@@ -1,9 +1,10 @@
 [package]
-name = "zero-renderer"
+name = "zero-gpu"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zero-gpu = { path = "../zero-gpu" }
 ash = {version = "0.38.0", features = ["linked"]}
+ash-window = "0.13.0"
 bytemuck = "1.24.0"
+raw-window-handle = "0.6.2"
