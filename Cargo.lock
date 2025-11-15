@@ -1158,27 +1158,27 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 name = "zero"
 version = "0.1.0"
 dependencies = [
- "zero-r2d",
- "zero-r3d",
- "zero-rcore",
+ "zero-renderer",
+ "zero-renderer-draw2d",
+ "zero-renderer-draw3d",
 ]
 
 [[package]]
-name = "zero-r2d"
-version = "0.1.0"
-
-[[package]]
-name = "zero-r3d"
-version = "0.1.0"
-
-[[package]]
-name = "zero-rcore"
+name = "zero-renderer"
 version = "0.1.0"
 dependencies = [
  "ash",
  "bytemuck",
  "glfw",
 ]
+
+[[package]]
+name = "zero-renderer-draw2d"
+version = "0.1.0"
+
+[[package]]
+name = "zero-renderer-draw3d"
+version = "0.1.0"
 
 [[package]]
 name = "zerocopy"

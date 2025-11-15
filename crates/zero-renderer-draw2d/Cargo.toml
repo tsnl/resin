@@ -1,5 +1,5 @@
 [package]
-name = "zero-r2d"
+name = "zero-renderer-draw2d"
 version = "0.1.0"
 edition = "2024"
 

@@ -9,6 +9,6 @@ name = "zero"
 crate-type = ["cdylib"]
 
 [dependencies]
-zero-rcore = { path = "crates/zero-rcore" }
-zero-r2d = { path = "crates/zero-r2d" }
-zero-r3d = { path = "crates/zero-r3d" }
+zero-renderer = { path = "crates/zero-renderer" }
+zero-renderer-draw2d = { path = "crates/zero-renderer-draw2d" }
+zero-renderer-draw3d = { path = "crates/zero-renderer-draw3d" }
