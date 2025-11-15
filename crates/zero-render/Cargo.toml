@@ -1,9 +1,8 @@
 [package]
-name = "zero-renderer"
+name = "zero-render"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+zero-prelude = { path = "../zero-prelude" }
 zero-gpu = { path = "../zero-gpu" }
-ash = {version = "0.38.0", features = ["linked"]}
-bytemuck = "1.24.0"

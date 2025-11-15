@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+zero-prelude = { path = "../zero-prelude" }
+zero-gpu = { path = "../zero-gpu" }
 glfw = "0.60.0"
+raw-window-handle = "0.6.2"

@@ -1,0 +1,10 @@
+[package]
+name = "zero-prelude"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ash = { version = "0.38.0", features = ["linked"] }
+parking_lot = "0.12.5"
+hashbrown = "0.16.0"
+bytemuck = "1.24.0"

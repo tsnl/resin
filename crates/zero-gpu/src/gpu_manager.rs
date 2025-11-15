@@ -1,6 +1,6 @@
-use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-
 use super::*;
+
+use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
 /// Vulkan context (thin wrapper around Instance), meant to be owned by the engine and shared across various modules.
 pub struct GpuManager {
@@ -15,7 +15,7 @@ pub struct GpuManagerConfig {
     pub require_surface_support: bool,
 }
 impl GpuManager {
-    pub fn new(config: GpuManagerConfig) -> Self {
+    pub fn create(config: GpuManagerConfig) -> Arc<Self> {
         unsafe {
             let ash_entry = ash::Entry::linked();
 
@@ -40,12 +40,12 @@ impl GpuManager {
                 None
             };
 
-            Self {
+            Arc::new(Self {
                 ash_entry,
                 ash_instance,
                 ash_khr_surface_instance,
                 provides_surface_support,
-            }
+            })
         }
     }
     pub fn entry(&self) -> &ash::Entry {

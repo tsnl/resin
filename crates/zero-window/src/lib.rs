@@ -1,12 +1,56 @@
-use glfw::Context;
-use raw_window_handle::HasWindowHandle;
-use std::sync::Arc;
-use zero_renderer::GpuWindow;
+use zero_prelude::*;
+
+use zero_gpu::GpuManager;
+
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+
+pub struct WindowManager {
+    config: WindowManagerConfig,
+    glfw: RwLock<glfw::Glfw>,
+    gpu_manager: OnceLock<Arc<GpuManager>>,
+}
+pub struct WindowManagerConfig {}
+impl WindowManager {
+    pub fn create(config: WindowManagerConfig) -> Arc<WindowManager> {
+        let glfw = RwLock::new(glfw::init(glfw::fail_on_errors).unwrap());
+        let gpu_manager = OnceLock::new();
+        Arc::new(WindowManager {
+            config,
+            glfw,
+            gpu_manager,
+        })
+    }
+    pub fn create_window(self: Arc<Self>, window_config: WindowConfig) -> Arc<Window> {
+        Window::create(window_config, self.clone())
+    }
+    pub fn set_gpu_manager(&self, gpu_manager: Arc<GpuManager>) {
+        let result = self.gpu_manager.set(gpu_manager);
+        if let Err(_) = result {
+            panic!("Failed to set GPU manager: was it already set?");
+        };
+    }
+    pub fn get_vulkan_required_instance_extensions(&self) -> Vec<CString> {
+        self.glfw
+            .read()
+            .get_required_instance_extensions()
+            .unwrap()
+            .into_iter()
+            .map(|it| CString::new(it).unwrap())
+            .collect()
+    }
+    fn glfw(&self) -> &RwLock<glfw::Glfw> {
+        &self.glfw
+    }
+    pub fn gpu_manager(&self) -> &Arc<GpuManager> {
+        &self.gpu_manager.get().expect("GPU manager not yet set.")
+    }
+}
 
 pub struct Window {
-    glfw: glfw::Glfw,
-    glfw_window: glfw::PWindow,
+    manager: Arc<WindowManager>,
+    glfw_window: RwLock<glfw::PWindow>,
     glfw_events: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
+    vk_surface: vk::SurfaceKHR,
 }
 pub struct WindowConfig {
     width: u32,
@@ -14,32 +58,44 @@ pub struct WindowConfig {
     title: String,
 }
 impl Window {
-    pub fn new(config: WindowConfig) -> Window {
-        let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
+    fn create(config: WindowConfig, manager: Arc<WindowManager>) -> Arc<Self> {
+        let (glfw_window, glfw_events, vk_surface) = {
+            let mut glfw = manager.glfw.write();
 
-        glfw.window_hint(glfw::WindowHint::Visible(false));
-        glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
-        let (mut glfw_window, glfw_events) = glfw
-            .create_window(
-                config.width,
-                config.height,
-                &config.title,
-                glfw::WindowMode::Windowed,
-            )
-            .expect("Failed to create GLFW window");
+            glfw.window_hint(glfw::WindowHint::Visible(false));
+            glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+            let (glfw_window, glfw_events) = glfw
+                .create_window(
+                    config.width,
+                    config.height,
+                    &config.title,
+                    glfw::WindowMode::Windowed,
+                )
+                .expect("Failed to create GLFW window");
 
-        Window {
-            glfw,
+            let vk_surface = manager.gpu_manager().create_surface(
+                glfw_window.raw_display_handle().unwrap(),
+                glfw_window.raw_window_handle().unwrap(),
+            );
+
+            let glfw_window = RwLock::new(glfw_window);
+            (glfw_window, glfw_events, vk_surface)
+        };
+        Arc::new(Self {
+            manager,
             glfw_window,
             glfw_events,
-        }
+            vk_surface,
+        })
     }
-    pub fn run(&mut self) {
-        self.glfw_window.show();
-        while !self.glfw_window.should_close() {
-            self.glfw.poll_events();
+    pub fn run(&self) {
+        let mut glfw = self.manager.glfw().write();
+        let mut glfw_window = self.glfw_window.write();
+
+        glfw_window.show();
+        while !glfw_window.should_close() {
+            glfw.poll_events();
         }
-        eprintln!("Application closed");
     }
 }
 impl Default for WindowConfig {

@@ -3,14 +3,15 @@ name = "zero"
 version = "0.1.0"
 edition = "2024"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = ["crates/*", "."]
+
 [lib]
 name = "zero"
 crate-type = ["cdylib"]
 
 [dependencies]
+zero-prelude = { path = "crates/zero-prelude" }
 zero-gpu = { path = "crates/zero-gpu" }
 zero-window = { path = "crates/zero-window" }
-zero-renderer = { path = "crates/zero-renderer" }
-zero-renderer-draw2d = { path = "crates/zero-renderer-draw2d" }
-zero-renderer-draw3d = { path = "crates/zero-renderer-draw3d" }
+zero-render = { path = "crates/zero-render" }

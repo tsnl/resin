@@ -18,6 +18,12 @@ pkgs.mkShell {
     pkg-config
     wayland
     wayland-protocols
+
+    # Vulkan:
+    vulkan-loader
+    vulkan-tools
+    vulkan-headers
+    vulkan-validation-layers
   ];
 
   # Crucially, set LD_LIBRARY_PATH so the dynamic linker can find the libraries at runtime
