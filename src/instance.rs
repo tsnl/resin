@@ -77,6 +77,19 @@ impl Instance {
     ) -> Arc<RenderManager> {
         todo!("Implement create_render_manager")
     }
+}
+impl Instance {
+    pub fn gpu_manager(&self) -> &Arc<GpuManager> {
+        &self.gpu_manager
+    }
+    pub fn window_manager(&self) -> &Arc<WindowManager> {
+        self.window_manager.as_ref().unwrap()
+    }
+    pub fn render_manager(&self) -> &Arc<RenderManager> {
+        self.render_manager.as_ref().unwrap()
+    }
+}
+impl Instance {
     pub fn run(&self) {
         todo!()
     }

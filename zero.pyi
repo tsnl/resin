@@ -13,7 +13,34 @@ class Instance:
         :param debug_mode: Whether to enable debug mode. Enables additional logging and debugging features, e.g. Vulkan validation layers.
         """
 
+    window_manager: WindowManager
+    render_manager: RenderManager
+
+class WindowManager:
+    """
+    Manager to create windows.
+    """
+
+    def create_window(
+        self,
+        title: str = "Untitled Zero App",
+        width: int = 800,
+        height: int = 600,
+    ):
+        """
+        Creates a new window to read input and write rendered frames.
+
+        :param title: The title of the window.
+        :param width: The width of the window.
+        :param height: The height of the window.
+        """
+
     def update(self):
         """
-        Starts the game engine and runs the main loop.
+        Updates all windows created by this manager.
         """
+
+class RenderManager:
+    """
+    Manager for all things rendering.
+    """

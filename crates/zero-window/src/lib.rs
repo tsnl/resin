@@ -20,7 +20,7 @@ impl WindowManager {
             gpu_manager,
         })
     }
-    pub fn create_window(self: Arc<Self>, window_config: WindowConfig) -> Arc<Window> {
+    pub fn create_window(self: &Arc<Self>, window_config: WindowConfig) -> Arc<Window> {
         Window::create(window_config, self.clone())
     }
     pub fn set_gpu_manager(&self, gpu_manager: Arc<GpuManager>) {
@@ -44,6 +44,10 @@ impl WindowManager {
     pub fn gpu_manager(&self) -> &Arc<GpuManager> {
         &self.gpu_manager.get().expect("GPU manager not yet set.")
     }
+    pub fn update(&self) {
+        let mut glfw = self.glfw().write();
+        glfw.poll_events();
+    }
 }
 
 pub struct Window {
@@ -53,9 +57,9 @@ pub struct Window {
     vk_surface: vk::SurfaceKHR,
 }
 pub struct WindowConfig {
-    width: u32,
-    height: u32,
-    title: String,
+    pub width: u32,
+    pub height: u32,
+    pub title: String,
 }
 impl Window {
     fn create(config: WindowConfig, manager: Arc<WindowManager>) -> Arc<Self> {
@@ -88,22 +92,16 @@ impl Window {
             vk_surface,
         })
     }
-    pub fn run(&self) {
-        let mut glfw = self.manager.glfw().write();
+    pub fn set_visible(&self, visible: bool) {
         let mut glfw_window = self.glfw_window.write();
-
-        glfw_window.show();
-        while !glfw_window.should_close() {
-            glfw.poll_events();
+        if visible {
+            glfw_window.show();
+        } else {
+            glfw_window.hide();
         }
     }
-}
-impl Default for WindowConfig {
-    fn default() -> Self {
-        Self {
-            width: 800,
-            height: 600,
-            title: "Unnamed App -- Built with Zero".to_string(),
-        }
+    pub fn should_close(&self) -> bool {
+        let glfw_window = self.glfw_window.read();
+        glfw_window.should_close()
     }
 }
