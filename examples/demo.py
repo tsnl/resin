@@ -1,15 +1,9 @@
-from zero import lib as zero
+import zero
 
 
 def main():
-    engine = zero.init(
-        zero.config(
-            True,
-            True,
-            True,
-        )
-    )
-    zero.run(engine)
+    instance = zero.Instance(require_render_support=False)
+    instance.run()
 
 
 if __name__ == "__main__":

@@ -15,3 +15,4 @@ zero-prelude = { path = "crates/zero-prelude" }
 zero-gpu = { path = "crates/zero-gpu" }
 zero-window = { path = "crates/zero-window" }
 zero-render = { path = "crates/zero-render" }
+pyo3 = "0.27.0"
