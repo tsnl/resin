@@ -15,7 +15,7 @@ impl GpuPhysicalDevice {
         let bytes = bytemuck::cast_slice(&self.vk_device_properties.device_name);
         CStr::from_bytes_until_nul(bytes).unwrap()
     }
-    pub(crate) fn queue_families(&self) -> Vec<vk::QueueFamilyProperties> {
+    pub fn queue_families(&self) -> Vec<vk::QueueFamilyProperties> {
         unsafe {
             self.ash_instance()
                 .get_physical_device_queue_family_properties(self.vk_physical_device)

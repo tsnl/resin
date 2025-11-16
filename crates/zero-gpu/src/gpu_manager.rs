@@ -105,36 +105,14 @@ impl GpuManager {
         self: Arc<Self>,
         physical_device: GpuPhysicalDevice,
         surface: Option<vk::SurfaceKHR>,
-        device_create_info: GpuDeviceConfig,
-    ) -> Option<GpuDevice> {
+        config: &GpuDeviceConfig,
+    ) -> Option<Arc<GpuDevice>> {
         if surface.is_some() && !self.provides_surface_support {
             panic!(
                 "This instance does not support surface creation, but a surface was provided when trying to create a device."
             );
         }
-        unsafe {
-            let queue_family_indices = GpuQueueFamilyIndices::find(&physical_device, surface)?;
-
-            let extension_names: Vec<_> = device_create_info
-                .enabled_extension_names
-                .iter()
-                .map(|it| it.as_ptr())
-                .collect();
-            let vk_device = self
-                .ash_instance()
-                .create_device(
-                    physical_device.vk_physical_device,
-                    &vk::DeviceCreateInfo::default().enabled_extension_names(&extension_names),
-                    None,
-                )
-                .unwrap();
-
-            Some(GpuDevice {
-                manager: self,
-                ash_device: vk_device,
-                queue_family_indices,
-            })
-        }
+        GpuDevice::create(self, physical_device, surface, config)
     }
 }
 

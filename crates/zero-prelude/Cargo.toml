@@ -8,3 +8,5 @@ ash = { version = "0.38.0", features = ["linked"] }
 parking_lot = "0.12.5"
 hashbrown = "0.16.0"
 bytemuck = "1.24.0"
+simd_math = "1.0.2"
+bitflags = "2.10.0"

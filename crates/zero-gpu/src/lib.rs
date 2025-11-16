@@ -12,3 +12,6 @@ use gpu_queue_family_indices::GpuQueueFamilyIndices;
 
 mod gpu_device;
 pub use gpu_device::{GpuDevice, GpuDeviceConfig};
+
+mod gpu_image;
+pub use gpu_image::{GpuImage, GpuImageConfig, GpuImageUsageFlags};

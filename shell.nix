@@ -4,20 +4,25 @@ in
 pkgs.mkShell {
   # Add necessary system libraries to the build inputs
   buildInputs = with pkgs; [
-    rustc
-    cargo
+    # Rust
+    rustup
+
+    # GLFW:
     glfw # The GLFW library
     libGL # The OpenGL library
-    # Add X11 dependencies if targeting X11 (default for many setups)
+    cmake # often required for the glfw-rs build script
+    pkg-config
+
+    # GLFW for Wayland
+    wayland
+    wayland-protocols
+
+    # GLFW for X11
     xorg.libX11
     xorg.libXrandr
     xorg.libXinerama
     xorg.libXcursor
     xorg.libXi
-    cmake # often required for the glfw-rs build script
-    pkg-config
-    wayland
-    wayland-protocols
 
     # Vulkan:
     vulkan-loader
