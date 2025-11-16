@@ -8,20 +8,25 @@ pub struct WindowManager {
     config: WindowManagerConfig,
     glfw: RwLock<glfw::Glfw>,
     gpu_manager: OnceLock<Arc<GpuManager>>,
+    windows: Mutex<Vec<Weak<Window>>>,
 }
 pub struct WindowManagerConfig {}
 impl WindowManager {
     pub fn create(config: WindowManagerConfig) -> Arc<WindowManager> {
         let glfw = RwLock::new(glfw::init(glfw::fail_on_errors).unwrap());
         let gpu_manager = OnceLock::new();
+        let windows = Mutex::default();
         Arc::new(WindowManager {
             config,
             glfw,
             gpu_manager,
+            windows,
         })
     }
     pub fn create_window(self: &Arc<Self>, window_config: WindowConfig) -> Arc<Window> {
-        Window::create(window_config, self.clone())
+        let window = Window::create(window_config, self.clone());
+        self.windows.lock().push(Arc::downgrade(&window));
+        window
     }
     pub fn set_gpu_manager(&self, gpu_manager: Arc<GpuManager>) {
         let result = self.gpu_manager.set(gpu_manager);
@@ -47,6 +52,21 @@ impl WindowManager {
     pub fn update(&self) {
         let mut glfw = self.glfw().write();
         glfw.poll_events();
+
+        let mut window_vec_lock = self.windows.lock();
+        let window_vec_mut: &mut Vec<_> = window_vec_lock.as_mut();
+        let new_window_vec: Vec<_> = std::mem::take(window_vec_mut)
+            .into_iter()
+            .filter_map(|window| {
+                if let Some(window) = window.upgrade() {
+                    window.update();
+                    Some(Arc::downgrade(&window))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        _ = std::mem::replace(window_vec_lock.as_mut(), new_window_vec);
     }
 }
 
@@ -54,7 +74,7 @@ pub struct Window {
     manager: Arc<WindowManager>,
     glfw_window: RwLock<glfw::PWindow>,
     glfw_events: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
-    vk_surface: vk::SurfaceKHR,
+    vulkan_surface: vk::SurfaceKHR,
 }
 pub struct WindowConfig {
     pub width: u32,
@@ -63,7 +83,7 @@ pub struct WindowConfig {
 }
 impl Window {
     fn create(config: WindowConfig, manager: Arc<WindowManager>) -> Arc<Self> {
-        let (glfw_window, glfw_events, vk_surface) = {
+        let (glfw_window, glfw_events, vulkan_surface) = {
             let mut glfw = manager.glfw.write();
 
             glfw.window_hint(glfw::WindowHint::Visible(false));
@@ -89,8 +109,11 @@ impl Window {
             manager,
             glfw_window,
             glfw_events,
-            vk_surface,
+            vulkan_surface,
         })
+    }
+    fn update(&self) {
+        // TODO: process input
     }
     pub fn set_visible(&self, visible: bool) {
         let mut glfw_window = self.glfw_window.write();
@@ -103,5 +126,8 @@ impl Window {
     pub fn should_close(&self) -> bool {
         let glfw_window = self.glfw_window.read();
         glfw_window.should_close()
+    }
+    pub fn vulkan_surface(&self) -> vk::SurfaceKHR {
+        self.vulkan_surface
     }
 }
