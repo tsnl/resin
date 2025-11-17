@@ -16,8 +16,12 @@ clean:
 
 .PHONY: zero
 zero: .venv
-	source .venv/bin/activate && pip install -e .
+	source .venv/bin/activate && pip install -e ".[dev]"
 
 .PHONY: demo
 demo: .venv zero
 	source .venv/bin/activate && python3 examples/demo.py
+
+.PHONY: check
+check: .venv zero
+	.venv/bin/pyright .

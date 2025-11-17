@@ -5,6 +5,9 @@ from dataclasses import dataclass
 # Common:
 #
 
+class OpaqueResourceHandle:
+    pass
+
 VkDeviceSize: TypeAlias = int
 VkFlags: TypeAlias = int
 VkSampleCountFlags: TypeAlias = VkFlags
@@ -13,7 +16,7 @@ VkSampleCountFlags: TypeAlias = VkFlags
 # VkInstance
 #
 
-VkInstance: TypeAlias = Any
+VkInstance: TypeAlias = OpaqueResourceHandle
 
 @dataclass
 class VkApplicationInfo:
@@ -56,7 +59,7 @@ def vkEnumeratePhysicalDevices(instance: VkInstance) -> List[VkPhysicalDevice]:
 # Physical Devices
 #
 
-VkPhysicalDevice: TypeAlias = Any
+VkPhysicalDevice: TypeAlias = OpaqueResourceHandle
 
 def vkGetPhysicalDeviceProperties(
     physicalDevice: VkPhysicalDevice,
@@ -181,4 +184,4 @@ class VkPhysicalDeviceLimits:
 # VkDevice
 #
 
-VkDevice: TypeAlias = Any
+VkDevice: TypeAlias = OpaqueResourceHandle

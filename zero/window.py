@@ -1,8 +1,5 @@
 __all__ = ["Window"]
 
-import atexit
-import functools
-
 import glfw
 
 from .excepts import GlfwError
@@ -10,7 +7,7 @@ from .core import ensure_glfw_init
 
 
 class Window:
-    _all = []
+    _all: list["Window"] = []
 
     def __init__(self, width: int, height: int, title: str):
         super().__init__()

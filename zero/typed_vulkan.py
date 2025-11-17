@@ -33,12 +33,16 @@ from vulkan import (
 )
 
 
+class OpaqueResourceHandle:
+    pass
+
+
 VkDeviceSize: TypeAlias = int
 VkFlags: TypeAlias = int
 VkSampleCountFlags: TypeAlias = VkFlags
 
-VkInstance: TypeAlias = Any
+VkInstance: TypeAlias = OpaqueResourceHandle
 
-VkPhysicalDevice: TypeAlias = Any
+VkPhysicalDevice: TypeAlias = OpaqueResourceHandle
 
-VkDevice: TypeAlias = Any
+VkDevice: TypeAlias = OpaqueResourceHandle
