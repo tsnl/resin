@@ -3,13 +3,13 @@ __all__ = [
     "GpuContext",
     # GpuPhysicalDevice
     "GpuPhysicalDevice",
-    "GpuPhysicalDeviceType",
-    "GpuPhysicalDeviceLimits",
     # GpuDevice
     "GpuDevice",
 ]
 
+from dataclasses import dataclass
 from enum import IntEnum
+from typing import TypeAlias, Literal
 
 import glfw
 
@@ -29,8 +29,20 @@ from .typed_vulkan import (
     vkGetPhysicalDeviceProperties,
     VkPhysicalDeviceProperties,
     VkPhysicalDeviceLimits,
+    VK_PHYSICAL_DEVICE_TYPE_OTHER,
+    VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+    VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
+    VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
+    VK_PHYSICAL_DEVICE_TYPE_CPU,
+    # Physical device queues:
+    vkGetPhysicalDeviceQueueFamilyProperties,
+    VK_QUEUE_COMPUTE_BIT,
+    VK_QUEUE_TRANSFER_BIT,
+    VK_QUEUE_GRAPHICS_BIT,
     # Devices:
     VkDevice,
+    vkCreateDevice,
+    VkDeviceCreateInfo,
 )
 
 
@@ -55,6 +67,20 @@ class GpuContext:
             enable_debug_layer_support,
             enable_present_support,
         )
+        self._enable_debug_layer_support = enable_debug_layer_support
+        self._enable_present_support = enable_present_support
+
+    @property
+    def vk_instance(self) -> VkInstance:
+        return self._vk_instance
+
+    @property
+    def enable_debug_layer_support(self) -> bool:
+        return self._enable_debug_layer_support
+
+    @property
+    def enable_present_support(self) -> bool:
+        return self._enable_present_support
 
     @staticmethod
     def _create_instance(
@@ -89,356 +115,193 @@ class GpuContext:
 
     def enumerate_physical_devices(self) -> list[GpuPhysicalDevice]:
         return [
-            GpuPhysicalDevice(vk_physical_device)
-            for vk_physical_device in vkEnumeratePhysicalDevices(self._vk_instance)
+            GpuPhysicalDevice(self, vk_physical_device)
+            for vk_physical_device in vkEnumeratePhysicalDevices(self.vk_instance)
         ]
+
+    def create_device(self, physical_device: GpuPhysicalDevice) -> GpuDevice:
+        return GpuDevice(physical_device)
+
+
+class GpuContextResource:
+    def __init__(self, context: GpuContext) -> None:
+        super().__init__()
+        self._context = context
+
+    @property
+    def context(self) -> GpuContext:
+        return self._context
 
 
 #
 # GpuPhysicalDevice
 #
 
-
-class GpuPhysicalDevice:
-    def __init__(self, vk_physical_device: VkPhysicalDevice) -> None:
-        super().__init__()
-        self.vk_physical_device = vk_physical_device
-        raw_properties = vkGetPhysicalDeviceProperties(vk_physical_device)
-        self.properties = GpuPhysicalDeviceProperties(raw_properties)
-
-
-class GpuPhysicalDeviceProperties:
-    api_version: int
-    driver_version: int
-    vendor_id: int
-    device_id: int
-    device_type: GpuPhysicalDeviceType
-    device_name: str
-    limits: GpuPhysicalDeviceLimits
-
-    def __init__(self, raw: VkPhysicalDeviceProperties) -> None:
-        self.api_version = int(raw.apiVersion)
-        self.driver_version = int(raw.driverVersion)
-        self.vendor_id = int(raw.vendorID)
-        self.device_id = int(raw.deviceID)
-        self.device_type = GpuPhysicalDeviceType(raw.deviceType)
-        self.device_name = str(raw.deviceName)
-        self.limits = GpuPhysicalDeviceLimits(raw.limits)
+GpuPhysicalDeviceType: TypeAlias = Literal[
+    "Other",
+    "IntegratedGpu",
+    "DiscreteGpu",
+    "VirtualGpu",
+    "Cpu",
+]
 
 
-class GpuPhysicalDeviceType(IntEnum):
-    OTHER = 0
-    INTEGRATED_GPU = 1
-    DISCRETE_GPU = 2
-    VIRTUAL_GPU = 3
-    CPU = 4
+class GpuPhysicalDevice(GpuContextResource):
+    vk_handle: VkPhysicalDevice
+    properties: VkPhysicalDeviceProperties
+
+    def __init__(
+        self,
+        context: GpuContext,
+        vk_physical_device: VkPhysicalDevice,
+    ) -> None:
+        super().__init__(context)
+        self.vk_handle = vk_physical_device
+        self.properties = vkGetPhysicalDeviceProperties(vk_physical_device)
+
+    def get_queue_families(self) -> list["GpuPhysicalDeviceQueueFamily"]:
+        qfi_props = vkGetPhysicalDeviceQueueFamilyProperties(self.vk_handle)
+
+        res = []
+        for index, props in enumerate(qfi_props):
+            assert props.queueCount > 0
+
+            supports_graphics = bool(props.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            supports_compute = bool(props.queueFlags & VK_QUEUE_COMPUTE_BIT)
+            supports_transfer = bool(props.queueFlags & VK_QUEUE_TRANSFER_BIT)
+            supports_present = False
+            if self.context.enable_present_support:
+                supports_present = bool(
+                    glfw.get_physical_device_presentation_support(
+                        self.context.vk_instance,
+                        self.vk_handle,
+                        index,
+                    )
+                )
+
+            qfi = GpuPhysicalDeviceQueueFamily(
+                index=index,
+                queue_count=props.queueCount,
+                supports_graphics=supports_graphics,
+                supports_compute=supports_compute,
+                supports_transfer=supports_transfer,
+                supports_present=supports_present,
+            )
+            res.append(qfi)
+
+        return res
+
+    def spell_device_type(self) -> str:
+        return {
+            int(VK_PHYSICAL_DEVICE_TYPE_OTHER): "Other",
+            int(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU): "IntegratedGpu",
+            int(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU): "DiscreteGpu",
+            int(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU): "VirtualGpu",
+            int(VK_PHYSICAL_DEVICE_TYPE_CPU): "Cpu",
+        }[self.properties.deviceType]
 
 
-class GpuPhysicalDeviceLimits:
-    max_image_dimension1d: int
-    max_image_dimension2d: int
-    max_image_dimension3d: int
-    max_image_dimension_cube: int
-    max_image_array_layers: int
-    max_texel_buffer_elements: int
-    max_uniform_buffer_range: int
-    max_storage_buffer_range: int
-    max_push_constants_size: int
-    max_memory_allocation_count: int
-    max_sampler_allocation_count: int
-    buffer_image_granularity: VkDeviceSize
-    sparse_address_space_size: VkDeviceSize
-    max_bound_descriptor_sets: int
-    max_per_stage_descriptor_samplers: int
-    max_per_stage_descriptor_uniform_buffers: int
-    max_per_stage_descriptor_storage_buffers: int
-    max_per_stage_descriptor_sampled_images: int
-    max_per_stage_descriptor_storage_images: int
-    max_per_stage_descriptor_input_attachments: int
-    max_per_stage_resources: int
-    max_descriptor_set_samplers: int
-    max_descriptor_set_uniform_buffers: int
-    max_descriptor_set_uniform_buffers_dynamic: int
-    max_descriptor_set_storage_buffers: int
-    max_descriptor_set_storage_buffers_dynamic: int
-    max_descriptor_set_sampled_images: int
-    max_descriptor_set_storage_images: int
-    max_descriptor_set_input_attachments: int
-    max_vertex_input_attributes: int
-    max_vertex_input_bindings: int
-    max_vertex_input_attribute_offset: int
-    max_vertex_input_binding_stride: int
-    max_vertex_output_components: int
-    max_tessellation_generation_level: int
-    max_tessellation_patch_size: int
-    max_tessellation_control_per_vertex_input_components: int
-    max_tessellation_control_per_vertex_output_components: int
-    max_tessellation_control_per_patch_output_components: int
-    max_tessellation_control_total_output_components: int
-    max_tessellation_evaluation_input_components: int
-    max_tessellation_evaluation_output_components: int
-    max_geometry_shader_invocations: int
-    max_geometry_input_components: int
-    max_geometry_output_components: int
-    max_geometry_output_vertices: int
-    max_geometry_total_output_components: int
-    max_fragment_input_components: int
-    max_fragment_output_attachments: int
-    max_fragment_dual_src_attachments: int
-    max_fragment_combined_output_resources: int
-    max_compute_shared_memory_size: int
-    max_compute_work_group_count: tuple[int, int, int]
-    max_compute_work_group_invocations: int
-    max_compute_work_group_size: tuple[int, int, int]
-    sub_pixel_precision_bits: int
-    sub_texel_precision_bits: int
-    mipmap_precision_bits: int
-    max_draw_indexed_index_value: int
-    max_draw_indirect_count: int
-    max_sampler_lod_bias: float
-    max_sampler_anisotropy: float
-    max_viewports: int
-    max_viewport_dimensions: tuple[int, int]
-    viewport_bounds_range: tuple[float, float]
-    viewport_sub_pixel_bits: int
-    min_memory_map_alignment: int
-    min_texel_buffer_offset_alignment: VkDeviceSize
-    min_uniform_buffer_offset_alignment: VkDeviceSize
-    min_storage_buffer_offset_alignment: VkDeviceSize
-    min_texel_offset: int
-    max_texel_offset: int
-    min_texel_gather_offset: int
-    max_texel_gather_offset: int
-    min_interpolation_offset: float
-    max_interpolation_offset: float
-    sub_pixel_interpolation_offset_bits: int
-    max_framebuffer_width: int
-    max_framebuffer_height: int
-    max_framebuffer_layers: int
-    framebuffer_color_sample_counts: VkSampleCountFlags
-    framebuffer_depth_sample_counts: VkSampleCountFlags
-    framebuffer_stencil_sample_counts: VkSampleCountFlags
-    framebuffer_no_attachments_sample_counts: VkSampleCountFlags
-    max_color_attachments: int
-    sampled_image_color_sample_counts: VkSampleCountFlags
-    sampled_image_integer_sample_counts: VkSampleCountFlags
-    sampled_image_depth_sample_counts: VkSampleCountFlags
-    sampled_image_stencil_sample_counts: VkSampleCountFlags
-    storage_image_sample_counts: VkSampleCountFlags
-    max_sample_mask_words: int
-    timestamp_compute_and_graphics: bool
-    timestamp_period: float
-    max_clip_distances: int
-    max_cull_distances: int
-    max_combined_clip_and_cull_distances: int
-    discrete_queue_priorities: int
-    point_size_range: tuple[float, float]
-    line_width_range: tuple[float, float]
-    point_size_granularity: float
-    line_width_granularity: float
-    strict_lines: bool
-    standard_sample_locations: bool
-    optimal_buffer_copy_offset_alignment: VkDeviceSize
-    optimal_buffer_copy_row_pitch_alignment: VkDeviceSize
-    non_coherent_atom_size: VkDeviceSize
+@dataclass
+class GpuPhysicalDeviceQueueFamily:
+    index: int
+    queue_count: int
+    supports_graphics: bool
+    supports_compute: bool
+    supports_transfer: bool
+    supports_present: bool
 
-    def __init__(self, raw: VkPhysicalDeviceLimits) -> None:
-        self.max_image_dimension1d = int(raw.maxImageDimension1D)
-        self.max_image_dimension2d = int(raw.maxImageDimension2D)
-        self.max_image_dimension3d = int(raw.maxImageDimension3D)
-        self.max_image_dimension_cube = int(raw.maxImageDimensionCube)
-        self.max_image_array_layers = int(raw.maxImageArrayLayers)
-        self.max_texel_buffer_elements = int(raw.maxTexelBufferElements)
-        self.max_uniform_buffer_range = int(raw.maxUniformBufferRange)
-        self.max_storage_buffer_range = int(raw.maxStorageBufferRange)
-        self.max_push_constants_size = int(raw.maxPushConstantsSize)
-        self.max_memory_allocation_count = int(raw.maxMemoryAllocationCount)
-        self.max_sampler_allocation_count = int(raw.maxSamplerAllocationCount)
-        self.buffer_image_granularity = VkDeviceSize(raw.bufferImageGranularity)
-        self.sparse_address_space_size = VkDeviceSize(raw.sparseAddressSpaceSize)
-        self.max_bound_descriptor_sets = int(raw.maxBoundDescriptorSets)
-        self.max_per_stage_descriptor_samplers = int(raw.maxPerStageDescriptorSamplers)
-        self.max_per_stage_descriptor_uniform_buffers = int(
-            raw.maxPerStageDescriptorUniformBuffers
+
+@dataclass
+class GpuPhysicalDeviceQueueFamilyIndices:
+    graphics: int | None = None
+    compute: int | None = None
+    transfer: int | None = None
+    present: int | None = None
+
+    def is_complete(self, require_present_support: bool) -> bool:
+        return (
+            self.graphics is not None
+            and self.compute is not None
+            and self.transfer is not None
+            and (not require_present_support or self.present is not None)
         )
-        self.max_per_stage_descriptor_storage_buffers = int(
-            raw.maxPerStageDescriptorStorageBuffers
+
+    def is_any_queue_family_shared(self) -> bool:
+        all_indices = [
+            index
+            for index in [
+                self.graphics,
+                self.compute,
+                self.transfer,
+                self.present,
+            ]
+            if index is not None
+        ]
+        return len(set(all_indices)) < len(all_indices)
+
+    @staticmethod
+    def find(
+        physical_device: "GpuPhysicalDevice",
+        require_present_support: bool,
+    ) -> "GpuPhysicalDeviceQueueFamilyIndices | None":
+        # First, try to find exclusive queue families:
+        qfi = GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
+            physical_device=physical_device,
+            require_present_support=require_present_support,
+            require_exclusive_queues=True,
         )
-        self.max_per_stage_descriptor_sampled_images = int(
-            raw.maxPerStageDescriptorSampledImages
+        if qfi is not None:
+            return qfi
+
+        # Fallback: allow shared queue families:
+        qfi = GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
+            physical_device=physical_device,
+            require_present_support=require_present_support,
+            require_exclusive_queues=False,
         )
-        self.max_per_stage_descriptor_storage_images = int(
-            raw.maxPerStageDescriptorStorageImages
-        )
-        self.max_per_stage_descriptor_input_attachments = int(
-            raw.maxPerStageDescriptorInputAttachments
-        )
-        self.max_per_stage_resources = int(raw.maxPerStageResources)
-        self.max_descriptor_set_samplers = int(raw.maxDescriptorSetSamplers)
-        self.max_descriptor_set_uniform_buffers = int(
-            raw.maxDescriptorSetUniformBuffers
-        )
-        self.max_descriptor_set_uniform_buffers_dynamic = int(
-            raw.maxDescriptorSetUniformBuffersDynamic
-        )
-        self.max_descriptor_set_storage_buffers = int(
-            raw.maxDescriptorSetStorageBuffers
-        )
-        self.max_descriptor_set_storage_buffers_dynamic = int(
-            raw.maxDescriptorSetStorageBuffersDynamic
-        )
-        self.max_descriptor_set_sampled_images = int(raw.maxDescriptorSetSampledImages)
-        self.max_descriptor_set_storage_images = int(raw.maxDescriptorSetStorageImages)
-        self.max_descriptor_set_input_attachments = int(
-            raw.maxDescriptorSetInputAttachments
-        )
-        self.max_vertex_input_attributes = int(raw.maxVertexInputAttributes)
-        self.max_vertex_input_bindings = int(raw.maxVertexInputBindings)
-        self.max_vertex_input_attribute_offset = int(raw.maxVertexInputAttributeOffset)
-        self.max_vertex_input_binding_stride = int(raw.maxVertexInputBindingStride)
-        self.max_vertex_output_components = int(raw.maxVertexOutputComponents)
-        self.max_tessellation_generation_level = int(raw.maxTessellationGenerationLevel)
-        self.max_tessellation_patch_size = int(raw.maxTessellationPatchSize)
-        self.max_tessellation_control_per_vertex_input_components = int(
-            raw.maxTessellationControlPerVertexInputComponents
-        )
-        self.max_tessellation_control_per_vertex_output_components = int(
-            raw.maxTessellationControlPerVertexOutputComponents
-        )
-        self.max_tessellation_control_per_patch_output_components = int(
-            raw.maxTessellationControlPerPatchOutputComponents
-        )
-        self.max_tessellation_control_total_output_components = int(
-            raw.maxTessellationControlTotalOutputComponents
-        )
-        self.max_tessellation_evaluation_input_components = int(
-            raw.maxTessellationEvaluationInputComponents
-        )
-        self.max_tessellation_evaluation_output_components = int(
-            raw.maxTessellationEvaluationOutputComponents
-        )
-        self.max_geometry_shader_invocations = int(raw.maxGeometryShaderInvocations)
-        self.max_geometry_input_components = int(raw.maxGeometryInputComponents)
-        self.max_geometry_output_components = int(raw.maxGeometryOutputComponents)
-        self.max_geometry_output_vertices = int(raw.maxGeometryOutputVertices)
-        self.max_geometry_total_output_components = int(
-            raw.maxGeometryTotalOutputComponents
-        )
-        self.max_fragment_input_components = int(raw.maxFragmentInputComponents)
-        self.max_fragment_output_attachments = int(raw.maxFragmentOutputAttachments)
-        self.max_fragment_dual_src_attachments = int(raw.maxFragmentDualSrcAttachments)
-        self.max_fragment_combined_output_resources = int(
-            raw.maxFragmentCombinedOutputResources
-        )
-        self.max_compute_shared_memory_size = int(raw.maxComputeSharedMemorySize)
-        self.max_compute_work_group_count = (
-            int(raw.maxComputeWorkGroupCount[0]),
-            int(raw.maxComputeWorkGroupCount[1]),
-            int(raw.maxComputeWorkGroupCount[2]),
-        )
-        self.max_compute_work_group_invocations = int(
-            raw.maxComputeWorkGroupInvocations
-        )
-        self.max_compute_work_group_size = (
-            int(raw.maxComputeWorkGroupSize[0]),
-            int(raw.maxComputeWorkGroupSize[1]),
-            int(raw.maxComputeWorkGroupSize[2]),
-        )
-        self.sub_pixel_precision_bits = int(raw.subPixelPrecisionBits)
-        self.sub_texel_precision_bits = int(raw.subTexelPrecisionBits)
-        self.mipmap_precision_bits = int(raw.mipmapPrecisionBits)
-        self.max_draw_indexed_index_value = int(raw.maxDrawIndexedIndexValue)
-        self.max_draw_indirect_count = int(raw.maxDrawIndirectCount)
-        self.max_sampler_lod_bias = float(raw.maxSamplerLodBias)
-        self.max_sampler_anisotropy = float(raw.maxSamplerAnisotropy)
-        self.max_viewports = int(raw.maxViewports)
-        self.max_viewport_dimensions = (
-            int(raw.maxViewportDimensions[0]),
-            int(raw.maxViewportDimensions[1]),
-        )
-        self.viewport_bounds_range = (
-            float(raw.viewportBoundsRange[0]),
-            float(raw.viewportBoundsRange[1]),
-        )
-        self.viewport_sub_pixel_bits = int(raw.viewportSubPixelBits)
-        self.min_memory_map_alignment = int(raw.minMemoryMapAlignment)
-        self.min_texel_buffer_offset_alignment = VkDeviceSize(
-            raw.minTexelBufferOffsetAlignment
-        )
-        self.min_uniform_buffer_offset_alignment = VkDeviceSize(
-            raw.minUniformBufferOffsetAlignment
-        )
-        self.min_storage_buffer_offset_alignment = VkDeviceSize(
-            raw.minStorageBufferOffsetAlignment
-        )
-        self.min_texel_offset = int(raw.minTexelOffset)
-        self.max_texel_offset = int(raw.maxTexelOffset)
-        self.min_texel_gather_offset = int(raw.minTexelGatherOffset)
-        self.max_texel_gather_offset = int(raw.maxTexelGatherOffset)
-        self.min_interpolation_offset = float(raw.minInterpolationOffset)
-        self.max_interpolation_offset = float(raw.maxInterpolationOffset)
-        self.sub_pixel_interpolation_offset_bits = int(
-            raw.subPixelInterpolationOffsetBits
-        )
-        self.max_framebuffer_width = int(raw.maxFramebufferWidth)
-        self.max_framebuffer_height = int(raw.maxFramebufferHeight)
-        self.max_framebuffer_layers = int(raw.maxFramebufferLayers)
-        self.framebuffer_color_sample_counts = VkSampleCountFlags(
-            raw.framebufferColorSampleCounts
-        )
-        self.framebuffer_depth_sample_counts = VkSampleCountFlags(
-            raw.framebufferDepthSampleCounts
-        )
-        self.framebuffer_stencil_sample_counts = VkSampleCountFlags(
-            raw.framebufferStencilSampleCounts
-        )
-        self.framebuffer_no_attachments_sample_counts = VkSampleCountFlags(
-            raw.framebufferNoAttachmentsSampleCounts
-        )
-        self.max_color_attachments = int(raw.maxColorAttachments)
-        self.sampled_image_color_sample_counts = VkSampleCountFlags(
-            raw.sampledImageColorSampleCounts
-        )
-        self.sampled_image_integer_sample_counts = VkSampleCountFlags(
-            raw.sampledImageIntegerSampleCounts
-        )
-        self.sampled_image_depth_sample_counts = VkSampleCountFlags(
-            raw.sampledImageDepthSampleCounts
-        )
-        self.sampled_image_stencil_sample_counts = VkSampleCountFlags(
-            raw.sampledImageStencilSampleCounts
-        )
-        self.storage_image_sample_counts = VkSampleCountFlags(
-            raw.storageImageSampleCounts
-        )
-        self.max_sample_mask_words = int(raw.maxSampleMaskWords)
-        self.timestamp_compute_and_graphics = bool(raw.timestampComputeAndGraphics)
-        self.timestamp_period = float(raw.timestampPeriod)
-        self.max_clip_distances = int(raw.maxClipDistances)
-        self.max_cull_distances = int(raw.maxCullDistances)
-        self.max_combined_clip_and_cull_distances = int(
-            raw.maxCombinedClipAndCullDistances
-        )
-        self.discrete_queue_priorities = int(raw.discreteQueuePriorities)
-        self.point_size_range = (
-            float(raw.pointSizeRange[0]),
-            float(raw.pointSizeRange[1]),
-        )
-        self.line_width_range = (
-            float(raw.lineWidthRange[0]),
-            float(raw.lineWidthRange[1]),
-        )
-        self.point_size_granularity = float(raw.pointSizeGranularity)
-        self.line_width_granularity = float(raw.lineWidthGranularity)
-        self.strict_lines = bool(raw.strictLines)
-        self.standard_sample_locations = bool(raw.standardSampleLocations)
-        self.optimal_buffer_copy_offset_alignment = VkDeviceSize(
-            raw.optimalBufferCopyOffsetAlignment
-        )
-        self.optimal_buffer_copy_row_pitch_alignment = VkDeviceSize(
-            raw.optimalBufferCopyRowPitchAlignment
-        )
-        self.non_coherent_atom_size = VkDeviceSize(raw.nonCoherentAtomSize)
+        if qfi is not None:
+            return qfi
+
+        # Failed
+        return None
+
+    @staticmethod
+    def _find_with_exclusivity_constraint(
+        physical_device: "GpuPhysicalDevice",
+        require_present_support: bool,
+        require_exclusive_queues: bool,
+    ) -> "GpuPhysicalDeviceQueueFamilyIndices | None":
+        res = GpuPhysicalDeviceQueueFamilyIndices()
+
+        for queue_family in physical_device.get_queue_families():
+            if res.graphics is not None and queue_family.supports_graphics:
+                res.graphics = queue_family.index
+                if require_exclusive_queues:
+                    continue
+
+            if res.compute is not None and queue_family.supports_compute:
+                res.compute = queue_family.index
+                if require_exclusive_queues:
+                    continue
+
+            if res.transfer is not None and queue_family.supports_transfer:
+                res.transfer = queue_family.index
+                if require_exclusive_queues:
+                    continue
+
+            if require_present_support:
+                if res.present is not None and queue_family.supports_present:
+                    res.present = queue_family.index
+                    if require_exclusive_queues:
+                        continue
+
+            if res.is_complete(require_present_support):
+                break
+
+        if res.is_complete(require_present_support):
+            return res
+        else:
+            return None
 
 
 #
@@ -446,5 +309,19 @@ class GpuPhysicalDeviceLimits:
 #
 
 
-class GpuDevice:
-    pass
+class GpuDevice(GpuContextResource):
+    def __init__(self, physical_device: GpuPhysicalDevice) -> None:
+        super().__init__(physical_device.context)
+
+        extensions = []
+
+        if self.context.enable_present_support:
+            extensions.append("VK_KHR_swapchain")
+
+        self.vk_device: VkDevice = vkCreateDevice(
+            physical_device.vk_handle,
+            VkDeviceCreateInfo(
+                enabledExtensionCount=len(extensions),
+                ppEnabledExtensionNames=extensions,
+            ),
+        )
