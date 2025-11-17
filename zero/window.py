@@ -5,6 +5,9 @@ import functools
 
 import glfw
 
+from .excepts import GlfwError
+from .core import ensure_glfw_init
+
 
 class Window:
     _all = []
@@ -12,7 +15,7 @@ class Window:
     def __init__(self, width: int, height: int, title: str):
         super().__init__()
 
-        _lazy_glfw_init()
+        ensure_glfw_init()
 
         glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
         glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
@@ -46,18 +49,3 @@ class Window:
     @staticmethod
     def update_all():
         glfw.poll_events()
-
-
-@functools.cache
-def _lazy_glfw_init():
-    ok = bool(glfw.init())
-    if not ok:
-        raise GlfwError("Failed to initialize GLFW")
-
-    atexit.register(glfw.terminate)
-
-
-class GlfwError(RuntimeError):
-    def __init__(self, message: str):
-        error_code, error_message = glfw.get_error()
-        super().__init__(f"{message}: {error_message} (error=0x{error_code:X})")

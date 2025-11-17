@@ -2,6 +2,8 @@ import zero
 
 
 def main():
+    gpu_context = zero.GpuContext()
+
     window = zero.Window(width=800, height=600, title="Zero Demo Window")
 
     window.show()
