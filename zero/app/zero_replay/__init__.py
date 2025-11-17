@@ -10,8 +10,12 @@ def main():
         enable_debug_layer_support=True,
         enable_present_support=False,
     )
-
     print_debug_info(gpu_context)
+
+    physical_device = next(iter(gpu_context.enumerate_physical_devices()))
+    device = gpu_context.create_device(physical_device)
+
+    print(device)
 
 
 def print_debug_info(gpu_context: zero.GpuContext) -> None:

@@ -311,6 +311,18 @@ class VkQueueFamilyProperties:
     timestampValidBits: int
     minImageTransferGranularity: VkExtent3D
 
+@dataclass
+class VkDeviceQueueCreateInfo:
+    # VkStructureType             sType;
+    # const void*                 pNext;
+    # VkDeviceQueueCreateFlags    flags;
+    # uint32_t                    queueFamilyIndex;
+    # uint32_t                    queueCount;
+    # const float*                pQueuePriorities;
+    queueFamilyIndex: int
+    queueCount: int
+    pQueuePriorities: Sequence[float] | None = None
+
 #
 # VkDevice
 #
@@ -318,7 +330,7 @@ class VkQueueFamilyProperties:
 def vkCreateDevice(
     physicalDevice: VkPhysicalDevice,
     pCreateInfo: VkDeviceCreateInfo,
-    pAllocator: Optional[Any] = None,
+    pAllocator: Any,
 ) -> VkDevice:
     """
     vkCreateDevice creates a logical device from a physical device.

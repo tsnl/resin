@@ -8,7 +8,7 @@ __all__ = [
 ]
 
 from dataclasses import dataclass
-from enum import IntEnum
+from collections import defaultdict
 from typing import TypeAlias, Literal
 
 import glfw
@@ -36,6 +36,7 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_CPU,
     # Physical device queues:
     vkGetPhysicalDeviceQueueFamilyProperties,
+    VkDeviceQueueCreateInfo,
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_TRANSFER_BIT,
     VK_QUEUE_GRAPHICS_BIT,
@@ -165,7 +166,6 @@ class GpuPhysicalDevice(GpuContextResource):
         res = []
         for index, props in enumerate(qfi_props):
             assert props.queueCount > 0
-
             supports_graphics = bool(props.queueFlags & VK_QUEUE_GRAPHICS_BIT)
             supports_compute = bool(props.queueFlags & VK_QUEUE_COMPUTE_BIT)
             supports_transfer = bool(props.queueFlags & VK_QUEUE_TRANSFER_BIT)
@@ -239,69 +239,101 @@ class GpuPhysicalDeviceQueueFamilyIndices:
         ]
         return len(set(all_indices)) < len(all_indices)
 
+    def compute_queue_create_info_list(self) -> list[VkDeviceQueueCreateInfo]:
+        dd = defaultdict(lambda: 0)
+        if self.graphics is not None:
+            dd[self.graphics] += 1
+        if self.compute is not None:
+            dd[self.compute] += 1
+        if self.transfer is not None:
+            dd[self.transfer] += 1
+        if self.present is not None:
+            dd[self.present] += 1
+        return [
+            VkDeviceQueueCreateInfo(
+                queueFamilyIndex=index,
+                queueCount=count,
+                pQueuePriorities=[1.0] * count,
+            )
+            for index, count in dd.items()
+        ]
+
     @staticmethod
     def find(
         physical_device: "GpuPhysicalDevice",
-        require_present_support: bool,
-    ) -> "GpuPhysicalDeviceQueueFamilyIndices | None":
+        present_support_enabled: bool,
+    ) -> "GpuPhysicalDeviceQueueFamilyIndices":
         # First, try to find exclusive queue families:
-        qfi = GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
-            physical_device=physical_device,
-            require_present_support=require_present_support,
-            require_exclusive_queues=True,
+        qfi_exclusive = (
+            GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
+                physical_device=physical_device,
+                require_present_support=present_support_enabled,
+                require_exclusive_queues=True,
+            )
         )
-        if qfi is not None:
-            return qfi
+        if qfi_exclusive.is_complete(present_support_enabled):
+            return qfi_exclusive
 
         # Fallback: allow shared queue families:
-        qfi = GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
-            physical_device=physical_device,
-            require_present_support=require_present_support,
-            require_exclusive_queues=False,
+        qfi_shared = (
+            GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
+                physical_device=physical_device,
+                require_present_support=present_support_enabled,
+                require_exclusive_queues=False,
+            )
         )
-        if qfi is not None:
-            return qfi
+        if qfi_shared.is_complete(present_support_enabled):
+            return qfi_shared
 
         # Failed
-        return None
+        raise RuntimeError(
+            f"Failed to find suitable queue families:\n- {qfi_exclusive=}\n- {qfi_shared=}"
+        )
 
     @staticmethod
     def _find_with_exclusivity_constraint(
         physical_device: "GpuPhysicalDevice",
         require_present_support: bool,
         require_exclusive_queues: bool,
-    ) -> "GpuPhysicalDeviceQueueFamilyIndices | None":
+    ) -> "GpuPhysicalDeviceQueueFamilyIndices":
         res = GpuPhysicalDeviceQueueFamilyIndices()
 
         for queue_family in physical_device.get_queue_families():
-            if res.graphics is not None and queue_family.supports_graphics:
+            queue_family_use_count = 0
+            queue_family_max_use_count = (
+                1 if require_exclusive_queues else queue_family.queue_count
+            )
+
+            def reserve_queue_and_check_can_continue() -> bool:
+                nonlocal queue_family_use_count
+                queue_family_use_count += 1
+                return queue_family_use_count == queue_family_max_use_count
+
+            if res.graphics is None and queue_family.supports_graphics:
                 res.graphics = queue_family.index
-                if require_exclusive_queues:
+                if reserve_queue_and_check_can_continue():
                     continue
 
-            if res.compute is not None and queue_family.supports_compute:
+            if res.compute is None and queue_family.supports_compute:
                 res.compute = queue_family.index
-                if require_exclusive_queues:
+                if reserve_queue_and_check_can_continue():
                     continue
 
-            if res.transfer is not None and queue_family.supports_transfer:
+            if res.transfer is None and queue_family.supports_transfer:
                 res.transfer = queue_family.index
-                if require_exclusive_queues:
+                if reserve_queue_and_check_can_continue():
                     continue
 
             if require_present_support:
-                if res.present is not None and queue_family.supports_present:
+                if res.present is None and queue_family.supports_present:
                     res.present = queue_family.index
-                    if require_exclusive_queues:
+                    if reserve_queue_and_check_can_continue():
                         continue
 
             if res.is_complete(require_present_support):
                 break
 
-        if res.is_complete(require_present_support):
-            return res
-        else:
-            return None
+        return res
 
 
 #
@@ -314,14 +346,21 @@ class GpuDevice(GpuContextResource):
         super().__init__(physical_device.context)
 
         extensions = []
-
         if self.context.enable_present_support:
             extensions.append("VK_KHR_swapchain")
+
+        queue_create_info_list = GpuPhysicalDeviceQueueFamilyIndices.find(
+            physical_device,
+            present_support_enabled=self.context.enable_present_support,
+        ).compute_queue_create_info_list()
 
         self.vk_device: VkDevice = vkCreateDevice(
             physical_device.vk_handle,
             VkDeviceCreateInfo(
                 enabledExtensionCount=len(extensions),
                 ppEnabledExtensionNames=extensions,
+                queueCreateInfoCount=len(queue_create_info_list),
+                pQueueCreateInfos=queue_create_info_list,
             ),
+            pAllocator=None,
         )

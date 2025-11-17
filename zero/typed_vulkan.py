@@ -21,6 +21,7 @@ __all__ = [
     "VK_PHYSICAL_DEVICE_TYPE_CPU",
     # Physical device queues
     "vkGetPhysicalDeviceQueueFamilyProperties",
+    "VkDeviceQueueCreateInfo",
     "VK_QUEUE_GRAPHICS_BIT",
     "VK_QUEUE_COMPUTE_BIT",
     "VK_QUEUE_TRANSFER_BIT",
@@ -47,8 +48,9 @@ from vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
-    # Physical device queues:
+    # Queues:
     vkGetPhysicalDeviceQueueFamilyProperties,
+    VkDeviceQueueCreateInfo,
     VK_QUEUE_GRAPHICS_BIT,
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_TRANSFER_BIT,
