@@ -9,7 +9,7 @@ __all__ = [
 
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import TypeAlias, Literal
+from typing import TypeAlias, Literal, final
 import sys
 from abc import abstractmethod, ABC
 
@@ -17,6 +17,9 @@ import glfw
 
 from .core import ensure_glfw_init
 from .typed_vulkan import (
+    # Basic:
+    vkGetInstanceProcAddr,
+    ffi,
     # Common:
     VkDeviceSize,
     VkSampleCountFlags,
@@ -28,6 +31,8 @@ from .typed_vulkan import (
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
     VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+    # Surface:
+    VkSurfaceKHR,
     # Physical devices:
     VkPhysicalDevice,
     vkGetPhysicalDeviceProperties,
@@ -38,7 +43,7 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
-    # Physical device queues:
+    # Queues:
     vkGetPhysicalDeviceQueueFamilyProperties,
     VkDeviceQueueCreateInfo,
     VK_QUEUE_COMPUTE_BIT,
@@ -53,11 +58,66 @@ from .typed_vulkan import (
 
 
 #
+# BaseGpuResource
+#
+
+
+class GpuResource(ABC):
+    def __init__(self, parent: GpuResource | None, context: GpuContext) -> None:
+        super().__init__()
+
+        self._parent: GpuResource | None = parent
+        self._context: GpuContext = context
+        self._children: set[GpuResource] = set()
+        self._is_disposed: bool = False
+
+        if self._parent:
+            self._parent._notify_child_constructed(self)
+
+    def _notify_child_constructed(self, child: "GpuResource") -> None:
+        self._children.add(child)
+
+    def _notify_child_disposed(self, child: "GpuResource") -> None:
+        assert child._is_disposed
+        self._children.remove(child)
+
+    @property
+    def context(self) -> GpuContext:
+        return self._context
+
+    def dispose(self) -> None:
+        # If already disposed, no-op.
+        if self._is_disposed:
+            return
+
+        # Dispose children.
+        # Each child's `dispose()` method will mutate 'self._children`, so we need to
+        # iterate over a copy of the set. We also expect all children to be disposed by
+        # the end.
+        for child in set(self._children):
+            child.dispose()
+        assert not self._children, "Expected all children to be disposed."
+
+        # Dispose self, then notify parent.
+        self._on_dispose()
+        self._is_disposed = True
+        if self._parent:
+            self._parent._notify_child_disposed(self)
+
+    @abstractmethod
+    def _on_dispose(self) -> None:
+        pass
+
+    def __del__(self) -> None:
+        self.dispose()
+
+
+#
 # GpuContext
 #
 
 
-class GpuContext:
+class GpuContext(GpuResource):
     def __init__(
         self,
         app_name: str = "Unnamed Zero App",
@@ -65,7 +125,7 @@ class GpuContext:
         enable_present_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent=None, context=self)
 
         ensure_glfw_init()
 
@@ -75,37 +135,28 @@ class GpuContext:
             else (sys.platform == "darwin")  # -> inferred
         )
 
-        self._vk_instance = GpuContext._create_instance(
+        self._enable_debug_layer_support = enable_debug_layer_support
+        self._enable_present_support = enable_present_support
+        self._enable_portability_subset = enable_portability_subset
+
+        self._vk_instance = GpuContext._help_create_instance(
             app_name,
             enable_debug_layer_support,
             enable_present_support,
             enable_portability_subset,
         )
-        self._enable_debug_layer_support = enable_debug_layer_support
-        self._enable_present_support = enable_present_support
-        self._enable_portability_subset = enable_portability_subset
+        self._vk_extra_proc_tab = {}
 
-        self._registered_resources: list[GpuContextResource] = []
-        self._is_disposed = False
-
-    @property
-    def vk_instance(self) -> VkInstance:
-        return self._vk_instance
-
-    @property
-    def enable_debug_layer_support(self) -> bool:
-        return self._enable_debug_layer_support
-
-    @property
-    def enable_present_support(self) -> bool:
-        return self._enable_present_support
-
-    @property
-    def enable_portability_subset(self) -> bool | None:
-        return self._enable_portability_subset
+        if enable_present_support:
+            self._vk_extra_proc_tab["vkGetPhysicalDeviceSurfaceSupportKHR"] = (
+                vkGetInstanceProcAddr(
+                    self._vk_instance,
+                    "vkGetPhysicalDeviceSurfaceSupportKHR",
+                )
+            )
 
     @staticmethod
-    def _create_instance(
+    def _help_create_instance(
         app_name: str,
         enable_debug_layers: bool,
         enable_present_support: bool,
@@ -143,60 +194,49 @@ class GpuContext:
             pAllocator=None,
         )
 
+    def _on_dispose(self) -> None:
+        vkDestroyInstance(self._vk_instance, pAllocator=None)
+
+    def get_physical_device_surface_support(
+        self,
+        physical_device: VkPhysicalDevice,
+        queue_family_index: int,
+        surface: VkSurfaceKHR,
+    ) -> bool:
+        proc = self._vk_extra_proc_tab.get("vkGetPhysicalDeviceSurfaceSupportKHR", None)
+        if proc is None:
+            assert not self.enable_present_support
+            return False
+        return proc(
+            physical_device,
+            queue_family_index,
+            surface,
+        )
+
+    @property
+    def enable_debug_layer_support(self) -> bool:
+        return self._enable_debug_layer_support
+
+    @property
+    def enable_present_support(self) -> bool:
+        return self._enable_present_support
+
+    @property
+    def enable_portability_subset(self) -> bool | None:
+        return self._enable_portability_subset
+
     def enumerate_physical_devices(self) -> list[GpuPhysicalDevice]:
         return [
             GpuPhysicalDevice(self, vk_physical_device)
-            for vk_physical_device in vkEnumeratePhysicalDevices(self.vk_instance)
+            for vk_physical_device in vkEnumeratePhysicalDevices(self._vk_instance)
         ]
 
-    def create_device(self, physical_device: GpuPhysicalDevice) -> GpuDevice:
-        return GpuDevice(physical_device)
-
-    def register_resource(self, resource: "GpuContextResource") -> None:
-        self._registered_resources.append(resource)
-
-    #
-    # Resource cleanup
-    #
-
-    def __del__(self) -> None:
-        self.dispose()
-
-    def dispose(self) -> None:
-        if self._is_disposed:
-            return
-        self.on_dispose()
-        self._is_disposed = True
-
-    def on_dispose(self) -> None:
-        for resource in reversed(self._registered_resources):
-            resource.dispose()
-        self._registered_resources.clear()
-        vkDestroyInstance(self.vk_instance, pAllocator=None)
-
-
-class GpuContextResource(ABC):
-    def __init__(self, context: GpuContext) -> None:
-        super().__init__()
-        self._context = context
-        self._is_disposed = False
-        self._context.register_resource(self)
-
-    @property
-    def context(self) -> GpuContext:
-        return self._context
-
-    def dispose(self) -> None:
-        if not self._is_disposed:
-            self.on_dispose()
-            self._is_disposed = True
-
-    @abstractmethod
-    def on_dispose(self) -> None:
-        pass
-
-    def __del__(self) -> None:
-        self.dispose()
+    def create_device(
+        self,
+        physical_device: GpuPhysicalDevice,
+        surface: VkSurfaceKHR | None,
+    ) -> GpuDevice:
+        return GpuDevice(physical_device, surface)
 
 
 #
@@ -212,21 +252,27 @@ GpuPhysicalDeviceType: TypeAlias = Literal[
 ]
 
 
-class GpuPhysicalDevice(GpuContextResource):
-    vk_handle: VkPhysicalDevice
-    properties: VkPhysicalDeviceProperties
-
+class GpuPhysicalDevice(GpuResource):
     def __init__(
         self,
         context: GpuContext,
         vk_physical_device: VkPhysicalDevice,
     ) -> None:
-        super().__init__(context)
-        self.vk_handle = vk_physical_device
-        self.properties = vkGetPhysicalDeviceProperties(vk_physical_device)
+        super().__init__(parent=context, context=context)
+        self._vk_physical_device = vk_physical_device
+        self._vk_properties = vkGetPhysicalDeviceProperties(vk_physical_device)
 
-    def get_queue_families(self) -> list["GpuPhysicalDeviceQueueFamily"]:
-        qfi_props = vkGetPhysicalDeviceQueueFamilyProperties(self.vk_handle)
+    def _on_dispose(self) -> None:
+        pass  # no private resources to free
+
+    def get_queue_families(
+        self,
+        surface: VkSurfaceKHR | None,
+    ) -> list["GpuPhysicalDeviceQueueFamily"]:
+        if surface is not None:
+            assert self.context.enable_present_support
+
+        qfi_props = vkGetPhysicalDeviceQueueFamilyProperties(self._vk_physical_device)
 
         res = []
         for index, props in enumerate(qfi_props):
@@ -234,14 +280,13 @@ class GpuPhysicalDevice(GpuContextResource):
             supports_graphics = bool(props.queueFlags & VK_QUEUE_GRAPHICS_BIT)
             supports_compute = bool(props.queueFlags & VK_QUEUE_COMPUTE_BIT)
             supports_transfer = bool(props.queueFlags & VK_QUEUE_TRANSFER_BIT)
+
             supports_present = False
-            if self.context.enable_present_support:
-                supports_present = bool(
-                    glfw.get_physical_device_presentation_support(
-                        self.context.vk_instance,
-                        self.vk_handle,
-                        index,
-                    )
+            if surface is not None:
+                supports_present = self.context.get_physical_device_surface_support(
+                    self._vk_physical_device,
+                    index,
+                    surface,
                 )
 
             qfi = GpuPhysicalDeviceQueueFamily(
@@ -263,10 +308,7 @@ class GpuPhysicalDevice(GpuContextResource):
             int(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU): "DiscreteGpu",
             int(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU): "VirtualGpu",
             int(VK_PHYSICAL_DEVICE_TYPE_CPU): "Cpu",
-        }[self.properties.deviceType]
-
-    def on_dispose(self) -> None:
-        pass  # no resources to free
+        }[self._vk_properties.deviceType]
 
 
 @dataclass
@@ -279,8 +321,13 @@ class GpuPhysicalDeviceQueueFamily:
     supports_present: bool
 
 
+#
+# QueueFamilyIndices
+#
+
+
 @dataclass
-class GpuPhysicalDeviceQueueFamilyIndices:
+class GpuQueueFamilyIndices:
     graphics: int | None = None
     compute: int | None = None
     transfer: int | None = None
@@ -329,28 +376,24 @@ class GpuPhysicalDeviceQueueFamilyIndices:
     @staticmethod
     def find(
         physical_device: "GpuPhysicalDevice",
-        present_support_enabled: bool,
-    ) -> "GpuPhysicalDeviceQueueFamilyIndices":
+        surface: VkSurfaceKHR | None = None,
+    ) -> "GpuQueueFamilyIndices":
         # First, try to find exclusive queue families:
-        qfi_exclusive = (
-            GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
-                physical_device=physical_device,
-                require_present_support=present_support_enabled,
-                require_exclusive_queues=True,
-            )
+        qfi_exclusive = GpuQueueFamilyIndices._find_with_exclusivity_constraint(
+            physical_device=physical_device,
+            surface=surface,
+            require_exclusive_queues=True,
         )
-        if qfi_exclusive.is_complete(present_support_enabled):
+        if qfi_exclusive.is_complete(require_present_support=surface is not None):
             return qfi_exclusive
 
         # Fallback: allow shared queue families:
-        qfi_shared = (
-            GpuPhysicalDeviceQueueFamilyIndices._find_with_exclusivity_constraint(
-                physical_device=physical_device,
-                require_present_support=present_support_enabled,
-                require_exclusive_queues=False,
-            )
+        qfi_shared = GpuQueueFamilyIndices._find_with_exclusivity_constraint(
+            physical_device=physical_device,
+            surface=surface,
+            require_exclusive_queues=False,
         )
-        if qfi_shared.is_complete(present_support_enabled):
+        if qfi_shared.is_complete(require_present_support=surface is not None):
             return qfi_shared
 
         # Failed
@@ -361,12 +404,12 @@ class GpuPhysicalDeviceQueueFamilyIndices:
     @staticmethod
     def _find_with_exclusivity_constraint(
         physical_device: "GpuPhysicalDevice",
-        require_present_support: bool,
+        surface: VkSurfaceKHR | None,
         require_exclusive_queues: bool,
-    ) -> "GpuPhysicalDeviceQueueFamilyIndices":
-        res = GpuPhysicalDeviceQueueFamilyIndices()
+    ) -> "GpuQueueFamilyIndices":
+        res = GpuQueueFamilyIndices()
 
-        for queue_family in physical_device.get_queue_families():
+        for queue_family in physical_device.get_queue_families(surface=surface):
             queue_family_use_count = 0
             queue_family_max_use_count = (
                 1 if require_exclusive_queues else queue_family.queue_count
@@ -392,13 +435,13 @@ class GpuPhysicalDeviceQueueFamilyIndices:
                 if reserve_queue_and_check_can_continue():
                     continue
 
-            if require_present_support:
+            if surface is not None:
                 if res.present is None and queue_family.supports_present:
                     res.present = queue_family.index
                     if reserve_queue_and_check_can_continue():
                         continue
 
-            if res.is_complete(require_present_support):
+            if res.is_complete(require_present_support=surface is not None):
                 break
 
         return res
@@ -409,23 +452,40 @@ class GpuPhysicalDeviceQueueFamilyIndices:
 #
 
 
-class GpuDevice(GpuContextResource):
-    def __init__(self, physical_device: GpuPhysicalDevice) -> None:
-        super().__init__(physical_device.context)
+class GpuDevice(GpuResource):
+    def __init__(
+        self,
+        physical_device: GpuPhysicalDevice,
+        surface: VkSurfaceKHR | None,
+    ) -> None:
+        super().__init__(parent=physical_device, context=physical_device.context)
 
+        self._qfis, self._vk_device = GpuDevice._help_create_vk_device(
+            context=self.context,
+            physical_device=physical_device,
+            surface=surface,
+        )
+
+    @staticmethod
+    def _help_create_vk_device(
+        context: GpuContext,
+        physical_device: GpuPhysicalDevice,
+        surface: VkSurfaceKHR | None,
+    ) -> tuple[GpuQueueFamilyIndices, VkDevice]:
         extensions = []
-        if self.context.enable_present_support:
+        if context.enable_present_support:
             extensions.append("VK_KHR_swapchain")
-        if self.context.enable_portability_subset:
+        if context.enable_portability_subset:
             extensions.append("VK_KHR_portability_subset")
 
-        queue_create_info_list = GpuPhysicalDeviceQueueFamilyIndices.find(
+        qfis = GpuQueueFamilyIndices.find(
             physical_device,
-            present_support_enabled=self.context.enable_present_support,
-        ).compute_queue_create_info_list()
+            surface=surface,
+        )
+        queue_create_info_list = qfis.compute_queue_create_info_list()
 
-        self._vk_device: VkDevice = vkCreateDevice(
-            physical_device.vk_handle,
+        return qfis, vkCreateDevice(
+            physical_device._vk_physical_device,
             VkDeviceCreateInfo(
                 enabledExtensionCount=len(extensions),
                 ppEnabledExtensionNames=extensions,
@@ -435,12 +495,13 @@ class GpuDevice(GpuContextResource):
             pAllocator=None,
         )
 
-    @property
-    def vk_device(self) -> VkDevice:
-        return self._vk_device
+    def _on_dispose(self) -> None:
+        vkDestroyDevice(device=self._vk_device, pAllocator=None)
 
-    def on_dispose(self) -> None:
-        vkDestroyDevice(device=self.vk_device, pAllocator=None)
+    def create_texture(
+        self,
+    ) -> "GpuTexture":
+        return GpuTexture(self)
 
 
 #
@@ -448,5 +509,13 @@ class GpuDevice(GpuContextResource):
 #
 
 
-class GpuTexture(GpuContextResource):
-    pass
+@final
+class GpuTexture(GpuResource):
+    def __init__(
+        self,
+        device: GpuDevice,
+    ) -> None:
+        super().__init__(parent=device, context=device.context)
+
+    def _on_dispose(self) -> None:
+        pass

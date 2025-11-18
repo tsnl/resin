@@ -13,7 +13,7 @@ def main():
     print_debug_info(gpu_context)
 
     physical_device = next(iter(gpu_context.enumerate_physical_devices()))
-    device = gpu_context.create_device(physical_device)
+    device = gpu_context.create_device(physical_device, surface=None)
 
     print(device)
 
@@ -24,10 +24,10 @@ def print_debug_info(gpu_context: zero.GpuContext) -> None:
         {
             "physical-devices": [
                 {
-                    "name": physical_device.properties.deviceName,
-                    "vendor-id": f"0x{physical_device.properties.vendorID:08x}",
-                    "device-id": f"0x{physical_device.properties.deviceID:08x}",
-                    "api-version": f"0x{physical_device.properties.apiVersion:08x}",
+                    "name": physical_device._vk_properties.deviceName,
+                    "vendor-id": f"0x{physical_device._vk_properties.vendorID:08x}",
+                    "device-id": f"0x{physical_device._vk_properties.deviceID:08x}",
+                    "api-version": f"0x{physical_device._vk_properties.apiVersion:08x}",
                     "device-type": physical_device.spell_device_type(),
                 }
                 for physical_device in gpu_context.enumerate_physical_devices()
