@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import TypeAlias, Literal
 import sys
+from abc import abstractmethod, ABC
 
 import glfw
 
@@ -22,6 +23,7 @@ from .typed_vulkan import (
     # Instance:
     VkInstance,
     vkCreateInstance,
+    vkDestroyInstance,
     VkInstanceCreateInfo,
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
@@ -45,6 +47,7 @@ from .typed_vulkan import (
     # Devices:
     VkDevice,
     vkCreateDevice,
+    vkDestroyDevice,
     VkDeviceCreateInfo,
 )
 
@@ -81,6 +84,9 @@ class GpuContext:
         self._enable_debug_layer_support = enable_debug_layer_support
         self._enable_present_support = enable_present_support
         self._enable_portability_subset = enable_portability_subset
+
+        self._registered_resources: list[GpuContextResource] = []
+        self._is_disposed = False
 
     @property
     def vk_instance(self) -> VkInstance:
@@ -146,15 +152,51 @@ class GpuContext:
     def create_device(self, physical_device: GpuPhysicalDevice) -> GpuDevice:
         return GpuDevice(physical_device)
 
+    def register_resource(self, resource: "GpuContextResource") -> None:
+        self._registered_resources.append(resource)
 
-class GpuContextResource:
+    #
+    # Resource cleanup
+    #
+
+    def __del__(self) -> None:
+        self.dispose()
+
+    def dispose(self) -> None:
+        if self._is_disposed:
+            return
+        self.on_dispose()
+        self._is_disposed = True
+
+    def on_dispose(self) -> None:
+        for resource in reversed(self._registered_resources):
+            resource.dispose()
+        self._registered_resources.clear()
+        vkDestroyInstance(self.vk_instance, pAllocator=None)
+
+
+class GpuContextResource(ABC):
     def __init__(self, context: GpuContext) -> None:
         super().__init__()
         self._context = context
+        self._is_disposed = False
+        self._context.register_resource(self)
 
     @property
     def context(self) -> GpuContext:
         return self._context
+
+    def dispose(self) -> None:
+        if not self._is_disposed:
+            self.on_dispose()
+            self._is_disposed = True
+
+    @abstractmethod
+    def on_dispose(self) -> None:
+        pass
+
+    def __del__(self) -> None:
+        self.dispose()
 
 
 #
@@ -222,6 +264,9 @@ class GpuPhysicalDevice(GpuContextResource):
             int(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU): "VirtualGpu",
             int(VK_PHYSICAL_DEVICE_TYPE_CPU): "Cpu",
         }[self.properties.deviceType]
+
+    def on_dispose(self) -> None:
+        pass  # no resources to free
 
 
 @dataclass
@@ -379,7 +424,7 @@ class GpuDevice(GpuContextResource):
             present_support_enabled=self.context.enable_present_support,
         ).compute_queue_create_info_list()
 
-        self.vk_device: VkDevice = vkCreateDevice(
+        self._vk_device: VkDevice = vkCreateDevice(
             physical_device.vk_handle,
             VkDeviceCreateInfo(
                 enabledExtensionCount=len(extensions),
@@ -389,3 +434,19 @@ class GpuDevice(GpuContextResource):
             ),
             pAllocator=None,
         )
+
+    @property
+    def vk_device(self) -> VkDevice:
+        return self._vk_device
+
+    def on_dispose(self) -> None:
+        vkDestroyDevice(device=self.vk_device, pAllocator=None)
+
+
+#
+# GpuTexture
+#
+
+
+class GpuTexture(GpuContextResource):
+    pass

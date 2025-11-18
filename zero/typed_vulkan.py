@@ -6,6 +6,7 @@ __all__ = [
     # Instance
     "VkInstance",
     "vkCreateInstance",
+    "vkDestroyInstance",
     "VkApplicationInfo",
     "VkInstanceCreateInfo",
     "vkEnumeratePhysicalDevices",
@@ -29,6 +30,7 @@ __all__ = [
     # Devices
     "VkDevice",
     "vkCreateDevice",
+    "vkDestroyDevice",
     "VkDeviceCreateInfo",
 ]
 
@@ -37,6 +39,7 @@ from typing import TypeAlias
 from vulkan import (
     # Instance:
     vkCreateInstance,
+    vkDestroyInstance,
     VkInstanceCreateInfo,
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
@@ -58,6 +61,7 @@ from vulkan import (
     VK_QUEUE_TRANSFER_BIT,
     # Devices:
     vkCreateDevice,
+    vkDestroyDevice,
     VkDeviceCreateInfo,
 )
 

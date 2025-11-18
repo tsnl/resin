@@ -57,6 +57,14 @@ def vkCreateInstance(
     vkCreateInstance creates a Vulkan instance.
     """
 
+def vkDestroyInstance(
+    instance: VkInstance,
+    pAllocator: Optional[Any] = None,
+) -> None:
+    """
+    vkDestroyInstance destroys a Vulkan instance.
+    """
+
 def vkEnumeratePhysicalDevices(instance: VkInstance) -> List[VkPhysicalDevice]:
     """
     vkEnumeratePhysicalDevices enumerates the physical devices available on the system.
@@ -338,4 +346,9 @@ def vkCreateDevice(
 ) -> VkDevice:
     """
     vkCreateDevice creates a logical device from a physical device.
+    """
+
+def vkDestroyDevice(device: VkDevice, pAllocator: Any) -> None:
+    """
+    vkDestroyDevice destroys a logical device.
     """
