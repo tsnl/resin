@@ -9,6 +9,7 @@ __all__ = [
     "VkApplicationInfo",
     "VkInstanceCreateInfo",
     "vkEnumeratePhysicalDevices",
+    "VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR",
     # Physical devices
     "VkPhysicalDevice",
     "vkGetPhysicalDeviceProperties",
@@ -39,6 +40,7 @@ from vulkan import (
     VkInstanceCreateInfo,
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
+    VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
     # Physical devices:
     vkGetPhysicalDeviceProperties,
     VkPhysicalDeviceProperties,

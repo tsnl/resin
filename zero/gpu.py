@@ -10,6 +10,7 @@ __all__ = [
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import TypeAlias, Literal
+import sys
 
 import glfw
 
@@ -24,6 +25,7 @@ from .typed_vulkan import (
     VkInstanceCreateInfo,
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
+    VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
     # Physical devices:
     VkPhysicalDevice,
     vkGetPhysicalDeviceProperties,
@@ -58,18 +60,27 @@ class GpuContext:
         app_name: str = "Unnamed Zero App",
         enable_debug_layer_support: bool = True,
         enable_present_support: bool = True,
+        enable_portability_subset_override: bool | None = None,
     ) -> None:
         super().__init__()
 
         ensure_glfw_init()
 
+        enable_portability_subset = (
+            enable_portability_subset_override
+            if enable_portability_subset_override is not None
+            else (sys.platform == "darwin")  # -> inferred
+        )
+
         self._vk_instance = GpuContext._create_instance(
             app_name,
             enable_debug_layer_support,
             enable_present_support,
+            enable_portability_subset,
         )
         self._enable_debug_layer_support = enable_debug_layer_support
         self._enable_present_support = enable_present_support
+        self._enable_portability_subset = enable_portability_subset
 
     @property
     def vk_instance(self) -> VkInstance:
@@ -83,14 +94,20 @@ class GpuContext:
     def enable_present_support(self) -> bool:
         return self._enable_present_support
 
+    @property
+    def enable_portability_subset(self) -> bool | None:
+        return self._enable_portability_subset
+
     @staticmethod
     def _create_instance(
         app_name: str,
         enable_debug_layers: bool,
         enable_present_support: bool,
+        enable_portability_subset: bool,
     ) -> VkInstance:
         layers = []
         extensions = []
+        flags = 0
 
         if enable_debug_layers:
             layers.append("VK_LAYER_KHRONOS_validation")
@@ -99,6 +116,11 @@ class GpuContext:
 
         if enable_present_support:
             extensions += glfw.get_required_instance_extensions()
+
+        if enable_portability_subset:
+            extensions.append("VK_KHR_portability_enumeration")
+            extensions.append("VK_KHR_get_physical_device_properties2")
+            flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
 
         return vkCreateInstance(
             pCreateInfo=VkInstanceCreateInfo(
@@ -110,6 +132,7 @@ class GpuContext:
                 ppEnabledLayerNames=layers,
                 enabledExtensionCount=len(extensions),
                 ppEnabledExtensionNames=extensions,
+                flags=flags,
             ),
             pAllocator=None,
         )
@@ -348,6 +371,8 @@ class GpuDevice(GpuContextResource):
         extensions = []
         if self.context.enable_present_support:
             extensions.append("VK_KHR_swapchain")
+        if self.context.enable_portability_subset:
+            extensions.append("VK_KHR_portability_subset")
 
         queue_create_info_list = GpuPhysicalDeviceQueueFamilyIndices.find(
             physical_device,

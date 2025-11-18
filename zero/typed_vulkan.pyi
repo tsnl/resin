@@ -37,6 +37,7 @@ class VkInstanceCreateInfo:
     ppEnabledLayerNames: Sequence[str] = ()
     enabledExtensionCount: int = 0
     ppEnabledExtensionNames: Sequence[str] = ()
+    flags: int = 0
 
 @dataclass
 class VkPhysicalDeviceProperties:
@@ -60,6 +61,9 @@ def vkEnumeratePhysicalDevices(instance: VkInstance) -> List[VkPhysicalDevice]:
     """
     vkEnumeratePhysicalDevices enumerates the physical devices available on the system.
     """
+
+VkInstanceCreateFlagBits: TypeAlias = VkFlags
+VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR: VkFlags = 0x00000001
 
 #
 # Physical Devices
