@@ -11,11 +11,10 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import TypeAlias, Literal, final
 import sys
-from abc import abstractmethod, ABC
+import os
 
-import glfw
-
-from .core import ensure_glfw_init
+from .core import BaseContext, BaseContextResource
+from .excepts import UnsupportedPlatformError
 from .typed_vulkan import (
     # Basic:
     vkGetInstanceProcAddr,
@@ -58,76 +57,19 @@ from .typed_vulkan import (
 
 
 #
-# BaseGpuResource
-#
-
-
-class GpuResource(ABC):
-    def __init__(self, parent: GpuResource | None, context: GpuContext) -> None:
-        super().__init__()
-
-        self._parent: GpuResource | None = parent
-        self._context: GpuContext = context
-        self._children: set[GpuResource] = set()
-        self._is_disposed: bool = False
-
-        if self._parent:
-            self._parent._notify_child_constructed(self)
-
-    def _notify_child_constructed(self, child: "GpuResource") -> None:
-        self._children.add(child)
-
-    def _notify_child_disposed(self, child: "GpuResource") -> None:
-        assert child._is_disposed
-        self._children.remove(child)
-
-    @property
-    def context(self) -> GpuContext:
-        return self._context
-
-    def dispose(self) -> None:
-        # If already disposed, no-op.
-        if self._is_disposed:
-            return
-
-        # Dispose children.
-        # Each child's `dispose()` method will mutate 'self._children`, so we need to
-        # iterate over a copy of the set. We also expect all children to be disposed by
-        # the end.
-        for child in set(self._children):
-            child.dispose()
-        assert not self._children, "Expected all children to be disposed."
-
-        # Dispose self, then notify parent.
-        self._on_dispose()
-        self._is_disposed = True
-        if self._parent:
-            self._parent._notify_child_disposed(self)
-
-    @abstractmethod
-    def _on_dispose(self) -> None:
-        pass
-
-    def __del__(self) -> None:
-        self.dispose()
-
-
-#
 # GpuContext
 #
 
 
-class GpuContext(GpuResource):
+class GpuContext(BaseContext["GpuContext"]):
     def __init__(
         self,
-        app_name: str = "Unnamed Zero App",
+        app_name: str = "Zero App",
         enable_debug_layer_support: bool = True,
         enable_present_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
-        super().__init__(parent=None, context=self)
-
-        ensure_glfw_init()
+        super().__init__()
 
         enable_portability_subset = (
             enable_portability_subset_override
@@ -172,7 +114,8 @@ class GpuContext(GpuResource):
             extensions.append("VK_EXT_debug_report")
 
         if enable_present_support:
-            extensions += glfw.get_required_instance_extensions()
+            extensions.append("VK_KHR_surface")
+            extensions += GpuContext._help_compute_required_platform_instance_extensions_for_present_support()
 
         if enable_portability_subset:
             extensions.append("VK_KHR_portability_enumeration")
@@ -193,6 +136,57 @@ class GpuContext(GpuResource):
             ),
             pAllocator=None,
         )
+
+    @staticmethod
+    def _help_compute_required_platform_instance_extensions_for_present_support() -> (
+        list[str]
+    ):
+        """
+        glfw.get_required_instance_extensions(), but no need to init GLFW.
+        """
+
+        # See: GLFW's recognized extensions
+        # https://github.com/glfw/glfw/blob/162896e5b9a40dc382c5c438cd12c90a5ff86ddd/src/vulkan.c#L129
+
+        match sys.platform:
+            case "win32":
+                return ["VK_KHR_win32_surface"]
+            case "linux":
+                return GpuContext._help_compute_required_platform_instance_extensions_for_present_support_on_linux()
+            case "darwin":
+                return ["VK_EXT_metal_surface"]
+            case _:
+                raise UnsupportedPlatformError(
+                    "Unrecognized platform when computing required Vulkan instance "
+                    f"extensions for Present (VkSurfaceKHR) support: {sys.platform!r}"
+                )
+
+    @staticmethod
+    def _help_compute_required_platform_instance_extensions_for_present_support_on_linux() -> (
+        list[str]
+    ):
+        """
+        glfw.get_required_instance_extensions(), but no need to init GLFW: Linux only.
+        Wayland or X11?
+        """
+
+        # See: GLFW's code for detecting X11 or Wayland (or other)
+        # https://github.com/glfw/glfw/blob/162896e5b9a40dc382c5c438cd12c90a5ff86ddd/src/platform.c#L89
+        #
+        # In addition to checking XDG_SESSION_TYPE, we further examine other environment
+        # variables to determine whether the session is valid.
+
+        session = os.environ.get("XDG_SESSION_TYPE")
+        if session == "wayland" and os.environ.get("WAYLAND_DISPLAY"):
+            return ["VK_KHR_wayland_surface"]
+        elif session == "x11" and os.environ.get("DISPLAY"):
+            return ["VK_KHR_xcb_surface"]
+        else:
+            raise UnsupportedPlatformError(
+                "Unrecognized display backend when computing required Vulkan instance "
+                "extensions for Present (VkSurfaceKHR) support: failed to detect "
+                "Wayland or X11 on a Linux host: are you running a window server?"
+            )
 
     def _on_dispose(self) -> None:
         if hasattr(self, "_vk_instance"):
@@ -240,6 +234,9 @@ class GpuContext(GpuResource):
         return GpuDevice(physical_device, surface)
 
 
+GpuResource: TypeAlias = BaseContextResource[GpuContext]
+
+
 #
 # GpuPhysicalDevice
 #
@@ -259,7 +256,7 @@ class GpuPhysicalDevice(GpuResource):
         context: GpuContext,
         vk_physical_device: VkPhysicalDevice,
     ) -> None:
-        super().__init__(parent=context, context=context)
+        super().__init__(parent=context)
         self._vk_physical_device = vk_physical_device
         self._vk_properties = vkGetPhysicalDeviceProperties(vk_physical_device)
 
@@ -459,7 +456,7 @@ class GpuDevice(GpuResource):
         physical_device: GpuPhysicalDevice,
         surface: VkSurfaceKHR | None,
     ) -> None:
-        super().__init__(parent=physical_device, context=physical_device.context)
+        super().__init__(parent=physical_device)
 
         self._qfis, self._vk_device = GpuDevice._help_create_vk_device(
             context=self.context,
@@ -516,7 +513,7 @@ class GpuTexture(GpuResource):
         self,
         device: GpuDevice,
     ) -> None:
-        super().__init__(parent=device, context=device.context)
+        super().__init__(parent=device)
 
     def _on_dispose(self) -> None:
         pass

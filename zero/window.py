@@ -6,6 +6,10 @@ from .excepts import GlfwError
 from .core import ensure_glfw_init
 
 
+class WindowContext:
+    pass
+
+
 class Window:
     _all: list["Window"] = []
 

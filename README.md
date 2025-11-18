@@ -12,4 +12,7 @@ $ uv sync
 
 # Run the example
 $ uv run --with zero -- zero-replay
+
+# Typecheck
+$ uv run --with zero -- pyright
 ```

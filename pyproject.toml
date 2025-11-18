@@ -23,3 +23,8 @@ line-length = 88
 [tool.uv.build-backend]
 module-name = "zero"
 module-root = ""
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.407",
+]

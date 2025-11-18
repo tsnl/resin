@@ -179,6 +179,11 @@ dev = [
     { name = "pytest" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "glfw", specifier = ">=2.10.0,<3.0.0" },
@@ -187,3 +192,6 @@ requires-dist = [
     { name = "vulkan", specifier = ">=1.3.275.1,<2.0.0.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pyright", specifier = ">=1.1.407" }]
