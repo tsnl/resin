@@ -195,7 +195,8 @@ class GpuContext(GpuResource):
         )
 
     def _on_dispose(self) -> None:
-        vkDestroyInstance(self._vk_instance, pAllocator=None)
+        if hasattr(self, "_vk_instance"):
+            vkDestroyInstance(self._vk_instance, pAllocator=None)
 
     def get_physical_device_surface_support(
         self,
@@ -496,11 +497,11 @@ class GpuDevice(GpuResource):
         )
 
     def _on_dispose(self) -> None:
-        vkDestroyDevice(device=self._vk_device, pAllocator=None)
+        if hasattr(self, "_vk_device"):
+            vkDestroyDevice(device=self._vk_device, pAllocator=None)
 
-    def create_texture(
-        self,
-    ) -> "GpuTexture":
+    def create_texture(self) -> "GpuTexture":
+        # TODO: implement the rest of this
         return GpuTexture(self)
 
 
