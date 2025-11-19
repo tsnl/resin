@@ -20,6 +20,12 @@ ffi: cffi.FFI
 # Common:
 #
 
+def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int: ...
+def vk_decompose_api_version(api_version: int) -> tuple[int, int, int, int]: ...
+def vk_api_version_str(api_version: int) -> str: ...
+
+VK_API_VERSION_1_4: int
+
 VkDeviceSize: TypeAlias = int
 VkFlags: TypeAlias = int
 

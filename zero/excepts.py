@@ -1,4 +1,8 @@
-__all__ = ["LogicError", "GlfwError", "UnsupportedPlatformError"]
+__all__ = [
+    "LogicError",
+    "GlfwError",
+    "PlatformSupportError",
+]
 
 import glfw
 
@@ -14,6 +18,6 @@ class GlfwError(RuntimeError):
         super().__init__(f"{message}: {error_message} (error=0x{error_code:X})")
 
 
-class UnsupportedPlatformError(RuntimeError):
+class PlatformSupportError(RuntimeError):
     def __init__(self, message: str):
         super().__init__(message)

@@ -7,6 +7,10 @@ __all__ = [
     "VkFlags",
     "VkSampleCountFlags",
     "VkExtent3D",
+    "VK_API_VERSION_1_4",
+    "VK_MAKE_API_VERSION",
+    "vk_decompose_api_version",
+    "vk_api_version_str",
     # Instance
     "VkInstance",
     "vkCreateInstance",
@@ -55,8 +59,8 @@ __all__ = [
     "VK_FORMAT_R32_SFLOAT",
     "VK_FORMAT_R8G8B8A8_UNORM",
     "VK_FORMAT_R32G32B32A32_SFLOAT",
-    "VkSampleCountFlags",
-    ## "VkSampleCountFlagBits"
+    "VK_FORMAT_D32_SFLOAT",
+    ## "VkSampleCountFlags"
     "VK_SAMPLE_COUNT_1_BIT",
     "VK_SAMPLE_COUNT_2_BIT",
     "VK_SAMPLE_COUNT_4_BIT",
@@ -91,10 +95,12 @@ __all__ = [
     "vkCreateImage",
     "vkDestroyImage",
     # Image views
+    "VkImageView",
     "vkCreateImageView",
     "VkImageViewCreateInfo",
     "vkDestroyImageView",
     # Samplers
+    "VkSampler",
     "vkCreateSampler",
     "VkSamplerCreateInfo",
     "vkDestroySampler",
@@ -151,6 +157,7 @@ from vulkan import (
     VK_FORMAT_R32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
     VK_FORMAT_R32G32B32A32_SFLOAT,
+    VK_FORMAT_D32_SFLOAT,
     ## VkSampleCountFlags,
     ## VkSampleCountFlagBits,
     VK_SAMPLE_COUNT_1_BIT,
@@ -208,6 +215,26 @@ VkImageCreateFlags: TypeAlias = VkFlags
 VkImageCreateFlagBits: TypeAlias = int
 
 
+def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:
+    return (variant << 29) | (major << 22) | (minor << 12) | (patch << 0)
+
+
+def vk_decompose_api_version(api_version: int) -> tuple[int, int, int, int]:
+    variant = (api_version >> 29) & 0x7
+    major = (api_version >> 22) & 0x7F
+    minor = (api_version >> 12) & 0x3FF
+    patch = (api_version >> 0) & 0xFFF
+    return variant, major, minor, patch
+
+
+def vk_api_version_str(api_version: int) -> str:
+    variant, major, minor, patch = vk_decompose_api_version(api_version)
+    return f"{major}.{minor}.{patch} (variant {variant})"
+
+
+VK_API_VERSION_1_4 = VK_MAKE_API_VERSION(0, 1, 4, 0)
+
+
 class VkInstance(OpaqueResourceHandle): ...
 
 
@@ -221,3 +248,9 @@ class VkDevice(OpaqueResourceHandle): ...
 
 
 class VkImage(OpaqueResourceHandle): ...
+
+
+class VkImageView(OpaqueResourceHandle): ...
+
+
+class VkSampler(OpaqueResourceHandle): ...

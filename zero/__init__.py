@@ -4,9 +4,9 @@ __all__ = [
     # gpu
     "GpuDevice",
     "GpuImage",
-    "GpuTextureUsage",
-    "GpuTextureSpec",
+    "GpuImageUsage",
+    "GpuImageMeta",
 ]
 
-from .gpu import GpuContext, GpuDevice, GpuImage, GpuTextureUsage, GpuTextureSpec
+from .gpu import GpuContext, GpuDevice, GpuImage, GpuImageUsage, GpuImageMeta
 from .window import Window

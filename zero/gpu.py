@@ -7,22 +7,20 @@ __all__ = [
     "GpuDevice",
     # GpuImage
     "GpuImage",
-    "GpuTextureUsage",
-    "GpuTextureSpec",
+    "GpuImageUsage",
+    "GpuImageMeta",
 ]
 
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import TypeAlias, Literal
-from enum import IntFlag, auto
 import sys
 import os
-import functools
 
 import torch
 
-from .core import BaseContext, BaseContextResource, expect
-from .excepts import UnsupportedPlatformError, LogicError
+from .core import BaseContext, BaseContextResource
+from .excepts import PlatformSupportError, LogicError
 from .typed_vulkan import (
     # Basic
     vkGetInstanceProcAddr,
@@ -31,6 +29,9 @@ from .typed_vulkan import (
     VkDeviceSize,
     VkSampleCountFlags,
     VkExtent3D,
+    VK_API_VERSION_1_4,
+    vk_decompose_api_version,
+    vk_api_version_str,
     # Instance
     VkInstance,
     vkCreateInstance,
@@ -63,23 +64,24 @@ from .typed_vulkan import (
     vkDestroyDevice,
     VkDeviceCreateInfo,
     # Images
-    ## VkImageCreateFlags,
-    ## VkImageCreateFlagBits,
+    ## VkImageCreateFlags
+    ## VkImageCreateFlagBits
     VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
     VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT,
     VK_IMAGE_CREATE_SPARSE_ALIASED_BIT,
     VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
     VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-    ## VkImageType,
+    ## VkImageType
     VK_IMAGE_TYPE_1D,
     VK_IMAGE_TYPE_2D,
     VK_IMAGE_TYPE_3D,
-    ## VkFormat,
+    ## VkFormat
     VK_FORMAT_R32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
     VK_FORMAT_R32G32B32A32_SFLOAT,
-    ## VkSampleCountFlags,
-    ## VkSampleCountFlagBits,
+    VK_FORMAT_D32_SFLOAT,
+    ## VkSampleCountFlags
+    ## VkSampleCountFlagBits
     VK_SAMPLE_COUNT_1_BIT,
     VK_SAMPLE_COUNT_2_BIT,
     VK_SAMPLE_COUNT_4_BIT,
@@ -87,21 +89,21 @@ from .typed_vulkan import (
     VK_SAMPLE_COUNT_16_BIT,
     VK_SAMPLE_COUNT_32_BIT,
     VK_SAMPLE_COUNT_64_BIT,
-    ## VkImageTiling,
+    ## VkImageTiling
     VK_IMAGE_TILING_OPTIMAL,
     VK_IMAGE_TILING_LINEAR,
-    ## VkImageUsageFlags,
-    ## VkImageUsageFlagBits,
+    ## VkImageUsageFlags
+    ## VkImageUsageFlagBits
     VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
     VK_IMAGE_USAGE_TRANSFER_DST_BIT,
     VK_IMAGE_USAGE_SAMPLED_BIT,
     VK_IMAGE_USAGE_STORAGE_BIT,
     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-    ## VkSharingMode,
+    ## VkSharingMode
     VK_SHARING_MODE_EXCLUSIVE,
     VK_SHARING_MODE_CONCURRENT,
-    ## VkImageLayout,
+    ## VkImageLayout
     VK_IMAGE_LAYOUT_UNDEFINED,
     VK_IMAGE_LAYOUT_GENERAL,
     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -110,14 +112,17 @@ from .typed_vulkan import (
     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
     VK_IMAGE_LAYOUT_PREINITIALIZED,
+    VkImage,
     vkCreateImage,
     VkImageCreateInfo,
     vkDestroyImage,
     # Image views
+    VkImageView,
     vkCreateImageView,
     VkImageViewCreateInfo,
     vkDestroyImageView,
     # Samplers
+    VkSampler,
     vkCreateSampler,
     VkSamplerCreateInfo,
     vkDestroySampler,
@@ -195,6 +200,7 @@ class GpuContext(BaseContext["GpuContext"]):
                 pApplicationInfo=VkApplicationInfo(
                     pApplicationName=app_name,
                     pEngineName="zero",
+                    apiVersion=VK_API_VERSION_1_4,
                 ),
                 enabledLayerCount=len(layers),
                 ppEnabledLayerNames=layers,
@@ -224,7 +230,7 @@ class GpuContext(BaseContext["GpuContext"]):
             case "darwin":
                 return ["VK_EXT_metal_surface"]
             case _:
-                raise UnsupportedPlatformError(
+                raise PlatformSupportError(
                     "Unrecognized platform when computing required Vulkan instance "
                     f"extensions for Present (VkSurfaceKHR) support: {sys.platform!r}"
                 )
@@ -250,7 +256,7 @@ class GpuContext(BaseContext["GpuContext"]):
         elif session == "x11" and os.environ.get("DISPLAY"):
             return ["VK_KHR_xcb_surface"]
         else:
-            raise UnsupportedPlatformError(
+            raise PlatformSupportError(
                 "Unrecognized display backend when computing required Vulkan instance "
                 "extensions for Present (VkSurfaceKHR) support: failed to detect "
                 "Wayland or X11 on a Linux host: are you running a window server?"
@@ -290,16 +296,55 @@ class GpuContext(BaseContext["GpuContext"]):
 
     def enumerate_physical_devices(self) -> list[GpuPhysicalDevice]:
         return [
-            GpuPhysicalDevice(self, vk_physical_device)
+            GpuPhysicalDevice(
+                context=self,
+                vk_physical_device=vk_physical_device,
+                vk_physical_device_properties=vkGetPhysicalDeviceProperties(
+                    vk_physical_device
+                ),
+            )
             for vk_physical_device in vkEnumeratePhysicalDevices(self._vk_instance)
         ]
 
     def create_device(
         self,
+        *,
         physical_device: GpuPhysicalDevice,
         surface: VkSurfaceKHR | None,
     ) -> GpuDevice:
-        return GpuDevice(physical_device, surface)
+        # Ensure Vulkan 1.4 support
+        physical_device.check_vulkan_1_4_support()
+
+        # Compute queue family indices
+        qfis = GpuQueueFamilyIndices.find(
+            physical_device,
+            surface=surface,
+        )
+        queue_create_info_list = qfis.compute_queue_create_info_list()
+
+        # Compute extensions
+        extensions = []
+        if self.enable_present_support:
+            extensions.append("VK_KHR_swapchain")
+        if self.enable_portability_subset:
+            extensions.append("VK_KHR_portability_subset")
+
+        # Done:
+        vk_device = vkCreateDevice(
+            physical_device._vk_physical_device,
+            VkDeviceCreateInfo(
+                enabledExtensionCount=len(extensions),
+                ppEnabledExtensionNames=extensions,
+                queueCreateInfoCount=len(queue_create_info_list),
+                pQueueCreateInfos=queue_create_info_list,
+            ),
+            pAllocator=None,
+        )
+        return GpuDevice(
+            context=self,
+            qfis=qfis,
+            vk_device=vk_device,
+        )
 
 
 GpuResource: TypeAlias = BaseContextResource[GpuContext]
@@ -319,17 +364,39 @@ GpuPhysicalDeviceType: TypeAlias = Literal[
 
 
 class GpuPhysicalDevice(GpuResource):
+    vk_physical_device: VkPhysicalDevice
+    vk_physical_device_properties: VkPhysicalDeviceProperties
+
     def __init__(
         self,
+        *,
         context: GpuContext,
         vk_physical_device: VkPhysicalDevice,
+        vk_physical_device_properties: VkPhysicalDeviceProperties,
     ) -> None:
         super().__init__(parent=context)
         self._vk_physical_device = vk_physical_device
-        self._vk_properties = vkGetPhysicalDeviceProperties(vk_physical_device)
+        self._vk_properties = vk_physical_device_properties
 
     def _on_dispose(self) -> None:
         pass  # no private resources to free
+
+    @property
+    def name(self) -> str:
+        return self._vk_properties.deviceName
+
+    @property
+    def vk_api_version(self) -> int:
+        return self._vk_properties.apiVersion
+
+    def check_vulkan_1_4_support(self):
+        if self._vk_properties.apiVersion >= VK_API_VERSION_1_4:
+            return
+        raise PlatformSupportError(
+            f"Physical device {self.name!r} does not support Vulkan 1.4.\n"
+            f"- provided: {vk_api_version_str(self.vk_api_version)}\n"
+            f"- required: {vk_api_version_str(VK_API_VERSION_1_4)}"
+        )
 
     def get_queue_families(
         self,
@@ -410,12 +477,7 @@ class GpuQueueFamilyIndices:
     def is_any_queue_family_shared(self) -> bool:
         all_indices = [
             index
-            for index in [
-                self.graphics,
-                self.compute,
-                self.transfer,
-                self.present,
-            ]
+            for index in [self.graphics, self.compute, self.transfer, self.present]
             if index is not None
         ]
         return len(set(all_indices)) < len(all_indices)
@@ -463,8 +525,15 @@ class GpuQueueFamilyIndices:
             return qfi_shared
 
         # Failed
-        raise RuntimeError(
-            f"Failed to find suitable queue families:\n- {qfi_exclusive=}\n- {qfi_shared=}"
+        raise PlatformSupportError(
+            "\n".join(
+                [
+                    f"Physical device {physical_device.name} does not meet the minimum "
+                    "engine requirements: failed to find suitable queue families:",
+                    f"- {qfi_exclusive=}",
+                    f"- {qfi_shared=}",
+                ]
+            )
         )
 
     @staticmethod
@@ -512,6 +581,16 @@ class GpuQueueFamilyIndices:
 
         return res
 
+    def __iter__(self):
+        if self.graphics is not None:
+            yield self.graphics
+        if self.compute is not None:
+            yield self.compute
+        if self.transfer is not None:
+            yield self.transfer
+        if self.present is not None:
+            yield self.present
+
 
 #
 # GpuDevice
@@ -519,154 +598,63 @@ class GpuQueueFamilyIndices:
 
 
 class GpuDevice(GpuResource):
+    qfis: GpuQueueFamilyIndices
+    vk_device: VkDevice
+
     def __init__(
         self,
-        physical_device: GpuPhysicalDevice,
-        surface: VkSurfaceKHR | None,
-    ) -> None:
-        super().__init__(parent=physical_device)
-
-        self._qfis, self._vk_device = GpuDevice._help_create_vk_device(
-            context=self.context,
-            physical_device=physical_device,
-            surface=surface,
-        )
-
-    @staticmethod
-    def _help_create_vk_device(
+        *,
         context: GpuContext,
-        physical_device: GpuPhysicalDevice,
-        surface: VkSurfaceKHR | None,
-    ) -> tuple[GpuQueueFamilyIndices, VkDevice]:
-        extensions = []
-        if context.enable_present_support:
-            extensions.append("VK_KHR_swapchain")
-        if context.enable_portability_subset:
-            extensions.append("VK_KHR_portability_subset")
-
-        qfis = GpuQueueFamilyIndices.find(
-            physical_device,
-            surface=surface,
-        )
-        queue_create_info_list = qfis.compute_queue_create_info_list()
-
-        return qfis, vkCreateDevice(
-            physical_device._vk_physical_device,
-            VkDeviceCreateInfo(
-                enabledExtensionCount=len(extensions),
-                ppEnabledExtensionNames=extensions,
-                queueCreateInfoCount=len(queue_create_info_list),
-                pQueueCreateInfos=queue_create_info_list,
-            ),
-            pAllocator=None,
-        )
+        qfis: GpuQueueFamilyIndices,
+        vk_device: VkDevice,
+    ) -> None:
+        super().__init__(parent=context)
+        self.qfis = qfis
+        self.vk_device = vk_device
 
     def _on_dispose(self) -> None:
-        if hasattr(self, "_vk_device"):
-            vkDestroyDevice(device=self._vk_device, pAllocator=None)
-
-    @property
-    def vk_device(self) -> VkDevice:
-        return self._vk_device
-
-    @property
-    def qfis(self) -> GpuQueueFamilyIndices:
-        return self._qfis
+        vkDestroyDevice(device=self.vk_device, pAllocator=None)
 
     def create_texture(
         self,
-        usages: tuple[GpuTextureUsage, ...],
         *,
+        usages: tuple[GpuImageUsage, ...],
         init: torch.Tensor | None = None,
-        spec: GpuTextureSpec | None = None,
+        meta: GpuImageMeta | None = None,
     ) -> "GpuImage":
-        return GpuImage(device=self, usages=usages, init=init, spec=spec)
-
-
-#
-# GpuImage
-#
-
-
-@dataclass
-class GpuTextureSpec:
-    shape: tuple[int, int, int]  # (height, width, channels)
-    dtype: torch.dtype
-
-    @staticmethod
-    def from_tensor(tensor: torch.Tensor) -> "GpuTextureSpec":
-        if tensor.ndim != 3:
-            raise LogicError(
-                f"GpuTextureSpec can only be created from 3D tensors, got tensor with "
-                f"{tensor.ndim} dimensions instead"
-            )
-        return GpuTextureSpec(
-            shape=(tensor.shape[0], tensor.shape[1], tensor.shape[2]),
-            dtype=tensor.dtype,
-        )
-
-    def select_vk_format(self) -> int:
-        match (self.dtype, self.shape[2]):
-            case (torch.float32, 1):
-                return VK_FORMAT_R32_SFLOAT
-            case (torch.uint8, 4):
-                return VK_FORMAT_R8G8B8A8_UNORM
-            case (torch.float32, 4):
-                return VK_FORMAT_R32G32B32A32_SFLOAT
-            case _:
-                raise LogicError(
-                    f"GpuTextureSpec.select_vk_format(): unsupported combination of "
-                    f"dtype={self.dtype} and channels={self.shape[2]}"
-                )
-
-
-GpuTextureUsage: TypeAlias = Literal[
-    "sampled",
-    "storage",
-    "color-attachment",
-    "depth-stencil-attachment",
-]
-
-
-class GpuImage(GpuResource):
-    def __init__(
-        self,
-        device: GpuDevice,
-        usages: tuple[GpuTextureUsage, ...],
-        *,
-        init: torch.Tensor | None = None,
-        spec: GpuTextureSpec | None = None,
-    ) -> None:
-        super().__init__(parent=device)
-
-        self._device: GpuDevice = device
-
-        # _init, _spec
-        self._init: torch.Tensor | None = init
-        if spec is not None and init is not None:
+        # Resolve 'shape'
+        if meta is not None and init is not None:
             raise LogicError("GpuImage(): cannot provide both init and spec")
-        elif spec is not None:
-            self._spec: GpuTextureSpec = spec
+        elif meta is not None:
+            resolved_meta: GpuImageMeta = meta
         elif init is not None:
-            self._spec = GpuTextureSpec.from_tensor(init)
+            resolved_meta = GpuImageMeta.from_tensor(init)
         else:
             raise LogicError("GpuImage(): either init or spec must be provided")
 
-        # vk_usage
+        # Compute the VkImageUsageFlags for image creation:
         vk_usage = 0
         for usage in usages:
-            vk_usage |= GpuImage._usage_to_vk_format_bit_dict().get(usage, 0)
+            vk_usage |= {
+                "texture-binding": VK_IMAGE_USAGE_SAMPLED_BIT,
+                "storage-binding": VK_IMAGE_USAGE_STORAGE_BIT,
+                "color-attachment": VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                "depth-attachment": (VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT),
+            }[usage]
 
-        # _vk_image
-        self._vk_image = vkCreateImage(
-            device=self._device.vk_device,
+        # Determine which queue families will access the image:
+        queue_family_indices = list(self.qfis)
+
+        # Create the VkImage:
+        vk_image = vkCreateImage(
+            device=self.vk_device,
             pCreateInfo=VkImageCreateInfo(
                 flags=0,
                 imageType=VK_IMAGE_TYPE_2D,
-                format=self._spec.select_vk_format(),
+                format=resolved_meta.infer_vk_format(usages),
                 extent=VkExtent3D(
-                    width=self._spec.shape[1],
-                    height=self._spec.shape[0],
+                    width=resolved_meta.shape[1],
+                    height=resolved_meta.shape[0],
                     depth=1,
                 ),
                 mipLevels=1,
@@ -675,23 +663,94 @@ class GpuImage(GpuResource):
                 tiling=VK_IMAGE_TILING_OPTIMAL,
                 usage=vk_usage,
                 sharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                queueFamilyIndexCount=1,
-                pQueueFamilyIndices=[expect(self._device.qfis.transfer)],
+                queueFamilyIndexCount=len(queue_family_indices),
+                pQueueFamilyIndices=queue_family_indices,
                 initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
             ),
             pAllocator=None,
         )
 
+        # TODO: upload 'init' data to the image
+
+        # Done:
+        return GpuImage(device=self, vk_image=vk_image)
+
+
+#
+# GpuImage
+#
+
+
+@dataclass
+class GpuImageMeta:
+    shape: tuple[int, int, int]  # (height, width, channels)
+    dtype: torch.dtype
+
     @staticmethod
-    @functools.cache
-    def _usage_to_vk_format_bit_dict() -> dict[GpuTextureUsage, int]:
-        return {
-            "sampled": VK_IMAGE_USAGE_SAMPLED_BIT,
-            "storage": VK_IMAGE_USAGE_STORAGE_BIT,
-            "color-attachment": VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-            "depth-stencil-attachment": (VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT),
-        }
+    def from_tensor(tensor: torch.Tensor) -> "GpuImageMeta":
+        if tensor.ndim != 3:
+            raise LogicError(
+                f"GpuTextureSpec can only be created from 3D tensors, got tensor with "
+                f"{tensor.ndim} dimensions instead"
+            )
+        return GpuImageMeta(
+            shape=(tensor.shape[0], tensor.shape[1], tensor.shape[2]),
+            dtype=tensor.dtype,
+        )
+
+    def infer_vk_format(
+        self,
+        usages: tuple[GpuImageUsage, ...],
+    ) -> int:
+        dtype = self.dtype
+        depth = self.shape[2]
+        is_depth_attachment = "depth-attachment" in usages
+
+        if is_depth_attachment:
+            match (dtype, depth):
+                case (torch.float32, 1):
+                    return VK_FORMAT_D32_SFLOAT
+                case _:
+                    raise LogicError(
+                        f"GpuTextureSpec.select_vk_format(): invalid depth attachment spec: "
+                        f"{dtype=}, {depth=}"
+                    )
+        else:
+            match (dtype, depth):
+                case (torch.uint8, 4):
+                    return VK_FORMAT_R8G8B8A8_UNORM
+                case (torch.float32, 1):
+                    return VK_FORMAT_R32_SFLOAT
+                case (torch.float32, 4):
+                    return VK_FORMAT_R32G32B32A32_SFLOAT
+                case _:
+                    raise LogicError(
+                        f"GpuTextureSpec.select_vk_format(): invalid image spec: "
+                        f"{dtype=}, {depth=}, {is_depth_attachment=}"
+                    )
+
+
+GpuImageUsage: TypeAlias = Literal[
+    "texture-binding",
+    "storage-binding",
+    "color-attachment",
+    "depth-attachment",
+]
+
+
+class GpuImage(GpuResource):
+    device: GpuDevice
+    vk_image: VkImage
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_image: VkImage,
+    ) -> None:
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_image = vk_image
 
     def _on_dispose(self) -> None:
-        if hasattr(self, "_vk_image"):
-            vkDestroyImage(self._device.vk_device, self._vk_image, pAllocator=None)
+        vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)

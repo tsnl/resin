@@ -14,11 +14,11 @@ def main():
     print_debug_info(gpu_context)
 
     physical_device = next(iter(gpu_context.enumerate_physical_devices()))
-    device = gpu_context.create_device(physical_device, surface=None)
+    device = gpu_context.create_device(physical_device=physical_device, surface=None)
 
     render_target_image = device.create_texture(
         usages=("color-attachment",),
-        spec=zero.GpuTextureSpec(shape=(1024, 1024, 4), dtype=torch.uint8),
+        meta=zero.GpuImageMeta(shape=(1024, 1024, 4), dtype=torch.uint8),
     )
 
     print(device)
