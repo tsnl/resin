@@ -47,16 +47,16 @@ __all__ = [
     "VK_IMAGE_CREATE_SPARSE_ALIASED_BIT",
     "VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT",
     "VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT",
-    "VkImageType",
+    ## "VkImageType"
     "VK_IMAGE_TYPE_1D",
     "VK_IMAGE_TYPE_2D",
     "VK_IMAGE_TYPE_3D",
-    "VkFormat",
+    ## "VkFormat"
     "VK_FORMAT_R32_SFLOAT",
     "VK_FORMAT_R8G8B8A8_UNORM",
     "VK_FORMAT_R32G32B32A32_SFLOAT",
     "VkSampleCountFlags",
-    "VkSampleCountFlagBits",
+    ## "VkSampleCountFlagBits"
     "VK_SAMPLE_COUNT_1_BIT",
     "VK_SAMPLE_COUNT_2_BIT",
     "VK_SAMPLE_COUNT_4_BIT",
@@ -64,21 +64,21 @@ __all__ = [
     "VK_SAMPLE_COUNT_16_BIT",
     "VK_SAMPLE_COUNT_32_BIT",
     "VK_SAMPLE_COUNT_64_BIT",
-    "VkImageTiling",
+    ## "VkImageTiling"
     "VK_IMAGE_TILING_OPTIMAL",
     "VK_IMAGE_TILING_LINEAR",
-    "VkImageUsageFlags",
-    "VkImageUsageFlagBits",
+    ## "VkImageUsageFlags"
+    ## "VkImageUsageFlagBits"
     "VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
     "VK_IMAGE_USAGE_TRANSFER_DST_BIT",
     "VK_IMAGE_USAGE_SAMPLED_BIT",
     "VK_IMAGE_USAGE_STORAGE_BIT",
     "VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT",
     "VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT",
-    "VkSharingMode",
+    ## "VkSharingMode"
     "VK_SHARING_MODE_EXCLUSIVE",
     "VK_SHARING_MODE_CONCURRENT",
-    "VkImageLayout",
+    ## "VkImageLayout"
     "VK_IMAGE_LAYOUT_UNDEFINED",
     "VK_IMAGE_LAYOUT_GENERAL",
     "VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL",
