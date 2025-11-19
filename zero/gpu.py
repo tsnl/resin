@@ -5,8 +5,8 @@ __all__ = [
     "GpuPhysicalDevice",
     # GpuDevice
     "GpuDevice",
-    # GpuTexture
-    "GpuTexture",
+    # GpuImage
+    "GpuImage",
     "GpuTextureUsage",
     "GpuTextureSpec",
 ]
@@ -579,12 +579,12 @@ class GpuDevice(GpuResource):
         *,
         init: torch.Tensor | None = None,
         spec: GpuTextureSpec | None = None,
-    ) -> "GpuTexture":
-        return GpuTexture(device=self, usages=usages, init=init, spec=spec)
+    ) -> "GpuImage":
+        return GpuImage(device=self, usages=usages, init=init, spec=spec)
 
 
 #
-# GpuTexture
+# GpuImage
 #
 
 
@@ -628,7 +628,7 @@ GpuTextureUsage: TypeAlias = Literal[
 ]
 
 
-class GpuTexture(GpuResource):
+class GpuImage(GpuResource):
     def __init__(
         self,
         device: GpuDevice,
@@ -644,18 +644,18 @@ class GpuTexture(GpuResource):
         # _init, _spec
         self._init: torch.Tensor | None = init
         if spec is not None and init is not None:
-            raise LogicError("GpuTexture(): cannot provide both init and spec")
+            raise LogicError("GpuImage(): cannot provide both init and spec")
         elif spec is not None:
             self._spec: GpuTextureSpec = spec
         elif init is not None:
             self._spec = GpuTextureSpec.from_tensor(init)
         else:
-            raise LogicError("GpuTexture(): either init or spec must be provided")
+            raise LogicError("GpuImage(): either init or spec must be provided")
 
         # vk_usage
         vk_usage = 0
         for usage in usages:
-            vk_usage |= GpuTexture._usage_to_vk_format_bit_dict().get(usage, 0)
+            vk_usage |= GpuImage._usage_to_vk_format_bit_dict().get(usage, 0)
 
         # _vk_image
         self._vk_image = vkCreateImage(
