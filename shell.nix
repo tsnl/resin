@@ -4,19 +4,14 @@ in
 pkgs.mkShell {
   # Add necessary system libraries to the build inputs
   buildInputs = with pkgs; [
-    # Rust
-    rustup
+    # Python
+    uv
 
     # GLFW:
     glfw # The GLFW library
-    libGL # The OpenGL library
-    cmake # often required for the glfw-rs build script
-    pkg-config
-
     # GLFW for Wayland
     wayland
     wayland-protocols
-
     # GLFW for X11
     xorg.libX11
     xorg.libXrandr
@@ -43,7 +38,4 @@ pkgs.mkShell {
       xorg.libXcursor
       xorg.libXi
     ];
-
-  # Optional: set RUST_SRC_PATH for rust-analyzer/IDE support
-  RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
 }

@@ -1,6 +1,7 @@
 import sys
 import json
 
+import torch
 import zero
 
 
@@ -15,7 +16,13 @@ def main():
     physical_device = next(iter(gpu_context.enumerate_physical_devices()))
     device = gpu_context.create_device(physical_device, surface=None)
 
+    render_target_texture = device.create_texture(
+        usages=("color-attachment",),
+        spec=zero.GpuTextureSpec(shape=(1024, 1024, 4), dtype=torch.uint8),
+    )
+
     print(device)
+    print(render_target_texture)
 
 
 def print_debug_info(gpu_context: zero.GpuContext) -> None:

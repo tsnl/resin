@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
 import atexit
 import functools
-from typing import cast, Type
+from typing import cast
 
 import glfw
 
-from .excepts import LogicError, GlfwError
+from .excepts import LogicError
 
 
 #
@@ -76,10 +76,15 @@ class BaseContext[TContext](BaseContextResource[TContext]):
         super().__init__(parent=None)
 
 
-@functools.cache
-def ensure_glfw_init():
-    ok = bool(glfw.init())
-    if not ok:
-        raise GlfwError("Failed to initialize GLFW")
+#
+# assert_not_none
+#
 
-    atexit.register(glfw.terminate)
+
+def expect[T](
+    opt_value: T | None,
+    message: str = "Expected value to not be None",
+) -> T:
+    if opt_value is None:
+        raise LogicError(message)
+    return opt_value

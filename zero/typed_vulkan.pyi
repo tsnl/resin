@@ -693,6 +693,7 @@ def vkCreateImage(
 # https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyImage.html
 def vkDestroyImage(
     device: VkDevice,
+    image: VkImage,
     pAllocator: Any,
 ) -> None:
     """

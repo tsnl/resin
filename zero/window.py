@@ -1,22 +1,39 @@
 __all__ = ["Window"]
 
+from typing import TypeAlias, Iterator
+
 import glfw
 
 from .excepts import GlfwError
-from .core import ensure_glfw_init
+from .core import BaseContext, BaseContextResource
 
 
-class WindowContext:
-    pass
+class WindowContext(BaseContext["WindowContext"]):
+    def __init__(self) -> None:
+        ok = bool(glfw.init())
+        if not ok:
+            raise GlfwError("Failed to initialize GLFW")
+
+    def _on_dispose(self) -> None:
+        glfw.terminate()
+
+    def create_window(
+        self,
+        width: int,
+        height: int,
+        title: str,
+    ) -> "Window":
+        return Window(context=self, width=width, height=height, title=title)
 
 
-class Window:
-    _all: list["Window"] = []
+WindowResource: TypeAlias = BaseContextResource["WindowContext"]
 
-    def __init__(self, width: int, height: int, title: str):
-        super().__init__()
 
-        ensure_glfw_init()
+class Window(WindowResource):
+    _all: set["Window"] = set()
+
+    def __init__(self, context: WindowContext, *, width: int, height: int, title: str):
+        super().__init__(parent=context)
 
         glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
         glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
@@ -32,7 +49,11 @@ class Window:
         if not self._glfw_window:
             raise GlfwError("Failed to create GLFW window")
 
-        Window._all.append(self)
+        Window._all.add(self)
+
+    def _on_dispose(self) -> None:
+        glfw.destroy_window(self._glfw_window)
+        Window._all.remove(self)
 
     def should_close(self) -> bool:
         return glfw.window_should_close(self._glfw_window)
@@ -44,8 +65,8 @@ class Window:
         glfw.hide_window(self._glfw_window)
 
     @staticmethod
-    def all() -> list["Window"]:
-        return Window._all
+    def all() -> Iterator["Window"]:
+        return iter(Window._all)
 
     @staticmethod
     def update_all():

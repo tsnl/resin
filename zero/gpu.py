@@ -5,24 +5,33 @@ __all__ = [
     "GpuPhysicalDevice",
     # GpuDevice
     "GpuDevice",
+    # GpuTexture
+    "GpuTexture",
+    "GpuTextureUsage",
+    "GpuTextureSpec",
 ]
 
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import TypeAlias, Literal, final
+from typing import TypeAlias, Literal
+from enum import IntFlag, auto
 import sys
 import os
+import functools
 
-from .core import BaseContext, BaseContextResource
-from .excepts import UnsupportedPlatformError
+import torch
+
+from .core import BaseContext, BaseContextResource, expect
+from .excepts import UnsupportedPlatformError, LogicError
 from .typed_vulkan import (
-    # Basic:
+    # Basic
     vkGetInstanceProcAddr,
     ffi,
-    # Common:
+    # Common
     VkDeviceSize,
     VkSampleCountFlags,
-    # Instance:
+    VkExtent3D,
+    # Instance
     VkInstance,
     vkCreateInstance,
     vkDestroyInstance,
@@ -30,9 +39,9 @@ from .typed_vulkan import (
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
     VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
-    # Surface:
+    # Surfaces
     VkSurfaceKHR,
-    # Physical devices:
+    # Physical devices
     VkPhysicalDevice,
     vkGetPhysicalDeviceProperties,
     VkPhysicalDeviceProperties,
@@ -42,17 +51,76 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
-    # Queues:
+    # Physical device queues
     vkGetPhysicalDeviceQueueFamilyProperties,
     VkDeviceQueueCreateInfo,
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_TRANSFER_BIT,
     VK_QUEUE_GRAPHICS_BIT,
-    # Devices:
+    # Devices
     VkDevice,
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
+    # Images
+    ## VkImageCreateFlags,
+    ## VkImageCreateFlagBits,
+    VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
+    VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT,
+    VK_IMAGE_CREATE_SPARSE_ALIASED_BIT,
+    VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
+    VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+    ## VkImageType,
+    VK_IMAGE_TYPE_1D,
+    VK_IMAGE_TYPE_2D,
+    VK_IMAGE_TYPE_3D,
+    ## VkFormat,
+    VK_FORMAT_R32_SFLOAT,
+    VK_FORMAT_R8G8B8A8_UNORM,
+    VK_FORMAT_R32G32B32A32_SFLOAT,
+    ## VkSampleCountFlags,
+    ## VkSampleCountFlagBits,
+    VK_SAMPLE_COUNT_1_BIT,
+    VK_SAMPLE_COUNT_2_BIT,
+    VK_SAMPLE_COUNT_4_BIT,
+    VK_SAMPLE_COUNT_8_BIT,
+    VK_SAMPLE_COUNT_16_BIT,
+    VK_SAMPLE_COUNT_32_BIT,
+    VK_SAMPLE_COUNT_64_BIT,
+    ## VkImageTiling,
+    VK_IMAGE_TILING_OPTIMAL,
+    VK_IMAGE_TILING_LINEAR,
+    ## VkImageUsageFlags,
+    ## VkImageUsageFlagBits,
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    VK_IMAGE_USAGE_SAMPLED_BIT,
+    VK_IMAGE_USAGE_STORAGE_BIT,
+    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    ## VkSharingMode,
+    VK_SHARING_MODE_EXCLUSIVE,
+    VK_SHARING_MODE_CONCURRENT,
+    ## VkImageLayout,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+    VK_IMAGE_LAYOUT_GENERAL,
+    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    VK_IMAGE_LAYOUT_PREINITIALIZED,
+    vkCreateImage,
+    VkImageCreateInfo,
+    vkDestroyImage,
+    # Image views
+    vkCreateImageView,
+    VkImageViewCreateInfo,
+    vkDestroyImageView,
+    # Samplers
+    vkCreateSampler,
+    VkSamplerCreateInfo,
+    vkDestroySampler,
 )
 
 
@@ -497,9 +565,22 @@ class GpuDevice(GpuResource):
         if hasattr(self, "_vk_device"):
             vkDestroyDevice(device=self._vk_device, pAllocator=None)
 
-    def create_texture(self) -> "GpuTexture":
-        # TODO: implement the rest of this
-        return GpuTexture(self)
+    @property
+    def vk_device(self) -> VkDevice:
+        return self._vk_device
+
+    @property
+    def qfis(self) -> GpuQueueFamilyIndices:
+        return self._qfis
+
+    def create_texture(
+        self,
+        usages: tuple[GpuTextureUsage, ...],
+        *,
+        init: torch.Tensor | None = None,
+        spec: GpuTextureSpec | None = None,
+    ) -> "GpuTexture":
+        return GpuTexture(device=self, usages=usages, init=init, spec=spec)
 
 
 #
@@ -507,13 +588,110 @@ class GpuDevice(GpuResource):
 #
 
 
-@final
+@dataclass
+class GpuTextureSpec:
+    shape: tuple[int, int, int]  # (height, width, channels)
+    dtype: torch.dtype
+
+    @staticmethod
+    def from_tensor(tensor: torch.Tensor) -> "GpuTextureSpec":
+        if tensor.ndim != 3:
+            raise LogicError(
+                f"GpuTextureSpec can only be created from 3D tensors, got tensor with "
+                f"{tensor.ndim} dimensions instead"
+            )
+        return GpuTextureSpec(
+            shape=(tensor.shape[0], tensor.shape[1], tensor.shape[2]),
+            dtype=tensor.dtype,
+        )
+
+    def select_vk_format(self) -> int:
+        match (self.dtype, self.shape[2]):
+            case (torch.float32, 1):
+                return VK_FORMAT_R32_SFLOAT
+            case (torch.uint8, 4):
+                return VK_FORMAT_R8G8B8A8_UNORM
+            case (torch.float32, 4):
+                return VK_FORMAT_R32G32B32A32_SFLOAT
+            case _:
+                raise LogicError(
+                    f"GpuTextureSpec.select_vk_format(): unsupported combination of "
+                    f"dtype={self.dtype} and channels={self.shape[2]}"
+                )
+
+
+GpuTextureUsage: TypeAlias = Literal[
+    "sampled",
+    "storage",
+    "color-attachment",
+    "depth-stencil-attachment",
+]
+
+
 class GpuTexture(GpuResource):
     def __init__(
         self,
         device: GpuDevice,
+        usages: tuple[GpuTextureUsage, ...],
+        *,
+        init: torch.Tensor | None = None,
+        spec: GpuTextureSpec | None = None,
     ) -> None:
         super().__init__(parent=device)
 
+        self._device: GpuDevice = device
+
+        # _init, _spec
+        self._init: torch.Tensor | None = init
+        if spec is not None and init is not None:
+            raise LogicError("GpuTexture(): cannot provide both init and spec")
+        elif spec is not None:
+            self._spec: GpuTextureSpec = spec
+        elif init is not None:
+            self._spec = GpuTextureSpec.from_tensor(init)
+        else:
+            raise LogicError("GpuTexture(): either init or spec must be provided")
+
+        # vk_usage
+        vk_usage = 0
+        for usage in usages:
+            vk_usage |= GpuTexture._usage_to_vk_format_bit_dict().get(usage, 0)
+
+        # _vk_image
+        self._vk_image = vkCreateImage(
+            device=self._device.vk_device,
+            pCreateInfo=VkImageCreateInfo(
+                flags=0,
+                imageType=VK_IMAGE_TYPE_2D,
+                format=self._spec.select_vk_format(),
+                extent=VkExtent3D(
+                    width=self._spec.shape[1],
+                    height=self._spec.shape[0],
+                    depth=1,
+                ),
+                mipLevels=1,
+                arrayLayers=1,
+                samples=VK_SAMPLE_COUNT_1_BIT,
+                tiling=VK_IMAGE_TILING_OPTIMAL,
+                usage=vk_usage,
+                sharingMode=VK_SHARING_MODE_EXCLUSIVE,
+                queueFamilyIndexCount=1,
+                pQueueFamilyIndices=[expect(self._device.qfis.transfer)],
+                initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
+            ),
+            pAllocator=None,
+        )
+
+    @staticmethod
+    @functools.cache
+    def _usage_to_vk_format_bit_dict() -> dict[GpuTextureUsage, int]:
+        return {
+            "sampled": VK_IMAGE_USAGE_SAMPLED_BIT,
+            "storage": VK_IMAGE_USAGE_STORAGE_BIT,
+            "color-attachment": VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            "depth-stencil-attachment": (VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT),
+        }
+
     def _on_dispose(self) -> None:
-        pass
+        if hasattr(self, "_vk_image"):
+            vkDestroyImage(self._device.vk_device, self._vk_image, pAllocator=None)
