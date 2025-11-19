@@ -30,4 +30,7 @@ module-name = "zero"
 module-root = ""
 
 [dependency-groups]
-dev = ["pyright>=1.1.407"]
+dev = [
+    "pyright>=1.1.407",
+    "ruff>=0.14.5",
+]

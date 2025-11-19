@@ -13,6 +13,7 @@ $ uv sync
 # Run the example
 $ uv run --with zero -- zero-replay
 
-# Typecheck
+# Lint and Typecheck
+$ uv run --with zero -- ruff check .
 $ uv run --with zero -- pyright
 ```
