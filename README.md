@@ -20,5 +20,6 @@ $ uv run --with zero -- pyright
 
 ## Resources
 
-- Rendering
-  - [Vulkan `VK_KHR_dynamic_rendering_local_read` in 1.4](https://docs.vulkan.org/spec/latest/appendices/legacy.html#_render_pass_objects_superseded_via_dynamic_rendering)
+-   Rendering
+    -   [Vulkan `VK_KHR_dynamic_rendering_local_read` in 1.4](https://docs.vulkan.org/spec/latest/appendices/legacy.html#_render_pass_objects_superseded_via_dynamic_rendering)
+    -   [Dynamic rendering blog post](https://www.khronos.org/blog/streamlining-render-passes)

@@ -13,14 +13,14 @@ __all__ = [
     "VK_MAKE_API_VERSION",
     "vk_decompose_api_version",
     "vk_api_version_str",
-    # Instance
+    # VkInstance
     "VkInstance",
     "vkCreateInstance",
     "vkDestroyInstance",
     "VkApplicationInfo",
     "VkInstanceCreateInfo",
     "VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR",
-    # Surfaces
+    # VkSurfaceKHR
     "VkSurfaceKHR",
     # Physical devices
     "VkPhysicalDevice",
@@ -39,12 +39,12 @@ __all__ = [
     "VK_QUEUE_GRAPHICS_BIT",
     "VK_QUEUE_COMPUTE_BIT",
     "VK_QUEUE_TRANSFER_BIT",
-    # Devices
+    # VkDevice
     "VkDevice",
     "vkCreateDevice",
     "vkDestroyDevice",
     "VkDeviceCreateInfo",
-    # Images
+    # VkImage
     "VkImage",
     "VkImageCreateFlags",
     "VkImageCreateFlagBits",
@@ -96,16 +96,18 @@ __all__ = [
     "VkImageCreateInfo",
     "vkCreateImage",
     "vkDestroyImage",
-    # Image views
+    # VkImageView
     "VkImageView",
     "vkCreateImageView",
     "VkImageViewCreateInfo",
     "vkDestroyImageView",
-    # Samplers
+    # VkSampler
     "VkSampler",
     "vkCreateSampler",
     "VkSamplerCreateInfo",
     "vkDestroySampler",
+    # VkRenderingAttachmentInfo
+    "VkRenderingAttachmentInfo",
 ]
 
 from typing import TypeAlias
@@ -116,13 +118,13 @@ from vulkan import (
     ffi,
     # Common
     VkExtent3D,
-    # Instance:
+    # vkInstance
     vkCreateInstance,
     vkDestroyInstance,
     VkInstanceCreateInfo,
     VkApplicationInfo,
     VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
-    # Physical devices:
+    # VkPhysicalDevice
     vkEnumeratePhysicalDevices,
     vkGetPhysicalDeviceProperties,
     VkPhysicalDeviceProperties,
@@ -132,18 +134,18 @@ from vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
-    # Surface: (N/A)
-    # Queues:
+    # VkSurfaceKHR: (N/A)
+    # Queues
     vkGetPhysicalDeviceQueueFamilyProperties,
     VkDeviceQueueCreateInfo,
     VK_QUEUE_GRAPHICS_BIT,
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_TRANSFER_BIT,
-    # Devices:
+    # VkDevice
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
-    # Images:
+    # VkImage
     ## VkImageCreateFlags,
     ## VkImageCreateFlagBits,
     VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
@@ -195,14 +197,16 @@ from vulkan import (
     VkImageCreateInfo,
     vkCreateImage,
     vkDestroyImage,
-    # Image views:
+    # VkImageView
     vkCreateImageView,
     VkImageViewCreateInfo,
     vkDestroyImageView,
-    # Samplers:
+    # VkSampler
     vkCreateSampler,
     VkSamplerCreateInfo,
     vkDestroySampler,
+    # VkRenderingAttachmentInfo
+    VkRenderingAttachmentInfo,
 )
 
 

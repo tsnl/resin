@@ -41,7 +41,7 @@ from .typed_vulkan import (
     VK_API_VERSION_1_4,
     vk_decompose_api_version,
     vk_api_version_str,
-    # Instance
+    # VkInstance
     VkInstance,
     vkCreateInstance,
     vkDestroyInstance,
@@ -49,9 +49,9 @@ from .typed_vulkan import (
     VkApplicationInfo,
     vkEnumeratePhysicalDevices,
     VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
-    # Surfaces
+    # VkSurfaceKHR
     VkSurfaceKHR,
-    # Physical devices
+    # VkPhysicalDevice
     VkPhysicalDevice,
     vkGetPhysicalDeviceProperties,
     VkPhysicalDeviceProperties,
@@ -67,12 +67,12 @@ from .typed_vulkan import (
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_TRANSFER_BIT,
     VK_QUEUE_GRAPHICS_BIT,
-    # Devices
+    # VkDevice
     VkDevice,
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
-    # Images
+    # VkImage
     ## VkImageCreateFlags
     ## VkImageCreateFlagBits
     VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
@@ -125,16 +125,22 @@ from .typed_vulkan import (
     vkCreateImage,
     VkImageCreateInfo,
     vkDestroyImage,
-    # Image views
+    # VkImageView
     VkImageView,
     vkCreateImageView,
     VkImageViewCreateInfo,
     vkDestroyImageView,
-    # Samplers
+    # VkSampler
     VkSampler,
     vkCreateSampler,
     VkSamplerCreateInfo,
     vkDestroySampler,
+    # VkRenderingAttachmentInfo
+    VkRenderingAttachmentInfo,
+    VkResolveModeFlagBits,
+    VkAttachmentLoadOp,
+    VkAttachmentStoreOp,
+    VkClearValue,
 )
 
 
@@ -751,16 +757,28 @@ GpuImageUsage: TypeAlias = Literal[
 class GpuImage(GpuResource):
     device: GpuDevice
     vk_image: VkImage
+    vk_image_view: VkImageView
 
     def __init__(
         self,
         *,
         device: GpuDevice,
         vk_image: VkImage,
+        vk_image_view: VkImageView,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
         self.vk_image = vk_image
+        self.vk_image_view = vk_image_view
 
     def _on_dispose(self) -> None:
         vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
+
+
+#
+# GpuCommandBuffer
+#
+
+
+class GpuCommandBuffer:
+    pass

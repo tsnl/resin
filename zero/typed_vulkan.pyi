@@ -902,3 +902,81 @@ def vkDestroySampler(
     """
     vkDestroySampler destroys a sampler object.
     """
+
+#
+# VkRenderingAttachmentInfo
+#
+
+# VkResolveModeFlagBits
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkResolveModeFlagBits.html
+VkResolveModeFlag: TypeAlias = VkFlags
+VkResolveModeFlagBits: TypeAlias = int
+VK_RESOLVE_MODE_NONE: VkResolveModeFlagBits = 0x00000000
+VK_RESOLVE_MODE_SAMPLE_ZERO_BIT: VkResolveModeFlagBits = 0x00000001
+VK_RESOLVE_MODE_AVERAGE_BIT: VkResolveModeFlagBits = 0x00000002
+VK_RESOLVE_MODE_MIN_BIT: VkResolveModeFlagBits = 0x00000004
+VK_RESOLVE_MODE_MAX_BIT: VkResolveModeFlagBits = 0x00000008
+
+# VkAttachmentLoadOp
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkAttachmentLoadOp.html
+VkAttachmentLoadOp: TypeAlias = int
+VK_ATTACHMENT_LOAD_OP_LOAD: VkAttachmentLoadOp = 0
+VK_ATTACHMENT_LOAD_OP_CLEAR: VkAttachmentLoadOp = 1
+VK_ATTACHMENT_LOAD_OP_DONT_CARE: VkAttachmentLoadOp = 2
+
+# VkAttachmentStoreOp
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkAttachmentStoreOp.html
+VkAttachmentStoreOp: TypeAlias = int
+VK_ATTACHMENT_STORE_OP_STORE: VkAttachmentStoreOp = 0
+VK_ATTACHMENT_STORE_OP_DONT_CARE: VkAttachmentStoreOp = 1
+
+# VkClearColorValue
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkClearColorValue.html
+@dataclass
+class VkClearColorValue:
+    float32: Sequence[float] = (0.0, 0.0, 0.0, 0.0)
+    int32: Sequence[int] = (0, 0, 0, 0)
+    uint32: Sequence[int] = (0, 0, 0, 0)
+
+# VkClearDepthStencilValue
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkClearDepthStencilValue.html
+@dataclass
+class VkClearDepthStencilValue:
+    depth: float = 1.0
+    stencil: int = 0
+
+# VkClearValue
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkClearValue.html
+@dataclass
+class VkClearValue:
+    color: VkClearColorValue | None = None
+    depthStencil: VkClearDepthStencilValue | None = None
+
+# VkRenderingAttachmentInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderingAttachmentInfo.html
+@dataclass
+class VkRenderingAttachmentInfo:
+    """
+    // Provided by VK_VERSION_1_3
+    typedef struct VkRenderingAttachmentInfo {
+        VkStructureType          sType;
+        const void*              pNext;
+        VkImageView              imageView;
+        VkImageLayout            imageLayout;
+        VkResolveModeFlagBits    resolveMode;
+        VkImageView              resolveImageView;
+        VkImageLayout            resolveImageLayout;
+        VkAttachmentLoadOp       loadOp;
+        VkAttachmentStoreOp      storeOp;
+        VkClearValue             clearValue;
+    } VkRenderingAttachmentInfo;
+    """
+
+    imageView: VkImageView
+    imageLayout: VkImageLayout
+    resolveMode: VkResolveModeFlagBits = 0
+    resolveImageView: VkImageView | None = None
+    resolveImageLayout: VkImageLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    loadOp: VkAttachmentLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+    storeOp: VkAttachmentStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+    clearValue: VkClearValue | None = None
