@@ -1,9 +1,5 @@
 from abc import ABC, abstractmethod
-import atexit
-import functools
 from typing import cast
-
-import glfw
 
 from .excepts import LogicError
 

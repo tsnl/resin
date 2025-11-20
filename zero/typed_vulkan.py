@@ -7,6 +7,8 @@ __all__ = [
     "VkFlags",
     "VkSampleCountFlags",
     "VkExtent3D",
+    "VK_API_VERSION_1_2",
+    "VK_API_VERSION_1_3",
     "VK_API_VERSION_1_4",
     "VK_MAKE_API_VERSION",
     "vk_decompose_api_version",
@@ -232,6 +234,8 @@ def vk_api_version_str(api_version: int) -> str:
     return f"{major}.{minor}.{patch} (variant {variant})"
 
 
+VK_API_VERSION_1_2 = VK_MAKE_API_VERSION(0, 1, 2, 0)
+VK_API_VERSION_1_3 = VK_MAKE_API_VERSION(0, 1, 3, 0)
 VK_API_VERSION_1_4 = VK_MAKE_API_VERSION(0, 1, 4, 0)
 
 

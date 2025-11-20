@@ -1,3 +1,11 @@
+"""
+GPU abstraction layer.
+
+Required Vulkan version:
+-   Vulkan 1.3 for VK_KHR_dynamic_rendering
+    https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_dynamic_rendering.html
+"""
+
 __all__ = [
     # GpuContext
     "GpuContext",
@@ -29,6 +37,7 @@ from .typed_vulkan import (
     VkDeviceSize,
     VkSampleCountFlags,
     VkExtent3D,
+    VK_API_VERSION_1_3,
     VK_API_VERSION_1_4,
     vk_decompose_api_version,
     vk_api_version_str,
@@ -200,7 +209,7 @@ class GpuContext(BaseContext["GpuContext"]):
                 pApplicationInfo=VkApplicationInfo(
                     pApplicationName=app_name,
                     pEngineName="zero",
-                    apiVersion=VK_API_VERSION_1_4,
+                    apiVersion=VK_API_VERSION_1_4,  # newest supported version
                 ),
                 enabledLayerCount=len(layers),
                 ppEnabledLayerNames=layers,
@@ -312,8 +321,8 @@ class GpuContext(BaseContext["GpuContext"]):
         physical_device: GpuPhysicalDevice,
         surface: VkSurfaceKHR | None,
     ) -> GpuDevice:
-        # Ensure Vulkan 1.4 support
-        physical_device.check_vulkan_1_4_support()
+        # Ensure Vulkan 1.3 support
+        physical_device.check_vulkan_1_3_support()
 
         # Compute queue family indices
         qfis = GpuQueueFamilyIndices.find(
@@ -324,6 +333,7 @@ class GpuContext(BaseContext["GpuContext"]):
 
         # Compute extensions
         extensions = []
+        extensions.append("VK_KHR_dynamic_rendering")
         if self.enable_present_support:
             extensions.append("VK_KHR_swapchain")
         if self.enable_portability_subset:
@@ -389,13 +399,13 @@ class GpuPhysicalDevice(GpuResource):
     def vk_api_version(self) -> int:
         return self._vk_properties.apiVersion
 
-    def check_vulkan_1_4_support(self):
-        if self._vk_properties.apiVersion >= VK_API_VERSION_1_4:
+    def check_vulkan_1_3_support(self):
+        if self._vk_properties.apiVersion >= VK_API_VERSION_1_3:
             return
         raise PlatformSupportError(
-            f"Physical device {self.name!r} does not support Vulkan 1.4.\n"
+            f"Physical device {self.name!r} does not support Vulkan 1.3.\n"
             f"- provided: {vk_api_version_str(self.vk_api_version)}\n"
-            f"- required: {vk_api_version_str(VK_API_VERSION_1_4)}"
+            f"- required: {vk_api_version_str(VK_API_VERSION_1_3)}"
         )
 
     def get_queue_families(
