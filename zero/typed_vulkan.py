@@ -101,6 +101,11 @@ __all__ = [
     "vkCreateImageView",
     "VkImageViewCreateInfo",
     "vkDestroyImageView",
+    "VkComponentMapping",
+    "VkImageSubresourceRange",
+    "VK_COMPONENT_SWIZZLE_IDENTITY",
+    "VK_IMAGE_ASPECT_DEPTH_BIT",
+    "VK_IMAGE_ASPECT_COLOR_BIT",
     # VkSampler
     "VkSampler",
     "vkCreateSampler",
@@ -108,6 +113,9 @@ __all__ = [
     "vkDestroySampler",
     # VkRenderingAttachmentInfo
     "VkRenderingAttachmentInfo",
+    "VkClearValue",
+    "VkClearColorValue",
+    "VkClearDepthStencilValue",
 ]
 
 from typing import TypeAlias
@@ -201,12 +209,20 @@ from vulkan import (
     vkCreateImageView,
     VkImageViewCreateInfo,
     vkDestroyImageView,
+    VkComponentMapping,
+    VkImageSubresourceRange,
+    VK_COMPONENT_SWIZZLE_IDENTITY,
+    VK_IMAGE_ASPECT_DEPTH_BIT,
+    VK_IMAGE_ASPECT_COLOR_BIT,
     # VkSampler
     vkCreateSampler,
     VkSamplerCreateInfo,
     vkDestroySampler,
     # VkRenderingAttachmentInfo
     VkRenderingAttachmentInfo,
+    VkClearValue,
+    VkClearColorValue,
+    VkClearDepthStencilValue,
 )
 
 
@@ -217,8 +233,13 @@ class OpaqueResourceHandle:
 VkDeviceSize: TypeAlias = int
 VkFlags: TypeAlias = int
 VkSampleCountFlags: TypeAlias = VkFlags
+VkSampleCountFlagBits: TypeAlias = int
 VkImageCreateFlags: TypeAlias = VkFlags
 VkImageCreateFlagBits: TypeAlias = int
+VkResolveModeFlags: int = VkFlags
+VkResolveModeFlagBits: TypeAlias = int
+VkAttachmentLoadOp: int = int
+VkAttachmentStoreOp: int = int
 
 
 def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:
