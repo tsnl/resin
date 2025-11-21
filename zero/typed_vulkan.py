@@ -244,10 +244,10 @@ VkSampleCountFlags: TypeAlias = VkFlags
 VkSampleCountFlagBits: TypeAlias = int
 VkImageCreateFlags: TypeAlias = VkFlags
 VkImageCreateFlagBits: TypeAlias = int
-VkResolveModeFlags: int = VkFlags
+VkResolveModeFlags: TypeAlias = VkFlags
 VkResolveModeFlagBits: TypeAlias = int
-VkAttachmentLoadOp: int = int
-VkAttachmentStoreOp: int = int
+VkAttachmentLoadOp: TypeAlias = int
+VkAttachmentStoreOp: TypeAlias = int
 
 
 def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:
