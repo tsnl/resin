@@ -92,7 +92,27 @@ VkInstanceCreateFlagBits: TypeAlias = VkFlags
 VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR: VkFlags = 0x00000001
 
 #
-# Physical Devices
+# VkSurfaceKHR
+#
+
+# VkSurfaceKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSurfaceKHR.html
+class VkSurfaceKHR(OpaqueResourceHandle): ...
+
+# vkGetPhysicalDeviceSurfaceSupportKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceSupportKHR.html
+def vkGetPhysicalDeviceSurfaceSupportKHR(
+    physicalDevice: VkPhysicalDevice,
+    queueFamilyIndex: int,
+    surface: VkSurfaceKHR,
+) -> bool:
+    """
+    vkGetPhysicalDeviceSurfaceSupportKHR queries if a queue family of a physical device
+    supports presentation to a given surface.
+    """
+
+#
+# VkPhysicalDevice
 #
 
 # VkGetPhysicalDevice
@@ -317,27 +337,29 @@ def vkGetPhysicalDeviceQueueFamilyProperties(
     """
 
 #
-# VkSurfaceKHR
+# VkPhysicalDevice Memory
 #
 
-# VkSurfaceKHR
-# https://docs.vulkan.org/refpages/latest/refpages/source/VkSurfaceKHR.html
-class VkSurfaceKHR(OpaqueResourceHandle): ...
+# VkPhysicalDeviceMemoryProperties
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceMemoryProperties.html
+@dataclass
+class VkPhysicalDeviceMemoryProperties:
+    memoryTypeCount: int
+    memoryTypes: List[Any]
+    memoryHeapCount: int
+    memoryHeaps: List[Any]
 
-# vkGetPhysicalDeviceSurfaceSupportKHR
-# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceSupportKHR.html
-def vkGetPhysicalDeviceSurfaceSupportKHR(
+# vkGetPhysicalDeviceMemoryProperties
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceMemoryProperties.html
+def vkGetPhysicalDeviceMemoryProperties(
     physicalDevice: VkPhysicalDevice,
-    queueFamilyIndex: int,
-    surface: VkSurfaceKHR,
-) -> bool:
+) -> VkPhysicalDeviceMemoryProperties:
     """
-    vkGetPhysicalDeviceSurfaceSupportKHR queries if a queue family of a physical device
-    supports presentation to a given surface.
+    vkGetPhysicalDeviceMemoryProperties retrieves the memory properties of a physical device.
     """
 
 #
-# VkQueue
+# VkPhysicalDevice Queues
 #
 
 # VkQueueFlags
@@ -431,6 +453,17 @@ def vkAllocateMemory(
     """
     vkAllocateMemory allocates device memory.
     """
+
+# VkMemoryPropertyFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryPropertyFlagBits.html
+VkMemoryPropertyFlags: TypeAlias = VkFlags
+VkMemoryPropertyFlagBits: TypeAlias = int
+VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT: VkMemoryPropertyFlagBits = 0x00000001
+VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT: VkMemoryPropertyFlagBits = 0x00000002
+VK_MEMORY_PROPERTY_HOST_COHERENT_BIT: VkMemoryPropertyFlagBits = 0x00000004
+VK_MEMORY_PROPERTY_HOST_CACHED_BIT: VkMemoryPropertyFlagBits = 0x00000008
+VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT: VkMemoryPropertyFlagBits = 0x00000010
+VK_MEMORY_PROPERTY_PROTECTED_BIT: VkMemoryPropertyFlagBits = 0x00000020
 
 #
 # VkImage

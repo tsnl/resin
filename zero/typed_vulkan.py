@@ -22,7 +22,7 @@ __all__ = [
     "VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR",
     # VkSurfaceKHR
     "VkSurfaceKHR",
-    # Physical devices
+    # VkPhysicalDevice
     "VkPhysicalDevice",
     "vkEnumeratePhysicalDevices",
     "vkGetPhysicalDeviceProperties",
@@ -33,7 +33,10 @@ __all__ = [
     "VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU",
     "VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU",
     "VK_PHYSICAL_DEVICE_TYPE_CPU",
-    # Physical device queues
+    # VkPhysicalDevice Memory
+    "VkPhysicalDeviceMemoryProperties",
+    "vkGetPhysicalDeviceMemoryProperties",
+    # VkPhysicalDevice queues
     "vkGetPhysicalDeviceQueueFamilyProperties",
     "VkDeviceQueueCreateInfo",
     "VK_QUEUE_GRAPHICS_BIT",
@@ -46,6 +49,13 @@ __all__ = [
     "VkDeviceCreateInfo",
     # VkMemory
     "VkMemoryRequirements",
+    "VkMemoryAllocateInfo",
+    "vkAllocateMemory",
+    "VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT",
+    "VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT",
+    "VK_MEMORY_PROPERTY_HOST_COHERENT_BIT",
+    "VK_MEMORY_PROPERTY_HOST_CACHED_BIT",
+    "VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT",
     # VkImage
     "VkImage",
     "VkImageCreateFlags",
@@ -146,8 +156,10 @@ from vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
-    # VkSurfaceKHR: (N/A)
-    # Queues
+    # VkPhysicalDevice Memory
+    VkPhysicalDeviceMemoryProperties,
+    vkGetPhysicalDeviceMemoryProperties,
+    # VkPhysicalDevice Queues
     vkGetPhysicalDeviceQueueFamilyProperties,
     VkDeviceQueueCreateInfo,
     VK_QUEUE_GRAPHICS_BIT,
@@ -159,6 +171,13 @@ from vulkan import (
     VkDeviceCreateInfo,
     # VkMemory
     VkMemoryRequirements,
+    VkMemoryAllocateInfo,
+    vkAllocateMemory,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+    VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT,
     # VkImage
     ## VkImageCreateFlags,
     ## VkImageCreateFlagBits,

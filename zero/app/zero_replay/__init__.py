@@ -31,10 +31,10 @@ def print_debug_info(gpu_context: zero.GpuContext) -> None:
         {
             "physical-devices": [
                 {
-                    "name": physical_device._vk_properties.deviceName,
-                    "vendor-id": f"0x{physical_device._vk_properties.vendorID:08x}",
-                    "device-id": f"0x{physical_device._vk_properties.deviceID:08x}",
-                    "api-version": f"0x{physical_device._vk_properties.apiVersion:08x}",
+                    "name": physical_device.vk_properties.deviceName,
+                    "vendor-id": f"0x{physical_device.vk_properties.vendorID:08x}",
+                    "device-id": f"0x{physical_device.vk_properties.deviceID:08x}",
+                    "api-version": f"0x{physical_device.vk_properties.apiVersion:08x}",
                     "device-type": physical_device.spell_device_type(),
                 }
                 for physical_device in gpu_context.enumerate_physical_devices()

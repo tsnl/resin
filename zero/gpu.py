@@ -61,6 +61,9 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
+    # Physical device memory
+    VkPhysicalDeviceMemoryProperties,
+    vkGetPhysicalDeviceMemoryProperties,
     # Physical device queues
     vkGetPhysicalDeviceQueueFamilyProperties,
     VkDeviceQueueCreateInfo,
@@ -74,6 +77,13 @@ from .typed_vulkan import (
     VkDeviceCreateInfo,
     # VkMemory
     VkMemoryRequirements,
+    VkMemoryAllocateInfo,
+    vkAllocateMemory,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+    VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT,
     # VkImage
     ## VkImageCreateFlags
     ## VkImageCreateFlagBits
@@ -328,6 +338,9 @@ class GpuContext(BaseContext["GpuContext"]):
                 vk_physical_device_properties=vkGetPhysicalDeviceProperties(
                     vk_physical_device
                 ),
+                vk_physical_device_memory_properties=vkGetPhysicalDeviceMemoryProperties(
+                    vk_physical_device
+                ),
             )
             for vk_physical_device in vkEnumeratePhysicalDevices(self._vk_instance)
         ]
@@ -358,7 +371,7 @@ class GpuContext(BaseContext["GpuContext"]):
 
         # Done:
         vk_device = vkCreateDevice(
-            physical_device._vk_physical_device,
+            physical_device.vk_physical_device,
             VkDeviceCreateInfo(
                 enabledExtensionCount=len(extensions),
                 ppEnabledExtensionNames=extensions,
@@ -369,6 +382,7 @@ class GpuContext(BaseContext["GpuContext"]):
         )
         return GpuDevice(
             context=self,
+            physical_device=physical_device,
             qfis=qfis,
             vk_device=vk_device,
         )
@@ -392,7 +406,8 @@ GpuPhysicalDeviceType: TypeAlias = Literal[
 
 class GpuPhysicalDevice(GpuResource):
     vk_physical_device: VkPhysicalDevice
-    vk_physical_device_properties: VkPhysicalDeviceProperties
+    vk_properties: VkPhysicalDeviceProperties
+    vk_memory_properties: VkPhysicalDeviceMemoryProperties
 
     def __init__(
         self,
@@ -400,30 +415,41 @@ class GpuPhysicalDevice(GpuResource):
         context: GpuContext,
         vk_physical_device: VkPhysicalDevice,
         vk_physical_device_properties: VkPhysicalDeviceProperties,
+        vk_physical_device_memory_properties: VkPhysicalDeviceMemoryProperties,
     ) -> None:
         super().__init__(parent=context)
-        self._vk_physical_device = vk_physical_device
-        self._vk_properties = vk_physical_device_properties
+        self.vk_physical_device = vk_physical_device
+        self.vk_properties = vk_physical_device_properties
+        self.vk_memory_properties = vk_physical_device_memory_properties
 
     def _on_dispose(self) -> None:
         pass  # no private resources to free
 
     @property
     def name(self) -> str:
-        return self._vk_properties.deviceName
+        return self.vk_properties.deviceName
 
     @property
     def vk_api_version(self) -> int:
-        return self._vk_properties.apiVersion
+        return self.vk_properties.apiVersion
 
     def check_vulkan_1_3_support(self):
-        if self._vk_properties.apiVersion >= VK_API_VERSION_1_3:
+        if self.vk_properties.apiVersion >= VK_API_VERSION_1_3:
             return
         raise PlatformSupportError(
             f"Physical device {self.name!r} does not support Vulkan 1.3.\n"
             f"- provided: {vk_api_version_str(self.vk_api_version)}\n"
             f"- required: {vk_api_version_str(VK_API_VERSION_1_3)}"
         )
+
+    def spell_device_type(self) -> str:
+        return {
+            int(VK_PHYSICAL_DEVICE_TYPE_OTHER): "Other",
+            int(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU): "IntegratedGpu",
+            int(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU): "DiscreteGpu",
+            int(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU): "VirtualGpu",
+            int(VK_PHYSICAL_DEVICE_TYPE_CPU): "Cpu",
+        }[self.vk_properties.deviceType]
 
     def get_queue_families(
         self,
@@ -432,7 +458,7 @@ class GpuPhysicalDevice(GpuResource):
         if surface is not None:
             assert self.context.enable_present_support
 
-        qfi_props = vkGetPhysicalDeviceQueueFamilyProperties(self._vk_physical_device)
+        qfi_props = vkGetPhysicalDeviceQueueFamilyProperties(self.vk_physical_device)
 
         res = []
         for index, props in enumerate(qfi_props):
@@ -444,7 +470,7 @@ class GpuPhysicalDevice(GpuResource):
             supports_present = False
             if surface is not None:
                 supports_present = self.context.get_physical_device_surface_support(
-                    self._vk_physical_device,
+                    self.vk_physical_device,
                     index,
                     surface,
                 )
@@ -460,15 +486,6 @@ class GpuPhysicalDevice(GpuResource):
             res.append(qfi)
 
         return res
-
-    def spell_device_type(self) -> str:
-        return {
-            int(VK_PHYSICAL_DEVICE_TYPE_OTHER): "Other",
-            int(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU): "IntegratedGpu",
-            int(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU): "DiscreteGpu",
-            int(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU): "VirtualGpu",
-            int(VK_PHYSICAL_DEVICE_TYPE_CPU): "Cpu",
-        }[self._vk_properties.deviceType]
 
 
 @dataclass
@@ -625,6 +642,7 @@ class GpuQueueFamilyIndices:
 
 
 class GpuDevice(GpuResource):
+    physical_device: GpuPhysicalDevice
     qfis: GpuQueueFamilyIndices
     vk_device: VkDevice
 
@@ -632,10 +650,12 @@ class GpuDevice(GpuResource):
         self,
         *,
         context: GpuContext,
+        physical_device: GpuPhysicalDevice,
         qfis: GpuQueueFamilyIndices,
         vk_device: VkDevice,
     ) -> None:
         super().__init__(parent=context)
+        self.physical_device = physical_device
         self.qfis = qfis
         self.vk_device = vk_device
 
@@ -712,7 +732,23 @@ class GpuDevice(GpuResource):
             device=self.vk_device,
             image=vk_image,
         )
-        vkBindImageMemory()
+        memory = vkAllocateMemory(
+            device=self.vk_device,
+            pAllocateInfo=VkMemoryAllocateInfo(
+                allocationSize=memory_requirements.size,
+                memoryTypeIndex=self._find_memory_type(
+                    memory_requirements.memoryTypeBits,
+                    required_properties=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                ),
+            ),
+            pAllocator=None,
+        )
+        vkBindImageMemory(
+            device=self.vk_device,
+            image=vk_image,
+            memory=memory,
+            memoryOffset=0,
+        )
 
         # Create the default VkImageView:
         vk_image_view = vkCreateImageView(
@@ -743,6 +779,26 @@ class GpuDevice(GpuResource):
 
         # Done:
         return GpuImage(device=self, vk_image=vk_image, vk_image_view=vk_image_view)
+
+    def _find_memory_type(
+        self,
+        type_filter: int,
+        required_properties: int,
+    ) -> int:
+        mem_props = self.physical_device.vk_memory_properties
+        for i in range(mem_props.memoryTypeCount):
+            if (type_filter & (1 << i)) == 0:
+                print("Rejecting memory type", i)
+                continue
+
+            matched = mem_props.memoryTypes[i].propertyFlags & required_properties
+            if matched != required_properties:
+                print("Rejecting memory type", i, "due to properties")
+                continue
+
+            return i
+
+        raise LogicError("Failed to find suitable memory type")
 
 
 #
@@ -781,8 +837,7 @@ class GpuImageMeta:
                     return VK_FORMAT_D32_SFLOAT
                 case _:
                     raise LogicError(
-                        f"GpuTextureSpec.select_vk_format(): invalid depth attachment spec: "
-                        f"{dtype=}, {depth=}"
+                        f"Invalid depth attachment spec: {dtype=}, {depth=}"
                     )
         else:
             match (dtype, depth):
@@ -794,7 +849,7 @@ class GpuImageMeta:
                     return VK_FORMAT_R32G32B32A32_SFLOAT
                 case _:
                     raise LogicError(
-                        f"GpuTextureSpec.select_vk_format(): invalid image spec: "
+                        f"Invalid image spec: "
                         f"{dtype=}, {depth=}, {is_depth_attachment=}"
                     )
 
