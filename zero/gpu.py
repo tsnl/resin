@@ -72,6 +72,8 @@ from .typed_vulkan import (
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
+    # VkMemory
+    VkMemoryRequirements,
     # VkImage
     ## VkImageCreateFlags
     ## VkImageCreateFlagBits
@@ -125,6 +127,8 @@ from .typed_vulkan import (
     vkCreateImage,
     VkImageCreateInfo,
     vkDestroyImage,
+    vkGetImageMemoryRequirements,
+    vkBindImageMemory,
     # VkImageView
     VkImageView,
     vkCreateImageView,
@@ -665,11 +669,15 @@ class GpuDevice(GpuResource):
                 "depth-attachment": (VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT),
             }[usage]
 
-        vk_image_aspect = (
-            VK_IMAGE_ASPECT_DEPTH_BIT
-            if "depth-attachment" in usages
-            else VK_IMAGE_ASPECT_COLOR_BIT
-        )
+        # Compute the VkImageAspectFlags for image view creation:
+        vk_image_aspect = 0
+        for usage in usages:
+            vk_image_aspect |= {
+                "texture-binding": VK_IMAGE_ASPECT_COLOR_BIT,
+                "storage-binding": VK_IMAGE_ASPECT_COLOR_BIT,
+                "color-attachment": VK_IMAGE_ASPECT_COLOR_BIT,
+                "depth-attachment": VK_IMAGE_ASPECT_DEPTH_BIT,
+            }[usage]
 
         # Determine which queue families will access the image:
         queue_family_indices = list(self.qfis)
@@ -699,6 +707,13 @@ class GpuDevice(GpuResource):
             pAllocator=None,
         )
 
+        # Allocate and bind memory for the image
+        memory_requirements = vkGetImageMemoryRequirements(
+            device=self.vk_device,
+            image=vk_image,
+        )
+        vkBindImageMemory()
+
         # Create the default VkImageView:
         vk_image_view = vkCreateImageView(
             device=self.vk_device,
@@ -714,12 +729,7 @@ class GpuDevice(GpuResource):
                     a=VK_COMPONENT_SWIZZLE_IDENTITY,
                 ),
                 subresourceRange=VkImageSubresourceRange(
-                    aspectMask={
-                        "depth-attachment": 0x00000002,  # VK_IMAGE_ASPECT_DEPTH_BIT
-                    }.get(
-                        usages[0],
-                        0x00000001,  # VK_IMAGE_ASPECT_COLOR_BIT
-                    ),
+                    aspectMask=vk_image_aspect,
                     baseMipLevel=0,
                     levelCount=1,
                     baseArrayLayer=0,
@@ -732,7 +742,7 @@ class GpuDevice(GpuResource):
         # TODO: upload 'init' data to the image
 
         # Done:
-        return GpuImage(device=self, vk_image=vk_image, vk_image_view=None)
+        return GpuImage(device=self, vk_image=vk_image, vk_image_view=vk_image_view)
 
 
 #

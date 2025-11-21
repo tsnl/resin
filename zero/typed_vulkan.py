@@ -44,6 +44,8 @@ __all__ = [
     "vkCreateDevice",
     "vkDestroyDevice",
     "VkDeviceCreateInfo",
+    # VkMemory
+    "VkMemoryRequirements",
     # VkImage
     "VkImage",
     "VkImageCreateFlags",
@@ -96,6 +98,8 @@ __all__ = [
     "VkImageCreateInfo",
     "vkCreateImage",
     "vkDestroyImage",
+    "vkGetImageMemoryRequirements",
+    "vkBindImageMemory",
     # VkImageView
     "VkImageView",
     "vkCreateImageView",
@@ -153,6 +157,8 @@ from vulkan import (
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
+    # VkMemory
+    VkMemoryRequirements,
     # VkImage
     ## VkImageCreateFlags,
     ## VkImageCreateFlagBits,
@@ -205,6 +211,8 @@ from vulkan import (
     VkImageCreateInfo,
     vkCreateImage,
     vkDestroyImage,
+    vkGetImageMemoryRequirements,
+    vkBindImageMemory,
     # VkImageView
     vkCreateImageView,
     VkImageViewCreateInfo,

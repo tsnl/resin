@@ -407,6 +407,32 @@ def vkDestroyDevice(device: VkDevice, pAllocator: Any) -> None:
     """
 
 #
+# VkDeviceMemory
+#
+
+class VkDeviceMemory(OpaqueResourceHandle): ...
+
+@dataclass
+class VkMemoryRequirements:
+    size: VkDeviceSize
+    alignment: VkDeviceSize
+    memoryTypeBits: int
+
+@dataclass
+class VkMemoryAllocateInfo:
+    allocationSize: VkDeviceSize
+    memoryTypeIndex: int
+
+def vkAllocateMemory(
+    device: VkDevice,
+    pAllocateInfo: VkMemoryAllocateInfo,
+    pAllocator: Any,
+) -> VkDeviceMemory:
+    """
+    vkAllocateMemory allocates device memory.
+    """
+
+#
 # VkImage
 #
 
@@ -706,6 +732,23 @@ def vkDestroyImage(
 ) -> None:
     """
     vkDestroyImage destroys an image object.
+    """
+
+def vkGetImageMemoryRequirements(
+    device: VkDevice, image: VkImage
+) -> VkMemoryRequirements:
+    """
+    vkGetImageMemoryRequirements retrieves the memory requirements for an image object.
+    """
+
+def vkBindImageMemory(
+    device: VkDevice,
+    image: VkImage,
+    memory: VkDeviceMemory,
+    memoryOffset: int,
+) -> None:
+    """
+    vkBindImageMemory binds device memory to an image object.
     """
 
 #
