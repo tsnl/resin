@@ -24,6 +24,9 @@ pkgs.mkShell {
     vulkan-tools
     vulkan-headers
     vulkan-validation-layers
+
+    # RenderDoc
+    renderdoc
   ];
 
   # Crucially, set LD_LIBRARY_PATH so the dynamic linker can find the libraries at runtime

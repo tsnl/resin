@@ -47,10 +47,13 @@ __all__ = [
     "vkCreateDevice",
     "vkDestroyDevice",
     "VkDeviceCreateInfo",
-    # VkMemory
+    # VkDeviceMemory
     "VkMemoryRequirements",
     "VkMemoryAllocateInfo",
     "vkAllocateMemory",
+    "vkFreeMemory",
+    "vkMapMemory",
+    "vkUnmapMemory",
     "VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT",
     "VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT",
     "VK_MEMORY_PROPERTY_HOST_COHERENT_BIT",
@@ -111,15 +114,15 @@ __all__ = [
     "vkGetImageMemoryRequirements",
     "vkBindImageMemory",
     # VkImageView
+    "VK_COMPONENT_SWIZZLE_IDENTITY",
+    "VK_IMAGE_ASPECT_DEPTH_BIT",
+    "VK_IMAGE_ASPECT_COLOR_BIT",
     "VkImageView",
     "vkCreateImageView",
     "VkImageViewCreateInfo",
     "vkDestroyImageView",
     "VkComponentMapping",
     "VkImageSubresourceRange",
-    "VK_COMPONENT_SWIZZLE_IDENTITY",
-    "VK_IMAGE_ASPECT_DEPTH_BIT",
-    "VK_IMAGE_ASPECT_COLOR_BIT",
     # VkSampler
     "VkSampler",
     "vkCreateSampler",
@@ -130,6 +133,18 @@ __all__ = [
     "VkClearValue",
     "VkClearColorValue",
     "VkClearDepthStencilValue",
+    # VkBuffer
+    "VK_BUFFER_USAGE_TRANSFER_SRC_BIT",
+    "VK_BUFFER_USAGE_TRANSFER_DST_BIT",
+    "VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT",
+    "VK_BUFFER_USAGE_STORAGE_BUFFER_BIT",
+    "VkBuffer",
+    "VkBufferCreateInfo",
+    "vkCreateBuffer",
+    "vkDestroyBuffer",
+    "vkGetBufferMemoryRequirements",
+    "VkBufferUsageFlags",
+    "VkBufferUsageFlagBits",
 ]
 
 from typing import TypeAlias
@@ -169,10 +184,13 @@ from vulkan import (
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
-    # VkMemory
+    # VkDeviceMemory
     VkMemoryRequirements,
     VkMemoryAllocateInfo,
     vkAllocateMemory,
+    vkFreeMemory,
+    vkMapMemory,
+    vkUnmapMemory,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -233,14 +251,14 @@ from vulkan import (
     vkGetImageMemoryRequirements,
     vkBindImageMemory,
     # VkImageView
+    VK_COMPONENT_SWIZZLE_IDENTITY,
+    VK_IMAGE_ASPECT_DEPTH_BIT,
+    VK_IMAGE_ASPECT_COLOR_BIT,
     vkCreateImageView,
     VkImageViewCreateInfo,
     vkDestroyImageView,
     VkComponentMapping,
     VkImageSubresourceRange,
-    VK_COMPONENT_SWIZZLE_IDENTITY,
-    VK_IMAGE_ASPECT_DEPTH_BIT,
-    VK_IMAGE_ASPECT_COLOR_BIT,
     # VkSampler
     vkCreateSampler,
     VkSamplerCreateInfo,
@@ -250,6 +268,16 @@ from vulkan import (
     VkClearValue,
     VkClearColorValue,
     VkClearDepthStencilValue,
+    # VkBuffer
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    VkBufferCreateInfo,
+    vkCreateBuffer,
+    vkDestroyBuffer,
+    vkGetBufferMemoryRequirements,
+    vkBindBufferMemory,
 )
 
 
@@ -267,6 +295,10 @@ VkResolveModeFlags: TypeAlias = VkFlags
 VkResolveModeFlagBits: TypeAlias = int
 VkAttachmentLoadOp: TypeAlias = int
 VkAttachmentStoreOp: TypeAlias = int
+VkBufferUsageFlags: TypeAlias = VkFlags
+VkBufferUsageFlagBits: TypeAlias = int
+VkMemoryMapFlags: TypeAlias = VkFlags
+VkMemoryMapFlagBits: TypeAlias = int
 
 
 def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:
@@ -310,3 +342,9 @@ class VkImageView(OpaqueResourceHandle): ...
 
 
 class VkSampler(OpaqueResourceHandle): ...
+
+
+class VkBuffer(OpaqueResourceHandle): ...
+
+
+class VkDeviceMemory(OpaqueResourceHandle): ...

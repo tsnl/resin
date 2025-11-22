@@ -445,6 +445,8 @@ class VkMemoryAllocateInfo:
     allocationSize: VkDeviceSize
     memoryTypeIndex: int
 
+# vkAllocateMemory
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkAllocateMemory.html
 def vkAllocateMemory(
     device: VkDevice,
     pAllocateInfo: VkMemoryAllocateInfo,
@@ -453,6 +455,32 @@ def vkAllocateMemory(
     """
     vkAllocateMemory allocates device memory.
     """
+
+# vkFreeMemory
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkFreeMemory.html
+def vkFreeMemory(
+    device: VkDevice,
+    memory: VkDeviceMemory,
+    pAllocator: Any,
+) -> None:
+    """
+    vkFreeMemory frees device memory.
+    """
+
+def vkMapMemory(
+    device: VkDevice,
+    memory: VkDeviceMemory,
+    offset: VkDeviceSize,
+    size: VkDeviceSize,
+    flags: int,
+) -> memoryview:
+    pass
+
+def vkUnmapMemory(
+    device: VkDevice,
+    memory: VkDeviceMemory,
+) -> None:
+    pass
 
 # VkMemoryPropertyFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryPropertyFlagBits.html
@@ -464,6 +492,11 @@ VK_MEMORY_PROPERTY_HOST_COHERENT_BIT: VkMemoryPropertyFlagBits = 0x00000004
 VK_MEMORY_PROPERTY_HOST_CACHED_BIT: VkMemoryPropertyFlagBits = 0x00000008
 VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT: VkMemoryPropertyFlagBits = 0x00000010
 VK_MEMORY_PROPERTY_PROTECTED_BIT: VkMemoryPropertyFlagBits = 0x00000020
+
+# VkMemoryMapFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryMapFlagBits.html
+VkMemoryMapFlags: TypeAlias = VkFlags
+VkMemoryMapFlagBits: TypeAlias = int
 
 #
 # VkImage
@@ -1056,3 +1089,88 @@ class VkRenderingAttachmentInfo:
     loadOp: VkAttachmentLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
     storeOp: VkAttachmentStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
     clearValue: VkClearValue | None = None
+
+#
+# VkBuffer
+#
+
+# VkBuffer
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBuffer.html
+class VkBuffer(OpaqueResourceHandle): ...
+
+# VkBufferCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferCreateFlagBits.html
+VkBufferCreateFlags: TypeAlias = VkFlags
+VkBufferCreateFlagBits: TypeAlias = int
+VK_BUFFER_CREATE_SPARSE_BINDING_BIT: VkBufferCreateFlagBits = 0x00000001
+VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT: VkBufferCreateFlagBits = 0x00000002
+VK_BUFFER_CREATE_SPARSE_ALIASED_BIT: VkBufferCreateFlagBits = 0x00000004
+
+# VkBufferUsageFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferUsageFlagBits.html
+VkBufferUsageFlags: TypeAlias = VkFlags
+VkBufferUsageFlagBits: TypeAlias = int
+VK_BUFFER_USAGE_TRANSFER_SRC_BIT: VkBufferUsageFlagBits = 0x00000001
+VK_BUFFER_USAGE_TRANSFER_DST_BIT: VkBufferUsageFlagBits = 0x00000002
+VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000004
+VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000008
+VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000010
+VK_BUFFER_USAGE_STORAGE_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000020
+VK_BUFFER_USAGE_INDEX_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000040
+VK_BUFFER_USAGE_VERTEX_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000080
+VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000100
+
+# VkBufferCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferCreateInfo.html
+@dataclass
+class VkBufferCreateInfo:
+    flags: VkBufferCreateFlags
+    size: VkDeviceSize
+    usage: VkBufferUsageFlags
+    sharingMode: VkSharingMode
+    queueFamilyIndexCount: int
+    pQueueFamilyIndices: Sequence[int] | None
+
+# vkCreateBuffer
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateBuffer.html
+def vkCreateBuffer(
+    device: VkDevice,
+    pCreateInfo: VkBufferCreateInfo,
+    pAllocator: Any,
+) -> VkBuffer:
+    """
+    vkCreateBuffer creates a new buffer object.
+    """
+
+# vkDestroyBuffer
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyBuffer.html
+def vkDestroyBuffer(
+    device: VkDevice,
+    buffer: VkBuffer,
+    pAllocator: Any,
+) -> None:
+    """
+    vkDestroyBuffer destroys a buffer object.
+    """
+
+# vkGetBufferMemoryRequirements
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetBufferMemoryRequirements.html
+def vkGetBufferMemoryRequirements(
+    device: VkDevice,
+    buffer: VkBuffer,
+) -> VkMemoryRequirements:
+    """
+    vkGetBufferMemoryRequirements retrieves the memory requirements for a buffer object.
+    """
+
+# vkBindBufferMemory
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkBindBufferMemory.html
+def vkBindBufferMemory(
+    device: VkDevice,
+    buffer: VkBuffer,
+    memory: VkDeviceMemory,
+    memoryOffset: VkDeviceSize,
+):
+    """
+    vkBindBufferMemory associates a piece of memory with the given buffer.
+    """

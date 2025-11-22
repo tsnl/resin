@@ -19,8 +19,10 @@ __all__ = [
     "GpuImageMeta",
 ]
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import TypeAlias, Literal
 import sys
 import os
@@ -75,10 +77,14 @@ from .typed_vulkan import (
     vkCreateDevice,
     vkDestroyDevice,
     VkDeviceCreateInfo,
-    # VkMemory
+    # VkDeviceMemory
+    VkDeviceMemory,
     VkMemoryRequirements,
     VkMemoryAllocateInfo,
     vkAllocateMemory,
+    vkFreeMemory,
+    vkMapMemory,
+    vkUnmapMemory,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -162,6 +168,17 @@ from .typed_vulkan import (
     VkClearValue,
     VkClearColorValue,
     VkClearDepthStencilValue,
+    # VkBuffer
+    VkBuffer,
+    vkCreateBuffer,
+    VkBufferCreateInfo,
+    vkDestroyBuffer,
+    vkGetBufferMemoryRequirements,
+    vkBindBufferMemory,
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 )
 
 
@@ -669,15 +686,19 @@ class GpuDevice(GpuResource):
         init: torch.Tensor | None = None,
         meta: GpuImageMeta | None = None,
     ) -> "GpuImage":
-        # Resolve 'shape'
+        # Resolve 'meta'
         if meta is not None and init is not None:
-            raise LogicError("GpuImage(): cannot provide both init and spec")
+            raise LogicError(
+                "Cannot provide both 'init' and 'meta' when creating an image"
+            )
         elif meta is not None:
             resolved_meta: GpuImageMeta = meta
         elif init is not None:
             resolved_meta = GpuImageMeta.from_tensor(init)
         else:
-            raise LogicError("GpuImage(): either init or spec must be provided")
+            raise LogicError(
+                "Must provide either 'init' or 'meta' when creating an image"
+            )
 
         # Compute the VkImageUsageFlags for image creation:
         vk_usage = 0
@@ -732,22 +753,15 @@ class GpuDevice(GpuResource):
             device=self.vk_device,
             image=vk_image,
         )
-        memory = vkAllocateMemory(
-            device=self.vk_device,
-            pAllocateInfo=VkMemoryAllocateInfo(
-                allocationSize=memory_requirements.size,
-                memoryTypeIndex=self._find_memory_type(
-                    memory_requirements.memoryTypeBits,
-                    required_properties=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                ),
-            ),
-            pAllocator=None,
+        memory = self._allocate_memory(
+            memory_requirements=memory_requirements,
+            device_local=True,
         )
         vkBindImageMemory(
             device=self.vk_device,
             image=vk_image,
-            memory=memory,
-            memoryOffset=0,
+            memory=memory.vk_device_memory,
+            memoryOffset=VkDeviceSize(0),
         )
 
         # Create the default VkImageView:
@@ -775,10 +789,176 @@ class GpuDevice(GpuResource):
             pAllocator=None,
         )
 
-        # TODO: upload 'init' data to the image
+        # Make the image:
+        image = GpuImage(
+            device=self,
+            vk_image=vk_image,
+            vk_image_view=vk_image_view,
+            memory=memory,
+            meta=resolved_meta,
+        )
+
+        # (Optional) upload the initial data if supplied
+        if init is not None:
+            image.write(init)
 
         # Done:
-        return GpuImage(device=self, vk_image=vk_image, vk_image_view=vk_image_view)
+        return image
+
+    def create_buffer(
+        self,
+        *,
+        usages: tuple[GpuBufferUsage, ...],
+        init: torch.Tensor | None = None,
+        meta: GpuBufferMeta | None = None,
+    ):
+        # Resolve 'meta'
+        if meta is not None and init is not None:
+            raise LogicError(
+                "Cannot provide both 'init' and 'meta' when creating a buffer"
+            )
+        elif meta is not None:
+            resolved_meta = meta
+        elif init is not None:
+            resolved_meta = GpuBufferMeta.from_tensor(init)
+        else:
+            raise LogicError(
+                "Must provide either 'init' or 'meta' when creating a buffer"
+            )
+
+        # Compute VkBufferUsageFlags
+        vk_usage = 0
+        for usage in usages:
+            vk_usage |= {
+                "copy-src": VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                "copy-dst": VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                "uniform": VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                "storage": VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            }.get(usage, 0)
+
+        # Compute whether 'device_local' is required to be True or False
+        device_local = None
+        for usage in usages:
+            required_device_local_value = {
+                "staging": False,
+                "uniform": True,
+                "storage": True,
+            }.get(usage)
+
+            # If no constraint is imposed, continue
+            if required_device_local_value is None:
+                continue
+
+            # Check for conflict:
+            if device_local is not None and required_device_local_value != device_local:
+                raise LogicError(
+                    "\n".join(
+                        [
+                            f"Inconsistent buffer usages supplied: {usages=}",
+                            (
+                                "Some usages require the memory to be "
+                                "device-local, while others require the memory to "
+                                "be host-local."
+                            ),
+                        ]
+                    )
+                )
+
+            # Apply the constraint
+            device_local = required_device_local_value
+
+        # Check if the 'device_local' bool was inferred successfully.
+        if device_local is None:
+            raise LogicError(
+                "\n".join(
+                    [
+                        f"Insufficient buffer usages supplied: {usages=}",
+                        (
+                            "Could not determine whether to allocate the buffer on the "
+                            "device or the host."
+                        ),
+                    ]
+                )
+            )
+
+        # Determine which queue families will access the buffer:
+        queue_family_indices = list(self.qfis)
+
+        # Create the VkBuffer
+        vk_buffer = vkCreateBuffer(
+            device=self.vk_device,
+            pCreateInfo=VkBufferCreateInfo(
+                flags=0,
+                size=resolved_meta.size,
+                usage=vk_usage,
+                sharingMode=VK_SHARING_MODE_EXCLUSIVE,
+                queueFamilyIndexCount=len(queue_family_indices),
+                pQueueFamilyIndices=queue_family_indices,
+            ),
+            pAllocator=None,
+        )
+
+        # Allocate and bind memory for the buffer:
+        memory_requirements = vkGetBufferMemoryRequirements(
+            device=self.vk_device,
+            buffer=vk_buffer,
+        )
+        memory = self._allocate_memory(
+            memory_requirements=memory_requirements,
+            device_local=device_local,
+        )
+        vkBindBufferMemory(
+            device=self.vk_device,
+            buffer=vk_buffer,
+            memory=memory.vk_device_memory,
+            memoryOffset=0,
+        )
+
+        # Make the GpuBuffer:
+        buffer = GpuBuffer(
+            device=self,
+            vk_buffer=vk_buffer,
+            memory=memory,
+            meta=resolved_meta,
+        )
+
+        # (Optional) upload GPU memory if init is supplied:
+        if init is not None:
+            buffer.write(data=init)
+
+        # Done:
+        return buffer
+
+    def _allocate_memory(
+        self,
+        *,
+        memory_requirements: VkMemoryRequirements,
+        device_local: bool,
+    ) -> GpuMemory:
+        vk_device_memory = vkAllocateMemory(
+            device=self.vk_device,
+            pAllocateInfo=VkMemoryAllocateInfo(
+                allocationSize=memory_requirements.size,
+                memoryTypeIndex=self._find_memory_type(
+                    memory_requirements.memoryTypeBits,
+                    required_properties=(
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                        if device_local
+                        else (
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                            | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                        )
+                    ),
+                ),
+            ),
+            pAllocator=None,
+        )
+        return GpuMemory(
+            device=self,
+            vk_device_memory=vk_device_memory,
+            size=memory_requirements.size,
+            device_local=device_local,
+        )
 
     def _find_memory_type(
         self,
@@ -788,17 +968,75 @@ class GpuDevice(GpuResource):
         mem_props = self.physical_device.vk_memory_properties
         for i in range(mem_props.memoryTypeCount):
             if (type_filter & (1 << i)) == 0:
-                print("Rejecting memory type", i)
                 continue
 
             matched = mem_props.memoryTypes[i].propertyFlags & required_properties
             if matched != required_properties:
-                print("Rejecting memory type", i, "due to properties")
                 continue
 
             return i
 
         raise LogicError("Failed to find suitable memory type")
+
+
+#
+# GpuMemory
+#
+
+
+class GpuMemory(GpuResource):
+    device: GpuDevice
+    vk_device_memory: VkDeviceMemory
+    size: int
+    device_local: bool
+    _mapped_view_counter: int
+    _mapped_view: memoryview | None
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_device_memory: VkDeviceMemory,
+        size: int,
+        device_local: bool,
+    ):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_device_memory = vk_device_memory
+        self.size = size
+        self.device_local = device_local
+        self._mapped_view_use_count = 0
+        self._mapped_view = None
+
+    def _on_dispose(self) -> None:
+        vkFreeMemory(self.device.vk_device, self.vk_device_memory, pAllocator=None)
+
+    @contextmanager
+    def map(self):
+        if self.device_local:
+            raise LogicError("Cannot memory-map a device-local GpuMemory.")
+
+        self._mapped_view_use_count += 1
+        if self._mapped_view is None:
+            self._mapped_view = vkMapMemory(
+                device=self.device.vk_device,
+                memory=self.vk_device_memory,
+                offset=0,
+                size=self.size,
+                flags=0,
+            )
+
+        assert self._mapped_view is not None
+        yield self._mapped_view
+
+        self._mapped_view_use_count -= 1
+        if self._mapped_view_use_count == 0:
+            vkFreeMemory(
+                device=self.device.vk_device,
+                memory=self.vk_device_memory,
+                pAllocator=None,
+            )
+            self._mapped_view = None
 
 
 #
@@ -853,6 +1091,13 @@ class GpuImageMeta:
                         f"{dtype=}, {depth=}, {is_depth_attachment=}"
                     )
 
+    def into_buffer_meta(self) -> GpuBufferMeta:
+        return GpuBufferMeta(
+            numel=(self.shape[0] * self.shape[1] * self.shape[2]),
+            element_size={torch.uint8: 1, torch.float32: 4}[self.dtype],
+            dtype=self.dtype,
+        )
+
 
 GpuImageUsage: TypeAlias = Literal[
     "texture-binding",
@@ -866,6 +1111,8 @@ class GpuImage(GpuResource):
     device: GpuDevice
     vk_image: VkImage
     vk_image_view: VkImageView
+    memory: GpuMemory
+    meta: GpuImageMeta
 
     def __init__(
         self,
@@ -873,14 +1120,115 @@ class GpuImage(GpuResource):
         device: GpuDevice,
         vk_image: VkImage,
         vk_image_view: VkImageView,
+        memory: GpuMemory,
+        meta: GpuImageMeta,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
         self.vk_image = vk_image
         self.vk_image_view = vk_image_view
+        self.memory = memory
+        self.meta = meta
 
     def _on_dispose(self) -> None:
         vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
+
+    def write(self, data: torch.Tensor) -> None:
+        meta = GpuImageMeta.from_tensor(data)
+        if meta != self.meta:
+            raise LogicError(
+                f"Data tensor shape/dtype mismatch: expected {self.meta}, got {meta}"
+            )
+
+        # No staging buffer needed if the buffer is not device-local:
+        if not self.memory.device_local:
+            with self.memory.map() as mem:
+                mem[:] = data.view(torch.uint8).flatten().numpy()
+            return
+
+        # Create a temporary staging buffer, initialize it, and then submit a copy
+        # operation.
+        usages = ("staging", "copy-src")
+        with self.device.create_buffer(usages=usages, init=data):
+            # TODO: Submit a copy operation
+            raise NotImplementedError()
+
+
+#
+# GpuBuffer
+#
+
+
+@dataclass
+class GpuBufferMeta:
+    numel: int
+    element_size: int
+    dtype: torch.dtype
+
+    @property
+    def size(self) -> int:
+        return self.numel * self.element_size
+
+    @staticmethod
+    def from_tensor(tensor: torch.Tensor) -> GpuBufferMeta:
+        return GpuBufferMeta(
+            numel=tensor.numel(),
+            element_size=tensor.element_size(),
+            dtype=tensor.dtype,
+        )
+
+
+GpuBufferUsage: TypeAlias = Literal[
+    "staging",
+    "copy-src",
+    "copy-dst",
+    "uniform",
+    "storage",
+]
+
+
+class GpuBuffer(GpuResource):
+    device: GpuDevice
+    vk_buffer: VkBuffer
+    memory: GpuMemory
+    meta: GpuBufferMeta
+
+    def __init__(
+        self,
+        device: GpuDevice,
+        vk_buffer: VkBuffer,
+        memory: GpuMemory,
+        meta: GpuBufferMeta,
+    ):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_buffer = vk_buffer
+        self.memory = memory
+        self.meta = meta
+
+    def _on_dispose(self):
+        vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
+
+    def write(self, data: torch.Tensor):
+        meta = GpuBufferMeta.from_tensor(data)
+        if meta != self.meta:
+            raise LogicError(
+                f"Data tensor shape/dtype mismatch: expected {self.meta}, got {meta}"
+            )
+
+        # No staging buffer needed if the buffer is not device-local:
+        if not self.memory.device_local:
+            with self.memory.map() as mem:
+                mem[:] = data.view(torch.uint8).flatten().numpy()
+            return
+
+        # Create a temporary staging buffer, initialize it, then submit a copy
+        # operation.
+        usages = ("staging", "copy-src")
+        with self.device.create_buffer(usages=usages, init=data) as staging_buffer:
+            # TODO: Issue a GPU transfer operation
+            _ = staging_buffer
+            raise NotImplementedError()
 
 
 #

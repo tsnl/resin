@@ -24,6 +24,8 @@ def main():
     print(device)
     print(render_target_image)
 
+    render_target_image.write(torch.ones((1024, 1024, 4), dtype=torch.uint8))
+
 
 def print_debug_info(gpu_context: zero.GpuContext) -> None:
     print("<gpu-info>")
