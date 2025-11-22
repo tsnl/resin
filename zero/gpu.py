@@ -19,7 +19,6 @@ __all__ = [
     "GpuImageMeta",
 ]
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from collections import defaultdict
 from contextlib import contextmanager
@@ -682,7 +681,7 @@ class GpuDevice(GpuResource):
     def create_image(
         self,
         *,
-        usages: tuple[GpuImageUsage, ...],
+        usages: list[GpuImageUsage],
         init: torch.Tensor | None = None,
         meta: GpuImageMeta | None = None,
     ) -> "GpuImage":
@@ -808,7 +807,7 @@ class GpuDevice(GpuResource):
     def create_buffer(
         self,
         *,
-        usages: tuple[GpuBufferUsage, ...],
+        usages: list[GpuBufferUsage],
         init: torch.Tensor | None = None,
         meta: GpuBufferMeta | None = None,
     ):
@@ -1063,7 +1062,7 @@ class GpuImageMeta:
 
     def infer_vk_format(
         self,
-        usages: tuple[GpuImageUsage, ...],
+        usages: list[GpuImageUsage],
     ) -> int:
         dtype = self.dtype
         depth = self.shape[2]
@@ -1148,7 +1147,7 @@ class GpuImage(GpuResource):
 
         # Create a temporary staging buffer, initialize it, and then submit a copy
         # operation.
-        usages = ("staging", "copy-src")
+        usages: list[GpuBufferUsage] = ["staging", "copy-src"]
         with self.device.create_buffer(usages=usages, init=data):
             # TODO: Submit a copy operation
             raise NotImplementedError()
@@ -1224,7 +1223,7 @@ class GpuBuffer(GpuResource):
 
         # Create a temporary staging buffer, initialize it, then submit a copy
         # operation.
-        usages = ("staging", "copy-src")
+        usages: list[GpuBufferUsage] = ["staging", "copy-src"]
         with self.device.create_buffer(usages=usages, init=data) as staging_buffer:
             # TODO: Issue a GPU transfer operation
             _ = staging_buffer
