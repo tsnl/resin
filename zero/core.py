@@ -67,20 +67,6 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
     def _on_dispose(self) -> None:
         pass
 
-    def __enter__(self) -> BaseContextResource[TContext]:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: types.TracebackType | None,
-    ):
-        _ = exc_type
-        _ = exc_val
-        _ = exc_tb
-        self.dispose()
-
 
 class BaseContext[TContext](BaseContextResource[TContext]):
     def __init__(self):

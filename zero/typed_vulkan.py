@@ -143,8 +143,34 @@ __all__ = [
     "vkCreateBuffer",
     "vkDestroyBuffer",
     "vkGetBufferMemoryRequirements",
+    "vkBindBufferMemory",
     "VkBufferUsageFlags",
     "VkBufferUsageFlagBits",
+    # VkBufferView
+    "vkCreateBufferView",
+    "VkBufferViewCreateInfo",
+    "vkDestroyBufferView",
+    # VkCommandPool
+    "VkCommandPool",
+    "vkCreateCommandPool",
+    "VkCommandPoolCreateInfo",
+    "vkDestroyCommandPool",
+    "VK_COMMAND_POOL_CREATE_TRANSIENT_BIT",
+    "VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT",
+    # VkCommandBuffer
+    "VkCommandBuffer",
+    "vkAllocateCommandBuffers",
+    "VkCommandBufferAllocateInfo",
+    "vkFreeCommandBuffers",
+    "vkResetCommandBuffer",
+    "vkBeginCommandBuffer",
+    "VkCommandBufferBeginInfo",
+    "vkEndCommandBuffer",
+    "VK_COMMAND_BUFFER_LEVEL_PRIMARY",
+    "VK_COMMAND_BUFFER_LEVEL_SECONDARY",
+    "VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT",
+    "VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT",
+    "VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT",
 ]
 
 from typing import TypeAlias
@@ -278,6 +304,29 @@ from vulkan import (
     vkDestroyBuffer,
     vkGetBufferMemoryRequirements,
     vkBindBufferMemory,
+    # VkBufferView
+    vkCreateBufferView,
+    VkBufferViewCreateInfo,
+    vkDestroyBufferView,
+    # VkCommandPool
+    vkCreateCommandPool,
+    VkCommandPoolCreateInfo,
+    vkDestroyCommandPool,
+    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+    # VkCommandBuffer
+    vkAllocateCommandBuffers,
+    VkCommandBufferAllocateInfo,
+    vkFreeCommandBuffers,
+    vkResetCommandBuffer,
+    vkBeginCommandBuffer,
+    VkCommandBufferBeginInfo,
+    vkEndCommandBuffer,
+    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+    VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT,
+    VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
 )
 
 
@@ -348,3 +397,9 @@ class VkBuffer(OpaqueResourceHandle): ...
 
 
 class VkDeviceMemory(OpaqueResourceHandle): ...
+
+
+class VkCommandPool(OpaqueResourceHandle): ...
+
+
+class VkCommandBuffer(OpaqueResourceHandle): ...

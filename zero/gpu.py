@@ -19,7 +19,7 @@ __all__ = [
     "GpuImageMeta",
 ]
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import TypeAlias, Literal
@@ -178,6 +178,27 @@ from .typed_vulkan import (
     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    # VkBufferView
+    vkCreateBufferView,
+    VkBufferViewCreateInfo,
+    vkDestroyBufferView,
+    # VkCommandPool
+    VkCommandPool,
+    vkCreateCommandPool,
+    VkCommandPoolCreateInfo,
+    vkDestroyCommandPool,
+    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    # VkCommandBuffer
+    VkCommandBuffer,
+    vkAllocateCommandBuffers,
+    VkCommandBufferAllocateInfo,
+    vkFreeCommandBuffers,
+    vkResetCommandBuffer,
+    vkBeginCommandBuffer,
+    VkCommandBufferBeginInfo,
+    vkEndCommandBuffer,
+    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    VK_COMMAND_BUFFER_LEVEL_SECONDARY,
 )
 
 
@@ -385,7 +406,7 @@ class GpuContext(BaseContext["GpuContext"]):
         if self.enable_portability_subset:
             extensions.append("VK_KHR_portability_subset")
 
-        # Done:
+        # Create device:
         vk_device = vkCreateDevice(
             physical_device.vk_physical_device,
             VkDeviceCreateInfo(
@@ -396,11 +417,26 @@ class GpuContext(BaseContext["GpuContext"]):
             ),
             pAllocator=None,
         )
+
+        # Create command pools:
+        vk_command_pools: dict[int, VkCommandPool] = {}
+        for qfi_index in {idx for _, idx in qfis}:
+            vk_command_pools[qfi_index] = vkCreateCommandPool(
+                device=vk_device,
+                pCreateInfo=VkCommandPoolCreateInfo(
+                    flags=VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+                    queueFamilyIndex=qfi_index,
+                ),
+                pAllocator=None,
+            )
+
+        # Return final GpuDevice:
         return GpuDevice(
             context=self,
             physical_device=physical_device,
             qfis=qfis,
             vk_device=vk_device,
+            vk_command_pools=vk_command_pools,
         )
 
 
@@ -519,39 +555,47 @@ class GpuPhysicalDeviceQueueFamily:
 #
 
 
+GpuQueueType: TypeAlias = Literal[
+    "graphics",
+    "compute",
+    "transfer",
+    "present",
+]
+
+
 @dataclass
 class GpuQueueFamilyIndices:
-    graphics: int | None = None
-    compute: int | None = None
-    transfer: int | None = None
-    present: int | None = None
+    type_to_qfi_map: dict[GpuQueueType, int] = field(default_factory=dict)
+
+    def __getitem__(self, key: GpuQueueType) -> int:
+        return self.type_to_qfi_map[key]
+
+    def __setitem__(self, key: GpuQueueType, value: int) -> None:
+        self.type_to_qfi_map[key] = value
+
+    def __contains__(self, key: GpuQueueType) -> bool:
+        return key in self.type_to_qfi_map
+
+    def __iter__(self):
+        yield from self.type_to_qfi_map.items()
 
     def is_complete(self, require_present_support: bool) -> bool:
         return (
-            self.graphics is not None
-            and self.compute is not None
-            and self.transfer is not None
-            and (not require_present_support or self.present is not None)
+            "graphics" in self.type_to_qfi_map
+            and "compute" in self.type_to_qfi_map
+            and "transfer" in self.type_to_qfi_map
+            and (not require_present_support or "present" in self.type_to_qfi_map)
         )
 
     def is_any_queue_family_shared(self) -> bool:
-        all_indices = [
-            index
-            for index in [self.graphics, self.compute, self.transfer, self.present]
-            if index is not None
-        ]
-        return len(set(all_indices)) < len(all_indices)
+        all_indices = list(self.type_to_qfi_map.values())
+        all_unique_indices = set(all_indices)
+        return len(all_unique_indices) < len(all_indices)
 
     def compute_queue_create_info_list(self) -> list[VkDeviceQueueCreateInfo]:
         dd = defaultdict(lambda: 0)
-        if self.graphics is not None:
-            dd[self.graphics] += 1
-        if self.compute is not None:
-            dd[self.compute] += 1
-        if self.transfer is not None:
-            dd[self.transfer] += 1
-        if self.present is not None:
-            dd[self.present] += 1
+        for _, index in self.type_to_qfi_map.items():
+            dd[index] += 1
         return [
             VkDeviceQueueCreateInfo(
                 queueFamilyIndex=index,
@@ -615,24 +659,24 @@ class GpuQueueFamilyIndices:
                 queue_family_use_count += 1
                 return queue_family_use_count == queue_family_max_use_count
 
-            if res.graphics is None and queue_family.supports_graphics:
-                res.graphics = queue_family.index
+            if "graphics" not in res and queue_family.supports_graphics:
+                res["graphics"] = queue_family.index
                 if reserve_queue_and_check_can_continue():
                     continue
 
-            if res.compute is None and queue_family.supports_compute:
-                res.compute = queue_family.index
+            if "compute" not in res and queue_family.supports_compute:
+                res["compute"] = queue_family.index
                 if reserve_queue_and_check_can_continue():
                     continue
 
-            if res.transfer is None and queue_family.supports_transfer:
-                res.transfer = queue_family.index
+            if "transfer" not in res and queue_family.supports_transfer:
+                res["transfer"] = queue_family.index
                 if reserve_queue_and_check_can_continue():
                     continue
 
             if surface is not None:
-                if res.present is None and queue_family.supports_present:
-                    res.present = queue_family.index
+                if "present" not in res and queue_family.supports_present:
+                    res["present"] = queue_family.index
                     if reserve_queue_and_check_can_continue():
                         continue
 
@@ -640,16 +684,6 @@ class GpuQueueFamilyIndices:
                 break
 
         return res
-
-    def __iter__(self):
-        if self.graphics is not None:
-            yield self.graphics
-        if self.compute is not None:
-            yield self.compute
-        if self.transfer is not None:
-            yield self.transfer
-        if self.present is not None:
-            yield self.present
 
 
 #
@@ -661,6 +695,7 @@ class GpuDevice(GpuResource):
     physical_device: GpuPhysicalDevice
     qfis: GpuQueueFamilyIndices
     vk_device: VkDevice
+    vk_command_pools: dict[int, VkCommandPool]
 
     def __init__(
         self,
@@ -669,36 +704,32 @@ class GpuDevice(GpuResource):
         physical_device: GpuPhysicalDevice,
         qfis: GpuQueueFamilyIndices,
         vk_device: VkDevice,
+        vk_command_pools: dict[int, VkCommandPool],
     ) -> None:
         super().__init__(parent=context)
         self.physical_device = physical_device
         self.qfis = qfis
         self.vk_device = vk_device
+        self.vk_command_pools = vk_command_pools
 
     def _on_dispose(self) -> None:
+        # Destroy command pools:
+        for _, vk_command_pool in self.vk_command_pools.items():
+            vkDestroyCommandPool(
+                device=self.vk_device,
+                commandPool=vk_command_pool,
+                pAllocator=None,
+            )
+
+        # Destroy device:
         vkDestroyDevice(device=self.vk_device, pAllocator=None)
 
     def create_image(
         self,
         *,
         usages: list[GpuImageUsage],
-        init: torch.Tensor | None = None,
-        meta: GpuImageMeta | None = None,
+        meta: GpuImageMeta,
     ) -> "GpuImage":
-        # Resolve 'meta'
-        if meta is not None and init is not None:
-            raise LogicError(
-                "Cannot provide both 'init' and 'meta' when creating an image"
-            )
-        elif meta is not None:
-            resolved_meta: GpuImageMeta = meta
-        elif init is not None:
-            resolved_meta = GpuImageMeta.from_tensor(init)
-        else:
-            raise LogicError(
-                "Must provide either 'init' or 'meta' when creating an image"
-            )
-
         # Compute the VkImageUsageFlags for image creation:
         vk_usage = 0
         for usage in usages:
@@ -720,7 +751,7 @@ class GpuDevice(GpuResource):
             }[usage]
 
         # Determine which queue families will access the image:
-        queue_family_indices = list(self.qfis)
+        queue_family_indices = list({idx for _, idx in self.qfis})
 
         # Create the VkImage:
         vk_image = vkCreateImage(
@@ -728,12 +759,8 @@ class GpuDevice(GpuResource):
             pCreateInfo=VkImageCreateInfo(
                 flags=0,
                 imageType=VK_IMAGE_TYPE_2D,
-                format=resolved_meta.infer_vk_format(usages),
-                extent=VkExtent3D(
-                    width=resolved_meta.shape[1],
-                    height=resolved_meta.shape[0],
-                    depth=1,
-                ),
+                format=meta.infer_vk_format(usages),
+                extent=VkExtent3D(width=meta.shape[1], height=meta.shape[0], depth=1),
                 mipLevels=1,
                 arrayLayers=1,
                 samples=VK_SAMPLE_COUNT_1_BIT,
@@ -770,7 +797,7 @@ class GpuDevice(GpuResource):
                 flags=0,
                 image=vk_image,
                 viewType=VK_IMAGE_TYPE_2D,
-                format=resolved_meta.infer_vk_format(usages),
+                format=meta.infer_vk_format(usages),
                 components=VkComponentMapping(
                     r=VK_COMPONENT_SWIZZLE_IDENTITY,
                     g=VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -794,12 +821,8 @@ class GpuDevice(GpuResource):
             vk_image=vk_image,
             vk_image_view=vk_image_view,
             memory=memory,
-            meta=resolved_meta,
+            meta=meta,
         )
-
-        # (Optional) upload the initial data if supplied
-        if init is not None:
-            image.write(init)
 
         # Done:
         return image
@@ -808,23 +831,8 @@ class GpuDevice(GpuResource):
         self,
         *,
         usages: list[GpuBufferUsage],
-        init: torch.Tensor | None = None,
-        meta: GpuBufferMeta | None = None,
+        meta: GpuBufferMeta,
     ):
-        # Resolve 'meta'
-        if meta is not None and init is not None:
-            raise LogicError(
-                "Cannot provide both 'init' and 'meta' when creating a buffer"
-            )
-        elif meta is not None:
-            resolved_meta = meta
-        elif init is not None:
-            resolved_meta = GpuBufferMeta.from_tensor(init)
-        else:
-            raise LogicError(
-                "Must provide either 'init' or 'meta' when creating a buffer"
-            )
-
         # Compute VkBufferUsageFlags
         vk_usage = 0
         for usage in usages:
@@ -881,14 +889,14 @@ class GpuDevice(GpuResource):
             )
 
         # Determine which queue families will access the buffer:
-        queue_family_indices = list(self.qfis)
+        queue_family_indices = list({idx for _, idx in self.qfis})
 
         # Create the VkBuffer
         vk_buffer = vkCreateBuffer(
             device=self.vk_device,
             pCreateInfo=VkBufferCreateInfo(
                 flags=0,
-                size=resolved_meta.size,
+                size=meta.size,
                 usage=vk_usage,
                 sharingMode=VK_SHARING_MODE_EXCLUSIVE,
                 queueFamilyIndexCount=len(queue_family_indices),
@@ -918,15 +926,52 @@ class GpuDevice(GpuResource):
             device=self,
             vk_buffer=vk_buffer,
             memory=memory,
-            meta=resolved_meta,
+            meta=meta,
         )
-
-        # (Optional) upload GPU memory if init is supplied:
-        if init is not None:
-            buffer.write(data=init)
 
         # Done:
         return buffer
+
+    @contextmanager
+    def command(self, *, queue_type: GpuQueueType):
+        queue_family_index = self.qfis[queue_type]
+        vk_command_pool = self.vk_command_pools[queue_family_index]
+
+        vk_command_buffer = vkAllocateCommandBuffers(
+            device=self.vk_device,
+            pAllocateInfo=VkCommandBufferAllocateInfo(
+                commandPool=vk_command_pool,
+                level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                commandBufferCount=1,
+            ),
+        )[0]
+
+        vkBeginCommandBuffer(
+            commandBuffer=vk_command_buffer,
+            pBeginInfo=VkCommandBufferBeginInfo(
+                flags=0,
+                pInheritanceInfo=None,
+            ),
+        )
+        yield GpuCommandEncoder(
+            device=self,
+            queue_family_index=queue_family_index,
+            vk_command_buffer=vk_command_buffer,
+        )
+        vkEndCommandBuffer(commandBuffer=vk_command_buffer)
+
+        # TODO: get the VkDeviceQueue
+        # https://docs.vulkan.org/refpages/latest/refpages/source/vkGetDeviceQueue.html
+
+        # TODO: submit the command buffer and return a submission id
+        # https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit.html
+
+        vkFreeCommandBuffers(
+            device=self.vk_device,
+            commandPool=vk_command_pool,
+            commandBufferCount=1,
+            pCommandBuffers=[vk_command_buffer],
+        )
 
     def _allocate_memory(
         self,
@@ -1074,7 +1119,7 @@ class GpuImageMeta:
                     return VK_FORMAT_D32_SFLOAT
                 case _:
                     raise LogicError(
-                        f"Invalid depth attachment spec: {dtype=}, {depth=}"
+                        f"Invalid depth attachment image meta: {dtype=}, {depth=}"
                     )
         else:
             match (dtype, depth):
@@ -1086,15 +1131,14 @@ class GpuImageMeta:
                     return VK_FORMAT_R32G32B32A32_SFLOAT
                 case _:
                     raise LogicError(
-                        f"Invalid image spec: "
+                        f"Invalid image meta: "
                         f"{dtype=}, {depth=}, {is_depth_attachment=}"
                     )
 
     def into_buffer_meta(self) -> GpuBufferMeta:
         return GpuBufferMeta(
-            numel=(self.shape[0] * self.shape[1] * self.shape[2]),
-            element_size={torch.uint8: 1, torch.float32: 4}[self.dtype],
-            dtype=self.dtype,
+            element_count=(self.shape[0] * self.shape[1] * self.shape[2]),
+            element_dtype=self.dtype,
         )
 
 
@@ -1132,26 +1176,6 @@ class GpuImage(GpuResource):
     def _on_dispose(self) -> None:
         vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
 
-    def write(self, data: torch.Tensor) -> None:
-        meta = GpuImageMeta.from_tensor(data)
-        if meta != self.meta:
-            raise LogicError(
-                f"Data tensor shape/dtype mismatch: expected {self.meta}, got {meta}"
-            )
-
-        # No staging buffer needed if the buffer is not device-local:
-        if not self.memory.device_local:
-            with self.memory.map() as mem:
-                mem[:] = data.view(torch.uint8).flatten().numpy()
-            return
-
-        # Create a temporary staging buffer, initialize it, and then submit a copy
-        # operation.
-        usages: list[GpuBufferUsage] = ["staging", "copy-src"]
-        with self.device.create_buffer(usages=usages, init=data):
-            # TODO: Submit a copy operation
-            raise NotImplementedError()
-
 
 #
 # GpuBuffer
@@ -1160,20 +1184,22 @@ class GpuImage(GpuResource):
 
 @dataclass
 class GpuBufferMeta:
-    numel: int
-    element_size: int
-    dtype: torch.dtype
+    element_count: int
+    element_dtype: torch.dtype
 
     @property
     def size(self) -> int:
-        return self.numel * self.element_size
+        return self.element_count * self.element_size
+
+    @property
+    def element_size(self) -> int:
+        return {torch.uint8: 1, torch.float32: 4}[self.element_dtype]
 
     @staticmethod
     def from_tensor(tensor: torch.Tensor) -> GpuBufferMeta:
         return GpuBufferMeta(
-            numel=tensor.numel(),
-            element_size=tensor.element_size(),
-            dtype=tensor.dtype,
+            element_count=tensor.numel(),
+            element_dtype=tensor.dtype,
         )
 
 
@@ -1208,32 +1234,36 @@ class GpuBuffer(GpuResource):
     def _on_dispose(self):
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
 
-    def write(self, data: torch.Tensor):
-        meta = GpuBufferMeta.from_tensor(data)
-        if meta != self.meta:
-            raise LogicError(
-                f"Data tensor shape/dtype mismatch: expected {self.meta}, got {meta}"
-            )
-
-        # No staging buffer needed if the buffer is not device-local:
-        if not self.memory.device_local:
-            with self.memory.map() as mem:
-                mem[:] = data.view(torch.uint8).flatten().numpy()
-            return
-
-        # Create a temporary staging buffer, initialize it, then submit a copy
-        # operation.
-        usages: list[GpuBufferUsage] = ["staging", "copy-src"]
-        with self.device.create_buffer(usages=usages, init=data) as staging_buffer:
-            # TODO: Issue a GPU transfer operation
-            _ = staging_buffer
-            raise NotImplementedError()
-
 
 #
 # GpuCommandBuffer
 #
 
 
-class GpuCommandBuffer:
-    pass
+GpuCommandBufferLevel: TypeAlias = Literal["primary", "secondary"]
+
+
+class GpuCommandEncoder(GpuResource):
+    device: GpuDevice
+    vk_command_buffer: VkCommandBuffer
+    queue_family_index: int
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        queue_family_index: int,
+        vk_command_buffer: VkCommandBuffer,
+    ) -> None:
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_command_buffer = vk_command_buffer
+        self.queue_family_index = queue_family_index
+
+    def _on_dispose(self) -> None:
+        vkFreeCommandBuffers(
+            device=self.device.vk_device,
+            commandPool=self.device.vk_command_pools[self.queue_family_index],
+            commandBufferCount=1,
+            pCommandBuffers=[self.vk_command_buffer],
+        )

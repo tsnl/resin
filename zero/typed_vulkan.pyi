@@ -1174,3 +1174,182 @@ def vkBindBufferMemory(
     """
     vkBindBufferMemory associates a piece of memory with the given buffer.
     """
+
+#
+# VkBufferView
+#
+
+# VkBufferView
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferView.html
+class VkBufferView(OpaqueResourceHandle): ...
+
+# VkBufferViewCreateFlags
+VkBufferViewCreateFlags: TypeAlias = VkFlags
+VkBufferViewCreateFlagBits: TypeAlias = int
+
+# vkCreateBufferView
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateBufferView.html
+def vkCreateBufferView(
+    device: VkDevice,
+    pCreateInfo: VkBufferViewCreateInfo,
+    pAllocator: Any,
+) -> VkBufferView:
+    """
+    vkCreateBufferView creates a new buffer view object.
+    """
+
+# vkDestroyBufferView
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyBufferView.html
+def vkDestroyBufferView(
+    device: VkDevice,
+    bufferView: VkBufferView,
+    pAllocator: Any,
+) -> None:
+    """
+    vkDestroyBufferView destroys a buffer view object.
+    """
+
+# VkBufferViewCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferViewCreateInfo
+@dataclass
+class VkBufferViewCreateInfo:
+    flags: VkBufferViewCreateFlags
+    buffer: VkBuffer
+    format: VkFormat
+    offset: VkDeviceSize
+    range: VkDeviceSize
+
+#
+# VkCommandPool
+#
+
+class VkCommandPool(OpaqueResourceHandle): ...
+
+# VkCommandPoolCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandPoolCreateFlags
+VkCommandPoolCreateFlags: TypeAlias = VkFlags
+VkCommandPoolCreateFlagBits: TypeAlias = int
+VK_COMMAND_POOL_CREATE_TRANSIENT_BIT: VkCommandPoolCreateFlagBits = (  #
+    0x00000001
+)
+VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT: VkCommandPoolCreateFlagBits = (
+    0x00000002
+)
+
+# vkCreateCommandPool
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateCommandPool.html
+def vkCreateCommandPool(
+    device: VkDevice,
+    pCreateInfo: VkCommandPoolCreateInfo,
+    pAllocator: Any,
+) -> VkCommandPool:
+    """
+    vkCreateCommandPool creates a new command pool object.
+    """
+
+# vkDestroyCommandPool
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyCommandPool.html
+def vkDestroyCommandPool(
+    device: VkDevice,
+    commandPool: VkCommandPool,
+    pAllocator: Any,
+) -> None:
+    """
+    vkDestroyCommandPool destroys a command pool object.
+    """
+
+# VkCommandPoolCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandPoolCreateInfo.html
+@dataclass
+class VkCommandPoolCreateInfo:
+    flags: VkCommandPoolCreateFlags
+    queueFamilyIndex: int
+
+#
+# VkCommandBuffer
+#
+
+# VkCommandBuffer
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBuffer.html
+class VkCommandBuffer(OpaqueResourceHandle): ...
+
+# VkCommandBufferLevel
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferLevel.html
+VkCommandBufferLevel: TypeAlias = int
+VK_COMMAND_BUFFER_LEVEL_PRIMARY: VkCommandBufferLevel = 0
+VK_COMMAND_BUFFER_LEVEL_SECONDARY: VkCommandBufferLevel = 1
+
+# VkCommandBufferResetFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferResetFlags.html
+VkCommandBufferResetFlags: TypeAlias = VkFlags
+VkCommandBufferResetFlagBits: TypeAlias = int
+
+# VkCommandBufferAllocateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferAllocateInfo.html
+@dataclass
+class VkCommandBufferAllocateInfo:
+    commandPool: VkCommandPool
+    level: VkCommandBufferLevel
+    commandBufferCount: int
+
+# vkAllocateCommandBuffers
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkAllocateCommandBuffers.html
+def vkAllocateCommandBuffers(
+    device: VkDevice,
+    pAllocateInfo: VkCommandBufferAllocateInfo,
+) -> Sequence[VkCommandBuffer]:
+    """
+    vkAllocateCommandBuffers allocates command buffers from a command pool.
+    """
+
+# vkFreeCommandBuffers
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkFreeCommandBuffers.html
+def vkFreeCommandBuffers(
+    device: VkDevice,
+    commandPool: VkCommandPool,
+    commandBufferCount: int,
+    pCommandBuffers: Sequence[VkCommandBuffer],
+) -> None:
+    """
+    vkFreeCommandBuffers frees command buffers back to the command pool.
+    """
+
+def vkResetCommandBuffer(
+    commandBuffer: VkCommandBuffer,
+    flags: VkCommandBufferResetFlags,
+) -> None:
+    """
+    vkResetCommandBuffer resets a command buffer to the initial state.
+    """
+
+VkCommandBufferUsageFlags: TypeAlias = VkFlags
+VkCommandBufferUsageFlagBits: TypeAlias = int
+VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: VkCommandBufferUsageFlagBits = (  #
+    0x00000001
+)
+VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: VkCommandBufferUsageFlagBits = (  #
+    0x00000002
+)
+VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT: VkCommandBufferUsageFlagBits = (  #
+    0x00000004
+)
+
+# VkCommandBufferBeginInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferBeginInfo
+@dataclass
+class VkCommandBufferBeginInfo:
+    flags: VkCommandBufferUsageFlags
+    pInheritanceInfo: Any | None
+
+def vkBeginCommandBuffer(
+    commandBuffer: VkCommandBuffer,
+    pBeginInfo: VkCommandBufferBeginInfo,
+) -> None:
+    """
+    vkBeginCommandBuffer starts the recording of a command buffer.
+    """
+
+def vkEndCommandBuffer(commandBuffer: VkCommandBuffer) -> None:
+    """
+    vkEndCommandBuffer ends the recording of a command buffer.
+    """

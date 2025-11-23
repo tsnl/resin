@@ -17,14 +17,12 @@ def main():
     device = gpu_context.create_device(physical_device=physical_device, surface=None)
 
     render_target_image = device.create_image(
-        usages=("color-attachment",),
+        usages=["color-attachment"],
         meta=zero.GpuImageMeta(shape=(1024, 1024, 4), dtype=torch.uint8),
     )
 
     print(device)
     print(render_target_image)
-
-    render_target_image.write(torch.ones((1024, 1024, 4), dtype=torch.uint8))
 
 
 def print_debug_info(gpu_context: zero.GpuContext) -> None:
