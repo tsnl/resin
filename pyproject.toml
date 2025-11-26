@@ -43,3 +43,6 @@ dev = [
     # Workspace packages:
     "setup",
 ]
+
+[tool.pyright]
+exclude = ["build/**"]
