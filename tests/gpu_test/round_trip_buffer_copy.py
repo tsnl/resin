@@ -26,7 +26,7 @@ def test_buffer_roundtrip():
     data0 = torch.randn(1024, dtype=torch.float32)
     meta = GpuBufferMeta.from_tensor(data0)
 
-    device_buf_usage: list[GpuBufferUsage] = ["copy-dst", "storage"]
+    device_buf_usage: list[GpuBufferUsage] = ["copy-src", "copy-dst", "storage"]
     host_buf_usage: list[GpuBufferUsage] = ["staging", "copy-src", "copy-dst"]
     device_buf = dev.create_buffer(usages=device_buf_usage, meta=meta)
     host_buf_1 = dev.create_buffer(usages=host_buf_usage, meta=meta)

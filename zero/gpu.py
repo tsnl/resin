@@ -1214,7 +1214,23 @@ class GpuDevice(GpuResource):
         )
 
     @contextmanager
-    def command(self, *, queue_type: GpuQueueType):
+    def command(
+        self,
+        *,
+        queue_type: GpuQueueType,
+        wait_semaphores: Optional[list[GpuSemaphore]] = None,
+        signal_semaphores: Optional[list[GpuSemaphore]] = None,
+        block: bool = True,
+    ):
+        """Create and submit a command buffer.
+
+        Args:
+            queue_type: Type of queue to submit to
+            wait_semaphores: Semaphores to wait on before execution
+            signal_semaphores: Semaphores to signal after execution
+            block: If True, wait for completion and dispose encoder immediately.
+                   If False, return encoder with fence for manual synchronization.
+        """
         queue_family_index = self.qfis[queue_type]
         vk_command_pool = self.vk_command_pools[queue_family_index]
 
@@ -1227,6 +1243,9 @@ class GpuDevice(GpuResource):
             ),
         )[0]
 
+        # Create fence for this command buffer
+        fence = GpuFence(device=self)
+
         vkBeginCommandBuffer(
             commandBuffer=vk_command_buffer,
             pBeginInfo=VkCommandBufferBeginInfo(
@@ -1234,23 +1253,29 @@ class GpuDevice(GpuResource):
                 pInheritanceInfo=None,
             ),
         )
-        yield GpuCommandEncoder(
+        encoder = GpuCommandEncoder(
             device=self,
             queue_family_index=queue_family_index,
             vk_command_buffer=vk_command_buffer,
+            fence=fence,
         )
-        vkEndCommandBuffer(commandBuffer=vk_command_buffer)
-        # Auto-submit and free
-        self.submit(
-            queue_type=queue_type,
-            command_buffers=[vk_command_buffer],
-        )
-        vkFreeCommandBuffers(
-            device=self.vk_device,
-            commandPool=vk_command_pool,
-            commandBufferCount=1,
-            pCommandBuffers=[vk_command_buffer],
-        )
+        try:
+            yield encoder
+        finally:
+            vkEndCommandBuffer(commandBuffer=vk_command_buffer)
+            # Auto-submit with fence
+            self.submit(
+                queue_type=queue_type,
+                command_buffers=[vk_command_buffer],
+                wait_semaphores=wait_semaphores,
+                signal_semaphores=signal_semaphores,
+                fence=fence,
+            )
+            if block:
+                # Wait for completion and dispose encoder (frees command buffer)
+                fence.wait()
+                encoder.dispose()
+            # else: encoder and fence remain alive for manual synchronization
 
     def submit(
         self,
@@ -1532,6 +1557,20 @@ class GpuFence(GpuResource):
             pAllocator=None,
         )
 
+    def wait(self, *, timeout_ns: int = 10**10) -> None:
+        """Wait for fence to be signaled.
+
+        Args:
+            timeout_ns: Timeout in nanoseconds (default 10s)
+        """
+        vk.vkWaitForFences(
+            device=self.device.vk_device,
+            fenceCount=1,
+            pFences=[self.vk_fence],
+            waitAll=True,
+            timeout=timeout_ns,
+        )
+
     def _on_dispose(self) -> None:
         vkDestroyFence(self.device.vk_device, self.vk_fence, pAllocator=None)
 
@@ -1618,6 +1657,7 @@ class GpuCommandEncoder(GpuResource):
     device: GpuDevice
     vk_command_buffer: VkCommandBuffer
     queue_family_index: int
+    fence: GpuFence
 
     def __init__(
         self,
@@ -1625,13 +1665,24 @@ class GpuCommandEncoder(GpuResource):
         device: GpuDevice,
         queue_family_index: int,
         vk_command_buffer: VkCommandBuffer,
+        fence: GpuFence,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
         self.vk_command_buffer = vk_command_buffer
         self.queue_family_index = queue_family_index
+        self.fence = fence
+
+    def get_fence(self) -> GpuFence:
+        """Get the fence associated with this command buffer.
+
+        The fence will be signaled when command buffer execution completes.
+        """
+        return self.fence
 
     def _on_dispose(self) -> None:
+        # Wait for command buffer to finish executing before freeing it
+        self.fence.wait()
         vkFreeCommandBuffers(
             device=self.device.vk_device,
             commandPool=self.device.vk_command_pools[self.queue_family_index],
