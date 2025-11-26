@@ -1,6 +1,6 @@
 [build-system]
-requires = ["uv_build>=0.9.10,<0.10.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=42", "wheel", "nuitka", "toml", "uv"]
+build-backend = "nuitka.distutils.Build"
 
 [project]
 name = "zero"
@@ -22,15 +22,12 @@ zero-replay = "zero.app.zero_replay:main"
 [tool.ruff]
 line-length = 88
 
-[tool.uv.build-backend]
+[tool.nuitka.distutils]
 module-name = "zero"
 module-root = ""
 
-[tool.uv.workspace]
-members = ["setup"]
-
-[tool.uv.sources]
-setup = { workspace = true }
+[tool.nuitka]
+# ...
 
 [project.optional-dependencies]
 dev = [
@@ -39,10 +36,4 @@ dev = [
     "pytest>=9.0.1,<10.0.0",
     "rich",
     "requests",
-
-    # Workspace packages:
-    "setup",
 ]
-
-[tool.pyright]
-exclude = ["build/**"]

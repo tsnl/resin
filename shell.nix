@@ -4,6 +4,9 @@ in
 pkgs.mkShell {
   # Add necessary system libraries to the build inputs
   buildInputs = with pkgs; [
+    # nix-ld is required for UV
+    nix-ld
+
     # Python
     uv
 
@@ -33,7 +36,7 @@ pkgs.mkShell {
   LD_LIBRARY_PATH =
     with pkgs;
     lib.makeLibraryPath [
-      pkgs.stdenv.cc.cc.lib
+      stdenv.cc.cc.lib
       libGL
       glfw
       xorg.libX11
@@ -41,5 +44,6 @@ pkgs.mkShell {
       xorg.libXinerama
       xorg.libXcursor
       xorg.libXi
+      vulkan-loader
     ];
 }
