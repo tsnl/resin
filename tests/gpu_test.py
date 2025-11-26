@@ -10,21 +10,6 @@ from zero.gpu import (
 )
 
 
-@pytest.fixture(autouse=True, scope="session")
-def ensure_vulkan_sdk_loaded():
-    """Skip tests unless Vulkan SDK env is active.
-
-    The repo's `AGENTS.md` requires sourcing the Vulkan SDK before running.
-    This guard prevents hard crashes when the Vulkan loader or validation
-    layers aren't available in the environment.
-    """
-    sdk = os.environ.get("VULKAN_SDK")
-    if not sdk:
-        pytest.skip(
-            "Vulkan SDK not active. Run: source ~/VulkanSDK/1.4.328.1/setup-env.sh"
-        )
-
-
 def make_device():
     ctx = GpuContext(
         app_name="gpu-tests",
@@ -87,14 +72,6 @@ def test_write_without_staging_raises():
 
 
 if __name__ == "__main__":
-    sdk = os.environ.get("VULKAN_SDK")
-    if not sdk:
-        print(
-            "Vulkan SDK not active. Run: source ~/VulkanSDK/1.4.328.1/setup-env.sh",
-            flush=True,
-        )
-        raise SystemExit(2)
-
     print("[gpu_test] Running buffer roundtrip…", flush=True)
     test_buffer_roundtrip()
     print("[gpu_test] Buffer roundtrip OK", flush=True)
