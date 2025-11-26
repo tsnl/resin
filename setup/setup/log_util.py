@@ -6,6 +6,7 @@ and falls back to a StreamHandler if `rich` is not installed.
 
 import logging
 from typing import Optional
+from rich.logging import RichHandler
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
@@ -19,13 +20,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     if logger.handlers:
         return logger
 
-    try:
-        from rich.logging import RichHandler
-
-        handler = RichHandler(show_time=False)
-    except Exception:
-        handler = logging.StreamHandler()
-
+    handler = RichHandler(show_time=False)
     formatter = logging.Formatter("%(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
