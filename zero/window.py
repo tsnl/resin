@@ -23,7 +23,24 @@ class WindowContext(BaseContext["WindowContext"]):
         height: int,
         title: str,
     ) -> "Window":
-        return Window(context=self, width=width, height=height, title=title)
+        # Configure window hints
+        glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
+        glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
+        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+
+        # Create GLFW window
+        glfw_window = glfw.create_window(
+            width=width,
+            height=height,
+            title=title,
+            monitor=None,
+            share=None,
+        )
+        if not glfw_window:
+            raise GlfwError("Failed to create GLFW window")
+
+        # Return Window resource
+        return Window(context=self, glfw_window=glfw_window)
 
 
 WindowResource: TypeAlias = BaseContextResource["WindowContext"]
@@ -32,23 +49,14 @@ WindowResource: TypeAlias = BaseContextResource["WindowContext"]
 class Window(WindowResource):
     _all: set["Window"] = set()
 
-    def __init__(self, context: WindowContext, *, width: int, height: int, title: str):
+    def __init__(
+        self,
+        *,
+        context: WindowContext,
+        glfw_window: glfw._GLFWwindow,
+    ) -> None:
         super().__init__(parent=context)
-
-        glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
-        glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
-        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-
-        self._glfw_window = glfw.create_window(
-            width=width,
-            height=height,
-            title=title,
-            monitor=None,
-            share=None,
-        )
-        if not self._glfw_window:
-            raise GlfwError("Failed to create GLFW window")
-
+        self._glfw_window = glfw_window
         Window._all.add(self)
 
     def _on_dispose(self) -> None:
