@@ -48,6 +48,27 @@ class VkOffset3D:
     y: int
     z: int
 
+# VkOffset2D
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkOffset2D.html
+@dataclass
+class VkOffset2D:
+    x: int
+    y: int
+
+# VkExtent2D
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkExtent2D.html
+@dataclass
+class VkExtent2D:
+    width: int
+    height: int
+
+# VkRect2D
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkRect2D.html
+@dataclass
+class VkRect2D:
+    offset: VkOffset2D
+    extent: VkExtent2D
+
 #
 # VkInstance
 #
@@ -1082,6 +1103,59 @@ class VkRenderingAttachmentInfo:
     loadOp: VkAttachmentLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
     storeOp: VkAttachmentStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
     clearValue: VkClearValue | None = None
+
+# VkRenderingInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderingInfo.html
+@dataclass
+class VkRenderingInfo:
+    flags: int
+    renderArea: VkRect2D
+    layerCount: int
+    viewMask: int
+    colorAttachmentCount: int
+    pColorAttachments: list[VkRenderingAttachmentInfo] | None
+    pDepthAttachment: VkRenderingAttachmentInfo | None
+    pStencilAttachment: VkRenderingAttachmentInfo | None
+
+# vkCmdBeginRendering
+def vkCmdBeginRendering(
+    commandBuffer: "VkCommandBuffer",
+    pRenderingInfo: VkRenderingInfo,
+) -> None: ...
+
+# vkCmdEndRendering
+def vkCmdEndRendering(commandBuffer: "VkCommandBuffer") -> None: ...
+
+# Graphics pipeline and binding
+class VkPipeline(OpaqueResourceHandle): ...
+class VkPipelineLayout(OpaqueResourceHandle): ...
+class VkDescriptorSetLayout(OpaqueResourceHandle): ...
+class VkDescriptorSet(OpaqueResourceHandle): ...
+
+VkPipelineBindPoint: TypeAlias = int  # VK_PIPELINE_BIND_POINT_GRAPHICS = 0, etc.
+
+def vkCmdBindPipeline(
+    commandBuffer: "VkCommandBuffer",
+    pipelineBindPoint: VkPipelineBindPoint,
+    pipeline: VkPipeline,
+) -> None: ...
+def vkCmdBindDescriptorSets(
+    commandBuffer: "VkCommandBuffer",
+    pipelineBindPoint: VkPipelineBindPoint,
+    layout: VkPipelineLayout,
+    firstSet: int,
+    descriptorSetCount: int,
+    pDescriptorSets: Sequence[VkDescriptorSet],
+    dynamicOffsetCount: int,
+    pDynamicOffsets: Sequence[int] | None,
+) -> None: ...
+def vkCmdDraw(
+    commandBuffer: "VkCommandBuffer",
+    vertexCount: int,
+    instanceCount: int,
+    firstVertex: int,
+    firstInstance: int,
+) -> None: ...
 
 #
 # VkBuffer

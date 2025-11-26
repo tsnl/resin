@@ -43,7 +43,6 @@ from .typed_vulkan import (
     VK_COMPONENT_SWIZZLE_IDENTITY,
     VK_FORMAT_D32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
-    ## VkFormat
     VK_FORMAT_R32_SFLOAT,
     VK_FORMAT_R32G32B32A32_SFLOAT,
     VK_IMAGE_ASPECT_COLOR_BIT,
@@ -51,9 +50,6 @@ from .typed_vulkan import (
     VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
     VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
     VK_IMAGE_CREATE_SPARSE_ALIASED_BIT,
-    # VkImage
-    ## VkImageCreateFlags
-    ## VkImageCreateFlagBits
     VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
     VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT,
     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -63,12 +59,9 @@ from .typed_vulkan import (
     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-    ## VkImageLayout
     VK_IMAGE_LAYOUT_UNDEFINED,
     VK_IMAGE_TILING_LINEAR,
-    ## VkImageTiling
     VK_IMAGE_TILING_OPTIMAL,
-    ## VkImageType
     VK_IMAGE_TYPE_1D,
     VK_IMAGE_TYPE_2D,
     VK_IMAGE_TYPE_3D,
@@ -77,8 +70,6 @@ from .typed_vulkan import (
     VK_IMAGE_USAGE_SAMPLED_BIT,
     VK_IMAGE_USAGE_STORAGE_BIT,
     VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-    ## VkImageUsageFlags
-    ## VkImageUsageFlagBits
     VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
     VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -95,8 +86,6 @@ from .typed_vulkan import (
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_GRAPHICS_BIT,
     VK_QUEUE_TRANSFER_BIT,
-    ## VkSampleCountFlags
-    ## VkSampleCountFlagBits
     VK_SAMPLE_COUNT_1_BIT,
     VK_SAMPLE_COUNT_2_BIT,
     VK_SAMPLE_COUNT_4_BIT,
@@ -105,12 +94,14 @@ from .typed_vulkan import (
     VK_SAMPLE_COUNT_32_BIT,
     VK_SAMPLE_COUNT_64_BIT,
     VK_SHARING_MODE_CONCURRENT,
-    ## VkSharingMode
     VK_SHARING_MODE_EXCLUSIVE,
     VkApplicationInfo,
     VkAttachmentLoadOp,
+    VkOffset3D,
+    VkOffset2D,
+    VkExtent2D,
+    VkRect2D,
     VkAttachmentStoreOp,
-    # VkBuffer
     VkBuffer,
     VkBufferCopy,
     VkBufferCreateInfo,
@@ -119,21 +110,16 @@ from .typed_vulkan import (
     VkClearColorValue,
     VkClearDepthStencilValue,
     VkClearValue,
-    # VkCommandBuffer
     VkCommandBuffer,
     VkCommandBufferAllocateInfo,
     VkCommandBufferBeginInfo,
-    # VkCommandPool
     VkCommandPool,
     VkCommandPoolCreateInfo,
     VkComponentMapping,
-    # VkDevice
     VkDevice,
     VkDeviceCreateInfo,
-    # VkDeviceMemory
     VkDeviceMemory,
     VkDeviceQueueCreateInfo,
-    # Common
     VkDeviceSize,
     VkExtent3D,
     VkFence,
@@ -143,34 +129,35 @@ from .typed_vulkan import (
     VkImageCreateInfo,
     VkImageSubresourceLayers,
     VkImageSubresourceRange,
-    # VkImageView
     VkImageView,
     VkImageViewCreateInfo,
-    # VkInstance
     VkInstance,
     VkInstanceCreateInfo,
     VkMemoryAllocateInfo,
     VkMemoryRequirements,
     VkOffset3D,
-    # VkPhysicalDevice
     VkPhysicalDevice,
     VkPhysicalDeviceLimits,
-    # Physical device memory
     VkPhysicalDeviceMemoryProperties,
     VkPhysicalDeviceProperties,
     VkQueue,
-    # VkRenderingAttachmentInfo
     VkRenderingAttachmentInfo,
+    VkRenderingInfo,
+    VkPipelineBindPoint,
+    VkPipeline,
+    VkPipelineLayout,
+    VkDescriptorSetLayout,
+    VkDescriptorSet,
     VkResolveModeFlagBits,
     VkSampleCountFlags,
-    # VkSampler
+    VK_ATTACHMENT_LOAD_OP_CLEAR,
+    VK_ATTACHMENT_LOAD_OP_LOAD,
+    VK_ATTACHMENT_STORE_OP_STORE,
     VkSampler,
     VkSamplerCreateInfo,
-    # Sync & Queues
     VkSemaphore,
     VkSemaphoreCreateInfo,
     VkSubmitInfo,
-    # VkSurfaceKHR
     VkSurfaceKHR,
     ffi,
     vk_api_version_str,
@@ -184,8 +171,12 @@ from .typed_vulkan import (
     vkCmdCopyBufferToImage,
     vkCmdCopyImage,
     vkCmdCopyImageToBuffer,
+    vkCmdBeginRendering,
+    vkCmdEndRendering,
+    vkCmdBindPipeline,
+    vkCmdBindDescriptorSets,
+    vkCmdDraw,
     vkCreateBuffer,
-    # VkBufferView
     vkCreateBufferView,
     vkCreateCommandPool,
     vkCreateDevice,
@@ -212,11 +203,9 @@ from .typed_vulkan import (
     vkGetBufferMemoryRequirements,
     vkGetDeviceQueue,
     vkGetImageMemoryRequirements,
-    # Basic
     vkGetInstanceProcAddr,
     vkGetPhysicalDeviceMemoryProperties,
     vkGetPhysicalDeviceProperties,
-    # Physical device queues
     vkGetPhysicalDeviceQueueFamilyProperties,
     vkMapMemory,
     vkQueueSubmit,
@@ -1520,4 +1509,207 @@ class GpuCommandEncoder(GpuResource):
                     ),
                 )
             ],
+        )
+
+    @contextmanager
+    def render(
+        self,
+        *,
+        color_attachment: GpuImage | None = None,
+        depth_attachment: GpuImage | None = None,
+        clear_on_load: bool = False,
+    ):
+        color_infos: list[VkRenderingAttachmentInfo] = []
+        if color_attachment is not None:
+            color_infos.append(
+                VkRenderingAttachmentInfo(
+                    imageView=color_attachment.vk_image_view,
+                    imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    resolveMode=VkResolveModeFlagBits(0),
+                    resolveImageView=None,
+                    resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
+                    loadOp=(
+                        VK_ATTACHMENT_LOAD_OP_CLEAR
+                        if clear_on_load
+                        else VK_ATTACHMENT_LOAD_OP_LOAD
+                    ),
+                    storeOp=VK_ATTACHMENT_STORE_OP_STORE,
+                    clearValue=VkClearValue(
+                        color=VkClearColorValue(float32=[0.0, 0.0, 0.0, 0.0])
+                    ),
+                )
+            )
+
+        depth_info = None
+        if depth_attachment is not None:
+            depth_info = VkRenderingAttachmentInfo(
+                imageView=depth_attachment.vk_image_view,
+                imageLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                resolveMode=VkResolveModeFlagBits(0),
+                resolveImageView=None,
+                resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
+                loadOp=(
+                    VK_ATTACHMENT_LOAD_OP_CLEAR
+                    if clear_on_load
+                    else VK_ATTACHMENT_LOAD_OP_LOAD
+                ),
+                storeOp=VK_ATTACHMENT_STORE_OP_STORE,
+                clearValue=VkClearValue(
+                    depthStencil=VkClearDepthStencilValue(depth=1.0, stencil=0)
+                ),
+            )
+
+        width = (
+            color_attachment.meta.shape[1]
+            if color_attachment
+            else (depth_attachment.meta.shape[1] if depth_attachment else 1)
+        )
+        height = (
+            color_attachment.meta.shape[0]
+            if color_attachment
+            else (depth_attachment.meta.shape[0] if depth_attachment else 1)
+        )
+
+        info = VkRenderingInfo(
+            flags=0,
+            renderArea=VkRect2D(
+                offset=VkOffset2D(x=0, y=0),
+                extent=VkExtent2D(width=width, height=height),
+            ),
+            layerCount=1,
+            viewMask=0,
+            colorAttachmentCount=len(color_infos),
+            pColorAttachments=(color_infos if color_infos else None),
+            pDepthAttachment=depth_info,
+            pStencilAttachment=None,
+        )
+
+        vkCmdBeginRendering(self.vk_command_buffer, pRenderingInfo=info)
+
+        yield GpuRenderPassCommandEncoder(parent=self, device=self.device)
+
+        vkCmdEndRendering(self.vk_command_buffer)
+
+
+class GpuPipelineLayout(GpuResource):
+    device: GpuDevice
+    vk_pipeline_layout: VkPipelineLayout
+
+    def __init__(self, *, device: GpuDevice, vk_pipeline_layout: VkPipelineLayout):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_pipeline_layout = vk_pipeline_layout
+
+    def _on_dispose(self) -> None:
+        pass
+
+
+class GpuDescriptorSetLayout(GpuResource):
+    device: GpuDevice
+    vk_descriptor_set_layout: VkDescriptorSetLayout
+
+    def __init__(
+        self, *, device: GpuDevice, vk_descriptor_set_layout: VkDescriptorSetLayout
+    ):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_descriptor_set_layout = vk_descriptor_set_layout
+
+    def _on_dispose(self) -> None:
+        pass
+
+
+class GpuDescriptorSet(GpuResource):
+    device: GpuDevice
+    vk_descriptor_set: VkDescriptorSet
+
+    def __init__(self, *, device: GpuDevice, vk_descriptor_set: VkDescriptorSet):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_descriptor_set = vk_descriptor_set
+
+    def _on_dispose(self) -> None:
+        pass
+
+
+class GpuPipeline(GpuResource):
+    device: GpuDevice
+    vk_pipeline: VkPipeline
+    layout: GpuPipelineLayout | None
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_pipeline: VkPipeline,
+        layout: GpuPipelineLayout | None = None,
+    ):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_pipeline = vk_pipeline
+        self.layout = layout
+
+    def _on_dispose(self) -> None:
+        pass
+
+
+class GpuRenderPassCommandEncoder(GpuResource):
+    device: GpuDevice
+    parent: GpuCommandEncoder
+
+    def __init__(self, *, parent: GpuCommandEncoder, device: GpuDevice):
+        super().__init__(parent=device)
+        self.device = device
+        self.parent = parent
+
+    def _on_dispose(self) -> None:
+        pass
+
+    def bind_pipeline(
+        self,
+        *,
+        pipeline: GpuPipeline,
+        bind_point: Literal["graphics"] = "graphics",
+    ) -> None:
+        if bind_point != "graphics":
+            raise LogicError("Only graphics pipeline bind point supported")
+        vkCmdBindPipeline(
+            commandBuffer=self.parent.vk_command_buffer,
+            pipelineBindPoint=VkPipelineBindPoint(0),
+            pipeline=pipeline.vk_pipeline,
+        )
+
+    def bind_descriptor_sets(
+        self,
+        *,
+        layout: GpuPipelineLayout,
+        first_set: int,
+        sets: list[GpuDescriptorSet],
+        dynamic_offsets: list[int] | None = None,
+    ) -> None:
+        vkCmdBindDescriptorSets(
+            commandBuffer=self.parent.vk_command_buffer,
+            pipelineBindPoint=VkPipelineBindPoint(0),
+            layout=layout.vk_pipeline_layout,
+            firstSet=first_set,
+            descriptorSetCount=len(sets),
+            pDescriptorSets=[s.vk_descriptor_set for s in sets],
+            dynamicOffsetCount=(len(dynamic_offsets) if dynamic_offsets else 0),
+            pDynamicOffsets=(dynamic_offsets if dynamic_offsets else None),
+        )
+
+    def draw(
+        self,
+        *,
+        vertex_count: int,
+        instance_count: int = 1,
+        first_vertex: int = 0,
+        first_instance: int = 0,
+    ) -> None:
+        vkCmdDraw(
+            commandBuffer=self.parent.vk_command_buffer,
+            vertexCount=vertex_count,
+            instanceCount=instance_count,
+            firstVertex=first_vertex,
+            firstInstance=first_instance,
         )
