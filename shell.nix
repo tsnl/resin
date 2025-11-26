@@ -28,6 +28,9 @@ pkgs.mkShell {
     vulkan-headers
     vulkan-validation-layers
 
+    # Slang compiler
+    shader-slang
+
     # RenderDoc
     renderdoc
   ];
