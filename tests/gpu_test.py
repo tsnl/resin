@@ -31,9 +31,7 @@ def test_buffer_roundtrip():
     )
 
     with dev.command(queue_type="transfer") as cmd:
-        cmd.write_buffer(
-            dst=device_buffer, tensor=tensor, staging_buffer=staging_buffer
-        )
+        cmd.write_buffer(dst=device_buffer, data=tensor, staging_buffer=staging_buffer)
     with dev.command(queue_type="transfer") as cmd:
         res = cmd.read_buffer(src=device_buffer, staging_buffer=staging_buffer)
         assert res is None  # deferred
@@ -48,12 +46,12 @@ def test_image_roundtrip():
     meta = GpuImageMeta.from_tensor(tensor)
     image = dev.create_image(usages=["texture-binding"], meta=meta)
     staging_buffer = dev.create_buffer(
-        usages=["staging", "copy-src", "copy-dst", "storage"],
+        usages=["staging", "copy-src", "copy-dst"],
         meta=meta.into_buffer_meta(),
     )
 
     with dev.command(queue_type="transfer") as cmd:
-        cmd.write_image(dst=image, tensor=tensor, staging_buffer=staging_buffer)
+        cmd.write_image(dst=image, data=tensor, staging_buffer=staging_buffer)
     with dev.command(queue_type="transfer") as cmd:
         cmd.read_image(src=image, staging_buffer=staging_buffer)
     with dev.command(queue_type="transfer") as cmd:
@@ -68,7 +66,7 @@ def test_write_without_staging_raises():
     device_buffer = dev.create_buffer(usages=["copy-dst", "storage"], meta=meta)
     with pytest.raises(LogicError):
         with dev.command(queue_type="transfer") as cmd:
-            cmd.write_buffer(dst=device_buffer, tensor=tensor, staging_buffer=None)
+            cmd.write_buffer(dst=device_buffer, data=tensor, staging_buffer=None)
 
 
 if __name__ == "__main__":

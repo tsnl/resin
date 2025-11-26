@@ -1138,10 +1138,9 @@ class GpuMemory(GpuResource):
 
         self._mapped_view_use_count -= 1
         if self._mapped_view_use_count == 0:
-            vkFreeMemory(
+            vkUnmapMemory(
                 device=self.device.vk_device,
                 memory=self.vk_device_memory,
-                pAllocator=None,
             )
             self._mapped_view = None
 
@@ -1435,26 +1434,28 @@ class GpuCommandEncoder(GpuResource):
 
     # Convenience methods
 
-    def _write_memory_with_mmap(self, *, buffer: GpuBuffer, data: bytes) -> None:
+    def _write_memory_with_mmap(self, *, buffer: GpuBuffer, data: torch.Tensor) -> None:
         if buffer.memory.device_local:
             raise LogicError("Cannot mmap device-local memory; use a staging buffer.")
         with buffer.memory.map() as mv:
-            mv[: len(data)] = data
+            mv[:] = memoryview(data.numpy())
 
-    def _read_memory_with_mmap(self, *, buffer: GpuBuffer) -> bytes:
+    def _read_memory_with_mmap(self, *, buffer: GpuBuffer) -> torch.Tensor:
         if buffer.memory.device_local:
             raise LogicError("Cannot mmap device-local memory; use a staging buffer.")
         with buffer.memory.map() as mv:
-            return bytes(mv[: buffer.meta.size])
+            return torch.frombuffer(
+                mv[: buffer.meta.size],
+                dtype=buffer.meta.element_dtype,
+            )
 
     def write_buffer(
         self,
         *,
         dst: GpuBuffer,
-        tensor: torch.Tensor,
+        data: torch.Tensor,
         staging_buffer: GpuBuffer | None = None,
     ) -> None:
-        data = tensor.numpy().tobytes()
         if staging_buffer is not None:
             if "staging" not in staging_buffer.usages:
                 raise LogicError(
@@ -1502,17 +1503,16 @@ class GpuCommandEncoder(GpuResource):
         self,
         *,
         dst: GpuImage,
-        tensor: torch.Tensor,
+        data: torch.Tensor,
         staging_buffer: GpuBuffer | None = None,
     ) -> None:
-        data = tensor.numpy().tobytes()
         if staging_buffer is not None:
             if "staging" not in staging_buffer.usages:
                 raise LogicError(
                     "Provided staging_buffer does not have 'staging' usage"
                 )
             # Images are always device-local; ensure destination image does not erroneously claim staging usage
-            if "depth-attachment" in dst.usages and tensor.shape[2] != 1:
+            if "depth-attachment" in dst.usages and data.shape[2] != 1:
                 raise LogicError(
                     "Depth attachment image write expects single channel data"
                 )
@@ -1564,8 +1564,7 @@ class GpuCommandEncoder(GpuResource):
     def finalize_read_buffer(self, staging_buffer: GpuBuffer) -> torch.Tensor:
         if "staging" not in staging_buffer.usages:
             raise LogicError("Provided staging_buffer does not have 'staging' usage")
-        raw = self._read_memory_with_mmap(buffer=staging_buffer)
-        arr = torch.frombuffer(raw, dtype=staging_buffer.meta.element_dtype)
+        arr = self._read_memory_with_mmap(buffer=staging_buffer)
         return arr.clone()
 
     def finalize_read_image(

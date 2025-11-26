@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "nuitka", "toml", "uv"]
-build-backend = "nuitka.distutils.Build"
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
 
 [project]
 name = "zero"
@@ -22,7 +22,7 @@ zero-replay = "zero.app.zero_replay:main"
 [tool.ruff]
 line-length = 88
 
-[tool.nuitka.distutils]
+[tool.uv.build-backend]
 module-name = "zero"
 module-root = ""
 
