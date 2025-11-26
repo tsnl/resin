@@ -14,7 +14,7 @@ def make_context() -> tuple[GpuContext, GpuDevice]:
     ctx = GpuContext(
         app_name="gpu-triangle-test",
         enable_debug_layer_support=True,
-        enable_present_support=False,  # Offscreen rendering
+        enable_present_support=False,
     )
     phys = ctx.enumerate_physical_devices()[0]
     dev = ctx.create_device(physical_device=phys, surface=None)
@@ -96,7 +96,7 @@ def test_render_simple_triangle():
     img = Image.fromarray(image_array, mode="RGBA")
     img.save(output_path)
 
-    print(f"✓ Triangle rendered successfully!")
+    print("✓ Triangle rendered successfully!")
     print(f"✓ Output saved to: {output_path}")
     print(f"✓ Non-black pixels: {non_black_pixels}/{width * height}")
 
