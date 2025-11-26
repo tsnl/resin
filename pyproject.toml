@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-zero-replay = "zero.app.zero_replay:main"
+zero-sandbox = "zero.app.zero_sandbox:main"
 
 [tool.ruff]
 line-length = 88

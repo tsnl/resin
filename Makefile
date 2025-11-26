@@ -1,5 +1,12 @@
-default: tests format-check typecheck
+default: sync
 
+#
+# Sync:
+#
+
+.PHONY: sync
+sync: shaders
+	uv sync --extra dev
 
 #
 # Shaders:
@@ -7,7 +14,7 @@ default: tests format-check typecheck
 
 .PHONY: shaders
 shaders:
-	uv run --extra dev tools/build-shaders.py
+	uv run --with zero --extra dev tools/build-shaders.py
 
 #
 # Tests:
