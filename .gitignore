@@ -5,3 +5,10 @@ dist
 build
 
 *.egg-info
+
+# Compiled shaders (generated during build)
+*.spv
+
+# Test outputs
+*.png
+.pytest_cache

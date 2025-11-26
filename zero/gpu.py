@@ -13,6 +13,10 @@ __all__ = [
     "GpuPhysicalDevice",
     # GpuDevice
     "GpuDevice",
+    # GpuShader
+    "GpuShader",
+    # GpuPipeline
+    "GpuPipeline",
     # GpuImage
     "GpuImage",
     "GpuImageUsage",
@@ -24,9 +28,11 @@ import sys
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Literal, Optional, TypeAlias
+from pathlib import Path
+from typing import Any, Literal, Optional, TypeAlias
 
 import torch
+import vulkan as vk
 
 from .core import BaseContext, BaseContextResource
 from .excepts import LogicError, PlatformSupportError
@@ -417,10 +423,18 @@ class GpuContext(BaseContext["GpuContext"]):
         if self.enable_portability_subset:
             extensions.append("VK_KHR_portability_subset")
 
+        # Enable dynamic rendering feature (Vulkan 1.3)
+        dynamic_rendering_features = vk.VkPhysicalDeviceDynamicRenderingFeatures(
+            sType=vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+            pNext=None,
+            dynamicRendering=vk.VK_TRUE,
+        )
+
         # Create device:
         vk_device = vkCreateDevice(
             physical_device.vk_physical_device,
             VkDeviceCreateInfo(
+                pNext=dynamic_rendering_features,
                 enabledExtensionCount=len(extensions),
                 ppEnabledExtensionNames=extensions,
                 queueCreateInfoCount=len(queue_create_info_list),
@@ -957,6 +971,247 @@ class GpuDevice(GpuResource):
 
         # Done:
         return buffer
+
+    def create_shader(
+        self,
+        *,
+        spirv_path: Path | str,
+        stage: Literal["vertex", "fragment"],
+    ) -> GpuShader:
+        """Create a shader module from a SPIR-V file"""
+        spirv_path = Path(spirv_path)
+
+        # Read SPIR-V bytecode
+        with open(spirv_path, "rb") as f:
+            spirv_code = f.read()
+
+        # Create shader module using raw Vulkan API
+        create_info = vk.VkShaderModuleCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            codeSize=len(spirv_code),
+            pCode=spirv_code,
+        )
+
+        vk_shader_module = vk.vkCreateShaderModule(
+            device=self.vk_device,
+            pCreateInfo=create_info,
+            pAllocator=None,
+        )
+
+        return GpuShader(
+            device=self,
+            vk_shader_module=vk_shader_module,
+            stage=stage,
+        )
+
+    def create_pipeline(
+        self,
+        *,
+        vertex_shader: GpuShader,
+        fragment_shader: GpuShader,
+        color_format: int,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> GpuPipeline:
+        """Create a graphics pipeline"""
+
+        # Pipeline layout (empty for now)
+        layout_create_info = vk.VkPipelineLayoutCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            setLayoutCount=0,
+            pSetLayouts=None,
+            pushConstantRangeCount=0,
+            pPushConstantRanges=None,
+        )
+
+        vk_pipeline_layout = vk.vkCreatePipelineLayout(
+            device=self.vk_device,
+            pCreateInfo=layout_create_info,
+            pAllocator=None,
+        )
+
+        layout = GpuPipelineLayout(
+            device=self,
+            vk_pipeline_layout=vk_pipeline_layout,
+        )
+
+        # Shader stages
+        shader_stages = [
+            vk.VkPipelineShaderStageCreateInfo(
+                sType=vk.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                pNext=None,
+                flags=0,
+                stage=vk.VK_SHADER_STAGE_VERTEX_BIT,
+                module=vertex_shader.vk_shader_module,
+                pName="main",
+                pSpecializationInfo=None,
+            ),
+            vk.VkPipelineShaderStageCreateInfo(
+                sType=vk.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                pNext=None,
+                flags=0,
+                stage=vk.VK_SHADER_STAGE_FRAGMENT_BIT,
+                module=fragment_shader.vk_shader_module,
+                pName="main",
+                pSpecializationInfo=None,
+            ),
+        ]
+
+        # Vertex input state (empty - hardcoded in shader)
+        vertex_input_state = vk.VkPipelineVertexInputStateCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            vertexBindingDescriptionCount=0,
+            pVertexBindingDescriptions=None,
+            vertexAttributeDescriptionCount=0,
+            pVertexAttributeDescriptions=None,
+        )
+
+        # Input assembly state
+        input_assembly_state = vk.VkPipelineInputAssemblyStateCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            topology=vk.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            primitiveRestartEnable=vk.VK_FALSE,
+        )
+
+        # Viewport state
+        viewport = vk.VkViewport(
+            x=0.0,
+            y=0.0,
+            width=float(viewport_width),
+            height=float(viewport_height),
+            minDepth=0.0,
+            maxDepth=1.0,
+        )
+
+        scissor = vk.VkRect2D(
+            offset=vk.VkOffset2D(x=0, y=0),
+            extent=vk.VkExtent2D(width=viewport_width, height=viewport_height),
+        )
+
+        viewport_state = vk.VkPipelineViewportStateCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            viewportCount=1,
+            pViewports=[viewport],
+            scissorCount=1,
+            pScissors=[scissor],
+        )
+
+        # Rasterization state
+        rasterization_state = vk.VkPipelineRasterizationStateCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            depthClampEnable=vk.VK_FALSE,
+            rasterizerDiscardEnable=vk.VK_FALSE,
+            polygonMode=vk.VK_POLYGON_MODE_FILL,
+            cullMode=vk.VK_CULL_MODE_NONE,
+            frontFace=vk.VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            depthBiasEnable=vk.VK_FALSE,
+            depthBiasConstantFactor=0.0,
+            depthBiasClamp=0.0,
+            depthBiasSlopeFactor=0.0,
+            lineWidth=1.0,
+        )
+
+        # Multisample state
+        multisample_state = vk.VkPipelineMultisampleStateCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            rasterizationSamples=vk.VK_SAMPLE_COUNT_1_BIT,
+            sampleShadingEnable=vk.VK_FALSE,
+            minSampleShading=1.0,
+            pSampleMask=None,
+            alphaToCoverageEnable=vk.VK_FALSE,
+            alphaToOneEnable=vk.VK_FALSE,
+        )
+
+        # Color blend state
+        color_blend_attachment = vk.VkPipelineColorBlendAttachmentState(
+            blendEnable=vk.VK_FALSE,
+            srcColorBlendFactor=vk.VK_BLEND_FACTOR_ONE,
+            dstColorBlendFactor=vk.VK_BLEND_FACTOR_ZERO,
+            colorBlendOp=vk.VK_BLEND_OP_ADD,
+            srcAlphaBlendFactor=vk.VK_BLEND_FACTOR_ONE,
+            dstAlphaBlendFactor=vk.VK_BLEND_FACTOR_ZERO,
+            alphaBlendOp=vk.VK_BLEND_OP_ADD,
+            colorWriteMask=(
+                vk.VK_COLOR_COMPONENT_R_BIT
+                | vk.VK_COLOR_COMPONENT_G_BIT
+                | vk.VK_COLOR_COMPONENT_B_BIT
+                | vk.VK_COLOR_COMPONENT_A_BIT
+            ),
+        )
+
+        color_blend_state = vk.VkPipelineColorBlendStateCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            pNext=None,
+            flags=0,
+            logicOpEnable=vk.VK_FALSE,
+            logicOp=vk.VK_LOGIC_OP_COPY,
+            attachmentCount=1,
+            pAttachments=[color_blend_attachment],
+            blendConstants=[0.0, 0.0, 0.0, 0.0],
+        )
+
+        # Dynamic rendering info (Vulkan 1.3)
+        rendering_info = vk.VkPipelineRenderingCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            pNext=None,
+            viewMask=0,
+            colorAttachmentCount=1,
+            pColorAttachmentFormats=[color_format],
+            depthAttachmentFormat=vk.VK_FORMAT_UNDEFINED,
+            stencilAttachmentFormat=vk.VK_FORMAT_UNDEFINED,
+        )
+
+        # Graphics pipeline create info
+        pipeline_create_info = vk.VkGraphicsPipelineCreateInfo(
+            sType=vk.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            pNext=rendering_info,
+            flags=0,
+            stageCount=len(shader_stages),
+            pStages=shader_stages,
+            pVertexInputState=vertex_input_state,
+            pInputAssemblyState=input_assembly_state,
+            pTessellationState=None,
+            pViewportState=viewport_state,
+            pRasterizationState=rasterization_state,
+            pMultisampleState=multisample_state,
+            pDepthStencilState=None,
+            pColorBlendState=color_blend_state,
+            pDynamicState=None,
+            layout=vk_pipeline_layout,
+            renderPass=None,  # Using dynamic rendering
+            subpass=0,
+            basePipelineHandle=None,
+            basePipelineIndex=-1,
+        )
+
+        # Create pipeline
+        vk_pipeline = vk.vkCreateGraphicsPipelines(
+            device=self.vk_device,
+            pipelineCache=None,
+            createInfoCount=1,
+            pCreateInfos=[pipeline_create_info],
+            pAllocator=None,
+        )[0]
+
+        return GpuPipeline(
+            device=self,
+            vk_pipeline=vk_pipeline,
+            layout=layout,
+        )
 
     @contextmanager
     def command(self, *, queue_type: GpuQueueType):
@@ -1591,6 +1846,43 @@ class GpuCommandEncoder(GpuResource):
         vkCmdEndRendering(self.vk_command_buffer)
 
 
+#
+# GpuShader
+#
+
+
+class GpuShader(GpuResource):
+    """Wrapper for VkShaderModule"""
+
+    device: GpuDevice
+    vk_shader_module: Any  # vk.VkShaderModule
+    stage: Literal["vertex", "fragment"]
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_shader_module: Any,  # vk.VkShaderModule
+        stage: Literal["vertex", "fragment"],
+    ):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_shader_module = vk_shader_module
+        self.stage = stage
+
+    def _on_dispose(self) -> None:
+        vk.vkDestroyShaderModule(
+            device=self.device.vk_device,
+            shaderModule=self.vk_shader_module,
+            pAllocator=None,
+        )
+
+
+#
+# GpuPipelineLayout, etc.
+#
+
+
 class GpuPipelineLayout(GpuResource):
     device: GpuDevice
     vk_pipeline_layout: VkPipelineLayout
@@ -1601,7 +1893,11 @@ class GpuPipelineLayout(GpuResource):
         self.vk_pipeline_layout = vk_pipeline_layout
 
     def _on_dispose(self) -> None:
-        pass
+        vk.vkDestroyPipelineLayout(
+            device=self.device.vk_device,
+            pipelineLayout=self.vk_pipeline_layout,
+            pAllocator=None,
+        )
 
 
 class GpuDescriptorSetLayout(GpuResource):
@@ -1650,7 +1946,11 @@ class GpuPipeline(GpuResource):
         self.layout = layout
 
     def _on_dispose(self) -> None:
-        pass
+        vk.vkDestroyPipeline(
+            device=self.device.vk_device,
+            pipeline=self.vk_pipeline,
+            pAllocator=None,
+        )
 
 
 class GpuRenderPassCommandEncoder(GpuResource):

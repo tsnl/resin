@@ -2,13 +2,20 @@ default: tests format-check typecheck
 
 
 #
+# Shaders:
+#
+
+.PHONY: shaders
+shaders:
+	uv run --extra dev tools/build-shaders.py
+
+#
 # Tests:
 #
 
-.PHONY: test
-
-test:
-	uv run --extra dev -- pytest -v --tb=short tests/
+.PHONY: tests
+tests: shaders
+	uv run --extra dev python -m pytest -v --tb=short tests/
 
 #
 # Ruff:
@@ -27,7 +34,15 @@ format-check:
 # Type-check:
 #
 
-.PHONY: check
+.PHONY: typecheck
 
-check:
+typecheck:
 	uv run --with zero -- pyright
+
+#
+# Build:
+#
+
+.PHONY: wheel
+wheel: shaders
+	uv build

@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 import torch
 
@@ -17,6 +18,7 @@ def main():
     physical_device = next(iter(gpu_context.enumerate_physical_devices()))
     device = gpu_context.create_device(physical_device=physical_device, surface=None)
 
+    # Create render target image (1024x1024 RGBA8)
     render_target_image = device.create_image(
         usages=["color-attachment"],
         meta=zero.GpuImageMeta(shape=(1024, 1024, 4), dtype=torch.uint8),
@@ -24,6 +26,45 @@ def main():
 
     print(device)
     print(render_target_image)
+
+    # Load shaders from compiled SPIR-V
+    shader_dir = Path(__file__).parent.parent.parent / "data" / "shader"
+
+    vertex_shader = device.create_shader(
+        spirv_path=shader_dir / "triangle.vert.spv",
+        stage="vertex",
+    )
+
+    fragment_shader = device.create_shader(
+        spirv_path=shader_dir / "triangle.frag.spv",
+        stage="fragment",
+    )
+
+    print(f"Loaded shaders: {vertex_shader}, {fragment_shader}")
+
+    # Create graphics pipeline
+    pipeline = device.create_pipeline(
+        vertex_shader=vertex_shader,
+        fragment_shader=fragment_shader,
+        color_format=render_target_image.meta.infer_vk_format(
+            render_target_image.usages
+        ),
+        viewport_width=1024,
+        viewport_height=1024,
+    )
+
+    print(f"Created pipeline: {pipeline}")
+
+    # Render triangle
+    with device.command(queue_type="graphics") as cmd:
+        with cmd.render(
+            color_attachment=render_target_image,
+            clear_on_load=True,
+        ) as render_pass:
+            render_pass.bind_pipeline(pipeline=pipeline)
+            render_pass.draw(vertex_count=3, instance_count=1)
+
+    print("Triangle rendered successfully!")
 
 
 def print_debug_info(gpu_context: zero.GpuContext) -> None:
