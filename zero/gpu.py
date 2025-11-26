@@ -429,9 +429,18 @@ class GpuContext(BaseContext["GpuContext"]):
 
         # Compute extensions
         extensions = []
+
+        # Add dynamic rendering extension (Vulkan 1.3)
         extensions.append("VK_KHR_dynamic_rendering")
+
+        # Add shader draw parameters extension: needed for Slang shaders
+        extensions.append("VK_KHR_shader_draw_parameters")
+
+        # Add present support extension if needed
         if self.enable_present_support:
             extensions.append("VK_KHR_swapchain")
+
+        # Add portability subset extension if needed (macOS)
         if self.enable_portability_subset:
             extensions.append("VK_KHR_portability_subset")
 

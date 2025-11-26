@@ -1,4 +1,5 @@
 // Triangle shader with hardcoded vertex data
+
 // Vertex shader
 
 struct VSOutput
