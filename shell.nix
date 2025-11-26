@@ -33,6 +33,7 @@ pkgs.mkShell {
   LD_LIBRARY_PATH =
     with pkgs;
     lib.makeLibraryPath [
+      pkgs.stdenv.cc.cc.lib
       libGL
       glfw
       xorg.libX11

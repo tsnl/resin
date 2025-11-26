@@ -22,9 +22,10 @@ clean:
 # Tests:
 #
 
-.PHONY: tests
+.PHONY: test
 
-tests:
+test:
+	source build/vulkan-sdk/${VULKAN_SDK_VERSION}/setup-env.sh && \
 	uv run --extra dev -- pytest -v --tb=short tests/
 
 #
@@ -40,10 +41,10 @@ format-check:
 	uv run --with zero -- ruff check .
 	
 #
-# Typecheck:
+# Type-check:
 #
 
-.PHONY: typecheck
+.PHONY: check
 
-typecheck:
+check:
 	uv run --with zero -- pyright
