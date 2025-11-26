@@ -1396,3 +1396,66 @@ def vkCmdCopyBufferToImage(
     """
     vkCmdCopyBufferToImage copies data from a buffer into an image.
     """
+
+# vkCmdCopyImageToBuffer
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdCopyImageToBuffer.html
+def vkCmdCopyImageToBuffer(
+    commandBuffer: VkCommandBuffer,
+    srcImage: VkImage,
+    srcImageLayout: VkImageLayout,
+    dstBuffer: VkBuffer,
+    regionCount: int,
+    pRegions: Sequence[VkBufferImageCopy],
+) -> None:
+    """
+    vkCmdCopyImageToBuffer copies data from an image into a buffer.
+    """
+
+# Synchronization & Queues
+class VkSemaphore(OpaqueResourceHandle): ...
+class VkFence(OpaqueResourceHandle): ...
+class VkQueue(OpaqueResourceHandle): ...
+
+@dataclass
+class VkSemaphoreCreateInfo:
+    flags: int = 0
+
+@dataclass
+class VkFenceCreateInfo:
+    flags: int = 0
+
+def vkCreateSemaphore(
+    device: VkDevice, pCreateInfo: VkSemaphoreCreateInfo, pAllocator: Any | None
+) -> VkSemaphore: ...
+def vkDestroySemaphore(
+    device: VkDevice, semaphore: VkSemaphore, pAllocator: Any | None
+) -> None: ...
+def vkCreateFence(
+    device: VkDevice, pCreateInfo: VkFenceCreateInfo, pAllocator: Any | None
+) -> VkFence: ...
+def vkDestroyFence(
+    device: VkDevice, fence: VkFence, pAllocator: Any | None
+) -> None: ...
+def vkGetDeviceQueue(
+    device: VkDevice, queueFamilyIndex: int, queueIndex: int
+) -> VkQueue: ...
+
+VkPipelineStageFlags: TypeAlias = VkFlags
+VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: int = 0x00000001
+
+@dataclass
+class VkSubmitInfo:
+    waitSemaphoreCount: int
+    pWaitSemaphores: Sequence[VkSemaphore] | None
+    pWaitDstStageMask: Sequence[VkPipelineStageFlags] | None
+    commandBufferCount: int
+    pCommandBuffers: Sequence[VkCommandBuffer] | None
+    signalSemaphoreCount: int
+    pSignalSemaphores: Sequence[VkSemaphore] | None
+
+def vkQueueSubmit(
+    queue: VkQueue,
+    submitCount: int,
+    pSubmits: Sequence[VkSubmitInfo],
+    fence: VkFence | None,
+) -> None: ...

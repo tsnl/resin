@@ -22,7 +22,7 @@ __all__ = [
 from dataclasses import dataclass, field
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import TypeAlias, Literal
+from typing import TypeAlias, Literal, Optional
 import sys
 import os
 
@@ -205,6 +205,21 @@ from .typed_vulkan import (
     VkBufferImageCopy,
     VkImageSubresourceLayers,
     VkOffset3D,
+    # Sync & Queues
+    VkSemaphore,
+    VkSemaphoreCreateInfo,
+    vkCreateSemaphore,
+    vkDestroySemaphore,
+    VkFence,
+    VkFenceCreateInfo,
+    vkCreateFence,
+    vkDestroyFence,
+    VkQueue,
+    vkGetDeviceQueue,
+    VkSubmitInfo,
+    vkQueueSubmit,
+    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    vkCmdCopyImageToBuffer,
 )
 
 
@@ -702,6 +717,7 @@ class GpuDevice(GpuResource):
     qfis: GpuQueueFamilyIndices
     vk_device: VkDevice
     vk_command_pools: dict[int, VkCommandPool]
+    vk_queues: dict[int, VkQueue]
 
     def __init__(
         self,
@@ -717,6 +733,15 @@ class GpuDevice(GpuResource):
         self.qfis = qfis
         self.vk_device = vk_device
         self.vk_command_pools = vk_command_pools
+        # Retrieve one queue per queue family index (queueIndex = 0)
+        self.vk_queues = {
+            qfi_index: vkGetDeviceQueue(
+                self.vk_device,
+                queueFamilyIndex=qfi_index,
+                queueIndex=0,
+            )
+            for qfi_index in {idx for _, idx in qfis}
+        }
 
     def _on_dispose(self) -> None:
         # Destroy command pools:
@@ -737,7 +762,8 @@ class GpuDevice(GpuResource):
         meta: GpuImageMeta,
     ) -> "GpuImage":
         # Compute the VkImageUsageFlags for image creation:
-        vk_usage = 0
+        # Always include transfer src/dst for copy operations
+        vk_usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
         for usage in usages:
             vk_usage |= {
                 "texture-binding": VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -829,6 +855,7 @@ class GpuDevice(GpuResource):
             memory=memory,
             meta=meta,
             aspect_mask=vk_image_aspect,
+            usages=usages,
         )
 
         # Done:
@@ -934,6 +961,7 @@ class GpuDevice(GpuResource):
             vk_buffer=vk_buffer,
             memory=memory,
             meta=meta,
+            usages=usages,
         )
 
         # Done:
@@ -966,18 +994,46 @@ class GpuDevice(GpuResource):
             vk_command_buffer=vk_command_buffer,
         )
         vkEndCommandBuffer(commandBuffer=vk_command_buffer)
-
-        # TODO: get the VkDeviceQueue
-        # https://docs.vulkan.org/refpages/latest/refpages/source/vkGetDeviceQueue.html
-
-        # TODO: submit the command buffer and return a submission id
-        # https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit.html
-
+        # Auto-submit and free
+        self.submit(
+            queue_type=queue_type,
+            command_buffers=[vk_command_buffer],
+        )
         vkFreeCommandBuffers(
             device=self.vk_device,
             commandPool=vk_command_pool,
             commandBufferCount=1,
             pCommandBuffers=[vk_command_buffer],
+        )
+
+    def submit(
+        self,
+        *,
+        queue_type: GpuQueueType,
+        command_buffers: list[VkCommandBuffer],
+        wait_semaphores: Optional[list["GpuSemaphore"]] = None,
+        signal_semaphores: Optional[list["GpuSemaphore"]] = None,
+        fence: Optional["GpuFence"] = None,
+    ) -> None:
+        vk_queue = self.vk_queues[self.qfis[queue_type]]
+        wait_sems = [s.vk_semaphore for s in (wait_semaphores or [])]
+        signal_sems = [s.vk_semaphore for s in (signal_semaphores or [])]
+        submit_info = VkSubmitInfo(
+            waitSemaphoreCount=len(wait_sems),
+            pWaitSemaphores=wait_sems or None,
+            pWaitDstStageMask=[VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT] * len(wait_sems)
+            if wait_sems
+            else None,
+            commandBufferCount=len(command_buffers),
+            pCommandBuffers=command_buffers,
+            signalSemaphoreCount=len(signal_sems),
+            pSignalSemaphores=signal_sems or None,
+        )
+        vkQueueSubmit(
+            vk_queue,
+            submitCount=1,
+            pSubmits=[submit_info],
+            fence=(fence.vk_fence if fence else None),
         )
 
     def _allocate_memory(
@@ -1164,6 +1220,7 @@ class GpuImage(GpuResource):
     memory: GpuMemory
     meta: GpuImageMeta
     aspect_mask: int
+    usages: list[GpuImageUsage]
 
     def __init__(
         self,
@@ -1174,6 +1231,7 @@ class GpuImage(GpuResource):
         memory: GpuMemory,
         meta: GpuImageMeta,
         aspect_mask: int,
+        usages: list[GpuImageUsage],
     ) -> None:
         super().__init__(parent=device)
         self.device = device
@@ -1182,9 +1240,47 @@ class GpuImage(GpuResource):
         self.memory = memory
         self.meta = meta
         self.aspect_mask = aspect_mask
+        self.usages = usages
 
     def _on_dispose(self) -> None:
         vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
+
+
+# Synchronization wrappers
+
+
+class GpuSemaphore(GpuResource):
+    device: GpuDevice
+    vk_semaphore: VkSemaphore
+
+    def __init__(self, *, device: GpuDevice) -> None:
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_semaphore = vkCreateSemaphore(
+            device=device.vk_device,
+            pCreateInfo=VkSemaphoreCreateInfo(flags=0),
+            pAllocator=None,
+        )
+
+    def _on_dispose(self) -> None:
+        vkDestroySemaphore(self.device.vk_device, self.vk_semaphore, pAllocator=None)
+
+
+class GpuFence(GpuResource):
+    device: GpuDevice
+    vk_fence: VkFence
+
+    def __init__(self, *, device: GpuDevice) -> None:
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_fence = vkCreateFence(
+            device=device.vk_device,
+            pCreateInfo=VkFenceCreateInfo(flags=0),
+            pAllocator=None,
+        )
+
+    def _on_dispose(self) -> None:
+        vkDestroyFence(self.device.vk_device, self.vk_fence, pAllocator=None)
 
 
 #
@@ -1227,6 +1323,7 @@ class GpuBuffer(GpuResource):
     vk_buffer: VkBuffer
     memory: GpuMemory
     meta: GpuBufferMeta
+    usages: list[GpuBufferUsage]
 
     def __init__(
         self,
@@ -1234,12 +1331,14 @@ class GpuBuffer(GpuResource):
         vk_buffer: VkBuffer,
         memory: GpuMemory,
         meta: GpuBufferMeta,
+        usages: list[GpuBufferUsage],
     ):
         super().__init__(parent=device)
         self.device = device
         self.vk_buffer = vk_buffer
         self.memory = memory
         self.meta = meta
+        self.usages = usages
 
     def _on_dispose(self):
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
@@ -1333,3 +1432,149 @@ class GpuCommandEncoder(GpuResource):
                 )
             ],
         )
+
+    # Convenience methods
+
+    def _write_memory_with_mmap(self, *, buffer: GpuBuffer, data: bytes) -> None:
+        if buffer.memory.device_local:
+            raise LogicError("Cannot mmap device-local memory; use a staging buffer.")
+        with buffer.memory.map() as mv:
+            mv[: len(data)] = data
+
+    def _read_memory_with_mmap(self, *, buffer: GpuBuffer) -> bytes:
+        if buffer.memory.device_local:
+            raise LogicError("Cannot mmap device-local memory; use a staging buffer.")
+        with buffer.memory.map() as mv:
+            return bytes(mv[: buffer.meta.size])
+
+    def write_buffer(
+        self,
+        *,
+        dst: GpuBuffer,
+        tensor: torch.Tensor,
+        staging_buffer: GpuBuffer | None = None,
+    ) -> None:
+        data = tensor.numpy().tobytes()
+        if staging_buffer is not None:
+            if "staging" not in staging_buffer.usages:
+                raise LogicError(
+                    "Provided staging_buffer does not have 'staging' usage"
+                )
+            if "staging" in dst.usages:
+                raise LogicError("Destination buffer must not have 'staging' usage")
+            self._write_memory_with_mmap(buffer=staging_buffer, data=data)
+            self.copy_buffer_to_buffer(src=staging_buffer, dst=dst, size=len(data))
+        else:
+            if dst.memory.device_local:
+                raise LogicError(
+                    "Need a staging buffer to write to device-local memory"
+                )
+            self._write_memory_with_mmap(buffer=dst, data=data)
+
+    def read_buffer(
+        self,
+        *,
+        src: GpuBuffer,
+        staging_buffer: GpuBuffer | None = None,
+    ) -> torch.Tensor | None:
+        if staging_buffer is not None:
+            if "staging" not in staging_buffer.usages:
+                raise LogicError(
+                    "Provided staging_buffer does not have 'staging' usage"
+                )
+            if "staging" in src.usages:
+                raise LogicError(
+                    "Source buffer must not have 'staging' usage when using a staging buffer"
+                )
+            self.copy_buffer_to_buffer(src=src, dst=staging_buffer, size=src.meta.size)
+            # Defer mapping until after submission (returns None)
+            return None
+        else:
+            if src.memory.device_local:
+                raise LogicError(
+                    "Need a staging buffer to read from device-local memory"
+                )
+            raw = self._read_memory_with_mmap(buffer=src)
+            arr = torch.frombuffer(raw, dtype=src.meta.element_dtype)
+            return arr.clone()
+
+    def write_image(
+        self,
+        *,
+        dst: GpuImage,
+        tensor: torch.Tensor,
+        staging_buffer: GpuBuffer | None = None,
+    ) -> None:
+        data = tensor.numpy().tobytes()
+        if staging_buffer is not None:
+            if "staging" not in staging_buffer.usages:
+                raise LogicError(
+                    "Provided staging_buffer does not have 'staging' usage"
+                )
+            # Images are always device-local; ensure destination image does not erroneously claim staging usage
+            if "depth-attachment" in dst.usages and tensor.shape[2] != 1:
+                raise LogicError(
+                    "Depth attachment image write expects single channel data"
+                )
+            self._write_memory_with_mmap(buffer=staging_buffer, data=data)
+            self.copy_buffer_to_image(src=staging_buffer, dst=dst)
+        else:
+            raise LogicError(
+                "Image writes require a staging buffer (no direct mapping)."
+            )
+
+    def read_image(
+        self,
+        *,
+        src: GpuImage,
+        staging_buffer: GpuBuffer,
+    ) -> None:
+        if "staging" not in staging_buffer.usages:
+            raise LogicError("Provided staging_buffer does not have 'staging' usage")
+        # Copy image -> buffer
+        vkCmdCopyImageToBuffer(
+            commandBuffer=self.vk_command_buffer,
+            srcImage=src.vk_image,
+            srcImageLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            dstBuffer=staging_buffer.vk_buffer,
+            regionCount=1,
+            pRegions=[
+                VkBufferImageCopy(
+                    bufferOffset=0,
+                    bufferRowLength=0,
+                    bufferImageHeight=0,
+                    imageSubresource=VkImageSubresourceLayers(
+                        aspectMask=src.aspect_mask,
+                        mipLevel=0,
+                        baseArrayLayer=0,
+                        layerCount=1,
+                    ),
+                    imageOffset=VkOffset3D(x=0, y=0, z=0),
+                    imageExtent=VkExtent3D(
+                        width=src.meta.shape[1],
+                        height=src.meta.shape[0],
+                        depth=1,
+                    ),
+                )
+            ],
+        )
+        # Defer mapping until after submission
+
+    # Finalization helpers (called after command buffer submission)
+    def finalize_read_buffer(self, staging_buffer: GpuBuffer) -> torch.Tensor:
+        if "staging" not in staging_buffer.usages:
+            raise LogicError("Provided staging_buffer does not have 'staging' usage")
+        raw = self._read_memory_with_mmap(buffer=staging_buffer)
+        arr = torch.frombuffer(raw, dtype=staging_buffer.meta.element_dtype)
+        return arr.clone()
+
+    def finalize_read_image(
+        self, staging_buffer: GpuBuffer, image: GpuImage
+    ) -> torch.Tensor:
+        if "staging" not in staging_buffer.usages:
+            raise LogicError("Provided staging_buffer does not have 'staging' usage")
+        raw = self._read_memory_with_mmap(buffer=staging_buffer)
+        meta = image.meta
+        numel = meta.shape[0] * meta.shape[1] * meta.shape[2]
+        arr = torch.frombuffer(raw, dtype=meta.dtype, count=numel).clone()
+        return arr.view(*meta.shape)

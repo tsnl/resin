@@ -177,6 +177,23 @@ __all__ = [
     "VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT",
     "VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT",
     "VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT",
+    # VkSemaphore
+    "VkSemaphore",
+    "VkSemaphoreCreateInfo",
+    "vkCreateSemaphore",
+    "vkDestroySemaphore",
+    # VkFence
+    "VkFence",
+    "VkFenceCreateInfo",
+    "vkCreateFence",
+    "vkDestroyFence",
+    "VkQueue",
+    "vkGetDeviceQueue",
+    "VkSubmitInfo",
+    "vkQueueSubmit",
+    "VkPipelineStageFlags",
+    "VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT",
+    "vkCmdCopyImageToBuffer",
 ]
 
 from typing import TypeAlias
@@ -339,6 +356,21 @@ from vulkan import (
     VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT,
     VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
+    # VkSemaphore
+    vkCreateSemaphore,
+    vkDestroySemaphore,
+    # VkFence
+    vkCreateFence,
+    vkDestroyFence,
+    VkSemaphoreCreateInfo,
+    VkFenceCreateInfo,
+    # VkQueue
+    vkGetDeviceQueue,
+    VkSubmitInfo,
+    vkQueueSubmit,
+    # VkPipelineStageFlags
+    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    vkCmdCopyImageToBuffer,
 )
 
 
@@ -415,3 +447,12 @@ class VkCommandPool(OpaqueResourceHandle): ...
 
 
 class VkCommandBuffer(OpaqueResourceHandle): ...
+
+
+class VkSemaphore(OpaqueResourceHandle): ...
+
+
+class VkFence(OpaqueResourceHandle): ...
+
+
+class VkQueue(OpaqueResourceHandle): ...

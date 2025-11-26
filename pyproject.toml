@@ -16,9 +16,6 @@ dependencies = [
     "numpy",                      # we don't use this directly, but torch needs it
 ]
 
-[project.optional-dependencies]
-dev = ["pyright (>=1.1.407,<2.0.0)", "pytest (>=9.0.1,<10.0.0)"]
-
 [project.scripts]
 zero-replay = "zero.app.zero_replay:main"
 
@@ -30,7 +27,4 @@ module-name = "zero"
 module-root = ""
 
 [dependency-groups]
-dev = [
-    "pyright>=1.1.407",
-    "ruff>=0.14.5",
-]
+dev = ["pyright>=1.1.407", "ruff>=0.14.5", "pytest>=9.0.1,<10.0.0"]
