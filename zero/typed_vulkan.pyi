@@ -39,6 +39,14 @@ class VkExtent3D:
     height: int
     depth: int
 
+# VkOffset3D
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkOffset3D.html
+@dataclass
+class VkOffset3D:
+    x: int
+    y: int
+    z: int
+
 #
 # VkInstance
 #
@@ -1065,22 +1073,6 @@ class VkClearValue:
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderingAttachmentInfo.html
 @dataclass
 class VkRenderingAttachmentInfo:
-    """
-    // Provided by VK_VERSION_1_3
-    typedef struct VkRenderingAttachmentInfo {
-        VkStructureType          sType;
-        const void*              pNext;
-        VkImageView              imageView;
-        VkImageLayout            imageLayout;
-        VkResolveModeFlagBits    resolveMode;
-        VkImageView              resolveImageView;
-        VkImageLayout            resolveImageLayout;
-        VkAttachmentLoadOp       loadOp;
-        VkAttachmentStoreOp      storeOp;
-        VkClearValue             clearValue;
-    } VkRenderingAttachmentInfo;
-    """
-
     imageView: VkImageView
     imageLayout: VkImageLayout
     resolveMode: VkResolveModeFlagBits = 0
@@ -1352,4 +1344,55 @@ def vkBeginCommandBuffer(
 def vkEndCommandBuffer(commandBuffer: VkCommandBuffer) -> None:
     """
     vkEndCommandBuffer ends the recording of a command buffer.
+    """
+
+# VkBufferCopy
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferCopy.html
+@dataclass
+class VkBufferCopy:
+    srcOffset: VkDeviceSize
+    dstOffset: VkDeviceSize
+    size: VkDeviceSize
+
+def vkCmdCopyBuffer(
+    commandBuffer: VkCommandBuffer,
+    srcBuffer: VkBuffer,
+    dstBuffer: VkBuffer,
+    regionCount: int,
+    pRegions: Sequence[VkBufferCopy],
+) -> None:
+    """
+    vkCmdCopyBuffer copies data between buffer regions.
+    """
+
+# VkImageSubresourceLayers
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkImageSubresourceLayers.html
+@dataclass
+class VkImageSubresourceLayers:
+    aspectMask: VkImageAspectFlags
+    mipLevel: int
+    baseArrayLayer: int
+    layerCount: int
+
+# VkBufferImageCopy
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferImageCopy.html
+@dataclass
+class VkBufferImageCopy:
+    bufferOffset: VkDeviceSize
+    bufferRowLength: int
+    bufferImageHeight: int
+    imageSubresource: VkImageSubresourceLayers
+    imageOffset: VkOffset3D
+    imageExtent: VkExtent3D
+
+def vkCmdCopyBufferToImage(
+    commandBuffer: VkCommandBuffer,
+    srcBuffer: VkBuffer,
+    dstImage: VkImage,
+    dstImageLayout: VkImageLayout,
+    regionCount: int,
+    pRegions: Sequence[VkBufferImageCopy],
+) -> None:
+    """
+    vkCmdCopyBufferToImage copies data from a buffer into an image.
     """

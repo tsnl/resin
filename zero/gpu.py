@@ -199,6 +199,12 @@ from .typed_vulkan import (
     vkEndCommandBuffer,
     VK_COMMAND_BUFFER_LEVEL_PRIMARY,
     VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+    vkCmdCopyBuffer,
+    VkBufferCopy,
+    vkCmdCopyBufferToImage,
+    VkBufferImageCopy,
+    VkImageSubresourceLayers,
+    VkOffset3D,
 )
 
 
@@ -822,6 +828,7 @@ class GpuDevice(GpuResource):
             vk_image_view=vk_image_view,
             memory=memory,
             meta=meta,
+            aspect_mask=vk_image_aspect,
         )
 
         # Done:
@@ -1156,6 +1163,7 @@ class GpuImage(GpuResource):
     vk_image_view: VkImageView
     memory: GpuMemory
     meta: GpuImageMeta
+    aspect_mask: int
 
     def __init__(
         self,
@@ -1165,6 +1173,7 @@ class GpuImage(GpuResource):
         vk_image_view: VkImageView,
         memory: GpuMemory,
         meta: GpuImageMeta,
+        aspect_mask: int,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
@@ -1172,6 +1181,7 @@ class GpuImage(GpuResource):
         self.vk_image_view = vk_image_view
         self.memory = memory
         self.meta = meta
+        self.aspect_mask = aspect_mask
 
     def _on_dispose(self) -> None:
         vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
@@ -1266,4 +1276,60 @@ class GpuCommandEncoder(GpuResource):
             commandPool=self.device.vk_command_pools[self.queue_family_index],
             commandBufferCount=1,
             pCommandBuffers=[self.vk_command_buffer],
+        )
+
+    def copy_buffer_to_buffer(
+        self,
+        *,
+        src: GpuBuffer,
+        dst: GpuBuffer,
+        size: int,
+        src_offset: int = 0,
+        dst_offset: int = 0,
+    ) -> None:
+        vkCmdCopyBuffer(
+            commandBuffer=self.vk_command_buffer,
+            srcBuffer=src.vk_buffer,
+            dstBuffer=dst.vk_buffer,
+            regionCount=1,
+            pRegions=[
+                VkBufferCopy(
+                    srcOffset=src_offset,
+                    dstOffset=dst_offset,
+                    size=size,
+                )
+            ],
+        )
+
+    def copy_buffer_to_image(
+        self,
+        *,
+        src: GpuBuffer,
+        dst: GpuImage,
+    ) -> None:
+        vkCmdCopyBufferToImage(
+            commandBuffer=self.vk_command_buffer,
+            srcBuffer=src.vk_buffer,
+            dstImage=dst.vk_image,
+            dstImageLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            regionCount=1,
+            pRegions=[
+                VkBufferImageCopy(
+                    bufferOffset=0,
+                    bufferRowLength=0,
+                    bufferImageHeight=0,
+                    imageSubresource=VkImageSubresourceLayers(
+                        aspectMask=dst.aspect_mask,
+                        mipLevel=0,
+                        baseArrayLayer=0,
+                        layerCount=1,
+                    ),
+                    imageOffset=VkOffset3D(x=0, y=0, z=0),
+                    imageExtent=VkExtent3D(
+                        width=dst.meta.shape[1],
+                        height=dst.meta.shape[0],
+                        depth=1,
+                    ),
+                )
+            ],
         )
