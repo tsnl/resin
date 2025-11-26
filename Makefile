@@ -1,3 +1,23 @@
+default: tests format-check typecheck
+
+#
+# Configuration:
+#
+
+VULKAN_SDK_VERSION=1.4.328.1
+
+#
+# Setup:
+#
+
+.PHONY: setup clean
+
+setup:
+	uv run --extra dev --with setup -- setup setup --vulkan-sdk-version $(VULKAN_SDK_VERSION)
+
+clean:
+	uv run --extra dev --with setup -- setup clean --vulkan-sdk-version $(VULKAN_SDK_VERSION) || true
+
 #
 # Tests:
 #
@@ -5,7 +25,7 @@
 .PHONY: tests
 
 tests:
-	uv run --with zero -- pytest -v --tb=short tests/
+	uv run --extra dev -- pytest -v --tb=short tests/
 
 #
 # Ruff:

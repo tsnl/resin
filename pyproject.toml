@@ -13,7 +13,7 @@ dependencies = [
     "vulkan>=1.3.275.1,<2.0.0.0",
     "glfw>=2.10.0,<3.0.0",
     "torch>=2.9.1",
-    "numpy",                      # we don't use this directly, but torch needs it
+    "numpy",
 ]
 
 [project.scripts]
@@ -26,5 +26,20 @@ line-length = 88
 module-name = "zero"
 module-root = ""
 
-[dependency-groups]
-dev = ["pyright>=1.1.407", "ruff>=0.14.5", "pytest>=9.0.1,<10.0.0"]
+[tool.uv.workspace]
+members = ["setup"]
+
+[tool.uv.sources]
+setup = { workspace = true }
+
+[project.optional-dependencies]
+dev = [
+    "pyright>=1.1.407",
+    "ruff>=0.14.5",
+    "pytest>=9.0.1,<10.0.0",
+    "rich",
+    "requests",
+
+    # Workspace packages:
+    "setup",
+]

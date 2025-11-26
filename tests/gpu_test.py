@@ -1,3 +1,4 @@
+import os
 import torch
 import pytest
 
@@ -9,8 +10,27 @@ from zero.gpu import (
 )
 
 
+@pytest.fixture(autouse=True, scope="session")
+def ensure_vulkan_sdk_loaded():
+    """Skip tests unless Vulkan SDK env is active.
+
+    The repo's `AGENTS.md` requires sourcing the Vulkan SDK before running.
+    This guard prevents hard crashes when the Vulkan loader or validation
+    layers aren't available in the environment.
+    """
+    sdk = os.environ.get("VULKAN_SDK")
+    if not sdk:
+        pytest.skip(
+            "Vulkan SDK not active. Run: source ~/VulkanSDK/1.4.328.1/setup-env.sh"
+        )
+
+
 def make_device():
-    ctx = GpuContext(enable_present_support=False)
+    ctx = GpuContext(
+        app_name="gpu-tests",
+        enable_debug_layer_support=True,
+        enable_present_support=False,
+    )
     phys = ctx.enumerate_physical_devices()[0]
     dev = ctx.create_device(physical_device=phys, surface=None)
     return ctx, dev
@@ -64,3 +84,29 @@ def test_write_without_staging_raises():
     with pytest.raises(LogicError):
         with dev.command(queue_type="transfer") as cmd:
             cmd.write_buffer(dst=device_buffer, tensor=tensor, staging_buffer=None)
+
+
+if __name__ == "__main__":
+    sdk = os.environ.get("VULKAN_SDK")
+    if not sdk:
+        print(
+            "Vulkan SDK not active. Run: source ~/VulkanSDK/1.4.328.1/setup-env.sh",
+            flush=True,
+        )
+        raise SystemExit(2)
+
+    print("[gpu_test] Running buffer roundtrip…", flush=True)
+    test_buffer_roundtrip()
+    print("[gpu_test] Buffer roundtrip OK", flush=True)
+
+    print("[gpu_test] Running image roundtrip…", flush=True)
+    test_image_roundtrip()
+    print("[gpu_test] Image roundtrip OK", flush=True)
+
+    print("[gpu_test] Checking staging guard…", flush=True)
+    try:
+        test_write_without_staging_raises()
+        print("[gpu_test] Staging guard OK", flush=True)
+    except AssertionError as e:
+        print(f"[gpu_test] Staging guard failed: {e}", flush=True)
+        raise
