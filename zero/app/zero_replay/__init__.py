@@ -1,7 +1,8 @@
-import sys
 import json
+import sys
 
 import torch
+
 import zero
 
 

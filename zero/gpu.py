@@ -19,93 +19,82 @@ __all__ = [
     "GpuImageMeta",
 ]
 
-from dataclasses import dataclass, field
+import os
+import sys
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import TypeAlias, Literal, Optional
-import sys
-import os
+from dataclasses import dataclass, field
+from typing import Literal, Optional, TypeAlias
 
 import torch
 
 from .core import BaseContext, BaseContextResource
-from .excepts import PlatformSupportError, LogicError
+from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
-    # Basic
-    vkGetInstanceProcAddr,
-    ffi,
-    # Common
-    VkDeviceSize,
-    VkSampleCountFlags,
-    VkExtent3D,
     VK_API_VERSION_1_3,
     VK_API_VERSION_1_4,
-    vk_decompose_api_version,
-    vk_api_version_str,
-    # VkInstance
-    VkInstance,
-    vkCreateInstance,
-    vkDestroyInstance,
-    VkInstanceCreateInfo,
-    VkApplicationInfo,
-    vkEnumeratePhysicalDevices,
-    VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
-    # VkSurfaceKHR
-    VkSurfaceKHR,
-    # VkPhysicalDevice
-    VkPhysicalDevice,
-    vkGetPhysicalDeviceProperties,
-    VkPhysicalDeviceProperties,
-    VkPhysicalDeviceLimits,
-    VK_PHYSICAL_DEVICE_TYPE_OTHER,
-    VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
-    VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
-    VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
-    VK_PHYSICAL_DEVICE_TYPE_CPU,
-    # Physical device memory
-    VkPhysicalDeviceMemoryProperties,
-    vkGetPhysicalDeviceMemoryProperties,
-    # Physical device queues
-    vkGetPhysicalDeviceQueueFamilyProperties,
-    VkDeviceQueueCreateInfo,
-    VK_QUEUE_COMPUTE_BIT,
-    VK_QUEUE_TRANSFER_BIT,
-    VK_QUEUE_GRAPHICS_BIT,
-    # VkDevice
-    VkDevice,
-    vkCreateDevice,
-    vkDestroyDevice,
-    VkDeviceCreateInfo,
-    # VkDeviceMemory
-    VkDeviceMemory,
-    VkMemoryRequirements,
-    VkMemoryAllocateInfo,
-    vkAllocateMemory,
-    vkFreeMemory,
-    vkMapMemory,
-    vkUnmapMemory,
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-    VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
-    VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT,
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    VK_COMPONENT_SWIZZLE_IDENTITY,
+    VK_FORMAT_D32_SFLOAT,
+    VK_FORMAT_R8G8B8A8_UNORM,
+    ## VkFormat
+    VK_FORMAT_R32_SFLOAT,
+    VK_FORMAT_R32G32B32A32_SFLOAT,
+    VK_IMAGE_ASPECT_COLOR_BIT,
+    VK_IMAGE_ASPECT_DEPTH_BIT,
+    VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+    VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
+    VK_IMAGE_CREATE_SPARSE_ALIASED_BIT,
     # VkImage
     ## VkImageCreateFlags
     ## VkImageCreateFlagBits
     VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
     VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT,
-    VK_IMAGE_CREATE_SPARSE_ALIASED_BIT,
-    VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
-    VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    VK_IMAGE_LAYOUT_GENERAL,
+    VK_IMAGE_LAYOUT_PREINITIALIZED,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    ## VkImageLayout
+    VK_IMAGE_LAYOUT_UNDEFINED,
+    VK_IMAGE_TILING_LINEAR,
+    ## VkImageTiling
+    VK_IMAGE_TILING_OPTIMAL,
     ## VkImageType
     VK_IMAGE_TYPE_1D,
     VK_IMAGE_TYPE_2D,
     VK_IMAGE_TYPE_3D,
-    ## VkFormat
-    VK_FORMAT_R32_SFLOAT,
-    VK_FORMAT_R8G8B8A8_UNORM,
-    VK_FORMAT_R32G32B32A32_SFLOAT,
-    VK_FORMAT_D32_SFLOAT,
+    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    VK_IMAGE_USAGE_SAMPLED_BIT,
+    VK_IMAGE_USAGE_STORAGE_BIT,
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    ## VkImageUsageFlags
+    ## VkImageUsageFlagBits
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+    VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT,
+    VK_PHYSICAL_DEVICE_TYPE_CPU,
+    VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
+    VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+    VK_PHYSICAL_DEVICE_TYPE_OTHER,
+    VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
+    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    VK_QUEUE_COMPUTE_BIT,
+    VK_QUEUE_GRAPHICS_BIT,
+    VK_QUEUE_TRANSFER_BIT,
     ## VkSampleCountFlags
     ## VkSampleCountFlagBits
     VK_SAMPLE_COUNT_1_BIT,
@@ -115,113 +104,125 @@ from .typed_vulkan import (
     VK_SAMPLE_COUNT_16_BIT,
     VK_SAMPLE_COUNT_32_BIT,
     VK_SAMPLE_COUNT_64_BIT,
-    ## VkImageTiling
-    VK_IMAGE_TILING_OPTIMAL,
-    VK_IMAGE_TILING_LINEAR,
-    ## VkImageUsageFlags
-    ## VkImageUsageFlagBits
-    VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-    VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-    VK_IMAGE_USAGE_SAMPLED_BIT,
-    VK_IMAGE_USAGE_STORAGE_BIT,
-    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    VK_SHARING_MODE_CONCURRENT,
     ## VkSharingMode
     VK_SHARING_MODE_EXCLUSIVE,
-    VK_SHARING_MODE_CONCURRENT,
-    ## VkImageLayout
-    VK_IMAGE_LAYOUT_UNDEFINED,
-    VK_IMAGE_LAYOUT_GENERAL,
-    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-    VK_IMAGE_LAYOUT_PREINITIALIZED,
+    VkApplicationInfo,
+    VkAttachmentLoadOp,
+    VkAttachmentStoreOp,
+    # VkBuffer
+    VkBuffer,
+    VkBufferCopy,
+    VkBufferCreateInfo,
+    VkBufferImageCopy,
+    VkBufferViewCreateInfo,
+    VkClearColorValue,
+    VkClearDepthStencilValue,
+    VkClearValue,
+    # VkCommandBuffer
+    VkCommandBuffer,
+    VkCommandBufferAllocateInfo,
+    VkCommandBufferBeginInfo,
+    # VkCommandPool
+    VkCommandPool,
+    VkCommandPoolCreateInfo,
+    VkComponentMapping,
+    # VkDevice
+    VkDevice,
+    VkDeviceCreateInfo,
+    # VkDeviceMemory
+    VkDeviceMemory,
+    VkDeviceQueueCreateInfo,
+    # Common
+    VkDeviceSize,
+    VkExtent3D,
+    VkFence,
+    VkFenceCreateInfo,
     VkImage,
-    vkCreateImage,
+    VkImageCopy,
     VkImageCreateInfo,
-    vkDestroyImage,
-    vkGetImageMemoryRequirements,
-    vkBindImageMemory,
+    VkImageSubresourceLayers,
+    VkImageSubresourceRange,
     # VkImageView
     VkImageView,
-    vkCreateImageView,
     VkImageViewCreateInfo,
-    vkDestroyImageView,
-    VkComponentMapping,
-    VkImageSubresourceRange,
-    VK_COMPONENT_SWIZZLE_IDENTITY,
-    VK_IMAGE_ASPECT_DEPTH_BIT,
-    VK_IMAGE_ASPECT_COLOR_BIT,
-    # VkSampler
-    VkSampler,
-    vkCreateSampler,
-    VkSamplerCreateInfo,
-    vkDestroySampler,
+    # VkInstance
+    VkInstance,
+    VkInstanceCreateInfo,
+    VkMemoryAllocateInfo,
+    VkMemoryRequirements,
+    VkOffset3D,
+    # VkPhysicalDevice
+    VkPhysicalDevice,
+    VkPhysicalDeviceLimits,
+    # Physical device memory
+    VkPhysicalDeviceMemoryProperties,
+    VkPhysicalDeviceProperties,
+    VkQueue,
     # VkRenderingAttachmentInfo
     VkRenderingAttachmentInfo,
     VkResolveModeFlagBits,
-    VkAttachmentLoadOp,
-    VkAttachmentStoreOp,
-    VkClearValue,
-    VkClearColorValue,
-    VkClearDepthStencilValue,
-    # VkBuffer
-    VkBuffer,
-    vkCreateBuffer,
-    VkBufferCreateInfo,
-    vkDestroyBuffer,
-    vkGetBufferMemoryRequirements,
-    vkBindBufferMemory,
-    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-    # VkBufferView
-    vkCreateBufferView,
-    VkBufferViewCreateInfo,
-    vkDestroyBufferView,
-    # VkCommandPool
-    VkCommandPool,
-    vkCreateCommandPool,
-    VkCommandPoolCreateInfo,
-    vkDestroyCommandPool,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    # VkCommandBuffer
-    VkCommandBuffer,
-    vkAllocateCommandBuffers,
-    VkCommandBufferAllocateInfo,
-    vkFreeCommandBuffers,
-    vkResetCommandBuffer,
-    vkBeginCommandBuffer,
-    VkCommandBufferBeginInfo,
-    vkEndCommandBuffer,
-    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    VK_COMMAND_BUFFER_LEVEL_SECONDARY,
-    vkCmdCopyBuffer,
-    VkBufferCopy,
-    vkCmdCopyBufferToImage,
-    VkBufferImageCopy,
-    VkImageSubresourceLayers,
-    VkOffset3D,
+    VkSampleCountFlags,
+    # VkSampler
+    VkSampler,
+    VkSamplerCreateInfo,
     # Sync & Queues
     VkSemaphore,
     VkSemaphoreCreateInfo,
-    vkCreateSemaphore,
-    vkDestroySemaphore,
-    VkFence,
-    VkFenceCreateInfo,
-    vkCreateFence,
-    vkDestroyFence,
-    VkQueue,
-    vkGetDeviceQueue,
     VkSubmitInfo,
-    vkQueueSubmit,
-    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    # VkSurfaceKHR
+    VkSurfaceKHR,
+    ffi,
+    vk_api_version_str,
+    vk_decompose_api_version,
+    vkAllocateCommandBuffers,
+    vkAllocateMemory,
+    vkBeginCommandBuffer,
+    vkBindBufferMemory,
+    vkBindImageMemory,
+    vkCmdCopyBuffer,
+    vkCmdCopyBufferToImage,
+    vkCmdCopyImage,
     vkCmdCopyImageToBuffer,
+    vkCreateBuffer,
+    # VkBufferView
+    vkCreateBufferView,
+    vkCreateCommandPool,
+    vkCreateDevice,
+    vkCreateFence,
+    vkCreateImage,
+    vkCreateImageView,
+    vkCreateInstance,
+    vkCreateSampler,
+    vkCreateSemaphore,
+    vkDestroyBuffer,
+    vkDestroyBufferView,
+    vkDestroyCommandPool,
+    vkDestroyDevice,
+    vkDestroyFence,
+    vkDestroyImage,
+    vkDestroyImageView,
+    vkDestroyInstance,
+    vkDestroySampler,
+    vkDestroySemaphore,
+    vkEndCommandBuffer,
+    vkEnumeratePhysicalDevices,
+    vkFreeCommandBuffers,
+    vkFreeMemory,
+    vkGetBufferMemoryRequirements,
+    vkGetDeviceQueue,
+    vkGetImageMemoryRequirements,
+    # Basic
+    vkGetInstanceProcAddr,
+    vkGetPhysicalDeviceMemoryProperties,
+    vkGetPhysicalDeviceProperties,
+    # Physical device queues
+    vkGetPhysicalDeviceQueueFamilyProperties,
+    vkMapMemory,
+    vkQueueSubmit,
+    vkResetCommandBuffer,
+    vkUnmapMemory,
 )
-
 
 #
 # GpuContext
@@ -962,6 +963,7 @@ class GpuDevice(GpuResource):
             memory=memory,
             meta=meta,
             usages=usages,
+            device_local=device_local,
         )
 
         # Done:
@@ -1144,6 +1146,14 @@ class GpuMemory(GpuResource):
             )
             self._mapped_view = None
 
+    def write(self, *, data: torch.Tensor):
+        with self.map() as host_mem:
+            host_mem[:] = memoryview(data.numpy())
+
+    def read(self, *, dtype: torch.dtype) -> torch.Tensor:
+        with self.map() as host_mem:
+            return torch.frombuffer(host_mem, dtype=dtype).clone()
+
 
 #
 # GpuImage
@@ -1323,6 +1333,7 @@ class GpuBuffer(GpuResource):
     memory: GpuMemory
     meta: GpuBufferMeta
     usages: list[GpuBufferUsage]
+    device_local: bool
 
     def __init__(
         self,
@@ -1331,6 +1342,7 @@ class GpuBuffer(GpuResource):
         memory: GpuMemory,
         meta: GpuBufferMeta,
         usages: list[GpuBufferUsage],
+        device_local: bool,
     ):
         super().__init__(parent=device)
         self.device = device
@@ -1338,9 +1350,16 @@ class GpuBuffer(GpuResource):
         self.memory = memory
         self.meta = meta
         self.usages = usages
+        self.device_local = device_local
 
     def _on_dispose(self):
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
+
+    def write(self, *, data: torch.Tensor):
+        self.memory.write(data=data)
+
+    def read(self) -> torch.Tensor:
+        return self.memory.read(dtype=self.meta.element_dtype)
 
 
 #
@@ -1432,111 +1451,17 @@ class GpuCommandEncoder(GpuResource):
             ],
         )
 
-    # Convenience methods
-
-    def _write_memory_with_mmap(self, *, buffer: GpuBuffer, data: torch.Tensor) -> None:
-        if buffer.memory.device_local:
-            raise LogicError("Cannot mmap device-local memory; use a staging buffer.")
-        with buffer.memory.map() as mv:
-            mv[:] = memoryview(data.numpy())
-
-    def _read_memory_with_mmap(self, *, buffer: GpuBuffer) -> torch.Tensor:
-        if buffer.memory.device_local:
-            raise LogicError("Cannot mmap device-local memory; use a staging buffer.")
-        with buffer.memory.map() as mv:
-            return torch.frombuffer(
-                mv[: buffer.meta.size],
-                dtype=buffer.meta.element_dtype,
-            )
-
-    def write_buffer(
-        self,
-        *,
-        dst: GpuBuffer,
-        data: torch.Tensor,
-        staging_buffer: GpuBuffer | None = None,
-    ) -> None:
-        if staging_buffer is not None:
-            if "staging" not in staging_buffer.usages:
-                raise LogicError(
-                    "Provided staging_buffer does not have 'staging' usage"
-                )
-            if "staging" in dst.usages:
-                raise LogicError("Destination buffer must not have 'staging' usage")
-            self._write_memory_with_mmap(buffer=staging_buffer, data=data)
-            self.copy_buffer_to_buffer(src=staging_buffer, dst=dst, size=len(data))
-        else:
-            if dst.memory.device_local:
-                raise LogicError(
-                    "Need a staging buffer to write to device-local memory"
-                )
-            self._write_memory_with_mmap(buffer=dst, data=data)
-
-    def read_buffer(
-        self,
-        *,
-        src: GpuBuffer,
-        staging_buffer: GpuBuffer | None = None,
-    ) -> torch.Tensor | None:
-        if staging_buffer is not None:
-            if "staging" not in staging_buffer.usages:
-                raise LogicError(
-                    "Provided staging_buffer does not have 'staging' usage"
-                )
-            if "staging" in src.usages:
-                raise LogicError(
-                    "Source buffer must not have 'staging' usage when using a staging buffer"
-                )
-            self.copy_buffer_to_buffer(src=src, dst=staging_buffer, size=src.meta.size)
-            # Defer mapping until after submission (returns None)
-            return None
-        else:
-            if src.memory.device_local:
-                raise LogicError(
-                    "Need a staging buffer to read from device-local memory"
-                )
-            raw = self._read_memory_with_mmap(buffer=src)
-            arr = torch.frombuffer(raw, dtype=src.meta.element_dtype)
-            return arr.clone()
-
-    def write_image(
-        self,
-        *,
-        dst: GpuImage,
-        data: torch.Tensor,
-        staging_buffer: GpuBuffer | None = None,
-    ) -> None:
-        if staging_buffer is not None:
-            if "staging" not in staging_buffer.usages:
-                raise LogicError(
-                    "Provided staging_buffer does not have 'staging' usage"
-                )
-            # Images are always device-local; ensure destination image does not erroneously claim staging usage
-            if "depth-attachment" in dst.usages and data.shape[2] != 1:
-                raise LogicError(
-                    "Depth attachment image write expects single channel data"
-                )
-            self._write_memory_with_mmap(buffer=staging_buffer, data=data)
-            self.copy_buffer_to_image(src=staging_buffer, dst=dst)
-        else:
-            raise LogicError(
-                "Image writes require a staging buffer (no direct mapping)."
-            )
-
-    def read_image(
+    def copy_image_to_buffer(
         self,
         *,
         src: GpuImage,
-        staging_buffer: GpuBuffer,
+        dst: GpuBuffer,
     ) -> None:
-        if "staging" not in staging_buffer.usages:
-            raise LogicError("Provided staging_buffer does not have 'staging' usage")
-        # Copy image -> buffer
         vkCmdCopyImageToBuffer(
             commandBuffer=self.vk_command_buffer,
             srcImage=src.vk_image,
             srcImageLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            dstBuffer=staging_buffer.vk_buffer,
+            dstBuffer=dst.vk_buffer,
             regionCount=1,
             pRegions=[
                 VkBufferImageCopy(
@@ -1558,22 +1483,41 @@ class GpuCommandEncoder(GpuResource):
                 )
             ],
         )
-        # Defer mapping until after submission
 
-    # Finalization helpers (called after command buffer submission)
-    def finalize_read_buffer(self, staging_buffer: GpuBuffer) -> torch.Tensor:
-        if "staging" not in staging_buffer.usages:
-            raise LogicError("Provided staging_buffer does not have 'staging' usage")
-        arr = self._read_memory_with_mmap(buffer=staging_buffer)
-        return arr.clone()
-
-    def finalize_read_image(
-        self, staging_buffer: GpuBuffer, image: GpuImage
-    ) -> torch.Tensor:
-        if "staging" not in staging_buffer.usages:
-            raise LogicError("Provided staging_buffer does not have 'staging' usage")
-        raw = self._read_memory_with_mmap(buffer=staging_buffer)
-        meta = image.meta
-        numel = meta.shape[0] * meta.shape[1] * meta.shape[2]
-        arr = torch.frombuffer(raw, dtype=meta.dtype, count=numel).clone()
-        return arr.view(*meta.shape)
+    def copy_image_to_image(
+        self,
+        *,
+        src: GpuImage,
+        dst: GpuImage,
+    ) -> None:
+        vkCmdCopyImage(
+            commandBuffer=self.vk_command_buffer,
+            srcImage=src.vk_image,
+            srcImageLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            dstImage=dst.vk_image,
+            dstImageLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            regionCount=1,
+            pRegions=[
+                VkImageCopy(
+                    srcSubresource=VkImageSubresourceLayers(
+                        aspectMask=src.aspect_mask,
+                        mipLevel=0,
+                        baseArrayLayer=0,
+                        layerCount=1,
+                    ),
+                    srcOffset=VkOffset3D(x=0, y=0, z=0),
+                    dstSubresource=VkImageSubresourceLayers(
+                        aspectMask=dst.aspect_mask,
+                        mipLevel=0,
+                        baseArrayLayer=0,
+                        layerCount=1,
+                    ),
+                    dstOffset=VkOffset3D(x=0, y=0, z=0),
+                    extent=VkExtent3D(
+                        width=src.meta.shape[1],
+                        height=src.meta.shape[0],
+                        depth=1,
+                    ),
+                )
+            ],
+        )

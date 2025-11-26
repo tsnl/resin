@@ -1,11 +1,11 @@
 __all__ = ["Window"]
 
-from typing import TypeAlias, Iterator
+from typing import Iterator, TypeAlias
 
 import glfw
 
-from .excepts import GlfwError
 from .core import BaseContext, BaseContextResource
+from .excepts import GlfwError
 
 
 class WindowContext(BaseContext["WindowContext"]):

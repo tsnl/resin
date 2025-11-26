@@ -1,9 +1,8 @@
+import types
 from abc import ABC, abstractmethod
 from typing import cast
-import types
 
 from .excepts import LogicError
-
 
 #
 # Context, ContextResource

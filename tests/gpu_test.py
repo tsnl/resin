@@ -1,16 +1,15 @@
-import os
 import torch
-import pytest
 
 from zero.gpu import (
-    GpuContext,
     GpuBufferMeta,
+    GpuBufferUsage,
+    GpuContext,
+    GpuDevice,
     GpuImageMeta,
-    LogicError,
 )
 
 
-def make_device():
+def make_context() -> tuple[GpuContext, GpuDevice]:
     ctx = GpuContext(
         app_name="gpu-tests",
         enable_debug_layer_support=True,
@@ -22,66 +21,62 @@ def make_device():
 
 
 def test_buffer_roundtrip():
-    ctx, dev = make_device()
-    tensor = torch.randn(1024, dtype=torch.float32)
-    meta = GpuBufferMeta.from_tensor(tensor)
-    device_buffer = dev.create_buffer(usages=["copy-dst", "storage"], meta=meta)
-    staging_buffer = dev.create_buffer(
-        usages=["staging", "copy-src", "copy-dst"], meta=meta
-    )
+    _, dev = make_context()
 
+    data0 = torch.randn(1024, dtype=torch.float32)
+    meta = GpuBufferMeta.from_tensor(data0)
+
+    device_buf_usage: list[GpuBufferUsage] = ["copy-dst", "storage"]
+    host_buf_usage: list[GpuBufferUsage] = ["staging", "copy-src", "copy-dst"]
+    device_buf = dev.create_buffer(usages=device_buf_usage, meta=meta)
+    host_buf_1 = dev.create_buffer(usages=host_buf_usage, meta=meta)
+    host_buf_2 = dev.create_buffer(usages=host_buf_usage, meta=meta)
+
+    # fill host_buf_1
+    host_buf_1.write(data=data0)
+
+    # copy host_buf_1 to device_buf
     with dev.command(queue_type="transfer") as cmd:
-        cmd.write_buffer(dst=device_buffer, data=tensor, staging_buffer=staging_buffer)
+        cmd.copy_buffer_to_buffer(src=host_buf_1, dst=device_buf, size=meta.size)
+
+    # copy device_buf to host_buf_2
     with dev.command(queue_type="transfer") as cmd:
-        res = cmd.read_buffer(src=device_buffer, staging_buffer=staging_buffer)
-        assert res is None  # deferred
-    with dev.command(queue_type="transfer") as cmd:  # use encoder helper finalize
-        roundtrip = cmd.finalize_read_buffer(staging_buffer)
-    assert torch.allclose(tensor, roundtrip)
+        cmd.copy_buffer_to_buffer(src=device_buf, dst=host_buf_2, size=meta.size)
+
+    # read host_buf_2
+    data1 = host_buf_2.read()
+
+    # Test:
+    assert torch.allclose(data0, data1)
 
 
 def test_image_roundtrip():
-    ctx, dev = make_device()
-    tensor = torch.randint(0, 256, (16, 32, 4), dtype=torch.uint8)
-    meta = GpuImageMeta.from_tensor(tensor)
+    _, dev = make_context()
+
+    data0 = torch.randint(0, 256, (1024, 1024, 4), dtype=torch.uint8)
+    meta = GpuImageMeta.from_tensor(data0)
+
+    host_buf_usage: list[GpuBufferUsage] = ["staging", "copy-src", "copy-dst"]
     image = dev.create_image(usages=["texture-binding"], meta=meta)
-    staging_buffer = dev.create_buffer(
-        usages=["staging", "copy-src", "copy-dst"],
-        meta=meta.into_buffer_meta(),
-    )
+    host_buf_1 = dev.create_buffer(usages=host_buf_usage, meta=meta.into_buffer_meta())
+    host_buf_2 = dev.create_buffer(usages=host_buf_usage, meta=meta.into_buffer_meta())
 
+    # fill host_buf_1
+    host_buf_1.write(data=data0)
+
+    # copy host_buf_1 to image
     with dev.command(queue_type="transfer") as cmd:
-        cmd.write_image(dst=image, data=tensor, staging_buffer=staging_buffer)
+        cmd.copy_buffer_to_image(dst=image, src=host_buf_1)
+
+    # copy image to host_buf_2
     with dev.command(queue_type="transfer") as cmd:
-        cmd.read_image(src=image, staging_buffer=staging_buffer)
-    with dev.command(queue_type="transfer") as cmd:
-        roundtrip = cmd.finalize_read_image(staging_buffer=staging_buffer, image=image)
-    assert torch.equal(tensor, roundtrip)
+        cmd.copy_image_to_buffer(src=image, dst=host_buf_2)
 
+    # read host_buf_2
+    data1 = host_buf_2.read()
 
-def test_write_without_staging_raises():
-    ctx, dev = make_device()
-    tensor = torch.randn(64, dtype=torch.float32)
-    meta = GpuBufferMeta.from_tensor(tensor)
-    device_buffer = dev.create_buffer(usages=["copy-dst", "storage"], meta=meta)
-    with pytest.raises(LogicError):
-        with dev.command(queue_type="transfer") as cmd:
-            cmd.write_buffer(dst=device_buffer, data=tensor, staging_buffer=None)
+    # reshape data1
+    data1 = data1.reshape(data0.shape)
 
-
-if __name__ == "__main__":
-    print("[gpu_test] Running buffer roundtrip…", flush=True)
-    test_buffer_roundtrip()
-    print("[gpu_test] Buffer roundtrip OK", flush=True)
-
-    print("[gpu_test] Running image roundtrip…", flush=True)
-    test_image_roundtrip()
-    print("[gpu_test] Image roundtrip OK", flush=True)
-
-    print("[gpu_test] Checking staging guard…", flush=True)
-    try:
-        test_write_without_staging_raises()
-        print("[gpu_test] Staging guard OK", flush=True)
-    except AssertionError as e:
-        print(f"[gpu_test] Staging guard failed: {e}", flush=True)
-        raise
+    # Test:
+    assert torch.equal(data0, data1)

@@ -1,6 +1,7 @@
-import cffi
-from typing import Any, List, Optional, Sequence, TypeAlias, Callable
 from dataclasses import dataclass
+from typing import Any, Callable, List, Optional, Sequence, TypeAlias
+
+import cffi
 
 #
 # Basic:
@@ -1363,6 +1364,29 @@ def vkCmdCopyBuffer(
 ) -> None:
     """
     vkCmdCopyBuffer copies data between buffer regions.
+    """
+
+# VkImageCopy
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkImageCopy.html
+@dataclass
+class VkImageCopy:
+    srcSubresource: VkImageSubresourceLayers
+    srcOffset: VkOffset3D
+    dstSubresource: VkImageSubresourceLayers
+    dstOffset: VkOffset3D
+    extent: VkExtent3D
+
+def vkCmdCopyImage(
+    commandBuffer: VkCommandBuffer,
+    srcImage: VkImage,
+    srcImageLayout: VkImageLayout,
+    dstImage: VkImage,
+    dstImageLayout: VkImageLayout,
+    regionCount: int,
+    pRegions: Sequence[VkImageCopy],
+) -> None:
+    """
+    vkCmdCopyImage copies data between image regions.
     """
 
 # VkImageSubresourceLayers

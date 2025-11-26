@@ -17,11 +17,12 @@ test:
 .PHONY: format format-check
 
 format:
-	uv run --with zero -- ruff format .
+	uv run --with zero --extra dev -- ruff format .
+	uv run --with zero --extra dev -- ruff check --select I --fix .
 
 format-check:
-	uv run --with zero -- ruff check .
-	
+	uv run --with zero --extra dev -- ruff check --select I .
+
 #
 # Type-check:
 #

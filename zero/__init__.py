@@ -8,5 +8,5 @@ __all__ = [
     "GpuImageMeta",
 ]
 
-from .gpu import GpuContext, GpuDevice, GpuImage, GpuImageUsage, GpuImageMeta
+from .gpu import GpuContext, GpuDevice, GpuImage, GpuImageMeta, GpuImageUsage
 from .window import Window
