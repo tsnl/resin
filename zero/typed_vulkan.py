@@ -458,6 +458,7 @@ VkBufferUsageFlags: TypeAlias = VkFlags
 VkBufferUsageFlagBits: TypeAlias = int
 VkMemoryMapFlags: TypeAlias = VkFlags
 VkMemoryMapFlagBits: TypeAlias = int
+VkFormat: TypeAlias = int
 
 
 def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:

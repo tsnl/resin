@@ -123,6 +123,7 @@ from .typed_vulkan import (
     VkExtent3D,
     VkFence,
     VkFenceCreateInfo,
+    VkFormat,
     VkGraphicsPipelineCreateInfo,
     VkImage,
     VkImageCopy,
@@ -792,6 +793,9 @@ class GpuDevice(GpuResource):
                 "depth-attachment": VK_IMAGE_ASPECT_DEPTH_BIT,
             }[usage]
 
+        # Infer VkFormat:
+        vk_format = meta.infer_vk_format(usages)
+
         # Determine which queue families will access the image:
         queue_family_indices = list({idx for _, idx in self.qfis})
 
@@ -801,7 +805,7 @@ class GpuDevice(GpuResource):
             pCreateInfo=VkImageCreateInfo(
                 flags=0,
                 imageType=VK_IMAGE_TYPE_2D,
-                format=meta.infer_vk_format(usages),
+                format=vk_format,
                 extent=VkExtent3D(width=meta.shape[1], height=meta.shape[0], depth=1),
                 mipLevels=1,
                 arrayLayers=1,
@@ -862,6 +866,7 @@ class GpuDevice(GpuResource):
             device=self,
             vk_image=vk_image,
             vk_image_view=vk_image_view,
+            vk_format=vk_format,
             memory=memory,
             meta=meta,
             aspect_mask=vk_image_aspect,
@@ -1015,7 +1020,7 @@ class GpuDevice(GpuResource):
         *,
         vertex_shader: GpuShader,
         fragment_shader: GpuShader,
-        color_format: int,
+        vk_color_format: VkFormat,
         viewport_width: int,
         viewport_height: int,
     ) -> GpuPipeline:
@@ -1154,7 +1159,7 @@ class GpuDevice(GpuResource):
         rendering_info = VkPipelineRenderingCreateInfo(
             viewMask=0,
             colorAttachmentCount=1,
-            pColorAttachmentFormats=[color_format],
+            pColorAttachmentFormats=[vk_color_format],
             depthAttachmentFormat=VK_FORMAT_UNDEFINED,
             stencilAttachmentFormat=VK_FORMAT_UNDEFINED,
         )
@@ -1464,6 +1469,7 @@ class GpuImage(GpuResource):
     device: GpuDevice
     vk_image: VkImage
     vk_image_view: VkImageView
+    vk_format: VkFormat
     memory: GpuMemory
     meta: GpuImageMeta
     aspect_mask: int
@@ -1475,6 +1481,7 @@ class GpuImage(GpuResource):
         device: GpuDevice,
         vk_image: VkImage,
         vk_image_view: VkImageView,
+        vk_format: VkFormat,
         memory: GpuMemory,
         meta: GpuImageMeta,
         aspect_mask: int,
@@ -1484,6 +1491,7 @@ class GpuImage(GpuResource):
         self.device = device
         self.vk_image = vk_image
         self.vk_image_view = vk_image_view
+        self.vk_format = vk_format
         self.memory = memory
         self.meta = meta
         self.aspect_mask = aspect_mask

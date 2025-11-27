@@ -43,7 +43,6 @@ def test_render_simple_triangle():
         spirv_path=shader_dir / "triangle.vert.spv",
         stage="vertex",
     )
-
     fragment_shader = dev.create_shader(
         spirv_path=shader_dir / "triangle.frag.spv",
         stage="fragment",
@@ -53,7 +52,7 @@ def test_render_simple_triangle():
     pipeline = dev.create_pipeline(
         vertex_shader=vertex_shader,
         fragment_shader=fragment_shader,
-        color_format=render_target.meta.infer_vk_format(render_target.usages),
+        vk_color_format=render_target.vk_format,
         viewport_width=width,
         viewport_height=height,
     )

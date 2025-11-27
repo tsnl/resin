@@ -46,7 +46,7 @@ def main():
     pipeline = device.create_pipeline(
         vertex_shader=vertex_shader,
         fragment_shader=fragment_shader,
-        color_format=render_target_image.meta.infer_vk_format(
+        vk_color_format=render_target_image.meta.infer_vk_format(
             render_target_image.usages
         ),
         viewport_width=1024,
