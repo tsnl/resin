@@ -204,6 +204,7 @@ from .typed_vulkan import (
     vkCreatePipelineLayout,
     vkCreateSemaphore,
     vkCreateShaderModule,
+    VkShaderModule,
     vkDestroyBuffer,
     vkDestroyCommandPool,
     vkDestroyDevice,
@@ -1328,6 +1329,22 @@ class GpuDevice(GpuResource):
             fence=(fence.vk_fence if fence else None),
         )
 
+    def create_fence(self) -> "GpuFence":
+        vk_fence = vkCreateFence(
+            device=self.vk_device,
+            pCreateInfo=VkFenceCreateInfo(flags=0),
+            pAllocator=None,
+        )
+        return GpuFence(device=self, vk_fence=vk_fence)
+
+    def create_semaphore(self) -> "GpuSemaphore":
+        vk_semaphore = vkCreateSemaphore(
+            device=self.vk_device,
+            pCreateInfo=VkSemaphoreCreateInfo(flags=0),
+            pAllocator=None,
+        )
+        return GpuSemaphore(device=self, vk_semaphore=vk_semaphore)
+
     def _allocate_memory(
         self,
         *,
@@ -1545,38 +1562,37 @@ class GpuImage(GpuResource):
         vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
 
 
-# Synchronization wrappers
+#
+# GpuSemaphore
+#
 
 
 class GpuSemaphore(GpuResource):
     device: GpuDevice
     vk_semaphore: VkSemaphore
 
-    def __init__(self, *, device: GpuDevice) -> None:
+    def __init__(self, *, device: GpuDevice, vk_semaphore: VkSemaphore) -> None:
         super().__init__(parent=device)
         self.device = device
-        self.vk_semaphore = vkCreateSemaphore(
-            device=device.vk_device,
-            pCreateInfo=VkSemaphoreCreateInfo(flags=0),
-            pAllocator=None,
-        )
+        self.vk_semaphore = vk_semaphore
 
     def _on_dispose(self) -> None:
         vkDestroySemaphore(self.device.vk_device, self.vk_semaphore, pAllocator=None)
+
+
+#
+# GpuFence
+#
 
 
 class GpuFence(GpuResource):
     device: GpuDevice
     vk_fence: VkFence
 
-    def __init__(self, *, device: GpuDevice) -> None:
+    def __init__(self, *, device: GpuDevice, vk_fence: VkFence) -> None:
         super().__init__(parent=device)
         self.device = device
-        self.vk_fence = vkCreateFence(
-            device=device.vk_device,
-            pCreateInfo=VkFenceCreateInfo(flags=0),
-            pAllocator=None,
-        )
+        self.vk_fence = vk_fence
 
     def wait(self, *, timeout_ns: int = 10**10) -> None:
         """Wait for fence to be signaled.
@@ -1927,14 +1943,14 @@ class GpuShader(GpuResource):
     """Wrapper for VkShaderModule"""
 
     device: GpuDevice
-    vk_shader_module: Any  # VkShaderModule
+    vk_shader_module: VkShaderModule
     stage: Literal["vertex", "fragment"]
 
     def __init__(
         self,
         *,
         device: GpuDevice,
-        vk_shader_module: Any,  # VkShaderModule
+        vk_shader_module: VkShaderModule,
         stage: Literal["vertex", "fragment"],
     ):
         super().__init__(parent=device)
@@ -1951,7 +1967,7 @@ class GpuShader(GpuResource):
 
 
 #
-# GpuPipelineLayout, etc.
+# GpuPipeline
 #
 
 
@@ -2003,14 +2019,14 @@ class GpuDescriptorSet(GpuResource):
 class GpuPipeline(GpuResource):
     device: GpuDevice
     vk_pipeline: VkPipeline
-    layout: GpuPipelineLayout | None
+    layout: GpuPipelineLayout
 
     def __init__(
         self,
         *,
         device: GpuDevice,
         vk_pipeline: VkPipeline,
-        layout: GpuPipelineLayout | None = None,
+        layout: GpuPipelineLayout,
     ):
         super().__init__(parent=device)
         self.device = device
