@@ -1,6 +1,6 @@
-import types
 from abc import ABC, abstractmethod
 from typing import cast
+from weakref import ref as WeakRef
 
 from .excepts import LogicError
 
@@ -21,7 +21,9 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
             self._parent: "BaseContextResource[TContext] | None" = parent
             self._context: TContext = parent._context
 
-        self._children: set[BaseContextResource[TContext]] = set()
+        self._children: list[WeakRef[BaseContextResource[TContext]]] = []
+        self._children_cleanup_threshold: int = 64
+
         self._is_disposed: bool = False
 
         self._post_init()
@@ -31,11 +33,25 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
             self._parent._notify_child_created(self)
 
     def _notify_child_created(self, child: "BaseContextResource[TContext]") -> None:
-        self._children.add(child)
+        if len(self._children) >= self._children_cleanup_threshold:
+            # Clean up dead weak references.
+            # Do not modify the order of existing children: critical for disposal.
+            self._children = [
+                child_ref for child_ref in self._children if child_ref() is not None
+            ]
 
-    def _notify_child_disposed(self, child: "BaseContextResource[TContext]") -> None:
-        assert child._is_disposed
-        self._children.remove(child)
+            # Adjust threshold if needed.
+            if len(self._children) >= self._children_cleanup_threshold:
+                # Increase threshold to avoid frequent cleanups.
+                self._children_cleanup_threshold *= 2
+            elif len(self._children) < self._children_cleanup_threshold // 4:
+                # Decrease threshold to avoid excessive memory usage.
+                self._children_cleanup_threshold //= 2
+
+        self._children.append(WeakRef(child))
+
+    def __del__(self) -> None:
+        self.dispose()
 
     @property
     def context(self) -> TContext:
@@ -46,21 +62,16 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
         if self._is_disposed:
             return
 
-        # Dispose children.
-        # Each child's `dispose()` method will mutate 'self._children`, so we need to
-        # iterate over a copy of the set. We also expect all children to be disposed by
-        # the end.
-        for child in set(self._children):
-            child.dispose()
-        assert not self._children, "Expected all children to be disposed."
+        # Dispose children in reverse order of creation.
+        for child_ref in reversed(self._children):
+            child = child_ref()
+            if child is not None:
+                child.dispose()
+        self._children.clear()
 
         # Dispose self.
         self._on_dispose()
         self._is_disposed = True
-
-        # Notify parent AFTER disposing self.
-        if self._parent:
-            self._parent._notify_child_disposed(self)
 
     @abstractmethod
     def _on_dispose(self) -> None:
@@ -73,14 +84,11 @@ class BaseContext[TContext](BaseContextResource[TContext]):
 
 
 #
-# assert_not_none
+# expect: check for None values
 #
 
 
-def expect[T](
-    opt_value: T | None,
-    message: str = "Expected value to not be None",
-) -> T:
+def expect[T](opt_value: T | None, message: str = "Expected value to not be None") -> T:
     if opt_value is None:
         raise LogicError(message)
     return opt_value
