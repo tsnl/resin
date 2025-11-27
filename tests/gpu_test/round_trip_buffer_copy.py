@@ -36,12 +36,14 @@ def test_buffer_roundtrip():
     host_buf_1.write(data=data0)
 
     # copy host_buf_1 to device_buf
-    with dev.command(queue_type="transfer") as cmd:
-        cmd.copy_buffer_to_buffer(src=host_buf_1, dst=device_buf, size=meta.size)
+    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.copy_buffer_to_buffer(src=host_buf_1, dst=device_buf, size=meta.size)
+    cmd.submit().wait()
 
     # copy device_buf to host_buf_2
-    with dev.command(queue_type="transfer") as cmd:
-        cmd.copy_buffer_to_buffer(src=device_buf, dst=host_buf_2, size=meta.size)
+    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.copy_buffer_to_buffer(src=device_buf, dst=host_buf_2, size=meta.size)
+    cmd.submit().wait()
 
     # read host_buf_2
     data1 = host_buf_2.read()
@@ -65,12 +67,14 @@ def test_image_roundtrip():
     host_buf_1.write(data=data0)
 
     # copy host_buf_1 to image
-    with dev.command(queue_type="transfer") as cmd:
-        cmd.copy_buffer_to_image(dst=image, src=host_buf_1)
+    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.copy_buffer_to_image(dst=image, src=host_buf_1)
+    cmd.submit().wait()
 
     # copy image to host_buf_2
-    with dev.command(queue_type="transfer") as cmd:
-        cmd.copy_image_to_buffer(src=image, dst=host_buf_2)
+    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.copy_image_to_buffer(src=image, dst=host_buf_2)
+    cmd.submit().wait()
 
     # read host_buf_2
     data1 = host_buf_2.read()

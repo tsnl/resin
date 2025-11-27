@@ -29,7 +29,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Optional, TypeAlias
+from typing import Literal, TypeAlias
 
 import torch
 
@@ -56,7 +56,6 @@ from .typed_vulkan import (
     VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     VK_COMPONENT_SWIZZLE_IDENTITY,
     VK_CULL_MODE_NONE,
-    VK_FALSE,
     VK_FORMAT_D32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
     VK_FORMAT_R32_SFLOAT,
@@ -98,19 +97,7 @@ from .typed_vulkan import (
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_EXCLUSIVE,
-    VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-    VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-    VK_TRUE,
+    VK_PIPELINE_BIND_POINT_GRAPHICS,
     VkApplicationInfo,
     VkBuffer,
     VkBufferCopy,
@@ -155,7 +142,6 @@ from .typed_vulkan import (
     VkPhysicalDeviceMemoryProperties,
     VkPhysicalDeviceProperties,
     VkPipeline,
-    VkPipelineBindPoint,
     VkPipelineColorBlendAttachmentState,
     VkPipelineColorBlendStateCreateInfo,
     VkPipelineInputAssemblyStateCreateInfo,
@@ -447,9 +433,7 @@ class GpuContext(BaseContext["GpuContext"]):
 
         # Enable dynamic rendering feature (Vulkan 1.3)
         dynamic_rendering_features = VkPhysicalDeviceDynamicRenderingFeatures(
-            sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-            pNext=None,
-            dynamicRendering=VK_TRUE,
+            dynamicRendering=True,
         )
 
         # Create device:
@@ -1009,8 +993,6 @@ class GpuDevice(GpuResource):
 
         # Create shader module using raw Vulkan API
         create_info = VkShaderModuleCreateInfo(
-            sType=VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-            pNext=None,
             flags=0,
             codeSize=len(spirv_code),
             pCode=spirv_code,
@@ -1041,8 +1023,6 @@ class GpuDevice(GpuResource):
 
         # Pipeline layout (empty for now)
         layout_create_info = VkPipelineLayoutCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            pNext=None,
             flags=0,
             setLayoutCount=0,
             pSetLayouts=None,
@@ -1064,8 +1044,6 @@ class GpuDevice(GpuResource):
         # Shader stages
         shader_stages = [
             VkPipelineShaderStageCreateInfo(
-                sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                pNext=None,
                 flags=0,
                 stage=VK_SHADER_STAGE_VERTEX_BIT,
                 module=vertex_shader.vk_shader_module,
@@ -1073,8 +1051,6 @@ class GpuDevice(GpuResource):
                 pSpecializationInfo=None,
             ),
             VkPipelineShaderStageCreateInfo(
-                sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                pNext=None,
                 flags=0,
                 stage=VK_SHADER_STAGE_FRAGMENT_BIT,
                 module=fragment_shader.vk_shader_module,
@@ -1085,8 +1061,6 @@ class GpuDevice(GpuResource):
 
         # Vertex input state (empty - hardcoded in shader)
         vertex_input_state = VkPipelineVertexInputStateCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            pNext=None,
             flags=0,
             vertexBindingDescriptionCount=0,
             pVertexBindingDescriptions=None,
@@ -1096,11 +1070,9 @@ class GpuDevice(GpuResource):
 
         # Input assembly state
         input_assembly_state = VkPipelineInputAssemblyStateCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            pNext=None,
             flags=0,
             topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-            primitiveRestartEnable=VK_FALSE,
+            primitiveRestartEnable=False,
         )
 
         # Viewport state
@@ -1119,8 +1091,6 @@ class GpuDevice(GpuResource):
         )
 
         viewport_state = VkPipelineViewportStateCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            pNext=None,
             flags=0,
             viewportCount=1,
             pViewports=[viewport],
@@ -1130,15 +1100,13 @@ class GpuDevice(GpuResource):
 
         # Rasterization state
         rasterization_state = VkPipelineRasterizationStateCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            pNext=None,
             flags=0,
-            depthClampEnable=VK_FALSE,
-            rasterizerDiscardEnable=VK_FALSE,
+            depthClampEnable=False,
+            rasterizerDiscardEnable=False,
             polygonMode=VK_POLYGON_MODE_FILL,
             cullMode=VK_CULL_MODE_NONE,
             frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE,
-            depthBiasEnable=VK_FALSE,
+            depthBiasEnable=False,
             depthBiasConstantFactor=0.0,
             depthBiasClamp=0.0,
             depthBiasSlopeFactor=0.0,
@@ -1147,20 +1115,18 @@ class GpuDevice(GpuResource):
 
         # Multisample state
         multisample_state = VkPipelineMultisampleStateCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            pNext=None,
             flags=0,
             rasterizationSamples=VK_SAMPLE_COUNT_1_BIT,
-            sampleShadingEnable=VK_FALSE,
+            sampleShadingEnable=False,
             minSampleShading=1.0,
             pSampleMask=None,
-            alphaToCoverageEnable=VK_FALSE,
-            alphaToOneEnable=VK_FALSE,
+            alphaToCoverageEnable=False,
+            alphaToOneEnable=False,
         )
 
         # Color blend state
         color_blend_attachment = VkPipelineColorBlendAttachmentState(
-            blendEnable=VK_FALSE,
+            blendEnable=False,
             srcColorBlendFactor=VK_BLEND_FACTOR_ONE,
             dstColorBlendFactor=VK_BLEND_FACTOR_ZERO,
             colorBlendOp=VK_BLEND_OP_ADD,
@@ -1176,10 +1142,8 @@ class GpuDevice(GpuResource):
         )
 
         color_blend_state = VkPipelineColorBlendStateCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            pNext=None,
             flags=0,
-            logicOpEnable=VK_FALSE,
+            logicOpEnable=False,
             logicOp=VK_LOGIC_OP_COPY,
             attachmentCount=1,
             pAttachments=[color_blend_attachment],
@@ -1188,8 +1152,6 @@ class GpuDevice(GpuResource):
 
         # Dynamic rendering info (Vulkan 1.3)
         rendering_info = VkPipelineRenderingCreateInfo(
-            sType=VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            pNext=None,
             viewMask=0,
             colorAttachmentCount=1,
             pColorAttachmentFormats=[color_format],
@@ -1199,7 +1161,6 @@ class GpuDevice(GpuResource):
 
         # Graphics pipeline create info
         pipeline_create_info = VkGraphicsPipelineCreateInfo(
-            sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             pNext=rendering_info,
             flags=0,
             stageCount=len(shader_stages),
@@ -1229,29 +1190,14 @@ class GpuDevice(GpuResource):
             pAllocator=None,
         )[0]
 
-        return GpuPipeline(
-            device=self,
-            vk_pipeline=vk_pipeline,
-            layout=layout,
-        )
+        # Wrap:
+        return GpuPipeline(device=self, vk_pipeline=vk_pipeline, layout=layout)
 
-    @contextmanager
-    def command(
-        self,
-        *,
-        queue_type: GpuQueueType,
-        wait_semaphores: Optional[list[GpuSemaphore]] = None,
-        signal_semaphores: Optional[list[GpuSemaphore]] = None,
-        block: bool = True,
-    ):
-        """Create and submit a command buffer.
+    def create_command_encoder(self, *, queue_type: GpuQueueType) -> GpuCommandEncoder:
+        """Create a command buffer encoder.
 
         Args:
-            queue_type: Type of queue to submit to
-            wait_semaphores: Semaphores to wait on before execution
-            signal_semaphores: Semaphores to signal after execution
-            block: If True, wait for completion and dispose encoder immediately.
-                   If False, return encoder with fence for manual synchronization.
+            queue_type: Type of queue to submit to.
         """
         queue_family_index = self.qfis[queue_type]
         vk_command_pool = self.vk_command_pools[queue_family_index]
@@ -1266,7 +1212,7 @@ class GpuDevice(GpuResource):
         )[0]
 
         # Create fence for this command buffer
-        fence = GpuFence(device=self)
+        fence = self.create_fence()
 
         vkBeginCommandBuffer(
             commandBuffer=vk_command_buffer,
@@ -1275,38 +1221,23 @@ class GpuDevice(GpuResource):
                 pInheritanceInfo=None,
             ),
         )
-        encoder = GpuCommandEncoder(
+        return GpuCommandEncoder(
             device=self,
             queue_family_index=queue_family_index,
             vk_command_buffer=vk_command_buffer,
             fence=fence,
+            submit_queue_type=queue_type,
+            dispose_fence=True,
         )
-        try:
-            yield encoder
-        finally:
-            vkEndCommandBuffer(commandBuffer=vk_command_buffer)
-            # Auto-submit with fence
-            self.submit(
-                queue_type=queue_type,
-                command_buffers=[vk_command_buffer],
-                wait_semaphores=wait_semaphores,
-                signal_semaphores=signal_semaphores,
-                fence=fence,
-            )
-            if block:
-                # Wait for completion and dispose encoder (frees command buffer)
-                fence.wait()
-                encoder.dispose()
-            # else: encoder and fence remain alive for manual synchronization
 
     def submit(
         self,
         *,
         queue_type: GpuQueueType,
         command_buffers: list[VkCommandBuffer],
-        wait_semaphores: Optional[list["GpuSemaphore"]] = None,
-        signal_semaphores: Optional[list["GpuSemaphore"]] = None,
-        fence: Optional["GpuFence"] = None,
+        wait_semaphores: list["GpuSemaphore"] | None = None,
+        signal_semaphores: list["GpuSemaphore"] | None = None,
+        fence: GpuFence | None = None,
     ) -> None:
         vk_queue = self.vk_queues[self.qfis[queue_type]]
         wait_sems = [s.vk_semaphore for s in (wait_semaphores or [])]
@@ -1695,6 +1626,8 @@ class GpuCommandEncoder(GpuResource):
     vk_command_buffer: VkCommandBuffer
     queue_family_index: int
     fence: GpuFence
+    submit_queue_type: GpuQueueType
+    dispose_fence: bool
 
     def __init__(
         self,
@@ -1703,19 +1636,16 @@ class GpuCommandEncoder(GpuResource):
         queue_family_index: int,
         vk_command_buffer: VkCommandBuffer,
         fence: GpuFence,
+        submit_queue_type: GpuQueueType,
+        dispose_fence: bool,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
         self.vk_command_buffer = vk_command_buffer
         self.queue_family_index = queue_family_index
         self.fence = fence
-
-    def get_fence(self) -> GpuFence:
-        """Get the fence associated with this command buffer.
-
-        The fence will be signaled when command buffer execution completes.
-        """
-        return self.fence
+        self.submit_queue_type = submit_queue_type
+        self.dispose_fence = dispose_fence
 
     def _on_dispose(self) -> None:
         # Wait for command buffer to finish executing before freeing it
@@ -1726,6 +1656,10 @@ class GpuCommandEncoder(GpuResource):
             commandBufferCount=1,
             pCommandBuffers=[self.vk_command_buffer],
         )
+
+        # If specified, dispose the fence as well
+        if self.dispose_fence:
+            self.fence.dispose()
 
     def copy_buffer_to_buffer(
         self,
@@ -1933,6 +1867,23 @@ class GpuCommandEncoder(GpuResource):
 
         vkCmdEndRendering(self.vk_command_buffer)
 
+    def submit(
+        self,
+        wait_semaphores: list[GpuSemaphore] | None = None,
+        signal_semaphores: list[GpuSemaphore] | None = None,
+    ) -> GpuFence:
+        vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
+
+        self.device.submit(
+            queue_type=self.submit_queue_type,
+            command_buffers=[self.vk_command_buffer],
+            wait_semaphores=wait_semaphores,
+            signal_semaphores=signal_semaphores,
+            fence=self.fence,
+        )
+
+        return self.fence
+
 
 #
 # GpuShader
@@ -2053,17 +2004,10 @@ class GpuRenderPassCommandEncoder(GpuResource):
     def _on_dispose(self) -> None:
         pass
 
-    def bind_pipeline(
-        self,
-        *,
-        pipeline: GpuPipeline,
-        bind_point: Literal["graphics"] = "graphics",
-    ) -> None:
-        if bind_point != "graphics":
-            raise LogicError("Only graphics pipeline bind point supported")
+    def bind_pipeline(self, *, pipeline: GpuPipeline) -> None:
         vkCmdBindPipeline(
             commandBuffer=self.parent.vk_command_buffer,
-            pipelineBindPoint=VkPipelineBindPoint(0),
+            pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipeline=pipeline.vk_pipeline,
         )
 
@@ -2077,7 +2021,7 @@ class GpuRenderPassCommandEncoder(GpuResource):
     ) -> None:
         vkCmdBindDescriptorSets(
             commandBuffer=self.parent.vk_command_buffer,
-            pipelineBindPoint=VkPipelineBindPoint(0),
+            pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS,
             layout=layout.vk_pipeline_layout,
             firstSet=first_set,
             descriptorSetCount=len(sets),

@@ -59,13 +59,14 @@ def test_render_simple_triangle():
     )
 
     # Render the triangle
-    with dev.command(queue_type="graphics") as cmd:
-        with cmd.render(
-            color_attachment=render_target,
-            clear_on_load=True,
-        ) as render_pass:
-            render_pass.bind_pipeline(pipeline=pipeline)
-            render_pass.draw(vertex_count=3, instance_count=1)
+    cmd = dev.create_command_encoder(queue_type="graphics")
+    with cmd.render(
+        color_attachment=render_target,
+        clear_on_load=True,
+    ) as render_pass:
+        render_pass.bind_pipeline(pipeline=pipeline)
+        render_pass.draw(vertex_count=3, instance_count=1)
+    cmd.submit().wait()
 
     # Read back the rendered image
     # Create staging buffer for readback
@@ -75,8 +76,9 @@ def test_render_simple_triangle():
     )
 
     # Copy image to staging buffer
-    with dev.command(queue_type="transfer") as cmd:
-        cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
+    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
+    cmd.submit().wait()
 
     # Read data from staging buffer
     image_data = staging_buffer.read()

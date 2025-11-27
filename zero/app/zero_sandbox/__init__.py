@@ -56,13 +56,14 @@ def main():
     print(f"Created pipeline: {pipeline}")
 
     # Render triangle
-    with device.command(queue_type="graphics") as cmd:
-        with cmd.render(
-            color_attachment=render_target_image,
-            clear_on_load=True,
-        ) as render_pass:
-            render_pass.bind_pipeline(pipeline=pipeline)
-            render_pass.draw(vertex_count=3, instance_count=1)
+    cmd = device.create_command_encoder(queue_type="graphics")
+    with cmd.render(
+        color_attachment=render_target_image,
+        clear_on_load=True,
+    ) as render_pass:
+        render_pass.bind_pipeline(pipeline=pipeline)
+        render_pass.draw(vertex_count=3, instance_count=1)
+    cmd.submit().wait()
 
     print("Triangle rendered successfully!")
 

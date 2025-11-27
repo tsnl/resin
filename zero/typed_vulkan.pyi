@@ -7,8 +7,7 @@ import cffi
 # Basic:
 #
 
-class OpaqueResourceHandle:
-    pass
+class OpaqueResourceHandle: ...
 
 def vkGetInstanceProcAddr(instance: "VkInstance", pName: str) -> Callable:
     """
@@ -28,6 +27,11 @@ def vk_api_version_str(api_version: int) -> str: ...
 VK_API_VERSION_1_2: int
 VK_API_VERSION_1_3: int
 VK_API_VERSION_1_4: int
+
+# VkBool32
+VkBool32: TypeAlias = bool
+VK_TRUE: VkBool32 = True
+VK_FALSE: VkBool32 = False
 
 VkDeviceSize: TypeAlias = int
 VkFlags: TypeAlias = int
@@ -68,6 +72,17 @@ class VkExtent2D:
 class VkRect2D:
     offset: VkOffset2D
     extent: VkExtent2D
+
+# VkViewport
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkViewport.html
+@dataclass
+class VkViewport:
+    x: float
+    y: float
+    width: float
+    height: float
+    minDepth: float
+    maxDepth: float
 
 #
 # VkInstance
@@ -272,10 +287,17 @@ class VkPhysicalDeviceLimits:
     optimalBufferCopyRowPitchAlignment: VkDeviceSize
     nonCoherentAtomSize: VkDeviceSize
 
+# VkPhysicalDeviceDynamicRenderingFeatures
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceDynamicRenderingFeatures.html
+@dataclass
+class VkPhysicalDeviceDynamicRenderingFeatures:
+    dynamicRendering: bool
+
 # VkPhysicalDeviceFeatures
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFeatures.html
 @dataclass
 class VkPhysicalDeviceFeatures:
+    pNext: Any = None
     robustBufferAccess: bool = False
     fullDrawIndexUint32: bool = False
     imageCubeArray: bool = False
@@ -433,6 +455,7 @@ VkDeviceCreateFlags: TypeAlias = VkFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceCreateInfo.html
 @dataclass
 class VkDeviceCreateInfo:
+    pNext: VkPhysicalDeviceDynamicRenderingFeatures | None = None
     flags: VkDeviceCreateFlags = 0
     queueCreateInfoCount: int = 0
     pQueueCreateInfos: Sequence[Any] = ()
@@ -1104,59 +1127,6 @@ class VkRenderingAttachmentInfo:
     storeOp: VkAttachmentStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
     clearValue: VkClearValue | None = None
 
-# VkRenderingInfo
-# https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderingInfo.html
-@dataclass
-class VkRenderingInfo:
-    flags: int
-    renderArea: VkRect2D
-    layerCount: int
-    viewMask: int
-    colorAttachmentCount: int
-    pColorAttachments: list[VkRenderingAttachmentInfo] | None
-    pDepthAttachment: VkRenderingAttachmentInfo | None
-    pStencilAttachment: VkRenderingAttachmentInfo | None
-
-# vkCmdBeginRendering
-def vkCmdBeginRendering(
-    commandBuffer: "VkCommandBuffer",
-    pRenderingInfo: VkRenderingInfo,
-) -> None: ...
-
-# vkCmdEndRendering
-def vkCmdEndRendering(commandBuffer: "VkCommandBuffer") -> None: ...
-
-# Graphics pipeline and binding
-class VkPipeline(OpaqueResourceHandle): ...
-class VkPipelineLayout(OpaqueResourceHandle): ...
-class VkDescriptorSetLayout(OpaqueResourceHandle): ...
-class VkDescriptorSet(OpaqueResourceHandle): ...
-
-VkPipelineBindPoint: TypeAlias = int  # VK_PIPELINE_BIND_POINT_GRAPHICS = 0, etc.
-
-def vkCmdBindPipeline(
-    commandBuffer: "VkCommandBuffer",
-    pipelineBindPoint: VkPipelineBindPoint,
-    pipeline: VkPipeline,
-) -> None: ...
-def vkCmdBindDescriptorSets(
-    commandBuffer: "VkCommandBuffer",
-    pipelineBindPoint: VkPipelineBindPoint,
-    layout: VkPipelineLayout,
-    firstSet: int,
-    descriptorSetCount: int,
-    pDescriptorSets: Sequence[VkDescriptorSet],
-    dynamicOffsetCount: int,
-    pDynamicOffsets: Sequence[int] | None,
-) -> None: ...
-def vkCmdDraw(
-    commandBuffer: "VkCommandBuffer",
-    vertexCount: int,
-    instanceCount: int,
-    firstVertex: int,
-    firstInstance: int,
-) -> None: ...
-
 #
 # VkBuffer
 #
@@ -1509,38 +1479,145 @@ def vkCmdCopyImageToBuffer(
     vkCmdCopyImageToBuffer copies data from an image into a buffer.
     """
 
-# Synchronization & Queues
-class VkSemaphore(OpaqueResourceHandle): ...
-class VkFence(OpaqueResourceHandle): ...
-class VkQueue(OpaqueResourceHandle): ...
+# Pipeline and drawing commands
+#
 
+# VkRenderingInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderingInfo.html
 @dataclass
-class VkSemaphoreCreateInfo:
-    flags: int = 0
+class VkRenderingInfo:
+    flags: int
+    renderArea: VkRect2D
+    layerCount: int
+    viewMask: int
+    colorAttachmentCount: int
+    pColorAttachments: list[VkRenderingAttachmentInfo] | None
+    pDepthAttachment: VkRenderingAttachmentInfo | None
+    pStencilAttachment: VkRenderingAttachmentInfo | None
 
+# vkCmdBeginRendering
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBeginRendering.html
+def vkCmdBeginRendering(
+    commandBuffer: "VkCommandBuffer",
+    pRenderingInfo: VkRenderingInfo,
+) -> None: ...
+
+# vkCmdEndRendering
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdEndRendering.html
+def vkCmdEndRendering(commandBuffer: "VkCommandBuffer") -> None: ...
+
+# vkCmdBindPipeline
+# http://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindPipeline.html
+def vkCmdBindPipeline(
+    commandBuffer: "VkCommandBuffer",
+    pipelineBindPoint: VkPipelineBindPoint,
+    pipeline: VkPipeline,
+) -> None: ...
+
+# vkCmdBindDescriptorSets
+# http://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindDescriptorSets
+def vkCmdBindDescriptorSets(
+    commandBuffer: "VkCommandBuffer",
+    pipelineBindPoint: VkPipelineBindPoint,
+    layout: VkPipelineLayout,
+    firstSet: int,
+    descriptorSetCount: int,
+    pDescriptorSets: Sequence[VkDescriptorSet],
+    dynamicOffsetCount: int,
+    pDynamicOffsets: Sequence[int] | None,
+) -> None: ...
+
+# vkCmdBindVertexBuffers
+# http://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindVertexBuffers
+def vkCmdDraw(
+    commandBuffer: "VkCommandBuffer",
+    vertexCount: int,
+    instanceCount: int,
+    firstVertex: int,
+    firstInstance: int,
+) -> None: ...
+
+#
+# VkFence
+#
+
+# VkFence
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkFence.html
+class VkFence(OpaqueResourceHandle): ...
+
+# VkFenceCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkFenceCreateFlags.html
 @dataclass
 class VkFenceCreateInfo:
     flags: int = 0
 
-def vkCreateSemaphore(
-    device: VkDevice, pCreateInfo: VkSemaphoreCreateInfo, pAllocator: Any | None
-) -> VkSemaphore: ...
-def vkDestroySemaphore(
-    device: VkDevice, semaphore: VkSemaphore, pAllocator: Any | None
-) -> None: ...
+# vkCreateFence
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateFence.html
 def vkCreateFence(
-    device: VkDevice, pCreateInfo: VkFenceCreateInfo, pAllocator: Any | None
+    device: VkDevice,
+    pCreateInfo: VkFenceCreateInfo,
+    pAllocator: Any | None,
 ) -> VkFence: ...
+
+# vkDestroyFence
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyFence.html
 def vkDestroyFence(
-    device: VkDevice, fence: VkFence, pAllocator: Any | None
+    device: VkDevice,
+    fence: VkFence,
+    pAllocator: Any | None,
 ) -> None: ...
+
+#
+# VkSemaphore
+#
+
+# VkSemaphore
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSemaphore.html
+class VkSemaphore(OpaqueResourceHandle): ...
+
+# VkSemaphoreCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSemaphoreCreateFlags.html
+@dataclass
+class VkSemaphoreCreateInfo:
+    flags: int = 0
+
+# vkCreateSemaphore
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateSemaphore.html
+def vkCreateSemaphore(
+    device: VkDevice,
+    pCreateInfo: VkSemaphoreCreateInfo,
+    pAllocator: Any | None,
+) -> VkSemaphore: ...
+
+# vkDestroySemaphore
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroySemaphore.html
+def vkDestroySemaphore(
+    device: VkDevice,
+    semaphore: VkSemaphore,
+    pAllocator: Any | None,
+) -> None: ...
+
+#
+# VkQueue
+#
+
+# VkQueue
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkQueue.html
+class VkQueue(OpaqueResourceHandle): ...
+
+# vkGetDeviceQueue
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetDeviceQueue.html
 def vkGetDeviceQueue(
     device: VkDevice, queueFamilyIndex: int, queueIndex: int
 ) -> VkQueue: ...
 
+# VkPipelineStageFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineStageFlagBits.html
 VkPipelineStageFlags: TypeAlias = VkFlags
 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: int = 0x00000001
 
+# VkSubmitInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSubmitInfo.html
 @dataclass
 class VkSubmitInfo:
     waitSemaphoreCount: int
@@ -1551,9 +1628,455 @@ class VkSubmitInfo:
     signalSemaphoreCount: int
     pSignalSemaphores: Sequence[VkSemaphore] | None
 
+# vkQueueSubmit
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit.html
 def vkQueueSubmit(
     queue: VkQueue,
     submitCount: int,
-    pSubmits: Sequence[VkSubmitInfo],
+    pSubmits: list[VkSubmitInfo],
     fence: VkFence | None,
 ) -> None: ...
+
+# vkWaitForFences
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkWaitForFences.html
+def vkWaitForFences(
+    device: VkDevice,
+    fenceCount: int,
+    pFences: list[VkFence],
+    waitAll: bool,
+    timeout: int,
+) -> None: ...
+
+#
+# VkShaderModule
+#
+
+# VkShaderModule
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderModule.html
+class VkShaderModule(OpaqueResourceHandle): ...
+
+# VkShaderModuleCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderModuleCreateFlags.html
+VkShaderModuleCreateFlags: TypeAlias = VkFlags
+VkShaderModuleCreateFlagBits: TypeAlias = int
+
+# VkShaderModuleCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderModuleCreateInfo
+@dataclass
+class VkShaderModuleCreateInfo:
+    flags: VkShaderModuleCreateFlags
+    codeSize: int
+    pCode: bytes
+
+# vkCreateShaderModule
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateShaderModule.html
+def vkCreateShaderModule(
+    device: VkDevice,
+    pCreateInfo: VkShaderModuleCreateInfo,
+    pAllocator: Any,
+) -> VkShaderModule:
+    """
+    vkCreateShaderModule creates a new shader module object.
+    """
+
+# vkDestroyShaderModule
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyShaderModule.html
+def vkDestroyShaderModule(
+    device: VkDevice,
+    shaderModule: VkShaderModule,
+    pAllocator: Any,
+) -> None:
+    """
+    vkDestroyShaderModule destroys a shader module object.
+    """
+
+#
+# VkPipeline
+#
+
+# VkPipeline
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipeline.html
+class VkPipeline(OpaqueResourceHandle): ...
+
+# VkPipelineCache
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineCache.html
+class VkPipelineCache(OpaqueResourceHandle): ...
+
+# VkPipelineLayout
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineLayout.html
+class VkPipelineLayout(OpaqueResourceHandle): ...
+
+# VkDescriptorSetLayout
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetLayout.html
+class VkDescriptorSetLayout(OpaqueResourceHandle): ...
+
+# VkDescriptorSet
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSet.html
+class VkDescriptorSet(OpaqueResourceHandle): ...
+
+# VkRenderPass
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderPass.html
+class VkRenderPass(OpaqueResourceHandle): ...
+
+# VkBlendFactor
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBlendFactor.html
+VkBlendFactor: TypeAlias = int
+VK_BLEND_FACTOR_ZERO: VkBlendFactor = 0
+VK_BLEND_FACTOR_ONE: VkBlendFactor = 1
+VK_BLEND_FACTOR_SRC_COLOR: VkBlendFactor = 2
+VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR: VkBlendFactor = 3
+VK_BLEND_FACTOR_DST_COLOR: VkBlendFactor = 4
+VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR: VkBlendFactor = 5
+VK_BLEND_FACTOR_SRC_ALPHA: VkBlendFactor = 6
+VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA: VkBlendFactor = 7
+VK_BLEND_FACTOR_DST_ALPHA: VkBlendFactor = 8
+VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA: VkBlendFactor = 9
+VK_BLEND_FACTOR_CONSTANT_COLOR: VkBlendFactor = 10
+VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR: VkBlendFactor = 11
+VK_BLEND_FACTOR_CONSTANT_ALPHA: VkBlendFactor = 12
+VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA: VkBlendFactor = 13
+VK_BLEND_FACTOR_SRC_ALPHA_SATURATE: VkBlendFactor = 14
+VK_BLEND_FACTOR_SRC1_COLOR: VkBlendFactor = 15
+VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR: VkBlendFactor = 16
+VK_BLEND_FACTOR_SRC1_ALPHA: VkBlendFactor = 17
+VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA: VkBlendFactor = 18
+
+# VkBlendOp
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBlendOp.html
+VkBlendOp: TypeAlias = int
+VK_BLEND_OP_ADD: VkBlendOp = 0
+VK_BLEND_OP_SUBTRACT: VkBlendOp = 1
+VK_BLEND_OP_REVERSE_SUBTRACT: VkBlendOp = 2
+VK_BLEND_OP_MIN: VkBlendOp = 3
+VK_BLEND_OP_MAX: VkBlendOp = 4
+
+# VkColorComponentFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkColorComponentFlagBits.html
+VkColorComponentFlags: TypeAlias = VkFlags
+VkColorComponentFlagBits: TypeAlias = int
+VK_COLOR_COMPONENT_R_BIT: VkColorComponentFlagBits = 0x00000001
+VK_COLOR_COMPONENT_G_BIT: VkColorComponentFlagBits = 0x00000002
+VK_COLOR_COMPONENT_B_BIT: VkColorComponentFlagBits = 0x00000004
+VK_COLOR_COMPONENT_A_BIT: VkColorComponentFlagBits = 0x00000008
+
+# VkCullModeFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCullModeFlagBits.html
+VkCullModeFlags: TypeAlias = VkFlags
+VkCullModeFlagBits: TypeAlias = int
+VK_CULL_MODE_NONE: int = 0
+VK_CULL_MODE_FRONT_BIT: int = 0x00000001
+VK_CULL_MODE_BACK_BIT: int = 0x00000002
+VK_CULL_MODE_FRONT_AND_BACK: int = 0x00000003
+
+# VkPipelineColorBlendAttachmentState
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineColorBlendAttachment
+@dataclass
+class VkPipelineColorBlendAttachmentState:
+    blendEnable: bool
+    srcColorBlendFactor: VkBlendFactor
+    dstColorBlendFactor: VkBlendFactor
+    colorBlendOp: VkBlendOp
+    srcAlphaBlendFactor: VkBlendFactor
+    dstAlphaBlendFactor: VkBlendFactor
+    alphaBlendOp: VkBlendOp
+    colorWriteMask: VkColorComponentFlags
+
+# VkPipelineCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineCreateFlagBits.html
+VkPipelineCreateFlags: TypeAlias = VkFlags
+VkPipelineCreateFlagBits: TypeAlias = int
+VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT: VkPipelineCreateFlagBits = 0x00000001
+VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT: VkPipelineCreateFlagBits = 0x00000002
+VK_PIPELINE_CREATE_DERIVATIVE_BIT: VkPipelineCreateFlagBits = 0x00000004
+
+# VkPipelineShaderStageCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineShaderStageCreateFlags.html
+VkPipelineShaderStageCreateFlags: TypeAlias = VkFlags
+VkPipelineShaderStageCreateFlagBits: TypeAlias = int
+VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT: VkPipelineShaderStageCreateFlagBits = 0x00000001
+VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT: VkPipelineShaderStageCreateFlagBits = 0x00000002
+
+# VkShaderStageFlagBits
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderStageFlagBits.html
+VkShaderStageFlags: TypeAlias = VkFlags
+VkShaderStageFlagBits: TypeAlias = int
+VK_SHADER_STAGE_VERTEX_BIT: VkShaderStageFlagBits = 0x00000001
+VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: VkShaderStageFlagBits = 0x00000002
+VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: VkShaderStageFlagBits = 0x00000004
+VK_SHADER_STAGE_GEOMETRY_BIT: VkShaderStageFlagBits = 0x00000008
+VK_SHADER_STAGE_FRAGMENT_BIT: VkShaderStageFlagBits = 0x00000010
+VK_SHADER_STAGE_COMPUTE_BIT: VkShaderStageFlagBits = 0x00000020
+VK_SHADER_STAGE_ALL_GRAPHICS: VkShaderStageFlagBits = 0x0000001F
+VK_SHADER_STAGE_ALL: VkShaderStageFlagBits = 0x7FFFFFFF
+
+# VkPrimitiveTopology
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPrimitiveTopology.html
+VkPrimitiveTopology: TypeAlias = int
+VK_PRIMITIVE_TOPOLOGY_POINT_LIST: VkPrimitiveTopology = 0
+VK_PRIMITIVE_TOPOLOGY_LINE_LIST: VkPrimitiveTopology = 1
+VK_PRIMITIVE_TOPOLOGY_LINE_STRIP: VkPrimitiveTopology = 2
+VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST: VkPrimitiveTopology = 3
+VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP: VkPrimitiveTopology = 4
+VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN: VkPrimitiveTopology = 5
+VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY: VkPrimitiveTopology = 6
+VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY: VkPrimitiveTopology = 7
+VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY: VkPrimitiveTopology = 8
+VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY: VkPrimitiveTopology = 9
+VK_PRIMITIVE_TOPOLOGY_PATCH_LIST: VkPrimitiveTopology = 10
+
+# VkPipelineBindPoint
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineBindPoint.html
+VkPipelineBindPoint: TypeAlias = int
+VK_PIPELINE_BIND_POINT_GRAPHICS: VkPipelineBindPoint = 0
+VK_PIPELINE_BIND_POINT_COMPUTE: VkPipelineBindPoint = 1
+
+# VkFrontFace
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkFrontFace.html
+VkFrontFace: TypeAlias = int
+VK_FRONT_FACE_COUNTER_CLOCKWISE: VkFrontFace = 0
+VK_FRONT_FACE_CLOCKWISE: VkFrontFace = 1
+
+# VkPolygonMode
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPolygonMode.html
+VkPolygonMode: TypeAlias = int
+VK_POLYGON_MODE_FILL: VkPolygonMode = 0
+VK_POLYGON_MODE_LINE: VkPolygonMode = 1
+VK_POLYGON_MODE_POINT: VkPolygonMode = 2
+
+# VkLogicOp
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkLogicOp.html
+VkLogicOp: TypeAlias = int
+VK_LOGIC_OP_CLEAR: VkLogicOp = 0
+VK_LOGIC_OP_AND: VkLogicOp = 1
+VK_LOGIC_OP_AND_REVERSE: VkLogicOp = 2
+VK_LOGIC_OP_COPY: VkLogicOp = 3
+VK_LOGIC_OP_AND_INVERTED: VkLogicOp = 4
+VK_LOGIC_OP_NO_OP: VkLogicOp = 5
+VK_LOGIC_OP_XOR: VkLogicOp = 6
+VK_LOGIC_OP_OR: VkLogicOp = 7
+VK_LOGIC_OP_NOR: VkLogicOp = 8
+VK_LOGIC_OP_EQUIVALENT: VkLogicOp = 9
+VK_LOGIC_OP_INVERT: VkLogicOp = 10
+VK_LOGIC_OP_OR_REVERSE: VkLogicOp = 11
+VK_LOGIC_OP_COPY_INVERTED: VkLogicOp = 12
+VK_LOGIC_OP_OR_INVERTED: VkLogicOp = 13
+VK_LOGIC_OP_NAND: VkLogicOp = 14
+VK_LOGIC_OP_SET: VkLogicOp = 15
+
+# VkDynamicState
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDynamicState.html
+VkDynamicState: TypeAlias = int
+VK_DYNAMIC_STATE_VIEWPORT: VkDynamicState = 0
+VK_DYNAMIC_STATE_SCISSOR: VkDynamicState = 1
+VK_DYNAMIC_STATE_LINE_WIDTH: VkDynamicState = 2
+VK_DYNAMIC_STATE_DEPTH_BIAS: VkDynamicState = 3
+VK_DYNAMIC_STATE_BLEND_CONSTANTS: VkDynamicState = 4
+VK_DYNAMIC_STATE_DEPTH_BOUNDS: VkDynamicState = 5
+VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK: VkDynamicState = 6
+VK_DYNAMIC_STATE_STENCIL_WRITE_MASK: VkDynamicState = 7
+VK_DYNAMIC_STATE_STENCIL_REFERENCE: VkDynamicState = 8
+
+# VkPipelineShaderStageCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineShaderStageCreate
+@dataclass
+class VkPipelineShaderStageCreateInfo:
+    flags: VkPipelineShaderStageCreateFlags
+    stage: VkShaderStageFlagBits
+    module: VkShaderModule
+    pName: str
+    pSpecializationInfo: Any | None
+
+# VkPipelineVertexInputStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineVertexInputStateCreateInfo.html
+@dataclass
+class VkPipelineVertexInputStateCreateInfo:
+    flags: int
+    vertexBindingDescriptionCount: int
+    pVertexBindingDescriptions: Any | None
+    vertexAttributeDescriptionCount: int
+    pVertexAttributeDescriptions: Any | None
+
+# VkPipelineInputAssemblyStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineInputAssemblyStateCreateInfo.html
+@dataclass
+class VkPipelineInputAssemblyStateCreateInfo:
+    flags: int
+    topology: VkPrimitiveTopology
+    primitiveRestartEnable: bool
+
+# VkPipelineTessellationStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineTessellationStateCreateInfo.html
+@dataclass
+class VkPipelineTessellationStateCreateInfo:
+    flags: int
+    patchControlPoints: int
+
+# VkPipelineViewportStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineViewportStateCreateInfo.html
+@dataclass
+class VkPipelineViewportStateCreateInfo:
+    flags: int
+    viewportCount: int
+    pViewports: Any | None
+    scissorCount: int
+    pScissors: Any | None
+
+# VkPipelineRasterizationStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineRasterizationStateCreateInfo.html
+@dataclass
+class VkPipelineRasterizationStateCreateInfo:
+    flags: int
+    depthClampEnable: bool
+    rasterizerDiscardEnable: bool
+    polygonMode: VkPolygonMode
+    cullMode: VkCullModeFlags
+    frontFace: VkFrontFace
+    depthBiasEnable: bool
+    depthBiasConstantFactor: float
+    depthBiasClamp: float
+    depthBiasSlopeFactor: float
+    lineWidth: float
+
+# VkPipelineMultisampleStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineMultisampleStateCreateInfo.html
+@dataclass
+class VkPipelineMultisampleStateCreateInfo:
+    flags: int
+    rasterizationSamples: VkSampleCountFlagBits
+    sampleShadingEnable: bool
+    minSampleShading: float
+    pSampleMask: Any | None
+    alphaToCoverageEnable: bool
+    alphaToOneEnable: bool
+
+# VkPipelineDepthStencilStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineDepthStencilStateCreateInfo.html
+@dataclass
+class VkPipelineDepthStencilStateCreateInfo:
+    flags: int
+    depthTestEnable: bool
+    depthWriteEnable: bool
+    depthCompareOp: VkCompareOp
+    depthBoundsTestEnable: bool
+    stencilTestEnable: bool
+    front: Any
+    back: Any
+    minDepthBounds: float
+    maxDepthBounds: float
+
+# VkPipelineColorBlendStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineColorBlendStateCreateInfo.html
+@dataclass
+class VkPipelineColorBlendStateCreateInfo:
+    flags: int
+    logicOpEnable: bool
+    logicOp: VkLogicOp
+    attachmentCount: int
+    pAttachments: list[VkPipelineColorBlendAttachmentState]
+    blendConstants: list[float]
+
+# VkPipelineDynamicStateCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineDynamicStateCreateInfo.html
+@dataclass
+class VkPipelineDynamicStateCreateInfo:
+    flags: int
+    dynamicStateCount: int
+    pDynamicStates: Sequence[VkDynamicState] | None
+
+# VkPipelineRenderingCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineRenderingCreateInfo.html
+@dataclass
+class VkPipelineRenderingCreateInfo:
+    viewMask: int = 0
+    colorAttachmentCount: int = 0
+    pColorAttachmentFormats: list[VkFormat] | None = None
+    depthAttachmentFormat: VkFormat | None = None
+    stencilAttachmentFormat: VkFormat | None = None
+
+# VkGraphicsPipelineCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkGraphicsPipelineCreateInfo.html
+@dataclass
+class VkGraphicsPipelineCreateInfo:
+    pNext: VkPipelineRenderingCreateInfo | None
+    flags: VkPipelineCreateFlags
+    stageCount: int
+    pStages: list[VkPipelineShaderStageCreateInfo]
+    pVertexInputState: VkPipelineVertexInputStateCreateInfo | None
+    pInputAssemblyState: VkPipelineInputAssemblyStateCreateInfo | None
+    pTessellationState: VkPipelineTessellationStateCreateInfo | None
+    pViewportState: VkPipelineViewportStateCreateInfo | None
+    pRasterizationState: VkPipelineRasterizationStateCreateInfo | None
+    pMultisampleState: VkPipelineMultisampleStateCreateInfo | None
+    pDepthStencilState: VkPipelineDepthStencilStateCreateInfo | None
+    pColorBlendState: VkPipelineColorBlendStateCreateInfo | None
+    pDynamicState: VkPipelineDynamicStateCreateInfo | None
+    layout: VkPipelineLayout
+    renderPass: VkRenderPass | None  # pass None for dynamic rendering
+    subpass: int
+    basePipelineHandle: VkPipeline | None
+    basePipelineIndex: int
+
+# vkCreateGraphicsPipelines
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateGraphicsPipelines.html
+def vkCreateGraphicsPipelines(
+    device: VkDevice,
+    pipelineCache: VkPipelineCache | None,
+    createInfoCount: int,
+    pCreateInfos: Sequence[VkGraphicsPipelineCreateInfo],
+    pAllocator: Any | None,
+) -> Sequence[VkPipeline]:
+    """
+    vkCreateGraphicsPipelines creates graphics pipeline objects.
+    """
+
+# vkDestroyPipeline
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyPipeline.html
+def vkDestroyPipeline(
+    device: VkDevice,
+    pipeline: VkPipeline,
+    pAllocator: Any | None,
+) -> None:
+    """
+    vkDestroyPipeline destroys a pipeline object.
+    """
+
+#
+# VkPipelineLayout
+#
+
+# VkPipelineLayoutCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineLayoutCreateFlags.html
+VkPipelineLayoutCreateFlags: TypeAlias = VkFlags
+VkPipelineLayoutCreateFlagBits: TypeAlias = int
+
+# VkPipelineLayoutCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineLayoutCreateInfo.html
+@dataclass
+class VkPipelineLayoutCreateInfo:
+    flags: VkPipelineLayoutCreateFlags
+    setLayoutCount: int
+    pSetLayouts: Sequence[VkDescriptorSetLayout] | None
+    pushConstantRangeCount: int
+    pPushConstantRanges: Any | None
+
+# vkCreatePipelineLayout
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreatePipelineLayout.html
+def vkCreatePipelineLayout(
+    device: VkDevice,
+    pCreateInfo: VkPipelineLayoutCreateInfo,
+    pAllocator: Any | None,
+) -> VkPipelineLayout:
+    """
+    vkCreatePipelineLayout creates a pipeline layout object.
+    """
+
+# vkDestroyPipelineLayout
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyPipelineLayout.html
+def vkDestroyPipelineLayout(
+    device: VkDevice,
+    pipelineLayout: VkPipelineLayout,
+    pAllocator: Any | None,
+) -> None:
+    """
+    vkDestroyPipelineLayout destroys a pipeline layout object.
+    """
