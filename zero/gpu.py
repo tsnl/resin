@@ -55,7 +55,9 @@ from .typed_vulkan import (
     VK_COMMAND_BUFFER_LEVEL_PRIMARY,
     VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     VK_COMPONENT_SWIZZLE_IDENTITY,
+    VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
+    VK_FENCE_CREATE_SIGNALED_BIT,
     VK_FORMAT_D32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
     VK_FORMAT_R32_SFLOAT,
@@ -82,6 +84,7 @@ from .typed_vulkan import (
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+    VK_PIPELINE_BIND_POINT_GRAPHICS,
     VK_PHYSICAL_DEVICE_TYPE_CPU,
     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
     VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
@@ -89,6 +92,7 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
     VK_POLYGON_MODE_FILL,
+    VK_PRESENT_MODE_FIFO_KHR,
     VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
     VK_QUEUE_COMPUTE_BIT,
     VK_QUEUE_GRAPHICS_BIT,
@@ -97,7 +101,17 @@ from .typed_vulkan import (
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_EXCLUSIVE,
-    VK_PIPELINE_BIND_POINT_GRAPHICS,
+    VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+    VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+    VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR,
+    VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
+    VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR,
+    VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR,
+    VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR,
+    VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR,
+    VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
+    VK_FORMAT_B8G8R8A8_UNORM,
+    VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
     VkApplicationInfo,
     VkBuffer,
     VkBufferCopy,
@@ -192,6 +206,7 @@ from .typed_vulkan import (
     vkCreateSemaphore,
     vkCreateShaderModule,
     VkShaderModule,
+    VkSwapchainCreateInfoKHR,
     vkDestroyBuffer,
     vkDestroyCommandPool,
     vkDestroyDevice,
@@ -215,6 +230,7 @@ from .typed_vulkan import (
     vkGetPhysicalDeviceQueueFamilyProperties,
     vkMapMemory,
     vkQueueSubmit,
+    VkSwapchainKHR,
     vkUnmapMemory,
     vkWaitForFences,
 )
@@ -253,12 +269,22 @@ class GpuContext(BaseContext["GpuContext"]):
         self._vk_extra_proc_tab = {}
 
         if enable_present_support:
-            self._vk_extra_proc_tab["vkGetPhysicalDeviceSurfaceSupportKHR"] = (
-                vkGetInstanceProcAddr(
-                    self._vk_instance,
-                    "vkGetPhysicalDeviceSurfaceSupportKHR",
-                )
-            )
+            self._load_extra_proc("vkGetPhysicalDeviceSurfaceSupportKHR")
+            self._load_extra_proc("vkCreateSwapchainKHR")
+            self._load_extra_proc("vkDestroySwapchainKHR")
+            self._load_extra_proc("vkGetSwapchainImagesKHR")
+            self._load_extra_proc("vkAcquireNextImageKHR")
+            self._load_extra_proc("vkQueuePresentKHR")
+
+    def _load_extra_proc(self, name: str):
+        proc = vkGetInstanceProcAddr(self._vk_instance, name)
+        if proc is None:
+            raise RuntimeError(f"Failed to load Vulkan instance procedure: {name!r}")
+        self._vk_extra_proc_tab[name] = proc
+        return proc
+
+    def ext_fn(self, name: str):
+        return self._vk_extra_proc_tab[name]
 
     @staticmethod
     def _help_create_instance(
@@ -356,21 +382,59 @@ class GpuContext(BaseContext["GpuContext"]):
         if hasattr(self, "_vk_instance"):
             vkDestroyInstance(self._vk_instance, pAllocator=None)
 
-    def get_physical_device_surface_support(
+    def vkGetPhysicalDeviceSurfaceSupportKHR(
         self,
         physical_device: VkPhysicalDevice,
         queue_family_index: int,
         surface: VkSurfaceKHR,
     ) -> bool:
-        proc = self._vk_extra_proc_tab.get("vkGetPhysicalDeviceSurfaceSupportKHR", None)
-        if proc is None:
-            assert not self.enable_present_support
-            return False
-        return proc(
-            physical_device,
-            queue_family_index,
-            surface,
+        return bool(
+            self.ext_fn("vkGetPhysicalDeviceSurfaceSupportKHR")(
+                physical_device, queue_family_index, surface
+            )
         )
+
+    def vkCreateSwapchainKHR(
+        self,
+        device: VkDevice,
+        pCreateInfo: VkSwapchainCreateInfoKHR,
+        pAllocator=None,
+    ) -> VkSwapchainKHR:
+        return self.ext_fn("vkCreateSwapchainKHR")(device, pCreateInfo, pAllocator)
+
+    def vkDestroySwapchainKHR(
+        self,
+        device: VkDevice,
+        swapchain: VkSwapchainKHR,
+        pAllocator=None,
+    ) -> None:
+        self.ext_fn("vkDestroySwapchainKHR")(device, swapchain, pAllocator)
+
+    def vkGetSwapchainImagesKHR(
+        self,
+        device: VkDevice,
+        swapchain: VkSwapchainKHR,
+    ) -> list[VkImage]:
+        return self.ext_fn("vkGetSwapchainImagesKHR")(device, swapchain)
+
+    def vkAcquireNextImageKHR(
+        self,
+        device: VkDevice,
+        swapchain: VkSwapchainKHR,
+        timeout: int,
+        semaphore: VkSemaphore | None,
+        fence: VkFence | None,
+    ) -> int:
+        return self.ext_fn("vkAcquireNextImageKHR")(
+            device, swapchain, timeout, semaphore, fence
+        )
+
+    def vkQueuePresentKHR(
+        self,
+        queue: VkQueue,
+        pPresentInfo,
+    ) -> int:
+        return self.ext_fn("vkQueuePresentKHR")(queue, pPresentInfo)
 
     @property
     def enable_debug_layer_support(self) -> bool:
@@ -553,7 +617,7 @@ class GpuPhysicalDevice(GpuResource):
 
             supports_present = False
             if surface is not None:
-                supports_present = self.context.get_physical_device_surface_support(
+                supports_present = self.context.vkGetPhysicalDeviceSurfaceSupportKHR(
                     self.vk_physical_device,
                     index,
                     surface,
@@ -1280,6 +1344,90 @@ class GpuDevice(GpuResource):
             pAllocator=None,
         )
         return GpuSemaphore(device=self, vk_semaphore=vk_semaphore)
+
+    def create_swapchain(
+        self,
+        *,
+        surface: VkSurfaceKHR,
+        width: int,
+        height: int,
+        vk_format: VkFormat = VK_FORMAT_B8G8R8A8_UNORM,
+        image_count: int = 2,
+    ) -> "GpuSwapchain":
+        vk_swapchain = self.context.vkCreateSwapchainKHR(
+            device=self.vk_device,
+            pCreateInfo=VkSwapchainCreateInfoKHR(
+                flags=0,
+                surface=surface,
+                minImageCount=image_count,
+                imageFormat=vk_format,
+                imageColorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+                imageExtent=VkExtent2D(width=width, height=height),
+                imageArrayLayers=1,
+                imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                imageSharingMode=VK_SHARING_MODE_EXCLUSIVE,
+                queueFamilyIndexCount=0,
+                pQueueFamilyIndices=None,
+                preTransform=VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+                compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                presentMode=VK_PRESENT_MODE_FIFO_KHR,
+                clipped=True,
+                oldSwapchain=None,
+            ),
+            pAllocator=None,
+        )
+        vk_images = self.context.vkGetSwapchainImagesKHR(self.vk_device, vk_swapchain)
+        vk_image_views = []
+        vk_fences = []
+        vk_semaphores = []
+        for vk_image in vk_images:
+            vk_image_view = vkCreateImageView(
+                device=self.vk_device,
+                pCreateInfo=VkImageViewCreateInfo(
+                    flags=0,
+                    image=vk_image,
+                    viewType=VK_IMAGE_TYPE_2D,
+                    format=vk_format,
+                    components=VkComponentMapping(
+                        r=VK_COMPONENT_SWIZZLE_IDENTITY,
+                        g=VK_COMPONENT_SWIZZLE_IDENTITY,
+                        b=VK_COMPONENT_SWIZZLE_IDENTITY,
+                        a=VK_COMPONENT_SWIZZLE_IDENTITY,
+                    ),
+                    subresourceRange=VkImageSubresourceRange(
+                        aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,
+                        baseMipLevel=0,
+                        levelCount=1,
+                        baseArrayLayer=0,
+                        layerCount=1,
+                    ),
+                ),
+                pAllocator=None,
+            )
+            vk_fence = vkCreateFence(
+                device=self.vk_device,
+                pCreateInfo=VkFenceCreateInfo(flags=VK_FENCE_CREATE_SIGNALED_BIT),
+                pAllocator=None,
+            )
+            vk_semaphore = vkCreateSemaphore(
+                device=self.vk_device,
+                pCreateInfo=VkSemaphoreCreateInfo(flags=0),
+                pAllocator=None,
+            )
+            vk_image_views.append(vk_image_view)
+            vk_fences.append(vk_fence)
+            vk_semaphores.append(vk_semaphore)
+        return GpuSwapchain(
+            device=self,
+            vk_swapchain=vk_swapchain,
+            vk_images=vk_images,
+            vk_image_views=vk_image_views,
+            vk_fences=vk_fences,
+            vk_semaphores=vk_semaphores,
+            vk_format=vk_format,
+            width=width,
+            height=height,
+        )
 
     def _allocate_memory(
         self,
@@ -2052,4 +2200,52 @@ class GpuRenderPassCommandEncoder(GpuResource):
             instanceCount=instance_count,
             firstVertex=first_vertex,
             firstInstance=first_instance,
+        )
+
+
+#
+# GpuSwapchain
+#
+
+
+class GpuSwapchain(GpuResource):
+    device: GpuDevice
+    vk_swapchain: VkSwapchainKHR
+    vk_images: list[VkImage]
+    vk_image_views: list[VkImageView]
+    vk_format: VkFormat
+    vk_fences: list[VkFence]
+    vk_semaphores: list[VkSemaphore]
+    width: int
+    height: int
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_swapchain: VkSwapchainKHR,
+        vk_images: list[VkImage],
+        vk_image_views: list[VkImageView],
+        vk_format: VkFormat,
+        vk_fences: list[VkFence],
+        vk_semaphores: list[VkSemaphore],
+        width: int,
+        height: int,
+    ):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_swapchain = vk_swapchain
+        self.vk_images = vk_images
+        self.vk_image_views = vk_image_views
+        self.vk_format = vk_format
+        self.vk_fences = vk_fences
+        self.vk_semaphores = vk_semaphores
+        self.width = width
+        self.height = height
+
+    def _on_dispose(self) -> None:
+        self.context.vkDestroySwapchainKHR(
+            device=self.device.vk_device,
+            swapchain=self.vk_swapchain,
+            pAllocator=None,
         )

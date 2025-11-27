@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Sequence, TypeAlias
+from typing import Any, Callable, List, Optional, list, TypeAlias
 
 import cffi
 
@@ -106,9 +106,9 @@ class VkApplicationInfo:
 class VkInstanceCreateInfo:
     pApplicationInfo: VkApplicationInfo | None
     enabledLayerCount: int = 0
-    ppEnabledLayerNames: Sequence[str] = ()
+    ppEnabledLayerNames: list[str] = ()
     enabledExtensionCount: int = 0
-    ppEnabledExtensionNames: Sequence[str] = ()
+    ppEnabledExtensionNames: list[str] = ()
     flags: int = 0
 
 # vkCreateInstance
@@ -437,7 +437,7 @@ class VkQueueFamilyProperties:
 class VkDeviceQueueCreateInfo:
     queueFamilyIndex: int
     queueCount: int
-    pQueuePriorities: Sequence[float] | None = None
+    pQueuePriorities: list[float] | None = None
 
 #
 # VkDevice
@@ -458,10 +458,10 @@ class VkDeviceCreateInfo:
     pNext: VkPhysicalDeviceDynamicRenderingFeatures | None = None
     flags: VkDeviceCreateFlags = 0
     queueCreateInfoCount: int = 0
-    pQueueCreateInfos: Sequence[Any] = ()
+    pQueueCreateInfos: list[Any] = ()
     enabledExtensionCount: int = 0
-    ppEnabledExtensionNames: Sequence[str] = ()
-    pEnabledFeatures: Sequence[Any] = ()
+    ppEnabledExtensionNames: list[str] = ()
+    pEnabledFeatures: list[Any] = ()
 
 # vkCreateDevice
 # https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateDevice.html
@@ -828,7 +828,7 @@ class VkImageCreateInfo:
     usage: VkImageUsageFlags
     sharingMode: VkSharingMode
     queueFamilyIndexCount: int
-    pQueueFamilyIndices: Sequence[int] | None
+    pQueueFamilyIndices: list[int] | None
     initialLayout: VkImageLayout
 
 # vkCreateImage
@@ -1096,9 +1096,9 @@ VK_ATTACHMENT_STORE_OP_DONT_CARE: VkAttachmentStoreOp = 1
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkClearColorValue.html
 @dataclass
 class VkClearColorValue:
-    float32: Sequence[float] = (0.0, 0.0, 0.0, 0.0)
-    int32: Sequence[int] = (0, 0, 0, 0)
-    uint32: Sequence[int] = (0, 0, 0, 0)
+    float32: list[float] = (0.0, 0.0, 0.0, 0.0)
+    int32: list[int] = (0, 0, 0, 0)
+    uint32: list[int] = (0, 0, 0, 0)
 
 # VkClearDepthStencilValue
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkClearDepthStencilValue.html
@@ -1166,7 +1166,7 @@ class VkBufferCreateInfo:
     usage: VkBufferUsageFlags
     sharingMode: VkSharingMode
     queueFamilyIndexCount: int
-    pQueueFamilyIndices: Sequence[int] | None
+    pQueueFamilyIndices: list[int] | None
 
 # vkCreateBuffer
 # https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateBuffer.html
@@ -1334,7 +1334,7 @@ class VkCommandBufferAllocateInfo:
 def vkAllocateCommandBuffers(
     device: VkDevice,
     pAllocateInfo: VkCommandBufferAllocateInfo,
-) -> Sequence[VkCommandBuffer]:
+) -> list[VkCommandBuffer]:
     """
     vkAllocateCommandBuffers allocates command buffers from a command pool.
     """
@@ -1345,7 +1345,7 @@ def vkFreeCommandBuffers(
     device: VkDevice,
     commandPool: VkCommandPool,
     commandBufferCount: int,
-    pCommandBuffers: Sequence[VkCommandBuffer],
+    pCommandBuffers: list[VkCommandBuffer],
 ) -> None:
     """
     vkFreeCommandBuffers frees command buffers back to the command pool.
@@ -1404,7 +1404,7 @@ def vkCmdCopyBuffer(
     srcBuffer: VkBuffer,
     dstBuffer: VkBuffer,
     regionCount: int,
-    pRegions: Sequence[VkBufferCopy],
+    pRegions: list[VkBufferCopy],
 ) -> None:
     """
     vkCmdCopyBuffer copies data between buffer regions.
@@ -1427,7 +1427,7 @@ def vkCmdCopyImage(
     dstImage: VkImage,
     dstImageLayout: VkImageLayout,
     regionCount: int,
-    pRegions: Sequence[VkImageCopy],
+    pRegions: list[VkImageCopy],
 ) -> None:
     """
     vkCmdCopyImage copies data between image regions.
@@ -1459,7 +1459,7 @@ def vkCmdCopyBufferToImage(
     dstImage: VkImage,
     dstImageLayout: VkImageLayout,
     regionCount: int,
-    pRegions: Sequence[VkBufferImageCopy],
+    pRegions: list[VkBufferImageCopy],
 ) -> None:
     """
     vkCmdCopyBufferToImage copies data from a buffer into an image.
@@ -1473,7 +1473,7 @@ def vkCmdCopyImageToBuffer(
     srcImageLayout: VkImageLayout,
     dstBuffer: VkBuffer,
     regionCount: int,
-    pRegions: Sequence[VkBufferImageCopy],
+    pRegions: list[VkBufferImageCopy],
 ) -> None:
     """
     vkCmdCopyImageToBuffer copies data from an image into a buffer.
@@ -1522,9 +1522,9 @@ def vkCmdBindDescriptorSets(
     layout: VkPipelineLayout,
     firstSet: int,
     descriptorSetCount: int,
-    pDescriptorSets: Sequence[VkDescriptorSet],
+    pDescriptorSets: list[VkDescriptorSet],
     dynamicOffsetCount: int,
-    pDynamicOffsets: Sequence[int] | None,
+    pDynamicOffsets: list[int] | None,
 ) -> None: ...
 
 # vkCmdBindVertexBuffers
@@ -1621,12 +1621,12 @@ VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: int = 0x00000001
 @dataclass
 class VkSubmitInfo:
     waitSemaphoreCount: int
-    pWaitSemaphores: Sequence[VkSemaphore] | None
-    pWaitDstStageMask: Sequence[VkPipelineStageFlags] | None
+    pWaitSemaphores: list[VkSemaphore] | None
+    pWaitDstStageMask: list[VkPipelineStageFlags] | None
     commandBufferCount: int
-    pCommandBuffers: Sequence[VkCommandBuffer] | None
+    pCommandBuffers: list[VkCommandBuffer] | None
     signalSemaphoreCount: int
-    pSignalSemaphores: Sequence[VkSemaphore] | None
+    pSignalSemaphores: list[VkSemaphore] | None
 
 # vkQueueSubmit
 # https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit.html
@@ -1981,7 +1981,7 @@ class VkPipelineColorBlendStateCreateInfo:
 class VkPipelineDynamicStateCreateInfo:
     flags: int
     dynamicStateCount: int
-    pDynamicStates: Sequence[VkDynamicState] | None
+    pDynamicStates: list[VkDynamicState] | None
 
 # VkPipelineRenderingCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineRenderingCreateInfo.html
@@ -2022,9 +2022,9 @@ def vkCreateGraphicsPipelines(
     device: VkDevice,
     pipelineCache: VkPipelineCache | None,
     createInfoCount: int,
-    pCreateInfos: Sequence[VkGraphicsPipelineCreateInfo],
+    pCreateInfos: list[VkGraphicsPipelineCreateInfo],
     pAllocator: Any | None,
-) -> Sequence[VkPipeline]:
+) -> list[VkPipeline]:
     """
     vkCreateGraphicsPipelines creates graphics pipeline objects.
     """
@@ -2055,7 +2055,7 @@ VkPipelineLayoutCreateFlagBits: TypeAlias = int
 class VkPipelineLayoutCreateInfo:
     flags: VkPipelineLayoutCreateFlags
     setLayoutCount: int
-    pSetLayouts: Sequence[VkDescriptorSetLayout] | None
+    pSetLayouts: list[VkDescriptorSetLayout] | None
     pushConstantRangeCount: int
     pPushConstantRanges: Any | None
 
@@ -2079,4 +2079,140 @@ def vkDestroyPipelineLayout(
 ) -> None:
     """
     vkDestroyPipelineLayout destroys a pipeline layout object.
+    """
+
+#
+# VkSwapchainKHR
+#
+
+# VkSwapchainKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainKHR.html
+class VkSwapchainKHR(OpaqueResourceHandle): ...
+
+# VkSwapchainCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainCreateFlags.html
+VkSwapchainCreateFlags: TypeAlias = VkFlags
+VkSwapchainCreateFlagBits: TypeAlias = int
+
+# VkColorSpaceKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkColorSpaceKHR.html
+VkColorSpaceKHR: TypeAlias = int
+VK_COLOR_SPACE_SRGB_NONLINEAR_KHR: VkColorSpaceKHR = 0
+
+# VkSurfaceTransformFlagBitsKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSurfaceTransformFlagBitsKHR.html
+VkSurfaceTransformFlagBitsKHR: TypeAlias = int
+VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000001
+VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000002
+VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000004
+VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000008
+VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR: VkSurfaceTransformFlagBitsKHR = (
+    0x00000010
+)
+VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000020
+VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000040
+VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000080
+VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000100
+
+# VkCompositeAlphaFlagBitsKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkCompositeAlphaFlagBitsKHR.html
+VkCompositeAlphaFlagBitsKHR: TypeAlias = int
+VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000001
+VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000002
+VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000004
+VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000008
+
+# VkPresentModeKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html
+VkPresentModeKHR: TypeAlias = int
+VK_PRESENT_MODE_IMMEDIATE_KHR: VkPresentModeKHR = 0
+VK_PRESENT_MODE_MAILBOX_KHR: VkPresentModeKHR = 1
+VK_PRESENT_MODE_FIFO_KHR: VkPresentModeKHR = 2
+VK_PRESENT_MODE_FIFO_RELAXED_KHR: VkPresentModeKHR = 3
+
+# VkSwapchainCreateInfoKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainCreateInfo
+@dataclass
+class VkSwapchainCreateInfoKHR:
+    flags: VkSwapchainCreateFlags
+    surface: VkSurfaceKHR
+    minImageCount: int
+    imageFormat: VkFormat
+    imageColorSpace: VkColorSpaceKHR
+    imageExtent: VkExtent2D
+    imageArrayLayers: int
+    imageUsage: VkImageUsageFlags
+    imageSharingMode: VkSharingMode
+    queueFamilyIndexCount: int
+    pQueueFamilyIndices: list[int] | None
+    preTransform: VkSurfaceTransformFlagBitsKHR
+    compositeAlpha: VkCompositeAlphaFlagBitsKHR
+    presentMode: VkPresentModeKHR
+    clipped: bool
+    oldSwapchain: VkSwapchainKHR | None
+
+# vkCreateSwapchainKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateSwapchainKHR.html
+def vkCreateSwapchainKHR(
+    device: VkDevice,
+    pCreateInfo: VkSwapchainCreateInfoKHR,
+    pAllocator: Any | None,
+) -> VkSwapchainKHR:
+    """
+    vkCreateSwapchainKHR creates a new swapchain object.
+    """
+
+# vkDestroySwapchainKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroySwapchainKHR.html
+def vkDestroySwapchainKHR(
+    device: VkDevice,
+    swapchain: VkSwapchainKHR,
+    pAllocator: Any | None,
+) -> None:
+    """
+    vkDestroySwapchainKHR destroys a swapchain object.
+    """
+
+# vkGetSwapchainImagesKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetSwapchainImagesKHR.html
+def vkGetSwapchainImagesKHR(
+    device: VkDevice,
+    swapchain: VkSwapchainKHR,
+) -> list[VkImage]:
+    """
+    vkGetSwapchainImagesKHR retrieves the array of presentable images associated with a swapchain.
+    """
+
+# vkAcquireNextImageKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkAcquireNextImageKHR.html
+def vkAcquireNextImageKHR(
+    device: VkDevice,
+    swapchain: VkSwapchainKHR,
+    timeout: int,
+    semaphore: VkSemaphore | None,
+    fence: VkFence | None,
+) -> int:
+    """
+    vkAcquireNextImageKHR acquires the next available presentable image.
+    """
+
+# VkPresentInfoKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentInfoKHR.html
+@dataclass
+class VkPresentInfoKHR:
+    waitSemaphoreCount: int
+    pWaitSemaphores: list[VkSemaphore] | None
+    swapchainCount: int
+    pSwapchains: list[VkSwapchainKHR]
+    pImageIndices: list[int]
+    pResults: list[int] | None
+
+# vkQueuePresentKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkQueuePresentKHR.html
+def vkQueuePresentKHR(
+    queue: VkQueue,
+    pPresentInfo: VkPresentInfoKHR,
+):
+    """
+    vkQueuePresentKHR queues an image for presentation.
     """
