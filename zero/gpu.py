@@ -2028,8 +2028,9 @@ class GpuMemory(GpuResource):
             self._mapped_view = None
 
     def write(self, *, data: torch.Tensor):
+        src_bytes = data.numpy().tobytes()
         with self.map() as host_mem:
-            host_mem[:] = memoryview(data.numpy())
+            host_mem[: len(src_bytes)] = src_bytes
 
     def read(self, *, dtype: torch.dtype) -> torch.Tensor:
         with self.map() as host_mem:
@@ -2240,7 +2241,7 @@ class GpuBufferMeta:
 
     @property
     def element_size(self) -> int:
-        return {torch.uint8: 1, torch.float32: 4}[self.element_dtype]
+        return {torch.uint8: 1, torch.uint32: 4, torch.float32: 4}[self.element_dtype]
 
     @staticmethod
     def from_tensor(tensor: torch.Tensor) -> GpuBufferMeta:
@@ -2612,16 +2613,7 @@ class GpuCommandEncoder(GpuResource):
         elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
             src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
 
-        dst_access_mask = 0
-        if new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            dst_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-        elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            dst_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
-        elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            dst_access_mask = VK_ACCESS_TRANSFER_READ_BIT
-        elif new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-            dst_access_mask = VK_ACCESS_SHADER_READ_BIT
-
+        # Determine stage mask based on queue type
         stage_mask = 0
         if self.submit_queue_type == "graphics":
             stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
@@ -2634,6 +2626,23 @@ class GpuCommandEncoder(GpuResource):
                 f"Unsupported queue type for image layout transition: "
                 f"{self.submit_queue_type!r}"
             )
+
+        # Determine dst access mask based on new layout
+        # Note: On transfer queues, we can only use transfer-related access flags
+        dst_access_mask = 0
+        if new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            dst_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            dst_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            dst_access_mask = VK_ACCESS_TRANSFER_READ_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            # On transfer queue, we can't use VK_ACCESS_SHADER_READ_BIT
+            # Use VK_ACCESS_NONE (0) - the sync will happen via semaphore/fence
+            if self.submit_queue_type == "transfer":
+                dst_access_mask = 0
+            else:
+                dst_access_mask = VK_ACCESS_SHADER_READ_BIT
 
         vkCmdPipelineBarrier(
             commandBuffer=self.vk_command_buffer,
