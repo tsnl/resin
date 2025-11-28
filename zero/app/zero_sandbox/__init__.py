@@ -154,12 +154,24 @@ def main_windowed(args: argparse.Namespace):
                 wait_semaphores=present_target.render_wait_semaphores,
                 signal_semaphores=present_target.render_done_semaphores,
             )
+
+            cmd.transition_image_layout(
+                image=present_target.swapchain_image,
+                usage="color-attachment",
+            )
+
             with cmd.render(
                 color_attachment=present_target.swapchain_image,
                 clear_on_load=True,
             ) as render_pass:
                 render_pass.bind_pipeline(pipeline=pipeline)
                 render_pass.draw(vertex_count=3, instance_count=1)
+
+            cmd.transition_image_layout(
+                image=present_target.swapchain_image,
+                usage="present-src",
+            )
+
             cmd.submit()
 
 

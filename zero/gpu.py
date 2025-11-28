@@ -34,6 +34,9 @@ import glfw
 from .core import BaseContext, BaseContextResource
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
+    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    VK_QUEUE_FAMILY_IGNORED,
     VK_API_VERSION_1_3,
     VK_API_VERSION_1_4,
     VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -89,6 +92,7 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_OTHER,
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
     VK_POLYGON_MODE_FILL,
     VK_PRESENT_MODE_FIFO_KHR,
     VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -110,6 +114,8 @@ from .typed_vulkan import (
     VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
     VK_FORMAT_B8G8R8A8_UNORM,
     VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+    vkCmdPipelineBarrier,
+    VkImageMemoryBarrier,
     VkApplicationInfo,
     VkBuffer,
     VkBufferCopy,
@@ -2178,9 +2184,55 @@ class GpuCommandEncoder(GpuResource):
 
         vkCmdBeginRendering(self.vk_command_buffer, pRenderingInfo=info)
 
-        yield GpuRenderPassCommandEncoder(parent=self, device=self.device)
+        yield GpuRenderPassCommandEncoder(command_encoder=self, device=self.device)
 
         vkCmdEndRendering(self.vk_command_buffer)
+
+    def transition_image_layout(
+        self,
+        *,
+        image: GpuImage,
+        usage: Literal["present-src", "color-attachment"],
+    ):
+        vkCmdPipelineBarrier(
+            commandBuffer=self.vk_command_buffer,
+            srcStageMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            dstStageMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            dependencyFlags=0,
+            memoryBarrierCount=0,
+            pMemoryBarriers=None,
+            bufferMemoryBarrierCount=0,
+            pBufferMemoryBarriers=None,
+            imageMemoryBarrierCount=1,
+            pImageMemoryBarriers=[
+                VkImageMemoryBarrier(
+                    srcAccessMask=0,
+                    dstAccessMask=(
+                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                        if usage == "color-attachment"
+                        else 0
+                    ),
+                    oldLayout=VK_IMAGE_LAYOUT_UNDEFINED,
+                    newLayout=(
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                        if usage == "color-attachment"
+                        else VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+                        if usage == "present-src"
+                        else VK_IMAGE_LAYOUT_UNDEFINED
+                    ),
+                    srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
+                    dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
+                    image=image.vk_image,
+                    subresourceRange=VkImageSubresourceRange(
+                        aspectMask=image.aspect_mask,
+                        baseMipLevel=0,
+                        levelCount=1,
+                        baseArrayLayer=0,
+                        layerCount=1,
+                    ),
+                )
+            ],
+        )
 
     def submit(self) -> GpuFence:
         vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
@@ -2307,19 +2359,19 @@ class GpuPipeline(GpuResource):
 
 class GpuRenderPassCommandEncoder(GpuResource):
     device: GpuDevice
-    parent: GpuCommandEncoder
+    command_encoder: GpuCommandEncoder
 
-    def __init__(self, *, parent: GpuCommandEncoder, device: GpuDevice):
-        super().__init__(parent=device)
+    def __init__(self, *, device: GpuDevice, command_encoder: GpuCommandEncoder):
+        super().__init__(parent=command_encoder)
         self.device = device
-        self.parent = parent
+        self.command_encoder = command_encoder
 
     def _on_dispose(self) -> None:
         pass
 
     def bind_pipeline(self, *, pipeline: GpuPipeline) -> None:
         vkCmdBindPipeline(
-            commandBuffer=self.parent.vk_command_buffer,
+            commandBuffer=self.command_encoder.vk_command_buffer,
             pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipeline=pipeline.vk_pipeline,
         )
@@ -2333,7 +2385,7 @@ class GpuRenderPassCommandEncoder(GpuResource):
         dynamic_offsets: list[int] | None = None,
     ) -> None:
         vkCmdBindDescriptorSets(
-            commandBuffer=self.parent.vk_command_buffer,
+            commandBuffer=self.command_encoder.vk_command_buffer,
             pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS,
             layout=layout.vk_pipeline_layout,
             firstSet=first_set,
@@ -2352,7 +2404,7 @@ class GpuRenderPassCommandEncoder(GpuResource):
         first_instance: int = 0,
     ) -> None:
         vkCmdDraw(
-            commandBuffer=self.parent.vk_command_buffer,
+            commandBuffer=self.command_encoder.vk_command_buffer,
             vertexCount=vertex_count,
             instanceCount=instance_count,
             firstVertex=first_vertex,

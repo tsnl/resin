@@ -439,6 +439,8 @@ VK_QUEUE_GRAPHICS_BIT: VkQueueFlagBits = 0x00000001
 VK_QUEUE_COMPUTE_BIT: VkQueueFlagBits = 0x00000002
 VK_QUEUE_TRANSFER_BIT: VkQueueFlagBits = 0x00000004
 
+VK_QUEUE_FAMILY_IGNORED: int = -1
+
 # VkQueueFamilyProperties
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkQueueFamilyProperties.html
 @dataclass
@@ -1503,6 +1505,83 @@ def vkCmdCopyImageToBuffer(
     vkCmdCopyImageToBuffer copies data from an image into a buffer.
     """
 
+# VkDependencyFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDependencyFlagBits.html
+VkDependencyFlags: TypeAlias = VkFlags
+VkDependencyFlagBits: TypeAlias = int
+
+# VkAccessFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkAccessFlagBits.html
+VkAccessFlags: TypeAlias = VkFlags
+VkAccessFlagBits: TypeAlias = int
+VK_ACCESS_INDIRECT_COMMAND_READ_BIT: VkAccessFlagBits = 0x00000001
+VK_ACCESS_INDEX_READ_BIT: VkAccessFlagBits = 0x00000002
+VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT: VkAccessFlagBits = 0x00000004
+VK_ACCESS_UNIFORM_READ_BIT: VkAccessFlagBits = 0x00000008
+VK_ACCESS_INPUT_ATTACHMENT_READ_BIT: VkAccessFlagBits = 0x00000010
+VK_ACCESS_SHADER_READ_BIT: VkAccessFlagBits = 0x00000020
+VK_ACCESS_SHADER_WRITE_BIT: VkAccessFlagBits = 0x00000040
+VK_ACCESS_COLOR_ATTACHMENT_READ_BIT: VkAccessFlagBits = 0x00000080
+VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT: VkAccessFlagBits = 0x00000100
+VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT: VkAccessFlagBits = 0x00000200
+VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT: VkAccessFlagBits = 0x00000400
+VK_ACCESS_TRANSFER_READ_BIT: VkAccessFlagBits = 0x00000800
+VK_ACCESS_TRANSFER_WRITE_BIT: VkAccessFlagBits = 0x00001000
+VK_ACCESS_HOST_READ_BIT: VkAccessFlagBits = 0x00002000
+VK_ACCESS_HOST_WRITE_BIT: VkAccessFlagBits = 0x00004000
+VK_ACCESS_MEMORY_READ_BIT: VkAccessFlagBits = 0x00008000
+VK_ACCESS_MEMORY_WRITE_BIT: VkAccessFlagBits = 0x00010000
+
+# VkMemoryBarrier
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryBarrier.html
+@dataclass
+class VkMemoryBarrier:
+    srcAccessMask: VkAccessFlags
+    dstAccessMask: VkAccessFlags
+
+# VkBufferMemoryBarrier
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferMemoryBarrier.html
+@dataclass
+class VkBufferMemoryBarrier:
+    srcAccessMask: VkAccessFlags
+    dstAccessMask: VkAccessFlags
+    srcQueueFamilyIndex: int
+    dstQueueFamilyIndex: int
+    buffer: VkBuffer
+    offset: VkDeviceSize
+    size: VkDeviceSize
+
+# VkImageMemoryBarrier
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkImageMemoryBarrier.html
+@dataclass
+class VkImageMemoryBarrier:
+    srcAccessMask: VkAccessFlags
+    dstAccessMask: VkAccessFlags
+    oldLayout: VkImageLayout
+    newLayout: VkImageLayout
+    srcQueueFamilyIndex: int
+    dstQueueFamilyIndex: int
+    image: VkImage
+    subresourceRange: VkImageSubresourceRange
+
+# vkCmdPipelineBarrier
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPipelineBarrier.html
+def vkCmdPipelineBarrier(
+    commandBuffer: VkCommandBuffer,
+    srcStageMask: VkPipelineStageFlags,
+    dstStageMask: VkPipelineStageFlags,
+    dependencyFlags: VkDependencyFlags,
+    memoryBarrierCount: int,
+    pMemoryBarriers: list[VkMemoryBarrier] | None,
+    bufferMemoryBarrierCount: int,
+    pBufferMemoryBarriers: list[VkBufferMemoryBarrier] | None,
+    imageMemoryBarrierCount: int,
+    pImageMemoryBarriers: list[VkImageMemoryBarrier] | None,
+) -> None:
+    """
+    vkCmdPipelineBarrier inserts a pipeline barrier into the command buffer.
+    """
+
 # Pipeline and drawing commands
 #
 
@@ -1645,6 +1724,7 @@ def vkGetDeviceQueue(
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineStageFlagBits.html
 VkPipelineStageFlags: TypeAlias = VkFlags
 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: int = 0x00000001
+VK_PIPELINE_STAGE_ALL_COMMANDS_BIT: int = 0xFFFFFFFF
 
 # VkSubmitInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSubmitInfo.html
