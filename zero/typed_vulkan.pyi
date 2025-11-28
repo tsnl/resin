@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, list, TypeAlias
+from typing import Any, Callable, List, Optional, TypeAlias, list
 
 import cffi
 
@@ -829,15 +829,16 @@ VK_SHARING_MODE_CONCURRENT: VkSharingMode = 1
 # VkImageLayout
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageLayout.html
 VkImageLayout: TypeAlias = int
-VK_IMAGE_LAYOUT_UNDEFINED: VkImageLayout = 0
-VK_IMAGE_LAYOUT_GENERAL: VkImageLayout = 1
-VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: VkImageLayout = 2
-VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL: VkImageLayout = 3
-VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL: VkImageLayout = 4
-VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: VkImageLayout = 5
-VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: VkImageLayout = 6
-VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: VkImageLayout = 7
-VK_IMAGE_LAYOUT_PREINITIALIZED: VkImageLayout = 8
+VK_IMAGE_LAYOUT_UNDEFINED: VkImageLayout = 0x0
+VK_IMAGE_LAYOUT_GENERAL: VkImageLayout = 0x1
+VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: VkImageLayout = 0x2
+VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL: VkImageLayout = 0x3
+VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL: VkImageLayout = 0x4
+VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: VkImageLayout = 0x5
+VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: VkImageLayout = 0x6
+VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: VkImageLayout = 0x7
+VK_IMAGE_LAYOUT_PREINITIALIZED: VkImageLayout = 0x8
+VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: VkImageLayout = 0x1000001002
 
 # VkImageCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageCreateInfo.html

@@ -12,6 +12,7 @@ __all__ = [
     "BUNDLED_DATA_PATH",
 ]
 
+from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuContext,
     GpuDevice,
@@ -21,5 +22,4 @@ from .gpu import (
     GpuPipeline,
     GpuShader,
 )
-from .window import WindowContext, Window
-from .bundled_data import BUNDLED_DATA_PATH
+from .window import Window, WindowContext
