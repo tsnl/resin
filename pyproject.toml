@@ -31,7 +31,7 @@ python_functions = ["test_*"]
 [tool.uv.build-backend]
 module-name = "zero"
 module-root = ""
-package-data = { "zero" = ["data/**/*.spv"] }
+package-data = { "zero" = ["bundled_data/**/*"] }
 
 [tool.nuitka]
 # ...

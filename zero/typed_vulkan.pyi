@@ -156,6 +156,23 @@ def vkGetPhysicalDeviceSurfaceSupportKHR(
     supports presentation to a given surface.
     """
 
+# VkSurfaceFormatKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkSurfaceFormatKHR.html
+@dataclass
+class VkSurfaceFormatKHR:
+    format: VkFormat
+    colorSpace: VkColorSpaceKHR
+
+# vkGetPhysicalDeviceSurfaceFormatsKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceFormatsKHR.html
+def vkGetPhysicalDeviceSurfaceFormatsKHR(
+    physicalDevice: VkPhysicalDevice,
+    surface: VkSurfaceKHR,
+) -> list[VkSurfaceFormatKHR]:
+    """
+    vkGetPhysicalDeviceSurfaceFormatsKHR queries the supported surface formats for a given physical device and surface.
+    """
+
 #
 # VkPhysicalDevice
 #
@@ -1651,6 +1668,14 @@ def vkWaitForFences(
     pFences: list[VkFence],
     waitAll: bool,
     timeout: int,
+) -> None: ...
+
+# vkResetFences
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkResetFences.html
+def vkResetFences(
+    device: VkDevice,
+    fenceCount: int,
+    pFences: list[VkFence],
 ) -> None: ...
 
 #

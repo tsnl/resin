@@ -255,6 +255,8 @@ __all__ = [
     "VkSurfaceFormatKHR",
     "vkUnmapMemory",
     "vkWaitForFences",
+    "VkPresentInfoKHR",
+    "vkResetFences",
     "vk_api_version_str",
     "vk_decompose_api_version",
 ]
@@ -473,6 +475,8 @@ from vulkan import (
     vkResetCommandBuffer,
     vkUnmapMemory,
     vkWaitForFences,
+    VkPresentInfoKHR,
+    vkResetFences,
     VkSwapchainCreateInfoKHR,
 )
 
@@ -780,4 +784,3 @@ VK_FORMAT_ASTC_12x12_SRGB_BLOCK: VkFormat = 184
 VkColorComponentFlags: TypeAlias = int
 
 VkColorSpaceKHR: TypeAlias = int
-VK_COLOR_SPACE_SRGB_NONLINEAR_KHR: VkColorSpaceKHR = 0

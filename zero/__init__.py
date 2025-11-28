@@ -9,6 +9,7 @@ __all__ = [
     "GpuImageMeta",
     "WindowContext",
     "Window",
+    "BUNDLED_DATA_PATH",
 ]
 
 from .gpu import (
@@ -21,3 +22,4 @@ from .gpu import (
     GpuShader,
 )
 from .window import WindowContext, Window
+from .bundled_data import BUNDLED_DATA_PATH
