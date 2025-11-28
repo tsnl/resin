@@ -172,7 +172,7 @@ def main_windowed(args: argparse.Namespace):
                 usage="present-src",
             )
 
-            cmd.submit().wait()
+            cmd.submit()
 
 
 def print_gpu_debug_info(
