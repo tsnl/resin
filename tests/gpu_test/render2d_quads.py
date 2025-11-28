@@ -24,11 +24,11 @@ from zero.gpu import (
     GpuImage,
     GpuImageMeta,
 )
-from zero.render2d import (
-    R2dQuadBatch,
-    R2dQuadList,
-    Renderer2d,
-    Renderer2dContext,
+from zero.render import (
+    DrawQuadBatch,
+    DrawQuadList,
+    Renderer,
+    RenderContext,
 )
 
 
@@ -120,7 +120,7 @@ def upload_texture(dev: GpuDevice, texture_data: torch.Tensor) -> GpuImage:
 def create_quad_batch(
     atlas: GpuImage | None,
     quads: list[dict],
-) -> R2dQuadBatch:
+) -> DrawQuadBatch:
     """Create a quad batch from a list of quad specifications.
 
     Each quad dict should have:
@@ -167,7 +167,7 @@ def create_quad_batch(
         bt = quad.get("border", (0, 0, 0, 0))
         border_thickness_px[i] = torch.tensor(bt, dtype=torch.uint32)
 
-    return R2dQuadBatch(
+    return DrawQuadBatch(
         atlas=atlas,
         offset_px=offset_px,
         texcoord_px=texcoord_px,
@@ -207,8 +207,8 @@ def test_render2d_quads():
 
     # Create Renderer2d
     print("\nCreating Renderer2d...")
-    r2d_ctx = Renderer2dContext(device=dev)
-    renderer: Renderer2d = r2d_ctx.create_renderer(
+    r2d_ctx = RenderContext(device=dev)
+    renderer: Renderer = r2d_ctx.create_renderer(
         framebuffer_width=width,
         framebuffer_height=height,
         max_quads_per_batch=1024,
@@ -216,7 +216,7 @@ def test_render2d_quads():
     print("  ✓ Created Renderer2d")
 
     # Create quad list with multiple batches
-    quad_list = R2dQuadList()
+    quad_list = DrawQuadList()
 
     # Batch 1: Gradient texture quads
     batch1 = create_quad_batch(

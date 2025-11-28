@@ -169,19 +169,8 @@ def render_tinted_bitmap(
         ]
     )
 
-    # Create descriptor pool
-    descriptor_pool = dev.create_descriptor_pool(
-        max_sets=1,
-        pool_sizes=[
-            ("uniform-buffer", 1),
-            ("sampled-image", 1),
-            ("sampler", 1),
-        ],
-    )
-
     # Create descriptor set
     descriptor_set = dev.create_descriptor_set(
-        pool=descriptor_pool,
         layout=descriptor_set_layout,
         bindings=[
             GpuDescriptorBinding(

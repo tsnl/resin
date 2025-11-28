@@ -10,15 +10,14 @@ Border side ordering: top, right, bottom, left (like CSS)
 """
 
 __all__ = [
-    "Renderer2dContext",
-    "Renderer2d",
-    "R2dQuadBatch",
-    "R2dQuadList",
+    "RenderContext",
+    "Renderer",
+    "DrawQuadBatch",
+    "DrawQuadList",
 ]
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import torch
 
@@ -35,12 +34,9 @@ from .gpu import (
     GpuRenderPassCommandEncoder,
 )
 
-if TYPE_CHECKING:
-    pass
-
 
 @dataclass
-class R2dQuadBatch:
+class DrawQuadBatch:
     """A batch of quads to render with a single draw call.
 
     Each batch has an optional atlas texture. All quads in the batch share
@@ -180,7 +176,7 @@ class R2dBatchGpuResources(BaseResource):
 
 
 @dataclass
-class R2dQuadList:
+class DrawQuadList:
     """A list of quad batches to render.
 
     Each batch corresponds to one Vulkan draw call. No two batches in a QuadList
@@ -190,9 +186,9 @@ class R2dQuadList:
         batches: List of R2dQuadBatch instances to render in order.
     """
 
-    batches: list[R2dQuadBatch] = field(default_factory=list)
+    batches: list[DrawQuadBatch] = field(default_factory=list)
 
-    def add_batch(self, batch: R2dQuadBatch) -> None:
+    def add_batch(self, batch: DrawQuadBatch) -> None:
         """Add a batch to the list."""
         self.batches.append(batch)
 
@@ -202,7 +198,7 @@ class R2dQuadList:
         return sum(batch.quad_count for batch in self.batches)
 
 
-class Renderer2dContext(BaseResource):
+class RenderContext(BaseResource):
     """Context for managing 2D renderer resources.
 
     This context holds references to the GPU device and provides factory
@@ -222,7 +218,7 @@ class Renderer2dContext(BaseResource):
         framebuffer_width: int,
         framebuffer_height: int,
         max_quads_per_batch: int = 65536,
-    ) -> "Renderer2d":
+    ) -> "Renderer":
         """Create a new Renderer2d instance.
 
         Args:
@@ -233,7 +229,7 @@ class Renderer2dContext(BaseResource):
         Returns:
             A new Renderer2d instance.
         """
-        return Renderer2d(
+        return Renderer(
             context=self,
             framebuffer_width=framebuffer_width,
             framebuffer_height=framebuffer_height,
@@ -244,26 +240,27 @@ class Renderer2dContext(BaseResource):
 Renderer2dResource = BaseResource
 
 
-class Renderer2d(Renderer2dResource):
-    """GPU-accelerated 2D quad renderer.
+class Renderer(Renderer2dResource):
+    """
+    GPU-accelerated 2D quad renderer.
 
     This renderer uses instanced rendering to efficiently draw many quads.
     It supports:
-    - Textured quads with atlas sampling
-    - Per-quad tint colors
-    - Per-quad borders with configurable thickness and color
-    - Orthographic projection based on framebuffer size
+    -   Textured quads with atlas sampling
+    -   Per-quad tint colors
+    -   Per-quad borders with configurable thickness and color
+    -   Orthographic projection based on framebuffer size
 
     The renderer uses a single graphics pipeline with the following bindings:
-    - Binding 0: Combined image sampler (atlas texture)
-    - Binding 1: Uniform buffer (framebuffer size, atlas size)
-    - Binding 2-6: Storage buffers (per-instance quad data)
+    -   Binding 0: Combined image sampler (atlas texture)
+    -   Binding 1: Uniform buffer (framebuffer size, atlas size)
+    -   Binding 2-6: Storage buffers (per-instance quad data)
     """
 
     def __init__(
         self,
         *,
-        context: Renderer2dContext,
+        context: RenderContext,
         framebuffer_width: int,
         framebuffer_height: int,
         max_quads_per_batch: int,
@@ -373,17 +370,6 @@ class Renderer2d(Renderer2dResource):
             ]
         )
 
-        # Descriptor pool - we need one set per batch
-        # Allocate a reasonable number of sets
-        self.descriptor_pool = self.device.create_descriptor_pool(
-            max_sets=256,
-            pool_sizes=[
-                ("combined-image-sampler", 256),
-                ("uniform-buffer", 256),
-                ("storage-buffer", 256 * 5),  # 5 storage buffers per set
-            ],
-        )
-
     def _create_pipeline(self) -> None:
         """Create the graphics pipeline."""
         # Load shaders
@@ -412,7 +398,7 @@ class Renderer2d(Renderer2dResource):
         )
 
     def _create_batch_resources(
-        self, batch: R2dQuadBatch, atlas: GpuImage
+        self, batch: DrawQuadBatch, atlas: GpuImage
     ) -> R2dBatchGpuResources:
         """Create GPU resources for a single batch."""
         n = max(batch.quad_count, 1)  # At least 1 element for valid buffers
@@ -471,7 +457,6 @@ class Renderer2d(Renderer2dResource):
 
         # Create descriptor set for this batch
         descriptor_set = self.device.create_descriptor_set(
-            pool=self.descriptor_pool,
             layout=self.descriptor_set_layout,
             bindings=[
                 GpuDescriptorBinding(
@@ -539,7 +524,7 @@ class Renderer2d(Renderer2dResource):
 
     def _upload_batch_data(
         self,
-        batch: R2dQuadBatch,
+        batch: DrawQuadBatch,
         resources: R2dBatchGpuResources,
         atlas: GpuImage,
         cmd: GpuCommandEncoder,
@@ -618,7 +603,7 @@ class Renderer2d(Renderer2dResource):
     def upload(
         self,
         *,
-        quad_list: R2dQuadList,
+        quad_list: DrawQuadList,
         cmd: GpuCommandEncoder,
     ) -> None:
         """Upload quad data to GPU buffers.
@@ -655,7 +640,7 @@ class Renderer2d(Renderer2dResource):
     def render(
         self,
         *,
-        quad_list: R2dQuadList,
+        quad_list: DrawQuadList,
         render_pass: GpuRenderPassCommandEncoder,
     ) -> None:
         """Render a list of quad batches using the provided render pass.

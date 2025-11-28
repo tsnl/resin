@@ -680,30 +680,8 @@ class GpuContext(GpuResource):
             vk_device=vk_device,
             vk_command_pools=vk_command_pools,
             present_support_enabled=surface is not None,
-            default_descriptor_pool=None,  # type: ignore
+            descriptor_pool_config=descriptor_pool_config or {},
         )
-
-        # Create default descriptor pool with configured or default capacities
-        if descriptor_pool_config is None:
-            descriptor_pool_config = {
-                "combined-image-sampler": 100,
-                "sampled-image": 100,
-                "sampler": 100,
-                "storage-buffer": 100,
-                "storage-image": 100,
-                "uniform-buffer": 100,
-            }
-
-        default_pool = gpu_device.create_descriptor_pool(
-            max_sets=1000,
-            pool_sizes=[
-                (desc_type, count)
-                for desc_type, count in descriptor_pool_config.items()
-            ],
-        )
-
-        # Update the device with the default pool
-        gpu_device._default_descriptor_pool = default_pool
 
         return gpu_device
 
@@ -990,7 +968,9 @@ class GpuDevice(GpuResource):
     vk_command_pools: dict[int, VkCommandPool]
     vk_queues: dict[int, VkQueue]
     present_support_enabled: bool
-    _default_descriptor_pool: "GpuDescriptorPool | None"
+    descriptor_pool_config: dict[GpuDescriptorType, int] | None
+    max_descriptor_pool_set_count: int = 1024
+    _descriptor_pool: GpuDescriptorPool
 
     def __init__(
         self,
@@ -1001,7 +981,8 @@ class GpuDevice(GpuResource):
         vk_device: VkDevice,
         vk_command_pools: dict[int, VkCommandPool],
         present_support_enabled: bool,
-        default_descriptor_pool: "GpuDescriptorPool | None" = None,
+        descriptor_pool_config: dict[GpuDescriptorType, int],
+        max_descriptor_pool_set_count: int = 1024,
     ) -> None:
         super().__init__(parent=context)
         self.physical_device = physical_device
@@ -1018,12 +999,33 @@ class GpuDevice(GpuResource):
             for qfi_index in {idx for _, idx in qfis}
         }
         self.present_support_enabled = present_support_enabled
-        self._default_descriptor_pool = default_descriptor_pool
+
+        descriptor_pool_config_defaults: dict[GpuDescriptorType, int] = {
+            "combined-image-sampler": 128,
+            "sampled-image": 128,
+            "sampler": 128,
+            "storage-buffer": 128,
+            "storage-image": 128,
+            "uniform-buffer": 128,
+        }
+        self.descriptor_pool_config = (
+            descriptor_pool_config_defaults | descriptor_pool_config
+        )
+
+        self.max_descriptor_pool_set_count = max_descriptor_pool_set_count
+
+        self._descriptor_pool = self._create_descriptor_pool(
+            max_sets=max_descriptor_pool_set_count,
+            pool_sizes=[
+                (desc_type, count)
+                for desc_type, count in descriptor_pool_config.items()
+            ],
+        )
 
     def _on_dispose(self) -> None:
         # Destroy default descriptor pool first (before command pools and device):
-        if self._default_descriptor_pool is not None:
-            self._default_descriptor_pool.dispose()
+        if self._descriptor_pool is not None:
+            self._descriptor_pool.dispose()
 
         # Destroy command pools:
         for _, vk_command_pool in self.vk_command_pools.items():
@@ -1340,7 +1342,7 @@ class GpuDevice(GpuResource):
 
         return GpuSampler(device=self, vk_sampler=vk_sampler)
 
-    def create_descriptor_pool(
+    def _create_descriptor_pool(
         self,
         *,
         max_sets: int,
@@ -1415,22 +1417,13 @@ class GpuDevice(GpuResource):
     def create_descriptor_set(
         self,
         *,
-        pool: "GpuDescriptorPool | None" = None,
         layout: "GpuDescriptorSetLayout",
         bindings: list["GpuDescriptorBinding"],
     ) -> "GpuDescriptorSet":
         """Create and write to a descriptor set."""
-        if pool is None:
-            pool = self._default_descriptor_pool
-
-        if pool is None:
-            raise LogicError(
-                "No descriptor pool available. Ensure create_device() was called successfully."
-            )
-
         # Allocate the descriptor set
         alloc_info = VkDescriptorSetAllocateInfo(
-            descriptorPool=pool.vk_descriptor_pool,
+            descriptorPool=self._descriptor_pool.vk_descriptor_pool,
             descriptorSetCount=1,
             pSetLayouts=[layout.vk_descriptor_set_layout],
         )
@@ -1521,7 +1514,7 @@ class GpuDevice(GpuResource):
         return GpuDescriptorSet(
             device=self,
             vk_descriptor_set=vk_set,
-            pool=pool,
+            pool=self._descriptor_pool,
             layout=layout,
         )
 
