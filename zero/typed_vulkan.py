@@ -284,6 +284,8 @@ __all__ = [
     "vkDeviceWaitIdle",
     "vkCmdPipelineBarrier",
     "VkImageMemoryBarrier",
+    "VkImageLayout",
+    "VK_QUEUE_FAMILY_IGNORED",
 ]
 
 
@@ -552,6 +554,7 @@ VkMemoryMapFlagBits: TypeAlias = int
 VkFormat: TypeAlias = int
 VkDependencyFlags: TypeAlias = VkFlags
 VkDependencyFlagBits: TypeAlias = int
+VkImageLayout: TypeAlias = int
 
 
 def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:

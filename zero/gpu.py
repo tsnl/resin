@@ -152,6 +152,7 @@ from .typed_vulkan import (
     VkImageSubresourceLayers,
     VkImageSubresourceRange,
     VkImageView,
+    VkImageLayout,
     VkImageViewCreateInfo,
     VkInstance,
     VkInstanceCreateInfo,
@@ -1034,6 +1035,8 @@ class GpuDevice(GpuResource):
             usages=usages,
             skip_image_destroy=False,
             skip_image_view_destroy=False,
+            initial_vk_layout=VK_IMAGE_LAYOUT_UNDEFINED,
+            current_vk_layout=VK_IMAGE_LAYOUT_UNDEFINED,
         )
 
         # Done:
@@ -1544,6 +1547,8 @@ class GpuDevice(GpuResource):
                 usages=["color-attachment"],
                 skip_image_destroy=True,
                 skip_image_view_destroy=False,
+                initial_vk_layout=VK_IMAGE_LAYOUT_UNDEFINED,
+                current_vk_layout=VK_IMAGE_LAYOUT_UNDEFINED,
             )
             images.append(image)
             in_flight_fences.append(self.create_fence(signalled=True))
@@ -1760,6 +1765,8 @@ class GpuImage(GpuResource):
     usages: list[GpuImageUsage]
     skip_image_destroy: bool
     skip_image_view_destroy: bool
+    initial_vk_layout: VkImageLayout
+    current_vk_layout: VkImageLayout
 
     def __init__(
         self,
@@ -1774,6 +1781,8 @@ class GpuImage(GpuResource):
         usages: list[GpuImageUsage],
         skip_image_destroy: bool,
         skip_image_view_destroy: bool,
+        initial_vk_layout: VkImageLayout,
+        current_vk_layout: VkImageLayout,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
@@ -1786,6 +1795,8 @@ class GpuImage(GpuResource):
         self.usages = usages
         self.skip_image_destroy = skip_image_destroy
         self.skip_image_view_destroy = skip_image_view_destroy
+        self.initial_vk_layout = initial_vk_layout
+        self.current_vk_layout = current_vk_layout
 
     def _on_dispose(self) -> None:
         if not self.skip_image_view_destroy:
@@ -2189,12 +2200,44 @@ class GpuCommandEncoder(GpuResource):
 
         vkCmdEndRendering(self.vk_command_buffer)
 
+        # Update tracked layouts after rendering
+        if color_attachment is not None:
+            color_attachment.current_vk_layout = (
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+            )
+        if depth_attachment is not None:
+            depth_attachment.current_vk_layout = (
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            )
+
     def transition_image_layout(
         self,
         *,
         image: GpuImage,
         usage: Literal["present-src", "color-attachment"],
     ):
+        # Determine the new layout based on usage
+        new_layout = (
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+            if usage == "color-attachment"
+            else VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+            if usage == "present-src"
+            else VK_IMAGE_LAYOUT_UNDEFINED
+        )
+
+        # Skip if already in the correct layout
+        if image.current_vk_layout == new_layout:
+            return
+
+        # Determine access masks based on old and new layouts
+        src_access_mask = 0
+        if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+
+        dst_access_mask = 0
+        if new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            dst_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+
         vkCmdPipelineBarrier(
             commandBuffer=self.vk_command_buffer,
             srcStageMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -2207,20 +2250,10 @@ class GpuCommandEncoder(GpuResource):
             imageMemoryBarrierCount=1,
             pImageMemoryBarriers=[
                 VkImageMemoryBarrier(
-                    srcAccessMask=0,
-                    dstAccessMask=(
-                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                        if usage == "color-attachment"
-                        else VK_ACCESS_NONE
-                    ),
-                    oldLayout=VK_IMAGE_LAYOUT_UNDEFINED,
-                    newLayout=(
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                        if usage == "color-attachment"
-                        else VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-                        if usage == "present-src"
-                        else VK_IMAGE_LAYOUT_UNDEFINED
-                    ),
+                    srcAccessMask=src_access_mask,
+                    dstAccessMask=dst_access_mask,
+                    oldLayout=image.current_vk_layout,
+                    newLayout=new_layout,
                     srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
                     dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
                     image=image.vk_image,
@@ -2234,6 +2267,9 @@ class GpuCommandEncoder(GpuResource):
                 )
             ],
         )
+
+        # Update tracked layout
+        image.current_vk_layout = new_layout
 
     def submit(self) -> GpuFence:
         vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
