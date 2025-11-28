@@ -1,4 +1,4 @@
-import json
+import argparse
 import sys
 from pathlib import Path
 
@@ -8,15 +8,44 @@ import zero
 
 
 def main():
-    gpu_context = zero.GpuContext(
-        app_name="zero-replay",
-        enable_debug_layer_support=True,
-        enable_present_support=False,
+    ap = argparse.ArgumentParser(description="Zero Sandbox Application")
+    ap.add_argument(
+        "--swapchain-image-count",
+        type=int,
+        default=3,
+        choices=[2, 3],
+        help="Number of swapchain images: 2 for double buffering, 3 for triple buffering",
     )
-    print_debug_info(gpu_context)
+    ap.add_argument(
+        "--enable-vulkan-debug-layers",
+        action="store_true",
+        help="Enable Vulkan debug layers for debugging purposes",
+    )
+    args = ap.parse_args()
+
+    gpu_context = zero.GpuContext(
+        app_name="zero-sandbox",
+        enable_debug_layer_support=args.enable_vulkan_debug_layers,
+        enable_present_support=True,
+    )
+    window_context = zero.WindowContext(
+        gpu_context=gpu_context,
+    )
+
+    print("<gpu-context-debug-info>")
+    gpu_context.print_debug_info(out=sys.stdout)
+    print()
+    print("</gpu-context-debug-info>")
+
+    window = window_context.create_window(width=1024, height=1024, title="Zero Sandbox")
+    surface = window.create_surface()
 
     physical_device = next(iter(gpu_context.enumerate_physical_devices()))
-    device = gpu_context.create_device(physical_device=physical_device, surface=None)
+    device = gpu_context.create_device(physical_device=physical_device, surface=surface)
+    swapchain = device.create_swapchain(
+        surface=surface,
+        image_count=args.swapchain_image_count,
+    )
 
     # Create render target image (1024x1024 RGBA8)
     render_target_image = device.create_image(
@@ -24,8 +53,8 @@ def main():
         meta=zero.GpuImageMeta(shape=(1024, 1024, 4), dtype=torch.uint8),
     )
 
-    print(device)
-    print(render_target_image)
+    print(device, file=sys.stderr)
+    print(render_target_image, file=sys.stderr)
 
     # Load shaders from compiled SPIR-V
     shader_dir = Path(__file__).parent.parent.parent / "data" / "shader"
@@ -66,28 +95,6 @@ def main():
     cmd.submit().wait()
 
     print("Triangle rendered successfully!")
-
-
-def print_debug_info(gpu_context: zero.GpuContext) -> None:
-    print("<gpu-info>")
-    json.dump(
-        {
-            "physical-devices": [
-                {
-                    "name": physical_device.vk_properties.deviceName,
-                    "vendor-id": f"0x{physical_device.vk_properties.vendorID:08x}",
-                    "device-id": f"0x{physical_device.vk_properties.deviceID:08x}",
-                    "api-version": f"0x{physical_device.vk_properties.apiVersion:08x}",
-                    "device-type": physical_device.spell_device_type(),
-                }
-                for physical_device in gpu_context.enumerate_physical_devices()
-            ]
-        },
-        sys.stdout,
-        indent=4,
-    )
-    print()
-    print("</gpu-info>")
 
 
 if __name__ == "__main__":

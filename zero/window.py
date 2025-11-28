@@ -1,6 +1,6 @@
 __all__ = ["Window"]
 
-from typing import Iterator, TypeAlias, cast
+from typing import TypeAlias
 
 import glfw
 
@@ -67,8 +67,13 @@ class Window(WindowResource):
         glfw.destroy_window(self.glfw_window_handle)
 
     def create_surface(self) -> GpuSurface:
+        width, height = glfw.get_framebuffer_size(
+            self.glfw_window_handle,
+        )
         return self.context.gpu_context.create_surface_from_raw_glfw_window_handle(
-            raw_glfw_window_handle=self.glfw_window_handle
+            raw_glfw_window_handle=self.glfw_window_handle,
+            framebuffer_width=width,
+            framebuffer_height=height,
         )
 
     def should_close(self) -> bool:
@@ -81,5 +86,5 @@ class Window(WindowResource):
         glfw.hide_window(self.glfw_window_handle)
 
     @staticmethod
-    def update_all():
+    def poll_events():
         glfw.poll_events()

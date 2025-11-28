@@ -1,13 +1,14 @@
 __all__ = [
     "Window",
     "GpuContext",
-    # gpu
     "GpuDevice",
     "GpuShader",
     "GpuPipeline",
     "GpuImage",
     "GpuImageUsage",
     "GpuImageMeta",
+    "WindowContext",
+    "Window",
 ]
 
 from .gpu import (
@@ -19,4 +20,4 @@ from .gpu import (
     GpuPipeline,
     GpuShader,
 )
-from .window import Window
+from .window import WindowContext, Window

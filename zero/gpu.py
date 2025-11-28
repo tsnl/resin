@@ -19,13 +19,14 @@ __all__ = [
     "GpuSwapchain",
 ]
 
+import json
 import os
 import sys
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Literal, TypeAlias
+from typing import Callable, Literal, TypeAlias, TYPE_CHECKING
 
 import torch
 import glfw
@@ -135,6 +136,7 @@ from .typed_vulkan import (
     VkFence,
     VkFenceCreateInfo,
     VkFormat,
+    VkSurfaceFormatKHR,
     VkGraphicsPipelineCreateInfo,
     VkImage,
     VkImageCopy,
@@ -233,6 +235,9 @@ from .typed_vulkan import (
     raw_ffi,
 )
 
+if TYPE_CHECKING:
+    from _typeshed import SupportsWrite
+
 #
 # GpuContext
 #
@@ -274,6 +279,7 @@ class GpuContext(BaseContext["GpuContext"]):
 
         if enable_present_support:
             self._load_extra_proc("vkGetPhysicalDeviceSurfaceSupportKHR")
+            self._load_extra_proc("vkGetPhysicalDeviceSurfaceFormatsKHR")
             self._load_extra_proc("vkDestroySurfaceKHR")
             self._load_extra_proc("vkCreateSwapchainKHR")
             self._load_extra_proc("vkDestroySwapchainKHR")
@@ -390,6 +396,10 @@ class GpuContext(BaseContext["GpuContext"]):
         if hasattr(self, "_vk_instance"):
             vkDestroyInstance(self.vk_instance, pAllocator=None)
 
+    #
+    # Vulkan extension functions:
+    #
+
     def vkGetPhysicalDeviceSurfaceSupportKHR(
         self,
         physical_device: VkPhysicalDevice,
@@ -400,6 +410,15 @@ class GpuContext(BaseContext["GpuContext"]):
             self.ext_fn("vkGetPhysicalDeviceSurfaceSupportKHR")(
                 physical_device, queue_family_index, surface
             )
+        )
+
+    def vkGetPhysicalDeviceSurfaceFormatsKHR(
+        self,
+        physical_device: VkPhysicalDevice,
+        surface: VkSurfaceKHR,
+    ) -> list[VkFormat]:
+        return self.ext_fn("vkGetPhysicalDeviceSurfaceFormatsKHR")(
+            physical_device, surface
         )
 
     def vkDestroySurfaceKHR(
@@ -452,15 +471,17 @@ class GpuContext(BaseContext["GpuContext"]):
     ) -> int:
         return self.ext_fn("vkQueuePresentKHR")(queue, pPresentInfo)
 
+    #
+    # GpuContext methods:
+    #
+
     def enumerate_physical_devices(self) -> list[GpuPhysicalDevice]:
         return [
             GpuPhysicalDevice(
                 context=self,
                 vk_physical_device=vk_physical_device,
-                vk_physical_device_properties=vkGetPhysicalDeviceProperties(
-                    vk_physical_device
-                ),
-                vk_physical_device_memory_properties=vkGetPhysicalDeviceMemoryProperties(
+                vk_properties=vkGetPhysicalDeviceProperties(vk_physical_device),
+                vk_memory_properties=vkGetPhysicalDeviceMemoryProperties(
                     vk_physical_device
                 ),
             )
@@ -471,10 +492,19 @@ class GpuContext(BaseContext["GpuContext"]):
         self,
         *,
         raw_glfw_window_handle: glfw._GLFWwindow,
+        framebuffer_width: int,
+        framebuffer_height: int,
     ) -> GpuSurface:
         """
         Do not call directly: use Window.create_surface() instead.
         """
+
+        if not self.enable_present_support:
+            raise LogicError(
+                "Cannot create a GpuSurface when GpuContext was created with "
+                "enable_present_support=False"
+            )
+
         surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
         result = glfw.create_window_surface(
             instance=self.vk_instance,
@@ -484,7 +514,12 @@ class GpuContext(BaseContext["GpuContext"]):
         )
         if result != 0:
             raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
-        return GpuSurface(context=self, vk_surface=surface_ptr[0])
+        return GpuSurface(
+            context=self,
+            vk_surface=surface_ptr[0],
+            width=framebuffer_width,
+            height=framebuffer_height,
+        )
 
     def create_device(
         self,
@@ -555,6 +590,24 @@ class GpuContext(BaseContext["GpuContext"]):
             vk_command_pools=vk_command_pools,
         )
 
+    def print_debug_info(self, out: SupportsWrite[str], indent: int = 4) -> None:
+        json.dump(
+            {
+                "physical-devices": [
+                    {
+                        "name": physical_device.vk_properties.deviceName,
+                        "vendor-id": f"0x{physical_device.vk_properties.vendorID:08x}",
+                        "device-id": f"0x{physical_device.vk_properties.deviceID:08x}",
+                        "api-version": f"0x{physical_device.vk_properties.apiVersion:08x}",
+                        "device-type": physical_device.spell_device_type(),
+                    }
+                    for physical_device in self.enumerate_physical_devices()
+                ]
+            },
+            out,
+            indent=indent,
+        )
+
 
 GpuResource: TypeAlias = BaseContextResource[GpuContext]
 
@@ -582,13 +635,13 @@ class GpuPhysicalDevice(GpuResource):
         *,
         context: GpuContext,
         vk_physical_device: VkPhysicalDevice,
-        vk_physical_device_properties: VkPhysicalDeviceProperties,
-        vk_physical_device_memory_properties: VkPhysicalDeviceMemoryProperties,
+        vk_properties: VkPhysicalDeviceProperties,
+        vk_memory_properties: VkPhysicalDeviceMemoryProperties,
     ) -> None:
         super().__init__(parent=context)
         self.vk_physical_device = vk_physical_device
-        self.vk_properties = vk_physical_device_properties
-        self.vk_memory_properties = vk_physical_device_memory_properties
+        self.vk_properties = vk_properties
+        self.vk_memory_properties = vk_memory_properties
 
     def _on_dispose(self) -> None:
         pass  # no private resources to free
@@ -654,6 +707,15 @@ class GpuPhysicalDevice(GpuResource):
             res.append(qfi)
 
         return res
+
+    def get_surface_formats(self, surface: "GpuSurface") -> list[VkSurfaceFormatKHR]:
+        assert self.context.enable_present_support
+        return list(
+            self.context.vkGetPhysicalDeviceSurfaceFormatsKHR(
+                self.vk_physical_device,
+                surface.vk_surface,
+            )
+        )
 
 
 @dataclass
@@ -1369,11 +1431,25 @@ class GpuDevice(GpuResource):
         self,
         *,
         surface: GpuSurface,
-        width: int,
-        height: int,
-        vk_format: VkFormat = VK_FORMAT_B8G8R8A8_UNORM,
-        image_count: int = 2,
+        image_count: int,
     ) -> "GpuSwapchain":
+        vk_format = VK_FORMAT_B8G8R8A8_UNORM
+        vk_colorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+        vk_surface_format_list = self.physical_device.get_surface_formats(surface)
+        for surface_format in vk_surface_format_list:
+            if surface_format.format != vk_format:
+                continue
+            if surface_format.colorSpace != vk_colorspace:
+                continue
+            break
+        else:
+            raise PlatformSupportError(
+                f"Physical device {self.physical_device.name!r} does not support "
+                "the required swapchain format: "
+                f"Requires format=VK_FORMAT_B8G8R8A8_UNORM, "
+                f"colorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR."
+            )
+
         vk_swapchain = self.context.vkCreateSwapchainKHR(
             device=self.vk_device,
             pCreateInfo=VkSwapchainCreateInfoKHR(
@@ -1381,8 +1457,8 @@ class GpuDevice(GpuResource):
                 surface=surface.vk_surface,
                 minImageCount=image_count,
                 imageFormat=vk_format,
-                imageColorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-                imageExtent=VkExtent2D(width=width, height=height),
+                imageColorSpace=vk_colorspace,
+                imageExtent=VkExtent2D(width=surface.width, height=surface.height),
                 imageArrayLayers=1,
                 imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
                 imageSharingMode=VK_SHARING_MODE_EXCLUSIVE,
@@ -1445,8 +1521,8 @@ class GpuDevice(GpuResource):
             vk_fences=vk_fences,
             vk_semaphores=vk_semaphores,
             vk_format=vk_format,
-            width=width,
-            height=height,
+            width=surface.width,
+            height=surface.height,
         )
 
     def _allocate_memory(
@@ -2230,15 +2306,21 @@ class GpuRenderPassCommandEncoder(GpuResource):
 
 class GpuSurface(GpuResource):
     vk_surface: VkSurfaceKHR
+    width: int
+    height: int
 
     def __init__(
         self,
         *,
         context: GpuContext,
         vk_surface: VkSurfaceKHR,
+        width: int,
+        height: int,
     ):
         super().__init__(parent=context)
         self.vk_surface = vk_surface
+        self.width = width
+        self.height = height
 
     def _on_dispose(self) -> None:
         self.context.vkDestroySurfaceKHR(
