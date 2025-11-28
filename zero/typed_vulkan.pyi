@@ -1531,6 +1531,7 @@ VK_ACCESS_HOST_READ_BIT: VkAccessFlagBits = 0x00002000
 VK_ACCESS_HOST_WRITE_BIT: VkAccessFlagBits = 0x00004000
 VK_ACCESS_MEMORY_READ_BIT: VkAccessFlagBits = 0x00008000
 VK_ACCESS_MEMORY_WRITE_BIT: VkAccessFlagBits = 0x00010000
+VK_ACCESS_NONE: VkAccessFlagBits = 0x00000000
 
 # VkMemoryBarrier
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryBarrier.html

@@ -35,6 +35,7 @@ from .core import BaseContext, BaseContextResource
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    VK_ACCESS_NONE,
     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
     VK_QUEUE_FAMILY_IGNORED,
     VK_API_VERSION_1_3,
@@ -2210,7 +2211,7 @@ class GpuCommandEncoder(GpuResource):
                     dstAccessMask=(
                         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
                         if usage == "color-attachment"
-                        else 0
+                        else VK_ACCESS_NONE
                     ),
                     oldLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                     newLayout=(
