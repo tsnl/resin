@@ -109,7 +109,9 @@ from .typed_vulkan import (
     VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
     VK_PIPELINE_BIND_POINT_GRAPHICS,
     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    VK_PIPELINE_STAGE_TRANSFER_BIT,
     VK_POLYGON_MODE_FILL,
     VK_PRESENT_MODE_FIFO_KHR,
     VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -2620,10 +2622,23 @@ class GpuCommandEncoder(GpuResource):
         elif new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
             dst_access_mask = VK_ACCESS_SHADER_READ_BIT
 
+        stage_mask = 0
+        if self.submit_queue_type == "graphics":
+            stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+        elif self.submit_queue_type == "compute":
+            stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        elif self.submit_queue_type == "transfer":
+            stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT
+        else:
+            raise LogicError(
+                f"Unsupported queue type for image layout transition: "
+                f"{self.submit_queue_type!r}"
+            )
+
         vkCmdPipelineBarrier(
             commandBuffer=self.vk_command_buffer,
-            srcStageMask=VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            dstStageMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            srcStageMask=stage_mask,
+            dstStageMask=stage_mask,
             dependencyFlags=0,
             memoryBarrierCount=0,
             pMemoryBarriers=None,
@@ -2632,7 +2647,7 @@ class GpuCommandEncoder(GpuResource):
             imageMemoryBarrierCount=1,
             pImageMemoryBarriers=[
                 VkImageMemoryBarrier(
-                    srcAccessMask=src_access_mask,
+                    srcAccessMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                     dstAccessMask=dst_access_mask,
                     oldLayout=image.current_vk_layout,
                     newLayout=new_layout,

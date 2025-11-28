@@ -1726,6 +1726,8 @@ def vkGetDeviceQueue(
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineStageFlagBits.html
 VkPipelineStageFlags: TypeAlias = VkFlags
 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: int = 0x00000001
+VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT: int = 0x00000800
+VK_PIPELINE_STAGE_TRANSFER_BIT: int = 0x00001000
 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT: int = 0xFFFFFFFF
 
 # VkSubmitInfo
