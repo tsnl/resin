@@ -221,6 +221,7 @@ def render_tinted_bitmap(
 
     # Render the tinted quad
     cmd = dev.create_command_encoder(queue_type="graphics")
+    cmd.transition_image_layout(image=render_target, layout="color-attachment-optimal")
     with cmd.render(
         color_attachment=render_target,
         clear_on_load=True,
@@ -243,6 +244,7 @@ def render_tinted_bitmap(
     )
 
     cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.transition_image_layout(image=render_target, layout="copy-src")
     cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
     cmd.submit().wait()
 
@@ -279,15 +281,15 @@ def test_render_tinted_bitmap():
         "black": (0.0, 0.0, 0.0, 1.0),
     }
 
-    print("Testing tinted bitmap rendering with descriptor sets...")
-    print(f"  Textures: {list(textures.keys())}")
-    print(f"  Tints: {list(tints.keys())}")
+    # print("Testing tinted bitmap rendering with descriptor sets...")
+    # print(f"  Textures: {list(textures.keys())}")
+    # print(f"  Tints: {list(tints.keys())}")
 
     # Upload textures to GPU
     gpu_textures = {}
     for tex_name, tex_data in textures.items():
         gpu_textures[tex_name] = upload_texture(dev, tex_data)
-        print(f"  ✓ Uploaded texture: {tex_name}")
+        # print(f"  ✓ Uploaded texture: {tex_name}")
 
     # Render all combinations
     output_count = 0
@@ -329,10 +331,10 @@ def test_render_tinted_bitmap():
                     f"Black tint on {tex_name} should be all black, got max RGB={rgb_max}"
                 )
 
-            print(f"  ✓ Rendered: {tex_name} + {tint_name} -> {output_path.name}")
+            # print(f"  ✓ Rendered: {tex_name} + {tint_name} -> {output_path.name}")
 
-    print(f"\n✓ Successfully rendered {output_count} tinted bitmap combinations!")
-    print("✓ Descriptor sets with texture and buffer bindings work correctly!")
+    # print(f"\n✓ Successfully rendered {output_count} tinted bitmap combinations!")
+    # print("✓ Descriptor sets with texture and buffer bindings work correctly!")
 
     # Cleanup
     ctx.dispose()

@@ -1016,10 +1016,7 @@ class GpuDevice(GpuResource):
 
         self._descriptor_pool = self._create_descriptor_pool(
             max_sets=max_descriptor_pool_set_count,
-            pool_sizes=[
-                (desc_type, count)
-                for desc_type, count in descriptor_pool_config.items()
-            ],
+            pool_sizes=self.descriptor_pool_config,
         )
 
     def _on_dispose(self) -> None:
@@ -1346,11 +1343,11 @@ class GpuDevice(GpuResource):
         self,
         *,
         max_sets: int,
-        pool_sizes: list[tuple[GpuDescriptorType, int]],
+        pool_sizes: dict[GpuDescriptorType, int],
     ) -> "GpuDescriptorPool":
         """Create a descriptor pool for allocating descriptor sets."""
         vk_pool_sizes = []
-        for desc_type, count in pool_sizes:
+        for desc_type, count in pool_sizes.items():
             vk_desc_type = {
                 "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 "sampled-image": VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
