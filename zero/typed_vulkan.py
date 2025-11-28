@@ -155,8 +155,33 @@ __all__ = [
     "VkCommandPool",
     "VkCommandPoolCreateInfo",
     "VkComponentMapping",
+    "VkDescriptorBufferInfo",
+    "VkDescriptorImageInfo",
+    "VkDescriptorPool",
+    "VkDescriptorPoolCreateInfo",
+    "VkDescriptorPoolSize",
     "VkDescriptorSet",
+    "VkDescriptorSetAllocateInfo",
     "VkDescriptorSetLayout",
+    "VkDescriptorSetLayoutBinding",
+    "VkDescriptorSetLayoutCreateInfo",
+    "VkDescriptorType",
+    "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER",
+    "VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE",
+    "VK_DESCRIPTOR_TYPE_SAMPLER",
+    "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER",
+    "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
+    "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER",
+    "VK_FILTER_LINEAR",
+    "VK_FILTER_NEAREST",
+    "VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER",
+    "VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE",
+    "VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT",
+    "VK_SAMPLER_ADDRESS_MODE_REPEAT",
+    "VK_SAMPLER_MIPMAP_MODE_LINEAR",
+    "VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK",
+    "VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL",
+    "VK_IMAGE_LAYOUT_GENERAL",
     "VkDevice",
     "VkDeviceCreateInfo",
     "VkDeviceQueueCreateInfo",
@@ -231,6 +256,7 @@ __all__ = [
     "VkDependencyFlags",
     "vkCmdDraw",
     "vkCmdEndRendering",
+    "vkAllocateDescriptorSets",
     "vkCreateBuffer",
     "vkCreateBufferView",
     "vkCreateCommandPool",
@@ -240,6 +266,8 @@ __all__ = [
     "vkCreateImage",
     "vkCreateImageView",
     "vkCreateInstance",
+    "vkCreateDescriptorPool",
+    "vkCreateDescriptorSetLayout",
     "vkCreatePipelineLayout",
     "vkCreateSampler",
     "vkCreateSemaphore",
@@ -247,6 +275,8 @@ __all__ = [
     "vkDestroyBuffer",
     "vkDestroyBufferView",
     "vkDestroyCommandPool",
+    "vkDestroyDescriptorPool",
+    "vkDestroyDescriptorSetLayout",
     "vkDestroyDevice",
     "vkDestroyFence",
     "vkDestroyImage",
@@ -286,6 +316,8 @@ __all__ = [
     "VkImageMemoryBarrier",
     "VkImageLayout",
     "VK_QUEUE_FAMILY_IGNORED",
+    "vkUpdateDescriptorSets",
+    "VkWriteDescriptorSet",
 ]
 
 
@@ -313,6 +345,7 @@ from vulkan import (
     VK_BLEND_FACTOR_ONE,
     VK_BLEND_FACTOR_ZERO,
     VK_BLEND_OP_ADD,
+    VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -338,7 +371,15 @@ from vulkan import (
     VK_CULL_MODE_FRONT_BIT,
     VK_CULL_MODE_NONE,
     VK_DEPENDENCY_BY_REGION_BIT,
+    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+    VK_DESCRIPTOR_TYPE_SAMPLER,
+    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     VK_FENCE_CREATE_SIGNALED_BIT,
+    VK_FILTER_LINEAR,
+    VK_FILTER_NEAREST,
     VK_FRONT_FACE_CLOCKWISE,
     VK_FRONT_FACE_COUNTER_CLOCKWISE,
     VK_IMAGE_ASPECT_COLOR_BIT,
@@ -404,6 +445,11 @@ from vulkan import (
     VK_SAMPLE_COUNT_16_BIT,
     VK_SAMPLE_COUNT_32_BIT,
     VK_SAMPLE_COUNT_64_BIT,
+    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
+    VK_SAMPLER_ADDRESS_MODE_REPEAT,
+    VK_SAMPLER_MIPMAP_MODE_LINEAR,
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_CONCURRENT,
@@ -429,6 +475,13 @@ from vulkan import (
     VkCommandBufferBeginInfo,
     VkCommandPoolCreateInfo,
     VkComponentMapping,
+    VkDescriptorBufferInfo,
+    VkDescriptorImageInfo,
+    VkDescriptorPoolCreateInfo,
+    VkDescriptorPoolSize,
+    VkDescriptorSetAllocateInfo,
+    VkDescriptorSetLayoutBinding,
+    VkDescriptorSetLayoutCreateInfo,
     VkDeviceCreateInfo,
     VkDeviceQueueCreateInfo,
     VkExtent2D,
@@ -471,7 +524,9 @@ from vulkan import (
     VkSurfaceFormatKHR,
     VkSwapchainCreateInfoKHR,
     VkViewport,
+    VkWriteDescriptorSet,
     vkAllocateCommandBuffers,
+    vkAllocateDescriptorSets,
     vkAllocateMemory,
     vkBeginCommandBuffer,
     vkBindBufferMemory,
@@ -489,6 +544,8 @@ from vulkan import (
     vkCreateBuffer,
     vkCreateBufferView,
     vkCreateCommandPool,
+    vkCreateDescriptorPool,
+    vkCreateDescriptorSetLayout,
     vkCreateDevice,
     vkCreateFence,
     vkCreateGraphicsPipelines,
@@ -502,6 +559,8 @@ from vulkan import (
     vkDestroyBuffer,
     vkDestroyBufferView,
     vkDestroyCommandPool,
+    vkDestroyDescriptorPool,
+    vkDestroyDescriptorSetLayout,
     vkDestroyDevice,
     vkDestroyFence,
     vkDestroyImage,
@@ -529,6 +588,7 @@ from vulkan import (
     vkResetCommandBuffer,
     vkResetFences,
     vkUnmapMemory,
+    vkUpdateDescriptorSets,
     vkWaitForFences,
 )
 from vulkan import (
@@ -548,6 +608,10 @@ VkImageCreateFlags: TypeAlias = VkFlags
 VkImageCreateFlagBits: TypeAlias = int
 VkResolveModeFlags: TypeAlias = VkFlags
 VkResolveModeFlagBits: TypeAlias = int
+VkDescriptorType: TypeAlias = int
+VkDescriptorPoolCreateFlags: TypeAlias = VkFlags
+VkDescriptorSetLayoutCreateFlags: TypeAlias = VkFlags
+VkShaderStageFlags: TypeAlias = VkFlags
 VkAttachmentLoadOp: TypeAlias = int
 VkAttachmentStoreOp: TypeAlias = int
 VkBufferUsageFlags: TypeAlias = VkFlags
@@ -634,6 +698,9 @@ class VkDescriptorSetLayout(OpaqueResourceHandle): ...
 
 
 class VkDescriptorSet(OpaqueResourceHandle): ...
+
+
+class VkDescriptorPool(OpaqueResourceHandle): ...
 
 
 class VkShaderModule(OpaqueResourceHandle): ...

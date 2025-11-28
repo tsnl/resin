@@ -48,6 +48,9 @@ def test_render_simple_triangle():
         stage="fragment",
     )
 
+    # Create pipeline layout (empty for simple triangle - no descriptors)
+    pipeline_layout = dev.create_pipeline_layout()
+
     # Create graphics pipeline
     pipeline = dev.create_pipeline(
         vertex_shader=vertex_shader,
@@ -55,6 +58,7 @@ def test_render_simple_triangle():
         vk_color_format=render_target.vk_format,
         viewport_width=width,
         viewport_height=height,
+        layout=pipeline_layout,
     )
 
     # Render the triangle

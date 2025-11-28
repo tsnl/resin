@@ -1834,6 +1834,187 @@ class VkDescriptorSetLayout(OpaqueResourceHandle): ...
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSet.html
 class VkDescriptorSet(OpaqueResourceHandle): ...
 
+# VkDescriptorPool
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPool.html
+class VkDescriptorPool(OpaqueResourceHandle): ...
+
+#
+# Descriptor Types and Constants
+#
+
+# VkDescriptorType
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorType.html
+VkDescriptorType: TypeAlias = int
+VK_DESCRIPTOR_TYPE_SAMPLER: VkDescriptorType = 0
+VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: VkDescriptorType = 1
+VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: VkDescriptorType = 2
+VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: VkDescriptorType = 3
+VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER: VkDescriptorType = 4
+VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER: VkDescriptorType = 5
+VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER: VkDescriptorType = 6
+VK_DESCRIPTOR_TYPE_STORAGE_BUFFER: VkDescriptorType = 7
+VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC: VkDescriptorType = 8
+VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: VkDescriptorType = 9
+VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT: VkDescriptorType = 10
+
+# VkDescriptorPoolCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolCreateFlagBits.html
+VkDescriptorPoolCreateFlags: TypeAlias = VkFlags
+VkDescriptorPoolCreateFlagBits: TypeAlias = int
+VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: VkDescriptorPoolCreateFlagBits = (
+    0x00000001
+)
+
+# VkDescriptorSetLayoutCreateFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetLayoutCreateFlagBits.html
+VkDescriptorSetLayoutCreateFlags: TypeAlias = VkFlags
+VkDescriptorSetLayoutCreateFlagBits: TypeAlias = int
+
+# VkShaderStageFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderStageFlagBits.html
+VkShaderStageFlags: TypeAlias = VkFlags
+VkShaderStageFlagBits: TypeAlias = int
+VK_SHADER_STAGE_ALL_GRAPHICS: VkShaderStageFlagBits = 0x0000001F
+VK_SHADER_STAGE_ALL: VkShaderStageFlagBits = 0x7FFFFFFF
+
+# VkDescriptorPoolSize
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolSize.html
+@dataclass
+class VkDescriptorPoolSize:
+    type: VkDescriptorType
+    descriptorCount: int
+
+# VkDescriptorPoolCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolCreateInfo.html
+@dataclass
+class VkDescriptorPoolCreateInfo:
+    flags: VkDescriptorPoolCreateFlags
+    maxSets: int
+    poolSizeCount: int
+    pPoolSizes: list[VkDescriptorPoolSize]
+
+# vkCreateDescriptorPool
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateDescriptorPool.html
+def vkCreateDescriptorPool(
+    device: VkDevice,
+    pCreateInfo: VkDescriptorPoolCreateInfo,
+    pAllocator: Any | None,
+) -> VkDescriptorPool:
+    """
+    vkCreateDescriptorPool creates a descriptor pool object.
+    """
+
+# vkDestroyDescriptorPool
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyDescriptorPool.html
+def vkDestroyDescriptorPool(
+    device: VkDevice,
+    descriptorPool: VkDescriptorPool,
+    pAllocator: Any | None,
+) -> None:
+    """
+    vkDestroyDescriptorPool destroys a descriptor pool object.
+    """
+
+# VkDescriptorSetLayoutBinding
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetLayoutBinding.html
+@dataclass
+class VkDescriptorSetLayoutBinding:
+    binding: int
+    descriptorType: VkDescriptorType
+    descriptorCount: int
+    stageFlags: VkShaderStageFlags
+    pImmutableSamplers: list[VkSampler] | None = None
+
+# VkDescriptorSetLayoutCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetLayoutCreateInfo.html
+@dataclass
+class VkDescriptorSetLayoutCreateInfo:
+    flags: VkDescriptorSetLayoutCreateFlags
+    bindingCount: int
+    pBindings: list[VkDescriptorSetLayoutBinding] | None
+
+# vkCreateDescriptorSetLayout
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateDescriptorSetLayout.html
+def vkCreateDescriptorSetLayout(
+    device: VkDevice,
+    pCreateInfo: VkDescriptorSetLayoutCreateInfo,
+    pAllocator: Any | None,
+) -> VkDescriptorSetLayout:
+    """
+    vkCreateDescriptorSetLayout creates a descriptor set layout object.
+    """
+
+# vkDestroyDescriptorSetLayout
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroyDescriptorSetLayout.html
+def vkDestroyDescriptorSetLayout(
+    device: VkDevice,
+    descriptorSetLayout: VkDescriptorSetLayout,
+    pAllocator: Any | None,
+) -> None:
+    """
+    vkDestroyDescriptorSetLayout destroys a descriptor set layout object.
+    """
+
+# VkDescriptorSetAllocateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetAllocateInfo.html
+@dataclass
+class VkDescriptorSetAllocateInfo:
+    descriptorPool: VkDescriptorPool
+    descriptorSetCount: int
+    pSetLayouts: list[VkDescriptorSetLayout]
+
+# vkAllocateDescriptorSets
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkAllocateDescriptorSets.html
+def vkAllocateDescriptorSets(
+    device: VkDevice,
+    pAllocateInfo: VkDescriptorSetAllocateInfo,
+) -> list[VkDescriptorSet]:
+    """
+    vkAllocateDescriptorSets allocates descriptor sets from a descriptor pool.
+    """
+
+# VkDescriptorBufferInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorBufferInfo.html
+@dataclass
+class VkDescriptorBufferInfo:
+    buffer: VkBuffer
+    offset: VkDeviceSize
+    range: VkDeviceSize
+
+# VkDescriptorImageInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorImageInfo.html
+@dataclass
+class VkDescriptorImageInfo:
+    sampler: VkSampler | None
+    imageView: VkImageView
+    imageLayout: VkImageLayout
+
+# VkWriteDescriptorSet
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkWriteDescriptorSet.html
+@dataclass
+class VkWriteDescriptorSet:
+    dstSet: VkDescriptorSet
+    dstBinding: int
+    dstArrayElement: int
+    descriptorCount: int
+    descriptorType: VkDescriptorType
+    pImageInfo: list[VkDescriptorImageInfo] | None = None
+    pBufferInfo: list[VkDescriptorBufferInfo] | None = None
+    pTexelBufferView: list[Any] | None = None
+
+# vkUpdateDescriptorSets
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkUpdateDescriptorSets.html
+def vkUpdateDescriptorSets(
+    device: VkDevice,
+    descriptorWriteCount: int,
+    pDescriptorWrites: list[VkWriteDescriptorSet],
+    descriptorCopyCount: int,
+    pDescriptorCopies: list[Any] | None,
+) -> None:
+    """
+    vkUpdateDescriptorSets updates the contents of a descriptor set object.
+    """
+
 # VkRenderPass
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderPass.html
 class VkRenderPass(OpaqueResourceHandle): ...

@@ -72,6 +72,9 @@ def main_headless(args: argparse.Namespace):
 
     print(f"Loaded shaders: {vertex_shader}, {fragment_shader}")
 
+    # Create pipeline layout (empty for simple triangle - no descriptors)
+    pipeline_layout = device.create_pipeline_layout()
+
     # Create graphics pipeline
     pipeline = device.create_pipeline(
         vertex_shader=vertex_shader,
@@ -81,6 +84,7 @@ def main_headless(args: argparse.Namespace):
         ),
         viewport_width=1024,
         viewport_height=1024,
+        layout=pipeline_layout,
     )
 
     print(f"Created pipeline: {pipeline}")
@@ -134,12 +138,16 @@ def main_windowed(args: argparse.Namespace):
         spirv_path=shader_dir / "triangle.frag.spv",
         stage="fragment",
     )
+    # Create pipeline layout (empty for simple triangle - no descriptors)
+    pipeline_layout = device.create_pipeline_layout()
+
     pipeline = device.create_pipeline(
         vertex_shader=vertex_shader,
         fragment_shader=fragment_shader,
         vk_color_format=swapchain.vk_format,
         viewport_width=swapchain.width,
         viewport_height=swapchain.height,
+        layout=pipeline_layout,
     )
 
     # Main window loop:

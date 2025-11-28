@@ -12,11 +12,17 @@ __all__ = [
     "GpuDevice",
     "GpuShader",
     "GpuPipeline",
+    "GpuPipelineLayout",
     "GpuImage",
     "GpuImageUsage",
     "GpuImageMeta",
     "GpuSurface",
     "GpuSwapchain",
+    "GpuSampler",
+    "GpuDescriptorPool",
+    "GpuDescriptorSetLayout",
+    "GpuDescriptorSet",
+    "GpuDescriptorBinding",
 ]
 
 import json
@@ -57,6 +63,12 @@ from .typed_vulkan import (
     VK_COMPONENT_SWIZZLE_IDENTITY,
     VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
+    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+    VK_DESCRIPTOR_TYPE_SAMPLER,
+    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     VK_FENCE_CREATE_SIGNALED_BIT,
     VK_FORMAT_B8G8R8A8_UNORM,
     VK_FORMAT_D32_SFLOAT,
@@ -120,8 +132,17 @@ from .typed_vulkan import (
     VkCommandPool,
     VkCommandPoolCreateInfo,
     VkComponentMapping,
+    VkDescriptorBufferInfo,
+    VkDescriptorImageInfo,
+    VkDescriptorPool,
+    VkDescriptorPoolCreateInfo,
+    VkDescriptorPoolSize,
     VkDescriptorSet,
+    VkDescriptorSetAllocateInfo,
     VkDescriptorSetLayout,
+    VkDescriptorSetLayoutBinding,
+    VkDescriptorSetLayoutCreateInfo,
+    VkDescriptorType,
     VkDevice,
     VkDeviceCreateInfo,
     VkDeviceMemory,
@@ -170,6 +191,8 @@ from .typed_vulkan import (
     VkRenderingAttachmentInfo,
     VkRenderingInfo,
     VkResolveModeFlagBits,
+    VkSampler,
+    VkSamplerCreateInfo,
     VkSemaphore,
     VkSemaphoreCreateInfo,
     VkShaderModule,
@@ -180,9 +203,11 @@ from .typed_vulkan import (
     VkSwapchainCreateInfoKHR,
     VkSwapchainKHR,
     VkViewport,
+    VkWriteDescriptorSet,
     raw_ffi,
     vk_api_version_str,
     vkAllocateCommandBuffers,
+    vkAllocateDescriptorSets,
     vkAllocateMemory,
     vkBeginCommandBuffer,
     vkBindBufferMemory,
@@ -199,6 +224,8 @@ from .typed_vulkan import (
     vkCmdPipelineBarrier,
     vkCreateBuffer,
     vkCreateCommandPool,
+    vkCreateDescriptorPool,
+    vkCreateDescriptorSetLayout,
     vkCreateDevice,
     vkCreateFence,
     vkCreateGraphicsPipelines,
@@ -206,10 +233,13 @@ from .typed_vulkan import (
     vkCreateImageView,
     vkCreateInstance,
     vkCreatePipelineLayout,
+    vkCreateSampler,
     vkCreateSemaphore,
     vkCreateShaderModule,
     vkDestroyBuffer,
     vkDestroyCommandPool,
+    vkDestroyDescriptorPool,
+    vkDestroyDescriptorSetLayout,
     vkDestroyDevice,
     vkDestroyFence,
     vkDestroyImage,
@@ -217,6 +247,7 @@ from .typed_vulkan import (
     vkDestroyInstance,
     vkDestroyPipeline,
     vkDestroyPipelineLayout,
+    vkDestroySampler,
     vkDestroySemaphore,
     vkDestroyShaderModule,
     vkDeviceWaitIdle,
@@ -235,6 +266,7 @@ from .typed_vulkan import (
     vkQueueSubmit,
     vkResetFences,
     vkUnmapMemory,
+    vkUpdateDescriptorSets,
     vkWaitForFences,
 )
 
@@ -1172,22 +1204,278 @@ class GpuDevice(GpuResource):
             stage=stage,
         )
 
-    def create_pipeline(
+    def create_sampler(
         self,
         *,
-        vertex_shader: GpuShader,
-        fragment_shader: GpuShader,
-        vk_color_format: VkFormat,
-        viewport_width: int,
-        viewport_height: int,
-    ) -> GpuPipeline:
-        """Create a graphics pipeline"""
+        mag_filter: Literal["nearest", "linear"] = "linear",
+        min_filter: Literal["nearest", "linear"] = "linear",
+        address_mode: Literal[
+            "repeat", "mirrored-repeat", "clamp-to-edge", "clamp-to-border"
+        ] = "clamp-to-edge",
+    ) -> "GpuSampler":
+        """Create a texture sampler"""
+        from .typed_vulkan import (
+            VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+            VK_FILTER_LINEAR,
+            VK_FILTER_NEAREST,
+            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
+            VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        )
 
-        # Pipeline layout (empty for now)
+        vk_mag_filter = (
+            VK_FILTER_LINEAR if mag_filter == "linear" else VK_FILTER_NEAREST
+        )
+        vk_min_filter = (
+            VK_FILTER_LINEAR if min_filter == "linear" else VK_FILTER_NEAREST
+        )
+
+        vk_address_mode = {
+            "repeat": VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            "mirrored-repeat": VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
+            "clamp-to-edge": VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            "clamp-to-border": VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+        }[address_mode]
+
+        create_info = VkSamplerCreateInfo(
+            flags=0,
+            magFilter=vk_mag_filter,
+            minFilter=vk_min_filter,
+            mipmapMode=VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            addressModeU=vk_address_mode,
+            addressModeV=vk_address_mode,
+            addressModeW=vk_address_mode,
+            mipLodBias=0.0,
+            anisotropyEnable=False,
+            maxAnisotropy=1.0,
+            compareEnable=False,
+            compareOp=0,
+            minLod=0.0,
+            maxLod=0.0,
+            borderColor=VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+            unnormalizedCoordinates=False,
+        )
+
+        vk_sampler = vkCreateSampler(
+            device=self.vk_device,
+            pCreateInfo=create_info,
+            pAllocator=None,
+        )
+
+        return GpuSampler(device=self, vk_sampler=vk_sampler)
+
+    def create_descriptor_pool(
+        self,
+        *,
+        max_sets: int,
+        pool_sizes: list[
+            tuple[
+                Literal[
+                    "combined-image-sampler",
+                    "sampled-image",
+                    "sampler",
+                    "storage-buffer",
+                    "storage-image",
+                    "uniform-buffer",
+                ],
+                int,
+            ]
+        ],
+    ) -> "GpuDescriptorPool":
+        """Create a descriptor pool for allocating descriptor sets."""
+        vk_pool_sizes = []
+        for desc_type, count in pool_sizes:
+            vk_desc_type = {
+                "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                "sampled-image": VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                "sampler": VK_DESCRIPTOR_TYPE_SAMPLER,
+                "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                "storage-image": VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            }[desc_type]
+            vk_pool_sizes.append(
+                VkDescriptorPoolSize(type=vk_desc_type, descriptorCount=count)
+            )
+
+        create_info = VkDescriptorPoolCreateInfo(
+            flags=0,
+            maxSets=max_sets,
+            poolSizeCount=len(vk_pool_sizes),
+            pPoolSizes=vk_pool_sizes,
+        )
+
+        vk_pool = vkCreateDescriptorPool(
+            device=self.vk_device,
+            pCreateInfo=create_info,
+            pAllocator=None,
+        )
+
+        return GpuDescriptorPool(device=self, vk_descriptor_pool=vk_pool)
+
+    def create_descriptor_set_layout(
+        self,
+        *,
+        bindings: list["GpuDescriptorBinding"],
+    ) -> "GpuDescriptorSetLayout":
+        """Create a descriptor set layout."""
+        vk_bindings = []
+        for binding in bindings:
+            vk_bindings.append(
+                VkDescriptorSetLayoutBinding(
+                    binding=binding.binding,
+                    descriptorType=binding.to_vk_descriptor_type(),
+                    descriptorCount=binding.count,
+                    stageFlags=binding.to_vk_shader_stage_flags(),
+                    pImmutableSamplers=None,
+                )
+            )
+
+        create_info = VkDescriptorSetLayoutCreateInfo(
+            flags=0,
+            bindingCount=len(vk_bindings),
+            pBindings=vk_bindings,
+        )
+
+        vk_layout = vkCreateDescriptorSetLayout(
+            device=self.vk_device,
+            pCreateInfo=create_info,
+            pAllocator=None,
+        )
+
+        return GpuDescriptorSetLayout(
+            device=self,
+            vk_descriptor_set_layout=vk_layout,
+            bindings=bindings,
+        )
+
+    def create_descriptor_set(
+        self,
+        *,
+        pool: "GpuDescriptorPool",
+        layout: "GpuDescriptorSetLayout",
+        bindings: list["GpuDescriptorBinding"],
+    ) -> "GpuDescriptorSet":
+        """Create and write to a descriptor set."""
+        from .typed_vulkan import (
+            VK_IMAGE_LAYOUT_GENERAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        )
+
+        # Allocate the descriptor set
+        alloc_info = VkDescriptorSetAllocateInfo(
+            descriptorPool=pool.vk_descriptor_pool,
+            descriptorSetCount=1,
+            pSetLayouts=[layout.vk_descriptor_set_layout],
+        )
+
+        vk_sets = vkAllocateDescriptorSets(
+            device=self.vk_device,
+            pAllocateInfo=alloc_info,
+        )
+        vk_set = vk_sets[0]
+
+        # Write the descriptor bindings
+        writes = []
+        for binding in bindings:
+            vk_desc_type = binding.to_vk_descriptor_type()
+
+            # Prepare image/buffer info based on binding type
+            # These must be passed at construction time to VkWriteDescriptorSet
+            p_image_info = None
+            p_buffer_info = None
+
+            if binding.descriptor_type in (
+                "combined-image-sampler",
+                "sampled-image",
+                "storage-image",
+            ):
+                if binding.image is None:
+                    raise LogicError(f"Binding {binding.binding} requires an image")
+                image_layout = (
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                    if binding.descriptor_type != "storage-image"
+                    else VK_IMAGE_LAYOUT_GENERAL
+                )
+                p_image_info = [
+                    VkDescriptorImageInfo(
+                        sampler=binding.sampler.vk_sampler if binding.sampler else None,
+                        imageView=binding.image.vk_image_view,
+                        imageLayout=image_layout,
+                    )
+                ]
+            elif binding.descriptor_type == "sampler":
+                if binding.sampler is None:
+                    raise LogicError(f"Binding {binding.binding} requires a sampler")
+                # For sampler-only descriptors, imageView can be None
+                p_image_info = [
+                    VkDescriptorImageInfo(
+                        sampler=binding.sampler.vk_sampler,
+                        imageView=binding.image.vk_image_view
+                        if binding.image
+                        else None,  # type: ignore
+                        imageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
+                    )
+                ]
+            elif binding.descriptor_type in ("uniform-buffer", "storage-buffer"):
+                if binding.buffer is None:
+                    raise LogicError(f"Binding {binding.binding} requires a buffer")
+                p_buffer_info = [
+                    VkDescriptorBufferInfo(
+                        buffer=binding.buffer.vk_buffer,
+                        offset=0,
+                        range=binding.buffer.meta.size,
+                    )
+                ]
+
+            # Create write descriptor set with all fields at construction time
+            # (CFFI cdata fields cannot be assigned after construction)
+            write = VkWriteDescriptorSet(
+                dstSet=vk_set,
+                dstBinding=binding.binding,
+                dstArrayElement=0,
+                descriptorCount=binding.count,
+                descriptorType=vk_desc_type,
+                pImageInfo=p_image_info,
+                pBufferInfo=p_buffer_info,
+                pTexelBufferView=None,
+            )
+
+            writes.append(write)
+
+        if writes:
+            vkUpdateDescriptorSets(
+                device=self.vk_device,
+                descriptorWriteCount=len(writes),
+                pDescriptorWrites=writes,
+                descriptorCopyCount=0,
+                pDescriptorCopies=None,
+            )
+
+        return GpuDescriptorSet(
+            device=self,
+            vk_descriptor_set=vk_set,
+            pool=pool,
+            layout=layout,
+        )
+
+    def create_pipeline_layout(
+        self,
+        *,
+        descriptor_set_layouts: list["GpuDescriptorSetLayout"] | None = None,
+    ) -> "GpuPipelineLayout":
+        """Create a pipeline layout."""
+        vk_set_layouts = (
+            [layout.vk_descriptor_set_layout for layout in descriptor_set_layouts]
+            if descriptor_set_layouts
+            else []
+        )
+
         layout_create_info = VkPipelineLayoutCreateInfo(
             flags=0,
-            setLayoutCount=0,
-            pSetLayouts=None,
+            setLayoutCount=len(vk_set_layouts),
+            pSetLayouts=vk_set_layouts if vk_set_layouts else None,
             pushConstantRangeCount=0,
             pPushConstantRanges=None,
         )
@@ -1198,10 +1486,34 @@ class GpuDevice(GpuResource):
             pAllocator=None,
         )
 
-        layout = GpuPipelineLayout(
+        return GpuPipelineLayout(
             device=self,
             vk_pipeline_layout=vk_pipeline_layout,
         )
+
+    def create_pipeline(
+        self,
+        *,
+        vertex_shader: GpuShader,
+        fragment_shader: GpuShader,
+        vk_color_format: VkFormat,
+        viewport_width: int,
+        viewport_height: int,
+        layout: "GpuPipelineLayout | None" = None,
+    ) -> GpuPipeline:
+        """Create a graphics pipeline.
+
+        Args:
+            vertex_shader: The vertex shader module.
+            fragment_shader: The fragment shader module.
+            vk_color_format: The color attachment format.
+            viewport_width: Width of the viewport.
+            viewport_height: Height of the viewport.
+            layout: Optional pipeline layout. If not provided, an empty layout is created.
+        """
+        # Use provided layout or create an empty one
+        if layout is None:
+            layout = self.create_pipeline_layout()
 
         # Shader stages
         shader_stages = [
@@ -1336,7 +1648,7 @@ class GpuDevice(GpuResource):
             pDepthStencilState=None,
             pColorBlendState=color_blend_state,
             pDynamicState=None,
-            layout=vk_pipeline_layout,
+            layout=layout.vk_pipeline_layout,
             renderPass=None,  # Using dynamic rendering
             subpass=0,
             basePipelineHandle=None,
@@ -2205,16 +2517,25 @@ class GpuCommandEncoder(GpuResource):
         self,
         *,
         image: GpuImage,
-        usage: Literal["present-src", "color-attachment"],
+        usage: Literal[
+            "present-src", "color-attachment", "copy-dst", "copy-src", "texture-binding"
+        ],
     ):
-        # Determine the new layout based on usage
-        new_layout = (
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-            if usage == "color-attachment"
-            else VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-            if usage == "present-src"
-            else VK_IMAGE_LAYOUT_UNDEFINED
+        from .typed_vulkan import (
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         )
+
+        # Determine the new layout based on usage
+        new_layout = {
+            "color-attachment": VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            "present-src": VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            "copy-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            "copy-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            "texture-binding": VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        }.get(usage, VK_IMAGE_LAYOUT_UNDEFINED)
 
         # Skip if already in the correct layout
         if image.current_vk_layout == new_layout:
@@ -2224,10 +2545,20 @@ class GpuCommandEncoder(GpuResource):
         src_access_mask = 0
         if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
             src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
+        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
 
         dst_access_mask = 0
         if new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
             dst_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            dst_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            dst_access_mask = VK_ACCESS_TRANSFER_READ_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            dst_access_mask = VK_ACCESS_SHADER_READ_BIT
 
         vkCmdPipelineBarrier(
             commandBuffer=self.vk_command_buffer,
@@ -2315,6 +2646,113 @@ class GpuShader(GpuResource):
 #
 
 
+#
+# Descriptor binding type for descriptor set creation
+#
+
+
+GpuDescriptorType: TypeAlias = Literal[
+    "combined-image-sampler",
+    "sampled-image",
+    "sampler",
+    "storage-buffer",
+    "storage-image",
+    "uniform-buffer",
+]
+
+GpuStage: TypeAlias = Literal[
+    "vertex",
+    "fragment",
+]
+
+
+@dataclass
+class GpuDescriptorBinding:
+    """Describes a single binding in a descriptor set layout or for writing to a descriptor set."""
+
+    binding: int
+    descriptor_type: GpuDescriptorType
+    count: int = 1
+    stages: list[GpuStage] = field(default_factory=lambda: ["vertex", "fragment"])
+
+    # For writing to descriptor sets (optional, used in create_descriptor_set):
+    image: "GpuImage | None" = None
+    sampler: "GpuSampler | None" = None
+    buffer: "GpuBuffer | None" = None
+
+    def to_vk_descriptor_type(self) -> VkDescriptorType:
+        return {
+            "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            "sampled-image": VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            "sampler": VK_DESCRIPTOR_TYPE_SAMPLER,
+            "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            "storage-image": VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        }[self.descriptor_type]
+
+    def to_vk_shader_stage_flags(self) -> int:
+        res = 0
+        for stage in self.stages:
+            res |= {
+                "vertex": VK_SHADER_STAGE_VERTEX_BIT,
+                "fragment": VK_SHADER_STAGE_FRAGMENT_BIT,
+            }[stage]
+        return res
+
+
+#
+# GpuSampler
+#
+
+
+class GpuSampler(GpuResource):
+    """Wrapper for VkSampler"""
+
+    device: GpuDevice
+    vk_sampler: VkSampler
+
+    def __init__(self, *, device: GpuDevice, vk_sampler: VkSampler):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_sampler = vk_sampler
+
+    def _on_dispose(self) -> None:
+        vkDestroySampler(
+            device=self.device.vk_device,
+            sampler=self.vk_sampler,
+            pAllocator=None,
+        )
+
+
+#
+# GpuDescriptorPool
+#
+
+
+class GpuDescriptorPool(GpuResource):
+    """Wrapper for VkDescriptorPool"""
+
+    device: GpuDevice
+    vk_descriptor_pool: VkDescriptorPool
+
+    def __init__(self, *, device: GpuDevice, vk_descriptor_pool: VkDescriptorPool):
+        super().__init__(parent=device)
+        self.device = device
+        self.vk_descriptor_pool = vk_descriptor_pool
+
+    def _on_dispose(self) -> None:
+        vkDestroyDescriptorPool(
+            device=self.device.vk_device,
+            descriptorPool=self.vk_descriptor_pool,
+            pAllocator=None,
+        )
+
+
+#
+# GpuPipelineLayout
+#
+
+
 class GpuPipelineLayout(GpuResource):
     device: GpuDevice
     vk_pipeline_layout: VkPipelineLayout
@@ -2335,28 +2773,50 @@ class GpuPipelineLayout(GpuResource):
 class GpuDescriptorSetLayout(GpuResource):
     device: GpuDevice
     vk_descriptor_set_layout: VkDescriptorSetLayout
+    bindings: list[GpuDescriptorBinding]
 
     def __init__(
-        self, *, device: GpuDevice, vk_descriptor_set_layout: VkDescriptorSetLayout
+        self,
+        *,
+        device: GpuDevice,
+        vk_descriptor_set_layout: VkDescriptorSetLayout,
+        bindings: list[GpuDescriptorBinding],
     ):
         super().__init__(parent=device)
         self.device = device
         self.vk_descriptor_set_layout = vk_descriptor_set_layout
+        self.bindings = bindings
 
     def _on_dispose(self) -> None:
-        pass
+        vkDestroyDescriptorSetLayout(
+            device=self.device.vk_device,
+            descriptorSetLayout=self.vk_descriptor_set_layout,
+            pAllocator=None,
+        )
 
 
 class GpuDescriptorSet(GpuResource):
     device: GpuDevice
     vk_descriptor_set: VkDescriptorSet
+    pool: GpuDescriptorPool
+    layout: GpuDescriptorSetLayout
 
-    def __init__(self, *, device: GpuDevice, vk_descriptor_set: VkDescriptorSet):
-        super().__init__(parent=device)
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_descriptor_set: VkDescriptorSet,
+        pool: GpuDescriptorPool,
+        layout: GpuDescriptorSetLayout,
+    ):
+        super().__init__(parent=pool)
         self.device = device
         self.vk_descriptor_set = vk_descriptor_set
+        self.pool = pool
+        self.layout = layout
 
     def _on_dispose(self) -> None:
+        # Descriptor sets are automatically freed when the pool is destroyed
         pass
 
 
