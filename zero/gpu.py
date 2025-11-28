@@ -2447,7 +2447,7 @@ class GpuSwapchain(GpuResource):
         )
 
     @contextmanager
-    def present(self, *, timeout_sec: float = 10.0):
+    def present(self, *, timeout_sec: float = 0.25):
         # See: https://vulkan-tutorial.com/Drawing_a_triangle/Drawing/Frames_in_flight
 
         global_frame_index = self.frame_counter
