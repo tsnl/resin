@@ -37,7 +37,6 @@ def test_buffer_roundtrip():
 
     # copy host_buf_1 to device_buf
     cmd = dev.create_command_encoder(queue_type="transfer")
-
     cmd.copy_buffer_to_buffer(src=host_buf_1, dst=device_buf, size=meta.size)
     cmd.submit().wait()
 
@@ -69,11 +68,13 @@ def test_image_roundtrip():
 
     # copy host_buf_1 to image
     cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.transition_image_layout(image=image, layout="copy-dst")
     cmd.copy_buffer_to_image(dst=image, src=host_buf_1)
     cmd.submit().wait()
 
     # copy image to host_buf_2
     cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.transition_image_layout(image=image, layout="copy-src")
     cmd.copy_image_to_buffer(src=image, dst=host_buf_2)
     cmd.submit().wait()
 

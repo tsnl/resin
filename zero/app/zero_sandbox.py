@@ -165,7 +165,7 @@ def main_windowed(args: argparse.Namespace):
 
             cmd.transition_image_layout(
                 image=present_target.swapchain_image,
-                usage="color-attachment",
+                layout="color-attachment",
             )
 
             with cmd.render(
@@ -177,7 +177,7 @@ def main_windowed(args: argparse.Namespace):
 
             cmd.transition_image_layout(
                 image=present_target.swapchain_image,
-                usage="present-src",
+                layout="present-src",
             )
 
             cmd.submit()

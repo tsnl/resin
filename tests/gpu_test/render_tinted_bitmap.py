@@ -95,9 +95,9 @@ def upload_texture(dev: GpuDevice, texture_data: torch.Tensor) -> GpuImage:
 
     # Copy staging buffer to texture
     cmd = dev.create_command_encoder(queue_type="transfer")
-    cmd.transition_image_layout(image=texture, usage="copy-dst")
+    cmd.transition_image_layout(image=texture, layout="copy-dst")
     cmd.copy_buffer_to_image(src=staging_buffer, dst=texture)
-    cmd.transition_image_layout(image=texture, usage="texture-binding")
+    cmd.transition_image_layout(image=texture, layout="texture-binding")
     cmd.submit().wait()
 
     return texture

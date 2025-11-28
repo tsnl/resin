@@ -63,6 +63,7 @@ def test_render_simple_triangle():
 
     # Render the triangle
     cmd = dev.create_command_encoder(queue_type="graphics")
+    cmd.transition_image_layout(image=render_target, layout="color-attachment-optimal")
     with cmd.render(
         color_attachment=render_target,
         clear_on_load=True,
@@ -80,6 +81,7 @@ def test_render_simple_triangle():
 
     # Copy image to staging buffer
     cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd.transition_image_layout(image=render_target, layout="copy-src")
     cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
     cmd.submit().wait()
 

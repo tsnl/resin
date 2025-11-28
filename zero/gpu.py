@@ -2100,6 +2100,16 @@ GpuImageUsage: TypeAlias = Literal[
     "depth-attachment",
 ]
 
+GpuImageLayout: TypeAlias = Literal[
+    "present-src",
+    "color-attachment-optimal",
+    "copy-dst",
+    "copy-src",
+    "texture-binding",
+    "transfer-src",
+    "transfer-dst",
+]
+
 
 class GpuImage(GpuResource):
     device: GpuDevice
@@ -2561,9 +2571,7 @@ class GpuCommandEncoder(GpuResource):
         self,
         *,
         image: GpuImage,
-        usage: Literal[
-            "present-src", "color-attachment", "copy-dst", "copy-src", "texture-binding"
-        ],
+        layout: GpuImageLayout | None,
     ):
         from .typed_vulkan import (
             VK_ACCESS_SHADER_READ_BIT,
@@ -2573,13 +2581,21 @@ class GpuCommandEncoder(GpuResource):
         )
 
         # Determine the new layout based on usage
-        new_layout = {
-            "color-attachment": VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            "present-src": VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            "copy-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            "copy-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            "texture-binding": VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        }.get(usage, VK_IMAGE_LAYOUT_UNDEFINED)
+        new_layout = (
+            None
+            if layout is None
+            else (
+                {
+                    "color-attachment-optimal": VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    "present-src": VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    "copy-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    "copy-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    "texture-binding": VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    "transfer-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    "transfer-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                }[layout]
+            )
+        )
 
         # Skip if already in the correct layout
         if image.current_vk_layout == new_layout:
