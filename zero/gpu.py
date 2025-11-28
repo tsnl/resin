@@ -2582,7 +2582,7 @@ class GpuCommandEncoder(GpuResource):
 
         # Determine the new layout based on usage
         new_layout = (
-            None
+            VK_IMAGE_LAYOUT_UNDEFINED
             if layout is None
             else (
                 {
@@ -2622,7 +2622,7 @@ class GpuCommandEncoder(GpuResource):
 
         vkCmdPipelineBarrier(
             commandBuffer=self.vk_command_buffer,
-            srcStageMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            srcStageMask=VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             dstStageMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             dependencyFlags=0,
             memoryBarrierCount=0,

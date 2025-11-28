@@ -58,7 +58,7 @@ def main_headless(args: argparse.Namespace):
     )
 
     # Load shaders from compiled SPIR-V
-    shader_dir = Path(__file__).parent.parent.parent / "data" / "shader"
+    shader_dir = zero.BUNDLED_DATA_PATH / "shader"
 
     vertex_shader = device.create_shader(
         spirv_path=shader_dir / "triangle.vert.spv",
@@ -91,6 +91,10 @@ def main_headless(args: argparse.Namespace):
 
     # Render triangle
     cmd = device.create_command_encoder(queue_type="graphics")
+    cmd.transition_image_layout(
+        image=render_target_image,
+        layout="color-attachment-optimal",
+    )
     with cmd.render(
         color_attachment=render_target_image,
         clear_on_load=True,
@@ -165,7 +169,7 @@ def main_windowed(args: argparse.Namespace):
 
             cmd.transition_image_layout(
                 image=present_target.swapchain_image,
-                layout="color-attachment",
+                layout="color-attachment-optimal",
             )
 
             with cmd.render(

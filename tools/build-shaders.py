@@ -18,7 +18,7 @@ def main():
     shader_dir = project_root / "shader"
 
     # Output directories
-    package_shader_dir = project_root / "zero" / "data" / "shader"
+    package_shader_dir = project_root / "zero" / "bundled_data" / "shader"
     test_shader_dir = project_root / "tests" / "gpu_test" / "data"
 
     # Ensure output directories exist
