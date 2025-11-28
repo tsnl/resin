@@ -1377,6 +1377,7 @@ class GpuDevice(GpuResource):
         )[0]
 
         # Create fence for this command buffer if none was provided
+        dispose_fence = fence is None
         fence = fence or self.create_fence()
 
         vkBeginCommandBuffer(
@@ -1392,7 +1393,7 @@ class GpuDevice(GpuResource):
             vk_command_buffer=vk_command_buffer,
             fence=fence,
             submit_queue_type=queue_type,
-            dispose_fence=True,
+            dispose_fence=dispose_fence,
         )
 
     def submit(

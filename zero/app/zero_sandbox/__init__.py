@@ -26,9 +26,10 @@ def main():
         help="Number of swapchain images: 2 for double buffering, 3 for triple buffering",
     )
     ap.add_argument(
-        "--enable-vulkan-debug-layers",
-        action="store_true",
-        help="Enable Vulkan debug layers for debugging purposes",
+        "--disable-vulkan-debug-layers",
+        dest="enable_vulkan_debug_layers",
+        action="store_false",
+        help="Disable Vulkan debug layers (enabled by default)",
     )
     args = ap.parse_args()
 
