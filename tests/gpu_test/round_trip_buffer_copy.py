@@ -37,6 +37,7 @@ def test_buffer_roundtrip():
 
     # copy host_buf_1 to device_buf
     cmd = dev.create_command_encoder(queue_type="transfer")
+
     cmd.copy_buffer_to_buffer(src=host_buf_1, dst=device_buf, size=meta.size)
     cmd.submit().wait()
 

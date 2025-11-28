@@ -19,7 +19,6 @@ __all__ = [
     "GpuSurface",
     "GpuSwapchain",
     "GpuSampler",
-    "GpuDescriptorPool",
     "GpuDescriptorSetLayout",
     "GpuDescriptorSet",
     "GpuDescriptorBinding",
@@ -49,6 +48,7 @@ from .typed_vulkan import (
     VK_BLEND_FACTOR_ONE,
     VK_BLEND_FACTOR_ZERO,
     VK_BLEND_OP_ADD,
+    VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -70,6 +70,8 @@ from .typed_vulkan import (
     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     VK_FENCE_CREATE_SIGNALED_BIT,
+    VK_FILTER_LINEAR,
+    VK_FILTER_NEAREST,
     VK_FORMAT_B8G8R8A8_UNORM,
     VK_FORMAT_D32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
@@ -81,7 +83,9 @@ from .typed_vulkan import (
     VK_IMAGE_ASPECT_DEPTH_BIT,
     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    VK_IMAGE_LAYOUT_GENERAL,
     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
     VK_IMAGE_LAYOUT_UNDEFINED,
@@ -114,6 +118,11 @@ from .typed_vulkan import (
     VK_QUEUE_GRAPHICS_BIT,
     VK_QUEUE_TRANSFER_BIT,
     VK_SAMPLE_COUNT_1_BIT,
+    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
+    VK_SAMPLER_ADDRESS_MODE_REPEAT,
+    VK_SAMPLER_MIPMAP_MODE_LINEAR,
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_EXCLUSIVE,
@@ -272,6 +281,28 @@ from .typed_vulkan import (
 
 if TYPE_CHECKING:
     from _typeshed import SupportsWrite
+
+#
+# Type aliases for GPU configuration
+#
+
+GpuDescriptorType: TypeAlias = Literal[
+    "combined-image-sampler",
+    "sampled-image",
+    "sampler",
+    "storage-buffer",
+    "storage-image",
+    "uniform-buffer",
+]
+
+GpuDescriptorBindingResourceType: TypeAlias = Literal["image", "sampler", "buffer"]
+
+GpuSamplerFilter: TypeAlias = Literal["nearest", "linear"]
+
+GpuStage: TypeAlias = Literal[
+    "vertex",
+    "fragment",
+]
 
 #
 # GpuContext
@@ -561,6 +592,7 @@ class GpuContext(BaseContext["GpuContext"]):
         *,
         physical_device: GpuPhysicalDevice,
         surface: GpuSurface | None,
+        descriptor_pool_config: dict[GpuDescriptorType, int] | None = None,
     ) -> GpuDevice:
         # Ensure Vulkan 1.3 support
         physical_device.check_vulkan_1_3_support()
@@ -616,15 +648,40 @@ class GpuContext(BaseContext["GpuContext"]):
                 pAllocator=None,
             )
 
-        # Return final GpuDevice:
-        return GpuDevice(
+        # Create a temporary GpuDevice to use for creating the default descriptor pool
+        gpu_device = GpuDevice(
             context=self,
             physical_device=physical_device,
             qfis=qfis,
             vk_device=vk_device,
             vk_command_pools=vk_command_pools,
             present_support_enabled=surface is not None,
+            default_descriptor_pool=None,  # type: ignore
         )
+
+        # Create default descriptor pool with configured or default capacities
+        if descriptor_pool_config is None:
+            descriptor_pool_config = {
+                "combined-image-sampler": 100,
+                "sampled-image": 100,
+                "sampler": 100,
+                "storage-buffer": 100,
+                "storage-image": 100,
+                "uniform-buffer": 100,
+            }
+
+        default_pool = gpu_device.create_descriptor_pool(
+            max_sets=1000,
+            pool_sizes=[
+                (desc_type, count)
+                for desc_type, count in descriptor_pool_config.items()
+            ],
+        )
+
+        # Update the device with the default pool
+        gpu_device._default_descriptor_pool = default_pool
+
+        return gpu_device
 
     def print_debug_info(self, out: SupportsWrite[str], indent: int = 4) -> None:
         json.dump(
@@ -912,6 +969,7 @@ class GpuDevice(GpuResource):
     vk_command_pools: dict[int, VkCommandPool]
     vk_queues: dict[int, VkQueue]
     present_support_enabled: bool
+    _default_descriptor_pool: "GpuDescriptorPool | None"
 
     def __init__(
         self,
@@ -922,6 +980,7 @@ class GpuDevice(GpuResource):
         vk_device: VkDevice,
         vk_command_pools: dict[int, VkCommandPool],
         present_support_enabled: bool,
+        default_descriptor_pool: "GpuDescriptorPool | None" = None,
     ) -> None:
         super().__init__(parent=context)
         self.physical_device = physical_device
@@ -938,8 +997,13 @@ class GpuDevice(GpuResource):
             for qfi_index in {idx for _, idx in qfis}
         }
         self.present_support_enabled = present_support_enabled
+        self._default_descriptor_pool = default_descriptor_pool
 
     def _on_dispose(self) -> None:
+        # Destroy default descriptor pool first (before command pools and device):
+        if self._default_descriptor_pool is not None:
+            self._default_descriptor_pool.dispose()
+
         # Destroy command pools:
         for _, vk_command_pool in self.vk_command_pools.items():
             vkDestroyCommandPool(
@@ -1207,24 +1271,13 @@ class GpuDevice(GpuResource):
     def create_sampler(
         self,
         *,
-        mag_filter: Literal["nearest", "linear"] = "linear",
-        min_filter: Literal["nearest", "linear"] = "linear",
+        mag_filter: GpuSamplerFilter = "linear",
+        min_filter: GpuSamplerFilter = "linear",
         address_mode: Literal[
             "repeat", "mirrored-repeat", "clamp-to-edge", "clamp-to-border"
         ] = "clamp-to-edge",
     ) -> "GpuSampler":
         """Create a texture sampler"""
-        from .typed_vulkan import (
-            VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-            VK_FILTER_LINEAR,
-            VK_FILTER_NEAREST,
-            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-            VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-            VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        )
-
         vk_mag_filter = (
             VK_FILTER_LINEAR if mag_filter == "linear" else VK_FILTER_NEAREST
         )
@@ -1270,19 +1323,7 @@ class GpuDevice(GpuResource):
         self,
         *,
         max_sets: int,
-        pool_sizes: list[
-            tuple[
-                Literal[
-                    "combined-image-sampler",
-                    "sampled-image",
-                    "sampler",
-                    "storage-buffer",
-                    "storage-image",
-                    "uniform-buffer",
-                ],
-                int,
-            ]
-        ],
+        pool_sizes: list[tuple[GpuDescriptorType, int]],
     ) -> "GpuDescriptorPool":
         """Create a descriptor pool for allocating descriptor sets."""
         vk_pool_sizes = []
@@ -1353,15 +1394,18 @@ class GpuDevice(GpuResource):
     def create_descriptor_set(
         self,
         *,
-        pool: "GpuDescriptorPool",
+        pool: "GpuDescriptorPool | None" = None,
         layout: "GpuDescriptorSetLayout",
         bindings: list["GpuDescriptorBinding"],
     ) -> "GpuDescriptorSet":
         """Create and write to a descriptor set."""
-        from .typed_vulkan import (
-            VK_IMAGE_LAYOUT_GENERAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        )
+        if pool is None:
+            pool = self._default_descriptor_pool
+
+        if pool is None:
+            raise LogicError(
+                "No descriptor pool available. Ensure create_device() was called successfully."
+            )
 
         # Allocate the descriptor set
         alloc_info = VkDescriptorSetAllocateInfo(
@@ -2651,21 +2695,6 @@ class GpuShader(GpuResource):
 #
 
 
-GpuDescriptorType: TypeAlias = Literal[
-    "combined-image-sampler",
-    "sampled-image",
-    "sampler",
-    "storage-buffer",
-    "storage-image",
-    "uniform-buffer",
-]
-
-GpuStage: TypeAlias = Literal[
-    "vertex",
-    "fragment",
-]
-
-
 @dataclass
 class GpuDescriptorBinding:
     """Describes a single binding in a descriptor set layout or for writing to a descriptor set."""
@@ -2679,6 +2708,22 @@ class GpuDescriptorBinding:
     image: "GpuImage | None" = None
     sampler: "GpuSampler | None" = None
     buffer: "GpuBuffer | None" = None
+
+    def _validate_binding_resource_type(
+        self,
+    ) -> GpuDescriptorBindingResourceType | None:
+        """Validate and return the resource type required by this binding."""
+        if self.descriptor_type in (
+            "combined-image-sampler",
+            "sampled-image",
+            "storage-image",
+        ):
+            return "image"
+        elif self.descriptor_type == "sampler":
+            return "sampler"
+        elif self.descriptor_type in ("uniform-buffer", "storage-buffer"):
+            return "buffer"
+        return None
 
     def to_vk_descriptor_type(self) -> VkDescriptorType:
         return {

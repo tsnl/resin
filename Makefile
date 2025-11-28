@@ -22,7 +22,7 @@ shaders:
 
 .PHONY: tests
 tests: shaders
-	uv run --extra dev python -m pytest -v --tb=short tests/
+	uv run --extra dev python -m pytest -vs --tb=short tests/
 
 #
 # Ruff:
