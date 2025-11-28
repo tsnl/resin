@@ -7,20 +7,16 @@ Required Vulkan version:
 """
 
 __all__ = [
-    # GpuContext
     "GpuContext",
-    # GpuPhysicalDevice
     "GpuPhysicalDevice",
-    # GpuDevice
     "GpuDevice",
-    # GpuShader
     "GpuShader",
-    # GpuPipeline
     "GpuPipeline",
-    # GpuImage
     "GpuImage",
     "GpuImageUsage",
     "GpuImageMeta",
+    "GpuSurface",
+    "GpuSwapchain",
 ]
 
 import os
@@ -29,9 +25,10 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Callable, Literal, TypeAlias
 
 import torch
+import glfw
 
 from .core import BaseContext, BaseContextResource
 from .excepts import LogicError, PlatformSupportError
@@ -233,6 +230,7 @@ from .typed_vulkan import (
     VkSwapchainKHR,
     vkUnmapMemory,
     vkWaitForFences,
+    raw_ffi,
 )
 
 #
@@ -241,6 +239,12 @@ from .typed_vulkan import (
 
 
 class GpuContext(BaseContext["GpuContext"]):
+    enable_debug_layer_support: bool
+    enable_present_support: bool
+    enable_portability_subset: bool
+    vk_instance: VkInstance
+    vk_extra_proc_tab: dict[str, Callable]
+
     def __init__(
         self,
         app_name: str = "Zero App",
@@ -256,20 +260,21 @@ class GpuContext(BaseContext["GpuContext"]):
             else (sys.platform == "darwin")  # -> inferred
         )
 
-        self._enable_debug_layer_support = enable_debug_layer_support
-        self._enable_present_support = enable_present_support
-        self._enable_portability_subset = enable_portability_subset
+        self.enable_debug_layer_support = enable_debug_layer_support
+        self.enable_present_support = enable_present_support
+        self.enable_portability_subset = enable_portability_subset
 
-        self._vk_instance = GpuContext._help_create_instance(
+        self.vk_instance = GpuContext._help_create_instance(
             app_name,
             enable_debug_layer_support,
             enable_present_support,
             enable_portability_subset,
         )
-        self._vk_extra_proc_tab = {}
+        self.vk_extra_proc_tab = {}
 
         if enable_present_support:
             self._load_extra_proc("vkGetPhysicalDeviceSurfaceSupportKHR")
+            self._load_extra_proc("vkDestroySurfaceKHR")
             self._load_extra_proc("vkCreateSwapchainKHR")
             self._load_extra_proc("vkDestroySwapchainKHR")
             self._load_extra_proc("vkGetSwapchainImagesKHR")
@@ -277,14 +282,14 @@ class GpuContext(BaseContext["GpuContext"]):
             self._load_extra_proc("vkQueuePresentKHR")
 
     def _load_extra_proc(self, name: str):
-        proc = vkGetInstanceProcAddr(self._vk_instance, name)
+        proc = vkGetInstanceProcAddr(self.vk_instance, name)
         if proc is None:
             raise RuntimeError(f"Failed to load Vulkan instance procedure: {name!r}")
-        self._vk_extra_proc_tab[name] = proc
+        self.vk_extra_proc_tab[name] = proc
         return proc
 
     def ext_fn(self, name: str):
-        return self._vk_extra_proc_tab[name]
+        return self.vk_extra_proc_tab[name]
 
     @staticmethod
     def _help_create_instance(
@@ -333,6 +338,9 @@ class GpuContext(BaseContext["GpuContext"]):
     ):
         """
         glfw.get_required_instance_extensions(), but no need to init GLFW.
+
+        This greatly streamlines initialization by letting the GpuContext be fully
+        independent of the WindowContext.
         """
 
         # See: GLFW's recognized extensions
@@ -380,7 +388,7 @@ class GpuContext(BaseContext["GpuContext"]):
 
     def _on_dispose(self) -> None:
         if hasattr(self, "_vk_instance"):
-            vkDestroyInstance(self._vk_instance, pAllocator=None)
+            vkDestroyInstance(self.vk_instance, pAllocator=None)
 
     def vkGetPhysicalDeviceSurfaceSupportKHR(
         self,
@@ -393,6 +401,14 @@ class GpuContext(BaseContext["GpuContext"]):
                 physical_device, queue_family_index, surface
             )
         )
+
+    def vkDestroySurfaceKHR(
+        self,
+        instance: VkInstance,
+        surface: VkSurfaceKHR,
+        pAllocator=None,
+    ) -> None:
+        self.ext_fn("vkDestroySurfaceKHR")(instance, surface, pAllocator)
 
     def vkCreateSwapchainKHR(
         self,
@@ -436,18 +452,6 @@ class GpuContext(BaseContext["GpuContext"]):
     ) -> int:
         return self.ext_fn("vkQueuePresentKHR")(queue, pPresentInfo)
 
-    @property
-    def enable_debug_layer_support(self) -> bool:
-        return self._enable_debug_layer_support
-
-    @property
-    def enable_present_support(self) -> bool:
-        return self._enable_present_support
-
-    @property
-    def enable_portability_subset(self) -> bool | None:
-        return self._enable_portability_subset
-
     def enumerate_physical_devices(self) -> list[GpuPhysicalDevice]:
         return [
             GpuPhysicalDevice(
@@ -460,23 +464,39 @@ class GpuContext(BaseContext["GpuContext"]):
                     vk_physical_device
                 ),
             )
-            for vk_physical_device in vkEnumeratePhysicalDevices(self._vk_instance)
+            for vk_physical_device in vkEnumeratePhysicalDevices(self.vk_instance)
         ]
+
+    def create_surface_from_raw_glfw_window_handle(
+        self,
+        *,
+        raw_glfw_window_handle: glfw._GLFWwindow,
+    ) -> GpuSurface:
+        """
+        Do not call directly: use Window.create_surface() instead.
+        """
+        surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
+        result = glfw.create_window_surface(
+            instance=self.vk_instance,
+            window=raw_glfw_window_handle,
+            allocator=None,
+            surface=surface_ptr,
+        )
+        if result != 0:
+            raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
+        return GpuSurface(context=self, vk_surface=surface_ptr[0])
 
     def create_device(
         self,
         *,
         physical_device: GpuPhysicalDevice,
-        surface: VkSurfaceKHR | None,
+        surface: GpuSurface | None,
     ) -> GpuDevice:
         # Ensure Vulkan 1.3 support
         physical_device.check_vulkan_1_3_support()
 
         # Compute queue family indices
-        qfis = GpuQueueFamilyIndices.find(
-            physical_device,
-            surface=surface,
-        )
+        qfis = GpuQueueFamilyIndices.find(physical_device, surface=surface)
         queue_create_info_list = qfis.compute_queue_create_info_list()
 
         # Compute extensions
@@ -601,7 +621,7 @@ class GpuPhysicalDevice(GpuResource):
 
     def get_queue_families(
         self,
-        surface: VkSurfaceKHR | None,
+        surface: GpuSurface | None,
     ) -> list["GpuPhysicalDeviceQueueFamily"]:
         if surface is not None:
             assert self.context.enable_present_support
@@ -620,7 +640,7 @@ class GpuPhysicalDevice(GpuResource):
                 supports_present = self.context.vkGetPhysicalDeviceSurfaceSupportKHR(
                     self.vk_physical_device,
                     index,
-                    surface,
+                    surface.vk_surface,
                 )
 
             qfi = GpuPhysicalDeviceQueueFamily(
@@ -704,7 +724,7 @@ class GpuQueueFamilyIndices:
     @staticmethod
     def find(
         physical_device: "GpuPhysicalDevice",
-        surface: VkSurfaceKHR | None = None,
+        surface: GpuSurface | None = None,
     ) -> "GpuQueueFamilyIndices":
         # First, try to find exclusive queue families:
         qfi_exclusive = GpuQueueFamilyIndices._find_with_exclusivity_constraint(
@@ -739,7 +759,7 @@ class GpuQueueFamilyIndices:
     @staticmethod
     def _find_with_exclusivity_constraint(
         physical_device: "GpuPhysicalDevice",
-        surface: VkSurfaceKHR | None,
+        surface: GpuSurface | None,
         require_exclusive_queues: bool,
     ) -> "GpuQueueFamilyIndices":
         res = GpuQueueFamilyIndices()
@@ -1348,7 +1368,7 @@ class GpuDevice(GpuResource):
     def create_swapchain(
         self,
         *,
-        surface: VkSurfaceKHR,
+        surface: GpuSurface,
         width: int,
         height: int,
         vk_format: VkFormat = VK_FORMAT_B8G8R8A8_UNORM,
@@ -1358,7 +1378,7 @@ class GpuDevice(GpuResource):
             device=self.vk_device,
             pCreateInfo=VkSwapchainCreateInfoKHR(
                 flags=0,
-                surface=surface,
+                surface=surface.vk_surface,
                 minImageCount=image_count,
                 imageFormat=vk_format,
                 imageColorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
@@ -2200,6 +2220,31 @@ class GpuRenderPassCommandEncoder(GpuResource):
             instanceCount=instance_count,
             firstVertex=first_vertex,
             firstInstance=first_instance,
+        )
+
+
+#
+# GpuSurface
+#
+
+
+class GpuSurface(GpuResource):
+    vk_surface: VkSurfaceKHR
+
+    def __init__(
+        self,
+        *,
+        context: GpuContext,
+        vk_surface: VkSurfaceKHR,
+    ):
+        super().__init__(parent=context)
+        self.vk_surface = vk_surface
+
+    def _on_dispose(self) -> None:
+        self.context.vkDestroySurfaceKHR(
+            instance=self.context.vk_instance,
+            surface=self.vk_surface,
+            pAllocator=None,
         )
 
 

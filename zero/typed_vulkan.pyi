@@ -14,7 +14,7 @@ def vkGetInstanceProcAddr(instance: "VkInstance", pName: str) -> Callable:
     vkGetInstanceProcAddr retrieves a function pointer for a Vulkan command.
     """
 
-ffi: cffi.FFI
+raw_ffi: cffi.FFI
 
 #
 # Common:
@@ -1547,6 +1547,12 @@ class VkFence(OpaqueResourceHandle): ...
 
 # VkFenceCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkFenceCreateFlags.html
+VkFenceCreateFlags: TypeAlias = VkFlags
+VkFenceCreateFlagBits: TypeAlias = int
+VK_FENCE_CREATE_SIGNALED_BIT: VkFenceCreateFlagBits = 0x00000001
+
+# VkFenceCreateInfo
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkFenceCreateInfo.html
 @dataclass
 class VkFenceCreateInfo:
     flags: int = 0

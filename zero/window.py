@@ -1,16 +1,21 @@
 __all__ = ["Window"]
 
-from typing import Iterator, TypeAlias
+from typing import Iterator, TypeAlias, cast
 
 import glfw
 
 from .core import BaseContext, BaseContextResource
 from .excepts import GlfwError
+from .gpu import GpuContext, GpuSurface
 
 
 class WindowContext(BaseContext["WindowContext"]):
-    def __init__(self) -> None:
-        ok = bool(glfw.init())
+    def __init__(self, gpu_context: GpuContext) -> None:
+        super().__init__()
+
+        self.gpu_context = gpu_context
+
+        ok = glfw.init()
         if not ok:
             raise GlfwError("Failed to initialize GLFW")
 
@@ -47,7 +52,7 @@ WindowResource: TypeAlias = BaseContextResource["WindowContext"]
 
 
 class Window(WindowResource):
-    _all: set["Window"] = set()
+    glfw_window_handle: glfw._GLFWwindow
 
     def __init__(
         self,
@@ -56,25 +61,24 @@ class Window(WindowResource):
         glfw_window: glfw._GLFWwindow,
     ) -> None:
         super().__init__(parent=context)
-        self._glfw_window = glfw_window
-        Window._all.add(self)
+        self.glfw_window_handle = glfw_window
 
     def _on_dispose(self) -> None:
-        glfw.destroy_window(self._glfw_window)
-        Window._all.remove(self)
+        glfw.destroy_window(self.glfw_window_handle)
+
+    def create_surface(self) -> GpuSurface:
+        return self.context.gpu_context.create_surface_from_raw_glfw_window_handle(
+            raw_glfw_window_handle=self.glfw_window_handle
+        )
 
     def should_close(self) -> bool:
-        return glfw.window_should_close(self._glfw_window)
+        return glfw.window_should_close(self.glfw_window_handle)
 
     def show(self):
-        glfw.show_window(self._glfw_window)
+        glfw.show_window(self.glfw_window_handle)
 
     def hide(self):
-        glfw.hide_window(self._glfw_window)
-
-    @staticmethod
-    def all() -> Iterator["Window"]:
-        return iter(Window._all)
+        glfw.hide_window(self.glfw_window_handle)
 
     @staticmethod
     def update_all():
