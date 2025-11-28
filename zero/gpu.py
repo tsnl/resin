@@ -2028,7 +2028,7 @@ class GpuMemory(GpuResource):
             self._mapped_view = None
 
     def write(self, *, data: torch.Tensor):
-        src_bytes = data.numpy().tobytes()
+        src_bytes = data.ravel().view(torch.uint8).numpy()
         with self.map() as host_mem:
             host_mem[: len(src_bytes)] = src_bytes
 
