@@ -420,7 +420,7 @@ class GpuContext(BaseContext["GpuContext"]):
         self,
         physical_device: VkPhysicalDevice,
         surface: VkSurfaceKHR,
-    ) -> list[VkFormat]:
+    ) -> list[VkSurfaceFormatKHR]:
         return self.ext_fn("vkGetPhysicalDeviceSurfaceFormatsKHR")(
             physical_device, surface
         )

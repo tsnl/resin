@@ -498,6 +498,13 @@ def vkDestroyDevice(device: VkDevice, pAllocator: Any) -> None:
     vkDestroyDevice destroys a logical device.
     """
 
+# vkDeviceWaitIdle
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkDeviceWaitIdle.html
+def vkDeviceWaitIdle(device: VkDevice) -> None:
+    """
+    vkDeviceWaitIdle waits until the device is idle.
+    """
+
 #
 # VkDeviceMemory
 #
