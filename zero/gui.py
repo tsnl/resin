@@ -1,6 +1,6 @@
 from typing import TypeAlias
 
-from .core import BaseContext, BaseContextResource
+from .core import BaseContext, BaseResource
 
 #
 # GuiContext
@@ -12,4 +12,4 @@ class GuiContext(BaseContext["GuiContext"]):
         pass
 
 
-GuiResource: TypeAlias = BaseContextResource[GuiContext]
+GuiResource: TypeAlias = BaseResource[GuiContext]

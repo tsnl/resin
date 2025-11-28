@@ -4,12 +4,12 @@ from typing import TypeAlias
 
 import glfw
 
-from .core import BaseContext, BaseContextResource
+from .core import BaseResource
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 
 
-class WindowContext(BaseContext["WindowContext"]):
+class WindowContext(BaseResource):
     def __init__(self, gpu_context: GpuContext) -> None:
         super().__init__()
 
@@ -48,10 +48,7 @@ class WindowContext(BaseContext["WindowContext"]):
         return Window(context=self, glfw_window=glfw_window)
 
 
-WindowResource: TypeAlias = BaseContextResource["WindowContext"]
-
-
-class Window(WindowResource):
+class Window(BaseResource):
     glfw_window_handle: glfw._GLFWwindow
 
     def __init__(
@@ -61,6 +58,7 @@ class Window(WindowResource):
         glfw_window: glfw._GLFWwindow,
     ) -> None:
         super().__init__(parent=context)
+        self.context = context
         self.glfw_window_handle = glfw_window
 
     def _on_dispose(self) -> None:

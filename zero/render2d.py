@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .core import BaseContext, BaseContextResource
+from .core import BaseResource
 from .gpu import (
     GpuBuffer,
     GpuBufferMeta,
@@ -107,8 +107,7 @@ class R2dQuadBatch:
         assert self.border_thickness_px.dtype == torch.uint32
 
 
-@dataclass
-class _R2dBatchGpuResources:
+class R2dBatchGpuResources(BaseResource):
     """GPU resources allocated for a single batch."""
 
     # Device-local buffers
@@ -127,6 +126,57 @@ class _R2dBatchGpuResources:
     border_color_staging: GpuBuffer
     border_thickness_staging: GpuBuffer
     uniform_staging: GpuBuffer
+
+    def __init__(
+        self,
+        *,
+        parent: BaseResource | None,
+        offset_buffer: GpuBuffer,
+        texcoord_buffer: GpuBuffer,
+        tint_buffer: GpuBuffer,
+        border_color_buffer: GpuBuffer,
+        border_thickness_buffer: GpuBuffer,
+        uniform_buffer: GpuBuffer,
+        descriptor_set: GpuDescriptorSet,
+        offset_staging: GpuBuffer,
+        texcoord_staging: GpuBuffer,
+        tint_staging: GpuBuffer,
+        border_color_staging: GpuBuffer,
+        border_thickness_staging: GpuBuffer,
+        uniform_staging: GpuBuffer,
+    ) -> None:
+        super().__init__(parent=parent)
+
+        self.offset_buffer = offset_buffer
+        self.texcoord_buffer = texcoord_buffer
+        self.tint_buffer = tint_buffer
+        self.border_color_buffer = border_color_buffer
+        self.border_thickness_buffer = border_thickness_buffer
+        self.uniform_buffer = uniform_buffer
+        self.descriptor_set = descriptor_set
+
+        self.offset_staging = offset_staging
+        self.texcoord_staging = texcoord_staging
+        self.tint_staging = tint_staging
+        self.border_color_staging = border_color_staging
+        self.border_thickness_staging = border_thickness_staging
+        self.uniform_staging = uniform_staging
+
+    def _on_dispose(self) -> None:
+        self.offset_buffer.dispose()
+        self.texcoord_buffer.dispose()
+        self.tint_buffer.dispose()
+        self.border_color_buffer.dispose()
+        self.border_thickness_buffer.dispose()
+        self.uniform_buffer.dispose()
+        self.descriptor_set.dispose()
+
+        self.offset_staging.dispose()
+        self.texcoord_staging.dispose()
+        self.tint_staging.dispose()
+        self.border_color_staging.dispose()
+        self.border_thickness_staging.dispose()
+        self.uniform_staging.dispose()
 
 
 @dataclass
@@ -152,7 +202,7 @@ class R2dQuadList:
         return sum(batch.quad_count for batch in self.batches)
 
 
-class Renderer2dContext(BaseContext["Renderer2dContext"]):
+class Renderer2dContext(BaseResource):
     """Context for managing 2D renderer resources.
 
     This context holds references to the GPU device and provides factory
@@ -191,7 +241,7 @@ class Renderer2dContext(BaseContext["Renderer2dContext"]):
         )
 
 
-Renderer2dResource = BaseContextResource["Renderer2dContext"]
+Renderer2dResource = BaseResource
 
 
 class Renderer2d(Renderer2dResource):
@@ -229,7 +279,7 @@ class Renderer2d(Renderer2dResource):
         self._shader_dir = Path(__file__).parent / "bundled_data" / "shader"
 
         # Per-batch GPU resources (created during prepare())
-        self._batch_resources: list[_R2dBatchGpuResources] = []
+        self._batch_resources: list[R2dBatchGpuResources] = []
 
         # Create resources
         self._create_default_texture()
@@ -363,7 +413,7 @@ class Renderer2d(Renderer2dResource):
 
     def _create_batch_resources(
         self, batch: R2dQuadBatch, atlas: GpuImage
-    ) -> _R2dBatchGpuResources:
+    ) -> R2dBatchGpuResources:
         """Create GPU resources for a single batch."""
         n = max(batch.quad_count, 1)  # At least 1 element for valid buffers
 
@@ -470,7 +520,8 @@ class Renderer2d(Renderer2dResource):
             ],
         )
 
-        return _R2dBatchGpuResources(
+        return R2dBatchGpuResources(
+            parent=self,
             offset_buffer=offset_buffer,
             texcoord_buffer=texcoord_buffer,
             tint_buffer=tint_buffer,
@@ -489,7 +540,7 @@ class Renderer2d(Renderer2dResource):
     def _upload_batch_data(
         self,
         batch: R2dQuadBatch,
-        resources: _R2dBatchGpuResources,
+        resources: R2dBatchGpuResources,
         atlas: GpuImage,
         cmd: GpuCommandEncoder,
     ) -> None:

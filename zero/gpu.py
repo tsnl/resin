@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
 import glfw
 import torch
 
-from .core import BaseContext, BaseContextResource
+from .core import BaseResource
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -311,7 +311,29 @@ GpuStage: TypeAlias = Literal[
 #
 
 
-class GpuContext(BaseContext["GpuContext"]):
+class GpuResource(BaseResource):
+    parent: GpuResource | None
+    context: "GpuContext"
+
+    def __init__(
+        self,
+        *,
+        parent: GpuResource | None,
+        context: GpuContext | None = None,
+    ):
+        super().__init__(parent=parent)
+
+        if parent is None:
+            assert context is not None
+            self.parent = None
+            self.context = context
+        else:
+            assert context is None
+            self.parent = parent
+            self.context = parent.context
+
+
+class GpuContext(GpuResource):
     enable_debug_layer_support: bool
     enable_present_support: bool
     enable_portability_subset: bool
@@ -325,7 +347,7 @@ class GpuContext(BaseContext["GpuContext"]):
         enable_present_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent=None, context=self)
 
         enable_portability_subset = (
             enable_portability_subset_override
@@ -702,9 +724,6 @@ class GpuContext(BaseContext["GpuContext"]):
             out,
             indent=indent,
         )
-
-
-GpuResource: TypeAlias = BaseContextResource[GpuContext]
 
 
 #

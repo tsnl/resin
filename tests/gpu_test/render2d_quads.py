@@ -208,7 +208,7 @@ def test_render2d_quads():
     # Create Renderer2d
     print("\nCreating Renderer2d...")
     r2d_ctx = Renderer2dContext(device=dev)
-    renderer = r2d_ctx.create_renderer(
+    renderer: Renderer2d = r2d_ctx.create_renderer(
         framebuffer_width=width,
         framebuffer_height=height,
         max_quads_per_batch=1024,

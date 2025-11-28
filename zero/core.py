@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import cast
 from weakref import ref as WeakRef
 
 from .excepts import LogicError
@@ -9,19 +8,12 @@ from .excepts import LogicError
 #
 
 
-class BaseContextResource[TContext: "BaseContext"](ABC):
-    def __init__(self, *, parent: "BaseContextResource[TContext] | None" = None):
+class BaseResource(ABC):
+    def __init__(self, *, parent: "BaseResource | None" = None):
         super().__init__()
 
-        if parent is None:
-            # Only `TContext` instances are allowed to have no parent.
-            self._parent = None
-            self._context: TContext = cast(TContext, self)
-        else:
-            self._parent: "BaseContextResource[TContext] | None" = parent
-            self._context: TContext = parent._context
-
-        self._children: list[WeakRef[BaseContextResource[TContext]]] = []
+        self._parent: "BaseResource | None" = parent
+        self._children: list[WeakRef[BaseResource]] = []
         self._children_cleanup_threshold: int = 64
 
         self._is_disposed: bool = False
@@ -32,7 +24,7 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
         if self._parent:
             self._parent._notify_child_added(self)
 
-    def _notify_child_added(self, child: "BaseContextResource[TContext]") -> None:
+    def _notify_child_added(self, child: "BaseResource") -> None:
         if len(self._children) >= self._children_cleanup_threshold:
             # Clean up dead weak references.
             # Do not modify the order of existing children: critical for disposal.
@@ -53,10 +45,6 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
     def __del__(self) -> None:
         self.dispose()
 
-    @property
-    def context(self) -> TContext:
-        return self._context
-
     def dispose(self) -> None:
         # If already disposed, no-op.
         if self._is_disposed:
@@ -76,11 +64,6 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
     @abstractmethod
     def _on_dispose(self) -> None:
         pass
-
-
-class BaseContext[TContext](BaseContextResource[TContext]):
-    def __init__(self):
-        super().__init__(parent=None)
 
 
 #
