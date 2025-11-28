@@ -235,6 +235,7 @@ from .typed_vulkan import (
     vkUnmapMemory,
     vkWaitForFences,
     vkResetFences,
+    vkDeviceWaitIdle,
     raw_ffi,
 )
 
@@ -1358,6 +1359,8 @@ class GpuDevice(GpuResource):
         *,
         queue_type: GpuQueueType,
         fence: GpuFence | None = None,
+        wait_semaphores: list["GpuSemaphore"] | None = None,
+        signal_semaphores: list["GpuSemaphore"] | None = None,
     ) -> GpuCommandEncoder:
         """Create a command buffer encoder.
 
@@ -1394,6 +1397,8 @@ class GpuDevice(GpuResource):
             fence=fence,
             submit_queue_type=queue_type,
             dispose_fence=dispose_fence,
+            wait_semaphores=wait_semaphores or [],
+            signal_semaphores=signal_semaphores or [],
         )
 
     def submit(
@@ -1549,6 +1554,9 @@ class GpuDevice(GpuResource):
             height=surface.height,
             frame_counter=0,
         )
+
+    def wait_idle(self) -> None:
+        vkDeviceWaitIdle(self.vk_device)
 
     def _allocate_memory(
         self,
@@ -1924,6 +1932,8 @@ class GpuCommandEncoder(GpuResource):
     fence: GpuFence
     submit_queue_type: GpuQueueType
     dispose_fence: bool
+    wait_semaphores: list["GpuSemaphore"] | None
+    signal_semaphores: list["GpuSemaphore"] | None
     _submitted: bool
 
     def __init__(
@@ -1935,6 +1945,8 @@ class GpuCommandEncoder(GpuResource):
         fence: GpuFence,
         submit_queue_type: GpuQueueType,
         dispose_fence: bool,
+        wait_semaphores: list["GpuSemaphore"],
+        signal_semaphores: list["GpuSemaphore"],
     ) -> None:
         super().__init__(parent=device)
         self.device = device
@@ -1943,6 +1955,8 @@ class GpuCommandEncoder(GpuResource):
         self.fence = fence
         self.submit_queue_type = submit_queue_type
         self.dispose_fence = dispose_fence
+        self.wait_semaphores = wait_semaphores
+        self.signal_semaphores = signal_semaphores
         self._submitted = False
 
     def _on_dispose(self) -> None:
@@ -2168,18 +2182,14 @@ class GpuCommandEncoder(GpuResource):
 
         vkCmdEndRendering(self.vk_command_buffer)
 
-    def submit(
-        self,
-        wait_semaphores: list[GpuSemaphore] | None = None,
-        signal_semaphores: list[GpuSemaphore] | None = None,
-    ) -> GpuFence:
+    def submit(self) -> GpuFence:
         vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
 
         self.device.submit(
             queue_type=self.submit_queue_type,
             command_buffers=[self.vk_command_buffer],
-            wait_semaphores=wait_semaphores,
-            signal_semaphores=signal_semaphores,
+            wait_semaphores=self.wait_semaphores,
+            signal_semaphores=self.signal_semaphores,
             fence=self.fence,
         )
 
@@ -2393,7 +2403,7 @@ class GpuSwapchain(GpuResource):
     vk_format: VkFormat
     in_flight_fences: list[GpuFence]
     image_available_semaphores: list[GpuSemaphore]
-    render_finished_semaphores: list[GpuSemaphore]
+    render_done_semaphores: list[GpuSemaphore]
     width: int
     height: int
     frame_counter: int
@@ -2419,12 +2429,17 @@ class GpuSwapchain(GpuResource):
         self.vk_format = vk_format
         self.in_flight_fences = in_flight_fences
         self.image_available_semaphores = image_available_semaphores
-        self.render_finished_semaphores = render_finished_semaphores
+        self.render_done_semaphores = render_finished_semaphores
         self.width = width
         self.height = height
         self.frame_counter = frame_counter
 
     def _on_dispose(self) -> None:
+        self.device.wait_idle()
+
+        for fence in self.in_flight_fences:
+            fence.wait()
+
         self.context.vkDestroySwapchainKHR(
             device=self.device.vk_device,
             swapchain=self.vk_swapchain,
@@ -2440,26 +2455,30 @@ class GpuSwapchain(GpuResource):
 
         current_frame = global_frame_index % len(self.in_flight_fences)
 
-        self.in_flight_fences[current_frame].wait()
-        self.in_flight_fences[current_frame].reset()
+        in_flight_fence = self.in_flight_fences[current_frame]
+        image_available_semaphore = self.image_available_semaphores[current_frame]
+        render_done_semaphore = self.render_done_semaphores[current_frame]
+
+        in_flight_fence.wait()
+        in_flight_fence.reset()
 
         image_index = self.context.vkAcquireNextImageKHR(
             device=self.device.vk_device,
             swapchain=self.vk_swapchain,
             timeout=int(timeout_sec * 10**9),
-            semaphore=self.image_available_semaphores[current_frame].vk_semaphore,
+            semaphore=image_available_semaphore.vk_semaphore,
             fence=None,
         )
 
-        yield GpuSwapchainTarget(
+        yield GpuPresentTarget(
             swapchain_image_index=image_index,
             global_frame_index=global_frame_index,
             wrapped_frame_index=current_frame,
             in_flight_index=current_frame,
             swapchain_image=self.images[image_index],
-            render_wait_semaphores=[self.image_available_semaphores[current_frame]],
-            render_done_semaphores=[self.render_finished_semaphores[current_frame]],
-            render_done_fence=self.in_flight_fences[current_frame],
+            render_wait_semaphores=[image_available_semaphore],
+            render_done_semaphores=[render_done_semaphore],
+            render_done_fence=in_flight_fence,
         )
 
         vk_queue = self.device.vk_queues[self.device.qfis["present"]]
@@ -2467,9 +2486,7 @@ class GpuSwapchain(GpuResource):
             queue=vk_queue,
             pPresentInfo=VkPresentInfoKHR(
                 waitSemaphoreCount=1,
-                pWaitSemaphores=[
-                    self.render_finished_semaphores[current_frame].vk_semaphore
-                ],
+                pWaitSemaphores=[render_done_semaphore.vk_semaphore],
                 swapchainCount=1,
                 pSwapchains=[self.vk_swapchain],
                 pImageIndices=[image_index],
@@ -2479,7 +2496,7 @@ class GpuSwapchain(GpuResource):
 
 
 @dataclass
-class GpuSwapchainTarget:
+class GpuPresentTarget:
     swapchain_image_index: int
     global_frame_index: int
     wrapped_frame_index: int

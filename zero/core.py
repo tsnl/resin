@@ -30,9 +30,9 @@ class BaseContextResource[TContext: "BaseContext"](ABC):
 
     def _post_init(self) -> None:
         if self._parent:
-            self._parent._notify_child_created(self)
+            self._parent._notify_child_added(self)
 
-    def _notify_child_created(self, child: "BaseContextResource[TContext]") -> None:
+    def _notify_child_added(self, child: "BaseContextResource[TContext]") -> None:
         if len(self._children) >= self._children_cleanup_threshold:
             # Clean up dead weak references.
             # Do not modify the order of existing children: critical for disposal.

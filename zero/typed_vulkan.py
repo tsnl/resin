@@ -259,6 +259,7 @@ __all__ = [
     "vkResetFences",
     "vk_api_version_str",
     "vk_decompose_api_version",
+    "vkDeviceWaitIdle",
 ]
 
 
@@ -478,6 +479,7 @@ from vulkan import (
     VkPresentInfoKHR,
     vkResetFences,
     VkSwapchainCreateInfoKHR,
+    vkDeviceWaitIdle,
 )
 
 

@@ -151,6 +151,8 @@ def main_windowed(args: argparse.Namespace):
             cmd = device.create_command_encoder(
                 queue_type="graphics",
                 fence=present_target.render_done_fence,
+                wait_semaphores=present_target.render_wait_semaphores,
+                signal_semaphores=present_target.render_done_semaphores,
             )
             with cmd.render(
                 color_attachment=present_target.swapchain_image,
@@ -158,10 +160,7 @@ def main_windowed(args: argparse.Namespace):
             ) as render_pass:
                 render_pass.bind_pipeline(pipeline=pipeline)
                 render_pass.draw(vertex_count=3, instance_count=1)
-            cmd.submit(
-                wait_semaphores=present_target.render_wait_semaphores,
-                signal_semaphores=present_target.render_done_semaphores,
-            )
+            cmd.submit()
 
 
 def print_gpu_debug_info(
