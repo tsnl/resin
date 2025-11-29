@@ -1,6 +1,5 @@
 """Test rendering a simple triangle to an offscreen image."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -37,7 +36,7 @@ def test_render_simple_triangle():
 
     # Get shader directory relative to this test file
     test_dir = Path(__file__).parent
-    shader_dir = test_dir / "data"
+    shader_dir = test_dir / "data" / "shaders" / "tests"
 
     # Load shaders
     vertex_shader = dev.create_shader(

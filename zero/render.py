@@ -33,6 +33,7 @@ from .gpu import (
     GpuImageMeta,
     GpuRenderPassCommandEncoder,
 )
+from .bundled_data import BUNDLED_DATA_PATH
 
 
 @dataclass
@@ -273,7 +274,7 @@ class Renderer(Renderer2dResource):
         self.max_quads_per_batch = max_quads_per_batch
 
         # Find shader directory
-        self._shader_dir = Path(__file__).parent / "bundled_data" / "shader"
+        self._shader_dir = BUNDLED_DATA_PATH / "shaders" / "zero"
 
         # Per-batch GPU resources (created during prepare())
         self._batch_resources: list[R2dBatchGpuResources] = []

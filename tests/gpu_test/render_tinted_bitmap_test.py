@@ -264,7 +264,7 @@ def test_render_tinted_bitmap():
 
     # Get shader directory relative to this test file
     test_dir = Path(__file__).parent
-    shader_dir = test_dir / "data"
+    shader_dir = test_dir / "data" / "shaders" / "tests"
 
     # Define textures
     textures = {
