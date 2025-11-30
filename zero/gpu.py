@@ -1720,7 +1720,14 @@ class GpuDevice(GpuResource):
         )[0]
 
         # Wrap:
-        return GpuPipeline(device=self, vk_pipeline=vk_pipeline, layout=layout)
+        return GpuPipeline(
+            device=self,
+            vk_pipeline=vk_pipeline,
+            vk_color_format=vk_color_format,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            layout=layout,
+        )
 
     def create_command_encoder(
         self,
@@ -2174,6 +2181,29 @@ class GpuImage(GpuResource):
             )
         if not self.skip_image_destroy:
             vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
+
+    @property
+    def width(self) -> int:
+        return self.meta.shape[1]
+
+    @property
+    def height(self) -> int:
+        return self.meta.shape[0]
+
+    @property
+    def channel_count(self) -> int:
+        return self.meta.shape[2]
+
+    def write(self, *, data: torch.Tensor):
+        staging_buffer = self.device.create_buffer(
+            usages=["copy-src"],
+            meta=GpuBufferMeta.from_tensor(data),
+        )
+        staging_buffer.memory.write(data=data)
+
+        cmd = self.device.create_command_encoder(queue_type="transfer")
+        cmd.copy_buffer_to_image(src=staging_buffer, dst=self)
+        cmd.submit().wait()
 
 
 #
@@ -2917,6 +2947,9 @@ class GpuDescriptorSet(GpuResource):
 class GpuPipeline(GpuResource):
     device: GpuDevice
     vk_pipeline: VkPipeline
+    vk_color_format: VkFormat
+    viewport_width: int
+    viewport_height: int
     layout: GpuPipelineLayout
 
     def __init__(
@@ -2924,11 +2957,17 @@ class GpuPipeline(GpuResource):
         *,
         device: GpuDevice,
         vk_pipeline: VkPipeline,
+        vk_color_format: VkFormat,
+        viewport_width: int,
+        viewport_height: int,
         layout: GpuPipelineLayout,
     ):
         super().__init__(parent=device)
         self.device = device
         self.vk_pipeline = vk_pipeline
+        self.vk_color_format = vk_color_format
+        self.viewport_width = viewport_width
+        self.viewport_height = viewport_height
         self.layout = layout
 
     def _on_dispose(self) -> None:

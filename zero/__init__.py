@@ -9,8 +9,11 @@ __all__ = [
     "GpuImageMeta",
     "WindowContext",
     "Window",
-    "RenderContext",
+    "RendererContext",
     "Renderer",
+    "RendererAtlas",
+    "RendererImage",
+    "RendererCanvas",
     "BUNDLED_DATA_PATH",
 ]
 
@@ -25,4 +28,10 @@ from .gpu import (
     GpuShader,
 )
 from .window import Window, WindowContext
-from .render import RenderContext, Renderer
+from .renderer import (
+    RendererContext,
+    Renderer,
+    RendererAtlas,
+    RendererImage,
+    RendererCanvas,
+)

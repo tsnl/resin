@@ -61,7 +61,6 @@ class BaseResource(ABC):
         self._on_dispose()
         self._is_disposed = True
 
-    @abstractmethod
     def _on_dispose(self) -> None:
         pass
 

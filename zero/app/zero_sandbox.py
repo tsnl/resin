@@ -58,7 +58,7 @@ def main_headless(args: argparse.Namespace):
     )
 
     # Load shaders from compiled SPIR-V
-    shader_dir = zero.BUNDLED_DATA_PATH / "shader"
+    shader_dir = zero.BUNDLED_DATA_PATH / "shaders" / "tests"
 
     vertex_shader = device.create_shader(
         spirv_path=shader_dir / "triangle.vert.spv",
@@ -133,7 +133,7 @@ def main_windowed(args: argparse.Namespace):
     )
 
     # Create render pipeline using the swapchain:
-    shader_dir = zero.BUNDLED_DATA_PATH / "shader"
+    shader_dir = zero.BUNDLED_DATA_PATH / "shaders" / "tests"
     vertex_shader = device.create_shader(
         spirv_path=shader_dir / "triangle.vert.spv",
         stage="vertex",
