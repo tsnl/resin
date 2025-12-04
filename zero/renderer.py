@@ -233,8 +233,8 @@ class RendererCanvas(BaseResource):
 class Renderer2d(BaseResource):
     renderer: Renderer
     default_white_image: RendererImage
-    _cached_gpu_pipeline_vertex_shader: GpuShader | None
-    _cached_gpu_pipeline_fragment_shader: GpuShader | None
+    _vertex_shader: GpuShader
+    _fragment_shader: GpuShader
     _cached_gpu_pipeline: GpuPipeline | None
     _cached_depth_image: GpuImage | None
     _cached_gpu_batches: dict["RendererAtlas", "R2dGpuQuadBatch"]
@@ -249,8 +249,8 @@ class Renderer2d(BaseResource):
 
         self.renderer = renderer
         self.default_white_image = default_white_image
-        self._cached_gpu_pipeline_vertex_shader = None
-        self._cached_gpu_pipeline_fragment_shader = None
+        self._vertex_shader = self._new_vertex_shader()
+        self._fragment_shader = self._new_fragment_shader()
         self._cached_gpu_pipeline = None
         self._cached_depth_image: GpuImage | None = None
         self._cached_gpu_batches = {}
@@ -272,82 +272,98 @@ class Renderer2d(BaseResource):
         depth_image = self._get_depth_image(width=target.width, height=target.height)
 
         # Get GPU batches for this canvas while updating cache:
-        gpu_batches = self._get_gpu_batches(canvas=canvas)
+        gpu_batches = self._get_gpu_batch_dict(canvas=canvas)
 
         # TODO: implement rendering to target
         raise NotImplementedError("Renderer2d.show() WIP")
 
     def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
-        # If the cached pipeline matches the target, return it:
-        if (
-            self._cached_gpu_pipeline is not None
-            and self._cached_gpu_pipeline.vk_color_format == target.vk_format
-            and self._cached_gpu_pipeline.viewport_width == target.width
-            and self._cached_gpu_pipeline.viewport_height == target.height
-        ):
-            return self._cached_gpu_pipeline
+        if cached_pipeline := self._get_cached_gpu_pipeline(target=target):
+            return cached_pipeline
+        gpu_pipeline = self._new_gpu_pipeline(target=target)
+        self._cached_gpu_pipeline = gpu_pipeline
+        return gpu_pipeline
 
-        # Get shaders:
-        if self._cached_gpu_pipeline_vertex_shader is None:
-            self._cached_gpu_pipeline_vertex_shader = self.gpu_device.create_shader(
-                spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.vert.spv",
-                stage="vertex",
-            )
-        if self._cached_gpu_pipeline_fragment_shader is None:
-            self._cached_gpu_pipeline_fragment_shader = self.gpu_device.create_shader(
-                spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.frag.spv",
-                stage="fragment",
-            )
+    def _get_cached_gpu_pipeline(self, target: GpuImage) -> GpuPipeline | None:
+        if self._cached_gpu_pipeline is None:
+            return None
+        if self._cached_gpu_pipeline.vk_color_format != target.vk_format:
+            return None
+        if self._cached_gpu_pipeline.viewport_width != target.width:
+            return None
+        if self._cached_gpu_pipeline.viewport_height != target.height:
+            return None
+        return self._cached_gpu_pipeline
 
-        # Create pipeline, cache it:
-        gpu_pipeline = self.gpu_device.create_pipeline(
-            vertex_shader=self._cached_gpu_pipeline_vertex_shader,
-            fragment_shader=self._cached_gpu_pipeline_fragment_shader,
+    def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
+        return self.gpu_device.create_pipeline(
+            vertex_shader=self._vertex_shader,
+            fragment_shader=self._fragment_shader,
             vk_color_format=target.vk_format,
             viewport_width=target.width,
             viewport_height=target.height,
         )
-        self._cached_gpu_pipeline = gpu_pipeline
 
-        # Return it:
-        return gpu_pipeline
+    def _new_vertex_shader(self) -> GpuShader:
+        return self.gpu_device.create_shader(
+            spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.vert.spv",
+            stage="vertex",
+        )
 
-    def _get_gpu_batches(
+    def _new_fragment_shader(self) -> GpuShader:
+        return self.gpu_device.create_shader(
+            spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.frag.spv",
+            stage="fragment",
+        )
+
+    def _get_gpu_batch_dict(
         self,
         *,
         canvas: "RendererCanvas",
     ) -> dict["RendererAtlas", "R2dGpuQuadBatch"]:
-        gpu_batches = {}
+        # Compute a fresh set of GPU batches:
+        gpu_batches = {
+            atlas: self._get_gpu_batch(atlas=atlas, cpu_batch=cpu_batch)
+            for atlas, cpu_batch in canvas.cpu_quad_collection.batches.items()
+        }
 
-        for atlas, cpu_batch in canvas.cpu_quad_collection.batches.items():
-            gpu_batch = self._cached_gpu_batches.get(atlas)
-            if gpu_batch is None or gpu_batch.capacity < cpu_batch.instance_count:
-                gpu_batch = self._new_gpu_batch(atlas=atlas, cpu_batch=cpu_batch)
-                self._cached_gpu_batches[atlas] = gpu_batch
-
-            gpu_batch.upload(cpu_batch=cpu_batch)
-
-            gpu_batches[atlas] = gpu_batch
-
+        # Only keep cached GPU batches that are still in use:
         self._cached_gpu_batches = gpu_batches
 
+        # Done:
         return gpu_batches
 
-    def _get_depth_image(self, *, width: int, height: int) -> GpuImage:
-        if (
-            self._cached_depth_image is not None
-            and self._cached_depth_image.width == width
-            and self._cached_depth_image.height == height
-        ):
-            return self._cached_depth_image
+    def _get_gpu_batch(
+        self,
+        *,
+        atlas: RendererAtlas,
+        cpu_batch: R2dCpuQuadBatch,
+    ) -> "R2dGpuQuadBatch":
+        if gpu_batch := self._get_cached_gpu_batch(atlas=atlas, cpu_batch=cpu_batch):
+            gpu_batch.upload(cpu_batch=cpu_batch)
+            return gpu_batch
 
-        depth_image = self.gpu_device.create_image(
-            usages=["depth-attachment"],
-            meta=GpuImageMeta(shape=(height, width, 1), dtype=torch.float32),
-        )
-        self._cached_depth_image = depth_image
+        gpu_batch = self._new_gpu_batch(atlas=atlas, cpu_batch=cpu_batch)
+        gpu_batch.upload(cpu_batch=cpu_batch)
 
-        return depth_image
+        self._cached_gpu_batches[atlas] = gpu_batch
+
+        return gpu_batch
+
+    def _get_cached_gpu_batch(
+        self,
+        *,
+        atlas: RendererAtlas,
+        cpu_batch: R2dCpuQuadBatch,
+    ) -> "R2dGpuQuadBatch | None":
+        gpu_batch = self._cached_gpu_batches.get(atlas)
+        if gpu_batch is None:
+            return None
+
+        if gpu_batch.capacity < cpu_batch.instance_count:
+            return None
+
+        return gpu_batch
 
     def _new_gpu_batch(
         self,
@@ -373,6 +389,25 @@ class Renderer2d(BaseResource):
             border_width=help_create_gpu_buffer(cpu_batch.border_width),
             corner_radius=help_create_gpu_buffer(cpu_batch.corner_radius),
             height=help_create_gpu_buffer(cpu_batch.height),
+        )
+
+    def _get_depth_image(self, *, width: int, height: int) -> GpuImage:
+        if (
+            self._cached_depth_image is not None
+            and self._cached_depth_image.width == width
+            and self._cached_depth_image.height == height
+        ):
+            return self._cached_depth_image
+
+        depth_image = self._new_depth_image(width=width, height=height)
+        self._cached_depth_image = depth_image
+
+        return depth_image
+
+    def _new_depth_image(self, *, width: int, height: int) -> GpuImage:
+        return self.gpu_device.create_image(
+            usages=["depth-attachment"],
+            meta=GpuImageMeta(shape=(height, width, 1), dtype=torch.float32),
         )
 
 
