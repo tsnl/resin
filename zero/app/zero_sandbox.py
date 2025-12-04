@@ -143,7 +143,7 @@ def main_windowed(args: argparse.Namespace):
         stage="fragment",
     )
     # Create pipeline layout (empty for simple triangle - no descriptors)
-    pipeline_layout = device.create_pipeline_layout()
+    pipeline_layout = device.create_pipeline_layout(descriptor_set_layouts=[])
 
     pipeline = device.create_pipeline(
         vertex_shader=vertex_shader,

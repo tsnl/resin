@@ -16,10 +16,7 @@ struct TintParams
 ConstantBuffer<TintParams> tintParams;
 
 [[vk::binding(1, 0)]]
-Texture2D<float4> inputTexture;
-
-[[vk::binding(2, 0)]]
-SamplerState textureSampler;
+Sampler2D textureSampler;
 
 [shader("vertex")]
 VSOutput vertexMain(uint vertexID: SV_VertexID)
@@ -29,11 +26,11 @@ VSOutput vertexMain(uint vertexID: SV_VertexID)
     // Vertices: 0=top-left, 1=bottom-left, 2=top-right, 3=bottom-right
     float2 positions[6];
     positions[0] = float2(-1.0, -1.0); // top-left (NDC)
-    positions[1] = float2(-1.0,  1.0); // bottom-left
-    positions[2] = float2( 1.0, -1.0); // top-right
-    positions[3] = float2( 1.0, -1.0); // top-right
-    positions[4] = float2(-1.0,  1.0); // bottom-left
-    positions[5] = float2( 1.0,  1.0); // bottom-right
+    positions[1] = float2(-1.0, 1.0);  // bottom-left
+    positions[2] = float2(1.0, -1.0);  // top-right
+    positions[3] = float2(1.0, -1.0);  // top-right
+    positions[4] = float2(-1.0, 1.0);  // bottom-left
+    positions[5] = float2(1.0, 1.0);   // bottom-right
 
     // UVs: map NDC (-1 to 1) to UV (0 to 1)
     float2 uvs[6];
@@ -67,7 +64,7 @@ struct PSOutput
 PSOutput fragmentMain(PSInput input)
 {
     // Sample the texture
-    float4 texColor = inputTexture.Sample(textureSampler, input.uv);
+    float4 texColor = textureSampler.Sample(input.uv);
 
     // Apply tint by multiplying with tint color
     PSOutput output;

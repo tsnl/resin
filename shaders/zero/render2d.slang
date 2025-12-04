@@ -9,25 +9,22 @@
 // Common uniform data
 struct R2dUniforms
 {
-    uint2 framebuffer_size_px;  // (width, height)
-    uint2 atlas_size_px;        // (width, height)
+    uint2 framebuffer_size_px; // (width, height)
+    uint2 atlas_size_px;       // (width, height)
 };
 
 // Vertex shader output / Fragment shader input
 struct VSOutput
 {
     float4 position : SV_Position;
-    float2 texcoord_px : TEXCOORD0;      // Interpolated texcoord in pixels
+    float2 texcoord_px : TEXCOORD0; // Interpolated texcoord in pixels
     nointerpolation uint instance_id : TEXCOORD1;
-    float2 local_pos : TEXCOORD2;        // Position within quad (0-1 range for border calculation)
+    float2 local_pos : TEXCOORD2; // Position within quad (0-1 range for border calculation)
 };
 
 // Bindings
 [[vk::binding(0, 0)]]
-Texture2D<float4> atlas;
-
-[[vk::binding(0, 0)]]
-SamplerState atlasSampler;
+Sampler2D atlas;
 
 [[vk::binding(1, 0)]]
 ConstantBuffer<R2dUniforms> uniforms;
@@ -53,7 +50,6 @@ StructuredBuffer<uint> border_color;
 [[vk::binding(6, 0)]]
 StructuredBuffer<uint> border_thickness_px;
 
-
 // Helper to get corner index from vertex ID
 // Vertex ordering for 2 triangles (CCW):
 // Triangle 1: TL(0), TR(1), BR(2)
@@ -68,7 +64,7 @@ uint getCornerIndex(uint vertexID)
 // Get offset for a corner
 float2 getOffset(uint instanceID, uint cornerIndex)
 {
-    uint baseIdx = instanceID * 8 + cornerIndex * 2;  // 8 uints per instance (4 corners * 2 coords)
+    uint baseIdx = instanceID * 8 + cornerIndex * 2; // 8 uints per instance (4 corners * 2 coords)
     return float2(float(offset_px[baseIdx]), float(offset_px[baseIdx + 1]));
 }
 
@@ -87,8 +83,7 @@ float4 getBorderThickness(uint instanceID)
         float(border_thickness_px[baseIdx]),
         float(border_thickness_px[baseIdx + 1]),
         float(border_thickness_px[baseIdx + 2]),
-        float(border_thickness_px[baseIdx + 3])
-    );
+        float(border_thickness_px[baseIdx + 3]));
 }
 
 // Get tint color (RGBA, 0-255 -> 0-1)
@@ -99,8 +94,7 @@ float4 getTintColor(uint instanceID)
         float(tint_color[baseIdx]) / 255.0,
         float(tint_color[baseIdx + 1]) / 255.0,
         float(tint_color[baseIdx + 2]) / 255.0,
-        float(tint_color[baseIdx + 3]) / 255.0
-    );
+        float(tint_color[baseIdx + 3]) / 255.0);
 }
 
 // Get border color (RGBA, 0-255 -> 0-1)
@@ -111,8 +105,7 @@ float4 getBorderColor(uint instanceID)
         float(border_color[baseIdx]) / 255.0,
         float(border_color[baseIdx + 1]) / 255.0,
         float(border_color[baseIdx + 2]) / 255.0,
-        float(border_color[baseIdx + 3]) / 255.0
-    );
+        float(border_color[baseIdx + 3]) / 255.0);
 }
 
 // Convert pixel position to NDC
@@ -122,9 +115,8 @@ float2 pixelToNDC(float2 pixel_pos, float2 framebuffer_size)
     return (pixel_pos / framebuffer_size) * 2.0 - 1.0;
 }
 
-
 [shader("vertex")]
-VSOutput vertexMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
+VSOutput vertexMain(uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID)
 {
     VSOutput output;
 
@@ -135,7 +127,7 @@ VSOutput vertexMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID
     float2 texcoord = getTexcoord(instanceID, cornerIndex);
 
     // Get border thickness
-    float4 border = getBorderThickness(instanceID);  // top, right, bottom, left
+    float4 border = getBorderThickness(instanceID); // top, right, bottom, left
 
     // Expand position outward by border thickness
     // Corner 0 (TL): expand left (-x) and up (-y)
@@ -145,21 +137,21 @@ VSOutput vertexMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID
     float2 expansion;
     switch (cornerIndex)
     {
-        case 0:  // TL
-            expansion = float2(-border.w, -border.x);  // left, top
-            break;
-        case 1:  // TR
-            expansion = float2(border.y, -border.x);   // right, top
-            break;
-        case 2:  // BR
-            expansion = float2(border.y, border.z);    // right, bottom
-            break;
-        case 3:  // BL
-            expansion = float2(-border.w, border.z);   // left, bottom
-            break;
-        default:
-            expansion = float2(0, 0);
-            break;
+    case 0:                                       // TL
+        expansion = float2(-border.w, -border.x); // left, top
+        break;
+    case 1:                                      // TR
+        expansion = float2(border.y, -border.x); // right, top
+        break;
+    case 2:                                     // BR
+        expansion = float2(border.y, border.z); // right, bottom
+        break;
+    case 3:                                      // BL
+        expansion = float2(-border.w, border.z); // left, bottom
+        break;
+    default:
+        expansion = float2(0, 0);
+        break;
     }
 
     pos_px += expansion;
@@ -181,16 +173,15 @@ VSOutput vertexMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID
     // Compute local position for border calculation
     // Map corner to (0,0), (1,0), (1,1), (0,1) for TL, TR, BR, BL
     float2 localCorners[4] = {
-        float2(0, 0),  // TL
-        float2(1, 0),  // TR
-        float2(1, 1),  // BR
-        float2(0, 1)   // BL
+        float2(0, 0), // TL
+        float2(1, 0), // TR
+        float2(1, 1), // BR
+        float2(0, 1)  // BL
     };
     output.local_pos = localCorners[cornerIndex];
 
     return output;
 }
-
 
 // Fragment shader
 
@@ -216,7 +207,7 @@ PSOutput fragmentMain(PSInput input)
     // Get colors
     float4 tint = getTintColor(instanceID);
     float4 borderCol = getBorderColor(instanceID);
-    float4 border = getBorderThickness(instanceID);  // top, right, bottom, left
+    float4 border = getBorderThickness(instanceID); // top, right, bottom, left
 
     // Sample atlas texture
     float2 atlas_size = float2(uniforms.atlas_size_px);

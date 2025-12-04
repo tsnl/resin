@@ -39,7 +39,9 @@ def slangc(path: Path, stage: ShaderStage, entry: str, output: Path):
         str(output),
     ]
     print(" ".join(args))
-    subprocess.run(args, check=True, capture_output=True)
+    res = subprocess.run(args, check=False, capture_output=False)
+    if res.returncode != 0:
+        exit(res.returncode)
 
 
 def get_output_path_suffix(shader: Shader, stage: ShaderStage) -> Path:
@@ -98,11 +100,11 @@ SHADERS: list[Shader] = [
         stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
         targets=["tests"],
     ),
-    Shader(
-        source=Path("shaders/zero/render2d.slang"),
-        stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-        targets=["zero"],
-    ),
+    # Shader(
+    #     source=Path("shaders/zero/r2d.slang"),
+    #     stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
+    #     targets=["zero"],
+    # ),
 ]
 
 TARGET_ROOT_MAP: dict[Target, Path] = {

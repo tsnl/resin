@@ -20,7 +20,8 @@ from PIL import Image
 from zero.gpu import (
     GpuBufferMeta,
     GpuContext,
-    GpuDescriptorBinding,
+    GpuDescriptorSetLayoutBinding,
+    GpuDescriptorSetBinding,
     GpuDevice,
     GpuImage,
     GpuImageMeta,
@@ -148,50 +149,15 @@ def render_tinted_bitmap(
     # Create descriptor set layout
     descriptor_set_layout = dev.create_descriptor_set_layout(
         bindings=[
-            GpuDescriptorBinding(
-                binding=0,
-                descriptor_type="uniform-buffer",
-                count=1,
-                stages=["fragment"],
-            ),
-            GpuDescriptorBinding(
-                binding=1,
-                descriptor_type="sampled-image",
-                count=1,
-                stages=["fragment"],
-            ),
-            GpuDescriptorBinding(
-                binding=2,
-                descriptor_type="sampler",
-                count=1,
-                stages=["fragment"],
-            ),
+            GpuDescriptorSetLayoutBinding(type="uniform-buffer", stages=["fragment"]),
+            GpuDescriptorSetLayoutBinding(type="texture", stages=["fragment"]),
         ]
     )
 
     # Create descriptor set
     descriptor_set = dev.create_descriptor_set(
         layout=descriptor_set_layout,
-        bindings=[
-            GpuDescriptorBinding(
-                binding=0,
-                descriptor_type="uniform-buffer",
-                count=1,
-                buffer=tint_buffer,
-            ),
-            GpuDescriptorBinding(
-                binding=1,
-                descriptor_type="sampled-image",
-                count=1,
-                image=texture,
-            ),
-            GpuDescriptorBinding(
-                binding=2,
-                descriptor_type="sampler",
-                count=1,
-                sampler=sampler,
-            ),
-        ],
+        bindings=[tint_buffer, (texture, sampler)],
     )
 
     # Create pipeline layout
@@ -233,8 +199,9 @@ def render_tinted_bitmap(
             sets=[descriptor_set],
         )
         render_pass.draw(
-            vertex_count=6, instance_count=1
-        )  # Full-screen quad = 2 triangles = 6 vertices
+            vertex_count=6,
+            instance_count=1,
+        )
     cmd.submit().wait()
 
     # Read back the rendered image

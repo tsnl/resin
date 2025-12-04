@@ -49,7 +49,7 @@ def test_render_simple_triangle():
     )
 
     # Create pipeline layout (empty for simple triangle - no descriptors)
-    pipeline_layout = dev.create_pipeline_layout()
+    pipeline_layout = dev.create_pipeline_layout(descriptor_set_layouts=[])
 
     # Create graphics pipeline
     pipeline = dev.create_pipeline(

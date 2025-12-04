@@ -8,24 +8,24 @@ __all__ = [
 
 import torch
 
+from .bundled_data import BUNDLED_DATA_PATH
+from .core import BaseResource
 from .excepts import LogicError
 from .gpu import (
-    GpuContext,
-    GpuImage,
-    GpuDevice,
     GpuBuffer,
     GpuBufferMeta,
+    GpuContext,
+    GpuDescriptorSet,
+    GpuDescriptorSetBinding,
+    GpuDescriptorSetLayout,
+    GpuDescriptorSetLayoutBinding,
+    GpuDevice,
+    GpuImage,
     GpuImageMeta,
     GpuPipeline,
-    GpuDescriptorSet,
-    GpuDescriptorSetLayout,
-    GpuDescriptorBinding,
-    GpuDescriptorBindingResourceType,
+    GpuPipelineLayout,
     GpuShader,
 )
-from .core import BaseResource
-from .bundled_data import BUNDLED_DATA_PATH
-
 
 #
 # Renderer API:
@@ -235,7 +235,8 @@ class Renderer2d(BaseResource):
     default_white_image: RendererImage
     _vertex_shader: GpuShader
     _fragment_shader: GpuShader
-    _cached_gpu_pipeline: GpuPipeline | None
+    _pipeline_layout: GpuPipelineLayout
+    _cached_pipeline: GpuPipeline | None
     _cached_depth_image: GpuImage | None
     _cached_gpu_batches: dict["RendererAtlas", "R2dGpuQuadBatch"]
 
@@ -251,8 +252,9 @@ class Renderer2d(BaseResource):
         self.default_white_image = default_white_image
         self._vertex_shader = self._new_vertex_shader()
         self._fragment_shader = self._new_fragment_shader()
-        self._cached_gpu_pipeline = None
-        self._cached_depth_image: GpuImage | None = None
+        self._pipeline_layout = self._new_pipeline_layout()
+        self._cached_pipeline = None
+        self._cached_depth_image = None
         self._cached_gpu_batches = {}
 
     @property
@@ -277,33 +279,6 @@ class Renderer2d(BaseResource):
         # TODO: implement rendering to target
         raise NotImplementedError("Renderer2d.show() WIP")
 
-    def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
-        if cached_pipeline := self._get_cached_gpu_pipeline(target=target):
-            return cached_pipeline
-        gpu_pipeline = self._new_gpu_pipeline(target=target)
-        self._cached_gpu_pipeline = gpu_pipeline
-        return gpu_pipeline
-
-    def _get_cached_gpu_pipeline(self, target: GpuImage) -> GpuPipeline | None:
-        if self._cached_gpu_pipeline is None:
-            return None
-        if self._cached_gpu_pipeline.vk_color_format != target.vk_format:
-            return None
-        if self._cached_gpu_pipeline.viewport_width != target.width:
-            return None
-        if self._cached_gpu_pipeline.viewport_height != target.height:
-            return None
-        return self._cached_gpu_pipeline
-
-    def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
-        return self.gpu_device.create_pipeline(
-            vertex_shader=self._vertex_shader,
-            fragment_shader=self._fragment_shader,
-            vk_color_format=target.vk_format,
-            viewport_width=target.width,
-            viewport_height=target.height,
-        )
-
     def _new_vertex_shader(self) -> GpuShader:
         return self.gpu_device.create_shader(
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.vert.spv",
@@ -314,6 +289,53 @@ class Renderer2d(BaseResource):
         return self.gpu_device.create_shader(
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.frag.spv",
             stage="fragment",
+        )
+
+    def _new_pipeline_layout(self) -> GpuPipelineLayout:
+        return self.gpu_device.create_pipeline_layout(
+            descriptor_set_layouts=[
+                self.gpu_device.create_descriptor_set_layout(
+                    bindings=[
+                        Binding(
+                            binding=0,
+                            descriptor_type="uniform-buffer",
+                            stages=["vertex", "fragment"],
+                        ),
+                        Binding(
+                            binding=1,
+                            descriptor_type="sampler",
+                            stages=["fragment"],
+                        ),
+                    ]
+                )
+            ]
+        )
+
+    def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
+        if cached_pipeline := self._get_cached_gpu_pipeline(target=target):
+            return cached_pipeline
+        gpu_pipeline = self._new_gpu_pipeline(target=target)
+        self._cached_pipeline = gpu_pipeline
+        return gpu_pipeline
+
+    def _get_cached_gpu_pipeline(self, target: GpuImage) -> GpuPipeline | None:
+        if self._cached_pipeline is None:
+            return None
+        if self._cached_pipeline.vk_color_format != target.vk_format:
+            return None
+        if self._cached_pipeline.viewport_width != target.width:
+            return None
+        if self._cached_pipeline.viewport_height != target.height:
+            return None
+        return self._cached_pipeline
+
+    def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
+        return self.gpu_device.create_pipeline(
+            vertex_shader=self._vertex_shader,
+            fragment_shader=self._fragment_shader,
+            vk_color_format=target.vk_format,
+            viewport_width=target.width,
+            viewport_height=target.height,
         )
 
     def _get_gpu_batch_dict(
@@ -359,10 +381,8 @@ class Renderer2d(BaseResource):
         gpu_batch = self._cached_gpu_batches.get(atlas)
         if gpu_batch is None:
             return None
-
         if gpu_batch.capacity < cpu_batch.instance_count:
             return None
-
         return gpu_batch
 
     def _new_gpu_batch(
@@ -373,22 +393,33 @@ class Renderer2d(BaseResource):
     ) -> "R2dGpuQuadBatch":
         def help_create_gpu_buffer(data: torch.Tensor) -> GpuBuffer:
             return self.gpu_device.create_buffer(
-                usages=["uniform", "copy-dst"],
+                usages=["storage", "copy-dst"],
                 meta=GpuBufferMeta.from_tensor(data),
             )
+
+        dst_px_buf = help_create_gpu_buffer(cpu_batch.dst_px)
+        src_uv_buf = help_create_gpu_buffer(cpu_batch.src_uv)
+        tint_color_buf = help_create_gpu_buffer(cpu_batch.tint_color)
+        border_color_buf = help_create_gpu_buffer(cpu_batch.border_color)
+        border_width_buf = help_create_gpu_buffer(cpu_batch.border_width)
+        corner_radius_buf = help_create_gpu_buffer(cpu_batch.corner_radius)
+        height_buf = help_create_gpu_buffer(cpu_batch.height)
+
+        binding = self.gpu_device.create_descriptor_set()
 
         return R2dGpuQuadBatch(
             renderer_2d=self,
             atlas=atlas,
             instance_count=cpu_batch.instance_count,
             capacity=cpu_batch.capacity,
-            dst_px=help_create_gpu_buffer(cpu_batch.dst_px),
-            src_uv=help_create_gpu_buffer(cpu_batch.src_uv),
-            tint_color=help_create_gpu_buffer(cpu_batch.tint_color),
-            border_color=help_create_gpu_buffer(cpu_batch.border_color),
-            border_width=help_create_gpu_buffer(cpu_batch.border_width),
-            corner_radius=help_create_gpu_buffer(cpu_batch.corner_radius),
-            height=help_create_gpu_buffer(cpu_batch.height),
+            dst_px=dst_px_buf,
+            src_uv=src_uv_buf,
+            tint_color=tint_color_buf,
+            border_color=border_color_buf,
+            border_width=border_width_buf,
+            corner_radius=corner_radius_buf,
+            height=height_buf,
+            binding=binding,
         )
 
     def _get_depth_image(self, *, width: int, height: int) -> GpuImage:
@@ -415,13 +446,8 @@ class R2dGpuQuadBatch(BaseResource):
     atlas: RendererAtlas
     instance_count: int
     capacity: int
-    dst_px: GpuBuffer
-    src_uv: GpuBuffer
-    tint_color: GpuBuffer
-    border_color: GpuBuffer
-    border_width: GpuBuffer
-    corner_radius: GpuBuffer
-    height: GpuBuffer
+    data: GpuBuffer
+    binding: GpuDescriptorSet
 
     def __init__(
         self,
@@ -437,6 +463,7 @@ class R2dGpuQuadBatch(BaseResource):
         border_width: GpuBuffer,
         corner_radius: GpuBuffer,
         height: GpuBuffer,
+        binding: GpuDescriptorSet,
     ):
         super().__init__(parent=renderer_2d)
 
@@ -450,17 +477,11 @@ class R2dGpuQuadBatch(BaseResource):
         self.border_width = border_width
         self.corner_radius = corner_radius
         self.height = height
+        self.binding = binding
 
     def upload(self, cpu_batch: R2dCpuQuadBatch):
-        self.dst_px.write(data=cpu_batch.dst_px[: cpu_batch.instance_count])
-        self.src_uv.write(data=cpu_batch.src_uv[: cpu_batch.instance_count])
-        self.tint_color.write(data=cpu_batch.tint_color[: cpu_batch.instance_count])
-        self.border_color.write(data=cpu_batch.border_color[: cpu_batch.instance_count])
-        self.border_width.write(data=cpu_batch.border_width[: cpu_batch.instance_count])
-        self.corner_radius.write(
-            data=cpu_batch.corner_radius[: cpu_batch.instance_count]
-        )
-        self.height.write(data=cpu_batch.height[: cpu_batch.instance_count])
+        # TODO: need to pack data: see shader
+        raise NotImplementedError()
 
 
 #
@@ -532,10 +553,10 @@ class R2dCpuQuadCollection:
         # Add instance to batch:
         batch.add_instance(
             dst_xy=(
-                (float(dst_x0_px), float(dst_y0_px)),  # TL
-                (float(dst_x1_px), float(dst_y0_px)),  # TR
-                (float(dst_x1_px), float(dst_y1_px)),  # BR
-                (float(dst_x0_px), float(dst_y1_px)),  # BL
+                (int(dst_x0_px), int(dst_y0_px)),  # TL
+                (int(dst_x1_px), int(dst_y0_px)),  # TR
+                (int(dst_x1_px), int(dst_y1_px)),  # BR
+                (int(dst_x0_px), int(dst_y1_px)),  # BL
             ),
             src_uv=(
                 (src_x0_uv, src_y0_uv),  # TL
@@ -572,13 +593,13 @@ class R2dCpuQuadBatch:
     def __init__(self, capacity: int = 8):
         super().__init__()
         self.instance_count = 0
-        self.dst_px = torch.zeros((capacity, 4, 2), dtype=torch.uint32)
+        self.dst_px = torch.zeros((capacity, 4, 2), dtype=torch.int32)
         self.src_uv = torch.zeros((capacity, 4, 2), dtype=torch.float32)
         self.tint_color = torch.zeros((capacity, 4), dtype=torch.float32)
         self.border_color = torch.zeros((capacity, 4), dtype=torch.float32)
-        self.border_width = torch.zeros((capacity, 4), dtype=torch.float32)
-        self.corner_radius = torch.zeros((capacity, 4), dtype=torch.float32)
-        self.height = torch.zeros((capacity, 1), dtype=torch.float32)
+        self.border_width = torch.zeros((capacity, 4), dtype=torch.int32)
+        self.corner_radius = torch.zeros((capacity, 4), dtype=torch.int32)
+        self.height = torch.zeros((capacity, 1), dtype=torch.int32)
 
     @property
     def capacity(self) -> int:
@@ -587,10 +608,10 @@ class R2dCpuQuadBatch:
     def add_instance(
         self,
         dst_xy: tuple[
-            tuple[float, float],
-            tuple[float, float],
-            tuple[float, float],
-            tuple[float, float],
+            tuple[int, int],
+            tuple[int, int],
+            tuple[int, int],
+            tuple[int, int],
         ],
         src_uv: tuple[
             tuple[float, float],
@@ -600,9 +621,9 @@ class R2dCpuQuadBatch:
         ],
         tint_color: tuple[float, float, float, float],
         border_color: tuple[float, float, float, float],
-        border_thickness_px: tuple[float, float, float, float],
-        corner_radius: tuple[float, float, float, float],
-        height: float,
+        border_thickness_px: tuple[int, int, int, int],
+        corner_radius: tuple[int, int, int, int],
+        height: int,
     ):
         idx = self.instance_count
         if idx >= self.capacity:
@@ -610,13 +631,13 @@ class R2dCpuQuadBatch:
 
         assert idx < self.capacity
 
-        self.dst_px[idx] = torch.tensor(dst_xy, dtype=torch.float32)
+        self.dst_px[idx] = torch.tensor(dst_xy, dtype=torch.int32)
         self.src_uv[idx] = torch.tensor(src_uv, dtype=torch.float32)
         self.tint_color[idx] = torch.tensor(tint_color, dtype=torch.float32)
         self.border_color[idx] = torch.tensor(border_color, dtype=torch.float32)
-        self.border_width[idx] = torch.tensor(border_thickness_px, dtype=torch.float32)
-        self.corner_radius[idx] = torch.tensor(corner_radius, dtype=torch.float32)
-        self.height[idx] = height
+        self.border_width[idx] = torch.tensor(border_thickness_px, dtype=torch.int32)
+        self.corner_radius[idx] = torch.tensor(corner_radius, dtype=torch.int32)
+        self.height[idx] = torch.tensor(height, dtype=torch.int32)
 
         self.instance_count += 1
 
@@ -626,10 +647,45 @@ class R2dCpuQuadBatch:
 
         growth = new_capacity - self.dst_px.shape[0]
 
-        self.dst_px = torch.cat([self.dst_px, torch.zeros((growth, 4, 2))])
-        self.src_uv = torch.cat([self.src_uv, torch.zeros((growth, 4, 2))])
-        self.tint_color = torch.cat([self.tint_color, torch.zeros((growth, 4))])
-        self.border_color = torch.cat([self.border_color, torch.zeros((growth, 4))])
-        self.border_width = torch.cat([self.border_width, torch.zeros((growth, 4))])
-        self.corner_radius = torch.cat([self.corner_radius, torch.zeros((growth, 4))])
-        self.height = torch.cat([self.height, torch.zeros((growth, 1))])
+        self.dst_px = torch.cat(
+            [
+                self.dst_px,
+                torch.zeros((growth, 4, 2), dtype=torch.int32),
+            ]
+        )
+        self.src_uv = torch.cat(
+            [
+                self.src_uv,
+                torch.zeros((growth, 4, 2), dtype=torch.float32),
+            ]
+        )
+        self.tint_color = torch.cat(
+            [
+                self.tint_color,
+                torch.zeros((growth, 4), dtype=torch.float32),
+            ]
+        )
+        self.border_color = torch.cat(
+            [
+                self.border_color,
+                torch.zeros((growth, 4), dtype=torch.float32),
+            ]
+        )
+        self.border_width = torch.cat(
+            [
+                self.border_width,
+                torch.zeros((growth, 4), dtype=torch.int32),
+            ]
+        )
+        self.corner_radius = torch.cat(
+            [
+                self.corner_radius,
+                torch.zeros((growth, 4), dtype=torch.int32),
+            ]
+        )
+        self.height = torch.cat(
+            [
+                self.height,
+                torch.zeros((growth, 1), dtype=torch.int32),
+            ]
+        )

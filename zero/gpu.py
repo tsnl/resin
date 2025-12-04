@@ -21,7 +21,6 @@ __all__ = [
     "GpuSampler",
     "GpuDescriptorSetLayout",
     "GpuDescriptorSet",
-    "GpuDescriptorBinding",
 ]
 
 import json
@@ -29,7 +28,7 @@ import os
 import sys
 from collections import defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
 
@@ -125,6 +124,7 @@ from .typed_vulkan import (
     VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
     VK_SAMPLER_ADDRESS_MODE_REPEAT,
     VK_SAMPLER_MIPMAP_MODE_LINEAR,
+    VK_SHADER_STAGE_COMPUTE_BIT,
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_EXCLUSIVE,
@@ -288,23 +288,9 @@ if TYPE_CHECKING:
 # Type aliases for GPU configuration
 #
 
-GpuDescriptorType: TypeAlias = Literal[
-    "combined-image-sampler",
-    "sampled-image",
-    "sampler",
-    "storage-buffer",
-    "storage-image",
-    "uniform-buffer",
-]
-
-GpuDescriptorBindingResourceType: TypeAlias = Literal["image", "sampler", "buffer"]
 
 GpuSamplerFilter: TypeAlias = Literal["nearest", "linear"]
 
-GpuStage: TypeAlias = Literal[
-    "vertex",
-    "fragment",
-]
 
 #
 # GpuContext
@@ -1001,12 +987,9 @@ class GpuDevice(GpuResource):
         self.present_support_enabled = present_support_enabled
 
         descriptor_pool_config_defaults: dict[GpuDescriptorType, int] = {
-            "combined-image-sampler": 128,
-            "sampled-image": 128,
-            "sampler": 128,
-            "storage-buffer": 128,
-            "storage-image": 128,
-            "uniform-buffer": 128,
+            "texture": 1024,
+            "storage-buffer": 1024,
+            "uniform-buffer": 1024,
         }
         self.descriptor_pool_config = (
             descriptor_pool_config_defaults | descriptor_pool_config
@@ -1346,19 +1329,13 @@ class GpuDevice(GpuResource):
         pool_sizes: dict[GpuDescriptorType, int],
     ) -> "GpuDescriptorPool":
         """Create a descriptor pool for allocating descriptor sets."""
-        vk_pool_sizes = []
-        for desc_type, count in pool_sizes.items():
-            vk_desc_type = {
-                "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                "sampled-image": VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                "sampler": VK_DESCRIPTOR_TYPE_SAMPLER,
-                "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                "storage-image": VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            }[desc_type]
-            vk_pool_sizes.append(
-                VkDescriptorPoolSize(type=vk_desc_type, descriptorCount=count)
+        vk_pool_sizes = [
+            VkDescriptorPoolSize(
+                type=vk_descriptor_type(desc_type),
+                descriptorCount=count,
             )
+            for desc_type, count in pool_sizes.items()
+        ]
 
         create_info = VkDescriptorPoolCreateInfo(
             flags=0,
@@ -1378,25 +1355,25 @@ class GpuDevice(GpuResource):
     def create_descriptor_set_layout(
         self,
         *,
-        bindings: list["GpuDescriptorBinding"],
+        bindings: list["GpuDescriptorSetLayoutBinding"],
     ) -> "GpuDescriptorSetLayout":
         """Create a descriptor set layout."""
-        vk_bindings = []
-        for binding in bindings:
-            vk_bindings.append(
-                VkDescriptorSetLayoutBinding(
-                    binding=binding.binding,
-                    descriptorType=binding.to_vk_descriptor_type(),
-                    descriptorCount=binding.count,
-                    stageFlags=binding.to_vk_shader_stage_flags(),
-                    pImmutableSamplers=None,
-                )
+
+        vk_binding_list = [
+            VkDescriptorSetLayoutBinding(
+                binding=binding_index,
+                descriptorType=vk_descriptor_type(binding.type),
+                descriptorCount=binding.count,
+                stageFlags=vk_shader_stages(binding.stages),
+                pImmutableSamplers=None,
             )
+            for binding_index, binding in enumerate(bindings)
+        ]
 
         create_info = VkDescriptorSetLayoutCreateInfo(
             flags=0,
-            bindingCount=len(vk_bindings),
-            pBindings=vk_bindings,
+            bindingCount=len(vk_binding_list),
+            pBindings=vk_binding_list,
         )
 
         vk_layout = vkCreateDescriptorSetLayout(
@@ -1415,122 +1392,85 @@ class GpuDevice(GpuResource):
         self,
         *,
         layout: "GpuDescriptorSetLayout",
-        bindings: list["GpuDescriptorBinding"],
+        bindings: list["GpuDescriptorSetBinding"],
     ) -> "GpuDescriptorSet":
-        """Create and write to a descriptor set."""
-        # Allocate the descriptor set
+        # Check that the number of bindings matches the layout
+        if len(bindings) != len(layout.bindings):
+            raise LogicError(
+                f"Descriptor set binding count mismatch: "
+                f"layout expects {len(layout.bindings)} bindings, "
+                f"but got {len(bindings)}"
+            )
+
+        # Check that each binding's descriptor type matches the layout
+        for binding, binding_layout in zip(bindings, layout.bindings):
+            ok_desc_types = compatible_descriptor_types_for_binding(binding)
+            if binding_layout.type not in ok_desc_types:
+                raise LogicError(
+                    f"Descriptor set binding type mismatch: "
+                    f"layout expects {binding_layout.type}, "
+                    f"but got {binding}: "
+                    f"expected one of {ok_desc_types}"
+                )
+
+        # Validation complete.
+
+        # Allocate the descriptor set:
         alloc_info = VkDescriptorSetAllocateInfo(
             descriptorPool=self._descriptor_pool.vk_descriptor_pool,
             descriptorSetCount=1,
             pSetLayouts=[layout.vk_descriptor_set_layout],
         )
-
         vk_sets = vkAllocateDescriptorSets(
             device=self.vk_device,
             pAllocateInfo=alloc_info,
         )
         vk_set = vk_sets[0]
 
-        # Write the descriptor bindings
-        writes = []
-        for binding in bindings:
-            vk_desc_type = binding.to_vk_descriptor_type()
-
-            # Prepare image/buffer info based on binding type
-            # These must be passed at construction time to VkWriteDescriptorSet
-            p_image_info = None
-            p_buffer_info = None
-
-            if binding.descriptor_type in (
-                "combined-image-sampler",
-                "sampled-image",
-                "storage-image",
-            ):
-                if binding.image is None:
-                    raise LogicError(f"Binding {binding.binding} requires an image")
-                image_layout = (
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                    if binding.descriptor_type != "storage-image"
-                    else VK_IMAGE_LAYOUT_GENERAL
-                )
-                p_image_info = [
-                    VkDescriptorImageInfo(
-                        sampler=binding.sampler.vk_sampler if binding.sampler else None,
-                        imageView=binding.image.vk_image_view,
-                        imageLayout=image_layout,
-                    )
-                ]
-            elif binding.descriptor_type == "sampler":
-                if binding.sampler is None:
-                    raise LogicError(f"Binding {binding.binding} requires a sampler")
-                # For sampler-only descriptors, imageView can be None
-                p_image_info = [
-                    VkDescriptorImageInfo(
-                        sampler=binding.sampler.vk_sampler,
-                        imageView=binding.image.vk_image_view
-                        if binding.image
-                        else None,  # type: ignore
-                        imageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
-                    )
-                ]
-            elif binding.descriptor_type in ("uniform-buffer", "storage-buffer"):
-                if binding.buffer is None:
-                    raise LogicError(f"Binding {binding.binding} requires a buffer")
-                p_buffer_info = [
-                    VkDescriptorBufferInfo(
-                        buffer=binding.buffer.vk_buffer,
-                        offset=0,
-                        range=binding.buffer.meta.size,
-                    )
-                ]
-
-            # Create write descriptor set with all fields at construction time
-            # (CFFI cdata fields cannot be assigned after construction)
-            write = VkWriteDescriptorSet(
-                dstSet=vk_set,
-                dstBinding=binding.binding,
-                dstArrayElement=0,
-                descriptorCount=binding.count,
-                descriptorType=vk_desc_type,
-                pImageInfo=p_image_info,
-                pBufferInfo=p_buffer_info,
-                pTexelBufferView=None,
+        # Update the descriptor sets by writing the bindings:
+        writes = [
+            descriptor_set_write_for_binding(
+                vk_set=vk_set,
+                binding_index=binding_index,
+                binding=binding,
+                binding_layout=binding_layout,
             )
-
-            writes.append(write)
-
-        if writes:
-            vkUpdateDescriptorSets(
-                device=self.vk_device,
-                descriptorWriteCount=len(writes),
-                pDescriptorWrites=writes,
-                descriptorCopyCount=0,
-                pDescriptorCopies=None,
+            for binding_index, (binding, binding_layout) in enumerate(
+                zip(bindings, layout.bindings)
             )
+        ]
+        vkUpdateDescriptorSets(
+            device=self.vk_device,
+            descriptorWriteCount=len(writes),
+            pDescriptorWrites=writes,
+            descriptorCopyCount=0,
+            pDescriptorCopies=None,
+        )
 
+        # Done:
         return GpuDescriptorSet(
             device=self,
             vk_descriptor_set=vk_set,
             pool=self._descriptor_pool,
             layout=layout,
+            bindings=bindings,
         )
 
     def create_pipeline_layout(
         self,
         *,
-        descriptor_set_layouts: list["GpuDescriptorSetLayout"] | None = None,
+        descriptor_set_layouts: list["GpuDescriptorSetLayout"],
     ) -> "GpuPipelineLayout":
         """Create a pipeline layout."""
-        vk_set_layouts = (
-            [layout.vk_descriptor_set_layout for layout in descriptor_set_layouts]
-            if descriptor_set_layouts
-            else []
-        )
+
+        vk_set_layouts = [
+            layout.vk_descriptor_set_layout for layout in descriptor_set_layouts
+        ]
 
         layout_create_info = VkPipelineLayoutCreateInfo(
             flags=0,
             setLayoutCount=len(vk_set_layouts),
-            pSetLayouts=vk_set_layouts if vk_set_layouts else None,
+            pSetLayouts=vk_set_layouts,
             pushConstantRangeCount=0,
             pPushConstantRanges=None,
         )
@@ -1544,6 +1484,7 @@ class GpuDevice(GpuResource):
         return GpuPipelineLayout(
             device=self,
             vk_pipeline_layout=vk_pipeline_layout,
+            descriptor_set_layouts=descriptor_set_layouts,
         )
 
     def create_pipeline(
@@ -1554,7 +1495,7 @@ class GpuDevice(GpuResource):
         vk_color_format: VkFormat,
         viewport_width: int,
         viewport_height: int,
-        layout: "GpuPipelineLayout | None" = None,
+        layout: "GpuPipelineLayout",
     ) -> GpuPipeline:
         """Create a graphics pipeline.
 
@@ -1566,9 +1507,6 @@ class GpuDevice(GpuResource):
             viewport_height: Height of the viewport.
             layout: Optional pipeline layout. If not provided, an empty layout is created.
         """
-        # Use provided layout or create an empty one
-        if layout is None:
-            layout = self.create_pipeline_layout()
 
         # Shader stages
         shader_stages = [
@@ -2765,66 +2703,6 @@ class GpuShader(GpuResource):
 
 
 #
-# GpuPipeline
-#
-
-
-#
-# Descriptor binding type for descriptor set creation
-#
-
-
-@dataclass
-class GpuDescriptorBinding:
-    """Describes a single binding in a descriptor set layout or for writing to a descriptor set."""
-
-    binding: int
-    descriptor_type: GpuDescriptorType
-    count: int = 1
-    stages: list[GpuStage] = field(default_factory=lambda: ["vertex", "fragment"])
-
-    # For writing to descriptor sets (optional, used in create_descriptor_set):
-    image: "GpuImage | None" = None
-    sampler: "GpuSampler | None" = None
-    buffer: "GpuBuffer | None" = None
-
-    def _validate_binding_resource_type(
-        self,
-    ) -> GpuDescriptorBindingResourceType | None:
-        """Validate and return the resource type required by this binding."""
-        if self.descriptor_type in (
-            "combined-image-sampler",
-            "sampled-image",
-            "storage-image",
-        ):
-            return "image"
-        elif self.descriptor_type == "sampler":
-            return "sampler"
-        elif self.descriptor_type in ("uniform-buffer", "storage-buffer"):
-            return "buffer"
-        return None
-
-    def to_vk_descriptor_type(self) -> VkDescriptorType:
-        return {
-            "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            "sampled-image": VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            "sampler": VK_DESCRIPTOR_TYPE_SAMPLER,
-            "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            "storage-image": VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        }[self.descriptor_type]
-
-    def to_vk_shader_stage_flags(self) -> int:
-        res = 0
-        for stage in self.stages:
-            res |= {
-                "vertex": VK_SHADER_STAGE_VERTEX_BIT,
-                "fragment": VK_SHADER_STAGE_FRAGMENT_BIT,
-            }[stage]
-        return res
-
-
-#
 # GpuSampler
 #
 
@@ -2873,18 +2751,26 @@ class GpuDescriptorPool(GpuResource):
 
 
 #
-# GpuPipelineLayout
+# GpuPipelineLayout, GpuDescriptorSetLayout:
 #
 
 
 class GpuPipelineLayout(GpuResource):
     device: GpuDevice
     vk_pipeline_layout: VkPipelineLayout
+    descriptor_set_layouts: list[GpuDescriptorSetLayout]
 
-    def __init__(self, *, device: GpuDevice, vk_pipeline_layout: VkPipelineLayout):
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        vk_pipeline_layout: VkPipelineLayout,
+        descriptor_set_layouts: list[GpuDescriptorSetLayout],
+    ):
         super().__init__(parent=device)
         self.device = device
         self.vk_pipeline_layout = vk_pipeline_layout
+        self.descriptor_set_layouts = descriptor_set_layouts
 
     def _on_dispose(self) -> None:
         vkDestroyPipelineLayout(
@@ -2897,14 +2783,14 @@ class GpuPipelineLayout(GpuResource):
 class GpuDescriptorSetLayout(GpuResource):
     device: GpuDevice
     vk_descriptor_set_layout: VkDescriptorSetLayout
-    bindings: list[GpuDescriptorBinding]
+    bindings: list["GpuDescriptorSetLayoutBinding"]
 
     def __init__(
         self,
         *,
         device: GpuDevice,
         vk_descriptor_set_layout: VkDescriptorSetLayout,
-        bindings: list[GpuDescriptorBinding],
+        bindings: list["GpuDescriptorSetLayoutBinding"],
     ):
         super().__init__(parent=device)
         self.device = device
@@ -2917,6 +2803,18 @@ class GpuDescriptorSetLayout(GpuResource):
             descriptorSetLayout=self.vk_descriptor_set_layout,
             pAllocator=None,
         )
+
+
+@dataclass
+class GpuDescriptorSetLayoutBinding:
+    type: GpuDescriptorType
+    stages: list[GpuStage] = field(default_factory=lambda: ["vertex", "fragment"])
+    count: int = 1
+
+
+#
+# GpuDescriptorSet:
+#
 
 
 class GpuDescriptorSet(GpuResource):
@@ -2932,16 +2830,113 @@ class GpuDescriptorSet(GpuResource):
         vk_descriptor_set: VkDescriptorSet,
         pool: GpuDescriptorPool,
         layout: GpuDescriptorSetLayout,
+        bindings: list[GpuDescriptorSetBinding],
     ):
         super().__init__(parent=pool)
         self.device = device
         self.vk_descriptor_set = vk_descriptor_set
         self.pool = pool
         self.layout = layout
+        self.bindings = bindings
 
-    def _on_dispose(self) -> None:
-        # Descriptor sets are automatically freed when the pool is destroyed
-        pass
+
+GpuDescriptorSetBinding: TypeAlias = GpuBuffer | tuple[GpuImage, GpuSampler]
+
+
+def compatible_descriptor_types_for_binding(
+    binding: GpuDescriptorSetBinding,
+) -> list[GpuDescriptorType]:
+    match binding:
+        case GpuBuffer():
+            res = []
+            if "uniform" in binding.usages:
+                res.append("uniform-buffer")
+            if "storage" in binding.usages:
+                res.append("storage-buffer")
+            return res
+        case (GpuImage(), GpuSampler()):
+            return ["texture"]
+
+
+def descriptor_set_write_for_binding(
+    vk_set: VkDescriptorSet,
+    binding_index: int,
+    binding: GpuDescriptorSetBinding,
+    binding_layout: GpuDescriptorSetLayoutBinding,
+):
+    match binding_layout.type:
+        case "texture":
+            assert isinstance(binding, tuple)
+            image, sampler = binding
+            return VkWriteDescriptorSet(
+                dstSet=vk_set,
+                dstBinding=binding_index,
+                dstArrayElement=0,
+                descriptorCount=1,
+                descriptorType=vk_descriptor_type(binding_layout.type),
+                pImageInfo=[
+                    VkDescriptorImageInfo(
+                        sampler=sampler.vk_sampler,
+                        imageView=image.vk_image_view,
+                        imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    )
+                ],
+                pBufferInfo=None,
+                pTexelBufferView=None,
+            )
+        case "uniform-buffer" | "storage-buffer":
+            assert isinstance(binding, GpuBuffer)
+            return VkWriteDescriptorSet(
+                dstSet=vk_set,
+                dstBinding=binding_index,
+                dstArrayElement=0,
+                descriptorCount=1,
+                descriptorType=vk_descriptor_type(binding_layout.type),
+                pImageInfo=None,
+                pBufferInfo=[
+                    VkDescriptorBufferInfo(
+                        buffer=binding.vk_buffer,
+                        offset=0,
+                        range=binding.meta.size,
+                    )
+                ],
+                pTexelBufferView=None,
+            )
+        case _:
+            raise LogicError()
+
+
+def vk_descriptor_set_binding(binding: GpuDescriptorSetBinding):
+    match binding:
+        case GpuBuffer():
+            return VkDescriptorBufferInfo(
+                buffer=binding.vk_buffer,
+                offset=0,
+                range=binding.meta.size,
+            )
+        case (GpuImage(), GpuSampler()) as binding:
+            image, sampler = binding
+            return VkDescriptorImageInfo(
+                sampler=sampler.vk_sampler,
+                imageView=image.vk_image_view,
+                imageLayout=image.current_vk_layout,
+            )
+
+
+GpuDescriptorType: TypeAlias = Literal["texture", "storage-buffer", "uniform-buffer"]
+
+
+def vk_descriptor_type(t: GpuDescriptorType):
+    return {
+        "texture": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    }[t]
+
+
+#
+# GpuPipeline:
+#
 
 
 class GpuPipeline(GpuResource):
@@ -3178,3 +3173,23 @@ class GpuPresentTarget:
     render_wait_semaphores: list[GpuSemaphore]
     render_done_semaphores: list[GpuSemaphore]
     render_done_fence: GpuFence
+
+
+#
+# GpuStage
+#
+
+GpuStage: TypeAlias = Literal["vertex", "fragment"]
+
+
+def vk_shader_stages(stages: list[GpuStage]) -> int:
+    result = 0
+    for stage in stages:
+        match stage:
+            case "vertex":
+                result |= VK_SHADER_STAGE_VERTEX_BIT
+            case "fragment":
+                result |= VK_SHADER_STAGE_FRAGMENT_BIT
+            case _:
+                raise LogicError(f"Invalid shader stage: {stage!r}")
+    return result
