@@ -4,45 +4,35 @@
 
 // Bind Group 0: common uniforms
 
-[[vk::binding(0, 0)]]
-ConstantBuffer<uint2> framebufferSize;
+struct R2dUniform
+{
+    uint2 framebufferSize;
+    uint2 atlasSize;
+}
 
-[[vk::binding(0, 1)]]
-ConstantBuffer<uint2> atlasSize;
+[[vk::binding(0, 0)]]
+ConstantBuffer<R2dUniform> uniform;
 
 // Bind Group 1: per-batch data
 
-struct Quad
+struct R2dQuad
 {
-    uint4x2 dstPx;          // 4 corners * 2 coords
-    float4x2 srcUv;         // 4 corners * 2 coords
-    uint tintColor;         // [u8; 4]: RGBA
-    uint borderColor;       // [u8; 4]: RGBA
-    uint borderThicknessPx; // [u8; 4]: T, R, B, L
-    uint cornerRadius;      // corner radius
-    uint height;            // height
+    int2x4 dstPx;           // 4 corners * 2 coords
+    float2x4 srcUv;         // 4 corners * 2 coords
+    float4 tintColor;       // RGBA
+    float4 borderColor;     // [u8; 4]: RGBA
+    int4 borderThicknessPx; // [u8; 4]: T, R, B, L
+    int cornerRadius;       // corner radius
+    int height;             // height
+    int _rsv0;              // reserved for alignment
+    int _rsv1;              // reserved for alignment
 };
 
-[[vk::binding(1, 0)]]
-StructuredBuffer<int4x2> dstPxArray;
+[[vk::binding(0, 1)]]
+Sampler2D atlasTexture;
 
 [[vk::binding(1, 1)]]
-StructuredBuffer<int4x2> srcUvArray;
-
-[[vk::binding(1, 2)]]
-StructuredBuffer<uint> tintColorArray;
-
-[[vk::binding(1, 3)]]
-StructuredBuffer<uint> borderColorArray;
-
-[[vk::binding(1, 4)]]
-StructuredBuffer<int4> borderThicknessPxArray;
-
-[[vk::binding(1, 5)]]
-StructuredBuffer<int4> cornerRadius;
-
-[[vk::binding(1, 6)]]
-StructuredBuffer<int> heightArray;
+StructuredBuffer<R2dQuad> quads;
 
 //
 // Vertex Shader

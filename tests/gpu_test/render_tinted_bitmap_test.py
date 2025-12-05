@@ -11,6 +11,7 @@ from a uniform buffer. It tests multiple procedurally generated textures
 (gradient, checkerboard) with multiple tint colors (white, red, green, blue, black).
 """
 
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -148,16 +149,27 @@ def render_tinted_bitmap(
 
     # Create descriptor set layout
     descriptor_set_layout = dev.create_descriptor_set_layout(
-        bindings=[
-            GpuDescriptorSetLayoutBinding(type="uniform-buffer", stages=["fragment"]),
-            GpuDescriptorSetLayoutBinding(type="texture", stages=["fragment"]),
-        ]
+        bindings=OrderedDict(
+            {
+                "tintParams": GpuDescriptorSetLayoutBinding(
+                    type="uniform-buffer",
+                    stages=["fragment"],
+                ),
+                "textureSampler": GpuDescriptorSetLayoutBinding(
+                    type="combined-image-sampler",
+                    stages=["fragment"],
+                ),
+            }.items()
+        )
     )
 
     # Create descriptor set
     descriptor_set = dev.create_descriptor_set(
         layout=descriptor_set_layout,
-        bindings=[tint_buffer, (texture, sampler)],
+        bindings={
+            "tintParams": tint_buffer,
+            "textureSampler": (texture, sampler),
+        },
     )
 
     # Create pipeline layout
@@ -248,15 +260,10 @@ def test_render_tinted_bitmap():
         "black": (0.0, 0.0, 0.0, 1.0),
     }
 
-    # print("Testing tinted bitmap rendering with descriptor sets...")
-    # print(f"  Textures: {list(textures.keys())}")
-    # print(f"  Tints: {list(tints.keys())}")
-
     # Upload textures to GPU
     gpu_textures = {}
     for tex_name, tex_data in textures.items():
         gpu_textures[tex_name] = upload_texture(dev, tex_data)
-        # print(f"  ✓ Uploaded texture: {tex_name}")
 
     # Render all combinations
     output_count = 0
@@ -297,11 +304,6 @@ def test_render_tinted_bitmap():
                 assert rgb_max == 0, (
                     f"Black tint on {tex_name} should be all black, got max RGB={rgb_max}"
                 )
-
-            # print(f"  ✓ Rendered: {tex_name} + {tint_name} -> {output_path.name}")
-
-    # print(f"\n✓ Successfully rendered {output_count} tinted bitmap combinations!")
-    # print("✓ Descriptor sets with texture and buffer bindings work correctly!")
 
     # Cleanup
     ctx.dispose()

@@ -103,10 +103,6 @@ def test_render_simple_triangle():
     img = Image.fromarray(image_array, mode="RGBA")
     img.save(output_path)
 
-    # print("✓ Triangle rendered successfully!", file=sys.stderr)
-    # print(f"✓ Output saved to: {output_path}", file=sys.stderr)
-    # print(f"✓ Non-black pixels: {non_black_pixels}/{width * height}", file=sys.stderr)
-
     # Basic validation: triangle should cover a reasonable number of pixels
     # A triangle covering roughly half the diagonal should have ~10-15k pixels
     min_expected_pixels = 5000

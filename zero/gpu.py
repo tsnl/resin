@@ -26,14 +26,15 @@ __all__ = [
 import json
 import os
 import sys
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
 
 import glfw
 import torch
+import numpy as np
 
 from .core import BaseResource
 from .excepts import LogicError, PlatformSupportError
@@ -987,7 +988,7 @@ class GpuDevice(GpuResource):
         self.present_support_enabled = present_support_enabled
 
         descriptor_pool_config_defaults: dict[GpuDescriptorType, int] = {
-            "texture": 1024,
+            "combined-image-sampler": 1024,
             "storage-buffer": 1024,
             "uniform-buffer": 1024,
         }
@@ -1355,7 +1356,7 @@ class GpuDevice(GpuResource):
     def create_descriptor_set_layout(
         self,
         *,
-        bindings: list["GpuDescriptorSetLayoutBinding"],
+        bindings: OrderedDict[str, "GpuDescriptorSetLayoutBinding"],
     ) -> "GpuDescriptorSetLayout":
         """Create a descriptor set layout."""
 
@@ -1367,7 +1368,7 @@ class GpuDevice(GpuResource):
                 stageFlags=vk_shader_stages(binding.stages),
                 pImmutableSamplers=None,
             )
-            for binding_index, binding in enumerate(bindings)
+            for binding_index, (_, binding) in enumerate(bindings.items())
         ]
 
         create_info = VkDescriptorSetLayoutCreateInfo(
@@ -1392,7 +1393,7 @@ class GpuDevice(GpuResource):
         self,
         *,
         layout: "GpuDescriptorSetLayout",
-        bindings: list["GpuDescriptorSetBinding"],
+        bindings: dict[str, "GpuDescriptorSetBinding"],
     ) -> "GpuDescriptorSet":
         # Check that the number of bindings matches the layout
         if len(bindings) != len(layout.bindings):
@@ -1403,7 +1404,9 @@ class GpuDevice(GpuResource):
             )
 
         # Check that each binding's descriptor type matches the layout
-        for binding, binding_layout in zip(bindings, layout.bindings):
+        for binding_name in bindings.keys():
+            binding = bindings[binding_name]
+            binding_layout = layout.bindings[binding_name]
             ok_desc_types = compatible_descriptor_types_for_binding(binding)
             if binding_layout.type not in ok_desc_types:
                 raise LogicError(
@@ -1428,16 +1431,16 @@ class GpuDevice(GpuResource):
         vk_set = vk_sets[0]
 
         # Update the descriptor sets by writing the bindings:
+        # IMPORTANT: Iterate over the layout's bindings to ensure the correct order, and
+        # thus, correct binding indices.
         writes = [
             descriptor_set_write_for_binding(
                 vk_set=vk_set,
                 binding_index=binding_index,
-                binding=binding,
-                binding_layout=binding_layout,
+                binding=bindings[binding_name],
+                binding_layout=layout.bindings[binding_name],
             )
-            for binding_index, (binding, binding_layout) in enumerate(
-                zip(bindings, layout.bindings)
-            )
+            for binding_index, binding_name in enumerate(layout.bindings.keys())
         ]
         vkUpdateDescriptorSets(
             device=self.vk_device,
@@ -2210,7 +2213,7 @@ class GpuFence(GpuResource):
 @dataclass
 class GpuBufferMeta:
     element_count: int
-    element_dtype: torch.dtype
+    element_dtype: torch.dtype | np.dtype
 
     @property
     def size(self) -> int:
@@ -2218,7 +2221,7 @@ class GpuBufferMeta:
 
     @property
     def element_size(self) -> int:
-        return {torch.uint8: 1, torch.uint32: 4, torch.float32: 4}[self.element_dtype]
+        return self.element_dtype.itemsize
 
     @staticmethod
     def from_tensor(tensor: torch.Tensor) -> GpuBufferMeta:
@@ -2783,14 +2786,14 @@ class GpuPipelineLayout(GpuResource):
 class GpuDescriptorSetLayout(GpuResource):
     device: GpuDevice
     vk_descriptor_set_layout: VkDescriptorSetLayout
-    bindings: list["GpuDescriptorSetLayoutBinding"]
+    bindings: OrderedDict[str, "GpuDescriptorSetLayoutBinding"]
 
     def __init__(
         self,
         *,
         device: GpuDevice,
         vk_descriptor_set_layout: VkDescriptorSetLayout,
-        bindings: list["GpuDescriptorSetLayoutBinding"],
+        bindings: OrderedDict[str, "GpuDescriptorSetLayoutBinding"],
     ):
         super().__init__(parent=device)
         self.device = device
@@ -2822,6 +2825,7 @@ class GpuDescriptorSet(GpuResource):
     vk_descriptor_set: VkDescriptorSet
     pool: GpuDescriptorPool
     layout: GpuDescriptorSetLayout
+    bindings: dict[str, GpuDescriptorSetBinding]
 
     def __init__(
         self,
@@ -2830,7 +2834,7 @@ class GpuDescriptorSet(GpuResource):
         vk_descriptor_set: VkDescriptorSet,
         pool: GpuDescriptorPool,
         layout: GpuDescriptorSetLayout,
-        bindings: list[GpuDescriptorSetBinding],
+        bindings: dict[str, GpuDescriptorSetBinding],
     ):
         super().__init__(parent=pool)
         self.device = device
@@ -2855,7 +2859,7 @@ def compatible_descriptor_types_for_binding(
                 res.append("storage-buffer")
             return res
         case (GpuImage(), GpuSampler()):
-            return ["texture"]
+            return ["combined-image-sampler"]
 
 
 def descriptor_set_write_for_binding(
@@ -2865,7 +2869,7 @@ def descriptor_set_write_for_binding(
     binding_layout: GpuDescriptorSetLayoutBinding,
 ):
     match binding_layout.type:
-        case "texture":
+        case "combined-image-sampler":
             assert isinstance(binding, tuple)
             image, sampler = binding
             return VkWriteDescriptorSet(
@@ -2923,12 +2927,14 @@ def vk_descriptor_set_binding(binding: GpuDescriptorSetBinding):
             )
 
 
-GpuDescriptorType: TypeAlias = Literal["texture", "storage-buffer", "uniform-buffer"]
+GpuDescriptorType: TypeAlias = Literal[
+    "combined-image-sampler", "storage-buffer", "uniform-buffer"
+]
 
 
 def vk_descriptor_type(t: GpuDescriptorType):
     return {
-        "texture": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
     }[t]

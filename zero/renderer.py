@@ -6,7 +6,10 @@ __all__ = [
     "RendererCanvas",
 ]
 
+from collections import OrderedDict
+
 import torch
+import numpy as np
 
 from .bundled_data import BUNDLED_DATA_PATH
 from .core import BaseResource
@@ -295,19 +298,33 @@ class Renderer2d(BaseResource):
         return self.gpu_device.create_pipeline_layout(
             descriptor_set_layouts=[
                 self.gpu_device.create_descriptor_set_layout(
-                    bindings=[
-                        Binding(
-                            binding=0,
-                            descriptor_type="uniform-buffer",
-                            stages=["vertex", "fragment"],
-                        ),
-                        Binding(
-                            binding=1,
-                            descriptor_type="sampler",
-                            stages=["fragment"],
-                        ),
-                    ]
-                )
+                    bindings=OrderedDict(
+                        {
+                            "framebufferSize": GpuDescriptorSetLayoutBinding(
+                                type="uniform-buffer",
+                                stages=["vertex", "fragment"],
+                            ),
+                            "atlasSize": GpuDescriptorSetLayoutBinding(
+                                type="uniform-buffer",
+                                stages=["vertex", "fragment"],
+                            ),
+                        }.items()
+                    )
+                ),
+                self.gpu_device.create_descriptor_set_layout(
+                    bindings=OrderedDict(
+                        {
+                            "atlasTexture": GpuDescriptorSetLayoutBinding(
+                                type="combined-image-sampler",
+                                stages=["fragment"],
+                            ),
+                            "quads": GpuDescriptorSetLayoutBinding(
+                                type="storage-buffer",
+                                stages=["fragment"],
+                            ),
+                        }.items()
+                    )
+                ),
             ]
         )
 
@@ -336,6 +353,7 @@ class Renderer2d(BaseResource):
             vk_color_format=target.vk_format,
             viewport_width=target.width,
             viewport_height=target.height,
+            layout=self._pipeline_layout,
         )
 
     def _get_gpu_batch_dict(
@@ -391,19 +409,24 @@ class Renderer2d(BaseResource):
         atlas: RendererAtlas,
         cpu_batch: R2dCpuQuadBatch,
     ) -> "R2dGpuQuadBatch":
-        def help_create_gpu_buffer(data: torch.Tensor) -> GpuBuffer:
-            return self.gpu_device.create_buffer(
-                usages=["storage", "copy-dst"],
-                meta=GpuBufferMeta.from_tensor(data),
-            )
+        quads_buf_cpu = np.empty(shape=cpu_batch.capacity, dtype=R2D_QUAD_NP_DTYPE)
 
-        dst_px_buf = help_create_gpu_buffer(cpu_batch.dst_px)
-        src_uv_buf = help_create_gpu_buffer(cpu_batch.src_uv)
-        tint_color_buf = help_create_gpu_buffer(cpu_batch.tint_color)
-        border_color_buf = help_create_gpu_buffer(cpu_batch.border_color)
-        border_width_buf = help_create_gpu_buffer(cpu_batch.border_width)
-        corner_radius_buf = help_create_gpu_buffer(cpu_batch.corner_radius)
-        height_buf = help_create_gpu_buffer(cpu_batch.height)
+        n = cpu_batch.instance_count
+        quads_buf_cpu["dst_px"][:n] = cpu_batch.dst_px.numpy()
+        quads_buf_cpu["src_uv"][:n] = cpu_batch.src_uv.numpy()
+        quads_buf_cpu["tint_color"][:n] = cpu_batch.tint_color.numpy()
+        quads_buf_cpu["border_color"][:n] = cpu_batch.border_color.numpy()
+        quads_buf_cpu["border_thickness_px"][:n] = cpu_batch.border_thickness.numpy()
+        quads_buf_cpu["corner_radius"][:n] = cpu_batch.corner_radius.numpy()
+        quads_buf_cpu["height"][:n] = cpu_batch.height.numpy()
+
+        quads_buf = self.gpu_device.create_buffer(
+            usages=["storage", "copy-dst"],
+            meta=GpuBufferMeta(
+                element_count=cpu_batch.capacity,
+                element_dtype=R2D_QUAD_NP_DTYPE,
+            ),
+        )
 
         binding = self.gpu_device.create_descriptor_set()
 
@@ -456,13 +479,7 @@ class R2dGpuQuadBatch(BaseResource):
         atlas: RendererAtlas,
         instance_count: int,
         capacity: int,
-        dst_px: GpuBuffer,
-        src_uv: GpuBuffer,
-        tint_color: GpuBuffer,
-        border_color: GpuBuffer,
-        border_width: GpuBuffer,
-        corner_radius: GpuBuffer,
-        height: GpuBuffer,
+        data: GpuBuffer,
         binding: GpuDescriptorSet,
     ):
         super().__init__(parent=renderer_2d)
@@ -470,13 +487,7 @@ class R2dGpuQuadBatch(BaseResource):
         self.atlas = atlas
         self.instance_count = instance_count
         self.capacity = capacity
-        self.dst_px = dst_px
-        self.src_uv = src_uv
-        self.tint_color = tint_color
-        self.border_color = border_color
-        self.border_width = border_width
-        self.corner_radius = corner_radius
-        self.height = height
+        self.data = data
         self.binding = binding
 
     def upload(self, cpu_batch: R2dCpuQuadBatch):
@@ -582,13 +593,13 @@ class R2dCpuQuadCollection:
 
 class R2dCpuQuadBatch:
     instance_count: int
-    dst_px: torch.Tensor  # (N, 4, 2): TL, TR, BR, BL
-    src_uv: torch.Tensor  # (N, 4, 2): TL, TR, BR, BL
-    tint_color: torch.Tensor  # (N, 4)
-    border_color: torch.Tensor  # (N, 4)
-    border_width: torch.Tensor  # (N, 4): T, R, B, L
-    corner_radius: torch.Tensor  # (N, 4): TL, TR, BR, BL
-    height: torch.Tensor  # (N, 1)
+    dst_px: torch.Tensor  # int32(N, 4, 2): TL, TR, BR, BL
+    src_uv: torch.Tensor  # float32(N, 4, 2): TL, TR, BR, BL
+    tint_color: torch.Tensor  # float32(N, 4)
+    border_color: torch.Tensor  # float32(N, 4)
+    border_thickness: torch.Tensor  # int32(N, 4): T, R, B, L
+    corner_radius: torch.Tensor  # int32(N, 4): TL, TR, BR, BL
+    height: torch.Tensor  # int32(N, 1)
 
     def __init__(self, capacity: int = 8):
         super().__init__()
@@ -597,7 +608,7 @@ class R2dCpuQuadBatch:
         self.src_uv = torch.zeros((capacity, 4, 2), dtype=torch.float32)
         self.tint_color = torch.zeros((capacity, 4), dtype=torch.float32)
         self.border_color = torch.zeros((capacity, 4), dtype=torch.float32)
-        self.border_width = torch.zeros((capacity, 4), dtype=torch.int32)
+        self.border_thickness = torch.zeros((capacity, 4), dtype=torch.int32)
         self.corner_radius = torch.zeros((capacity, 4), dtype=torch.int32)
         self.height = torch.zeros((capacity, 1), dtype=torch.int32)
 
@@ -635,7 +646,9 @@ class R2dCpuQuadBatch:
         self.src_uv[idx] = torch.tensor(src_uv, dtype=torch.float32)
         self.tint_color[idx] = torch.tensor(tint_color, dtype=torch.float32)
         self.border_color[idx] = torch.tensor(border_color, dtype=torch.float32)
-        self.border_width[idx] = torch.tensor(border_thickness_px, dtype=torch.int32)
+        self.border_thickness[idx] = torch.tensor(
+            border_thickness_px, dtype=torch.int32
+        )
         self.corner_radius[idx] = torch.tensor(corner_radius, dtype=torch.int32)
         self.height[idx] = torch.tensor(height, dtype=torch.int32)
 
@@ -671,9 +684,9 @@ class R2dCpuQuadBatch:
                 torch.zeros((growth, 4), dtype=torch.float32),
             ]
         )
-        self.border_width = torch.cat(
+        self.border_thickness = torch.cat(
             [
-                self.border_width,
+                self.border_thickness,
                 torch.zeros((growth, 4), dtype=torch.int32),
             ]
         )
@@ -689,3 +702,18 @@ class R2dCpuQuadBatch:
                 torch.zeros((growth, 1), dtype=torch.int32),
             ]
         )
+
+
+R2D_QUAD_NP_DTYPE = np.dtype(
+    [
+        ("dst_px", np.uint32, (4, 2)),
+        ("src_uv", np.float32, (4, 2)),
+        ("tint_color", np.float32, (4,)),
+        ("border_color", np.float32, (4,)),
+        ("border_thickness_px", np.uint32, (4,)),
+        ("corner_radius", np.uint32),
+        ("height", np.uint32),
+        ("_rsv0", np.uint32),
+        ("_rsv1", np.uint32),
+    ]
+)
