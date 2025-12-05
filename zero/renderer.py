@@ -9,6 +9,7 @@ __all__ = [
 from collections import OrderedDict
 
 import numpy as np
+import numpy.typing as npt
 
 from .bundled_data import BUNDLED_DATA_PATH
 from .core import BaseResource
@@ -207,8 +208,8 @@ class RendererCanvas(BaseResource):
         scale: float | None = None,
         tint_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-        border_thickness_px: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-        corner_radius: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
+        corner_radius: tuple[int, int, int, int] = (0, 0, 0, 0),
     ):
         """
         Draw a quad with an optional image, border, tint, corner radius, etc to the
@@ -408,17 +409,6 @@ class Renderer2d(BaseResource):
         atlas: RendererAtlas,
         cpu_batch: "R2dCpuQuadBatch",
     ) -> "R2dGpuQuadBatch":
-        quads_buf_cpu = np.empty(shape=cpu_batch.capacity, dtype=R2D_QUAD_NP_DTYPE)
-
-        n = cpu_batch.instance_count
-        quads_buf_cpu["dst_px"][:n] = cpu_batch.dst_px[:n]
-        quads_buf_cpu["src_uv"][:n] = cpu_batch.src_uv[:n]
-        quads_buf_cpu["tint_color"][:n] = cpu_batch.tint_color[:n]
-        quads_buf_cpu["border_color"][:n] = cpu_batch.border_color[:n]
-        quads_buf_cpu["border_thickness_px"][:n] = cpu_batch.border_thickness[:n]
-        quads_buf_cpu["corner_radius"][:n] = cpu_batch.corner_radius[:n]
-        quads_buf_cpu["height"][:n] = cpu_batch.height[:n]
-
         quads_buf = self.gpu_device.create_buffer(
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
@@ -434,13 +424,7 @@ class Renderer2d(BaseResource):
             atlas=atlas,
             instance_count=cpu_batch.instance_count,
             capacity=cpu_batch.capacity,
-            dst_px=dst_px_buf,
-            src_uv=src_uv_buf,
-            tint_color=tint_color_buf,
-            border_color=border_color_buf,
-            border_width=border_width_buf,
-            corner_radius=corner_radius_buf,
-            height=height_buf,
+            buffer=quads_buf,
             binding=binding,
         )
 
@@ -468,7 +452,7 @@ class R2dGpuQuadBatch(BaseResource):
     atlas: RendererAtlas
     instance_count: int
     capacity: int
-    data: GpuBuffer
+    buffer: GpuBuffer
     binding: GpuDescriptorSet
 
     def __init__(
@@ -478,7 +462,7 @@ class R2dGpuQuadBatch(BaseResource):
         atlas: RendererAtlas,
         instance_count: int,
         capacity: int,
-        data: GpuBuffer,
+        buffer: GpuBuffer,
         binding: GpuDescriptorSet,
     ):
         super().__init__(parent=renderer_2d)
@@ -486,7 +470,7 @@ class R2dGpuQuadBatch(BaseResource):
         self.atlas = atlas
         self.instance_count = instance_count
         self.capacity = capacity
-        self.data = data
+        self.buffer = buffer
         self.binding = binding
 
     def upload(self, cpu_batch: R2dCpuQuadBatch):
@@ -517,8 +501,8 @@ class R2dCpuQuadCollection:
         scale: float | None = None,
         tint_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-        border_thickness_px: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-        corner_radius: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
+        corner_radius: tuple[int, int, int, int] = (0, 0, 0, 0),
     ):
         """
         Draws a quad with an optional image, border, tint, corner radius, etc to the
@@ -592,28 +576,16 @@ class R2dCpuQuadCollection:
 
 class R2dCpuQuadBatch:
     instance_count: int
-    dst_px: np.ndarray  # int32(N, 4, 2): TL, TR, BR, BL
-    src_uv: np.ndarray  # float32(N, 4, 2): TL, TR, BR, BL
-    tint_color: np.ndarray  # float32(N, 4)
-    border_color: np.ndarray  # float32(N, 4)
-    border_thickness: np.ndarray  # int32(N, 4): T, R, B, L
-    corner_radius: np.ndarray  # int32(N, 4): TL, TR, BR, BL
-    height: np.ndarray  # int32(N, 1)
+    data: np.ndarray
 
     def __init__(self, capacity: int = 8):
         super().__init__()
         self.instance_count = 0
-        self.dst_px = np.zeros((capacity, 4, 2), dtype=np.int32)
-        self.src_uv = np.zeros((capacity, 4, 2), dtype=np.float32)
-        self.tint_color = np.zeros((capacity, 4), dtype=np.float32)
-        self.border_color = np.zeros((capacity, 4), dtype=np.float32)
-        self.border_thickness = np.zeros((capacity, 4), dtype=np.int32)
-        self.corner_radius = np.zeros((capacity, 4), dtype=np.int32)
-        self.height = np.zeros((capacity, 1), dtype=np.int32)
+        self.data = np.empty(capacity, dtype=R2D_QUAD_NP_DTYPE)
 
     @property
     def capacity(self) -> int:
-        return self.dst_px.shape[0]
+        return self.data.shape[0]
 
     def add_instance(
         self,
@@ -635,24 +607,26 @@ class R2dCpuQuadBatch:
         corner_radius: tuple[int, int, int, int],
         height: int,
     ):
+        self._ensure_capacity(self.instance_count)
+
         idx = self.instance_count
-        if idx >= self.capacity:
-            self._double_capacity()
+        assert idx < self.capacity, "self._ensure_capacity() failed"
 
-        assert idx < self.capacity
-
-        self.dst_px[idx] = np.array(dst_xy, dtype=np.int32)
-        self.src_uv[idx] = np.array(src_uv, dtype=np.float32)
-        self.tint_color[idx] = np.array(tint_color, dtype=np.float32)
-        self.border_color[idx] = np.array(border_color, dtype=np.float32)
-        self.border_thickness[idx] = np.array(border_thickness_px, dtype=np.int32)
-        self.corner_radius[idx] = np.array(corner_radius, dtype=np.int32)
-        self.height[idx] = np.array(height, dtype=np.int32)
+        self.data["dst_px"][idx] = dst_xy
+        self.data["src_uv"][idx] = src_uv
+        self.data["tint_color"][idx] = tint_color
+        self.data["border_color"][idx] = border_color
+        self.data["border_thickness_px"][idx] = border_thickness_px
+        self.data["corner_radius"][idx] = corner_radius
+        self.data["height"][idx] = height
 
         self.instance_count += 1
 
-    def _double_capacity(self):
-        new_capacity = self.dst_px.shape[0] * 2
+    def _ensure_capacity(self, n: int):
+        if n <= self.capacity:
+            return
+
+        new_capacity = _next_po2(n)
         assert new_capacity > self.dst_px.shape[0]
 
         growth = new_capacity - self.dst_px.shape[0]
@@ -714,3 +688,13 @@ R2D_QUAD_NP_DTYPE = np.dtype(
         ("_rsv1", np.uint32),
     ]
 )
+
+
+def _next_po2(x: int) -> int:
+    """Return the next power of two greater than or equal to x."""
+    if x <= 0:
+        return 1
+    v = 1
+    while v < x:
+        v *= 2
+    return v
