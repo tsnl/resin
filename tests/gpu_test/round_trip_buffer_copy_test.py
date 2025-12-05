@@ -1,4 +1,4 @@
-import torch
+import numpy as np
 
 from zero.gpu import (
     GpuBufferMeta,
@@ -23,8 +23,8 @@ def make_context() -> tuple[GpuContext, GpuDevice]:
 def test_buffer_roundtrip():
     _, dev = make_context()
 
-    data0 = torch.randn(1024, dtype=torch.float32)
-    meta = GpuBufferMeta.from_tensor(data0)
+    data0 = np.random.randn(1024).astype(np.float32)
+    meta = GpuBufferMeta.from_array(data0)
 
     device_buf_usage: list[GpuBufferUsage] = ["copy-src", "copy-dst", "storage"]
     host_buf_usage: list[GpuBufferUsage] = ["staging", "copy-src", "copy-dst"]
@@ -49,14 +49,14 @@ def test_buffer_roundtrip():
     data1 = host_buf_2.read()
 
     # Test:
-    assert torch.allclose(data0, data1)
+    assert np.allclose(data0, data1)
 
 
 def test_image_roundtrip():
     _, dev = make_context()
 
-    data0 = torch.randint(0, 256, (1024, 1024, 4), dtype=torch.uint8)
-    meta = GpuImageMeta.from_tensor(data0)
+    data0 = np.random.randint(0, 256, (1024, 1024, 4), dtype=np.uint8)
+    meta = GpuImageMeta.from_array(data0)
 
     host_buf_usage: list[GpuBufferUsage] = ["staging", "copy-src", "copy-dst"]
     image = dev.create_image(usages=["texture-binding"], meta=meta)
@@ -85,4 +85,4 @@ def test_image_roundtrip():
     data1 = data1.reshape(data0.shape)
 
     # Test:
-    assert torch.equal(data0, data1)
+    assert np.array_equal(data0, data1)

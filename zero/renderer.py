@@ -8,7 +8,6 @@ __all__ = [
 
 from collections import OrderedDict
 
-import torch
 import numpy as np
 
 from .bundled_data import BUNDLED_DATA_PATH
@@ -71,7 +70,7 @@ class Renderer(BaseResource):
         self.gpu_device = gpu_device
 
         self.default_white_image_atlas = self.create_atlas(
-            data=torch.full((32, 32, 4), 0xFF, dtype=torch.uint8),
+            data=np.full((32, 32, 4), 0xFF, dtype=np.uint8),
             image_rect_map={"default": (0, 0, 32, 32)},
         )
         self.default_white_image = self.default_white_image_atlas["default"]
@@ -84,7 +83,7 @@ class Renderer(BaseResource):
     def create_atlas(
         self,
         *,
-        data: torch.Tensor,
+        data: np.ndarray,
         image_rect_map: dict[str, tuple[int, int, int, int]],
     ) -> "RendererAtlas":
         """
@@ -95,7 +94,7 @@ class Renderer(BaseResource):
 
         gpu_image = self.gpu_device.create_image(
             usages=["texture-binding"],
-            meta=GpuImageMeta.from_tensor(data),
+            meta=GpuImageMeta.from_array(data),
         )
         gpu_image.write(data=data)
 
@@ -407,18 +406,18 @@ class Renderer2d(BaseResource):
         self,
         *,
         atlas: RendererAtlas,
-        cpu_batch: R2dCpuQuadBatch,
+        cpu_batch: "R2dCpuQuadBatch",
     ) -> "R2dGpuQuadBatch":
         quads_buf_cpu = np.empty(shape=cpu_batch.capacity, dtype=R2D_QUAD_NP_DTYPE)
 
         n = cpu_batch.instance_count
-        quads_buf_cpu["dst_px"][:n] = cpu_batch.dst_px.numpy()
-        quads_buf_cpu["src_uv"][:n] = cpu_batch.src_uv.numpy()
-        quads_buf_cpu["tint_color"][:n] = cpu_batch.tint_color.numpy()
-        quads_buf_cpu["border_color"][:n] = cpu_batch.border_color.numpy()
-        quads_buf_cpu["border_thickness_px"][:n] = cpu_batch.border_thickness.numpy()
-        quads_buf_cpu["corner_radius"][:n] = cpu_batch.corner_radius.numpy()
-        quads_buf_cpu["height"][:n] = cpu_batch.height.numpy()
+        quads_buf_cpu["dst_px"][:n] = cpu_batch.dst_px[:n]
+        quads_buf_cpu["src_uv"][:n] = cpu_batch.src_uv[:n]
+        quads_buf_cpu["tint_color"][:n] = cpu_batch.tint_color[:n]
+        quads_buf_cpu["border_color"][:n] = cpu_batch.border_color[:n]
+        quads_buf_cpu["border_thickness_px"][:n] = cpu_batch.border_thickness[:n]
+        quads_buf_cpu["corner_radius"][:n] = cpu_batch.corner_radius[:n]
+        quads_buf_cpu["height"][:n] = cpu_batch.height[:n]
 
         quads_buf = self.gpu_device.create_buffer(
             usages=["storage", "copy-dst"],
@@ -461,7 +460,7 @@ class Renderer2d(BaseResource):
     def _new_depth_image(self, *, width: int, height: int) -> GpuImage:
         return self.gpu_device.create_image(
             usages=["depth-attachment"],
-            meta=GpuImageMeta(shape=(height, width, 1), dtype=torch.float32),
+            meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
         )
 
 
@@ -593,24 +592,24 @@ class R2dCpuQuadCollection:
 
 class R2dCpuQuadBatch:
     instance_count: int
-    dst_px: torch.Tensor  # int32(N, 4, 2): TL, TR, BR, BL
-    src_uv: torch.Tensor  # float32(N, 4, 2): TL, TR, BR, BL
-    tint_color: torch.Tensor  # float32(N, 4)
-    border_color: torch.Tensor  # float32(N, 4)
-    border_thickness: torch.Tensor  # int32(N, 4): T, R, B, L
-    corner_radius: torch.Tensor  # int32(N, 4): TL, TR, BR, BL
-    height: torch.Tensor  # int32(N, 1)
+    dst_px: np.ndarray  # int32(N, 4, 2): TL, TR, BR, BL
+    src_uv: np.ndarray  # float32(N, 4, 2): TL, TR, BR, BL
+    tint_color: np.ndarray  # float32(N, 4)
+    border_color: np.ndarray  # float32(N, 4)
+    border_thickness: np.ndarray  # int32(N, 4): T, R, B, L
+    corner_radius: np.ndarray  # int32(N, 4): TL, TR, BR, BL
+    height: np.ndarray  # int32(N, 1)
 
     def __init__(self, capacity: int = 8):
         super().__init__()
         self.instance_count = 0
-        self.dst_px = torch.zeros((capacity, 4, 2), dtype=torch.int32)
-        self.src_uv = torch.zeros((capacity, 4, 2), dtype=torch.float32)
-        self.tint_color = torch.zeros((capacity, 4), dtype=torch.float32)
-        self.border_color = torch.zeros((capacity, 4), dtype=torch.float32)
-        self.border_thickness = torch.zeros((capacity, 4), dtype=torch.int32)
-        self.corner_radius = torch.zeros((capacity, 4), dtype=torch.int32)
-        self.height = torch.zeros((capacity, 1), dtype=torch.int32)
+        self.dst_px = np.zeros((capacity, 4, 2), dtype=np.int32)
+        self.src_uv = np.zeros((capacity, 4, 2), dtype=np.float32)
+        self.tint_color = np.zeros((capacity, 4), dtype=np.float32)
+        self.border_color = np.zeros((capacity, 4), dtype=np.float32)
+        self.border_thickness = np.zeros((capacity, 4), dtype=np.int32)
+        self.corner_radius = np.zeros((capacity, 4), dtype=np.int32)
+        self.height = np.zeros((capacity, 1), dtype=np.int32)
 
     @property
     def capacity(self) -> int:
@@ -642,15 +641,13 @@ class R2dCpuQuadBatch:
 
         assert idx < self.capacity
 
-        self.dst_px[idx] = torch.tensor(dst_xy, dtype=torch.int32)
-        self.src_uv[idx] = torch.tensor(src_uv, dtype=torch.float32)
-        self.tint_color[idx] = torch.tensor(tint_color, dtype=torch.float32)
-        self.border_color[idx] = torch.tensor(border_color, dtype=torch.float32)
-        self.border_thickness[idx] = torch.tensor(
-            border_thickness_px, dtype=torch.int32
-        )
-        self.corner_radius[idx] = torch.tensor(corner_radius, dtype=torch.int32)
-        self.height[idx] = torch.tensor(height, dtype=torch.int32)
+        self.dst_px[idx] = np.array(dst_xy, dtype=np.int32)
+        self.src_uv[idx] = np.array(src_uv, dtype=np.float32)
+        self.tint_color[idx] = np.array(tint_color, dtype=np.float32)
+        self.border_color[idx] = np.array(border_color, dtype=np.float32)
+        self.border_thickness[idx] = np.array(border_thickness_px, dtype=np.int32)
+        self.corner_radius[idx] = np.array(corner_radius, dtype=np.int32)
+        self.height[idx] = np.array(height, dtype=np.int32)
 
         self.instance_count += 1
 
@@ -660,46 +657,46 @@ class R2dCpuQuadBatch:
 
         growth = new_capacity - self.dst_px.shape[0]
 
-        self.dst_px = torch.cat(
+        self.dst_px = np.concatenate(
             [
                 self.dst_px,
-                torch.zeros((growth, 4, 2), dtype=torch.int32),
+                np.zeros((growth, 4, 2), dtype=np.int32),
             ]
         )
-        self.src_uv = torch.cat(
+        self.src_uv = np.concatenate(
             [
                 self.src_uv,
-                torch.zeros((growth, 4, 2), dtype=torch.float32),
+                np.zeros((growth, 4, 2), dtype=np.float32),
             ]
         )
-        self.tint_color = torch.cat(
+        self.tint_color = np.concatenate(
             [
                 self.tint_color,
-                torch.zeros((growth, 4), dtype=torch.float32),
+                np.zeros((growth, 4), dtype=np.float32),
             ]
         )
-        self.border_color = torch.cat(
+        self.border_color = np.concatenate(
             [
                 self.border_color,
-                torch.zeros((growth, 4), dtype=torch.float32),
+                np.zeros((growth, 4), dtype=np.float32),
             ]
         )
-        self.border_thickness = torch.cat(
+        self.border_thickness = np.concatenate(
             [
                 self.border_thickness,
-                torch.zeros((growth, 4), dtype=torch.int32),
+                np.zeros((growth, 4), dtype=np.int32),
             ]
         )
-        self.corner_radius = torch.cat(
+        self.corner_radius = np.concatenate(
             [
                 self.corner_radius,
-                torch.zeros((growth, 4), dtype=torch.int32),
+                np.zeros((growth, 4), dtype=np.int32),
             ]
         )
-        self.height = torch.cat(
+        self.height = np.concatenate(
             [
                 self.height,
-                torch.zeros((growth, 1), dtype=torch.int32),
+                np.zeros((growth, 1), dtype=np.int32),
             ]
         )
 

@@ -15,7 +15,6 @@ from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
-import torch
 from PIL import Image
 
 from zero.gpu import (
@@ -41,7 +40,7 @@ def make_context() -> tuple[GpuContext, GpuDevice]:
     return ctx, dev
 
 
-def generate_gradient_texture(width: int, height: int) -> torch.Tensor:
+def generate_gradient_texture(width: int, height: int) -> np.ndarray:
     """Generate a horizontal gradient texture (RGBA8).
 
     Left side is red, right side is blue, with green gradient from top to bottom.
@@ -53,12 +52,12 @@ def generate_gradient_texture(width: int, height: int) -> torch.Tensor:
             g = int(255 * (y / (height - 1)))
             b = int(255 * (x / (width - 1)))
             data[y, x] = [r, g, b, 255]
-    return torch.from_numpy(data)
+    return data
 
 
 def generate_checkerboard_texture(
     width: int, height: int, tile_size: int = 32
-) -> torch.Tensor:
+) -> np.ndarray:
     """Generate a checkerboard texture (RGBA8).
 
     Alternating white and magenta tiles.
@@ -72,10 +71,10 @@ def generate_checkerboard_texture(
                 data[y, x] = [255, 255, 255, 255]  # White
             else:
                 data[y, x] = [255, 0, 255, 255]  # Magenta
-    return torch.from_numpy(data)
+    return data
 
 
-def upload_texture(dev: GpuDevice, texture_data: torch.Tensor) -> GpuImage:
+def upload_texture(dev: GpuDevice, texture_data: np.ndarray) -> GpuImage:
     """Upload texture data to the GPU."""
     height, width, channels = texture_data.shape
     assert channels == 4, "Texture must be RGBA8"
@@ -83,7 +82,7 @@ def upload_texture(dev: GpuDevice, texture_data: torch.Tensor) -> GpuImage:
     # Create the GPU image
     texture = dev.create_image(
         usages=["texture-binding"],
-        meta=GpuImageMeta(shape=(height, width, 4), dtype=torch.uint8),
+        meta=GpuImageMeta(shape=(height, width, 4), dtype=np.uint8),
     )
 
     # Create staging buffer for upload
@@ -93,7 +92,7 @@ def upload_texture(dev: GpuDevice, texture_data: torch.Tensor) -> GpuImage:
     )
 
     # Write data to staging buffer
-    staging_buffer.write(data=texture_data.contiguous())
+    staging_buffer.write(data=texture_data)
 
     # Copy staging buffer to texture
     cmd = dev.create_command_encoder(queue_type="transfer")
@@ -112,12 +111,12 @@ def render_tinted_bitmap(
     output_width: int,
     output_height: int,
     shader_dir: Path,
-) -> torch.Tensor:
+) -> np.ndarray:
     """Render a texture with a tint color and return the result."""
     # Create render target image (RGBA8)
     render_target = dev.create_image(
         usages=["color-attachment", "texture-binding"],
-        meta=GpuImageMeta(shape=(output_height, output_width, 4), dtype=torch.uint8),
+        meta=GpuImageMeta(shape=(output_height, output_width, 4), dtype=np.uint8),
     )
 
     # Create sampler
@@ -130,7 +129,7 @@ def render_tinted_bitmap(
     # Create uniform buffer for tint color (4 floats for RGBA)
     tint_buffer = dev.create_buffer(
         usages=["uniform", "copy-dst"],
-        meta=GpuBufferMeta(element_count=4, element_dtype=torch.float32),
+        meta=GpuBufferMeta(element_count=4, element_dtype=np.float32),
     )
 
     # Upload tint color to uniform buffer via staging
@@ -138,7 +137,7 @@ def render_tinted_bitmap(
         usages=["staging", "copy-src"],
         meta=tint_buffer.meta,
     )
-    tint_data = torch.tensor(tint_color, dtype=torch.float32)
+    tint_data = np.array(tint_color, dtype=np.float32)
     tint_staging.write(data=tint_data)
 
     cmd = dev.create_command_encoder(queue_type="transfer")
@@ -280,7 +279,7 @@ def test_render_tinted_bitmap():
             )
 
             # Convert to numpy for saving
-            result_np = result.numpy()
+            result_np = result
 
             # Save as PNG
             output_path = test_dir / f"output_tinted_{tex_name}_{tint_name}.png"

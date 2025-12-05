@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import numpy as np
-import torch
 from PIL import Image
 
 from zero.gpu import GpuContext, GpuDevice, GpuImageMeta
@@ -31,7 +30,7 @@ def test_render_simple_triangle():
     # Create render target image (RGBA8)
     render_target = dev.create_image(
         usages=["color-attachment", "texture-binding"],
-        meta=GpuImageMeta(shape=(height, width, 4), dtype=torch.uint8),
+        meta=GpuImageMeta(shape=(height, width, 4), dtype=np.uint8),
     )
 
     # Get shader directory relative to this test file
@@ -92,7 +91,7 @@ def test_render_simple_triangle():
     image_data = image_data.reshape((height, width, 4))
 
     # Convert to numpy array
-    image_array = image_data.numpy()
+    image_array = image_data
 
     # Verify we have non-zero pixels (triangle was rendered)
     non_black_pixels = np.sum(image_array[:, :, :3].sum(axis=2) > 0)

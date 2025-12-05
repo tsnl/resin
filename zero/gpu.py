@@ -30,11 +30,11 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
+from typing import TYPE_CHECKING, Callable, Literal, TypeAlias, Any
 
 import glfw
-import torch
 import numpy as np
+import numpy.typing as npt
 
 from .core import BaseResource
 from .excepts import LogicError, PlatformSupportError
@@ -1847,7 +1847,7 @@ class GpuDevice(GpuResource):
                 memory=None,
                 meta=GpuImageMeta(
                     shape=(surface.height, surface.width, 4),
-                    dtype=torch.uint8,
+                    dtype=np.uint8,
                 ),
                 aspect_mask=VK_IMAGE_ASPECT_COLOR_BIT,
                 usages=["color-attachment"],
@@ -1984,14 +1984,14 @@ class GpuMemory(GpuResource):
             )
             self._mapped_view = None
 
-    def write(self, *, data: torch.Tensor):
-        src_bytes = data.ravel().view(torch.uint8).numpy()
+    def write(self, *, data: np.ndarray):
+        src_bytes = data.ravel().view(np.uint8)
         with self.map() as host_mem:
             host_mem[: len(src_bytes)] = src_bytes
 
-    def read(self, *, dtype: torch.dtype) -> torch.Tensor:
+    def read(self, *, dtype: np.dtype) -> np.ndarray:
         with self.map() as host_mem:
-            return torch.frombuffer(host_mem, dtype=dtype).clone()
+            return np.frombuffer(host_mem, dtype=dtype).copy()
 
 
 #
@@ -2002,18 +2002,18 @@ class GpuMemory(GpuResource):
 @dataclass
 class GpuImageMeta:
     shape: tuple[int, int, int]  # (height, width, channels)
-    dtype: torch.dtype
+    dtype: npt.DTypeLike
 
     @staticmethod
-    def from_tensor(tensor: torch.Tensor) -> "GpuImageMeta":
-        if tensor.ndim != 3:
+    def from_array(array: np.ndarray) -> "GpuImageMeta":
+        if array.ndim != 3:
             raise LogicError(
-                f"GpuTextureSpec can only be created from 3D tensors, got tensor with "
-                f"{tensor.ndim} dimensions instead"
+                f"GpuTextureSpec can only be created from 3D arrays, got array with "
+                f"{array.ndim} dimensions instead"
             )
         return GpuImageMeta(
-            shape=(tensor.shape[0], tensor.shape[1], tensor.shape[2]),
-            dtype=tensor.dtype,
+            shape=(array.shape[0], array.shape[1], array.shape[2]),
+            dtype=array.dtype,
         )
 
     def infer_vk_format(
@@ -2026,7 +2026,7 @@ class GpuImageMeta:
 
         if is_depth_attachment:
             match (dtype, depth):
-                case (torch.float32, 1):
+                case (np.float32, 1):
                     return VK_FORMAT_D32_SFLOAT
                 case _:
                     raise LogicError(
@@ -2034,11 +2034,11 @@ class GpuImageMeta:
                     )
         else:
             match (dtype, depth):
-                case (torch.uint8, 4):
+                case (np.uint8, 4):
                     return VK_FORMAT_R8G8B8A8_UNORM
-                case (torch.float32, 1):
+                case (np.float32, 1):
                     return VK_FORMAT_R32_SFLOAT
-                case (torch.float32, 4):
+                case (np.float32, 4):
                     return VK_FORMAT_R32G32B32A32_SFLOAT
                 case _:
                     raise LogicError(
@@ -2046,7 +2046,7 @@ class GpuImageMeta:
                         f"{dtype=}, {depth=}, {is_depth_attachment=}"
                     )
 
-    def into_buffer_meta(self) -> GpuBufferMeta:
+    def into_buffer_meta(self) -> "GpuBufferMeta":
         return GpuBufferMeta(
             element_count=(self.shape[0] * self.shape[1] * self.shape[2]),
             element_dtype=self.dtype,
@@ -2135,10 +2135,10 @@ class GpuImage(GpuResource):
     def channel_count(self) -> int:
         return self.meta.shape[2]
 
-    def write(self, *, data: torch.Tensor):
+    def write(self, *, data: np.ndarray):
         staging_buffer = self.device.create_buffer(
             usages=["copy-src"],
-            meta=GpuBufferMeta.from_tensor(data),
+            meta=GpuBufferMeta.from_array(data),
         )
         staging_buffer.memory.write(data=data)
 
@@ -2213,7 +2213,7 @@ class GpuFence(GpuResource):
 @dataclass
 class GpuBufferMeta:
     element_count: int
-    element_dtype: torch.dtype | np.dtype
+    element_dtype: npt.DTypeLike
 
     @property
     def size(self) -> int:
@@ -2221,13 +2221,13 @@ class GpuBufferMeta:
 
     @property
     def element_size(self) -> int:
-        return self.element_dtype.itemsize
+        return np.dtype(self.element_dtype).itemsize
 
     @staticmethod
-    def from_tensor(tensor: torch.Tensor) -> GpuBufferMeta:
+    def from_array(array: np.ndarray) -> "GpuBufferMeta":
         return GpuBufferMeta(
-            element_count=tensor.numel(),
-            element_dtype=tensor.dtype,
+            element_count=array.size,
+            element_dtype=array.dtype,
         )
 
 
@@ -2268,11 +2268,11 @@ class GpuBuffer(GpuResource):
     def _on_dispose(self):
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
 
-    def write(self, *, data: torch.Tensor):
+    def write(self, *, data: np.ndarray):
         self.memory.write(data=data)
 
-    def read(self) -> torch.Tensor:
-        return self.memory.read(dtype=self.meta.element_dtype)
+    def read(self) -> np.ndarray:
+        return self.memory.read(dtype=np.dtype(self.meta.element_dtype))
 
 
 #
@@ -2584,14 +2584,14 @@ class GpuCommandEncoder(GpuResource):
         if image.current_vk_layout == new_layout:
             return
 
-        # Determine access masks based on old and new layouts
-        src_access_mask = 0
-        if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
-        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
+        # # Determine access masks based on old and new layouts
+        # src_access_mask = 0
+        # if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+        #     src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+        # elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+        #     src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
+        # elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        #     src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
 
         # Determine stage mask based on queue type
         stage_mask = 0

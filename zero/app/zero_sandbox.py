@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import torch
+import numpy as np
 
 import zero
 
@@ -54,7 +54,7 @@ def main_headless(args: argparse.Namespace):
     # Create render target image (1024x1024 RGBA8)
     render_target_image = device.create_image(
         usages=["color-attachment"],
-        meta=zero.GpuImageMeta(shape=(1024, 1024, 4), dtype=torch.uint8),
+        meta=zero.GpuImageMeta(shape=(1024, 1024, 4), dtype=np.uint8),
     )
 
     # Load shaders from compiled SPIR-V
