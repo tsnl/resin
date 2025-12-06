@@ -27,6 +27,9 @@ from .gpu import (
     GpuImageMeta,
     GpuPipeline,
     GpuPipelineLayout,
+    GpuSampler,
+    GpuSamplerAddressMode,
+    GpuSamplerFilter,
     GpuShader,
 )
 
@@ -86,6 +89,9 @@ class Renderer(BaseResource):
         *,
         data: np.ndarray,
         image_rect_map: dict[str, tuple[int, int, int, int]],
+        mag_filter: GpuSamplerFilter = "linear",
+        min_filter: GpuSamplerFilter = "linear",
+        address_mode: GpuSamplerAddressMode = "clamp-to-edge",
     ) -> "RendererAtlas":
         """
         Create a new `RendererAtlas` from the given image data and image rectangle map.
@@ -97,11 +103,17 @@ class Renderer(BaseResource):
             usages=["texture-binding"],
             meta=GpuImageMeta.from_array(data),
         )
+        gpu_sampler = self.gpu_device.create_sampler(
+            mag_filter=mag_filter,
+            min_filter=min_filter,
+            address_mode=address_mode,
+        )
         gpu_image.write(data=data)
 
         return RendererAtlas(
             context=self.context,
             gpu_image=gpu_image,
+            gpu_sampler=gpu_sampler,
             image_rect_map=image_rect_map,
         )
 
@@ -133,6 +145,7 @@ class Renderer(BaseResource):
 class RendererAtlas(BaseResource):
     context: RendererContext
     gpu_image: GpuImage
+    gpu_sampler: GpuSampler
     image_map: dict[str, "RendererImage"]
 
     def __init__(
@@ -140,10 +153,12 @@ class RendererAtlas(BaseResource):
         *,
         context: RendererContext,
         gpu_image: GpuImage,
+        gpu_sampler: GpuSampler,
         image_rect_map: dict[str, tuple[int, int, int, int]],
     ):
         super().__init__(parent=context)
         self.gpu_image = gpu_image
+        self.gpu_sampler = gpu_sampler
         self.image_map = {
             name: RendererImage(atlas=self, entry_name=name, rect_xywh=rect_xywh)
             for name, rect_xywh in image_rect_map.items()
@@ -239,6 +254,8 @@ class Renderer2d(BaseResource):
     _vertex_shader: GpuShader
     _fragment_shader: GpuShader
     _pipeline_layout: GpuPipelineLayout
+    _common_uniform_buf: GpuBuffer
+    _common_uniform_descriptor_set: GpuDescriptorSet
     _cached_pipeline: GpuPipeline | None
     _cached_depth_image: GpuImage | None
     _cached_gpu_batches: dict["RendererAtlas", "R2dGpuQuadBatch"]
@@ -256,6 +273,8 @@ class Renderer2d(BaseResource):
         self._vertex_shader = self._new_vertex_shader()
         self._fragment_shader = self._new_fragment_shader()
         self._pipeline_layout = self._new_pipeline_layout()
+        self._common_uniform_buf = self._new_common_uniform_buffer()
+        self._common_uniform_descriptor_set = self._new_common_uniform_descriptor_set()
         self._cached_pipeline = None
         self._cached_depth_image = None
         self._cached_gpu_batches = {}
@@ -300,11 +319,7 @@ class Renderer2d(BaseResource):
                 self.gpu_device.create_descriptor_set_layout(
                     bindings=OrderedDict(
                         {
-                            "framebufferSize": GpuDescriptorSetLayoutBinding(
-                                type="uniform-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                            "atlasSize": GpuDescriptorSetLayoutBinding(
+                            "uniform": GpuDescriptorSetLayoutBinding(
                                 type="uniform-buffer",
                                 stages=["vertex", "fragment"],
                             ),
@@ -326,6 +341,18 @@ class Renderer2d(BaseResource):
                     )
                 ),
             ]
+        )
+
+    def _new_common_uniform_buffer(self) -> GpuBuffer:
+        return self.gpu_device.create_buffer(
+            usages=["uniform", "copy-dst"],
+            meta=GpuBufferMeta(element_count=1, element_dtype=R2D_UNIFORM_DTYPE),
+        )
+
+    def _new_common_uniform_descriptor_set(self) -> GpuDescriptorSet:
+        return self.gpu_device.create_descriptor_set(
+            layout=self._pipeline_layout.descriptor_set_layouts[0],
+            bindings={"uniform": self._common_uniform_buf},
         )
 
     def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
@@ -409,22 +436,26 @@ class Renderer2d(BaseResource):
         atlas: RendererAtlas,
         cpu_batch: "R2dCpuQuadBatch",
     ) -> "R2dGpuQuadBatch":
-        quads_buf = self.gpu_device.create_buffer(
+        gpu_quads_buf = self.gpu_device.create_buffer(
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
                 element_count=cpu_batch.capacity,
                 element_dtype=R2D_QUAD_NP_DTYPE,
             ),
         )
-
-        binding = self.gpu_device.create_descriptor_set()
-
+        binding = self.gpu_device.create_descriptor_set(
+            layout=self._pipeline_layout.descriptor_set_layouts[1],
+            bindings={
+                "atlasTexture": (atlas.gpu_image, atlas.gpu_sampler),
+                "quads": gpu_quads_buf,
+            },
+        )
         return R2dGpuQuadBatch(
             renderer_2d=self,
             atlas=atlas,
             instance_count=cpu_batch.instance_count,
             capacity=cpu_batch.capacity,
-            buffer=quads_buf,
+            buffer=gpu_quads_buf,
             binding=binding,
         )
 
@@ -474,8 +505,7 @@ class R2dGpuQuadBatch(BaseResource):
         self.binding = binding
 
     def upload(self, cpu_batch: R2dCpuQuadBatch):
-        # TODO: need to pack data: see shader
-        raise NotImplementedError()
+        self.buffer.memory.write(data=cpu_batch.data[: cpu_batch.instance_count])
 
 
 #
@@ -675,9 +705,27 @@ class R2dCpuQuadBatch:
         )
 
 
+def _next_po2(x: int) -> int:
+    """Return the next power of two greater than or equal to x."""
+    if x <= 0:
+        return 1
+    v = 1
+    while v < x:
+        v *= 2
+    return v
+
+
+R2D_UNIFORM_DTYPE = np.dtype(
+    [
+        ("framebuffer_size_px", np.int32, (2,)),
+        ("atlas_size_px", np.int32, (2,)),
+    ]
+)
+
+
 R2D_QUAD_NP_DTYPE = np.dtype(
     [
-        ("dst_px", np.uint32, (4, 2)),
+        ("dst_px", np.int32, (4, 2)),
         ("src_uv", np.float32, (4, 2)),
         ("tint_color", np.float32, (4,)),
         ("border_color", np.float32, (4,)),
@@ -688,13 +736,4 @@ R2D_QUAD_NP_DTYPE = np.dtype(
         ("_rsv1", np.uint32),
     ]
 )
-
-
-def _next_po2(x: int) -> int:
-    """Return the next power of two greater than or equal to x."""
-    if x <= 0:
-        return 1
-    v = 1
-    while v < x:
-        v *= 2
-    return v
+assert R2D_QUAD_NP_DTYPE.itemsize == 32 * 4

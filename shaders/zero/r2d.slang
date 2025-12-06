@@ -6,8 +6,8 @@
 
 struct R2dUniform
 {
-    uint2 framebufferSize;
-    uint2 atlasSize;
+    int2 framebufferSizePx;
+    int2 atlasSizePx;
 }
 
 [[vk::binding(0, 0)]]

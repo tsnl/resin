@@ -286,14 +286,6 @@ if TYPE_CHECKING:
     from _typeshed import SupportsWrite
 
 #
-# Type aliases for GPU configuration
-#
-
-
-GpuSamplerFilter: TypeAlias = Literal["nearest", "linear"]
-
-
-#
 # GpuContext
 #
 
@@ -1275,11 +1267,9 @@ class GpuDevice(GpuResource):
     def create_sampler(
         self,
         *,
-        mag_filter: GpuSamplerFilter = "linear",
-        min_filter: GpuSamplerFilter = "linear",
-        address_mode: Literal[
-            "repeat", "mirrored-repeat", "clamp-to-edge", "clamp-to-border"
-        ] = "clamp-to-edge",
+        mag_filter: "GpuSamplerFilter" = "linear",
+        min_filter: "GpuSamplerFilter" = "linear",
+        address_mode: "GpuSamplerAddressMode" = "clamp-to-edge",
     ) -> "GpuSampler":
         """Create a texture sampler"""
         vk_mag_filter = (
@@ -2727,6 +2717,19 @@ class GpuSampler(GpuResource):
             sampler=self.vk_sampler,
             pAllocator=None,
         )
+
+
+GpuSamplerFilter: TypeAlias = Literal[
+    "nearest",
+    "linear",
+]
+
+GpuSamplerAddressMode: TypeAlias = Literal[
+    "repeat",
+    "mirrored-repeat",
+    "clamp-to-edge",
+    "clamp-to-border",
+]
 
 
 #
