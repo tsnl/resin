@@ -127,8 +127,8 @@ def main():
 
 
 def print_gpu_debug_info(
-    gpu_context: core.GpuContext,
-    file: core.SupportsWrite[str] = sys.stdout,
+    gpu_context: zfw_core.GpuContext,
+    file: zfw_core.SupportsWrite[str] = sys.stdout,
 ):
     print("<gpu-debug-info>")
     gpu_context.print_debug_info(out=file)
