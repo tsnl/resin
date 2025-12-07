@@ -1,6 +1,6 @@
 import numpy as np
 
-from zero.gpu import (
+from zfw_core.gpu import (
     GpuBufferMeta,
     GpuBufferUsage,
     GpuContext,

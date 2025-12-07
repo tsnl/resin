@@ -14,7 +14,7 @@ sync: shaders
 
 .PHONY: shaders
 shaders:
-	uv run --with zero --extra dev tools/build-shaders.py
+	uv run --with zfw --extra dev modules/zfw_core/tools/build-shaders.py
 
 #
 # Tests:
@@ -22,7 +22,7 @@ shaders:
 
 .PHONY: tests
 tests: shaders
-	uv run --extra dev python -m pytest -vs --tb=short tests/
+	uv run --extra dev python -m pytest -vs --tb=short .
 
 #
 # Ruff:
@@ -31,11 +31,11 @@ tests: shaders
 .PHONY: format format-check
 
 format:
-	uv run --with zero --extra dev -- ruff format .
-	uv run --with zero --extra dev -- ruff check --select I --fix .
+	uv run --with zfw --extra dev -- ruff format .
+	uv run --with zfw --extra dev -- ruff check --select I --fix .
 
 format-check:
-	uv run --with zero --extra dev -- ruff check --select I .
+	uv run --with zfw --extra dev -- ruff check --select I .
 
 #
 # Type-check:
@@ -44,7 +44,7 @@ format-check:
 .PHONY: typecheck
 
 typecheck:
-	uv run --with zero -- pyright
+	uv run --with zfw -- pyright
 
 #
 # Build:

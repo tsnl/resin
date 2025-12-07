@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from zero.gpu import (
+from zfw_core.gpu import (
     GpuBufferMeta,
     GpuContext,
     GpuDescriptorSetLayoutBinding,

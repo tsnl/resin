@@ -4,7 +4,7 @@ from typing import TypeAlias
 
 import glfw
 
-from .core import BaseResource
+from .basic import BaseResource
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 

@@ -15,7 +15,7 @@ from typing import Literal, TypeAlias
 
 
 ShaderStage: TypeAlias = Literal["vertex", "fragment"]
-Target: TypeAlias = Literal["zero", "tests", "zero_sandbox"]
+Target: TypeAlias = Literal["zfw_core", "zfw_core_tests", "zfw_sandbox"]
 
 
 @dataclass
@@ -91,26 +91,26 @@ def main():
 
 SHADERS: list[Shader] = [
     Shader(
-        source=Path("shaders/tests/triangle.slang"),
+        source=Path("modules/zfw_core/shaders/tests/triangle.slang"),
         stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-        targets=["tests", "zero_sandbox"],
+        targets=["zfw_core_tests", "zfw_sandbox"],
     ),
     Shader(
-        source=Path("shaders/tests/tinted_bitmap.slang"),
+        source=Path("modules/zfw_core/shaders/tests/tinted_bitmap.slang"),
         stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-        targets=["tests"],
+        targets=["zfw_core_tests"],
     ),
     # Shader(
-    #     source=Path("shaders/zero/r2d.slang"),
+    #     source=Path("shaders/zfw/r2d.slang"),
     #     stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-    #     targets=["zero"],
+    #     targets=["zfw"],
     # ),
 ]
 
 TARGET_ROOT_MAP: dict[Target, Path] = {
-    "zero": Path("zero/bundled_data"),
-    "zero_sandbox": Path("zero/bundled_data"),
-    "tests": Path("tests/gpu_test/data"),
+    "zfw_core": Path("modules/zfw_core/src/bundled_data"),
+    "zfw_core_tests": Path("modules/zfw_core/tests/gpu_test/data"),
+    "zfw_sandbox": Path("modules/zfw_sandbox/src/bundled_data"),
 }
 
 

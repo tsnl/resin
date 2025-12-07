@@ -1,7 +1,31 @@
-from abc import ABC, abstractmethod
+__all__ = [
+    "SupportsWrite",
+    "BaseResource",
+    "expect",
+]
+
+from abc import ABC
 from weakref import ref as WeakRef
+from typing import TypeVar, Protocol
 
 from .excepts import LogicError
+
+
+#
+# Typing (from _typeshed)
+#
+
+# Why define these _typeshed types?
+# It's not possible to install _typeshed at runtime.
+# We don't want users to have `if TYPE_CHECKING` blocks everywhere.
+# So we just copy the relevant definitions here.
+
+_T_contra = TypeVar("_T_contra", contravariant=True)
+
+
+class SupportsWrite(Protocol[_T_contra]):
+    def write(self, s: _T_contra, /) -> object: ...
+
 
 #
 # Context, ContextResource

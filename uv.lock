@@ -2,6 +2,13 @@ version = 1
 revision = 3
 requires-python = ">=3.14"
 
+[manifest]
+members = [
+    "zfw",
+    "zfw-core",
+    "zfw-sandbox",
+]
+
 [[package]]
 name = "certifi"
 version = "2025.11.12"
@@ -355,13 +362,15 @@ wheels = [
 ]
 
 [[package]]
-name = "zero"
+name = "zfw"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "glfw" },
     { name = "numpy" },
     { name = "vulkan" },
+    { name = "zfw-core" },
+    { name = "zfw-sandbox" },
 ]
 
 [package.optional-dependencies]
@@ -385,5 +394,17 @@ requires-dist = [
     { name = "rich", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.5" },
     { name = "vulkan", specifier = ">=1.3.275.1,<2.0.0.0" },
+    { name = "zfw-core", editable = "modules/zfw_core" },
+    { name = "zfw-sandbox", editable = "modules/zfw_sandbox" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "zfw-core"
+version = "0.1.0"
+source = { editable = "modules/zfw_core" }
+
+[[package]]
+name = "zfw-sandbox"
+version = "0.1.0"
+source = { editable = "modules/zfw_sandbox" }

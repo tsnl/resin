@@ -1,4 +1,4 @@
-# `zero`
+# `zfw` -- Zero Framework
 
 A game engine for fun and profit, written in pure Python.
 
@@ -11,11 +11,11 @@ We use `uv` for project management.
 $ uv sync
 
 # Run the example
-$ uv run --with zero -- zero-replay
+$ uv run --with zfw -- zfw-replay
 
 # Lint and Typecheck
-$ uv run --with zero -- ruff check .
-$ uv run --with zero -- pyright
+$ uv run --with zfw -- ruff check .
+$ uv run --with zfw -- pyright
 ```
 
 ## Resources

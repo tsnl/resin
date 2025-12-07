@@ -7,7 +7,6 @@
 struct R2dUniform
 {
     int2 framebufferSizePx;
-    int2 atlasSizePx;
 }
 
 [[vk::binding(0, 0)]]
@@ -54,7 +53,7 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
     VSOutput output;
 
-    // TODO
+    R2dQuad quad = quads[instanceId];
 
     return output;
 }

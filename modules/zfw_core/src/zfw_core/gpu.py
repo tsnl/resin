@@ -36,7 +36,7 @@ import glfw
 import numpy as np
 import numpy.typing as npt
 
-from .core import BaseResource
+from .basic import BaseResource
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -395,7 +395,7 @@ class GpuContext(GpuResource):
             pCreateInfo=VkInstanceCreateInfo(
                 pApplicationInfo=VkApplicationInfo(
                     pApplicationName=app_name,
-                    pEngineName="zero",
+                    pEngineName="zfw",
                     apiVersion=VK_API_VERSION_1_4,  # newest supported version
                 ),
                 enabledLayerCount=len(layers),

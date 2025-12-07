@@ -1,6 +1,6 @@
 from typing import TypeAlias
 
-from .core import BaseContext, BaseResource
+from .basic import BaseContext, BaseResource
 
 #
 # GuiContext

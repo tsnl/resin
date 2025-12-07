@@ -9,10 +9,9 @@ __all__ = [
 from collections import OrderedDict
 
 import numpy as np
-import numpy.typing as npt
 
 from .bundled_data import BUNDLED_DATA_PATH
-from .core import BaseResource
+from .basic import BaseResource
 from .excepts import LogicError
 from .gpu import (
     GpuBuffer,
@@ -718,9 +717,9 @@ def _next_po2(x: int) -> int:
 R2D_UNIFORM_DTYPE = np.dtype(
     [
         ("framebuffer_size_px", np.int32, (2,)),
-        ("atlas_size_px", np.int32, (2,)),
     ]
 )
+assert R2D_UNIFORM_DTYPE.itemsize == 2 * 4
 
 
 R2D_QUAD_NP_DTYPE = np.dtype(

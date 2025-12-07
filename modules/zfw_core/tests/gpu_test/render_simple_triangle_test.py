@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from zero.gpu import GpuContext, GpuDevice, GpuImageMeta
+from zfw_core.gpu import GpuContext, GpuDevice, GpuImageMeta
 
 
 def make_context() -> tuple[GpuContext, GpuDevice]:
@@ -93,7 +93,7 @@ def test_render_simple_triangle():
     # Convert to numpy array
     image_array = image_data
 
-    # Verify we have non-zero pixels (triangle was rendered)
+    # Verify we have non-zfw pixels (triangle was rendered)
     non_black_pixels = np.sum(image_array[:, :, :3].sum(axis=2) > 0)
     assert non_black_pixels > 0, "No pixels were drawn - triangle not rendered"
 
