@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-import zfw_core as core
+import zfw_core
 
 
 class Engine:
@@ -11,14 +11,23 @@ class Engine:
         app_name: str,
         enable_vulkan_debug_layers: bool,
     ):
-        self.gpu_context = core.GpuContext(
+        self.gpu_context = zfw_core.GpuContext(
             app_name=app_name,
             enable_debug_layer_support=enable_vulkan_debug_layers,
             enable_present_support=True,
         )
-        self.window_context = core.WindowContext(
+        self.window_context = zfw_core.WindowContext(
             gpu_context=self.gpu_context,
         )
+
+    def print_gpu_debug_info(
+        self,
+        file: zfw_core.SupportsWrite[str] = sys.stdout,
+    ):
+        print("<gpu-debug-info>")
+        self.gpu_context.print_debug_info(out=file)
+        print()
+        print("</gpu-debug-info>")
 
 
 def main():
@@ -38,20 +47,23 @@ def main():
     )
     args = ap.parse_args()
 
-    gpu_ctx = core.GpuContext()
-    window_context = core.WindowContext(
-        gpu_context=gpu_ctx,
+    engine = Engine(
+        app_name="Zero Sandbox",
+        enable_vulkan_debug_layers=args.enable_vulkan_debug_layers,
     )
 
-    print_gpu_debug_info(gpu_ctx, file=sys.stdout)
-
     # Create window, GPU surface:
-    window = window_context.create_window(width=1024, height=1024, title="Zero Sandbox")
+    window = engine.window_context.create_window(
+        width=1024, height=1024, title="Zero Sandbox"
+    )
     surface = window.create_surface()
 
     # Create GPU device using the surface:
-    physical_device = next(iter(gpu_ctx.enumerate_physical_devices()))
-    device = gpu_ctx.create_device(physical_device=physical_device, surface=surface)
+    physical_device = next(iter(engine.gpu_context.enumerate_physical_devices()))
+    device = engine.gpu_context.create_device(
+        physical_device=physical_device,
+        surface=surface,
+    )
 
     # Create swapchain:
     swapchain = device.create_swapchain(
@@ -60,7 +72,7 @@ def main():
     )
 
     # Create render pipeline using the swapchain:
-    shader_dir = core.BUNDLED_DATA_PATH / "shaders" / "tests"
+    shader_dir = zfw_core.BUNDLED_DATA_PATH / "shaders" / "tests"
     vertex_shader = device.create_shader(
         spirv_path=shader_dir / "triangle.vert.spv",
         stage="vertex",

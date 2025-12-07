@@ -17,7 +17,10 @@ def zfw_core_main():
         zfw_build.Shader(
             source=(zfw_core_root / "shaders/tests/triangle.slang"),
             stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-            targets=["zfw_core_tests"],
+            targets=[
+                "zfw_core_tests",
+                "zfw_core",  # FIXME: remove this when sandbox uses the core renderer
+            ],
         ),
         zfw_build.Shader(
             source=(zfw_core_root / "shaders/tests/tinted_bitmap.slang"),

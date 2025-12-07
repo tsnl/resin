@@ -416,3 +416,9 @@ source = { editable = "modules/zfw_core" }
 name = "zfw-sandbox"
 version = "0.1.0"
 source = { editable = "modules/zfw_sandbox" }
+dependencies = [
+    { name = "zfw-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "zfw-core", editable = "modules/zfw_core" }]
