@@ -1,15 +1,15 @@
 from typing import TypeAlias
 
-from .basic import BaseContext, BaseResource
+from .basic import BaseResource
 
 #
 # GuiContext
 #
 
 
-class GuiContext(BaseContext["GuiContext"]):
+class GuiContext(BaseResource):
     def _on_dispose(self) -> None:
         pass
 
 
-GuiResource: TypeAlias = BaseResource[GuiContext]
+GuiResource: TypeAlias = BaseResource

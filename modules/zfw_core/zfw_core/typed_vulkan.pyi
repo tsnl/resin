@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, TypeAlias, list
+from typing import Any, Callable, List, Optional, TypeAlias
 
 import cffi
 
@@ -106,9 +106,9 @@ class VkApplicationInfo:
 class VkInstanceCreateInfo:
     pApplicationInfo: VkApplicationInfo | None
     enabledLayerCount: int = 0
-    ppEnabledLayerNames: list[str] = ()
+    ppEnabledLayerNames: list[str] = []
     enabledExtensionCount: int = 0
-    ppEnabledExtensionNames: list[str] = ()
+    ppEnabledExtensionNames: list[str] = []
     flags: int = 0
 
 # vkCreateInstance
@@ -477,10 +477,10 @@ class VkDeviceCreateInfo:
     pNext: VkPhysicalDeviceDynamicRenderingFeatures | None = None
     flags: VkDeviceCreateFlags = 0
     queueCreateInfoCount: int = 0
-    pQueueCreateInfos: list[Any] = ()
+    pQueueCreateInfos: list[Any] = []
     enabledExtensionCount: int = 0
-    ppEnabledExtensionNames: list[str] = ()
-    pEnabledFeatures: list[Any] = ()
+    ppEnabledExtensionNames: list[str] = []
+    pEnabledFeatures: list[Any] = []
 
 # vkCreateDevice
 # https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateDevice.html
@@ -1123,9 +1123,9 @@ VK_ATTACHMENT_STORE_OP_DONT_CARE: VkAttachmentStoreOp = 1
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkClearColorValue.html
 @dataclass
 class VkClearColorValue:
-    float32: list[float] = (0.0, 0.0, 0.0, 0.0)
-    int32: list[int] = (0, 0, 0, 0)
-    uint32: list[int] = (0, 0, 0, 0)
+    float32: list[float] = [0.0, 0.0, 0.0, 0.0]
+    int32: list[int] = [0, 0, 0, 0]
+    uint32: list[int] = [0, 0, 0, 0]
 
 # VkClearDepthStencilValue
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkClearDepthStencilValue.html
