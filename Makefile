@@ -1,19 +1,31 @@
 default: wheel
 
 #
-# Bundled data:
+# Sync
 #
+
+.PHONY: sync
+sync: bundled-data
+	uv sync --extra dev
 
 .PHONY: bundled-data
 bundled-data:
 	uv run --extra dev python ./build-bundled-data.py
 
 #
+# Sandbox:
+#
+
+.PHONY: sandbox
+sandbox: sync
+	uv run --extra dev zfw-sandbox
+
+#
 # Tests:
 #
 
 .PHONY: tests
-tests: bundled-data
+tests: sync
 	uv run --extra dev python -m pytest -vs --tb=short .
 
 #
@@ -42,5 +54,5 @@ check-typing:
 #
 
 .PHONY: wheel
-wheel: bundled-data check-formatting check-typing tests
+wheel: sync check-formatting check-typing tests
 	uv build
