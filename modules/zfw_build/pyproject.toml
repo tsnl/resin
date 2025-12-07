@@ -5,8 +5,12 @@ description = "zfw build utilities"
 readme = "README.md"
 authors = [{ name = "Nikhil Idiculla", email = "nikhil.idiculla@gmail.com" }]
 requires-python = ">=3.14"
-dependencies = ["hatchling"]
+dependencies = []
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "zfw_build"
+module-root = ""

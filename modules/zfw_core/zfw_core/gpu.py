@@ -30,7 +30,7 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal, TypeAlias, Any
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypeAlias
 
 import glfw
 import numpy as np

@@ -1773,6 +1773,19 @@ def vkResetFences(
 # VkShaderModule
 #
 
+# VkShaderStageFlags
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderStageFlagBits.html
+VkShaderStageFlags: TypeAlias = VkFlags
+VkShaderStageFlagBits: TypeAlias = int
+VK_SHADER_STAGE_VERTEX_BIT: VkShaderStageFlagBits = 0x00000001
+VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: VkShaderStageFlagBits = 0x00000002
+VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: VkShaderStageFlagBits = 0x00000004
+VK_SHADER_STAGE_GEOMETRY_BIT: VkShaderStageFlagBits = 0x00000008
+VK_SHADER_STAGE_FRAGMENT_BIT: VkShaderStageFlagBits = 0x00000010
+VK_SHADER_STAGE_COMPUTE_BIT: VkShaderStageFlagBits = 0x00000020
+VK_SHADER_STAGE_ALL_GRAPHICS: VkShaderStageFlagBits = 0x0000001F
+VK_SHADER_STAGE_ALL: VkShaderStageFlagBits = 0x7FFFFFFF
+
 # VkShaderModule
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderModule.html
 class VkShaderModule(OpaqueResourceHandle): ...
@@ -1871,13 +1884,6 @@ VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: VkDescriptorPoolCreateFlagBit
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetLayoutCreateFlagBits.html
 VkDescriptorSetLayoutCreateFlags: TypeAlias = VkFlags
 VkDescriptorSetLayoutCreateFlagBits: TypeAlias = int
-
-# VkShaderStageFlags
-# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderStageFlagBits.html
-VkShaderStageFlags: TypeAlias = VkFlags
-VkShaderStageFlagBits: TypeAlias = int
-VK_SHADER_STAGE_ALL_GRAPHICS: VkShaderStageFlagBits = 0x0000001F
-VK_SHADER_STAGE_ALL: VkShaderStageFlagBits = 0x7FFFFFFF
 
 # VkDescriptorPoolSize
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolSize.html
@@ -2098,19 +2104,6 @@ VkPipelineShaderStageCreateFlags: TypeAlias = VkFlags
 VkPipelineShaderStageCreateFlagBits: TypeAlias = int
 VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT: VkPipelineShaderStageCreateFlagBits = 0x00000001
 VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT: VkPipelineShaderStageCreateFlagBits = 0x00000002
-
-# VkShaderStageFlagBits
-# https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderStageFlagBits.html
-VkShaderStageFlags: TypeAlias = VkFlags
-VkShaderStageFlagBits: TypeAlias = int
-VK_SHADER_STAGE_VERTEX_BIT: VkShaderStageFlagBits = 0x00000001
-VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: VkShaderStageFlagBits = 0x00000002
-VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: VkShaderStageFlagBits = 0x00000004
-VK_SHADER_STAGE_GEOMETRY_BIT: VkShaderStageFlagBits = 0x00000008
-VK_SHADER_STAGE_FRAGMENT_BIT: VkShaderStageFlagBits = 0x00000010
-VK_SHADER_STAGE_COMPUTE_BIT: VkShaderStageFlagBits = 0x00000020
-VK_SHADER_STAGE_ALL_GRAPHICS: VkShaderStageFlagBits = 0x0000001F
-VK_SHADER_STAGE_ALL: VkShaderStageFlagBits = 0x7FFFFFFF
 
 # VkPrimitiveTopology
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPrimitiveTopology.html

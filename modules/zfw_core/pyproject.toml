@@ -8,20 +8,10 @@ requires-python = ">=3.14"
 dependencies = []
 
 [build-system]
-requires = ["hatchling", "zfw_build"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
 
-[tool.hatch.build]
-include = ["zfw_core/bundled_data/**/*"]
-
-[tool.hatch.build.hooks.custom]
-path = "build.py"
-
-[tool.uv]
-cache-keys = [
-    { file = "pyproject.toml" },
-    { file = "build.py" },
-    { file = "tests/**/*.py" },
-    { file = "**/*.slang" },
-    { file = "**/*.spv" },
-]
+[tool.uv.build-backend]
+package-data = { "zfw_core" = ["bundled_data/**/*"] }
+module-name = "zfw_core"
+module-root = ""

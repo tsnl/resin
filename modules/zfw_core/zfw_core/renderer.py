@@ -10,8 +10,8 @@ from collections import OrderedDict
 
 import numpy as np
 
-from .bundled_data import BUNDLED_DATA_PATH
 from .basic import BaseResource
+from .bundled_data import BUNDLED_DATA_PATH
 from .excepts import LogicError
 from .gpu import (
     GpuBuffer,

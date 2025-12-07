@@ -57,3 +57,15 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 
     return output;
 }
+
+//
+// Fragment Shader
+//
+
+[shader("fragment")]
+float4 fragmentMain(VSOutput input) : SV_Target
+{
+    // TODO
+
+    return float4(1.0, 0.0, 0.0, 1.0);
+}

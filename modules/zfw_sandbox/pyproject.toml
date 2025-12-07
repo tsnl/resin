@@ -6,5 +6,14 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []
 
+[build-system]
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
+
 [project.scripts]
 zfw-sandbox = "zfw_sandbox:main"
+
+[tool.uv.build-backend]
+package-data = { "zfw_sandbox" = ["bundled_data/**/*"] }
+module-name = "zfw_sandbox"
+module-root = ""

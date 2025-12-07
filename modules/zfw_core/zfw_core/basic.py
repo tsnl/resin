@@ -5,11 +5,10 @@ __all__ = [
 ]
 
 from abc import ABC
+from typing import Protocol, TypeVar
 from weakref import ref as WeakRef
-from typing import TypeVar, Protocol
 
 from .excepts import LogicError
-
 
 #
 # Typing (from _typeshed)

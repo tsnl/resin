@@ -42,4 +42,5 @@ dev = [
     "rich",
     "requests",
     "pillow>=10.0.0",
+    "zfw_build",
 ]

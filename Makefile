@@ -1,11 +1,19 @@
 default: wheel
 
 #
+# Assets:
+#
+
+.PHONY: assets
+assets:
+	uv run --extra dev python ./build.py
+
+#
 # Tests:
 #
 
 .PHONY: tests
-tests:
+tests: assets
 	uv run --extra dev python -m pytest -vs --tb=short .
 
 #
@@ -34,5 +42,5 @@ check-typing:
 #
 
 .PHONY: wheel
-wheel: check-formatting check-typing tests
+wheel: assets check-formatting check-typing tests
 	uv build
