@@ -1,19 +1,19 @@
 default: wheel
 
 #
-# Assets:
+# Bundled data:
 #
 
-.PHONY: assets
-assets:
-	uv run --extra dev python ./build.py
+.PHONY: bundled-data
+bundled-data:
+	uv run --extra dev python ./build-bundled-data.py
 
 #
 # Tests:
 #
 
 .PHONY: tests
-tests: assets
+tests: bundled-data
 	uv run --extra dev python -m pytest -vs --tb=short .
 
 #
@@ -42,5 +42,5 @@ check-typing:
 #
 
 .PHONY: wheel
-wheel: assets check-formatting check-typing tests
+wheel: bundled-data check-formatting check-typing tests
 	uv build
