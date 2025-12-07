@@ -1,49 +1,32 @@
-default: sync
-
-#
-# Sync:
-#
-
-.PHONY: sync
-sync: shaders
-	uv sync --extra dev
-
-#
-# Shaders:
-#
-
-.PHONY: shaders
-shaders:
-	uv run --with zfw --extra dev modules/zfw_core/tools/build-shaders.py
+default: wheel
 
 #
 # Tests:
 #
 
 .PHONY: tests
-tests: shaders
+tests:
 	uv run --extra dev python -m pytest -vs --tb=short .
 
 #
 # Ruff:
 #
 
-.PHONY: format format-check
-
+.PHONY: format
 format:
 	uv run --with zfw --extra dev -- ruff format .
 	uv run --with zfw --extra dev -- ruff check --select I --fix .
 
-format-check:
+.PHONY: check-formatting
+check-formatting:
 	uv run --with zfw --extra dev -- ruff check --select I .
 
 #
 # Type-check:
 #
 
-.PHONY: typecheck
-
-typecheck:
+.PHONY: check-typing
+check-typing:
 	uv run --with zfw -- pyright
 
 #
@@ -51,5 +34,5 @@ typecheck:
 #
 
 .PHONY: wheel
-wheel: shaders
+wheel: check-formatting check-typing tests
 	uv build

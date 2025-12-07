@@ -1,7 +1,3 @@
-[build-system]
-requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
-build-backend = "uv_build"
-
 [project]
 name = "zfw"
 version = "0.1.0"
@@ -17,6 +13,10 @@ dependencies = [
     "zfw_sandbox",
 ]
 
+[build-system]
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
+
 [tool.ruff]
 line-length = 88
 
@@ -27,9 +27,10 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [tool.uv.workspace]
-members = ["modules/zfw_core", "modules/zfw_sandbox"]
+members = ["modules/zfw_build", "modules/zfw_core", "modules/zfw_sandbox"]
 
 [tool.uv.sources]
+zfw_build = { workspace = true }
 zfw_core = { workspace = true }
 zfw_sandbox = { workspace = true }
 
