@@ -11,7 +11,7 @@ requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
 build-backend = "uv_build"
 
 [project.scripts]
-zfw-sandbox = "zfw_sandbox:main"
+zfw-sandbox = "zfw_sandbox.zfw_sandbox_cli:main"
 
 [tool.uv.build-backend]
 package-data = { "zfw_sandbox" = ["bundled_data/**/*"] }
