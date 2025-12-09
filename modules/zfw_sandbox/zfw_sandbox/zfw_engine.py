@@ -2,7 +2,7 @@ import sys
 
 import zfw_core
 from zfw_core.gpu import GpuDevice, GpuSwapChain
-from zfw_core.renderer import Renderer
+from zfw_core.renderer import Renderer, RendererCanvas
 from zfw_core.window import Window
 
 
@@ -32,8 +32,8 @@ class ZfwEngine:
             surface=self.window.gpu_surface,
         )
 
-        # Create swapchain:
-        self.gpu_swapchain = GpuSwapChain(
+        # Create swap chain:
+        self.gpu_swap_chain = GpuSwapChain(
             device=self.gpu_device,
             surface=self.window.gpu_surface,
             image_count=swapchain_image_count,
@@ -44,6 +44,10 @@ class ZfwEngine:
             context=self.render_context,
             gpu_device=self.gpu_device,
         )
+        self.render_canvas = RendererCanvas(renderer=self.renderer)
+
+        # State:
+        self.rendered_frame_count = 0
 
     def print_gpu_debug_info(
         self,
@@ -53,3 +57,21 @@ class ZfwEngine:
         self.gpu_context.print_debug_info(out=file)
         print()
         print("</gpu-debug-info>")
+
+    def update(self):
+        Window.poll_events()
+
+    def render(self):
+        if self.rendered_frame_count == 0:
+            self.window.show()
+
+        with self.gpu_swap_chain.present() as target:
+            self.renderer.show(
+                canvas=self.render_canvas,
+                target=target.image,
+                wait_semaphores=[target.render_wait_semaphore],
+                done_semaphores=[target.render_done_semaphore],
+                done_fence=target.render_done_fence,
+            )
+
+        self.rendered_frame_count += 1

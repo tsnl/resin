@@ -1,11 +1,12 @@
 __all__ = ["Window"]
 
 import glfw
+import numpy as np
 
 from .basic import BaseResource
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
-from .typed_vulkan import raw_ffi, VkSurfaceKHR
+from .typed_vulkan import raw_ffi
 
 
 class WindowContext(BaseResource):

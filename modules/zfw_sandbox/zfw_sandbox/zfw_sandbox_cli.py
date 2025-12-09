@@ -25,8 +25,8 @@ def main():
     )
 
     while not engine.window.should_close():
-        engine.window.poll_events()
-        # TODO: render
+        engine.update()
+        engine.render()
 
 
 def print_gpu_debug_info(

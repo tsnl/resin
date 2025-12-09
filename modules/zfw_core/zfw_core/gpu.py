@@ -18,7 +18,6 @@ __all__ = [
     "GpuImageMeta",
     "GpuSurface",
     "GpuSwapChain",
-    "GpuSwapImage",
     "GpuSampler",
     "GpuDescriptorSetLayout",
     "GpuDescriptorSet",
@@ -31,9 +30,8 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Literal, TypeAlias
+from typing import TYPE_CHECKING, Callable, Literal, TypeAlias, Any
 
-import glfw
 import numpy as np
 import numpy.typing as npt
 
@@ -1276,22 +1274,22 @@ class GpuImage(GpuResource):
         device: GpuDevice,
         usages: list[GpuImageUsage],
         meta: GpuImageMeta,
-        vk_image: VkImage | None = None,
+        custom_vk_image_handle: VkImage | None = None,
         vk_image_view: VkImageView | None = None,
-        vk_format: VkFormat | None = None,
+        custom_vk_format: VkFormat | None = None,
     ) -> None:
         super().__init__(parent=device)
         self.device = device
         self.usages = usages
         self.meta = meta
 
-        self._owns_vk_image = vk_image is None
+        self._owns_vk_image = custom_vk_image_handle is None
         self._owns_vk_image_view = vk_image_view is None
 
         self.aspect_mask = vk_image_aspect(usages)
         self.vk_format = (
-            vk_format  # user override supplied
-            if vk_format is not None
+            custom_vk_format  # user override supplied
+            if custom_vk_format is not None
             else meta.infer_vk_format(usages)
         )
         self.vk_image, self.memory = (
@@ -1301,8 +1299,8 @@ class GpuImage(GpuResource):
                 usages=usages,
                 vk_format=self.vk_format,
             )
-            if vk_image is None
-            else (vk_image, None)
+            if custom_vk_image_handle is None
+            else (custom_vk_image_handle, None)
         )
         self.vk_image_view = (
             self._help_create_image_view(
@@ -2864,34 +2862,57 @@ class GpuPipeline(GpuResource):
 class GpuRenderPassCommandEncoder(GpuResource):
     device: GpuDevice
     command_encoder: GpuCommandEncoder
+    bound_pipeline: GpuPipeline | None
 
     def __init__(self, *, device: GpuDevice, command_encoder: GpuCommandEncoder):
         super().__init__(parent=command_encoder)
         self.device = device
         self.command_encoder = command_encoder
+        self.bound_pipeline = None
 
     def _on_dispose(self) -> None:
         pass
 
     def bind_pipeline(self, *, pipeline: GpuPipeline) -> None:
+        if self.bound_pipeline is pipeline:
+            return
+
+        self.bound_pipeline = pipeline
+
         vkCmdBindPipeline(
             commandBuffer=self.command_encoder.vk_command_buffer,
             pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipeline=pipeline.vk_pipeline,
         )
 
+    def bind_descriptor_set(
+        self,
+        *,
+        set_index: int,
+        descriptor_set: GpuDescriptorSet,
+        dynamic_offsets: list[int] | None = None,
+    ) -> None:
+        self.bind_descriptor_sets(
+            first_set=set_index,
+            sets=[descriptor_set],
+            dynamic_offsets=dynamic_offsets,
+        )
+
     def bind_descriptor_sets(
         self,
         *,
-        layout: GpuPipelineLayout,
         first_set: int,
         sets: list[GpuDescriptorSet],
         dynamic_offsets: list[int] | None = None,
     ) -> None:
+        if self.bound_pipeline is None:
+            raise LogicError(
+                "Cannot bind descriptor sets: No pipeline is currently bound."
+            )
         vkCmdBindDescriptorSets(
             commandBuffer=self.command_encoder.vk_command_buffer,
             pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS,
-            layout=layout.vk_pipeline_layout,
+            layout=self.bound_pipeline.layout.vk_pipeline_layout,
             firstSet=first_set,
             descriptorSetCount=len(sets),
             pDescriptorSets=[s.vk_descriptor_set for s in sets],
@@ -2955,7 +2976,8 @@ class GpuSurface(GpuResource):
 class GpuSwapChain(GpuResource):
     device: GpuDevice
     vk_swapchain: VkSwapchainKHR
-    swapchain_images: list[GpuSwapImage]
+    images: list[GpuImage]
+    slots: list[GpuSwapChainSlot]
     vk_format: VkFormat
     width: int
     height: int
@@ -2973,19 +2995,19 @@ class GpuSwapChain(GpuResource):
         self.frame_counter = 0
         self.width = surface.width
         self.height = surface.height
-        vk_format, vk_colorspace = self._help_select_surface_format(device, surface)
+        vk_format, vk_colorspace = self._select_surface_format(device, surface)
         self.vk_format = vk_format
         self.vk_colorspace = vk_colorspace
-        self.vk_swapchain = self._help_create_swapchain(surface, image_count)
-        self.swapchain_images = self._help_create_swapchain_images(surface)
+        self.vk_swapchain = self._create_swap_chain(surface, image_count)
+        self.images = self._wrap_swap_chain_images(surface)
+        self.slots = self._create_slots()
 
     @staticmethod
-    def _help_select_surface_format(device: GpuDevice, surface: GpuSurface):
+    def _select_surface_format(device: GpuDevice, surface: GpuSurface):
         vk_format = VK_FORMAT_B8G8R8A8_SRGB
         vk_colorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
         vk_surface_format_list = device.physical_device.get_surface_formats(surface)
         for surface_format, surface_color_space in vk_surface_format_list:
-            print(f"{surface_format=!r}, {surface_color_space=!r}")
             if surface_format != vk_format:
                 continue
             if surface_color_space != vk_colorspace:
@@ -3000,7 +3022,7 @@ class GpuSwapChain(GpuResource):
             )
         return vk_format, vk_colorspace
 
-    def _help_create_swapchain(
+    def _create_swap_chain(
         self, surface: GpuSurface, image_count: int
     ) -> VkSwapchainKHR:
         return self.device.context.vkCreateSwapchainKHR(
@@ -3026,19 +3048,31 @@ class GpuSwapChain(GpuResource):
             pAllocator=None,
         )
 
-    def _help_create_swapchain_images(self, surface: GpuSurface) -> list[GpuSwapImage]:
+    def _wrap_swap_chain_images(self, surface: GpuSurface) -> list[GpuImage]:
         return [
-            GpuSwapImage(swapchain=self, surface=surface, vk_image=vk_image)
+            GpuImage(
+                device=self.device,
+                usages=["color-attachment"],
+                meta=GpuImageMeta(
+                    shape=(surface.width, surface.height, 4),
+                    dtype=np.uint8,
+                ),
+                custom_vk_image_handle=vk_image,
+                custom_vk_format=self.vk_format,
+            )
             for vk_image in self.device.context.vkGetSwapchainImagesKHR(
                 self.device.vk_device, self.vk_swapchain
             )
         ]
 
+    def _create_slots(self) -> list[GpuSwapChainSlot]:
+        return [GpuSwapChainSlot(swap_chain=self) for _ in self.images]
+
     def _on_dispose(self) -> None:
         self.device.wait_idle()
 
-        for swapchain_image in self.swapchain_images:
-            swapchain_image.in_flight_fence.wait()
+        for slot in self.slots:
+            slot.in_flight_fence.wait()
 
         self.context.vkDestroySwapchainKHR(
             device=self.device.vk_device,
@@ -3053,33 +3087,28 @@ class GpuSwapChain(GpuResource):
         global_frame_index = self.frame_counter
         self.frame_counter += 1
 
-        current_frame = global_frame_index % len(self.swapchain_images)
+        slot_index = global_frame_index % len(self.images)
 
-        swapchain_image = self.swapchain_images[current_frame]
-        in_flight_fence = swapchain_image.in_flight_fence
-        image_available_semaphore = swapchain_image.image_available_semaphore
-        render_done_semaphore = swapchain_image.render_done_semaphore
+        slot = self.slots[slot_index]
 
-        in_flight_fence.wait()
-        in_flight_fence.reset()
+        slot.in_flight_fence.wait()
+        slot.in_flight_fence.reset()
 
         image_index = self.context.vkAcquireNextImageKHR(
             device=self.device.vk_device,
             swapchain=self.vk_swapchain,
             timeout=int(timeout_sec * 10**9),
-            semaphore=image_available_semaphore.vk_semaphore,
+            semaphore=slot.image_available_semaphore.vk_semaphore,
             fence=None,
         )
 
         yield GpuPresentTarget(
-            swapchain_image_index=image_index,
-            global_frame_index=global_frame_index,
-            wrapped_frame_index=current_frame,
-            in_flight_index=current_frame,
-            swapchain_image=self.swapchain_images[image_index].image,
-            render_wait_semaphores=[image_available_semaphore],
-            render_done_semaphores=[render_done_semaphore],
-            render_done_fence=in_flight_fence,
+            slot_index=slot_index,
+            image_index=image_index,
+            image=self.images[image_index],
+            render_wait_semaphore=slot.image_available_semaphore,
+            render_done_semaphore=slot.render_done_semaphore,
+            render_done_fence=slot.in_flight_fence,
         )
 
         vk_queue = self.device.vk_queues[self.device.qfis["present"]]
@@ -3087,7 +3116,7 @@ class GpuSwapChain(GpuResource):
             queue=vk_queue,
             pPresentInfo=VkPresentInfoKHR(
                 waitSemaphoreCount=1,
-                pWaitSemaphores=[render_done_semaphore.vk_semaphore],
+                pWaitSemaphores=[slot.render_done_semaphore.vk_semaphore],
                 swapchainCount=1,
                 pSwapchains=[self.vk_swapchain],
                 pImageIndices=[image_index],
@@ -3096,50 +3125,62 @@ class GpuSwapChain(GpuResource):
         )
 
 
-class GpuSwapImage(GpuResource):
-    """
-    Represents a single swapchain image with its associated synchronization objects.
-    """
-
-    swapchain: GpuSwapChain
-    device: GpuDevice
-    image: GpuImage
+class GpuSwapChainSlot(GpuResource):
+    swap_chain: GpuSwapChain
     in_flight_fence: GpuFence
     image_available_semaphore: GpuSemaphore
     render_done_semaphore: GpuSemaphore
 
-    def __init__(
-        self,
-        *,
-        swapchain: GpuSwapChain,
-        surface: GpuSurface,
-        vk_image: VkImage,
-    ):
-        super().__init__(parent=swapchain)
-        self.swapchain = swapchain
-        self.device = swapchain.device
-        self.image = GpuImage(
-            device=self.device,
-            usages=["color-attachment"],
-            meta=GpuImageMeta(shape=(surface.height, surface.width, 4), dtype=np.uint8),
-            vk_image=vk_image,
-            vk_format=self.swapchain.vk_format,
+    def __init__(self, *, swap_chain: GpuSwapChain):
+        super().__init__(parent=swap_chain)
+        self.swap_chain = swap_chain
+        self.in_flight_fence = GpuFence(
+            device=swap_chain.device,
+            parent=self,
+            signalled=True,
         )
-        self.in_flight_fence = GpuFence(device=self.device, parent=self, signalled=True)
-        self.image_available_semaphore = GpuSemaphore(device=self.device, parent=self)
-        self.render_done_semaphore = GpuSemaphore(device=self.device, parent=self)
+        self.image_available_semaphore = GpuSemaphore(
+            device=swap_chain.device,
+            parent=self,
+        )
+        self.render_done_semaphore = GpuSemaphore(
+            device=swap_chain.device,
+            parent=self,
+        )
 
 
 @dataclass
 class GpuPresentTarget:
-    swapchain_image_index: int
-    global_frame_index: int
-    wrapped_frame_index: int
-    in_flight_index: int
-    swapchain_image: GpuImage
-    render_wait_semaphores: list[GpuSemaphore]
-    render_done_semaphores: list[GpuSemaphore]
+    slot_index: int
+    """
+    The slot index in the swap chain: frame_index % image_count. 
+    May be different from image_index.
+    """
+
+    image_index: int
+    """
+    The index of the swap chain image to present.
+    """
+
+    image: GpuImage
+    """
+    The swap chain image to present to. Use this as a color attachment when rendering.
+    """
+
+    render_wait_semaphore: GpuSemaphore
+    """
+    A semaphore that the rendering should wait on before starting.
+    """
+
+    render_done_semaphore: GpuSemaphore
+    """
+    A semaphore that renderers must signal when rendering is done.
+    """
+
     render_done_fence: GpuFence
+    """
+    A fence that renderers must signal when rendering is done.
+    """
 
 
 #
