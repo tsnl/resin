@@ -1,7 +1,6 @@
 __all__ = ["Window"]
 
 import glfw
-import numpy as np
 
 from .basic import BaseResource
 from .excepts import GlfwError

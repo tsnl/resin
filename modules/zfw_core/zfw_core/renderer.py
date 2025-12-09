@@ -91,8 +91,6 @@ class Renderer(BaseResource):
         command_encoder = GpuCommandEncoder(
             device=self.gpu_device,
             queue_type="graphics",
-            wait_semaphores=wait_semaphores,
-            signal_semaphores=done_semaphores,
         )
 
         command_encoder.transition_image_layout(
@@ -106,7 +104,16 @@ class Renderer(BaseResource):
             encoder=command_encoder,
         )
 
-        return command_encoder.submit(fence=done_fence)
+        command_encoder.transition_image_layout(
+            image=target,
+            layout="present-src",
+        )
+
+        return command_encoder.submit(
+            fence=done_fence,
+            wait_semaphores=wait_semaphores,
+            signal_semaphores=done_semaphores,
+        )
 
 
 #
@@ -116,6 +123,7 @@ class Renderer(BaseResource):
 
 class RendererAtlas(BaseResource):
     renderer: "Renderer"
+    gpu_device: GpuDevice
     gpu_image: GpuImage
     gpu_sampler: GpuSampler
     image_map: dict[str, "RendererImage"]
@@ -135,6 +143,7 @@ class RendererAtlas(BaseResource):
         assert data.ndim == 3 and data.shape[2] == 4
 
         self.renderer = renderer
+        self.gpu_device = renderer.gpu_device
 
         self.gpu_image = GpuImage(
             device=renderer.gpu_device,
@@ -147,15 +156,47 @@ class RendererAtlas(BaseResource):
             min_filter=min_filter,
             address_mode=address_mode,
         )
-        self.gpu_image.write(data=data)
 
         self.image_map = {
             name: RendererImage(atlas=self, entry_name=name, rect_xywh=rect_xywh)
             for name, rect_xywh in image_rect_map.items()
         }
 
+        self.write(data=data)
+
     def __getitem__(self, image_name: str) -> "RendererImage":
         return self.image_map[image_name]
+
+    def write(self, *, data: np.ndarray):
+        assert self.gpu_image.memory
+
+        # Create and write to a staging buffer:
+        staging_buffer = GpuBuffer(
+            device=self.gpu_device,
+            usages=["staging", "copy-src"],
+            meta=GpuBufferMeta.from_array(data),
+        )
+        staging_buffer.memory.write(data=data)
+
+        # Using a one-time command buffer, copy from the staging buffer to the image,
+        # blocking until done:
+        command_encoder = GpuCommandEncoder(
+            device=self.gpu_device,
+            queue_type="transfer",
+        )
+        command_encoder.transition_image_layout(
+            image=self.gpu_image,
+            layout="transfer-dst-optimal",
+        )
+        command_encoder.copy_buffer_to_image(
+            src=staging_buffer,
+            dst=self.gpu_image,
+        )
+        command_encoder.transition_image_layout(
+            image=self.gpu_image,
+            layout="texture-binding",
+        )
+        command_encoder.submit().wait()
 
 
 class RendererImage(BaseResource):

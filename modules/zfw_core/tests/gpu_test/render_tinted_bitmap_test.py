@@ -223,15 +223,8 @@ def render_tinted_bitmap(
         clear_on_load=True,
     ) as render_pass:
         render_pass.bind_pipeline(pipeline=pipeline)
-        render_pass.bind_descriptor_sets(
-            layout=pipeline_layout,
-            first_set=0,
-            sets=[descriptor_set],
-        )
-        render_pass.draw(
-            vertex_count=6,
-            instance_count=1,
-        )
+        render_pass.bind_descriptor_sets(first_set=0, sets=[descriptor_set])
+        render_pass.draw(vertex_count=6, instance_count=1)
     cmd.submit().wait()
 
     # Read back the rendered image

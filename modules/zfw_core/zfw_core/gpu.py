@@ -30,7 +30,7 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal, TypeAlias, Any
+from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -38,6 +38,10 @@ import numpy.typing as npt
 from .basic import BaseResource
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
+    VK_ACCESS_SHADER_READ_BIT,
+    VK_ACCESS_TRANSFER_READ_BIT,
+    VK_ACCESS_TRANSFER_WRITE_BIT,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
     VK_API_VERSION_1_3,
     VK_API_VERSION_1_4,
@@ -1192,11 +1196,9 @@ GpuImageUsage: TypeAlias = Literal[
 GpuImageLayout: TypeAlias = Literal[
     "present-src",
     "color-attachment-optimal",
-    "copy-dst",
-    "copy-src",
     "texture-binding",
-    "transfer-src",
-    "transfer-dst",
+    "transfer-src-optimal",
+    "transfer-dst-optimal",
 ]
 
 
@@ -1226,15 +1228,11 @@ def vk_image_layout(layout: GpuImageLayout) -> VkImageLayout:
             return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
         case "color-attachment-optimal":
             return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-        case "copy-dst":
-            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-        case "copy-src":
-            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
         case "texture-binding":
             return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        case "transfer-src":
+        case "transfer-src-optimal":
             return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-        case "transfer-dst":
+        case "transfer-dst-optimal":
             return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
         case _:
             raise LogicError(f"Invalid image layout: {layout!r}")
@@ -1275,7 +1273,7 @@ class GpuImage(GpuResource):
         usages: list[GpuImageUsage],
         meta: GpuImageMeta,
         custom_vk_image_handle: VkImage | None = None,
-        vk_image_view: VkImageView | None = None,
+        custom_vk_image_view: VkImageView | None = None,
         custom_vk_format: VkFormat | None = None,
     ) -> None:
         super().__init__(parent=device)
@@ -1284,7 +1282,7 @@ class GpuImage(GpuResource):
         self.meta = meta
 
         self._owns_vk_image = custom_vk_image_handle is None
-        self._owns_vk_image_view = vk_image_view is None
+        self._owns_vk_image_view = custom_vk_image_view is None
 
         self.aspect_mask = vk_image_aspect(usages)
         self.vk_format = (
@@ -1309,8 +1307,8 @@ class GpuImage(GpuResource):
                 vk_format=self.vk_format,
                 aspect_mask=self.aspect_mask,
             )
-            if vk_image_view is None
-            else vk_image_view
+            if custom_vk_image_view is None
+            else custom_vk_image_view
         )
 
         self.initial_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
@@ -1708,23 +1706,11 @@ class GpuCommandEncoder(GpuResource):
     vk_command_buffer: VkCommandBuffer
     queue_family_index: int
     submit_queue_type: GpuQueueType
-    dispose_fence: bool
-    wait_semaphores: list["GpuSemaphore"] | None
-    signal_semaphores: list["GpuSemaphore"] | None
 
-    def __init__(
-        self,
-        *,
-        device: GpuDevice,
-        queue_type: GpuQueueType,
-        wait_semaphores: list["GpuSemaphore"] | None = None,
-        signal_semaphores: list["GpuSemaphore"] | None = None,
-    ) -> None:
+    def __init__(self, *, device: GpuDevice, queue_type: GpuQueueType) -> None:
         super().__init__(parent=device)
         self.device = device
         self.submit_queue_type = queue_type
-        self.wait_semaphores = wait_semaphores or []
-        self.signal_semaphores = signal_semaphores or []
         self.queue_family_index = device.qfis[queue_type]
         self.vk_command_buffer = self._help_allocate_command_buffer(
             device, self.queue_family_index
@@ -1986,13 +1972,6 @@ class GpuCommandEncoder(GpuResource):
         image: GpuImage,
         layout: GpuImageLayout | None,
     ):
-        from .typed_vulkan import (
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_ACCESS_TRANSFER_READ_BIT,
-            VK_ACCESS_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        )
-
         # Determine the new layout based on usage
         new_layout = (
             VK_IMAGE_LAYOUT_UNDEFINED
@@ -2004,8 +1983,8 @@ class GpuCommandEncoder(GpuResource):
                     "copy-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     "copy-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     "texture-binding": VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    "transfer-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    "transfer-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    "transfer-src-optimal": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    "transfer-dst-optimal": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 }[layout]
             )
         )
@@ -2087,7 +2066,12 @@ class GpuCommandEncoder(GpuResource):
         # Update tracked layout
         image.current_vk_layout = new_layout
 
-    def submit(self, fence: GpuFence | None = None) -> GpuFence:
+    def submit(
+        self,
+        fence: GpuFence | None = None,
+        wait_semaphores: list["GpuSemaphore"] | None = None,
+        signal_semaphores: list["GpuSemaphore"] | None = None,
+    ) -> GpuFence:
         vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
 
         fence = fence or GpuFence(device=self.device, parent=self)
@@ -2095,8 +2079,8 @@ class GpuCommandEncoder(GpuResource):
         self.device.submit(
             queue_type=self.submit_queue_type,
             command_buffers=[self.vk_command_buffer],
-            wait_semaphores=self.wait_semaphores,
-            signal_semaphores=self.signal_semaphores,
+            wait_semaphores=wait_semaphores or [],
+            signal_semaphores=signal_semaphores or [],
             fence=fence,
         )
 
@@ -2995,9 +2979,9 @@ class GpuSwapChain(GpuResource):
         self.frame_counter = 0
         self.width = surface.width
         self.height = surface.height
-        vk_format, vk_colorspace = self._select_surface_format(device, surface)
+        vk_format, vk_color_space = self._select_surface_format(device, surface)
         self.vk_format = vk_format
-        self.vk_colorspace = vk_colorspace
+        self.vk_color_space = vk_color_space
         self.vk_swapchain = self._create_swap_chain(surface, image_count)
         self.images = self._wrap_swap_chain_images(surface)
         self.slots = self._create_slots()
@@ -3032,7 +3016,7 @@ class GpuSwapChain(GpuResource):
                 surface=surface.vk_surface,
                 minImageCount=image_count,
                 imageFormat=self.vk_format,
-                imageColorSpace=self.vk_colorspace,
+                imageColorSpace=self.vk_color_space,
                 imageExtent=VkExtent2D(width=surface.width, height=surface.height),
                 imageArrayLayers=1,
                 imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -3054,7 +3038,7 @@ class GpuSwapChain(GpuResource):
                 device=self.device,
                 usages=["color-attachment"],
                 meta=GpuImageMeta(
-                    shape=(surface.width, surface.height, 4),
+                    shape=(surface.height, surface.width, 4),
                     dtype=np.uint8,
                 ),
                 custom_vk_image_handle=vk_image,
