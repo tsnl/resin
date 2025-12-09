@@ -893,37 +893,56 @@ class GpuDevice(GpuResource):
     ) -> None:
         super().__init__(parent=context)
 
-        # Ensure Vulkan 1.3 support
         physical_device.check_vulkan_1_3_support()
 
-        # Compute queue family indices
-        qfis = GpuQueueFamilyIndices.find(physical_device, surface=surface)
-        queue_create_info_list = qfis.compute_queue_create_info_list()
+        self.physical_device = physical_device
+        self.qfis = GpuQueueFamilyIndices.find(physical_device, surface=surface)
+        self.vk_device = self._help_create_device(
+            physical_device=physical_device,
+            qfis=self.qfis,
+            extensions=self._help_compute_extensions(context),
+        )
+        self.vk_command_pools = self._help_create_command_pools(
+            vk_device=self.vk_device, qfis=self.qfis
+        )
+        self.vk_queues = self._help_get_queues(vk_device=self.vk_device, qfis=self.qfis)
+        self.present_support_enabled = surface is not None
+        self.descriptor_pool_config = self._help_compute_descriptor_pool_config(
+            descriptor_pool_config
+        )
+        self.max_descriptor_pool_set_count = max_descriptor_pool_set_count
+        self._descriptor_pool = GpuDescriptorPool(
+            device=self,
+            max_sets=max_descriptor_pool_set_count,
+            pool_sizes=self.descriptor_pool_config,
+        )
 
-        # Compute extensions
-        extensions = []
-
-        # Add dynamic rendering extension (Vulkan 1.3)
-        extensions.append("VK_KHR_dynamic_rendering")
-
-        # Add shader draw parameters extension: needed for Slang shaders
-        extensions.append("VK_KHR_shader_draw_parameters")
-
-        # Add present support extension if needed
+    @staticmethod
+    def _help_compute_extensions(context: GpuContext) -> list[str]:
+        """Compute the list of required device extensions."""
+        extensions = [
+            "VK_KHR_dynamic_rendering",  # Vulkan 1.3
+            "VK_KHR_shader_draw_parameters",  # needed for Slang shaders
+        ]
         if context.enable_present_support:
             extensions.append("VK_KHR_swapchain")
-
-        # Add portability subset extension if needed (macOS)
         if context.enable_portability_subset:
-            extensions.append("VK_KHR_portability_subset")
+            extensions.append("VK_KHR_portability_subset")  # macOS
+        return extensions
 
-        # Enable dynamic rendering feature (Vulkan 1.3)
+    @staticmethod
+    def _help_create_device(
+        *,
+        physical_device: GpuPhysicalDevice,
+        qfis: GpuQueueFamilyIndices,
+        extensions: list[str],
+    ) -> VkDevice:
+        """Create a VkDevice with the specified configuration."""
+        queue_create_info_list = qfis.compute_queue_create_info_list()
         dynamic_rendering_features = VkPhysicalDeviceDynamicRenderingFeatures(
             dynamicRendering=True,
         )
-
-        # Create device:
-        vk_device = vkCreateDevice(
+        return vkCreateDevice(
             physical_device.vk_physical_device,
             VkDeviceCreateInfo(
                 pNext=dynamic_rendering_features,
@@ -935,10 +954,15 @@ class GpuDevice(GpuResource):
             pAllocator=None,
         )
 
-        # Create command pools:
-        vk_command_pools: dict[int, VkCommandPool] = {}
-        for qfi_index in {idx for _, idx in qfis}:
-            vk_command_pools[qfi_index] = vkCreateCommandPool(
+    @staticmethod
+    def _help_create_command_pools(
+        *,
+        vk_device: VkDevice,
+        qfis: GpuQueueFamilyIndices,
+    ) -> dict[int, VkCommandPool]:
+        """Create command pools for each unique queue family index."""
+        return {
+            qfi_index: vkCreateCommandPool(
                 device=vk_device,
                 pCreateInfo=VkCommandPoolCreateInfo(
                     flags=VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
@@ -946,38 +970,36 @@ class GpuDevice(GpuResource):
                 ),
                 pAllocator=None,
             )
+            for qfi_index in {idx for _, idx in qfis}
+        }
 
-        self.physical_device = physical_device
-        self.qfis = qfis
-        self.vk_device = vk_device
-        self.vk_command_pools = vk_command_pools
-        # Retrieve one queue per queue family index (queueIndex = 0)
-        self.vk_queues = {
+    @staticmethod
+    def _help_get_queues(
+        *,
+        vk_device: VkDevice,
+        qfis: GpuQueueFamilyIndices,
+    ) -> dict[int, VkQueue]:
+        """Retrieve one queue per unique queue family index (queueIndex = 0)."""
+        return {
             qfi_index: vkGetDeviceQueue(
-                self.vk_device,
+                vk_device,
                 queueFamilyIndex=qfi_index,
                 queueIndex=0,
             )
             for qfi_index in {idx for _, idx in qfis}
         }
-        self.present_support_enabled = surface is not None
 
-        descriptor_pool_config_defaults: dict[GpuDescriptorType, int] = {
+    @staticmethod
+    def _help_compute_descriptor_pool_config(
+        descriptor_pool_config: dict[GpuDescriptorType, int] | None,
+    ) -> dict[GpuDescriptorType, int]:
+        """Compute descriptor pool config with defaults."""
+        defaults: dict[GpuDescriptorType, int] = {
             "combined-image-sampler": 1024,
             "storage-buffer": 1024,
             "uniform-buffer": 1024,
         }
-        self.descriptor_pool_config = descriptor_pool_config_defaults | (
-            descriptor_pool_config or {}
-        )
-
-        self.max_descriptor_pool_set_count = max_descriptor_pool_set_count
-
-        self._descriptor_pool = GpuDescriptorPool(
-            device=self,
-            max_sets=max_descriptor_pool_set_count,
-            pool_sizes=self.descriptor_pool_config,
-        )
+        return defaults | (descriptor_pool_config or {})
 
     def _on_dispose(self) -> None:
         # Destroy default descriptor pool first (before command pools and device):
@@ -1209,6 +1231,60 @@ GpuImageLayout: TypeAlias = Literal[
 ]
 
 
+def vk_image_usage(usages: list[GpuImageUsage]) -> int:
+    """Map a list of GpuImageUsage to VkImageUsageFlags."""
+    # Always include transfer src/dst for copy operations
+    result = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    for usage in usages:
+        match usage:
+            case "texture-binding":
+                result |= VK_IMAGE_USAGE_SAMPLED_BIT
+            case "storage-binding":
+                result |= VK_IMAGE_USAGE_STORAGE_BIT
+            case "color-attachment":
+                result |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            case "depth-attachment":
+                result |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+            case _:
+                raise LogicError(f"Invalid image usage: {usage!r}")
+    return result
+
+
+def vk_image_layout(layout: GpuImageLayout) -> VkImageLayout:
+    """Map a GpuImageLayout to VkImageLayout."""
+    match layout:
+        case "present-src":
+            return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+        case "color-attachment-optimal":
+            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        case "copy-dst":
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        case "copy-src":
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        case "texture-binding":
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        case "transfer-src":
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        case "transfer-dst":
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        case _:
+            raise LogicError(f"Invalid image layout: {layout!r}")
+
+
+def vk_image_aspect(usages: list[GpuImageUsage]) -> int:
+    """Compute VkImageAspectFlags from a list of GpuImageUsage."""
+    result = 0
+    for usage in usages:
+        match usage:
+            case "texture-binding" | "storage-binding" | "color-attachment":
+                result |= VK_IMAGE_ASPECT_COLOR_BIT
+            case "depth-attachment":
+                result |= VK_IMAGE_ASPECT_DEPTH_BIT
+            case _:
+                raise LogicError(f"Invalid image usage: {usage!r}")
+    return result
+
+
 class GpuImage(GpuResource):
     device: GpuDevice
     vk_image: VkImage
@@ -1238,116 +1314,122 @@ class GpuImage(GpuResource):
         self.usages = usages
         self.meta = meta
 
-        # Determine ownership based on whether handles were provided
         self._owns_vk_image = vk_image is None
         self._owns_vk_image_view = vk_image_view is None
 
-        # Compute the VkImageUsageFlags for image creation:
-        # Always include transfer src/dst for copy operations
-        vk_usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-        for usage in usages:
-            vk_usage |= {
-                "texture-binding": VK_IMAGE_USAGE_SAMPLED_BIT,
-                "storage-binding": VK_IMAGE_USAGE_STORAGE_BIT,
-                "color-attachment": VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                "depth-attachment": (VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT),
-            }[usage]
-
-        # Compute the VkImageAspectFlags for image view creation:
-        vk_image_aspect = 0
-        for usage in usages:
-            vk_image_aspect |= {
-                "texture-binding": VK_IMAGE_ASPECT_COLOR_BIT,
-                "storage-binding": VK_IMAGE_ASPECT_COLOR_BIT,
-                "color-attachment": VK_IMAGE_ASPECT_COLOR_BIT,
-                "depth-attachment": VK_IMAGE_ASPECT_DEPTH_BIT,
-            }[usage]
-        self.aspect_mask = vk_image_aspect
-
-        # Infer VkFormat:
+        self.aspect_mask = vk_image_aspect(usages)
         self.vk_format = (
-            vk_format if vk_format is not None else meta.infer_vk_format(usages)
+            vk_format  # user override supplied
+            if vk_format is not None
+            else meta.infer_vk_format(usages)
         )
-
-        if self._owns_vk_image:
-            # Create the VkImage:
-            # Determine which queue families will access the image:
-            queue_family_indices = list({idx for _, idx in device.qfis})
-
-            self.vk_image = vkCreateImage(
-                device=device.vk_device,
-                pCreateInfo=VkImageCreateInfo(
-                    flags=0,
-                    imageType=VK_IMAGE_TYPE_2D,
-                    format=self.vk_format,
-                    extent=VkExtent3D(
-                        width=meta.shape[1], height=meta.shape[0], depth=1
-                    ),
-                    mipLevels=1,
-                    arrayLayers=1,
-                    samples=VK_SAMPLE_COUNT_1_BIT,
-                    tiling=VK_IMAGE_TILING_OPTIMAL,
-                    usage=vk_usage,
-                    sharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                    queueFamilyIndexCount=len(queue_family_indices),
-                    pQueueFamilyIndices=queue_family_indices,
-                    initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
-                ),
-                pAllocator=None,
-            )
-
-            # Allocate and bind memory for the image
-            memory_requirements = vkGetImageMemoryRequirements(
-                device=device.vk_device,
-                image=self.vk_image,
-            )
-            self.memory = GpuMemory(
+        self.vk_image, self.memory = (
+            self._help_create_image(
                 device=device,
-                memory_requirements=memory_requirements,
-                device_local=True,
+                meta=meta,
+                usages=usages,
+                vk_format=self.vk_format,
             )
-            vkBindImageMemory(
-                device=device.vk_device,
-                image=self.vk_image,
-                memory=self.memory.vk_device_memory,
-                memoryOffset=VkDeviceSize(0),
+            if vk_image is None
+            else (vk_image, None)
+        )
+        self.vk_image_view = (
+            self._help_create_image_view(
+                device=device,
+                vk_image=self.vk_image,
+                vk_format=self.vk_format,
+                aspect_mask=self.aspect_mask,
             )
-        else:
-            assert vk_image is not None
-            self.vk_image = vk_image
-            self.memory = None  # External images don't have managed memory
-
-        if self._owns_vk_image_view:
-            # Create the default VkImageView:
-            self.vk_image_view = vkCreateImageView(
-                device=device.vk_device,
-                pCreateInfo=VkImageViewCreateInfo(
-                    flags=0,
-                    image=self.vk_image,
-                    viewType=VK_IMAGE_TYPE_2D,
-                    format=self.vk_format,
-                    components=VkComponentMapping(
-                        r=VK_COMPONENT_SWIZZLE_IDENTITY,
-                        g=VK_COMPONENT_SWIZZLE_IDENTITY,
-                        b=VK_COMPONENT_SWIZZLE_IDENTITY,
-                        a=VK_COMPONENT_SWIZZLE_IDENTITY,
-                    ),
-                    subresourceRange=VkImageSubresourceRange(
-                        aspectMask=vk_image_aspect,
-                        baseMipLevel=0,
-                        levelCount=1,
-                        baseArrayLayer=0,
-                        layerCount=1,
-                    ),
-                ),
-                pAllocator=None,
-            )
-        else:
-            assert vk_image_view is not None
-            self.vk_image_view = vk_image_view
+            if vk_image_view is None
+            else vk_image_view
+        )
 
         self.initial_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
         self.current_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
+
+    @staticmethod
+    def _help_create_image(
+        *,
+        device: GpuDevice,
+        meta: GpuImageMeta,
+        usages: list[GpuImageUsage],
+        vk_format: VkFormat,
+    ) -> tuple[VkImage, GpuMemory]:
+        """Create a VkImage and allocate/bind memory for it."""
+        # Determine which queue families will access the image:
+        queue_family_indices = list({idx for _, idx in device.qfis})
+
+        image = vkCreateImage(
+            device=device.vk_device,
+            pCreateInfo=VkImageCreateInfo(
+                flags=0,
+                imageType=VK_IMAGE_TYPE_2D,
+                format=vk_format,
+                extent=VkExtent3D(width=meta.shape[1], height=meta.shape[0], depth=1),
+                mipLevels=1,
+                arrayLayers=1,
+                samples=VK_SAMPLE_COUNT_1_BIT,
+                tiling=VK_IMAGE_TILING_OPTIMAL,
+                usage=vk_image_usage(usages),
+                sharingMode=VK_SHARING_MODE_EXCLUSIVE,
+                queueFamilyIndexCount=len(queue_family_indices),
+                pQueueFamilyIndices=queue_family_indices,
+                initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
+            ),
+            pAllocator=None,
+        )
+
+        # Allocate and bind memory for the image
+        memory_requirements = vkGetImageMemoryRequirements(
+            device=device.vk_device,
+            image=image,
+        )
+        memory = GpuMemory(
+            device=device,
+            memory_requirements=memory_requirements,
+            device_local=True,
+        )
+        vkBindImageMemory(
+            device=device.vk_device,
+            image=image,
+            memory=memory.vk_device_memory,
+            memoryOffset=VkDeviceSize(0),
+        )
+
+        return image, memory
+
+    @staticmethod
+    def _help_create_image_view(
+        *,
+        device: GpuDevice,
+        vk_image: VkImage,
+        vk_format: VkFormat,
+        aspect_mask: int,
+    ) -> VkImageView:
+        """Create a VkImageView for the given image."""
+        return vkCreateImageView(
+            device=device.vk_device,
+            pCreateInfo=VkImageViewCreateInfo(
+                flags=0,
+                image=vk_image,
+                viewType=VK_IMAGE_TYPE_2D,
+                format=vk_format,
+                components=VkComponentMapping(
+                    r=VK_COMPONENT_SWIZZLE_IDENTITY,
+                    g=VK_COMPONENT_SWIZZLE_IDENTITY,
+                    b=VK_COMPONENT_SWIZZLE_IDENTITY,
+                    a=VK_COMPONENT_SWIZZLE_IDENTITY,
+                ),
+                subresourceRange=VkImageSubresourceRange(
+                    aspectMask=aspect_mask,
+                    baseMipLevel=0,
+                    levelCount=1,
+                    baseArrayLayer=0,
+                    layerCount=1,
+                ),
+            ),
+            pAllocator=None,
+        )
 
     def _on_dispose(self) -> None:
         if self._owns_vk_image_view:
@@ -1493,6 +1575,71 @@ GpuBufferUsage: TypeAlias = Literal[
 ]
 
 
+def vk_buffer_usage(usages: list[GpuBufferUsage]) -> int:
+    """Map a list of GpuBufferUsage to VkBufferUsageFlags."""
+    result = 0
+    for usage in usages:
+        match usage:
+            case "copy-src":
+                result |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+            case "copy-dst":
+                result |= VK_BUFFER_USAGE_TRANSFER_DST_BIT
+            case "uniform":
+                result |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+            case "storage":
+                result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+            case "staging":
+                pass  # staging doesn't add a usage flag, it affects memory locality
+            case _:
+                raise LogicError(f"Invalid buffer usage: {usage!r}")
+    return result
+
+
+def vk_buffer_device_local(usages: list[GpuBufferUsage]) -> bool:
+    """Determine whether a buffer should be device-local based on its usages."""
+    device_local: bool | None = None
+    for usage in usages:
+        match usage:
+            case "staging":
+                required = False
+            case "uniform" | "storage":
+                required = True
+            case "copy-src" | "copy-dst":
+                continue  # no constraint
+            case _:
+                raise LogicError(f"Invalid buffer usage: {usage!r}")
+
+        if device_local is not None and required != device_local:
+            raise LogicError(
+                "\n".join(
+                    [
+                        f"Inconsistent buffer usages supplied: {usages=}",
+                        (
+                            "Some usages require the memory to be "
+                            "device-local, while others require the memory to "
+                            "be host-local."
+                        ),
+                    ]
+                )
+            )
+        device_local = required
+
+    if device_local is None:
+        raise LogicError(
+            "\n".join(
+                [
+                    f"Insufficient buffer usages supplied: {usages=}",
+                    (
+                        "Could not determine whether to allocate the buffer on the "
+                        "device or the host."
+                    ),
+                ]
+            )
+        )
+
+    return device_local
+
+
 class GpuBuffer(GpuResource):
     device: GpuDevice
     vk_buffer: VkBuffer
@@ -1512,74 +1659,32 @@ class GpuBuffer(GpuResource):
         self.device = device
         self.usages = usages
         self.meta = meta
+        self.device_local = vk_buffer_device_local(usages)
+        self.vk_buffer, self.memory = self._help_create_buffer(
+            device=device,
+            usages=usages,
+            meta=meta,
+            device_local=self.device_local,
+        )
 
-        # Compute VkBufferUsageFlags
-        vk_usage = 0
-        for usage in usages:
-            vk_usage |= {
-                "copy-src": VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                "copy-dst": VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                "uniform": VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                "storage": VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            }.get(usage, 0)
-
-        # Compute whether 'device_local' is required to be True or False
-        device_local = None
-        for usage in usages:
-            required_device_local_value = {
-                "staging": False,
-                "uniform": True,
-                "storage": True,
-            }.get(usage)
-
-            # If no constraint is imposed, continue
-            if required_device_local_value is None:
-                continue
-
-            # Check for conflict:
-            if device_local is not None and required_device_local_value != device_local:
-                raise LogicError(
-                    "\n".join(
-                        [
-                            f"Inconsistent buffer usages supplied: {usages=}",
-                            (
-                                "Some usages require the memory to be "
-                                "device-local, while others require the memory to "
-                                "be host-local."
-                            ),
-                        ]
-                    )
-                )
-
-            # Apply the constraint
-            device_local = required_device_local_value
-
-        # Check if the 'device_local' bool was inferred successfully.
-        if device_local is None:
-            raise LogicError(
-                "\n".join(
-                    [
-                        f"Insufficient buffer usages supplied: {usages=}",
-                        (
-                            "Could not determine whether to allocate the buffer on the "
-                            "device or the host."
-                        ),
-                    ]
-                )
-            )
-
-        self.device_local = device_local
-
+    @staticmethod
+    def _help_create_buffer(
+        *,
+        device: GpuDevice,
+        usages: list[GpuBufferUsage],
+        meta: GpuBufferMeta,
+        device_local: bool,
+    ) -> tuple[VkBuffer, GpuMemory]:
+        """Create a VkBuffer and allocate/bind memory for it."""
         # Determine which queue families will access the buffer:
         queue_family_indices = list({idx for _, idx in device.qfis})
 
-        # Create the VkBuffer
-        self.vk_buffer = vkCreateBuffer(
+        buffer = vkCreateBuffer(
             device=device.vk_device,
             pCreateInfo=VkBufferCreateInfo(
                 flags=0,
                 size=meta.size,
-                usage=vk_usage,
+                usage=vk_buffer_usage(usages),
                 sharingMode=VK_SHARING_MODE_EXCLUSIVE,
                 queueFamilyIndexCount=len(queue_family_indices),
                 pQueueFamilyIndices=queue_family_indices,
@@ -1590,19 +1695,21 @@ class GpuBuffer(GpuResource):
         # Allocate and bind memory for the buffer:
         memory_requirements = vkGetBufferMemoryRequirements(
             device=device.vk_device,
-            buffer=self.vk_buffer,
+            buffer=buffer,
         )
-        self.memory = GpuMemory(
+        memory = GpuMemory(
             device=device,
             memory_requirements=memory_requirements,
             device_local=device_local,
         )
         vkBindBufferMemory(
             device=device.vk_device,
-            buffer=self.vk_buffer,
-            memory=self.memory.vk_device_memory,
+            buffer=buffer,
+            memory=memory.vk_device_memory,
             memoryOffset=0,
         )
+
+        return buffer, memory
 
     def _on_dispose(self):
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
