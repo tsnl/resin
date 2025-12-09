@@ -59,6 +59,11 @@ class ZfwEngine(zfw_core.BaseResource):
         # State:
         self.rendered_frame_count = 0
 
+        # Debug: scan for resource cycles
+        if debug:
+            n = self.detect_resource_cycles(verbose=True)
+            print(f"ZfwEngine: no resource cycles detected: {n=}", file=sys.stderr)
+
     def print_gpu_debug_info(
         self,
         file: zfw_core.SupportsWrite[str] = sys.stdout,

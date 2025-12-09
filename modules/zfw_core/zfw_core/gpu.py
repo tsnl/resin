@@ -1054,6 +1054,11 @@ class GpuMemory(BaseResource):
 
         self.vk_device_memory = self._allocate_memory(memory_requirements)
 
+    def __repr__(self) -> str:
+        return (
+            f"<GpuMemory object at {hex(id(self))} with handle {self.vk_device_memory}>"
+        )
+
     def _allocate_memory(self, requirements: VkMemoryRequirements) -> VkDeviceMemory:
         return vkAllocateMemory(
             device=self.device.vk_device,
@@ -1392,6 +1397,9 @@ class GpuImage(BaseResource):
         if self._owns_vk_image:
             vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
 
+    def __repr__(self) -> str:
+        return f"<GpuImage object at {hex(id(self))} with handle {self.vk_image}>"
+
     @property
     def width(self) -> int:
         return self.meta.shape[1]
@@ -1436,6 +1444,11 @@ class GpuSemaphore(BaseResource):
             pAllocator=None,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"<GpuSemaphore object at {hex(id(self))} with handle {self.vk_semaphore}>"
+        )
+
     def _on_dispose(self) -> None:
         vkDestroySemaphore(self.device.vk_device, self.vk_semaphore, pAllocator=None)
 
@@ -1460,6 +1473,13 @@ class GpuFence(BaseResource):
             pAllocator=None,
         )
 
+    def __repr__(self) -> str:
+        return f"<GpuFence object at {hex(id(self))} with handle {self.vk_fence}>"
+
+    def _on_dispose(self) -> None:
+        self.wait()
+        vkDestroyFence(self.device.vk_device, self.vk_fence, pAllocator=None)
+
     def wait(self, *, timeout_sec: float = 1.0) -> None:
         """Wait for fence to be signaled.
 
@@ -1481,10 +1501,6 @@ class GpuFence(BaseResource):
             fenceCount=1,
             pFences=[self.vk_fence],
         )
-
-    def _on_dispose(self) -> None:
-        self.wait()
-        vkDestroyFence(self.device.vk_device, self.vk_fence, pAllocator=None)
 
 
 #
@@ -1614,6 +1630,9 @@ class GpuBuffer(BaseResource):
             device_local=self.device_local,
         )
 
+    def __repr__(self) -> str:
+        return f"<GpuBuffer object at {hex(id(self))} with handle {self.vk_buffer}>"
+
     @staticmethod
     def _help_create_buffer(
         *,
@@ -1659,6 +1678,9 @@ class GpuBuffer(BaseResource):
         return buffer, memory
 
     def _on_dispose(self):
+        if self.memory is not None:
+            self.memory.dispose()
+
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
 
     def write(self, *, data: np.ndarray):
@@ -2958,13 +2980,13 @@ class GpuSurface(BaseResource):
 
 
 #
-# GpuSwapchain
+# GpuSwapChain
 #
 
 
 class GpuSwapChain(BaseResource):
     device: GpuDevice
-    vk_swapchain: VkSwapchainKHR
+    vk_swap_chain: VkSwapchainKHR
     images: list[GpuImage]
     slots: list[GpuSwapChainSlot]
     vk_format: VkFormat
@@ -2987,7 +3009,7 @@ class GpuSwapChain(BaseResource):
         vk_format, vk_color_space = self._select_surface_format(device, surface)
         self.vk_format = vk_format
         self.vk_color_space = vk_color_space
-        self.vk_swapchain = self._create_swap_chain(surface, image_count)
+        self.vk_swap_chain = self._create_swap_chain(surface, image_count)
         self.images = self._wrap_swap_chain_images(surface)
         self.slots = self._create_slots()
 
@@ -3054,12 +3076,17 @@ class GpuSwapChain(BaseResource):
                 custom_vk_format=self.vk_format,
             )
             for vk_image in self.device.context.vkGetSwapchainImagesKHR(
-                self.device.vk_device, self.vk_swapchain
+                self.device.vk_device, self.vk_swap_chain
             )
         ]
 
     def _create_slots(self) -> list[GpuSwapChainSlot]:
         return [GpuSwapChainSlot(swap_chain=self) for _ in self.images]
+
+    def __repr__(self) -> str:
+        return (
+            f"<GpuSwapChain object at {hex(id(self))} with handle {self.vk_swap_chain}>"
+        )
 
     def _on_dispose(self) -> None:
         self.device.wait_idle()
@@ -3069,7 +3096,7 @@ class GpuSwapChain(BaseResource):
 
         self.context.vkDestroySwapchainKHR(
             device=self.device.vk_device,
-            swapchain=self.vk_swapchain,
+            swapchain=self.vk_swap_chain,
             pAllocator=None,
         )
 
@@ -3089,7 +3116,7 @@ class GpuSwapChain(BaseResource):
 
         image_index = self.context.vkAcquireNextImageKHR(
             device=self.device.vk_device,
-            swapchain=self.vk_swapchain,
+            swapchain=self.vk_swap_chain,
             timeout=int(timeout_sec * 10**9),
             semaphore=slot.image_available_semaphore.vk_semaphore,
             fence=None,
@@ -3111,7 +3138,7 @@ class GpuSwapChain(BaseResource):
                 waitSemaphoreCount=1,
                 pWaitSemaphores=[slot.render_done_semaphore.vk_semaphore],
                 swapchainCount=1,
-                pSwapchains=[self.vk_swapchain],
+                pSwapchains=[self.vk_swap_chain],
                 pImageIndices=[image_index],
                 pResults=None,
             ),

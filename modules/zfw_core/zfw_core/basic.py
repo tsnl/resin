@@ -5,7 +5,8 @@ __all__ = [
 ]
 
 from abc import ABC
-from typing import Protocol, TypeVar
+import sys
+from typing import Protocol, TypeVar, Iterable
 from weakref import ref as WeakRef
 
 from .excepts import LogicError
@@ -78,6 +79,9 @@ class BaseResource(ABC):
         self._children.append(WeakRef(child))
 
     def __del__(self) -> None:
+        if self._parent is not None:
+            parent = self._parent
+            del parent
         self.dispose()
 
     def dispose(self) -> None:
@@ -103,6 +107,49 @@ class BaseResource(ABC):
 
     def _on_dispose(self) -> None:
         pass
+
+    def iter_descendants(self, *, verbose: bool) -> "Iterable[BaseResource]":
+        """
+        Iterate over all descendant resources in the resource tree.
+        """
+        yield from self._iter_descendants(mut_ancestors_list=[], verbose=verbose)
+
+    def _iter_descendants(
+        self, *, mut_ancestors_list: list[BaseResource], verbose: bool
+    ) -> "Iterable[BaseResource]":
+        """
+        Iterate over all descendant resources in the resource tree.
+        """
+
+        if verbose:
+            depth = len(mut_ancestors_list)
+            print(f"{' ' * depth * 4}{self}")
+
+        if self in mut_ancestors_list:
+            raise LogicError(
+                f"Cyclic resource dependency: {self=}, {mut_ancestors_list=}"
+            )
+
+        mut_ancestors_list.append(self)
+
+        for child_ref in self._children:
+            child = child_ref()
+            if child is None:
+                continue
+
+            yield child
+            yield from child._iter_descendants(
+                mut_ancestors_list=mut_ancestors_list,
+                verbose=verbose,
+            )
+
+        mut_ancestors_list.pop()
+
+    def detect_resource_cycles(self, *, verbose: bool = False) -> int:
+        n = 0
+        for _ in self.iter_descendants(verbose=verbose):
+            n += 1
+        return n
 
 
 #
