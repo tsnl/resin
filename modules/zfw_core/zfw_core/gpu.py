@@ -1096,15 +1096,18 @@ class GpuMemory(GpuResource):
         self._mapped_view_use_count = 0
         self._mapped_view = None
 
-        self.vk_device_memory = vkAllocateMemory(
-            device=device.vk_device,
+        self.vk_device_memory = self._allocate_memory(memory_requirements)
+
+    def _allocate_memory(self, requirements: VkMemoryRequirements) -> VkDeviceMemory:
+        return vkAllocateMemory(
+            device=self.device.vk_device,
             pAllocateInfo=VkMemoryAllocateInfo(
-                allocationSize=memory_requirements.size,
-                memoryTypeIndex=device._find_memory_type(
-                    memory_requirements.memoryTypeBits,
+                allocationSize=requirements.size,
+                memoryTypeIndex=self.device._find_memory_type(
+                    requirements.memoryTypeBits,
                     required_properties=(
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-                        if device_local
+                        if self.device_local
                         else (
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                             | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
