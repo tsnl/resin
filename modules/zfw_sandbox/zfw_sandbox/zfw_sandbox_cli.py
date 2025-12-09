@@ -15,17 +15,12 @@ def main():
         choices=[2, 3],
         help="Number of swapchain images: 2 for double buffering, 3 for triple buffering",
     )
-    ap.add_argument(
-        "--disable-vulkan-debug-layers",
-        dest="enable_vulkan_debug_layers",
-        action="store_false",
-        help="Disable Vulkan debug layers (enabled by default)",
-    )
+    ap.add_argument("--debug", action="store_true", help="Enable debug settings")
     args = ap.parse_args()
 
     engine = ZfwEngine(
         app_name="Zero Sandbox",
-        debug=args.enable_vulkan_debug_layers,
+        debug=args.debug,
         swapchain_image_count=args.swapchain_image_count,
     )
 
