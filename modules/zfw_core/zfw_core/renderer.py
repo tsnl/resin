@@ -41,8 +41,14 @@ from .gpu import (
 
 
 class RendererContext(BaseResource):
-    def __init__(self, gpu_context: GpuContext):
-        super().__init__(parent=gpu_context)
+    def __init__(
+        self,
+        *,
+        gpu_context: GpuContext,
+        parent: BaseResource | None = None,
+    ):
+        super().__init__(parent=parent)
+        self.gpu_context = gpu_context
 
 
 class Renderer(BaseResource):

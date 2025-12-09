@@ -6,15 +6,25 @@ from zfw_core.renderer import Renderer, RendererCanvas
 from zfw_core.window import Window
 
 
-class ZfwEngine:
+class ZfwEngine(zfw_core.BaseResource):
     def __init__(self, *, app_name: str, debug: bool, swapchain_image_count: int):
+        super().__init__(parent=None)
+
+        # Create contexts:
         self.gpu_context = zfw_core.GpuContext(
+            parent=self,
             app_name=app_name,
             enable_debug_layer_support=debug,
             enable_present_support=True,
         )
-        self.window_context = zfw_core.WindowContext(gpu_context=self.gpu_context)
-        self.render_context = zfw_core.RendererContext(gpu_context=self.gpu_context)
+        self.window_context = zfw_core.WindowContext(
+            parent=self,
+            gpu_context=self.gpu_context,
+        )
+        self.render_context = zfw_core.RendererContext(
+            parent=self,
+            gpu_context=self.gpu_context,
+        )
 
         # Create window, GPU surface:
         self.window = Window(

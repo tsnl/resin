@@ -74,13 +74,13 @@ def test_image_roundtrip():
 
     # copy host_buf_1 to image
     cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
-    cmd.transition_image_layout(image=image, layout="copy-dst")
+    cmd.transition_image_layout(image=image, layout="transfer-dst-optimal")
     cmd.copy_buffer_to_image(dst=image, src=host_buf_1)
     cmd.submit().wait()
 
     # copy image to host_buf_2
     cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
-    cmd.transition_image_layout(image=image, layout="copy-src")
+    cmd.transition_image_layout(image=image, layout="transfer-src-optimal")
     cmd.copy_image_to_buffer(src=image, dst=host_buf_2)
     cmd.submit().wait()
 

@@ -32,7 +32,19 @@ class SupportsWrite(Protocol[_T_contra]):
 
 
 class BaseResource(ABC):
-    def __init__(self, *, parent: "BaseResource | None" = None):
+    """
+    All resources in Zfw inherit from this base class to create a clear tree hierarchy.
+
+    Each resource must be disposed of before its parent resource is disposed.
+    Resource disposal is triggered either automatically by `__del__` or manually by
+    calling `dispose()`. Disposal of a resource will also dispose all its child
+    resources in reverse order of their creation.
+
+    Explicit disposal is recommended to ensure timely release of resources. This must be
+    done with care to avoid disposing a parent before its children.
+    """
+
+    def __init__(self, *, parent: "BaseResource | None"):
         super().__init__()
 
         self._parent: "BaseResource | None" = parent
@@ -72,6 +84,11 @@ class BaseResource(ABC):
         # If already disposed, no-op.
         if self._is_disposed:
             return
+
+        # If 'self' is not yet disposed, ensure self._parent has not yet been disposed
+        # either.
+        if self._parent is not None and self._parent._is_disposed:
+            raise LogicError(f"Cannot dispose resource {self} after its parent")
 
         # Dispose children in reverse order of creation.
         for child_ref in reversed(self._children):

@@ -105,7 +105,7 @@ def upload_texture(dev: GpuDevice, texture_data: np.ndarray) -> GpuImage:
 
     # Copy staging buffer to texture
     cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
-    cmd.transition_image_layout(image=texture, layout="copy-dst")
+    cmd.transition_image_layout(image=texture, layout="transfer-dst-optimal")
     cmd.copy_buffer_to_image(src=staging_buffer, dst=texture)
     cmd.transition_image_layout(image=texture, layout="texture-binding")
     cmd.submit().wait()
@@ -232,7 +232,7 @@ def render_tinted_bitmap(
     )
 
     cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
-    cmd.transition_image_layout(image=render_target, layout="copy-src")
+    cmd.transition_image_layout(image=render_target, layout="transfer-src-optimal")
     cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
     cmd.submit().wait()
 

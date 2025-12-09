@@ -305,12 +305,14 @@ class GpuContext(BaseResource):
 
     def __init__(
         self,
-        app_name: str = "Zero App",
+        *,
+        parent: BaseResource | None = None,
+        app_name: str = "Zfw App",
         enable_debug_layer_support: bool = True,
         enable_present_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
-        super().__init__(parent=None)
+        super().__init__(parent=parent)
 
         enable_portability_subset = (
             enable_portability_subset_override

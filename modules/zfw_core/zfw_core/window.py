@@ -9,8 +9,13 @@ from .typed_vulkan import raw_ffi
 
 
 class WindowContext(BaseResource):
-    def __init__(self, gpu_context: GpuContext) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        gpu_context: GpuContext,
+        parent: BaseResource | None = None,
+    ) -> None:
+        super().__init__(parent=parent)
 
         self.gpu_context = gpu_context
 

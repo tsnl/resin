@@ -1,4 +1,5 @@
 __all__ = [
+    "BaseResource",
     "SupportsWrite",
     "Window",
     "GpuContext",
@@ -18,7 +19,7 @@ __all__ = [
     "BUNDLED_DATA_PATH",
 ]
 
-from .basic import SupportsWrite
+from .basic import BaseResource, SupportsWrite
 from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuContext,
