@@ -26,6 +26,7 @@ __all__ = [
 import json
 import os
 import sys
+from weakref import ref as WeakRef
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -1706,6 +1707,7 @@ class GpuCommandEncoder(GpuResource):
     vk_command_buffer: VkCommandBuffer
     queue_family_index: int
     submit_queue_type: GpuQueueType
+    _submit_fence: WeakRef[GpuFence] | None
 
     def __init__(self, *, device: GpuDevice, queue_type: GpuQueueType) -> None:
         super().__init__(parent=device)
@@ -1715,6 +1717,7 @@ class GpuCommandEncoder(GpuResource):
         self.vk_command_buffer = self._help_allocate_command_buffer(
             device, self.queue_family_index
         )
+        self._submit_fence = None
         self._help_begin_command_buffer(self.vk_command_buffer)
 
     @staticmethod
@@ -1742,6 +1745,11 @@ class GpuCommandEncoder(GpuResource):
         )
 
     def _on_dispose(self) -> None:
+        # Wait for submission to complete
+        opt_submit_fence = self._submit_fence() if self._submit_fence else None
+        if opt_submit_fence is not None:
+            opt_submit_fence.wait()
+
         # Free the command buffer
         vkFreeCommandBuffers(
             device=self.device.vk_device,
@@ -2074,7 +2082,11 @@ class GpuCommandEncoder(GpuResource):
     ) -> GpuFence:
         vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
 
+        if self._submit_fence is not None:
+            raise LogicError("Each GpuCommandEncoder can only be submitted once.")
+
         fence = fence or GpuFence(device=self.device, parent=self)
+        self._submit_fence = WeakRef(fence)
 
         self.device.submit(
             queue_type=self.submit_queue_type,
