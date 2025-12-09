@@ -1,7 +1,7 @@
 import sys
 
 import zfw_core
-from zfw_core.gpu import GpuDevice, GpuSwapchain
+from zfw_core.gpu import GpuDevice, GpuSwapChain
 from zfw_core.renderer import Renderer
 from zfw_core.window import Window
 
@@ -34,7 +34,7 @@ class ZfwEngine:
         )
 
         # Create swapchain:
-        self.swapchain = GpuSwapchain(
+        self.swapchain = GpuSwapChain(
             device=self.device,
             surface=self.surface,
             image_count=swapchain_image_count,

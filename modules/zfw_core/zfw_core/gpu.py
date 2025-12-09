@@ -17,7 +17,8 @@ __all__ = [
     "GpuImageUsage",
     "GpuImageMeta",
     "GpuSurface",
-    "GpuSwapchain",
+    "GpuSwapChain",
+    "GpuSwapImage",
     "GpuSampler",
     "GpuDescriptorSetLayout",
     "GpuDescriptorSet",
@@ -1476,8 +1477,13 @@ class GpuSemaphore(GpuResource):
     device: GpuDevice
     vk_semaphore: VkSemaphore
 
-    def __init__(self, *, device: GpuDevice) -> None:
-        super().__init__(parent=device)
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        parent: GpuResource | None = None,
+    ) -> None:
+        super().__init__(parent=(parent or device))
         self.device = device
 
         self.vk_semaphore = vkCreateSemaphore(
@@ -1754,11 +1760,18 @@ class GpuCommandEncoder(GpuResource):
         self.submit_queue_type = queue_type
         self.wait_semaphores = wait_semaphores or []
         self.signal_semaphores = signal_semaphores or []
-
         self.queue_family_index = device.qfis[queue_type]
-        vk_command_pool = device.vk_command_pools[self.queue_family_index]
+        self.vk_command_buffer = self._help_allocate_command_buffer(
+            device, self.queue_family_index
+        )
+        self._help_begin_command_buffer(self.vk_command_buffer)
 
-        self.vk_command_buffer = vkAllocateCommandBuffers(
+    @staticmethod
+    def _help_allocate_command_buffer(
+        device: GpuDevice, queue_family_index: int
+    ) -> VkCommandBuffer:
+        vk_command_pool = device.vk_command_pools[queue_family_index]
+        return vkAllocateCommandBuffers(
             device=device.vk_device,
             pAllocateInfo=VkCommandBufferAllocateInfo(
                 commandPool=vk_command_pool,
@@ -1767,8 +1780,10 @@ class GpuCommandEncoder(GpuResource):
             ),
         )[0]
 
+    @staticmethod
+    def _help_begin_command_buffer(vk_command_buffer: VkCommandBuffer) -> None:
         vkBeginCommandBuffer(
-            commandBuffer=self.vk_command_buffer,
+            commandBuffer=vk_command_buffer,
             pBeginInfo=VkCommandBufferBeginInfo(
                 flags=0,
                 pInheritanceInfo=None,
@@ -2145,7 +2160,12 @@ class GpuShader(GpuResource):
         super().__init__(parent=device)
         self.device = device
         self.stage = stage
+        self.vk_shader_module = self._help_create_shader_module(device, spirv_path)
 
+    @staticmethod
+    def _help_create_shader_module(
+        device: GpuDevice, spirv_path: Path | str
+    ) -> VkShaderModule:
         spirv_path = Path(spirv_path)
 
         # Read SPIR-V bytecode
@@ -2159,7 +2179,7 @@ class GpuShader(GpuResource):
             pCode=spirv_code,
         )
 
-        self.vk_shader_module = vkCreateShaderModule(
+        return vkCreateShaderModule(
             device=device.vk_device,
             pCreateInfo=create_info,
             pAllocator=None,
@@ -2178,6 +2198,32 @@ class GpuShader(GpuResource):
 #
 
 
+def vk_sampler_filter(filter: "GpuSamplerFilter") -> int:
+    """Convert GpuSamplerFilter to Vulkan filter constant."""
+    match filter:
+        case "linear":
+            return VK_FILTER_LINEAR
+        case "nearest":
+            return VK_FILTER_NEAREST
+        case _:
+            raise LogicError(f"Invalid sampler filter: {filter!r}")
+
+
+def vk_sampler_address_mode(mode: "GpuSamplerAddressMode") -> int:
+    """Convert GpuSamplerAddressMode to Vulkan address mode constant."""
+    match mode:
+        case "repeat":
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT
+        case "mirrored-repeat":
+            return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+        case "clamp-to-edge":
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+        case "clamp-to-border":
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+        case _:
+            raise LogicError(f"Invalid sampler address mode: {mode!r}")
+
+
 class GpuSampler(GpuResource):
     """Wrapper for VkSampler"""
 
@@ -2194,20 +2240,20 @@ class GpuSampler(GpuResource):
     ):
         super().__init__(parent=device)
         self.device = device
-
-        vk_mag_filter = (
-            VK_FILTER_LINEAR if mag_filter == "linear" else VK_FILTER_NEAREST
-        )
-        vk_min_filter = (
-            VK_FILTER_LINEAR if min_filter == "linear" else VK_FILTER_NEAREST
+        self.vk_sampler = self._help_create_sampler(
+            device, mag_filter, min_filter, address_mode
         )
 
-        vk_address_mode = {
-            "repeat": VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            "mirrored-repeat": VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-            "clamp-to-edge": VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-            "clamp-to-border": VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-        }[address_mode]
+    @staticmethod
+    def _help_create_sampler(
+        device: GpuDevice,
+        mag_filter: "GpuSamplerFilter",
+        min_filter: "GpuSamplerFilter",
+        address_mode: "GpuSamplerAddressMode",
+    ) -> VkSampler:
+        vk_mag_filter = vk_sampler_filter(mag_filter)
+        vk_min_filter = vk_sampler_filter(min_filter)
+        vk_address_mode = vk_sampler_address_mode(address_mode)
 
         create_info = VkSamplerCreateInfo(
             flags=0,
@@ -2228,7 +2274,7 @@ class GpuSampler(GpuResource):
             unnormalizedCoordinates=False,
         )
 
-        self.vk_sampler = vkCreateSampler(
+        return vkCreateSampler(
             device=device.vk_device,
             pCreateInfo=create_info,
             pAllocator=None,
@@ -2275,7 +2321,16 @@ class GpuDescriptorPool(GpuResource):
     ):
         super().__init__(parent=device)
         self.device = device
+        self.vk_descriptor_pool = self._help_create_descriptor_pool(
+            device, max_sets, pool_sizes
+        )
 
+    @staticmethod
+    def _help_create_descriptor_pool(
+        device: GpuDevice,
+        max_sets: int,
+        pool_sizes: dict[GpuDescriptorType, int],
+    ) -> VkDescriptorPool:
         vk_pool_sizes = [
             VkDescriptorPoolSize(
                 type=vk_descriptor_type(desc_type),
@@ -2291,8 +2346,8 @@ class GpuDescriptorPool(GpuResource):
             pPoolSizes=vk_pool_sizes,
         )
 
-        self.vk_descriptor_pool = vkCreateDescriptorPool(
-            device=self.device.vk_device,
+        return vkCreateDescriptorPool(
+            device=device.vk_device,
             pCreateInfo=create_info,
             pAllocator=None,
         )
@@ -2324,7 +2379,15 @@ class GpuPipelineLayout(GpuResource):
         super().__init__(parent=device)
         self.device = device
         self.descriptor_set_layouts = descriptor_set_layouts
+        self.vk_pipeline_layout = self._help_create_pipeline_layout(
+            device, descriptor_set_layouts
+        )
 
+    @staticmethod
+    def _help_create_pipeline_layout(
+        device: GpuDevice,
+        descriptor_set_layouts: list[GpuDescriptorSetLayout],
+    ) -> VkPipelineLayout:
         vk_set_layouts = [
             layout.vk_descriptor_set_layout for layout in descriptor_set_layouts
         ]
@@ -2337,7 +2400,7 @@ class GpuPipelineLayout(GpuResource):
             pPushConstantRanges=None,
         )
 
-        self.vk_pipeline_layout = vkCreatePipelineLayout(
+        return vkCreatePipelineLayout(
             device=device.vk_device,
             pCreateInfo=layout_create_info,
             pAllocator=None,
@@ -2365,7 +2428,15 @@ class GpuDescriptorSetLayout(GpuResource):
         super().__init__(parent=device)
         self.device = device
         self.bindings = bindings
+        self.vk_descriptor_set_layout = self._help_create_descriptor_set_layout(
+            device, bindings
+        )
 
+    @staticmethod
+    def _help_create_descriptor_set_layout(
+        device: GpuDevice,
+        bindings: OrderedDict[str, "GpuDescriptorSetLayoutBinding"],
+    ) -> VkDescriptorSetLayout:
         vk_binding_list = [
             VkDescriptorSetLayoutBinding(
                 binding=binding_index,
@@ -2383,7 +2454,7 @@ class GpuDescriptorSetLayout(GpuResource):
             pBindings=vk_binding_list,
         )
 
-        self.vk_descriptor_set_layout = vkCreateDescriptorSetLayout(
+        return vkCreateDescriptorSetLayout(
             device=device.vk_device,
             pCreateInfo=create_info,
             pAllocator=None,
@@ -2428,7 +2499,15 @@ class GpuDescriptorSet(GpuResource):
         self.pool = device._descriptor_pool
         self.layout = layout
         self.bindings = bindings
+        self._help_validate_bindings(bindings, layout)
+        self.vk_descriptor_set = self._help_allocate_descriptor_set(device, layout)
+        self._help_write_bindings(device, self.vk_descriptor_set, bindings, layout)
 
+    @staticmethod
+    def _help_validate_bindings(
+        bindings: dict[str, GpuDescriptorSetBinding],
+        layout: GpuDescriptorSetLayout,
+    ) -> None:
         # Check that the number of bindings matches the layout
         if len(bindings) != len(layout.bindings):
             raise LogicError(
@@ -2450,9 +2529,12 @@ class GpuDescriptorSet(GpuResource):
                     f"expected one of {ok_desc_types}"
                 )
 
-        # Allocate the descriptor set:
+    @staticmethod
+    def _help_allocate_descriptor_set(
+        device: GpuDevice, layout: GpuDescriptorSetLayout
+    ) -> VkDescriptorSet:
         alloc_info = VkDescriptorSetAllocateInfo(
-            descriptorPool=self.pool.vk_descriptor_pool,
+            descriptorPool=device._descriptor_pool.vk_descriptor_pool,
             descriptorSetCount=1,
             pSetLayouts=[layout.vk_descriptor_set_layout],
         )
@@ -2460,14 +2542,21 @@ class GpuDescriptorSet(GpuResource):
             device=device.vk_device,
             pAllocateInfo=alloc_info,
         )
-        self.vk_descriptor_set = vk_sets[0]
+        return vk_sets[0]
 
+    @staticmethod
+    def _help_write_bindings(
+        device: GpuDevice,
+        vk_set: VkDescriptorSet,
+        bindings: dict[str, GpuDescriptorSetBinding],
+        layout: GpuDescriptorSetLayout,
+    ) -> None:
         # Update the descriptor sets by writing the bindings:
         # IMPORTANT: Iterate over the layout's bindings to ensure the correct order, and
         # thus, correct binding indices.
         writes = [
             descriptor_set_write_for_binding(
-                vk_set=self.vk_descriptor_set,
+                vk_set=vk_set,
                 binding_index=binding_index,
                 binding=bindings[binding_name],
                 binding_layout=layout.bindings[binding_name],
@@ -2609,9 +2698,22 @@ class GpuPipeline(GpuResource):
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
         self.layout = layout
+        self.vk_pipeline = self._help_create_pipeline(
+            device=device,
+            vertex_shader=vertex_shader,
+            fragment_shader=fragment_shader,
+            vk_color_format=vk_color_format,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            layout=layout,
+        )
 
-        # Shader stages
-        shader_stages = [
+    @staticmethod
+    def _help_create_shader_stages(
+        vertex_shader: GpuShader,
+        fragment_shader: GpuShader,
+    ) -> list:
+        return [
             VkPipelineShaderStageCreateInfo(
                 flags=0,
                 stage=VK_SHADER_STAGE_VERTEX_BIT,
@@ -2628,8 +2730,9 @@ class GpuPipeline(GpuResource):
             ),
         ]
 
-        # Vertex input state (empty - hardcoded in shader)
-        vertex_input_state = VkPipelineVertexInputStateCreateInfo(
+    @staticmethod
+    def _help_create_vertex_input_state() -> VkPipelineVertexInputStateCreateInfo:
+        return VkPipelineVertexInputStateCreateInfo(
             flags=0,
             vertexBindingDescriptionCount=0,
             pVertexBindingDescriptions=None,
@@ -2637,29 +2740,32 @@ class GpuPipeline(GpuResource):
             pVertexAttributeDescriptions=None,
         )
 
-        # Input assembly state
-        input_assembly_state = VkPipelineInputAssemblyStateCreateInfo(
+    @staticmethod
+    def _help_create_input_assembly_state() -> VkPipelineInputAssemblyStateCreateInfo:
+        return VkPipelineInputAssemblyStateCreateInfo(
             flags=0,
             topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             primitiveRestartEnable=False,
         )
 
-        # Viewport state
+    @staticmethod
+    def _help_create_viewport_state(
+        width: int,
+        height: int,
+    ) -> VkPipelineViewportStateCreateInfo:
         viewport = VkViewport(
             x=0.0,
             y=0.0,
-            width=float(viewport_width),
-            height=float(viewport_height),
+            width=float(width),
+            height=float(height),
             minDepth=0.0,
             maxDepth=1.0,
         )
-
         scissor = VkRect2D(
             offset=VkOffset2D(x=0, y=0),
-            extent=VkExtent2D(width=viewport_width, height=viewport_height),
+            extent=VkExtent2D(width=width, height=height),
         )
-
-        viewport_state = VkPipelineViewportStateCreateInfo(
+        return VkPipelineViewportStateCreateInfo(
             flags=0,
             viewportCount=1,
             pViewports=[viewport],
@@ -2667,8 +2773,9 @@ class GpuPipeline(GpuResource):
             pScissors=[scissor],
         )
 
-        # Rasterization state
-        rasterization_state = VkPipelineRasterizationStateCreateInfo(
+    @staticmethod
+    def _help_create_rasterization_state() -> VkPipelineRasterizationStateCreateInfo:
+        return VkPipelineRasterizationStateCreateInfo(
             flags=0,
             depthClampEnable=False,
             rasterizerDiscardEnable=False,
@@ -2682,8 +2789,9 @@ class GpuPipeline(GpuResource):
             lineWidth=1.0,
         )
 
-        # Multisample state
-        multisample_state = VkPipelineMultisampleStateCreateInfo(
+    @staticmethod
+    def _help_create_multisample_state() -> VkPipelineMultisampleStateCreateInfo:
+        return VkPipelineMultisampleStateCreateInfo(
             flags=0,
             rasterizationSamples=VK_SAMPLE_COUNT_1_BIT,
             sampleShadingEnable=False,
@@ -2693,7 +2801,8 @@ class GpuPipeline(GpuResource):
             alphaToOneEnable=False,
         )
 
-        # Color blend state
+    @staticmethod
+    def _help_create_color_blend_state() -> VkPipelineColorBlendStateCreateInfo:
         color_blend_attachment = VkPipelineColorBlendAttachmentState(
             blendEnable=False,
             srcColorBlendFactor=VK_BLEND_FACTOR_ONE,
@@ -2709,8 +2818,7 @@ class GpuPipeline(GpuResource):
                 | VK_COLOR_COMPONENT_A_BIT
             ),
         )
-
-        color_blend_state = VkPipelineColorBlendStateCreateInfo(
+        return VkPipelineColorBlendStateCreateInfo(
             flags=0,
             logicOpEnable=False,
             logicOp=VK_LOGIC_OP_COPY,
@@ -2719,7 +2827,28 @@ class GpuPipeline(GpuResource):
             blendConstants=[0.0, 0.0, 0.0, 0.0],
         )
 
-        # Dynamic rendering info (Vulkan 1.3)
+    @staticmethod
+    def _help_create_pipeline(
+        device: GpuDevice,
+        vertex_shader: GpuShader,
+        fragment_shader: GpuShader,
+        vk_color_format: VkFormat,
+        viewport_width: int,
+        viewport_height: int,
+        layout: GpuPipelineLayout,
+    ) -> VkPipeline:
+        shader_stages = GpuPipeline._help_create_shader_stages(
+            vertex_shader, fragment_shader
+        )
+        vertex_input_state = GpuPipeline._help_create_vertex_input_state()
+        input_assembly_state = GpuPipeline._help_create_input_assembly_state()
+        viewport_state = GpuPipeline._help_create_viewport_state(
+            viewport_width, viewport_height
+        )
+        rasterization_state = GpuPipeline._help_create_rasterization_state()
+        multisample_state = GpuPipeline._help_create_multisample_state()
+        color_blend_state = GpuPipeline._help_create_color_blend_state()
+
         rendering_info = VkPipelineRenderingCreateInfo(
             viewMask=0,
             colorAttachmentCount=1,
@@ -2728,7 +2857,6 @@ class GpuPipeline(GpuResource):
             stencilAttachmentFormat=VK_FORMAT_UNDEFINED,
         )
 
-        # Graphics pipeline create info
         pipeline_create_info = VkGraphicsPipelineCreateInfo(
             pNext=rendering_info,
             flags=0,
@@ -2744,14 +2872,13 @@ class GpuPipeline(GpuResource):
             pColorBlendState=color_blend_state,
             pDynamicState=None,
             layout=layout.vk_pipeline_layout,
-            renderPass=None,  # Using dynamic rendering
+            renderPass=None,
             subpass=0,
             basePipelineHandle=None,
             basePipelineIndex=-1,
         )
 
-        # Create pipeline
-        self.vk_pipeline = vkCreateGraphicsPipelines(
+        return vkCreateGraphicsPipelines(
             device=device.vk_device,
             pipelineCache=None,
             createInfoCount=1,
@@ -2858,14 +2985,11 @@ class GpuSurface(GpuResource):
 #
 
 
-class GpuSwapchain(GpuResource):
+class GpuSwapChain(GpuResource):
     device: GpuDevice
     vk_swapchain: VkSwapchainKHR
-    images: list[GpuImage]
+    swapchain_images: list[GpuSwapImage]
     vk_format: VkFormat
-    in_flight_fences: list[GpuFence]
-    image_available_semaphores: list[GpuSemaphore]
-    render_done_semaphores: list[GpuSemaphore]
     width: int
     height: int
     frame_counter: int
@@ -2880,7 +3004,16 @@ class GpuSwapchain(GpuResource):
         super().__init__(parent=device)
         self.device = device
         self.frame_counter = 0
+        self.width = surface.width
+        self.height = surface.height
+        vk_format, vk_colorspace = self._help_select_surface_format(device, surface)
+        self.vk_format = vk_format
+        self.vk_colorspace = vk_colorspace
+        self.vk_swapchain = self._help_create_swapchain(surface, image_count)
+        self.swapchain_images = self._help_create_swapchain_images(surface)
 
+    @staticmethod
+    def _help_select_surface_format(device: GpuDevice, surface: GpuSurface):
         vk_format = VK_FORMAT_B8G8R8A8_SRGB
         vk_colorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
         vk_surface_format_list = device.physical_device.get_surface_formats(surface)
@@ -2898,19 +3031,19 @@ class GpuSwapchain(GpuResource):
                 f"Requires format=VK_FORMAT_R8G8B8A8_SRGB, "
                 f"colorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR."
             )
+        return vk_format, vk_colorspace
 
-        self.vk_format = vk_format
-        self.width = surface.width
-        self.height = surface.height
-
-        self.vk_swapchain = device.context.vkCreateSwapchainKHR(
-            device=device.vk_device,
+    def _help_create_swapchain(
+        self, surface: GpuSurface, image_count: int
+    ) -> VkSwapchainKHR:
+        return self.device.context.vkCreateSwapchainKHR(
+            device=self.device.vk_device,
             pCreateInfo=VkSwapchainCreateInfoKHR(
                 flags=0,
                 surface=surface.vk_surface,
                 minImageCount=image_count,
-                imageFormat=vk_format,
-                imageColorSpace=vk_colorspace,
+                imageFormat=self.vk_format,
+                imageColorSpace=self.vk_colorspace,
                 imageExtent=VkExtent2D(width=surface.width, height=surface.height),
                 imageArrayLayers=1,
                 imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -2926,34 +3059,19 @@ class GpuSwapchain(GpuResource):
             pAllocator=None,
         )
 
-        vk_images = device.context.vkGetSwapchainImagesKHR(
-            device.vk_device, self.vk_swapchain
-        )
-        self.images = []
-        self.in_flight_fences = []
-        self.image_available_semaphores = []
-        self.render_done_semaphores = []
-        for vk_image in vk_images:
-            image = GpuImage(
-                device=device,
-                usages=["color-attachment"],
-                meta=GpuImageMeta(
-                    shape=(surface.height, surface.width, 4),
-                    dtype=np.uint8,
-                ),
-                vk_image=vk_image,
-                vk_format=vk_format,
+    def _help_create_swapchain_images(self, surface: GpuSurface) -> list[GpuSwapImage]:
+        return [
+            GpuSwapImage(swapchain=self, surface=surface, vk_image=vk_image)
+            for vk_image in self.device.context.vkGetSwapchainImagesKHR(
+                self.device.vk_device, self.vk_swapchain
             )
-            self.images.append(image)
-            self.in_flight_fences.append(GpuFence(device=device, signalled=True))
-            self.image_available_semaphores.append(GpuSemaphore(device=device))
-            self.render_done_semaphores.append(GpuSemaphore(device=device))
+        ]
 
     def _on_dispose(self) -> None:
         self.device.wait_idle()
 
-        for fence in self.in_flight_fences:
-            fence.wait()
+        for swapchain_image in self.swapchain_images:
+            swapchain_image.in_flight_fence.wait()
 
         self.context.vkDestroySwapchainKHR(
             device=self.device.vk_device,
@@ -2968,11 +3086,12 @@ class GpuSwapchain(GpuResource):
         global_frame_index = self.frame_counter
         self.frame_counter += 1
 
-        current_frame = global_frame_index % len(self.in_flight_fences)
+        current_frame = global_frame_index % len(self.swapchain_images)
 
-        in_flight_fence = self.in_flight_fences[current_frame]
-        image_available_semaphore = self.image_available_semaphores[current_frame]
-        render_done_semaphore = self.render_done_semaphores[current_frame]
+        swapchain_image = self.swapchain_images[current_frame]
+        in_flight_fence = swapchain_image.in_flight_fence
+        image_available_semaphore = swapchain_image.image_available_semaphore
+        render_done_semaphore = swapchain_image.render_done_semaphore
 
         in_flight_fence.wait()
         in_flight_fence.reset()
@@ -2990,7 +3109,7 @@ class GpuSwapchain(GpuResource):
             global_frame_index=global_frame_index,
             wrapped_frame_index=current_frame,
             in_flight_index=current_frame,
-            swapchain_image=self.images[image_index],
+            swapchain_image=self.swapchain_images[image_index].image,
             render_wait_semaphores=[image_available_semaphore],
             render_done_semaphores=[render_done_semaphore],
             render_done_fence=in_flight_fence,
@@ -3008,6 +3127,40 @@ class GpuSwapchain(GpuResource):
                 pResults=None,
             ),
         )
+
+
+class GpuSwapImage(GpuResource):
+    """
+    Represents a single swapchain image with its associated synchronization objects.
+    """
+
+    swapchain: GpuSwapChain
+    device: GpuDevice
+    image: GpuImage
+    in_flight_fence: GpuFence
+    image_available_semaphore: GpuSemaphore
+    render_done_semaphore: GpuSemaphore
+
+    def __init__(
+        self,
+        *,
+        swapchain: GpuSwapChain,
+        surface: GpuSurface,
+        vk_image: VkImage,
+    ):
+        super().__init__(parent=swapchain)
+        self.swapchain = swapchain
+        self.device = swapchain.device
+        self.image = GpuImage(
+            device=self.device,
+            usages=["color-attachment"],
+            meta=GpuImageMeta(shape=(surface.height, surface.width, 4), dtype=np.uint8),
+            vk_image=vk_image,
+            vk_format=self.swapchain.vk_format,
+        )
+        self.in_flight_fence = GpuFence(device=self.device, parent=self, signalled=True)
+        self.image_available_semaphore = GpuSemaphore(device=self.device, parent=self)
+        self.render_done_semaphore = GpuSemaphore(device=self.device, parent=self)
 
 
 @dataclass
