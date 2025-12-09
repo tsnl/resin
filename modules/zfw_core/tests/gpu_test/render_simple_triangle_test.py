@@ -4,7 +4,17 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
-from zfw_core.gpu import GpuContext, GpuDevice, GpuImageMeta
+from zfw_core.gpu import (
+    GpuBuffer,
+    GpuCommandEncoder,
+    GpuContext,
+    GpuDevice,
+    GpuImage,
+    GpuImageMeta,
+    GpuPipeline,
+    GpuPipelineLayout,
+    GpuShader,
+)
 
 
 def make_context() -> tuple[GpuContext, GpuDevice]:
@@ -15,7 +25,7 @@ def make_context() -> tuple[GpuContext, GpuDevice]:
         enable_present_support=False,
     )
     phys = ctx.enumerate_physical_devices()[0]
-    dev = ctx.create_device(physical_device=phys, surface=None)
+    dev = GpuDevice(context=ctx, physical_device=phys, surface=None)
     return ctx, dev
 
 
@@ -27,7 +37,8 @@ def test_render_simple_triangle():
     width, height = 512, 512
 
     # Create render target image (RGBA8)
-    render_target = dev.create_image(
+    render_target = GpuImage(
+        device=dev,
         usages=["color-attachment", "texture-binding"],
         meta=GpuImageMeta(shape=(height, width, 4), dtype=np.uint8),
     )
@@ -37,20 +48,23 @@ def test_render_simple_triangle():
     shader_dir = test_dir / "data" / "shaders" / "tests"
 
     # Load shaders
-    vertex_shader = dev.create_shader(
+    vertex_shader = GpuShader(
+        device=dev,
         spirv_path=shader_dir / "triangle.vert.spv",
         stage="vertex",
     )
-    fragment_shader = dev.create_shader(
+    fragment_shader = GpuShader(
+        device=dev,
         spirv_path=shader_dir / "triangle.frag.spv",
         stage="fragment",
     )
 
     # Create pipeline layout (empty for simple triangle - no descriptors)
-    pipeline_layout = dev.create_pipeline_layout(descriptor_set_layouts=[])
+    pipeline_layout = GpuPipelineLayout(device=dev, descriptor_set_layouts=[])
 
     # Create graphics pipeline
-    pipeline = dev.create_pipeline(
+    pipeline = GpuPipeline(
+        device=dev,
         vertex_shader=vertex_shader,
         fragment_shader=fragment_shader,
         vk_color_format=render_target.vk_format,
@@ -60,7 +74,7 @@ def test_render_simple_triangle():
     )
 
     # Render the triangle
-    cmd = dev.create_command_encoder(queue_type="graphics")
+    cmd = GpuCommandEncoder(device=dev, queue_type="graphics")
     cmd.transition_image_layout(image=render_target, layout="color-attachment-optimal")
     with cmd.render(
         color_attachment=render_target,
@@ -72,13 +86,14 @@ def test_render_simple_triangle():
 
     # Read back the rendered image
     # Create staging buffer for readback
-    staging_buffer = dev.create_buffer(
+    staging_buffer = GpuBuffer(
+        device=dev,
         usages=["staging", "copy-dst"],
         meta=render_target.meta.into_buffer_meta(),
     )
 
     # Copy image to staging buffer
-    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
     cmd.transition_image_layout(image=render_target, layout="copy-src")
     cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
     cmd.submit().wait()

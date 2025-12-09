@@ -18,7 +18,6 @@ from .gpu import (
     GpuBufferMeta,
     GpuContext,
     GpuDescriptorSet,
-    GpuDescriptorSetBinding,
     GpuDescriptorSetLayout,
     GpuDescriptorSetLayoutBinding,
     GpuDevice,
@@ -41,13 +40,6 @@ class RendererContext(BaseResource):
     def __init__(self, gpu_context: GpuContext):
         super().__init__(parent=gpu_context)
 
-    def create_renderer(self, *, gpu_device: GpuDevice) -> "Renderer":
-        """
-        Create a new `Renderer` instance using the given GPU device.
-        """
-
-        return Renderer(context=self, gpu_device=gpu_device)
-
 
 class Renderer(BaseResource):
     context: RendererContext
@@ -62,17 +54,13 @@ class Renderer(BaseResource):
         context: RendererContext,
         gpu_device: GpuDevice,
     ):
-        """
-        DO NOT CALL THIS CONSTRUCTOR DIRECTLY.
-
-        Use `RendererContext.create_renderer()` instead.
-        """
-
         super().__init__(parent=context)
 
+        self.context = context
         self.gpu_device = gpu_device
 
-        self.default_white_image_atlas = self.create_atlas(
+        self.default_white_image_atlas = RendererAtlas(
+            renderer=self,
             data=np.full((32, 32, 4), 0xFF, dtype=np.uint8),
             image_rect_map={"default": (0, 0, 32, 32)},
         )
@@ -82,51 +70,6 @@ class Renderer(BaseResource):
             renderer=self,
             default_white_image=self.default_white_image,
         )
-
-    def create_atlas(
-        self,
-        *,
-        data: np.ndarray,
-        image_rect_map: dict[str, tuple[int, int, int, int]],
-        mag_filter: GpuSamplerFilter = "linear",
-        min_filter: GpuSamplerFilter = "linear",
-        address_mode: GpuSamplerAddressMode = "clamp-to-edge",
-    ) -> "RendererAtlas":
-        """
-        Create a new `RendererAtlas` from the given image data and image rectangle map.
-        """
-
-        assert data.ndim == 3 and data.shape[2] == 4
-
-        gpu_image = self.gpu_device.create_image(
-            usages=["texture-binding"],
-            meta=GpuImageMeta.from_array(data),
-        )
-        gpu_sampler = self.gpu_device.create_sampler(
-            mag_filter=mag_filter,
-            min_filter=min_filter,
-            address_mode=address_mode,
-        )
-        gpu_image.write(data=data)
-
-        return RendererAtlas(
-            context=self.context,
-            gpu_image=gpu_image,
-            gpu_sampler=gpu_sampler,
-            image_rect_map=image_rect_map,
-        )
-
-    def create_canvas(self) -> "RendererCanvas":
-        """
-        Create a fresh `RendererCanvas` instance.
-
-        You should create a new canvas for each frame you want to render.
-
-        You can render quads to the canvas using the `RendererCanvas.draw()` method, and
-        then submit the canvas for rendering using the `Renderer.show()` method.
-        """
-
-        return self.renderer_2d.create_canvas()
 
     def show(self, *, canvas: "RendererCanvas", target: GpuImage):
         """
@@ -142,7 +85,7 @@ class Renderer(BaseResource):
 
 
 class RendererAtlas(BaseResource):
-    context: RendererContext
+    renderer: "Renderer"
     gpu_image: GpuImage
     gpu_sampler: GpuSampler
     image_map: dict[str, "RendererImage"]
@@ -150,14 +93,32 @@ class RendererAtlas(BaseResource):
     def __init__(
         self,
         *,
-        context: RendererContext,
-        gpu_image: GpuImage,
-        gpu_sampler: GpuSampler,
+        renderer: "Renderer",
+        data: np.ndarray,
         image_rect_map: dict[str, tuple[int, int, int, int]],
+        mag_filter: GpuSamplerFilter = "linear",
+        min_filter: GpuSamplerFilter = "linear",
+        address_mode: GpuSamplerAddressMode = "clamp-to-edge",
     ):
-        super().__init__(parent=context)
-        self.gpu_image = gpu_image
-        self.gpu_sampler = gpu_sampler
+        super().__init__(parent=renderer)
+
+        assert data.ndim == 3 and data.shape[2] == 4
+
+        self.renderer = renderer
+
+        self.gpu_image = GpuImage(
+            device=renderer.gpu_device,
+            usages=["texture-binding"],
+            meta=GpuImageMeta.from_array(data),
+        )
+        self.gpu_sampler = GpuSampler(
+            device=renderer.gpu_device,
+            mag_filter=mag_filter,
+            min_filter=min_filter,
+            address_mode=address_mode,
+        )
+        self.gpu_image.write(data=data)
+
         self.image_map = {
             name: RendererImage(atlas=self, entry_name=name, rect_xywh=rect_xywh)
             for name, rect_xywh in image_rect_map.items()
@@ -205,12 +166,14 @@ class RendererImage(BaseResource):
 
 
 class RendererCanvas(BaseResource):
+    renderer: "Renderer"
     cpu_quad_collection: R2dCpuQuadCollection
 
-    def __init__(self, *, default_white_image: RendererImage):
-        super().__init__()
+    def __init__(self, *, renderer: "Renderer"):
+        super().__init__(parent=renderer)
+        self.renderer = renderer
         self.cpu_quad_collection = R2dCpuQuadCollection(
-            default_white_image=default_white_image
+            default_white_image=renderer.default_white_image
         )
 
     def draw(
@@ -282,9 +245,6 @@ class Renderer2d(BaseResource):
     def gpu_device(self) -> GpuDevice:
         return self.renderer.gpu_device
 
-    def create_canvas(self) -> "RendererCanvas":
-        return RendererCanvas(default_white_image=self.default_white_image)
-
     def show(self, *, canvas: "RendererCanvas", target: GpuImage):
         assert "color-attachment" in target.usages
 
@@ -301,21 +261,25 @@ class Renderer2d(BaseResource):
         raise NotImplementedError("Renderer2d.show() WIP")
 
     def _new_vertex_shader(self) -> GpuShader:
-        return self.gpu_device.create_shader(
+        return GpuShader(
+            device=self.gpu_device,
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.vert.spv",
             stage="vertex",
         )
 
     def _new_fragment_shader(self) -> GpuShader:
-        return self.gpu_device.create_shader(
+        return GpuShader(
+            device=self.gpu_device,
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.frag.spv",
             stage="fragment",
         )
 
     def _new_pipeline_layout(self) -> GpuPipelineLayout:
-        return self.gpu_device.create_pipeline_layout(
+        return GpuPipelineLayout(
+            device=self.gpu_device,
             descriptor_set_layouts=[
-                self.gpu_device.create_descriptor_set_layout(
+                GpuDescriptorSetLayout(
+                    device=self.gpu_device,
                     bindings=OrderedDict(
                         {
                             "uniform": GpuDescriptorSetLayoutBinding(
@@ -323,9 +287,10 @@ class Renderer2d(BaseResource):
                                 stages=["vertex", "fragment"],
                             ),
                         }.items()
-                    )
+                    ),
                 ),
-                self.gpu_device.create_descriptor_set_layout(
+                GpuDescriptorSetLayout(
+                    device=self.gpu_device,
                     bindings=OrderedDict(
                         {
                             "atlasTexture": GpuDescriptorSetLayoutBinding(
@@ -337,19 +302,21 @@ class Renderer2d(BaseResource):
                                 stages=["fragment"],
                             ),
                         }.items()
-                    )
+                    ),
                 ),
-            ]
+            ],
         )
 
     def _new_common_uniform_buffer(self) -> GpuBuffer:
-        return self.gpu_device.create_buffer(
+        return GpuBuffer(
+            device=self.gpu_device,
             usages=["uniform", "copy-dst"],
             meta=GpuBufferMeta(element_count=1, element_dtype=R2D_UNIFORM_DTYPE),
         )
 
     def _new_common_uniform_descriptor_set(self) -> GpuDescriptorSet:
-        return self.gpu_device.create_descriptor_set(
+        return GpuDescriptorSet(
+            device=self.gpu_device,
             layout=self._pipeline_layout.descriptor_set_layouts[0],
             bindings={"uniform": self._common_uniform_buf},
         )
@@ -373,7 +340,8 @@ class Renderer2d(BaseResource):
         return self._cached_pipeline
 
     def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
-        return self.gpu_device.create_pipeline(
+        return GpuPipeline(
+            device=self.gpu_device,
             vertex_shader=self._vertex_shader,
             fragment_shader=self._fragment_shader,
             vk_color_format=target.vk_format,
@@ -435,14 +403,16 @@ class Renderer2d(BaseResource):
         atlas: RendererAtlas,
         cpu_batch: "R2dCpuQuadBatch",
     ) -> "R2dGpuQuadBatch":
-        gpu_quads_buf = self.gpu_device.create_buffer(
+        gpu_quads_buf = GpuBuffer(
+            device=self.gpu_device,
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
                 element_count=cpu_batch.capacity,
                 element_dtype=R2D_QUAD_NP_DTYPE,
             ),
         )
-        binding = self.gpu_device.create_descriptor_set(
+        binding = GpuDescriptorSet(
+            device=self.gpu_device,
             layout=self._pipeline_layout.descriptor_set_layouts[1],
             bindings={
                 "atlasTexture": (atlas.gpu_image, atlas.gpu_sampler),
@@ -472,7 +442,8 @@ class Renderer2d(BaseResource):
         return depth_image
 
     def _new_depth_image(self, *, width: int, height: int) -> GpuImage:
-        return self.gpu_device.create_image(
+        return GpuImage(
+            device=self.gpu_device,
             usages=["depth-attachment"],
             meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
         )

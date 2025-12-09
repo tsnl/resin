@@ -1,6 +1,8 @@
 import sys
 
 import zfw_core
+from zfw_core.gpu import GpuDevice, GpuSwapchain
+from zfw_core.renderer import Renderer
 
 
 class ZfwEngine:
@@ -23,19 +25,21 @@ class ZfwEngine:
 
         # Create GPU device using the surface:
         physical_device = next(iter(self.gpu_context.enumerate_physical_devices()))
-        self.device = self.gpu_context.create_device(
+        self.device = GpuDevice(
+            context=self.gpu_context,
             physical_device=physical_device,
             surface=self.surface,
         )
 
         # Create swapchain:
-        self.swapchain = self.device.create_swapchain(
+        self.swapchain = GpuSwapchain(
+            device=self.device,
             surface=self.surface,
             image_count=swapchain_image_count,
         )
 
         # Create renderer:
-        self.renderer = self.render_context.create_renderer(gpu_device=self.device)
+        self.renderer = Renderer(context=self.render_context, gpu_device=self.device)
 
     def print_gpu_debug_info(
         self,

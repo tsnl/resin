@@ -17,13 +17,21 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from zfw_core.gpu import (
+    GpuBuffer,
     GpuBufferMeta,
+    GpuCommandEncoder,
     GpuContext,
+    GpuDescriptorSet,
     GpuDescriptorSetBinding,
+    GpuDescriptorSetLayout,
     GpuDescriptorSetLayoutBinding,
     GpuDevice,
     GpuImage,
     GpuImageMeta,
+    GpuPipeline,
+    GpuPipelineLayout,
+    GpuSampler,
+    GpuShader,
 )
 
 
@@ -35,7 +43,7 @@ def make_context() -> tuple[GpuContext, GpuDevice]:
         enable_present_support=False,
     )
     phys = ctx.enumerate_physical_devices()[0]
-    dev = ctx.create_device(physical_device=phys, surface=None)
+    dev = GpuDevice(context=ctx, physical_device=phys, surface=None)
     return ctx, dev
 
 
@@ -79,13 +87,15 @@ def upload_texture(dev: GpuDevice, texture_data: np.ndarray) -> GpuImage:
     assert channels == 4, "Texture must be RGBA8"
 
     # Create the GPU image
-    texture = dev.create_image(
+    texture = GpuImage(
+        device=dev,
         usages=["texture-binding"],
         meta=GpuImageMeta(shape=(height, width, 4), dtype=np.uint8),
     )
 
     # Create staging buffer for upload
-    staging_buffer = dev.create_buffer(
+    staging_buffer = GpuBuffer(
+        device=dev,
         usages=["staging", "copy-src"],
         meta=texture.meta.into_buffer_meta(),
     )
@@ -94,7 +104,7 @@ def upload_texture(dev: GpuDevice, texture_data: np.ndarray) -> GpuImage:
     staging_buffer.write(data=texture_data)
 
     # Copy staging buffer to texture
-    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
     cmd.transition_image_layout(image=texture, layout="copy-dst")
     cmd.copy_buffer_to_image(src=staging_buffer, dst=texture)
     cmd.transition_image_layout(image=texture, layout="texture-binding")
@@ -113,40 +123,45 @@ def render_tinted_bitmap(
 ) -> np.ndarray:
     """Render a texture with a tint color and return the result."""
     # Create render target image (RGBA8)
-    render_target = dev.create_image(
+    render_target = GpuImage(
+        device=dev,
         usages=["color-attachment", "texture-binding"],
         meta=GpuImageMeta(shape=(output_height, output_width, 4), dtype=np.uint8),
     )
 
     # Create sampler
-    sampler = dev.create_sampler(
+    sampler = GpuSampler(
+        device=dev,
         mag_filter="linear",
         min_filter="linear",
         address_mode="clamp-to-edge",
     )
 
     # Create uniform buffer for tint color (4 floats for RGBA)
-    tint_buffer = dev.create_buffer(
+    tint_buffer = GpuBuffer(
+        device=dev,
         usages=["uniform", "copy-dst"],
         meta=GpuBufferMeta(element_count=4, element_dtype=np.float32),
     )
 
     # Upload tint color to uniform buffer via staging
-    tint_staging = dev.create_buffer(
+    tint_staging = GpuBuffer(
+        device=dev,
         usages=["staging", "copy-src"],
         meta=tint_buffer.meta,
     )
     tint_data = np.array(tint_color, dtype=np.float32)
     tint_staging.write(data=tint_data)
 
-    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
     cmd.copy_buffer_to_buffer(
         src=tint_staging, dst=tint_buffer, size=tint_buffer.meta.size
     )
     cmd.submit().wait()
 
     # Create descriptor set layout
-    descriptor_set_layout = dev.create_descriptor_set_layout(
+    descriptor_set_layout = GpuDescriptorSetLayout(
+        device=dev,
         bindings=OrderedDict(
             {
                 "tintParams": GpuDescriptorSetLayoutBinding(
@@ -158,11 +173,12 @@ def render_tinted_bitmap(
                     stages=["fragment"],
                 ),
             }.items()
-        )
+        ),
     )
 
     # Create descriptor set
-    descriptor_set = dev.create_descriptor_set(
+    descriptor_set = GpuDescriptorSet(
+        device=dev,
         layout=descriptor_set_layout,
         bindings={
             "tintParams": tint_buffer,
@@ -171,22 +187,26 @@ def render_tinted_bitmap(
     )
 
     # Create pipeline layout
-    pipeline_layout = dev.create_pipeline_layout(
+    pipeline_layout = GpuPipelineLayout(
+        device=dev,
         descriptor_set_layouts=[descriptor_set_layout],
     )
 
     # Load shaders
-    vertex_shader = dev.create_shader(
+    vertex_shader = GpuShader(
+        device=dev,
         spirv_path=shader_dir / "tinted_bitmap.vert.spv",
         stage="vertex",
     )
-    fragment_shader = dev.create_shader(
+    fragment_shader = GpuShader(
+        device=dev,
         spirv_path=shader_dir / "tinted_bitmap.frag.spv",
         stage="fragment",
     )
 
     # Create graphics pipeline
-    pipeline = dev.create_pipeline(
+    pipeline = GpuPipeline(
+        device=dev,
         vertex_shader=vertex_shader,
         fragment_shader=fragment_shader,
         vk_color_format=render_target.vk_format,
@@ -196,7 +216,7 @@ def render_tinted_bitmap(
     )
 
     # Render the tinted quad
-    cmd = dev.create_command_encoder(queue_type="graphics")
+    cmd = GpuCommandEncoder(device=dev, queue_type="graphics")
     cmd.transition_image_layout(image=render_target, layout="color-attachment-optimal")
     with cmd.render(
         color_attachment=render_target,
@@ -215,12 +235,13 @@ def render_tinted_bitmap(
     cmd.submit().wait()
 
     # Read back the rendered image
-    staging_buffer = dev.create_buffer(
+    staging_buffer = GpuBuffer(
+        device=dev,
         usages=["staging", "copy-dst"],
         meta=render_target.meta.into_buffer_meta(),
     )
 
-    cmd = dev.create_command_encoder(queue_type="transfer")
+    cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
     cmd.transition_image_layout(image=render_target, layout="copy-src")
     cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
     cmd.submit().wait()

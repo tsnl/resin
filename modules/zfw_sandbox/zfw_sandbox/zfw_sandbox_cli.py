@@ -31,7 +31,6 @@ def main():
 
     while not engine.window.should_close():
         engine.window.poll_events()
-
         # TODO: render
 
 
