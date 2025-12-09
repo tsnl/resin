@@ -1,12 +1,11 @@
 __all__ = ["Window"]
 
-from typing import TypeAlias
-
 import glfw
 
 from .basic import BaseResource
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
+from .typed_vulkan import raw_ffi, VkSurfaceKHR
 
 
 class WindowContext(BaseResource):
@@ -24,7 +23,12 @@ class WindowContext(BaseResource):
 
 
 class Window(BaseResource):
+    context: WindowContext
+    width: int
+    height: int
+    title: str
     glfw_window_handle: glfw._GLFWwindow
+    gpu_surface: GpuSurface
 
     def __init__(
         self,
@@ -36,22 +40,21 @@ class Window(BaseResource):
     ) -> None:
         super().__init__(parent=context)
         self.context = context
-        self.glfw_window_handle = Window._new_glfw_window(
-            width=width,
-            height=height,
-            title=title,
-        )
+        self.width = width
+        self.height = height
+        self.title = title
+        self.glfw_window_handle = self._new_glfw_window()
+        self.gpu_surface = self._new_gpu_surface()
 
-    @staticmethod
-    def _new_glfw_window(width: int, height: int, title: str) -> glfw._GLFWwindow:
+    def _new_glfw_window(self) -> glfw._GLFWwindow:
         glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
         glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
 
         glfw_window = glfw.create_window(
-            width=width,
-            height=height,
-            title=title,
+            width=self.width,
+            height=self.height,
+            title=self.title,
             monitor=None,
             share=None,
         )
@@ -60,18 +63,29 @@ class Window(BaseResource):
 
         return glfw_window
 
+    def _new_gpu_surface(self) -> GpuSurface:
+        if not self.context.gpu_context.enable_present_support:
+            raise RuntimeError("GPU context does not support presentation")
+
+        surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
+        result = glfw.create_window_surface(
+            instance=self.context.gpu_context.vk_instance,
+            window=self.glfw_window_handle,
+            allocator=None,
+            surface=surface_ptr,
+        )
+        if result != 0:
+            raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
+        width, height = glfw.get_framebuffer_size(self.glfw_window_handle)
+        return GpuSurface(
+            context=self.context.gpu_context,
+            vk_surface=surface_ptr[0],
+            width=width,
+            height=height,
+        )
+
     def _on_dispose(self) -> None:
         glfw.destroy_window(self.glfw_window_handle)
-
-    def create_surface(self) -> GpuSurface:
-        width, height = glfw.get_framebuffer_size(
-            self.glfw_window_handle,
-        )
-        return self.context.gpu_context.create_surface_from_raw_glfw_window_handle(
-            raw_glfw_window_handle=self.glfw_window_handle,
-            framebuffer_width=width,
-            framebuffer_height=height,
-        )
 
     def should_close(self) -> bool:
         return glfw.window_should_close(self.glfw_window_handle)

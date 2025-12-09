@@ -560,39 +560,6 @@ class GpuContext(GpuResource):
             for vk_physical_device in vkEnumeratePhysicalDevices(self.vk_instance)
         ]
 
-    def create_surface_from_raw_glfw_window_handle(
-        self,
-        *,
-        raw_glfw_window_handle: glfw._GLFWwindow,
-        framebuffer_width: int,
-        framebuffer_height: int,
-    ) -> GpuSurface:
-        """
-        Do not call directly: use Window.create_surface() instead.
-        """
-
-        if not self.enable_present_support:
-            raise LogicError(
-                "Cannot create a GpuSurface when GpuContext was created with "
-                "enable_present_support=False"
-            )
-
-        surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
-        result = glfw.create_window_surface(
-            instance=self.vk_instance,
-            window=raw_glfw_window_handle,
-            allocator=None,
-            surface=surface_ptr,
-        )
-        if result != 0:
-            raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
-        return GpuSurface(
-            context=self,
-            vk_surface=surface_ptr[0],
-            width=framebuffer_width,
-            height=framebuffer_height,
-        )
-
     def print_debug_info(self, out: SupportsWrite[str], indent: int = 4) -> None:
         json.dump(
             {

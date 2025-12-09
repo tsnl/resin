@@ -23,25 +23,27 @@ class ZfwEngine:
             height=720,
             title="Zero Sandbox",
         )
-        self.surface = self.window.create_surface()
 
         # Create GPU device using the surface:
         physical_device = next(iter(self.gpu_context.enumerate_physical_devices()))
-        self.device = GpuDevice(
+        self.gpu_device = GpuDevice(
             context=self.gpu_context,
             physical_device=physical_device,
-            surface=self.surface,
+            surface=self.window.gpu_surface,
         )
 
         # Create swapchain:
-        self.swapchain = GpuSwapChain(
-            device=self.device,
-            surface=self.surface,
+        self.gpu_swapchain = GpuSwapChain(
+            device=self.gpu_device,
+            surface=self.window.gpu_surface,
             image_count=swapchain_image_count,
         )
 
         # Create renderer:
-        self.renderer = Renderer(context=self.render_context, gpu_device=self.device)
+        self.renderer = Renderer(
+            context=self.render_context,
+            gpu_device=self.gpu_device,
+        )
 
     def print_gpu_debug_info(
         self,
