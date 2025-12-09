@@ -3,6 +3,7 @@ import sys
 import zfw_core
 from zfw_core.gpu import GpuDevice, GpuSwapchain
 from zfw_core.renderer import Renderer
+from zfw_core.window import Window
 
 
 class ZfwEngine:
@@ -16,7 +17,8 @@ class ZfwEngine:
         self.render_context = zfw_core.RendererContext(gpu_context=self.gpu_context)
 
         # Create window, GPU surface:
-        self.window = self.window_context.create_window(
+        self.window = Window(
+            context=self.window_context,
             width=1280,
             height=720,
             title="Zero Sandbox",

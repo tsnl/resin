@@ -263,14 +263,14 @@ class Renderer2d(BaseResource):
     def _new_vertex_shader(self) -> GpuShader:
         return GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.vert.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.vert.spv",
             stage="vertex",
         )
 
     def _new_fragment_shader(self) -> GpuShader:
         return GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.frag.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.frag.spv",
             stage="fragment",
         )
 

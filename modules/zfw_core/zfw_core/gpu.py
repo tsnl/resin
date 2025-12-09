@@ -72,7 +72,8 @@ from .typed_vulkan import (
     VK_FENCE_CREATE_SIGNALED_BIT,
     VK_FILTER_LINEAR,
     VK_FILTER_NEAREST,
-    VK_FORMAT_B8G8R8A8_UNORM,
+    VK_FORMAT_R8G8B8A8_SRGB,
+    VK_FORMAT_B8G8R8A8_SRGB,
     VK_FORMAT_D32_SFLOAT,
     VK_FORMAT_R8G8B8A8_UNORM,
     VK_FORMAT_R32_SFLOAT,
@@ -165,6 +166,7 @@ from .typed_vulkan import (
     VkFence,
     VkFenceCreateInfo,
     VkFormat,
+    VkColorSpaceKHR,
     VkGraphicsPipelineCreateInfo,
     VkImage,
     VkImageCopy,
@@ -705,14 +707,17 @@ class GpuPhysicalDevice(GpuResource):
 
         return res
 
-    def get_surface_formats(self, surface: "GpuSurface") -> list[VkSurfaceFormatKHR]:
+    def get_surface_formats(
+        self, surface: "GpuSurface"
+    ) -> list[tuple[VkFormat, VkColorSpaceKHR]]:
         assert self.context.enable_present_support
-        return list(
-            self.context.vkGetPhysicalDeviceSurfaceFormatsKHR(
+        return [
+            (it.format, it.colorSpace)
+            for it in self.context.vkGetPhysicalDeviceSurfaceFormatsKHR(
                 self.vk_physical_device,
                 surface.vk_surface,
             )
-        )
+        ]
 
 
 @dataclass
@@ -2766,20 +2771,21 @@ class GpuSwapchain(GpuResource):
         self.device = device
         self.frame_counter = 0
 
-        vk_format = VK_FORMAT_B8G8R8A8_UNORM
+        vk_format = VK_FORMAT_B8G8R8A8_SRGB
         vk_colorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
         vk_surface_format_list = device.physical_device.get_surface_formats(surface)
-        for surface_format in vk_surface_format_list:
-            if surface_format.format != vk_format:
+        for surface_format, surface_color_space in vk_surface_format_list:
+            print(f"{surface_format=!r}, {surface_color_space=!r}")
+            if surface_format != vk_format:
                 continue
-            if surface_format.colorSpace != vk_colorspace:
+            if surface_color_space != vk_colorspace:
                 continue
             break
         else:
             raise PlatformSupportError(
                 f"Physical device {device.physical_device.name!r} does not support "
                 "the required swapchain format: "
-                f"Requires format=VK_FORMAT_B8G8R8A8_UNORM, "
+                f"Requires format=VK_FORMAT_R8G8B8A8_SRGB, "
                 f"colorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR."
             )
 

@@ -57,7 +57,8 @@ __all__ = [
     "VK_FORMAT_D32_SFLOAT",
     "VK_FORMAT_R32G32B32A32_SFLOAT",
     "VK_FORMAT_R32_SFLOAT",
-    "VK_FORMAT_R8G8B8A8_UNORM",
+    "VK_FORMAT_R8G8B8A8_SRGB",
+    "VK_FORMAT_B8G8R8A8_SRGB",
     "VK_FORMAT_UNDEFINED",
     "VK_FRONT_FACE_CLOCKWISE",
     "VK_FRONT_FACE_COUNTER_CLOCKWISE",
@@ -321,6 +322,8 @@ __all__ = [
     "VK_QUEUE_FAMILY_IGNORED",
     "vkUpdateDescriptorSets",
     "VkWriteDescriptorSet",
+    "VkFormat",
+    "VkColorSpaceKHR",
 ]
 
 
