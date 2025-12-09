@@ -218,10 +218,7 @@ def render_tinted_bitmap(
     # Render the tinted quad
     cmd = GpuCommandEncoder(device=dev, queue_type="graphics")
     cmd.transition_image_layout(image=render_target, layout="color-attachment-optimal")
-    with cmd.render(
-        color_attachment=render_target,
-        clear_on_load=True,
-    ) as render_pass:
+    with cmd.render(color_attachment=render_target, clear="black") as render_pass:
         render_pass.bind_pipeline(pipeline=pipeline)
         render_pass.bind_descriptor_sets(first_set=0, sets=[descriptor_set])
         render_pass.draw(vertex_count=6, instance_count=1)

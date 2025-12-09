@@ -296,29 +296,7 @@ if TYPE_CHECKING:
 #
 
 
-class GpuResource(BaseResource):
-    parent: GpuResource | None
-    context: "GpuContext"
-
-    def __init__(
-        self,
-        *,
-        parent: GpuResource | None,
-        context: GpuContext | None = None,
-    ):
-        super().__init__(parent=parent)
-
-        if parent is None:
-            assert context is not None
-            self.parent = None
-            self.context = context
-        else:
-            assert context is None
-            self.parent = parent
-            self.context = parent.context
-
-
-class GpuContext(GpuResource):
+class GpuContext(BaseResource):
     enable_debug_layer_support: bool
     enable_present_support: bool
     enable_portability_subset: bool
@@ -332,7 +310,7 @@ class GpuContext(GpuResource):
         enable_present_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
-        super().__init__(parent=None, context=self)
+        super().__init__(parent=None)
 
         enable_portability_subset = (
             enable_portability_subset_override
@@ -595,7 +573,8 @@ GpuPhysicalDeviceType: TypeAlias = Literal[
 ]
 
 
-class GpuPhysicalDevice(GpuResource):
+class GpuPhysicalDevice(BaseResource):
+    context: GpuContext
     vk_physical_device: VkPhysicalDevice
     vk_properties: VkPhysicalDeviceProperties
     vk_memory_properties: VkPhysicalDeviceMemoryProperties
@@ -609,6 +588,7 @@ class GpuPhysicalDevice(GpuResource):
         vk_memory_properties: VkPhysicalDeviceMemoryProperties,
     ) -> None:
         super().__init__(parent=context)
+        self.context = context
         self.vk_physical_device = vk_physical_device
         self.vk_properties = vk_properties
         self.vk_memory_properties = vk_memory_properties
@@ -842,7 +822,8 @@ class GpuQueueFamilyIndices:
 #
 
 
-class GpuDevice(GpuResource):
+class GpuDevice(BaseResource):
+    context: GpuContext
     physical_device: GpuPhysicalDevice
     qfis: GpuQueueFamilyIndices
     vk_device: VkDevice
@@ -864,9 +845,11 @@ class GpuDevice(GpuResource):
     ) -> None:
         super().__init__(parent=context)
 
-        physical_device.check_vulkan_1_3_support()
+        self.context = context
 
+        physical_device.check_vulkan_1_3_support()
         self.physical_device = physical_device
+
         self.qfis = GpuQueueFamilyIndices.find(physical_device, surface=surface)
         self.vk_device = self._help_create_device(
             physical_device=physical_device,
@@ -1045,7 +1028,7 @@ class GpuDevice(GpuResource):
 #
 
 
-class GpuMemory(GpuResource):
+class GpuMemory(BaseResource):
     device: GpuDevice
     vk_device_memory: VkDeviceMemory
     size: int
@@ -1253,7 +1236,7 @@ def vk_image_aspect(usages: list[GpuImageUsage]) -> int:
     return result
 
 
-class GpuImage(GpuResource):
+class GpuImage(BaseResource):
     device: GpuDevice
     vk_image: VkImage
     vk_image_view: VkImageView
@@ -1437,17 +1420,12 @@ class GpuImage(GpuResource):
 #
 
 
-class GpuSemaphore(GpuResource):
+class GpuSemaphore(BaseResource):
     device: GpuDevice
     vk_semaphore: VkSemaphore
 
-    def __init__(
-        self,
-        *,
-        device: GpuDevice,
-        parent: GpuResource | None = None,
-    ) -> None:
-        super().__init__(parent=(parent or device))
+    def __init__(self, *, device: GpuDevice) -> None:
+        super().__init__(parent=device)
         self.device = device
 
         self.vk_semaphore = vkCreateSemaphore(
@@ -1465,18 +1443,12 @@ class GpuSemaphore(GpuResource):
 #
 
 
-class GpuFence(GpuResource):
+class GpuFence(BaseResource):
     device: GpuDevice
     vk_fence: VkFence
 
-    def __init__(
-        self,
-        *,
-        device: GpuDevice,
-        parent: GpuResource | None = None,
-        signalled: bool = False,
-    ) -> None:
-        super().__init__(parent=(parent or device))
+    def __init__(self, *, device: GpuDevice, signalled: bool = False) -> None:
+        super().__init__(parent=device)
         self.device = device
         self.vk_fence = vkCreateFence(
             device=device.vk_device,
@@ -1486,18 +1458,18 @@ class GpuFence(GpuResource):
             pAllocator=None,
         )
 
-    def wait(self, *, timeout_ns: int = 10**10) -> None:
+    def wait(self, *, timeout_sec: float = 1.0) -> None:
         """Wait for fence to be signaled.
 
         Args:
-            timeout_ns: Timeout in nanoseconds (default 10s)
+            timeout_sec: Timeout in seconds (default 1s)
         """
         vkWaitForFences(
             device=self.device.vk_device,
             fenceCount=1,
             pFences=[self.vk_fence],
             waitAll=True,
-            timeout=timeout_ns,
+            timeout=int(timeout_sec * 1e9),
         )
 
     def reset(self) -> None:
@@ -1613,7 +1585,7 @@ def vk_buffer_device_local(usages: list[GpuBufferUsage]) -> bool:
     return device_local
 
 
-class GpuBuffer(GpuResource):
+class GpuBuffer(BaseResource):
     device: GpuDevice
     vk_buffer: VkBuffer
     memory: GpuMemory
@@ -1702,26 +1674,28 @@ class GpuBuffer(GpuResource):
 GpuCommandBufferLevel: TypeAlias = Literal["primary", "secondary"]
 
 
-class GpuCommandEncoder(GpuResource):
+class GpuCommandEncoder(BaseResource):
     device: GpuDevice
     vk_command_buffer: VkCommandBuffer
     queue_family_index: int
     submit_queue_type: GpuQueueType
-    _submit_fence: WeakRef[GpuFence] | None
+    _submit_fence: GpuFence | None
 
     def __init__(self, *, device: GpuDevice, queue_type: GpuQueueType) -> None:
         super().__init__(parent=device)
         self.device = device
         self.submit_queue_type = queue_type
         self.queue_family_index = device.qfis[queue_type]
-        self.vk_command_buffer = self._help_allocate_command_buffer(
+        self.vk_command_buffer = self._allocate_command_buffer(
             device, self.queue_family_index
         )
         self._submit_fence = None
-        self._help_begin_command_buffer(self.vk_command_buffer)
+        self._submit_fence_is_owned = False
+
+        self._begin_command_buffer(self.vk_command_buffer)
 
     @staticmethod
-    def _help_allocate_command_buffer(
+    def _allocate_command_buffer(
         device: GpuDevice, queue_family_index: int
     ) -> VkCommandBuffer:
         vk_command_pool = device.vk_command_pools[queue_family_index]
@@ -1734,8 +1708,7 @@ class GpuCommandEncoder(GpuResource):
             ),
         )[0]
 
-    @staticmethod
-    def _help_begin_command_buffer(vk_command_buffer: VkCommandBuffer) -> None:
+    def _begin_command_buffer(self, vk_command_buffer: VkCommandBuffer) -> None:
         vkBeginCommandBuffer(
             commandBuffer=vk_command_buffer,
             pBeginInfo=VkCommandBufferBeginInfo(
@@ -1744,11 +1717,21 @@ class GpuCommandEncoder(GpuResource):
             ),
         )
 
+    def _end_command_buffer(self, vk_command_buffer: VkCommandBuffer) -> None:
+        vkEndCommandBuffer(commandBuffer=vk_command_buffer)
+
     def _on_dispose(self) -> None:
-        # Wait for submission to complete
-        opt_submit_fence = self._submit_fence() if self._submit_fence else None
-        if opt_submit_fence is not None:
-            opt_submit_fence.wait()
+        # If not submitted, end the command buffer:
+        if self._submit_fence is None:
+            self._end_command_buffer(self.vk_command_buffer)
+
+        # Wait for submission to complete:
+        if self._submit_fence is not None:
+            if self._submit_fence_is_owned:
+                self._submit_fence.dispose()
+            else:
+                self._submit_fence.wait()
+            self._submit_fence = None
 
         # Free the command buffer
         vkFreeCommandBuffers(
@@ -1891,7 +1874,7 @@ class GpuCommandEncoder(GpuResource):
         *,
         color_attachment: GpuImage | None = None,
         depth_attachment: GpuImage | None = None,
-        clear_on_load: bool = False,
+        clear: Literal["black", "transparent"] | None = None,
     ):
         color_infos: list[VkRenderingAttachmentInfo] = []
         if color_attachment is not None:
@@ -1904,12 +1887,18 @@ class GpuCommandEncoder(GpuResource):
                     resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                     loadOp=(
                         VK_ATTACHMENT_LOAD_OP_CLEAR
-                        if clear_on_load
+                        if clear is not None
                         else VK_ATTACHMENT_LOAD_OP_LOAD
                     ),
                     storeOp=VK_ATTACHMENT_STORE_OP_STORE,
                     clearValue=VkClearValue(
-                        color=VkClearColorValue(float32=[0.0, 0.0, 0.0, 0.0])
+                        color=VkClearColorValue(
+                            float32=(
+                                [0.0, 0.0, 0.0, 1.0]
+                                if clear == "black"
+                                else [0.0, 0.0, 0.0, 0.0]
+                            ),
+                        )
                     ),
                 )
             )
@@ -1923,9 +1912,7 @@ class GpuCommandEncoder(GpuResource):
                 resolveImageView=None,
                 resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                 loadOp=(
-                    VK_ATTACHMENT_LOAD_OP_CLEAR
-                    if clear_on_load
-                    else VK_ATTACHMENT_LOAD_OP_LOAD
+                    VK_ATTACHMENT_LOAD_OP_CLEAR if clear else VK_ATTACHMENT_LOAD_OP_LOAD
                 ),
                 storeOp=VK_ATTACHMENT_STORE_OP_STORE,
                 clearValue=VkClearValue(
@@ -2080,23 +2067,25 @@ class GpuCommandEncoder(GpuResource):
         wait_semaphores: list["GpuSemaphore"] | None = None,
         signal_semaphores: list["GpuSemaphore"] | None = None,
     ) -> GpuFence:
-        vkEndCommandBuffer(commandBuffer=self.vk_command_buffer)
+        self._end_command_buffer(self.vk_command_buffer)
 
         if self._submit_fence is not None:
             raise LogicError("Each GpuCommandEncoder can only be submitted once.")
 
-        fence = fence or GpuFence(device=self.device, parent=self)
-        self._submit_fence = WeakRef(fence)
+        self._submit_fence = (
+            fence if fence is not None else GpuFence(device=self.device)
+        )
+        self._submit_fence_is_owned = fence is None
 
         self.device.submit(
             queue_type=self.submit_queue_type,
             command_buffers=[self.vk_command_buffer],
             wait_semaphores=wait_semaphores or [],
             signal_semaphores=signal_semaphores or [],
-            fence=fence,
+            fence=self._submit_fence,
         )
 
-        return fence
+        return self._submit_fence
 
 
 #
@@ -2104,7 +2093,7 @@ class GpuCommandEncoder(GpuResource):
 #
 
 
-class GpuShader(GpuResource):
+class GpuShader(BaseResource):
     """Wrapper for VkShaderModule"""
 
     device: GpuDevice
@@ -2185,7 +2174,7 @@ def vk_sampler_address_mode(mode: "GpuSamplerAddressMode") -> int:
             raise LogicError(f"Invalid sampler address mode: {mode!r}")
 
 
-class GpuSampler(GpuResource):
+class GpuSampler(BaseResource):
     """Wrapper for VkSampler"""
 
     device: GpuDevice
@@ -2267,7 +2256,7 @@ GpuSamplerAddressMode: TypeAlias = Literal[
 #
 
 
-class GpuDescriptorPool(GpuResource):
+class GpuDescriptorPool(BaseResource):
     """Wrapper for VkDescriptorPool"""
 
     device: GpuDevice
@@ -2326,7 +2315,7 @@ class GpuDescriptorPool(GpuResource):
 #
 
 
-class GpuPipelineLayout(GpuResource):
+class GpuPipelineLayout(BaseResource):
     device: GpuDevice
     vk_pipeline_layout: VkPipelineLayout
     descriptor_set_layouts: list[GpuDescriptorSetLayout]
@@ -2375,7 +2364,7 @@ class GpuPipelineLayout(GpuResource):
         )
 
 
-class GpuDescriptorSetLayout(GpuResource):
+class GpuDescriptorSetLayout(BaseResource):
     device: GpuDevice
     vk_descriptor_set_layout: VkDescriptorSetLayout
     bindings: OrderedDict[str, "GpuDescriptorSetLayoutBinding"]
@@ -2441,7 +2430,7 @@ class GpuDescriptorSetLayoutBinding:
 #
 
 
-class GpuDescriptorSet(GpuResource):
+class GpuDescriptorSet(BaseResource):
     device: GpuDevice
     vk_descriptor_set: VkDescriptorSet
     pool: GpuDescriptorPool
@@ -2634,7 +2623,7 @@ def vk_descriptor_type(t: GpuDescriptorType):
 #
 
 
-class GpuPipeline(GpuResource):
+class GpuPipeline(BaseResource):
     device: GpuDevice
     vk_pipeline: VkPipeline
     vk_color_format: VkFormat
@@ -2855,7 +2844,7 @@ class GpuPipeline(GpuResource):
         )
 
 
-class GpuRenderPassCommandEncoder(GpuResource):
+class GpuRenderPassCommandEncoder(BaseResource):
     device: GpuDevice
     command_encoder: GpuCommandEncoder
     bound_pipeline: GpuPipeline | None
@@ -2938,7 +2927,8 @@ class GpuRenderPassCommandEncoder(GpuResource):
 #
 
 
-class GpuSurface(GpuResource):
+class GpuSurface(BaseResource):
+    context: GpuContext
     vk_surface: VkSurfaceKHR
     width: int
     height: int
@@ -2952,6 +2942,7 @@ class GpuSurface(GpuResource):
         height: int,
     ):
         super().__init__(parent=context)
+        self.context = context
         self.vk_surface = vk_surface
         self.width = width
         self.height = height
@@ -2969,7 +2960,7 @@ class GpuSurface(GpuResource):
 #
 
 
-class GpuSwapChain(GpuResource):
+class GpuSwapChain(BaseResource):
     device: GpuDevice
     vk_swapchain: VkSwapchainKHR
     images: list[GpuImage]
@@ -2986,7 +2977,7 @@ class GpuSwapChain(GpuResource):
         surface: GpuSurface,
         image_count: int,
     ):
-        super().__init__(parent=device)
+        super().__init__(parent=surface)
         self.device = device
         self.frame_counter = 0
         self.width = surface.width
@@ -2997,6 +2988,10 @@ class GpuSwapChain(GpuResource):
         self.vk_swapchain = self._create_swap_chain(surface, image_count)
         self.images = self._wrap_swap_chain_images(surface)
         self.slots = self._create_slots()
+
+    @property
+    def context(self) -> GpuContext:
+        return self.device.context
 
     @staticmethod
     def _select_surface_format(device: GpuDevice, surface: GpuSurface):
@@ -3121,7 +3116,7 @@ class GpuSwapChain(GpuResource):
         )
 
 
-class GpuSwapChainSlot(GpuResource):
+class GpuSwapChainSlot(BaseResource):
     swap_chain: GpuSwapChain
     in_flight_fence: GpuFence
     image_available_semaphore: GpuSemaphore
@@ -3130,19 +3125,14 @@ class GpuSwapChainSlot(GpuResource):
     def __init__(self, *, swap_chain: GpuSwapChain):
         super().__init__(parent=swap_chain)
         self.swap_chain = swap_chain
-        self.in_flight_fence = GpuFence(
-            device=swap_chain.device,
-            parent=self,
-            signalled=True,
-        )
-        self.image_available_semaphore = GpuSemaphore(
-            device=swap_chain.device,
-            parent=self,
-        )
-        self.render_done_semaphore = GpuSemaphore(
-            device=swap_chain.device,
-            parent=self,
-        )
+        self.in_flight_fence = GpuFence(device=swap_chain.device, signalled=True)
+        self.image_available_semaphore = GpuSemaphore(device=swap_chain.device)
+        self.render_done_semaphore = GpuSemaphore(device=swap_chain.device)
+
+    def _on_dispose(self) -> None:
+        self.in_flight_fence.dispose()
+        self.image_available_semaphore.dispose()
+        self.render_done_semaphore.dispose()
 
 
 @dataclass

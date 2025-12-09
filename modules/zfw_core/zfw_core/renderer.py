@@ -70,10 +70,15 @@ class Renderer(BaseResource):
         )
         self.default_white_image = self.default_white_image_atlas["default"]
 
-        self.renderer_2d = Renderer2d(
-            renderer=self,
-            default_white_image=self.default_white_image,
-        )
+        self.renderer_2d = Renderer2d(renderer=self)
+
+    def _on_dispose(self) -> None:
+        # Explicitly dispose renderer_2d since there's a circular reference between self
+        # and renderer_2d.
+        self.renderer_2d.dispose()
+
+        # Dispose default white image and atlas:
+        self.default_white_image_atlas.dispose()
 
     def show(
         self,
@@ -163,6 +168,10 @@ class RendererAtlas(BaseResource):
         }
 
         self.write(data=data)
+
+    def _on_dispose(self) -> None:
+        self.gpu_sampler.dispose()
+        self.gpu_image.dispose()
 
     def __getitem__(self, image_name: str) -> "RendererImage":
         return self.image_map[image_name]
@@ -285,8 +294,9 @@ class RendererCanvas(BaseResource):
 
 
 class Renderer2d(BaseResource):
-    renderer: Renderer
-    default_white_image: RendererImage
+    _renderer: Renderer
+    _gpu_device: GpuDevice
+    _default_white_image: RendererImage
     _vertex_shader: GpuShader
     _fragment_shader: GpuShader
     _pipeline_layout: GpuPipelineLayout
@@ -297,16 +307,13 @@ class Renderer2d(BaseResource):
     _cached_depth_image: GpuImage | None
     _cached_gpu_batches: dict["RendererAtlas", "R2dGpuQuadBatch"]
 
-    def __init__(
-        self,
-        *,
-        renderer: Renderer,
-        default_white_image: RendererImage,
-    ):
+    def __init__(self, *, renderer: Renderer):
         super().__init__(parent=renderer)
 
-        self.renderer = renderer
-        self.default_white_image = default_white_image
+        self._renderer = renderer
+        self._gpu_device = renderer.gpu_device
+        self._default_white_image = renderer.default_white_image
+
         self._vertex_shader = self._new_vertex_shader()
         self._fragment_shader = self._new_fragment_shader()
         self._pipeline_layout = self._new_pipeline_layout()
@@ -317,9 +324,24 @@ class Renderer2d(BaseResource):
         self._cached_depth_image = None
         self._cached_gpu_batches = {}
 
-    @property
-    def gpu_device(self) -> GpuDevice:
-        return self.renderer.gpu_device
+    def _on_dispose(self) -> None:
+        self._vertex_shader.dispose()
+        self._fragment_shader.dispose()
+
+        self._pipeline_layout.dispose()
+
+        self._common_uniform_descriptor_set.dispose()
+
+        self._common_uniform_staging_buf.dispose()
+        self._common_uniform_device_buf.dispose()
+
+        for gpu_batch in self._cached_gpu_batches.values():
+            gpu_batch.dispose()
+
+        if self._cached_depth_image is not None:
+            self._cached_depth_image.dispose()
+        if self._cached_pipeline is not None:
+            self._cached_pipeline.dispose()
 
     def show(
         self,
@@ -346,24 +368,24 @@ class Renderer2d(BaseResource):
 
     def _new_vertex_shader(self) -> GpuShader:
         return GpuShader(
-            device=self.gpu_device,
+            device=self._gpu_device,
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.vert.spv",
             stage="vertex",
         )
 
     def _new_fragment_shader(self) -> GpuShader:
         return GpuShader(
-            device=self.gpu_device,
+            device=self._gpu_device,
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.frag.spv",
             stage="fragment",
         )
 
     def _new_pipeline_layout(self) -> GpuPipelineLayout:
         return GpuPipelineLayout(
-            device=self.gpu_device,
+            device=self._gpu_device,
             descriptor_set_layouts=[
                 GpuDescriptorSetLayout(
-                    device=self.gpu_device,
+                    device=self._gpu_device,
                     bindings=OrderedDict(
                         {
                             "uniform": GpuDescriptorSetLayoutBinding(
@@ -374,7 +396,7 @@ class Renderer2d(BaseResource):
                     ),
                 ),
                 GpuDescriptorSetLayout(
-                    device=self.gpu_device,
+                    device=self._gpu_device,
                     bindings=OrderedDict(
                         {
                             "atlasTexture": GpuDescriptorSetLayoutBinding(
@@ -393,14 +415,14 @@ class Renderer2d(BaseResource):
 
     def _new_common_uniform_buffer(self, *, staging: bool) -> GpuBuffer:
         return GpuBuffer(
-            device=self.gpu_device,
+            device=self._gpu_device,
             usages=["uniform", "copy-dst"] if not staging else ["staging", "copy-src"],
             meta=GpuBufferMeta(element_count=1, element_dtype=R2D_UNIFORM_DTYPE),
         )
 
     def _new_common_uniform_descriptor_set(self) -> GpuDescriptorSet:
         return GpuDescriptorSet(
-            device=self.gpu_device,
+            device=self._gpu_device,
             layout=self._pipeline_layout.descriptor_set_layouts[0],
             bindings={"uniform": self._common_uniform_device_buf},
         )
@@ -425,7 +447,7 @@ class Renderer2d(BaseResource):
 
     def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
         return GpuPipeline(
-            device=self.gpu_device,
+            device=self._gpu_device,
             vertex_shader=self._vertex_shader,
             fragment_shader=self._fragment_shader,
             vk_color_format=target.vk_format,
@@ -494,7 +516,7 @@ class Renderer2d(BaseResource):
         cpu_batch: "R2dCpuQuadBatch",
     ) -> "R2dGpuQuadBatch":
         device_buf = GpuBuffer(
-            device=self.gpu_device,
+            device=self._gpu_device,
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
                 element_count=cpu_batch.capacity,
@@ -502,7 +524,7 @@ class Renderer2d(BaseResource):
             ),
         )
         staging_buf = GpuBuffer(
-            device=self.gpu_device,
+            device=self._gpu_device,
             usages=["staging", "copy-src"],
             meta=GpuBufferMeta(
                 element_count=cpu_batch.capacity,
@@ -510,7 +532,7 @@ class Renderer2d(BaseResource):
             ),
         )
         binding = GpuDescriptorSet(
-            device=self.gpu_device,
+            device=self._gpu_device,
             layout=self._pipeline_layout.descriptor_set_layouts[1],
             bindings={
                 "atlasTexture": (atlas.gpu_image, atlas.gpu_sampler),
@@ -518,12 +540,13 @@ class Renderer2d(BaseResource):
             },
         )
         return R2dGpuQuadBatch(
+            renderer=self,
             atlas=atlas,
             instance_count=cpu_batch.instance_count,
             capacity=cpu_batch.capacity,
             staging_buf=staging_buf,
             device_buf=device_buf,
-            binding=binding,
+            descriptor_set=binding,
         )
 
     def _get_depth_image(self, *, width: int, height: int) -> GpuImage:
@@ -541,7 +564,7 @@ class Renderer2d(BaseResource):
 
     def _new_depth_image(self, *, width: int, height: int) -> GpuImage:
         return GpuImage(
-            device=self.gpu_device,
+            device=self._gpu_device,
             usages=["depth-attachment"],
             meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
         )
@@ -583,7 +606,7 @@ class Renderer2d(BaseResource):
             for gpu_batch in gpu_batches.values():
                 render_pass.bind_descriptor_set(
                     set_index=1,
-                    descriptor_set=gpu_batch.binding,
+                    descriptor_set=gpu_batch.descriptor_set,
                 )
                 render_pass.draw(
                     vertex_count=6,
@@ -593,14 +616,39 @@ class Renderer2d(BaseResource):
                 )
 
 
-@dataclass
 class R2dGpuQuadBatch(BaseResource):
+    renderer: Renderer2d
     atlas: RendererAtlas
     instance_count: int
     capacity: int
     device_buf: GpuBuffer
     staging_buf: GpuBuffer
-    binding: GpuDescriptorSet
+    descriptor_set: GpuDescriptorSet
+
+    def __init__(
+        self,
+        *,
+        renderer: Renderer2d,
+        atlas: RendererAtlas,
+        instance_count: int,
+        capacity: int,
+        staging_buf: GpuBuffer,
+        device_buf: GpuBuffer,
+        descriptor_set: GpuDescriptorSet,
+    ):
+        super().__init__(parent=renderer)
+        self.renderer = renderer
+        self.atlas = atlas
+        self.instance_count = instance_count
+        self.capacity = capacity
+        self.staging_buf = staging_buf
+        self.device_buf = device_buf
+        self.descriptor_set = descriptor_set
+
+    def _on_dispose(self) -> None:
+        self.descriptor_set.dispose()
+        self.staging_buf.dispose()
+        self.device_buf.dispose()
 
     def write(self, *, cpu_batch: R2dCpuQuadBatch, command_encoder: GpuCommandEncoder):
         # Write to staging buffer:

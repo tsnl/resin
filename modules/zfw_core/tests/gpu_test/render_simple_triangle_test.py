@@ -76,10 +76,7 @@ def test_render_simple_triangle():
     # Render the triangle
     cmd = GpuCommandEncoder(device=dev, queue_type="graphics")
     cmd.transition_image_layout(image=render_target, layout="color-attachment-optimal")
-    with cmd.render(
-        color_attachment=render_target,
-        clear_on_load=True,
-    ) as render_pass:
+    with cmd.render(color_attachment=render_target, clear="black") as render_pass:
         render_pass.bind_pipeline(pipeline=pipeline)
         render_pass.draw(vertex_count=3, instance_count=1)
     cmd.submit().wait()
@@ -94,7 +91,7 @@ def test_render_simple_triangle():
 
     # Copy image to staging buffer
     cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
-    cmd.transition_image_layout(image=render_target, layout="copy-src")
+    cmd.transition_image_layout(image=render_target, layout="transfer-src-optimal")
     cmd.copy_image_to_buffer(src=render_target, dst=staging_buffer)
     cmd.submit().wait()
 
@@ -126,3 +123,12 @@ def test_render_simple_triangle():
 
     # Cleanup
     ctx.dispose()
+
+
+def main():
+    """Run the simple triangle render test."""
+    test_render_simple_triangle()
+
+
+if __name__ == "__main__":
+    main()
