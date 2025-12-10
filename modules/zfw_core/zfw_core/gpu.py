@@ -1164,9 +1164,14 @@ class GpuMemory(BaseResource):
 class GpuImageMeta:
     shape: tuple[int, int, int]  # (height, width, channels)
     dtype: npt.DTypeLike
+    color_space: GpuColorSpace = "linear"
 
     @staticmethod
-    def from_array(array: np.ndarray) -> "GpuImageMeta":
+    def from_array(
+        array: np.ndarray,
+        *,
+        color_space: GpuColorSpace = "linear",
+    ) -> "GpuImageMeta":
         if array.ndim != 3:
             raise LogicError(
                 f"GpuTextureSpec can only be created from 3D arrays, got array with "
@@ -1175,6 +1180,7 @@ class GpuImageMeta:
         return GpuImageMeta(
             shape=(array.shape[0], array.shape[1], array.shape[2]),
             dtype=array.dtype,
+            color_space=color_space,
         )
 
     def infer_vk_format(
@@ -1184,6 +1190,7 @@ class GpuImageMeta:
         dtype = self.dtype
         depth = self.shape[2]
         is_depth_attachment = "depth-attachment" in usages
+        color_space = self.color_space
 
         if is_depth_attachment:
             match (dtype, depth):
@@ -1194,17 +1201,19 @@ class GpuImageMeta:
                         f"Invalid depth attachment image meta: {dtype=}, {depth=}"
                     )
         else:
-            match (dtype, depth):
-                case (np.uint8, 4):
+            match (dtype, depth, color_space):
+                case (np.uint8, 4, "linear"):
                     return VK_FORMAT_R8G8B8A8_UNORM
-                case (np.float32, 1):
+                case (np.uint8, 4, "srgb"):
+                    return VK_FORMAT_R8G8B8A8_SRGB
+                case (np.float32, 1, "linear"):
                     return VK_FORMAT_R32_SFLOAT
-                case (np.float32, 4):
+                case (np.float32, 4, "linear"):
                     return VK_FORMAT_R32G32B32A32_SFLOAT
                 case _:
                     raise LogicError(
                         f"Invalid image meta: "
-                        f"{dtype=}, {depth=}, {is_depth_attachment=}"
+                        f"{dtype=}, {depth=}, {is_depth_attachment=}, {color_space=}"
                     )
 
     def into_buffer_meta(self) -> "GpuBufferMeta":
@@ -1227,6 +1236,11 @@ GpuImageLayout: TypeAlias = Literal[
     "texture-binding",
     "transfer-src-optimal",
     "transfer-dst-optimal",
+]
+
+GpuColorSpace: TypeAlias = Literal[
+    "srgb",
+    "linear",
 ]
 
 

@@ -4,6 +4,7 @@ import numpy as np
 import PIL.Image
 
 import zfw_core as zfw
+from zfw_core.typed_vulkan import VK_FORMAT_R8G8B8A8_SRGB
 
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
@@ -37,6 +38,7 @@ class Renderer2dFixture(zfw.BaseResource):
             meta=zfw.GpuImageMeta(
                 shape=(TEST_IMAGE_H, TEST_IMAGE_W, 4),
                 dtype=np.uint8,
+                color_space="srgb",
             ),
         )
 
