@@ -23,10 +23,10 @@ struct R2dQuad
     float4 tintColor;       // RGBA
     float4 borderColor;     // RGBA
     int4 borderThicknessPx; // T, R, B, L
-    int cornerRadius;       // corner radius
     float height;           // height
     int _rsv0;              // reserved for alignment
     int _rsv1;              // reserved for alignment
+    int _rsv2;              // reserved for alignment
 };
 
 struct R2dBatchUniform
@@ -58,8 +58,7 @@ struct VSOutput
     float4 tintColor : TEXCOORD1;
     float4 borderColor : TEXCOORD2;
     int4 borderThicknessPx : TEXCOORD3;
-    int4 cornerRadius : TEXCOORD4;
-    float2 positionPx : TEXCOORD5;
+    float2 positionPx : TEXCOORD4;
 };
 
 [shader("vertex")]
@@ -84,7 +83,6 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     output.tintColor = quad.tintColor;
     output.borderColor = quad.borderColor;
     output.borderThicknessPx = quad.borderThicknessPx;
-    output.cornerRadius = int4(quad.cornerRadius, quad.cornerRadius, quad.cornerRadius, quad.cornerRadius);
     output.positionPx = float2(vertexPosPx);
     return output;
 }

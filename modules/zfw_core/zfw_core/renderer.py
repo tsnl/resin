@@ -274,11 +274,9 @@ class RendererCanvas(BaseResource):
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-        corner_radius_px: int = 0,
     ):
         """
-        Draw a quad with an optional image, border, color, corner radius, etc to the
-        canvas.
+        Draw a quad with an optional image, border, color, etc to the canvas.
         """
 
         self.cpu_quad_collection.add(
@@ -289,7 +287,6 @@ class RendererCanvas(BaseResource):
             color=color,
             border_color=border_color,
             border_thickness_px=border_thickness_px,
-            corner_radius_px=corner_radius_px,
         )
 
 
@@ -750,10 +747,9 @@ class R2dCpuQuadCollection:
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-        corner_radius_px: int = 0,
     ):
         """
-        Draws a quad with an optional image, border, color, corner radius, etc to the
+        Draws a quad with an optional image, border, color, etc to the
         canvas.
 
         Under the hood, we add the quad to a batch corresponding to the image's atlas.
@@ -809,7 +805,6 @@ class R2dCpuQuadCollection:
             color=color,
             border_color=border_color,
             border_thickness_px=border_thickness_px,
-            corner_radius_px=corner_radius_px,
             height=self.total_added_image_count,
         )
         self.total_added_image_count += 1
@@ -852,7 +847,6 @@ class R2dCpuQuadBatch:
         color: tuple[float, float, float, float],
         border_color: tuple[float, float, float, float],
         border_thickness_px: tuple[int, int, int, int],
-        corner_radius_px: int,
         height: int,
     ):
         self._ensure_capacity(self.instance_count + 1)
@@ -865,7 +859,6 @@ class R2dCpuQuadBatch:
         self.data["color"][idx] = color
         self.data["border_color"][idx] = border_color
         self.data["border_thickness_px"][idx] = border_thickness_px
-        self.data["corner_radius_px"][idx] = corner_radius_px
         self.data["height"][idx] = height
 
         self.instance_count += 1
@@ -911,10 +904,10 @@ R2D_QUAD_NP_DTYPE = np.dtype(
         ("color", np.float32, (4,)),
         ("border_color", np.float32, (4,)),
         ("border_thickness_px", np.uint32, (4,)),
-        ("corner_radius_px", np.uint32),
         ("height", np.float32),
         ("_rsv0", np.uint32),
         ("_rsv1", np.uint32),
+        ("_rsv2", np.uint32),
     ]
 )
 assert R2D_QUAD_NP_DTYPE.itemsize == 32 * 4
