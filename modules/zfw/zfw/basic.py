@@ -4,9 +4,9 @@ __all__ = [
     "expect",
 ]
 
-from abc import ABC
 import sys
-from typing import Protocol, TypeVar, Iterable
+from abc import ABC
+from typing import Iterable, Protocol, TypeVar
 from weakref import ref as WeakRef
 
 from .excepts import LogicError

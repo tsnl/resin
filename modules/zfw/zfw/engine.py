@@ -1,14 +1,15 @@
-from contextlib import contextmanager
 import sys
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererContext, RendererCanvas
+from .renderer import Renderer, RendererCanvas, RendererContext
 from .window import Window, WindowContext
 
 if TYPE_CHECKING:
     from .renderer import RendererCanvas
+
 
 class Engine(BaseResource):
     _gpu_context: GpuContext

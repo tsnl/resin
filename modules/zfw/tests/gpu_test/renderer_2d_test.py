@@ -2,10 +2,8 @@ from pathlib import Path
 
 import numpy as np
 import PIL.Image
-
 import zfw
 from zfw.typed_vulkan import VK_FORMAT_R8G8B8A8_SRGB
-
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
 
