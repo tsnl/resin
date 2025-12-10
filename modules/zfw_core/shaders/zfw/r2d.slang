@@ -47,7 +47,6 @@ struct VSOutput
     float4 borderColor : TEXCOORD2;
     int4 borderThicknessPx : TEXCOORD3;
     int4 cornerRadius : TEXCOORD4;
-    int height : TEXCOORD5;
 };
 
 [shader("vertex")]
@@ -60,7 +59,7 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     VSOutput output;
     uint cornerIdx = vertexCornerIdx(vertexId);
     output.position.xy = framebufferPxToNdcVec2(quad.dstPx[cornerIdx]);
-    output.position.z = 1.0 - quad.height / uniform.maxHeight; // Normalize height to [0.0, 1.0], then flip
+    output.position.z = quad.height / uniform.maxHeight;
     output.position.w = 1.0;
     output.uv = quad.srcUv[cornerIdx];
     output.tintColor = quad.tintColor;
@@ -88,7 +87,7 @@ float2 framebufferPxToNdcVec2(int2 posPx)
 {
     float2 ndc;
     ndc.x = (float(posPx.x) / float(uniform.framebufferSizePx.x)) * 2.0 - 1.0;
-    ndc.y = 1.0 - (float(posPx.y) / float(uniform.framebufferSizePx.y)) * 2.0;
+    ndc.y = (float(posPx.y) / float(uniform.framebufferSizePx.y)) * 2.0 - 1.0;
     return ndc;
 }
 

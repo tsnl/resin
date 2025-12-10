@@ -28,7 +28,7 @@ def main():
         engine.update()
 
         with engine.render() as canvas:
-            canvas.draw(dst_xy=(0, 0), dst_wh=(128, 128), color=(1.0, 1.0, 1.0, 1.0))
+            canvas.draw(dst_xy=(32, 64), dst_wh=(256, 128), color=(1.0, 1.0, 1.0, 1.0))
 
 
 def print_gpu_debug_info(

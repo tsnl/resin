@@ -2773,12 +2773,13 @@ class GpuPipeline(BaseResource):
 
     @staticmethod
     def _help_create_depth_stencil_state() -> VkPipelineDepthStencilStateCreateInfo:
+        # FIXME: Currently depth testing is disabled; enable it.
         return VkPipelineDepthStencilStateCreateInfo(
             flags=0,
-            depthTestEnable=True,
-            depthWriteEnable=True,
+            depthTestEnable=False,
+            depthWriteEnable=False,
             depthCompareOp=VK_COMPARE_OP_LESS,
-            depthBoundsTestEnable=True,
+            depthBoundsTestEnable=False,
             stencilTestEnable=False,
             front=VkStencilOpState(
                 failOp=VK_STENCIL_OP_KEEP,

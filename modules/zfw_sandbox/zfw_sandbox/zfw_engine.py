@@ -83,6 +83,8 @@ class ZfwEngine(zfw_core.BaseResource):
 
     @contextmanager
     def render(self):
+        self._render_canvas.reset()
+
         yield self._render_canvas
 
         if self.rendered_frame_count == 0:

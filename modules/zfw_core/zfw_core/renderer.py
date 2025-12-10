@@ -415,7 +415,7 @@ class Renderer2d(BaseResource):
                             ),
                             "quads": GpuDescriptorSetLayoutBinding(
                                 type="storage-buffer",
-                                stages=["fragment"],
+                                stages=["vertex"],
                             ),
                         }.items()
                     ),
@@ -586,7 +586,7 @@ class Renderer2d(BaseResource):
         target: GpuImage,
         max_height: float,
     ):
-        uniform_data = np.empty((1,), dtype=R2D_UNIFORM_DTYPE)
+        uniform_data = np.zeros((1,), dtype=R2D_UNIFORM_DTYPE)
         uniform_data["framebuffer_size_px"] = [target.width, target.height]
         uniform_data["max_height"] = max_height
         self._common_uniform_staging_buf.memory.write(data=uniform_data)
