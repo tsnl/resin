@@ -84,6 +84,7 @@ class Window(BaseResource):
         width, height = glfw.get_framebuffer_size(self.glfw_window_handle)
         return GpuSurface(
             context=self.context.gpu_context,
+            parent=self,
             vk_surface=surface_ptr[0],
             width=width,
             height=height,

@@ -12,17 +12,14 @@ class ZfwEngine(zfw_core.BaseResource):
 
         # Create contexts:
         self.gpu_context = zfw_core.GpuContext(
-            parent=self,
             app_name=app_name,
             enable_debug_layer_support=debug,
             enable_present_support=True,
         )
         self.window_context = zfw_core.WindowContext(
-            parent=self,
             gpu_context=self.gpu_context,
         )
         self.render_context = zfw_core.RendererContext(
-            parent=self,
             gpu_context=self.gpu_context,
         )
 
@@ -59,10 +56,17 @@ class ZfwEngine(zfw_core.BaseResource):
         # State:
         self.rendered_frame_count = 0
 
-        # Debug: scan for resource cycles
-        if debug:
-            n = self.detect_resource_cycles(verbose=True)
-            print(f"ZfwEngine: no resource cycles detected: {n=}", file=sys.stderr)
+    def _on_dispose(self) -> None:
+        self.render_canvas.dispose()
+
+        self.gpu_swap_chain.dispose()
+        self.gpu_device.dispose()
+
+        self.window.dispose()
+
+        self.render_context.dispose()
+        self.window_context.dispose()
+        self.gpu_context.dispose()
 
     def print_gpu_debug_info(
         self,

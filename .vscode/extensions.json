@@ -2,6 +2,7 @@
     "recommendations": [
         "ms-python.python",
         "shader-slang.slang-language-extension",
-        "tamasfe.even-better-toml"
+        "tamasfe.even-better-toml",
+        "charliermarsh.ruff"
     ]
 }

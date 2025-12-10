@@ -868,10 +868,10 @@ class GpuDevice(BaseResource):
         )
         self.max_descriptor_pool_set_count = max_descriptor_pool_set_count
         self.vk_descriptor_pool = self._help_create_descriptor_pool(
-            max_sets=self.max_descriptor_pool_set_count, 
+            max_sets=self.max_descriptor_pool_set_count,
             pool_sizes=self.descriptor_pool_config,
         )
-        
+
     def _help_create_descriptor_pool(
         self,
         max_sets: int,
@@ -2124,10 +2124,8 @@ class GpuCommandEncoder(BaseResource):
         if self._submit_fence is not None:
             raise LogicError("Each GpuCommandEncoder can only be submitted once.")
 
-        self._submit_fence = (
-            fence if fence is not None else GpuFence(device=self.device)
-        )
         self._submit_fence_is_owned = fence is None
+        self._submit_fence = fence or GpuFence(device=self.device)
 
         self.device.submit(
             queue_type=self.submit_queue_type,
@@ -2928,11 +2926,12 @@ class GpuSurface(BaseResource):
         self,
         *,
         context: GpuContext,
+        parent: BaseResource,
         vk_surface: VkSurfaceKHR,
         width: int,
         height: int,
     ):
-        super().__init__(parent=context)
+        super().__init__(parent=parent)
         self.context = context
         self.vk_surface = vk_surface
         self.width = width
