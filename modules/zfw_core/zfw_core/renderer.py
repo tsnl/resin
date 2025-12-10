@@ -362,7 +362,11 @@ class Renderer2d(BaseResource):
         depth_image = self._get_depth_image(width=target.width, height=target.height)
         gpu_batches = self._get_gpu_batch_dict(canvas=canvas, encoder=encoder)
 
-        self._write_common_uniform(encoder=encoder, target=target)
+        self._write_common_uniform(
+            encoder=encoder,
+            target=target,
+            max_height=float(canvas.cpu_quad_collection.total_added_image_count),
+        )
 
         self._draw(
             encoder=encoder,
@@ -580,9 +584,11 @@ class Renderer2d(BaseResource):
         *,
         encoder: GpuCommandEncoder,
         target: GpuImage,
+        max_height: float,
     ):
-        framebuffer_size_px = np.array([target.width, target.height], dtype=np.int32)
-        uniform_data = np.array([(framebuffer_size_px,)], dtype=R2D_UNIFORM_DTYPE)
+        uniform_data = np.empty((1,), dtype=R2D_UNIFORM_DTYPE)
+        uniform_data["framebuffer_size_px"] = [target.width, target.height]
+        uniform_data["max_height"] = max_height
         self._common_uniform_staging_buf.memory.write(data=uniform_data)
         encoder.copy_buffer_to_buffer(
             src=self._common_uniform_staging_buf,
@@ -889,6 +895,7 @@ def _next_po2(x: int) -> int:
 R2D_UNIFORM_DTYPE = np.dtype(
     [
         ("framebuffer_size_px", np.int32, (2,)),
+        ("max_height", np.float32),
     ]
 )
 assert R2D_UNIFORM_DTYPE.itemsize == 2 * 4
@@ -902,7 +909,7 @@ R2D_QUAD_NP_DTYPE = np.dtype(
         ("border_color", np.float32, (4,)),
         ("border_thickness_px", np.uint32, (4,)),
         ("corner_radius", np.uint32),
-        ("height", np.uint32),
+        ("height", np.float32),
         ("_rsv0", np.uint32),
         ("_rsv1", np.uint32),
     ]
