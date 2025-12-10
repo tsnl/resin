@@ -6,17 +6,17 @@ ROOT = Path(__file__).parent
 
 
 def zfw_core_main():
-    zfw_core_root = ROOT / "modules/zfw_core"
+    zfw_core_root = ROOT / "modules/zfw"
 
     targets: dict[str, Path] = {
-        "zfw_core": zfw_core_root / "zfw_core/bundled_data",
+        "zfw": zfw_core_root / "zfw/bundled_data",
     }
 
     shaders: list[zfw_build.Shader] = [
         zfw_build.Shader(
             source=(zfw_core_root / "shaders/zfw/r2d.slang"),
             stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-            targets=["zfw_core"],
+            targets=["zfw"],
         ),
     ]
 

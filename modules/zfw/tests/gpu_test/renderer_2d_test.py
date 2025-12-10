@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 import PIL.Image
 
-import zfw_core as zfw
-from zfw_core.typed_vulkan import VK_FORMAT_R8G8B8A8_SRGB
+import zfw
+from zfw.typed_vulkan import VK_FORMAT_R8G8B8A8_SRGB
 
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
@@ -14,7 +14,7 @@ class Renderer2dFixture(zfw.BaseResource):
     def __init__(self):
         super().__init__(parent=None)
         self.gpu_context = zfw.GpuContext(
-            app_name="zfw_core.tests.renderer_2d_test",
+            app_name="zfw.tests.renderer_2d_test",
             enable_debug_layer_support=True,
             enable_present_support=False,
         )

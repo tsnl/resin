@@ -1,9 +1,7 @@
 import argparse
 import sys
 
-import zfw_core
-
-from .zfw_engine import ZfwEngine
+import zfw
 
 
 def main():
@@ -18,7 +16,7 @@ def main():
     ap.add_argument("--debug", action="store_true", help="Enable debug settings")
     args = ap.parse_args()
 
-    engine = ZfwEngine(
+    engine = zfw.Engine(
         app_name="Zero Sandbox",
         debug=args.debug,
         swapchain_image_count=args.swapchain_image_count,
@@ -48,8 +46,8 @@ def main():
 
 
 def print_gpu_debug_info(
-    gpu_context: zfw_core.GpuContext,
-    file: zfw_core.SupportsWrite[str] = sys.stdout,
+    gpu_context: zfw.GpuContext,
+    file: zfw.SupportsWrite[str] = sys.stdout,
 ):
     print("<gpu-debug-info>")
     gpu_context.print_debug_info(out=file)

@@ -6,11 +6,11 @@ default: wheel
 
 .PHONY: sync
 sync: bundled-data
-	uv sync --extra dev
+	uv sync --all-extras
 
 .PHONY: bundled-data
 bundled-data:
-	uv run --extra dev python ./build-bundled-data.py
+	uv run --package zfw --extra dev python ./build-bundled-data.py
 
 #
 # Sandbox:
@@ -18,7 +18,7 @@ bundled-data:
 
 .PHONY: sandbox
 sandbox: sync
-	uv run --extra dev zfw-sandbox --debug
+	uv run --package zfw_sandbox zfw-sandbox --debug
 
 #
 # Tests:
@@ -26,7 +26,7 @@ sandbox: sync
 
 .PHONY: tests
 tests: sync
-	uv run --extra dev python -m pytest -vs --tb=short .
+	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
 
 #
 # Ruff:
@@ -34,12 +34,12 @@ tests: sync
 
 .PHONY: format
 format:
-	uv run --with zfw --extra dev -- ruff format .
-	uv run --with zfw --extra dev -- ruff check --select I --fix .
+	uv run --package zfw --extra dev -- ruff format .
+	uv run --package zfw --extra dev -- ruff check --select I --fix .
 
 .PHONY: check-formatting
 check-formatting:
-	uv run --with zfw --extra dev -- ruff check --select I .
+	uv run --package zfw --extra dev -- ruff check --select I .
 
 #
 # Type-check:
@@ -47,7 +47,7 @@ check-formatting:
 
 .PHONY: check-typing
 check-typing:
-	uv run --with zfw -- pyright
+	uv run --package zfw --extra dev -- pyright
 
 #
 # Build:
@@ -55,4 +55,4 @@ check-typing:
 
 .PHONY: wheel
 wheel: sync check-formatting check-typing tests
-	uv build
+	uv build --all

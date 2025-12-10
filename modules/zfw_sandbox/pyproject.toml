@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["zfw_core"]
+dependencies = ["zfw"]
 
 [build-system]
 requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
@@ -17,3 +17,6 @@ zfw-sandbox = "zfw_sandbox.zfw_sandbox_cli:main"
 package-data = { "zfw_sandbox" = ["bundled_data/**/*"] }
 module-name = "zfw_sandbox"
 module-root = ""
+
+[tool.uv.sources]
+zfw = { workspace = true }

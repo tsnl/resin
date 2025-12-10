@@ -21,25 +21,34 @@ __all__ = [
     "RendererCanvas",
     "RendererAtlas",
     "RendererImage",
-    "RendererCanvas",
     "BUNDLED_DATA_PATH",
+    "Engine",
 ]
 
 from .basic import BaseResource, SupportsWrite
 from .bundled_data import BUNDLED_DATA_PATH
+from .engine import Engine
 from .gpu import (
+    GpuBuffer,
+    GpuBufferMeta,
+    GpuCommandEncoder,
     GpuContext,
+    GpuDescriptorSet,
+    GpuDescriptorSetLayout,
+    GpuDescriptorSetLayoutBinding,
     GpuDevice,
+    GpuFence,
     GpuImage,
     GpuImageMeta,
     GpuImageUsage,
-    GpuBuffer,
-    GpuBufferMeta,
     GpuPipeline,
-    GpuShader,
-    GpuCommandEncoder,
-    GpuFence,
+    GpuPipelineLayout,
+    GpuSampler,
+    GpuSamplerAddressMode,
+    GpuSamplerFilter,
     GpuSemaphore,
+    GpuShader,
+    GpuSwapChain,
 )
 from .renderer import (
     Renderer,

@@ -55,7 +55,16 @@ class Renderer(BaseResource):
     gpu_device: GpuDevice
     default_white_image_atlas: "RendererAtlas"
     default_white_image: "RendererImage"
-    renderer_2d: "Renderer2d"
+
+    _vertex_shader: GpuShader
+    _fragment_shader: GpuShader
+    _pipeline_layout: GpuPipelineLayout
+    _common_uniform_staging_buf: GpuBuffer
+    _common_uniform_device_buf: GpuBuffer
+    _common_uniform_descriptor_set: GpuDescriptorSet
+    _cached_pipeline: GpuPipeline | None
+    _cached_depth_image: GpuImage | None
+    _cached_gpu_desc_sets: dict["RendererAtlas", "RendererQuadBatchDescriptorSet"]
 
     def __init__(
         self,
@@ -75,12 +84,34 @@ class Renderer(BaseResource):
         )
         self.default_white_image = self.default_white_image_atlas["default"]
 
-        self.renderer_2d = Renderer2d(renderer=self)
+        self._vertex_shader = self._new_vertex_shader()
+        self._fragment_shader = self._new_fragment_shader()
+        self._pipeline_layout = self._new_pipeline_layout()
+        self._common_uniform_staging_buf = self._new_common_uniform_buffer(staging=True)
+        self._common_uniform_device_buf = self._new_common_uniform_buffer(staging=False)
+        self._common_uniform_descriptor_set = self._new_common_uniform_descriptor_set()
+        self._cached_pipeline = None
+        self._cached_depth_image = None
+        self._cached_gpu_desc_sets = {}
 
     def _on_dispose(self) -> None:
-        # Explicitly dispose renderer_2d since there's a circular reference between self
-        # and renderer_2d.
-        self.renderer_2d.dispose()
+        self._vertex_shader.dispose()
+        self._fragment_shader.dispose()
+
+        self._pipeline_layout.dispose()
+
+        self._common_uniform_descriptor_set.dispose()
+
+        self._common_uniform_staging_buf.dispose()
+        self._common_uniform_device_buf.dispose()
+
+        for gpu_batch in self._cached_gpu_desc_sets.values():
+            gpu_batch.dispose()
+
+        if self._cached_depth_image is not None:
+            self._cached_depth_image.dispose()
+        if self._cached_pipeline is not None:
+            self._cached_pipeline.dispose()
 
         # Dispose default white image and atlas:
         self.default_white_image_atlas.dispose()
@@ -108,10 +139,24 @@ class Renderer(BaseResource):
             layout="color-attachment-optimal",
         )
 
-        self.renderer_2d.show(
-            canvas=canvas,
-            target=target,
+        assert "color-attachment" in target.usages
+
+        gpu_pipeline = self._get_gpu_pipeline(target=target)
+        depth_image = self._get_depth_image(width=target.width, height=target.height)
+        gpu_batches = self._get_gpu_batch_dict(canvas=canvas, encoder=command_encoder)
+
+        self._write_common_uniform(
             encoder=command_encoder,
+            target=target,
+            total_quad_count=canvas.cpu_quad_collection.total_added_image_count,
+        )
+
+        self._draw(
+            encoder=command_encoder,
+            pipeline=gpu_pipeline,
+            depth_image=depth_image,
+            gpu_batches=gpu_batches,
+            target=target,
         )
 
         command_encoder.transition_image_layout(
@@ -128,6 +173,283 @@ class Renderer(BaseResource):
             wait_semaphores=wait_semaphores,
             signal_semaphores=done_semaphores,
         )
+
+    def _new_vertex_shader(self) -> GpuShader:
+        return GpuShader(
+            device=self.gpu_device,
+            spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.vert.spv",
+            stage="vertex",
+        )
+
+    def _new_fragment_shader(self) -> GpuShader:
+        return GpuShader(
+            device=self.gpu_device,
+            spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.frag.spv",
+            stage="fragment",
+        )
+
+    def _new_pipeline_layout(self) -> GpuPipelineLayout:
+        return GpuPipelineLayout(
+            device=self.gpu_device,
+            descriptor_set_layouts=[
+                GpuDescriptorSetLayout(
+                    device=self.gpu_device,
+                    bindings=OrderedDict(
+                        {
+                            "commonUniform": GpuDescriptorSetLayoutBinding(
+                                type="uniform-buffer",
+                                stages=["vertex", "fragment"],
+                            ),
+                        }.items()
+                    ),
+                ),
+                GpuDescriptorSetLayout(
+                    device=self.gpu_device,
+                    bindings=OrderedDict(
+                        {
+                            "atlasTexture": GpuDescriptorSetLayoutBinding(
+                                type="combined-image-sampler",
+                                stages=["vertex", "fragment"],
+                            ),
+                            "quads": GpuDescriptorSetLayoutBinding(
+                                type="storage-buffer",
+                                stages=["vertex", "fragment"],
+                            ),
+                            "batchUniform": GpuDescriptorSetLayoutBinding(
+                                type="uniform-buffer",
+                                stages=["vertex", "fragment"],
+                            ),
+                        }.items()
+                    ),
+                ),
+            ],
+        )
+
+    def _new_common_uniform_buffer(self, *, staging: bool) -> GpuBuffer:
+        return GpuBuffer(
+            device=self.gpu_device,
+            usages=["uniform", "copy-dst"] if not staging else ["staging", "copy-src"],
+            meta=GpuBufferMeta(element_count=1, element_dtype=R2D_UNIFORM_DTYPE),
+        )
+
+    def _new_common_uniform_descriptor_set(self) -> GpuDescriptorSet:
+        return GpuDescriptorSet(
+            device=self.gpu_device,
+            layout=self._pipeline_layout.descriptor_set_layouts[0],
+            bindings={"commonUniform": self._common_uniform_device_buf},
+        )
+
+    def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
+        if cached_pipeline := self._get_cached_gpu_pipeline(target=target):
+            return cached_pipeline
+        gpu_pipeline = self._new_gpu_pipeline(target=target)
+        self._cached_pipeline = gpu_pipeline
+        return gpu_pipeline
+
+    def _get_cached_gpu_pipeline(self, target: GpuImage) -> GpuPipeline | None:
+        if self._cached_pipeline is None:
+            return None
+        if self._cached_pipeline.vk_color_format != target.vk_format:
+            return None
+        if self._cached_pipeline.viewport_width != target.width:
+            return None
+        if self._cached_pipeline.viewport_height != target.height:
+            return None
+        return self._cached_pipeline
+
+    def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
+        return GpuPipeline(
+            device=self.gpu_device,
+            vertex_shader=self._vertex_shader,
+            fragment_shader=self._fragment_shader,
+            vk_color_format=target.vk_format,
+            enable_depth_test=False,
+            enable_alpha_blending=True,
+            viewport_width=target.width,
+            viewport_height=target.height,
+            layout=self._pipeline_layout,
+        )
+
+    def _get_gpu_batch_dict(
+        self,
+        *,
+        canvas: "RendererCanvas",
+        encoder: GpuCommandEncoder,
+    ) -> dict["RendererAtlas", "RendererQuadBatchDescriptorSet"]:
+        # Compute a fresh set of GPU batches:
+        gpu_batches = {
+            atlas: self._get_gpu_batch(
+                atlas=atlas,
+                cpu_batch=cpu_batch,
+                command_encoder=encoder,
+            )
+            for atlas, cpu_batch in canvas.cpu_quad_collection.batches.items()
+        }
+
+        # Only keep cached GPU batches that are still in use:
+        self._cached_gpu_desc_sets = gpu_batches
+
+        # Done:
+        return gpu_batches
+
+    def _get_gpu_batch(
+        self,
+        *,
+        atlas: RendererAtlas,
+        cpu_batch: "RendererQuadBatch",
+        command_encoder: GpuCommandEncoder,
+    ) -> "RendererQuadBatchDescriptorSet":
+        if gpu_batch := self._get_cached_gpu_batch(atlas=atlas, cpu_batch=cpu_batch):
+            gpu_batch.write(cpu_batch=cpu_batch, command_encoder=command_encoder)
+            return gpu_batch
+
+        gpu_batch = self._new_gpu_batch(atlas=atlas, cpu_batch=cpu_batch)
+        gpu_batch.write(cpu_batch=cpu_batch, command_encoder=command_encoder)
+
+        self._cached_gpu_desc_sets[atlas] = gpu_batch
+
+        return gpu_batch
+
+    def _get_cached_gpu_batch(
+        self,
+        *,
+        atlas: RendererAtlas,
+        cpu_batch: "RendererQuadBatch",
+    ) -> "RendererQuadBatchDescriptorSet | None":
+        gpu_batch = self._cached_gpu_desc_sets.get(atlas)
+        if gpu_batch is None:
+            return None
+        if gpu_batch.capacity < cpu_batch.instance_count:
+            return None
+        return gpu_batch
+
+    def _new_gpu_batch(
+        self,
+        *,
+        atlas: RendererAtlas,
+        cpu_batch: "RendererQuadBatch",
+    ) -> "RendererQuadBatchDescriptorSet":
+        uniform_device_buf = GpuBuffer(
+            device=self.gpu_device,
+            usages=["uniform", "copy-dst"],
+            meta=GpuBufferMeta(
+                element_count=1,
+                element_dtype=R2D_BATCH_UNIFORM_DTYPE,
+            ),
+        )
+        uniform_staging_buf = GpuBuffer(
+            device=self.gpu_device,
+            usages=["staging", "copy-src"],
+            meta=GpuBufferMeta(
+                element_count=1,
+                element_dtype=R2D_BATCH_UNIFORM_DTYPE,
+            ),
+        )
+        quads_device_buf = GpuBuffer(
+            device=self.gpu_device,
+            usages=["storage", "copy-dst"],
+            meta=GpuBufferMeta(
+                element_count=cpu_batch.capacity,
+                element_dtype=R2D_QUAD_NP_DTYPE,
+            ),
+        )
+        quads_staging_buf = GpuBuffer(
+            device=self.gpu_device,
+            usages=["staging", "copy-src"],
+            meta=GpuBufferMeta(
+                element_count=cpu_batch.capacity,
+                element_dtype=R2D_QUAD_NP_DTYPE,
+            ),
+        )
+        binding = GpuDescriptorSet(
+            device=self.gpu_device,
+            layout=self._pipeline_layout.descriptor_set_layouts[1],
+            bindings={
+                "atlasTexture": (atlas.gpu_image, atlas.gpu_sampler),
+                "quads": quads_device_buf,
+                "batchUniform": uniform_device_buf,
+            },
+        )
+        return RendererQuadBatchDescriptorSet(
+            renderer=self,
+            atlas=atlas,
+            instance_count=cpu_batch.instance_count,
+            capacity=cpu_batch.capacity,
+            quads_staging_buf=quads_staging_buf,
+            quads_device_buf=quads_device_buf,
+            uniform_staging_buf=uniform_staging_buf,
+            uniform_device_buf=uniform_device_buf,
+            descriptor_set=binding,
+        )
+
+    def _get_depth_image(self, *, width: int, height: int) -> GpuImage:
+        if (
+            self._cached_depth_image is not None
+            and self._cached_depth_image.width == width
+            and self._cached_depth_image.height == height
+        ):
+            return self._cached_depth_image
+
+        depth_image = self._new_depth_image(width=width, height=height)
+        self._cached_depth_image = depth_image
+
+        return depth_image
+
+    def _new_depth_image(self, *, width: int, height: int) -> GpuImage:
+        return GpuImage(
+            device=self.gpu_device,
+            usages=["depth-attachment"],
+            meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
+        )
+
+    def _write_common_uniform(
+        self,
+        *,
+        encoder: GpuCommandEncoder,
+        target: GpuImage,
+        total_quad_count: int,
+    ):
+        uniform_data = np.zeros((1,), dtype=R2D_UNIFORM_DTYPE)
+        uniform_data["framebuffer_size_px"] = [target.width, target.height]
+        uniform_data["total_quad_count"] = float(total_quad_count)
+        self._common_uniform_staging_buf.memory.write(data=uniform_data)
+        encoder.copy_buffer_to_buffer(
+            src=self._common_uniform_staging_buf,
+            dst=self._common_uniform_device_buf,
+            size=R2D_UNIFORM_DTYPE.itemsize,
+        )
+
+    def _draw(
+        self,
+        *,
+        encoder: GpuCommandEncoder,
+        pipeline: GpuPipeline,
+        depth_image: GpuImage,
+        gpu_batches: dict["RendererAtlas", "RendererQuadBatchDescriptorSet"],
+        target: GpuImage,
+    ):
+        with encoder.render(
+            color_attachment=target,
+            depth_attachment=depth_image,
+            clear_color="black",
+        ) as render_pass:
+            render_pass.bind_pipeline(pipeline=pipeline)
+            render_pass.bind_descriptor_set(
+                set_index=0,
+                descriptor_set=self._common_uniform_descriptor_set,
+            )
+
+            for gpu_batch in gpu_batches.values():
+                render_pass.bind_descriptor_set(
+                    set_index=1,
+                    descriptor_set=gpu_batch.descriptor_set,
+                )
+                render_pass.draw(
+                    vertex_count=6,
+                    instance_count=gpu_batch.instance_count,
+                    first_vertex=0,
+                    first_instance=0,
+                )
 
 
 #
@@ -256,12 +578,12 @@ class RendererImage(BaseResource):
 
 class RendererCanvas(BaseResource):
     renderer: "Renderer"
-    cpu_quad_collection: R2dCpuQuadCollection
+    cpu_quad_collection: RendererQuadCollection
 
     def __init__(self, *, renderer: "Renderer"):
         super().__init__(parent=renderer)
         self.renderer = renderer
-        self.cpu_quad_collection = R2dCpuQuadCollection(
+        self.cpu_quad_collection = RendererQuadCollection(
             default_white_image=renderer.default_white_image
         )
 
@@ -294,368 +616,8 @@ class RendererCanvas(BaseResource):
         )
 
 
-#
-# Renderer2d: private implementation of 2D renderer
-#
-
-
-class Renderer2d(BaseResource):
-    _renderer: Renderer
-    _gpu_device: GpuDevice
-    _default_white_image: RendererImage
-    _vertex_shader: GpuShader
-    _fragment_shader: GpuShader
-    _pipeline_layout: GpuPipelineLayout
-    _common_uniform_staging_buf: GpuBuffer
-    _common_uniform_device_buf: GpuBuffer
-    _common_uniform_descriptor_set: GpuDescriptorSet
-    _cached_pipeline: GpuPipeline | None
-    _cached_depth_image: GpuImage | None
-    _cached_gpu_batches: dict["RendererAtlas", "R2dGpuQuadBatch"]
-
-    def __init__(self, *, renderer: Renderer):
-        super().__init__(parent=renderer)
-
-        self._renderer = renderer
-        self._gpu_device = renderer.gpu_device
-        self._default_white_image = renderer.default_white_image
-
-        self._vertex_shader = self._new_vertex_shader()
-        self._fragment_shader = self._new_fragment_shader()
-        self._pipeline_layout = self._new_pipeline_layout()
-        self._common_uniform_staging_buf = self._new_common_uniform_buffer(staging=True)
-        self._common_uniform_device_buf = self._new_common_uniform_buffer(staging=False)
-        self._common_uniform_descriptor_set = self._new_common_uniform_descriptor_set()
-        self._cached_pipeline = None
-        self._cached_depth_image = None
-        self._cached_gpu_batches = {}
-
-    def _on_dispose(self) -> None:
-        self._vertex_shader.dispose()
-        self._fragment_shader.dispose()
-
-        self._pipeline_layout.dispose()
-
-        self._common_uniform_descriptor_set.dispose()
-
-        self._common_uniform_staging_buf.dispose()
-        self._common_uniform_device_buf.dispose()
-
-        for gpu_batch in self._cached_gpu_batches.values():
-            gpu_batch.dispose()
-
-        if self._cached_depth_image is not None:
-            self._cached_depth_image.dispose()
-        if self._cached_pipeline is not None:
-            self._cached_pipeline.dispose()
-
-    def show(
-        self,
-        *,
-        canvas: "RendererCanvas",
-        target: GpuImage,
-        encoder: GpuCommandEncoder,
-    ):
-        assert "color-attachment" in target.usages
-
-        gpu_pipeline = self._get_gpu_pipeline(target=target)
-        depth_image = self._get_depth_image(width=target.width, height=target.height)
-        gpu_batches = self._get_gpu_batch_dict(canvas=canvas, encoder=encoder)
-
-        self._write_common_uniform(
-            encoder=encoder,
-            target=target,
-            total_quad_count=canvas.cpu_quad_collection.total_added_image_count,
-        )
-
-        self._draw(
-            encoder=encoder,
-            pipeline=gpu_pipeline,
-            depth_image=depth_image,
-            gpu_batches=gpu_batches,
-            target=target,
-        )
-
-    def _new_vertex_shader(self) -> GpuShader:
-        return GpuShader(
-            device=self._gpu_device,
-            spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.vert.spv",
-            stage="vertex",
-        )
-
-    def _new_fragment_shader(self) -> GpuShader:
-        return GpuShader(
-            device=self._gpu_device,
-            spirv_path=BUNDLED_DATA_PATH / "shaders" / "zfw" / "r2d.frag.spv",
-            stage="fragment",
-        )
-
-    def _new_pipeline_layout(self) -> GpuPipelineLayout:
-        return GpuPipelineLayout(
-            device=self._gpu_device,
-            descriptor_set_layouts=[
-                GpuDescriptorSetLayout(
-                    device=self._gpu_device,
-                    bindings=OrderedDict(
-                        {
-                            "commonUniform": GpuDescriptorSetLayoutBinding(
-                                type="uniform-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                        }.items()
-                    ),
-                ),
-                GpuDescriptorSetLayout(
-                    device=self._gpu_device,
-                    bindings=OrderedDict(
-                        {
-                            "atlasTexture": GpuDescriptorSetLayoutBinding(
-                                type="combined-image-sampler",
-                                stages=["vertex", "fragment"],
-                            ),
-                            "quads": GpuDescriptorSetLayoutBinding(
-                                type="storage-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                            "batchUniform": GpuDescriptorSetLayoutBinding(
-                                type="uniform-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                        }.items()
-                    ),
-                ),
-            ],
-        )
-
-    def _new_common_uniform_buffer(self, *, staging: bool) -> GpuBuffer:
-        return GpuBuffer(
-            device=self._gpu_device,
-            usages=["uniform", "copy-dst"] if not staging else ["staging", "copy-src"],
-            meta=GpuBufferMeta(element_count=1, element_dtype=R2D_UNIFORM_DTYPE),
-        )
-
-    def _new_common_uniform_descriptor_set(self) -> GpuDescriptorSet:
-        return GpuDescriptorSet(
-            device=self._gpu_device,
-            layout=self._pipeline_layout.descriptor_set_layouts[0],
-            bindings={"commonUniform": self._common_uniform_device_buf},
-        )
-
-    def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
-        if cached_pipeline := self._get_cached_gpu_pipeline(target=target):
-            return cached_pipeline
-        gpu_pipeline = self._new_gpu_pipeline(target=target)
-        self._cached_pipeline = gpu_pipeline
-        return gpu_pipeline
-
-    def _get_cached_gpu_pipeline(self, target: GpuImage) -> GpuPipeline | None:
-        if self._cached_pipeline is None:
-            return None
-        if self._cached_pipeline.vk_color_format != target.vk_format:
-            return None
-        if self._cached_pipeline.viewport_width != target.width:
-            return None
-        if self._cached_pipeline.viewport_height != target.height:
-            return None
-        return self._cached_pipeline
-
-    def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
-        return GpuPipeline(
-            device=self._gpu_device,
-            vertex_shader=self._vertex_shader,
-            fragment_shader=self._fragment_shader,
-            vk_color_format=target.vk_format,
-            enable_depth_test=False,
-            enable_alpha_blending=True,
-            viewport_width=target.width,
-            viewport_height=target.height,
-            layout=self._pipeline_layout,
-        )
-
-    def _get_gpu_batch_dict(
-        self,
-        *,
-        canvas: "RendererCanvas",
-        encoder: GpuCommandEncoder,
-    ) -> dict["RendererAtlas", "R2dGpuQuadBatch"]:
-        # Compute a fresh set of GPU batches:
-        gpu_batches = {
-            atlas: self._get_gpu_batch(
-                atlas=atlas,
-                cpu_batch=cpu_batch,
-                command_encoder=encoder,
-            )
-            for atlas, cpu_batch in canvas.cpu_quad_collection.batches.items()
-        }
-
-        # Only keep cached GPU batches that are still in use:
-        self._cached_gpu_batches = gpu_batches
-
-        # Done:
-        return gpu_batches
-
-    def _get_gpu_batch(
-        self,
-        *,
-        atlas: RendererAtlas,
-        cpu_batch: R2dCpuQuadBatch,
-        command_encoder: GpuCommandEncoder,
-    ) -> "R2dGpuQuadBatch":
-        if gpu_batch := self._get_cached_gpu_batch(atlas=atlas, cpu_batch=cpu_batch):
-            gpu_batch.write(cpu_batch=cpu_batch, command_encoder=command_encoder)
-            return gpu_batch
-
-        gpu_batch = self._new_gpu_batch(atlas=atlas, cpu_batch=cpu_batch)
-        gpu_batch.write(cpu_batch=cpu_batch, command_encoder=command_encoder)
-
-        self._cached_gpu_batches[atlas] = gpu_batch
-
-        return gpu_batch
-
-    def _get_cached_gpu_batch(
-        self,
-        *,
-        atlas: RendererAtlas,
-        cpu_batch: R2dCpuQuadBatch,
-    ) -> "R2dGpuQuadBatch | None":
-        gpu_batch = self._cached_gpu_batches.get(atlas)
-        if gpu_batch is None:
-            return None
-        if gpu_batch.capacity < cpu_batch.instance_count:
-            return None
-        return gpu_batch
-
-    def _new_gpu_batch(
-        self,
-        *,
-        atlas: RendererAtlas,
-        cpu_batch: "R2dCpuQuadBatch",
-    ) -> "R2dGpuQuadBatch":
-        uniform_device_buf = GpuBuffer(
-            device=self._gpu_device,
-            usages=["uniform", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=1,
-                element_dtype=R2D_BATCH_UNIFORM_DTYPE,
-            ),
-        )
-        uniform_staging_buf = GpuBuffer(
-            device=self._gpu_device,
-            usages=["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=1,
-                element_dtype=R2D_BATCH_UNIFORM_DTYPE,
-            ),
-        )
-        quads_device_buf = GpuBuffer(
-            device=self._gpu_device,
-            usages=["storage", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=cpu_batch.capacity,
-                element_dtype=R2D_QUAD_NP_DTYPE,
-            ),
-        )
-        quads_staging_buf = GpuBuffer(
-            device=self._gpu_device,
-            usages=["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=cpu_batch.capacity,
-                element_dtype=R2D_QUAD_NP_DTYPE,
-            ),
-        )
-        binding = GpuDescriptorSet(
-            device=self._gpu_device,
-            layout=self._pipeline_layout.descriptor_set_layouts[1],
-            bindings={
-                "atlasTexture": (atlas.gpu_image, atlas.gpu_sampler),
-                "quads": quads_device_buf,
-                "batchUniform": uniform_device_buf,
-            },
-        )
-        return R2dGpuQuadBatch(
-            renderer=self,
-            atlas=atlas,
-            instance_count=cpu_batch.instance_count,
-            capacity=cpu_batch.capacity,
-            quads_staging_buf=quads_staging_buf,
-            quads_device_buf=quads_device_buf,
-            uniform_staging_buf=uniform_staging_buf,
-            uniform_device_buf=uniform_device_buf,
-            descriptor_set=binding,
-        )
-
-    def _get_depth_image(self, *, width: int, height: int) -> GpuImage:
-        if (
-            self._cached_depth_image is not None
-            and self._cached_depth_image.width == width
-            and self._cached_depth_image.height == height
-        ):
-            return self._cached_depth_image
-
-        depth_image = self._new_depth_image(width=width, height=height)
-        self._cached_depth_image = depth_image
-
-        return depth_image
-
-    def _new_depth_image(self, *, width: int, height: int) -> GpuImage:
-        return GpuImage(
-            device=self._gpu_device,
-            usages=["depth-attachment"],
-            meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
-        )
-
-    def _write_common_uniform(
-        self,
-        *,
-        encoder: GpuCommandEncoder,
-        target: GpuImage,
-        total_quad_count: int,
-    ):
-        uniform_data = np.zeros((1,), dtype=R2D_UNIFORM_DTYPE)
-        uniform_data["framebuffer_size_px"] = [target.width, target.height]
-        uniform_data["total_quad_count"] = float(total_quad_count)
-        self._common_uniform_staging_buf.memory.write(data=uniform_data)
-        encoder.copy_buffer_to_buffer(
-            src=self._common_uniform_staging_buf,
-            dst=self._common_uniform_device_buf,
-            size=R2D_UNIFORM_DTYPE.itemsize,
-        )
-
-    def _draw(
-        self,
-        *,
-        encoder: GpuCommandEncoder,
-        pipeline: GpuPipeline,
-        depth_image: GpuImage,
-        gpu_batches: dict["RendererAtlas", "R2dGpuQuadBatch"],
-        target: GpuImage,
-    ):
-        with encoder.render(
-            color_attachment=target,
-            depth_attachment=depth_image,
-            clear="black",
-        ) as render_pass:
-            render_pass.bind_pipeline(pipeline=pipeline)
-            render_pass.bind_descriptor_set(
-                set_index=0,
-                descriptor_set=self._common_uniform_descriptor_set,
-            )
-
-            for gpu_batch in gpu_batches.values():
-                render_pass.bind_descriptor_set(
-                    set_index=1,
-                    descriptor_set=gpu_batch.descriptor_set,
-                )
-                render_pass.draw(
-                    vertex_count=6,
-                    instance_count=gpu_batch.instance_count,
-                    first_vertex=0,
-                    first_instance=0,
-                )
-
-
-class R2dGpuQuadBatch(BaseResource):
-    renderer: Renderer2d
+class RendererQuadBatchDescriptorSet(BaseResource):
+    renderer: Renderer
     atlas: RendererAtlas
     instance_count: int
     capacity: int
@@ -668,7 +630,7 @@ class R2dGpuQuadBatch(BaseResource):
     def __init__(
         self,
         *,
-        renderer: Renderer2d,
+        renderer: Renderer,
         atlas: RendererAtlas,
         instance_count: int,
         capacity: int,
@@ -696,7 +658,9 @@ class R2dGpuQuadBatch(BaseResource):
         self.quads_staging_buf.dispose()
         self.quads_device_buf.dispose()
 
-    def write(self, *, cpu_batch: R2dCpuQuadBatch, command_encoder: GpuCommandEncoder):
+    def write(
+        self, *, cpu_batch: RendererQuadBatch, command_encoder: GpuCommandEncoder
+    ):
         # Quads:
         self.quads_staging_buf.memory.write(
             data=cpu_batch.data[: cpu_batch.instance_count]
@@ -724,8 +688,8 @@ class R2dGpuQuadBatch(BaseResource):
 #
 
 
-class R2dCpuQuadCollection:
-    batches: dict[RendererAtlas, "R2dCpuQuadBatch"]
+class RendererQuadCollection:
+    batches: dict[RendererAtlas, "RendererQuadBatch"]
     default_white_image: RendererImage
     total_added_image_count: int
 
@@ -815,15 +779,15 @@ class R2dCpuQuadCollection:
         )
         self.total_added_image_count += 1
 
-    def _get_batch_for_atlas(self, atlas: RendererAtlas) -> R2dCpuQuadBatch:
+    def _get_batch_for_atlas(self, atlas: RendererAtlas) -> RendererQuadBatch:
         batch = self.batches.get(atlas)
         if batch is None:
-            batch = R2dCpuQuadBatch()
+            batch = RendererQuadBatch()
             self.batches[atlas] = batch
         return batch
 
 
-class R2dCpuQuadBatch:
+class RendererQuadBatch:
     instance_count: int
     data: np.ndarray
 

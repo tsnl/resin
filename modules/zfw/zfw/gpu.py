@@ -1949,7 +1949,7 @@ class GpuCommandEncoder(BaseResource):
         *,
         color_attachment: GpuImage | None = None,
         depth_attachment: GpuImage | None = None,
-        clear: Literal["black", "transparent"] | None = None,
+        clear_color: Literal["black", "transparent"] | None = None,
     ):
         color_infos: list[VkRenderingAttachmentInfo] = []
         if color_attachment is not None:
@@ -1962,7 +1962,7 @@ class GpuCommandEncoder(BaseResource):
                     resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                     loadOp=(
                         VK_ATTACHMENT_LOAD_OP_CLEAR
-                        if clear is not None
+                        if clear_color is not None
                         else VK_ATTACHMENT_LOAD_OP_LOAD
                     ),
                     storeOp=VK_ATTACHMENT_STORE_OP_STORE,
@@ -1970,7 +1970,7 @@ class GpuCommandEncoder(BaseResource):
                         color=VkClearColorValue(
                             float32=(
                                 [0.0, 0.0, 0.0, 1.0]
-                                if clear == "black"
+                                if clear_color == "black"
                                 else [0.0, 0.0, 0.0, 0.0]
                             ),
                         )
@@ -1987,7 +1987,9 @@ class GpuCommandEncoder(BaseResource):
                 resolveImageView=None,
                 resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                 loadOp=(
-                    VK_ATTACHMENT_LOAD_OP_CLEAR if clear else VK_ATTACHMENT_LOAD_OP_LOAD
+                    VK_ATTACHMENT_LOAD_OP_CLEAR
+                    if clear_color
+                    else VK_ATTACHMENT_LOAD_OP_LOAD
                 ),
                 storeOp=VK_ATTACHMENT_STORE_OP_STORE,
                 clearValue=VkClearValue(
