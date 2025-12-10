@@ -7,12 +7,12 @@
 struct R2dUniform
 {
     int2 framebufferSizePx;
-    float maxHeight;
+    float totalQuadCount;
     uint _rsv0; // reserved for alignment
 }
 
 [[vk::binding(0, 0)]]
-ConstantBuffer<R2dUniform> uniform;
+ConstantBuffer<R2dUniform> commonUniform;
 
 // Bind Group 1: per-batch data
 
@@ -29,11 +29,22 @@ struct R2dQuad
     int _rsv1;              // reserved for alignment
 };
 
+struct R2dBatchUniform
+{
+    uint instanceCount;
+    uint isOpaque;
+    uint _rsv0; // reserved for alignment
+    uint _rsv1; // reserved for alignment
+};
+
 [[vk::binding(0, 1)]]
 Sampler2D atlasTexture;
 
 [[vk::binding(1, 1)]]
 StructuredBuffer<R2dQuad> quads;
+
+[[vk::binding(2, 1)]]
+ConstantBuffer<R2dBatchUniform> batchUniform;
 
 //
 // Vertex Shader
@@ -52,14 +63,21 @@ struct VSOutput
 [shader("vertex")]
 VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
-    R2dQuad quad = quads[instanceId];
+    // Determine quad index based on opacity.
+    // - Opaque quads are rendered top-to-bottom to minimize overdraw.
+    // - Transparent quads are rendered bottom-to-top to ensure correct blending.
+    uint quadIndex = batchUniform.isOpaque != 0 ? (batchUniform.instanceCount - 1 - instanceId) : (instanceId);
+    // uint quadIndex = instanceId;
+
+    // Fetch quad data.
+    R2dQuad quad = quads[quadIndex];
 
     // TODO: handle non-0 border thickness.
 
     VSOutput output;
     uint cornerIdx = vertexCornerIdx(vertexId);
     output.position.xy = framebufferPxToNdcVec2(quad.dstPx[cornerIdx]);
-    output.position.z = 1.0 - ((quad.height + 1.0) / (uniform.maxHeight + 1.0));
+    output.position.z = (1.0 + quad.height) / (1.0 + commonUniform.totalQuadCount);
     output.position.w = 1.0;
     output.uv = quad.srcUv[cornerIdx];
     output.tintColor = quad.tintColor;
@@ -86,8 +104,8 @@ uint vertexCornerIdx(uint vertexIdx)
 float2 framebufferPxToNdcVec2(int2 posPx)
 {
     float2 ndc;
-    ndc.x = (float(posPx.x) / float(uniform.framebufferSizePx.x)) * 2.0 - 1.0;
-    ndc.y = (float(posPx.y) / float(uniform.framebufferSizePx.y)) * 2.0 - 1.0;
+    ndc.x = (float(posPx.x) / float(commonUniform.framebufferSizePx.x)) * 2.0 - 1.0;
+    ndc.y = (float(posPx.y) / float(commonUniform.framebufferSizePx.y)) * 2.0 - 1.0;
     return ndc;
 }
 

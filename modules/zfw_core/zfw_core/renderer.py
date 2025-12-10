@@ -365,7 +365,7 @@ class Renderer2d(BaseResource):
         self._write_common_uniform(
             encoder=encoder,
             target=target,
-            max_height=float(canvas.cpu_quad_collection.total_added_image_count),
+            total_quad_count=canvas.cpu_quad_collection.total_added_image_count,
         )
 
         self._draw(
@@ -398,7 +398,7 @@ class Renderer2d(BaseResource):
                     device=self._gpu_device,
                     bindings=OrderedDict(
                         {
-                            "uniform": GpuDescriptorSetLayoutBinding(
+                            "commonUniform": GpuDescriptorSetLayoutBinding(
                                 type="uniform-buffer",
                                 stages=["vertex", "fragment"],
                             ),
@@ -415,6 +415,10 @@ class Renderer2d(BaseResource):
                             ),
                             "quads": GpuDescriptorSetLayoutBinding(
                                 type="storage-buffer",
+                                stages=["vertex"],
+                            ),
+                            "batchUniform": GpuDescriptorSetLayoutBinding(
+                                type="uniform-buffer",
                                 stages=["vertex"],
                             ),
                         }.items()
@@ -434,7 +438,7 @@ class Renderer2d(BaseResource):
         return GpuDescriptorSet(
             device=self._gpu_device,
             layout=self._pipeline_layout.descriptor_set_layouts[0],
-            bindings={"uniform": self._common_uniform_device_buf},
+            bindings={"commonUniform": self._common_uniform_device_buf},
         )
 
     def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
@@ -525,7 +529,23 @@ class Renderer2d(BaseResource):
         atlas: RendererAtlas,
         cpu_batch: "R2dCpuQuadBatch",
     ) -> "R2dGpuQuadBatch":
-        device_buf = GpuBuffer(
+        uniform_device_buf = GpuBuffer(
+            device=self._gpu_device,
+            usages=["uniform", "copy-dst"],
+            meta=GpuBufferMeta(
+                element_count=1,
+                element_dtype=R2D_BATCH_UNIFORM_DTYPE,
+            ),
+        )
+        uniform_staging_buf = GpuBuffer(
+            device=self._gpu_device,
+            usages=["staging", "copy-src"],
+            meta=GpuBufferMeta(
+                element_count=1,
+                element_dtype=R2D_BATCH_UNIFORM_DTYPE,
+            ),
+        )
+        quads_device_buf = GpuBuffer(
             device=self._gpu_device,
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
@@ -533,7 +553,7 @@ class Renderer2d(BaseResource):
                 element_dtype=R2D_QUAD_NP_DTYPE,
             ),
         )
-        staging_buf = GpuBuffer(
+        quads_staging_buf = GpuBuffer(
             device=self._gpu_device,
             usages=["staging", "copy-src"],
             meta=GpuBufferMeta(
@@ -546,7 +566,8 @@ class Renderer2d(BaseResource):
             layout=self._pipeline_layout.descriptor_set_layouts[1],
             bindings={
                 "atlasTexture": (atlas.gpu_image, atlas.gpu_sampler),
-                "quads": device_buf,
+                "quads": quads_device_buf,
+                "batchUniform": uniform_device_buf,
             },
         )
         return R2dGpuQuadBatch(
@@ -554,8 +575,10 @@ class Renderer2d(BaseResource):
             atlas=atlas,
             instance_count=cpu_batch.instance_count,
             capacity=cpu_batch.capacity,
-            staging_buf=staging_buf,
-            device_buf=device_buf,
+            quads_staging_buf=quads_staging_buf,
+            quads_device_buf=quads_device_buf,
+            uniform_staging_buf=uniform_staging_buf,
+            uniform_device_buf=uniform_device_buf,
             descriptor_set=binding,
         )
 
@@ -584,11 +607,11 @@ class Renderer2d(BaseResource):
         *,
         encoder: GpuCommandEncoder,
         target: GpuImage,
-        max_height: float,
+        total_quad_count: int,
     ):
         uniform_data = np.zeros((1,), dtype=R2D_UNIFORM_DTYPE)
         uniform_data["framebuffer_size_px"] = [target.width, target.height]
-        uniform_data["max_height"] = max_height
+        uniform_data["total_quad_count"] = float(total_quad_count)
         self._common_uniform_staging_buf.memory.write(data=uniform_data)
         encoder.copy_buffer_to_buffer(
             src=self._common_uniform_staging_buf,
@@ -634,8 +657,10 @@ class R2dGpuQuadBatch(BaseResource):
     atlas: RendererAtlas
     instance_count: int
     capacity: int
-    device_buf: GpuBuffer
-    staging_buf: GpuBuffer
+    quads_device_buf: GpuBuffer
+    quads_staging_buf: GpuBuffer
+    uniform_device_buf: GpuBuffer
+    uniform_staging_buf: GpuBuffer
     descriptor_set: GpuDescriptorSet
 
     def __init__(
@@ -645,8 +670,10 @@ class R2dGpuQuadBatch(BaseResource):
         atlas: RendererAtlas,
         instance_count: int,
         capacity: int,
-        staging_buf: GpuBuffer,
-        device_buf: GpuBuffer,
+        quads_device_buf: GpuBuffer,
+        quads_staging_buf: GpuBuffer,
+        uniform_device_buf: GpuBuffer,
+        uniform_staging_buf: GpuBuffer,
         descriptor_set: GpuDescriptorSet,
     ):
         super().__init__(parent=renderer)
@@ -654,24 +681,39 @@ class R2dGpuQuadBatch(BaseResource):
         self.atlas = atlas
         self.instance_count = instance_count
         self.capacity = capacity
-        self.staging_buf = staging_buf
-        self.device_buf = device_buf
+        self.quads_device_buf = quads_device_buf
+        self.quads_staging_buf = quads_staging_buf
+        self.uniform_device_buf = uniform_device_buf
+        self.uniform_staging_buf = uniform_staging_buf
         self.descriptor_set = descriptor_set
 
     def _on_dispose(self) -> None:
         self.descriptor_set.dispose()
-        self.staging_buf.dispose()
-        self.device_buf.dispose()
+        self.uniform_staging_buf.dispose()
+        self.uniform_device_buf.dispose()
+        self.quads_staging_buf.dispose()
+        self.quads_device_buf.dispose()
 
     def write(self, *, cpu_batch: R2dCpuQuadBatch, command_encoder: GpuCommandEncoder):
-        # Write to staging buffer:
-        self.staging_buf.memory.write(data=cpu_batch.data[: cpu_batch.instance_count])
-
-        # Copy to device buffer:
+        # Quads:
+        self.quads_staging_buf.memory.write(
+            data=cpu_batch.data[: cpu_batch.instance_count]
+        )
         command_encoder.copy_buffer_to_buffer(
-            src=self.staging_buf,
-            dst=self.device_buf,
+            src=self.quads_staging_buf,
+            dst=self.quads_device_buf,
             size=cpu_batch.instance_count * R2D_QUAD_NP_DTYPE.itemsize,
+        )
+
+        # Batch uniform:
+        uniform_array = np.empty((1,), dtype=R2D_BATCH_UNIFORM_DTYPE)
+        uniform_array["instance_count"] = int(cpu_batch.instance_count)
+        uniform_array["is_opaque"] = 1  # TODO: support transparency
+        self.uniform_staging_buf.memory.write(data=uniform_array)
+        command_encoder.copy_buffer_to_buffer(
+            src=self.uniform_staging_buf,
+            dst=self.uniform_device_buf,
+            size=R2D_BATCH_UNIFORM_DTYPE.itemsize,
         )
 
 
@@ -856,7 +898,7 @@ def _next_po2(x: int) -> int:
 R2D_UNIFORM_DTYPE = np.dtype(
     [
         ("framebuffer_size_px", np.int32, (2,)),
-        ("max_height", np.float32),
+        ("total_quad_count", np.float32),
         ("_rsv0", np.uint32),
     ]
 )
@@ -877,3 +919,13 @@ R2D_QUAD_NP_DTYPE = np.dtype(
     ]
 )
 assert R2D_QUAD_NP_DTYPE.itemsize == 32 * 4
+
+R2D_BATCH_UNIFORM_DTYPE = np.dtype(
+    [
+        ("instance_count", np.uint32),
+        ("is_opaque", np.uint32),
+        ("_rsv0", np.uint32),
+        ("_rsv1", np.uint32),
+    ]
+)
+assert R2D_BATCH_UNIFORM_DTYPE.itemsize == 4 * 4

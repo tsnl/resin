@@ -67,6 +67,8 @@ from .typed_vulkan import (
     VK_COMPARE_OP_ALWAYS,
     VK_COMPARE_OP_LESS,
     VK_COMPARE_OP_LESS_OR_EQUAL,
+    VK_COMPARE_OP_GREATER,
+    VK_COMPARE_OP_GREATER_OR_EQUAL,
     VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1973,7 +1975,7 @@ class GpuCommandEncoder(BaseResource):
                 ),
                 storeOp=VK_ATTACHMENT_STORE_OP_STORE,
                 clearValue=VkClearValue(
-                    depthStencil=VkClearDepthStencilValue(depth=1.0, stencil=0)
+                    depthStencil=VkClearDepthStencilValue(depth=0.0, stencil=0)
                 ),
             )
 
@@ -2778,7 +2780,7 @@ class GpuPipeline(BaseResource):
             flags=0,
             depthTestEnable=True,
             depthWriteEnable=True,
-            depthCompareOp=VK_COMPARE_OP_LESS,
+            depthCompareOp=VK_COMPARE_OP_GREATER,
             depthBoundsTestEnable=True,
             stencilTestEnable=False,
             front=VkStencilOpState(
