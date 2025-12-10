@@ -602,6 +602,7 @@ class Renderer2d(BaseResource):
         with encoder.render(
             color_attachment=target,
             depth_attachment=depth_image,
+            clear="black",
         ) as render_pass:
             render_pass.bind_pipeline(pipeline=pipeline)
             render_pass.bind_descriptor_set(
