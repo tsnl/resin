@@ -68,13 +68,11 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     R2dQuad quad = quads[instanceId];
 
     // Compute quad corner in pixels:
-    const int2 cornerBorderEgressPx[4] = getCornerEgressPxArray(quad);
     uint cornerIdx = vertexCornerIdx(vertexId);
-    int2 vertexPosPx = quad.dstPx[cornerIdx] + cornerBorderEgressPx[cornerIdx];
+    int2 vertexPosPx = getCornerCoordsPxArray(quad, 1)[cornerIdx];
 
     // Emit vertex data.
     VSOutput output;
-
     output.position.xy = framebufferPxToNdcVec2(vertexPosPx);
     output.position.z = (1.0 + quad.height) / (1.0 + commonUniform.totalQuadCount);
     output.position.w = 1.0;
