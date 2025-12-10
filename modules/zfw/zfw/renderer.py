@@ -1,9 +1,9 @@
 __all__ = [
-    "RendererContext",
     "Renderer",
     "RendererAtlas",
-    "RendererImage",
     "RendererCanvas",
+    "RendererContext",
+    "RendererImage",
 ]
 
 from collections import OrderedDict
@@ -56,8 +56,8 @@ class Renderer(BaseResource):
     default_white_image_atlas: "RendererAtlas"
     default_white_image: "RendererImage"
 
-    _vertex_shader: GpuShader
-    _fragment_shader: GpuShader
+    _quads_vertex_shader: GpuShader
+    _quads_fragment_shader: GpuShader
     _pipeline_layout: GpuPipelineLayout
     _common_uniform_staging_buf: GpuBuffer
     _common_uniform_device_buf: GpuBuffer
@@ -84,8 +84,8 @@ class Renderer(BaseResource):
         )
         self.default_white_image = self.default_white_image_atlas["default"]
 
-        self._vertex_shader = self._new_vertex_shader()
-        self._fragment_shader = self._new_fragment_shader()
+        self._quads_vertex_shader = self._new_vertex_shader()
+        self._quads_fragment_shader = self._new_fragment_shader()
         self._pipeline_layout = self._new_pipeline_layout()
         self._common_uniform_staging_buf = self._new_common_uniform_buffer(staging=True)
         self._common_uniform_device_buf = self._new_common_uniform_buffer(staging=False)
@@ -95,8 +95,8 @@ class Renderer(BaseResource):
         self._cached_gpu_desc_sets = {}
 
     def _on_dispose(self) -> None:
-        self._vertex_shader.dispose()
-        self._fragment_shader.dispose()
+        self._quads_vertex_shader.dispose()
+        self._quads_fragment_shader.dispose()
 
         self._pipeline_layout.dispose()
 
@@ -260,8 +260,8 @@ class Renderer(BaseResource):
     def _new_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
         return GpuPipeline(
             device=self.gpu_device,
-            vertex_shader=self._vertex_shader,
-            fragment_shader=self._fragment_shader,
+            vertex_shader=self._quads_vertex_shader,
+            fragment_shader=self._quads_fragment_shader,
             vk_color_format=target.vk_format,
             enable_depth_test=False,
             enable_alpha_blending=True,
@@ -295,7 +295,7 @@ class Renderer(BaseResource):
     def _get_gpu_batch(
         self,
         *,
-        atlas: RendererAtlas,
+        atlas: "RendererAtlas",
         cpu_batch: "RendererQuadBatch",
         command_encoder: GpuCommandEncoder,
     ) -> "RendererQuadBatchDescriptorSet":
@@ -313,7 +313,7 @@ class Renderer(BaseResource):
     def _get_cached_gpu_batch(
         self,
         *,
-        atlas: RendererAtlas,
+        atlas: "RendererAtlas",
         cpu_batch: "RendererQuadBatch",
     ) -> "RendererQuadBatchDescriptorSet | None":
         gpu_batch = self._cached_gpu_desc_sets.get(atlas)
@@ -326,7 +326,7 @@ class Renderer(BaseResource):
     def _new_gpu_batch(
         self,
         *,
-        atlas: RendererAtlas,
+        atlas: "RendererAtlas",
         cpu_batch: "RendererQuadBatch",
     ) -> "RendererQuadBatchDescriptorSet":
         uniform_device_buf = GpuBuffer(
@@ -578,7 +578,7 @@ class RendererImage(BaseResource):
 
 class RendererCanvas(BaseResource):
     renderer: "Renderer"
-    cpu_quad_collection: RendererQuadCollection
+    cpu_quad_collection: "RendererQuadCollection"
 
     def __init__(self, *, renderer: "Renderer"):
         super().__init__(parent=renderer)
@@ -659,7 +659,7 @@ class RendererQuadBatchDescriptorSet(BaseResource):
         self.quads_device_buf.dispose()
 
     def write(
-        self, *, cpu_batch: RendererQuadBatch, command_encoder: GpuCommandEncoder
+        self, *, cpu_batch: "RendererQuadBatch", command_encoder: GpuCommandEncoder
     ):
         # Quads:
         self.quads_staging_buf.memory.write(
@@ -779,7 +779,7 @@ class RendererQuadCollection:
         )
         self.total_added_image_count += 1
 
-    def _get_batch_for_atlas(self, atlas: RendererAtlas) -> RendererQuadBatch:
+    def _get_batch_for_atlas(self, atlas: RendererAtlas) -> "RendererQuadBatch":
         batch = self.batches.get(atlas)
         if batch is None:
             batch = RendererQuadBatch()

@@ -8,7 +8,7 @@ from typing import Literal, TypeAlias
 @dataclass
 class Shader:
     source: Path
-    stages: dict[ShaderStage, str]
+    stages: dict["ShaderStage", str]
     targets: list[str]
 
 

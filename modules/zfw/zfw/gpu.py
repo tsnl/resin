@@ -8,19 +8,19 @@ Required Vulkan version:
 
 __all__ = [
     "GpuContext",
-    "GpuPhysicalDevice",
+    "GpuDescriptorSet",
+    "GpuDescriptorSetLayout",
     "GpuDevice",
-    "GpuShader",
+    "GpuImage",
+    "GpuImageMeta",
+    "GpuImageUsage",
+    "GpuPhysicalDevice",
     "GpuPipeline",
     "GpuPipelineLayout",
-    "GpuImage",
-    "GpuImageUsage",
-    "GpuImageMeta",
+    "GpuSampler",
+    "GpuShader",
     "GpuSurface",
     "GpuSwapChain",
-    "GpuSampler",
-    "GpuDescriptorSetLayout",
-    "GpuDescriptorSet",
 ]
 
 import json
@@ -50,7 +50,6 @@ from .typed_vulkan import (
     VK_BLEND_FACTOR_ONE,
     VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
     VK_BLEND_FACTOR_SRC_ALPHA,
-    VK_BLEND_FACTOR_ZERO,
     VK_BLEND_OP_ADD,
     VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -66,17 +65,11 @@ from .typed_vulkan import (
     VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     VK_COMPARE_OP_ALWAYS,
     VK_COMPARE_OP_GREATER,
-    VK_COMPARE_OP_GREATER_OR_EQUAL,
-    VK_COMPARE_OP_LESS,
-    VK_COMPARE_OP_LESS_OR_EQUAL,
     VK_COMPONENT_SWIZZLE_IDENTITY,
     VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-    VK_DESCRIPTOR_TYPE_SAMPLER,
     VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     VK_FENCE_CREATE_SIGNALED_BIT,
     VK_FILTER_LINEAR,
@@ -93,7 +86,6 @@ from .typed_vulkan import (
     VK_IMAGE_ASPECT_DEPTH_BIT,
     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    VK_IMAGE_LAYOUT_GENERAL,
     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -135,7 +127,6 @@ from .typed_vulkan import (
     VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
     VK_SAMPLER_ADDRESS_MODE_REPEAT,
     VK_SAMPLER_MIPMAP_MODE_LINEAR,
-    VK_SHADER_STAGE_COMPUTE_BIT,
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_EXCLUSIVE,
@@ -166,7 +157,6 @@ from .typed_vulkan import (
     VkDescriptorSetLayout,
     VkDescriptorSetLayoutBinding,
     VkDescriptorSetLayoutCreateInfo,
-    VkDescriptorType,
     VkDevice,
     VkDeviceCreateInfo,
     VkDeviceMemory,
@@ -230,7 +220,6 @@ from .typed_vulkan import (
     VkSwapchainKHR,
     VkViewport,
     VkWriteDescriptorSet,
-    raw_ffi,
     vk_api_version_str,
     vkAllocateCommandBuffers,
     vkAllocateDescriptorSets,
@@ -538,7 +527,7 @@ class GpuContext(BaseResource):
     # GpuContext methods:
     #
 
-    def enumerate_physical_devices(self) -> list[GpuPhysicalDevice]:
+    def enumerate_physical_devices(self) -> list["GpuPhysicalDevice"]:
         return [
             GpuPhysicalDevice(
                 context=self,
@@ -634,7 +623,7 @@ class GpuPhysicalDevice(BaseResource):
 
     def get_queue_families(
         self,
-        surface: GpuSurface | None,
+        surface: "GpuSurface | None",
     ) -> list["GpuPhysicalDeviceQueueFamily"]:
         if surface is not None:
             assert self.context.enable_present_support
@@ -749,7 +738,7 @@ class GpuQueueFamilyIndices:
     @staticmethod
     def find(
         physical_device: "GpuPhysicalDevice",
-        surface: GpuSurface | None = None,
+        surface: "GpuSurface | None" = None,
     ) -> "GpuQueueFamilyIndices":
         # First, try to find exclusive queue families:
         qfi_exclusive = GpuQueueFamilyIndices._find_with_exclusivity_constraint(
@@ -784,7 +773,7 @@ class GpuQueueFamilyIndices:
     @staticmethod
     def _find_with_exclusivity_constraint(
         physical_device: "GpuPhysicalDevice",
-        surface: GpuSurface | None,
+        surface: "GpuSurface | None",
         require_exclusive_queues: bool,
     ) -> "GpuQueueFamilyIndices":
         res = GpuQueueFamilyIndices()
@@ -839,7 +828,7 @@ class GpuDevice(BaseResource):
     vk_device: VkDevice
     vk_command_pools: dict[int, VkCommandPool]
     vk_queues: dict[int, VkQueue]
-    descriptor_pool_config: dict[GpuDescriptorType, int] | None
+    descriptor_pool_config: dict["GpuDescriptorType", int] | None
     max_descriptor_pool_set_count: int
     vk_descriptor_pool: VkDescriptorPool
     present_support_enabled: bool
@@ -849,8 +838,8 @@ class GpuDevice(BaseResource):
         *,
         context: GpuContext,
         physical_device: GpuPhysicalDevice,
-        surface: GpuSurface | None,
-        descriptor_pool_config: dict[GpuDescriptorType, int] | None = None,
+        surface: "GpuSurface | None",
+        descriptor_pool_config: dict["GpuDescriptorType", int] | None = None,
         max_descriptor_pool_set_count: int = 1024,
     ) -> None:
         super().__init__(parent=context)
@@ -883,7 +872,7 @@ class GpuDevice(BaseResource):
     def _help_create_descriptor_pool(
         self,
         max_sets: int,
-        pool_sizes: dict[GpuDescriptorType, int],
+        pool_sizes: dict["GpuDescriptorType", int],
     ) -> VkDescriptorPool:
         vk_pool_sizes = [
             VkDescriptorPoolSize(
@@ -980,8 +969,8 @@ class GpuDevice(BaseResource):
 
     @staticmethod
     def _help_compute_descriptor_pool_config(
-        descriptor_pool_config: dict[GpuDescriptorType, int] | None,
-    ) -> dict[GpuDescriptorType, int]:
+        descriptor_pool_config: dict["GpuDescriptorType", int] | None,
+    ) -> dict["GpuDescriptorType", int]:
         """Compute descriptor pool config with defaults."""
         defaults: dict[GpuDescriptorType, int] = {
             "combined-image-sampler": 1024,
@@ -1016,7 +1005,7 @@ class GpuDevice(BaseResource):
         command_buffers: list[VkCommandBuffer],
         wait_semaphores: list["GpuSemaphore"] | None = None,
         signal_semaphores: list["GpuSemaphore"] | None = None,
-        fence: GpuFence | None = None,
+        fence: "GpuFence | None" = None,
     ) -> None:
         vk_queue = self.vk_queues[self.qfis[queue_type]]
         wait_sems = [s.vk_semaphore for s in (wait_semaphores or [])]
@@ -1163,13 +1152,13 @@ class GpuMemory(BaseResource):
 class GpuImageMeta:
     shape: tuple[int, int, int]  # (height, width, channels)
     dtype: npt.DTypeLike
-    color_space: GpuColorSpace = "linear"
+    color_space: "GpuColorSpace" = "linear"
 
     @staticmethod
     def from_array(
         array: np.ndarray,
         *,
-        color_space: GpuColorSpace = "linear",
+        color_space: "GpuColorSpace" = "linear",
     ) -> "GpuImageMeta":
         if array.ndim != 3:
             raise LogicError(
@@ -1184,7 +1173,7 @@ class GpuImageMeta:
 
     def infer_vk_format(
         self,
-        usages: list[GpuImageUsage],
+        usages: list["GpuImageUsage"],
     ) -> int:
         dtype = self.dtype
         depth = self.shape[2]
@@ -2333,13 +2322,13 @@ GpuSamplerAddressMode: TypeAlias = Literal[
 class GpuPipelineLayout(BaseResource):
     device: GpuDevice
     vk_pipeline_layout: VkPipelineLayout
-    descriptor_set_layouts: list[GpuDescriptorSetLayout]
+    descriptor_set_layouts: list["GpuDescriptorSetLayout"]
 
     def __init__(
         self,
         *,
         device: GpuDevice,
-        descriptor_set_layouts: list[GpuDescriptorSetLayout],
+        descriptor_set_layouts: list["GpuDescriptorSetLayout"],
     ):
         super().__init__(parent=device)
         self.device = device
@@ -2351,7 +2340,7 @@ class GpuPipelineLayout(BaseResource):
     @staticmethod
     def _help_create_pipeline_layout(
         device: GpuDevice,
-        descriptor_set_layouts: list[GpuDescriptorSetLayout],
+        descriptor_set_layouts: list["GpuDescriptorSetLayout"],
     ) -> VkPipelineLayout:
         vk_set_layouts = [
             layout.vk_descriptor_set_layout for layout in descriptor_set_layouts
@@ -2435,8 +2424,8 @@ class GpuDescriptorSetLayout(BaseResource):
 
 @dataclass
 class GpuDescriptorSetLayoutBinding:
-    type: GpuDescriptorType
-    stages: list[GpuStage] = field(default_factory=lambda: ["vertex", "fragment"])
+    type: "GpuDescriptorType"
+    stages: list["GpuStage"] = field(default_factory=lambda: ["vertex", "fragment"])
     count: int = 1
 
 
@@ -2449,14 +2438,14 @@ class GpuDescriptorSet(BaseResource):
     device: GpuDevice
     vk_descriptor_set: VkDescriptorSet
     layout: GpuDescriptorSetLayout
-    bindings: dict[str, GpuDescriptorSetBinding]
+    bindings: dict[str, "GpuDescriptorSetBinding"]
 
     def __init__(
         self,
         *,
         device: GpuDevice,
         layout: GpuDescriptorSetLayout,
-        bindings: dict[str, GpuDescriptorSetBinding],
+        bindings: dict[str, "GpuDescriptorSetBinding"],
     ):
         super().__init__(parent=device)
         self.device = device
@@ -2468,7 +2457,7 @@ class GpuDescriptorSet(BaseResource):
 
     @staticmethod
     def _help_validate_bindings(
-        bindings: dict[str, GpuDescriptorSetBinding],
+        bindings: dict[str, "GpuDescriptorSetBinding"],
         layout: GpuDescriptorSetLayout,
     ) -> None:
         # Check that the number of bindings matches the layout
@@ -2511,7 +2500,7 @@ class GpuDescriptorSet(BaseResource):
     def _help_write_bindings(
         device: GpuDevice,
         vk_set: VkDescriptorSet,
-        bindings: dict[str, GpuDescriptorSetBinding],
+        bindings: dict[str, "GpuDescriptorSetBinding"],
         layout: GpuDescriptorSetLayout,
     ) -> None:
         # Update the descriptor sets by writing the bindings:
@@ -2540,7 +2529,7 @@ GpuDescriptorSetBinding: TypeAlias = GpuBuffer | tuple[GpuImage, GpuSampler]
 
 def compatible_descriptor_types_for_binding(
     binding: GpuDescriptorSetBinding,
-) -> list[GpuDescriptorType]:
+) -> list["GpuDescriptorType"]:
     match binding:
         case GpuBuffer():
             res = []
@@ -3026,7 +3015,7 @@ class GpuSwapChain(BaseResource):
     device: GpuDevice
     vk_swap_chain: VkSwapchainKHR
     images: list[GpuImage]
-    slots: list[GpuSwapChainSlot]
+    slots: list["GpuSwapChainSlot"]
     vk_format: VkFormat
     width: int
     height: int
@@ -3118,7 +3107,7 @@ class GpuSwapChain(BaseResource):
             )
         ]
 
-    def _create_slots(self) -> list[GpuSwapChainSlot]:
+    def _create_slots(self) -> list["GpuSwapChainSlot"]:
         return [GpuSwapChainSlot(swap_chain=self) for _ in self.images]
 
     def __repr__(self) -> str:

@@ -1,6 +1,6 @@
 __all__ = [
-    "LogicError",
     "GlfwError",
+    "LogicError",
     "PlatformSupportError",
 ]
 

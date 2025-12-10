@@ -29,24 +29,26 @@ tests: sync
 	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
 
 #
-# Ruff:
+# Lint, Check: Format, Lint, Typecheck:
 #
 
-.PHONY: format
+.PHONY: check
+check: format-check lint-check type-check
+
+.PHONY: format format-check
 format:
 	uv run --package zfw --extra dev -- ruff format .
-	uv run --package zfw --extra dev -- ruff check --select I --fix .
-
-.PHONY: check-formatting
-check-formatting:
+format-check:
 	uv run --package zfw --extra dev -- ruff check --select I .
 
-#
-# Type-check:
-#
+.PHONY: lint lint-check
+lint: format
+	uv run --package zfw --extra dev -- ruff check --fix .
+lint-check:
+	uv run --package zfw --extra dev -- ruff check .
 
-.PHONY: check-typing
-check-typing:
+.PHONY: type-check
+type-check:
 	uv run --package zfw --extra dev -- pyright
 
 #
