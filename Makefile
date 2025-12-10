@@ -18,7 +18,7 @@ bundled-data:
 
 .PHONY: sandbox
 sandbox: sync
-	uv run --extra dev zfw-sandbox
+	uv run --extra dev zfw-sandbox --debug
 
 #
 # Tests:

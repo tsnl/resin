@@ -461,6 +461,8 @@ class Renderer2d(BaseResource):
             vertex_shader=self._vertex_shader,
             fragment_shader=self._fragment_shader,
             vk_color_format=target.vk_format,
+            enable_depth_test=False,
+            enable_alpha_blending=True,
             viewport_width=target.width,
             viewport_height=target.height,
             layout=self._pipeline_layout,

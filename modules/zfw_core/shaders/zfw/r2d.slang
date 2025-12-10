@@ -32,9 +32,9 @@ struct R2dQuad
 struct R2dBatchUniform
 {
     uint instanceCount;
-    uint isOpaque;
     uint _rsv0; // reserved for alignment
     uint _rsv1; // reserved for alignment
+    uint _rsv2; // reserved for alignment
 };
 
 [[vk::binding(0, 1)]]
@@ -53,7 +53,7 @@ ConstantBuffer<R2dBatchUniform> batchUniform;
 struct VSOutput
 {
     float4 position : SV_Position;
-    uint instanceId : SV_InstanceID;
+    nointerpolation uint instanceId : SV_InstanceID;
     float2 uv : TEXCOORD0;
     float4 tintColor : TEXCOORD1;
     float4 borderColor : TEXCOORD2;
@@ -65,7 +65,7 @@ struct VSOutput
 VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
     // Fetch quad data.
-    R2dQuad quad = getQuad(instanceId);
+    R2dQuad quad = quads[instanceId];
 
     // Compute quad corner in pixels:
     const int2 cornerBorderEgressPx[4] = getCornerEgressPxArray(quad);
@@ -116,7 +116,7 @@ float2 framebufferPxToNdcVec2(int2 posPx)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    R2dQuad quad = getQuad(input.instanceId);
+    R2dQuad quad = quads[input.instanceId];
 
     int2 quadHalfSizePx = (quad.dstPx[2] - quad.dstPx[0]) / 2;
     int2 quadCenterPx = quad.dstPx[0] + quadHalfSizePx;
@@ -139,15 +139,6 @@ float4 fragmentMain(VSOutput input) : SV_Target
 //
 // Common:
 //
-
-R2dQuad getQuad(uint instanceId)
-{
-    // Determine quad index based on opacity.
-    // - Opaque quads are rendered top-to-bottom to minimize overdraw.
-    // - Transparent quads are rendered bottom-to-top to ensure correct blending.
-    uint quadIndex = batchUniform.isOpaque != 0 ? (batchUniform.instanceCount - 1 - instanceId) : (instanceId);
-    return quads[quadIndex];
-}
 
 int2[4] getCornerEgressPxArray(R2dQuad quad)
 {

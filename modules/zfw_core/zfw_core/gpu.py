@@ -48,8 +48,10 @@ from .typed_vulkan import (
     VK_ATTACHMENT_LOAD_OP_CLEAR,
     VK_ATTACHMENT_LOAD_OP_LOAD,
     VK_ATTACHMENT_STORE_OP_STORE,
-    VK_BLEND_FACTOR_ONE,
     VK_BLEND_FACTOR_ZERO,
+    VK_BLEND_FACTOR_ONE,
+    VK_BLEND_FACTOR_SRC_ALPHA,
+    VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
     VK_BLEND_OP_ADD,
     VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -2634,6 +2636,8 @@ class GpuPipeline(BaseResource):
         vertex_shader: GpuShader,
         fragment_shader: GpuShader,
         vk_color_format: VkFormat,
+        enable_depth_test: bool,
+        enable_alpha_blending: bool,
         viewport_width: int,
         viewport_height: int,
         layout: GpuPipelineLayout,
@@ -2641,19 +2645,21 @@ class GpuPipeline(BaseResource):
         super().__init__(parent=device)
         self.device = device
         self.vk_color_format = vk_color_format
-        self.viewport_width = viewport_width
-        self.viewport_height = viewport_height
-        self.layout = layout
         self.vk_pipeline = self._help_create_pipeline(
             device=device,
             vertex_shader=vertex_shader,
             fragment_shader=fragment_shader,
             vk_color_format=vk_color_format,
             vk_depth_format=VK_FORMAT_D32_SFLOAT,
+            enable_depth_test=enable_depth_test,
+            enable_alpha_blending=enable_alpha_blending,
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             layout=layout,
         )
+        self.viewport_width = viewport_width
+        self.viewport_height = viewport_height
+        self.layout = layout
 
     @staticmethod
     def _help_create_shader_stages(
@@ -2749,14 +2755,16 @@ class GpuPipeline(BaseResource):
         )
 
     @staticmethod
-    def _help_create_color_blend_state() -> VkPipelineColorBlendStateCreateInfo:
+    def _help_create_color_blend_state(
+        enable_alpha_blending: bool,
+    ) -> VkPipelineColorBlendStateCreateInfo:
         color_blend_attachment = VkPipelineColorBlendAttachmentState(
-            blendEnable=False,
-            srcColorBlendFactor=VK_BLEND_FACTOR_ONE,
-            dstColorBlendFactor=VK_BLEND_FACTOR_ZERO,
+            blendEnable=enable_alpha_blending,
+            srcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA,
+            dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             colorBlendOp=VK_BLEND_OP_ADD,
             srcAlphaBlendFactor=VK_BLEND_FACTOR_ONE,
-            dstAlphaBlendFactor=VK_BLEND_FACTOR_ZERO,
+            dstAlphaBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             alphaBlendOp=VK_BLEND_OP_ADD,
             colorWriteMask=(
                 VK_COLOR_COMPONENT_R_BIT
@@ -2775,11 +2783,13 @@ class GpuPipeline(BaseResource):
         )
 
     @staticmethod
-    def _help_create_depth_stencil_state() -> VkPipelineDepthStencilStateCreateInfo:
+    def _help_create_depth_stencil_state(
+        enable_depth_test: bool,
+    ) -> VkPipelineDepthStencilStateCreateInfo:
         return VkPipelineDepthStencilStateCreateInfo(
             flags=0,
-            depthTestEnable=True,
-            depthWriteEnable=True,
+            depthTestEnable=enable_depth_test,
+            depthWriteEnable=enable_depth_test,
             depthCompareOp=VK_COMPARE_OP_GREATER,
             depthBoundsTestEnable=True,
             stencilTestEnable=False,
@@ -2812,6 +2822,8 @@ class GpuPipeline(BaseResource):
         fragment_shader: GpuShader,
         vk_color_format: VkFormat,
         vk_depth_format: VkFormat,
+        enable_depth_test: bool,
+        enable_alpha_blending: bool,
         viewport_width: int,
         viewport_height: int,
         layout: GpuPipelineLayout,
@@ -2826,8 +2838,12 @@ class GpuPipeline(BaseResource):
         )
         rasterization_state = GpuPipeline._help_create_rasterization_state()
         multisample_state = GpuPipeline._help_create_multisample_state()
-        color_blend_state = GpuPipeline._help_create_color_blend_state()
-        depth_state = GpuPipeline._help_create_depth_stencil_state()
+        color_blend_state = GpuPipeline._help_create_color_blend_state(
+            enable_alpha_blending=enable_alpha_blending
+        )
+        depth_state = GpuPipeline._help_create_depth_stencil_state(
+            enable_depth_test=enable_depth_test
+        )
 
         rendering_info = VkPipelineRenderingCreateInfo(
             viewMask=0,
