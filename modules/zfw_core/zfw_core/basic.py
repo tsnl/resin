@@ -92,7 +92,9 @@ class BaseResource(ABC):
         # If 'self' is not yet disposed, ensure self._parent has not yet been disposed
         # either.
         if self._parent is not None and self._parent._is_disposed:
-            raise LogicError(f"Cannot dispose resource {self} after its parent")
+            raise LogicError(
+                f"Cannot dispose resource {self} after its parent {self._parent}"
+            )
 
         # Dispose children in reverse order of creation.
         for child_ref in reversed(self._children):

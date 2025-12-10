@@ -1150,7 +1150,7 @@ class GpuMemory(BaseResource):
         with self.map() as host_mem:
             host_mem[: len(src_bytes)] = src_bytes
 
-    def read(self, *, dtype: np.dtype) -> np.ndarray:
+    def read(self, *, dtype: npt.DTypeLike) -> np.ndarray:
         with self.map() as host_mem:
             return np.frombuffer(host_mem, dtype=dtype).copy()
 

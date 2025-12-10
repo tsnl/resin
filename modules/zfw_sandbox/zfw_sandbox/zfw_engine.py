@@ -96,7 +96,7 @@ class ZfwEngine(zfw_core.BaseResource):
                 target=target.image,
                 wait_semaphores=[target.render_wait_semaphore],
                 done_semaphores=[target.render_done_semaphore],
-                done_fence=target.render_done_fence,
+                fence=target.render_done_fence,
             )
 
         self.rendered_frame_count += 1

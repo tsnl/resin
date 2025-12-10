@@ -10,23 +10,9 @@ def zfw_core_main():
 
     targets: dict[str, Path] = {
         "zfw_core": zfw_core_root / "zfw_core/bundled_data",
-        "zfw_core_tests": zfw_core_root / "tests/gpu_test/data",
     }
 
     shaders: list[zfw_build.Shader] = [
-        zfw_build.Shader(
-            source=(zfw_core_root / "shaders/tests/triangle.slang"),
-            stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-            targets=[
-                "zfw_core_tests",
-                "zfw_core",  # FIXME: remove this when sandbox uses the core renderer
-            ],
-        ),
-        zfw_build.Shader(
-            source=(zfw_core_root / "shaders/tests/tinted_bitmap.slang"),
-            stages={"vertex": "vertexMain", "fragment": "fragmentMain"},
-            targets=["zfw_core_tests"],
-        ),
         zfw_build.Shader(
             source=(zfw_core_root / "shaders/zfw/r2d.slang"),
             stages={"vertex": "vertexMain", "fragment": "fragmentMain"},

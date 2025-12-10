@@ -92,8 +92,8 @@ class Renderer(BaseResource):
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
-        done_fence: GpuFence,
-    ) -> GpuFence:
+        fence: GpuFence,
+    ):
         """
         Render the given `RendererCanvas` to the given target `GpuImage`.
         """
@@ -116,11 +116,15 @@ class Renderer(BaseResource):
 
         command_encoder.transition_image_layout(
             image=target,
-            layout="present-src",
+            layout=(
+                "present-src"
+                if self.gpu_device.present_support_enabled
+                else "transfer-src-optimal"
+            ),
         )
 
-        return command_encoder.submit(
-            fence=done_fence,
+        command_encoder.submit(
+            fence=fence,
             wait_semaphores=wait_semaphores,
             signal_semaphores=done_semaphores,
         )
