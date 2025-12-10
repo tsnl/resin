@@ -7,7 +7,6 @@ __all__ = [
 ]
 
 from collections import OrderedDict
-from dataclasses import dataclass
 
 import numpy as np
 
@@ -411,15 +410,15 @@ class Renderer2d(BaseResource):
                         {
                             "atlasTexture": GpuDescriptorSetLayoutBinding(
                                 type="combined-image-sampler",
-                                stages=["fragment"],
+                                stages=["vertex", "fragment"],
                             ),
                             "quads": GpuDescriptorSetLayoutBinding(
                                 type="storage-buffer",
-                                stages=["vertex"],
+                                stages=["vertex", "fragment"],
                             ),
                             "batchUniform": GpuDescriptorSetLayoutBinding(
                                 type="uniform-buffer",
-                                stages=["vertex"],
+                                stages=["vertex", "fragment"],
                             ),
                         }.items()
                     ),

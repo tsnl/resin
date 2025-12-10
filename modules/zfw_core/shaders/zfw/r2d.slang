@@ -21,8 +21,8 @@ struct R2dQuad
     Array<int2, 4> dstPx;   // 4 corners * 2 coords: TL, TR, BR, BL
     Array<float2, 4> srcUv; // 4 corners * 2 coords: TL, TR, BR, BL
     float4 tintColor;       // RGBA
-    float4 borderColor;     // [u8; 4]: RGBA
-    int4 borderThicknessPx; // [u8; 4]: T, R, B, L
+    float4 borderColor;     // RGBA
+    int4 borderThicknessPx; // T, R, B, L
     int cornerRadius;       // corner radius
     float height;           // height
     int _rsv0;              // reserved for alignment
@@ -53,37 +53,39 @@ ConstantBuffer<R2dBatchUniform> batchUniform;
 struct VSOutput
 {
     float4 position : SV_Position;
+    uint instanceId : SV_InstanceID;
     float2 uv : TEXCOORD0;
     float4 tintColor : TEXCOORD1;
     float4 borderColor : TEXCOORD2;
     int4 borderThicknessPx : TEXCOORD3;
     int4 cornerRadius : TEXCOORD4;
+    float2 positionPx : TEXCOORD5;
 };
 
 [shader("vertex")]
 VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
-    // Determine quad index based on opacity.
-    // - Opaque quads are rendered top-to-bottom to minimize overdraw.
-    // - Transparent quads are rendered bottom-to-top to ensure correct blending.
-    uint quadIndex = batchUniform.isOpaque != 0 ? (batchUniform.instanceCount - 1 - instanceId) : (instanceId);
-    // uint quadIndex = instanceId;
-
     // Fetch quad data.
-    R2dQuad quad = quads[quadIndex];
+    R2dQuad quad = getQuad(instanceId);
 
-    // TODO: handle non-0 border thickness.
-
-    VSOutput output;
+    // Compute quad corner in pixels:
+    const int2 cornerBorderEgressPx[4] = getCornerEgressPxArray(quad);
     uint cornerIdx = vertexCornerIdx(vertexId);
-    output.position.xy = framebufferPxToNdcVec2(quad.dstPx[cornerIdx]);
+    int2 vertexPosPx = quad.dstPx[cornerIdx] + cornerBorderEgressPx[cornerIdx];
+
+    // Emit vertex data.
+    VSOutput output;
+
+    output.position.xy = framebufferPxToNdcVec2(vertexPosPx);
     output.position.z = (1.0 + quad.height) / (1.0 + commonUniform.totalQuadCount);
     output.position.w = 1.0;
+    output.instanceId = instanceId;
     output.uv = quad.srcUv[cornerIdx];
     output.tintColor = quad.tintColor;
     output.borderColor = quad.borderColor;
     output.borderThicknessPx = quad.borderThicknessPx;
     output.cornerRadius = int4(quad.cornerRadius, quad.cornerRadius, quad.cornerRadius, quad.cornerRadius);
+    output.positionPx = float2(vertexPosPx);
     return output;
 }
 
@@ -116,8 +118,65 @@ float2 framebufferPxToNdcVec2(int2 posPx)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    // TODO: implement border rendering and corner radius
+    R2dQuad quad = getQuad(input.instanceId);
 
-    float4 color = atlasTexture.SampleLevel(input.uv, 0);
-    return color * input.tintColor;
+    int2 quadHalfSizePx = (quad.dstPx[2] - quad.dstPx[0]) / 2;
+    int2 quadCenterPx = quad.dstPx[0] + quadHalfSizePx;
+
+    const int2 innerRectCoordsPx[4] = getCornerCoordsPxArray(quad, 0);
+
+    // Fragments inside the inner rect are not in the border.
+    // Fragments between inner and outer rects are in the border.
+    if (intersectRectPoint(innerRectCoordsPx, int2(input.positionPx)))
+    {
+        float4 color = atlasTexture.SampleLevel(input.uv, 0);
+        return color * input.tintColor;
+    }
+    else
+    {
+        return quad.borderColor;
+    }
+}
+
+//
+// Common:
+//
+
+R2dQuad getQuad(uint instanceId)
+{
+    // Determine quad index based on opacity.
+    // - Opaque quads are rendered top-to-bottom to minimize overdraw.
+    // - Transparent quads are rendered bottom-to-top to ensure correct blending.
+    uint quadIndex = batchUniform.isOpaque != 0 ? (batchUniform.instanceCount - 1 - instanceId) : (instanceId);
+    return quads[quadIndex];
+}
+
+int2[4] getCornerEgressPxArray(R2dQuad quad)
+{
+    // Precompute corner border egress in pixels.
+    const int2 cornerBorderEgressPx[4] = {
+        int2(-quad.borderThicknessPx[3], -quad.borderThicknessPx[0]), // TL
+        int2(+quad.borderThicknessPx[1], -quad.borderThicknessPx[0]), // TR
+        int2(+quad.borderThicknessPx[1], +quad.borderThicknessPx[2]), // BR
+        int2(-quad.borderThicknessPx[3], +quad.borderThicknessPx[2]), // BL
+    };
+    return cornerBorderEgressPx;
+}
+
+int2[4] getCornerCoordsPxArray(R2dQuad quad, int egressScalar)
+{
+    const int2 egressPx[4] = getCornerEgressPxArray(quad);
+    const int2 cornerCoordsPx[4] = {
+        quad.dstPx[0] + egressScalar * egressPx[0], // TL
+        quad.dstPx[1] + egressScalar * egressPx[1], // TR
+        quad.dstPx[2] + egressScalar * egressPx[2], // BR
+        quad.dstPx[3] + egressScalar * egressPx[3], // BL
+    };
+    return cornerCoordsPx;
+}
+
+bool intersectRectPoint(int2[4] corners, int2 point)
+{
+    return (point.x >= corners[0].x && point.x < corners[1].x &&
+            point.y >= corners[0].y && point.y < corners[2].y);
 }
