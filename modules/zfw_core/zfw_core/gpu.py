@@ -2778,7 +2778,7 @@ class GpuPipeline(BaseResource):
             flags=0,
             depthTestEnable=True,
             depthWriteEnable=True,
-            depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL,
+            depthCompareOp=VK_COMPARE_OP_LESS,
             depthBoundsTestEnable=True,
             stencilTestEnable=False,
             front=VkStencilOpState(
