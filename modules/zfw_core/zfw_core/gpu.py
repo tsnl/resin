@@ -831,10 +831,10 @@ class GpuDevice(BaseResource):
     vk_device: VkDevice
     vk_command_pools: dict[int, VkCommandPool]
     vk_queues: dict[int, VkQueue]
-    present_support_enabled: bool
     descriptor_pool_config: dict[GpuDescriptorType, int] | None
-    max_descriptor_pool_set_count: int = 1024
-    _descriptor_pool: GpuDescriptorPool
+    max_descriptor_pool_set_count: int
+    vk_descriptor_pool: VkDescriptorPool
+    present_support_enabled: bool
 
     def __init__(
         self,
@@ -867,10 +867,35 @@ class GpuDevice(BaseResource):
             descriptor_pool_config
         )
         self.max_descriptor_pool_set_count = max_descriptor_pool_set_count
-        self._descriptor_pool = GpuDescriptorPool(
-            device=self,
-            max_sets=max_descriptor_pool_set_count,
+        self.vk_descriptor_pool = self._help_create_descriptor_pool(
+            max_sets=self.max_descriptor_pool_set_count, 
             pool_sizes=self.descriptor_pool_config,
+        )
+        
+    def _help_create_descriptor_pool(
+        self,
+        max_sets: int,
+        pool_sizes: dict[GpuDescriptorType, int],
+    ) -> VkDescriptorPool:
+        vk_pool_sizes = [
+            VkDescriptorPoolSize(
+                type=vk_descriptor_type(desc_type),
+                descriptorCount=count,
+            )
+            for desc_type, count in pool_sizes.items()
+        ]
+
+        create_info = VkDescriptorPoolCreateInfo(
+            flags=0,
+            maxSets=max_sets,
+            poolSizeCount=len(vk_pool_sizes),
+            pPoolSizes=vk_pool_sizes,
+        )
+
+        return vkCreateDescriptorPool(
+            device=self.vk_device,
+            pCreateInfo=create_info,
+            pAllocator=None,
         )
 
     @staticmethod
@@ -958,9 +983,12 @@ class GpuDevice(BaseResource):
         return defaults | (descriptor_pool_config or {})
 
     def _on_dispose(self) -> None:
-        # Destroy default descriptor pool first (before command pools and device):
-        if self._descriptor_pool is not None:
-            self._descriptor_pool.dispose()
+        # Destroy default descriptor pool first:
+        vkDestroyDescriptorPool(
+            device=self.vk_device,
+            descriptorPool=self.vk_descriptor_pool,
+            pAllocator=None,
+        )
 
         # Destroy command pools:
         for _, vk_command_pool in self.vk_command_pools.items():
@@ -2276,65 +2304,6 @@ GpuSamplerAddressMode: TypeAlias = Literal[
 
 
 #
-# GpuDescriptorPool
-#
-
-
-class GpuDescriptorPool(BaseResource):
-    """Wrapper for VkDescriptorPool"""
-
-    device: GpuDevice
-    vk_descriptor_pool: VkDescriptorPool
-
-    def __init__(
-        self,
-        *,
-        device: GpuDevice,
-        max_sets: int,
-        pool_sizes: dict[GpuDescriptorType, int],
-    ):
-        super().__init__(parent=device)
-        self.device = device
-        self.vk_descriptor_pool = self._help_create_descriptor_pool(
-            device, max_sets, pool_sizes
-        )
-
-    @staticmethod
-    def _help_create_descriptor_pool(
-        device: GpuDevice,
-        max_sets: int,
-        pool_sizes: dict[GpuDescriptorType, int],
-    ) -> VkDescriptorPool:
-        vk_pool_sizes = [
-            VkDescriptorPoolSize(
-                type=vk_descriptor_type(desc_type),
-                descriptorCount=count,
-            )
-            for desc_type, count in pool_sizes.items()
-        ]
-
-        create_info = VkDescriptorPoolCreateInfo(
-            flags=0,
-            maxSets=max_sets,
-            poolSizeCount=len(vk_pool_sizes),
-            pPoolSizes=vk_pool_sizes,
-        )
-
-        return vkCreateDescriptorPool(
-            device=device.vk_device,
-            pCreateInfo=create_info,
-            pAllocator=None,
-        )
-
-    def _on_dispose(self) -> None:
-        vkDestroyDescriptorPool(
-            device=self.device.vk_device,
-            descriptorPool=self.vk_descriptor_pool,
-            pAllocator=None,
-        )
-
-
-#
 # GpuPipelineLayout, GpuDescriptorSetLayout:
 #
 
@@ -2457,7 +2426,6 @@ class GpuDescriptorSetLayoutBinding:
 class GpuDescriptorSet(BaseResource):
     device: GpuDevice
     vk_descriptor_set: VkDescriptorSet
-    pool: GpuDescriptorPool
     layout: GpuDescriptorSetLayout
     bindings: dict[str, GpuDescriptorSetBinding]
 
@@ -2468,9 +2436,8 @@ class GpuDescriptorSet(BaseResource):
         layout: GpuDescriptorSetLayout,
         bindings: dict[str, GpuDescriptorSetBinding],
     ):
-        super().__init__(parent=device._descriptor_pool)
+        super().__init__(parent=device)
         self.device = device
-        self.pool = device._descriptor_pool
         self.layout = layout
         self.bindings = bindings
         self._help_validate_bindings(bindings, layout)
@@ -2508,7 +2475,7 @@ class GpuDescriptorSet(BaseResource):
         device: GpuDevice, layout: GpuDescriptorSetLayout
     ) -> VkDescriptorSet:
         alloc_info = VkDescriptorSetAllocateInfo(
-            descriptorPool=device._descriptor_pool.vk_descriptor_pool,
+            descriptorPool=device.vk_descriptor_pool,
             descriptorSetCount=1,
             pSetLayouts=[layout.vk_descriptor_set_layout],
         )

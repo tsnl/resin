@@ -103,10 +103,15 @@ class BaseResource(ABC):
 
         # Dispose self.
         self._on_dispose()
+        self._parent = None
         self._is_disposed = True
 
     def _on_dispose(self) -> None:
         pass
+
+    #
+    # Debug:
+    #
 
     def iter_descendants(self, *, verbose: bool) -> "Iterable[BaseResource]":
         """
