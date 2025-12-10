@@ -272,13 +272,13 @@ class RendererCanvas(BaseResource):
         image: RendererImage | None = None,
         dst_wh: tuple[int, int] | None = None,
         scale: float | None = None,
-        tint_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-        corner_radius: tuple[int, int, int, int] = (0, 0, 0, 0),
+        corner_radius_px: int = 0,
     ):
         """
-        Draw a quad with an optional image, border, tint, corner radius, etc to the
+        Draw a quad with an optional image, border, color, corner radius, etc to the
         canvas.
         """
 
@@ -287,10 +287,10 @@ class RendererCanvas(BaseResource):
             image=image,
             dst_wh=dst_wh,
             scale=scale,
-            tint_color=tint_color,
+            color=color,
             border_color=border_color,
             border_thickness_px=border_thickness_px,
-            corner_radius=corner_radius,
+            corner_radius_px=corner_radius_px,
         )
 
 
@@ -706,13 +706,13 @@ class R2dCpuQuadCollection:
         image: RendererImage | None = None,
         dst_wh: tuple[int, int] | None = None,
         scale: float | None = None,
-        tint_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-        corner_radius: tuple[int, int, int, int] = (0, 0, 0, 0),
+        corner_radius_px: int = 0,
     ):
         """
-        Draws a quad with an optional image, border, tint, corner radius, etc to the
+        Draws a quad with an optional image, border, color, corner radius, etc to the
         canvas.
 
         Under the hood, we add the quad to a batch corresponding to the image's atlas.
@@ -765,10 +765,10 @@ class R2dCpuQuadCollection:
                 (src_x1_uv, src_y1_uv),  # BR
                 (src_x0_uv, src_y1_uv),  # BL
             ),
-            tint_color=tint_color,
+            color=color,
             border_color=border_color,
             border_thickness_px=border_thickness_px,
-            corner_radius=corner_radius,
+            corner_radius_px=corner_radius_px,
             height=self.total_added_image_count,
         )
         self.total_added_image_count += 1
@@ -788,7 +788,7 @@ class R2dCpuQuadBatch:
     def __init__(self, capacity: int = 8):
         super().__init__()
         self.instance_count = 0
-        self.data = np.empty(capacity, dtype=R2D_QUAD_NP_DTYPE)
+        self.data = np.empty((capacity,), dtype=R2D_QUAD_NP_DTYPE)
 
     @property
     def capacity(self) -> int:
@@ -808,23 +808,23 @@ class R2dCpuQuadBatch:
             tuple[float, float],
             tuple[float, float],
         ],
-        tint_color: tuple[float, float, float, float],
+        color: tuple[float, float, float, float],
         border_color: tuple[float, float, float, float],
         border_thickness_px: tuple[int, int, int, int],
-        corner_radius: tuple[int, int, int, int],
+        corner_radius_px: int,
         height: int,
     ):
-        self._ensure_capacity(self.instance_count)
+        self._ensure_capacity(self.instance_count + 1)
 
         idx = self.instance_count
         assert idx < self.capacity, "self._ensure_capacity() failed"
 
         self.data["dst_px"][idx] = dst_xy
         self.data["src_uv"][idx] = src_uv
-        self.data["tint_color"][idx] = tint_color
+        self.data["color"][idx] = color
         self.data["border_color"][idx] = border_color
         self.data["border_thickness_px"][idx] = border_thickness_px
-        self.data["corner_radius"][idx] = corner_radius
+        self.data["corner_radius_px"][idx] = corner_radius_px
         self.data["height"][idx] = height
 
         self.instance_count += 1
@@ -834,51 +834,12 @@ class R2dCpuQuadBatch:
             return
 
         new_capacity = _next_po2(n)
-        assert new_capacity > self.dst_px.shape[0]
+        assert new_capacity > self.data.shape[0]
 
-        growth = new_capacity - self.dst_px.shape[0]
-
-        self.dst_px = np.concatenate(
-            [
-                self.dst_px,
-                np.zeros((growth, 4, 2), dtype=np.int32),
-            ]
-        )
-        self.src_uv = np.concatenate(
-            [
-                self.src_uv,
-                np.zeros((growth, 4, 2), dtype=np.float32),
-            ]
-        )
-        self.tint_color = np.concatenate(
-            [
-                self.tint_color,
-                np.zeros((growth, 4), dtype=np.float32),
-            ]
-        )
-        self.border_color = np.concatenate(
-            [
-                self.border_color,
-                np.zeros((growth, 4), dtype=np.float32),
-            ]
-        )
-        self.border_thickness = np.concatenate(
-            [
-                self.border_thickness,
-                np.zeros((growth, 4), dtype=np.int32),
-            ]
-        )
-        self.corner_radius = np.concatenate(
-            [
-                self.corner_radius,
-                np.zeros((growth, 4), dtype=np.int32),
-            ]
-        )
-        self.height = np.concatenate(
-            [
-                self.height,
-                np.zeros((growth, 1), dtype=np.int32),
-            ]
+        growth = new_capacity - self.data.shape[0]
+        self.data = np.concatenate(
+            [self.data, np.empty((growth,), dtype=R2D_QUAD_NP_DTYPE)],
+            axis=0,
         )
 
 
@@ -896,19 +857,20 @@ R2D_UNIFORM_DTYPE = np.dtype(
     [
         ("framebuffer_size_px", np.int32, (2,)),
         ("max_height", np.float32),
+        ("_rsv0", np.uint32),
     ]
 )
-assert R2D_UNIFORM_DTYPE.itemsize == 2 * 4
+assert R2D_UNIFORM_DTYPE.itemsize == 4 * 4
 
 
 R2D_QUAD_NP_DTYPE = np.dtype(
     [
         ("dst_px", np.int32, (4, 2)),
         ("src_uv", np.float32, (4, 2)),
-        ("tint_color", np.float32, (4,)),
+        ("color", np.float32, (4,)),
         ("border_color", np.float32, (4,)),
         ("border_thickness_px", np.uint32, (4,)),
-        ("corner_radius", np.uint32),
+        ("corner_radius_px", np.uint32),
         ("height", np.float32),
         ("_rsv0", np.uint32),
         ("_rsv1", np.uint32),

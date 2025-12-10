@@ -26,7 +26,6 @@ __all__ = [
 import json
 import os
 import sys
-from weakref import ref as WeakRef
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -65,6 +64,8 @@ from .typed_vulkan import (
     VK_COMMAND_BUFFER_LEVEL_PRIMARY,
     VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     VK_COMPONENT_SWIZZLE_IDENTITY,
+    VK_COMPARE_OP_ALWAYS,
+    VK_COMPARE_OP_LESS,
     VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -134,6 +135,7 @@ from .typed_vulkan import (
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
     VK_SHARING_MODE_EXCLUSIVE,
+    VK_STENCIL_OP_KEEP,
     VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
     VkApplicationInfo,
     VkBuffer,
@@ -194,6 +196,7 @@ from .typed_vulkan import (
     VkPipeline,
     VkPipelineColorBlendAttachmentState,
     VkPipelineColorBlendStateCreateInfo,
+    VkPipelineDepthStencilStateCreateInfo,
     VkPipelineInputAssemblyStateCreateInfo,
     VkPipelineLayout,
     VkPipelineLayoutCreateInfo,
@@ -215,6 +218,7 @@ from .typed_vulkan import (
     VkSemaphoreCreateInfo,
     VkShaderModule,
     VkShaderModuleCreateInfo,
+    VkStencilOpState,
     VkSubmitInfo,
     VkSurfaceFormatKHR,
     VkSurfaceKHR,
@@ -2642,6 +2646,7 @@ class GpuPipeline(BaseResource):
             vertex_shader=vertex_shader,
             fragment_shader=fragment_shader,
             vk_color_format=vk_color_format,
+            vk_depth_format=VK_FORMAT_D32_SFLOAT,
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             layout=layout,
@@ -2767,11 +2772,43 @@ class GpuPipeline(BaseResource):
         )
 
     @staticmethod
+    def _help_create_depth_stencil_state() -> VkPipelineDepthStencilStateCreateInfo:
+        return VkPipelineDepthStencilStateCreateInfo(
+            flags=0,
+            depthTestEnable=True,
+            depthWriteEnable=True,
+            depthCompareOp=VK_COMPARE_OP_LESS,
+            depthBoundsTestEnable=True,
+            stencilTestEnable=False,
+            front=VkStencilOpState(
+                failOp=VK_STENCIL_OP_KEEP,
+                passOp=VK_STENCIL_OP_KEEP,
+                depthFailOp=VK_STENCIL_OP_KEEP,
+                compareOp=VK_COMPARE_OP_ALWAYS,
+                compareMask=0,
+                writeMask=0,
+                reference=0,
+            ),
+            back=VkStencilOpState(
+                failOp=VK_STENCIL_OP_KEEP,
+                passOp=VK_STENCIL_OP_KEEP,
+                depthFailOp=VK_STENCIL_OP_KEEP,
+                compareOp=VK_COMPARE_OP_ALWAYS,
+                compareMask=0,
+                writeMask=0,
+                reference=0,
+            ),
+            minDepthBounds=0.0,
+            maxDepthBounds=1.0,
+        )
+
+    @staticmethod
     def _help_create_pipeline(
         device: GpuDevice,
         vertex_shader: GpuShader,
         fragment_shader: GpuShader,
         vk_color_format: VkFormat,
+        vk_depth_format: VkFormat,
         viewport_width: int,
         viewport_height: int,
         layout: GpuPipelineLayout,
@@ -2787,12 +2824,13 @@ class GpuPipeline(BaseResource):
         rasterization_state = GpuPipeline._help_create_rasterization_state()
         multisample_state = GpuPipeline._help_create_multisample_state()
         color_blend_state = GpuPipeline._help_create_color_blend_state()
+        depth_state = GpuPipeline._help_create_depth_stencil_state()
 
         rendering_info = VkPipelineRenderingCreateInfo(
             viewMask=0,
             colorAttachmentCount=1,
             pColorAttachmentFormats=[vk_color_format],
-            depthAttachmentFormat=VK_FORMAT_UNDEFINED,
+            depthAttachmentFormat=vk_depth_format,
             stencilAttachmentFormat=VK_FORMAT_UNDEFINED,
         )
 
@@ -2807,7 +2845,7 @@ class GpuPipeline(BaseResource):
             pViewportState=viewport_state,
             pRasterizationState=rasterization_state,
             pMultisampleState=multisample_state,
-            pDepthStencilState=None,
+            pDepthStencilState=depth_state,
             pColorBlendState=color_blend_state,
             pDynamicState=None,
             layout=layout.vk_pipeline_layout,

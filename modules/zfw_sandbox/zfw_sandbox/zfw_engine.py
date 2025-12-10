@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import sys
 
 import zfw_core
@@ -51,13 +52,13 @@ class ZfwEngine(zfw_core.BaseResource):
             context=self.render_context,
             gpu_device=self.gpu_device,
         )
-        self.render_canvas = RendererCanvas(renderer=self.renderer)
+        self._render_canvas = RendererCanvas(renderer=self.renderer)
 
         # State:
         self.rendered_frame_count = 0
 
     def _on_dispose(self) -> None:
-        self.render_canvas.dispose()
+        self._render_canvas.dispose()
 
         self.gpu_swap_chain.dispose()
         self.gpu_device.dispose()
@@ -80,13 +81,16 @@ class ZfwEngine(zfw_core.BaseResource):
     def update(self):
         Window.poll_events()
 
+    @contextmanager
     def render(self):
+        yield self._render_canvas
+
         if self.rendered_frame_count == 0:
             self.window.show()
 
         with self.gpu_swap_chain.present() as target:
             self.renderer.show(
-                canvas=self.render_canvas,
+                canvas=self._render_canvas,
                 target=target.image,
                 wait_semaphores=[target.render_wait_semaphore],
                 done_semaphores=[target.render_done_semaphore],

@@ -8,6 +8,7 @@ struct R2dUniform
 {
     int2 framebufferSizePx;
     float maxHeight;
+    uint _rsv0; // reserved for alignment
 }
 
 [[vk::binding(0, 0)]]
@@ -52,19 +53,20 @@ struct VSOutput
 [shader("vertex")]
 VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
-    VSOutput output;
-
     R2dQuad quad = quads[instanceId];
+
+    // TODO: handle non-0 border thickness.
+
+    VSOutput output;
     uint cornerIdx = vertexCornerIdx(vertexId);
     output.position.xy = framebufferPxToNdcVec2(quad.dstPx[cornerIdx]);
-    output.position.z = -quad.height / uniform.maxHeight; // Normalize height to [0.0, 1.0], then flip sign
+    output.position.z = 1.0 - quad.height / uniform.maxHeight; // Normalize height to [0.0, 1.0], then flip
     output.position.w = 1.0;
     output.uv = quad.srcUv[cornerIdx];
     output.tintColor = quad.tintColor;
     output.borderColor = quad.borderColor;
     output.borderThicknessPx = quad.borderThicknessPx;
     output.cornerRadius = int4(quad.cornerRadius, quad.cornerRadius, quad.cornerRadius, quad.cornerRadius);
-
     return output;
 }
 
@@ -79,7 +81,6 @@ uint vertexCornerIdx(uint vertexIdx)
     // * vertexIdx: 3 -> cornerIdx: 0 = (v=3 % 3)=0 + (v=3 // 4)=0
     // * vertexIdx: 4 -> cornerIdx: 2 = (v=4 % 3)=1 + (v=4 // 4)=1
     // * vertexIdx: 5 -> cornerIdx: 3 = (v=5 % 3)=2 + (v=5 // 4)=1
-
     return vertexIdx % 3 + vertexIdx / 4;
 }
 
@@ -98,7 +99,8 @@ float2 framebufferPxToNdcVec2(int2 posPx)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    // TODO
+    // TODO: implement border rendering and corner radius
 
-    return float4(1.0, 0.0, 0.0, 1.0);
+    float4 color = atlasTexture.SampleLevel(input.uv, 0);
+    return color * input.tintColor;
 }

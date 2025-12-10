@@ -1039,6 +1039,18 @@ VK_COMPARE_OP_NOT_EQUAL: VkCompareOp = 5
 VK_COMPARE_OP_GREATER_OR_EQUAL: VkCompareOp = 6
 VK_COMPARE_OP_ALWAYS: VkCompareOp = 7
 
+# VkStencilOp
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkStencilOp.html
+VkStencilOp: TypeAlias = int
+VK_STENCIL_OP_KEEP: VkStencilOp = 0
+VK_STENCIL_OP_ZERO: VkStencilOp = 1
+VK_STENCIL_OP_REPLACE: VkStencilOp = 2
+VK_STENCIL_OP_INCREMENT_AND_CLAMP: VkStencilOp = 3
+VK_STENCIL_OP_DECREMENT_AND_CLAMP: VkStencilOp = 4
+VK_STENCIL_OP_INVERT: VkStencilOp = 5
+VK_STENCIL_OP_INCREMENT_AND_WRAP: VkStencilOp = 6
+VK_STENCIL_OP_DECREMENT_AND_WRAP: VkStencilOp = 7
+
 # VkBorderColor
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkBorderColor.html
 VkBorderColor: TypeAlias = int
@@ -2245,6 +2257,18 @@ class VkPipelineMultisampleStateCreateInfo:
     alphaToCoverageEnable: bool
     alphaToOneEnable: bool
 
+# VkStencilOpState
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkStencilOpState.html
+@dataclass
+class VkStencilOpState:
+    failOp: VkStencilOp
+    passOp: VkStencilOp
+    depthFailOp: VkStencilOp
+    compareOp: VkCompareOp
+    compareMask: int
+    writeMask: int
+    reference: int
+
 # VkPipelineDepthStencilStateCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineDepthStencilStateCreateInfo.html
 @dataclass
@@ -2255,8 +2279,8 @@ class VkPipelineDepthStencilStateCreateInfo:
     depthCompareOp: VkCompareOp
     depthBoundsTestEnable: bool
     stencilTestEnable: bool
-    front: Any
-    back: Any
+    front: VkStencilOpState
+    back: VkStencilOpState
     minDepthBounds: float
     maxDepthBounds: float
 
