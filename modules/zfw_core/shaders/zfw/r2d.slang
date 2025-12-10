@@ -59,7 +59,7 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     VSOutput output;
     uint cornerIdx = vertexCornerIdx(vertexId);
     output.position.xy = framebufferPxToNdcVec2(quad.dstPx[cornerIdx]);
-    output.position.z = quad.height / uniform.maxHeight;
+    output.position.z = 1.0 - (quad.height / uniform.maxHeight);
     output.position.w = 1.0;
     output.uv = quad.srcUv[cornerIdx];
     output.tintColor = quad.tintColor;

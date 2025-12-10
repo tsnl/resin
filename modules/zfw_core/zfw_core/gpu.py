@@ -66,6 +66,7 @@ from .typed_vulkan import (
     VK_COMPONENT_SWIZZLE_IDENTITY,
     VK_COMPARE_OP_ALWAYS,
     VK_COMPARE_OP_LESS,
+    VK_COMPARE_OP_LESS_OR_EQUAL,
     VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -2773,13 +2774,12 @@ class GpuPipeline(BaseResource):
 
     @staticmethod
     def _help_create_depth_stencil_state() -> VkPipelineDepthStencilStateCreateInfo:
-        # FIXME: Currently depth testing is disabled; enable it.
         return VkPipelineDepthStencilStateCreateInfo(
             flags=0,
-            depthTestEnable=False,
-            depthWriteEnable=False,
-            depthCompareOp=VK_COMPARE_OP_LESS,
-            depthBoundsTestEnable=False,
+            depthTestEnable=True,
+            depthWriteEnable=True,
+            depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL,
+            depthBoundsTestEnable=True,
             stencilTestEnable=False,
             front=VkStencilOpState(
                 failOp=VK_STENCIL_OP_KEEP,

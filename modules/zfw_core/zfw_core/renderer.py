@@ -71,8 +71,8 @@ class Renderer(BaseResource):
 
         self.default_white_image_atlas = RendererAtlas(
             renderer=self,
-            data=np.full((32, 32, 4), 0xFF, dtype=np.uint8),
-            image_rect_map={"default": (0, 0, 32, 32)},
+            data=np.full((8, 8, 4), 0xFF, dtype=np.uint8),
+            image_rect_map={"default": (0, 0, 8, 8)},
         )
         self.default_white_image = self.default_white_image_atlas["default"]
 
