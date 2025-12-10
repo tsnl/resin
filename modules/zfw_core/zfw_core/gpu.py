@@ -3112,14 +3112,14 @@ class GpuSwapChain(BaseResource):
 
 
 class GpuSwapChainSlot(BaseResource):
-    swap_chain: GpuSwapChain
     in_flight_fence: GpuFence
     image_available_semaphore: GpuSemaphore
     render_done_semaphore: GpuSemaphore
 
     def __init__(self, *, swap_chain: GpuSwapChain):
-        super().__init__(parent=swap_chain)
-        self.swap_chain = swap_chain
+        super().__init__(parent=swap_chain.device)
+        # IMPORTANT: Do not store a reference to `swap_chain` as this creates a
+        # reference cycle that prevents proper resource disposal.
         self.in_flight_fence = GpuFence(device=swap_chain.device, signalled=True)
         self.image_available_semaphore = GpuSemaphore(device=swap_chain.device)
         self.render_done_semaphore = GpuSemaphore(device=swap_chain.device)
