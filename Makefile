@@ -39,7 +39,7 @@ check: format-check lint-check type-check
 format:
 	uv run --package zfw --extra dev -- ruff format .
 format-check:
-	uv run --package zfw --extra dev -- ruff check --select I .
+	uv run --package zfw --extra dev -- ruff format --check
 
 .PHONY: lint lint-check
 lint: format
