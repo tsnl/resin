@@ -7,10 +7,11 @@ __all__ = [
 ]
 
 from collections import OrderedDict
+from typing import Literal, TypeAlias
 
 import numpy as np
 
-from .basic import BaseResource, next_po2
+from .basic import BaseResource, expect, next_po2
 from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuBuffer,
@@ -236,6 +237,196 @@ class RendererImage(BaseResource):
         u = x_px / atlas_width
         v = y_px / atlas_height
         return (u, v)
+
+
+RendererImage2: TypeAlias = int
+
+
+class RendererAtlas2(BaseResource):
+    renderer: Renderer
+    gpu_device: GpuDevice
+
+    def __init__(
+        self,
+        *,
+        renderer: Renderer,
+        channels: Literal[1, 4],
+        page_size: int = 4096,
+        max_pages: int = 32,
+        max_rects: int = 1 << 20,
+    ):
+        super().__init__(parent=renderer)
+        self.renderer = renderer
+        self.gpu_device = renderer.gpu_device
+
+        self.page_size = page_size
+        self.channels = channels
+
+        self.page_rect_allocator = PageRectAllocator(
+            max_pages=max_pages,
+            max_rects=max_rects,
+        )
+        self.page_data = np.empty(
+            (max_pages, page_size, page_size, channels),
+            dtype=np.float32,
+        )
+        self.page_list = []
+
+    def alloc(self, *, data: np.ndarray) -> RendererImage2:
+        data = data.reshape((-1, -1, self.channels))
+
+        # Determine the size of the rectangle in UV space:
+        w_px, h_px = data.shape[1], data.shape[0]
+        w = w_px / self.page_size
+        h = h_px / self.page_size
+
+        # First, try to allocate from an existing page:
+        alloc_index = self.page_rect_allocator.alloc(w=w, h=h)
+        if alloc_index is not None:
+            return RendererImage2(alloc_index)
+
+        # Otherwise, try running compaction.
+        old_rect_array = self.page_rect_allocator.compact()
+
+    def _upload_all_images(self, old_rect_array: "UvRectArray"):
+        new_rect_array = self.page_rect_allocator.rects
+
+        # TODO: copy data from old_rect_array to new_rect_array
+        raise NotImplementedError()
+
+    def _upload_image(self, index: int, data: np.ndarray):
+        raise NotImplementedError()
+
+    def _add_page(self):
+        page = GpuImage(
+            device=self.renderer.gpu_device,
+            usages=["texture-binding"],
+            meta=GpuImageMeta(
+                shape=(self.page_size, self.page_size, self.channels),
+                dtype=np.float32,
+                color_space="linear",
+            ),
+        )
+        self.page_list.append(page)
+
+
+class PageRectAllocator:
+    """
+    Inserts rectangles into pages, each a unit square of size 1.0 x 1.0 in UV space.
+    """
+
+    def __init__(self, *, max_pages: int, max_rects: int):
+        super().__init__()
+
+        self.max_pages = max_pages
+        self.max_rects = max_rects
+
+        self.page_cursor_array = np.zeros(
+            (max_pages,),
+            dtype=np.dtype(
+                [
+                    ("insert_x", np.float32),
+                    ("insert_y", np.float32),
+                    ("row_height", np.float32),
+                ]
+            ),
+        )
+        self.page_count = 0
+
+        self.rect_array = UvRectArray((self.max_rects,))
+        self.rect_count = 0
+
+    @property
+    def pages(self) -> np.ndarray:
+        return self.page_cursor_array[: self.page_count]
+
+    @property
+    def rects(self) -> "UvRectArray":
+        return self.rect_array[: self.rect_count].view(UvRectArray)
+
+    @rects.setter
+    def rects(self, value: "UvRectArray | np.ndarray"):
+        self.rect_array[: self.rect_count] = value
+
+    def alloc(self, *, w: float, h: float) -> int | None:
+        # Iterate over pages in reverse order, trying to insert:
+        for page_index in reversed(range(self.page_count)):
+            page = self.page_cursor_array[page_index]
+
+            # Try to insert on the current row:
+            x, y = page["insert_x"], page["insert_y"]
+            if x + w <= 1.0 and y + h <= 1.0:
+                page["insert_x"] += w
+                page["row_height"] = max(page["row_height"], h)
+                return self._push_allocation(x, y, w, h)
+
+            # Try to insert on a new row:
+            x = 0
+            y += page["row_height"]
+            if x + w <= 1.0 and y + h <= 1.0:
+                page["insert_x"] = w
+                page["insert_y"] = y
+                page["row_height"] = h
+                return self._push_allocation(x, y, w, h)
+
+    def compact(self) -> "UvRectArray":
+        # Create a new, empty allocator that can hold all the current rects:
+        new_allocator = PageRectAllocator(
+            max_pages=self.max_pages,
+            max_rects=self.rect_count,
+        )
+
+        # Sort rects by area in descending order, ordering alloc indices for insertion:
+        insert_idx_array = np.argsort(-1 * self.rects["w"] * self.rects["h"])
+
+        # Insert rects in the new allocator, building an array mapping old to new
+        # indices:
+        new_idx_array = np.empty_like(insert_idx_array)
+        for old_idx in insert_idx_array:
+            new_idx_array[old_idx] = expect(
+                new_allocator.alloc(
+                    w=self.rects[old_idx]["w"].item(),
+                    h=self.rects[old_idx]["h"].item(),
+                )
+            )
+
+        # Swap the current 'rect_array' for the new one.
+        # Return the old rect array.
+        # The user can map the old array entries to the new ones currently in self.
+        old_rect_array = self.rects
+        self.rects = new_allocator.rects[new_idx_array]
+
+        # Done:
+        assert old_rect_array.shape == self.rect_array.shape
+        return old_rect_array.view(UvRectArray)
+
+    def add_page(self):
+        self.page_count += 1
+        assert self.page_count <= self.max_pages
+
+    def _push_allocation(self, x: float, y: float, w: float, h: float) -> int:
+        allocation_index = self.rect_count
+        self.rect_count += 1
+        assert self.rect_count <= self.max_rects
+
+        self.rect_array[allocation_index] = (x, y, w, h)
+
+        return allocation_index
+
+
+UV_RECT_DTYPE = np.dtype(
+    [
+        ("x", np.float32),
+        ("y", np.float32),
+        ("w", np.float32),
+        ("h", np.float32),
+    ]
+)
+
+
+class UvRectArray(np.ndarray):
+    def __new__(cls, shape: tuple[int, ...] | int) -> "UvRectArray":
+        return np.zeros(shape, dtype=UV_RECT_DTYPE).view(cls)
 
 
 #
@@ -793,6 +984,6 @@ assert RendererQuadPipeline.BATCH_UNIFORM_DTYPE.itemsize == 4 * 4
 assert RendererQuadPipeline.QUAD_DTYPE.itemsize == 32 * 4
 
 
-class RendererQuadArray(np.recarray):
+class RendererQuadArray(np.ndarray):
     def __new__(cls, shape: tuple[int, ...] | int) -> "RendererQuadArray":
         return np.zeros(shape, dtype=RendererQuadPipeline.QUAD_DTYPE).view(cls)

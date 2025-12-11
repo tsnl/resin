@@ -6,7 +6,7 @@
     "editor.rulers": [
         88
     ],
-    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
     "python-envs.pythonProjects": [],
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff"
