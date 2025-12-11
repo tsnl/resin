@@ -61,9 +61,6 @@ from .gpu import (
     GpuSwapChain,
 )
 from .renderer import (
-    RENDERER_QUAD_DTYPE,
-    RENDERER_QUADS_BATCH_UNIFORM_DTYPE,
-    RENDERER_QUADS_COMMON_UNIFORM_DTYPE,
     Renderer,
     RendererAtlas,
     RendererContext,

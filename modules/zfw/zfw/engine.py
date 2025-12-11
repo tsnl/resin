@@ -5,7 +5,7 @@ import numpy as np
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererContext, RENDERER_QUAD_DTYPE
+from .renderer import Renderer, RendererContext, RendererImage, RendererQuadArray
 from .window import Window, WindowContext
 
 
@@ -18,7 +18,7 @@ class Engine(BaseResource):
     _gpu_swap_chain: GpuSwapChain
     _renderer: Renderer
     _rendered_frame_count: int
-    _quad_buffer: np.ndarray
+    _quad_buffer: RendererQuadArray
 
     def __init__(self, *, app_name: str, debug: bool, swapchain_image_count: int):
         super().__init__(parent=None)
@@ -66,7 +66,7 @@ class Engine(BaseResource):
         )
 
         # Initialize quad buffer for drawing
-        self._quad_buffer = np.empty((0,), dtype=RENDERER_QUAD_DTYPE)
+        self._quad_buffer = RendererQuadArray((0,))
 
         # State:
         self._rendered_frame_count = 0
@@ -125,7 +125,7 @@ class Engine(BaseResource):
     def render(self):
         """Context manager for rendering a frame with quads."""
         # Reset quad buffer for the frame
-        self._quad_buffer = np.empty((0,), dtype=RENDERER_QUAD_DTYPE)
+        self._quad_buffer = RendererQuadArray((0,))
 
         yield self
 
@@ -162,7 +162,7 @@ class Engine(BaseResource):
             image = self._renderer.default_white_image
 
         # Create a new quad entry
-        quad = np.empty((1,), dtype=RENDERER_QUAD_DTYPE)
+        quad = RendererQuadArray((1,))
 
         # Compute destination coordinates
         dst_x0_px, dst_y0_px = dst_xy
@@ -193,4 +193,5 @@ class Engine(BaseResource):
         quad[0]["atlas_id"] = image.atlas.atlas_id
 
         # Append to quad buffer
-        self._quad_buffer = np.concatenate([self._quad_buffer, quad])
+        new_quad_buffer = np.concatenate([self._quad_buffer, quad], axis=0)
+        self._quad_buffer = new_quad_buffer.view(RendererQuadArray)

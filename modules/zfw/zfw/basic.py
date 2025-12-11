@@ -27,7 +27,7 @@ class SupportsWrite(Protocol[_T_contra]):
 
 
 #
-# Context, ContextResource
+# BaseResource
 #
 
 
@@ -120,3 +120,18 @@ def expect[T](opt_value: T | None, message: str = "Expected value to not be None
     if opt_value is None:
         raise LogicError(message)
     return opt_value
+
+
+#
+# Simple math utilities
+#
+
+
+def next_po2(x: int) -> int:
+    """Return the next power of two greater than or equal to x."""
+    if x <= 0:
+        return 1
+    v = 1
+    while v < x:
+        v *= 2
+    return v

@@ -40,7 +40,7 @@ class Renderer2dFixture(zfw.BaseResource):
         )
 
         # Initialize empty quad array
-        self.quads = np.empty((0,), dtype=zfw.RENDERER_QUAD_DTYPE)
+        self.quads: zfw.RendererQuadArray = zfw.RendererQuadArray((0,))
 
     def _on_dispose(self) -> None:
         self.target.dispose()
@@ -82,7 +82,7 @@ class Renderer2dFixture(zfw.BaseResource):
         image = self.renderer.default_white_image
 
         # Create a new quad entry
-        quad = np.empty((1,), dtype=zfw.RENDERER_QUAD_DTYPE)
+        quad = zfw.RendererQuadArray((1,))
 
         # Compute destination coordinates
         dst_x0_px, dst_y0_px = dst_xy
@@ -113,7 +113,7 @@ class Renderer2dFixture(zfw.BaseResource):
         quad[0]["atlas_id"] = image.atlas.atlas_id
 
         # Append to quad buffer
-        self.quads = np.concatenate([self.quads, quad])
+        self.quads = np.concatenate([self.quads, quad]).view(zfw.RendererQuadArray)
 
     def draw(self):
         self.add_quad(
