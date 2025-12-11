@@ -1,14 +1,12 @@
 import sys
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+
+import numpy as np
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererCanvas, RendererContext
+from .renderer import Renderer, RendererContext, RENDERER_QUAD_DTYPE
 from .window import Window, WindowContext
-
-if TYPE_CHECKING:
-    from .renderer import RendererCanvas
 
 
 class Engine(BaseResource):
@@ -19,8 +17,8 @@ class Engine(BaseResource):
     _gpu_device: GpuDevice
     _gpu_swap_chain: GpuSwapChain
     _renderer: Renderer
-    _render_canvas: RendererCanvas
     _rendered_frame_count: int
+    _quad_buffer: np.ndarray
 
     def __init__(self, *, app_name: str, debug: bool, swapchain_image_count: int):
         super().__init__(parent=None)
@@ -66,7 +64,9 @@ class Engine(BaseResource):
             context=self._render_context,
             gpu_device=self._gpu_device,
         )
-        self._render_canvas = RendererCanvas(renderer=self._renderer)
+
+        # Initialize quad buffer for drawing
+        self._quad_buffer = np.empty((0,), dtype=RENDERER_QUAD_DTYPE)
 
         # State:
         self._rendered_frame_count = 0
@@ -100,8 +100,6 @@ class Engine(BaseResource):
         return self._renderer
 
     def _on_dispose(self) -> None:
-        self._render_canvas.dispose()
-
         self._gpu_swap_chain.dispose()
         self._gpu_device.dispose()
 
@@ -125,16 +123,18 @@ class Engine(BaseResource):
 
     @contextmanager
     def render(self):
-        self._render_canvas.reset()
+        """Context manager for rendering a frame with quads."""
+        # Reset quad buffer for the frame
+        self._quad_buffer = np.empty((0,), dtype=RENDERER_QUAD_DTYPE)
 
-        yield self._render_canvas
+        yield self
 
         if self._rendered_frame_count == 0:
             self._window.show()
 
         with self._gpu_swap_chain.present() as target:
-            self._renderer.show(
-                canvas=self._render_canvas,
+            self._renderer.draw(
+                quads=self._quad_buffer,
                 target=target.image,
                 wait_semaphores=[target.render_wait_semaphore],
                 done_semaphores=[target.render_done_semaphore],
@@ -142,3 +142,55 @@ class Engine(BaseResource):
             )
 
         self._rendered_frame_count += 1
+
+    def add_quad(
+        self,
+        *,
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int],
+        image: "RendererImage | None" = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
+    ):
+        """
+        Add a quad to be rendered in the current frame.
+        """
+
+        # Use default white image if no image provided
+        if image is None:
+            image = self._renderer.default_white_image
+
+        # Create a new quad entry
+        quad = np.empty((1,), dtype=RENDERER_QUAD_DTYPE)
+
+        # Compute destination coordinates
+        dst_x0_px, dst_y0_px = dst_xy
+        dst_w_px, dst_h_px = dst_wh
+        dst_x1_px = dst_x0_px + dst_w_px
+        dst_y1_px = dst_y0_px + dst_h_px
+
+        quad[0]["dst_px"] = (
+            (dst_x0_px, dst_y0_px),  # TL
+            (dst_x1_px, dst_y0_px),  # TR
+            (dst_x1_px, dst_y1_px),  # BR
+            (dst_x0_px, dst_y1_px),  # BL
+        )
+
+        # Get UV coordinates from image
+        (src_x0_uv, src_y0_uv), (src_x1_uv, src_y1_uv) = image.rect_xy_xy_uv
+        quad[0]["src_uv"] = (
+            (src_x0_uv, src_y0_uv),  # TL
+            (src_x1_uv, src_y0_uv),  # TR
+            (src_x1_uv, src_y1_uv),  # BR
+            (src_x0_uv, src_y1_uv),  # BL
+        )
+
+        quad[0]["color"] = color
+        quad[0]["border_color"] = border_color
+        quad[0]["border_thickness_px"] = border_thickness_px
+        quad[0]["height"] = len(self._quad_buffer)
+        quad[0]["atlas_id"] = image.atlas.atlas_id
+
+        # Append to quad buffer
+        self._quad_buffer = np.concatenate([self._quad_buffer, quad])

@@ -39,7 +39,8 @@ class Renderer2dFixture(zfw.BaseResource):
             ),
         )
 
-        self.canvas = zfw.RendererCanvas(renderer=self.renderer)
+        # Initialize empty quad array
+        self.quads = np.empty((0,), dtype=zfw.RENDERER_QUAD_DTYPE)
 
     def _on_dispose(self) -> None:
         self.target.dispose()
@@ -67,20 +68,67 @@ class Renderer2dFixture(zfw.BaseResource):
             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
         )
 
+    def add_quad(
+        self,
+        *,
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int],
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    ):
+        """Add a quad to the render buffer."""
+        # Use default white image
+        image = self.renderer.default_white_image
+
+        # Create a new quad entry
+        quad = np.empty((1,), dtype=zfw.RENDERER_QUAD_DTYPE)
+
+        # Compute destination coordinates
+        dst_x0_px, dst_y0_px = dst_xy
+        dst_w_px, dst_h_px = dst_wh
+        dst_x1_px = dst_x0_px + dst_w_px
+        dst_y1_px = dst_y0_px + dst_h_px
+
+        quad[0]["dst_px"] = (
+            (dst_x0_px, dst_y0_px),  # TL
+            (dst_x1_px, dst_y0_px),  # TR
+            (dst_x1_px, dst_y1_px),  # BR
+            (dst_x0_px, dst_y1_px),  # BL
+        )
+
+        # Get UV coordinates from image
+        (src_x0_uv, src_y0_uv), (src_x1_uv, src_y1_uv) = image.rect_xy_xy_uv
+        quad[0]["src_uv"] = (
+            (src_x0_uv, src_y0_uv),  # TL
+            (src_x1_uv, src_y0_uv),  # TR
+            (src_x1_uv, src_y1_uv),  # BR
+            (src_x0_uv, src_y1_uv),  # BL
+        )
+
+        quad[0]["color"] = color
+        quad[0]["border_color"] = border_color
+        quad[0]["border_thickness_px"] = border_thickness_px
+        quad[0]["height"] = len(self.quads)
+        quad[0]["atlas_id"] = image.atlas.atlas_id
+
+        # Append to quad buffer
+        self.quads = np.concatenate([self.quads, quad])
+
     def draw(self):
-        self.canvas.draw(
+        self.add_quad(
             dst_xy=(32, 64),
             dst_wh=(512, 256),
             color=(1.0, 1.0, 1.0, 1.0),
             border_thickness_px=(0, 0, 8, 0),
             border_color=(0.0, 0.1, 0.8, 1.0),
         )
-        self.canvas.draw(
+        self.add_quad(
             dst_xy=(40, 72),
             dst_wh=(64, 64),
             color=(0.0, 0.2, 0.0, 1.0),
         )
-        self.canvas.draw(
+        self.add_quad(
             dst_xy=(112, 72),
             dst_wh=(64, 64),
             color=(0.0, 0.2, 0.0, 0.5),
@@ -88,8 +136,8 @@ class Renderer2dFixture(zfw.BaseResource):
 
     def show(self):
         fence = zfw.GpuFence(device=self.gpu_device)
-        self.renderer.show(
-            canvas=self.canvas,
+        self.renderer.draw(
+            quads=self.quads,
             target=self.target,
             fence=fence,
             wait_semaphores=[],

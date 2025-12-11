@@ -8,7 +8,7 @@ struct R2dUniform
 {
     int2 framebufferSizePx;
     float totalQuadCount;
-    uint _rsv0; // reserved for alignment
+    uint atlasId; // reserved for alignment
 }
 
 [[vk::binding(0, 0)]]
@@ -24,9 +24,9 @@ struct R2dQuad
     float4 borderColor;     // RGBA
     int4 borderThicknessPx; // T, R, B, L
     float height;           // height
+    uint atlasId;           // reserved for alignment
     int _rsv0;              // reserved for alignment
     int _rsv1;              // reserved for alignment
-    int _rsv2;              // reserved for alignment
 };
 
 struct R2dBatchUniform

@@ -1,5 +1,8 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
+    "RENDERER_QUADS_BATCH_UNIFORM_DTYPE",
+    "RENDERER_QUADS_COMMON_UNIFORM_DTYPE",
+    "RENDERER_QUAD_DTYPE",
     "BaseResource",
     "Engine",
     "GpuBuffer",
@@ -24,11 +27,10 @@ __all__ = [
     "GpuSwapChain",
     "Renderer",
     "RendererAtlas",
-    "RendererCanvas",
     "RendererContext",
     "RendererImage",
+    "RendererQuadArray",
     "SupportsWrite",
-    "Window",
     "Window",
     "WindowContext",
 ]
@@ -59,10 +61,13 @@ from .gpu import (
     GpuSwapChain,
 )
 from .renderer import (
+    RENDERER_QUAD_DTYPE,
+    RENDERER_QUADS_BATCH_UNIFORM_DTYPE,
+    RENDERER_QUADS_COMMON_UNIFORM_DTYPE,
     Renderer,
     RendererAtlas,
-    RendererCanvas,
     RendererContext,
     RendererImage,
+    RendererQuadArray,
 )
 from .window import Window, WindowContext
