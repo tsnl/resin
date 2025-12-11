@@ -1,8 +1,5 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
-    "RENDERER_QUADS_BATCH_UNIFORM_DTYPE",
-    "RENDERER_QUADS_COMMON_UNIFORM_DTYPE",
-    "RENDERER_QUAD_DTYPE",
     "BaseResource",
     "Engine",
     "GpuBuffer",
