@@ -62,6 +62,7 @@ from .typed_vulkan import (
     VK_COLOR_COMPONENT_R_BIT,
     VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
     VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     VK_COMPARE_OP_ALWAYS,
     VK_COMPARE_OP_GREATER,
@@ -1775,7 +1776,7 @@ class GpuCommandEncoder(BaseResource):
         vkBeginCommandBuffer(
             commandBuffer=vk_command_buffer,
             pBeginInfo=VkCommandBufferBeginInfo(
-                flags=0,
+                flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                 pInheritanceInfo=None,
             ),
         )
@@ -1832,6 +1833,9 @@ class GpuCommandEncoder(BaseResource):
         *,
         src: GpuBuffer,
         dst: GpuImage,
+        buffer_offset: int = 0,
+        image_offset: tuple[int, int] = (0, 0),
+        image_extent: tuple[int, int] | None = None,
     ) -> None:
         vkCmdCopyBufferToImage(
             commandBuffer=self.vk_command_buffer,
@@ -1841,7 +1845,7 @@ class GpuCommandEncoder(BaseResource):
             regionCount=1,
             pRegions=[
                 VkBufferImageCopy(
-                    bufferOffset=0,
+                    bufferOffset=buffer_offset,
                     bufferRowLength=0,
                     bufferImageHeight=0,
                     imageSubresource=VkImageSubresourceLayers(
@@ -1850,11 +1854,19 @@ class GpuCommandEncoder(BaseResource):
                         baseArrayLayer=0,
                         layerCount=1,
                     ),
-                    imageOffset=VkOffset3D(x=0, y=0, z=0),
-                    imageExtent=VkExtent3D(
-                        width=dst.meta.shape[1],
-                        height=dst.meta.shape[0],
-                        depth=1,
+                    imageOffset=VkOffset3D(x=image_offset[0], y=image_offset[1], z=0),
+                    imageExtent=(
+                        VkExtent3D(
+                            width=dst.meta.shape[1],
+                            height=dst.meta.shape[0],
+                            depth=1,
+                        )
+                        if image_extent is None
+                        else VkExtent3D(
+                            width=image_extent[0],
+                            height=image_extent[1],
+                            depth=1,
+                        )
                     ),
                 )
             ],
@@ -2040,8 +2052,6 @@ class GpuCommandEncoder(BaseResource):
                 {
                     "color-attachment-optimal": VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     "present-src": VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                    "copy-dst": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    "copy-src": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     "texture-binding": VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     "transfer-src-optimal": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     "transfer-dst-optimal": VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
