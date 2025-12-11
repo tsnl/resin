@@ -1,7 +1,19 @@
 default: wheel
 
 #
-# Sync
+# Run:
+#
+
+.PHONY: sandbox
+sandbox: sync
+	uv run --package zfw_sandbox zfw-sandbox --debug
+
+.PHONY: tests
+tests: sync
+	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
+
+#
+# Develop:
 #
 
 .PHONY: sync
@@ -12,47 +24,19 @@ sync: bundled-data
 bundled-data:
 	uv run --package zfw --extra dev python ./build-bundled-data.py
 
-#
-# Sandbox:
-#
-
-.PHONY: sandbox
-sandbox: sync
-	uv run --package zfw_sandbox zfw-sandbox --debug
-
-#
-# Tests:
-#
-
-.PHONY: tests
-tests: sync
-	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
-
-#
-# Lint, Check: Format, Lint, Typecheck:
-#
-
 .PHONY: check
-check: format-check lint-check type-check
+check:
+	uv run --package zfw --extra dev -- ruff format --check .
+	uv run --package zfw --extra dev -- ruff check .
+	uv run --package zfw --extra dev -- pyright
 
 .PHONY: format format-check
 format:
 	uv run --package zfw --extra dev -- ruff format .
-format-check:
-	uv run --package zfw --extra dev -- ruff format --check
-
-.PHONY: lint lint-check
-lint: format
 	uv run --package zfw --extra dev -- ruff check --fix .
-lint-check:
-	uv run --package zfw --extra dev -- ruff check .
-
-.PHONY: type-check
-type-check:
-	uv run --package zfw --extra dev -- pyright
 
 #
-# Build:
+# Deploy:
 #
 
 .PHONY: wheel
