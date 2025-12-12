@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 import numpy as np
@@ -57,7 +58,7 @@ class Renderer(BaseResource):
     default_white_image: "RendererImage"
     quad_pipeline: "RendererQuadPipeline"
 
-    _atlases: list["RendererAtlas"]
+    _atlases: dict["RendererAtlasChannels", "RendererAtlas"]
 
     def __init__(
         self,
@@ -70,28 +71,19 @@ class Renderer(BaseResource):
         self.context = context
         self.gpu_device = gpu_device
 
-        self._atlases = []
-
-        self.default_white_image_atlas = RendererAtlas(
-            renderer=self,
-            data=np.full((8, 8, 4), 0xFF, dtype=np.uint8),
-            image_rect_map={"default": (0, 0, 8, 8)},
-        )
-        self.default_white_image = self.default_white_image_atlas["default"]
+        self._atlases = {
+            1: RendererAtlas(renderer=self, channels=1),
+            4: RendererAtlas(renderer=self, channels=4),
+        }
 
         self.quad_pipeline = RendererQuadPipeline(renderer=self, gpu_device=gpu_device)
 
     def _on_dispose(self) -> None:
         self.quad_pipeline.dispose()
 
-        # Dispose default white image and atlas:
-        self.default_white_image_atlas.dispose()
-
-    def register_new_atlas(self, atlas: "RendererAtlas") -> int:
-        """Register a new atlas and return its atlas_id."""
-        atlas_id = len(self._atlases)
-        self._atlases.append(atlas)
-        return atlas_id
+        # Dispose atlases:
+        for _, atlas in self._atlases.items():
+            atlas.dispose()
 
     def draw(
         self,
@@ -108,6 +100,7 @@ class Renderer(BaseResource):
         The quads array should have dtype RENDERER_QUAD_DTYPE and contain
         atlas_id fields indicating which atlas each quad belongs to.
         """
+
         self.quad_pipeline.draw(
             quads=quads,
             target=target,
@@ -122,127 +115,37 @@ class Renderer(BaseResource):
 #
 
 
+@dataclass
+class RendererImage:
+    atlas: "RendererAtlas"
+    index: int
+
+    @property
+    def uv_xywh(self) -> tuple[float, float, float, float]:
+        return tuple(self.atlas._page_rect_allocator.rects[self.index])
+
+    @property
+    def px_xywh(self) -> tuple[int, int, int, int]:
+        x_uv, y_uv, w_uv, h_uv = self.uv_xywh
+        page_size = self.atlas.page_size
+
+        x_px = int(x_uv * page_size)
+        y_px = int((y_uv % 1.0) * page_size)
+        w_px = int(w_uv * page_size)
+        h_px = int(h_uv * page_size)
+
+        return (x_px, y_px, w_px, h_px)
+
+    @property
+    def page_index(self) -> int:
+        _, y_uv, _, _ = self.uv_xywh
+        return int(y_uv)
+
+
+RendererAtlasChannels: TypeAlias = Literal[1, 4]
+
+
 class RendererAtlas(BaseResource):
-    renderer: "Renderer"
-    gpu_device: GpuDevice
-    gpu_image: GpuImage
-    gpu_sampler: GpuSampler
-    image_map: dict[str, "RendererImage"]
-    atlas_id: int
-
-    def __init__(
-        self,
-        *,
-        renderer: "Renderer",
-        data: np.ndarray,
-        image_rect_map: dict[str, tuple[int, int, int, int]],
-        mag_filter: GpuSamplerFilter = "linear",
-        min_filter: GpuSamplerFilter = "linear",
-        address_mode: GpuSamplerAddressMode = "clamp-to-edge",
-    ):
-        super().__init__(parent=renderer)
-
-        assert data.ndim == 3 and data.shape[2] == 4
-
-        self.renderer = renderer
-        self.gpu_device = renderer.gpu_device
-
-        self.gpu_image = GpuImage(
-            device=renderer.gpu_device,
-            usages=["texture-binding"],
-            meta=GpuImageMeta.from_array(data),
-        )
-        self.gpu_sampler = GpuSampler(
-            device=renderer.gpu_device,
-            mag_filter=mag_filter,
-            min_filter=min_filter,
-            address_mode=address_mode,
-        )
-
-        self.image_map = {
-            name: RendererImage(atlas=self, entry_name=name, rect_xywh=rect_xywh)
-            for name, rect_xywh in image_rect_map.items()
-        }
-
-        self.atlas_id = renderer.register_new_atlas(self)
-
-        self.write(data=data)
-
-    def _on_dispose(self) -> None:
-        self.gpu_sampler.dispose()
-        self.gpu_image.dispose()
-
-    def __getitem__(self, image_name: str) -> "RendererImage":
-        return self.image_map[image_name]
-
-    def write(self, *, data: np.ndarray):
-        assert self.gpu_image.memory
-
-        # Create and write to a staging buffer:
-        staging_buffer = GpuBuffer(
-            device=self.gpu_device,
-            usages=["staging", "copy-src"],
-            meta=GpuBufferMeta.from_array(data),
-        )
-        staging_buffer.memory.write(data=data)
-
-        # Using a one-time command buffer, copy from the staging buffer to the image,
-        # blocking until done:
-        command_encoder = GpuCommandEncoder(
-            device=self.gpu_device,
-            queue_type="transfer",
-        )
-        command_encoder.transition_image_layout(
-            image=self.gpu_image,
-            layout="transfer-dst-optimal",
-        )
-        command_encoder.copy_buffer_to_image(
-            src=staging_buffer,
-            dst=self.gpu_image,
-        )
-        command_encoder.transition_image_layout(
-            image=self.gpu_image,
-            layout="texture-binding",
-        )
-        command_encoder.submit().wait()
-
-
-class RendererImage(BaseResource):
-    atlas: RendererAtlas
-    entry_name: str
-    width_px: int
-    height_px: int
-    rect_xy_xy_px: tuple[tuple[int, int], tuple[int, int]]
-    rect_xy_xy_uv: tuple[tuple[float, float], tuple[float, float]]
-
-    def __init__(
-        self,
-        atlas: RendererAtlas,
-        entry_name: str,
-        rect_xywh: tuple[int, int, int, int],
-    ):
-        super().__init__(parent=atlas)
-        self.atlas = atlas
-        self.entry_name = entry_name
-        x0_px, y0_px, w_px, h_px = rect_xywh
-        x1_px, y1_px = x0_px + w_px - 1, y0_px + h_px - 1
-        self.width_px = w_px
-        self.height_px = h_px
-        self.rect_xy_xy_px = ((x0_px, y0_px), (x1_px, y1_px))
-        self.rect_xy_xy_uv = (self._uv(x0_px, y0_px), self._uv(x1_px, y1_px))
-
-    def _uv(self, x_px: int, y_px: int) -> tuple[float, float]:
-        atlas_width = self.atlas.gpu_image.width
-        atlas_height = self.atlas.gpu_image.height
-        u = x_px / atlas_width
-        v = y_px / atlas_height
-        return (u, v)
-
-
-RendererImage2: TypeAlias = int
-
-
-class RendererAtlas2(BaseResource):
     renderer: Renderer
     gpu_device: GpuDevice
 
@@ -250,17 +153,19 @@ class RendererAtlas2(BaseResource):
         self,
         *,
         renderer: Renderer,
-        channels: Literal[1, 4],
+        channels: RendererAtlasChannels,
+        max_pages: int = 4,
         page_size: int = 4096,
-        max_pages: int = 32,
         max_rects: int = 1 << 20,
     ):
         super().__init__(parent=renderer)
         self.renderer = renderer
         self.gpu_device = renderer.gpu_device
 
-        self.page_size = page_size
         self.channels = channels
+        self.page_size = page_size
+        self.max_pages = max_pages
+        self.max_rects = max_rects
 
         self._page_rect_allocator = PageRectAllocator(
             max_pages=max_pages,
@@ -270,9 +175,23 @@ class RendererAtlas2(BaseResource):
             (max_pages, page_size, page_size, channels),
             dtype=np.float32,
         )
-        self._page_gpu_image_list = []
+        self._page_gpu_image_list = self._create_page_gpu_images()
 
-    def insert(self, *, data: np.ndarray) -> RendererImage2:
+    def _create_page_gpu_images(self) -> list[GpuImage]:
+        return [
+            GpuImage(
+                device=self.renderer.gpu_device,
+                usages=["texture-binding"],
+                meta=GpuImageMeta(
+                    shape=(self.page_size, self.page_size, self.channels),
+                    dtype=np.float32,
+                    color_space="linear",
+                ),
+            )
+            for _ in range(self.max_pages)
+        ]
+
+    def insert(self, *, data: np.ndarray) -> RendererImage:
         assert data.ndim in (2, 3)
 
         if data.ndim == 2:
@@ -290,15 +209,13 @@ class RendererAtlas2(BaseResource):
             return image
 
         # If that fails, add a new page and try again:
-        self._add_page()
-        image = self._try_simple_insert(data=data)
-        if image is not None:
+        if self._try_add_page() and (image := self._try_simple_insert(data=data)):
             return image
 
         # If that fails, we're out of memory:
         raise MemoryError("out of atlas memory")
 
-    def _try_simple_insert(self, *, data: np.ndarray) -> RendererImage2 | None:
+    def _try_simple_insert(self, *, data: np.ndarray) -> RendererImage | None:
         assert data.ndim == 3 and data.shape[2] == self.channels
 
         w_px, h_px = data.shape[1], data.shape[0]
@@ -308,7 +225,7 @@ class RendererAtlas2(BaseResource):
         alloc_index = self._page_rect_allocator.alloc(w=w, h=h)
         if alloc_index is not None:
             self._upload_image(alloc_index, data)
-            return RendererImage2(alloc_index)
+            return RendererImage(atlas=self, index=alloc_index)
 
         return None
 
@@ -392,23 +309,8 @@ class RendererAtlas2(BaseResource):
             )
         command_encoder.submit().wait()
 
-    def _add_page(self):
-        page_index = len(self._page_gpu_image_list)
-
-        page = GpuImage(
-            device=self.renderer.gpu_device,
-            usages=["texture-binding"],
-            meta=GpuImageMeta(
-                shape=(self.page_size, self.page_size, self.channels),
-                dtype=np.float32,
-                color_space="linear",
-            ),
-        )
-        self._page_gpu_image_list.append(page)
-
-        self._page_pixel_data[page_index].fill(0.0)
-
-        self._page_rect_allocator.add_page()
+    def _try_add_page(self) -> bool:
+        return self._page_rect_allocator.try_add_page()
 
     def _upload_image(self, alloc_index: int, data: np.ndarray):
         assert data.shape[2] == self.channels
@@ -538,12 +440,13 @@ class PageRectAllocator:
         assert old_rect_array.shape == self.rects.shape
         return old_rect_array.view(UvRectArray)
 
-    def add_page(self):
+    def try_add_page(self) -> bool:
         if self.page_count >= self.max_pages:
-            raise MemoryError("Out of page allocations")
+            return False
 
         self.page_count += 1
         assert self.page_count <= self.max_pages
+        return True
 
     def _push_allocation(
         self,

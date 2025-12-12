@@ -2497,7 +2497,11 @@ class GpuDescriptorSet(BaseResource):
                     f"Descriptor set binding type mismatch: "
                     f"layout expects {binding_layout.type}, "
                     f"but got {binding}: "
-                    f"expected one of {ok_desc_types}"
+                    + (
+                        "no compatible descriptor types found."
+                        if not ok_desc_types
+                        else f"expected one of {repr(ok_desc_types)}."
+                    )
                 )
 
     @staticmethod
@@ -2543,22 +2547,29 @@ class GpuDescriptorSet(BaseResource):
         )
 
 
-GpuDescriptorSetBinding: TypeAlias = GpuBuffer | tuple[GpuImage, GpuSampler]
+GpuDescriptorSetBinding: TypeAlias = """
+    GpuBufferDescriptorSetBinding |
+    GpuImageArraySamplerDescriptorSetBinding
+"""
+GpuBufferDescriptorSetBinding: TypeAlias = GpuBuffer
+GpuImageArraySamplerDescriptorSetBinding: TypeAlias = tuple[list[GpuImage], GpuSampler]
 
 
 def compatible_descriptor_types_for_binding(
     binding: GpuDescriptorSetBinding,
-) -> list["GpuDescriptorType"]:
+) -> set["GpuDescriptorType"]:
     match binding:
         case GpuBuffer():
-            res = []
+            res = set()
             if "uniform" in binding.usages:
-                res.append("uniform-buffer")
+                res.add("uniform-buffer")
             if "storage" in binding.usages:
-                res.append("storage-buffer")
+                res.add("storage-buffer")
             return res
-        case (GpuImage(), GpuSampler()):
-            return ["combined-image-sampler"]
+        case (list(), GpuSampler()) if all(isinstance(x, GpuImage) for x in binding[0]):
+            return {"combined-image-sampler"}
+        case _:
+            raise NotImplementedError()
 
 
 def descriptor_set_write_for_binding(
@@ -3214,7 +3225,7 @@ class GpuSwapChainSlot(BaseResource):
 class GpuPresentTarget:
     slot_index: int
     """
-    The slot index in the swap chain: frame_index % image_count. 
+    The slot index in the swap chain: frame_index % image_count.
     May be different from image_index.
     """
 
