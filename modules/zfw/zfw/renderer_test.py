@@ -16,6 +16,7 @@ from .gpu import (
     GpuBufferMeta,
 )
 from .renderer import (
+    RendererAtlas2,
     RendererContext,
     Renderer,
     RendererQuadArray,
@@ -166,10 +167,10 @@ class RendererTestEngine(BaseResource):
 
 
 def test_renderer_quads():
-    fixture = RendererTestEngine()
-    fixture.draw()
-    fixture.show()
-    image = fixture.readback()
+    engine = RendererTestEngine()
+    engine.draw()
+    engine.show()
+    image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,6 +234,41 @@ def test_page_rect_allocator():
     # Ensure that adding another page fails with MemoryError.
     with pytest.raises(MemoryError):
         allocator.add_page()
+
+
+def test_renderer_atlas():
+    gpu_context = GpuContext(
+        app_name="zfw.renderer_test.test_renderer_atlas",
+        enable_debug_layer_support=True,
+        enable_present_support=False,
+    )
+    renderer_context = RendererContext(
+        gpu_context=gpu_context,
+    )
+
+    gpu_device = GpuDevice(
+        context=gpu_context,
+        physical_device=gpu_context.enumerate_physical_devices()[0],
+        surface=None,
+    )
+    renderer = Renderer(
+        context=renderer_context,
+        gpu_device=gpu_device,
+    )
+
+    atlas = RendererAtlas2(renderer=renderer, channels=4)
+
+    orig_image_data = np.empty((128, 128, 4), dtype=np.float32)
+    xs, ys = np.meshgrid(
+        np.linspace(0.0, 1.0, num=128, endpoint=False),
+        np.linspace(0.0, 1.0, num=128, endpoint=False),
+        indexing="xy",
+    )
+    orig_image_data[..., 0] = xs
+    orig_image_data[..., 1] = ys
+    orig_image_data[..., 2] = 0.0
+
+    image = atlas.insert(data=orig_image_data)
 
 
 if __name__ == "__main__":

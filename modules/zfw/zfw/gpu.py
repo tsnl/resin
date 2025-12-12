@@ -1553,6 +1553,12 @@ class GpuBufferMeta:
     element_count: int
     element_dtype: npt.DTypeLike
 
+    def __post_init__(self):
+        if self.size <= 0:
+            raise LogicError(
+                f"GpuBufferMeta must have positive size, got {self.size} bytes"
+            )
+
     @property
     def size(self) -> int:
         return self.element_count * self.element_size
@@ -1682,6 +1688,9 @@ class GpuBuffer(BaseResource):
         device_local: bool,
     ) -> tuple[VkBuffer, GpuMemory]:
         """Create a VkBuffer and allocate/bind memory for it."""
+
+        assert meta.size > 0, "Cannot create a buffer with size 0"
+
         # Determine which queue families will access the buffer:
         queue_family_indices = list({idx for _, idx in device.qfis})
 

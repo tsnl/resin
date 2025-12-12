@@ -273,7 +273,10 @@ class RendererAtlas2(BaseResource):
         self.page_list = []
 
     def insert(self, *, data: np.ndarray) -> RendererImage2:
-        data = data.reshape((-1, -1, self.channels))
+        assert data.ndim in (2, 3)
+
+        if data.ndim == 2:
+            data = data[:, :, np.newaxis]
 
         # First, try to allocate from an existing page:
         image = self._try_simple_insert(data=data)
@@ -316,8 +319,8 @@ class RendererAtlas2(BaseResource):
 
         # Next, compact the pages on the CPU:
         self._compact_pages_on_cpu(
-            old_uv_rect_array=old_rect_array,
-            new_uv_rect_array=self.page_rect_allocator.rects,
+            structured_old_uv_rect_array=old_rect_array,
+            structured_new_uv_rect_array=self.page_rect_allocator.rects,
         )
 
         # Finally, upload all the pages from the CPU to the GPU:
@@ -326,10 +329,13 @@ class RendererAtlas2(BaseResource):
     def _compact_pages_on_cpu(
         self,
         *,
-        old_uv_rect_array: "UvRectArray",
-        new_uv_rect_array: "UvRectArray",
+        structured_old_uv_rect_array: "UvRectArray",
+        structured_new_uv_rect_array: "UvRectArray",
     ):
-        assert old_uv_rect_array.shape == new_uv_rect_array.shape
+        assert structured_old_uv_rect_array.shape == structured_new_uv_rect_array.shape
+
+        old_uv_rect_array = structured_old_uv_rect_array.view(np.float32).reshape(-1, 4)
+        new_uv_rect_array = structured_new_uv_rect_array.view(np.float32).reshape(-1, 4)
 
         rect_count = old_uv_rect_array.shape[0]
         page_count = len(self.page_list)
@@ -353,6 +359,10 @@ class RendererAtlas2(BaseResource):
 
     def _upload_all_pages(self):
         page_count = len(self.page_list)
+
+        # If no pages, then nothing to do:
+        if not page_count:
+            return
 
         # Create and write to a staging buffer:
         staging_buffer = GpuBuffer(
@@ -381,6 +391,8 @@ class RendererAtlas2(BaseResource):
         command_encoder.submit().wait()
 
     def _add_page(self):
+        page_index = len(self.page_list)
+
         page = GpuImage(
             device=self.renderer.gpu_device,
             usages=["texture-binding"],
@@ -391,6 +403,8 @@ class RendererAtlas2(BaseResource):
             ),
         )
         self.page_list.append(page)
+
+        self.page_data[page_index].fill(0.0)
 
     def _upload_image(self, alloc_index: int, data: np.ndarray):
         assert data.shape[2] == self.channels
@@ -515,7 +529,7 @@ class PageRectAllocator:
         self.rects = new_allocator.rects[new_idx_array]
 
         # Done:
-        assert old_rect_array.shape == self.rect_array.shape
+        assert old_rect_array.shape == self.rects.shape
         return old_rect_array.view(UvRectArray)
 
     def add_page(self):
