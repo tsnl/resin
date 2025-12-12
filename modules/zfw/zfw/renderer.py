@@ -262,15 +262,15 @@ class RendererAtlas2(BaseResource):
         self.page_size = page_size
         self.channels = channels
 
-        self.page_rect_allocator = PageRectAllocator(
+        self._page_rect_allocator = PageRectAllocator(
             max_pages=max_pages,
             max_rects=max_rects,
         )
-        self.page_data = np.empty(
+        self._page_pixel_data = np.empty(
             (max_pages, page_size, page_size, channels),
             dtype=np.float32,
         )
-        self.page_list = []
+        self._page_gpu_image_list = []
 
     def insert(self, *, data: np.ndarray) -> RendererImage2:
         assert data.ndim in (2, 3)
@@ -305,7 +305,7 @@ class RendererAtlas2(BaseResource):
         w = w_px / self.page_size
         h = h_px / self.page_size
 
-        alloc_index = self.page_rect_allocator.alloc(w=w, h=h)
+        alloc_index = self._page_rect_allocator.alloc(w=w, h=h)
         if alloc_index is not None:
             self._upload_image(alloc_index, data)
             return RendererImage2(alloc_index)
@@ -315,12 +315,12 @@ class RendererAtlas2(BaseResource):
     def compact(self):
         # First, compact just the allocation table.
         # We obtain a copy of the old allocation table.
-        old_rect_array = self.page_rect_allocator.compact()
+        old_rect_array = self._page_rect_allocator.compact()
 
         # Next, compact the pages on the CPU:
         self._compact_pages_on_cpu(
             structured_old_uv_rect_array=old_rect_array,
-            structured_new_uv_rect_array=self.page_rect_allocator.rects,
+            structured_new_uv_rect_array=self._page_rect_allocator.rects,
         )
 
         # Finally, upload all the pages from the CPU to the GPU:
@@ -338,12 +338,12 @@ class RendererAtlas2(BaseResource):
         new_uv_rect_array = structured_new_uv_rect_array.view(np.float32).reshape(-1, 4)
 
         rect_count = old_uv_rect_array.shape[0]
-        page_count = len(self.page_list)
+        page_count = len(self._page_gpu_image_list)
 
         old_px_rect_array = (old_uv_rect_array * self.page_size).astype(int)
         new_px_rect_array = (new_uv_rect_array * self.page_size).astype(int)
 
-        src_page_data = self.page_data[:page_count].copy()
+        src_page_data = self._page_pixel_data[:page_count].copy()
         for rect_index in range(rect_count):
             src_x, src_y, src_w, src_h = old_px_rect_array[rect_index]
             dst_x, dst_y, dst_w, dst_h = new_px_rect_array[rect_index]
@@ -355,10 +355,12 @@ class RendererAtlas2(BaseResource):
             dst_y = dst_y % self.page_size
 
             s = src_page_data[src_page, src_y : src_y + src_h, src_x : src_x + src_w]
-            self.page_data[dst_page, dst_y : dst_y + dst_h, dst_x : dst_x + dst_w] = s
+            self._page_pixel_data[
+                dst_page, dst_y : dst_y + dst_h, dst_x : dst_x + dst_w
+            ] = s
 
     def _upload_all_pages(self):
-        page_count = len(self.page_list)
+        page_count = len(self._page_gpu_image_list)
 
         # If no pages, then nothing to do:
         if not page_count:
@@ -368,9 +370,9 @@ class RendererAtlas2(BaseResource):
         staging_buffer = GpuBuffer(
             device=self.gpu_device,
             usages=["staging", "copy-src"],
-            meta=GpuBufferMeta.from_array(self.page_data[:page_count]),
+            meta=GpuBufferMeta.from_array(self._page_pixel_data[:page_count]),
         )
-        staging_buffer.memory.write(data=self.page_data[:page_count])
+        staging_buffer.memory.write(data=self._page_pixel_data[:page_count])
 
         # Using a one-time command buffer, copy from the staging buffer to the images,
         # blocking until done:
@@ -378,7 +380,7 @@ class RendererAtlas2(BaseResource):
             device=self.gpu_device,
             queue_type="transfer",
         )
-        for page_index, page in enumerate(self.page_list):
+        for page_index, page in enumerate(self._page_gpu_image_list):
             command_encoder.transition_image_layout(
                 image=page,
                 layout="transfer-dst-optimal",
@@ -386,12 +388,12 @@ class RendererAtlas2(BaseResource):
             command_encoder.copy_buffer_to_image(
                 src=staging_buffer,
                 dst=page,
-                buffer_offset=self.page_data[page_index].nbytes * page_index,
+                buffer_offset=self._page_pixel_data[page_index].nbytes * page_index,
             )
         command_encoder.submit().wait()
 
     def _add_page(self):
-        page_index = len(self.page_list)
+        page_index = len(self._page_gpu_image_list)
 
         page = GpuImage(
             device=self.renderer.gpu_device,
@@ -402,15 +404,17 @@ class RendererAtlas2(BaseResource):
                 color_space="linear",
             ),
         )
-        self.page_list.append(page)
+        self._page_gpu_image_list.append(page)
 
-        self.page_data[page_index].fill(0.0)
+        self._page_pixel_data[page_index].fill(0.0)
+
+        self._page_rect_allocator.add_page()
 
     def _upload_image(self, alloc_index: int, data: np.ndarray):
         assert data.shape[2] == self.channels
         assert data.dtype == np.float32
 
-        rects = self.page_rect_allocator.rects
+        rects = self._page_rect_allocator.rects.view(np.float32).reshape(-1, 4)
 
         x_px, y_px, w_px, h_px = (rects[alloc_index] * self.page_size).astype(int)
         page_index = y_px // self.page_size
@@ -430,12 +434,12 @@ class RendererAtlas2(BaseResource):
             queue_type="transfer",
         )
         command_encoder.transition_image_layout(
-            image=self.page_list[page_index],
+            image=self._page_gpu_image_list[page_index],
             layout="transfer-dst-optimal",
         )
         command_encoder.copy_buffer_to_image(
             src=staging_buffer,
-            dst=self.page_list[page_index],
+            dst=self._page_gpu_image_list[page_index],
             image_offset=(x_px, y_px),
             image_extent=(w_px, h_px),
         )
@@ -500,6 +504,8 @@ class PageRectAllocator:
                 page["insert_y"] = y
                 page["row_height"] = h
                 return self._push_allocation(x, y, w, h, page_index)
+        else:
+            return None
 
     def compact(self) -> "UvRectArray":
         # Create a new, empty allocator that can hold all the current rects:

@@ -270,6 +270,13 @@ def test_renderer_atlas():
 
     image = atlas.insert(data=orig_image_data)
 
+    # TODO: Read back the atlas data and verify that the image was inserted correctly.
+
+    renderer.dispose()
+    gpu_device.dispose()
+    renderer_context.dispose()
+    gpu_context.dispose()
+
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
