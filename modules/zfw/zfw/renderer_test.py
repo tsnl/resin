@@ -30,7 +30,7 @@ class RendererTestEngine(BaseResource):
     def __init__(self):
         super().__init__(parent=None)
         self.gpu_context = GpuContext(
-            app_name="tests.renderer_2d_test",
+            app_name="zfw renderer_test",
             enable_debug_layer_support=True,
             enable_present_support=False,
         )
