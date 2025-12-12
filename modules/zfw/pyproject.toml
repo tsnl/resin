@@ -31,6 +31,7 @@ build-backend = "uv_build"
 package-data = { "zfw" = ["bundled_data/**/*"] }
 module-name = "zfw"
 module-root = ""
+source-exclude = ["*_test.py"]
 
 [tool.uv.sources]
 zfw_build = { workspace = true }
