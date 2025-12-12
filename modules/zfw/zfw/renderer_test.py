@@ -177,7 +177,7 @@ def test_renderer_quads():
 
 
 def test_page_rect_allocator():
-    allocator = PageRectAllocator(max_pages=2, max_rects=10)
+    allocator = PageRectAllocator(max_pages=2, max_rects=7)
 
     # First, add a single page.
     allocator.add_page()
@@ -205,26 +205,34 @@ def test_page_rect_allocator():
     assert (allocator.rects[r3] == UvRectArray.of([(0.0, 0.6, 0.95, 0.1)])).all()
 
     # Check that we'd exhaust the first page with a gigantic allocation.
-    r4 = allocator.alloc(w=1.0, h=0.5)
-    assert r4 is None
+    n0 = allocator.alloc(w=1.0, h=0.5)
+    assert n0 is None
 
     # Check that we can still insert into the first page in the third row.
-    r5 = allocator.alloc(w=0.05, h=0.1)
-    assert r5 is not None
-    assert (allocator.rects[r5] == UvRectArray.of([(0.95, 0.6, 0.05, 0.1)])).all()
+    r4 = allocator.alloc(w=0.05, h=0.1)
+    assert r4 is not None
+    assert (allocator.rects[r4] == UvRectArray.of([(0.95, 0.6, 0.05, 0.1)])).all()
 
-    # Add a page...
+    # Add a second page...
     allocator.add_page()
 
     # ...and check that the gigantic allocation now works.
-    r6 = allocator.alloc(w=1.0, h=0.5)
-    assert r6 is not None
-    assert (allocator.rects[r6] == UvRectArray.of([(0.0, 1.0, 1.0, 0.5)])).all()
+    r5 = allocator.alloc(w=1.0, h=0.5)
+    assert r5 is not None
+    assert (allocator.rects[r5] == UvRectArray.of([(0.0, 1.0, 1.0, 0.5)])).all()
 
     # Ensure that allocations in the second page have the expected offset Y coordinate.
-    r7 = allocator.alloc(w=0.5, h=0.5)
-    assert r7 is not None
-    assert (allocator.rects[r7] == UvRectArray.of([(0.0, 1.5, 0.5, 0.5)])).all()
+    r6 = allocator.alloc(w=0.5, h=0.5)
+    assert r6 is not None
+    assert (allocator.rects[r6] == UvRectArray.of([(0.0, 1.5, 0.5, 0.5)])).all()
+
+    # Ensure any further allocations fail with MemoryError.
+    with pytest.raises(MemoryError):
+        allocator.alloc(w=0.1, h=0.1)
+
+    # Ensure that adding another page fails with MemoryError.
+    with pytest.raises(MemoryError):
+        allocator.add_page()
 
 
 if __name__ == "__main__":

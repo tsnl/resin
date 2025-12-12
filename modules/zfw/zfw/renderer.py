@@ -519,6 +519,9 @@ class PageRectAllocator:
         return old_rect_array.view(UvRectArray)
 
     def add_page(self):
+        if self.page_count >= self.max_pages:
+            raise MemoryError("Out of page allocations")
+
         self.page_count += 1
         assert self.page_count <= self.max_pages
 
@@ -530,6 +533,9 @@ class PageRectAllocator:
         h: float,
         page_index: int,
     ) -> int:
+        if self.rect_count >= self.max_rects:
+            raise MemoryError("Out of rect allocations")
+
         assert 0.0 <= x < 1.0 and 0.0 <= y < 1.0
         assert 0.0 < x + w <= 1.0 and 0.0 < y + h <= 1.0
         assert isinstance(page_index, int)
