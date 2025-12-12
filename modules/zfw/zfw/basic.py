@@ -5,8 +5,11 @@ __all__ = [
 ]
 
 from abc import ABC
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, Self
 from weakref import ref as WeakRef
+
+import numpy as np
+import numpy.typing as npt
 
 from .excepts import LogicError
 
@@ -135,3 +138,19 @@ def next_po2(x: int) -> int:
     while v < x:
         v *= 2
     return v
+
+
+#
+# StructuredNDArray
+#
+
+
+class StructuredNDArray(np.ndarray, ABC):
+    DTYPE: np.dtype
+
+    def __new__(cls, shape: tuple[int, ...] | int) -> Self:
+        return np.zeros(shape, dtype=cls.DTYPE).view(cls)
+
+    @classmethod
+    def of(cls, arr: npt.NDArrayLike) -> Self:
+        return np.asarray(arr, dtype=cls.DTYPE).view(cls)

@@ -2,37 +2,56 @@ from pathlib import Path
 
 import numpy as np
 import PIL.Image
-import zfw
+import pytest
+
+from .basic import BaseResource
+from .gpu import (
+    GpuContext,
+    GpuDevice,
+    GpuImage,
+    GpuBuffer,
+    GpuCommandEncoder,
+    GpuFence,
+    GpuImageMeta,
+    GpuBufferMeta,
+)
+from .renderer import (
+    RendererContext,
+    Renderer,
+    RendererQuadArray,
+    PageRectAllocator,
+    UvRectArray,
+)
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
 
 
-class Renderer2dFixture(zfw.BaseResource):
+class RendererTestEngine(BaseResource):
     def __init__(self):
         super().__init__(parent=None)
-        self.gpu_context = zfw.GpuContext(
-            app_name="zfw.tests.renderer_2d_test",
+        self.gpu_context = GpuContext(
+            app_name="tests.renderer_2d_test",
             enable_debug_layer_support=True,
             enable_present_support=False,
         )
-        self.renderer_context = zfw.RendererContext(
+        self.renderer_context = RendererContext(
             gpu_context=self.gpu_context,
         )
 
-        self.gpu_device = zfw.GpuDevice(
+        self.gpu_device = GpuDevice(
             context=self.gpu_context,
             physical_device=self.gpu_context.enumerate_physical_devices()[0],
             surface=None,
         )
-        self.renderer = zfw.Renderer(
+        self.renderer = Renderer(
             context=self.renderer_context,
             gpu_device=self.gpu_device,
         )
 
-        self.target = zfw.GpuImage(
+        self.target = GpuImage(
             device=self.gpu_device,
             usages=["color-attachment"],
-            meta=zfw.GpuImageMeta(
+            meta=GpuImageMeta(
                 shape=(TEST_IMAGE_H, TEST_IMAGE_W, 4),
                 dtype=np.uint8,
                 color_space="srgb",
@@ -40,7 +59,7 @@ class Renderer2dFixture(zfw.BaseResource):
         )
 
         # Initialize empty quad array
-        self.quads: zfw.RendererQuadArray = zfw.RendererQuadArray((0,))
+        self.quads: RendererQuadArray = RendererQuadArray((0,))
 
     def _on_dispose(self) -> None:
         self.target.dispose()
@@ -52,15 +71,15 @@ class Renderer2dFixture(zfw.BaseResource):
         self.gpu_context.dispose()
 
     def readback(self) -> np.ndarray:
-        buffer = zfw.GpuBuffer(
+        buffer = GpuBuffer(
             device=self.gpu_device,
             usages=["copy-dst", "staging"],
-            meta=zfw.GpuBufferMeta(
+            meta=GpuBufferMeta(
                 element_count=(TEST_IMAGE_H * TEST_IMAGE_W * 4),
                 element_dtype=np.uint8,
             ),
         )
-        encoder = zfw.GpuCommandEncoder(device=self.gpu_device, queue_type="transfer")
+        encoder = GpuCommandEncoder(device=self.gpu_device, queue_type="transfer")
         encoder.copy_image_to_buffer(src=self.target, dst=buffer)
         encoder.submit().wait()
 
@@ -82,7 +101,7 @@ class Renderer2dFixture(zfw.BaseResource):
         image = self.renderer.default_white_image
 
         # Create a new quad entry
-        quad = zfw.RendererQuadArray((1,))
+        quad = RendererQuadArray((1,))
 
         # Compute destination coordinates
         dst_x0_px, dst_y0_px = dst_xy
@@ -113,7 +132,7 @@ class Renderer2dFixture(zfw.BaseResource):
         quad[0]["atlas_id"] = image.atlas.atlas_id
 
         # Append to quad buffer
-        self.quads = np.concatenate([self.quads, quad]).view(zfw.RendererQuadArray)
+        self.quads = np.concatenate([self.quads, quad]).view(RendererQuadArray)
 
     def draw(self):
         self.add_quad(
@@ -135,7 +154,7 @@ class Renderer2dFixture(zfw.BaseResource):
         )
 
     def show(self):
-        fence = zfw.GpuFence(device=self.gpu_device)
+        fence = GpuFence(device=self.gpu_device)
         self.renderer.draw(
             quads=self.quads,
             target=self.target,
@@ -146,15 +165,67 @@ class Renderer2dFixture(zfw.BaseResource):
         fence.wait()
 
 
-def test_renderer_2d():
-    fixture = Renderer2dFixture()
+def test_renderer_quads():
+    fixture = RendererTestEngine()
     fixture.draw()
     fixture.show()
     image = fixture.readback()
 
-    output_path = Path(__file__).parent / "renderer_2d_test_output.png"
+    output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
 
 
+def test_page_rect_allocator():
+    allocator = PageRectAllocator(max_pages=2, max_rects=10)
+
+    # First, add a single page.
+    allocator.add_page()
+
+    # Check that we can insert.
+    r0 = allocator.alloc(w=0.9, h=0.5)
+    assert r0 is not None
+    assert (allocator.rects[r0] == UvRectArray.of((0.0, 0.0, 0.9, 0.5))).all()
+
+    # Check that we can fill out the first row.
+    r1 = allocator.alloc(w=0.1, h=0.4)
+    assert r1 is not None
+    assert (allocator.rects[r1] == UvRectArray.of([(0.9, 0.0, 0.1, 0.4)])).all()
+
+    # The next allocation should move to the second row, advancing by the tallest rect
+    # in the previous row.
+    r2 = allocator.alloc(w=0.1, h=0.1)
+    assert r2 is not None
+    assert (allocator.rects[r2] == UvRectArray.of([(0.0, 0.5, 0.1, 0.1)])).all()
+
+    # Even if the second row is not full, we can't fit the next rect in it. Check that
+    # we move to the third row.
+    r3 = allocator.alloc(w=0.95, h=0.1)
+    assert r3 is not None
+    assert (allocator.rects[r3] == UvRectArray.of([(0.0, 0.6, 0.95, 0.1)])).all()
+
+    # Check that we'd exhaust the first page with a gigantic allocation.
+    r4 = allocator.alloc(w=1.0, h=0.5)
+    assert r4 is None
+
+    # Check that we can still insert into the first page in the third row.
+    r5 = allocator.alloc(w=0.05, h=0.1)
+    assert r5 is not None
+    assert (allocator.rects[r5] == UvRectArray.of([(0.95, 0.6, 0.05, 0.1)])).all()
+
+    # Add a page...
+    allocator.add_page()
+
+    # ...and check that the gigantic allocation now works.
+    r6 = allocator.alloc(w=1.0, h=0.5)
+    assert r6 is not None
+    assert (allocator.rects[r6] == UvRectArray.of([(0.0, 1.0, 1.0, 0.5)])).all()
+
+    # Ensure that allocations in the second page have the expected offset Y coordinate.
+    r7 = allocator.alloc(w=0.5, h=0.5)
+    assert r7 is not None
+    assert (allocator.rects[r7] == UvRectArray.of([(0.0, 1.5, 0.5, 0.5)])).all()
+
+
 if __name__ == "__main__":
-    test_renderer_2d()
+    pytest.main(["-v", __file__])

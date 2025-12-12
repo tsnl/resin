@@ -1,5 +1,7 @@
 import numpy as np
-from zfw.gpu import (
+import pytest
+
+from .gpu import (
     GpuBuffer,
     GpuBufferMeta,
     GpuBufferUsage,
@@ -92,3 +94,7 @@ def test_image_roundtrip():
 
     # Test:
     assert np.array_equal(data0, data1)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

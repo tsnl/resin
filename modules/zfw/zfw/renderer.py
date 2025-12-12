@@ -11,7 +11,7 @@ from typing import Literal, TypeAlias
 
 import numpy as np
 
-from .basic import BaseResource, expect, next_po2
+from .basic import BaseResource, StructuredNDArray, expect, next_po2
 from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuBuffer,
@@ -553,9 +553,8 @@ UV_RECT_DTYPE = np.dtype(
 )
 
 
-class UvRectArray(np.ndarray):
-    def __new__(cls, shape: tuple[int, ...] | int) -> "UvRectArray":
-        return np.zeros(shape, dtype=UV_RECT_DTYPE).view(cls)
+class UvRectArray(StructuredNDArray):
+    DTYPE = UV_RECT_DTYPE
 
 
 #
