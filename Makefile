@@ -40,5 +40,5 @@ format:
 #
 
 .PHONY: wheel
-wheel: sync check-formatting check-typing tests
+wheel: sync check tests
 	uv build --all
