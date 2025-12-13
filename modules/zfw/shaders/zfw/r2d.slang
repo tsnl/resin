@@ -24,7 +24,7 @@ struct R2dQuad
     float4 borderColor;     // RGBA
     int4 borderThicknessPx; // T, R, B, L
     float height;           // height
-    uint atlasId;           // reserved for alignment
+    uint imageId;           // RGBA image ID in the atlas
     int _rsv0;              // reserved for alignment
     int _rsv1;              // reserved for alignment
 };

@@ -256,8 +256,6 @@ def test_renderer_atlas_smoketest():
         gpu_device=gpu_device,
     )
 
-    atlas = RendererAtlas(renderer=renderer, channels=4, max_pages=1)
-
     orig_image_data = np.empty((128, 128, 4), dtype=np.float32)
     xs, ys = np.meshgrid(
         np.linspace(0.0, 1.0, num=128, endpoint=False),
@@ -269,8 +267,7 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 2] = 0.0
     orig_image_data[..., 3] = 1.0
 
-    image: RendererImage = atlas.insert(data=orig_image_data)
-    assert image.atlas is atlas
+    image = RendererImage(renderer=renderer, data=orig_image_data)
     assert image.px_xywh == (0, 0, 128, 128)
 
     renderer.dispose()

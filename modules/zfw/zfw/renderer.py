@@ -1,6 +1,5 @@
 __all__ = [
     "Renderer",
-    "RendererAtlas",
     "RendererContext",
     "RendererImage",
     "RendererQuadArray",
@@ -115,10 +114,21 @@ class Renderer(BaseResource):
 #
 
 
-@dataclass
 class RendererImage:
+    renderer: Renderer
     atlas: "RendererAtlas"
     index: int
+
+    def __init__(self, *, renderer: Renderer, data: np.ndarray):
+        super().__init__()
+
+        assert data.ndim in (2, 3)
+        if data.ndim == 2:
+            data = data[:, :, np.newaxis]
+
+        self.renderer = renderer
+        self.atlas = renderer._atlases[data.shape[2]]
+        self.index = self.atlas.insert(data=data)
 
     @property
     def uv_xywh(self) -> tuple[float, float, float, float]:
@@ -191,11 +201,8 @@ class RendererAtlas(BaseResource):
             for _ in range(self.max_pages)
         ]
 
-    def insert(self, *, data: np.ndarray) -> RendererImage:
-        assert data.ndim in (2, 3)
-
-        if data.ndim == 2:
-            data = data[:, :, np.newaxis]
+    def insert(self, *, data: np.ndarray) -> int:
+        assert data.ndim == 3 and data.shape[2] == self.channels
 
         # First, try to allocate from an existing page:
         image = self._try_simple_insert(data=data)
@@ -209,13 +216,16 @@ class RendererAtlas(BaseResource):
             return image
 
         # If that fails, add a new page and try again:
-        if self._try_add_page() and (image := self._try_simple_insert(data=data)):
+        if (
+            self._try_add_page()
+            and (image := self._try_simple_insert(data=data)) is not None
+        ):
             return image
 
         # If that fails, we're out of memory:
         raise MemoryError("out of atlas memory")
 
-    def _try_simple_insert(self, *, data: np.ndarray) -> RendererImage | None:
+    def _try_simple_insert(self, *, data: np.ndarray) -> int | None:
         assert data.ndim == 3 and data.shape[2] == self.channels
 
         w_px, h_px = data.shape[1], data.shape[0]
@@ -225,7 +235,7 @@ class RendererAtlas(BaseResource):
         alloc_index = self._page_rect_allocator.alloc(w=w, h=h)
         if alloc_index is not None:
             self._upload_image(alloc_index, data)
-            return RendererImage(atlas=self, index=alloc_index)
+            return alloc_index
 
         return None
 
@@ -517,7 +527,7 @@ class RendererQuadPipeline(BaseResource):
             ("border_color", np.float32, (4,)),
             ("border_thickness_px", np.uint32, (4,)),
             ("height", np.float32),
-            ("atlas_id", np.uint32),
+            ("image_id", np.uint32),
             ("_rsv0", np.uint32),
             ("_rsv1", np.uint32),
         ]
