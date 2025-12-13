@@ -5,7 +5,7 @@ description = "zfw build utilities"
 readme = "README.md"
 authors = [{ name = "Nikhil Idiculla", email = "nikhil.idiculla@gmail.com" }]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = ["zstandard"]
 
 [build-system]
 requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
@@ -14,3 +14,6 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "zfw_build"
 module-root = ""
+
+[project.scripts]
+zfw-build = "zfw_build.__init__:main"

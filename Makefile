@@ -17,12 +17,12 @@ tests: sync
 #
 
 .PHONY: sync
-sync: bundled-data
+sync: build
 	uv sync --all-extras
 
-.PHONY: bundled-data
-bundled-data:
-	uv run --package zfw --extra dev python ./build-bundled-data.py
+.PHONY: build
+build:
+	uv run --package zfw_build zfw-build
 
 .PHONY: check
 check:

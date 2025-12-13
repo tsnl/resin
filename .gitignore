@@ -11,3 +11,6 @@ __pycache__
 /output
 /dist
 /build
+
+# Data
+/data
