@@ -2,19 +2,27 @@
 // Bindings:
 //
 
+import atlas;
+
+//
+// Bindings:
+//
+
+import atlas;
+
 // Bind Group 0: common uniforms
 
 struct R2dUniform
 {
     int2 framebufferSizePx;
     float totalQuadCount;
-    uint atlasId; // reserved for alignment
+    uint atlasSizePx;
 }
 
 [[vk::binding(0, 0)]]
 ConstantBuffer<R2dUniform> commonUniform;
 
-// Bind Group 1: per-batch data
+// Bind Group 2: per-batch data
 
 struct R2dQuad
 {
@@ -25,25 +33,22 @@ struct R2dQuad
     int4 borderThicknessPx; // T, R, B, L
     float height;           // height
     uint imageId;           // RGBA image ID in the atlas
-    int _rsv0;              // reserved for alignment
-    int _rsv1;              // reserved for alignment
+    uint flags;             // bit 0: linear filtering
+    uint _pad;              // padding to 128 bytes
 };
 
 struct R2dBatchUniform
 {
     uint instanceCount;
-    uint _rsv0; // reserved for alignment
-    uint _rsv1; // reserved for alignment
-    uint _rsv2; // reserved for alignment
+    uint isOpaque;
+    uint isMono;
+    uint _rsv2;
 };
 
-[[vk::binding(0, 1)]]
-Sampler2D atlasTexture;
-
-[[vk::binding(1, 1)]]
+[[vk::binding(0, 2)]]
 StructuredBuffer<R2dQuad> quads;
 
-[[vk::binding(2, 1)]]
+[[vk::binding(1, 2)]]
 ConstantBuffer<R2dBatchUniform> batchUniform;
 
 //
@@ -125,7 +130,9 @@ float4 fragmentMain(VSOutput input) : SV_Target
     // Fragments between inner and outer rects are in the border.
     if (intersectRectPoint(innerRectCoordsPx, int2(input.positionPx)))
     {
-        float4 color = atlasTexture.SampleLevel(input.uv, 0);
+        bool isLinear = (quad.flags & 1) != 0;
+        bool isMono = (batchUniform.isMono != 0);
+        float4 color = sampleAtlas(quad.imageId, input.uv, isMono, isLinear, commonUniform.atlasSizePx);
         return color * input.tintColor;
     }
     else

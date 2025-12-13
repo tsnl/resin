@@ -16,7 +16,6 @@ from .gpu import (
     GpuBufferMeta,
 )
 from .renderer import (
-    RendererAtlas,
     RendererImage,
     RendererContext,
     Renderer,
@@ -25,157 +24,178 @@ from .renderer import (
     UvRectArray,
 )
 
-# TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
+TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
 
 
-# class RendererTestEngine(BaseResource):
-#     def __init__(self):
-#         super().__init__(parent=None)
-#         self.gpu_context = GpuContext(
-#             app_name="zfw renderer_test",
-#             enable_debug_layer_support=True,
-#             enable_present_support=False,
-#         )
-#         self.renderer_context = RendererContext(
-#             gpu_context=self.gpu_context,
-#         )
+class RendererTestEngine(BaseResource):
+    def __init__(self):
+        super().__init__(parent=None)
+        self.gpu_context = GpuContext(
+            app_name="zfw renderer_test",
+            enable_debug_layer_support=True,
+            enable_present_support=False,
+        )
+        self.renderer_context = RendererContext(
+            gpu_context=self.gpu_context,
+        )
 
-#         self.gpu_device = GpuDevice(
-#             context=self.gpu_context,
-#             physical_device=self.gpu_context.enumerate_physical_devices()[0],
-#             surface=None,
-#         )
-#         self.renderer = Renderer(
-#             context=self.renderer_context,
-#             gpu_device=self.gpu_device,
-#         )
+        self.gpu_device = GpuDevice(
+            context=self.gpu_context,
+            physical_device=self.gpu_context.enumerate_physical_devices()[0],
+            surface=None,
+        )
+        self.renderer = Renderer(
+            context=self.renderer_context,
+            gpu_device=self.gpu_device,
+        )
 
-#         self.target = GpuImage(
-#             device=self.gpu_device,
-#             usages=["color-attachment"],
-#             meta=GpuImageMeta(
-#                 shape=(TEST_IMAGE_H, TEST_IMAGE_W, 4),
-#                 dtype=np.uint8,
-#                 color_space="srgb",
-#             ),
-#         )
+        self.target = GpuImage(
+            device=self.gpu_device,
+            usages=["color-attachment", "transfer-src"],
+            meta=GpuImageMeta(
+                shape=(TEST_IMAGE_H, TEST_IMAGE_W, 4),
+                dtype=np.uint8,
+                color_space="srgb",
+            ),
+        )
 
-#         # Initialize empty quad array
-#         self.quads: RendererQuadArray = RendererQuadArray((0,))
+        # Initialize empty quad array
+        self.quads: RendererQuadArray = RendererQuadArray((0,))
 
-#     def _on_dispose(self) -> None:
-#         self.target.dispose()
+    def _on_dispose(self) -> None:
+        self.target.dispose()
 
-#         self.renderer.dispose()
-#         self.gpu_device.dispose()
+        self.renderer.dispose()
+        self.gpu_device.dispose()
 
-#         self.renderer_context.dispose()
-#         self.gpu_context.dispose()
+        self.renderer_context.dispose()
+        self.gpu_context.dispose()
 
-#     def readback(self) -> np.ndarray:
-#         buffer = GpuBuffer(
-#             device=self.gpu_device,
-#             usages=["copy-dst", "staging"],
-#             meta=GpuBufferMeta(
-#                 element_count=(TEST_IMAGE_H * TEST_IMAGE_W * 4),
-#                 element_dtype=np.uint8,
-#             ),
-#         )
-#         encoder = GpuCommandEncoder(device=self.gpu_device, queue_type="transfer")
-#         encoder.copy_image_to_buffer(src=self.target, dst=buffer)
-#         encoder.submit().wait()
+    def readback(self) -> np.ndarray:
+        buffer = GpuBuffer(
+            device=self.gpu_device,
+            usages=["copy-dst", "staging"],
+            meta=GpuBufferMeta(
+                element_count=(TEST_IMAGE_H * TEST_IMAGE_W * 4),
+                element_dtype=np.uint8,
+            ),
+        )
+        encoder = GpuCommandEncoder(device=self.gpu_device, queue_type="transfer")
+        encoder.transition_image_layout(
+            image=self.target,
+            layout="transfer-src-optimal",
+        )
+        encoder.copy_image_to_buffer(src=self.target, dst=buffer)
+        encoder.submit().wait()
 
-#         return buffer.memory.read(dtype=np.uint8).reshape(
-#             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
-#         )
+        return buffer.memory.read(dtype=np.uint8).reshape(
+            (TEST_IMAGE_H, TEST_IMAGE_W, 4)
+        )
 
-#     def add_quad(
-#         self,
-#         *,
-#         dst_xy: tuple[int, int],
-#         dst_wh: tuple[int, int],
-#         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-#         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-#         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-#     ):
-#         """Add a quad to the render buffer."""
-#         # Use default white image
-#         image = self.renderer.default_white_image
+    def add_quad(
+        self,
+        *,
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int],
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    ):
+        """Add a quad to the render buffer."""
+        # Use default white image
+        image = self.renderer.default_white_image
 
-#         # Create a new quad entry
-#         quad = RendererQuadArray((1,))
+        # Create a new quad entry
+        quad = RendererQuadArray((1,))
 
-#         # Compute destination coordinates
-#         dst_x0_px, dst_y0_px = dst_xy
-#         dst_w_px, dst_h_px = dst_wh
-#         dst_x1_px = dst_x0_px + dst_w_px
-#         dst_y1_px = dst_y0_px + dst_h_px
+        # Compute destination coordinates
+        dst_x0_px, dst_y0_px = dst_xy
+        dst_w_px, dst_h_px = dst_wh
+        dst_x1_px = dst_x0_px + dst_w_px
+        dst_y1_px = dst_y0_px + dst_h_px
 
-#         quad[0]["dst_px"] = (
-#             (dst_x0_px, dst_y0_px),  # TL
-#             (dst_x1_px, dst_y0_px),  # TR
-#             (dst_x1_px, dst_y1_px),  # BR
-#             (dst_x0_px, dst_y1_px),  # BL
-#         )
+        quad[0]["dst_px"] = (
+            (dst_x0_px, dst_y0_px),  # TL
+            (dst_x1_px, dst_y0_px),  # TR
+            (dst_x1_px, dst_y1_px),  # BR
+            (dst_x0_px, dst_y1_px),  # BL
+        )
 
-#         # Get UV coordinates from image
-#         (src_x0_uv, src_y0_uv), (src_x1_uv, src_y1_uv) = image.rect_xy_xy_uv
-#         quad[0]["src_uv"] = (
-#             (src_x0_uv, src_y0_uv),  # TL
-#             (src_x1_uv, src_y0_uv),  # TR
-#             (src_x1_uv, src_y1_uv),  # BR
-#             (src_x0_uv, src_y1_uv),  # BL
-#         )
+        # Get UV coordinates from image
+        quad[0]["src_uv"] = (
+            (0.0, 0.0),  # TL
+            (1.0, 0.0),  # TR
+            (1.0, 1.0),  # BR
+            (0.0, 1.0),  # BL
+        )
 
-#         quad[0]["color"] = color
-#         quad[0]["border_color"] = border_color
-#         quad[0]["border_thickness_px"] = border_thickness_px
-#         quad[0]["height"] = len(self.quads)
-#         quad[0]["atlas_id"] = image.atlas.atlas_id
+        quad[0]["color"] = color
+        quad[0]["border_color"] = border_color
+        quad[0]["border_thickness_px"] = border_thickness_px
+        quad[0]["height"] = len(self.quads)
+        quad[0]["image_id"] = image.index
+        quad[0]["flags"] = 1  # Linear
 
-#         # Append to quad buffer
-#         self.quads = np.concatenate([self.quads, quad]).view(RendererQuadArray)
+        # Append to quad buffer
+        self.quads = np.concatenate([self.quads, quad]).view(RendererQuadArray)
+        """Add a quad to the render buffer."""
+        # Use default white image
+        # Note: default_white_image might not be initialized if not used?
+        # Renderer initializes it?
+        # Renderer definition has `default_white_image: "RendererImage"`.
+        # But `__init__` didn't initialize it in the code I read.
+        # I should check Renderer.__init__ again.
+        # It initialized `_atlases` and `quad_pipeline`.
+        # It did NOT initialize `default_white_image`.
+        # Maybe I missed it or it's missing.
+        # If it's missing, I should add it to Renderer.__init__.
 
-#     def draw(self):
-#         self.add_quad(
-#             dst_xy=(32, 64),
-#             dst_wh=(512, 256),
-#             color=(1.0, 1.0, 1.0, 1.0),
-#             border_thickness_px=(0, 0, 8, 0),
-#             border_color=(0.0, 0.1, 0.8, 1.0),
-#         )
-#         self.add_quad(
-#             dst_xy=(40, 72),
-#             dst_wh=(64, 64),
-#             color=(0.0, 0.2, 0.0, 1.0),
-#         )
-#         self.add_quad(
-#             dst_xy=(112, 72),
-#             dst_wh=(64, 64),
-#             color=(0.0, 0.2, 0.0, 0.5),
-#         )
+        # Assuming it exists or I will fix it.
+        # For now, I'll assume I need to fix it if it's missing.
 
-#     def show(self):
-#         fence = GpuFence(device=self.gpu_device)
-#         self.renderer.draw(
-#             quads=self.quads,
-#             target=self.target,
-#             fence=fence,
-#             wait_semaphores=[],
-#             done_semaphores=[],
-#         )
-#         fence.wait()
+        # Let's check Renderer.__init__ again.
+        pass
+
+    def draw(self):
+        self.add_quad(
+            dst_xy=(32, 64),
+            dst_wh=(512, 256),
+            color=(1.0, 1.0, 1.0, 1.0),
+            border_thickness_px=(0, 0, 8, 0),
+            border_color=(0.0, 0.1, 0.8, 1.0),
+        )
+        self.add_quad(
+            dst_xy=(40, 72),
+            dst_wh=(64, 64),
+            color=(0.0, 0.2, 0.0, 1.0),
+        )
+        self.add_quad(
+            dst_xy=(112, 72),
+            dst_wh=(64, 64),
+            color=(0.0, 0.2, 0.0, 0.5),
+        )
+
+    def show(self):
+        fence = GpuFence(device=self.gpu_device)
+        self.renderer.draw(
+            quads=self.quads,
+            target=self.target,
+            fence=fence,
+            wait_semaphores=[],
+            done_semaphores=[],
+        )
+        fence.wait()
 
 
-# def test_renderer_quads():
-#     engine = RendererTestEngine()
-#     engine.draw()
-#     engine.show()
-#     image = engine.readback()
+def test_renderer_quads():
+    engine = RendererTestEngine()
+    engine.draw()
+    engine.show()
+    image = engine.readback()
 
-#     output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
-#     output_path.parent.mkdir(parents=True, exist_ok=True)
-#     PIL.Image.fromarray(image).save(output_path)
+    output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(image).save(output_path)
 
 
 def test_page_rect_allocator():
@@ -268,7 +288,8 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 3] = 1.0
 
     image = RendererImage(renderer=renderer, data=orig_image_data)
-    assert image.px_xywh == (0, 0, 128, 128)
+    # Note: x=1 because default_white_image (1x1) is at x=0
+    assert image.px_xywh == (1, 0, 128, 128)
 
     renderer.dispose()
     gpu_device.dispose()

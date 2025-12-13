@@ -308,7 +308,13 @@ class VkPhysicalDeviceLimits:
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceDynamicRenderingFeatures.html
 @dataclass
 class VkPhysicalDeviceDynamicRenderingFeatures:
+    pNext: "VkPhysicalDeviceVulkan12Features | None" = None
     dynamicRendering: bool
+
+@dataclass
+class VkPhysicalDeviceVulkan12Features:
+    runtimeDescriptorArray: bool
+    shaderSampledImageArrayNonUniformIndexing: bool
 
 # VkPhysicalDeviceFeatures
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFeatures.html

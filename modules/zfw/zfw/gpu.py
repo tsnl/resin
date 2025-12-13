@@ -69,7 +69,8 @@ from .typed_vulkan import (
     VK_COMPONENT_SWIZZLE_IDENTITY,
     VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     VK_CULL_MODE_NONE,
-    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+    VK_DESCRIPTOR_TYPE_SAMPLER,
     VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     VK_FENCE_CREATE_SIGNALED_BIT,
@@ -188,6 +189,7 @@ from .typed_vulkan import (
     VkPhysicalDeviceDynamicRenderingFeatures,
     VkPhysicalDeviceMemoryProperties,
     VkPhysicalDeviceProperties,
+    VkPhysicalDeviceVulkan12Features,
     VkPipeline,
     VkPipelineColorBlendAttachmentState,
     VkPipelineColorBlendStateCreateInfo,
@@ -918,7 +920,13 @@ class GpuDevice(BaseResource):
     ) -> VkDevice:
         """Create a VkDevice with the specified configuration."""
         queue_create_info_list = qfis.compute_queue_create_info_list()
+
+        vulkan_12_features = VkPhysicalDeviceVulkan12Features(
+            runtimeDescriptorArray=True,
+            shaderSampledImageArrayNonUniformIndexing=True,
+        )
         dynamic_rendering_features = VkPhysicalDeviceDynamicRenderingFeatures(
+            pNext=vulkan_12_features,
             dynamicRendering=True,
         )
         return vkCreateDevice(
@@ -974,7 +982,8 @@ class GpuDevice(BaseResource):
     ) -> dict["GpuDescriptorType", int]:
         """Compute descriptor pool config with defaults."""
         defaults: dict[GpuDescriptorType, int] = {
-            "combined-image-sampler": 1024,
+            "sampled-image": 1024,
+            "sampler": 1024,
             "storage-buffer": 1024,
             "uniform-buffer": 1024,
         }
@@ -1217,6 +1226,8 @@ GpuImageUsage: TypeAlias = Literal[
     "storage-binding",
     "color-attachment",
     "depth-attachment",
+    "transfer-src",
+    "transfer-dst",
 ]
 
 GpuImageLayout: TypeAlias = Literal[
@@ -1247,6 +1258,8 @@ def vk_image_usage(usages: list[GpuImageUsage]) -> int:
                 result |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
             case "depth-attachment":
                 result |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+            case "transfer-src" | "transfer-dst":
+                pass
             case _:
                 raise LogicError(f"Invalid image usage: {usage!r}")
     return result
@@ -1278,6 +1291,8 @@ def vk_image_aspect(usages: list[GpuImageUsage]) -> int:
                 result |= VK_IMAGE_ASPECT_COLOR_BIT
             case "depth-attachment":
                 result |= VK_IMAGE_ASPECT_DEPTH_BIT
+            case "transfer-src" | "transfer-dst":
+                pass
             case _:
                 raise LogicError(f"Invalid image usage: {usage!r}")
     return result
@@ -1843,8 +1858,8 @@ class GpuCommandEncoder(BaseResource):
         src: GpuBuffer,
         dst: GpuImage,
         buffer_offset: int = 0,
-        image_offset: tuple[int, int] = (0, 0),
-        image_extent: tuple[int, int] | None = None,
+        image_offset: tuple[int, int, int] = (0, 0, 0),
+        image_extent: tuple[int, int, int] | None = None,
     ) -> None:
         vkCmdCopyBufferToImage(
             commandBuffer=self.vk_command_buffer,
@@ -1863,7 +1878,11 @@ class GpuCommandEncoder(BaseResource):
                         baseArrayLayer=0,
                         layerCount=1,
                     ),
-                    imageOffset=VkOffset3D(x=image_offset[0], y=image_offset[1], z=0),
+                    imageOffset=VkOffset3D(
+                        x=image_offset[0],
+                        y=image_offset[1],
+                        z=image_offset[2],
+                    ),
                     imageExtent=(
                         VkExtent3D(
                             width=dst.meta.shape[1],
@@ -1874,7 +1893,7 @@ class GpuCommandEncoder(BaseResource):
                         else VkExtent3D(
                             width=image_extent[0],
                             height=image_extent[1],
-                            depth=1,
+                            depth=image_extent[2],
                         )
                     ),
                 )
@@ -2549,10 +2568,12 @@ class GpuDescriptorSet(BaseResource):
 
 GpuDescriptorSetBinding: TypeAlias = """
     GpuBufferDescriptorSetBinding |
-    GpuImageArraySamplerDescriptorSetBinding
+    GpuSampledImageDescriptorSetBinding |
+    GpuSamplerDescriptorSetBinding
 """
 GpuBufferDescriptorSetBinding: TypeAlias = GpuBuffer
-GpuImageArraySamplerDescriptorSetBinding: TypeAlias = tuple[list[GpuImage], GpuSampler]
+GpuSampledImageDescriptorSetBinding: TypeAlias = list[GpuImage]
+GpuSamplerDescriptorSetBinding: TypeAlias = GpuSampler
 
 
 def compatible_descriptor_types_for_binding(
@@ -2566,8 +2587,10 @@ def compatible_descriptor_types_for_binding(
             if "storage" in binding.usages:
                 res.add("storage-buffer")
             return res
-        case (list(), GpuSampler()) if all(isinstance(x, GpuImage) for x in binding[0]):
-            return {"combined-image-sampler"}
+        case list() if all(isinstance(x, GpuImage) for x in binding):
+            return {"sampled-image"}
+        case GpuSampler():
+            return {"sampler"}
         case _:
             raise NotImplementedError()
 
@@ -2579,9 +2602,27 @@ def descriptor_set_write_for_binding(
     binding_layout: GpuDescriptorSetLayoutBinding,
 ):
     match binding_layout.type:
-        case "combined-image-sampler":
-            assert isinstance(binding, tuple)
-            image, sampler = binding
+        case "sampled-image":
+            assert isinstance(binding, list)
+            return VkWriteDescriptorSet(
+                dstSet=vk_set,
+                dstBinding=binding_index,
+                dstArrayElement=0,
+                descriptorCount=len(binding),
+                descriptorType=vk_descriptor_type(binding_layout.type),
+                pImageInfo=[
+                    VkDescriptorImageInfo(
+                        sampler=None,
+                        imageView=image.vk_image_view,
+                        imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    )
+                    for image in binding
+                ],
+                pBufferInfo=None,
+                pTexelBufferView=None,
+            )
+        case "sampler":
+            assert isinstance(binding, GpuSampler)
             return VkWriteDescriptorSet(
                 dstSet=vk_set,
                 dstBinding=binding_index,
@@ -2590,9 +2631,9 @@ def descriptor_set_write_for_binding(
                 descriptorType=vk_descriptor_type(binding_layout.type),
                 pImageInfo=[
                     VkDescriptorImageInfo(
-                        sampler=sampler.vk_sampler,
-                        imageView=image.vk_image_view,
-                        imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        sampler=binding.vk_sampler,
+                        imageView=None,
+                        imageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                     )
                 ],
                 pBufferInfo=None,
@@ -2620,31 +2661,15 @@ def descriptor_set_write_for_binding(
             raise LogicError()
 
 
-def vk_descriptor_set_binding(binding: GpuDescriptorSetBinding):
-    match binding:
-        case GpuBuffer():
-            return VkDescriptorBufferInfo(
-                buffer=binding.vk_buffer,
-                offset=0,
-                range=binding.meta.size,
-            )
-        case (GpuImage(), GpuSampler()) as binding:
-            image, sampler = binding
-            return VkDescriptorImageInfo(
-                sampler=sampler.vk_sampler,
-                imageView=image.vk_image_view,
-                imageLayout=image.current_vk_layout,
-            )
-
-
 GpuDescriptorType: TypeAlias = Literal[
-    "combined-image-sampler", "storage-buffer", "uniform-buffer"
+    "sampled-image", "sampler", "storage-buffer", "uniform-buffer"
 ]
 
 
 def vk_descriptor_type(t: GpuDescriptorType):
     return {
-        "combined-image-sampler": VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        "sampled-image": VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        "sampler": VK_DESCRIPTOR_TYPE_SAMPLER,
         "uniform-buffer": VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         "storage-buffer": VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
     }[t]
