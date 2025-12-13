@@ -20,8 +20,6 @@ from .renderer import (
     RendererContext,
     Renderer,
     RendererQuadArray,
-    PageRectAllocator,
-    UvRectArray,
 )
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
@@ -198,64 +196,6 @@ def test_renderer_quads():
     PIL.Image.fromarray(image).save(output_path)
 
 
-def test_page_rect_allocator():
-    allocator = PageRectAllocator(max_pages=2, max_rects=7)
-
-    # First, add a single page.
-    allocator.try_add_page()
-
-    # Check that we can insert.
-    r0 = allocator.alloc(w=0.9, h=0.5)
-    assert r0 is not None
-    assert (allocator.rects[r0] == UvRectArray.of((0.0, 0.0, 0.9, 0.5))).all()
-
-    # Check that we can fill out the first row.
-    r1 = allocator.alloc(w=0.1, h=0.4)
-    assert r1 is not None
-    assert (allocator.rects[r1] == UvRectArray.of([(0.9, 0.0, 0.1, 0.4)])).all()
-
-    # The next allocation should move to the second row, advancing by the tallest rect
-    # in the previous row.
-    r2 = allocator.alloc(w=0.1, h=0.1)
-    assert r2 is not None
-    assert (allocator.rects[r2] == UvRectArray.of([(0.0, 0.5, 0.1, 0.1)])).all()
-
-    # Even if the second row is not full, we can't fit the next rect in it. Check that
-    # we move to the third row.
-    r3 = allocator.alloc(w=0.95, h=0.1)
-    assert r3 is not None
-    assert (allocator.rects[r3] == UvRectArray.of([(0.0, 0.6, 0.95, 0.1)])).all()
-
-    # Check that we'd exhaust the first page with a gigantic allocation.
-    n0 = allocator.alloc(w=1.0, h=0.5)
-    assert n0 is None
-
-    # Check that we can still insert into the first page in the third row.
-    r4 = allocator.alloc(w=0.05, h=0.1)
-    assert r4 is not None
-    assert (allocator.rects[r4] == UvRectArray.of([(0.95, 0.6, 0.05, 0.1)])).all()
-
-    # Add a second page...
-    allocator.try_add_page()
-
-    # ...and check that the gigantic allocation now works.
-    r5 = allocator.alloc(w=1.0, h=0.5)
-    assert r5 is not None
-    assert (allocator.rects[r5] == UvRectArray.of([(0.0, 1.0, 1.0, 0.5)])).all()
-
-    # Ensure that allocations in the second page have the expected offset Y coordinate.
-    r6 = allocator.alloc(w=0.5, h=0.5)
-    assert r6 is not None
-    assert (allocator.rects[r6] == UvRectArray.of([(0.0, 1.5, 0.5, 0.5)])).all()
-
-    # Ensure that adding another page returns False.
-    assert not allocator.try_add_page()
-
-    # Ensure any further allocations fail with MemoryError.
-    with pytest.raises(MemoryError):
-        allocator.alloc(w=0.1, h=0.1)
-
-
 def test_renderer_atlas_smoketest():
     gpu_context = GpuContext(
         app_name="zfw.renderer_test.test_renderer_atlas",
@@ -287,9 +227,12 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 2] = 0.0
     orig_image_data[..., 3] = 1.0
 
-    image = RendererImage(renderer=renderer, data=orig_image_data)
-    # Note: x=1 because default_white_image (1x1) is at x=0
-    assert image.px_xywh == (1, 0, 128, 128)
+    image = RendererImage(data=orig_image_data)
+    renderer._atlases[4].insert(image)
+    renderer._atlases[4].flush()
+
+    # Note: x=0 because it's larger than default_white_image (1x1)
+    assert image.px_xywh == (0, 0, 128, 128)
 
     renderer.dispose()
     gpu_device.dispose()

@@ -1143,10 +1143,10 @@ class GpuMemory(BaseResource):
             )
             self._mapped_view = None
 
-    def write(self, *, data: np.ndarray):
+    def write(self, *, data: np.ndarray, offset: int = 0):
         src_bytes = data.ravel().view(np.uint8)
         with self.map() as host_mem:
-            host_mem[: len(src_bytes)] = src_bytes
+            host_mem[offset : offset + len(src_bytes)] = src_bytes
 
     def read(self, *, dtype: npt.DTypeLike) -> np.ndarray:
         with self.map() as host_mem:
