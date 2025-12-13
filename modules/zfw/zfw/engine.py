@@ -154,7 +154,7 @@ class Engine(BaseResource):
     ):
         """Add a quad to the render buffer."""
         # Use default white image
-        image = self.renderer.default_white_image
+        image = self.renderer._default_white_image
 
         # Create a new quad entry
         quad = RendererQuadArray((1,))
@@ -184,7 +184,7 @@ class Engine(BaseResource):
         quad[0]["border_color"] = border_color
         quad[0]["border_thickness_px"] = border_thickness_px
         quad[0]["height"] = len(self._quad_buffer)
-        quad[0]["image_id"] = image.index
+        quad[0]["image_id"] = image._index
         quad[0]["flags"] = 1  # Linear
 
         # Append to quad buffer

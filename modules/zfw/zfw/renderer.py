@@ -48,13 +48,13 @@ class RendererContext(BaseResource):
 
 
 class Renderer(BaseResource):
-    context: RendererContext
-    gpu_device: GpuDevice
-    default_white_image_atlas: "RendererAtlas"
-    default_white_image: "RendererImage"
-    quad_pipeline: "RendererQuadPipeline"
-
+    _context: RendererContext
+    _gpu_device: GpuDevice
     _atlases: dict["RendererAtlasChannels", "RendererAtlas"]
+    _atlas_descriptor_set_layout: GpuDescriptorSetLayout
+    _atlas_descriptor_set: GpuDescriptorSet
+    _default_white_image: "RendererImage"
+    _quad_renderer: "QuadRenderer"
 
     def __init__(
         self,
@@ -64,16 +64,16 @@ class Renderer(BaseResource):
     ):
         super().__init__(parent=context)
 
-        self.context = context
-        self.gpu_device = gpu_device
+        self._context = context
+        self._gpu_device = gpu_device
 
         self._atlases = {
             1: RendererAtlas(renderer=self, channels=1),
             4: RendererAtlas(renderer=self, channels=4),
         }
 
-        self.renderer_descriptor_set_layout = GpuDescriptorSetLayout(
-            device=self.gpu_device,
+        self._atlas_descriptor_set_layout = GpuDescriptorSetLayout(
+            device=self._gpu_device,
             bindings=OrderedDict(
                 {
                     "atlasMono": GpuDescriptorSetLayoutBinding(
@@ -89,10 +89,9 @@ class Renderer(BaseResource):
                 }.items()
             ),
         )
-
-        self.renderer_descriptor_set = GpuDescriptorSet(
-            device=self.gpu_device,
-            layout=self.renderer_descriptor_set_layout,
+        self._atlas_descriptor_set = GpuDescriptorSet(
+            device=self._gpu_device,
+            layout=self._atlas_descriptor_set_layout,
             bindings={
                 "atlasMono": self._atlases[1]._page_gpu_image_list,
                 "atlasRgba": self._atlases[4]._page_gpu_image_list,
@@ -103,18 +102,17 @@ class Renderer(BaseResource):
             },
         )
 
-        self.default_white_image = RendererImage(
+        self._default_white_image = RendererImage(
+            renderer=self,
             data=np.ones((1, 1, 4), dtype=np.float32),
         )
-        self._atlases[4].insert(self.default_white_image)
-        self.default_white_image_atlas = self._atlases[4]
 
-        self.quad_pipeline = RendererQuadPipeline(renderer=self, gpu_device=gpu_device)
+        self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
     def _on_dispose(self) -> None:
-        self.quad_pipeline.dispose()
-        self.renderer_descriptor_set.dispose()
-        self.renderer_descriptor_set_layout.dispose()
+        self._quad_renderer.dispose()
+        self._atlas_descriptor_set.dispose()
+        self._atlas_descriptor_set_layout.dispose()
 
         # Dispose atlases:
         for _, atlas in self._atlases.items():
@@ -138,7 +136,7 @@ class Renderer(BaseResource):
         for atlas in self._atlases.values():
             atlas.flush()
 
-        self.quad_pipeline.draw(
+        self._quad_renderer.draw(
             quads=quads,
             target=target,
             wait_semaphores=wait_semaphores,
@@ -153,37 +151,38 @@ class Renderer(BaseResource):
 
 
 class RendererImage:
-    index: int
+    _atlas: "RendererAtlas"
+    _index: int
     _uv_xywh: tuple[float, float, float, float] | None
     _px_xywh: tuple[int, int, int, int] | None
 
-    def __init__(self, *, data: np.ndarray):
+    def __init__(self, *, renderer: "Renderer", data: np.ndarray):
         assert data.ndim in (2, 3)
         if data.ndim == 2:
             data = data[:, :, np.newaxis]
 
-        self.data = data.copy()
-        self.data.flags.writeable = False
-        self.index = -1
+        self._atlas = renderer._atlases[data.shape[2]]
+        self._data = data.copy()
+        self._data.flags.writeable = False
+        self._index = -1
         self._uv_xywh = None
         self._px_xywh = None
 
+        self._atlas.insert(self)
+
     @property
     def uv_xywh(self) -> tuple[float, float, float, float]:
-        if self._uv_xywh is None:
-            raise RuntimeError("Image not allocated (call flush())")
+        assert self._uv_xywh is not None
         return self._uv_xywh
 
     @property
     def px_xywh(self) -> tuple[int, int, int, int]:
-        if self._px_xywh is None:
-            raise RuntimeError("Image not allocated (call flush())")
+        assert self._px_xywh is not None
         return self._px_xywh
 
     @property
     def page_index(self) -> int:
-        if self._uv_xywh is None:
-            raise RuntimeError("Image not allocated (call flush())")
+        assert self._uv_xywh is not None
         return int(self._uv_xywh[1])
 
 
@@ -205,7 +204,7 @@ class RendererAtlas(BaseResource):
     ):
         super().__init__(parent=renderer)
         self.renderer = renderer
-        self.gpu_device = renderer.gpu_device
+        self.gpu_device = renderer._gpu_device
 
         self.channels = channels
         self.atlas_id = channels
@@ -213,7 +212,7 @@ class RendererAtlas(BaseResource):
         self.max_pages = max_pages
         self.max_rects = max_rects
 
-        self.images: list[RendererImage] = []
+        self._images: list[RendererImage] = []
         self._unallocated_images: list[RendererImage] = []
 
         self._page_cursor_array = np.zeros(
@@ -256,7 +255,7 @@ class RendererAtlas(BaseResource):
     def _create_page_gpu_images(self) -> list[GpuImage]:
         return [
             GpuImage(
-                device=self.renderer.gpu_device,
+                device=self.renderer._gpu_device,
                 usages=["texture-binding", "transfer-dst"],
                 meta=GpuImageMeta(
                     shape=(self.page_size, self.page_size, self.channels),
@@ -267,19 +266,18 @@ class RendererAtlas(BaseResource):
             for _ in range(self.max_pages)
         ]
 
-    def insert(self, image: RendererImage) -> int:
-        assert image.data.shape[2] == self.channels
-        image.index = len(self.images)
-        self.images.append(image)
+    def insert(self, image: RendererImage):
+        assert image._data.shape[2] == self.channels
+        image._index = len(self._images)
+        self._images.append(image)
         self._unallocated_images.append(image)
-        return image.index
 
     def flush(self):
         if not self._unallocated_images:
             return
 
         self._unallocated_images.sort(
-            key=lambda img: img.data.shape[0] * img.data.shape[1], reverse=True
+            key=lambda img: img._data.shape[0] * img._data.shape[1], reverse=True
         )
 
         failed_to_alloc = False
@@ -293,14 +291,14 @@ class RendererAtlas(BaseResource):
 
         if failed_to_alloc:
             self._compact()
-            dirty_images = self.images  # All images dirty
+            dirty_images = self._images  # All images dirty
 
         self._upload_pages(dirty_images)
         self._upload_rects()
         self._unallocated_images.clear()
 
     def _alloc_image(self, img: RendererImage) -> bool:
-        h_px, w_px = img.data.shape[0], img.data.shape[1]
+        h_px, w_px = img._data.shape[0], img._data.shape[1]
         w = w_px / self.page_size
         h = h_px / self.page_size
 
@@ -359,7 +357,7 @@ class RendererAtlas(BaseResource):
 
         # Update CPU pixel data
         self._page_pixel_data[page_index, y_px : y_px + h_px, x_px : x_px + w_px] = (
-            img.data
+            img._data
         )
 
     def _compact(self):
@@ -370,8 +368,8 @@ class RendererAtlas(BaseResource):
 
         # Sort ALL images by size
         all_images = sorted(
-            self.images,
-            key=lambda img: img.data.shape[0] * img.data.shape[1],
+            self._images,
+            key=lambda img: img._data.shape[0] * img._data.shape[1],
             reverse=True,
         )
 
@@ -405,7 +403,7 @@ class RendererAtlas(BaseResource):
         for page_index, images in pages.items():
             offset = 0
             for img in images:
-                staging_buffer.memory.write(data=img.data, offset=offset)
+                staging_buffer.memory.write(data=img._data, offset=offset)
 
                 command_encoder.transition_image_layout(
                     image=self._page_gpu_image_list[page_index],
@@ -418,7 +416,7 @@ class RendererAtlas(BaseResource):
                     image_offset=(img.px_xywh[0], img.px_xywh[1], 0),
                     image_extent=(img.px_xywh[2], img.px_xywh[3], 1),
                 )
-                offset += img.data.nbytes
+                offset += img._data.nbytes
 
             # Must submit per page because we reuse the staging buffer
             command_encoder.submit().wait()
@@ -430,8 +428,8 @@ class RendererAtlas(BaseResource):
         staging_buffer.dispose()
 
     def _upload_rects(self):
-        rects = np.zeros((len(self.images),), dtype=UV_RECT_DTYPE)
-        for i, img in enumerate(self.images):
+        rects = np.zeros((len(self._images),), dtype=UV_RECT_DTYPE)
+        for i, img in enumerate(self._images):
             if img._uv_xywh is not None:
                 rects[i] = img._uv_xywh
 
@@ -466,11 +464,11 @@ UV_RECT_DTYPE = np.dtype(
 
 
 #
-# RendererQuadPipeline
+# QuadRenderer
 #
 
 
-class RendererQuadPipeline(BaseResource):
+class QuadRenderer(BaseResource):
     """Encapsulates the quads rendering pipeline with all GPU resources and logic."""
 
     COMMON_UNIFORM_DTYPE = np.dtype(
@@ -599,7 +597,7 @@ class RendererQuadPipeline(BaseResource):
             usages=["uniform", "copy-dst"],
             meta=GpuBufferMeta(
                 element_count=1,
-                element_dtype=RendererQuadPipeline.BATCH_UNIFORM_DTYPE,
+                element_dtype=QuadRenderer.BATCH_UNIFORM_DTYPE,
             ),
         )
         self._batch_uniform_staging_buf = GpuBuffer(
@@ -607,7 +605,7 @@ class RendererQuadPipeline(BaseResource):
             usages=["staging", "copy-src"],
             meta=GpuBufferMeta(
                 element_count=1,
-                element_dtype=RendererQuadPipeline.BATCH_UNIFORM_DTYPE,
+                element_dtype=QuadRenderer.BATCH_UNIFORM_DTYPE,
             ),
         )
         self._quad_array_device_buf = GpuBuffer(
@@ -615,7 +613,7 @@ class RendererQuadPipeline(BaseResource):
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
                 element_count=new_capacity,
-                element_dtype=RendererQuadPipeline.QUAD_DTYPE,
+                element_dtype=QuadRenderer.QUAD_DTYPE,
             ),
         )
         self._quad_array_staging_buf = GpuBuffer(
@@ -623,7 +621,7 @@ class RendererQuadPipeline(BaseResource):
             usages=["staging", "copy-src"],
             meta=GpuBufferMeta(
                 element_count=new_capacity,
-                element_dtype=RendererQuadPipeline.QUAD_DTYPE,
+                element_dtype=QuadRenderer.QUAD_DTYPE,
             ),
         )
         self._batch_descriptor_set = GpuDescriptorSet(
@@ -675,15 +673,13 @@ class RendererQuadPipeline(BaseResource):
             command_encoder.copy_buffer_to_buffer(
                 src=self._quad_array_staging_buf,
                 dst=self._quad_array_device_buf,
-                size=len(quads) * RendererQuadPipeline.QUAD_DTYPE.itemsize,
+                size=len(quads) * QuadRenderer.QUAD_DTYPE.itemsize,
             )
 
             # Batch uniform:
             assert self._batch_uniform_staging_buf is not None
             assert self._batch_uniform_device_buf is not None
-            uniform_array = np.empty(
-                (1,), dtype=RendererQuadPipeline.BATCH_UNIFORM_DTYPE
-            )
+            uniform_array = np.empty((1,), dtype=QuadRenderer.BATCH_UNIFORM_DTYPE)
             uniform_array[0]["instance_count"] = int(len(quads))
             uniform_array[0]["is_opaque"] = 1  # TODO: support transparency
             uniform_array[0]["is_mono"] = 0
@@ -691,7 +687,7 @@ class RendererQuadPipeline(BaseResource):
             command_encoder.copy_buffer_to_buffer(
                 src=self._batch_uniform_staging_buf,
                 dst=self._batch_uniform_device_buf,
-                size=RendererQuadPipeline.BATCH_UNIFORM_DTYPE.itemsize,
+                size=QuadRenderer.BATCH_UNIFORM_DTYPE.itemsize,
             )
 
         self._write_common_uniform(
@@ -752,7 +748,7 @@ class RendererQuadPipeline(BaseResource):
                         }.items()
                     ),
                 ),
-                self.renderer.renderer_descriptor_set_layout,
+                self.renderer._atlas_descriptor_set_layout,
                 GpuDescriptorSetLayout(
                     device=self.gpu_device,
                     bindings=OrderedDict(
@@ -777,7 +773,7 @@ class RendererQuadPipeline(BaseResource):
             usages=["uniform", "copy-dst"] if not staging else ["staging", "copy-src"],
             meta=GpuBufferMeta(
                 element_count=1,
-                element_dtype=RendererQuadPipeline.COMMON_UNIFORM_DTYPE,
+                element_dtype=QuadRenderer.COMMON_UNIFORM_DTYPE,
             ),
         )
 
@@ -846,7 +842,7 @@ class RendererQuadPipeline(BaseResource):
         target: GpuImage,
         total_quad_count: int,
     ):
-        uniform_data = np.zeros((1,), dtype=RendererQuadPipeline.COMMON_UNIFORM_DTYPE)
+        uniform_data = np.zeros((1,), dtype=QuadRenderer.COMMON_UNIFORM_DTYPE)
         uniform_data[0]["framebuffer_size_px"] = [target.width, target.height]
         uniform_data[0]["total_quad_count"] = float(total_quad_count)
         uniform_data[0]["atlas_size_px"] = self.renderer._atlases[4].page_size
@@ -854,7 +850,7 @@ class RendererQuadPipeline(BaseResource):
         encoder.copy_buffer_to_buffer(
             src=self._common_uniform_staging_buf,
             dst=self._common_uniform_device_buf,
-            size=RendererQuadPipeline.COMMON_UNIFORM_DTYPE.itemsize,
+            size=QuadRenderer.COMMON_UNIFORM_DTYPE.itemsize,
         )
 
     def _draw(
@@ -878,7 +874,7 @@ class RendererQuadPipeline(BaseResource):
             )
             render_pass.bind_descriptor_set(
                 set_index=1,
-                descriptor_set=self.renderer.renderer_descriptor_set,
+                descriptor_set=self.renderer._atlas_descriptor_set,
             )
 
             if instance_count > 0:
@@ -895,11 +891,11 @@ class RendererQuadPipeline(BaseResource):
                 )
 
 
-assert RendererQuadPipeline.COMMON_UNIFORM_DTYPE.itemsize == 4 * 4
-assert RendererQuadPipeline.BATCH_UNIFORM_DTYPE.itemsize == 4 * 4
-assert RendererQuadPipeline.QUAD_DTYPE.itemsize == 32 * 4
+assert QuadRenderer.COMMON_UNIFORM_DTYPE.itemsize == 4 * 4
+assert QuadRenderer.BATCH_UNIFORM_DTYPE.itemsize == 4 * 4
+assert QuadRenderer.QUAD_DTYPE.itemsize == 32 * 4
 
 
 class RendererQuadArray(np.ndarray):
     def __new__(cls, shape: tuple[int, ...] | int) -> "RendererQuadArray":
-        return np.zeros(shape, dtype=RendererQuadPipeline.QUAD_DTYPE).view(cls)
+        return np.zeros(shape, dtype=QuadRenderer.QUAD_DTYPE).view(cls)

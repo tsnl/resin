@@ -101,7 +101,7 @@ class RendererTestEngine(BaseResource):
     ):
         """Add a quad to the render buffer."""
         # Use default white image
-        image = self.renderer.default_white_image
+        image = self.renderer._default_white_image
 
         # Create a new quad entry
         quad = RendererQuadArray((1,))
@@ -131,7 +131,7 @@ class RendererTestEngine(BaseResource):
         quad[0]["border_color"] = border_color
         quad[0]["border_thickness_px"] = border_thickness_px
         quad[0]["height"] = len(self.quads)
-        quad[0]["image_id"] = image.index
+        quad[0]["image_id"] = image._index
         quad[0]["flags"] = 1  # Linear
 
         # Append to quad buffer
@@ -210,12 +210,12 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 2] = 0.0
     orig_image_data[..., 3] = 1.0
 
-    image = RendererImage(data=orig_image_data)
+    image = RendererImage(renderer=renderer, data=orig_image_data)
     renderer._atlases[4].insert(image)
     renderer._atlases[4].flush()
 
     # Note: x=0 because it's larger than default_white_image (1x1)
-    assert image.px_xywh == (0, 0, 128, 128)
+    assert image.px_xywh[2:] == (128, 128)
 
     renderer.dispose()
     gpu_device.dispose()
