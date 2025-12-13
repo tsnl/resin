@@ -5,7 +5,7 @@ import numpy as np
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererContext, RendererImage, RendererQuadArray
+from .renderer import Renderer, RendererContext, RendererQuadArray
 from .window import Window, WindowContext
 
 
@@ -148,18 +148,13 @@ class Engine(BaseResource):
         *,
         dst_xy: tuple[int, int],
         dst_wh: tuple[int, int],
-        image: "RendererImage | None" = None,
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
     ):
-        """
-        Add a quad to be rendered in the current frame.
-        """
-
-        # Use default white image if no image provided
-        if image is None:
-            image = self._renderer.default_white_image
+        """Add a quad to the render buffer."""
+        # Use default white image
+        image = self.renderer.default_white_image
 
         # Create a new quad entry
         quad = RendererQuadArray((1,))
@@ -178,20 +173,21 @@ class Engine(BaseResource):
         )
 
         # Get UV coordinates from image
-        (src_x0_uv, src_y0_uv), (src_x1_uv, src_y1_uv) = image.rect_xy_xy_uv
         quad[0]["src_uv"] = (
-            (src_x0_uv, src_y0_uv),  # TL
-            (src_x1_uv, src_y0_uv),  # TR
-            (src_x1_uv, src_y1_uv),  # BR
-            (src_x0_uv, src_y1_uv),  # BL
+            (0.0, 0.0),  # TL
+            (1.0, 0.0),  # TR
+            (1.0, 1.0),  # BR
+            (0.0, 1.0),  # BL
         )
 
         quad[0]["color"] = color
         quad[0]["border_color"] = border_color
         quad[0]["border_thickness_px"] = border_thickness_px
         quad[0]["height"] = len(self._quad_buffer)
-        quad[0]["atlas_id"] = image.atlas.atlas_id
+        quad[0]["image_id"] = image.index
+        quad[0]["flags"] = 1  # Linear
 
         # Append to quad buffer
-        new_quad_buffer = np.concatenate([self._quad_buffer, quad], axis=0)
-        self._quad_buffer = new_quad_buffer.view(RendererQuadArray)
+        self._quad_buffer = np.concatenate([self._quad_buffer, quad]).view(
+            RendererQuadArray
+        )

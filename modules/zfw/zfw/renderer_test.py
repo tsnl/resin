@@ -136,23 +136,6 @@ class RendererTestEngine(BaseResource):
 
         # Append to quad buffer
         self.quads = np.concatenate([self.quads, quad]).view(RendererQuadArray)
-        """Add a quad to the render buffer."""
-        # Use default white image
-        # Note: default_white_image might not be initialized if not used?
-        # Renderer initializes it?
-        # Renderer definition has `default_white_image: "RendererImage"`.
-        # But `__init__` didn't initialize it in the code I read.
-        # I should check Renderer.__init__ again.
-        # It initialized `_atlases` and `quad_pipeline`.
-        # It did NOT initialize `default_white_image`.
-        # Maybe I missed it or it's missing.
-        # If it's missing, I should add it to Renderer.__init__.
-
-        # Assuming it exists or I will fix it.
-        # For now, I'll assume I need to fix it if it's missing.
-
-        # Let's check Renderer.__init__ again.
-        pass
 
     def draw(self):
         self.add_quad(

@@ -10,7 +10,7 @@ from typing import Literal, TypeAlias
 
 import numpy as np
 
-from .basic import BaseResource, StructuredNDArray, expect, next_po2
+from .basic import BaseResource, next_po2
 from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuBuffer,
