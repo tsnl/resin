@@ -33,8 +33,8 @@ struct R2dQuad
     int4 borderThicknessPx; // T, R, B, L
     float height;           // height
     uint imageId;           // RGBA image ID in the atlas
-    uint flags;             // bit 0: linear filtering
-    uint _pad;              // padding to 128 bytes
+    uint _rsv0;             // reserved
+    uint _rsv1;             // reserved
 };
 
 struct R2dBatchUniform
@@ -130,9 +130,8 @@ float4 fragmentMain(VSOutput input) : SV_Target
     // Fragments between inner and outer rects are in the border.
     if (intersectRectPoint(innerRectCoordsPx, int2(input.positionPx)))
     {
-        bool isLinear = (quad.flags & 1) != 0;
         bool isMono = (batchUniform.isMono != 0);
-        float4 color = sampleAtlas(quad.imageId, input.uv, isMono, isLinear, commonUniform.atlasSizePx);
+        float4 color = sampleAtlasRgba(quad.imageId, input.uv, commonUniform.atlasSizePx);
         return color * input.tintColor;
     }
     else

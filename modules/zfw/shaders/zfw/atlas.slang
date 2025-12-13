@@ -18,19 +18,29 @@ StructuredBuffer<UvRect> rectsMono;
 StructuredBuffer<UvRect> rectsRgba;
 
 [[vk::binding(4, 1)]]
-SamplerState samplerLinear;
+SamplerState sampler;
 
-[[vk::binding(5, 1)]]
-SamplerState samplerNearest;
-
-float4 sampleAtlas(uint imageId, float2 uv, bool isMono, bool isLinear, uint atlasSizePx)
+float sampleAtlasMono(uint imageId, float2 uv, uint atlasSizePx)
 {
-    UvRect rect;
-    if (isMono)
-        rect = rectsMono[imageId];
-    else
-        rect = rectsRgba[imageId];
+    UvRect rect = rectsMono[imageId];
+    SamplePageAndUv pageAndUv = getSamplePageAndUv(rect, uv, atlasSizePx);
+    return atlasRgba[pageAndUv.pageIndex].Sample(sampler, pageAndUv.uv).r;
+}
 
+float4 sampleAtlasRgba(uint imageId, float2 uv, uint atlasSizePx)
+{
+    UvRect rect = rectsRgba[imageId];
+    SamplePageAndUv pageAndUv = getSamplePageAndUv(rect, uv, atlasSizePx);
+    return atlasRgba[pageAndUv.pageIndex].Sample(sampler, pageAndUv.uv);
+}
+
+struct SamplePageAndUv
+{
+    uint pageIndex;
+    float2 uv;
+};
+SamplePageAndUv getSamplePageAndUv(UvRect rect, float2 uv, uint atlasSizePx)
+{
     // rect.y contains page index in integer part
     uint pageIndex = uint(rect.y);
     float y_uv = frac(rect.y);
@@ -53,20 +63,8 @@ float4 sampleAtlas(uint imageId, float2 uv, bool isMono, bool isLinear, uint atl
 
     finalUv = clamp(finalUv, minUv, maxUv);
 
-    if (isMono)
-    {
-        float val;
-        if (isLinear)
-            val = atlasMono[pageIndex].Sample(samplerLinear, finalUv).r;
-        else
-            val = atlasMono[pageIndex].Sample(samplerNearest, finalUv).r;
-        return float4(val, val, val, 1.0);
-    }
-    else
-    {
-        if (isLinear)
-            return atlasRgba[pageIndex].Sample(samplerLinear, finalUv);
-        else
-            return atlasRgba[pageIndex].Sample(samplerNearest, finalUv);
-    }
+    SamplePageAndUv result;
+    result.pageIndex = pageIndex;
+    result.uv = finalUv;
+    return result;
 }

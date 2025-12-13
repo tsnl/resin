@@ -6,9 +6,11 @@ __all__ = [
 ]
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 import numpy as np
+from zfw.excepts import LogicError
 
 from .basic import BaseResource, next_po2
 from .bundled_data import BUNDLED_DATA_PATH
@@ -77,17 +79,21 @@ class Renderer(BaseResource):
             bindings=OrderedDict(
                 {
                     "atlasMono": GpuDescriptorSetLayoutBinding(
-                        type="sampled-image", count=self._atlases[1].max_pages
+                        type="sampled-image", count=self._atlases[1]._max_pages
                     ),
                     "atlasRgba": GpuDescriptorSetLayoutBinding(
-                        type="sampled-image", count=self._atlases[4].max_pages
+                        type="sampled-image", count=self._atlases[4]._max_pages
                     ),
                     "rectsMono": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
                     "rectsRgba": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
-                    "samplerLinear": GpuDescriptorSetLayoutBinding(type="sampler"),
-                    "samplerNearest": GpuDescriptorSetLayoutBinding(type="sampler"),
+                    "sampler": GpuDescriptorSetLayoutBinding(type="sampler"),
                 }.items()
             ),
+        )
+        self._sampler = GpuSampler(
+            device=self._gpu_device,
+            mag_filter="linear",
+            min_filter="linear",
         )
         self._atlas_descriptor_set = GpuDescriptorSet(
             device=self._gpu_device,
@@ -95,10 +101,9 @@ class Renderer(BaseResource):
             bindings={
                 "atlasMono": self._atlases[1]._page_gpu_image_list,
                 "atlasRgba": self._atlases[4]._page_gpu_image_list,
-                "rectsMono": self._atlases[1].rects_buffer,
-                "rectsRgba": self._atlases[4].rects_buffer,
-                "samplerLinear": self._atlases[4].linear_sampler,
-                "samplerNearest": self._atlases[4].nearest_sampler,
+                "rectsMono": self._atlases[1]._uv_rect_array_device_buf,
+                "rectsRgba": self._atlases[4]._uv_rect_array_device_buf,
+                "sampler": self._sampler,
             },
         )
 
@@ -121,7 +126,7 @@ class Renderer(BaseResource):
     def draw(
         self,
         *,
-        quads: "RendererQuadArray",
+        quads: "RendererQuadArray | list[RendererQuad]",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -171,6 +176,12 @@ class RendererImage:
         self._atlas.insert(self)
 
     @property
+    def image_id(self) -> int:
+        if self._index < 0:
+            raise LogicError("Image not yet allocated in atlas")
+        return self._index
+
+    @property
     def uv_xywh(self) -> tuple[float, float, float, float]:
         assert self._uv_xywh is not None
         return self._uv_xywh
@@ -190,8 +201,19 @@ RendererAtlasChannels: TypeAlias = Literal[1, 4]
 
 
 class RendererAtlas(BaseResource):
-    renderer: Renderer
-    gpu_device: GpuDevice
+    _renderer: Renderer
+    _gpu_device: GpuDevice
+    _channels: RendererAtlasChannels
+    _page_size: int
+    _max_pages: int
+    _max_rects: int
+    _images: list[RendererImage]
+    _unallocated_images: list[RendererImage]
+    _page_cursor_array: np.ndarray
+    _page_count: int
+    _page_pixel_data: np.ndarray
+    _page_gpu_image_list: list[GpuImage]
+    _uv_rect_array_device_buf: GpuBuffer
 
     def __init__(
         self,
@@ -203,14 +225,13 @@ class RendererAtlas(BaseResource):
         max_rects: int = 1 << 20,
     ):
         super().__init__(parent=renderer)
-        self.renderer = renderer
-        self.gpu_device = renderer._gpu_device
+        self._renderer = renderer
+        self._gpu_device = renderer._gpu_device
 
-        self.channels = channels
-        self.atlas_id = channels
-        self.page_size = page_size
-        self.max_pages = max_pages
-        self.max_rects = max_rects
+        self._channels = channels
+        self._page_size = page_size
+        self._max_pages = max_pages
+        self._max_rects = max_rects
 
         self._images: list[RendererImage] = []
         self._unallocated_images: list[RendererImage] = []
@@ -226,48 +247,37 @@ class RendererAtlas(BaseResource):
             ),
         )
         self._page_count = 0
-
         self._page_pixel_data = np.empty(
             (max_pages, page_size, page_size, channels),
             dtype=np.float32,
         )
         self._page_gpu_image_list = self._create_page_gpu_images()
 
-        self.rects_buffer = GpuBuffer(
-            device=self.gpu_device,
+        self._uv_rect_array_device_buf = GpuBuffer(
+            device=self._gpu_device,
             usages=["storage", "copy-dst"],
             meta=GpuBufferMeta(
                 element_count=max_rects,
                 element_dtype=UV_RECT_DTYPE,
             ),
         )
-        self.linear_sampler = GpuSampler(
-            device=self.gpu_device,
-            mag_filter="linear",
-            min_filter="linear",
-        )
-        self.nearest_sampler = GpuSampler(
-            device=self.gpu_device,
-            mag_filter="nearest",
-            min_filter="nearest",
-        )
 
     def _create_page_gpu_images(self) -> list[GpuImage]:
         return [
             GpuImage(
-                device=self.renderer._gpu_device,
+                device=self._renderer._gpu_device,
                 usages=["texture-binding", "transfer-dst"],
                 meta=GpuImageMeta(
-                    shape=(self.page_size, self.page_size, self.channels),
+                    shape=(self._page_size, self._page_size, self._channels),
                     dtype=np.float32,
                     color_space="linear",
                 ),
             )
-            for _ in range(self.max_pages)
+            for _ in range(self._max_pages)
         ]
 
     def insert(self, image: RendererImage):
-        assert image._data.shape[2] == self.channels
+        assert image._data.shape[2] == self._channels
         image._index = len(self._images)
         self._images.append(image)
         self._unallocated_images.append(image)
@@ -299,8 +309,8 @@ class RendererAtlas(BaseResource):
 
     def _alloc_image(self, img: RendererImage) -> bool:
         h_px, w_px = img._data.shape[0], img._data.shape[1]
-        w = w_px / self.page_size
-        h = h_px / self.page_size
+        w = w_px / self._page_size
+        h = h_px / self._page_size
 
         # Iterate over pages in reverse order
         for page_index in reversed(range(self._page_count)):
@@ -325,7 +335,7 @@ class RendererAtlas(BaseResource):
                 return True
 
         # Try add page
-        if self._page_count < self.max_pages:
+        if self._page_count < self._max_pages:
             page_index = self._page_count
             self._page_count += 1
             page = self._page_cursor_array[page_index]
@@ -349,10 +359,10 @@ class RendererAtlas(BaseResource):
     ):
         img._uv_xywh = (x, float(page_index) + y, w, h)
 
-        x_px = int(x * self.page_size)
-        y_px = int(y * self.page_size)
-        w_px = int(w * self.page_size)
-        h_px = int(h * self.page_size)
+        x_px = int(x * self._page_size)
+        y_px = int(y * self._page_size)
+        w_px = int(w * self._page_size)
+        h_px = int(h * self._page_size)
         img._px_xywh = (x_px, y_px, w_px, h_px)
 
         # Update CPU pixel data
@@ -382,16 +392,16 @@ class RendererAtlas(BaseResource):
             return
 
         staging_buffer = GpuBuffer(
-            device=self.gpu_device,
+            device=self._gpu_device,
             usages=["staging", "copy-src"],
             meta=GpuBufferMeta(
-                element_count=self.page_size * self.page_size * self.channels,
+                element_count=self._page_size * self._page_size * self._channels,
                 element_dtype=np.float32,
             ),
         )
 
         command_encoder = GpuCommandEncoder(
-            device=self.gpu_device,
+            device=self._gpu_device,
             queue_type="transfer",
         )
 
@@ -421,7 +431,7 @@ class RendererAtlas(BaseResource):
             # Must submit per page because we reuse the staging buffer
             command_encoder.submit().wait()
             command_encoder = GpuCommandEncoder(
-                device=self.gpu_device,
+                device=self._gpu_device,
                 queue_type="transfer",
             )
 
@@ -434,19 +444,19 @@ class RendererAtlas(BaseResource):
                 rects[i] = img._uv_xywh
 
         staging_buffer = GpuBuffer(
-            device=self.gpu_device,
+            device=self._gpu_device,
             usages=["staging", "copy-src"],
             meta=GpuBufferMeta.from_array(rects),
         )
         staging_buffer.memory.write(data=rects)
 
         command_encoder = GpuCommandEncoder(
-            device=self.gpu_device,
+            device=self._gpu_device,
             queue_type="transfer",
         )
         command_encoder.copy_buffer_to_buffer(
             src=staging_buffer,
-            dst=self.rects_buffer,
+            dst=self._uv_rect_array_device_buf,
             size=rects.nbytes,
         )
         command_encoder.submit().wait()
@@ -495,8 +505,8 @@ class QuadRenderer(BaseResource):
             ("border_thickness_px", np.uint32, (4,)),
             ("height", np.float32),
             ("image_id", np.uint32),
-            ("flags", np.uint32),
-            ("_pad", np.uint32),
+            ("_rsv0", np.uint32),
+            ("_rsv1", np.uint32),
         ]
     )
 
@@ -636,7 +646,7 @@ class QuadRenderer(BaseResource):
     def draw(
         self,
         *,
-        quads: "RendererQuadArray",
+        quads: "RendererQuadArray | list[RendererQuad]",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -647,6 +657,12 @@ class QuadRenderer(BaseResource):
 
         The quads array should have dtype RENDERER_QUAD_DTYPE.
         """
+
+        if isinstance(quads, list):
+            quads = RendererQuadArray.from_quad_list(
+                quad_list=quads,
+                default_white_image=self.renderer._default_white_image,
+            )
 
         command_encoder = GpuCommandEncoder(
             device=self.gpu_device,
@@ -845,7 +861,7 @@ class QuadRenderer(BaseResource):
         uniform_data = np.zeros((1,), dtype=QuadRenderer.COMMON_UNIFORM_DTYPE)
         uniform_data[0]["framebuffer_size_px"] = [target.width, target.height]
         uniform_data[0]["total_quad_count"] = float(total_quad_count)
-        uniform_data[0]["atlas_size_px"] = self.renderer._atlases[4].page_size
+        uniform_data[0]["atlas_size_px"] = self.renderer._atlases[4]._page_size
         self._common_uniform_staging_buf.memory.write(data=uniform_data)
         encoder.copy_buffer_to_buffer(
             src=self._common_uniform_staging_buf,
@@ -899,3 +915,56 @@ assert QuadRenderer.QUAD_DTYPE.itemsize == 32 * 4
 class RendererQuadArray(np.ndarray):
     def __new__(cls, shape: tuple[int, ...] | int) -> "RendererQuadArray":
         return np.zeros(shape, dtype=QuadRenderer.QUAD_DTYPE).view(cls)
+
+    @staticmethod
+    def from_quad_list(
+        *,
+        quad_list: list["RendererQuad"],
+        default_white_image: RendererImage,
+        layer_height_offset: float = 0.0,
+    ) -> "RendererQuadArray":
+        arr = RendererQuadArray(len(quad_list))
+        for i, quad in enumerate(quad_list):
+            # dst_px
+            x, y = quad.dst_xy
+            w, h = quad.eval_dst_px_wh()
+            arr[i]["dst_px"][0] = [x, y]
+            arr[i]["dst_px"][1] = [x + w, y]
+            arr[i]["dst_px"][2] = [x + w, y + h]
+            arr[i]["dst_px"][3] = [x, y + h]
+
+            # src_uv, image_id
+            quad_image = quad.image or default_white_image
+            u, v, uw, vh = quad_image.uv_xywh
+            arr[i]["src_uv"][0] = [u, v]
+            arr[i]["src_uv"][1] = [u + uw, v]
+            arr[i]["src_uv"][2] = [u + uw, v + vh]
+            arr[i]["src_uv"][3] = [u, v + vh]
+            arr[i]["image_id"] = quad_image.image_id
+
+            # color, border_color, border_thickness_px
+            arr[i]["color"] = quad.color
+            arr[i]["border_color"] = quad.border_color
+            arr[i]["border_thickness_px"] = quad.border_thickness_px
+
+            # height
+            arr[i]["height"] = layer_height_offset + float(i)
+
+        return arr
+
+
+@dataclass
+class RendererQuad:
+    dst_xy: tuple[int, int]
+    dst_wh: tuple[int, int] | None = None
+    color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0)  # TRBL
+    image: RendererImage | None = None
+
+    def eval_dst_px_wh(self) -> tuple[int, int]:
+        if self.dst_wh is not None:
+            return self.dst_wh
+        if self.image is not None:
+            return self.image.px_xywh[2], self.image.px_xywh[3]
+        raise LogicError("RendererQuad dst_px_wh or image must be set")

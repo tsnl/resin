@@ -26,6 +26,7 @@ __all__ = [
     "RendererAtlas",
     "RendererContext",
     "RendererImage",
+    "RendererQuad",
     "RendererQuadArray",
     "SupportsWrite",
     "Window",
@@ -63,5 +64,6 @@ from .renderer import (
     RendererContext,
     RendererImage,
     RendererQuadArray,
+    RendererQuad,
 )
 from .window import Window, WindowContext

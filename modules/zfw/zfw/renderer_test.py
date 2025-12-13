@@ -20,6 +20,7 @@ from .renderer import (
     RendererContext,
     Renderer,
     RendererQuadArray,
+    RendererQuad,
 )
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
@@ -57,9 +58,6 @@ class RendererTestEngine(BaseResource):
             ),
         )
 
-        # Initialize empty quad array
-        self.quads: RendererQuadArray = RendererQuadArray((0,))
-
     def _on_dispose(self) -> None:
         self.target.dispose()
 
@@ -90,76 +88,10 @@ class RendererTestEngine(BaseResource):
             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
         )
 
-    def add_quad(
-        self,
-        *,
-        dst_xy: tuple[int, int],
-        dst_wh: tuple[int, int],
-        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-    ):
-        """Add a quad to the render buffer."""
-        # Use default white image
-        image = self.renderer._default_white_image
-
-        # Create a new quad entry
-        quad = RendererQuadArray((1,))
-
-        # Compute destination coordinates
-        dst_x0_px, dst_y0_px = dst_xy
-        dst_w_px, dst_h_px = dst_wh
-        dst_x1_px = dst_x0_px + dst_w_px
-        dst_y1_px = dst_y0_px + dst_h_px
-
-        quad[0]["dst_px"] = (
-            (dst_x0_px, dst_y0_px),  # TL
-            (dst_x1_px, dst_y0_px),  # TR
-            (dst_x1_px, dst_y1_px),  # BR
-            (dst_x0_px, dst_y1_px),  # BL
-        )
-
-        # Get UV coordinates from image
-        quad[0]["src_uv"] = (
-            (0.0, 0.0),  # TL
-            (1.0, 0.0),  # TR
-            (1.0, 1.0),  # BR
-            (0.0, 1.0),  # BL
-        )
-
-        quad[0]["color"] = color
-        quad[0]["border_color"] = border_color
-        quad[0]["border_thickness_px"] = border_thickness_px
-        quad[0]["height"] = len(self.quads)
-        quad[0]["image_id"] = image._index
-        quad[0]["flags"] = 1  # Linear
-
-        # Append to quad buffer
-        self.quads = np.concatenate([self.quads, quad]).view(RendererQuadArray)
-
-    def draw(self):
-        self.add_quad(
-            dst_xy=(32, 64),
-            dst_wh=(512, 256),
-            color=(1.0, 1.0, 1.0, 1.0),
-            border_thickness_px=(0, 0, 8, 0),
-            border_color=(0.0, 0.1, 0.8, 1.0),
-        )
-        self.add_quad(
-            dst_xy=(40, 72),
-            dst_wh=(64, 64),
-            color=(0.0, 0.2, 0.0, 1.0),
-        )
-        self.add_quad(
-            dst_xy=(112, 72),
-            dst_wh=(64, 64),
-            color=(0.0, 0.2, 0.0, 0.5),
-        )
-
-    def show(self):
+    def draw(self, quads: RendererQuadArray | list[RendererQuad]):
         fence = GpuFence(device=self.gpu_device)
         self.renderer.draw(
-            quads=self.quads,
+            quads=quads,
             target=self.target,
             fence=fence,
             wait_semaphores=[],
@@ -170,8 +102,27 @@ class RendererTestEngine(BaseResource):
 
 def test_renderer_quads():
     engine = RendererTestEngine()
-    engine.draw()
-    engine.show()
+    engine.draw(
+        quads=[
+            RendererQuad(
+                dst_xy=(32, 64),
+                dst_wh=(512, 256),
+                color=(1.0, 1.0, 1.0, 1.0),
+                border_thickness_px=(0, 0, 8, 0),
+                border_color=(0.0, 0.1, 0.8, 1.0),
+            ),
+            RendererQuad(
+                dst_xy=(40, 72),
+                dst_wh=(64, 64),
+                color=(0.0, 0.2, 0.0, 1.0),
+            ),
+            RendererQuad(
+                dst_xy=(112, 72),
+                dst_wh=(64, 64),
+                color=(0.0, 0.2, 0.0, 0.5),
+            ),
+        ]
+    )
     image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")

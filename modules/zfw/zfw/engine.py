@@ -1,11 +1,8 @@
 import sys
-from contextlib import contextmanager
-
-import numpy as np
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererContext, RendererQuadArray
+from .renderer import Renderer, RendererContext, RendererQuadArray, RendererQuad
 from .window import Window, WindowContext
 
 
@@ -18,7 +15,6 @@ class Engine(BaseResource):
     _gpu_swap_chain: GpuSwapChain
     _renderer: Renderer
     _rendered_frame_count: int
-    _quad_buffer: RendererQuadArray
 
     def __init__(self, *, app_name: str, debug: bool, swapchain_image_count: int):
         super().__init__(parent=None)
@@ -64,9 +60,6 @@ class Engine(BaseResource):
             context=self._render_context,
             gpu_device=self._gpu_device,
         )
-
-        # Initialize quad buffer for drawing
-        self._quad_buffer = RendererQuadArray((0,))
 
         # State:
         self._rendered_frame_count = 0
@@ -121,20 +114,14 @@ class Engine(BaseResource):
     def update(self):
         Window.poll_events()
 
-    @contextmanager
-    def render(self):
+    def render(self, quads: RendererQuadArray | list[RendererQuad]):
         """Context manager for rendering a frame with quads."""
-        # Reset quad buffer for the frame
-        self._quad_buffer = RendererQuadArray((0,))
-
-        yield self
-
         if self._rendered_frame_count == 0:
             self._window.show()
 
         with self._gpu_swap_chain.present() as target:
             self._renderer.draw(
-                quads=self._quad_buffer,
+                quads=quads,
                 target=target.image,
                 wait_semaphores=[target.render_wait_semaphore],
                 done_semaphores=[target.render_done_semaphore],
@@ -142,52 +129,3 @@ class Engine(BaseResource):
             )
 
         self._rendered_frame_count += 1
-
-    def add_quad(
-        self,
-        *,
-        dst_xy: tuple[int, int],
-        dst_wh: tuple[int, int],
-        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),
-        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
-    ):
-        """Add a quad to the render buffer."""
-        # Use default white image
-        image = self.renderer._default_white_image
-
-        # Create a new quad entry
-        quad = RendererQuadArray((1,))
-
-        # Compute destination coordinates
-        dst_x0_px, dst_y0_px = dst_xy
-        dst_w_px, dst_h_px = dst_wh
-        dst_x1_px = dst_x0_px + dst_w_px
-        dst_y1_px = dst_y0_px + dst_h_px
-
-        quad[0]["dst_px"] = (
-            (dst_x0_px, dst_y0_px),  # TL
-            (dst_x1_px, dst_y0_px),  # TR
-            (dst_x1_px, dst_y1_px),  # BR
-            (dst_x0_px, dst_y1_px),  # BL
-        )
-
-        # Get UV coordinates from image
-        quad[0]["src_uv"] = (
-            (0.0, 0.0),  # TL
-            (1.0, 0.0),  # TR
-            (1.0, 1.0),  # BR
-            (0.0, 1.0),  # BL
-        )
-
-        quad[0]["color"] = color
-        quad[0]["border_color"] = border_color
-        quad[0]["border_thickness_px"] = border_thickness_px
-        quad[0]["height"] = len(self._quad_buffer)
-        quad[0]["image_id"] = image._index
-        quad[0]["flags"] = 1  # Linear
-
-        # Append to quad buffer
-        self._quad_buffer = np.concatenate([self._quad_buffer, quad]).view(
-            RendererQuadArray
-        )
