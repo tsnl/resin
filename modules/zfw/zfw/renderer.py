@@ -70,7 +70,6 @@ class Renderer(BaseResource):
         context: RendererContext,
         gpu_device: GpuDevice,
         scale: float = 1.0,
-        enable_subpixel_aa: bool = True,
     ):
         super().__init__(parent=context)
 
@@ -123,10 +122,7 @@ class Renderer(BaseResource):
 
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
-        self._font_engine = FontEngine(
-            renderer=self,
-            enable_subpixel_aa=enable_subpixel_aa,
-        )
+        self._font_engine = FontEngine(renderer=self)
 
     @property
     def scale(self) -> float:
@@ -965,17 +961,14 @@ class FontEngine(BaseResource):
         tuple["RendererImage | None", int, int],
     ]
     _ft_weight_axis_index: dict[RendererFont, int]
-    _enable_subpixel_aa: bool
 
     def __init__(
         self,
         renderer: Renderer,
-        enable_subpixel_aa: bool = True,
     ) -> None:
         super().__init__(parent=renderer)
 
         self._renderer = renderer
-        self._enable_subpixel_aa = enable_subpixel_aa
 
         self._all_fonts = ["sans-serif", "serif"]
         self._hb_font_map = {
@@ -1075,15 +1068,7 @@ class FontEngine(BaseResource):
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, effective_size_px)
         self._set_freetype_weight(font, font_weight)
-        ft_face.load_glyph(
-            glyph_index,
-            ft.FT_LOAD_RENDER
-            | (
-                ft.FT_LOAD_TARGET_LCD
-                if self._enable_subpixel_aa
-                else ft.FT_LOAD_TARGET_NORMAL
-            ),
-        )
+        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
 
         bitmap_left = ft_face.glyph.bitmap_left
         bitmap_top = ft_face.glyph.bitmap_top
@@ -1100,29 +1085,19 @@ class FontEngine(BaseResource):
         # Load buffer as (h, pitch)
         buffer_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, pitch)
 
-        # For LCD subpixel rendering, width is 3x
-        real_w = w // 3 if self._enable_subpixel_aa else w
-
         # Prepare RGBA data array
-        data = np.empty((h, real_w, 4), dtype=np.float32)
+        data = np.empty((h, w, 4), dtype=np.float32)
 
         # Slice to remove padding if any
         if pitch != w:
             buffer_array = buffer_array[:, :w]
 
-        # Reshape to (h, real_w, 3)
-        if self._enable_subpixel_aa:
-            rgb = buffer_array.reshape(h, real_w, 3)
-            rgb_norm = rgb / 255.0
-        else:
-            gray = buffer_array.reshape(h, real_w, 1)
-            rgb_norm = np.repeat(gray, 3, axis=2) / 255.0
-
-        # Fill data
-        data[..., 0] = rgb_norm[..., 0]
-        data[..., 1] = rgb_norm[..., 1]
-        data[..., 2] = rgb_norm[..., 2]
-        data[..., 3] = rgb_norm.mean(axis=2)
+        # Grayscale glyph: use gray value for all RGB channels and alpha
+        gray_norm = buffer_array / 255.0
+        data[..., 0] = 1.0
+        data[..., 1] = 1.0
+        data[..., 2] = 1.0
+        data[..., 3] = gray_norm
 
         # Create RendererImage
         image = RendererImage(renderer=self._renderer, data=data)

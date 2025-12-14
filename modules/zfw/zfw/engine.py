@@ -22,7 +22,6 @@ class Engine(BaseResource):
         app_name: str,
         debug: bool,
         swapchain_image_count: int,
-        enable_subpixel_aa_override: bool | None = None,
     ):
         super().__init__(parent=None)
 
@@ -70,11 +69,6 @@ class Engine(BaseResource):
             context=self._render_context,
             gpu_device=self._gpu_device,
             scale=scale,
-            enable_subpixel_aa=(
-                enable_subpixel_aa_override
-                if enable_subpixel_aa_override is not None
-                else sys.platform != "darwin"
-            ),
         )
 
         # State:
