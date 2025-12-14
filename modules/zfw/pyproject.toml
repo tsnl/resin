@@ -1,7 +1,7 @@
 [project]
 name = "zfw"
 version = "0.1.0"
-description = "Add your description here"
+description = "A game engine for fun and profit, written in Python."
 readme = "README.md"
 authors = [{ name = "Nikhil Idiculla", email = "nikhil.idiculla@gmail.com" }]
 requires-python = ">=3.14"
