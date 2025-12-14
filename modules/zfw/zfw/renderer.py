@@ -512,7 +512,13 @@ UV_RECT_DTYPE = np.dtype(
 
 
 class QuadRenderer(BaseResource):
-    """Encapsulates the quads rendering pipeline with all GPU resources and logic."""
+    """
+    Encapsulates the quads rendering pipeline with all GPU resources and logic.
+
+    All coordinates and dimensions in QuadRenderer operate in physical pixels
+    (device pixels), not logical/device-independent pixels. The RendererCanvas
+    API handles conversion from logical to physical coordinates.
+    """
 
     COMMON_UNIFORM_DTYPE = np.dtype(
         [
@@ -1236,14 +1242,6 @@ class FontEngine(BaseResource):
                 ib_phys = min(qy_phys + qh_phys, dst_y_phys + dst_h_phys)
 
                 if ir_phys > ix_phys and ib_phys > iy_phys:
-                    # Convert to logical pixel coordinates for output
-                    dst_ix = int(ix_phys / renderer_scale)
-                    dst_iy = int(iy_phys / renderer_scale)
-                    dst_ir = int((ir_phys + renderer_scale - 1) / renderer_scale)
-                    dst_ib = int((ib_phys + renderer_scale - 1) / renderer_scale)
-                    dst_iw = dst_ir - dst_ix
-                    dst_ih = dst_ib - dst_iy
-
                     # Clipping offset and size in physical pixels (for src rect)
                     src_off_x = ix_phys - qx_phys
                     src_off_y = iy_phys - qy_phys
@@ -1254,10 +1252,16 @@ class FontEngine(BaseResource):
                     src_w = min(src_w, image.px_width - src_off_x)
                     src_h = min(src_h, image.px_height - src_off_y)
 
-                    if src_w > 0 and src_h > 0 and dst_iw > 0 and dst_ih > 0:
-                        canvas.add_quad(
-                            dst_xy=(dst_ix, dst_iy),
-                            dst_wh=(dst_iw, dst_ih),
+                    # Destination size in physical pixels (1:1 mapping with source)
+                    glyph_dst_w = src_w
+                    glyph_dst_h = src_h
+
+                    if src_w > 0 and src_h > 0:
+                        # Use physical pixel coordinates directly to avoid
+                        # scaling artifacts with nearest-neighbor sampling
+                        canvas.add_quad_physical(
+                            dst_xy_phys=(ix_phys, iy_phys),
+                            dst_wh_phys=(glyph_dst_w, glyph_dst_h),
                             src_xy=(src_off_x, src_off_y),
                             src_wh=(src_w, src_h),
                             color=color,
@@ -1275,6 +1279,16 @@ class FontEngine(BaseResource):
 
 
 class RendererCanvas:
+    """
+    A canvas for accumulating quads to be rendered.
+
+    The public API (add_quad, add_text) accepts coordinates in logical
+    (device-independent) pixels. These are converted to physical pixels
+    internally based on the renderer's scale factor.
+
+    For direct physical pixel control, use add_quad_physical().
+    """
+
     def __init__(self, renderer: Renderer, capacity: int = 64):
         self.renderer = renderer
         self._quad_array = RendererQuadArray(capacity)
@@ -1331,59 +1345,40 @@ class RendererCanvas:
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
         image: RendererImage | None = None,
     ):
-        """Adds a single quad to the list."""
+        """
+        Adds a single quad using logical (device-independent) pixel coordinates.
 
-        # Ensure capacity
-        if len(self) >= self.capacity:
-            self.reserve(1 + len(self))
-        assert len(self) < self.capacity
-
-        # Reserve index
-        index = self._quad_count
-        self._quad_count += 1
-
-        # Resolve:
-        src_wh = RendererCanvas._resolve_src_wh(dst_wh, src_wh, image)
-        assert src_wh is not None
-
-        # write: dst_px
-        dst_w, dst_h = RendererCanvas._eval_dst_px_wh(dst_wh, src_wh)
-
+        Coordinates are converted to physical pixels internally based on the
+        renderer's scale factor.
+        """
         scale = self.renderer.scale
-        x = int(dst_xy[0] * scale)
-        y = int(dst_xy[1] * scale)
-        w = int(dst_w * scale)
-        h = int(dst_h * scale)
 
-        self._quad_array[index]["dst_px"][0] = [x, y]
-        self._quad_array[index]["dst_px"][1] = [x + w, y]
-        self._quad_array[index]["dst_px"][2] = [x + w, y + h]
-        self._quad_array[index]["dst_px"][3] = [x, y + h]
+        # Resolve src_wh (in physical pixels, from image)
+        src_wh_resolved = RendererCanvas._resolve_src_wh(dst_wh, src_wh, image)
 
-        # write: src_uv
-        uv_xywh = RendererCanvas._eval_src_uv_xywh(src_xy, src_wh, image)
-        uv_x, uv_y, uv_w, uv_h = uv_xywh
-        self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
-        self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
-        self._quad_array[index]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
-        self._quad_array[index]["src_uv"][3] = [uv_x, uv_y + uv_h]
+        # Compute dst_wh in logical pixels
+        dst_wh_logical = RendererCanvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
 
-        # write: image_id
-        quad_image = image or self.renderer._default_white_image
-        self._quad_array[index]["image_id"] = quad_image.image_id
-
-        # write: color, border_color, border_thickness_px
-        self._quad_array[index]["color"] = color
-        self._quad_array[index]["border_color"] = border_color
-        self._quad_array[index]["border_thickness_px"] = [
+        # Convert logical to physical
+        dst_xy_phys = (int(dst_xy[0] * scale), int(dst_xy[1] * scale))
+        dst_wh_phys = (int(dst_wh_logical[0] * scale), int(dst_wh_logical[1] * scale))
+        border_thickness_phys = (
             int(border_thickness_px[0] * scale),
             int(border_thickness_px[1] * scale),
             int(border_thickness_px[2] * scale),
             int(border_thickness_px[3] * scale),
-        ]
+        )
 
-        # write: height
-        self._quad_array[index]["height"] = float(index)
+        self.add_quad_physical(
+            dst_xy_phys=dst_xy_phys,
+            dst_wh_phys=dst_wh_phys,
+            src_xy=src_xy,
+            src_wh=src_wh_resolved,
+            color=color,
+            border_color=border_color,
+            border_thickness_phys=border_thickness_phys,
+            image=image,
+        )
 
     @staticmethod
     def _resolve_src_wh(
@@ -1433,6 +1428,68 @@ class RendererCanvas:
             src_wh[1] / image.px_height,
         )
         return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])
+
+    def add_quad_physical(
+        self,
+        *,
+        dst_xy_phys: tuple[int, int],
+        dst_wh_phys: tuple[int, int],
+        src_xy: tuple[int, int] = (0, 0),
+        src_wh: tuple[int, int] | None = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        border_thickness_phys: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
+        image: RendererImage | None = None,
+    ):
+        """
+        Adds a single quad using physical (device) pixel coordinates.
+
+        All coordinate and size parameters are in physical pixels. This method
+        is used internally by add_quad() and for text rendering where 1:1 pixel
+        mapping is required.
+        """
+        # Ensure capacity
+        if len(self) >= self.capacity:
+            self.reserve(1 + len(self))
+        assert len(self) < self.capacity
+
+        # Reserve index
+        index = self._quad_count
+        self._quad_count += 1
+
+        # Physical pixel coordinates - no scaling
+        x, y = dst_xy_phys
+        w, h = dst_wh_phys
+
+        self._quad_array[index]["dst_px"][0] = [x, y]
+        self._quad_array[index]["dst_px"][1] = [x + w, y]
+        self._quad_array[index]["dst_px"][2] = [x + w, y + h]
+        self._quad_array[index]["dst_px"][3] = [x, y + h]
+
+        # write: src_uv
+        resolved_src_wh = (
+            src_wh
+            if src_wh is not None
+            else (image.px_width if image else w, image.px_height if image else h)
+        )
+        uv_xywh = RendererCanvas._eval_src_uv_xywh(src_xy, resolved_src_wh, image)
+        uv_x, uv_y, uv_w, uv_h = uv_xywh
+        self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
+        self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
+        self._quad_array[index]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
+        self._quad_array[index]["src_uv"][3] = [uv_x, uv_y + uv_h]
+
+        # write: image_id
+        quad_image = image or self.renderer._default_white_image
+        self._quad_array[index]["image_id"] = quad_image.image_id
+
+        # write: color, border_color, border_thickness_px
+        self._quad_array[index]["color"] = color
+        self._quad_array[index]["border_color"] = border_color
+        self._quad_array[index]["border_thickness_px"] = list(border_thickness_phys)
+
+        # write: height
+        self._quad_array[index]["height"] = float(index)
 
     #
     # add_text
