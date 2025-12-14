@@ -1,19 +1,22 @@
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeAlias
 
-
-@dataclass
-class Shader:
-    source: str
-    stages: dict["ShaderStage", str]
-
-    def __post_init__(self):
-        assert not Path(self.source).is_absolute()
+import pydantic
 
 
 ShaderStage: TypeAlias = Literal["vertex", "fragment"]
+
+
+class Shader(pydantic.BaseModel):
+    source: str
+    """Path to the shader source file, relative to the package root."""
+
+    stages: dict["ShaderStage", str]
+    """Mapping of shader stage to entry point name in the source file."""
+
+    def __post_init__(self):
+        assert not Path(self.source).is_absolute()
 
 
 def slangc(path: Path, stage: ShaderStage, entry: str, output: Path):
@@ -42,7 +45,7 @@ def get_output_path_suffix(
     return Path(shader.source).with_suffix(f".{stage[:4]}.spv")
 
 
-def compile_shaders(
+def build_shaders(
     package_root: Path,
     shaders: list[Shader],
     package_output_path: Path,

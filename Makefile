@@ -22,7 +22,8 @@ sync: build
 
 .PHONY: build
 build:
-	uv run --package zfw_build zfw-build
+	uv run --package zfw_build zfw-build -p modules/zfw
+	uv run --package zfw_build zfw-build -p modules/zfw_sandbox
 
 .PHONY: check
 check:

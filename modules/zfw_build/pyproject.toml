@@ -1,11 +1,11 @@
 [project]
 name = "zfw_build"
 version = "0.1.0"
-description = "zfw build utilities"
+description = "zfw build utility."
 readme = "README.md"
 authors = [{ name = "Nikhil Idiculla", email = "nikhil.idiculla@gmail.com" }]
 requires-python = ">=3.14"
-dependencies = ["zstandard"]
+dependencies = ["pydantic>=2.12.5", "zstandard>=0.25.0"]
 
 [build-system]
 requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
@@ -17,3 +17,4 @@ module-root = ""
 
 [project.scripts]
 zfw-build = "zfw_build.__init__:main"
+zfw-pack = "zfw_build.pack:main"

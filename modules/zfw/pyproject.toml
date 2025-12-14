@@ -35,3 +35,12 @@ source-exclude = ["*_test.py"]
 
 [tool.uv.sources]
 zfw_build = { workspace = true }
+
+
+#
+# zfw_build configuration
+#
+
+[[tool.zfw_build.shaders]]
+source = "shaders/r2d.slang"
+stages = { vertex = "vertexMain", fragment = "fragmentMain" }

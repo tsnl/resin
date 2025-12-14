@@ -12,5 +12,5 @@ __pycache__
 /dist
 /build
 
-# Data
-/data
+# Bundled data in packages:
+bundled_data

@@ -20,3 +20,11 @@ module-root = ""
 
 [tool.uv.sources]
 zfw = { workspace = true }
+
+#
+# zfw_build configuration
+#
+
+
+[tool.zfw_build]
+data_packs = ["data/KenneyGameAssetsAllInOne-3_3_0.tar.zstd"]
