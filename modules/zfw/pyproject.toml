@@ -45,7 +45,7 @@ zfw_build = { workspace = true }
 #
 
 [tool.zfw_build]
-data_packs = ["data/font-Inter_4_1"]
+data_packs = ["data/font-Inter_4_1", "data/font-Lora"]
 
 [[tool.zfw_build.shaders]]
 source = "shaders/r2d.slang"

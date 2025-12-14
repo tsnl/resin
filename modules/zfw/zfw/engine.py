@@ -2,7 +2,7 @@ import sys
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererContext, RendererQuadArray
+from .renderer import Renderer, RendererContext, RendererCanvas
 from .window import Window, WindowContext
 
 
@@ -114,14 +114,14 @@ class Engine(BaseResource):
     def update(self):
         Window.poll_events()
 
-    def render(self, quads: RendererQuadArray):
+    def render(self, canvas: RendererCanvas):
         """Context manager for rendering a frame with quads."""
         if self._rendered_frame_count == 0:
             self._window.show()
 
         with self._gpu_swap_chain.present() as target:
             self._renderer.draw(
-                quads=quads,
+                canvas=canvas,
                 target=target.image,
                 wait_semaphores=[target.render_wait_semaphore],
                 done_semaphores=[target.render_done_semaphore],

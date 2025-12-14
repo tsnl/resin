@@ -129,7 +129,7 @@ class Renderer(BaseResource):
     def draw(
         self,
         *,
-        quads: "RendererQuadArray",
+        canvas: "RendererCanvas",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -145,7 +145,7 @@ class Renderer(BaseResource):
             atlas.flush()
 
         self._quad_renderer.draw(
-            quads=quads,
+            quads=canvas.as_quad_array(),
             target=target,
             wait_semaphores=wait_semaphores,
             done_semaphores=done_semaphores,
@@ -933,11 +933,33 @@ class RendererQuadArray(np.ndarray):
         return np.zeros(shape, dtype=QuadRenderer.QUAD_DTYPE).view(cls)
 
 
-class RendererQuadList:
+#
+# RendererFont, RendererFontAtlas:
+#
+
+
+RendererFont: TypeAlias = Literal["sans-serif", "serif"]
+
+
+class RendererFontAtlas:
+    def __init__(self) -> None:
+        pass
+
+
+#
+# RendererCanvas:
+#
+
+
+class RendererCanvas:
     def __init__(self, renderer: Renderer, capacity: int = 64):
         self.renderer = renderer
         self._quad_array = RendererQuadArray(capacity)
         self._quad_count = 0
+
+    #
+    # Getters and properties:
+    #
 
     def __len__(self) -> int:
         return self._quad_count
@@ -946,8 +968,33 @@ class RendererQuadList:
     def capacity(self) -> int:
         return len(self._quad_array)
 
-    def finish(self) -> RendererQuadArray:
+    def as_quad_array(self) -> RendererQuadArray:
         return self._quad_array[: self._quad_count].view(RendererQuadArray)
+
+    #
+    # clear, reserve
+    #
+
+    def clear(self):
+        self._quad_count = 0
+
+    def reserve(self, new_capacity: int):
+        """Ensure that the quad list has at least the given capacity."""
+        if new_capacity <= self.capacity:
+            return
+        self.reserve_exact(new_capacity=round_up_to_po2(new_capacity))
+
+    def reserve_exact(self, new_capacity: int):
+        """Like 'reserve', but will never allocate more than requested."""
+        if new_capacity <= self.capacity:
+            return
+        new_array = RendererQuadArray(new_capacity)
+        new_array[: len(self._quad_array)] = self._quad_array
+        self._quad_array = new_array
+
+    #
+    # add_quad
+    #
 
     def add_quad(
         self,
@@ -960,7 +1007,9 @@ class RendererQuadList:
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
         border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
         image: RendererImage | None = None,
-    ) -> int:
+    ):
+        """Adds a single quad to the list."""
+
         # Ensure capacity
         if len(self) >= self.capacity:
             self.reserve(1 + len(self))
@@ -971,18 +1020,18 @@ class RendererQuadList:
         self._quad_count += 1
 
         # Resolve:
-        src_wh = RendererQuadList._resolve_src_wh(dst_wh, src_wh, image)
+        src_wh = RendererCanvas._resolve_src_wh(dst_wh, src_wh, image)
         assert src_wh is not None
 
         # write: dst_px
-        dst_w, dst_h = RendererQuadList._eval_dst_px_wh(dst_wh, src_wh)
+        dst_w, dst_h = RendererCanvas._eval_dst_px_wh(dst_wh, src_wh)
         self._quad_array[index]["dst_px"][0] = [dst_xy[0], dst_xy[1]]
         self._quad_array[index]["dst_px"][1] = [dst_xy[0] + dst_w, dst_xy[1]]
         self._quad_array[index]["dst_px"][2] = [dst_xy[0] + dst_w, dst_xy[1] + dst_h]
         self._quad_array[index]["dst_px"][3] = [dst_xy[0], dst_xy[1] + dst_h]
 
         # write: src_uv
-        uv_xywh = RendererQuadList._eval_src_uv_xywh(src_xy, src_wh, image)
+        uv_xywh = RendererCanvas._eval_src_uv_xywh(src_xy, src_wh, image)
         uv_x, uv_y, uv_w, uv_h = uv_xywh
         self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
         self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
@@ -1000,19 +1049,6 @@ class RendererQuadList:
 
         # write: height
         self._quad_array[index]["height"] = float(index)
-
-        # Done:
-        return index
-
-    def reserve(self, new_capacity: int):
-        self.reserve_exact(new_capacity=round_up_to_po2(new_capacity))
-
-    def reserve_exact(self, new_capacity: int):
-        if new_capacity <= self.capacity:
-            return
-        new_array = RendererQuadArray(new_capacity)
-        new_array[: len(self._quad_array)] = self._quad_array
-        self._quad_array = new_array
 
     @staticmethod
     def _resolve_src_wh(
@@ -1062,3 +1098,21 @@ class RendererQuadList:
             src_wh[1] / image.px_height,
         )
         return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])
+
+    #
+    # add_text
+    #
+
+    def add_text(
+        self,
+        *,
+        text: str,
+        font: "RendererFont",
+        dst_xy: tuple[int, int],
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+    ):
+        """
+        Adds quads for rendering the given text string with the given font.
+        """
+
+        raise NotImplementedError()

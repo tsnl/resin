@@ -19,8 +19,7 @@ from .renderer import (
     RendererImage,
     RendererContext,
     Renderer,
-    RendererQuadArray,
-    RendererQuadList,
+    RendererCanvas,
 )
 from .images import load_rgba_image
 
@@ -89,10 +88,10 @@ class RendererTestEngine(BaseResource):
             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
         )
 
-    def draw(self, quads: RendererQuadArray):
+    def draw(self, canvas: RendererCanvas):
         fence = GpuFence(device=self.gpu_device)
         self.renderer.draw(
-            quads=quads,
+            canvas=canvas,
             target=self.target,
             fence=fence,
             wait_semaphores=[],
@@ -104,26 +103,26 @@ class RendererTestEngine(BaseResource):
 def test_renderer_quads():
     engine = RendererTestEngine()
 
-    quads = RendererQuadList(renderer=engine.renderer)
-    quads.add_quad(
+    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas.add_quad(
         dst_xy=(32, 64),
         dst_wh=(512, 256),
         color=(1.0, 1.0, 1.0, 1.0),
         border_thickness_px=(0, 0, 8, 0),
         border_color=(0.0, 0.1, 0.8, 1.0),
     )
-    quads.add_quad(
+    canvas.add_quad(
         dst_xy=(40, 72),
         dst_wh=(64, 64),
         color=(0.0, 0.2, 0.0, 1.0),
     )
-    quads.add_quad(
+    canvas.add_quad(
         dst_xy=(112, 72),
         dst_wh=(64, 64),
         color=(0.0, 0.2, 0.0, 0.5),
     )
 
-    engine.draw(quads=quads.finish())
+    engine.draw(canvas=canvas)
     image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
@@ -140,8 +139,8 @@ def test_renderer_image():
     image = RendererImage(renderer=engine.renderer, data=image_data)
 
     border_thickness_px = 8
-    quads = RendererQuadList(renderer=engine.renderer)
-    quads.add_quad(
+    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas.add_quad(
         dst_xy=(
             (TEST_IMAGE_W - image_data.shape[1] - border_thickness_px) // 2,
             (TEST_IMAGE_H - image_data.shape[0] - border_thickness_px) // 2,
@@ -152,7 +151,7 @@ def test_renderer_image():
         image=image,
     )
 
-    engine.draw(quads=quads.finish())
+    engine.draw(canvas=canvas)
     output_image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_image.png")
