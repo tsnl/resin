@@ -22,7 +22,6 @@ class Engine(BaseResource):
         app_name: str,
         debug: bool,
         swapchain_image_count: int,
-        dpi_override: int | None = None,
         enable_subpixel_aa_override: bool | None = None,
     ):
         super().__init__(parent=None)
@@ -70,7 +69,6 @@ class Engine(BaseResource):
         self._renderer = Renderer(
             context=self._render_context,
             gpu_device=self._gpu_device,
-            dpi=int(96 * scale) if dpi_override is None else dpi_override,
             scale=scale,
             enable_subpixel_aa=(
                 enable_subpixel_aa_override

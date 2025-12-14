@@ -69,7 +69,6 @@ class Renderer(BaseResource):
         *,
         context: RendererContext,
         gpu_device: GpuDevice,
-        dpi: int = 96,
         scale: float = 1.0,
         enable_subpixel_aa: bool = True,
     ):
@@ -126,7 +125,6 @@ class Renderer(BaseResource):
 
         self._font_engine = FontEngine(
             renderer=self,
-            dpi=dpi,
             enable_subpixel_aa=enable_subpixel_aa,
         )
 
@@ -967,19 +965,16 @@ class FontEngine(BaseResource):
         tuple["RendererImage | None", int, int],
     ]
     _ft_weight_axis_index: dict[RendererFont, int]
-    _dpi: int
     _enable_subpixel_aa: bool
 
     def __init__(
         self,
         renderer: Renderer,
-        dpi: int = 96,
         enable_subpixel_aa: bool = True,
     ) -> None:
         super().__init__(parent=renderer)
 
         self._renderer = renderer
-        self._dpi = dpi
         self._enable_subpixel_aa = enable_subpixel_aa
 
         self._all_fonts = ["sans-serif", "serif"]
@@ -1047,8 +1042,9 @@ class FontEngine(BaseResource):
         font_weight: int,
     ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
         hb_font = self._hb_font_map[font]
-        scale_factor = self._dpi / 96.0
-        effective_size_px = int(font_size_px * scale_factor)
+        # Use renderer's scale factor for HiDPI support
+        renderer_scale = self._renderer.scale
+        effective_size_px = int(font_size_px * renderer_scale)
         scale = effective_size_px * 64  # HarfBuzz uses 26.6 fixed point
         hb_font.scale = (scale, scale)
         hb_font.set_variations({"wght": font_weight})
@@ -1068,8 +1064,9 @@ class FontEngine(BaseResource):
         font_size_px: int,
         font_weight: int,
     ) -> tuple["RendererImage | None", int, int]:
-        scale_factor = self._dpi / 96.0
-        effective_size_px = int(font_size_px * scale_factor)
+        # Use renderer's scale factor for HiDPI support
+        renderer_scale = self._renderer.scale
+        effective_size_px = int(font_size_px * renderer_scale)
         image_cache_key = (font, glyph_index, effective_size_px, font_weight)
 
         if image_cache_key in self._ft_image_cache:
@@ -1151,21 +1148,30 @@ class FontEngine(BaseResource):
         if not text:
             return
 
-        scale_factor = self._dpi / 96.0
-        effective_size_px = int(font_size_px * scale_factor)
+        # Get the renderer's scale factor (for HiDPI)
+        # This is the content scale from the window (e.g., 2.0 for Retina displays)
+        renderer_scale = self._renderer.scale
+
+        # We render glyphs at the scaled size for sharpness
+        # effective_size_px is the actual pixel size we render at
+        effective_size_px = int(font_size_px * renderer_scale)
 
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, effective_size_px)
         self._set_freetype_weight(font, font_weight)
         metrics = ft_face.size
-        ascender = metrics.ascender / 64.0 / scale_factor
-        height = metrics.height / 64.0 / scale_factor
+
+        # Font metrics are in 26.6 fixed point, divide by 64
+        # These are in physical pixels, so divide by renderer_scale to get logical pixels
+        ascender = metrics.ascender / 64.0 / renderer_scale
+        height = metrics.height / 64.0 / renderer_scale
 
         infos, positions = self._shape_text(font, text, font_size_px, font_weight)
 
         dst_x, dst_y = dst_xy
         dst_w, dst_h = dst_wh
 
+        # pen_x, pen_y are in logical coordinates (before scaling)
         pen_x = float(dst_x)
         pen_y = float(dst_y) + ascender
         start_x = float(dst_x)
@@ -1184,10 +1190,12 @@ class FontEngine(BaseResource):
                 pen_y += height
                 continue
 
-            x_advance = pos.x_advance / 64.0 / scale_factor
-            y_advance = pos.y_advance / 64.0 / scale_factor
-            x_offset = pos.x_offset / 64.0 / scale_factor
-            y_offset = pos.y_offset / 64.0 / scale_factor
+            # HarfBuzz positions are in 26.6 fixed point at the scaled size
+            # Divide by 64 to get physical pixels, then by renderer_scale for logical pixels
+            x_advance = pos.x_advance / 64.0 / renderer_scale
+            y_advance = pos.y_advance / 64.0 / renderer_scale
+            x_offset = pos.x_offset / 64.0 / renderer_scale
+            y_offset = pos.y_offset / 64.0 / renderer_scale
 
             # Word wrapping
             if wrap and not char.isspace():
@@ -1208,7 +1216,7 @@ class FontEngine(BaseResource):
                         c_char = text[c] if c < len(text) else " "
                         if c_char.isspace():
                             break
-                        word_width += positions[j].x_advance / 64.0 / scale_factor
+                        word_width += positions[j].x_advance / 64.0 / renderer_scale
 
                     # Wrap if word doesn't fit and we're not at start of line
                     if (pen_x + word_width > dst_x + dst_w) and (pen_x > start_x):
@@ -1220,29 +1228,48 @@ class FontEngine(BaseResource):
             )
 
             if image is not None:
-                qx = pen_x + x_offset + bitmap_left / scale_factor
-                qy = pen_y - bitmap_top / scale_factor - y_offset
-                qw = image.px_width / scale_factor
-                qh = image.px_height / scale_factor
+                # bitmap_left and bitmap_top are in physical pixels (at effective_size_px)
+                # Convert to logical coordinates
+                qx = pen_x + x_offset + bitmap_left / renderer_scale
+                qy = pen_y - bitmap_top / renderer_scale - y_offset
 
-                # Intersection with dst rect
-                ix = max(qx, dst_x)
-                iy = max(qy, dst_y)
-                ir = min(qx + qw, dst_x + dst_w)
-                ib = min(qy + qh, dst_y + dst_h)
+                # image.px_width/height are physical pixels, convert to logical size
+                qw = image.px_width / renderer_scale
+                qh = image.px_height / renderer_scale
+
+                # Intersection with dst rect (in logical coordinates)
+                ix = max(qx, float(dst_x))
+                iy = max(qy, float(dst_y))
+                ir = min(qx + qw, float(dst_x + dst_w))
+                ib = min(qy + qh, float(dst_y + dst_h))
 
                 if ir > ix and ib > iy:
-                    off_x = ix - qx
-                    off_y = iy - qy
+                    # Calculate clipping offsets in logical coordinates
+                    off_x_logical = ix - qx
+                    off_y_logical = iy - qy
+                    clip_w_logical = ir - ix
+                    clip_h_logical = ib - iy
 
-                    canvas.add_quad(
-                        dst_xy=(int(ix), int(iy)),
-                        dst_wh=(int(ir - ix), int(ib - iy)),
-                        src_xy=(int(off_x), int(off_y)),
-                        src_wh=(int(ir - ix), int(ib - iy)),
-                        color=color,
-                        image=image,
-                    )
+                    # Convert to physical pixel coordinates for src_xy/src_wh
+                    # These index into the glyph image which is at physical resolution
+                    src_off_x = int(off_x_logical * renderer_scale)
+                    src_off_y = int(off_y_logical * renderer_scale)
+                    src_w = int(clip_w_logical * renderer_scale)
+                    src_h = int(clip_h_logical * renderer_scale)
+
+                    # Ensure we don't exceed the image bounds
+                    src_w = min(src_w, image.px_width - src_off_x)
+                    src_h = min(src_h, image.px_height - src_off_y)
+
+                    if src_w > 0 and src_h > 0:
+                        canvas.add_quad(
+                            dst_xy=(int(ix), int(iy)),
+                            dst_wh=(int(clip_w_logical), int(clip_h_logical)),
+                            src_xy=(src_off_x, src_off_y),
+                            src_wh=(src_w, src_h),
+                            color=color,
+                            image=image,
+                        )
 
             pen_x += x_advance
             pen_y += y_advance
