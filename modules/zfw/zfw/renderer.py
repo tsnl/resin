@@ -71,6 +71,7 @@ class Renderer(BaseResource):
         gpu_device: GpuDevice,
         dpi: int = 96,
         scale: float = 1.0,
+        enable_subpixel_aa: bool = True,
     ):
         super().__init__(parent=context)
 
@@ -123,7 +124,11 @@ class Renderer(BaseResource):
 
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
-        self._font_engine = FontEngine(renderer=self, dpi=dpi)
+        self._font_engine = FontEngine(
+            renderer=self,
+            dpi=dpi,
+            enable_subpixel_aa=enable_subpixel_aa,
+        )
 
     @property
     def scale(self) -> float:
