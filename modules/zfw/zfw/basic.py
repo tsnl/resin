@@ -9,6 +9,7 @@ __all__ = [
 from abc import ABC
 from typing import Protocol, TypeVar, Self, TypeAlias, Literal
 from weakref import ref as WeakRef
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -96,8 +97,8 @@ class BaseResource(ABC):
         # If 'self' is not yet disposed, ensure self._parent has not yet been disposed
         # either.
         if self._parent is not None and self._parent._is_disposed:
-            raise LogicError(
-                f"Cannot dispose resource {self} after its parent {self._parent}"
+            warnings.warn(
+                f"Cannot dispose resource {self} after its parent {self._parent}",
             )
 
         # Dispose children in reverse order of creation.

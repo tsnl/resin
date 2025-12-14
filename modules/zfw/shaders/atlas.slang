@@ -24,7 +24,7 @@ float sampleAtlasMono(uint imageId, float2 uv, uint atlasSizePx)
 {
     UvRect rect = rectsMono[imageId];
     SamplePageAndUv pageAndUv = getSamplePageAndUv(rect, uv, atlasSizePx);
-    return atlasRgba[pageAndUv.pageIndex].Sample(sampler, pageAndUv.uv).r;
+    return atlasMono[pageAndUv.pageIndex].Sample(sampler, pageAndUv.uv).r;
 }
 
 float4 sampleAtlasRgba(uint imageId, float2 uv, uint atlasSizePx)

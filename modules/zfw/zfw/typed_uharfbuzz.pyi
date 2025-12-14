@@ -2,8 +2,8 @@ class Face:
     def __init__(self, blob: bytes) -> None: ...
 
 class Font:
+    scale: tuple[int, int]
     def __init__(self, face: Face) -> None: ...
-    def set_scale(self, x_scale: int, y_scale: int) -> None: ...
 
 class Buffer:
     glyph_infos: list["GlyphInfo"]

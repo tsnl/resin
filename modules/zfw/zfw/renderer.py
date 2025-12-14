@@ -949,7 +949,10 @@ class FontEngine(BaseResource):
     _renderer: Renderer
     _all_fonts: list[RendererFont]
     _hb_font_map: dict[RendererFont, hb.Font]
-    _ft_image_cache: dict[tuple[RendererFont, int, int], RendererImage]
+    _ft_image_cache: dict[
+        tuple[RendererFont, int, int],
+        tuple["RendererImage | None", int, int],
+    ]
 
     def __init__(self, renderer: Renderer) -> None:
         super().__init__(parent=renderer)
@@ -999,7 +1002,7 @@ class FontEngine(BaseResource):
     ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
         hb_font = self._hb_font_map[font]
         scale = font_size_px * 64  # HarfBuzz uses 26.6 fixed point
-        hb_font.set_scale(scale, scale)
+        hb_font.scale = (scale, scale)
 
         hb_buffer = hb.Buffer()
         hb_buffer.add_str(text)
@@ -1014,26 +1017,38 @@ class FontEngine(BaseResource):
         font: RendererFont,
         glyph_index: int,
         font_size_px: int,
-    ) -> "RendererImage":
+    ) -> tuple["RendererImage | None", int, int]:
         image_cache_key = (font, glyph_index, font_size_px)
 
-        image = self._ft_image_cache.get(image_cache_key)
-        if image is not None:
-            return image
+        if image_cache_key in self._ft_image_cache:
+            return self._ft_image_cache[image_cache_key]
 
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, font_size_px)
         ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
+
+        bitmap_left = ft_face.glyph.bitmap_left
+        bitmap_top = ft_face.glyph.bitmap_top
         bitmap = ft_face.glyph.bitmap
-        assert bitmap.buffer
+
+        if not bitmap.buffer or bitmap.width == 0 or bitmap.rows == 0:
+            result = (None, 0, 0)
+            self._ft_image_cache[image_cache_key] = result
+            return result
 
         h, w = bitmap.rows, bitmap.width
-        data = np.frombuffer(bitmap.buffer, dtype=np.uint8).reshape(h, w) / 255.0
+        alpha = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, w) / 255.0
+        data = np.empty((h, w, 4), dtype=np.float32)
+        data[..., 0] = 1.0
+        data[..., 1] = 1.0
+        data[..., 2] = 1.0
+        data[..., 3] = alpha
 
         image = RendererImage(renderer=self._renderer, data=data)
-        self._ft_image_cache[image_cache_key] = image
+        result = (image, bitmap_left, bitmap_top)
+        self._ft_image_cache[image_cache_key] = result
 
-        return image
+        return result
 
     def _add_quads_to_canvas(
         self,
@@ -1047,18 +1062,66 @@ class FontEngine(BaseResource):
         dst_wh: tuple[int, int],
         wrap: bool,
     ):
-        # TODO:
-        # - use harfbuzz to shape the text and get glyphs
-        # - for each glyph, get the glyph image from freetype
-        # - for each glyph image, add a quad to the canvas at the appropriate position
-        #   - ensure `quad.src_wh` and `quad.dst_wh` are used to clip partial glyphs in
-        #     the rect given by `dst_xy` and `dst_wh`
-        #   - wrap text as needed to fit within `dst_wh` if 'wrap' is specified,
-        #     otherwise the overflow is just to hide, but must handle partial glyphs
-        #   - assume (ensure?) the glyph images are solid white: use the `quad.color`
-        #     parameter to tint the glyphs to the desired color. Just pass-through the
-        #     user argument.
-        raise NotImplementedError()
+        if not text:
+            return
+
+        ft_face = self._ft_face_map[font]
+        ft_face.set_pixel_sizes(0, font_size_px)
+        metrics = ft_face.size
+        ascender = metrics.ascender / 64.0
+        height = metrics.height / 64.0
+
+        infos, positions = self._shape_text(font, text, font_size_px)
+
+        dst_x, dst_y = dst_xy
+        dst_w, dst_h = dst_wh
+
+        pen_x = float(dst_x)
+        pen_y = float(dst_y) + ascender
+        start_x = float(dst_x)
+
+        for info, pos in zip(infos, positions):
+            codepoint = info.codepoint
+            x_advance = pos.x_advance / 64.0
+            y_advance = pos.y_advance / 64.0
+            x_offset = pos.x_offset / 64.0
+            y_offset = pos.y_offset / 64.0
+
+            if wrap and (pen_x + x_advance > dst_x + dst_w):
+                pen_x = start_x
+                pen_y += height
+
+            image, bitmap_left, bitmap_top = self._get_glyph_image(
+                font, codepoint, font_size_px
+            )
+
+            if image is not None:
+                qx = pen_x + x_offset + bitmap_left
+                qy = pen_y - bitmap_top - y_offset
+                qw = image.px_width
+                qh = image.px_height
+
+                # Intersection with dst rect
+                ix = max(qx, dst_x)
+                iy = max(qy, dst_y)
+                ir = min(qx + qw, dst_x + dst_w)
+                ib = min(qy + qh, dst_y + dst_h)
+
+                if ir > ix and ib > iy:
+                    off_x = ix - qx
+                    off_y = iy - qy
+
+                    canvas.add_quad(
+                        dst_xy=(int(ix), int(iy)),
+                        dst_wh=(int(ir - ix), int(ib - iy)),
+                        src_xy=(int(off_x), int(off_y)),
+                        src_wh=(int(ir - ix), int(ib - iy)),
+                        color=color,
+                        image=image,
+                    )
+
+            pen_x += x_advance
+            pen_y += y_advance
 
 
 #
@@ -1225,6 +1288,7 @@ class RendererCanvas:
         font: "RendererFont",
         dst_xy: tuple[int, int],
         dst_wh: tuple[int, int],
+        font_size_px: int = 16,
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         wrap: bool = True,
     ):
@@ -1238,7 +1302,7 @@ class RendererCanvas:
             canvas=self,
             text=text,
             font=font,
-            font_size_px=16,
+            font_size_px=font_size_px,
             color=color,
             dst_xy=dst_xy,
             dst_wh=dst_wh,

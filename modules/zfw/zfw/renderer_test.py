@@ -203,5 +203,72 @@ def test_renderer_atlas_smoketest():
     gpu_context.dispose()
 
 
+def test_renderer_text_basic():
+    engine = RendererTestEngine()
+    canvas = RendererCanvas(renderer=engine.renderer)
+
+    canvas.add_text(
+        text="Hello, world",
+        font="sans-serif",
+        dst_xy=(50, 50),
+        dst_wh=(400, 100),
+        font_size_px=48,
+        color=(1.0, 1.0, 1.0, 1.0),
+    )
+
+    engine.draw(canvas=canvas)
+    image = engine.readback()
+
+    output_path = Path("output/zfw/renderer_test/test_renderer_text_basic.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(image).save(output_path)
+
+
+def test_renderer_text_wrap():
+    engine = RendererTestEngine()
+    canvas = RendererCanvas(renderer=engine.renderer)
+
+    long_text = "This is a long text that should wrap to the next line because the width is limited."
+    canvas.add_text(
+        text=long_text,
+        font="serif",
+        dst_xy=(50, 200),
+        dst_wh=(300, 400),
+        font_size_px=32,
+        color=(1.0, 0.8, 0.2, 1.0),
+        wrap=True,
+    )
+
+    engine.draw(canvas=canvas)
+    image = engine.readback()
+
+    output_path = Path("output/zfw/renderer_test/test_renderer_text_wrap.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(image).save(output_path)
+
+
+def test_renderer_text_clip():
+    engine = RendererTestEngine()
+    canvas = RendererCanvas(renderer=engine.renderer)
+
+    # Text that overflows but wrap is False
+    canvas.add_text(
+        text="This text should be clipped because it is too long for the box.",
+        font="sans-serif",
+        dst_xy=(50, 400),
+        dst_wh=(200, 50),
+        font_size_px=32,
+        color=(0.5, 0.5, 1.0, 1.0),
+        wrap=False,
+    )
+
+    engine.draw(canvas=canvas)
+    image = engine.readback()
+
+    output_path = Path("output/zfw/renderer_test/test_renderer_text_clip.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(image).save(output_path)
+
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
