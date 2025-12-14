@@ -38,7 +38,6 @@ pkgs.mkShell {
     unzip
     zstd
     pv
-    tar
   ];
 
   # Crucially, set LD_LIBRARY_PATH so the dynamic linker can find the libraries at runtime
