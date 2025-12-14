@@ -100,8 +100,8 @@ class Renderer(BaseResource):
         )
         self._sampler = GpuSampler(
             device=self._gpu_device,
-            mag_filter="linear",
-            min_filter="linear",
+            mag_filter="nearest",
+            min_filter="nearest",
         )
         self._atlas_descriptor_set = GpuDescriptorSet(
             device=self._gpu_device,
