@@ -1148,10 +1148,9 @@ class FontEngine(BaseResource):
         if not text:
             return
 
-        # Strategy: Do ALL layout in physical (device) pixels.
-        # HarfBuzz and FreeType work at effective_size_px = font_size_px * scale.
-        # We accumulate pen position in physical pixels, then convert to logical
-        # pixels only when emitting quads.
+        # Strategy: Accumulate pen position in 26.6 fixed-point to preserve
+        # subpixel precision. Only round to integer pixels when placing glyphs.
+        # This prevents accumulated rounding error.
 
         renderer_scale = self._renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
@@ -1161,25 +1160,31 @@ class FontEngine(BaseResource):
         self._set_freetype_weight(font, font_weight)
         metrics = ft_face.size
 
-        # FreeType metrics are in 26.6 fixed point - convert to physical pixels
-        ascender_phys = metrics.ascender >> 6  # divide by 64, round toward zero
-        height_phys = metrics.height >> 6
+        # FreeType metrics are in 26.6 fixed point - keep in 26.6
+        ascender_26_6 = metrics.ascender
+        height_26_6 = metrics.height
 
         infos, positions = self._shape_text(font, text, font_size_px, font_weight)
 
         dst_x, dst_y = dst_xy
         dst_w, dst_h = dst_wh
 
-        # Convert destination rect to physical pixels
+        # Convert destination rect to physical 26.6 fixed-point
+        dst_x_26_6 = int(dst_x * renderer_scale * 64)
+        dst_y_26_6 = int(dst_y * renderer_scale * 64)
+        dst_w_26_6 = int(dst_w * renderer_scale * 64)
+        dst_h_26_6 = int(dst_h * renderer_scale * 64)
+
+        # Physical pixel versions for clipping (integers)
         dst_x_phys = int(dst_x * renderer_scale)
         dst_y_phys = int(dst_y * renderer_scale)
         dst_w_phys = int(dst_w * renderer_scale)
         dst_h_phys = int(dst_h * renderer_scale)
 
-        # Pen position in physical pixels (integers)
-        pen_x_phys = dst_x_phys
-        pen_y_phys = dst_y_phys + ascender_phys
-        start_x_phys = dst_x_phys
+        # Pen position in 26.6 fixed-point (physical)
+        pen_x_26_6 = dst_x_26_6
+        pen_y_26_6 = dst_y_26_6 + ascender_26_6
+        start_x_26_6 = dst_x_26_6
 
         for i in range(len(infos)):
             info = infos[i]
@@ -1191,18 +1196,17 @@ class FontEngine(BaseResource):
 
             # Handle explicit newlines
             if char == "\n":
-                pen_x_phys = start_x_phys
-                pen_y_phys += height_phys
+                pen_x_26_6 = start_x_26_6
+                pen_y_26_6 += height_26_6
                 continue
 
-            # HarfBuzz positions are in 26.6 fixed point - convert to physical pixels
-            # Use round (add 32 before shift) for better accuracy
-            x_advance_phys = (pos.x_advance + 32) >> 6
-            y_advance_phys = (pos.y_advance + 32) >> 6
-            x_offset_phys = (pos.x_offset + 32) >> 6
-            y_offset_phys = (pos.y_offset + 32) >> 6
+            # HarfBuzz positions are in 26.6 fixed point - use directly
+            x_advance_26_6 = pos.x_advance
+            y_advance_26_6 = pos.y_advance
+            x_offset_26_6 = pos.x_offset
+            y_offset_26_6 = pos.y_offset
 
-            # Word wrapping
+            # Word wrapping (use 26.6 for accurate measurement)
             if wrap and not char.isspace():
                 is_word_start = False
                 if i == 0:
@@ -1214,26 +1218,33 @@ class FontEngine(BaseResource):
                         is_word_start = True
 
                 if is_word_start:
-                    word_width_phys = 0
+                    word_width_26_6 = 0
                     for j in range(i, len(infos)):
                         c = infos[j].cluster
                         c_char = text[c] if c < len(text) else " "
                         if c_char.isspace():
                             break
-                        word_width_phys += (positions[j].x_advance + 32) >> 6
+                        word_width_26_6 += positions[j].x_advance
 
                     # Wrap if word doesn't fit and we're not at start of line
-                    if (pen_x_phys + word_width_phys > dst_x_phys + dst_w_phys) and (
-                        pen_x_phys > start_x_phys
+                    if (pen_x_26_6 + word_width_26_6 > dst_x_26_6 + dst_w_26_6) and (
+                        pen_x_26_6 > start_x_26_6
                     ):
-                        pen_x_phys = start_x_phys
-                        pen_y_phys += height_phys
+                        pen_x_26_6 = start_x_26_6
+                        pen_y_26_6 += height_26_6
 
             image, bitmap_left, bitmap_top = self._get_glyph_image(
                 font, codepoint, font_size_px, font_weight
             )
 
             if image is not None:
+                # Convert pen position to physical pixels for this glyph
+                # Round 26.6 to nearest integer pixel
+                pen_x_phys = (pen_x_26_6 + 32) >> 6
+                pen_y_phys = (pen_y_26_6 + 32) >> 6
+                x_offset_phys = (x_offset_26_6 + 32) >> 6
+                y_offset_phys = (y_offset_26_6 + 32) >> 6
+
                 # bitmap_left and bitmap_top are already in physical pixels
                 # Glyph quad position in physical pixels
                 qx_phys = pen_x_phys + x_offset_phys + bitmap_left
@@ -1278,8 +1289,9 @@ class FontEngine(BaseResource):
                             image=image,
                         )
 
-            pen_x_phys += x_advance_phys
-            pen_y_phys += y_advance_phys
+            # Accumulate in 26.6 to preserve precision
+            pen_x_26_6 += x_advance_26_6
+            pen_y_26_6 += y_advance_26_6
 
 
 #
