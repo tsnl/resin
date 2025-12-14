@@ -1,0 +1,5 @@
+- Use `make` targets to do anything if possible
+  - `make sync` runs codgen via `make build` and then runs `uv sync`.
+  - `make tests` runs all tests and writes test outputs (e.g. image renders).
+  - `make sandbox` launches a windowed interactive application.
+- Ensure you use `uv` to activate a Python environment with the right dependencies.

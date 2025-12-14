@@ -65,6 +65,26 @@ def main():
             dst_wh=(64, 64),
             image=block_01_image,
         )
+        canvas.add_text(
+            text="Hello, world",
+            font="sans-serif",
+            dst_xy=(40, 144),
+            dst_wh=(400, 100),
+            font_size_px=18,
+            font_weight=200,
+            color=(0.0, 0.0, 0.0, 1.0),
+            wrap=False,
+        )
+        canvas.add_text(
+            text="Hello, world",
+            font="sans-serif",
+            dst_xy=(40, 216),
+            dst_wh=(400, 100),
+            font_size_px=18,
+            font_weight=700,
+            color=(0.0, 0.0, 0.0, 1.0),
+            wrap=False,
+        )
         engine.render(canvas=canvas)
 
 

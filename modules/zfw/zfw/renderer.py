@@ -68,6 +68,7 @@ class Renderer(BaseResource):
         *,
         context: RendererContext,
         gpu_device: GpuDevice,
+        dpi: int = 96,
     ):
         super().__init__(parent=context)
 
@@ -119,7 +120,7 @@ class Renderer(BaseResource):
 
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
-        self._font_engine = FontEngine(renderer=self)
+        self._font_engine = FontEngine(renderer=self, dpi=dpi)
 
     def _on_dispose(self) -> None:
         self._quad_renderer.dispose()
@@ -950,14 +951,17 @@ class FontEngine(BaseResource):
     _all_fonts: list[RendererFont]
     _hb_font_map: dict[RendererFont, hb.Font]
     _ft_image_cache: dict[
-        tuple[RendererFont, int, int],
+        tuple[RendererFont, int, int, int],
         tuple["RendererImage | None", int, int],
     ]
+    _ft_weight_axis_index: dict[RendererFont, int]
+    _dpi: int
 
-    def __init__(self, renderer: Renderer) -> None:
+    def __init__(self, renderer: Renderer, dpi: int = 96) -> None:
         super().__init__(parent=renderer)
 
         self._renderer = renderer
+        self._dpi = dpi
 
         self._all_fonts = ["sans-serif", "serif"]
         self._hb_font_map = {
@@ -969,6 +973,18 @@ class FontEngine(BaseResource):
             for font in self._all_fonts
         }
         self._ft_image_cache = {}
+        self._ft_weight_axis_index = {}
+
+        for font in self._all_fonts:
+            face = self._ft_face_map[font]
+            try:
+                info = face.get_variation_info()
+                for i, axis in enumerate(info.axes):
+                    if axis.tag == "wght":
+                        self._ft_weight_axis_index[font] = i
+                        break
+            except Exception:
+                pass
 
     @staticmethod
     def _load_harfbuzz_font(font: RendererFont) -> hb.Font:
@@ -994,15 +1010,29 @@ class FontEngine(BaseResource):
         ft_face = ft.Face(str(file_path))
         return ft_face
 
+    def _set_freetype_weight(self, font: RendererFont, weight: int) -> None:
+        if font not in self._ft_weight_axis_index:
+            return
+
+        face = self._ft_face_map[font]
+        axis_idx = self._ft_weight_axis_index[font]
+        coords = list(face.get_var_design_coords())
+        coords[axis_idx] = float(weight)
+        face.set_var_design_coords(coords)
+
     def _shape_text(
         self,
         font: RendererFont,
         text: str,
         font_size_px: int,
+        font_weight: int,
     ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
         hb_font = self._hb_font_map[font]
-        scale = font_size_px * 64  # HarfBuzz uses 26.6 fixed point
+        scale_factor = self._dpi / 96.0
+        effective_size_px = int(font_size_px * scale_factor)
+        scale = effective_size_px * 64  # HarfBuzz uses 26.6 fixed point
         hb_font.scale = (scale, scale)
+        hb_font.set_variations({"wght": font_weight})
 
         hb_buffer = hb.Buffer()
         hb_buffer.add_str(text)
@@ -1017,15 +1047,19 @@ class FontEngine(BaseResource):
         font: RendererFont,
         glyph_index: int,
         font_size_px: int,
+        font_weight: int,
     ) -> tuple["RendererImage | None", int, int]:
-        image_cache_key = (font, glyph_index, font_size_px)
+        scale_factor = self._dpi / 96.0
+        effective_size_px = int(font_size_px * scale_factor)
+        image_cache_key = (font, glyph_index, effective_size_px, font_weight)
 
         if image_cache_key in self._ft_image_cache:
             return self._ft_image_cache[image_cache_key]
 
         ft_face = self._ft_face_map[font]
-        ft_face.set_pixel_sizes(0, font_size_px)
-        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
+        ft_face.set_pixel_sizes(0, effective_size_px)
+        self._set_freetype_weight(font, font_weight)
+        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_LCD)
 
         bitmap_left = ft_face.glyph.bitmap_left
         bitmap_top = ft_face.glyph.bitmap_top
@@ -1037,12 +1071,22 @@ class FontEngine(BaseResource):
             return result
 
         h, w = bitmap.rows, bitmap.width
-        alpha = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, w) / 255.0
-        data = np.empty((h, w, 4), dtype=np.float32)
-        data[..., 0] = 1.0
-        data[..., 1] = 1.0
-        data[..., 2] = 1.0
-        data[..., 3] = alpha
+        pitch = bitmap.pitch
+
+        # Load buffer as (h, pitch)
+        buffer_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, pitch)
+
+        # Slice to remove padding if any
+        if pitch != w:
+            buffer_array = buffer_array[:, :w]
+
+        # Now reshape to (h, w // 3, 3)
+        rgb = buffer_array.reshape(h, w // 3, 3) / 255.0
+        data = np.empty((h, w // 3, 4), dtype=np.float32)
+        data[..., 0] = rgb[..., 0]
+        data[..., 1] = rgb[..., 1]
+        data[..., 2] = rgb[..., 2]
+        data[..., 3] = np.mean(rgb, axis=2)
 
         image = RendererImage(renderer=self._renderer, data=data)
         result = (image, bitmap_left, bitmap_top)
@@ -1061,17 +1105,22 @@ class FontEngine(BaseResource):
         dst_xy: tuple[int, int],
         dst_wh: tuple[int, int],
         wrap: bool,
+        font_weight: int,
     ):
         if not text:
             return
 
-        ft_face = self._ft_face_map[font]
-        ft_face.set_pixel_sizes(0, font_size_px)
-        metrics = ft_face.size
-        ascender = metrics.ascender / 64.0
-        height = metrics.height / 64.0
+        scale_factor = self._dpi / 96.0
+        effective_size_px = int(font_size_px * scale_factor)
 
-        infos, positions = self._shape_text(font, text, font_size_px)
+        ft_face = self._ft_face_map[font]
+        ft_face.set_pixel_sizes(0, effective_size_px)
+        self._set_freetype_weight(font, font_weight)
+        metrics = ft_face.size
+        ascender = metrics.ascender / 64.0 / scale_factor
+        height = metrics.height / 64.0 / scale_factor
+
+        infos, positions = self._shape_text(font, text, font_size_px, font_weight)
 
         dst_x, dst_y = dst_xy
         dst_w, dst_h = dst_wh
@@ -1094,10 +1143,10 @@ class FontEngine(BaseResource):
                 pen_y += height
                 continue
 
-            x_advance = pos.x_advance / 64.0
-            y_advance = pos.y_advance / 64.0
-            x_offset = pos.x_offset / 64.0
-            y_offset = pos.y_offset / 64.0
+            x_advance = pos.x_advance / 64.0 / scale_factor
+            y_advance = pos.y_advance / 64.0 / scale_factor
+            x_offset = pos.x_offset / 64.0 / scale_factor
+            y_offset = pos.y_offset / 64.0 / scale_factor
 
             # Word wrapping
             if wrap and not char.isspace():
@@ -1118,7 +1167,7 @@ class FontEngine(BaseResource):
                         c_char = text[c] if c < len(text) else " "
                         if c_char.isspace():
                             break
-                        word_width += positions[j].x_advance / 64.0
+                        word_width += positions[j].x_advance / 64.0 / scale_factor
 
                     # Wrap if word doesn't fit and we're not at start of line
                     if (pen_x + word_width > dst_x + dst_w) and (pen_x > start_x):
@@ -1126,14 +1175,14 @@ class FontEngine(BaseResource):
                         pen_y += height
 
             image, bitmap_left, bitmap_top = self._get_glyph_image(
-                font, codepoint, font_size_px
+                font, codepoint, font_size_px, font_weight
             )
 
             if image is not None:
-                qx = pen_x + x_offset + bitmap_left
-                qy = pen_y - bitmap_top - y_offset
-                qw = image.px_width
-                qh = image.px_height
+                qx = pen_x + x_offset + bitmap_left / scale_factor
+                qy = pen_y - bitmap_top / scale_factor - y_offset
+                qw = image.px_width / scale_factor
+                qh = image.px_height / scale_factor
 
                 # Intersection with dst rect
                 ix = max(qx, dst_x)
@@ -1325,6 +1374,7 @@ class RendererCanvas:
         font_size_px: int = 16,
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         wrap: bool = True,
+        font_weight: int = 400,
     ):
         """
         Adds quads for rendering the given text string with the given font.
@@ -1341,4 +1391,5 @@ class RendererCanvas:
             dst_xy=dst_xy,
             dst_wh=dst_wh,
             wrap=wrap,
+            font_weight=font_weight,
         )

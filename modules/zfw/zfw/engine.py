@@ -16,7 +16,14 @@ class Engine(BaseResource):
     _renderer: Renderer
     _rendered_frame_count: int
 
-    def __init__(self, *, app_name: str, debug: bool, swapchain_image_count: int):
+    def __init__(
+        self,
+        *,
+        app_name: str,
+        debug: bool,
+        swapchain_image_count: int,
+        dpi: int = 96,
+    ):
         super().__init__(parent=None)
 
         # Create contexts:
@@ -59,6 +66,7 @@ class Engine(BaseResource):
         self._renderer = Renderer(
             context=self._render_context,
             gpu_device=self._gpu_device,
+            dpi=dpi,
         )
 
         # State:
