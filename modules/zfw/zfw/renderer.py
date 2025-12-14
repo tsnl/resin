@@ -1066,7 +1066,7 @@ class FontEngine(BaseResource):
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, effective_size_px)
         self._set_freetype_weight(font, font_weight)
-        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
+        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_LCD)
 
         bitmap_left = ft_face.glyph.bitmap_left
         bitmap_top = ft_face.glyph.bitmap_top
@@ -1087,13 +1087,18 @@ class FontEngine(BaseResource):
         if pitch != w:
             buffer_array = buffer_array[:, :w]
 
-        # Create RGBA data (white color, alpha from bitmap)
-        alpha = buffer_array / 255.0
-        data = np.empty((h, w, 4), dtype=np.float32)
-        data[..., 0] = 1.0
-        data[..., 1] = 1.0
-        data[..., 2] = 1.0
-        data[..., 3] = alpha
+        # For LCD, width is 3x
+        real_w = w // 3
+
+        # Reshape to (h, real_w, 3)
+        rgb = buffer_array.reshape(h, real_w, 3)
+        rgb_norm = rgb / 255.0
+
+        data = np.empty((h, real_w, 4), dtype=np.float32)
+        data[..., 0] = rgb_norm[..., 0]
+        data[..., 1] = rgb_norm[..., 1]
+        data[..., 2] = rgb_norm[..., 2]
+        data[..., 3] = rgb_norm.mean(axis=2)
 
         image = RendererImage(renderer=self._renderer, data=data)
         result = (image, bitmap_left, bitmap_top)
