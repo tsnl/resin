@@ -970,19 +970,20 @@ class RendererQuadList:
         index = self._quad_count
         self._quad_count += 1
 
+        # Resolve:
+        src_wh = RendererQuadList._resolve_src_wh(dst_wh, src_wh, image)
+        assert src_wh is not None
+
         # write: dst_px
-        dst_w, dst_h = RendererQuadList._eval_dst_px_wh(dst_wh=dst_wh, image=image)
+        dst_w, dst_h = RendererQuadList._eval_dst_px_wh(dst_wh, src_wh)
         self._quad_array[index]["dst_px"][0] = [dst_xy[0], dst_xy[1]]
         self._quad_array[index]["dst_px"][1] = [dst_xy[0] + dst_w, dst_xy[1]]
         self._quad_array[index]["dst_px"][2] = [dst_xy[0] + dst_w, dst_xy[1] + dst_h]
         self._quad_array[index]["dst_px"][3] = [dst_xy[0], dst_xy[1] + dst_h]
 
         # write: src_uv
-        uv_x, uv_y, uv_w, uv_h = RendererQuadList._eval_src_uv_xywh(
-            src_xy=src_xy,
-            src_wh=src_wh,
-            image=image,
-        )
+        uv_xywh = RendererQuadList._eval_src_uv_xywh(src_xy, src_wh, image)
+        uv_x, uv_y, uv_w, uv_h = uv_xywh
         self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
         self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
         self._quad_array[index]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
@@ -1014,20 +1015,39 @@ class RendererQuadList:
         self._quad_array = new_array
 
     @staticmethod
+    def _resolve_src_wh(
+        dst_wh: tuple[int, int] | None,
+        src_wh: tuple[int, int] | None,
+        image: RendererImage | None,
+    ) -> tuple[int, int]:
+        if image is not None:
+            # Image present: check if src_wh is given to crop, else use full image size
+            if src_wh is not None:
+                return src_wh
+            else:
+                return image.px_width, image.px_height
+
+        # No image: src_wh is irrelevant even if given. Use dst_wh.
+        if dst_wh is not None:
+            return dst_wh
+
+        # Neither image nor dst_wh given: error
+        raise LogicError("Cannot determine quad size: supply dst_wh or image.")
+
+    @staticmethod
     def _eval_dst_px_wh(
         dst_wh: tuple[int, int] | None,
-        image: RendererImage | None,
+        src_wh: tuple[int, int],
     ) -> tuple[int, int]:
         if dst_wh is not None:
             return dst_wh
-        if image is not None:
-            return image.px_width, image.px_height
-        raise LogicError("RendererQuad dst_px_wh or image must be set")
+        else:
+            return src_wh
 
     @staticmethod
     def _eval_src_uv_xywh(
         src_xy: tuple[int, int],
-        src_wh: tuple[int, int] | None,
+        src_wh: tuple[int, int],
         image: RendererImage | None,
     ) -> tuple[float, float, float, float]:
         if image is None:
@@ -1038,11 +1058,7 @@ class RendererQuadList:
             src_xy[1] / image.px_height,
         )
         src_uv_wh = (
-            (1.0, 1.0)
-            if src_wh is None
-            else (
-                src_wh[0] / image.px_width,
-                src_wh[1] / image.px_height,
-            )
+            src_wh[0] / image.px_width,
+            src_wh[1] / image.px_height,
         )
         return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])
