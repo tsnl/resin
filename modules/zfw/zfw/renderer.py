@@ -1148,12 +1148,12 @@ class FontEngine(BaseResource):
         if not text:
             return
 
-        # Get the renderer's scale factor (for HiDPI)
-        # This is the content scale from the window (e.g., 2.0 for Retina displays)
-        renderer_scale = self._renderer.scale
+        # Strategy: Do ALL layout in physical (device) pixels.
+        # HarfBuzz and FreeType work at effective_size_px = font_size_px * scale.
+        # We accumulate pen position in physical pixels, then convert to logical
+        # pixels only when emitting quads.
 
-        # We render glyphs at the scaled size for sharpness
-        # effective_size_px is the actual pixel size we render at
+        renderer_scale = self._renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
 
         ft_face = self._ft_face_map[font]
@@ -1161,20 +1161,25 @@ class FontEngine(BaseResource):
         self._set_freetype_weight(font, font_weight)
         metrics = ft_face.size
 
-        # Font metrics are in 26.6 fixed point, divide by 64
-        # These are in physical pixels, so divide by renderer_scale to get logical pixels
-        ascender = metrics.ascender / 64.0 / renderer_scale
-        height = metrics.height / 64.0 / renderer_scale
+        # FreeType metrics are in 26.6 fixed point - convert to physical pixels
+        ascender_phys = metrics.ascender >> 6  # divide by 64, round toward zero
+        height_phys = metrics.height >> 6
 
         infos, positions = self._shape_text(font, text, font_size_px, font_weight)
 
         dst_x, dst_y = dst_xy
         dst_w, dst_h = dst_wh
 
-        # pen_x, pen_y are in logical coordinates (before scaling)
-        pen_x = float(dst_x)
-        pen_y = float(dst_y) + ascender
-        start_x = float(dst_x)
+        # Convert destination rect to physical pixels
+        dst_x_phys = int(dst_x * renderer_scale)
+        dst_y_phys = int(dst_y * renderer_scale)
+        dst_w_phys = int(dst_w * renderer_scale)
+        dst_h_phys = int(dst_h * renderer_scale)
+
+        # Pen position in physical pixels (integers)
+        pen_x_phys = dst_x_phys
+        pen_y_phys = dst_y_phys + ascender_phys
+        start_x_phys = dst_x_phys
 
         for i in range(len(infos)):
             info = infos[i]
@@ -1186,20 +1191,19 @@ class FontEngine(BaseResource):
 
             # Handle explicit newlines
             if char == "\n":
-                pen_x = start_x
-                pen_y += height
+                pen_x_phys = start_x_phys
+                pen_y_phys += height_phys
                 continue
 
-            # HarfBuzz positions are in 26.6 fixed point at the scaled size
-            # Divide by 64 to get physical pixels, then by renderer_scale for logical pixels
-            x_advance = pos.x_advance / 64.0 / renderer_scale
-            y_advance = pos.y_advance / 64.0 / renderer_scale
-            x_offset = pos.x_offset / 64.0 / renderer_scale
-            y_offset = pos.y_offset / 64.0 / renderer_scale
+            # HarfBuzz positions are in 26.6 fixed point - convert to physical pixels
+            # Use round (add 32 before shift) for better accuracy
+            x_advance_phys = (pos.x_advance + 32) >> 6
+            y_advance_phys = (pos.y_advance + 32) >> 6
+            x_offset_phys = (pos.x_offset + 32) >> 6
+            y_offset_phys = (pos.y_offset + 32) >> 6
 
             # Word wrapping
             if wrap and not char.isspace():
-                # Check if start of word
                 is_word_start = False
                 if i == 0:
                     is_word_start = True
@@ -1210,69 +1214,72 @@ class FontEngine(BaseResource):
                         is_word_start = True
 
                 if is_word_start:
-                    word_width = 0.0
+                    word_width_phys = 0
                     for j in range(i, len(infos)):
                         c = infos[j].cluster
                         c_char = text[c] if c < len(text) else " "
                         if c_char.isspace():
                             break
-                        word_width += positions[j].x_advance / 64.0 / renderer_scale
+                        word_width_phys += (positions[j].x_advance + 32) >> 6
 
                     # Wrap if word doesn't fit and we're not at start of line
-                    if (pen_x + word_width > dst_x + dst_w) and (pen_x > start_x):
-                        pen_x = start_x
-                        pen_y += height
+                    if (pen_x_phys + word_width_phys > dst_x_phys + dst_w_phys) and (
+                        pen_x_phys > start_x_phys
+                    ):
+                        pen_x_phys = start_x_phys
+                        pen_y_phys += height_phys
 
             image, bitmap_left, bitmap_top = self._get_glyph_image(
                 font, codepoint, font_size_px, font_weight
             )
 
             if image is not None:
-                # bitmap_left and bitmap_top are in physical pixels (at effective_size_px)
-                # Convert to logical coordinates
-                qx = pen_x + x_offset + bitmap_left / renderer_scale
-                qy = pen_y - bitmap_top / renderer_scale - y_offset
+                # bitmap_left and bitmap_top are already in physical pixels
+                # Glyph quad position in physical pixels
+                qx_phys = pen_x_phys + x_offset_phys + bitmap_left
+                qy_phys = pen_y_phys - bitmap_top - y_offset_phys
 
-                # image.px_width/height are physical pixels, convert to logical size
-                qw = image.px_width / renderer_scale
-                qh = image.px_height / renderer_scale
+                # Glyph dimensions in physical pixels
+                qw_phys = image.px_width
+                qh_phys = image.px_height
 
-                # Intersection with dst rect (in logical coordinates)
-                ix = max(qx, float(dst_x))
-                iy = max(qy, float(dst_y))
-                ir = min(qx + qw, float(dst_x + dst_w))
-                ib = min(qy + qh, float(dst_y + dst_h))
+                # Intersection with dst rect (in physical pixels)
+                ix_phys = max(qx_phys, dst_x_phys)
+                iy_phys = max(qy_phys, dst_y_phys)
+                ir_phys = min(qx_phys + qw_phys, dst_x_phys + dst_w_phys)
+                ib_phys = min(qy_phys + qh_phys, dst_y_phys + dst_h_phys)
 
-                if ir > ix and ib > iy:
-                    # Calculate clipping offsets in logical coordinates
-                    off_x_logical = ix - qx
-                    off_y_logical = iy - qy
-                    clip_w_logical = ir - ix
-                    clip_h_logical = ib - iy
+                if ir_phys > ix_phys and ib_phys > iy_phys:
+                    # Convert to logical pixel coordinates for output
+                    dst_ix = int(ix_phys / renderer_scale)
+                    dst_iy = int(iy_phys / renderer_scale)
+                    dst_ir = int((ir_phys + renderer_scale - 1) / renderer_scale)
+                    dst_ib = int((ib_phys + renderer_scale - 1) / renderer_scale)
+                    dst_iw = dst_ir - dst_ix
+                    dst_ih = dst_ib - dst_iy
 
-                    # Convert to physical pixel coordinates for src_xy/src_wh
-                    # These index into the glyph image which is at physical resolution
-                    src_off_x = int(off_x_logical * renderer_scale)
-                    src_off_y = int(off_y_logical * renderer_scale)
-                    src_w = int(clip_w_logical * renderer_scale)
-                    src_h = int(clip_h_logical * renderer_scale)
+                    # Clipping offset and size in physical pixels (for src rect)
+                    src_off_x = ix_phys - qx_phys
+                    src_off_y = iy_phys - qy_phys
+                    src_w = ir_phys - ix_phys
+                    src_h = ib_phys - iy_phys
 
                     # Ensure we don't exceed the image bounds
                     src_w = min(src_w, image.px_width - src_off_x)
                     src_h = min(src_h, image.px_height - src_off_y)
 
-                    if src_w > 0 and src_h > 0:
+                    if src_w > 0 and src_h > 0 and dst_iw > 0 and dst_ih > 0:
                         canvas.add_quad(
-                            dst_xy=(int(ix), int(iy)),
-                            dst_wh=(int(clip_w_logical), int(clip_h_logical)),
+                            dst_xy=(dst_ix, dst_iy),
+                            dst_wh=(dst_iw, dst_ih),
                             src_xy=(src_off_x, src_off_y),
                             src_wh=(src_w, src_h),
                             color=color,
                             image=image,
                         )
 
-            pen_x += x_advance
-            pen_y += y_advance
+            pen_x_phys += x_advance_phys
+            pen_y_phys += y_advance_phys
 
 
 #

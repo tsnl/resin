@@ -5,4 +5,4 @@ __all__ = [
     "shape",
 ]
 
-from uharfbuzz import Face, Font, Buffer, shape
+from uharfbuzz import Face, Font, Buffer, shape  # type: ignore
