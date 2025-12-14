@@ -42,6 +42,9 @@ zfw_build = { workspace = true }
 # zfw_build configuration
 #
 
+[tool.zfw_build]
+data_packs = ["data/font-Inter_4_1"]
+
 [[tool.zfw_build.shaders]]
 source = "shaders/r2d.slang"
 stages = { vertex = "vertexMain", fragment = "fragmentMain" }
