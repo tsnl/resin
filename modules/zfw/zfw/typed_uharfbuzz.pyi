@@ -4,6 +4,7 @@ class Face:
 class Font:
     scale: tuple[int, int]
     def __init__(self, face: Face) -> None: ...
+    def set_variations(self, variations: dict[str, float]) -> None: ...
 
 class Buffer:
     glyph_infos: list["GlyphInfo"]
