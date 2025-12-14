@@ -23,7 +23,7 @@ from .renderer import (
 )
 from .images import load_rgba_image
 
-TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
+TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
 
 class RendererTestEngine(BaseResource):
@@ -266,6 +266,64 @@ def test_renderer_text_clip():
     image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_text_clip.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(image).save(output_path)
+
+
+def test_renderer_text_matrix():
+    engine = RendererTestEngine()
+    canvas = RendererCanvas(renderer=engine.renderer)
+
+    fonts = ["sans-serif", "serif"]
+    sizes = [12, 18, 24]
+    weights = [100, 400, 700, 900]
+
+    start_x = 20
+    start_y = 20
+    padding = 10
+
+    current_y = start_y
+
+    for font in fonts:
+        for size in sizes:
+            row_height = size + 20
+            current_x = start_x
+
+            for weight in weights:
+                text = f"{font} {size}px w{weight}"
+
+                # Estimate width
+                box_w = 280
+                box_h = row_height
+
+                # Background quad with border
+                canvas.add_quad(
+                    dst_xy=(current_x, current_y),
+                    dst_wh=(box_w, box_h),
+                    color=(0.1, 0.1, 0.1, 1.0),
+                    border_color=(0.5, 0.5, 0.5, 1.0),
+                    border_thickness_px=(1, 1, 1, 1),
+                )
+
+                canvas.add_text(
+                    text=text,
+                    font=font,
+                    dst_xy=(current_x + 5, current_y + 5),
+                    dst_wh=(box_w - 10, box_h - 10),
+                    font_size_px=size,
+                    font_weight=weight,
+                    color=(1.0, 1.0, 1.0, 1.0),
+                    wrap=False,
+                )
+
+                current_x += box_w + padding
+
+            current_y += row_height + padding
+
+    engine.draw(canvas=canvas)
+    image = engine.readback()
+
+    output_path = Path("output/zfw/renderer_test/test_renderer_text_matrix.png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
 

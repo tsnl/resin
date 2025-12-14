@@ -63,10 +63,14 @@ class Engine(BaseResource):
         )
 
         # Create renderer:
+        scale_x, scale_y = self._window.content_scale
+        scale = scale_x
+
         self._renderer = Renderer(
             context=self._render_context,
             gpu_device=self._gpu_device,
-            dpi=dpi,
+            dpi=int(96 * scale),
+            scale=scale,
         )
 
         # State:

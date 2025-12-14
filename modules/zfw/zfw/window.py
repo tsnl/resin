@@ -102,6 +102,10 @@ class Window(BaseResource):
     def hide(self):
         glfw.hide_window(self.glfw_window_handle)
 
+    @property
+    def content_scale(self) -> tuple[float, float]:
+        return glfw.get_window_content_scale(self.glfw_window_handle)
+
     @staticmethod
     def poll_events():
         glfw.poll_events()

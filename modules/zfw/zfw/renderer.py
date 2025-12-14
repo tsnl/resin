@@ -62,6 +62,7 @@ class Renderer(BaseResource):
     _default_white_image: "RendererImage"
     _quad_renderer: "QuadRenderer"
     _font_engine: "FontEngine"
+    _scale: float
 
     def __init__(
         self,
@@ -69,11 +70,13 @@ class Renderer(BaseResource):
         context: RendererContext,
         gpu_device: GpuDevice,
         dpi: int = 96,
+        scale: float = 1.0,
     ):
         super().__init__(parent=context)
 
         self._context = context
         self._gpu_device = gpu_device
+        self._scale = scale
 
         self._atlases = {
             1: RendererAtlas(renderer=self, channels=1),
@@ -121,6 +124,10 @@ class Renderer(BaseResource):
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
         self._font_engine = FontEngine(renderer=self, dpi=dpi)
+
+    @property
+    def scale(self) -> float:
+        return self._scale
 
     def _on_dispose(self) -> None:
         self._quad_renderer.dispose()
@@ -1059,7 +1066,7 @@ class FontEngine(BaseResource):
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, effective_size_px)
         self._set_freetype_weight(font, font_weight)
-        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_LCD)
+        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
 
         bitmap_left = ft_face.glyph.bitmap_left
         bitmap_top = ft_face.glyph.bitmap_top
@@ -1080,13 +1087,13 @@ class FontEngine(BaseResource):
         if pitch != w:
             buffer_array = buffer_array[:, :w]
 
-        # Now reshape to (h, w // 3, 3)
-        rgb = buffer_array.reshape(h, w // 3, 3) / 255.0
-        data = np.empty((h, w // 3, 4), dtype=np.float32)
-        data[..., 0] = rgb[..., 0]
-        data[..., 1] = rgb[..., 1]
-        data[..., 2] = rgb[..., 2]
-        data[..., 3] = np.mean(rgb, axis=2)
+        # Create RGBA data (white color, alpha from bitmap)
+        alpha = buffer_array / 255.0
+        data = np.empty((h, w, 4), dtype=np.float32)
+        data[..., 0] = 1.0
+        data[..., 1] = 1.0
+        data[..., 2] = 1.0
+        data[..., 3] = alpha
 
         image = RendererImage(renderer=self._renderer, data=data)
         result = (image, bitmap_left, bitmap_top)
@@ -1286,10 +1293,17 @@ class RendererCanvas:
 
         # write: dst_px
         dst_w, dst_h = RendererCanvas._eval_dst_px_wh(dst_wh, src_wh)
-        self._quad_array[index]["dst_px"][0] = [dst_xy[0], dst_xy[1]]
-        self._quad_array[index]["dst_px"][1] = [dst_xy[0] + dst_w, dst_xy[1]]
-        self._quad_array[index]["dst_px"][2] = [dst_xy[0] + dst_w, dst_xy[1] + dst_h]
-        self._quad_array[index]["dst_px"][3] = [dst_xy[0], dst_xy[1] + dst_h]
+
+        scale = self.renderer.scale
+        x = int(dst_xy[0] * scale)
+        y = int(dst_xy[1] * scale)
+        w = int(dst_w * scale)
+        h = int(dst_h * scale)
+
+        self._quad_array[index]["dst_px"][0] = [x, y]
+        self._quad_array[index]["dst_px"][1] = [x + w, y]
+        self._quad_array[index]["dst_px"][2] = [x + w, y + h]
+        self._quad_array[index]["dst_px"][3] = [x, y + h]
 
         # write: src_uv
         uv_xywh = RendererCanvas._eval_src_uv_xywh(src_xy, src_wh, image)
@@ -1306,7 +1320,12 @@ class RendererCanvas:
         # write: color, border_color, border_thickness_px
         self._quad_array[index]["color"] = color
         self._quad_array[index]["border_color"] = border_color
-        self._quad_array[index]["border_thickness_px"] = border_thickness_px
+        self._quad_array[index]["border_thickness_px"] = [
+            int(border_thickness_px[0] * scale),
+            int(border_thickness_px[1] * scale),
+            int(border_thickness_px[2] * scale),
+            int(border_thickness_px[3] * scale),
+        ]
 
         # write: height
         self._quad_array[index]["height"] = float(index)
