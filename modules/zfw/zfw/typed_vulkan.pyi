@@ -308,7 +308,7 @@ class VkPhysicalDeviceLimits:
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceDynamicRenderingFeatures.html
 @dataclass
 class VkPhysicalDeviceDynamicRenderingFeatures:
-    pNext: "VkPhysicalDeviceVulkan12Features | None" = None
+    pNext: "VkPhysicalDeviceVulkan12Features | None"
     dynamicRendering: bool
 
 @dataclass
@@ -2012,7 +2012,7 @@ class VkDescriptorBufferInfo:
 @dataclass
 class VkDescriptorImageInfo:
     sampler: VkSampler | None
-    imageView: VkImageView
+    imageView: VkImageView | None
     imageLayout: VkImageLayout
 
 # VkWriteDescriptorSet
