@@ -1,6 +1,8 @@
 __all__ = [
+    "convert_linear_to_srgb",
     "convert_srgb_to_linear",
-    "load_image_data",
+    "convert_srgb_to_linear",
+    "load_rgba_image",
 ]
 
 from pathlib import Path
@@ -8,17 +10,80 @@ from pathlib import Path
 import PIL.Image
 import numpy as np
 
+from .basic import ColorSpace
 
-def load_image_data(file_path: Path | str) -> np.ndarray:
-    srgb = np.array(PIL.Image.open(file_path).convert("RGBA"))
-    srgb_normalized = srgb.astype(np.float32) / 255.0
-    linear = convert_srgb_to_linear(srgb_normalized[..., :3])
-    alpha = srgb_normalized[..., 3:4]
-    return np.concatenate((linear, alpha), axis=-1)
+
+def load_rgba_image(
+    file_path: Path | str,
+    file_color_space: ColorSpace = "srgb",
+    output_color_space: ColorSpace = "linear",
+) -> np.ndarray:
+    """
+    Loads an RGBA image as a normalized NumPy array in linear color space.
+
+    :param file_path: The path to the image file to load.
+    """
+
+    src = np.array(PIL.Image.open(file_path).convert("RGBA"))
+    src_normalized = src.astype(np.float32) / 255.0
+    dst_rgb_linear = convert_color(
+        src_normalized[..., :3],
+        src_color_space=file_color_space,
+        dst_color_space=output_color_space,
+    )
+    dst_alpha = src_normalized[..., 3:4]
+    return np.concatenate((dst_rgb_linear, dst_alpha), axis=-1)
+
+
+def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
+    """
+    Saves an RGBA image from a normalized NumPy array in linear color space.
+
+    :param file_path: The path to save the image file to.
+    :param data: The image data as a NumPy array.
+    """
+
+    assert data.ndim == 3, "Data must be a 3D array: (height, width, channels)"
+    assert data.shape[-1] == 4, "Data must have 4 channels (RGBA)"
+
+    linear = data[..., :3]
+    alpha = data[..., 3:4]
+    srgb_normalized = convert_linear_to_srgb(linear)
+    srgb_normalized = np.concatenate((srgb_normalized, alpha), axis=-1)
+    srgb = (srgb_normalized * 255.0).clip(0, 255).astype(np.uint8)
+    PIL.Image.fromarray(srgb, mode="RGBA").save(file_path)
+
+
+def convert_color(
+    data: np.ndarray, src_color_space: ColorSpace, dst_color_space: ColorSpace
+) -> np.ndarray:
+    """
+    Convert an image between color spaces.
+
+    :param data: The image data as a NumPy array.
+    :param src_color_space: The source color space of the image.
+    :param dst_color_space: The destination color space of the image.
+    """
+
+    if src_color_space == dst_color_space:
+        return data
+
+    match (src_color_space, dst_color_space):
+        case ("srgb", "linear"):
+            return convert_srgb_to_linear(data)
+        case ("linear", "srgb"):
+            return convert_linear_to_srgb(data)
+        case _:
+            raise ValueError(
+                f"Unsupported color space conversion: {repr(src_color_space)} to {repr(dst_color_space)}"
+            )
 
 
 def convert_srgb_to_linear(srgb_normalized: np.ndarray) -> np.ndarray:
-    """Convert an sRGB image to linear color space."""
+    """
+    Convert an sRGB image to linear color space.
+    """
+
     threshold = 0.04045
     below_threshold = srgb_normalized <= threshold
     above_threshold = srgb_normalized > threshold
@@ -30,3 +95,21 @@ def convert_srgb_to_linear(srgb_normalized: np.ndarray) -> np.ndarray:
     ) ** 2.4
 
     return linear
+
+
+def convert_linear_to_srgb(linear_normalized: np.ndarray) -> np.ndarray:
+    """
+    Convert a linear color space image to sRGB.
+    """
+
+    threshold = 0.0031308
+    below_threshold = linear_normalized <= threshold
+    above_threshold = linear_normalized > threshold
+
+    srgb_normalized = np.zeros_like(linear_normalized)
+    srgb_normalized[below_threshold] = linear_normalized[below_threshold] * 12.92
+    srgb_normalized[above_threshold] = (
+        1.055 * (linear_normalized[above_threshold] ** (1.0 / 2.4)) - 0.055
+    )
+
+    return srgb_normalized

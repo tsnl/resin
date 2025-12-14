@@ -1,9 +1,5 @@
 import argparse
 import sys
-from pathlib import Path
-
-import PIL.Image
-import numpy as np
 
 import zfw
 
@@ -38,7 +34,7 @@ def main():
 
     block_01_image = zfw.RendererImage(
         renderer=engine.renderer,
-        data=zfw.load_image_data(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
+        data=zfw.load_rgba_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
     while not engine.window.should_close():

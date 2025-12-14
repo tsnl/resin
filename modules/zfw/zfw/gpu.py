@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
 import numpy as np
 import numpy.typing as npt
 
-from .basic import BaseResource
+from .basic import BaseResource, ColorSpace
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -1162,13 +1162,13 @@ class GpuMemory(BaseResource):
 class GpuImageMeta:
     shape: tuple[int, int, int]  # (height, width, channels)
     dtype: npt.DTypeLike
-    color_space: "GpuColorSpace" = "linear"
+    color_space: ColorSpace = "linear"
 
     @staticmethod
     def from_array(
         array: np.ndarray,
         *,
-        color_space: "GpuColorSpace" = "linear",
+        color_space: ColorSpace = "linear",
     ) -> "GpuImageMeta":
         if array.ndim != 3:
             raise LogicError(
@@ -1236,11 +1236,6 @@ GpuImageLayout: TypeAlias = Literal[
     "texture-binding",
     "transfer-src-optimal",
     "transfer-dst-optimal",
-]
-
-GpuColorSpace: TypeAlias = Literal[
-    "srgb",
-    "linear",
 ]
 
 

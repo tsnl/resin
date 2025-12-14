@@ -32,7 +32,7 @@ __all__ = [
     "Window",
     "WindowContext",
     "convert_srgb_to_linear",
-    "load_image_data",
+    "load_rgba_image",
 ]
 
 from .basic import BaseResource, SupportsWrite
@@ -69,4 +69,4 @@ from .renderer import (
     RendererQuad,
 )
 from .window import Window, WindowContext
-from .images import load_image_data, convert_srgb_to_linear
+from .images import load_rgba_image, convert_srgb_to_linear

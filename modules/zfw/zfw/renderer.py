@@ -1,5 +1,6 @@
 __all__ = [
     "Renderer",
+    "RendererAtlas",
     "RendererContext",
     "RendererImage",
     "RendererQuadArray",
@@ -32,6 +33,7 @@ from .gpu import (
     GpuSemaphore,
     GpuShader,
 )
+
 
 #
 # Renderer API:
@@ -148,6 +150,9 @@ class Renderer(BaseResource):
             done_semaphores=done_semaphores,
             fence=fence,
         )
+
+    def atlas(self, channels: "RendererAtlasChannels") -> "RendererAtlas":
+        return self._atlases[channels]
 
 
 #

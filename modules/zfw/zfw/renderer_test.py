@@ -22,7 +22,7 @@ from .renderer import (
     RendererQuadArray,
     RendererQuad,
 )
-from .images import load_image_data
+from .images import load_rgba_image
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
 
@@ -135,7 +135,7 @@ def test_renderer_quads():
 def test_renderer_image():
     engine = RendererTestEngine()
 
-    image_data = load_image_data("test_data/rainbow-512x512.png")
+    image_data = load_rgba_image("test_data/rainbow-512x512.png")
     assert image_data.shape == (512, 512, 4)
 
     image = RendererImage(renderer=engine.renderer, data=image_data)
@@ -143,8 +143,10 @@ def test_renderer_image():
     engine.draw(
         quads=[
             RendererQuad(
-                dst_xy=(0, 0),
+                dst_xy=(16, 16),
                 color=(1.0, 1.0, 1.0, 1.0),
+                border_thickness_px=(8, 8, 8, 8),
+                border_color=(1.0, 1.0, 0.0, 1.0),
                 image=image,
             ),
         ]

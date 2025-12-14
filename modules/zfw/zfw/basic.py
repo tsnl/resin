@@ -1,11 +1,13 @@
 __all__ = [
     "BaseResource",
+    "ColorSpace",
     "SupportsWrite",
     "expect",
+    "next_po2",
 ]
 
 from abc import ABC
-from typing import Protocol, TypeVar, Self
+from typing import Protocol, TypeVar, Self, TypeAlias, Literal
 from weakref import ref as WeakRef
 
 import numpy as np
@@ -154,3 +156,10 @@ class StructuredNDArray(np.ndarray, ABC):
     @classmethod
     def of(cls, arr: npt.NDArrayLike) -> Self:
         return np.asarray(arr, dtype=cls.DTYPE).view(cls)
+
+
+#
+# Constants
+#
+
+ColorSpace: TypeAlias = Literal["srgb", "linear"]
