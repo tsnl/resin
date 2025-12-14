@@ -140,10 +140,15 @@ def test_renderer_image():
 
     image = RendererImage(renderer=engine.renderer, data=image_data)
 
+    border_thickness_px = 8
+
     engine.draw(
         quads=[
             RendererQuad(
-                dst_xy=(16, 16),
+                dst_xy=(
+                    (TEST_IMAGE_W - image_data.shape[1] - border_thickness_px) // 2,
+                    (TEST_IMAGE_H - image_data.shape[0] - border_thickness_px) // 2,
+                ),
                 color=(1.0, 1.0, 1.0, 1.0),
                 border_thickness_px=(8, 8, 8, 8),
                 border_color=(1.0, 1.0, 0.0, 1.0),
