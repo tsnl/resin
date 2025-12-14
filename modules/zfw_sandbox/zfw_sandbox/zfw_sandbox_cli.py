@@ -30,7 +30,7 @@ def main():
         app_name="Zero Sandbox",
         debug=args.debug,
         swapchain_image_count=args.swapchain_image_count,
-        enable_subpixel_aa_override=False,
+        enable_subpixel_aa_override=True,
     )
 
     block_01_image = zfw.RendererImage(
