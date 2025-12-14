@@ -13,6 +13,8 @@ KENNEY_SOKOBAN_DATA_PATH = (
     / "PNG/Default size"
 )
 
+FONT_SIZE_PX = 18
+
 
 def main():
     ap = argparse.ArgumentParser(description="Zero Sandbox Application")
@@ -70,7 +72,7 @@ def main():
             font="sans-serif",
             dst_xy=(40, 144),
             dst_wh=(400, 100),
-            font_size_px=18,
+            font_size_px=FONT_SIZE_PX,
             font_weight=100,
             color=(0.0, 0.0, 0.0, 1.0),
             wrap=False,
@@ -80,7 +82,7 @@ def main():
             font="sans-serif",
             dst_xy=(40, 174),
             dst_wh=(400, 100),
-            font_size_px=18,
+            font_size_px=FONT_SIZE_PX,
             font_weight=400,
             color=(0.0, 0.0, 0.0, 1.0),
             wrap=False,
@@ -90,7 +92,7 @@ def main():
             font="sans-serif",
             dst_xy=(40, 204),
             dst_wh=(400, 100),
-            font_size_px=18,
+            font_size_px=FONT_SIZE_PX,
             font_weight=800,
             color=(0.0, 0.0, 0.0, 1.0),
             wrap=False,
@@ -100,7 +102,7 @@ def main():
             font="sans-serif",
             dst_xy=(40, 234),
             dst_wh=(400, 100),
-            font_size_px=18,
+            font_size_px=FONT_SIZE_PX,
             font_weight=1200,
             color=(0.0, 0.0, 0.0, 1.0),
             wrap=False,
