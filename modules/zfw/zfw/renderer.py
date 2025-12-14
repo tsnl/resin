@@ -2,16 +2,16 @@ __all__ = [
     "Renderer",
     "RendererAtlas",
     "RendererContext",
+    "RendererFont",
     "RendererImage",
     "RendererQuadArray",
 ]
 
 from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, cast
 
 import numpy as np
-import uharfbuzz as hb
+import freetype as ft
 
 from .basic import BaseResource, round_up_to_po2
 from .bundled_data import BUNDLED_DATA_PATH
@@ -34,6 +34,7 @@ from .gpu import (
     GpuSemaphore,
     GpuShader,
 )
+from . import typed_uharfbuzz as hb
 
 
 #
@@ -60,6 +61,7 @@ class Renderer(BaseResource):
     _atlas_descriptor_set: GpuDescriptorSet
     _default_white_image: "RendererImage"
     _quad_renderer: "QuadRenderer"
+    _font_cache: "FontCache"
 
     def __init__(
         self,
@@ -116,6 +118,8 @@ class Renderer(BaseResource):
         )
 
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
+
+        self._font_cache = FontCache(renderer=self)
 
     def _on_dispose(self) -> None:
         self._quad_renderer.dispose()
@@ -941,9 +945,46 @@ class RendererQuadArray(np.ndarray):
 RendererFont: TypeAlias = Literal["sans-serif", "serif"]
 
 
-class RendererFontAtlas:
-    def __init__(self) -> None:
-        pass
+class FontCache(BaseResource):
+    _all_fonts: list[RendererFont]
+    _hb_font_map: dict[RendererFont, hb.Font]
+
+    def __init__(self, renderer: Renderer) -> None:
+        super().__init__(parent=renderer)
+
+        self._all_fonts = ["sans-serif", "serif"]
+        self._hb_font_map = {
+            font: FontCache._load_harfbuzz_font(font)  #
+            for font in self._all_fonts
+        }
+        self._ft_font_map = {
+            font: FontCache._load_freetype_font(font)  #
+            for font in self._all_fonts
+        }
+
+    @staticmethod
+    def _load_harfbuzz_font(font: RendererFont) -> hb.Font:
+        file_path = {
+            "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
+            "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
+        }[font]
+
+        with open(file_path, "rb") as f:
+            hb_blob = f.read()
+
+        hb_face = hb.Face(hb_blob)
+        hb_font = hb.Font(hb_face)
+        return hb_font
+
+    @staticmethod
+    def _load_freetype_font(font: RendererFont) -> ft.Face:
+        file_path = {
+            "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
+            "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
+        }[font]
+
+        ft_face = ft.Face(str(file_path))
+        return ft_face
 
 
 #
@@ -1115,4 +1156,4 @@ class RendererCanvas:
         Adds quads for rendering the given text string with the given font.
         """
 
-        raise NotImplementedError()
+        pass
