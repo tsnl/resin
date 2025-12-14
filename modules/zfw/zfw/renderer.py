@@ -1042,10 +1042,22 @@ class FontEngine(BaseResource):
         text: str,
         font: RendererFont,
         font_size_px: int,
+        color: tuple[float, float, float, float],
         dst_xy: tuple[int, int],
         dst_wh: tuple[int, int],
+        wrap: bool,
     ):
-        # TODO: need to wrap
+        # TODO:
+        # - use harfbuzz to shape the text and get glyphs
+        # - for each glyph, get the glyph image from freetype
+        # - for each glyph image, add a quad to the canvas at the appropriate position
+        #   - ensure `quad.src_wh` and `quad.dst_wh` are used to clip partial glyphs in
+        #     the rect given by `dst_xy` and `dst_wh`
+        #   - wrap text as needed to fit within `dst_wh` if 'wrap' is specified,
+        #     otherwise the overflow is just to hide, but must handle partial glyphs
+        #   - assume (ensure?) the glyph images are solid white: use the `quad.color`
+        #     parameter to tint the glyphs to the desired color. Just pass-through the
+        #     user argument.
         raise NotImplementedError()
 
 
@@ -1212,10 +1224,23 @@ class RendererCanvas:
         text: str,
         font: "RendererFont",
         dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int],
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        wrap: bool = True,
     ):
         """
         Adds quads for rendering the given text string with the given font.
         """
 
         font_cache = self.renderer._font_engine
+
+        font_cache._add_quads_to_canvas(
+            canvas=self,
+            text=text,
+            font=font,
+            font_size_px=16,
+            color=color,
+            dst_xy=dst_xy,
+            dst_wh=dst_wh,
+            wrap=wrap,
+        )
