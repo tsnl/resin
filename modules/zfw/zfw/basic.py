@@ -3,7 +3,7 @@ __all__ = [
     "ColorSpace",
     "SupportsWrite",
     "expect",
-    "next_po2",
+    "round_up_to_po2",
 ]
 
 from abc import ABC
@@ -132,7 +132,7 @@ def expect[T](opt_value: T | None, message: str = "Expected value to not be None
 #
 
 
-def next_po2(x: int) -> int:
+def round_up_to_po2(x: int) -> int:
     """Return the next power of two greater than or equal to x."""
     if x <= 0:
         return 1

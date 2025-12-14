@@ -30,7 +30,7 @@ def test_image_roundtrip():
 
 
 def test_srgb_to_linear_to_srgb_roundtrip():
-    ITER_COUNT = 1024
+    ITER_COUNT = 1 << 10
 
     np.random.seed(42)
     for _ in range(ITER_COUNT):

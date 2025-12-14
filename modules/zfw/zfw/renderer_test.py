@@ -20,7 +20,7 @@ from .renderer import (
     RendererContext,
     Renderer,
     RendererQuadArray,
-    RendererQuad,
+    RendererQuadList,
 )
 from .images import load_rgba_image
 
@@ -89,7 +89,7 @@ class RendererTestEngine(BaseResource):
             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
         )
 
-    def draw(self, quads: RendererQuadArray | list[RendererQuad]):
+    def draw(self, quads: RendererQuadArray):
         fence = GpuFence(device=self.gpu_device)
         self.renderer.draw(
             quads=quads,
@@ -104,27 +104,26 @@ class RendererTestEngine(BaseResource):
 def test_renderer_quads():
     engine = RendererTestEngine()
 
-    engine.draw(
-        quads=[
-            RendererQuad(
-                dst_xy=(32, 64),
-                dst_wh=(512, 256),
-                color=(1.0, 1.0, 1.0, 1.0),
-                border_thickness_px=(0, 0, 8, 0),
-                border_color=(0.0, 0.1, 0.8, 1.0),
-            ),
-            RendererQuad(
-                dst_xy=(40, 72),
-                dst_wh=(64, 64),
-                color=(0.0, 0.2, 0.0, 1.0),
-            ),
-            RendererQuad(
-                dst_xy=(112, 72),
-                dst_wh=(64, 64),
-                color=(0.0, 0.2, 0.0, 0.5),
-            ),
-        ]
+    quads = RendererQuadList(renderer=engine.renderer)
+    quads.add_quad(
+        dst_xy=(32, 64),
+        dst_wh=(512, 256),
+        color=(1.0, 1.0, 1.0, 1.0),
+        border_thickness_px=(0, 0, 8, 0),
+        border_color=(0.0, 0.1, 0.8, 1.0),
     )
+    quads.add_quad(
+        dst_xy=(40, 72),
+        dst_wh=(64, 64),
+        color=(0.0, 0.2, 0.0, 1.0),
+    )
+    quads.add_quad(
+        dst_xy=(112, 72),
+        dst_wh=(64, 64),
+        color=(0.0, 0.2, 0.0, 0.5),
+    )
+
+    engine.draw(quads=quads.finish())
     image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
@@ -141,21 +140,19 @@ def test_renderer_image():
     image = RendererImage(renderer=engine.renderer, data=image_data)
 
     border_thickness_px = 8
-
-    engine.draw(
-        quads=[
-            RendererQuad(
-                dst_xy=(
-                    (TEST_IMAGE_W - image_data.shape[1] - border_thickness_px) // 2,
-                    (TEST_IMAGE_H - image_data.shape[0] - border_thickness_px) // 2,
-                ),
-                color=(1.0, 1.0, 1.0, 1.0),
-                border_thickness_px=(8, 8, 8, 8),
-                border_color=(1.0, 1.0, 0.0, 1.0),
-                image=image,
-            ),
-        ]
+    quads = RendererQuadList(renderer=engine.renderer)
+    quads.add_quad(
+        dst_xy=(
+            (TEST_IMAGE_W - image_data.shape[1] - border_thickness_px) // 2,
+            (TEST_IMAGE_H - image_data.shape[0] - border_thickness_px) // 2,
+        ),
+        color=(1.0, 1.0, 1.0, 1.0),
+        border_thickness_px=(8, 8, 8, 8),
+        border_color=(1.0, 1.0, 0.0, 1.0),
+        image=image,
     )
+
+    engine.draw(quads=quads.finish())
     output_image = engine.readback()
 
     output_path = Path("output/zfw/renderer_test/test_renderer_image.png")

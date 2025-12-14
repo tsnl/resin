@@ -26,8 +26,8 @@ __all__ = [
     "RendererAtlas",
     "RendererContext",
     "RendererImage",
-    "RendererQuad",
     "RendererQuadArray",
+    "RendererQuadList",
     "SupportsWrite",
     "Window",
     "WindowContext",
@@ -66,7 +66,7 @@ from .renderer import (
     RendererContext,
     RendererImage,
     RendererQuadArray,
-    RendererQuad,
+    RendererQuadList,
 )
 from .window import Window, WindowContext
 from .images import load_rgba_image, convert_srgb_to_linear

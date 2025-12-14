@@ -40,32 +40,31 @@ def main():
     while not engine.window.should_close():
         engine.update()
 
-        engine.render(
-            quads=[
-                zfw.RendererQuad(
-                    dst_xy=(32, 64),
-                    dst_wh=(512, 256),
-                    color=(1.0, 1.0, 1.0, 1.0),
-                    border_thickness_px=(0, 0, 8, 0),
-                    border_color=(0.0, 0.1, 0.8, 1.0),
-                ),
-                zfw.RendererQuad(
-                    dst_xy=(40, 72),
-                    dst_wh=(64, 64),
-                    color=(0.0, 0.2, 0.0, 1.0),
-                ),
-                zfw.RendererQuad(
-                    dst_xy=(112, 72),
-                    dst_wh=(64, 64),
-                    color=(0.0, 0.2, 0.0, 0.5),
-                ),
-                zfw.RendererQuad(
-                    dst_xy=(184, 72),
-                    dst_wh=(64, 64),
-                    image=block_01_image,
-                ),
-            ]
+        quads = zfw.RendererQuadList(renderer=engine.renderer)
+        quads.add_quad(
+            dst_xy=(32, 64),
+            dst_wh=(512, 256),
+            color=(1.0, 1.0, 1.0, 1.0),
+            border_thickness_px=(0, 0, 8, 0),
+            border_color=(0.0, 0.1, 0.8, 1.0),
         )
+        quads.add_quad(
+            dst_xy=(40, 72),
+            dst_wh=(64, 64),
+            color=(0.0, 0.2, 0.0, 1.0),
+        )
+        quads.add_quad(
+            dst_xy=(112, 72),
+            dst_wh=(64, 64),
+            color=(0.0, 0.2, 0.0, 0.5),
+        )
+        quads.add_quad(
+            dst_xy=(184, 72),
+            dst_wh=(64, 64),
+            image=block_01_image,
+        )
+
+        engine.render(quads=quads.finish())
 
 
 def print_gpu_debug_info(

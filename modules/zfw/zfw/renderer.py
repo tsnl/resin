@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 import numpy as np
-from zfw.excepts import LogicError
+import uharfbuzz as hb
 
-from .basic import BaseResource, next_po2
+from .basic import BaseResource, round_up_to_po2
 from .bundled_data import BUNDLED_DATA_PATH
+from .excepts import LogicError
 from .gpu import (
     GpuBuffer,
     GpuBufferMeta,
@@ -128,7 +129,7 @@ class Renderer(BaseResource):
     def draw(
         self,
         *,
-        quads: "RendererQuadArray | list[RendererQuad]",
+        quads: "RendererQuadArray",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -620,7 +621,7 @@ class QuadRenderer(BaseResource):
             self._quad_array_device_buf.dispose()
 
         # Create new resources
-        new_capacity = max(8, next_po2(capacity))
+        new_capacity = max(8, round_up_to_po2(capacity))
         self._quad_capacity = new_capacity
 
         self._batch_uniform_device_buf = GpuBuffer(
@@ -667,7 +668,7 @@ class QuadRenderer(BaseResource):
     def draw(
         self,
         *,
-        quads: "RendererQuadArray | list[RendererQuad]",
+        quads: "RendererQuadArray",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -678,12 +679,6 @@ class QuadRenderer(BaseResource):
 
         The quads array should have dtype RENDERER_QUAD_DTYPE.
         """
-
-        if isinstance(quads, list):
-            quads = RendererQuadArray.from_quad_list(
-                quad_list=quads,
-                default_white_image=self.renderer._default_white_image,
-            )
 
         command_encoder = GpuCommandEncoder(
             device=self.gpu_device,
@@ -937,77 +932,117 @@ class RendererQuadArray(np.ndarray):
     def __new__(cls, shape: tuple[int, ...] | int) -> "RendererQuadArray":
         return np.zeros(shape, dtype=QuadRenderer.QUAD_DTYPE).view(cls)
 
-    @staticmethod
-    def from_quad_list(
+
+class RendererQuadList:
+    def __init__(self, renderer: Renderer, capacity: int = 64):
+        self.renderer = renderer
+        self._quad_array = RendererQuadArray(capacity)
+        self._quad_count = 0
+
+    def __len__(self) -> int:
+        return self._quad_count
+
+    @property
+    def capacity(self) -> int:
+        return len(self._quad_array)
+
+    def finish(self) -> RendererQuadArray:
+        return self._quad_array[: self._quad_count].view(RendererQuadArray)
+
+    def add_quad(
+        self,
         *,
-        quad_list: list["RendererQuad"],
-        default_white_image: RendererImage,
-        layer_height_offset: float = 0.0,
-    ) -> "RendererQuadArray":
-        arr = RendererQuadArray(len(quad_list))
-        for i, quad in enumerate(quad_list):
-            # dst_px
-            x, y = quad.dst_xy
-            w, h = quad.eval_dst_px_wh()
-            arr[i]["dst_px"][0] = [x, y]
-            arr[i]["dst_px"][1] = [x + w, y]
-            arr[i]["dst_px"][2] = [x + w, y + h]
-            arr[i]["dst_px"][3] = [x, y + h]
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int] | None = None,
+        src_xy: tuple[int, int] = (0, 0),
+        src_wh: tuple[int, int] | None = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
+        image: RendererImage | None = None,
+    ) -> int:
+        # Ensure capacity
+        if len(self) >= self.capacity:
+            self.reserve(1 + len(self))
+        assert len(self) < self.capacity
 
-            # src_uv
-            uv_x, uv_y, uv_w, uv_h = quad.eval_src_uv_xywh()
-            arr[i]["src_uv"][0] = [uv_x, uv_y]
-            arr[i]["src_uv"][1] = [uv_x + uv_w, uv_y]
-            arr[i]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
-            arr[i]["src_uv"][3] = [uv_x, uv_y + uv_h]
+        # Reserve index
+        index = self._quad_count
+        self._quad_count += 1
 
-            # image_id
-            quad_image = quad.image or default_white_image
-            arr[i]["image_id"] = quad_image.image_id
+        # write: dst_px
+        dst_w, dst_h = RendererQuadList._eval_dst_px_wh(dst_wh=dst_wh, image=image)
+        self._quad_array[index]["dst_px"][0] = [dst_xy[0], dst_xy[1]]
+        self._quad_array[index]["dst_px"][1] = [dst_xy[0] + dst_w, dst_xy[1]]
+        self._quad_array[index]["dst_px"][2] = [dst_xy[0] + dst_w, dst_xy[1] + dst_h]
+        self._quad_array[index]["dst_px"][3] = [dst_xy[0], dst_xy[1] + dst_h]
 
-            # color, border_color, border_thickness_px
-            arr[i]["color"] = quad.color
-            arr[i]["border_color"] = quad.border_color
-            arr[i]["border_thickness_px"] = quad.border_thickness_px
+        # write: src_uv
+        uv_x, uv_y, uv_w, uv_h = RendererQuadList._eval_src_uv_xywh(
+            src_xy=src_xy,
+            src_wh=src_wh,
+            image=image,
+        )
+        self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
+        self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
+        self._quad_array[index]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
+        self._quad_array[index]["src_uv"][3] = [uv_x, uv_y + uv_h]
 
-            # height
-            arr[i]["height"] = layer_height_offset + float(i)
+        # write: image_id
+        quad_image = image or self.renderer._default_white_image
+        self._quad_array[index]["image_id"] = quad_image.image_id
 
-        return arr
+        # write: color, border_color, border_thickness_px
+        self._quad_array[index]["color"] = color
+        self._quad_array[index]["border_color"] = border_color
+        self._quad_array[index]["border_thickness_px"] = border_thickness_px
 
+        # write: height
+        self._quad_array[index]["height"] = float(index)
 
-@dataclass
-class RendererQuad:
-    dst_xy: tuple[int, int]
-    dst_wh: tuple[int, int] | None = None
-    src_xy: tuple[int, int] = (0, 0)
-    src_wh: tuple[int, int] | None = None
-    color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
-    border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
-    border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0)  # TRBL
-    image: RendererImage | None = None
+        # Done:
+        return index
 
-    def eval_dst_px_wh(self) -> tuple[int, int]:
-        if self.dst_wh is not None:
-            return self.dst_wh
-        if self.image is not None:
-            return self.image.allocation_px_xywh[2], self.image.allocation_px_xywh[3]
+    def reserve(self, new_capacity: int):
+        self.reserve_exact(new_capacity=round_up_to_po2(new_capacity))
+
+    def reserve_exact(self, new_capacity: int):
+        if new_capacity <= self.capacity:
+            return
+        new_array = RendererQuadArray(new_capacity)
+        new_array[: len(self._quad_array)] = self._quad_array
+        self._quad_array = new_array
+
+    @staticmethod
+    def _eval_dst_px_wh(
+        dst_wh: tuple[int, int] | None,
+        image: RendererImage | None,
+    ) -> tuple[int, int]:
+        if dst_wh is not None:
+            return dst_wh
+        if image is not None:
+            return image.px_width, image.px_height
         raise LogicError("RendererQuad dst_px_wh or image must be set")
 
-    def eval_src_uv_xywh(self) -> tuple[float, float, float, float]:
-        if self.image is None:
+    @staticmethod
+    def _eval_src_uv_xywh(
+        src_xy: tuple[int, int],
+        src_wh: tuple[int, int] | None,
+        image: RendererImage | None,
+    ) -> tuple[float, float, float, float]:
+        if image is None:
             return (0.0, 0.0, 1.0, 1.0)
 
         src_uv_xy = (
-            self.src_xy[0] / self.image.px_width,
-            self.src_xy[1] / self.image.px_height,
+            src_xy[0] / image.px_width,
+            src_xy[1] / image.px_height,
         )
         src_uv_wh = (
             (1.0, 1.0)
-            if self.src_wh is None
+            if src_wh is None
             else (
-                self.src_wh[0] / self.image.px_width,
-                self.src_wh[1] / self.image.px_height,
+                src_wh[0] / image.px_width,
+                src_wh[1] / image.px_height,
             )
         )
         return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])
