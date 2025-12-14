@@ -20,9 +20,11 @@ tests: sync
 sync: build
 	uv sync --all-extras
 
-.PHONY: build
-build:
+.PHONY: build build-zfw build-zfw_sandbox
+build: build-zfw build-zfw_sandbox
+build-zfw:
 	uv run --package zfw_build zfw-build -p modules/zfw
+build-zfw_sandbox:
 	uv run --package zfw_build zfw-build -p modules/zfw_sandbox
 
 .PHONY: check
