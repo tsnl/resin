@@ -1080,16 +1080,50 @@ class FontEngine(BaseResource):
         pen_y = float(dst_y) + ascender
         start_x = float(dst_x)
 
-        for info, pos in zip(infos, positions):
+        for i in range(len(infos)):
+            info = infos[i]
+            pos = positions[i]
+
             codepoint = info.codepoint
+            cluster = info.cluster
+            char = text[cluster] if cluster < len(text) else " "
+
+            # Handle explicit newlines
+            if char == "\n":
+                pen_x = start_x
+                pen_y += height
+                continue
+
             x_advance = pos.x_advance / 64.0
             y_advance = pos.y_advance / 64.0
             x_offset = pos.x_offset / 64.0
             y_offset = pos.y_offset / 64.0
 
-            if wrap and (pen_x + x_advance > dst_x + dst_w):
-                pen_x = start_x
-                pen_y += height
+            # Word wrapping
+            if wrap and not char.isspace():
+                # Check if start of word
+                is_word_start = False
+                if i == 0:
+                    is_word_start = True
+                else:
+                    prev_cluster = infos[i - 1].cluster
+                    prev_char = text[prev_cluster] if prev_cluster < len(text) else " "
+                    if prev_char.isspace():
+                        is_word_start = True
+
+                if is_word_start:
+                    word_width = 0.0
+                    for j in range(i, len(infos)):
+                        c = infos[j].cluster
+                        c_char = text[c] if c < len(text) else " "
+                        if c_char.isspace():
+                            break
+                        word_width += positions[j].x_advance / 64.0
+
+                    # Wrap if word doesn't fit and we're not at start of line
+                    if (pen_x + word_width > dst_x + dst_w) and (pen_x > start_x):
+                        pen_x = start_x
+                        pen_y += height
 
             image, bitmap_left, bitmap_top = self._get_glyph_image(
                 font, codepoint, font_size_px
