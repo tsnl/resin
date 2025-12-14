@@ -8,7 +8,7 @@ __all__ = [
 ]
 
 from collections import OrderedDict
-from typing import Literal, TypeAlias, cast
+from typing import Literal, TypeAlias
 
 import numpy as np
 import freetype as ft
@@ -61,7 +61,7 @@ class Renderer(BaseResource):
     _atlas_descriptor_set: GpuDescriptorSet
     _default_white_image: "RendererImage"
     _quad_renderer: "QuadRenderer"
-    _font_cache: "FontCache"
+    _font_engine: "FontEngine"
 
     def __init__(
         self,
@@ -119,7 +119,7 @@ class Renderer(BaseResource):
 
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
-        self._font_cache = FontCache(renderer=self)
+        self._font_engine = FontEngine(renderer=self)
 
     def _on_dispose(self) -> None:
         self._quad_renderer.dispose()
@@ -945,22 +945,27 @@ class RendererQuadArray(np.ndarray):
 RendererFont: TypeAlias = Literal["sans-serif", "serif"]
 
 
-class FontCache(BaseResource):
+class FontEngine(BaseResource):
+    _renderer: Renderer
     _all_fonts: list[RendererFont]
     _hb_font_map: dict[RendererFont, hb.Font]
+    _ft_image_cache: dict[tuple[RendererFont, int, int], RendererImage]
 
     def __init__(self, renderer: Renderer) -> None:
         super().__init__(parent=renderer)
 
+        self._renderer = renderer
+
         self._all_fonts = ["sans-serif", "serif"]
         self._hb_font_map = {
-            font: FontCache._load_harfbuzz_font(font)  #
+            font: FontEngine._load_harfbuzz_font(font)  #
             for font in self._all_fonts
         }
-        self._ft_font_map = {
-            font: FontCache._load_freetype_font(font)  #
+        self._ft_face_map = {
+            font: FontEngine._load_freetype_font(font)  #
             for font in self._all_fonts
         }
+        self._ft_image_cache = {}
 
     @staticmethod
     def _load_harfbuzz_font(font: RendererFont) -> hb.Font:
@@ -985,6 +990,63 @@ class FontCache(BaseResource):
 
         ft_face = ft.Face(str(file_path))
         return ft_face
+
+    def _shape_text(
+        self,
+        font: RendererFont,
+        text: str,
+        font_size_px: int,
+    ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
+        hb_font = self._hb_font_map[font]
+        scale = font_size_px * 64  # HarfBuzz uses 26.6 fixed point
+        hb_font.set_scale(scale, scale)
+
+        hb_buffer = hb.Buffer()
+        hb_buffer.add_str(text)
+        hb_buffer.guess_segment_properties()
+
+        hb.shape(hb_font, hb_buffer)
+
+        return hb_buffer.glyph_infos, hb_buffer.glyph_positions
+
+    def _get_glyph_image(
+        self,
+        font: RendererFont,
+        glyph_index: int,
+        font_size_px: int,
+    ) -> "RendererImage":
+        image_cache_key = (font, glyph_index, font_size_px)
+
+        image = self._ft_image_cache.get(image_cache_key)
+        if image is not None:
+            return image
+
+        ft_face = self._ft_face_map[font]
+        ft_face.set_pixel_sizes(0, font_size_px)
+        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
+        bitmap = ft_face.glyph.bitmap
+        assert bitmap.buffer
+
+        h, w = bitmap.rows, bitmap.width
+        data = np.frombuffer(bitmap.buffer, dtype=np.uint8).reshape(h, w) / 255.0
+
+        image = RendererImage(renderer=self._renderer, data=data)
+        self._ft_image_cache[image_cache_key] = image
+
+        return image
+
+    def _add_quads_to_canvas(
+        self,
+        *,
+        canvas: "RendererCanvas",
+        text: str,
+        font: RendererFont,
+        font_size_px: int,
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int],
+    ):
+        # TODO: need to wrap
+        raise NotImplementedError()
 
 
 #
@@ -1156,4 +1218,4 @@ class RendererCanvas:
         Adds quads for rendering the given text string with the given font.
         """
 
-        pass
+        font_cache = self.renderer._font_engine

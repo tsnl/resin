@@ -3,6 +3,7 @@ class Face:
 
 class Font:
     def __init__(self, face: Face) -> None: ...
+    def set_scale(self, x_scale: int, y_scale: int) -> None: ...
 
 class Buffer:
     glyph_infos: list["GlyphInfo"]
@@ -21,3 +22,5 @@ class GlyphPosition:
     y_advance: int
     x_offset: int
     y_offset: int
+
+def shape(font: Font, buffer: Buffer) -> None: ...
