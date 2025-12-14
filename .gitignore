@@ -12,5 +12,5 @@ __pycache__
 /dist
 /build
 
-# Bundled data in packages:
+# `bundled_data` is always excluded. Built by `zfw-build`.
 bundled_data
