@@ -22,6 +22,7 @@ from .renderer import (
     RendererQuadArray,
     RendererQuad,
 )
+from .images import load_image_data
 
 TEST_IMAGE_W, TEST_IMAGE_H = 800, 600
 
@@ -102,6 +103,7 @@ class RendererTestEngine(BaseResource):
 
 def test_renderer_quads():
     engine = RendererTestEngine()
+
     engine.draw(
         quads=[
             RendererQuad(
@@ -128,6 +130,30 @@ def test_renderer_quads():
     output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
+
+
+def test_renderer_image():
+    engine = RendererTestEngine()
+
+    image_data = load_image_data("test_data/rainbow-512x512.png")
+    assert image_data.shape == (512, 512, 4)
+
+    image = RendererImage(renderer=engine.renderer, data=image_data)
+
+    engine.draw(
+        quads=[
+            RendererQuad(
+                dst_xy=(0, 0),
+                color=(1.0, 1.0, 1.0, 1.0),
+                image=image,
+            ),
+        ]
+    )
+    output_image = engine.readback()
+
+    output_path = Path("output/zfw/renderer_test/test_renderer_image.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(output_image).save(output_path)
 
 
 def test_renderer_atlas_smoketest():

@@ -38,7 +38,7 @@ def main():
 
     block_01_image = zfw.RendererImage(
         renderer=engine.renderer,
-        data=load_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
+        data=zfw.load_image_data(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
     while not engine.window.should_close():
@@ -81,10 +81,6 @@ def print_gpu_debug_info(
     gpu_context.print_debug_info(out=file)
     print()
     print("</gpu-debug-info>")
-
-
-def load_image(file_path: Path) -> np.ndarray:
-    return np.array(PIL.Image.open(file_path).convert("RGBA"))
 
 
 if __name__ == "__main__":
