@@ -1,7 +1,21 @@
 import argparse
 import sys
+from pathlib import Path
+
+import PIL.Image
+import numpy as np
 
 import zfw
+
+from .bundled_data import BUNDLED_DATA_PATH
+
+
+KENNEY_SOKOBAN_DATA_PATH = (
+    BUNDLED_DATA_PATH
+    / "data/KenneyGameAssetsAllInOne-3_3_0/2D assets"
+    / "Sokoban Pack"
+    / "PNG/Default size"
+)
 
 
 def main():
@@ -20,6 +34,11 @@ def main():
         app_name="Zero Sandbox",
         debug=args.debug,
         swapchain_image_count=args.swapchain_image_count,
+    )
+
+    block_01_image = zfw.RendererImage(
+        renderer=engine.renderer,
+        data=load_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
     while not engine.window.should_close():
@@ -44,6 +63,12 @@ def main():
                     dst_wh=(64, 64),
                     color=(0.0, 0.2, 0.0, 0.5),
                 ),
+                zfw.RendererQuad(
+                    dst_xy=(184, 72),
+                    dst_wh=(64, 64),
+                    color=(0.0, 0.0, 0.0, 1.0),
+                    image=block_01_image,
+                ),
             ]
         )
 
@@ -56,6 +81,10 @@ def print_gpu_debug_info(
     gpu_context.print_debug_info(out=file)
     print()
     print("</gpu-debug-info>")
+
+
+def load_image(file_path: Path) -> np.ndarray:
+    return np.array(PIL.Image.open(file_path).convert("RGBA"))
 
 
 if __name__ == "__main__":
