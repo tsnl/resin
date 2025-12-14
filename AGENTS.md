@@ -3,3 +3,4 @@
   - `make tests` runs all tests and writes test outputs (e.g. image renders).
   - `make sandbox` launches a windowed interactive application.
 - Ensure you use `uv` to activate a Python environment with the right dependencies.
+- (on macOS) Run `source ~/VulkanSDK/1.4.328.1/setup-env.sh` before running any `make` targets.
