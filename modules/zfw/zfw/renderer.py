@@ -163,8 +163,8 @@ class Renderer(BaseResource):
 class RendererImage:
     _atlas: "RendererAtlas"
     _index: int
-    _uv_xywh: tuple[float, float, float, float] | None
-    _px_xywh: tuple[int, int, int, int] | None
+    _allocation_uv_xywh: tuple[float, float, float, float] | None
+    _allocation_px_xywh: tuple[int, int, int, int] | None
 
     def __init__(self, *, renderer: "Renderer", data: np.ndarray):
         assert data.ndim in (2, 3)
@@ -175,8 +175,8 @@ class RendererImage:
         self._data = data.copy()
         self._data.flags.writeable = False
         self._index = -1
-        self._uv_xywh = None
-        self._px_xywh = None
+        self._allocation_uv_xywh = None
+        self._allocation_px_xywh = None
 
         self._atlas.insert(self)
 
@@ -187,19 +187,27 @@ class RendererImage:
         return self._index
 
     @property
-    def uv_xywh(self) -> tuple[float, float, float, float]:
-        assert self._uv_xywh is not None
-        return self._uv_xywh
+    def px_width(self) -> int:
+        return self._data.shape[1]
 
     @property
-    def px_xywh(self) -> tuple[int, int, int, int]:
-        assert self._px_xywh is not None
-        return self._px_xywh
+    def px_height(self) -> int:
+        return self._data.shape[0]
+
+    @property
+    def allocation_uv_xywh(self) -> tuple[float, float, float, float]:
+        assert self._allocation_uv_xywh is not None
+        return self._allocation_uv_xywh
+
+    @property
+    def allocation_px_xywh(self) -> tuple[int, int, int, int]:
+        assert self._allocation_px_xywh is not None
+        return self._allocation_px_xywh
 
     @property
     def page_index(self) -> int:
-        assert self._uv_xywh is not None
-        return int(self._uv_xywh[1])
+        assert self._allocation_uv_xywh is not None
+        return int(self._allocation_uv_xywh[1])
 
 
 RendererAtlasChannels: TypeAlias = Literal[1, 4]
@@ -362,13 +370,13 @@ class RendererAtlas(BaseResource):
         w: float,
         h: float,
     ):
-        img._uv_xywh = (x, float(page_index) + y, w, h)
+        img._allocation_uv_xywh = (x, float(page_index) + y, w, h)
 
         x_px = int(x * self._page_size)
         y_px = int(y * self._page_size)
         w_px = int(w * self._page_size)
         h_px = int(h * self._page_size)
-        img._px_xywh = (x_px, y_px, w_px, h_px)
+        img._allocation_px_xywh = (x_px, y_px, w_px, h_px)
 
         # Update CPU pixel data
         self._page_pixel_data[page_index, y_px : y_px + h_px, x_px : x_px + w_px] = (
@@ -428,8 +436,16 @@ class RendererAtlas(BaseResource):
                     src=staging_buffer,
                     dst=self._page_gpu_image_list[page_index],
                     buffer_offset=offset,
-                    image_offset=(img.px_xywh[0], img.px_xywh[1], 0),
-                    image_extent=(img.px_xywh[2], img.px_xywh[3], 1),
+                    image_offset=(
+                        img.allocation_px_xywh[0],
+                        img.allocation_px_xywh[1],
+                        0,
+                    ),
+                    image_extent=(
+                        img.allocation_px_xywh[2],
+                        img.allocation_px_xywh[3],
+                        1,
+                    ),
                 )
                 offset += img._data.nbytes
 
@@ -445,8 +461,8 @@ class RendererAtlas(BaseResource):
     def _upload_rects(self):
         rects = np.zeros((len(self._images),), dtype=UV_RECT_DTYPE)
         for i, img in enumerate(self._images):
-            if img._uv_xywh is not None:
-                rects[i] = img._uv_xywh
+            if img._allocation_uv_xywh is not None:
+                rects[i] = img._allocation_uv_xywh
 
         staging_buffer = GpuBuffer(
             device=self._gpu_device,
@@ -938,13 +954,15 @@ class RendererQuadArray(np.ndarray):
             arr[i]["dst_px"][2] = [x + w, y + h]
             arr[i]["dst_px"][3] = [x, y + h]
 
-            # src_uv, image_id
+            # src_uv
+            uv_x, uv_y, uv_w, uv_h = quad.eval_src_uv_xywh()
+            arr[i]["src_uv"][0] = [uv_x, uv_y]
+            arr[i]["src_uv"][1] = [uv_x + uv_w, uv_y]
+            arr[i]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
+            arr[i]["src_uv"][3] = [uv_x, uv_y + uv_h]
+
+            # image_id
             quad_image = quad.image or default_white_image
-            u, v, uw, vh = quad_image.uv_xywh
-            arr[i]["src_uv"][0] = [u, v]
-            arr[i]["src_uv"][1] = [u + uw, v]
-            arr[i]["src_uv"][2] = [u + uw, v + vh]
-            arr[i]["src_uv"][3] = [u, v + vh]
             arr[i]["image_id"] = quad_image.image_id
 
             # color, border_color, border_thickness_px
@@ -962,6 +980,8 @@ class RendererQuadArray(np.ndarray):
 class RendererQuad:
     dst_xy: tuple[int, int]
     dst_wh: tuple[int, int] | None = None
+    src_xy: tuple[int, int] = (0, 0)
+    src_wh: tuple[int, int] | None = None
     color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0)  # TRBL
@@ -971,5 +991,23 @@ class RendererQuad:
         if self.dst_wh is not None:
             return self.dst_wh
         if self.image is not None:
-            return self.image.px_xywh[2], self.image.px_xywh[3]
+            return self.image.allocation_px_xywh[2], self.image.allocation_px_xywh[3]
         raise LogicError("RendererQuad dst_px_wh or image must be set")
+
+    def eval_src_uv_xywh(self) -> tuple[float, float, float, float]:
+        if self.image is None:
+            return (0.0, 0.0, 1.0, 1.0)
+
+        src_uv_xy = (
+            self.src_xy[0] / self.image.px_width,
+            self.src_xy[1] / self.image.px_height,
+        )
+        src_uv_wh = (
+            (1.0, 1.0)
+            if self.src_wh is None
+            else (
+                self.src_wh[0] / self.image.px_width,
+                self.src_wh[1] / self.image.px_height,
+            )
+        )
+        return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])

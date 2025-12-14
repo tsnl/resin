@@ -135,7 +135,7 @@ def test_renderer_quads():
 def test_renderer_image():
     engine = RendererTestEngine()
 
-    image_data = load_rgba_image("test_data/rainbow-512x512.png")
+    image_data = load_rgba_image("tests_data/rainbow-512x512.png")
     assert image_data.shape == (512, 512, 4)
 
     image = RendererImage(renderer=engine.renderer, data=image_data)
@@ -194,7 +194,7 @@ def test_renderer_atlas_smoketest():
     renderer._atlases[4].flush()
 
     # Note: x=0 because it's larger than default_white_image (1x1)
-    assert image.px_xywh[2:] == (128, 128)
+    assert image.allocation_px_xywh[2:] == (128, 128)
 
     renderer.dispose()
     gpu_device.dispose()

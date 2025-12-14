@@ -62,7 +62,6 @@ def main():
                 zfw.RendererQuad(
                     dst_xy=(184, 72),
                     dst_wh=(64, 64),
-                    color=(0.0, 0.0, 0.0, 1.0),
                     image=block_01_image,
                 ),
             ]

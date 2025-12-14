@@ -11,7 +11,7 @@ from .images import (
 
 
 def test_image_roundtrip():
-    INPUT_PATH = Path("test_data/rainbow-512x512.png")
+    INPUT_PATH = Path("tests_data/rainbow-512x512.png")
     OUTPUT_PATH = Path("output/zfw/images_test/test_image_roundtrip.png")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
