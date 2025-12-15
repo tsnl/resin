@@ -1,15 +1,11 @@
-from typing import TypeAlias
+from abc import ABC, abstractmethod
 
-from .basic import BaseResource
-
-#
-# GuiContext
-#
+from .renderer import RendererCanvas
 
 
-class GuiContext(BaseResource):
-    def _on_dispose(self) -> None:
-        pass
+class GuiWidget(ABC):
+    @abstractmethod
+    def on_render(self, renderer: RendererCanvas) -> None: ...
 
-
-GuiResource: TypeAlias = BaseResource
+    @abstractmethod
+    def on_window_event(self, event: str, **kwargs) -> None: ...

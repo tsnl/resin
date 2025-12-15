@@ -1,10 +1,9 @@
 __all__ = [
+    "QuadArray",
     "Renderer",
     "RendererAtlas",
     "RendererContext",
-    "RendererFont",
     "RendererImage",
-    "RendererQuadArray",
 ]
 
 from collections import OrderedDict
@@ -13,7 +12,7 @@ from typing import Literal, TypeAlias
 import numpy as np
 import freetype as ft
 
-from .basic import BaseResource, round_up_to_po2
+from .basic import BaseResource, round_up_to_po2, Font
 from .bundled_data import BUNDLED_DATA_PATH
 from .excepts import LogicError
 from .gpu import (
@@ -61,7 +60,7 @@ class Renderer(BaseResource):
     _atlas_descriptor_set: GpuDescriptorSet
     _default_white_image: "RendererImage"
     _quad_renderer: "QuadRenderer"
-    _font_engine: "FontEngine"
+    _text_quad_writer: "TextQuadWriter"
     _scale: float
 
     def __init__(
@@ -122,7 +121,7 @@ class Renderer(BaseResource):
 
         self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
 
-        self._font_engine = FontEngine(renderer=self)
+        self._text_quad_writer = TextQuadWriter(renderer=self)
 
     @property
     def scale(self) -> float:
@@ -685,7 +684,7 @@ class QuadRenderer(BaseResource):
     def draw(
         self,
         *,
-        quads: "RendererQuadArray",
+        quads: "QuadArray",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -945,44 +944,38 @@ assert QuadRenderer.BATCH_UNIFORM_DTYPE.itemsize == 4 * 4
 assert QuadRenderer.QUAD_DTYPE.itemsize == 32 * 4
 
 
-class RendererQuadArray(np.ndarray):
-    def __new__(cls, shape: tuple[int, ...] | int) -> "RendererQuadArray":
+class QuadArray(np.ndarray):
+    def __new__(cls, shape: tuple[int, ...] | int) -> "QuadArray":
         return np.zeros(shape, dtype=QuadRenderer.QUAD_DTYPE).view(cls)
 
 
 #
-# RendererFont, RendererFontAtlas:
+# TextQuadWriter
 #
 
 
-RendererFont: TypeAlias = Literal["sans-serif", "serif"]
-
-
-class FontEngine(BaseResource):
+class TextQuadWriter(BaseResource):
     _renderer: Renderer
-    _all_fonts: list[RendererFont]
-    _hb_font_map: dict[RendererFont, hb.Font]
+    _all_fonts: list[Font]
+    _hb_font_map: dict[Font, hb.Font]
     _ft_image_cache: dict[
-        tuple[RendererFont, int, int, int],
+        tuple[Font, int, int, int],
         tuple["RendererImage | None", int, int],
     ]
-    _ft_weight_axis_index: dict[RendererFont, int]
+    _ft_weight_axis_index: dict[Font, int]
 
-    def __init__(
-        self,
-        renderer: Renderer,
-    ) -> None:
+    def __init__(self, renderer: Renderer) -> None:
         super().__init__(parent=renderer)
 
         self._renderer = renderer
 
         self._all_fonts = ["sans-serif", "serif"]
         self._hb_font_map = {
-            font: FontEngine._load_harfbuzz_font(font)  #
+            font: TextQuadWriter._load_harfbuzz_font(font)  #
             for font in self._all_fonts
         }
         self._ft_face_map = {
-            font: FontEngine._load_freetype_font(font)  #
+            font: TextQuadWriter._load_freetype_font(font)  #
             for font in self._all_fonts
         }
         self._ft_image_cache = {}
@@ -1000,7 +993,7 @@ class FontEngine(BaseResource):
                 pass
 
     @staticmethod
-    def _load_harfbuzz_font(font: RendererFont) -> hb.Font:
+    def _load_harfbuzz_font(font: Font) -> hb.Font:
         file_path = {
             "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
             "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
@@ -1014,7 +1007,7 @@ class FontEngine(BaseResource):
         return hb_font
 
     @staticmethod
-    def _load_freetype_font(font: RendererFont) -> ft.Face:
+    def _load_freetype_font(font: Font) -> ft.Face:
         file_path = {
             "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
             "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
@@ -1023,7 +1016,7 @@ class FontEngine(BaseResource):
         ft_face = ft.Face(str(file_path))
         return ft_face
 
-    def _set_freetype_weight(self, font: RendererFont, weight: int) -> None:
+    def _set_freetype_weight(self, font: Font, weight: int) -> None:
         if font not in self._ft_weight_axis_index:
             return
 
@@ -1035,7 +1028,7 @@ class FontEngine(BaseResource):
 
     def _shape_text(
         self,
-        font: RendererFont,
+        font: Font,
         text: str,
         font_size_px: int,
         font_weight: int,
@@ -1058,7 +1051,7 @@ class FontEngine(BaseResource):
 
     def _get_glyph_image(
         self,
-        font: RendererFont,
+        font: Font,
         glyph_index: int,
         font_size_px: int,
         font_weight: int,
@@ -1118,7 +1111,7 @@ class FontEngine(BaseResource):
         *,
         canvas: "RendererCanvas",
         text: str,
-        font: RendererFont,
+        font: Font,
         font_size_px: int,
         color: tuple[float, float, float, float],
         dst_xy: tuple[int, int],
@@ -1292,7 +1285,7 @@ class RendererCanvas:
 
     def __init__(self, renderer: Renderer, capacity: int = 64):
         self.renderer = renderer
-        self._quad_array = RendererQuadArray(capacity)
+        self._quad_array = QuadArray(capacity)
         self._quad_count = 0
 
     #
@@ -1306,8 +1299,8 @@ class RendererCanvas:
     def capacity(self) -> int:
         return len(self._quad_array)
 
-    def as_quad_array(self) -> RendererQuadArray:
-        return self._quad_array[: self._quad_count].view(RendererQuadArray)
+    def as_quad_array(self) -> QuadArray:
+        return self._quad_array[: self._quad_count].view(QuadArray)
 
     #
     # clear, reserve
@@ -1326,7 +1319,7 @@ class RendererCanvas:
         """Like 'reserve', but will never allocate more than requested."""
         if new_capacity <= self.capacity:
             return
-        new_array = RendererQuadArray(new_capacity)
+        new_array = QuadArray(new_capacity)
         new_array[: len(self._quad_array)] = self._quad_array
         self._quad_array = new_array
 
@@ -1480,7 +1473,7 @@ class RendererCanvas:
         self,
         *,
         text: str,
-        font: "RendererFont",
+        font: "Font",
         dst_xy: tuple[int, int],
         dst_wh: tuple[int, int],
         font_size_px: int = 16,
@@ -1492,7 +1485,7 @@ class RendererCanvas:
         Adds quads for rendering the given text string with the given font.
         """
 
-        font_cache = self.renderer._font_engine
+        font_cache = self.renderer._text_quad_writer
 
         font_cache._add_quads_to_canvas(
             canvas=self,

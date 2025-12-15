@@ -1,7 +1,9 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
     "BaseResource",
+    "ColorSpace",
     "Engine",
+    "Font",
     "GpuBuffer",
     "GpuBufferMeta",
     "GpuCommandEncoder",
@@ -22,12 +24,12 @@ __all__ = [
     "GpuSemaphore",
     "GpuShader",
     "GpuSwapChain",
+    "QuadArray",
     "Renderer",
     "RendererAtlas",
     "RendererCanvas",
     "RendererContext",
     "RendererImage",
-    "RendererQuadArray",
     "SupportsWrite",
     "Window",
     "WindowContext",
@@ -35,7 +37,7 @@ __all__ = [
     "load_rgba_image",
 ]
 
-from .basic import BaseResource, SupportsWrite
+from .basic import BaseResource, SupportsWrite, Font, ColorSpace
 from .bundled_data import BUNDLED_DATA_PATH
 from .engine import Engine
 from .gpu import (
@@ -65,7 +67,7 @@ from .renderer import (
     RendererAtlas,
     RendererContext,
     RendererImage,
-    RendererQuadArray,
+    QuadArray,
     RendererCanvas,
 )
 from .window import Window, WindowContext

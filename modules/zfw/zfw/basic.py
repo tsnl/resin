@@ -164,3 +164,4 @@ class StructuredNDArray(np.ndarray, ABC):
 #
 
 ColorSpace: TypeAlias = Literal["srgb", "linear"]
+Font: TypeAlias = Literal["sans-serif", "serif"]
