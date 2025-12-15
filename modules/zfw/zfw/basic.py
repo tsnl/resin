@@ -1,6 +1,9 @@
 __all__ = [
     "BaseResource",
     "ColorSpace",
+    "Key",
+    "KeyAction",
+    "KeyModifier",
     "SupportsWrite",
     "expect",
     "round_up_to_po2",
@@ -50,70 +53,78 @@ class BaseResource(ABC):
     done with care to avoid disposing a parent before its children.
     """
 
-    def __init__(self, *, parent: "BaseResource | None"):
+    def __init__(self, *, parent_resource: "BaseResource | None"):
         super().__init__()
 
-        self._parent: "BaseResource | None" = parent
-        self._children: list[WeakRef[BaseResource]] = []
-        self._children_cleanup_threshold: int = 64
+        self._parent_resource: "BaseResource | None" = parent_resource
+        self._child_resources: list[WeakRef[BaseResource]] = []
+        self._child_resources_cleanup_threshold: int = 64
 
-        self._is_disposed: bool = False
+        self._resource_is_disposed: bool = False
 
-        self._post_init()
+        self._resource_post_init()
 
-    def _post_init(self) -> None:
-        if self._parent:
-            self._parent._notify_child_added(self)
+    def _resource_post_init(self) -> None:
+        if self._parent_resource:
+            self._parent_resource._notify_child_resource_added(self)
 
-    def _notify_child_added(self, child: "BaseResource") -> None:
-        if len(self._children) >= self._children_cleanup_threshold:
+    def _notify_child_resource_added(self, child: "BaseResource") -> None:
+        if len(self._child_resources) >= self._child_resources_cleanup_threshold:
             # Clean up dead weak references.
             # Do not modify the order of existing children: critical for disposal.
-            self._children = [
-                child_ref for child_ref in self._children if child_ref() is not None
+            self._child_resources = [
+                child_ref
+                for child_ref in self._child_resources
+                if child_ref() is not None
             ]
 
             # Adjust threshold if needed.
-            if len(self._children) >= self._children_cleanup_threshold:
+            if len(self._child_resources) >= self._child_resources_cleanup_threshold:
                 # Increase threshold to avoid frequent cleanups.
-                self._children_cleanup_threshold *= 2
-            elif len(self._children) < self._children_cleanup_threshold // 4:
+                self._child_resources_cleanup_threshold *= 2
+            elif (
+                len(self._child_resources)
+                < self._child_resources_cleanup_threshold // 4
+            ):
                 # Decrease threshold to avoid excessive memory usage.
-                self._children_cleanup_threshold //= 2
+                self._child_resources_cleanup_threshold //= 2
 
-        self._children.append(WeakRef(child))
+        self._child_resources.append(WeakRef(child))
 
     def __del__(self) -> None:
-        if self._parent is not None:
-            parent = self._parent
+        if self._parent_resource is not None:
+            parent = self._parent_resource
             del parent
-        self.dispose()
+        self.dispose_resource()
 
-    def dispose(self) -> None:
+    def dispose_resource(self) -> None:
         # If already disposed, no-op.
-        if self._is_disposed:
+        if self._resource_is_disposed:
             return
 
         # If 'self' is not yet disposed, ensure self._parent has not yet been disposed
         # either.
-        if self._parent is not None and self._parent._is_disposed:
+        if (
+            self._parent_resource is not None
+            and self._parent_resource._resource_is_disposed
+        ):
             warnings.warn(
-                f"Cannot dispose resource {self} after its parent {self._parent}",
+                f"Cannot dispose resource {self} after its parent {self._parent_resource}",
             )
 
         # Dispose children in reverse order of creation.
-        for child_ref in reversed(self._children):
+        for child_ref in reversed(self._child_resources):
             child = child_ref()
             if child is not None:
-                child.dispose()
-        self._children.clear()
+                child.dispose_resource()
+        self._child_resources.clear()
 
         # Dispose self.
-        self._on_dispose()
-        self._parent = None
-        self._is_disposed = True
+        self._on_dispose_resource()
+        self._parent_resource = None
+        self._resource_is_disposed = True
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         pass
 
 
@@ -160,8 +171,166 @@ class StructuredNDArray(np.ndarray, ABC):
 
 
 #
+# Camel-case to snake-case conversion
+#
+
+
+def camel_to_snake(name: str) -> str:
+    small_chunks = []
+    for large_chunk in name.split("_"):
+        last_small_chunk_start_index = 0
+        for i in range(1, len(large_chunk)):
+            if large_chunk[i].isupper():
+                small_chunks.append(large_chunk[last_small_chunk_start_index:i].lower())
+                last_small_chunk_start_index = i
+        small_chunks.append(large_chunk[last_small_chunk_start_index:].lower())
+    return "_".join(small_chunks)
+
+
+#
 # Constants
 #
 
 ColorSpace: TypeAlias = Literal["srgb", "linear"]
+
 Font: TypeAlias = Literal["sans-serif", "serif"]
+
+Key: TypeAlias = Literal[
+    # Printable keys (US layout)
+    "space",
+    "apostrophe",
+    "comma",
+    "minus",
+    "period",
+    "slash",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "semicolon",
+    "equal",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "left-bracket",
+    "backslash",
+    "right-bracket",
+    "grave-accent",
+    "world-1",
+    "world-2",
+    # Function keys and special keys
+    "escape",
+    "enter",
+    "tab",
+    "backspace",
+    "insert",
+    "delete",
+    "right",
+    "left",
+    "down",
+    "up",
+    "page-up",
+    "page-down",
+    "home",
+    "end",
+    "caps-lock",
+    "scroll-lock",
+    "num-lock",
+    "print-screen",
+    "pause",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
+    "f13",
+    "f14",
+    "f15",
+    "f16",
+    "f17",
+    "f18",
+    "f19",
+    "f20",
+    "f21",
+    "f22",
+    "f23",
+    "f24",
+    "f25",
+    # Keypad keys
+    "kp-0",
+    "kp-1",
+    "kp-2",
+    "kp-3",
+    "kp-4",
+    "kp-5",
+    "kp-6",
+    "kp-7",
+    "kp-8",
+    "kp-9",
+    "kp-decimal",
+    "kp-divide",
+    "kp-multiply",
+    "kp-subtract",
+    "kp-add",
+    "kp-enter",
+    "kp-equal",
+    # Modifier keys
+    "left-shift",
+    "left-control",
+    "left-alt",
+    "left-super",
+    "right-shift",
+    "right-control",
+    "right-alt",
+    "right-super",
+    "menu",
+]
+KeyAction: TypeAlias = Literal["press", "release", "repeat"]
+KeyModifier: TypeAlias = Literal["shift", "control", "alt", "super"]
+
+MouseButton: TypeAlias = Literal[
+    "left",  # left mouse button, aka button-1
+    "right",  # right mouse button, aka button-2
+    "middle",  # middle mouse button, aka button-3
+    "button-4",
+    "button-5",
+    "button-6",
+    "button-7",
+    "button-8",
+]

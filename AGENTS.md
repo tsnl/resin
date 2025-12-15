@@ -4,3 +4,4 @@
   - `make sandbox` launches a windowed interactive application.
 - Ensure you use `uv` to activate a Python environment with the right dependencies.
 - (on macOS) Run `source ~/VulkanSDK/1.4.328.1/setup-env.sh` before running any `make` targets.
+- Ensure all `__init__()` constructors take `kwargs` only and forward extra `kwargs` to `super().__init__()` (enables multiple inheritance).

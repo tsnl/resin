@@ -306,13 +306,13 @@ class GpuContext(BaseResource):
     def __init__(
         self,
         *,
-        parent: BaseResource | None = None,
+        parent_resource: BaseResource | None = None,
         app_name: str = "Zfw App",
         enable_debug_layer_support: bool = True,
         enable_present_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
-        super().__init__(parent=parent)
+        super().__init__(parent_resource=parent_resource)
 
         enable_portability_subset = (
             enable_portability_subset_override
@@ -447,7 +447,7 @@ class GpuContext(BaseResource):
                 "Wayland or X11 on a Linux host: are you running a window server?"
             )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         if hasattr(self, "_vk_instance"):
             vkDestroyInstance(self.vk_instance, pAllocator=None)
 
@@ -533,7 +533,7 @@ class GpuContext(BaseResource):
     def enumerate_physical_devices(self) -> list["GpuPhysicalDevice"]:
         return [
             GpuPhysicalDevice(
-                context=self,
+                gpu_context=self,
                 vk_physical_device=vk_physical_device,
                 vk_properties=vkGetPhysicalDeviceProperties(vk_physical_device),
                 vk_memory_properties=vkGetPhysicalDeviceMemoryProperties(
@@ -576,7 +576,7 @@ GpuPhysicalDeviceType: TypeAlias = Literal[
 
 
 class GpuPhysicalDevice(BaseResource):
-    context: GpuContext
+    gpu_context: GpuContext
     vk_physical_device: VkPhysicalDevice
     vk_properties: VkPhysicalDeviceProperties
     vk_memory_properties: VkPhysicalDeviceMemoryProperties
@@ -584,18 +584,18 @@ class GpuPhysicalDevice(BaseResource):
     def __init__(
         self,
         *,
-        context: GpuContext,
+        gpu_context: GpuContext,
         vk_physical_device: VkPhysicalDevice,
         vk_properties: VkPhysicalDeviceProperties,
         vk_memory_properties: VkPhysicalDeviceMemoryProperties,
     ) -> None:
-        super().__init__(parent=context)
-        self.context = context
+        super().__init__(parent_resource=gpu_context)
+        self.gpu_context = gpu_context
         self.vk_physical_device = vk_physical_device
         self.vk_properties = vk_properties
         self.vk_memory_properties = vk_memory_properties
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         pass  # no private resources to free
 
     @property
@@ -629,7 +629,7 @@ class GpuPhysicalDevice(BaseResource):
         surface: "GpuSurface | None",
     ) -> list["GpuPhysicalDeviceQueueFamily"]:
         if surface is not None:
-            assert self.context.enable_present_support
+            assert self.gpu_context.enable_present_support
 
         qfi_props = vkGetPhysicalDeviceQueueFamilyProperties(self.vk_physical_device)
 
@@ -642,10 +642,12 @@ class GpuPhysicalDevice(BaseResource):
 
             supports_present = False
             if surface is not None:
-                supports_present = self.context.vkGetPhysicalDeviceSurfaceSupportKHR(
-                    self.vk_physical_device,
-                    index,
-                    surface.vk_surface,
+                supports_present = (
+                    self.gpu_context.vkGetPhysicalDeviceSurfaceSupportKHR(
+                        self.vk_physical_device,
+                        index,
+                        surface.vk_surface,
+                    )
                 )
 
             qfi = GpuPhysicalDeviceQueueFamily(
@@ -663,10 +665,10 @@ class GpuPhysicalDevice(BaseResource):
     def get_surface_formats(
         self, surface: "GpuSurface"
     ) -> list[tuple[VkFormat, VkColorSpaceKHR]]:
-        assert self.context.enable_present_support
+        assert self.gpu_context.enable_present_support
         return [
             (it.format, it.colorSpace)
-            for it in self.context.vkGetPhysicalDeviceSurfaceFormatsKHR(
+            for it in self.gpu_context.vkGetPhysicalDeviceSurfaceFormatsKHR(
                 self.vk_physical_device,
                 surface.vk_surface,
             )
@@ -845,7 +847,7 @@ class GpuDevice(BaseResource):
         descriptor_pool_config: dict["GpuDescriptorType", int] | None = None,
         max_descriptor_pool_set_count: int = 1024,
     ) -> None:
-        super().__init__(parent=context)
+        super().__init__(parent_resource=context)
 
         self.context = context
 
@@ -989,7 +991,7 @@ class GpuDevice(BaseResource):
         }
         return defaults | (descriptor_pool_config or {})
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         # Destroy default descriptor pool first:
         vkDestroyDescriptorPool(
             device=self.vk_device,
@@ -1080,7 +1082,7 @@ class GpuMemory(BaseResource):
         memory_requirements: VkMemoryRequirements,
         device_local: bool,
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.size = memory_requirements.size
         self.device_local = device_local
@@ -1114,7 +1116,7 @@ class GpuMemory(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkFreeMemory(self.device.vk_device, self.vk_device_memory, pAllocator=None)
 
     @contextmanager
@@ -1317,7 +1319,7 @@ class GpuImage(BaseResource):
         custom_vk_image_view: VkImageView | None = None,
         custom_vk_format: VkFormat | None = None,
     ) -> None:
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.usages = usages
         self.meta = meta
@@ -1439,7 +1441,7 @@ class GpuImage(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         if self._owns_vk_image_view:
             vkDestroyImageView(
                 self.device.vk_device, self.vk_image_view, pAllocator=None
@@ -1485,7 +1487,7 @@ class GpuSemaphore(BaseResource):
     vk_semaphore: VkSemaphore
 
     def __init__(self, *, device: GpuDevice) -> None:
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
 
         self.vk_semaphore = vkCreateSemaphore(
@@ -1499,7 +1501,7 @@ class GpuSemaphore(BaseResource):
             f"<GpuSemaphore object at {hex(id(self))} with handle {self.vk_semaphore}>"
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkDestroySemaphore(self.device.vk_device, self.vk_semaphore, pAllocator=None)
 
 
@@ -1513,7 +1515,7 @@ class GpuFence(BaseResource):
     vk_fence: VkFence
 
     def __init__(self, *, device: GpuDevice, signalled: bool = False) -> None:
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.vk_fence = vkCreateFence(
             device=device.vk_device,
@@ -1526,7 +1528,7 @@ class GpuFence(BaseResource):
     def __repr__(self) -> str:
         return f"<GpuFence object at {hex(id(self))} with handle {self.vk_fence}>"
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         self.wait()
         vkDestroyFence(self.device.vk_device, self.vk_fence, pAllocator=None)
 
@@ -1674,7 +1676,7 @@ class GpuBuffer(BaseResource):
         usages: list[GpuBufferUsage],
         meta: GpuBufferMeta,
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.usages = usages
         self.meta = meta
@@ -1736,9 +1738,9 @@ class GpuBuffer(BaseResource):
 
         return buffer, memory
 
-    def _on_dispose(self):
+    def _on_dispose_resource(self):
         if self.memory is not None:
-            self.memory.dispose()
+            self.memory.dispose_resource()
 
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
 
@@ -1765,7 +1767,7 @@ class GpuCommandEncoder(BaseResource):
     _submit_fence: GpuFence | None
 
     def __init__(self, *, device: GpuDevice, queue_type: GpuQueueType) -> None:
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.submit_queue_type = queue_type
         self.queue_family_index = device.qfis[queue_type]
@@ -1803,7 +1805,7 @@ class GpuCommandEncoder(BaseResource):
     def _end_command_buffer(self, vk_command_buffer: VkCommandBuffer) -> None:
         vkEndCommandBuffer(commandBuffer=vk_command_buffer)
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         # If not submitted, end the command buffer:
         if self._submit_fence is None:
             self._end_command_buffer(self.vk_command_buffer)
@@ -1811,7 +1813,7 @@ class GpuCommandEncoder(BaseResource):
         # Wait for submission to complete:
         if self._submit_fence is not None:
             if self._submit_fence_is_owned:
-                self._submit_fence.dispose()
+                self._submit_fence.dispose_resource()
             else:
                 self._submit_fence.wait()
             self._submit_fence = None
@@ -2203,7 +2205,7 @@ class GpuShader(BaseResource):
         spirv_path: Path | str,
         stage: Literal["vertex", "fragment"],
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.stage = stage
         self.vk_shader_module = self._help_create_shader_module(device, spirv_path)
@@ -2231,7 +2233,7 @@ class GpuShader(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkDestroyShaderModule(
             device=self.device.vk_device,
             shaderModule=self.vk_shader_module,
@@ -2284,7 +2286,7 @@ class GpuSampler(BaseResource):
         min_filter: "GpuSamplerFilter" = "linear",
         address_mode: "GpuSamplerAddressMode" = "clamp-to-edge",
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.vk_sampler = self._help_create_sampler(
             device, mag_filter, min_filter, address_mode
@@ -2326,7 +2328,7 @@ class GpuSampler(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkDestroySampler(
             device=self.device.vk_device,
             sampler=self.vk_sampler,
@@ -2363,7 +2365,7 @@ class GpuPipelineLayout(BaseResource):
         device: GpuDevice,
         descriptor_set_layouts: list["GpuDescriptorSetLayout"],
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.descriptor_set_layouts = descriptor_set_layouts
         self.vk_pipeline_layout = self._help_create_pipeline_layout(
@@ -2393,7 +2395,7 @@ class GpuPipelineLayout(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkDestroyPipelineLayout(
             device=self.device.vk_device,
             pipelineLayout=self.vk_pipeline_layout,
@@ -2412,7 +2414,7 @@ class GpuDescriptorSetLayout(BaseResource):
         device: GpuDevice,
         bindings: OrderedDict[str, "GpuDescriptorSetLayoutBinding"],
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.bindings = bindings
         self.vk_descriptor_set_layout = self._help_create_descriptor_set_layout(
@@ -2447,7 +2449,7 @@ class GpuDescriptorSetLayout(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkDestroyDescriptorSetLayout(
             device=self.device.vk_device,
             descriptorSetLayout=self.vk_descriptor_set_layout,
@@ -2480,7 +2482,7 @@ class GpuDescriptorSet(BaseResource):
         layout: GpuDescriptorSetLayout,
         bindings: dict[str, "GpuDescriptorSetBinding"],
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.layout = layout
         self.bindings = bindings
@@ -2696,7 +2698,7 @@ class GpuPipeline(BaseResource):
         viewport_height: int,
         layout: GpuPipelineLayout,
     ):
-        super().__init__(parent=device)
+        super().__init__(parent_resource=device)
         self.device = device
         self.vk_color_format = vk_color_format
         self.vk_pipeline = self._help_create_pipeline(
@@ -2936,7 +2938,7 @@ class GpuPipeline(BaseResource):
             pAllocator=None,
         )[0]
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         vkDestroyPipeline(
             device=self.device.vk_device,
             pipeline=self.vk_pipeline,
@@ -2950,12 +2952,12 @@ class GpuRenderPassCommandEncoder(BaseResource):
     bound_pipeline: GpuPipeline | None
 
     def __init__(self, *, device: GpuDevice, command_encoder: GpuCommandEncoder):
-        super().__init__(parent=command_encoder)
+        super().__init__(parent_resource=command_encoder)
         self.device = device
         self.command_encoder = command_encoder
         self.bound_pipeline = None
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         pass
 
     def bind_pipeline(self, *, pipeline: GpuPipeline) -> None:
@@ -3037,18 +3039,18 @@ class GpuSurface(BaseResource):
         self,
         *,
         context: GpuContext,
-        parent: BaseResource,
+        parent_resource: BaseResource,
         vk_surface: VkSurfaceKHR,
         width: int,
         height: int,
     ):
-        super().__init__(parent=parent)
+        super().__init__(parent_resource=parent_resource)
         self.context = context
         self.vk_surface = vk_surface
         self.width = width
         self.height = height
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         self.context.vkDestroySurfaceKHR(
             instance=self.context.vk_instance,
             surface=self.vk_surface,
@@ -3078,7 +3080,7 @@ class GpuSwapChain(BaseResource):
         surface: GpuSurface,
         image_count: int,
     ):
-        super().__init__(parent=surface)
+        super().__init__(parent_resource=surface)
         self.device = device
         self.frame_counter = 0
         self.width = surface.width
@@ -3165,7 +3167,7 @@ class GpuSwapChain(BaseResource):
             f"<GpuSwapChain object at {hex(id(self))} with handle {self.vk_swap_chain}>"
         )
 
-    def _on_dispose(self) -> None:
+    def _on_dispose_resource(self) -> None:
         self.device.wait_idle()
 
         for slot in self.slots:
@@ -3228,17 +3230,17 @@ class GpuSwapChainSlot(BaseResource):
     render_done_semaphore: GpuSemaphore
 
     def __init__(self, *, swap_chain: GpuSwapChain):
-        super().__init__(parent=swap_chain.device)
+        super().__init__(parent_resource=swap_chain.device)
         # IMPORTANT: Do not store a reference to `swap_chain` as this creates a
         # reference cycle that prevents proper resource disposal.
         self.in_flight_fence = GpuFence(device=swap_chain.device, signalled=True)
         self.image_available_semaphore = GpuSemaphore(device=swap_chain.device)
         self.render_done_semaphore = GpuSemaphore(device=swap_chain.device)
 
-    def _on_dispose(self) -> None:
-        self.in_flight_fence.dispose()
-        self.image_available_semaphore.dispose()
-        self.render_done_semaphore.dispose()
+    def _on_dispose_resource(self) -> None:
+        self.in_flight_fence.dispose_resource()
+        self.image_available_semaphore.dispose_resource()
+        self.render_done_semaphore.dispose_resource()
 
 
 @dataclass

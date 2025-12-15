@@ -1,6 +1,7 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
     "BaseResource",
+    "Canvas",
     "ColorSpace",
     "Engine",
     "Font",
@@ -27,12 +28,15 @@ __all__ = [
     "QuadArray",
     "Renderer",
     "RendererAtlas",
-    "RendererCanvas",
     "RendererContext",
     "RendererImage",
     "SupportsWrite",
     "Window",
     "WindowContext",
+    "WindowCursorMode",
+    "WindowCursorPosEvent",
+    "WindowKeyEvent",
+    "WindowMouseButtonEvent",
     "convert_srgb_to_linear",
     "load_rgba_image",
 ]
@@ -68,7 +72,14 @@ from .renderer import (
     RendererContext,
     RendererImage,
     QuadArray,
-    RendererCanvas,
+    Canvas,
 )
-from .window import Window, WindowContext
+from .window import (
+    Window,
+    WindowContext,
+    WindowKeyEvent,
+    WindowCursorMode,
+    WindowCursorPosEvent,
+    WindowMouseButtonEvent,
+)
 from .images import load_rgba_image, convert_srgb_to_linear

@@ -46,9 +46,9 @@ class RendererContext(BaseResource):
         self,
         *,
         gpu_context: GpuContext,
-        parent: BaseResource | None = None,
+        parent_resource: BaseResource | None = None,
     ):
-        super().__init__(parent=parent)
+        super().__init__(parent_resource=parent_resource)
         self.gpu_context = gpu_context
 
 
@@ -70,7 +70,7 @@ class Renderer(BaseResource):
         gpu_device: GpuDevice,
         scale: float = 1.0,
     ):
-        super().__init__(parent=context)
+        super().__init__(parent_resource=context)
 
         self._context = context
         self._gpu_device = gpu_device
@@ -127,19 +127,19 @@ class Renderer(BaseResource):
     def scale(self) -> float:
         return self._scale
 
-    def _on_dispose(self) -> None:
-        self._quad_renderer.dispose()
-        self._atlas_descriptor_set.dispose()
-        self._atlas_descriptor_set_layout.dispose()
+    def _on_dispose_resource(self) -> None:
+        self._quad_renderer.dispose_resource()
+        self._atlas_descriptor_set.dispose_resource()
+        self._atlas_descriptor_set_layout.dispose_resource()
 
         # Dispose atlases:
         for _, atlas in self._atlases.items():
-            atlas.dispose()
+            atlas.dispose_resource()
 
     def draw(
         self,
         *,
-        canvas: "RendererCanvas",
+        canvas: "Canvas",
         target: GpuImage,
         wait_semaphores: list[GpuSemaphore],
         done_semaphores: list[GpuSemaphore],
@@ -248,7 +248,7 @@ class RendererAtlas(BaseResource):
         page_size: int = 4096,
         max_rects: int = 1 << 20,
     ):
-        super().__init__(parent=renderer)
+        super().__init__(parent_resource=renderer)
         self._renderer = renderer
         self._gpu_device = renderer._gpu_device
 
@@ -467,7 +467,7 @@ class RendererAtlas(BaseResource):
                 queue_type="transfer",
             )
 
-        staging_buffer.dispose()
+        staging_buffer.dispose_resource()
 
     def _upload_rects(self):
         rects = np.zeros((len(self._images),), dtype=UV_RECT_DTYPE)
@@ -492,7 +492,7 @@ class RendererAtlas(BaseResource):
             size=rects.nbytes,
         )
         command_encoder.submit().wait()
-        staging_buffer.dispose()
+        staging_buffer.dispose_resource()
 
 
 UV_RECT_DTYPE = np.dtype(
@@ -573,7 +573,7 @@ class QuadRenderer(BaseResource):
         renderer: "Renderer",
         gpu_device: GpuDevice,
     ):
-        super().__init__(parent=renderer)
+        super().__init__(parent_resource=renderer)
         self.renderer = renderer
         self.gpu_device = gpu_device
 
@@ -593,32 +593,32 @@ class QuadRenderer(BaseResource):
         self._batch_uniform_device_buf = None
         self._batch_descriptor_set = None
 
-    def _on_dispose(self) -> None:
-        self._vertex_shader.dispose()
-        self._fragment_shader.dispose()
+    def _on_dispose_resource(self) -> None:
+        self._vertex_shader.dispose_resource()
+        self._fragment_shader.dispose_resource()
 
-        self._pipeline_layout.dispose()
+        self._pipeline_layout.dispose_resource()
 
-        self._common_uniform_descriptor_set.dispose()
+        self._common_uniform_descriptor_set.dispose_resource()
 
-        self._common_uniform_staging_buf.dispose()
-        self._common_uniform_device_buf.dispose()
+        self._common_uniform_staging_buf.dispose_resource()
+        self._common_uniform_device_buf.dispose_resource()
 
         if self._batch_descriptor_set is not None:
-            self._batch_descriptor_set.dispose()
+            self._batch_descriptor_set.dispose_resource()
         if self._batch_uniform_staging_buf is not None:
-            self._batch_uniform_staging_buf.dispose()
+            self._batch_uniform_staging_buf.dispose_resource()
         if self._batch_uniform_device_buf is not None:
-            self._batch_uniform_device_buf.dispose()
+            self._batch_uniform_device_buf.dispose_resource()
         if self._quad_array_staging_buf is not None:
-            self._quad_array_staging_buf.dispose()
+            self._quad_array_staging_buf.dispose_resource()
         if self._quad_array_device_buf is not None:
-            self._quad_array_device_buf.dispose()
+            self._quad_array_device_buf.dispose_resource()
 
         if self._cached_depth_image is not None:
-            self._cached_depth_image.dispose()
+            self._cached_depth_image.dispose_resource()
         if self._cached_gpu_pipeline is not None:
-            self._cached_gpu_pipeline.dispose()
+            self._cached_gpu_pipeline.dispose_resource()
 
     def _ensure_batch_capacity(self, capacity: int):
         if capacity <= self._quad_capacity:
@@ -626,15 +626,15 @@ class QuadRenderer(BaseResource):
 
         # Dispose old resources
         if self._batch_descriptor_set is not None:
-            self._batch_descriptor_set.dispose()
+            self._batch_descriptor_set.dispose_resource()
         if self._batch_uniform_staging_buf is not None:
-            self._batch_uniform_staging_buf.dispose()
+            self._batch_uniform_staging_buf.dispose_resource()
         if self._batch_uniform_device_buf is not None:
-            self._batch_uniform_device_buf.dispose()
+            self._batch_uniform_device_buf.dispose_resource()
         if self._quad_array_staging_buf is not None:
-            self._quad_array_staging_buf.dispose()
+            self._quad_array_staging_buf.dispose_resource()
         if self._quad_array_device_buf is not None:
-            self._quad_array_device_buf.dispose()
+            self._quad_array_device_buf.dispose_resource()
 
         # Create new resources
         new_capacity = max(8, round_up_to_po2(capacity))
@@ -965,7 +965,7 @@ class TextQuadWriter(BaseResource):
     _ft_weight_axis_index: dict[Font, int]
 
     def __init__(self, renderer: Renderer) -> None:
-        super().__init__(parent=renderer)
+        super().__init__(parent_resource=renderer)
 
         self._renderer = renderer
 
@@ -1109,7 +1109,7 @@ class TextQuadWriter(BaseResource):
     def _add_quads_to_canvas(
         self,
         *,
-        canvas: "RendererCanvas",
+        canvas: "Canvas",
         text: str,
         font: Font,
         font_size_px: int,
@@ -1147,7 +1147,7 @@ class TextQuadWriter(BaseResource):
         dst_x_26_6 = int(dst_x * renderer_scale * 64)
         dst_y_26_6 = int(dst_y * renderer_scale * 64)
         dst_w_26_6 = int(dst_w * renderer_scale * 64)
-        dst_h_26_6 = int(dst_h * renderer_scale * 64)
+        # dst_h_26_6 = int(dst_h * renderer_scale * 64)
 
         # Physical pixel versions for clipping (integers)
         dst_x_phys = int(dst_x * renderer_scale)
@@ -1272,7 +1272,7 @@ class TextQuadWriter(BaseResource):
 #
 
 
-class RendererCanvas:
+class Canvas:
     """
     A canvas for accumulating quads to be rendered.
 
@@ -1352,10 +1352,10 @@ class RendererCanvas:
             scale = self.renderer.scale
 
             # Resolve src_wh (in physical pixels, from image)
-            src_wh_resolved = RendererCanvas._resolve_src_wh(dst_wh, src_wh, image)
+            src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
 
             # Compute dst_wh in logical pixels
-            dst_wh_logical = RendererCanvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
+            dst_wh_logical = Canvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
 
             # Convert logical to physical
             dst_xy = (int(dst_xy[0] * scale), int(dst_xy[1] * scale))
@@ -1370,8 +1370,8 @@ class RendererCanvas:
                 int(border_thickness_px[3] * scale),
             )
         else:
-            src_wh_resolved = RendererCanvas._resolve_src_wh(dst_wh, src_wh, image)
-            dst_wh = RendererCanvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
+            src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
+            dst_wh = Canvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
 
         # Ensure capacity
         if len(self) >= self.capacity:
@@ -1397,7 +1397,7 @@ class RendererCanvas:
             if src_wh is not None
             else (image.px_width if image else w, image.px_height if image else h)
         )
-        uv_xywh = RendererCanvas._eval_src_uv_xywh(src_xy, resolved_src_wh, image)
+        uv_xywh = Canvas._eval_src_uv_xywh(src_xy, resolved_src_wh, image)
         uv_x, uv_y, uv_w, uv_h = uv_xywh
         self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
         self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]

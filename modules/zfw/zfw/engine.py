@@ -2,7 +2,7 @@ import sys
 
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
-from .renderer import Renderer, RendererContext, RendererCanvas
+from .renderer import Renderer, RendererContext, Canvas
 from .window import Window, WindowContext
 
 
@@ -23,7 +23,7 @@ class Engine(BaseResource):
         debug: bool,
         swapchain_image_count: int,
     ):
-        super().__init__(parent=None)
+        super().__init__(parent_resource=None)
 
         # Create contexts:
         self._gpu_context = GpuContext(
@@ -40,10 +40,10 @@ class Engine(BaseResource):
 
         # Create window, GPU surface:
         self._window = Window(
-            context=self._window_context,
-            width=1280,
-            height=720,
-            title="Zero Sandbox",
+            window_context=self._window_context,
+            window_width=1280,
+            window_height=720,
+            window_title="Zero Sandbox",
         )
 
         # Create GPU device using the surface:
@@ -51,13 +51,13 @@ class Engine(BaseResource):
         self._gpu_device = GpuDevice(
             context=self._gpu_context,
             physical_device=physical_device,
-            surface=self._window.gpu_surface,
+            surface=self._window.window_gpu_surface,
         )
 
         # Create swap chain:
         self._gpu_swap_chain = GpuSwapChain(
             device=self._gpu_device,
-            surface=self._window.gpu_surface,
+            surface=self._window.window_gpu_surface,
             image_count=swapchain_image_count,
         )
 
@@ -102,15 +102,15 @@ class Engine(BaseResource):
     def renderer(self) -> Renderer:
         return self._renderer
 
-    def _on_dispose(self) -> None:
-        self._gpu_swap_chain.dispose()
-        self._gpu_device.dispose()
+    def _on_dispose_resource(self) -> None:
+        self._gpu_swap_chain.dispose_resource()
+        self._gpu_device.dispose_resource()
 
-        self._window.dispose()
+        self._window.dispose_resource()
 
-        self._render_context.dispose()
-        self._window_context.dispose()
-        self._gpu_context.dispose()
+        self._render_context.dispose_resource()
+        self._window_context.dispose_resource()
+        self._gpu_context.dispose_resource()
 
     def print_gpu_debug_info(
         self,
@@ -124,7 +124,7 @@ class Engine(BaseResource):
     def update(self):
         Window.poll_events()
 
-    def render(self, canvas: RendererCanvas):
+    def render(self, canvas: Canvas):
         """Context manager for rendering a frame with quads."""
         if self._rendered_frame_count == 0:
             self._window.show()

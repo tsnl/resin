@@ -4,7 +4,7 @@ import numpy as np
 import PIL.Image
 import pytest
 
-from .basic import BaseResource
+from .basic import BaseResource, Font
 from .gpu import (
     GpuContext,
     GpuDevice,
@@ -19,7 +19,7 @@ from .renderer import (
     RendererImage,
     RendererContext,
     Renderer,
-    RendererCanvas,
+    Canvas,
 )
 from .images import load_rgba_image
 
@@ -28,7 +28,7 @@ TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
 class RendererTestEngine(BaseResource):
     def __init__(self):
-        super().__init__(parent=None)
+        super().__init__(parent_resource=None)
         self.gpu_context = GpuContext(
             app_name="zfw renderer_test",
             enable_debug_layer_support=True,
@@ -58,14 +58,14 @@ class RendererTestEngine(BaseResource):
             ),
         )
 
-    def _on_dispose(self) -> None:
-        self.target.dispose()
+    def _on_dispose_resource(self) -> None:
+        self.target.dispose_resource()
 
-        self.renderer.dispose()
-        self.gpu_device.dispose()
+        self.renderer.dispose_resource()
+        self.gpu_device.dispose_resource()
 
-        self.renderer_context.dispose()
-        self.gpu_context.dispose()
+        self.renderer_context.dispose_resource()
+        self.gpu_context.dispose_resource()
 
     def readback(self) -> np.ndarray:
         buffer = GpuBuffer(
@@ -88,7 +88,7 @@ class RendererTestEngine(BaseResource):
             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
         )
 
-    def draw(self, canvas: RendererCanvas):
+    def draw(self, canvas: Canvas):
         fence = GpuFence(device=self.gpu_device)
         self.renderer.draw(
             canvas=canvas,
@@ -103,7 +103,7 @@ class RendererTestEngine(BaseResource):
 def test_renderer_quads():
     engine = RendererTestEngine()
 
-    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas = Canvas(renderer=engine.renderer)
     canvas.add_quad(
         dst_xy=(32, 64),
         dst_wh=(512, 256),
@@ -139,7 +139,7 @@ def test_renderer_image():
     image = RendererImage(renderer=engine.renderer, data=image_data)
 
     border_thickness_px = 8
-    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas = Canvas(renderer=engine.renderer)
     canvas.add_quad(
         dst_xy=(
             (TEST_IMAGE_W - image_data.shape[1] - border_thickness_px) // 2,
@@ -197,15 +197,15 @@ def test_renderer_atlas_smoketest():
     # Note: x=0 because it's larger than default_white_image (1x1)
     assert image.allocation_px_xywh[2:] == (128, 128)
 
-    renderer.dispose()
-    gpu_device.dispose()
-    renderer_context.dispose()
-    gpu_context.dispose()
+    renderer.dispose_resource()
+    gpu_device.dispose_resource()
+    renderer_context.dispose_resource()
+    gpu_context.dispose_resource()
 
 
 def test_renderer_text_basic():
     engine = RendererTestEngine()
-    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas = Canvas(renderer=engine.renderer)
 
     canvas.add_text(
         text="Hello, world",
@@ -226,7 +226,7 @@ def test_renderer_text_basic():
 
 def test_renderer_text_wrap():
     engine = RendererTestEngine()
-    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas = Canvas(renderer=engine.renderer)
 
     long_text = "This is a long text that should wrap to the next line because the width is limited."
     canvas.add_text(
@@ -249,7 +249,7 @@ def test_renderer_text_wrap():
 
 def test_renderer_text_clip():
     engine = RendererTestEngine()
-    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas = Canvas(renderer=engine.renderer)
 
     # Text that overflows but wrap is False
     canvas.add_text(
@@ -272,9 +272,9 @@ def test_renderer_text_clip():
 
 def test_renderer_text_matrix():
     engine = RendererTestEngine()
-    canvas = RendererCanvas(renderer=engine.renderer)
+    canvas = Canvas(renderer=engine.renderer)
 
-    fonts = ["sans-serif", "serif"]
+    fonts: list[Font] = ["sans-serif", "serif"]
     sizes = [12, 18, 24]
     weights = [100, 400, 700, 900]
 

@@ -34,12 +34,24 @@ def main():
         swapchain_image_count=args.swapchain_image_count,
     )
 
+    @engine.window.subscribe()
+    def window_key_event(event: zfw.WindowKeyEvent):
+        print(f"{event!r}")
+
+    @engine.window.subscribe()
+    def window_cursor_pos_event(event: zfw.WindowCursorPosEvent):
+        print(f"{event!r}")
+
+    @engine.window.subscribe()
+    def window_mouse_button_event(event: zfw.WindowMouseButtonEvent):
+        print(f"{event!r}")
+
     block_01_image = zfw.RendererImage(
         renderer=engine.renderer,
         data=zfw.load_rgba_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
-    canvas = zfw.RendererCanvas(renderer=engine.renderer)
+    canvas = zfw.Canvas(renderer=engine.renderer)
 
     while not engine.window.should_close():
         engine.update()
@@ -101,7 +113,7 @@ def main():
             text="Hello, world: weight=1200",
             font="sans-serif",
             dst_xy=(40, 234),
-            dst_wh=(400, 100),
+            dst_wh=(500, 100),
             font_size_px=FONT_SIZE_PX,
             font_weight=1200,
             color=(0.0, 0.0, 0.0, 1.0),
