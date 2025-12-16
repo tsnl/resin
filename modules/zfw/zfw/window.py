@@ -89,7 +89,8 @@ class Window(EventRouter, BaseResource):
         else:
             warnings.warn(
                 "Raw mouse motion is not supported on this system: 'joystick' cursor "
-                "mode may be less accurate."
+                "mode may be less accurate.",
+                category=RuntimeWarning,
             )
 
         # Bind event handlers:
