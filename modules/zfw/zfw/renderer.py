@@ -10,7 +10,6 @@ from collections import OrderedDict
 from typing import Literal, TypeAlias
 
 import numpy as np
-import freetype as ft
 
 from .basic import BaseResource, round_up_to_po2, Font
 from .bundled_data import BUNDLED_DATA_PATH
@@ -33,8 +32,8 @@ from .gpu import (
     GpuSemaphore,
     GpuShader,
 )
+from . import typed_freetype as ft  # Must import before uharfbuzz
 from . import typed_uharfbuzz as hb
-
 
 #
 # Renderer API:
