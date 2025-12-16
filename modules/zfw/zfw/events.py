@@ -1,7 +1,7 @@
 from abc import ABC
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Callable, TypeAlias, TypeVar
+from dataclasses import dataclass, is_dataclass
+from typing import Callable
 
 from .basic import camel_to_snake
 
@@ -11,7 +11,10 @@ _event_name_to_cls_map: dict[str, type["Event"]] = {}
 
 @dataclass
 class Event(ABC):
-    def __init_subclass__(cls) -> None:
+    @classmethod
+    def __init_subclass__(cls: type["Event"]) -> None:
+        if not is_dataclass(cls):
+            raise TypeError("Event subclasses must be dataclasses")
         if (c := _event_name_to_cls_map.setdefault(cls.hook_name(), cls)) is not cls:
             raise ValueError(
                 f"Event unique name '{cls.hook_name()}' is already registered "
@@ -28,31 +31,30 @@ class Event(ABC):
         return camel_to_snake(cls.__name__)
 
 
-class EventRouter:
+class EventRouter[TEvent: Event]:
     _callback_registry: defaultdict[str, list["EventHandler"]]
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self) -> None:
+        super().__init__()
         self._callback_registry = defaultdict(list)
 
-    def subscribe(self) -> Callable[["EventHandler"], "EventHandler"]:
+    def subscribe[T: Event](self) -> Callable[["EventHandler[T]"], "EventHandler[T]"]:
         """Register a listener function for events."""
 
-        def decorator(fn: "EventHandler") -> "EventHandler":
+        def decorator(fn: "EventHandler[T]") -> "EventHandler[T]":
             self._callback_registry[fn.__name__].append(fn)
             return fn
 
         return decorator
 
-    def unsubscribe(self, fn: "EventHandler") -> None:
+    def unsubscribe(self, fn: "EventHandler[TEvent]") -> None:
         """Unregister a listener function from events."""
         self._callback_registry[fn.__name__].remove(fn)
 
-    def publish(self, event: Event) -> None:
+    def publish(self, event: TEvent) -> None:
         """Publish an event to all registered listeners."""
         for fn in self._callback_registry[event.hook_name()]:
             fn(event)
 
 
-TEvent = TypeVar("TEvent", bound=Event, covariant=True)
-EventHandler: TypeAlias = Callable[[TEvent], None]
+type EventHandler[TEvent: Event] = Callable[[TEvent], None]

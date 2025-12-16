@@ -1,4 +1,12 @@
-__all__ = ["Window"]
+__all__ = [
+    "Window",
+    "WindowContext",
+    "WindowCursorMode",
+    "WindowCursorPosEvent",
+    "WindowEvent",
+    "WindowKeyEvent",
+    "WindowMouseButtonEvent",
+]
 
 from dataclasses import dataclass
 from typing import TypeAlias, Literal
@@ -6,7 +14,7 @@ import warnings
 
 import glfw
 
-from .basic import BaseResource, KeyAction, KeyModifier, Key
+from .basic import BaseResource, ButtonAction, KeyModifier, Key
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 from .typed_vulkan import raw_ffi
@@ -32,30 +40,34 @@ class WindowContext(BaseResource):
         glfw.terminate()
 
 
-class Window(EventRouter, BaseResource):
+class Window(BaseResource):
     window_context: WindowContext
-    window_width: int
-    window_height: int
-    window_title: str
-    window_glfw_window_handle: glfw._GLFWwindow
-    window_gpu_surface: GpuSurface
+    width: int
+    height: int
+    title: str
+    glfw_window_handle: glfw._GLFWwindow
+    gpu_surface: GpuSurface
+    event_router: EventRouter["WindowEvent"]
+    last_mouse_x: float
+    last_mouse_y: float
 
     def __init__(
         self,
         *,
         window_context: WindowContext,
-        window_width: int,
-        window_height: int,
-        window_title: str,
+        width: int,
+        height: int,
+        title: str,
     ) -> None:
         super().__init__(parent_resource=window_context)
 
         self.window_context = window_context
-        self.window_width = window_width
-        self.window_height = window_height
-        self.window_title = window_title
-        self.window_glfw_window_handle = self._new_glfw_window()
-        self.window_gpu_surface = self._new_gpu_surface()
+        self.width = width
+        self.height = height
+        self.title = title
+        self.glfw_window_handle = self._new_glfw_window()
+        self.gpu_surface = self._new_gpu_surface()
+        self.event_router = EventRouter["WindowEvent"]()
 
         self.last_mouse_x: float = 0.0
         self.last_mouse_y: float = 0.0
@@ -66,9 +78,9 @@ class Window(EventRouter, BaseResource):
         glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw_window = glfw.create_window(
-            width=self.window_width,
-            height=self.window_height,
-            title=self.window_title,
+            width=self.width,
+            height=self.height,
+            title=self.title,
             monitor=None,
             share=None,
         )
@@ -107,6 +119,7 @@ class Window(EventRouter, BaseResource):
             cbfun=self._on_glfw_cursor_pos_event,
         )
 
+        # Return the created GLFW window handle
         return glfw_window
 
     def _new_gpu_surface(self) -> GpuSurface:
@@ -116,13 +129,13 @@ class Window(EventRouter, BaseResource):
         surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
         result = glfw.create_window_surface(
             instance=self.window_context.gpu_context.vk_instance,
-            window=self.window_glfw_window_handle,
+            window=self.glfw_window_handle,
             allocator=None,
             surface=surface_ptr,
         )
         if result != 0:
             raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
-        width, height = glfw.get_framebuffer_size(self.window_glfw_window_handle)
+        width, height = glfw.get_framebuffer_size(self.glfw_window_handle)
         return GpuSurface(
             context=self.window_context.gpu_context,
             parent_resource=self,
@@ -132,38 +145,33 @@ class Window(EventRouter, BaseResource):
         )
 
     def _on_dispose_resource(self) -> None:
-        glfw.destroy_window(self.window_glfw_window_handle)
+        glfw.destroy_window(self.glfw_window_handle)
 
     def should_close(self) -> bool:
-        return glfw.window_should_close(self.window_glfw_window_handle)
+        return glfw.window_should_close(self.glfw_window_handle)
 
     def show(self):
-        glfw.show_window(self.window_glfw_window_handle)
+        glfw.show_window(self.glfw_window_handle)
 
     def hide(self):
-        glfw.hide_window(self.window_glfw_window_handle)
+        glfw.hide_window(self.glfw_window_handle)
 
     def set_cursor_mode(self, cursor_mode: "WindowCursorMode"):
         """
         Sets the mouse input mode for the window.
-        - "cursor": cursor-style input, mouse movement handled by the OS.
+        - "cursor": cursor input, mouse movement handled by the OS.
         - "joystick": cursor hidden, mouse movement captured by the window.
-
-        :param self: Description
-        :param mouse_input_mode: Description
-        :type mouse_input_mode: "WindowMouseInputMode"
         """
-
         match cursor_mode:
             case "joystick":
                 glfw.set_input_mode(
-                    self.window_glfw_window_handle,
+                    self.glfw_window_handle,
                     glfw.CURSOR,
                     glfw.CURSOR_DISABLED,
                 )
             case "cursor":
                 glfw.set_input_mode(
-                    self.window_glfw_window_handle,
+                    self.glfw_window_handle,
                     glfw.CURSOR,
                     glfw.CURSOR_NORMAL,
                 )
@@ -172,7 +180,7 @@ class Window(EventRouter, BaseResource):
 
     @property
     def content_scale(self) -> tuple[float, float]:
-        return glfw.get_window_content_scale(self.window_glfw_window_handle)
+        return glfw.get_window_content_scale(self.glfw_window_handle)
 
     @staticmethod
     def poll_events():
@@ -186,7 +194,7 @@ class Window(EventRouter, BaseResource):
         action: int,
         mods: int,
     ) -> None:
-        self.publish(
+        self.event_router.publish(
             WindowKeyEvent(
                 window=self,
                 key=_decode_glfw_key(key),
@@ -203,7 +211,7 @@ class Window(EventRouter, BaseResource):
         action: int,
         mods: int,
     ) -> None:
-        self.publish(
+        self.event_router.publish(
             WindowMouseButtonEvent(
                 window=self,
                 button=_decode_glfw_mouse_button(button),
@@ -220,32 +228,38 @@ class Window(EventRouter, BaseResource):
     ) -> None:
         dx, self.last_mouse_x = x - self.last_mouse_x, x
         dy, self.last_mouse_y = y - self.last_mouse_y, y
-
-        self.publish(WindowCursorPosEvent(window=self, x=x, y=y, dx=dx, dy=dy))
+        self.event_router.publish(
+            WindowCursorPosEvent(window=self, x=x, y=y, dx=dx, dy=dy)
+        )
 
 
 WindowCursorMode: TypeAlias = Literal["cursor", "joystick"]
 
 
 @dataclass
-class WindowKeyEvent(Event):
+class WindowEvent(Event):
+    pass
+
+
+@dataclass
+class WindowKeyEvent(WindowEvent):
     window: Window
     key: Key | None
-    action: "KeyAction"
+    action: "ButtonAction"
     mods: list["KeyModifier"]
     raw_scancode: int
 
 
 @dataclass
-class WindowMouseButtonEvent(Event):
+class WindowMouseButtonEvent(WindowEvent):
     window: Window
     button: str
-    action: "KeyAction"
+    action: "ButtonAction"
     mods: list["KeyModifier"]
 
 
 @dataclass
-class WindowCursorPosEvent(Event):
+class WindowCursorPosEvent(WindowEvent):
     window: Window
     x: float
     y: float
@@ -253,8 +267,8 @@ class WindowCursorPosEvent(Event):
     dy: float
 
 
-def _decode_glfw_action(action: int) -> KeyAction:
-    d: dict[int, KeyAction] = {
+def _decode_glfw_action(action: int) -> ButtonAction:
+    d: dict[int, ButtonAction] = {
         glfw.PRESS: "press",
         glfw.RELEASE: "release",
         glfw.REPEAT: "repeat",

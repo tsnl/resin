@@ -2,7 +2,7 @@ __all__ = [
     "BaseResource",
     "ColorSpace",
     "Key",
-    "KeyAction",
+    "ButtonAction",
     "KeyModifier",
     "SupportsWrite",
     "expect",
@@ -321,7 +321,7 @@ Key: TypeAlias = Literal[
     "right-super",
     "menu",
 ]
-KeyAction: TypeAlias = Literal["press", "release", "repeat"]
+ButtonAction: TypeAlias = Literal["press", "release", "repeat"]
 KeyModifier: TypeAlias = Literal["shift", "control", "alt", "super"]
 
 MouseButton: TypeAlias = Literal[

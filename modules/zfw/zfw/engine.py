@@ -41,9 +41,9 @@ class Engine(BaseResource):
         # Create window, GPU surface:
         self._window = Window(
             window_context=self._window_context,
-            window_width=1280,
-            window_height=720,
-            window_title="Zero Sandbox",
+            width=1280,
+            height=720,
+            title="Zero Sandbox",
         )
 
         # Create GPU device using the surface:
@@ -51,13 +51,13 @@ class Engine(BaseResource):
         self._gpu_device = GpuDevice(
             context=self._gpu_context,
             physical_device=physical_device,
-            surface=self._window.window_gpu_surface,
+            surface=self._window.gpu_surface,
         )
 
         # Create swap chain:
         self._gpu_swap_chain = GpuSwapChain(
             device=self._gpu_device,
-            surface=self._window.window_gpu_surface,
+            surface=self._window.gpu_surface,
             image_count=swapchain_image_count,
         )
 
