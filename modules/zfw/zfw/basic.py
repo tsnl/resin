@@ -1,8 +1,8 @@
 __all__ = [
     "BaseResource",
+    "ButtonAction",
     "ColorSpace",
     "Key",
-    "ButtonAction",
     "KeyModifier",
     "SupportsWrite",
     "expect",

@@ -32,6 +32,7 @@ def main():
         app_name="Zero Sandbox",
         debug=args.debug,
         swapchain_image_count=args.swapchain_image_count,
+        enable_gui=True,
     )
 
     block_01_image = zfw.RendererImage(
@@ -39,15 +40,12 @@ def main():
         data=zfw.load_rgba_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
-    canvas = zfw.Canvas(renderer=engine.renderer)
-
-    gui_window = zfw.GuiWindow(window=engine.window)
     gui_label = zfw.GuiLabel(
-        parent_widget=gui_window,
-        xywh_dip=(50, 50, 200, 40),
+        parent_widget=engine.window,
+        xywh_dip=(50, 50, 200, 54),
         text="Hello, GUI!",
-        font_size_dip=14,
-        padding=(10, 0, 10, 5),
+        font_size_dip=18,
+        padding=(12, 0, 12, 5),
         bg_color=(0.2, 0.2, 0.2, 1.0),
         bg_hover_color=(0.4, 0.4, 0.4, 1.0),
         fg_color=(1.0, 1.0, 1.0, 1.0),
@@ -55,12 +53,12 @@ def main():
         hover_border_thickness=(2, 2, 2, 2),
     )
 
+    _ = block_01_image
+    _ = gui_label
+
     while not engine.window.should_close():
         engine.update()
-
-        canvas.clear()
-        gui_window.render(canvas=canvas)
-        engine.render(canvas=canvas)
+        engine.render()
 
 
 def print_gpu_debug_info(
