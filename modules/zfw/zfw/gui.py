@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Literal
 import warnings
 
+from cassowary import SimplexSolver, Variable, STRONG, REQUIRED
+
 import glfw
 
 from .basic import (
@@ -63,7 +65,7 @@ type GuiTheme = dict[str, GuiWidgetStyle]
 DEFAULT_THEME: GuiTheme = {
     "label": GuiWidgetStyle(
         bg_color=(0.0, 0.0, 0.0, 0.0),
-        fg_color=(0.0, 0.0, 0.0, 1.0),
+        fg_color=(1.0, 1.0, 1.0, 1.0),
     ),
     "button": GuiWidgetStyle(
         bg_color=(0.9, 0.9, 0.9, 1.0),
@@ -106,24 +108,157 @@ class GuiNode(BaseResource, ABC):
     _latest_local_mouse_pos: tuple[int, int]
     _latest_global_mouse_pos: tuple[int, int]
 
+    # Layout params (position in parent)
+    _layout_row: int
+    _layout_col: int
+    _layout_row_span: int
+    _layout_col_span: int
+
+    # Grid params (for children)
+    _num_child_grid_rows: int
+    _num_child_grid_cols: int
+    _child_grid_row_size: tuple[int, ...]
+    _child_grid_col_size: tuple[int, ...]
+
     def __init__(
         self,
         *,
         parent_node: "GuiNode | None",
-        local_xywh_dip: tuple[int, int, int, int],
+        local_xywh_dip: tuple[int, int, int, int] | None = None,
+        row: int = 0,
+        col: int = 0,
+        row_span: int = 1,
+        col_span: int = 1,
+        num_child_grid_rows: int = 1,
+        num_child_grid_cols: int = 1,
+        child_grid_row_size: tuple[int, ...] | None = None,
+        child_grid_col_size: tuple[int, ...] | None = None,
         parent_resource: "BaseResource | None" = None,
     ) -> None:
         super().__init__(parent_resource=(parent_resource or parent_node))
 
         self._parent_node = parent_node
-        self._local_xywh_dip = local_xywh_dip
+        self._local_xywh_dip = local_xywh_dip or (0, 0, 0, 0)
         self._child_node_list = []
         self._mouse_over = False
         self._latest_local_mouse_pos = (0, 0)
         self._latest_global_mouse_pos = (0, 0)
 
+        self._layout_row = row
+        self._layout_col = col
+        self._layout_row_span = row_span
+        self._layout_col_span = col_span
+
+        self._num_child_grid_rows = num_child_grid_rows
+        self._num_child_grid_cols = num_child_grid_cols
+        self._child_grid_row_size = child_grid_row_size or tuple(
+            [-1] * num_child_grid_rows
+        )
+        self._child_grid_col_size = child_grid_col_size or tuple(
+            [-1] * num_child_grid_cols
+        )
+
         if self._parent_node is not None:
             self._parent_node._add_child_node(self)
+
+    def set_grid_config(
+        self,
+        num_rows: int,
+        num_cols: int,
+        row_sizes: tuple[int, ...] | None = None,
+        col_sizes: tuple[int, ...] | None = None,
+    ) -> None:
+        self._num_child_grid_rows = num_rows
+        self._num_child_grid_cols = num_cols
+        self._child_grid_row_size = row_sizes or tuple([-1] * num_rows)
+        self._child_grid_col_size = col_sizes or tuple([-1] * num_cols)
+
+    def update_layout(self) -> None:
+        if self._child_node_list:
+            self._solve_layout()
+
+        for child in self._child_node_list:
+            child.update_layout()
+
+    def _solve_layout(self) -> None:
+        solver = SimplexSolver()
+
+        # Variables for grid lines
+        row_vars = [Variable(f"row_{i}") for i in range(self._num_child_grid_rows + 1)]
+        col_vars = [Variable(f"col_{i}") for i in range(self._num_child_grid_cols + 1)]
+
+        # Unit size for stretch
+        unit_w = Variable("unit_w")
+        unit_h = Variable("unit_h")
+
+        # Constraints
+        _, _, w, h = self._local_xywh_dip
+
+        # Boundaries
+        solver.add_constraint(row_vars[0] == 0)
+        solver.add_constraint(row_vars[self._num_child_grid_rows] == h)
+        solver.add_constraint(col_vars[0] == 0)
+        solver.add_constraint(col_vars[self._num_child_grid_cols] == w)
+
+        # Ordering
+        for i in range(self._num_child_grid_rows):
+            solver.add_constraint(row_vars[i + 1] >= row_vars[i])
+        for i in range(self._num_child_grid_cols):
+            solver.add_constraint(col_vars[i + 1] >= col_vars[i])
+
+        # Row sizes
+        for i in range(self._num_child_grid_rows):
+            size = (
+                self._child_grid_row_size[i]
+                if i < len(self._child_grid_row_size)
+                else -1
+            )
+            if size >= 0:
+                solver.add_constraint(
+                    row_vars[i + 1] - row_vars[i] == size, strength=STRONG
+                )
+            else:
+                weight = -size
+                solver.add_constraint(
+                    row_vars[i + 1] - row_vars[i] == weight * unit_h, strength=STRONG
+                )
+
+        # Col sizes
+        for i in range(self._num_child_grid_cols):
+            size = (
+                self._child_grid_col_size[i]
+                if i < len(self._child_grid_col_size)
+                else -1
+            )
+            if size >= 0:
+                solver.add_constraint(
+                    col_vars[i + 1] - col_vars[i] == size, strength=STRONG
+                )
+            else:
+                weight = -size
+                solver.add_constraint(
+                    col_vars[i + 1] - col_vars[i] == weight * unit_w, strength=STRONG
+                )
+
+        # Update children
+        for child in self._child_node_list:
+            r = child._layout_row
+            c = child._layout_col
+            rs = child._layout_row_span
+            cs = child._layout_col_span
+
+            # Clamp to grid
+            r = max(0, min(r, self._num_child_grid_rows - 1))
+            c = max(0, min(c, self._num_child_grid_cols - 1))
+            rs = max(1, min(rs, self._num_child_grid_rows - r))
+            cs = max(1, min(cs, self._num_child_grid_cols - c))
+
+            y1 = row_vars[r].value
+            y2 = row_vars[r + rs].value
+            x1 = col_vars[c].value
+            x2 = col_vars[c + cs].value
+
+            child._local_xywh_dip = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
 
     @property
     def gui_context(self) -> GuiContext:
@@ -249,6 +384,10 @@ class GuiWindow(GuiNode):
         width: int,
         height: int,
         title: str,
+        num_grid_rows: int = 1,
+        num_grid_cols: int = 1,
+        grid_row_sizes: tuple[int, ...] | None = None,
+        grid_col_sizes: tuple[int, ...] | None = None,
     ) -> None:
         self.width = width
         self.height = height
@@ -258,6 +397,10 @@ class GuiWindow(GuiNode):
         super().__init__(
             parent_node=None,
             local_xywh_dip=(0, 0, width, height),
+            num_child_grid_rows=num_grid_rows,
+            num_child_grid_cols=num_grid_cols,
+            child_grid_row_size=grid_row_sizes,
+            child_grid_col_size=grid_col_sizes,
             parent_resource=gui_context,
         )
 
@@ -418,6 +561,7 @@ class GuiWindow(GuiNode):
         )
 
     def render(self, canvas: Canvas) -> None:
+        self.update_layout()
         self._render(canvas)
 
     def _render_self(self, canvas: Canvas) -> None:
@@ -433,12 +577,30 @@ class GuiWidget(GuiNode):
         self,
         *,
         parent_node: GuiNode,
-        xywh_dip: tuple[int, int, int, int],
-        text: str,
+        row: int = 0,
+        col: int = 0,
+        row_span: int = 1,
+        col_span: int = 1,
+        num_child_grid_rows: int = 1,
+        num_child_grid_cols: int = 1,
+        child_grid_row_size: tuple[int, ...] | None = None,
+        child_grid_col_size: tuple[int, ...] | None = None,
+        text: str = "",
         archetype: str = "label",
         is_enabled: bool = True,
     ) -> None:
-        super().__init__(parent_node=parent_node, local_xywh_dip=xywh_dip)
+        super().__init__(
+            parent_node=parent_node,
+            local_xywh_dip=None,
+            row=row,
+            col=col,
+            row_span=row_span,
+            col_span=col_span,
+            num_child_grid_rows=num_child_grid_rows,
+            num_child_grid_cols=num_child_grid_cols,
+            child_grid_row_size=child_grid_row_size,
+            child_grid_col_size=child_grid_col_size,
+        )
         self._text = text
         self._archetype = archetype
         self._is_enabled = is_enabled

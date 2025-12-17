@@ -19,6 +19,15 @@ wheels = [
 ]
 
 [[package]]
+name = "cassowary"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/85/3eb30718ab1eb495b7b1aac101f1157030c936726884e1a1047fde77cb62/cassowary-0.5.2.tar.gz", hash = "sha256:d7c0d10722738eca3cd939c8f6f1a580fdfa4fad71b71d0d193c10aaa3d406dd", size = 33583, upload-time = "2020-02-03T04:25:18.141Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/d9/879a2e23c6e3129e6b7970e48635ca2e233c1620f64866d49e67e9c699cf/cassowary-0.5.2-py2.py3-none-any.whl", hash = "sha256:5da16ceca5fd42c848d3a875f3834a7b93f2cc74dd07039ea7e5305c0fbb926d", size = 14407, upload-time = "2020-02-03T04:25:16.065Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.11.12"
 source = { registry = "https://pypi.org/simple" }
@@ -470,6 +479,7 @@ name = "zfw"
 version = "0.1.0"
 source = { editable = "modules/zfw" }
 dependencies = [
+    { name = "cassowary" },
     { name = "freetype-py" },
     { name = "glfw" },
     { name = "numpy" },
@@ -491,6 +501,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cassowary", specifier = ">=0.5.2" },
     { name = "freetype-py", specifier = ">=2.5.1" },
     { name = "glfw", specifier = ">=2.10.0,<3.0.0" },
     { name = "numpy", specifier = ">=2.3.5,<3.0.0" },

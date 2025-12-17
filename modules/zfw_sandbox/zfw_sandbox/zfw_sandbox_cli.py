@@ -40,15 +40,53 @@ def main():
         data=zfw.load_rgba_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
-    gui_label = zfw.GuiWidget(
+    # Configure window grid
+    engine.window.set_grid_config(
+        num_rows=3,
+        num_cols=2,
+        row_sizes=(60, -1, 60),  # Header, Content, Footer
+        col_sizes=(200, -1),  # Sidebar, Main
+    )
+
+    # Header
+    zfw.GuiWidget(
         parent_node=engine.window,
-        xywh_dip=(50, 50, 200, 54),
-        text="Hello, GUI!",
+        row=0,
+        col=0,
+        col_span=2,
+        text="Header (Fixed 60px)",
+        archetype="label",
+    )
+
+    # Sidebar
+    zfw.GuiWidget(
+        parent_node=engine.window,
+        row=1,
+        col=0,
+        text="Sidebar (Fixed 200px)",
         archetype="button",
     )
 
+    # Main Content
+    zfw.GuiWidget(
+        parent_node=engine.window,
+        row=1,
+        col=1,
+        text="Main Content (Stretch)",
+        archetype="label",
+    )
+
+    # Footer
+    zfw.GuiWidget(
+        parent_node=engine.window,
+        row=2,
+        col=0,
+        col_span=2,
+        text="Footer (Fixed 60px)",
+        archetype="label",
+    )
+
     _ = block_01_image
-    _ = gui_label
 
     while not engine.window.should_close():
         engine.update()
