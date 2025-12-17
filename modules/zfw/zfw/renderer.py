@@ -1169,6 +1169,58 @@ class TextQuadWriter(BaseResource):
         lines.append((line_start_index, len(infos), current_line_width_26_6))
         return lines
 
+    def _get_line_optical_bounds(
+        self,
+        font: Font,
+        infos: list[hb.GlyphInfo],
+        positions: list[hb.GlyphPosition],
+        start_idx: int,
+        end_idx: int,
+    ) -> tuple[int, int]:
+        """
+        Returns (min_x, max_x) of the ink bounds for the given range of glyphs,
+        relative to the start of the line (pen_x = 0).
+        Values are in 26.6 fixed point.
+        """
+        hb_font = self._hb_font_map[font]
+        min_x = 2147483647
+        max_x = -2147483648
+
+        pen_x = 0
+        has_ink = False
+
+        for i in range(start_idx, end_idx):
+            info = infos[i]
+            pos = positions[i]
+
+            extents = hb_font.get_glyph_extents(info.codepoint)
+
+            # If width/height are 0, it's likely whitespace or invisible
+            if extents.width != 0 and extents.height != 0:
+                # Glyph origin relative to pen
+                # HarfBuzz extents are relative to glyph origin
+                # x_offset is applied to glyph origin
+
+                # Ink rect:
+                # left = pen_x + x_offset + x_bearing
+                # right = left + width
+
+                left = pen_x + pos.x_offset + extents.x_bearing
+                right = left + extents.width
+
+                if left < min_x:
+                    min_x = left
+                if right > max_x:
+                    max_x = right
+                has_ink = True
+
+            pen_x += pos.x_advance
+
+        if not has_ink:
+            return 0, 0
+
+        return min_x, max_x
+
     def _add_quads_to_canvas(
         self,
         *,
@@ -1183,6 +1235,7 @@ class TextQuadWriter(BaseResource):
         font_weight: int,
         align_x: HorizontalAlignment,
         align_y: VerticalAlignment,
+        optical_alignment: bool,
     ):
         if not text:
             return
@@ -1236,10 +1289,24 @@ class TextQuadWriter(BaseResource):
         for start_idx, end_idx, line_width_26_6 in lines:
             # Horizontal alignment
             pen_x_26_6 = dst_x_26_6
-            if align_x == "center":
-                pen_x_26_6 += (dst_w_26_6 - line_width_26_6) // 2
-            elif align_x == "right":
-                pen_x_26_6 += dst_w_26_6 - line_width_26_6
+
+            if optical_alignment:
+                min_ink, max_ink = self._get_line_optical_bounds(
+                    font, infos, positions, start_idx, end_idx
+                )
+                optical_width = max_ink - min_ink
+
+                if align_x == "center":
+                    pen_x_26_6 += (dst_w_26_6 - optical_width) // 2 - min_ink
+                elif align_x == "right":
+                    pen_x_26_6 += dst_w_26_6 - max_ink
+                elif align_x == "left":
+                    pen_x_26_6 -= min_ink
+            else:
+                if align_x == "center":
+                    pen_x_26_6 += (dst_w_26_6 - line_width_26_6) // 2
+                elif align_x == "right":
+                    pen_x_26_6 += dst_w_26_6 - line_width_26_6
 
             for i in range(start_idx, end_idx):
                 info = infos[i]
@@ -1531,11 +1598,15 @@ class Canvas:
         font_weight: int = 400,
         horizontal_alignment: HorizontalAlignment = "left",
         vertical_alignment: VerticalAlignment = "top",
+        optical_alignment: bool = True,
     ):
         """
         Adds quads for rendering the given text string with the given font.
 
         Supports horizontal and vertical alignment within the destination rectangle.
+
+        If `optical_alignment` is True, aligns based on the visible ink bounds
+        rather than the logical metric bounds.
         """
 
         font_cache = self.renderer._text_quad_writer
@@ -1552,4 +1623,5 @@ class Canvas:
             font_weight=font_weight,
             align_x=horizontal_alignment,
             align_y=vertical_alignment,
+            optical_alignment=optical_alignment,
         )

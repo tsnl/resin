@@ -330,3 +330,42 @@ def test_renderer_text_matrix():
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
+
+
+def test_renderer_text_optical():
+    engine = RendererTestEngine()
+    canvas = Canvas(renderer=engine.renderer)
+
+    # Render text with metric vs optical alignment
+    text = "AVATAR"
+    font = "sans-serif"
+    size = 64
+
+    # Metric Center
+    canvas.add_text(
+        text=text,
+        font=font,
+        dst_xy=(100, 100),
+        dst_wh=(400, 100),
+        font_size_px=size,
+        horizontal_alignment="center",
+        optical_alignment=False,
+    )
+
+    # Optical Center
+    canvas.add_text(
+        text=text,
+        font=font,
+        dst_xy=(100, 300),
+        dst_wh=(400, 100),
+        font_size_px=size,
+        horizontal_alignment="center",
+        optical_alignment=True,
+    )
+
+    engine.draw(canvas=canvas)
+    image = engine.readback()
+
+    output_path = Path("output/zfw/renderer_test/test_renderer_text_optical.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(image).save(output_path)

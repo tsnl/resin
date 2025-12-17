@@ -5,6 +5,7 @@ class Font:
     scale: tuple[int, int]
     def __init__(self, face: Face) -> None: ...
     def set_variations(self, variations: dict[str, float]) -> None: ...
+    def get_glyph_extents(self, glyph: int) -> "GlyphExtents": ...
 
 class Buffer:
     glyph_infos: list["GlyphInfo"]
@@ -23,5 +24,11 @@ class GlyphPosition:
     y_advance: int
     x_offset: int
     y_offset: int
+
+class GlyphExtents:
+    x_bearing: int
+    y_bearing: int
+    width: int
+    height: int
 
 def shape(font: Font, buffer: Buffer) -> None: ...
