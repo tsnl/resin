@@ -332,3 +332,7 @@ type MouseButton = Literal[
     "button-7",
     "button-8",
 ]
+
+
+type HorizontalAlignment = Literal["left", "center", "right"]
+type VerticalAlignment = Literal["top", "middle", "bottom"]

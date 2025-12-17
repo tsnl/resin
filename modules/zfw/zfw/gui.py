@@ -19,7 +19,16 @@ import warnings
 
 import glfw
 
-from .basic import BaseResource, MouseButton, ButtonAction, Font, KeyModifier, Key
+from .basic import (
+    BaseResource,
+    MouseButton,
+    ButtonAction,
+    Font,
+    KeyModifier,
+    Key,
+    HorizontalAlignment,
+    VerticalAlignment,
+)
 from .renderer import Canvas, RendererImage
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
@@ -366,6 +375,8 @@ class GuiWindow(GuiWidget):
 
 class GuiLabel(GuiWidget):
     _text: str
+    _text_horizontal_alignment: HorizontalAlignment
+    _text_vertical_alignment: VerticalAlignment
     _font: Font
     _font_size_dip: int
     _bg_color: tuple[float, float, float, float]
@@ -387,6 +398,8 @@ class GuiLabel(GuiWidget):
         parent_widget: GuiWidget,
         xywh_dip: tuple[int, int, int, int],
         text: str,
+        text_horizontal_alignment: HorizontalAlignment = "center",
+        text_vertical_alignment: VerticalAlignment = "middle",
         font: Font = "sans-serif",
         font_size_dip: int = 18,
         bg_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
@@ -404,6 +417,8 @@ class GuiLabel(GuiWidget):
     ) -> None:
         super().__init__(parent_widget=parent_widget, local_xywh_dip=xywh_dip)
         self._text = text
+        self._text_horizontal_alignment = text_horizontal_alignment
+        self._text_vertical_alignment = text_vertical_alignment
         self._font = font
         self._font_size_dip = font_size_dip
         self._bg_color = bg_color
@@ -448,6 +463,8 @@ class GuiLabel(GuiWidget):
             dst_wh=(w - pl - pr, h - pt - pb),
             color=(self._fg_color if not self._mouse_over else self._fg_hover_color),
             wrap=self._wrap,
+            horizontal_alignment=self._text_horizontal_alignment,
+            vertical_alignment=self._text_vertical_alignment,
         )
 
 

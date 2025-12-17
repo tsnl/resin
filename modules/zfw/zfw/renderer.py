@@ -11,7 +11,13 @@ from typing import Literal
 
 import numpy as np
 
-from .basic import BaseResource, round_up_to_po2, Font
+from .basic import (
+    BaseResource,
+    round_up_to_po2,
+    Font,
+    HorizontalAlignment,
+    VerticalAlignment,
+)
 from .bundled_data import BUNDLED_DATA_PATH
 from .excepts import LogicError
 from .gpu import (
@@ -1105,6 +1111,64 @@ class TextQuadWriter(BaseResource):
         # Done:
         return result
 
+    def _layout_text_lines(
+        self,
+        infos: list[hb.GlyphInfo],
+        positions: list[hb.GlyphPosition],
+        text: str,
+        wrap: bool,
+        max_width_26_6: int,
+    ) -> list[tuple[int, int, int]]:
+        lines = []
+        line_start_index = 0
+        current_line_width_26_6 = 0
+
+        i = 0
+        while i < len(infos):
+            info = infos[i]
+            pos = positions[i]
+            cluster = info.cluster
+            char = text[cluster] if cluster < len(text) else " "
+
+            if char == "\n":
+                lines.append((line_start_index, i, current_line_width_26_6))
+                line_start_index = i + 1
+                current_line_width_26_6 = 0
+                i += 1
+                continue
+
+            if wrap and not char.isspace():
+                is_word_start = False
+                if i == line_start_index:
+                    is_word_start = True
+                else:
+                    prev_cluster = infos[i - 1].cluster
+                    prev_char = text[prev_cluster] if prev_cluster < len(text) else " "
+                    if prev_char.isspace():
+                        is_word_start = True
+
+                if is_word_start:
+                    word_width_26_6 = 0
+                    for j in range(i, len(infos)):
+                        c = infos[j].cluster
+                        c_char = text[c] if c < len(text) else " "
+                        if c_char.isspace() or c_char == "\n":
+                            break
+                        word_width_26_6 += positions[j].x_advance
+
+                    if (
+                        current_line_width_26_6 + word_width_26_6 > max_width_26_6
+                    ) and (current_line_width_26_6 > 0):
+                        lines.append((line_start_index, i, current_line_width_26_6))
+                        line_start_index = i
+                        current_line_width_26_6 = 0
+
+            current_line_width_26_6 += pos.x_advance
+            i += 1
+
+        lines.append((line_start_index, len(infos), current_line_width_26_6))
+        return lines
+
     def _add_quads_to_canvas(
         self,
         *,
@@ -1117,6 +1181,8 @@ class TextQuadWriter(BaseResource):
         dst_wh: tuple[int, int],
         wrap: bool,
         font_weight: int,
+        align_x: HorizontalAlignment,
+        align_y: VerticalAlignment,
     ):
         if not text:
             return
@@ -1146,7 +1212,7 @@ class TextQuadWriter(BaseResource):
         dst_x_26_6 = int(dst_x * renderer_scale * 64)
         dst_y_26_6 = int(dst_y * renderer_scale * 64)
         dst_w_26_6 = int(dst_w * renderer_scale * 64)
-        # dst_h_26_6 = int(dst_h * renderer_scale * 64)
+        dst_h_26_6 = int(dst_h * renderer_scale * 64)
 
         # Physical pixel versions for clipping (integers)
         dst_x_phys = int(dst_x * renderer_scale)
@@ -1154,116 +1220,100 @@ class TextQuadWriter(BaseResource):
         dst_w_phys = int(dst_w * renderer_scale)
         dst_h_phys = int(dst_h * renderer_scale)
 
-        # Pen position in 26.6 fixed-point (physical)
-        pen_x_26_6 = dst_x_26_6
-        pen_y_26_6 = dst_y_26_6 + ascender_26_6
-        start_x_26_6 = dst_x_26_6
+        lines = self._layout_text_lines(infos, positions, text, wrap, dst_w_26_6)
 
-        for i in range(len(infos)):
-            info = infos[i]
-            pos = positions[i]
+        total_text_height_26_6 = len(lines) * height_26_6
 
-            codepoint = info.codepoint
-            cluster = info.cluster
-            char = text[cluster] if cluster < len(text) else " "
+        # Vertical alignment
+        start_y_26_6 = dst_y_26_6
+        if align_y == "middle":
+            start_y_26_6 += (dst_h_26_6 - total_text_height_26_6) // 2
+        elif align_y == "bottom":
+            start_y_26_6 += dst_h_26_6 - total_text_height_26_6
 
-            # Handle explicit newlines
-            if char == "\n":
-                pen_x_26_6 = start_x_26_6
-                pen_y_26_6 += height_26_6
-                continue
+        pen_y_26_6 = start_y_26_6 + ascender_26_6
 
-            # HarfBuzz positions are in 26.6 fixed point - use directly
-            x_advance_26_6 = pos.x_advance
-            y_advance_26_6 = pos.y_advance
-            x_offset_26_6 = pos.x_offset
-            y_offset_26_6 = pos.y_offset
+        for start_idx, end_idx, line_width_26_6 in lines:
+            # Horizontal alignment
+            pen_x_26_6 = dst_x_26_6
+            if align_x == "center":
+                pen_x_26_6 += (dst_w_26_6 - line_width_26_6) // 2
+            elif align_x == "right":
+                pen_x_26_6 += dst_w_26_6 - line_width_26_6
 
-            # Word wrapping (use 26.6 for accurate measurement)
-            if wrap and not char.isspace():
-                is_word_start = False
-                if i == 0:
-                    is_word_start = True
-                else:
-                    prev_cluster = infos[i - 1].cluster
-                    prev_char = text[prev_cluster] if prev_cluster < len(text) else " "
-                    if prev_char.isspace():
-                        is_word_start = True
+            for i in range(start_idx, end_idx):
+                info = infos[i]
+                pos = positions[i]
 
-                if is_word_start:
-                    word_width_26_6 = 0
-                    for j in range(i, len(infos)):
-                        c = infos[j].cluster
-                        c_char = text[c] if c < len(text) else " "
-                        if c_char.isspace():
-                            break
-                        word_width_26_6 += positions[j].x_advance
+                codepoint = info.codepoint
+                # cluster = info.cluster
 
-                    # Wrap if word doesn't fit and we're not at start of line
-                    if (pen_x_26_6 + word_width_26_6 > dst_x_26_6 + dst_w_26_6) and (
-                        pen_x_26_6 > start_x_26_6
-                    ):
-                        pen_x_26_6 = start_x_26_6
-                        pen_y_26_6 += height_26_6
+                # HarfBuzz positions are in 26.6 fixed point - use directly
+                x_advance_26_6 = pos.x_advance
+                y_advance_26_6 = pos.y_advance
+                x_offset_26_6 = pos.x_offset
+                y_offset_26_6 = pos.y_offset
 
-            image, bitmap_left, bitmap_top = self._get_glyph_image(
-                font, codepoint, font_size_px, font_weight
-            )
+                image, bitmap_left, bitmap_top = self._get_glyph_image(
+                    font, codepoint, font_size_px, font_weight
+                )
 
-            if image is not None:
-                # Convert pen position to physical pixels for this glyph
-                # Round 26.6 to nearest integer pixel
-                pen_x_phys = (pen_x_26_6 + 32) >> 6
-                pen_y_phys = (pen_y_26_6 + 32) >> 6
-                x_offset_phys = (x_offset_26_6 + 32) >> 6
-                y_offset_phys = (y_offset_26_6 + 32) >> 6
+                if image is not None:
+                    # Convert pen position to physical pixels for this glyph
+                    # Round 26.6 to nearest integer pixel
+                    pen_x_phys = (pen_x_26_6 + 32) >> 6
+                    pen_y_phys = (pen_y_26_6 + 32) >> 6
+                    x_offset_phys = (x_offset_26_6 + 32) >> 6
+                    y_offset_phys = (y_offset_26_6 + 32) >> 6
 
-                # bitmap_left and bitmap_top are already in physical pixels
-                # Glyph quad position in physical pixels
-                qx_phys = pen_x_phys + x_offset_phys + bitmap_left
-                qy_phys = pen_y_phys - bitmap_top - y_offset_phys
+                    # bitmap_left and bitmap_top are already in physical pixels
+                    # Glyph quad position in physical pixels
+                    qx_phys = pen_x_phys + x_offset_phys + bitmap_left
+                    qy_phys = pen_y_phys - bitmap_top - y_offset_phys
 
-                # Glyph dimensions in physical pixels
-                qw_phys = image.px_width
-                qh_phys = image.px_height
+                    # Glyph dimensions in physical pixels
+                    qw_phys = image.px_width
+                    qh_phys = image.px_height
 
-                # Intersection with dst rect (in physical pixels)
-                ix_phys = max(qx_phys, dst_x_phys)
-                iy_phys = max(qy_phys, dst_y_phys)
-                ir_phys = min(qx_phys + qw_phys, dst_x_phys + dst_w_phys)
-                ib_phys = min(qy_phys + qh_phys, dst_y_phys + dst_h_phys)
+                    # Intersection with dst rect (in physical pixels)
+                    ix_phys = max(qx_phys, dst_x_phys)
+                    iy_phys = max(qy_phys, dst_y_phys)
+                    ir_phys = min(qx_phys + qw_phys, dst_x_phys + dst_w_phys)
+                    ib_phys = min(qy_phys + qh_phys, dst_y_phys + dst_h_phys)
 
-                if ir_phys > ix_phys and ib_phys > iy_phys:
-                    # Clipping offset and size in physical pixels (for src rect)
-                    src_off_x = ix_phys - qx_phys
-                    src_off_y = iy_phys - qy_phys
-                    src_w = ir_phys - ix_phys
-                    src_h = ib_phys - iy_phys
+                    if ir_phys > ix_phys and ib_phys > iy_phys:
+                        # Clipping offset and size in physical pixels (for src rect)
+                        src_off_x = ix_phys - qx_phys
+                        src_off_y = iy_phys - qy_phys
+                        src_w = ir_phys - ix_phys
+                        src_h = ib_phys - iy_phys
 
-                    # Ensure we don't exceed the image bounds
-                    src_w = min(src_w, image.px_width - src_off_x)
-                    src_h = min(src_h, image.px_height - src_off_y)
+                        # Ensure we don't exceed the image bounds
+                        src_w = min(src_w, image.px_width - src_off_x)
+                        src_h = min(src_h, image.px_height - src_off_y)
 
-                    # Destination size in physical pixels (1:1 mapping with source)
-                    glyph_dst_w = src_w
-                    glyph_dst_h = src_h
+                        # Destination size in physical pixels (1:1 mapping with source)
+                        glyph_dst_w = src_w
+                        glyph_dst_h = src_h
 
-                    if src_w > 0 and src_h > 0:
-                        # Use physical pixel coordinates directly to avoid
-                        # scaling artifacts with nearest-neighbor sampling
-                        canvas.add_quad(
-                            dst_xy=(ix_phys, iy_phys),
-                            dst_wh=(glyph_dst_w, glyph_dst_h),
-                            src_xy=(src_off_x, src_off_y),
-                            src_wh=(src_w, src_h),
-                            color=color,
-                            image=image,
-                            _dip=False,
-                        )
+                        if src_w > 0 and src_h > 0:
+                            # Use physical pixel coordinates directly to avoid
+                            # scaling artifacts with nearest-neighbor sampling
+                            canvas.add_quad(
+                                dst_xy=(ix_phys, iy_phys),
+                                dst_wh=(glyph_dst_w, glyph_dst_h),
+                                src_xy=(src_off_x, src_off_y),
+                                src_wh=(src_w, src_h),
+                                color=color,
+                                image=image,
+                                _dip=False,
+                            )
 
-            # Accumulate in 26.6 to preserve precision
-            pen_x_26_6 += x_advance_26_6
-            pen_y_26_6 += y_advance_26_6
+                # Accumulate in 26.6 to preserve precision
+                pen_x_26_6 += x_advance_26_6
+                pen_y_26_6 += y_advance_26_6
+
+            pen_y_26_6 += height_26_6
 
 
 #
@@ -1479,9 +1529,13 @@ class Canvas:
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         wrap: bool = True,
         font_weight: int = 400,
+        horizontal_alignment: HorizontalAlignment = "left",
+        vertical_alignment: VerticalAlignment = "top",
     ):
         """
         Adds quads for rendering the given text string with the given font.
+
+        Supports horizontal and vertical alignment within the destination rectangle.
         """
 
         font_cache = self.renderer._text_quad_writer
@@ -1496,4 +1550,6 @@ class Canvas:
             dst_wh=dst_wh,
             wrap=wrap,
             font_weight=font_weight,
+            align_x=horizontal_alignment,
+            align_y=vertical_alignment,
         )

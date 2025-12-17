@@ -45,7 +45,6 @@ def main():
         xywh_dip=(50, 50, 200, 54),
         text="Hello, GUI!",
         font_size_dip=18,
-        padding=(12, 0, 12, 5),
         bg_color=(0.2, 0.2, 0.2, 1.0),
         bg_hover_color=(0.4, 0.4, 0.4, 1.0),
         fg_color=(1.0, 1.0, 1.0, 1.0),
