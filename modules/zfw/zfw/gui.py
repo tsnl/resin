@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Literal
 import warnings
 
-from cassowary import SimplexSolver, Variable, STRONG, REQUIRED
+from cassowary import SimplexSolver, Variable, STRONG
 
 import glfw
 
@@ -215,12 +215,14 @@ class GuiNode(BaseResource, ABC):
             )
             if size >= 0:
                 solver.add_constraint(
-                    row_vars[i + 1] - row_vars[i] == size, strength=STRONG
+                    row_vars[i + 1] - row_vars[i] == size,
+                    strength=STRONG,
                 )
             else:
                 weight = -size
                 solver.add_constraint(
-                    row_vars[i + 1] - row_vars[i] == weight * unit_h, strength=STRONG
+                    row_vars[i + 1] - row_vars[i] == weight * unit_h,
+                    strength=STRONG,
                 )
 
         # Col sizes
@@ -232,12 +234,14 @@ class GuiNode(BaseResource, ABC):
             )
             if size >= 0:
                 solver.add_constraint(
-                    col_vars[i + 1] - col_vars[i] == size, strength=STRONG
+                    col_vars[i + 1] - col_vars[i] == size,
+                    strength=STRONG,
                 )
             else:
                 weight = -size
                 solver.add_constraint(
-                    col_vars[i + 1] - col_vars[i] == weight * unit_w, strength=STRONG
+                    col_vars[i + 1] - col_vars[i] == weight * unit_w,
+                    strength=STRONG,
                 )
 
         # Update children
