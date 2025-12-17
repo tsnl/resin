@@ -34,18 +34,6 @@ def main():
         swapchain_image_count=args.swapchain_image_count,
     )
 
-    @engine.window.subscribe()
-    def window_key_event(event: zfw.WindowKeyEvent):
-        print(f"{event!r}")
-
-    @engine.window.subscribe()
-    def window_cursor_pos_event(event: zfw.WindowCursorPosEvent):
-        print(f"{event!r}")
-
-    @engine.window.subscribe()
-    def window_mouse_button_event(event: zfw.WindowMouseButtonEvent):
-        print(f"{event!r}")
-
     block_01_image = zfw.RendererImage(
         renderer=engine.renderer,
         data=zfw.load_rgba_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
@@ -53,72 +41,25 @@ def main():
 
     canvas = zfw.Canvas(renderer=engine.renderer)
 
+    gui_window = zfw.GuiWindow(window=engine.window)
+    gui_label = zfw.GuiLabel(
+        parent_widget=gui_window,
+        xywh_dip=(50, 50, 200, 40),
+        text="Hello, GUI!",
+        font_size_dip=14,
+        padding=(10, 0, 10, 5),
+        bg_color=(0.2, 0.2, 0.2, 1.0),
+        bg_hover_color=(0.4, 0.4, 0.4, 1.0),
+        fg_color=(1.0, 1.0, 1.0, 1.0),
+        hover_border_color=(1.0, 1.0, 1.0, 1.0),
+        hover_border_thickness=(2, 2, 2, 2),
+    )
+
     while not engine.window.should_close():
         engine.update()
 
         canvas.clear()
-        canvas.add_quad(
-            dst_xy=(32, 64),
-            dst_wh=(512, 256),
-            color=(1.0, 1.0, 1.0, 1.0),
-            border_thickness_px=(0, 0, 8, 0),
-            border_color=(0.0, 0.1, 0.8, 1.0),
-        )
-        canvas.add_quad(
-            dst_xy=(40, 72),
-            dst_wh=(64, 64),
-            color=(0.0, 0.2, 0.0, 1.0),
-        )
-        canvas.add_quad(
-            dst_xy=(112, 72),
-            dst_wh=(64, 64),
-            color=(0.0, 0.2, 0.0, 0.5),
-        )
-        canvas.add_quad(
-            dst_xy=(184, 72),
-            dst_wh=(64, 64),
-            image=block_01_image,
-        )
-        canvas.add_text(
-            text="Hello, world: weight=100",
-            font="sans-serif",
-            dst_xy=(40, 144),
-            dst_wh=(400, 100),
-            font_size_px=FONT_SIZE_PX,
-            font_weight=100,
-            color=(0.0, 0.0, 0.0, 1.0),
-            wrap=False,
-        )
-        canvas.add_text(
-            text="Hello, world: weight=400",
-            font="sans-serif",
-            dst_xy=(40, 174),
-            dst_wh=(400, 100),
-            font_size_px=FONT_SIZE_PX,
-            font_weight=400,
-            color=(0.0, 0.0, 0.0, 1.0),
-            wrap=False,
-        )
-        canvas.add_text(
-            text="Hello, world: weight=800",
-            font="sans-serif",
-            dst_xy=(40, 204),
-            dst_wh=(400, 100),
-            font_size_px=FONT_SIZE_PX,
-            font_weight=800,
-            color=(0.0, 0.0, 0.0, 1.0),
-            wrap=False,
-        )
-        canvas.add_text(
-            text="Hello, world: weight=1200",
-            font="sans-serif",
-            dst_xy=(40, 234),
-            dst_wh=(500, 100),
-            font_size_px=FONT_SIZE_PX,
-            font_weight=1200,
-            color=(0.0, 0.0, 0.0, 1.0),
-            wrap=False,
-        )
+        gui_window.render(canvas=canvas)
         engine.render(canvas=canvas)
 
 

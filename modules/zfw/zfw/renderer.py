@@ -539,7 +539,7 @@ class QuadRenderer(BaseResource):
             ("src_uv", np.float32, (4, 2)),
             ("color", np.float32, (4,)),
             ("border_color", np.float32, (4,)),
-            ("border_thickness_px", np.uint32, (4,)),
+            ("border_thickness", np.uint32, (4,)),
             ("height", np.float32),
             ("image_id", np.uint32),
             ("_rsv0", np.uint32),
@@ -1258,7 +1258,7 @@ class TextQuadWriter(BaseResource):
                             src_wh=(src_w, src_h),
                             color=color,
                             image=image,
-                            dip=False,
+                            _dip=False,
                         )
 
             # Accumulate in 26.6 to preserve precision
@@ -1335,10 +1335,10 @@ class Canvas:
         src_wh: tuple[int, int] | None = None,
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
-        border_thickness_px: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
+        border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
         image: RendererImage | None = None,
-        dip: bool = True,
-    ):
+        _dip: bool = True,
+    ) -> None:
         """
         Adds a single quad using logical (device-independent) pixel coordinates.
 
@@ -1347,7 +1347,7 @@ class Canvas:
         """
 
         # If dip is True, convert to physical pixel coordinates
-        if dip:
+        if _dip:
             scale = self.renderer.scale
 
             # Resolve src_wh (in physical pixels, from image)
@@ -1362,11 +1362,11 @@ class Canvas:
                 int(dst_wh_logical[0] * scale),
                 int(dst_wh_logical[1] * scale),
             )
-            border_thickness_px = (
-                int(border_thickness_px[0] * scale),
-                int(border_thickness_px[1] * scale),
-                int(border_thickness_px[2] * scale),
-                int(border_thickness_px[3] * scale),
+            border_thickness = (
+                int(border_thickness[0] * scale),
+                int(border_thickness[1] * scale),
+                int(border_thickness[2] * scale),
+                int(border_thickness[3] * scale),
             )
         else:
             src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
@@ -1407,10 +1407,10 @@ class Canvas:
         quad_image = image or self.renderer._default_white_image
         self._quad_array[index]["image_id"] = quad_image.image_id
 
-        # write: color, border_color, border_thickness_px
+        # write: color, border_color, border_thickness
         self._quad_array[index]["color"] = color
         self._quad_array[index]["border_color"] = border_color
-        self._quad_array[index]["border_thickness_px"] = list(border_thickness_px)
+        self._quad_array[index]["border_thickness"] = list(border_thickness)
 
         # write: height
         self._quad_array[index]["height"] = float(index)

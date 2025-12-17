@@ -39,6 +39,9 @@ __all__ = [
     "WindowMouseButtonEvent",
     "convert_srgb_to_linear",
     "load_rgba_image",
+    "GuiWindow",
+    "GuiWidget",
+    "GuiLabel",
 ]
 
 from .basic import BaseResource, SupportsWrite, Font, ColorSpace
@@ -83,3 +86,4 @@ from .window import (
     WindowMouseButtonEvent,
 )
 from .images import load_rgba_image, convert_srgb_to_linear
+from .gui import GuiWindow, GuiWidget, GuiLabel

@@ -108,7 +108,7 @@ def test_renderer_quads():
         dst_xy=(32, 64),
         dst_wh=(512, 256),
         color=(1.0, 1.0, 1.0, 1.0),
-        border_thickness_px=(0, 0, 8, 0),
+        border_thickness=(0, 0, 8, 0),
         border_color=(0.0, 0.1, 0.8, 1.0),
     )
     canvas.add_quad(
@@ -138,15 +138,15 @@ def test_renderer_image():
 
     image = RendererImage(renderer=engine.renderer, data=image_data)
 
-    border_thickness_px = 8
+    border_thickness = 8
     canvas = Canvas(renderer=engine.renderer)
     canvas.add_quad(
         dst_xy=(
-            (TEST_IMAGE_W - image_data.shape[1] - border_thickness_px) // 2,
-            (TEST_IMAGE_H - image_data.shape[0] - border_thickness_px) // 2,
+            (TEST_IMAGE_W - image_data.shape[1] - border_thickness) // 2,
+            (TEST_IMAGE_H - image_data.shape[0] - border_thickness) // 2,
         ),
         color=(1.0, 1.0, 1.0, 1.0),
-        border_thickness_px=(8, 8, 8, 8),
+        border_thickness=(8, 8, 8, 8),
         border_color=(1.0, 1.0, 0.0, 1.0),
         image=image,
     )
@@ -302,7 +302,7 @@ def test_renderer_text_matrix():
                     dst_wh=(box_w, box_h),
                     color=(0.1, 0.1, 0.1, 1.0),
                     border_color=(0.5, 0.5, 0.5, 1.0),
-                    border_thickness_px=(1, 1, 1, 1),
+                    border_thickness=(1, 1, 1, 1),
                 )
 
                 canvas.add_text(

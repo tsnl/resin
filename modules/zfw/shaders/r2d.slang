@@ -30,7 +30,7 @@ struct R2dQuad
     Array<float2, 4> srcUv; // 4 corners * 2 coords: TL, TR, BR, BL
     float4 tintColor;       // RGBA
     float4 borderColor;     // RGBA
-    int4 borderThicknessPx; // T, R, B, L
+    int4 borderThickness; // T, R, B, L
     float height;           // height
     uint imageId;           // RGBA image ID in the atlas
     uint _rsv0;             // reserved
@@ -62,7 +62,7 @@ struct VSOutput
     float2 uv : TEXCOORD0;
     float4 tintColor : TEXCOORD1;
     float4 borderColor : TEXCOORD2;
-    int4 borderThicknessPx : TEXCOORD3;
+    int4 borderThickness : TEXCOORD3;
     float2 positionPx : TEXCOORD4;
 };
 
@@ -85,7 +85,7 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     output.uv = quad.srcUv[cornerIdx];
     output.tintColor = quad.tintColor;
     output.borderColor = quad.borderColor;
-    output.borderThicknessPx = quad.borderThicknessPx;
+    output.borderThickness = quad.borderThickness;
     output.positionPx = float2(vertexPosPx);
     return output;
 }
@@ -148,10 +148,10 @@ int2[4] getCornerEgressPxArray(R2dQuad quad)
 {
     // Precompute corner border egress in pixels.
     const int2 cornerBorderEgressPx[4] = {
-        int2(-quad.borderThicknessPx[3], -quad.borderThicknessPx[0]), // TL
-        int2(+quad.borderThicknessPx[1], -quad.borderThicknessPx[0]), // TR
-        int2(+quad.borderThicknessPx[1], +quad.borderThicknessPx[2]), // BR
-        int2(-quad.borderThicknessPx[3], +quad.borderThicknessPx[2]), // BL
+        int2(-quad.borderThickness[3], -quad.borderThickness[0]), // TL
+        int2(+quad.borderThickness[1], -quad.borderThickness[0]), // TR
+        int2(+quad.borderThickness[1], +quad.borderThickness[2]), // BR
+        int2(-quad.borderThickness[3], +quad.borderThickness[2]), // BL
     };
     return cornerBorderEgressPx;
 }
