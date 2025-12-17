@@ -64,17 +64,26 @@ type GuiTheme = dict[str, GuiWidgetStyle]
 
 DEFAULT_THEME: GuiTheme = {
     "label": GuiWidgetStyle(
-        bg_color=(0.0, 0.0, 0.0, 0.0),
-        fg_color=(1.0, 1.0, 1.0, 1.0),
+        bg_color=(0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
+        fg_color=(0.0, 0.0, 0.0, 1.0),  # Black text
     ),
     "button": GuiWidgetStyle(
-        bg_color=(0.9, 0.9, 0.9, 1.0),
-        fg_color=(0.0, 0.0, 0.0, 1.0),
-        border_color=(0.0, 0.0, 0.0, 0.0),
-        border_thickness=(0, 0, 0, 0),
-        hover_border_color=(0.0, 0.0, 0.0, 1.0),
+        bg_color=(0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
+        fg_color=(0.0, 0.0, 0.0, 1.0),  # Black text
+        bg_hover_color=(0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
+        border_color=(0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
+        border_thickness=(1, 1, 1, 1),
+        hover_border_color=(0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
         hover_border_thickness=(1, 1, 1, 1),
         padding=(5, 10, 5, 10),
+    ),
+    "header": GuiWidgetStyle(
+        bg_color=(0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
+        fg_color=(1.0, 1.0, 1.0, 1.0),  # White text
+        font_size_dip=32,
+        font_weight=800,
+        border_color=(0.0, 0.2, 0.5, 1.0),
+        border_thickness=(0, 0, 2, 0),
     ),
 }
 
@@ -84,13 +93,11 @@ class GuiContext(BaseResource):
         self,
         *,
         gpu_context: GpuContext,
-        theme: GuiTheme | None = None,
         parent_resource: BaseResource | None = None,
     ) -> None:
         super().__init__(parent_resource=parent_resource)
 
         self.gpu_context = gpu_context
-        self.theme = theme or DEFAULT_THEME
 
         ok = glfw.init()
         if not ok:
@@ -273,6 +280,15 @@ class GuiNode(BaseResource, ABC):
             res = res._parent_resource
         raise RuntimeError("GuiNode is not attached to a GuiContext")
 
+    @property
+    def gui_window(self) -> "GuiWindow":
+        res: GuiNode | None = self
+        while res is not None:
+            if isinstance(res, GuiWindow):
+                return res
+            res = res._parent_node
+        raise RuntimeError("GuiNode is not attached to a GuiWindow")
+
     def _add_child_node(self, child_node: "GuiNode") -> None:
         self._child_node_list.append(child_node)
 
@@ -376,6 +392,7 @@ class GuiWindow(GuiNode):
     width: int
     height: int
     title: str
+    theme: GuiTheme
     glfw_window_handle: glfw._GLFWwindow
     gpu_surface: GpuSurface
     last_mouse_x: float
@@ -388,6 +405,7 @@ class GuiWindow(GuiNode):
         width: int,
         height: int,
         title: str,
+        theme: GuiTheme | None = None,
         num_grid_rows: int = 1,
         num_grid_cols: int = 1,
         grid_row_sizes: tuple[int, ...] | None = None,
@@ -396,6 +414,7 @@ class GuiWindow(GuiNode):
         self.width = width
         self.height = height
         self.title = title
+        self.theme = theme or DEFAULT_THEME
 
         # Initialize GuiNode
         super().__init__(
@@ -618,7 +637,7 @@ class GuiWidget(GuiNode):
         self._is_enabled = value
 
     def _render_self(self, canvas: Canvas) -> None:
-        style = self.gui_context.theme.get(self._archetype)
+        style = self.gui_window.theme.get(self._archetype)
         if style is None:
             style = DEFAULT_THEME.get("label")
             if style is None:

@@ -3,7 +3,7 @@ import sys
 from .basic import BaseResource, SupportsWrite
 from .gpu import GpuContext, GpuDevice, GpuSwapChain
 from .renderer import Renderer, RendererContext, Canvas
-from .gui import GuiWindow, GuiContext
+from .gui import GuiWindow, GuiContext, GuiTheme
 
 
 class Engine(BaseResource):
@@ -24,6 +24,7 @@ class Engine(BaseResource):
         debug: bool,
         swapchain_image_count: int,
         enable_gui: bool = True,
+        gui_theme: GuiTheme | None = None,
     ):
         super().__init__(parent_resource=None)
 
@@ -34,12 +35,9 @@ class Engine(BaseResource):
             enable_present_support=enable_gui,
         )
 
-        if enable_gui:
-            self._gui_context = GuiContext(
-                gpu_context=self._gpu_context,
-            )
-        else:
-            self._gui_context = None
+        self._gui_context = (
+            GuiContext(gpu_context=self._gpu_context) if enable_gui else None
+        )
 
         self._render_context = RendererContext(
             gpu_context=self._gpu_context,
@@ -47,12 +45,14 @@ class Engine(BaseResource):
 
         if enable_gui:
             assert self._gui_context is not None
+
             # Create window, GPU surface:
             self._window = GuiWindow(
                 gui_context=self._gui_context,
                 width=1280,
                 height=720,
-                title="Zero Sandbox",
+                title=app_name,
+                theme=gui_theme,
             )
 
             # Create GPU device using the surface:

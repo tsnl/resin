@@ -1,5 +1,9 @@
 [tool.uv.workspace]
-members = ["modules/zfw", "modules/zfw_build", "modules/zfw_sandbox"]
+members = [
+    "modules/zfw",
+    "modules/zfw_build",
+    "modules/zfw_sandbox",
+]
 
 [tool.ruff.lint]
 extend-select = [
