@@ -40,16 +40,11 @@ def main():
         data=zfw.load_rgba_image(KENNEY_SOKOBAN_DATA_PATH / "Blocks/block_01.png"),
     )
 
-    gui_label = zfw.GuiLabel(
-        parent_widget=engine.window,
+    gui_label = zfw.GuiWidget(
+        parent_node=engine.window,
         xywh_dip=(50, 50, 200, 54),
         text="Hello, GUI!",
-        font_size_dip=18,
-        bg_color=(0.2, 0.2, 0.2, 1.0),
-        bg_hover_color=(0.4, 0.4, 0.4, 1.0),
-        fg_color=(1.0, 1.0, 1.0, 1.0),
-        hover_border_color=(1.0, 1.0, 1.0, 1.0),
-        hover_border_thickness=(2, 2, 2, 2),
+        archetype="button",
     )
 
     _ = block_01_image

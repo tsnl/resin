@@ -14,6 +14,7 @@ Widget stacking order:
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Literal
 import warnings
 
@@ -35,16 +36,59 @@ from .gpu import GpuContext, GpuSurface
 from .typed_vulkan import raw_ffi
 
 
+@dataclass
+class GuiWidgetStyle:
+    font: Font = "sans-serif"
+    font_size_dip: int = 18
+    font_weight: int = 400
+    bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    bg_image: RendererImage | None = None
+    bg_hover_color: tuple[float, float, float, float] | None = None
+    bg_hover_image: RendererImage | None = None
+    fg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    fg_hover_color: tuple[float, float, float, float] | None = None
+    border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0)
+    hover_border_color: tuple[float, float, float, float] | None = None
+    hover_border_thickness: tuple[int, int, int, int] | None = None
+    padding: tuple[int, int, int, int] = (0, 0, 0, 0)
+    text_horizontal_alignment: HorizontalAlignment = "center"
+    text_vertical_alignment: VerticalAlignment = "middle"
+    wrap: bool = False
+
+
+type GuiTheme = dict[str, GuiWidgetStyle]
+
+
+DEFAULT_THEME: GuiTheme = {
+    "label": GuiWidgetStyle(
+        bg_color=(0.0, 0.0, 0.0, 0.0),
+        fg_color=(0.0, 0.0, 0.0, 1.0),
+    ),
+    "button": GuiWidgetStyle(
+        bg_color=(0.9, 0.9, 0.9, 1.0),
+        fg_color=(0.0, 0.0, 0.0, 1.0),
+        border_color=(0.0, 0.0, 0.0, 0.0),
+        border_thickness=(0, 0, 0, 0),
+        hover_border_color=(0.0, 0.0, 0.0, 1.0),
+        hover_border_thickness=(1, 1, 1, 1),
+        padding=(5, 10, 5, 10),
+    ),
+}
+
+
 class GuiContext(BaseResource):
     def __init__(
         self,
         *,
         gpu_context: GpuContext,
+        theme: GuiTheme | None = None,
         parent_resource: BaseResource | None = None,
     ) -> None:
         super().__init__(parent_resource=parent_resource)
 
         self.gpu_context = gpu_context
+        self.theme = theme or DEFAULT_THEME
 
         ok = glfw.init()
         if not ok:
@@ -54,10 +98,10 @@ class GuiContext(BaseResource):
         glfw.terminate()
 
 
-class GuiWidget(BaseResource, ABC):
-    _parent_widget: "GuiWidget | None"
+class GuiNode(BaseResource, ABC):
+    _parent_node: "GuiNode | None"
     _local_xywh_dip: tuple[int, int, int, int]
-    _child_widget_list: list["GuiWidget"]
+    _child_node_list: list["GuiNode"]
     _mouse_over: bool
     _latest_local_mouse_pos: tuple[int, int]
     _latest_global_mouse_pos: tuple[int, int]
@@ -65,24 +109,33 @@ class GuiWidget(BaseResource, ABC):
     def __init__(
         self,
         *,
-        parent_widget: "GuiWidget | None",
+        parent_node: "GuiNode | None",
         local_xywh_dip: tuple[int, int, int, int],
         parent_resource: "BaseResource | None" = None,
     ) -> None:
-        super().__init__(parent_resource=(parent_resource or parent_widget))
+        super().__init__(parent_resource=(parent_resource or parent_node))
 
-        self._parent_widget = parent_widget
+        self._parent_node = parent_node
         self._local_xywh_dip = local_xywh_dip
-        self._child_widget_list = []
+        self._child_node_list = []
         self._mouse_over = False
         self._latest_local_mouse_pos = (0, 0)
         self._latest_global_mouse_pos = (0, 0)
 
-        if self._parent_widget is not None:
-            self._parent_widget._add_child_widget(self)
+        if self._parent_node is not None:
+            self._parent_node._add_child_node(self)
 
-    def _add_child_widget(self, child_widget: "GuiWidget") -> None:
-        self._child_widget_list.append(child_widget)
+    @property
+    def gui_context(self) -> GuiContext:
+        res: BaseResource | None = self
+        while res is not None:
+            if isinstance(res, GuiContext):
+                return res
+            res = res._parent_resource
+        raise RuntimeError("GuiNode is not attached to a GuiContext")
+
+    def _add_child_node(self, child_node: "GuiNode") -> None:
+        self._child_node_list.append(child_node)
 
     @property
     def mouse_over(self) -> bool:
@@ -94,10 +147,10 @@ class GuiWidget(BaseResource, ABC):
 
     @property
     def global_xywh_dip(self) -> tuple[int, int, int, int]:
-        if self._parent_widget is None:
+        if self._parent_node is None:
             return self._local_xywh_dip
         else:
-            parent_x, parent_y, _, _ = self._parent_widget.global_xywh_dip
+            parent_x, parent_y, _, _ = self._parent_node.global_xywh_dip
             x, y, w, h = self._local_xywh_dip
             return (parent_x + x, parent_y + y, w, h)
 
@@ -124,7 +177,7 @@ class GuiWidget(BaseResource, ABC):
 
         # Regardless of whether mouse is over, propagate to children.
         # Children may be outside parent's bounds.
-        for child in self._child_widget_list:
+        for child in self._child_node_list:
             child._receive_mouse_position(mouse_x_dip, mouse_y_dip)
 
     def _receive_mouse_button_action(
@@ -137,7 +190,7 @@ class GuiWidget(BaseResource, ABC):
             return False
 
         # Propagate to children first (topmost first).
-        for child in reversed(self._child_widget_list):
+        for child in reversed(self._child_node_list):
             if child._receive_mouse_button_action(button=button, action=action):
                 return True
         else:
@@ -170,7 +223,7 @@ class GuiWidget(BaseResource, ABC):
         self._render_self(canvas)
 
         # Render children, in order, after self.
-        for child in self._child_widget_list:
+        for child in self._child_node_list:
             child._render(canvas)
 
     @abstractmethod
@@ -180,8 +233,7 @@ class GuiWidget(BaseResource, ABC):
 type WindowCursorMode = Literal["cursor", "joystick"]
 
 
-class GuiWindow(GuiWidget):
-    gui_context: GuiContext
+class GuiWindow(GuiNode):
     width: int
     height: int
     title: str
@@ -198,14 +250,13 @@ class GuiWindow(GuiWidget):
         height: int,
         title: str,
     ) -> None:
-        self.gui_context = gui_context
         self.width = width
         self.height = height
         self.title = title
 
-        # Initialize GuiWidget
+        # Initialize GuiNode
         super().__init__(
-            parent_widget=None,
+            parent_node=None,
             local_xywh_dip=(0, 0, width, height),
             parent_resource=gui_context,
         )
@@ -335,7 +386,7 @@ class GuiWindow(GuiWidget):
         action: int,
         mods: int,
     ) -> None:
-        # TODO: Handle key events in GuiWidget if needed
+        # TODO: Handle key events in GuiNode if needed
         pass
 
     def _on_glfw_mouse_button_event(
@@ -373,98 +424,96 @@ class GuiWindow(GuiWidget):
         _ = canvas  # No-op for window itself.
 
 
-class GuiLabel(GuiWidget):
+class GuiWidget(GuiNode):
     _text: str
-    _text_horizontal_alignment: HorizontalAlignment
-    _text_vertical_alignment: VerticalAlignment
-    _font: Font
-    _font_size_dip: int
-    _bg_color: tuple[float, float, float, float]
-    _bg_image: RendererImage | None
-    _bg_hover_color: tuple[float, float, float, float]
-    _bg_hover_image: RendererImage | None
-    _fg_color: tuple[float, float, float, float]
-    _fg_hover_color: tuple[float, float, float, float]
-    _border_color: tuple[float, float, float, float]
-    _border_thickness: tuple[int, int, int, int]
-    _hover_border_color: tuple[float, float, float, float]
-    _hover_border_thickness: tuple[int, int, int, int]
-    _padding: tuple[int, int, int, int]
-    _wrap: bool
+    _archetype: str
+    _is_enabled: bool
 
     def __init__(
         self,
         *,
-        parent_widget: GuiWidget,
+        parent_node: GuiNode,
         xywh_dip: tuple[int, int, int, int],
         text: str,
-        text_horizontal_alignment: HorizontalAlignment = "center",
-        text_vertical_alignment: VerticalAlignment = "middle",
-        font: Font = "sans-serif",
-        font_size_dip: int = 18,
-        bg_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        bg_image: RendererImage | None = None,
-        bg_hover_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        bg_hover_image: RendererImage | None = None,
-        fg_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        fg_hover_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
-        border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),
-        hover_border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
-        hover_border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),
-        padding: tuple[int, int, int, int] = (5, 5, 5, 5),
-        wrap: bool = False,
+        archetype: str = "label",
+        is_enabled: bool = True,
     ) -> None:
-        super().__init__(parent_widget=parent_widget, local_xywh_dip=xywh_dip)
+        super().__init__(parent_node=parent_node, local_xywh_dip=xywh_dip)
         self._text = text
-        self._text_horizontal_alignment = text_horizontal_alignment
-        self._text_vertical_alignment = text_vertical_alignment
-        self._font = font
-        self._font_size_dip = font_size_dip
-        self._bg_color = bg_color
-        self._bg_image = bg_image
-        self._bg_hover_color = bg_hover_color
-        self._bg_hover_image = bg_hover_image
-        self._fg_color = fg_color
-        self._fg_hover_color = fg_hover_color or fg_color
-        self._border_color = border_color
-        self._border_thickness = border_thickness
-        self._hover_border_color = hover_border_color or border_color
-        self._hover_border_thickness = hover_border_thickness or border_thickness
-        self._padding = padding
-        self._wrap = wrap
+        self._archetype = archetype
+        self._is_enabled = is_enabled
+
+    @property
+    def is_enabled(self) -> bool:
+        return self._is_enabled
+
+    @is_enabled.setter
+    def is_enabled(self, value: bool) -> None:
+        self._is_enabled = value
 
     def _render_self(self, canvas: Canvas) -> None:
+        style = self.gui_context.theme.get(self._archetype)
+        if style is None:
+            style = DEFAULT_THEME.get("label")
+            if style is None:
+                return
+
         x, y, w, h = self.global_xywh_dip
+
+        is_hover = self.mouse_over and self.is_enabled
+
+        # Determine colors
+        bg_color = (
+            style.bg_hover_color
+            if (is_hover and style.bg_hover_color is not None)
+            else style.bg_color
+        )
+        bg_image = (
+            style.bg_hover_image
+            if (is_hover and style.bg_hover_image is not None)
+            else style.bg_image
+        )
+
+        border_color = (
+            style.hover_border_color
+            if (is_hover and style.hover_border_color is not None)
+            else style.border_color
+        )
+        border_thickness = (
+            style.hover_border_thickness
+            if (is_hover and style.hover_border_thickness is not None)
+            else style.border_thickness
+        )
+
+        fg_color = (
+            style.fg_hover_color
+            if (is_hover and style.fg_hover_color is not None)
+            else style.fg_color
+        )
 
         # Draw background quad:
         canvas.add_quad(
             dst_xy=(x, y),
             dst_wh=(w, h),
-            color=(self._bg_color if not self._mouse_over else self._bg_hover_color),
-            image=(self._bg_image if not self._mouse_over else self._bg_hover_image),
-            border_color=(
-                self._border_color if not self._mouse_over else self._hover_border_color
-            ),
-            border_thickness=(
-                self._border_thickness
-                if not self._mouse_over
-                else self._hover_border_thickness
-            ),
+            color=bg_color,
+            image=bg_image,
+            border_color=border_color,
+            border_thickness=border_thickness,
         )
 
         # Draw text:
-        pt, pr, pb, pl = self._padding
+        pt, pr, pb, pl = style.padding
         canvas.add_text(
             text=self._text,
-            font=self._font,
-            font_size_px=self._font_size_dip,
+            font=style.font,
+            font_size_px=style.font_size_dip,
+            font_weight=style.font_weight,
             dst_xy=(x + pl, y + pt),
             dst_wh=(w - pl - pr, h - pt - pb),
-            color=(self._fg_color if not self._mouse_over else self._fg_hover_color),
-            wrap=self._wrap,
-            horizontal_alignment=self._text_horizontal_alignment,
-            vertical_alignment=self._text_vertical_alignment,
+            color=fg_color,
+            wrap=style.wrap,
+            horizontal_alignment=style.text_horizontal_alignment,
+            vertical_alignment=style.text_vertical_alignment,
         )
 
 

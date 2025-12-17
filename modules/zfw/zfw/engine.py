@@ -132,16 +132,27 @@ class Engine(BaseResource):
         return self._renderer
 
     def _on_dispose_resource(self) -> None:
+        #
+        # Resources
+        #
+
         if self._gpu_swap_chain:
             self._gpu_swap_chain.dispose_resource()
+
         self._gpu_device.dispose_resource()
 
         if self._window:
             self._window.dispose_resource()
 
+        #
+        # Contexts:
+        #
+
         self._render_context.dispose_resource()
+
         if self._gui_context:
             self._gui_context.dispose_resource()
+
         self._gpu_context.dispose_resource()
 
     def print_gpu_debug_info(
