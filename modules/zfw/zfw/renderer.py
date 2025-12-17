@@ -7,7 +7,7 @@ __all__ = [
 ]
 
 from collections import OrderedDict
-from typing import Literal, TypeAlias
+from typing import Literal
 
 import numpy as np
 
@@ -220,7 +220,7 @@ class RendererImage:
         return int(self._allocation_uv_xywh[1])
 
 
-RendererAtlasChannels: TypeAlias = Literal[1, 4]
+type RendererAtlasChannels = Literal[1, 4]
 
 
 class RendererAtlas(BaseResource):

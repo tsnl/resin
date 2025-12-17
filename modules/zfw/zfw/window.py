@@ -1,32 +1,27 @@
-"""
-GUI widgets and window management.
+__all__ = [
+    "Window",
+    "WindowContext",
+    "WindowCursorMode",
+    "WindowCursorPosEvent",
+    "WindowEvent",
+    "WindowKeyEvent",
+    "WindowMouseButtonEvent",
+]
 
-Each widget...
-- Is an event router for GuiEvents: it can receive and publish GuiEvents.
-- Has an axis-aligned position and size in device-independent pixels (DIP) relative to
-  its parent widget.
-- Can render itself on a Canvas.
-- May have child widgets that extend outside its bounds.
-
-Widget stacking order:
-- parent always below children
-- among siblings, later added always above earlier added
-"""
-
-from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Literal
 import warnings
 
 import glfw
 
-from .basic import BaseResource, MouseButton, ButtonAction, Font, KeyModifier, Key
-from .renderer import Canvas, RendererImage
+from .basic import BaseResource, ButtonAction, KeyModifier, Key, MouseButton
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 from .typed_vulkan import raw_ffi
+from .events import EventRouter, Event
 
 
-class GuiContext(BaseResource):
+class WindowContext(BaseResource):
     def __init__(
         self,
         *,
@@ -45,164 +40,34 @@ class GuiContext(BaseResource):
         glfw.terminate()
 
 
-class GuiWidget(BaseResource, ABC):
-    _parent_widget: "GuiWidget | None"
-    _local_xywh_dip: tuple[int, int, int, int]
-    _child_widget_list: list["GuiWidget"]
-    _mouse_over: bool
-    _latest_local_mouse_pos: tuple[int, int]
-    _latest_global_mouse_pos: tuple[int, int]
-
-    def __init__(
-        self,
-        *,
-        parent_widget: "GuiWidget | None",
-        local_xywh_dip: tuple[int, int, int, int],
-        parent_resource: "BaseResource | None" = None,
-    ) -> None:
-        super().__init__(parent_resource=(parent_resource or parent_widget))
-
-        self._parent_widget = parent_widget
-        self._local_xywh_dip = local_xywh_dip
-        self._child_widget_list = []
-        self._mouse_over = False
-        self._latest_local_mouse_pos = (0, 0)
-        self._latest_global_mouse_pos = (0, 0)
-
-        if self._parent_widget is not None:
-            self._parent_widget._add_child_widget(self)
-
-    def _add_child_widget(self, child_widget: "GuiWidget") -> None:
-        self._child_widget_list.append(child_widget)
-
-    @property
-    def mouse_over(self) -> bool:
-        return self._mouse_over
-
-    @property
-    def local_xywh_dip(self) -> tuple[int, int, int, int]:
-        return self._local_xywh_dip
-
-    @property
-    def global_xywh_dip(self) -> tuple[int, int, int, int]:
-        if self._parent_widget is None:
-            return self._local_xywh_dip
-        else:
-            parent_x, parent_y, _, _ = self._parent_widget.global_xywh_dip
-            x, y, w, h = self._local_xywh_dip
-            return (parent_x + x, parent_y + y, w, h)
-
-    def _receive_mouse_position(self, mouse_x_dip: int, mouse_y_dip: int):
-        # OPTIMIZATION: early out if mouse position hasn't changed.
-        if (mouse_x_dip, mouse_y_dip) == self._latest_global_mouse_pos:
-            return
-
-        # Update `self._mouse_over`
-        is_over = self._intersect_point(mouse_x_dip, mouse_y_dip)
-        if is_over != self._mouse_over:
-            self._mouse_over = is_over
-            self._on_mouse_over_changed(mouse_x_dip, mouse_y_dip)
-
-        # If mouse is over, call `_on_mouse_move`.
-        if self._mouse_over:
-            self._on_mouse_move(mouse_x_dip, mouse_y_dip)
-
-        # If mouse is over, update `self._local_mouse_pos`.
-        if self._mouse_over:
-            x, y, _, _ = self.global_xywh_dip
-            self._latest_global_mouse_pos = (mouse_x_dip, mouse_y_dip)
-            self._latest_local_mouse_pos = (mouse_x_dip - x, mouse_y_dip - y)
-
-        # Regardless of whether mouse is over, propagate to children.
-        # Children may be outside parent's bounds.
-        for child in self._child_widget_list:
-            child._receive_mouse_position(mouse_x_dip, mouse_y_dip)
-
-    def _receive_mouse_button_action(
-        self,
-        button: MouseButton,
-        action: ButtonAction,
-    ) -> bool:
-        # Only handle mouse button release events for now.
-        if action != "release":
-            return False
-
-        # Propagate to children first (topmost first).
-        for child in reversed(self._child_widget_list):
-            if child._receive_mouse_button_action(button=button, action=action):
-                return True
-        else:
-            # No child handled it, try to handle it ourselves.
-
-            # Only handle if mouse is over.
-            # This means a widget cannot be clicked if the mouse is outside its bounds,
-            # even if it has children outside its bounds.
-            if not self._mouse_over:
-                return False
-
-            # Invoke the click handler.
-            return self._on_click(button=button)
-
-    def _intersect_point(self, x: int, y: int) -> bool:
-        rx, ry, rw, rh = self.global_xywh_dip
-        return rx <= x < rx + rw and ry <= y < ry + rh
-
-    def _on_mouse_over_changed(self, x_dip: int, y_dip: int) -> None:
-        pass
-
-    def _on_mouse_move(self, x_dip: int, y_dip: int) -> None:
-        pass
-
-    def _on_click(self, button: MouseButton) -> bool:
-        return False
-
-    def _render(self, canvas: Canvas) -> None:
-        # Render self.
-        self._render_self(canvas)
-
-        # Render children, in order, after self.
-        for child in self._child_widget_list:
-            child._render(canvas)
-
-    @abstractmethod
-    def _render_self(self, canvas: Canvas) -> None: ...
-
-
-type WindowCursorMode = Literal["cursor", "joystick"]
-
-
-class GuiWindow(GuiWidget):
-    gui_context: GuiContext
+class Window(BaseResource):
+    window_context: WindowContext
     width: int
     height: int
     title: str
     glfw_window_handle: glfw._GLFWwindow
     gpu_surface: GpuSurface
+    event_router: EventRouter["WindowEvent"]
     last_mouse_x: float
     last_mouse_y: float
 
     def __init__(
         self,
         *,
-        gui_context: GuiContext,
+        window_context: WindowContext,
         width: int,
         height: int,
         title: str,
     ) -> None:
-        self.gui_context = gui_context
+        super().__init__(parent_resource=window_context)
+
+        self.window_context = window_context
         self.width = width
         self.height = height
         self.title = title
-
-        # Initialize GuiWidget
-        super().__init__(
-            parent_widget=None,
-            local_xywh_dip=(0, 0, width, height),
-            parent_resource=gui_context,
-        )
-
         self.glfw_window_handle = self._new_glfw_window()
         self.gpu_surface = self._new_gpu_surface()
+        self.event_router = EventRouter["WindowEvent"]()
 
         self.last_mouse_x: float = 0.0
         self.last_mouse_y: float = 0.0
@@ -223,6 +88,10 @@ class GuiWindow(GuiWidget):
             raise GlfwError("Failed to create GLFW window")
 
         # If raw mouse motion is supported, enable it by default.
+        # > If supported, raw mouse motion can be enabled or disabled per-window and at
+        # > any time but it will only be provided when the cursor is disabled.
+        # If raw mouse motion is supported, it should be enabled whenever the cursor
+        # mode is set to "joystick".
         if glfw.raw_mouse_motion_supported():
             glfw.set_input_mode(
                 glfw_window,
@@ -254,12 +123,12 @@ class GuiWindow(GuiWidget):
         return glfw_window
 
     def _new_gpu_surface(self) -> GpuSurface:
-        if not self.gui_context.gpu_context.enable_present_support:
+        if not self.window_context.gpu_context.enable_present_support:
             raise RuntimeError("GPU context does not support presentation")
 
         surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
         result = glfw.create_window_surface(
-            instance=self.gui_context.gpu_context.vk_instance,
+            instance=self.window_context.gpu_context.vk_instance,
             window=self.glfw_window_handle,
             allocator=None,
             surface=surface_ptr,
@@ -268,7 +137,7 @@ class GuiWindow(GuiWidget):
             raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
         width, height = glfw.get_framebuffer_size(self.glfw_window_handle)
         return GpuSurface(
-            context=self.gui_context.gpu_context,
+            context=self.window_context.gpu_context,
             parent_resource=self,
             vk_surface=surface_ptr[0],
             width=width,
@@ -276,7 +145,6 @@ class GuiWindow(GuiWidget):
         )
 
     def _on_dispose_resource(self) -> None:
-        super()._on_dispose_resource()
         glfw.destroy_window(self.glfw_window_handle)
 
     def should_close(self) -> bool:
@@ -326,8 +194,15 @@ class GuiWindow(GuiWidget):
         action: int,
         mods: int,
     ) -> None:
-        # TODO: Handle key events in GuiWidget if needed
-        pass
+        self.event_router.publish(
+            WindowKeyEvent(
+                window=self,
+                key=_decode_glfw_key(key),
+                action=_decode_glfw_action(action),
+                mods=_decode_glfw_mods(mods),
+                raw_scancode=scancode,
+            )
+        )
 
     def _on_glfw_mouse_button_event(
         self,
@@ -336,9 +211,13 @@ class GuiWindow(GuiWidget):
         action: int,
         mods: int,
     ) -> None:
-        self._receive_mouse_button_action(
-            button=_decode_glfw_mouse_button(button),
-            action=_decode_glfw_action(action),
+        self.event_router.publish(
+            WindowMouseButtonEvent(
+                window=self,
+                button=_decode_glfw_mouse_button(button),
+                action=_decode_glfw_action(action),
+                mods=_decode_glfw_mods(mods),
+            )
         )
 
     def _on_glfw_cursor_pos_event(
@@ -349,106 +228,43 @@ class GuiWindow(GuiWidget):
     ) -> None:
         dx, self.last_mouse_x = x - self.last_mouse_x, x
         dy, self.last_mouse_y = y - self.last_mouse_y, y
-
-        _ = dx, dy  # Currently unused
-
-        self._receive_mouse_position(
-            mouse_x_dip=int(round(x)),
-            mouse_y_dip=int(round(y)),
+        self.event_router.publish(
+            WindowCursorPosEvent(window=self, x=x, y=y, dx=dx, dy=dy)
         )
 
-    def render(self, canvas: Canvas) -> None:
-        self._render(canvas)
 
-    def _render_self(self, canvas: Canvas) -> None:
-        _ = canvas  # No-op for window itself.
+type WindowCursorMode = Literal["cursor", "joystick"]
 
 
-class GuiLabel(GuiWidget):
-    _text: str
-    _font: Font
-    _font_size_dip: int
-    _bg_color: tuple[float, float, float, float]
-    _bg_image: RendererImage | None
-    _bg_hover_color: tuple[float, float, float, float]
-    _bg_hover_image: RendererImage | None
-    _fg_color: tuple[float, float, float, float]
-    _fg_hover_color: tuple[float, float, float, float]
-    _border_color: tuple[float, float, float, float]
-    _border_thickness: tuple[int, int, int, int]
-    _hover_border_color: tuple[float, float, float, float]
-    _hover_border_thickness: tuple[int, int, int, int]
-    _padding: tuple[int, int, int, int]
-    _wrap: bool
+@dataclass
+class WindowEvent(Event):
+    pass
 
-    def __init__(
-        self,
-        *,
-        parent_widget: GuiWidget,
-        xywh_dip: tuple[int, int, int, int],
-        text: str,
-        font: Font = "sans-serif",
-        font_size_dip: int = 18,
-        bg_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        bg_image: RendererImage | None = None,
-        bg_hover_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        bg_hover_image: RendererImage | None = None,
-        fg_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        fg_hover_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
-        border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),
-        hover_border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
-        hover_border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),
-        padding: tuple[int, int, int, int] = (5, 5, 5, 5),
-        wrap: bool = False,
-    ) -> None:
-        super().__init__(parent_widget=parent_widget, local_xywh_dip=xywh_dip)
-        self._text = text
-        self._font = font
-        self._font_size_dip = font_size_dip
-        self._bg_color = bg_color
-        self._bg_image = bg_image
-        self._bg_hover_color = bg_hover_color
-        self._bg_hover_image = bg_hover_image
-        self._fg_color = fg_color
-        self._fg_hover_color = fg_hover_color or fg_color
-        self._border_color = border_color
-        self._border_thickness = border_thickness
-        self._hover_border_color = hover_border_color or border_color
-        self._hover_border_thickness = hover_border_thickness or border_thickness
-        self._padding = padding
-        self._wrap = wrap
 
-    def _render_self(self, canvas: Canvas) -> None:
-        x, y, w, h = self.global_xywh_dip
+@dataclass
+class WindowKeyEvent(WindowEvent):
+    window: Window
+    key: Key | None
+    action: "ButtonAction"
+    mods: list["KeyModifier"]
+    raw_scancode: int
 
-        # Draw background quad:
-        canvas.add_quad(
-            dst_xy=(x, y),
-            dst_wh=(w, h),
-            color=(self._bg_color if not self._mouse_over else self._bg_hover_color),
-            image=(self._bg_image if not self._mouse_over else self._bg_hover_image),
-            border_color=(
-                self._border_color if not self._mouse_over else self._hover_border_color
-            ),
-            border_thickness=(
-                self._border_thickness
-                if not self._mouse_over
-                else self._hover_border_thickness
-            ),
-        )
 
-        # Draw text:
-        pt, pr, pb, pl = self._padding
-        canvas.add_text(
-            text=self._text,
-            font=self._font,
-            font_size_px=self._font_size_dip,
-            dst_xy=(x + pl, y + pt),
-            dst_wh=(w - pl - pr, h - pt - pb),
-            color=(self._fg_color if not self._mouse_over else self._fg_hover_color),
-            wrap=self._wrap,
-        )
+@dataclass
+class WindowMouseButtonEvent(WindowEvent):
+    window: Window
+    button: "MouseButton"
+    action: "ButtonAction"
+    mods: list["KeyModifier"]
+
+
+@dataclass
+class WindowCursorPosEvent(WindowEvent):
+    window: Window
+    x: float
+    y: float
+    dx: float
+    dy: float
 
 
 def _decode_glfw_action(action: int) -> ButtonAction:

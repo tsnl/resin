@@ -30,7 +30,7 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal, TypeAlias
+from typing import TYPE_CHECKING, Callable, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -566,7 +566,7 @@ class GpuContext(BaseResource):
 # GpuPhysicalDevice
 #
 
-GpuPhysicalDeviceType: TypeAlias = Literal[
+type GpuPhysicalDeviceType = Literal[
     "Other",
     "IntegratedGpu",
     "DiscreteGpu",
@@ -690,7 +690,7 @@ class GpuPhysicalDeviceQueueFamily:
 #
 
 
-GpuQueueType: TypeAlias = Literal[
+type GpuQueueType = Literal[
     "graphics",
     "compute",
     "transfer",
@@ -1223,7 +1223,7 @@ class GpuImageMeta:
         )
 
 
-GpuImageUsage: TypeAlias = Literal[
+type GpuImageUsage = Literal[
     "texture-binding",
     "storage-binding",
     "color-attachment",
@@ -1232,7 +1232,7 @@ GpuImageUsage: TypeAlias = Literal[
     "transfer-dst",
 ]
 
-GpuImageLayout: TypeAlias = Literal[
+type GpuImageLayout = Literal[
     "present-src",
     "color-attachment-optimal",
     "texture-binding",
@@ -1403,7 +1403,7 @@ class GpuImage(BaseResource):
             device=device.vk_device,
             image=image,
             memory=memory.vk_device_memory,
-            memoryOffset=VkDeviceSize(0),
+            memoryOffset=VkDeviceSize.__value__(0),
         )
 
         return image, memory
@@ -1587,7 +1587,7 @@ class GpuBufferMeta:
         )
 
 
-GpuBufferUsage: TypeAlias = Literal[
+type GpuBufferUsage = Literal[
     "staging",
     "copy-src",
     "copy-dst",
@@ -1756,7 +1756,7 @@ class GpuBuffer(BaseResource):
 #
 
 
-GpuCommandBufferLevel: TypeAlias = Literal["primary", "secondary"]
+type GpuCommandBufferLevel = Literal["primary", "secondary"]
 
 
 class GpuCommandEncoder(BaseResource):
@@ -1982,7 +1982,7 @@ class GpuCommandEncoder(BaseResource):
                 VkRenderingAttachmentInfo(
                     imageView=color_attachment.vk_image_view,
                     imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                    resolveMode=VkResolveModeFlagBits(0),
+                    resolveMode=VkResolveModeFlagBits.__value__(0),
                     resolveImageView=None,
                     resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                     loadOp=(
@@ -2008,7 +2008,7 @@ class GpuCommandEncoder(BaseResource):
             depth_info = VkRenderingAttachmentInfo(
                 imageView=depth_attachment.vk_image_view,
                 imageLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                resolveMode=VkResolveModeFlagBits(0),
+                resolveMode=VkResolveModeFlagBits.__value__(0),
                 resolveImageView=None,
                 resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                 loadOp=(
@@ -2336,12 +2336,12 @@ class GpuSampler(BaseResource):
         )
 
 
-GpuSamplerFilter: TypeAlias = Literal[
+type GpuSamplerFilter = Literal[
     "nearest",
     "linear",
 ]
 
-GpuSamplerAddressMode: TypeAlias = Literal[
+type GpuSamplerAddressMode = Literal[
     "repeat",
     "mirrored-repeat",
     "clamp-to-edge",
@@ -2563,14 +2563,14 @@ class GpuDescriptorSet(BaseResource):
         )
 
 
-GpuDescriptorSetBinding: TypeAlias = """
+type GpuDescriptorSetBinding = """
     GpuBufferDescriptorSetBinding |
     GpuSampledImageDescriptorSetBinding |
     GpuSamplerDescriptorSetBinding
 """
-GpuBufferDescriptorSetBinding: TypeAlias = GpuBuffer
-GpuSampledImageDescriptorSetBinding: TypeAlias = list[GpuImage]
-GpuSamplerDescriptorSetBinding: TypeAlias = GpuSampler
+type GpuBufferDescriptorSetBinding = GpuBuffer
+type GpuSampledImageDescriptorSetBinding = list[GpuImage]
+type GpuSamplerDescriptorSetBinding = GpuSampler
 
 
 def compatible_descriptor_types_for_binding(
@@ -2658,7 +2658,7 @@ def descriptor_set_write_for_binding(
             raise LogicError()
 
 
-GpuDescriptorType: TypeAlias = Literal[
+type GpuDescriptorType = Literal[
     "sampled-image", "sampler", "storage-buffer", "uniform-buffer"
 ]
 
@@ -3281,7 +3281,7 @@ class GpuPresentTarget:
 # GpuStage
 #
 
-GpuStage: TypeAlias = Literal["vertex", "fragment"]
+type GpuStage = Literal["vertex", "fragment"]
 
 
 def vk_shader_stages(stages: list[GpuStage]) -> int:

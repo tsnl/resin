@@ -10,7 +10,7 @@ __all__ = [
 ]
 
 from abc import ABC
-from typing import Protocol, TypeVar, Self, TypeAlias, Literal
+from typing import Protocol, TypeVar, Self, Literal
 from weakref import ref as WeakRef
 import warnings
 
@@ -191,11 +191,9 @@ def camel_to_snake(name: str) -> str:
 # Constants
 #
 
-ColorSpace: TypeAlias = Literal["srgb", "linear"]
-
-Font: TypeAlias = Literal["sans-serif", "serif"]
-
-Key: TypeAlias = Literal[
+type ColorSpace = Literal["srgb", "linear"]
+type Font = Literal["sans-serif", "serif"]
+type Key = Literal[
     # Printable keys (US layout)
     "space",
     "apostrophe",
@@ -321,10 +319,10 @@ Key: TypeAlias = Literal[
     "right-super",
     "menu",
 ]
-ButtonAction: TypeAlias = Literal["press", "release", "repeat"]
-KeyModifier: TypeAlias = Literal["shift", "control", "alt", "super"]
+type ButtonAction = Literal["press", "release", "repeat"]
+type KeyModifier = Literal["shift", "control", "alt", "super"]
 
-MouseButton: TypeAlias = Literal[
+type MouseButton = Literal[
     "left",  # left mouse button, aka button-1
     "right",  # right mouse button, aka button-2
     "middle",  # middle mouse button, aka button-3

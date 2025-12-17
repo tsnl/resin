@@ -1,11 +1,11 @@
 import subprocess
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Literal
 
 import pydantic
 
 
-ShaderStage: TypeAlias = Literal["vertex", "fragment"]
+type ShaderStage = Literal["vertex", "fragment"]
 
 
 class Shader(pydantic.BaseModel):

@@ -339,8 +339,6 @@ __all__ = [
 ]
 
 
-from typing import TypeAlias
-
 from vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -632,28 +630,28 @@ class OpaqueResourceHandle:
     pass
 
 
-VkDeviceSize: TypeAlias = int
-VkFlags: TypeAlias = int
-VkSampleCountFlags: TypeAlias = VkFlags
-VkSampleCountFlagBits: TypeAlias = int
-VkImageCreateFlags: TypeAlias = VkFlags
-VkImageCreateFlagBits: TypeAlias = int
-VkResolveModeFlags: TypeAlias = VkFlags
-VkResolveModeFlagBits: TypeAlias = int
-VkDescriptorType: TypeAlias = int
-VkDescriptorPoolCreateFlags: TypeAlias = VkFlags
-VkDescriptorSetLayoutCreateFlags: TypeAlias = VkFlags
-VkShaderStageFlags: TypeAlias = VkFlags
-VkAttachmentLoadOp: TypeAlias = int
-VkAttachmentStoreOp: TypeAlias = int
-VkBufferUsageFlags: TypeAlias = VkFlags
-VkBufferUsageFlagBits: TypeAlias = int
-VkMemoryMapFlags: TypeAlias = VkFlags
-VkMemoryMapFlagBits: TypeAlias = int
-VkFormat: TypeAlias = int
-VkDependencyFlags: TypeAlias = VkFlags
-VkDependencyFlagBits: TypeAlias = int
-VkImageLayout: TypeAlias = int
+type VkDeviceSize = int
+type VkFlags = int
+type VkSampleCountFlags = VkFlags
+type VkSampleCountFlagBits = int
+type VkImageCreateFlags = VkFlags
+type VkImageCreateFlagBits = int
+type VkResolveModeFlags = VkFlags
+type VkResolveModeFlagBits = int
+type VkDescriptorType = int
+type VkDescriptorPoolCreateFlags = VkFlags
+type VkDescriptorSetLayoutCreateFlags = VkFlags
+type VkShaderStageFlags = VkFlags
+type VkAttachmentLoadOp = int
+type VkAttachmentStoreOp = int
+type VkBufferUsageFlags = VkFlags
+type VkBufferUsageFlagBits = int
+type VkMemoryMapFlags = VkFlags
+type VkMemoryMapFlagBits = int
+type VkFormat = int
+type VkDependencyFlags = VkFlags
+type VkDependencyFlagBits = int
+type VkImageLayout = int
 
 
 def VK_MAKE_API_VERSION(variant: int, major: int, minor: int, patch: int) -> int:
@@ -742,7 +740,7 @@ class VkSwapchainKHR(OpaqueResourceHandle): ...
 
 
 # Bind point enum
-VkPipelineBindPoint: TypeAlias = int  # 0 = GRAPHICS
+type VkPipelineBindPoint = int  # 0 = GRAPHICS
 
 
 # Attachment load/store ops (match .pyi values)
@@ -939,6 +937,6 @@ VK_FORMAT_ASTC_12x10_SRGB_BLOCK: VkFormat = 182
 VK_FORMAT_ASTC_12x12_UNORM_BLOCK: VkFormat = 183
 VK_FORMAT_ASTC_12x12_SRGB_BLOCK: VkFormat = 184
 
-VkColorComponentFlags: TypeAlias = int
+type VkColorComponentFlags = int
 
-VkColorSpaceKHR: TypeAlias = int
+type VkColorSpaceKHR = int

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, TypeAlias
+from typing import Any, Callable, List, Optional
 
 import cffi
 
@@ -29,12 +29,12 @@ VK_API_VERSION_1_3: int
 VK_API_VERSION_1_4: int
 
 # VkBool32
-VkBool32: TypeAlias = bool
+type VkBool32 = bool
 VK_TRUE: VkBool32 = True
 VK_FALSE: VkBool32 = False
 
-VkDeviceSize: TypeAlias = int
-VkFlags: TypeAlias = int
+type VkDeviceSize = int
+type VkFlags = int
 
 # VkExtent3D
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkExtent3D.html
@@ -133,7 +133,7 @@ def vkDestroyInstance(
 
 # VkInstanceCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkInstanceCreateFlagBits.html
-VkInstanceCreateFlagBits: TypeAlias = VkFlags
+type VkInstanceCreateFlagBits = VkFlags
 VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR: VkFlags = 0x00000001
 
 #
@@ -379,7 +379,7 @@ class VkPhysicalDeviceFeatures:
 
 # VkPhysicalDeviceType
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceType.html
-VkPhysicalDeviceType: TypeAlias = int
+type VkPhysicalDeviceType = int
 VK_PHYSICAL_DEVICE_TYPE_OTHER: VkPhysicalDeviceType = 0
 VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: VkPhysicalDeviceType = 1
 VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: VkPhysicalDeviceType = 2
@@ -439,8 +439,8 @@ def vkGetPhysicalDeviceMemoryProperties(
 
 # VkQueueFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkQueueFlagBits.html
-VkQueueFlags: TypeAlias = VkFlags
-VkQueueFlagBits: TypeAlias = int
+type VkQueueFlags = VkFlags
+type VkQueueFlagBits = int
 VK_QUEUE_GRAPHICS_BIT: VkQueueFlagBits = 0x00000001
 VK_QUEUE_COMPUTE_BIT: VkQueueFlagBits = 0x00000002
 VK_QUEUE_TRANSFER_BIT: VkQueueFlagBits = 0x00000004
@@ -474,7 +474,7 @@ class VkDevice(OpaqueResourceHandle): ...
 
 # VkDeviceCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceCreateFlags.html
-VkDeviceCreateFlags: TypeAlias = VkFlags
+type VkDeviceCreateFlags = VkFlags
 
 # VkDeviceCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceCreateInfo.html
@@ -569,8 +569,8 @@ def vkUnmapMemory(
 
 # VkMemoryPropertyFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryPropertyFlagBits.html
-VkMemoryPropertyFlags: TypeAlias = VkFlags
-VkMemoryPropertyFlagBits: TypeAlias = int
+type VkMemoryPropertyFlags = VkFlags
+type VkMemoryPropertyFlagBits = int
 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT: VkMemoryPropertyFlagBits = 0x00000001
 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT: VkMemoryPropertyFlagBits = 0x00000002
 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT: VkMemoryPropertyFlagBits = 0x00000004
@@ -580,8 +580,8 @@ VK_MEMORY_PROPERTY_PROTECTED_BIT: VkMemoryPropertyFlagBits = 0x00000020
 
 # VkMemoryMapFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryMapFlagBits.html
-VkMemoryMapFlags: TypeAlias = VkFlags
-VkMemoryMapFlagBits: TypeAlias = int
+type VkMemoryMapFlags = VkFlags
+type VkMemoryMapFlagBits = int
 
 #
 # VkImage
@@ -593,8 +593,8 @@ class VkImage(OpaqueResourceHandle): ...
 
 # VkImageCreateFlagBits:
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageCreateFlagBits.html
-VkImageCreateFlags: TypeAlias = VkFlags
-VkImageCreateFlagBits: TypeAlias = int
+type VkImageCreateFlags = VkFlags
+type VkImageCreateFlagBits = int
 VK_IMAGE_CREATE_SPARSE_BINDING_BIT = 0x00000001
 VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT = 0x00000002
 VK_IMAGE_CREATE_SPARSE_ALIASED_BIT = 0x00000004
@@ -603,14 +603,14 @@ VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT = 0x00000010
 
 # VkImageType
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageType.html
-VkImageType: TypeAlias = int
+type VkImageType = int
 VK_IMAGE_TYPE_1D: VkImageType = 0
 VK_IMAGE_TYPE_2D: VkImageType = 1
 VK_IMAGE_TYPE_3D: VkImageType = 2
 
 # VkFormat
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkFormat.html
-VkFormat: TypeAlias = int
+type VkFormat = int
 VK_FORMAT_UNDEFINED: VkFormat = 0
 VK_FORMAT_R4G4_UNORM_PACK8: VkFormat = 1
 VK_FORMAT_R4G4B4A4_UNORM_PACK16: VkFormat = 2
@@ -799,8 +799,8 @@ VK_FORMAT_ASTC_12x12_SRGB_BLOCK: VkFormat = 184
 
 # VkSampleCountFlagBits
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSampleCountFlagBits.html
-VkSampleCountFlags: TypeAlias = VkFlags
-VkSampleCountFlagBits: TypeAlias = int
+type VkSampleCountFlags = VkFlags
+type VkSampleCountFlagBits = int
 VK_SAMPLE_COUNT_1_BIT: VkSampleCountFlagBits = 0x00000001
 VK_SAMPLE_COUNT_2_BIT: VkSampleCountFlagBits = 0x00000002
 VK_SAMPLE_COUNT_4_BIT: VkSampleCountFlagBits = 0x00000004
@@ -811,14 +811,14 @@ VK_SAMPLE_COUNT_64_BIT: VkSampleCountFlagBits = 0x00000040
 
 # VkImageTiling
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageTiling.html
-VkImageTiling: TypeAlias = int
+type VkImageTiling = int
 VK_IMAGE_TILING_OPTIMAL: VkImageTiling = 0
 VK_IMAGE_TILING_LINEAR: VkImageTiling = 1
 
 # VkImageUsageFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageUsageFlagBits
-VkImageUsageFlags: TypeAlias = VkFlags
-VkImageUsageFlagBits: TypeAlias = int
+type VkImageUsageFlags = VkFlags
+type VkImageUsageFlagBits = int
 VK_IMAGE_USAGE_TRANSFER_SRC_BIT: VkImageUsageFlagBits = 0x00000001
 VK_IMAGE_USAGE_TRANSFER_DST_BIT: VkImageUsageFlagBits = 0x00000002
 VK_IMAGE_USAGE_SAMPLED_BIT: VkImageUsageFlagBits = 0x00000004
@@ -828,13 +828,13 @@ VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT: VkImageUsageFlagBits = 0x00000020
 
 # VkSharingMode
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSharingMode.html
-VkSharingMode: TypeAlias = int
+type VkSharingMode = int
 VK_SHARING_MODE_EXCLUSIVE: VkSharingMode = 0
 VK_SHARING_MODE_CONCURRENT: VkSharingMode = 1
 
 # VkImageLayout
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageLayout.html
-VkImageLayout: TypeAlias = int
+type VkImageLayout = int
 VK_IMAGE_LAYOUT_UNDEFINED: VkImageLayout = 0x0
 VK_IMAGE_LAYOUT_GENERAL: VkImageLayout = 0x1
 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: VkImageLayout = 0x2
@@ -913,12 +913,12 @@ class VkImageView(OpaqueResourceHandle): ...
 
 # VkImageViewCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageViewCreateFlags.html
-VkImageViewCreateFlags: TypeAlias = VkFlags
-VkImageViewCreateFlagBits: TypeAlias = int
+type VkImageViewCreateFlags = VkFlags
+type VkImageViewCreateFlagBits = int
 
 # VkImageViewType
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageViewType.html
-VkImageViewType: TypeAlias = int
+type VkImageViewType = int
 VK_IMAGE_VIEW_TYPE_1D: VkImageViewType = 0
 VK_IMAGE_VIEW_TYPE_2D: VkImageViewType = 1
 VK_IMAGE_VIEW_TYPE_3D: VkImageViewType = 2
@@ -938,7 +938,7 @@ class VkComponentMapping:
 
 # VkComponentSwizzle
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkComponentSwizzle.html
-VkComponentSwizzle: TypeAlias = int
+type VkComponentSwizzle = int
 VK_COMPONENT_SWIZZLE_IDENTITY: VkComponentSwizzle = 0
 VK_COMPONENT_SWIZZLE_ZERO: VkComponentSwizzle = 1
 VK_COMPONENT_SWIZZLE_ONE: VkComponentSwizzle = 2
@@ -959,8 +959,8 @@ class VkImageSubresourceRange:
 
 # VkImageAspectFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkImageAspectFlagBits.html
-VkImageAspectFlags: TypeAlias = VkFlags
-VkImageAspectFlagBits: TypeAlias = int
+type VkImageAspectFlags = VkFlags
+type VkImageAspectFlagBits = int
 VK_IMAGE_ASPECT_COLOR_BIT: VkImageAspectFlagBits = 0x00000001
 VK_IMAGE_ASPECT_DEPTH_BIT: VkImageAspectFlagBits = 0x00000002
 VK_IMAGE_ASPECT_STENCIL_BIT: VkImageAspectFlagBits = 0x00000004
@@ -1009,24 +1009,24 @@ class VkSampler(OpaqueResourceHandle): ...
 
 # VkSamplerCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSamplerCreateFlagBits.html
-VkSamplerCreateFlags: TypeAlias = VkFlags
-VkSamplerCreateFlagBits: TypeAlias = int
+type VkSamplerCreateFlags = VkFlags
+type VkSamplerCreateFlagBits = int
 
 # VkFilter
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkFilter.html
-VkFilter: TypeAlias = int
+type VkFilter = int
 VK_FILTER_NEAREST: VkFilter = 0
 VK_FILTER_LINEAR: VkFilter = 1
 
 # VkSamplerMipmapMode
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSamplerMipmapMode.html
-VkSamplerMipmapMode: TypeAlias = int
+type VkSamplerMipmapMode = int
 VK_SAMPLER_MIPMAP_MODE_NEAREST: VkSamplerMipmapMode = 0
 VK_SAMPLER_MIPMAP_MODE_LINEAR: VkSamplerMipmapMode = 1
 
 # VkSamplerAddressMode
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSamplerAddressMode.html
-VkSamplerAddressMode: TypeAlias = int
+type VkSamplerAddressMode = int
 VK_SAMPLER_ADDRESS_MODE_REPEAT: VkSamplerAddressMode = 0
 VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT: VkSamplerAddressMode = 1
 VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE: VkSamplerAddressMode = 2
@@ -1035,7 +1035,7 @@ VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE: VkSamplerAddressMode = 4
 
 # VkCompareOp
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCompareOp.html
-VkCompareOp: TypeAlias = int
+type VkCompareOp = int
 VK_COMPARE_OP_NEVER: VkCompareOp = 0
 VK_COMPARE_OP_LESS: VkCompareOp = 1
 VK_COMPARE_OP_EQUAL: VkCompareOp = 2
@@ -1047,7 +1047,7 @@ VK_COMPARE_OP_ALWAYS: VkCompareOp = 7
 
 # VkStencilOp
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkStencilOp.html
-VkStencilOp: TypeAlias = int
+type VkStencilOp = int
 VK_STENCIL_OP_KEEP: VkStencilOp = 0
 VK_STENCIL_OP_ZERO: VkStencilOp = 1
 VK_STENCIL_OP_REPLACE: VkStencilOp = 2
@@ -1059,7 +1059,7 @@ VK_STENCIL_OP_DECREMENT_AND_WRAP: VkStencilOp = 7
 
 # VkBorderColor
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkBorderColor.html
-VkBorderColor: TypeAlias = int
+type VkBorderColor = int
 VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK: VkBorderColor = 0
 VK_BORDER_COLOR_INT_TRANSPARENT_BLACK: VkBorderColor = 1
 VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK: VkBorderColor = 2
@@ -1116,8 +1116,8 @@ def vkDestroySampler(
 
 # VkResolveModeFlagBits
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkResolveModeFlagBits.html
-VkResolveModeFlag: TypeAlias = VkFlags
-VkResolveModeFlagBits: TypeAlias = int
+type VkResolveModeFlag = VkFlags
+type VkResolveModeFlagBits = int
 VK_RESOLVE_MODE_NONE: VkResolveModeFlagBits = 0x00000000
 VK_RESOLVE_MODE_SAMPLE_ZERO_BIT: VkResolveModeFlagBits = 0x00000001
 VK_RESOLVE_MODE_AVERAGE_BIT: VkResolveModeFlagBits = 0x00000002
@@ -1126,14 +1126,14 @@ VK_RESOLVE_MODE_MAX_BIT: VkResolveModeFlagBits = 0x00000008
 
 # VkAttachmentLoadOp
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkAttachmentLoadOp.html
-VkAttachmentLoadOp: TypeAlias = int
+type VkAttachmentLoadOp = int
 VK_ATTACHMENT_LOAD_OP_LOAD: VkAttachmentLoadOp = 0
 VK_ATTACHMENT_LOAD_OP_CLEAR: VkAttachmentLoadOp = 1
 VK_ATTACHMENT_LOAD_OP_DONT_CARE: VkAttachmentLoadOp = 2
 
 # VkAttachmentStoreOp
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkAttachmentStoreOp.html
-VkAttachmentStoreOp: TypeAlias = int
+type VkAttachmentStoreOp = int
 VK_ATTACHMENT_STORE_OP_STORE: VkAttachmentStoreOp = 0
 VK_ATTACHMENT_STORE_OP_DONT_CARE: VkAttachmentStoreOp = 1
 
@@ -1182,16 +1182,16 @@ class VkBuffer(OpaqueResourceHandle): ...
 
 # VkBufferCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferCreateFlagBits.html
-VkBufferCreateFlags: TypeAlias = VkFlags
-VkBufferCreateFlagBits: TypeAlias = int
+type VkBufferCreateFlags = VkFlags
+type VkBufferCreateFlagBits = int
 VK_BUFFER_CREATE_SPARSE_BINDING_BIT: VkBufferCreateFlagBits = 0x00000001
 VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT: VkBufferCreateFlagBits = 0x00000002
 VK_BUFFER_CREATE_SPARSE_ALIASED_BIT: VkBufferCreateFlagBits = 0x00000004
 
 # VkBufferUsageFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkBufferUsageFlagBits.html
-VkBufferUsageFlags: TypeAlias = VkFlags
-VkBufferUsageFlagBits: TypeAlias = int
+type VkBufferUsageFlags = VkFlags
+type VkBufferUsageFlagBits = int
 VK_BUFFER_USAGE_TRANSFER_SRC_BIT: VkBufferUsageFlagBits = 0x00000001
 VK_BUFFER_USAGE_TRANSFER_DST_BIT: VkBufferUsageFlagBits = 0x00000002
 VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT: VkBufferUsageFlagBits = 0x00000004
@@ -1266,8 +1266,8 @@ def vkBindBufferMemory(
 class VkBufferView(OpaqueResourceHandle): ...
 
 # VkBufferViewCreateFlags
-VkBufferViewCreateFlags: TypeAlias = VkFlags
-VkBufferViewCreateFlagBits: TypeAlias = int
+type VkBufferViewCreateFlags = VkFlags
+type VkBufferViewCreateFlagBits = int
 
 # vkCreateBufferView
 # https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateBufferView.html
@@ -1309,8 +1309,8 @@ class VkCommandPool(OpaqueResourceHandle): ...
 
 # VkCommandPoolCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandPoolCreateFlags
-VkCommandPoolCreateFlags: TypeAlias = VkFlags
-VkCommandPoolCreateFlagBits: TypeAlias = int
+type VkCommandPoolCreateFlags = VkFlags
+type VkCommandPoolCreateFlagBits = int
 VK_COMMAND_POOL_CREATE_TRANSIENT_BIT: VkCommandPoolCreateFlagBits = (  #
     0x00000001
 )
@@ -1357,14 +1357,14 @@ class VkCommandBuffer(OpaqueResourceHandle): ...
 
 # VkCommandBufferLevel
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferLevel.html
-VkCommandBufferLevel: TypeAlias = int
+type VkCommandBufferLevel = int
 VK_COMMAND_BUFFER_LEVEL_PRIMARY: VkCommandBufferLevel = 0
 VK_COMMAND_BUFFER_LEVEL_SECONDARY: VkCommandBufferLevel = 1
 
 # VkCommandBufferResetFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferResetFlags.html
-VkCommandBufferResetFlags: TypeAlias = VkFlags
-VkCommandBufferResetFlagBits: TypeAlias = int
+type VkCommandBufferResetFlags = VkFlags
+type VkCommandBufferResetFlagBits = int
 
 # VkCommandBufferAllocateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCommandBufferAllocateInfo.html
@@ -1404,8 +1404,8 @@ def vkResetCommandBuffer(
     vkResetCommandBuffer resets a command buffer to the initial state.
     """
 
-VkCommandBufferUsageFlags: TypeAlias = VkFlags
-VkCommandBufferUsageFlagBits: TypeAlias = int
+type VkCommandBufferUsageFlags = VkFlags
+type VkCommandBufferUsageFlagBits = int
 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: VkCommandBufferUsageFlagBits = (  #
     0x00000001
 )
@@ -1526,13 +1526,13 @@ def vkCmdCopyImageToBuffer(
 
 # VkDependencyFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDependencyFlagBits.html
-VkDependencyFlags: TypeAlias = VkFlags
-VkDependencyFlagBits: TypeAlias = int
+type VkDependencyFlags = VkFlags
+type VkDependencyFlagBits = int
 
 # VkAccessFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkAccessFlagBits.html
-VkAccessFlags: TypeAlias = VkFlags
-VkAccessFlagBits: TypeAlias = int
+type VkAccessFlags = VkFlags
+type VkAccessFlagBits = int
 VK_ACCESS_INDIRECT_COMMAND_READ_BIT: VkAccessFlagBits = 0x00000001
 VK_ACCESS_INDEX_READ_BIT: VkAccessFlagBits = 0x00000002
 VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT: VkAccessFlagBits = 0x00000004
@@ -1670,8 +1670,8 @@ class VkFence(OpaqueResourceHandle): ...
 
 # VkFenceCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkFenceCreateFlags.html
-VkFenceCreateFlags: TypeAlias = VkFlags
-VkFenceCreateFlagBits: TypeAlias = int
+type VkFenceCreateFlags = VkFlags
+type VkFenceCreateFlagBits = int
 VK_FENCE_CREATE_SIGNALED_BIT: VkFenceCreateFlagBits = 0x00000001
 
 # VkFenceCreateInfo
@@ -1742,7 +1742,7 @@ def vkGetDeviceQueue(
 
 # VkPipelineStageFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineStageFlagBits.html
-VkPipelineStageFlags: TypeAlias = VkFlags
+type VkPipelineStageFlags = VkFlags
 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT: int = 0x00000001
 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT: int = 0x00000800
 VK_PIPELINE_STAGE_TRANSFER_BIT: int = 0x00001000
@@ -1793,8 +1793,8 @@ def vkResetFences(
 
 # VkShaderStageFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderStageFlagBits.html
-VkShaderStageFlags: TypeAlias = VkFlags
-VkShaderStageFlagBits: TypeAlias = int
+type VkShaderStageFlags = VkFlags
+type VkShaderStageFlagBits = int
 VK_SHADER_STAGE_VERTEX_BIT: VkShaderStageFlagBits = 0x00000001
 VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: VkShaderStageFlagBits = 0x00000002
 VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: VkShaderStageFlagBits = 0x00000004
@@ -1810,8 +1810,8 @@ class VkShaderModule(OpaqueResourceHandle): ...
 
 # VkShaderModuleCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderModuleCreateFlags.html
-VkShaderModuleCreateFlags: TypeAlias = VkFlags
-VkShaderModuleCreateFlagBits: TypeAlias = int
+type VkShaderModuleCreateFlags = VkFlags
+type VkShaderModuleCreateFlagBits = int
 
 # VkShaderModuleCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderModuleCreateInfo
@@ -1877,7 +1877,7 @@ class VkDescriptorPool(OpaqueResourceHandle): ...
 
 # VkDescriptorType
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorType.html
-VkDescriptorType: TypeAlias = int
+type VkDescriptorType = int
 VK_DESCRIPTOR_TYPE_SAMPLER: VkDescriptorType = 0
 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: VkDescriptorType = 1
 VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: VkDescriptorType = 2
@@ -1892,16 +1892,16 @@ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT: VkDescriptorType = 10
 
 # VkDescriptorPoolCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolCreateFlagBits.html
-VkDescriptorPoolCreateFlags: TypeAlias = VkFlags
-VkDescriptorPoolCreateFlagBits: TypeAlias = int
+type VkDescriptorPoolCreateFlags = VkFlags
+type VkDescriptorPoolCreateFlagBits = int
 VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: VkDescriptorPoolCreateFlagBits = (
     0x00000001
 )
 
 # VkDescriptorSetLayoutCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorSetLayoutCreateFlagBits.html
-VkDescriptorSetLayoutCreateFlags: TypeAlias = VkFlags
-VkDescriptorSetLayoutCreateFlagBits: TypeAlias = int
+type VkDescriptorSetLayoutCreateFlags = VkFlags
+type VkDescriptorSetLayoutCreateFlagBits = int
 
 # VkDescriptorPoolSize
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolSize.html
@@ -2047,7 +2047,7 @@ class VkRenderPass(OpaqueResourceHandle): ...
 
 # VkBlendFactor
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkBlendFactor.html
-VkBlendFactor: TypeAlias = int
+type VkBlendFactor = int
 VK_BLEND_FACTOR_ZERO: VkBlendFactor = 0
 VK_BLEND_FACTOR_ONE: VkBlendFactor = 1
 VK_BLEND_FACTOR_SRC_COLOR: VkBlendFactor = 2
@@ -2070,7 +2070,7 @@ VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA: VkBlendFactor = 18
 
 # VkBlendOp
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkBlendOp.html
-VkBlendOp: TypeAlias = int
+type VkBlendOp = int
 VK_BLEND_OP_ADD: VkBlendOp = 0
 VK_BLEND_OP_SUBTRACT: VkBlendOp = 1
 VK_BLEND_OP_REVERSE_SUBTRACT: VkBlendOp = 2
@@ -2079,8 +2079,8 @@ VK_BLEND_OP_MAX: VkBlendOp = 4
 
 # VkColorComponentFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkColorComponentFlagBits.html
-VkColorComponentFlags: TypeAlias = VkFlags
-VkColorComponentFlagBits: TypeAlias = int
+type VkColorComponentFlags = VkFlags
+type VkColorComponentFlagBits = int
 VK_COLOR_COMPONENT_R_BIT: VkColorComponentFlagBits = 0x00000001
 VK_COLOR_COMPONENT_G_BIT: VkColorComponentFlagBits = 0x00000002
 VK_COLOR_COMPONENT_B_BIT: VkColorComponentFlagBits = 0x00000004
@@ -2088,8 +2088,8 @@ VK_COLOR_COMPONENT_A_BIT: VkColorComponentFlagBits = 0x00000008
 
 # VkCullModeFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCullModeFlagBits.html
-VkCullModeFlags: TypeAlias = VkFlags
-VkCullModeFlagBits: TypeAlias = int
+type VkCullModeFlags = VkFlags
+type VkCullModeFlagBits = int
 VK_CULL_MODE_NONE: int = 0
 VK_CULL_MODE_FRONT_BIT: int = 0x00000001
 VK_CULL_MODE_BACK_BIT: int = 0x00000002
@@ -2110,22 +2110,22 @@ class VkPipelineColorBlendAttachmentState:
 
 # VkPipelineCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineCreateFlagBits.html
-VkPipelineCreateFlags: TypeAlias = VkFlags
-VkPipelineCreateFlagBits: TypeAlias = int
+type VkPipelineCreateFlags = VkFlags
+type VkPipelineCreateFlagBits = int
 VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT: VkPipelineCreateFlagBits = 0x00000001
 VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT: VkPipelineCreateFlagBits = 0x00000002
 VK_PIPELINE_CREATE_DERIVATIVE_BIT: VkPipelineCreateFlagBits = 0x00000004
 
 # VkPipelineShaderStageCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineShaderStageCreateFlags.html
-VkPipelineShaderStageCreateFlags: TypeAlias = VkFlags
-VkPipelineShaderStageCreateFlagBits: TypeAlias = int
+type VkPipelineShaderStageCreateFlags = VkFlags
+type VkPipelineShaderStageCreateFlagBits = int
 VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT: VkPipelineShaderStageCreateFlagBits = 0x00000001
 VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT: VkPipelineShaderStageCreateFlagBits = 0x00000002
 
 # VkPrimitiveTopology
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPrimitiveTopology.html
-VkPrimitiveTopology: TypeAlias = int
+type VkPrimitiveTopology = int
 VK_PRIMITIVE_TOPOLOGY_POINT_LIST: VkPrimitiveTopology = 0
 VK_PRIMITIVE_TOPOLOGY_LINE_LIST: VkPrimitiveTopology = 1
 VK_PRIMITIVE_TOPOLOGY_LINE_STRIP: VkPrimitiveTopology = 2
@@ -2140,26 +2140,26 @@ VK_PRIMITIVE_TOPOLOGY_PATCH_LIST: VkPrimitiveTopology = 10
 
 # VkPipelineBindPoint
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineBindPoint.html
-VkPipelineBindPoint: TypeAlias = int
+type VkPipelineBindPoint = int
 VK_PIPELINE_BIND_POINT_GRAPHICS: VkPipelineBindPoint = 0
 VK_PIPELINE_BIND_POINT_COMPUTE: VkPipelineBindPoint = 1
 
 # VkFrontFace
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkFrontFace.html
-VkFrontFace: TypeAlias = int
+type VkFrontFace = int
 VK_FRONT_FACE_COUNTER_CLOCKWISE: VkFrontFace = 0
 VK_FRONT_FACE_CLOCKWISE: VkFrontFace = 1
 
 # VkPolygonMode
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPolygonMode.html
-VkPolygonMode: TypeAlias = int
+type VkPolygonMode = int
 VK_POLYGON_MODE_FILL: VkPolygonMode = 0
 VK_POLYGON_MODE_LINE: VkPolygonMode = 1
 VK_POLYGON_MODE_POINT: VkPolygonMode = 2
 
 # VkLogicOp
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkLogicOp.html
-VkLogicOp: TypeAlias = int
+type VkLogicOp = int
 VK_LOGIC_OP_CLEAR: VkLogicOp = 0
 VK_LOGIC_OP_AND: VkLogicOp = 1
 VK_LOGIC_OP_AND_REVERSE: VkLogicOp = 2
@@ -2179,7 +2179,7 @@ VK_LOGIC_OP_SET: VkLogicOp = 15
 
 # VkDynamicState
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDynamicState.html
-VkDynamicState: TypeAlias = int
+type VkDynamicState = int
 VK_DYNAMIC_STATE_VIEWPORT: VkDynamicState = 0
 VK_DYNAMIC_STATE_SCISSOR: VkDynamicState = 1
 VK_DYNAMIC_STATE_LINE_WIDTH: VkDynamicState = 2
@@ -2372,8 +2372,8 @@ def vkDestroyPipeline(
 
 # VkPipelineLayoutCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineLayoutCreateFlags.html
-VkPipelineLayoutCreateFlags: TypeAlias = VkFlags
-VkPipelineLayoutCreateFlagBits: TypeAlias = int
+type VkPipelineLayoutCreateFlags = VkFlags
+type VkPipelineLayoutCreateFlagBits = int
 
 # VkPipelineLayoutCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineLayoutCreateInfo.html
@@ -2417,17 +2417,17 @@ class VkSwapchainKHR(OpaqueResourceHandle): ...
 
 # VkSwapchainCreateFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainCreateFlags.html
-VkSwapchainCreateFlags: TypeAlias = VkFlags
-VkSwapchainCreateFlagBits: TypeAlias = int
+type VkSwapchainCreateFlags = VkFlags
+type VkSwapchainCreateFlagBits = int
 
 # VkColorSpaceKHR
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkColorSpaceKHR.html
-VkColorSpaceKHR: TypeAlias = int
+type VkColorSpaceKHR = int
 VK_COLOR_SPACE_SRGB_NONLINEAR_KHR: VkColorSpaceKHR = 0
 
 # VkSurfaceTransformFlagBitsKHR
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkSurfaceTransformFlagBitsKHR.html
-VkSurfaceTransformFlagBitsKHR: TypeAlias = int
+type VkSurfaceTransformFlagBitsKHR = int
 VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000001
 VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000002
 VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000004
@@ -2442,7 +2442,7 @@ VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR: VkSurfaceTransformFlagBitsKHR = 0x00000100
 
 # VkCompositeAlphaFlagBitsKHR
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkCompositeAlphaFlagBitsKHR.html
-VkCompositeAlphaFlagBitsKHR: TypeAlias = int
+type VkCompositeAlphaFlagBitsKHR = int
 VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000001
 VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000002
 VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000004
@@ -2450,7 +2450,7 @@ VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR: VkCompositeAlphaFlagBitsKHR = 0x00000008
 
 # VkPresentModeKHR
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html
-VkPresentModeKHR: TypeAlias = int
+type VkPresentModeKHR = int
 VK_PRESENT_MODE_IMMEDIATE_KHR: VkPresentModeKHR = 0
 VK_PRESENT_MODE_MAILBOX_KHR: VkPresentModeKHR = 1
 VK_PRESENT_MODE_FIFO_KHR: VkPresentModeKHR = 2
