@@ -47,7 +47,7 @@ class EventRouter[TEvent: Event]:
 
         return decorator
 
-    def unsubscribe(self, fn: "EventHandler[TEvent]") -> None:
+    def unsubscribe(self, fn: "EventHandler") -> None:
         """Unregister a listener function from events."""
         self._callback_registry[fn.__name__].remove(fn)
 

@@ -14,7 +14,7 @@ import warnings
 
 import glfw
 
-from .basic import BaseResource, ButtonAction, KeyModifier, Key
+from .basic import BaseResource, ButtonAction, KeyModifier, Key, MouseButton
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 from .typed_vulkan import raw_ffi
@@ -253,7 +253,7 @@ class WindowKeyEvent(WindowEvent):
 @dataclass
 class WindowMouseButtonEvent(WindowEvent):
     window: Window
-    button: str
+    button: "MouseButton"
     action: "ButtonAction"
     mods: list["KeyModifier"]
 
@@ -420,8 +420,8 @@ def _decode_glfw_key(key: int) -> Key | None:
     return glfw_key_map.get(key, None)
 
 
-def _decode_glfw_mouse_button(button: int) -> str:
-    glfw_mouse_button_map: dict[int, str] = {
+def _decode_glfw_mouse_button(button: int) -> MouseButton:
+    glfw_mouse_button_map: dict[int, MouseButton] = {
         glfw.MOUSE_BUTTON_1: "left",
         glfw.MOUSE_BUTTON_2: "right",
         glfw.MOUSE_BUTTON_3: "middle",
@@ -431,4 +431,4 @@ def _decode_glfw_mouse_button(button: int) -> str:
         glfw.MOUSE_BUTTON_7: "button-7",
         glfw.MOUSE_BUTTON_8: "button-8",
     }
-    return glfw_mouse_button_map.get(button, "button_" + str(button))
+    return glfw_mouse_button_map[button]
