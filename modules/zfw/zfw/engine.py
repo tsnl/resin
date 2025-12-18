@@ -60,13 +60,13 @@ class Engine(BaseResource):
             self._gpu_device = GpuDevice(
                 context=self._gpu_context,
                 physical_device=physical_device,
-                surface=self._window.gpu_surface,
+                surface=self._window._gpu_surface,
             )
 
             # Create swap chain:
             self._gpu_swap_chain = GpuSwapChain(
                 device=self._gpu_device,
-                surface=self._window.gpu_surface,
+                surface=self._window._gpu_surface,
                 image_count=swapchain_image_count,
             )
 

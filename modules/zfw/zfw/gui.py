@@ -27,7 +27,13 @@ from dataclasses import dataclass
 from typing import Literal
 import warnings
 
-from cassowary import SimplexSolver, Variable, STRONG
+from kiwisolver import (
+    Solver as KiwiSolver,
+    Variable as KiwiVariable,
+    Expression as KiwiExpression,
+    Term as KiwiTerm,
+)
+
 
 import glfw
 
@@ -66,6 +72,7 @@ class GuiWidgetStyle:
     hover_border_color: tuple[float, float, float, float] | None = None
     hover_border_thickness: tuple[int, int, int, int] | None = None
     padding: tuple[int, int, int, int] = (0, 0, 0, 0)
+    margin: tuple[int, int, int, int] = (5, 5, 5, 5)
     text_horizontal_alignment: HorizontalAlignment = "center"
     text_vertical_alignment: VerticalAlignment = "middle"
     wrap: bool = False
@@ -128,7 +135,8 @@ class GuiContext(BaseResource):
     ) -> None:
         super().__init__(parent_resource=parent_resource)
 
-        self.gpu_context = gpu_context
+        self._gpu_context = gpu_context
+        self._kiwi_solver = KiwiSolver()
 
         ok = glfw.init()
         if not ok:
@@ -146,12 +154,13 @@ class GuiWindow(BaseResource):
     _height: int
     _title: str
     _theme: GuiTheme
-    glfw_window_handle: glfw._GLFWwindow
-    gpu_surface: GpuSurface
-    last_mouse_x: float
-    last_mouse_y: float
+    _glfw_window_handle: glfw._GLFWwindow
+    _gpu_surface: GpuSurface
+    _last_mouse_x: float
+    _last_mouse_y: float
     _gui_context: GuiContext
-    _central_widget: "GuiWidget"
+    _central_widget: "GuiWidget | None"
+    _kiwi_solver: KiwiSolver
 
     def __init__(
         self,
@@ -161,10 +170,6 @@ class GuiWindow(BaseResource):
         height: int,
         title: str,
         theme: GuiTheme | None = None,
-        num_grid_rows: int = 1,
-        num_grid_cols: int = 1,
-        grid_row_sizes: tuple[int, ...] | None = None,
-        grid_col_sizes: tuple[int, ...] | None = None,
     ) -> None:
         super().__init__(parent_resource=gui_context)
 
@@ -174,23 +179,18 @@ class GuiWindow(BaseResource):
         self._title = title
         self._theme = theme or DEFAULT_THEME
 
-        self.glfw_window_handle = self._new_glfw_window()
-        self.gpu_surface = self._new_gpu_surface()
+        self._glfw_window_handle = self._new_glfw_window()
+        self._gpu_surface = self._new_gpu_surface()
 
-        self.last_mouse_x: float = 0.0
-        self.last_mouse_y: float = 0.0
+        self._last_mouse_x: float = 0.0
+        self._last_mouse_y: float = 0.0
 
         # Create central widget that occupies the full window
-        self._central_widget = GuiWidget(
-            parent_widget=None,
-            local_xywh_dip=(0, 0, width, height),
-            theme=self._theme,
-            num_child_grid_rows=num_grid_rows,
-            num_child_grid_cols=num_grid_cols,
-            child_grid_row_size=grid_row_sizes,
-            child_grid_col_size=grid_col_sizes,
-            parent_resource=self,
-        )
+        self._central_widget = None
+
+        # For Kiwi solver: window size variables
+        self._w_var = KiwiVariable("window_width")
+        self._h_var = KiwiVariable("window_height")
 
     def _new_glfw_window(self) -> glfw._GLFWwindow:
         # Create GLFW window:
@@ -239,21 +239,21 @@ class GuiWindow(BaseResource):
         return glfw_window
 
     def _new_gpu_surface(self) -> GpuSurface:
-        if not self._gui_context.gpu_context.enable_present_support:
+        if not self._gui_context._gpu_context.enable_present_support:
             raise RuntimeError("GPU context does not support presentation")
 
         surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
         result = glfw.create_window_surface(
-            instance=self._gui_context.gpu_context.vk_instance,
-            window=self.glfw_window_handle,
+            instance=self._gui_context._gpu_context.vk_instance,
+            window=self._glfw_window_handle,
             allocator=None,
             surface=surface_ptr,
         )
         if result != 0:
             raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
-        width, height = glfw.get_framebuffer_size(self.glfw_window_handle)
+        width, height = glfw.get_framebuffer_size(self._glfw_window_handle)
         return GpuSurface(
-            context=self._gui_context.gpu_context,
+            context=self._gui_context._gpu_context,
             parent_resource=self,
             vk_surface=surface_ptr[0],
             width=width,
@@ -262,16 +262,16 @@ class GuiWindow(BaseResource):
 
     def _on_dispose_resource(self) -> None:
         super()._on_dispose_resource()
-        glfw.destroy_window(self.glfw_window_handle)
+        glfw.destroy_window(self._glfw_window_handle)
 
     def should_close(self) -> bool:
-        return glfw.window_should_close(self.glfw_window_handle)
+        return glfw.window_should_close(self._glfw_window_handle)
 
     def show(self):
-        glfw.show_window(self.glfw_window_handle)
+        glfw.show_window(self._glfw_window_handle)
 
     def hide(self):
-        glfw.hide_window(self.glfw_window_handle)
+        glfw.hide_window(self._glfw_window_handle)
 
     def set_cursor_mode(self, cursor_mode: "GuiCursorMode"):
         """
@@ -282,13 +282,13 @@ class GuiWindow(BaseResource):
         match cursor_mode:
             case "joystick":
                 glfw.set_input_mode(
-                    self.glfw_window_handle,
+                    self._glfw_window_handle,
                     glfw.CURSOR,
                     glfw.CURSOR_DISABLED,
                 )
             case "cursor":
                 glfw.set_input_mode(
-                    self.glfw_window_handle,
+                    self._glfw_window_handle,
                     glfw.CURSOR,
                     glfw.CURSOR_NORMAL,
                 )
@@ -297,7 +297,7 @@ class GuiWindow(BaseResource):
 
     @property
     def content_scale(self) -> tuple[float, float]:
-        return glfw.get_window_content_scale(self.glfw_window_handle)
+        return glfw.get_window_content_scale(self._glfw_window_handle)
 
     @staticmethod
     def poll_events():
@@ -311,6 +311,9 @@ class GuiWindow(BaseResource):
         action: int,
         mods: int,
     ) -> None:
+        if not self._central_widget:
+            return
+
         # TODO: Handle key events in GuiWidget if needed
         pass
 
@@ -321,6 +324,9 @@ class GuiWindow(BaseResource):
         action: int,
         mods: int,
     ) -> None:
+        if not self._central_widget:
+            return
+
         self._central_widget._receive_mouse_button_action(
             button=_decode_glfw_mouse_button(button),
             action=_decode_glfw_action(action),
@@ -332,8 +338,11 @@ class GuiWindow(BaseResource):
         x: float,
         y: float,
     ) -> None:
-        dx, self.last_mouse_x = x - self.last_mouse_x, x
-        dy, self.last_mouse_y = y - self.last_mouse_y, y
+        if not self._central_widget:
+            return
+
+        dx, self._last_mouse_x = x - self._last_mouse_x, x
+        dy, self._last_mouse_y = y - self._last_mouse_y, y
 
         _ = dx, dy  # Currently unused
 
@@ -343,35 +352,63 @@ class GuiWindow(BaseResource):
         )
 
     def render(self, canvas: Canvas) -> None:
-        self._central_widget.update_layout()
+        if self._central_widget is None:
+            return
         self._central_widget._render(canvas)
 
     @property
     def central_widget(self) -> "GuiWidget":
         """Get the central widget that occupies the full window area."""
+        assert self._central_widget is not None
         return self._central_widget
+
+    def set_central_widget(self, widget: "GuiWidget") -> None:
+        """Set the central widget that occupies the full window area."""
+        self._central_widget = widget
+        self._update_layout()
+
+    def _update_layout(self):
+        if self._central_widget is None:
+            return
+
+        solver = self._gui_context._kiwi_solver
+
+        solver.reset()
+
+        solver.addEditVariable(self._w_var, "strong")
+        solver.addEditVariable(self._h_var, "strong")
+        solver.suggestValue(self._w_var, self._width)
+        solver.suggestValue(self._h_var, self._height)
+
+        self._central_widget._setup_constraints(
+            solver,
+            0.0,
+            0.0,
+            self._w_var,
+            self._h_var,
+        )
+
+        solver.updateVariables()
 
 
 class GuiWidget(BaseResource):
     _parent_widget: "GuiWidget | None"
+    _window: "GuiWindow"
     _gui_context: "GuiContext"
-    _local_xywh_dip: tuple[int, int, int, int]
     _child_widget_list: list["GuiWidget"]
     _mouse_over: bool
     _latest_local_mouse_pos: tuple[int, int]
     _latest_global_mouse_pos: tuple[int, int]
 
     # Layout params (position in parent)
-    _layout_row: int
-    _layout_col: int
-    _layout_row_span: int
-    _layout_col_span: int
+    _row: int
+    _col: int
+    _row_span: int
+    _col_span: int
 
     # Grid params (for children)
-    _num_child_grid_rows: int
-    _num_child_grid_cols: int
-    _child_grid_row_size: tuple[int, ...]
-    _child_grid_col_size: tuple[int, ...]
+    _grid_row_size_hints: tuple[int, ...]
+    _grid_col_size_hints: tuple[int, ...]
 
     # Content:
     _text: str
@@ -382,53 +419,55 @@ class GuiWidget(BaseResource):
     # Events
     _click_event_hub: EventHub["MouseButton"]
 
+    # Bounding box in DIP (computed during layout)
+    _x: KiwiVariable
+    _y: KiwiVariable
+    _w: KiwiVariable
+    _h: KiwiVariable
+
     def __init__(
         self,
         *,
-        parent_widget: "GuiWidget | None",
-        local_xywh_dip: tuple[int, int, int, int] | None = None,
+        parent_widget: "GuiWidget | None" = None,
+        window: "GuiWindow | None" = None,
         theme: GuiTheme | None = None,
         row: int = 0,
         col: int = 0,
         row_span: int = 1,
         col_span: int = 1,
-        num_child_grid_rows: int = 1,
-        num_child_grid_cols: int = 1,
-        child_grid_row_size: tuple[int, ...] | None = None,
-        child_grid_col_size: tuple[int, ...] | None = None,
+        grid_rows: tuple[int, ...] | None = None,
+        grid_cols: tuple[int, ...] | None = None,
         text: str = "",
         style_classes: list[str] | None = None,
         is_clickable: bool = True,
         parent_resource: "BaseResource | None" = None,
     ) -> None:
+        if not window and not parent_widget:
+            raise ValueError("Either parent_window or parent_widget must be provided")
+        if window and parent_widget:
+            raise ValueError("Either parent_window or parent_widget should be provided")
+
         super().__init__(parent_resource=(parent_resource or parent_widget))
 
-        self._parent_widget = parent_widget
+        self._parent_widget, self._window = GuiWidget._resolve_parent_widget_and_window(
+            parent_widget=parent_widget,
+            window=window,
+        )
+        self._gui_context = self._window._gui_context
+        self._theme = GuiWidget._resolve_theme(theme=theme, parent_widget=parent_widget)
 
-        self._local_xywh_dip = local_xywh_dip or (0, 0, 0, 0)
         self._child_widget_list = []
         self._mouse_over = False
         self._latest_local_mouse_pos = (0, 0)
         self._latest_global_mouse_pos = (0, 0)
 
-        self._layout_row = row
-        self._layout_col = col
-        self._layout_row_span = row_span
-        self._layout_col_span = col_span
+        self._row = row
+        self._col = col
+        self._row_span = row_span
+        self._col_span = col_span
 
-        self._num_child_grid_rows = num_child_grid_rows
-        self._num_child_grid_cols = num_child_grid_cols
-        self._child_grid_row_size = child_grid_row_size or tuple(
-            [-1] * num_child_grid_rows
-        )
-        self._child_grid_col_size = child_grid_col_size or tuple(
-            [-1] * num_child_grid_cols
-        )
-
-        # Inherit theme from parent widget, or use provided theme
-        self._theme = theme or (
-            self._parent_widget._theme if self._parent_widget else DEFAULT_THEME
-        )
+        self._grid_row_size_hints = grid_rows or (-1,)
+        self._grid_col_size_hints = grid_cols or (-1,)
 
         self._text = text
         self._style_classes = style_classes or ["label"]
@@ -440,132 +479,172 @@ class GuiWidget(BaseResource):
 
         self._click_event_hub = EventHub["MouseButton"]()
 
-    @property
-    def click(self) -> EventHub["MouseButton"]:
-        return self._click_event_hub
+        # Layout variables:
+        self._x = KiwiVariable(f"{repr(self)}::x")
+        self._y = KiwiVariable(f"{repr(self)}::y")
+        self._w = KiwiVariable(f"{repr(self)}::w")
+        self._h = KiwiVariable(f"{repr(self)}::h")
+        self._grid_row_unit_var = KiwiVariable(f"{repr(self)}::grid_row_unit")
+        self._grid_col_unit_var = KiwiVariable(f"{repr(self)}::grid_col_unit")
+        self._grid_row_size_vars: list[KiwiVariable] = [
+            KiwiVariable(f"{repr(self)}::grid_row_{i}")
+            for i in range(len(self._grid_row_size_hints))
+        ]
+        self._grid_col_size_vars: list[KiwiVariable] = [
+            KiwiVariable(f"{repr(self)}::grid_col_{i}")
+            for i in range(len(self._grid_col_size_hints))
+        ]
 
-    def set_grid_config(
-        self,
-        num_rows: int,
-        num_cols: int,
-        row_sizes: tuple[int, ...] | None = None,
-        col_sizes: tuple[int, ...] | None = None,
-    ) -> None:
-        self._num_child_grid_rows = num_rows
-        self._num_child_grid_cols = num_cols
-        self._child_grid_row_size = row_sizes or tuple([-1] * num_rows)
-        self._child_grid_col_size = col_sizes or tuple([-1] * num_cols)
+    @staticmethod
+    def _resolve_parent_widget_and_window(
+        parent_widget: "GuiWidget | None",
+        window: "GuiWindow | None",
+    ) -> tuple["GuiWidget | None", "GuiWindow"]:
+        if not window and not parent_widget:
+            raise ValueError("Either parent_window or parent_widget must be provided")
+        if window and parent_widget:
+            raise ValueError("Either parent_window or parent_widget should be provided")
+        if parent_widget:
+            return parent_widget, parent_widget._window
+        else:
+            assert window is not None
+            return None, window
 
-    def update_layout(self) -> None:
-        if self._child_widget_list:
-            self._solve_layout()
-
-        for child in self._child_widget_list:
-            child.update_layout()
-
-    def _solve_layout(self) -> None:
-        solver = SimplexSolver()
-
-        # Variables for grid lines
-        row_vars = [Variable(f"row_{i}") for i in range(self._num_child_grid_rows + 1)]
-        col_vars = [Variable(f"col_{i}") for i in range(self._num_child_grid_cols + 1)]
-
-        # Unit size for stretch
-        unit_w = Variable("unit_w")
-        unit_h = Variable("unit_h")
-
-        # Constraints
-        _, _, w, h = self._local_xywh_dip
-
-        # Boundaries
-        solver.add_constraint(row_vars[0] == 0)
-        solver.add_constraint(row_vars[self._num_child_grid_rows] == h)
-        solver.add_constraint(col_vars[0] == 0)
-        solver.add_constraint(col_vars[self._num_child_grid_cols] == w)
-
-        # Ordering
-        for i in range(self._num_child_grid_rows):
-            solver.add_constraint(row_vars[i + 1] >= row_vars[i])
-        for i in range(self._num_child_grid_cols):
-            solver.add_constraint(col_vars[i + 1] >= col_vars[i])
-
-        # Row sizes
-        for i in range(self._num_child_grid_rows):
-            size = (
-                self._child_grid_row_size[i]
-                if i < len(self._child_grid_row_size)
-                else -1
-            )
-            if size >= 0:
-                solver.add_constraint(
-                    row_vars[i + 1] - row_vars[i] == size,
-                    strength=STRONG,
-                )
-            else:
-                weight = -size
-                solver.add_constraint(
-                    row_vars[i + 1] - row_vars[i] == weight * unit_h,
-                    strength=STRONG,
-                )
-
-        # Col sizes
-        for i in range(self._num_child_grid_cols):
-            size = (
-                self._child_grid_col_size[i]
-                if i < len(self._child_grid_col_size)
-                else -1
-            )
-            if size >= 0:
-                solver.add_constraint(
-                    col_vars[i + 1] - col_vars[i] == size,
-                    strength=STRONG,
-                )
-            else:
-                weight = -size
-                solver.add_constraint(
-                    col_vars[i + 1] - col_vars[i] == weight * unit_w,
-                    strength=STRONG,
-                )
-
-        # Update children
-        for child in self._child_widget_list:
-            r = child._layout_row
-            c = child._layout_col
-            rs = child._layout_row_span
-            cs = child._layout_col_span
-
-            # Clamp to grid
-            r = max(0, min(r, self._num_child_grid_rows - 1))
-            c = max(0, min(c, self._num_child_grid_cols - 1))
-            rs = max(1, min(rs, self._num_child_grid_rows - r))
-            cs = max(1, min(cs, self._num_child_grid_cols - c))
-
-            y1 = row_vars[r].value
-            y2 = row_vars[r + rs].value
-            x1 = col_vars[c].value
-            x2 = col_vars[c + cs].value
-
-            child._local_xywh_dip = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+    @staticmethod
+    def _resolve_theme(
+        theme: GuiTheme | None,
+        parent_widget: "GuiWidget | None",
+    ) -> GuiTheme:
+        if theme is not None:
+            return theme
+        if parent_widget is not None:
+            return parent_widget._theme
+        return DEFAULT_THEME
 
     def _add_child_widget(self, child_widget: "GuiWidget") -> None:
         self._child_widget_list.append(child_widget)
+
+    def _setup_constraints(
+        self,
+        solver: KiwiSolver,
+        x: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        y: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        w: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        h: KiwiExpression | KiwiTerm | KiwiVariable | float,
+    ) -> None:
+        # Setup own position constraints:
+        self._setup_xywh_constraints(solver=solver, x=x, y=y, w=w, h=h)
+
+        # Setup grid layout constraints for children:
+        self._setup_grid_dim_layout_constraints(
+            grid_hints=self._grid_row_size_hints,
+            grid_vars=self._grid_row_size_vars,
+            unit_var=self._grid_row_unit_var,
+            total_var=self._h,
+            solver=solver,
+        )
+        self._setup_grid_dim_layout_constraints(
+            grid_hints=self._grid_col_size_hints,
+            grid_vars=self._grid_col_size_vars,
+            unit_var=self._grid_col_unit_var,
+            total_var=self._w,
+            solver=solver,
+        )
+
+        # Setup children's constraints:
+        self._setup_children_constraints(solver=solver)
+
+    def _setup_xywh_constraints(
+        self,
+        solver: KiwiSolver,
+        x: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        y: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        w: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        h: KiwiExpression | KiwiTerm | KiwiVariable | float,
+    ) -> None:
+        # Position constraints:
+        solver.addConstraint(self._x == x)
+        solver.addConstraint(self._y == y)
+
+        # Size constraints:
+        solver.addConstraint(self._w == w)
+        solver.addConstraint(self._h == h)
+
+    @staticmethod
+    def _setup_grid_dim_layout_constraints(
+        grid_hints: tuple[int, ...],
+        grid_vars: list[KiwiVariable],
+        unit_var: KiwiVariable,
+        total_var: KiwiVariable,
+        solver: KiwiSolver,
+    ) -> None:
+        solver.addConstraint(unit_var >= 0)
+        for grid_var, size_hint in zip(grid_vars, grid_hints):
+            solver.addConstraint(grid_var >= 0)
+            if size_hint < 0:
+                solver.addConstraint(grid_var == -size_hint * unit_var)
+            else:
+                solver.addConstraint(grid_var == size_hint)
+
+        solver.addConstraint(total_var == sum(grid_vars, 0.0))
+
+    def _setup_children_constraints(self, solver: KiwiSolver) -> None:
+        for child in self._child_widget_list:
+            # Compute child's x, y, w, h based on grid layout:
+            child_x = self._x + sum(
+                self._grid_col_size_vars[i] for i in range(child._col)
+            )
+            child_y = self._y + sum(
+                self._grid_row_size_vars[i] for i in range(child._row)
+            )
+            child_w = sum(
+                (
+                    self._grid_col_size_vars[i]
+                    for i in range(child._col, child._col + child._col_span)
+                ),
+                0.0,
+            )
+            child_h = sum(
+                (
+                    self._grid_row_size_vars[i]
+                    for i in range(child._row, child._row + child._row_span)
+                ),
+                0.0,
+            )
+
+            # Setup child's constraints recursively:
+            child._setup_constraints(
+                solver=solver,
+                x=child_x,
+                y=child_y,
+                w=child_w,
+                h=child_h,
+            )
+
+    @property
+    def click(self) -> EventHub["MouseButton"]:
+        return self._click_event_hub
 
     @property
     def mouse_over(self) -> bool:
         return self._mouse_over
 
     @property
-    def local_xywh_dip(self) -> tuple[int, int, int, int]:
-        return self._local_xywh_dip
+    def _xywh(self) -> tuple[int, int, int, int]:
+        return (
+            int(round(self._x.value())),
+            int(round(self._y.value())),
+            int(round(self._w.value())),
+            int(round(self._h.value())),
+        )
 
-    @property
-    def global_xywh_dip(self) -> tuple[int, int, int, int]:
-        if self._parent_widget is None:
-            return self._local_xywh_dip
-        else:
-            parent_x, parent_y, _, _ = self._parent_widget.global_xywh_dip
-            x, y, w, h = self._local_xywh_dip
-            return (parent_x + x, parent_y + y, w, h)
+    def set_grid_config(
+        self,
+        row_sizes: tuple[int, ...] | None = None,
+        col_sizes: tuple[int, ...] | None = None,
+    ) -> None:
+        self._grid_row_size_hints = row_sizes or (-1,)
+        self._grid_col_size_hints = col_sizes or (-1,)
 
     def _receive_mouse_position(self, mouse_x_dip: int, mouse_y_dip: int):
         # OPTIMIZATION: early out if mouse position hasn't changed.
@@ -584,7 +663,7 @@ class GuiWidget(BaseResource):
 
         # If mouse is over, update `self._local_mouse_pos`.
         if self._mouse_over:
-            x, y, _, _ = self.global_xywh_dip
+            x, y, _, _ = self._xywh
             self._latest_global_mouse_pos = (mouse_x_dip, mouse_y_dip)
             self._latest_local_mouse_pos = (mouse_x_dip - x, mouse_y_dip - y)
 
@@ -619,8 +698,9 @@ class GuiWidget(BaseResource):
             return self._on_click(button=button)
 
     def _intersect_point(self, x: int, y: int) -> bool:
-        rx, ry, rw, rh = self.global_xywh_dip
-        return rx <= x < rx + rw and ry <= y < ry + rh
+        rx, ry, rw, rh = self._xywh
+        mt, mr, mb, ml = self._cached_style.margin
+        return rx + ml <= x < rx + rw - mr and ry + mt <= y < ry + rh - mb
 
     def _on_mouse_over_changed(self, x_dip: int, y_dip: int) -> None:
         pass
@@ -659,7 +739,9 @@ class GuiWidget(BaseResource):
     def _render_self(self, canvas: Canvas) -> None:
         style = self._cached_style
 
-        x, y, w, h = self.global_xywh_dip
+        x, y, w, h = self._xywh
+        pt, pr, pb, pl = style.padding
+        mt, mr, mb, ml = style.margin
 
         # Determine colors
         bg_color = (
@@ -692,8 +774,8 @@ class GuiWidget(BaseResource):
 
         # Draw background quad:
         canvas.add_quad(
-            dst_xy=(x, y),
-            dst_wh=(w, h),
+            dst_xy=(x + ml, y + mt),
+            dst_wh=(w - ml - mr, h - mt - mb),
             color=bg_color,
             image=bg_image,
             border_color=border_color,
@@ -701,14 +783,13 @@ class GuiWidget(BaseResource):
         )
 
         # Draw text:
-        pt, pr, pb, pl = style.padding
         canvas.add_text(
             text=self._text,
             font=style.font,
             font_size_px=style.font_size_dip,
             font_weight=style.font_weight,
-            dst_xy=(x + pl, y + pt),
-            dst_wh=(w - pl - pr, h - pt - pb),
+            dst_xy=(x + ml + pl, y + mt + pt),
+            dst_wh=(w - ml - mr - pl - pr, h - mt - mb - pt - pb),
             color=fg_color,
             wrap=style.wrap,
             horizontal_alignment=style.text_horizontal_alignment,
