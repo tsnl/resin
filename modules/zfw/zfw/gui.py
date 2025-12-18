@@ -47,6 +47,7 @@ from .renderer import Canvas, RendererImage
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 from .typed_vulkan import raw_ffi
+from .events import EventHub
 
 
 @dataclass
@@ -141,10 +142,10 @@ type GuiCursorMode = Literal["cursor", "joystick"]
 
 
 class GuiWindow(BaseResource):
-    width: int
-    height: int
-    title: str
-    theme: GuiTheme
+    _width: int
+    _height: int
+    _title: str
+    _theme: GuiTheme
     glfw_window_handle: glfw._GLFWwindow
     gpu_surface: GpuSurface
     last_mouse_x: float
@@ -168,10 +169,10 @@ class GuiWindow(BaseResource):
         super().__init__(parent_resource=gui_context)
 
         self._gui_context = gui_context
-        self.width = width
-        self.height = height
-        self.title = title
-        self.theme = theme or DEFAULT_THEME
+        self._width = width
+        self._height = height
+        self._title = title
+        self._theme = theme or DEFAULT_THEME
 
         self.glfw_window_handle = self._new_glfw_window()
         self.gpu_surface = self._new_gpu_surface()
@@ -182,10 +183,8 @@ class GuiWindow(BaseResource):
         # Create central widget that occupies the full window
         self._central_widget = GuiWidget(
             parent_widget=None,
-            gui_context=gui_context,
-            gui_window=self,
             local_xywh_dip=(0, 0, width, height),
-            theme=self.theme,
+            theme=self._theme,
             num_child_grid_rows=num_grid_rows,
             num_child_grid_cols=num_grid_cols,
             child_grid_row_size=grid_row_sizes,
@@ -199,9 +198,9 @@ class GuiWindow(BaseResource):
         glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw_window = glfw.create_window(
-            width=self.width,
-            height=self.height,
-            title=self.title,
+            width=self._width,
+            height=self._height,
+            title=self._title,
             monitor=None,
             share=None,
         )
@@ -355,7 +354,6 @@ class GuiWindow(BaseResource):
 
 class GuiWidget(BaseResource):
     _parent_widget: "GuiWidget | None"
-    _gui_window: "GuiWindow | None"
     _gui_context: "GuiContext"
     _local_xywh_dip: tuple[int, int, int, int]
     _child_widget_list: list["GuiWidget"]
@@ -378,15 +376,16 @@ class GuiWidget(BaseResource):
     # Content:
     _text: str
     _style_classes: list[str]
-    _is_enabled: bool
+    _is_clickable: bool
     _theme: GuiTheme
+
+    # Events
+    _click_event_hub: EventHub["MouseButton"]
 
     def __init__(
         self,
         *,
         parent_widget: "GuiWidget | None",
-        gui_context: GuiContext | None = None,
-        gui_window: "GuiWindow | None" = None,
         local_xywh_dip: tuple[int, int, int, int] | None = None,
         theme: GuiTheme | None = None,
         row: int = 0,
@@ -399,25 +398,13 @@ class GuiWidget(BaseResource):
         child_grid_col_size: tuple[int, ...] | None = None,
         text: str = "",
         style_classes: list[str] | None = None,
-        is_enabled: bool = True,
+        is_clickable: bool = True,
         parent_resource: "BaseResource | None" = None,
     ) -> None:
         super().__init__(parent_resource=(parent_resource or parent_widget))
 
         self._parent_widget = parent_widget
-        self._gui_window = (
-            gui_window if parent_widget is None else parent_widget._gui_window
-        )
 
-        # Infer gui_context from parent if not provided
-        if gui_context is None:
-            if parent_widget is not None:
-                gui_context = parent_widget._gui_context
-            else:
-                raise ValueError(
-                    "gui_context must be provided when parent_widget is None"
-                )
-        self._gui_context = gui_context
         self._local_xywh_dip = local_xywh_dip or (0, 0, 0, 0)
         self._child_widget_list = []
         self._mouse_over = False
@@ -439,20 +426,23 @@ class GuiWidget(BaseResource):
         )
 
         # Inherit theme from parent widget, or use provided theme
-        if parent_widget is not None:
-            self._theme = parent_widget._theme
-        elif theme is not None:
-            self._theme = theme
-        else:
-            self._theme = DEFAULT_THEME
+        self._theme = theme or (
+            self._parent_widget._theme if self._parent_widget else DEFAULT_THEME
+        )
 
         self._text = text
         self._style_classes = style_classes or ["label"]
         self._cached_style = _eval_style(self._theme, self._style_classes)
-        self._is_enabled = is_enabled
+        self._is_clickable = is_clickable
 
         if self._parent_widget is not None:
             self._parent_widget._add_child_widget(self)
+
+        self._click_event_hub = EventHub["MouseButton"]()
+
+    @property
+    def click(self) -> EventHub["MouseButton"]:
+        return self._click_event_hub
 
     def set_grid_config(
         self,
@@ -639,7 +629,10 @@ class GuiWidget(BaseResource):
         pass
 
     def _on_click(self, button: MouseButton) -> bool:
-        return False
+        if not self._is_clickable:
+            return False
+        self._click_event_hub.publish(button)
+        return True
 
     def _render(self, canvas: Canvas) -> None:
         # Render self.
@@ -656,46 +649,44 @@ class GuiWidget(BaseResource):
         return [tag.strip() for tag in raw.split(" ") if tag.strip()]
 
     @property
-    def is_enabled(self) -> bool:
-        return self._is_enabled
+    def is_clickable(self) -> bool:
+        return self._is_clickable
 
-    @is_enabled.setter
-    def is_enabled(self, value: bool) -> None:
-        self._is_enabled = value
+    @is_clickable.setter
+    def is_clickable(self, value: bool) -> None:
+        self._is_clickable = value
 
     def _render_self(self, canvas: Canvas) -> None:
         style = self._cached_style
 
         x, y, w, h = self.global_xywh_dip
 
-        is_hover = self.mouse_over and self.is_enabled
-
         # Determine colors
         bg_color = (
             style.bg_hover_color
-            if (is_hover and style.bg_hover_color is not None)
+            if (self.mouse_over and style.bg_hover_color is not None)
             else style.bg_color
         )
         bg_image = (
             style.bg_hover_image
-            if (is_hover and style.bg_hover_image is not None)
+            if (self.mouse_over and style.bg_hover_image is not None)
             else style.bg_image
         )
 
         border_color = (
             style.hover_border_color
-            if (is_hover and style.hover_border_color is not None)
+            if (self.mouse_over and style.hover_border_color is not None)
             else style.border_color
         )
         border_thickness = (
             style.hover_border_thickness
-            if (is_hover and style.hover_border_thickness is not None)
+            if (self.mouse_over and style.hover_border_thickness is not None)
             else style.border_thickness
         )
 
         fg_color = (
             style.fg_hover_color
-            if (is_hover and style.fg_hover_color is not None)
+            if (self.mouse_over and style.fg_hover_color is not None)
             else style.fg_color
         )
 

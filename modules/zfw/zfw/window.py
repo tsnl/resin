@@ -18,7 +18,7 @@ from .basic import BaseResource, ButtonAction, KeyModifier, Key, MouseButton
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuSurface
 from .typed_vulkan import raw_ffi
-from .events import EventRouter, Event
+from .events import EventHub, Event
 
 
 class WindowContext(BaseResource):
@@ -47,7 +47,7 @@ class Window(BaseResource):
     title: str
     glfw_window_handle: glfw._GLFWwindow
     gpu_surface: GpuSurface
-    event_router: EventRouter["WindowEvent"]
+    event_router: EventHub["WindowEvent"]
     last_mouse_x: float
     last_mouse_y: float
 
@@ -67,7 +67,7 @@ class Window(BaseResource):
         self.title = title
         self.glfw_window_handle = self._new_glfw_window()
         self.gpu_surface = self._new_gpu_surface()
-        self.event_router = EventRouter["WindowEvent"]()
+        self.event_router = EventHub["WindowEvent"]()
 
         self.last_mouse_x: float = 0.0
         self.last_mouse_y: float = 0.0

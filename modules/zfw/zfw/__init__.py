@@ -4,6 +4,7 @@ __all__ = [
     "Canvas",
     "ColorSpace",
     "Engine",
+    "EventHub",
     "Font",
     "GpuBuffer",
     "GpuBufferMeta",
@@ -26,7 +27,7 @@ __all__ = [
     "GpuShader",
     "GpuSwapChain",
     "GuiContext",
-    "GuiNode",
+    "GuiCursorMode",
     "GuiTheme",
     "GuiWidget",
     "GuiWidgetStyle",
@@ -40,7 +41,6 @@ __all__ = [
     "RendererContext",
     "RendererImage",
     "SupportsWrite",
-    "WindowCursorMode",
     "convert_srgb_to_linear",
     "load_rgba_image",
 ]
@@ -91,7 +91,8 @@ from .gui import (
     GuiWindow,
     GuiWidget,
     GuiContext,
-    WindowCursorMode,
+    GuiCursorMode,
     GuiTheme,
     GuiWidgetStyle,
 )
+from .events import EventHub
