@@ -31,6 +31,9 @@ __all__ = [
     "GuiWidget",
     "GuiWidgetStyle",
     "GuiWindow",
+    "Json",
+    "JsonArray",
+    "JsonObject",
     "QuadArray",
     "Renderer",
     "RendererAtlas",
@@ -42,7 +45,15 @@ __all__ = [
     "load_rgba_image",
 ]
 
-from .basic import BaseResource, SupportsWrite, Font, ColorSpace
+from .basic import (
+    BaseResource,
+    SupportsWrite,
+    Font,
+    ColorSpace,
+    Json,
+    JsonArray,
+    JsonObject,
+)
 from .bundled_data import BUNDLED_DATA_PATH
 from .engine import Engine
 from .gpu import (

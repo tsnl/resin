@@ -10,7 +10,7 @@ __all__ = [
 ]
 
 from abc import ABC
-from typing import Protocol, TypeVar, Self, Literal
+from typing import Protocol, TypeVar, Self, Literal, Sequence
 from weakref import ref as WeakRef
 import warnings
 
@@ -336,3 +336,12 @@ type MouseButton = Literal[
 
 type HorizontalAlignment = Literal["left", "center", "right"]
 type VerticalAlignment = Literal["top", "middle", "bottom"]
+
+
+#
+# Json types
+#
+
+type JsonObject = dict[str, Json]
+type JsonArray = Sequence[Json]
+type Json = JsonObject | JsonArray | str | int | float | bool | None
