@@ -72,7 +72,7 @@ class GuiWidgetStyle:
     hover_border_color: tuple[float, float, float, float] | None = None
     hover_border_thickness: tuple[int, int, int, int] | None = None
     padding: tuple[int, int, int, int] = (0, 0, 0, 0)
-    margin: tuple[int, int, int, int] = (5, 5, 5, 5)
+    margin: tuple[int, int, int, int] = (0, 0, 0, 0)
     text_horizontal_alignment: HorizontalAlignment = "center"
     text_vertical_alignment: VerticalAlignment = "middle"
     wrap: bool = False
@@ -87,7 +87,6 @@ DEFAULT_THEME: GuiTheme = {
         "border_color": (0.0, 0.0, 0.0, 0.0),
         "border_thickness": (0, 0, 0, 0),
         "padding": (0, 0, 0, 0),
-        "margin": (0, 0, 0, 0),
     },
     "label": {
         "bg_color": (0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
@@ -101,16 +100,14 @@ DEFAULT_THEME: GuiTheme = {
         "border_thickness": (1, 1, 1, 1),
         "hover_border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
         "hover_border_thickness": (1, 1, 1, 1),
-        "padding": (5, 10, 5, 10),
+        "padding": (5, 5, 5, 5),
+        "margin": (10, 10, 10, 10),
     },
     "h1": {
         "font_size_dip": 32,
         "font_weight": 1000,
         "fg_color": (1.0, 1.0, 1.0, 1.0),  # White text
         "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
-        "border_color": (0.0, 0.2, 0.5, 1.0),
-        "border_thickness": (0, 0, 2, 0),
-        "margin": (0, 0, 0, 0),
     },
     "h2": {
         "font_size_dip": 24,

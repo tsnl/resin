@@ -35,6 +35,7 @@ __all__ = [
     "Json",
     "JsonArray",
     "JsonObject",
+    "MouseButton",
     "QuadArray",
     "Renderer",
     "RendererAtlas",
@@ -53,6 +54,7 @@ from .basic import (
     Json,
     JsonArray,
     JsonObject,
+    MouseButton,
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .engine import Engine
