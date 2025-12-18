@@ -15,9 +15,9 @@ from .universal_paperclips import UniversalPaperclipsWidget
 
 
 class MainMenuWidget(zfw.GuiWidget):
-    def __init__(self, window: zfw.GuiWindow):
+    def __init__(self, engine: zfw.Engine):
         super().__init__(
-            window=window,
+            window=engine.window,
             grid_rows=(100, -1, -1),
             grid_cols=(-1, -1, -1),
             style_classes=["central"],
@@ -46,9 +46,9 @@ class MainMenuWidget(zfw.GuiWidget):
         def universal_paperclips_button_click(button: zfw.MouseButton):
             if self._universal_paperclips_widget is None:
                 self._universal_paperclips_widget = UniversalPaperclipsWidget(
-                    window=window,
+                    engine=engine,
                 )
-            window.set_central_widget(self._universal_paperclips_widget)
+            engine.window.set_central_widget(self._universal_paperclips_widget)
 
 
 def main():
@@ -59,7 +59,7 @@ def main():
         enable_gui=True,
     )
 
-    main_menu_widget = MainMenuWidget(window=engine.window)
+    main_menu_widget = MainMenuWidget(engine=engine)
     engine.window.set_central_widget(main_menu_widget)
 
     while not engine.window.should_close():

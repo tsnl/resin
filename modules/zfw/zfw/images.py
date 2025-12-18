@@ -3,6 +3,7 @@ __all__ = [
     "convert_srgb_to_linear",
     "convert_srgb_to_linear",
     "load_rgba_image",
+    "resize_image",
 ]
 
 from pathlib import Path

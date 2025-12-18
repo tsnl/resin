@@ -62,9 +62,7 @@ class GuiWidgetStyle:
     font_size_dip: int = 14
     font_weight: int = 400
     bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
-    bg_image: RendererImage | None = None
     bg_hover_color: tuple[float, float, float, float] | None = None
-    bg_hover_image: RendererImage | None = None
     fg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     fg_hover_color: tuple[float, float, float, float] | None = None
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
@@ -115,6 +113,11 @@ DEFAULT_THEME: GuiTheme = {
         "fg_color": (0.0, 0.0, 0.0, 1.0),
     },
 }
+
+
+def _eval_theme(theme: GuiTheme, override: GuiTheme) -> GuiTheme:
+    all_keys = set(theme.keys()) | set(override.keys())
+    return {key: {**theme.get(key, {}), **override.get(key, {})} for key in all_keys}
 
 
 def _eval_style(theme: GuiTheme, class_names: list[str]) -> GuiWidgetStyle:
@@ -433,7 +436,13 @@ class GuiWidget(BaseResource):
     _grid_col_size_hints: tuple[int, ...]
 
     # Content:
-    _text: str
+    _text: str | None
+    _image: RendererImage | None
+    _image_crop_xy: tuple[int, int] | None
+    _image_crop_wh: tuple[int, int] | None
+    _image_hover: RendererImage | None
+    _image_hover_crop_xy: tuple[int, int] | None
+    _image_hover_crop_wh: tuple[int, int] | None
     _style_classes: list[str]
     _is_clickable: bool
     _theme: GuiTheme
@@ -459,7 +468,13 @@ class GuiWidget(BaseResource):
         col_span: int = 1,
         grid_rows: tuple[int, ...] | None = None,
         grid_cols: tuple[int, ...] | None = None,
-        text: str = "",
+        text: str | None = None,
+        image: RendererImage | None = None,
+        image_crop_xy: tuple[int, int] | None = None,
+        image_crop_wh: tuple[int, int] | None = None,
+        image_hover: RendererImage | None = None,
+        image_hover_crop_xy: tuple[int, int] | None = None,
+        image_hover_crop_wh: tuple[int, int] | None = None,
         style_classes: list[str] | None = None,
         is_clickable: bool = True,
         parent_resource: "BaseResource | None" = None,
@@ -492,6 +507,12 @@ class GuiWidget(BaseResource):
         self._grid_col_size_hints = grid_cols or (-1,)
 
         self._text = text
+        self._image = image
+        self._image_crop_xy = image_crop_xy
+        self._image_crop_wh = image_crop_wh
+        self._image_hover = image_hover
+        self._image_hover_crop_xy = image_hover_crop_xy
+        self._image_hover_crop_wh = image_hover_crop_wh
         self._style_classes = style_classes or ["label"]
         self._cached_style = _eval_style(self._theme, self._style_classes)
         self._is_clickable = is_clickable
@@ -537,11 +558,10 @@ class GuiWidget(BaseResource):
         theme: GuiTheme | None,
         parent_widget: "GuiWidget | None",
     ) -> GuiTheme:
-        if theme is not None:
-            return theme
-        if parent_widget is not None:
-            return parent_widget._theme
-        return DEFAULT_THEME
+        return _eval_theme(
+            parent_widget._theme if parent_widget is not None else DEFAULT_THEME,
+            theme or {},
+        )
 
     def _add_child_widget(self, child_widget: "GuiWidget") -> None:
         self._child_widget_list.append(child_widget)
@@ -771,10 +791,10 @@ class GuiWidget(BaseResource):
             if (self.mouse_over and style.bg_hover_color is not None)
             else style.bg_color
         )
-        bg_image = (
-            style.bg_hover_image
-            if (self.mouse_over and style.bg_hover_image is not None)
-            else style.bg_image
+        bg_image, bg_image_crop_xy, bg_image_crop_wh = (
+            (self._image_hover, self._image_hover_crop_xy, self._image_hover_crop_wh)
+            if (self.mouse_over and self._image_hover is not None)
+            else (self._image, self._image_crop_xy, self._image_crop_wh)
         )
 
         border_color = (
@@ -798,6 +818,8 @@ class GuiWidget(BaseResource):
         canvas.add_quad(
             dst_xy=(x + ml, y + mt),
             dst_wh=(w - ml - mr, h - mt - mb),
+            src_xy=bg_image_crop_xy or (0, 0),
+            src_wh=bg_image_crop_wh,
             color=bg_color,
             image=bg_image,
             border_color=border_color,
@@ -805,18 +827,19 @@ class GuiWidget(BaseResource):
         )
 
         # Draw text:
-        canvas.add_text(
-            text=self._text,
-            font=style.font,
-            font_size_px=style.font_size_dip,
-            font_weight=style.font_weight,
-            dst_xy=(x + ml + pl, y + mt + pt),
-            dst_wh=(w - ml - mr - pl - pr, h - mt - mb - pt - pb),
-            color=fg_color,
-            wrap=style.wrap,
-            horizontal_alignment=style.text_horizontal_alignment,
-            vertical_alignment=style.text_vertical_alignment,
-        )
+        if self._text is not None:
+            canvas.add_text(
+                text=self._text,
+                font=style.font,
+                font_size_px=style.font_size_dip,
+                font_weight=style.font_weight,
+                dst_xy=(x + ml + pl, y + mt + pt),
+                dst_wh=(w - ml - mr - pl - pr, h - mt - mb - pt - pb),
+                color=fg_color,
+                wrap=style.wrap,
+                horizontal_alignment=style.text_horizontal_alignment,
+                vertical_alignment=style.text_vertical_alignment,
+            )
 
     def _on_dispose_resource(self) -> None:
         for child in self._child_widget_list:
