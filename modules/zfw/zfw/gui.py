@@ -13,6 +13,15 @@ Widget stacking order:
 - among siblings, later added always above earlier added
 """
 
+__all__ = [
+    "DEFAULT_THEME",
+    "GuiContext",
+    "GuiTheme",
+    "GuiWidget",
+    "GuiWidgetStyle",
+    "GuiWindow",
+]
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
@@ -31,6 +40,8 @@ from .basic import (
     Key,
     HorizontalAlignment,
     VerticalAlignment,
+    JsonObject,
+    LogicError,
 )
 from .renderer import Canvas, RendererImage
 from .excepts import GlfwError
@@ -41,7 +52,7 @@ from .typed_vulkan import raw_ffi
 @dataclass
 class GuiWidgetStyle:
     font: Font = "sans-serif"
-    font_size_dip: int = 18
+    font_size_dip: int = 14
     font_weight: int = 400
     bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     bg_image: RendererImage | None = None
@@ -59,33 +70,52 @@ class GuiWidgetStyle:
     wrap: bool = False
 
 
-type GuiTheme = dict[str, GuiWidgetStyle]
+type GuiTheme = dict[str, JsonObject]
 
 
 DEFAULT_THEME: GuiTheme = {
-    "label": GuiWidgetStyle(
-        bg_color=(0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
-        fg_color=(0.0, 0.0, 0.0, 1.0),  # Black text
-    ),
-    "button": GuiWidgetStyle(
-        bg_color=(0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
-        fg_color=(0.0, 0.0, 0.0, 1.0),  # Black text
-        bg_hover_color=(0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
-        border_color=(0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
-        border_thickness=(1, 1, 1, 1),
-        hover_border_color=(0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
-        hover_border_thickness=(1, 1, 1, 1),
-        padding=(5, 10, 5, 10),
-    ),
-    "header": GuiWidgetStyle(
-        bg_color=(0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
-        fg_color=(1.0, 1.0, 1.0, 1.0),  # White text
-        font_size_dip=32,
-        font_weight=800,
-        border_color=(0.0, 0.2, 0.5, 1.0),
-        border_thickness=(0, 0, 2, 0),
-    ),
+    "label": {
+        "bg_color": (0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
+        "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
+    },
+    "button": {
+        "bg_color": (0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
+        "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
+        "bg_hover_color": (0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
+        "border_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
+        "border_thickness": (1, 1, 1, 1),
+        "hover_border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
+        "hover_border_thickness": (1, 1, 1, 1),
+        "padding": (5, 10, 5, 10),
+    },
+    "h1": {
+        "font_size_dip": 32,
+        "font_weight": 1000,
+        "fg_color": (1.0, 1.0, 1.0, 1.0),  # White text
+        "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
+        "border_color": (0.0, 0.2, 0.5, 1.0),
+        "border_thickness": (0, 0, 2, 0),
+    },
+    "h2": {
+        "font_size_dip": 24,
+        "font_weight": 800,
+        "fg_color": (0.0, 0.0, 0.0, 1.0),
+    },
 }
+
+
+def _eval_style(theme: GuiTheme, class_names: list[str]) -> GuiWidgetStyle:
+    for class_name in class_names:
+        if class_name not in theme:
+            raise LogicError(f"Style class name not found in theme: {class_name!r}")
+
+    d = {}
+    for class_name in class_names:
+        style_data = theme.get(class_name)
+        if style_data is None:
+            raise LogicError(f"Style class name not found in theme: {class_name!r}")
+        d |= style_data
+    return GuiWidgetStyle(**d)
 
 
 class GuiContext(BaseResource):
@@ -109,6 +139,8 @@ class GuiContext(BaseResource):
 
 class GuiNode(BaseResource, ABC):
     _parent_node: "GuiNode | None"
+    _gui_window: "GuiWindow"
+    _gui_context: "GuiContext"
     _local_xywh_dip: tuple[int, int, int, int]
     _child_node_list: list["GuiNode"]
     _mouse_over: bool
@@ -131,6 +163,8 @@ class GuiNode(BaseResource, ABC):
         self,
         *,
         parent_node: "GuiNode | None",
+        gui_window: "GuiWindow",
+        gui_context: "GuiContext",
         local_xywh_dip: tuple[int, int, int, int] | None = None,
         row: int = 0,
         col: int = 0,
@@ -145,6 +179,8 @@ class GuiNode(BaseResource, ABC):
         super().__init__(parent_resource=(parent_resource or parent_node))
 
         self._parent_node = parent_node
+        self._gui_window = gui_window
+        self._gui_context = gui_context
         self._local_xywh_dip = local_xywh_dip or (0, 0, 0, 0)
         self._child_node_list = []
         self._mouse_over = False
@@ -270,24 +306,6 @@ class GuiNode(BaseResource, ABC):
             x2 = col_vars[c + cs].value
 
             child._local_xywh_dip = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
-
-    @property
-    def gui_context(self) -> GuiContext:
-        res: BaseResource | None = self
-        while res is not None:
-            if isinstance(res, GuiContext):
-                return res
-            res = res._parent_resource
-        raise RuntimeError("GuiNode is not attached to a GuiContext")
-
-    @property
-    def gui_window(self) -> "GuiWindow":
-        res: GuiNode | None = self
-        while res is not None:
-            if isinstance(res, GuiWindow):
-                return res
-            res = res._parent_node
-        raise RuntimeError("GuiNode is not attached to a GuiWindow")
 
     def _add_child_node(self, child_node: "GuiNode") -> None:
         self._child_node_list.append(child_node)
@@ -419,6 +437,8 @@ class GuiWindow(GuiNode):
         # Initialize GuiNode
         super().__init__(
             parent_node=None,
+            gui_context=gui_context,
+            gui_window=self,
             local_xywh_dip=(0, 0, width, height),
             num_child_grid_rows=num_grid_rows,
             num_child_grid_cols=num_grid_cols,
@@ -480,12 +500,12 @@ class GuiWindow(GuiNode):
         return glfw_window
 
     def _new_gpu_surface(self) -> GpuSurface:
-        if not self.gui_context.gpu_context.enable_present_support:
+        if not self._gui_context.gpu_context.enable_present_support:
             raise RuntimeError("GPU context does not support presentation")
 
         surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
         result = glfw.create_window_surface(
-            instance=self.gui_context.gpu_context.vk_instance,
+            instance=self._gui_context.gpu_context.vk_instance,
             window=self.glfw_window_handle,
             allocator=None,
             surface=surface_ptr,
@@ -494,7 +514,7 @@ class GuiWindow(GuiNode):
             raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
         width, height = glfw.get_framebuffer_size(self.glfw_window_handle)
         return GpuSurface(
-            context=self.gui_context.gpu_context,
+            context=self._gui_context.gpu_context,
             parent_resource=self,
             vk_surface=surface_ptr[0],
             width=width,
@@ -593,7 +613,7 @@ class GuiWindow(GuiNode):
 
 class GuiWidget(GuiNode):
     _text: str
-    _archetype: str
+    _style_classes: list[str]
     _is_enabled: bool
 
     def __init__(
@@ -609,11 +629,13 @@ class GuiWidget(GuiNode):
         child_grid_row_size: tuple[int, ...] | None = None,
         child_grid_col_size: tuple[int, ...] | None = None,
         text: str = "",
-        archetype: str = "label",
+        style_classes: list[str] | None = None,
         is_enabled: bool = True,
     ) -> None:
         super().__init__(
             parent_node=parent_node,
+            gui_context=parent_node._gui_context,
+            gui_window=parent_node._gui_window,
             local_xywh_dip=None,
             row=row,
             col=col,
@@ -625,8 +647,15 @@ class GuiWidget(GuiNode):
             child_grid_col_size=child_grid_col_size,
         )
         self._text = text
-        self._archetype = archetype
+        self._style_classes = style_classes or ["label"]
+        self._cached_style = _eval_style(self._gui_window.theme, self._style_classes)
         self._is_enabled = is_enabled
+
+    @staticmethod
+    def _parse_style_class_names(raw: str | list[str]) -> list[str]:
+        if isinstance(raw, list):
+            return raw
+        return [tag.strip() for tag in raw.split(" ") if tag.strip()]
 
     @property
     def is_enabled(self) -> bool:
@@ -637,11 +666,7 @@ class GuiWidget(GuiNode):
         self._is_enabled = value
 
     def _render_self(self, canvas: Canvas) -> None:
-        style = self.gui_window.theme.get(self._archetype)
-        if style is None:
-            style = DEFAULT_THEME.get("label")
-            if style is None:
-                return
+        style = self._cached_style
 
         x, y, w, h = self.global_xywh_dip
 

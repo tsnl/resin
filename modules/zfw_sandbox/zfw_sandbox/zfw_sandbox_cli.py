@@ -138,7 +138,7 @@ def main():
         col=0,
         col_span=3,
         text="Universal Paperclips",
-        archetype="header",
+        style_classes=["label", "h1"],
     )
 
     # Row 1: Paperclip count display
@@ -148,7 +148,7 @@ def main():
         col=0,
         col_span=3,
         text=f"Paperclips: {game.paperclips:,}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Row 2: Make Paperclip button
@@ -158,7 +158,7 @@ def main():
         col=0,
         col_span=3,
         text="Make Paperclip",
-        archetype="button",
+        style_classes=["button"],
     )
 
     # Row 3: Business section (left column)
@@ -167,85 +167,85 @@ def main():
         row=3,
         col=0,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Business header
     zfw.GuiWidget(
         parent_node=business_container,
         text="Business",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Available funds
     funds_label = zfw.GuiWidget(
         parent_node=business_container,
         text=f"Available Funds: $ {game.funds:.2f}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Unsold inventory
     inventory_label = zfw.GuiWidget(
         parent_node=business_container,
         text=f"Unsold Inventory: {game.unsold_inventory}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Price controls
     price_container = zfw.GuiWidget(
         parent_node=business_container,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     lower_price_button = zfw.GuiWidget(
         parent_node=price_container,
         text="lower",
-        archetype="button",
+        style_classes=["button"],
     )
 
     raise_price_button = zfw.GuiWidget(
         parent_node=price_container,
         text="raise",
-        archetype="button",
+        style_classes=["button"],
     )
 
     price_label = zfw.GuiWidget(
         parent_node=price_container,
         text=f"Price per Clip: $ {game.price_per_clip:.2f}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Public demand
     demand_label = zfw.GuiWidget(
         parent_node=business_container,
         text=f"Public Demand: {game.public_demand:.0f}%",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Marketing section
     marketing_container = zfw.GuiWidget(
         parent_node=business_container,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     marketing_button = zfw.GuiWidget(
         parent_node=marketing_container,
         text="Marketing",
-        archetype="button",
+        style_classes=["button"],
     )
 
     marketing_label = zfw.GuiWidget(
         parent_node=marketing_container,
         text=f"Level: {game.marketing_level}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     marketing_cost_label = zfw.GuiWidget(
         parent_node=marketing_container,
         text=f"Cost: $ {game.marketing_cost:.2f}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Row 4: Manufacturing section (left column)
@@ -254,71 +254,71 @@ def main():
         row=4,
         col=0,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Manufacturing header
     zfw.GuiWidget(
         parent_node=manufacturing_container,
         text="Manufacturing",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Clips per second
     cps_label = zfw.GuiWidget(
         parent_node=manufacturing_container,
         text=f"Clips per Second: {game.clips_per_second}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Wire
     wire_container = zfw.GuiWidget(
         parent_node=manufacturing_container,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     wire_button = zfw.GuiWidget(
         parent_node=wire_container,
         text="Wire",
-        archetype="button",
+        style_classes=["button"],
     )
 
     wire_label = zfw.GuiWidget(
         parent_node=wire_container,
         text=f"{game.wire_inches} inches",
-        archetype="label",
+        style_classes=["label"],
     )
 
     wire_cost_label = zfw.GuiWidget(
         parent_node=wire_container,
         text=f"Cost: $ {game.wire_cost:.2f}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # AutoClippers
     autoclipper_container = zfw.GuiWidget(
         parent_node=manufacturing_container,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     autoclipper_button = zfw.GuiWidget(
         parent_node=autoclipper_container,
         text="AutoClippers",
-        archetype="button",
+        style_classes=["button"],
     )
 
     autoclipper_label = zfw.GuiWidget(
         parent_node=autoclipper_container,
         text=f"{game.auto_clippers}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     autoclipper_cost_label = zfw.GuiWidget(
         parent_node=autoclipper_container,
         text=f"Cost: $ {game.auto_clippers_cost:.2f}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Row 3-4: Computational Resources section (middle column)
@@ -328,73 +328,73 @@ def main():
         row_span=2,
         col=1,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Computational Resources header
     zfw.GuiWidget(
         parent_node=computational_container,
         text="Computational Resources",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Trust
     trust_label = zfw.GuiWidget(
         parent_node=computational_container,
         text=f"Trust: {game.trust}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Processors
     processors_container = zfw.GuiWidget(
         parent_node=computational_container,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     processors_button = zfw.GuiWidget(
         parent_node=processors_container,
         text="Processors",
-        archetype="button",
+        style_classes=["button"],
     )
 
     processors_label = zfw.GuiWidget(
         parent_node=processors_container,
         text=f"{game.processors}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Memory
     memory_container = zfw.GuiWidget(
         parent_node=computational_container,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     memory_button = zfw.GuiWidget(
         parent_node=memory_container,
         text="Memory",
-        archetype="button",
+        style_classes=["button"],
     )
 
     memory_label = zfw.GuiWidget(
         parent_node=memory_container,
         text=f"{game.memory}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Operations
     operations_label = zfw.GuiWidget(
         parent_node=computational_container,
         text=f"Operations: {game.operations} / {game.max_operations:,}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Creativity
     creativity_label = zfw.GuiWidget(
         parent_node=computational_container,
         text=f"Creativity: {game.creativity}",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Row 3-6: Projects section (right column)
@@ -404,35 +404,35 @@ def main():
         row_span=4,
         col=2,
         text="",
-        archetype="label",
+        style_classes=["label"],
     )
 
     # Projects header
     zfw.GuiWidget(
         parent_node=projects_container,
         text="Projects",
-        archetype="label",
+        style_classes=["label", "h2"],
     )
 
     # Project 1: Improved AutoClippers
     project1_button = zfw.GuiWidget(
         parent_node=projects_container,
         text="Improved AutoClippers (750 ops)\nIncreases AutoClipper performance 25%",
-        archetype="button",
+        style_classes=["button"],
     )
 
     # Project 2: Improved Wire Extrusion
     project2_button = zfw.GuiWidget(
         parent_node=projects_container,
         text="Improved Wire Extrusion (1,750 ops)\n50% more wire supply from every spool",
-        archetype="button",
+        style_classes=["button"],
     )
 
     # Project 3: RevTracker
     project3_button = zfw.GuiWidget(
         parent_node=projects_container,
         text="RevTracker (500 ops)\nAutomatically calculates average revenue\nper second",
-        archetype="button",
+        style_classes=["button"],
     )
 
     # Placeholder refs to avoid unused variable warnings
@@ -478,14 +478,6 @@ def print_gpu_debug_info(
     file: zfw.SupportsWrite[str] = sys.stdout,
 ):
     print("<gpu-debug-info>")
-    gpu_context.print_debug_info(out=file)
-    print()
-    print("</gpu-debug-info>")
-
-
-if __name__ == "__main__":
-    main()
-
     gpu_context.print_debug_info(out=file)
     print()
     print("</gpu-debug-info>")
