@@ -16,13 +16,13 @@ Widget stacking order:
 __all__ = [
     "DEFAULT_THEME",
     "GuiContext",
+    "GuiCursorMode",
     "GuiTheme",
     "GuiWidget",
     "GuiWidgetStyle",
     "GuiWindow",
 ]
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
 import warnings
@@ -137,276 +137,10 @@ class GuiContext(BaseResource):
         glfw.terminate()
 
 
-class GuiNode(BaseResource, ABC):
-    _parent_node: "GuiNode | None"
-    _gui_window: "GuiWindow"
-    _gui_context: "GuiContext"
-    _local_xywh_dip: tuple[int, int, int, int]
-    _child_node_list: list["GuiNode"]
-    _mouse_over: bool
-    _latest_local_mouse_pos: tuple[int, int]
-    _latest_global_mouse_pos: tuple[int, int]
-
-    # Layout params (position in parent)
-    _layout_row: int
-    _layout_col: int
-    _layout_row_span: int
-    _layout_col_span: int
-
-    # Grid params (for children)
-    _num_child_grid_rows: int
-    _num_child_grid_cols: int
-    _child_grid_row_size: tuple[int, ...]
-    _child_grid_col_size: tuple[int, ...]
-
-    def __init__(
-        self,
-        *,
-        parent_node: "GuiNode | None",
-        gui_window: "GuiWindow",
-        gui_context: "GuiContext",
-        local_xywh_dip: tuple[int, int, int, int] | None = None,
-        row: int = 0,
-        col: int = 0,
-        row_span: int = 1,
-        col_span: int = 1,
-        num_child_grid_rows: int = 1,
-        num_child_grid_cols: int = 1,
-        child_grid_row_size: tuple[int, ...] | None = None,
-        child_grid_col_size: tuple[int, ...] | None = None,
-        parent_resource: "BaseResource | None" = None,
-    ) -> None:
-        super().__init__(parent_resource=(parent_resource or parent_node))
-
-        self._parent_node = parent_node
-        self._gui_window = gui_window
-        self._gui_context = gui_context
-        self._local_xywh_dip = local_xywh_dip or (0, 0, 0, 0)
-        self._child_node_list = []
-        self._mouse_over = False
-        self._latest_local_mouse_pos = (0, 0)
-        self._latest_global_mouse_pos = (0, 0)
-
-        self._layout_row = row
-        self._layout_col = col
-        self._layout_row_span = row_span
-        self._layout_col_span = col_span
-
-        self._num_child_grid_rows = num_child_grid_rows
-        self._num_child_grid_cols = num_child_grid_cols
-        self._child_grid_row_size = child_grid_row_size or tuple(
-            [-1] * num_child_grid_rows
-        )
-        self._child_grid_col_size = child_grid_col_size or tuple(
-            [-1] * num_child_grid_cols
-        )
-
-        if self._parent_node is not None:
-            self._parent_node._add_child_node(self)
-
-    def set_grid_config(
-        self,
-        num_rows: int,
-        num_cols: int,
-        row_sizes: tuple[int, ...] | None = None,
-        col_sizes: tuple[int, ...] | None = None,
-    ) -> None:
-        self._num_child_grid_rows = num_rows
-        self._num_child_grid_cols = num_cols
-        self._child_grid_row_size = row_sizes or tuple([-1] * num_rows)
-        self._child_grid_col_size = col_sizes or tuple([-1] * num_cols)
-
-    def update_layout(self) -> None:
-        if self._child_node_list:
-            self._solve_layout()
-
-        for child in self._child_node_list:
-            child.update_layout()
-
-    def _solve_layout(self) -> None:
-        solver = SimplexSolver()
-
-        # Variables for grid lines
-        row_vars = [Variable(f"row_{i}") for i in range(self._num_child_grid_rows + 1)]
-        col_vars = [Variable(f"col_{i}") for i in range(self._num_child_grid_cols + 1)]
-
-        # Unit size for stretch
-        unit_w = Variable("unit_w")
-        unit_h = Variable("unit_h")
-
-        # Constraints
-        _, _, w, h = self._local_xywh_dip
-
-        # Boundaries
-        solver.add_constraint(row_vars[0] == 0)
-        solver.add_constraint(row_vars[self._num_child_grid_rows] == h)
-        solver.add_constraint(col_vars[0] == 0)
-        solver.add_constraint(col_vars[self._num_child_grid_cols] == w)
-
-        # Ordering
-        for i in range(self._num_child_grid_rows):
-            solver.add_constraint(row_vars[i + 1] >= row_vars[i])
-        for i in range(self._num_child_grid_cols):
-            solver.add_constraint(col_vars[i + 1] >= col_vars[i])
-
-        # Row sizes
-        for i in range(self._num_child_grid_rows):
-            size = (
-                self._child_grid_row_size[i]
-                if i < len(self._child_grid_row_size)
-                else -1
-            )
-            if size >= 0:
-                solver.add_constraint(
-                    row_vars[i + 1] - row_vars[i] == size,
-                    strength=STRONG,
-                )
-            else:
-                weight = -size
-                solver.add_constraint(
-                    row_vars[i + 1] - row_vars[i] == weight * unit_h,
-                    strength=STRONG,
-                )
-
-        # Col sizes
-        for i in range(self._num_child_grid_cols):
-            size = (
-                self._child_grid_col_size[i]
-                if i < len(self._child_grid_col_size)
-                else -1
-            )
-            if size >= 0:
-                solver.add_constraint(
-                    col_vars[i + 1] - col_vars[i] == size,
-                    strength=STRONG,
-                )
-            else:
-                weight = -size
-                solver.add_constraint(
-                    col_vars[i + 1] - col_vars[i] == weight * unit_w,
-                    strength=STRONG,
-                )
-
-        # Update children
-        for child in self._child_node_list:
-            r = child._layout_row
-            c = child._layout_col
-            rs = child._layout_row_span
-            cs = child._layout_col_span
-
-            # Clamp to grid
-            r = max(0, min(r, self._num_child_grid_rows - 1))
-            c = max(0, min(c, self._num_child_grid_cols - 1))
-            rs = max(1, min(rs, self._num_child_grid_rows - r))
-            cs = max(1, min(cs, self._num_child_grid_cols - c))
-
-            y1 = row_vars[r].value
-            y2 = row_vars[r + rs].value
-            x1 = col_vars[c].value
-            x2 = col_vars[c + cs].value
-
-            child._local_xywh_dip = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
-
-    def _add_child_node(self, child_node: "GuiNode") -> None:
-        self._child_node_list.append(child_node)
-
-    @property
-    def mouse_over(self) -> bool:
-        return self._mouse_over
-
-    @property
-    def local_xywh_dip(self) -> tuple[int, int, int, int]:
-        return self._local_xywh_dip
-
-    @property
-    def global_xywh_dip(self) -> tuple[int, int, int, int]:
-        if self._parent_node is None:
-            return self._local_xywh_dip
-        else:
-            parent_x, parent_y, _, _ = self._parent_node.global_xywh_dip
-            x, y, w, h = self._local_xywh_dip
-            return (parent_x + x, parent_y + y, w, h)
-
-    def _receive_mouse_position(self, mouse_x_dip: int, mouse_y_dip: int):
-        # OPTIMIZATION: early out if mouse position hasn't changed.
-        if (mouse_x_dip, mouse_y_dip) == self._latest_global_mouse_pos:
-            return
-
-        # Update `self._mouse_over`
-        is_over = self._intersect_point(mouse_x_dip, mouse_y_dip)
-        if is_over != self._mouse_over:
-            self._mouse_over = is_over
-            self._on_mouse_over_changed(mouse_x_dip, mouse_y_dip)
-
-        # If mouse is over, call `_on_mouse_move`.
-        if self._mouse_over:
-            self._on_mouse_move(mouse_x_dip, mouse_y_dip)
-
-        # If mouse is over, update `self._local_mouse_pos`.
-        if self._mouse_over:
-            x, y, _, _ = self.global_xywh_dip
-            self._latest_global_mouse_pos = (mouse_x_dip, mouse_y_dip)
-            self._latest_local_mouse_pos = (mouse_x_dip - x, mouse_y_dip - y)
-
-        # Regardless of whether mouse is over, propagate to children.
-        # Children may be outside parent's bounds.
-        for child in self._child_node_list:
-            child._receive_mouse_position(mouse_x_dip, mouse_y_dip)
-
-    def _receive_mouse_button_action(
-        self,
-        button: MouseButton,
-        action: ButtonAction,
-    ) -> bool:
-        # Only handle mouse button release events for now.
-        if action != "release":
-            return False
-
-        # Propagate to children first (topmost first).
-        for child in reversed(self._child_node_list):
-            if child._receive_mouse_button_action(button=button, action=action):
-                return True
-        else:
-            # No child handled it, try to handle it ourselves.
-
-            # Only handle if mouse is over.
-            # This means a widget cannot be clicked if the mouse is outside its bounds,
-            # even if it has children outside its bounds.
-            if not self._mouse_over:
-                return False
-
-            # Invoke the click handler.
-            return self._on_click(button=button)
-
-    def _intersect_point(self, x: int, y: int) -> bool:
-        rx, ry, rw, rh = self.global_xywh_dip
-        return rx <= x < rx + rw and ry <= y < ry + rh
-
-    def _on_mouse_over_changed(self, x_dip: int, y_dip: int) -> None:
-        pass
-
-    def _on_mouse_move(self, x_dip: int, y_dip: int) -> None:
-        pass
-
-    def _on_click(self, button: MouseButton) -> bool:
-        return False
-
-    def _render(self, canvas: Canvas) -> None:
-        # Render self.
-        self._render_self(canvas)
-
-        # Render children, in order, after self.
-        for child in self._child_node_list:
-            child._render(canvas)
-
-    @abstractmethod
-    def _render_self(self, canvas: Canvas) -> None: ...
+type GuiCursorMode = Literal["cursor", "joystick"]
 
 
-type WindowCursorMode = Literal["cursor", "joystick"]
-
-
-class GuiWindow(GuiNode):
+class GuiWindow(BaseResource):
     width: int
     height: int
     title: str
@@ -415,6 +149,8 @@ class GuiWindow(GuiNode):
     gpu_surface: GpuSurface
     last_mouse_x: float
     last_mouse_y: float
+    _gui_context: GuiContext
+    _central_widget: "GuiWidget"
 
     def __init__(
         self,
@@ -429,29 +165,33 @@ class GuiWindow(GuiNode):
         grid_row_sizes: tuple[int, ...] | None = None,
         grid_col_sizes: tuple[int, ...] | None = None,
     ) -> None:
+        super().__init__(parent_resource=gui_context)
+
+        self._gui_context = gui_context
         self.width = width
         self.height = height
         self.title = title
         self.theme = theme or DEFAULT_THEME
-
-        # Initialize GuiNode
-        super().__init__(
-            parent_node=None,
-            gui_context=gui_context,
-            gui_window=self,
-            local_xywh_dip=(0, 0, width, height),
-            num_child_grid_rows=num_grid_rows,
-            num_child_grid_cols=num_grid_cols,
-            child_grid_row_size=grid_row_sizes,
-            child_grid_col_size=grid_col_sizes,
-            parent_resource=gui_context,
-        )
 
         self.glfw_window_handle = self._new_glfw_window()
         self.gpu_surface = self._new_gpu_surface()
 
         self.last_mouse_x: float = 0.0
         self.last_mouse_y: float = 0.0
+
+        # Create central widget that occupies the full window
+        self._central_widget = GuiWidget(
+            parent_widget=None,
+            gui_context=gui_context,
+            gui_window=self,
+            local_xywh_dip=(0, 0, width, height),
+            theme=self.theme,
+            num_child_grid_rows=num_grid_rows,
+            num_child_grid_cols=num_grid_cols,
+            child_grid_row_size=grid_row_sizes,
+            child_grid_col_size=grid_col_sizes,
+            parent_resource=self,
+        )
 
     def _new_glfw_window(self) -> glfw._GLFWwindow:
         # Create GLFW window:
@@ -534,7 +274,7 @@ class GuiWindow(GuiNode):
     def hide(self):
         glfw.hide_window(self.glfw_window_handle)
 
-    def set_cursor_mode(self, cursor_mode: "WindowCursorMode"):
+    def set_cursor_mode(self, cursor_mode: "GuiCursorMode"):
         """
         Sets the mouse input mode for the window.
         - "cursor": cursor input, mouse movement handled by the OS.
@@ -572,7 +312,7 @@ class GuiWindow(GuiNode):
         action: int,
         mods: int,
     ) -> None:
-        # TODO: Handle key events in GuiNode if needed
+        # TODO: Handle key events in GuiWidget if needed
         pass
 
     def _on_glfw_mouse_button_event(
@@ -582,7 +322,7 @@ class GuiWindow(GuiNode):
         action: int,
         mods: int,
     ) -> None:
-        self._receive_mouse_button_action(
+        self._central_widget._receive_mouse_button_action(
             button=_decode_glfw_mouse_button(button),
             action=_decode_glfw_action(action),
         )
@@ -598,28 +338,57 @@ class GuiWindow(GuiNode):
 
         _ = dx, dy  # Currently unused
 
-        self._receive_mouse_position(
+        self._central_widget._receive_mouse_position(
             mouse_x_dip=int(round(x)),
             mouse_y_dip=int(round(y)),
         )
 
     def render(self, canvas: Canvas) -> None:
-        self.update_layout()
-        self._render(canvas)
+        self._central_widget.update_layout()
+        self._central_widget._render(canvas)
 
-    def _render_self(self, canvas: Canvas) -> None:
-        _ = canvas  # No-op for window itself.
+    @property
+    def central_widget(self) -> "GuiWidget":
+        """Get the central widget that occupies the full window area."""
+        return self._central_widget
 
 
-class GuiWidget(GuiNode):
+class GuiWidget(BaseResource):
+    _parent_widget: "GuiWidget | None"
+    _gui_window: "GuiWindow | None"
+    _gui_context: "GuiContext"
+    _local_xywh_dip: tuple[int, int, int, int]
+    _child_widget_list: list["GuiWidget"]
+    _mouse_over: bool
+    _latest_local_mouse_pos: tuple[int, int]
+    _latest_global_mouse_pos: tuple[int, int]
+
+    # Layout params (position in parent)
+    _layout_row: int
+    _layout_col: int
+    _layout_row_span: int
+    _layout_col_span: int
+
+    # Grid params (for children)
+    _num_child_grid_rows: int
+    _num_child_grid_cols: int
+    _child_grid_row_size: tuple[int, ...]
+    _child_grid_col_size: tuple[int, ...]
+
+    # Content:
     _text: str
     _style_classes: list[str]
     _is_enabled: bool
+    _theme: GuiTheme
 
     def __init__(
         self,
         *,
-        parent_node: GuiNode,
+        parent_widget: "GuiWidget | None",
+        gui_context: GuiContext | None = None,
+        gui_window: "GuiWindow | None" = None,
+        local_xywh_dip: tuple[int, int, int, int] | None = None,
+        theme: GuiTheme | None = None,
         row: int = 0,
         col: int = 0,
         row_span: int = 1,
@@ -631,25 +400,254 @@ class GuiWidget(GuiNode):
         text: str = "",
         style_classes: list[str] | None = None,
         is_enabled: bool = True,
+        parent_resource: "BaseResource | None" = None,
     ) -> None:
-        super().__init__(
-            parent_node=parent_node,
-            gui_context=parent_node._gui_context,
-            gui_window=parent_node._gui_window,
-            local_xywh_dip=None,
-            row=row,
-            col=col,
-            row_span=row_span,
-            col_span=col_span,
-            num_child_grid_rows=num_child_grid_rows,
-            num_child_grid_cols=num_child_grid_cols,
-            child_grid_row_size=child_grid_row_size,
-            child_grid_col_size=child_grid_col_size,
+        super().__init__(parent_resource=(parent_resource or parent_widget))
+
+        self._parent_widget = parent_widget
+        self._gui_window = (
+            gui_window if parent_widget is None else parent_widget._gui_window
         )
+
+        # Infer gui_context from parent if not provided
+        if gui_context is None:
+            if parent_widget is not None:
+                gui_context = parent_widget._gui_context
+            else:
+                raise ValueError(
+                    "gui_context must be provided when parent_widget is None"
+                )
+        self._gui_context = gui_context
+        self._local_xywh_dip = local_xywh_dip or (0, 0, 0, 0)
+        self._child_widget_list = []
+        self._mouse_over = False
+        self._latest_local_mouse_pos = (0, 0)
+        self._latest_global_mouse_pos = (0, 0)
+
+        self._layout_row = row
+        self._layout_col = col
+        self._layout_row_span = row_span
+        self._layout_col_span = col_span
+
+        self._num_child_grid_rows = num_child_grid_rows
+        self._num_child_grid_cols = num_child_grid_cols
+        self._child_grid_row_size = child_grid_row_size or tuple(
+            [-1] * num_child_grid_rows
+        )
+        self._child_grid_col_size = child_grid_col_size or tuple(
+            [-1] * num_child_grid_cols
+        )
+
+        # Inherit theme from parent widget, or use provided theme
+        if parent_widget is not None:
+            self._theme = parent_widget._theme
+        elif theme is not None:
+            self._theme = theme
+        else:
+            self._theme = DEFAULT_THEME
+
         self._text = text
         self._style_classes = style_classes or ["label"]
-        self._cached_style = _eval_style(self._gui_window.theme, self._style_classes)
+        self._cached_style = _eval_style(self._theme, self._style_classes)
         self._is_enabled = is_enabled
+
+        if self._parent_widget is not None:
+            self._parent_widget._add_child_widget(self)
+
+    def set_grid_config(
+        self,
+        num_rows: int,
+        num_cols: int,
+        row_sizes: tuple[int, ...] | None = None,
+        col_sizes: tuple[int, ...] | None = None,
+    ) -> None:
+        self._num_child_grid_rows = num_rows
+        self._num_child_grid_cols = num_cols
+        self._child_grid_row_size = row_sizes or tuple([-1] * num_rows)
+        self._child_grid_col_size = col_sizes or tuple([-1] * num_cols)
+
+    def update_layout(self) -> None:
+        if self._child_widget_list:
+            self._solve_layout()
+
+        for child in self._child_widget_list:
+            child.update_layout()
+
+    def _solve_layout(self) -> None:
+        solver = SimplexSolver()
+
+        # Variables for grid lines
+        row_vars = [Variable(f"row_{i}") for i in range(self._num_child_grid_rows + 1)]
+        col_vars = [Variable(f"col_{i}") for i in range(self._num_child_grid_cols + 1)]
+
+        # Unit size for stretch
+        unit_w = Variable("unit_w")
+        unit_h = Variable("unit_h")
+
+        # Constraints
+        _, _, w, h = self._local_xywh_dip
+
+        # Boundaries
+        solver.add_constraint(row_vars[0] == 0)
+        solver.add_constraint(row_vars[self._num_child_grid_rows] == h)
+        solver.add_constraint(col_vars[0] == 0)
+        solver.add_constraint(col_vars[self._num_child_grid_cols] == w)
+
+        # Ordering
+        for i in range(self._num_child_grid_rows):
+            solver.add_constraint(row_vars[i + 1] >= row_vars[i])
+        for i in range(self._num_child_grid_cols):
+            solver.add_constraint(col_vars[i + 1] >= col_vars[i])
+
+        # Row sizes
+        for i in range(self._num_child_grid_rows):
+            size = (
+                self._child_grid_row_size[i]
+                if i < len(self._child_grid_row_size)
+                else -1
+            )
+            if size >= 0:
+                solver.add_constraint(
+                    row_vars[i + 1] - row_vars[i] == size,
+                    strength=STRONG,
+                )
+            else:
+                weight = -size
+                solver.add_constraint(
+                    row_vars[i + 1] - row_vars[i] == weight * unit_h,
+                    strength=STRONG,
+                )
+
+        # Col sizes
+        for i in range(self._num_child_grid_cols):
+            size = (
+                self._child_grid_col_size[i]
+                if i < len(self._child_grid_col_size)
+                else -1
+            )
+            if size >= 0:
+                solver.add_constraint(
+                    col_vars[i + 1] - col_vars[i] == size,
+                    strength=STRONG,
+                )
+            else:
+                weight = -size
+                solver.add_constraint(
+                    col_vars[i + 1] - col_vars[i] == weight * unit_w,
+                    strength=STRONG,
+                )
+
+        # Update children
+        for child in self._child_widget_list:
+            r = child._layout_row
+            c = child._layout_col
+            rs = child._layout_row_span
+            cs = child._layout_col_span
+
+            # Clamp to grid
+            r = max(0, min(r, self._num_child_grid_rows - 1))
+            c = max(0, min(c, self._num_child_grid_cols - 1))
+            rs = max(1, min(rs, self._num_child_grid_rows - r))
+            cs = max(1, min(cs, self._num_child_grid_cols - c))
+
+            y1 = row_vars[r].value
+            y2 = row_vars[r + rs].value
+            x1 = col_vars[c].value
+            x2 = col_vars[c + cs].value
+
+            child._local_xywh_dip = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+
+    def _add_child_widget(self, child_widget: "GuiWidget") -> None:
+        self._child_widget_list.append(child_widget)
+
+    @property
+    def mouse_over(self) -> bool:
+        return self._mouse_over
+
+    @property
+    def local_xywh_dip(self) -> tuple[int, int, int, int]:
+        return self._local_xywh_dip
+
+    @property
+    def global_xywh_dip(self) -> tuple[int, int, int, int]:
+        if self._parent_widget is None:
+            return self._local_xywh_dip
+        else:
+            parent_x, parent_y, _, _ = self._parent_widget.global_xywh_dip
+            x, y, w, h = self._local_xywh_dip
+            return (parent_x + x, parent_y + y, w, h)
+
+    def _receive_mouse_position(self, mouse_x_dip: int, mouse_y_dip: int):
+        # OPTIMIZATION: early out if mouse position hasn't changed.
+        if (mouse_x_dip, mouse_y_dip) == self._latest_global_mouse_pos:
+            return
+
+        # Update `self._mouse_over`
+        is_over = self._intersect_point(mouse_x_dip, mouse_y_dip)
+        if is_over != self._mouse_over:
+            self._mouse_over = is_over
+            self._on_mouse_over_changed(mouse_x_dip, mouse_y_dip)
+
+        # If mouse is over, call `_on_mouse_move`.
+        if self._mouse_over:
+            self._on_mouse_move(mouse_x_dip, mouse_y_dip)
+
+        # If mouse is over, update `self._local_mouse_pos`.
+        if self._mouse_over:
+            x, y, _, _ = self.global_xywh_dip
+            self._latest_global_mouse_pos = (mouse_x_dip, mouse_y_dip)
+            self._latest_local_mouse_pos = (mouse_x_dip - x, mouse_y_dip - y)
+
+        # Regardless of whether mouse is over, propagate to children.
+        # Children may be outside parent's bounds.
+        for child in self._child_widget_list:
+            child._receive_mouse_position(mouse_x_dip, mouse_y_dip)
+
+    def _receive_mouse_button_action(
+        self,
+        button: MouseButton,
+        action: ButtonAction,
+    ) -> bool:
+        # Only handle mouse button release events for now.
+        if action != "release":
+            return False
+
+        # Propagate to children first (topmost first).
+        for child in reversed(self._child_widget_list):
+            if child._receive_mouse_button_action(button=button, action=action):
+                return True
+        else:
+            # No child handled it, try to handle it ourselves.
+
+            # Only handle if mouse is over.
+            # This means a widget cannot be clicked if the mouse is outside its bounds,
+            # even if it has children outside its bounds.
+            if not self._mouse_over:
+                return False
+
+            # Invoke the click handler.
+            return self._on_click(button=button)
+
+    def _intersect_point(self, x: int, y: int) -> bool:
+        rx, ry, rw, rh = self.global_xywh_dip
+        return rx <= x < rx + rw and ry <= y < ry + rh
+
+    def _on_mouse_over_changed(self, x_dip: int, y_dip: int) -> None:
+        pass
+
+    def _on_mouse_move(self, x_dip: int, y_dip: int) -> None:
+        pass
+
+    def _on_click(self, button: MouseButton) -> bool:
+        return False
+
+    def _render(self, canvas: Canvas) -> None:
+        # Render self.
+        self._render_self(canvas)
+
+        # Render children, in order, after self.
+        for child in self._child_widget_list:
+            child._render(canvas)
 
     @staticmethod
     def _parse_style_class_names(raw: str | list[str]) -> list[str]:

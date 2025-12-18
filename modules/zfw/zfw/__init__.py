@@ -89,7 +89,6 @@ from .renderer import (
 from .images import load_rgba_image, convert_srgb_to_linear
 from .gui import (
     GuiWindow,
-    GuiNode,
     GuiWidget,
     GuiContext,
     WindowCursorMode,
