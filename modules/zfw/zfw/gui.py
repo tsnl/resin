@@ -801,6 +801,10 @@ class GuiWidget(BaseResource):
             vertical_alignment=style.text_vertical_alignment,
         )
 
+    def _on_dispose_resource(self) -> None:
+        for child in self._child_widget_list:
+            child.dispose_resource()
+
 
 def _decode_glfw_action(action: int) -> ButtonAction:
     d: dict[int, ButtonAction] = {
