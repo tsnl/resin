@@ -176,12 +176,15 @@ class GuiWindow(BaseResource):
         title: str,
         theme: GuiTheme | None = None,
     ) -> None:
+        # TODO: Allow resizable windows: need Renderer to handle swap chain recreation.
+
         super().__init__(parent_resource=gui_context)
 
         self._gui_context = gui_context
         self._width = width
         self._height = height
         self._title = title
+        self._resizable = False
         self._theme = theme or DEFAULT_THEME
 
         self._glfw_window_handle = self._new_glfw_window()
@@ -200,7 +203,7 @@ class GuiWindow(BaseResource):
     def _new_glfw_window(self) -> glfw._GLFWwindow:
         # Create GLFW window:
         glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
-        glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
+        glfw.window_hint(glfw.RESIZABLE, int(self._resizable))
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw_window = glfw.create_window(
             width=self._width,
@@ -238,6 +241,10 @@ class GuiWindow(BaseResource):
         glfw.set_cursor_pos_callback(
             window=glfw_window,
             cbfun=self._on_glfw_cursor_pos_event,
+        )
+        glfw.set_framebuffer_size_callback(
+            window=glfw_window,
+            cbfun=self._on_framebuffer_resize_event,
         )
 
         # Return the created GLFW window handle
@@ -355,6 +362,16 @@ class GuiWindow(BaseResource):
             mouse_x_dip=int(round(x)),
             mouse_y_dip=int(round(y)),
         )
+
+    def _on_framebuffer_resize_event(
+        self,
+        _glfw_window_handle: glfw._GLFWwindow,
+        width: int,
+        height: int,
+    ):
+        self._width = width
+        self._height = height
+        self._update_layout()
 
     def render(self, canvas: Canvas) -> None:
         if self._central_widget is None:
