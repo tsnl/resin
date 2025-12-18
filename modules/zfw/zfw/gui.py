@@ -82,6 +82,13 @@ type GuiTheme = dict[str, JsonObject]
 
 
 DEFAULT_THEME: GuiTheme = {
+    "central": {
+        "bg_color": (0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
+        "border_color": (0.0, 0.0, 0.0, 0.0),
+        "border_thickness": (0, 0, 0, 0),
+        "padding": (0, 0, 0, 0),
+        "margin": (0, 0, 0, 0),
+    },
     "label": {
         "bg_color": (0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
         "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
@@ -103,6 +110,7 @@ DEFAULT_THEME: GuiTheme = {
         "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
         "border_color": (0.0, 0.2, 0.5, 1.0),
         "border_thickness": (0, 0, 2, 0),
+        "margin": (0, 0, 0, 0),
     },
     "h2": {
         "font_size_dip": 24,
