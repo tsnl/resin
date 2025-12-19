@@ -79,7 +79,7 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
     def __init__(self, engine: zfw.Engine):
         super().__init__(
             window=engine.window,
-            grid_rows=(200, 40, 40, -1, -1),
+            grid_rows=(200, 40, 40, -1, -1, -1),
             grid_cols=(-1, -1, -1),
             style_classes=["central"],
             theme=_THEME,
@@ -116,7 +116,14 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
             col=0,
         )
 
-        # TODO: manufacturing module at (4,0)
+        self._manufacturing_module_widget = (
+            UniversalPaperclipsManufacturingModuleWidget(
+                engine=engine,
+                parent=self,
+                row=4,
+                col=0,
+            )
+        )
 
         # TODO: computational resources module at (2, 1)
 
@@ -139,9 +146,10 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
                 30,  # unsold inventory
                 30,  # price per paperclip
                 30,  # public demand
-                30,  # (spacer)
+                15,  # (spacer)
                 30,  # marketing button + level
                 30,  # marketing upgrade cost
+                -1,  # (flexible spacer)
             ),
             grid_cols=(50, 50, -1),
             row=row,
@@ -164,7 +172,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             col=0,
             col_span=3,
             style_classes=["label"],
-            text="Available Funds: $0.00",
+            text="Available Funds: $ 0.00",
         )
         self._unsold_inventory_widget = zfw.GuiWidget(
             parent_widget=self,
@@ -218,6 +226,48 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             col=2,
             style_classes=["label"],
             text="Level: 1",
+        )
+        self._marketing_cost_label_widget = zfw.GuiWidget(
+            parent_widget=self,
+            row=7,
+            col=0,
+            col_span=2,
+            style_classes=["label"],
+            text="Cost:        $ ",
+        )
+        self._marketing_cost_display_widget = zfw.GuiWidget(
+            parent_widget=self,
+            row=7,
+            col=2,
+            style_classes=["label"],
+            text="0.00",
+        )
+
+
+class UniversalPaperclipsManufacturingModuleWidget(zfw.GuiWidget):
+    def __init__(
+        self,
+        engine: zfw.Engine,
+        parent: zfw.GuiWidget,
+        row: int,
+        col: int,
+    ):
+        super().__init__(
+            parent_widget=parent,
+            grid_rows=(_MODULE_HEADER_SIZE_DIP, -1),
+            grid_cols=(-1,),
+            row=row,
+            col=col,
+            style_classes=["module"],
+        )
+        self._engine = engine
+
+        self._title_widget = zfw.GuiWidget(
+            parent_widget=self,
+            row=0,
+            col=0,
+            style_classes=["label", "h2"],
+            text="Manufacturing",
         )
 
 
