@@ -210,6 +210,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             col_span=2,
             style_classes=["button"],
             text="Marketing",
+            clickable=False,
         )
         self._marketing_level_widget = zfw.GuiWidget(
             parent_widget=self,

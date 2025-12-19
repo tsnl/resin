@@ -136,12 +136,22 @@ class GuiWidgetStyle:
     font_weight: int = 400
     bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     bg_hover_color: tuple[float, float, float, float] | None = None
+    # When not clickable: background colors (default to same color, no hover light-up)
+    unclickable_bg_color: tuple[float, float, float, float] | None = None
+    unclickable_bg_hover_color: tuple[float, float, float, float] | None = None
     fg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     fg_hover_color: tuple[float, float, float, float] | None = None
+    # When not clickable: foreground color (default no hover change)
+    unclickable_fg_color: tuple[float, float, float, float] | None = None
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0)
     hover_border_color: tuple[float, float, float, float] | None = None
     hover_border_thickness: tuple[int, int, int, int] | None = None
+    # When not clickable: border styles (default no hover change)
+    unclickable_border_color: tuple[float, float, float, float] | None = None
+    unclickable_border_thickness: tuple[int, int, int, int] | None = None
+    unclickable_hover_border_color: tuple[float, float, float, float] | None = None
+    unclickable_hover_border_thickness: tuple[int, int, int, int] | None = None
     padding: tuple[int, int, int, int] = (0, 0, 0, 0)
     margin: tuple[int, int, int, int] = (0, 0, 0, 0)
     text_horizontal_alignment: HorizontalAlignment = "center"
@@ -168,11 +178,18 @@ DEFAULT_THEME: GuiTheme = {
     "button": {
         "bg_color": (0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
         "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
+        "unclickable_fg_color": (0.35, 0.35, 0.35, 1.0),
         "bg_hover_color": (0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
+        "unclickable_bg_color": (0.82, 0.82, 0.82, 1.0),
+        "unclickable_bg_hover_color": (0.82, 0.82, 0.82, 1.0),
         "border_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
         "border_thickness": (1, 1, 1, 1),
         "hover_border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
         "hover_border_thickness": (1, 1, 1, 1),
+        "unclickable_border_color": (0.65, 0.65, 0.65, 1.0),
+        "unclickable_border_thickness": (1, 1, 1, 1),
+        "unclickable_hover_border_color": (0.65, 0.65, 0.65, 1.0),
+        "unclickable_hover_border_thickness": (1, 1, 1, 1),
         "padding": (5, 5, 5, 5),
         "margin": (10, 10, 10, 10),
     },
@@ -603,7 +620,7 @@ class GuiWidget(BaseResource):
     _image_hover_src_wh: tuple[int, int] | None
     _image_hover_layout: GuiImageLayout
     _style_classes: list[str]
-    _is_clickable: bool
+    _clickable: bool
     _theme: GuiTheme
 
     # Events
@@ -637,7 +654,7 @@ class GuiWidget(BaseResource):
         image_hover_src_wh: tuple[int, int] | None = None,
         image_hover_layout: GuiImageLayout | None = None,
         style_classes: list[str] | None = None,
-        is_clickable: bool = True,
+        clickable: bool = True,
         parent_resource: "BaseResource | None" = None,
     ) -> None:
         if not window and not parent_widget:
@@ -678,7 +695,7 @@ class GuiWidget(BaseResource):
         self._image_hover_layout = image_hover_layout or image_layout
         self._style_classes = style_classes or ["label"]
         self._cached_style = _eval_style(self._theme, self._style_classes)
-        self._is_clickable = is_clickable
+        self._clickable = clickable
 
         if self._parent_widget is not None:
             self._parent_widget._add_child_widget(self)
@@ -914,7 +931,7 @@ class GuiWidget(BaseResource):
         pass
 
     def _on_click(self, button: MouseButton) -> bool:
-        if not self._is_clickable:
+        if not self._clickable:
             return False
         self._click_event_hub.publish(button)
         return True
@@ -935,11 +952,11 @@ class GuiWidget(BaseResource):
 
     @property
     def is_clickable(self) -> bool:
-        return self._is_clickable
+        return self._clickable
 
     @is_clickable.setter
     def is_clickable(self, value: bool) -> None:
-        self._is_clickable = value
+        self._clickable = value
 
     def _render_self(self, canvas: Canvas) -> None:
         style = self._cached_style
@@ -948,12 +965,21 @@ class GuiWidget(BaseResource):
         pt, pr, pb, pl = style.padding
         mt, mr, mb, ml = style.margin
 
-        # Determine colors
-        bg_color = (
-            style.bg_hover_color
-            if (self.mouse_over and style.bg_hover_color is not None)
-            else style.bg_color
-        )
+        # Determine background color (respect unclickable variants)
+        if not self._clickable:
+            base_bg = style.unclickable_bg_color or style.bg_color
+            hover_bg = (
+                style.unclickable_bg_hover_color
+                if style.unclickable_bg_hover_color is not None
+                else base_bg
+            )
+            bg_color = hover_bg if self.mouse_over else base_bg
+        else:
+            base_bg = style.bg_color
+            hover_bg = (
+                style.bg_hover_color if style.bg_hover_color is not None else base_bg
+            )
+            bg_color = hover_bg if self.mouse_over else base_bg
 
         # Determine image and layout
         if self.mouse_over and self._image_hover is not None:
@@ -977,22 +1003,51 @@ class GuiWidget(BaseResource):
             user_src_wh=image_src_wh,
         )
 
-        border_color = (
-            style.hover_border_color
-            if (self.mouse_over and style.hover_border_color is not None)
-            else style.border_color
-        )
-        border_thickness = (
-            style.hover_border_thickness
-            if (self.mouse_over and style.hover_border_thickness is not None)
-            else style.border_thickness
-        )
+        # Determine border styles (respect unclickable variants)
+        if not self._clickable:
+            base_border_color = style.unclickable_border_color or style.border_color
+            base_border_thickness = (
+                style.unclickable_border_thickness or style.border_thickness
+            )
+            hover_border_color = (
+                style.unclickable_hover_border_color
+                if style.unclickable_hover_border_color is not None
+                else base_border_color
+            )
+            hover_border_thickness = (
+                style.unclickable_hover_border_thickness
+                if style.unclickable_hover_border_thickness is not None
+                else base_border_thickness
+            )
+            border_color = hover_border_color if self.mouse_over else base_border_color
+            border_thickness = (
+                hover_border_thickness if self.mouse_over else base_border_thickness
+            )
+        else:
+            border_color = (
+                style.hover_border_color
+                if (self.mouse_over and style.hover_border_color is not None)
+                else style.border_color
+            )
+            border_thickness = (
+                style.hover_border_thickness
+                if (self.mouse_over and style.hover_border_thickness is not None)
+                else style.border_thickness
+            )
 
-        fg_color = (
-            style.fg_hover_color
-            if (self.mouse_over and style.fg_hover_color is not None)
-            else style.fg_color
-        )
+        # Determine foreground color
+        if not self._clickable:
+            fg_color = (
+                style.unclickable_fg_color
+                if style.unclickable_fg_color is not None
+                else style.fg_color
+            )
+        else:
+            fg_color = (
+                style.fg_hover_color
+                if (self.mouse_over and style.fg_hover_color is not None)
+                else style.fg_color
+            )
 
         # Draw background quad:
         canvas.add_quad(
