@@ -11,7 +11,10 @@ import zfw
 
 from .bundled_data import BUNDLED_DATA_PATH
 
-from .universal_paperclips import UniversalPaperclipsWidget
+from .universal_paperclips import (
+    UniversalPaperclipsMainMenuWidget,
+    UniversalPaperclipsWidget,
+)
 
 
 class MainMenuWidget(zfw.GuiWidget):
@@ -45,7 +48,7 @@ class MainMenuWidget(zfw.GuiWidget):
         @self._universal_paperclips_button.click.subscribe()
         def universal_paperclips_button_click(button: zfw.MouseButton):
             if self._universal_paperclips_widget is None:
-                self._universal_paperclips_widget = UniversalPaperclipsWidget(
+                self._universal_paperclips_widget = UniversalPaperclipsMainMenuWidget(
                     engine=engine,
                 )
             engine.window.set_central_widget(self._universal_paperclips_widget)
