@@ -56,6 +56,79 @@ from .typed_vulkan import raw_ffi
 from .events import EventHub
 
 
+type GuiImageLayout = Literal["fit", "crop", "stretch"]
+
+
+def _compute_image_src_xy_wh(
+    dst_wh: tuple[int, int],
+    image: RendererImage | None,
+    layout: GuiImageLayout,
+    user_src_xy: tuple[int, int] = (0, 0),
+    user_src_wh: tuple[int, int] | None = None,
+) -> tuple[tuple[int, int], tuple[int, int] | None]:
+    """
+    Compute the src_xy and src_wh to pass to Canvas.add_quad() based on the layout mode.
+
+    Args:
+        dst_wh: The destination widget size in pixels
+        image: The image to layout, or None
+        layout: The layout mode ("fit", "crop", or "stretch")
+        user_src_xy: User-specified source rectangle origin (default: top-left)
+        user_src_wh: User-specified source rectangle size, or None to use full image
+
+    Returns:
+        A tuple of (src_xy, src_wh) to pass to Canvas.add_quad()
+    """
+    if image is None:
+        # No image: return defaults
+        return user_src_xy, user_src_wh
+
+    # Determine the source rectangle
+    src_w = user_src_wh[0] if user_src_wh is not None else image.px_width
+    src_h = user_src_wh[1] if user_src_wh is not None else image.px_height
+    src_xy = user_src_xy
+    src_wh = (src_w, src_h)
+
+    dst_w, dst_h = dst_wh
+
+    if layout == "stretch":
+        # Stretch: use the source rectangle as-is
+        return src_xy, src_wh
+    elif layout == "fit":
+        # Fit: scale the source rectangle so the entire image fits within the destination
+        # We adjust src_wh to match the aspect ratio of dst_wh
+        src_aspect = src_w / src_h
+        dst_aspect = dst_w / dst_h
+
+        if src_aspect > dst_aspect:
+            # Source is wider: limit by destination width
+            new_src_w = int(src_h * dst_aspect)
+            offset = (src_w - new_src_w) // 2
+            return (src_xy[0] + offset, src_xy[1]), (new_src_w, src_h)
+        else:
+            # Source is taller: limit by destination height
+            new_src_h = int(src_w / dst_aspect)
+            offset = (src_h - new_src_h) // 2
+            return (src_xy[0], src_xy[1] + offset), (src_w, new_src_h)
+    elif layout == "crop":
+        # Crop: trim the minimum to fit the center
+        src_aspect = src_w / src_h
+        dst_aspect = dst_w / dst_h
+
+        if src_aspect > dst_aspect:
+            # Source is wider: crop left and right
+            new_src_w = int(src_h * dst_aspect)
+            offset = (src_w - new_src_w) // 2
+            return (src_xy[0] + offset, src_xy[1]), (new_src_w, src_h)
+        else:
+            # Source is taller: crop top and bottom
+            new_src_h = int(src_w / dst_aspect)
+            offset = (src_h - new_src_h) // 2
+            return (src_xy[0], src_xy[1] + offset), (src_w, new_src_h)
+    else:
+        raise ValueError(f"Invalid image layout: {layout}")
+
+
 @dataclass
 class GuiWidgetStyle:
     font: Font = "sans-serif"
@@ -74,6 +147,8 @@ class GuiWidgetStyle:
     text_horizontal_alignment: HorizontalAlignment = "center"
     text_vertical_alignment: VerticalAlignment = "middle"
     wrap: bool = False
+    image_layout: GuiImageLayout = "fit"
+    image_hover_layout: GuiImageLayout = "fit"
 
 
 type GuiTheme = dict[str, JsonObject]
@@ -438,11 +513,13 @@ class GuiWidget(BaseResource):
     # Content:
     _text: str | None
     _image: RendererImage | None
-    _image_crop_xy: tuple[int, int] | None
-    _image_crop_wh: tuple[int, int] | None
+    _image_src_xy: tuple[int, int]
+    _image_src_wh: tuple[int, int] | None
+    _image_layout: GuiImageLayout
     _image_hover: RendererImage | None
-    _image_hover_crop_xy: tuple[int, int] | None
-    _image_hover_crop_wh: tuple[int, int] | None
+    _image_hover_src_xy: tuple[int, int]
+    _image_hover_src_wh: tuple[int, int] | None
+    _image_hover_layout: GuiImageLayout
     _style_classes: list[str]
     _is_clickable: bool
     _theme: GuiTheme
@@ -470,11 +547,13 @@ class GuiWidget(BaseResource):
         grid_cols: tuple[int, ...] | None = None,
         text: str | None = None,
         image: RendererImage | None = None,
-        image_crop_xy: tuple[int, int] | None = None,
-        image_crop_wh: tuple[int, int] | None = None,
+        image_src_xy: tuple[int, int] = (0, 0),
+        image_src_wh: tuple[int, int] | None = None,
+        image_layout: GuiImageLayout = "fit",
         image_hover: RendererImage | None = None,
-        image_hover_crop_xy: tuple[int, int] | None = None,
-        image_hover_crop_wh: tuple[int, int] | None = None,
+        image_hover_src_xy: tuple[int, int] = (0, 0),
+        image_hover_src_wh: tuple[int, int] | None = None,
+        image_hover_layout: GuiImageLayout | None = None,
         style_classes: list[str] | None = None,
         is_clickable: bool = True,
         parent_resource: "BaseResource | None" = None,
@@ -508,11 +587,13 @@ class GuiWidget(BaseResource):
 
         self._text = text
         self._image = image
-        self._image_crop_xy = image_crop_xy
-        self._image_crop_wh = image_crop_wh
+        self._image_src_xy = image_src_xy
+        self._image_src_wh = image_src_wh
+        self._image_layout = image_layout
         self._image_hover = image_hover
-        self._image_hover_crop_xy = image_hover_crop_xy
-        self._image_hover_crop_wh = image_hover_crop_wh
+        self._image_hover_src_xy = image_hover_src_xy
+        self._image_hover_src_wh = image_hover_src_wh
+        self._image_hover_layout = image_hover_layout or image_layout
         self._style_classes = style_classes or ["label"]
         self._cached_style = _eval_style(self._theme, self._style_classes)
         self._is_clickable = is_clickable
@@ -791,10 +872,27 @@ class GuiWidget(BaseResource):
             if (self.mouse_over and style.bg_hover_color is not None)
             else style.bg_color
         )
-        bg_image, bg_image_crop_xy, bg_image_crop_wh = (
-            (self._image_hover, self._image_hover_crop_xy, self._image_hover_crop_wh)
-            if (self.mouse_over and self._image_hover is not None)
-            else (self._image, self._image_crop_xy, self._image_crop_wh)
+
+        # Determine image and layout
+        if self.mouse_over and self._image_hover is not None:
+            bg_image = self._image_hover
+            image_src_xy = self._image_hover_src_xy
+            image_src_wh = self._image_hover_src_wh
+            image_layout = self._image_hover_layout
+        else:
+            bg_image = self._image
+            image_src_xy = self._image_src_xy
+            image_src_wh = self._image_src_wh
+            image_layout = self._image_layout
+
+        # Compute src_xy and src_wh based on layout mode
+        dst_wh = (w - ml - mr, h - mt - mb)
+        src_xy, src_wh = _compute_image_src_xy_wh(
+            dst_wh=dst_wh,
+            image=bg_image,
+            layout=image_layout,
+            user_src_xy=image_src_xy,
+            user_src_wh=image_src_wh,
         )
 
         border_color = (
@@ -817,9 +915,9 @@ class GuiWidget(BaseResource):
         # Draw background quad:
         canvas.add_quad(
             dst_xy=(x + ml, y + mt),
-            dst_wh=(w - ml - mr, h - mt - mb),
-            src_xy=bg_image_crop_xy or (0, 0),
-            src_wh=bg_image_crop_wh,
+            dst_wh=dst_wh,
+            src_xy=src_xy,
+            src_wh=src_wh,
             color=bg_color,
             image=bg_image,
             border_color=border_color,

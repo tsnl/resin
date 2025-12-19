@@ -23,7 +23,7 @@ class MainMenuWidget(zfw.GuiWidget):
             style_classes=["central"],
         )
 
-        self._title = zfw.GuiWidget(
+        self._title_widget = zfw.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,
@@ -50,12 +50,19 @@ class MainMenuWidget(zfw.GuiWidget):
                 )
             engine.window.set_central_widget(self._universal_paperclips_widget)
 
+    def _on_dispose_resource(self) -> None:
+        super()._on_dispose_resource()
+        self._title_widget.dispose_resource()
+        self._universal_paperclips_button.dispose_resource()
+        if self._universal_paperclips_widget is not None:
+            self._universal_paperclips_widget.dispose_resource()
+
 
 def main():
     engine = zfw.Engine(
         app_name="ZFW Sandbox",
         debug=True,
-        swapchain_image_count=2,
+        swapchain_image_count=3,
         enable_gui=True,
     )
 
@@ -65,6 +72,9 @@ def main():
     while not engine.window.should_close():
         engine.update()
         engine.render()
+
+    main_menu_widget.dispose_resource()
+    engine.dispose_resource()
 
 
 if __name__ == "__main__":
