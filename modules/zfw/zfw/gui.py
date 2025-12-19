@@ -246,6 +246,7 @@ class GuiWindow(BaseResource):
     _last_mouse_y: float
     _gui_context: GuiContext
     _central_widget: "GuiWidget | None"
+    _central_widget_stack: list["GuiWidget"]
     _kiwi_solver: KiwiSolver
 
     def __init__(
@@ -277,6 +278,7 @@ class GuiWindow(BaseResource):
 
         # Create central widget that occupies the full window
         self._central_widget = None
+        self._central_widget_stack = []
 
         # For Kiwi solver: window size variables
         self._w_var = KiwiVariable("window_width")
@@ -531,6 +533,21 @@ class GuiWindow(BaseResource):
         """Set the central widget that occupies the full window area."""
         self._central_widget = widget
         self._update_layout()
+
+    def push_central_widget(self, widget: "GuiWidget") -> None:
+        """Push a new central widget onto the stack."""
+        if self._central_widget is not None:
+            self._central_widget_stack.append(self._central_widget)
+        self._central_widget = widget
+        self._update_layout()
+
+    def pop_central_widget(self) -> None:
+        """Pop the current central widget and restore the previous one."""
+        if self._central_widget_stack:
+            self._central_widget = self._central_widget_stack.pop()
+            self._update_layout()
+        else:
+            self._central_widget = None
 
     def _update_layout(self):
         if self._central_widget is None:

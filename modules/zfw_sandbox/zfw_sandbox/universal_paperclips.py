@@ -56,6 +56,10 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
             text="Quit",
         )
 
+        @self._quit_button_widget.click.subscribe()
+        def quit_button_click(button: zfw.MouseButton):
+            engine.window.pop_central_widget()
+
 
 class UniversalPaperclipsWidget(zfw.GuiWidget):
     def __init__(self, engine: zfw.Engine):

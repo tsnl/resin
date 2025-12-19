@@ -51,7 +51,7 @@ class MainMenuWidget(zfw.GuiWidget):
                 self._universal_paperclips_widget = UniversalPaperclipsMainMenuWidget(
                     engine=engine,
                 )
-            engine.window.set_central_widget(self._universal_paperclips_widget)
+            engine.window.push_central_widget(self._universal_paperclips_widget)
 
     def _on_dispose_resource(self) -> None:
         super()._on_dispose_resource()
