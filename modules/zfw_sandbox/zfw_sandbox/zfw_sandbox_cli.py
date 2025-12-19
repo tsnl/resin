@@ -69,14 +69,16 @@ def main():
         enable_gui=True,
     )
 
-    main_menu_widget = MainMenuWidget(engine=engine)
-    engine.window.set_central_widget(main_menu_widget)
+    # start_widget = MainMenuWidget(engine=engine)
+    start_widget = UniversalPaperclipsWidget(engine=engine)
+
+    engine.window.set_central_widget(start_widget)
 
     while not engine.window.should_close():
         engine.update()
         engine.render()
 
-    main_menu_widget.dispose_resource()
+    start_widget.dispose_resource()
     engine.dispose_resource()
 
 
