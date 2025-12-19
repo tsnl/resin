@@ -192,7 +192,7 @@ def camel_to_snake(name: str) -> str:
 #
 
 type ColorSpace = Literal["srgb", "linear"]
-type Font = Literal["sans-serif", "serif"]
+type Font = Literal["sans-serif", "serif", "monospaced"]
 type Key = Literal[
     # Printable keys (US layout)
     "space",

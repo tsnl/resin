@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 from collections import OrderedDict
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -974,7 +975,7 @@ class TextQuadWriter(BaseResource):
 
         self._renderer = renderer
 
-        self._all_fonts = ["sans-serif", "serif"]
+        self._all_fonts = ["sans-serif", "serif", "monospaced"]
         self._hb_font_map = {
             font: TextQuadWriter._load_harfbuzz_font(font)  #
             for font in self._all_fonts
@@ -998,11 +999,19 @@ class TextQuadWriter(BaseResource):
                 pass
 
     @staticmethod
-    def _load_harfbuzz_font(font: Font) -> hb.Font:
-        file_path = {
-            "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
-            "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
+    def _get_font_file_path(font: Font) -> Path:
+        return {
+            "sans-serif": (BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf"),
+            "serif": (BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf"),
+            "monospaced": (
+                BUNDLED_DATA_PATH
+                / "data/font-SourceCodePro/SourceCodePro-VariableFont_wght.ttf"
+            ),
         }[font]
+
+    @staticmethod
+    def _load_harfbuzz_font(font: Font) -> hb.Font:
+        file_path = TextQuadWriter._get_font_file_path(font)
 
         with open(file_path, "rb") as f:
             hb_blob = f.read()
@@ -1013,11 +1022,7 @@ class TextQuadWriter(BaseResource):
 
     @staticmethod
     def _load_freetype_font(font: Font) -> ft.Face:
-        file_path = {
-            "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
-            "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
-        }[font]
-
+        file_path = TextQuadWriter._get_font_file_path(font)
         ft_face = ft.Face(str(file_path))
         return ft_face
 
