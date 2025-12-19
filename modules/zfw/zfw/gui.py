@@ -51,7 +51,7 @@ from .basic import (
 )
 from .renderer import Canvas, RendererImage
 from .excepts import GlfwError
-from .gpu import GpuContext, GpuSurface
+from .gpu import GpuContext, GpuDevice, GpuSurface, GpuSwapChain
 from .typed_vulkan import raw_ffi
 from .events import EventHub
 
@@ -239,6 +239,9 @@ class GuiWindow(BaseResource):
     _theme: GuiTheme
     _glfw_window_handle: glfw._GLFWwindow
     _gpu_surface: GpuSurface
+    _gpu_device: GpuDevice | None
+    _gpu_swap_chain: GpuSwapChain | None
+    _swapchain_image_count: int
     _last_mouse_x: float
     _last_mouse_y: float
     _gui_context: GuiContext
@@ -254,19 +257,20 @@ class GuiWindow(BaseResource):
         title: str,
         theme: GuiTheme | None = None,
     ) -> None:
-        # TODO: Allow resizable windows: need Renderer to handle swap chain recreation.
-
         super().__init__(parent_resource=gui_context)
 
         self._gui_context = gui_context
         self._width = width
         self._height = height
         self._title = title
-        self._resizable = False
+        self._resizable = True
         self._theme = theme or DEFAULT_THEME
 
         self._glfw_window_handle = self._new_glfw_window()
         self._gpu_surface = self._new_gpu_surface()
+        self._gpu_device = None
+        self._gpu_swap_chain = None
+        self._swapchain_image_count = 3
 
         self._last_mouse_x: float = 0.0
         self._last_mouse_y: float = 0.0
@@ -350,7 +354,68 @@ class GuiWindow(BaseResource):
             height=height,
         )
 
+    def _recreate_gpu_surface(self) -> None:
+        """Recreate the GPU surface after a window resize event."""
+        # Dispose the old surface
+        self._gpu_surface.dispose_resource()
+        # Create a new surface with the current framebuffer size
+        self._gpu_surface = self._new_gpu_surface()
+
+    def set_gpu_device(
+        self, gpu_device: GpuDevice, swapchain_image_count: int = 3
+    ) -> None:
+        """Set the GPU device and create the swapchain."""
+        self._gpu_device = gpu_device
+        self._swapchain_image_count = swapchain_image_count
+        self._create_swapchain()
+
+    def _create_swapchain(self) -> None:
+        """Create the GPU swapchain."""
+        if self._gpu_device is None:
+            return
+
+        # Dispose old swapchain if it exists
+        if self._gpu_swap_chain is not None:
+            self._gpu_device.wait_idle()
+            self._gpu_swap_chain.dispose_resource()
+
+        # Create new swapchain
+        self._gpu_swap_chain = GpuSwapChain(
+            device=self._gpu_device,
+            surface=self._gpu_surface,
+            image_count=self._swapchain_image_count,
+        )
+
+    def handle_resize(self) -> bool:
+        """
+        Check if the window was resized and recreate the GPU surface if needed.
+
+        Returns True if a resize occurred and the surface was recreated, False otherwise.
+        """
+        # Get current framebuffer size
+        current_width = self._gpu_surface.width
+        current_height = self._gpu_surface.height
+        framebuffer_width = self._width
+        framebuffer_height = self._height
+
+        # Ignore resize if dimensions are zero (window minimized or not yet sized)
+        if framebuffer_width <= 0 or framebuffer_height <= 0:
+            return False
+
+        # Check if size has changed
+        if current_width != framebuffer_width or current_height != framebuffer_height:
+            # Recreate the GPU surface with the new size
+            self._recreate_gpu_surface()
+            # Recreate the swapchain if device is set
+            if self._gpu_device is not None:
+                self._create_swapchain()
+            return True
+
+        return False
+
     def _on_dispose_resource(self) -> None:
+        if self._gpu_swap_chain is not None:
+            self._gpu_swap_chain.dispose_resource()
         super()._on_dispose_resource()
         glfw.destroy_window(self._glfw_window_handle)
 

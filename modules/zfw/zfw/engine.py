@@ -12,7 +12,6 @@ class Engine(BaseResource):
     _render_context: RendererContext
     _window: GuiWindow | None
     _gpu_device: GpuDevice
-    _gpu_swap_chain: GpuSwapChain | None
     _renderer: Renderer
     _rendered_frame_count: int
     _canvas: Canvas
@@ -54,47 +53,36 @@ class Engine(BaseResource):
                 title=app_name,
                 theme=gui_theme,
             )
-
-            # Create GPU device using the surface:
-            physical_device = next(iter(self._gpu_context.enumerate_physical_devices()))
-            self._gpu_device = GpuDevice(
-                context=self._gpu_context,
-                physical_device=physical_device,
-                surface=self._window._gpu_surface,
-            )
-
-            # Create swap chain:
-            self._gpu_swap_chain = GpuSwapChain(
-                device=self._gpu_device,
-                surface=self._window._gpu_surface,
-                image_count=swapchain_image_count,
-            )
-
-            # Create renderer:
-            scale_x, scale_y = self._window.content_scale
-            scale = scale_x
-
-            self._renderer = Renderer(
-                context=self._render_context,
-                gpu_device=self._gpu_device,
-                scale=scale,
-            )
         else:
             self._window = None
-            self._gpu_swap_chain = None
 
-            physical_device = next(iter(self._gpu_context.enumerate_physical_devices()))
-            self._gpu_device = GpuDevice(
-                context=self._gpu_context,
-                physical_device=physical_device,
-                surface=None,
-            )
+        # Create GPU device (using surface if window exists):
+        physical_device = next(iter(self._gpu_context.enumerate_physical_devices()))
+        self._gpu_device = GpuDevice(
+            context=self._gpu_context,
+            physical_device=physical_device,
+            surface=self._window._gpu_surface if self._window else None,
+        )
 
-            self._renderer = Renderer(
-                context=self._render_context,
+        # Set device on window and create swapchain if window exists
+        if self._window is not None:
+            self._window.set_gpu_device(
                 gpu_device=self._gpu_device,
-                scale=1.0,
+                swapchain_image_count=swapchain_image_count,
             )
+
+        # Create renderer:
+        if self._window:
+            scale_x, scale_y = self._window.content_scale
+            scale = scale_x
+        else:
+            scale = 1.0
+
+        self._renderer = Renderer(
+            context=self._render_context,
+            gpu_device=self._gpu_device,
+            scale=scale,
+        )
 
         self._canvas = Canvas(renderer=self._renderer)
 
@@ -125,7 +113,7 @@ class Engine(BaseResource):
 
     @property
     def gpu_swap_chain(self) -> GpuSwapChain | None:
-        return self._gpu_swap_chain
+        return self._window._gpu_swap_chain if self._window else None
 
     @property
     def renderer(self) -> Renderer:
@@ -136,13 +124,10 @@ class Engine(BaseResource):
         # Resources
         #
 
-        if self._gpu_swap_chain:
-            self._gpu_swap_chain.dispose_resource()
-
-        self._gpu_device.dispose_resource()
-
         if self._window:
             self._window.dispose_resource()
+
+        self._gpu_device.dispose_resource()
 
         #
         # Contexts:
@@ -167,16 +152,18 @@ class Engine(BaseResource):
     def update(self):
         if self._window:
             GuiWindow.poll_events()
+            # Check if window was resized and recreate surface/swapchain if needed
+            self._window.handle_resize()
 
     def render(self):
         """Context manager for rendering a frame with quads."""
-        if self._window is None or self._gpu_swap_chain is None:
+        if self._window is None or self._window._gpu_swap_chain is None:
             return
 
         if self._rendered_frame_count == 0:
             self._window.show()
 
-        with self._gpu_swap_chain.present() as target:
+        with self._window._gpu_swap_chain.present() as target:
             self._canvas.clear()
             self._window.render(canvas=self._canvas)
 
