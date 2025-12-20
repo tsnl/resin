@@ -884,18 +884,23 @@ class GuiWidget(BaseResource):
     #
 
     def _update_style(self) -> None:
-        state: GuiWidgetState = (
-            "unclickable"
-            if not self._clickable
-            else "hover"
-            if self._mouse_over
-            else "default"
-        )
         self._style = _eval_style(
             theme=self._theme,
             class_names=self._style_classes,
-            state=state,
+            state=self._compute_style_state(),
         )
+
+        # Recursively update children
+        for child in self._child_widget_list:
+            child._update_style()
+
+    def _compute_style_state(self) -> GuiWidgetState:
+        if not self._clickable:
+            return "unclickable"
+        elif self._mouse_over:
+            return "hover"
+        else:
+            return "default"
 
     #
     # Phase 2: update layout constraints:
