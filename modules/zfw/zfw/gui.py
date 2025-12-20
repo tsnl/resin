@@ -156,7 +156,7 @@ class GuiWidgetStyle:
     image_layout: GuiImageLayout = "fit"
 
 
-type GuiWidgetState = Literal["default", "hover", "unclickable"]
+type GuiWidgetState = Literal["default", "hover", "unclickable", "pressed", "cancelled"]
 type GuiTheme = dict[str, dict[GuiWidgetState, JsonObject]]
 
 
@@ -197,6 +197,14 @@ _DEFAULT_THEME: GuiTheme = {
         "hover": {
             "bg_color": (0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
             "border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
+        },
+        "pressed": {
+            "bg_color": (0.4, 0.6, 0.85, 1.0),  # Dark blue when pressed
+            "border_color": (0.0, 0.2, 0.5, 1.0),  # Darker blue border when pressed
+        },
+        "cancelled": {
+            "bg_color": (0.75, 0.75, 0.75, 1.0),  # Grey when cancelled
+            "border_color": (0.5, 0.5, 0.5, 1.0),  # Darker grey border when cancelled
         },
         "unclickable": {
             "fg_color": (0.35, 0.35, 0.35, 1.0),
@@ -596,16 +604,20 @@ class GuiWindow(BaseResource):
     def _on_glfw_mouse_button_event(
         self,
         _glfw_window_handle: glfw._GLFWwindow,
-        button: int,
-        action: int,
+        glfw_button: int,
+        glfw_action: int,
         mods: int,
     ) -> None:
         if not self._central_widget:
             return
 
+        button = _decode_glfw_mouse_button(glfw_button)
+        action = _decode_glfw_action(glfw_action)
+
         self._central_widget._receive_mouse_button_action(
-            button=_decode_glfw_mouse_button(button),
-            action=_decode_glfw_action(action),
+            button=button,
+            action=action,
+            click_handled=False if action == "release" else None,
         )
 
     def _on_glfw_cursor_pos_event(
@@ -685,6 +697,7 @@ class GuiWidget(BaseResource):
     _mouse_over: bool
     _latest_local_mouse_pos: tuple[int, int]
     _latest_global_mouse_pos: tuple[int, int]
+    _mouse_button_pressed_locally: bool
 
     # Layout params (position in parent)
     _row: int
@@ -764,6 +777,7 @@ class GuiWidget(BaseResource):
         self._mouse_over = False
         self._latest_local_mouse_pos = (0, 0)
         self._latest_global_mouse_pos = (0, 0)
+        self._mouse_button_pressed_locally = False
 
         self._row = row
         self._col = col
@@ -888,6 +902,11 @@ class GuiWidget(BaseResource):
     def _compute_style_state(self) -> GuiWidgetState:
         if not self._clickable:
             return "unclickable"
+        elif self._mouse_button_pressed_locally:
+            if self._mouse_over:
+                return "pressed"
+            else:
+                return "cancelled"
         elif self._mouse_over:
             return "hover"
         else:
@@ -1028,26 +1047,59 @@ class GuiWidget(BaseResource):
         self,
         button: MouseButton,
         action: ButtonAction,
-    ) -> bool:
-        # Only handle mouse button release events for now.
-        if action != "release":
-            return False
+        click_handled: bool | None,
+    ):
+        if action == "press":
+            assert click_handled is None, "click_handled must be None for press action"
 
-        # Propagate to children first (topmost first).
-        for child in reversed(self._child_widget_list):
-            if child._receive_mouse_button_action(button=button, action=action):
-                return True
+            # Set pressed state if mouse is over this widget
+            if self._mouse_over:
+                self._mouse_button_pressed_locally = True
+            # Propagate press events to children first (topmost first)
+            for child in reversed(self._child_widget_list):
+                if child._receive_mouse_button_action(
+                    button=button,
+                    action=action,
+                    click_handled=None,
+                ):
+                    return True
+            return self._mouse_button_pressed_locally
+        elif action == "release":
+            assert click_handled is not None, (
+                "click_handled must be provided for release action"
+            )
+
+            # Clear pressed state
+            self._mouse_button_pressed_locally = False
+
+            # Propagate to children first (topmost first) if not click_handled:
+            for child in reversed(self._child_widget_list):
+                click_handled = child._receive_mouse_button_action(
+                    button=button,
+                    action=action,
+                    click_handled=click_handled,
+                )
+
+            # Invoke the click handler if mouse is over and click not yet handled.
+            if self._mouse_over and not click_handled:
+                click_handled = self._on_click(button=button)
+
+            # Return whether the click was handled.
+            return click_handled
         else:
-            # No child handled it, try to handle it ourselves.
+            assert click_handled is None, (
+                "click_handled must be None for non-press/release actions"
+            )
 
-            # Only handle if mouse is over.
-            # This means a widget cannot be clicked if the mouse is outside its bounds,
-            # even if it has children outside its bounds.
-            if not self._mouse_over:
-                return False
-
-            # Invoke the click handler.
-            return self._on_click(button=button)
+            # Handle other actions (repeat, etc.) by propagating to children
+            for child in reversed(self._child_widget_list):
+                if child._receive_mouse_button_action(
+                    button=button,
+                    action=action,
+                    click_handled=None,
+                ):
+                    return True
+            return False
 
     def _intersect_point(self, x: int, y: int) -> bool:
         rx, ry, rw, rh = self._xywh

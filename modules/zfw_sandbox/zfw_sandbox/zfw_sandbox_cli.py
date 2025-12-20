@@ -69,8 +69,8 @@ def main():
         enable_gui=True,
     )
 
-    # start_widget = MainMenuWidget(engine=engine)
-    start_widget = UniversalPaperclipsWidget(engine=engine)
+    start_widget = MainMenuWidget(engine=engine)
+    # start_widget = UniversalPaperclipsWidget(engine=engine)
 
     engine.window.set_central_widget(start_widget)
 
