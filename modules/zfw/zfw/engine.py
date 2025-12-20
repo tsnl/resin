@@ -48,8 +48,8 @@ class Engine(BaseResource):
             # Create window, GPU surface:
             self._window = GuiWindow(
                 gui_context=self._gui_context,
-                width=1280,
-                height=720,
+                width_dip=1280,
+                height_dip=720,
                 title=app_name,
                 theme=gui_theme,
             )

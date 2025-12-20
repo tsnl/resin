@@ -250,8 +250,10 @@ type GuiCursorMode = Literal["cursor", "joystick"]
 
 
 class GuiWindow(BaseResource):
-    _width: int
-    _height: int
+    _width_dip: int
+    _height_dip: int
+    _width_px: int
+    _height_px: int
     _title: str
     _theme: GuiTheme
     _glfw_window_handle: glfw._GLFWwindow
@@ -270,16 +272,18 @@ class GuiWindow(BaseResource):
         self,
         *,
         gui_context: GuiContext,
-        width: int,
-        height: int,
+        width_dip: int,
+        height_dip: int,
         title: str,
         theme: GuiTheme | None = None,
     ) -> None:
         super().__init__(parent_resource=gui_context)
 
         self._gui_context = gui_context
-        self._width = width
-        self._height = height
+        self._width_dip = width_dip
+        self._height_dip = height_dip
+        self._width_px = 0
+        self._height_px = 0
         self._title = title
         self._resizable = True
         self._theme = theme or DEFAULT_THEME
@@ -307,8 +311,8 @@ class GuiWindow(BaseResource):
         glfw.window_hint(glfw.RESIZABLE, int(self._resizable))
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw_window = glfw.create_window(
-            width=self._width,
-            height=self._height,
+            width=self._width_dip,
+            height=self._height_dip,
             title=self._title,
             monitor=None,
             share=None,
@@ -347,6 +351,11 @@ class GuiWindow(BaseResource):
             window=glfw_window,
             cbfun=self._on_framebuffer_resize_event,
         )
+
+        # Update window sizes:
+        width_px, height_px = glfw.get_framebuffer_size(glfw_window)
+        self._width_px = width_px
+        self._height_px = height_px
 
         # Return the created GLFW window handle
         return glfw_window
@@ -414,8 +423,8 @@ class GuiWindow(BaseResource):
         # Get current framebuffer size
         current_width = self._gpu_surface.width
         current_height = self._gpu_surface.height
-        framebuffer_width = self._width
-        framebuffer_height = self._height
+        framebuffer_width = self._width_px
+        framebuffer_height = self._height_px
 
         # Ignore resize if dimensions are zero (window minimized or not yet sized)
         if framebuffer_width <= 0 or framebuffer_height <= 0:
@@ -528,11 +537,14 @@ class GuiWindow(BaseResource):
     def _on_framebuffer_resize_event(
         self,
         _glfw_window_handle: glfw._GLFWwindow,
-        width: int,
-        height: int,
+        width_px: int,
+        height_px: int,
     ):
-        self._width = width
-        self._height = height
+        xs, ys = glfw.get_window_content_scale(self._glfw_window_handle)
+        self._width_dip = int(round(width_px / xs))
+        self._height_dip = int(round(height_px / ys))
+        self._width_px = width_px
+        self._height_px = height_px
         self._update_layout()
 
     def render(self, canvas: Canvas) -> None:
@@ -576,8 +588,8 @@ class GuiWindow(BaseResource):
 
         solver.addEditVariable(self._w_var, "strong")
         solver.addEditVariable(self._h_var, "strong")
-        solver.suggestValue(self._w_var, self._width)
-        solver.suggestValue(self._h_var, self._height)
+        solver.suggestValue(self._w_var, self._width_dip)
+        solver.suggestValue(self._h_var, self._height_dip)
 
         self._central_widget._setup_constraints(
             solver,
