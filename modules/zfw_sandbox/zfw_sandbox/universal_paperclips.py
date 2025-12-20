@@ -56,21 +56,21 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
             text="Quit",
         )
 
-        @self._new_game_button_widget.click.subscribe()
+        @self._new_game_button_widget.click_event.subscribe()
         def new_game_button_click(button: zfw.MouseButton):
             self._engine.window.push_central_widget(
                 UniversalPaperclipsWidget(engine=self._engine),
             )
 
-        @self._load_game_button_widget.click.subscribe()
+        @self._load_game_button_widget.click_event.subscribe()
         def load_game_button_click(button: zfw.MouseButton):
             raise NotImplementedError()
 
-        @self._settings_button_widget.click.subscribe()
+        @self._settings_button_widget.click_event.subscribe()
         def settings_button_click(button: zfw.MouseButton):
             raise NotImplementedError()
 
-        @self._quit_button_widget.click.subscribe()
+        @self._quit_button_widget.click_event.subscribe()
         def quit_button_click(button: zfw.MouseButton):
             engine.window.pop_central_widget()
 
@@ -276,64 +276,86 @@ _MARGIN = 4
 
 _THEME = {
     "central": {
-        "bg_color": (1.0, 1.0, 1.0, 1.0),
-        "bg_hover_color": (1.0, 1.0, 1.0, 1.0),
+        "default": {
+            "bg_color": (1.0, 1.0, 1.0, 1.0),
+        },
+        "hover": {
+            "bg_color": (1.0, 1.0, 1.0, 1.0),
+        },
     },
     "module": {
-        "margin": (10, 10, 10, 10),
-        "padding": (10, 10, 10, 10),
+        "default": {
+            "margin": (10, 10, 10, 10),
+            "padding": (10, 10, 10, 10),
+        },
     },
     "label": {
-        "bg_color": (1.0, 1.0, 1.0, 0.0),
-        "fg_color": (0.0, 0.0, 0.0, 1.0),
-        "font": "serif",
-        "font_size_dip": 18,
-        "padding": (2, 5, 2, 5),
-        "text_horizontal_alignment": "left",
-        "text_vertical_alignment": "middle",
+        "default": {
+            "bg_color": (1.0, 1.0, 1.0, 0.0),
+            "fg_color": (0.0, 0.0, 0.0, 1.0),
+            "font": "serif",
+            "font_size_dip": 18,
+            "padding": (2, 5, 2, 5),
+            "text_horizontal_alignment": "left",
+            "text_vertical_alignment": "middle",
+        },
     },
     "button": {
-        "padding": (0, 0, 0, 0),
-        "margin": (_MARGIN,) * 4,
-        "text_horizontal_alignment": "center",
-        "text_vertical_alignment": "middle",
+        "default": {
+            "padding": (0, 0, 0, 0),
+            "margin": (_MARGIN,) * 4,
+            "text_horizontal_alignment": "center",
+            "text_vertical_alignment": "middle",
+        },
     },
     "h1": {
-        "bg_color": (1.0,) * 4,
-        "fg_color": (0.0, 0.0, 0.0, 1.0),
-        "font_size_dip": 28,
-        "font": "serif",
-        "text_horizontal_alignment": "center",
-        "text_vertical_alignment": "middle",
+        "default": {
+            "bg_color": (1.0,) * 4,
+            "fg_color": (0.0, 0.0, 0.0, 1.0),
+            "font_size_dip": 28,
+            "font": "serif",
+            "text_horizontal_alignment": "center",
+            "text_vertical_alignment": "middle",
+        },
     },
     "h2": {
-        "bg_color": (1.0,) * 4,
-        "fg_color": (0.0, 0.0, 0.0, 1.0),
-        "font_size_dip": 22,
-        "font": "serif",
-        "border_color": (0.0, 0.0, 0.0, 1.0),
-        "border_thickness": (0, 0, 2, 0),
-        "padding": (5, 5, 5, 5),
+        "default": {
+            "bg_color": (1.0,) * 4,
+            "fg_color": (0.0, 0.0, 0.0, 1.0),
+            "font_size_dip": 22,
+            "font": "serif",
+            "border_color": (0.0, 0.0, 0.0, 1.0),
+            "border_thickness": (0, 0, 2, 0),
+            "padding": (5, 5, 5, 5),
+        },
     },
     "paperclip-counter": {
-        "text_horizontal_alignment": "left",
-        "text_vertical_alignment": "top",
+        "default": {
+            "text_horizontal_alignment": "left",
+            "text_vertical_alignment": "top",
+        },
     },
     "console": {
-        "font": "monospaced",
-        "text_horizontal_alignment": "left",
-        "text_vertical_alignment": "top",
-        "wrap": True,
-        "bg_color": (0.0, 0.0, 0.0, 1.0),
-        "fg_color": (0.9, 0.9, 0.9, 1.0),
-        "margin": (_MARGIN,) * 4,
-        "border_color": (0.5, 0.5, 0.5, 1.0),
-        "border_thickness": (2, 2, 2, 2),
+        "default": {
+            "font": "monospaced",
+            "text_horizontal_alignment": "left",
+            "text_vertical_alignment": "top",
+            "wrap": True,
+            "bg_color": (0.0, 0.0, 0.0, 1.0),
+            "fg_color": (0.9, 0.9, 0.9, 1.0),
+            "margin": (_MARGIN,) * 4,
+            "border_color": (0.5, 0.5, 0.5, 1.0),
+            "border_thickness": (2, 2, 2, 2),
+        },
     },
     "button-pair-left": {
-        "margin": (_MARGIN, _MARGIN // 2, _MARGIN, _MARGIN),
+        "default": {
+            "margin": (_MARGIN, _MARGIN // 2, _MARGIN, _MARGIN),
+        },
     },
     "button-pair-right": {
-        "margin": (_MARGIN, _MARGIN, _MARGIN, _MARGIN // 2),
+        "default": {
+            "margin": (_MARGIN, _MARGIN, _MARGIN, _MARGIN // 2),
+        },
     },
 }

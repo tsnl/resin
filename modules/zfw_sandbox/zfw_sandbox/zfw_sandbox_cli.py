@@ -45,7 +45,7 @@ class MainMenuWidget(zfw.GuiWidget):
 
         self._universal_paperclips_widget = None
 
-        @self._universal_paperclips_button.click.subscribe()
+        @self._universal_paperclips_button.click_event.subscribe()
         def universal_paperclips_button_click(button: zfw.MouseButton):
             if self._universal_paperclips_widget is None:
                 self._universal_paperclips_widget = UniversalPaperclipsMainMenuWidget(

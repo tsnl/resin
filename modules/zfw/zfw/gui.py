@@ -14,7 +14,6 @@ Widget stacking order:
 """
 
 __all__ = [
-    "DEFAULT_THEME",
     "GuiContext",
     "GuiCursorMode",
     "GuiTheme",
@@ -135,94 +134,122 @@ class GuiWidgetStyle:
     font_size_dip: int = 14
     font_weight: int = 400
     bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
-    bg_hover_color: tuple[float, float, float, float] | None = None
-    # When not clickable: background colors (default to same color, no hover light-up)
-    unclickable_bg_color: tuple[float, float, float, float] | None = None
-    unclickable_bg_hover_color: tuple[float, float, float, float] | None = None
     fg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
-    fg_hover_color: tuple[float, float, float, float] | None = None
-    # When not clickable: foreground color (default no hover change)
-    unclickable_fg_color: tuple[float, float, float, float] | None = None
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0)
-    hover_border_color: tuple[float, float, float, float] | None = None
-    hover_border_thickness: tuple[int, int, int, int] | None = None
-    # When not clickable: border styles (default no hover change)
-    unclickable_border_color: tuple[float, float, float, float] | None = None
-    unclickable_border_thickness: tuple[int, int, int, int] | None = None
-    unclickable_hover_border_color: tuple[float, float, float, float] | None = None
-    unclickable_hover_border_thickness: tuple[int, int, int, int] | None = None
     padding: tuple[int, int, int, int] = (0, 0, 0, 0)
     margin: tuple[int, int, int, int] = (0, 0, 0, 0)
     text_horizontal_alignment: HorizontalAlignment = "center"
     text_vertical_alignment: VerticalAlignment = "middle"
     wrap: bool = False
     image_layout: GuiImageLayout = "fit"
-    image_hover_layout: GuiImageLayout = "fit"
 
 
-type GuiTheme = dict[str, JsonObject]
+type GuiWidgetState = Literal["default", "hover", "unclickable"]
+type GuiTheme = dict[str, dict[GuiWidgetState, JsonObject]]
 
 
-DEFAULT_THEME: GuiTheme = {
+_DEFAULT_THEME: GuiTheme = {
     "central": {
-        "bg_color": (0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
-        "border_color": (0.0, 0.0, 0.0, 0.0),
-        "border_thickness": (0, 0, 0, 0),
-        "padding": (0, 0, 0, 0),
+        "default": {
+            "bg_color": (
+                0.925,
+                0.925,
+                0.925,
+                1.0,
+            ),  # Light gray background (Windows XP)
+            "border_color": (0.0, 0.0, 0.0, 0.0),
+            "border_thickness": (0, 0, 0, 0),
+            "padding": (0, 0, 0, 0),
+        }
     },
     "label": {
-        "bg_color": (0.925, 0.925, 0.925, 1.0),  # Light gray background (Windows XP)
-        "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
+        "default": {
+            "bg_color": (
+                0.925,
+                0.925,
+                0.925,
+                1.0,
+            ),
+            "fg_color": (0.0, 0.0, 0.0, 1.0),
+        },
     },
     "button": {
-        "bg_color": (0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
-        "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
-        "unclickable_fg_color": (0.35, 0.35, 0.35, 1.0),
-        "bg_hover_color": (0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
-        "unclickable_bg_color": (0.82, 0.82, 0.82, 1.0),
-        "unclickable_bg_hover_color": (0.82, 0.82, 0.82, 1.0),
-        "border_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
-        "border_thickness": (1, 1, 1, 1),
-        "hover_border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
-        "hover_border_thickness": (1, 1, 1, 1),
-        "unclickable_border_color": (0.65, 0.65, 0.65, 1.0),
-        "unclickable_border_thickness": (1, 1, 1, 1),
-        "unclickable_hover_border_color": (0.65, 0.65, 0.65, 1.0),
-        "unclickable_hover_border_thickness": (1, 1, 1, 1),
-        "padding": (5, 5, 5, 5),
-        "margin": (10, 10, 10, 10),
+        "default": {
+            "bg_color": (0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
+            "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
+            "border_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
+            "border_thickness": (1, 1, 1, 1),
+            "padding": (5, 5, 5, 5),
+            "margin": (10, 10, 10, 10),
+        },
+        "hover": {
+            "bg_color": (0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
+            "border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
+        },
+        "unclickable": {
+            "fg_color": (0.35, 0.35, 0.35, 1.0),
+            "bg_color": (0.82, 0.82, 0.82, 1.0),
+            "border_color": (0.65, 0.65, 0.65, 1.0),
+            "border_thickness": (1, 1, 1, 1),
+        },
     },
     "h1": {
-        "font_size_dip": 32,
-        "font_weight": 1000,
-        "fg_color": (1.0, 1.0, 1.0, 1.0),  # White text
-        "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
+        "default": {
+            "font_size_dip": 32,
+            "font_weight": 1000,
+            "fg_color": (1.0, 1.0, 1.0, 1.0),  # White text
+            "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
+        },
     },
     "h2": {
-        "font_size_dip": 24,
-        "font_weight": 800,
-        "fg_color": (0.0, 0.0, 0.0, 1.0),
+        "default": {
+            "font_size_dip": 24,
+            "font_weight": 800,
+            "fg_color": (0.0, 0.0, 0.0, 1.0),
+        },
     },
 }
 
 
 def _eval_theme(theme: GuiTheme, override: GuiTheme) -> GuiTheme:
-    all_keys = set(theme.keys()) | set(override.keys())
-    return {key: {**theme.get(key, {}), **override.get(key, {})} for key in all_keys}
+    res = {}
+
+    for class_name in set(theme.keys()) | set(override.keys()):
+        res[class_name] = {}
+
+        theme_dicts = theme.get(class_name, {})
+        override_dicts = override.get(class_name, {})
+
+        res[class_name] = {
+            state_name: {
+                **theme_dicts.get(state_name, {}),
+                **override_dicts.get(state_name, {}),
+            }
+            for state_name in set(theme_dicts.keys()) | set(override_dicts.keys())
+        }
+
+    return res
 
 
-def _eval_style(theme: GuiTheme, class_names: list[str]) -> GuiWidgetStyle:
+def _eval_style(
+    theme: GuiTheme,
+    class_names: list[str],
+    state: GuiWidgetState,
+) -> GuiWidgetStyle:
     for class_name in class_names:
         if class_name not in theme:
             raise LogicError(f"Style class name not found in theme: {class_name!r}")
 
     d = {}
     for class_name in class_names:
-        style_data = theme.get(class_name)
-        if style_data is None:
-            raise LogicError(f"Style class name not found in theme: {class_name!r}")
-        d |= style_data
+        per_state_style_dicts = theme[class_name]
+
+        d |= per_state_style_dicts.get("default", {})
+
+        if state != "default":
+            d |= per_state_style_dicts.get(state, {})
+
     return GuiWidgetStyle(**d)
 
 
@@ -275,6 +302,7 @@ class GuiWindow(BaseResource):
         width_dip: int,
         height_dip: int,
         title: str,
+        resizable: bool = True,
         theme: GuiTheme | None = None,
     ) -> None:
         super().__init__(parent_resource=gui_context)
@@ -285,8 +313,8 @@ class GuiWindow(BaseResource):
         self._width_px = 0
         self._height_px = 0
         self._title = title
-        self._resizable = True
-        self._theme = theme or DEFAULT_THEME
+        self._resizable = resizable
+        self._theme = theme or _DEFAULT_THEME
 
         self._glfw_window_handle = self._new_glfw_window()
         self._gpu_surface = self._new_gpu_surface()
@@ -389,8 +417,24 @@ class GuiWindow(BaseResource):
         # Create a new surface with the current framebuffer size
         self._gpu_surface = self._new_gpu_surface()
 
+    #
+    # Resource disposal:
+    #
+
+    def _on_dispose_resource(self) -> None:
+        if self._gpu_swap_chain is not None:
+            self._gpu_swap_chain.dispose_resource()
+        super()._on_dispose_resource()
+        glfw.destroy_window(self._glfw_window_handle)
+
+    #
+    # Swapchain management, setting a GPU device:
+    #
+
     def set_gpu_device(
-        self, gpu_device: GpuDevice, swapchain_image_count: int = 3
+        self,
+        gpu_device: GpuDevice,
+        swapchain_image_count: int = 3,
     ) -> None:
         """Set the GPU device and create the swapchain."""
         self._gpu_device = gpu_device
@@ -414,38 +458,39 @@ class GuiWindow(BaseResource):
             image_count=self._swapchain_image_count,
         )
 
-    def handle_resize(self) -> bool:
-        """
-        Check if the window was resized and recreate the GPU surface if needed.
+    #
+    # Central widget management:
+    #
 
-        Returns True if a resize occurred and the surface was recreated, False otherwise.
-        """
-        # Get current framebuffer size
-        current_width = self._gpu_surface.width
-        current_height = self._gpu_surface.height
-        framebuffer_width = self._width_px
-        framebuffer_height = self._height_px
+    @property
+    def central_widget(self) -> "GuiWidget":
+        """Get the central widget that occupies the full window area."""
+        assert self._central_widget is not None
+        return self._central_widget
 
-        # Ignore resize if dimensions are zero (window minimized or not yet sized)
-        if framebuffer_width <= 0 or framebuffer_height <= 0:
-            return False
+    def set_central_widget(self, widget: "GuiWidget") -> None:
+        """Set the central widget that occupies the full window area."""
+        self._central_widget = widget
+        self.update_layout()
 
-        # Check if size has changed
-        if current_width != framebuffer_width or current_height != framebuffer_height:
-            # Recreate the GPU surface with the new size
-            self._recreate_gpu_surface()
-            # Recreate the swapchain if device is set
-            if self._gpu_device is not None:
-                self._create_swapchain()
-            return True
+    def push_central_widget(self, widget: "GuiWidget") -> None:
+        """Push a new central widget onto the stack."""
+        if self._central_widget is not None:
+            self._central_widget_stack.append(self._central_widget)
+        self._central_widget = widget
+        self.update_layout()
 
-        return False
+    def pop_central_widget(self) -> None:
+        """Pop the current central widget and restore the previous one."""
+        if self._central_widget_stack:
+            self._central_widget = self._central_widget_stack.pop()
+            self.update_layout()
+        else:
+            self._central_widget = None
 
-    def _on_dispose_resource(self) -> None:
-        if self._gpu_swap_chain is not None:
-            self._gpu_swap_chain.dispose_resource()
-        super()._on_dispose_resource()
-        glfw.destroy_window(self._glfw_window_handle)
+    #
+    # Window management:
+    #
 
     def should_close(self) -> bool:
         return glfw.window_should_close(self._glfw_window_handle)
@@ -481,6 +526,46 @@ class GuiWindow(BaseResource):
     @property
     def content_scale(self) -> tuple[float, float]:
         return glfw.get_window_content_scale(self._glfw_window_handle)
+
+    #
+    # Phase 1: update style:
+    #
+
+    def update_style(self) -> None:
+        if self._central_widget is None:
+            return
+        self._central_widget._update_style()
+
+    #
+    # Phase 2: update layout
+    #
+
+    def update_layout(self):
+        if self._central_widget is None:
+            return
+
+        solver = self._gui_context._kiwi_solver
+
+        solver.reset()
+
+        solver.addEditVariable(self._w_var, "strong")
+        solver.addEditVariable(self._h_var, "strong")
+        solver.suggestValue(self._w_var, self._width_dip)
+        solver.suggestValue(self._h_var, self._height_dip)
+
+        self._central_widget._update_layout_constraints(
+            solver,
+            0.0,
+            0.0,
+            self._w_var,
+            self._h_var,
+        )
+
+        solver.updateVariables()
+
+    #
+    # Phase 3: input events:
+    #
 
     @staticmethod
     def poll_events():
@@ -529,7 +614,7 @@ class GuiWindow(BaseResource):
 
         _ = dx, dy  # Currently unused
 
-        self._central_widget._receive_mouse_position(
+        self._central_widget._receive_mouse_position_change(
             mouse_x_dip=int(round(x)),
             mouse_y_dip=int(round(y)),
         )
@@ -545,64 +630,63 @@ class GuiWindow(BaseResource):
         self._height_dip = int(round(height_px / ys))
         self._width_px = width_px
         self._height_px = height_px
-        self._update_layout()
+        self._handle_resize_for_gpu_surface()
+
+    def _handle_resize_for_gpu_surface(self) -> bool:
+        """
+        Check if the window was resized and recreate the GPU surface if needed.
+
+        Returns True if a resize occurred and the surface was recreated, False otherwise.
+        """
+        # Get current framebuffer size
+        current_width = self._gpu_surface.width
+        current_height = self._gpu_surface.height
+        framebuffer_width = self._width_px
+        framebuffer_height = self._height_px
+
+        # Ignore resize if dimensions are zero (window minimized or not yet sized)
+        if framebuffer_width <= 0 or framebuffer_height <= 0:
+            return False
+
+        # Check if size has changed
+        if current_width != framebuffer_width or current_height != framebuffer_height:
+            # Recreate the GPU surface with the new size
+            self._recreate_gpu_surface()
+            # Recreate the swapchain if device is set
+            if self._gpu_device is not None:
+                self._create_swapchain()
+            return True
+
+        return False
+
+    #
+    # Render:
+    #
 
     def render(self, canvas: Canvas) -> None:
         if self._central_widget is None:
             return
         self._central_widget._render(canvas)
 
-    @property
-    def central_widget(self) -> "GuiWidget":
-        """Get the central widget that occupies the full window area."""
-        assert self._central_widget is not None
-        return self._central_widget
-
-    def set_central_widget(self, widget: "GuiWidget") -> None:
-        """Set the central widget that occupies the full window area."""
-        self._central_widget = widget
-        self._update_layout()
-
-    def push_central_widget(self, widget: "GuiWidget") -> None:
-        """Push a new central widget onto the stack."""
-        if self._central_widget is not None:
-            self._central_widget_stack.append(self._central_widget)
-        self._central_widget = widget
-        self._update_layout()
-
-    def pop_central_widget(self) -> None:
-        """Pop the current central widget and restore the previous one."""
-        if self._central_widget_stack:
-            self._central_widget = self._central_widget_stack.pop()
-            self._update_layout()
-        else:
-            self._central_widget = None
-
-    def _update_layout(self):
-        if self._central_widget is None:
-            return
-
-        solver = self._gui_context._kiwi_solver
-
-        solver.reset()
-
-        solver.addEditVariable(self._w_var, "strong")
-        solver.addEditVariable(self._h_var, "strong")
-        solver.suggestValue(self._w_var, self._width_dip)
-        solver.suggestValue(self._h_var, self._height_dip)
-
-        self._central_widget._setup_constraints(
-            solver,
-            0.0,
-            0.0,
-            self._w_var,
-            self._h_var,
-        )
-
-        solver.updateVariables()
-
 
 class GuiWidget(BaseResource):
+    """
+    A single multi-purpose GUI widget.
+    - Contains a background image, text, borders, children in a grid layout.
+    - CSS-like styling via style classes and overrides (hover, unclickable, etc).
+    - Event processing loop order:
+        1.  Update style based on previous state (hover, clicked, etc).
+            The margin, border, and padding may affect the state (hover, clicked, etc)
+            by affecting the bounding box of the widget or its layout children.
+        2.  Update layout constraints based on style (margin, border, padding, etc).
+            Solve layout constraints.
+            This ensures the widget and its children have up-to-date positions and
+            sizes given the current layout.
+        3.  Update internal state (hover, clicked, etc) using input events and style:
+            mouse move, mouse button, key press, etc.
+        4.  Render self and children.
+    """
+
     _parent_widget: "GuiWidget | None"
     _window: "GuiWindow"
     _gui_context: "GuiContext"
@@ -637,6 +721,8 @@ class GuiWidget(BaseResource):
 
     # Events
     _click_event_hub: EventHub["MouseButton"]
+    _mouse_over_changed_event_hub: EventHub[bool]
+    _mouse_move_event_hub: EventHub[tuple[int, int]]
 
     # Bounding box in DIP (computed during layout)
     _x: KiwiVariable
@@ -706,13 +792,15 @@ class GuiWidget(BaseResource):
         self._image_hover_src_wh = image_hover_src_wh
         self._image_hover_layout = image_hover_layout or image_layout
         self._style_classes = style_classes or ["label"]
-        self._cached_style = _eval_style(self._theme, self._style_classes)
+        self._style = _eval_style(self._theme, self._style_classes, "default")
         self._clickable = clickable
 
         if self._parent_widget is not None:
             self._parent_widget._add_child_widget(self)
 
         self._click_event_hub = EventHub["MouseButton"]()
+        self._mouse_over_changed_event_hub = EventHub[bool]()
+        self._mouse_move_event_hub = EventHub[tuple[int, int]]()
 
         # Layout variables:
         self._x = KiwiVariable(f"{repr(self)}::x")
@@ -751,14 +839,69 @@ class GuiWidget(BaseResource):
         parent_widget: "GuiWidget | None",
     ) -> GuiTheme:
         return _eval_theme(
-            parent_widget._theme if parent_widget is not None else DEFAULT_THEME,
+            parent_widget._theme if parent_widget is not None else _DEFAULT_THEME,
             theme or {},
         )
 
     def _add_child_widget(self, child_widget: "GuiWidget") -> None:
         self._child_widget_list.append(child_widget)
 
-    def _setup_constraints(
+    #
+    # Dispose resources:
+    #
+
+    def _on_dispose_resource(self) -> None:
+        for child in self._child_widget_list:
+            child.dispose_resource()
+
+    #
+    # Event hubs:
+    #
+
+    @property
+    def click_event(self) -> EventHub["MouseButton"]:
+        return self._click_event_hub
+
+    @property
+    def mouse_over_changed_event(self) -> EventHub[bool]:
+        return self._mouse_over_changed_event_hub
+
+    #
+    # Layout accessors:
+    #
+
+    @property
+    def _xywh(self) -> tuple[int, int, int, int]:
+        return (
+            int(round(self._x.value())),
+            int(round(self._y.value())),
+            int(round(self._w.value())),
+            int(round(self._h.value())),
+        )
+
+    #
+    # Phase 1: update style based on previous state:
+    #
+
+    def _update_style(self) -> None:
+        state: GuiWidgetState = (
+            "unclickable"
+            if not self._clickable
+            else "hover"
+            if self._mouse_over
+            else "default"
+        )
+        self._style = _eval_style(
+            theme=self._theme,
+            class_names=self._style_classes,
+            state=state,
+        )
+
+    #
+    # Phase 2: update layout constraints:
+    #
+
+    def _update_layout_constraints(
         self,
         solver: KiwiSolver,
         x: KiwiExpression | KiwiTerm | KiwiVariable | float,
@@ -767,17 +910,17 @@ class GuiWidget(BaseResource):
         h: KiwiExpression | KiwiTerm | KiwiVariable | float,
     ) -> None:
         # Setup own position constraints:
-        self._setup_xywh_constraints(solver=solver, x=x, y=y, w=w, h=h)
+        self._update_layout_constraints_for_xywh(solver=solver, x=x, y=y, w=w, h=h)
 
         # Setup grid layout constraints for children:
-        self._setup_grid_dim_layout_constraints(
+        self._update_layout_constraints_for_grid_dim(
             grid_hints=self._grid_row_size_hints,
             grid_vars=self._grid_row_size_vars,
             unit_var=self._grid_row_unit_var,
             total_var=self._h,
             solver=solver,
         )
-        self._setup_grid_dim_layout_constraints(
+        self._update_layout_constraints_for_grid_dim(
             grid_hints=self._grid_col_size_hints,
             grid_vars=self._grid_col_size_vars,
             unit_var=self._grid_col_unit_var,
@@ -786,9 +929,9 @@ class GuiWidget(BaseResource):
         )
 
         # Setup children's constraints:
-        self._setup_children_constraints(solver=solver)
+        self._update_layout_constraints_for_children(solver=solver)
 
-    def _setup_xywh_constraints(
+    def _update_layout_constraints_for_xywh(
         self,
         solver: KiwiSolver,
         x: KiwiExpression | KiwiTerm | KiwiVariable | float,
@@ -805,7 +948,7 @@ class GuiWidget(BaseResource):
         solver.addConstraint(self._h == h)
 
     @staticmethod
-    def _setup_grid_dim_layout_constraints(
+    def _update_layout_constraints_for_grid_dim(
         grid_hints: tuple[int, ...],
         grid_vars: list[KiwiVariable],
         unit_var: KiwiVariable,
@@ -822,7 +965,7 @@ class GuiWidget(BaseResource):
 
         solver.addConstraint(total_var == sum(grid_vars, 0.0))
 
-    def _setup_children_constraints(self, solver: KiwiSolver) -> None:
+    def _update_layout_constraints_for_children(self, solver: KiwiSolver) -> None:
         for child in self._child_widget_list:
             # Compute child's x, y, w, h based on grid layout:
             child_x = self._x + sum(
@@ -847,7 +990,7 @@ class GuiWidget(BaseResource):
             )
 
             # Setup child's constraints recursively:
-            child._setup_constraints(
+            child._update_layout_constraints(
                 solver=solver,
                 x=child_x,
                 y=child_y,
@@ -855,32 +998,11 @@ class GuiWidget(BaseResource):
                 h=child_h,
             )
 
-    @property
-    def click(self) -> EventHub["MouseButton"]:
-        return self._click_event_hub
+    #
+    # Phase 3: process input events:
+    #
 
-    @property
-    def mouse_over(self) -> bool:
-        return self._mouse_over
-
-    @property
-    def _xywh(self) -> tuple[int, int, int, int]:
-        return (
-            int(round(self._x.value())),
-            int(round(self._y.value())),
-            int(round(self._w.value())),
-            int(round(self._h.value())),
-        )
-
-    def set_grid_config(
-        self,
-        row_sizes: tuple[int, ...] | None = None,
-        col_sizes: tuple[int, ...] | None = None,
-    ) -> None:
-        self._grid_row_size_hints = row_sizes or (-1,)
-        self._grid_col_size_hints = col_sizes or (-1,)
-
-    def _receive_mouse_position(self, mouse_x_dip: int, mouse_y_dip: int):
+    def _receive_mouse_position_change(self, mouse_x_dip: int, mouse_y_dip: int):
         # OPTIMIZATION: early out if mouse position hasn't changed.
         if (mouse_x_dip, mouse_y_dip) == self._latest_global_mouse_pos:
             return
@@ -889,7 +1011,7 @@ class GuiWidget(BaseResource):
         is_over = self._intersect_point(mouse_x_dip, mouse_y_dip)
         if is_over != self._mouse_over:
             self._mouse_over = is_over
-            self._on_mouse_over_changed(mouse_x_dip, mouse_y_dip)
+            self._on_mouse_over_changed()
 
         # If mouse is over, call `_on_mouse_move`.
         if self._mouse_over:
@@ -904,7 +1026,7 @@ class GuiWidget(BaseResource):
         # Regardless of whether mouse is over, propagate to children.
         # Children may be outside parent's bounds.
         for child in self._child_widget_list:
-            child._receive_mouse_position(mouse_x_dip, mouse_y_dip)
+            child._receive_mouse_position_change(mouse_x_dip, mouse_y_dip)
 
     def _receive_mouse_button_action(
         self,
@@ -933,20 +1055,24 @@ class GuiWidget(BaseResource):
 
     def _intersect_point(self, x: int, y: int) -> bool:
         rx, ry, rw, rh = self._xywh
-        mt, mr, mb, ml = self._cached_style.margin
+        mt, mr, mb, ml = self._style.margin
         return rx + ml <= x < rx + rw - mr and ry + mt <= y < ry + rh - mb
 
-    def _on_mouse_over_changed(self, x_dip: int, y_dip: int) -> None:
-        pass
+    def _on_mouse_over_changed(self) -> None:
+        self._mouse_over_changed_event_hub.publish(self._mouse_over)
 
     def _on_mouse_move(self, x_dip: int, y_dip: int) -> None:
-        pass
+        self._mouse_move_event_hub.publish((x_dip, y_dip))
 
     def _on_click(self, button: MouseButton) -> bool:
         if not self._clickable:
             return False
         self._click_event_hub.publish(button)
         return True
+
+    #
+    # Render:
+    #
 
     def _render(self, canvas: Canvas) -> None:
         # Render self.
@@ -956,45 +1082,19 @@ class GuiWidget(BaseResource):
         for child in self._child_widget_list:
             child._render(canvas)
 
-    @staticmethod
-    def _parse_style_class_names(raw: str | list[str]) -> list[str]:
-        if isinstance(raw, list):
-            return raw
-        return [tag.strip() for tag in raw.split(" ") if tag.strip()]
-
-    @property
-    def is_clickable(self) -> bool:
-        return self._clickable
-
-    @is_clickable.setter
-    def is_clickable(self, value: bool) -> None:
-        self._clickable = value
-
     def _render_self(self, canvas: Canvas) -> None:
-        style = self._cached_style
+        # Get the latest style:
+        style = self._style
 
+        # Get position and size:
         x, y, w, h = self._xywh
         pt, pr, pb, pl = style.padding
+        bt, br, bb, bl = style.border_thickness
         mt, mr, mb, ml = style.margin
 
-        # Determine background color (respect unclickable variants)
-        if not self._clickable:
-            base_bg = style.unclickable_bg_color or style.bg_color
-            hover_bg = (
-                style.unclickable_bg_hover_color
-                if style.unclickable_bg_hover_color is not None
-                else base_bg
-            )
-            bg_color = hover_bg if self.mouse_over else base_bg
-        else:
-            base_bg = style.bg_color
-            hover_bg = (
-                style.bg_hover_color if style.bg_hover_color is not None else base_bg
-            )
-            bg_color = hover_bg if self.mouse_over else base_bg
-
-        # Determine image and layout
-        if self.mouse_over and self._image_hover is not None:
+        # Determine image and image layout
+        # TODO: move this image into style, so it's resolved during style eval.
+        if self._mouse_over and self._image_hover is not None:
             bg_image = self._image_hover
             image_src_xy = self._image_hover_src_xy
             image_src_wh = self._image_hover_src_wh
@@ -1006,7 +1106,7 @@ class GuiWidget(BaseResource):
             image_layout = self._image_layout
 
         # Compute src_xy and src_wh based on layout mode
-        dst_wh = (w - ml - mr, h - mt - mb)
+        dst_wh = (w - ml - mr - bl - br, h - mt - mb - bt - bb)
         src_xy, src_wh = _compute_image_src_xy_wh(
             dst_wh=dst_wh,
             image=bg_image,
@@ -1015,62 +1115,19 @@ class GuiWidget(BaseResource):
             user_src_wh=image_src_wh,
         )
 
-        # Determine border styles (respect unclickable variants)
-        if not self._clickable:
-            base_border_color = style.unclickable_border_color or style.border_color
-            base_border_thickness = (
-                style.unclickable_border_thickness or style.border_thickness
-            )
-            hover_border_color = (
-                style.unclickable_hover_border_color
-                if style.unclickable_hover_border_color is not None
-                else base_border_color
-            )
-            hover_border_thickness = (
-                style.unclickable_hover_border_thickness
-                if style.unclickable_hover_border_thickness is not None
-                else base_border_thickness
-            )
-            border_color = hover_border_color if self.mouse_over else base_border_color
-            border_thickness = (
-                hover_border_thickness if self.mouse_over else base_border_thickness
-            )
-        else:
-            border_color = (
-                style.hover_border_color
-                if (self.mouse_over and style.hover_border_color is not None)
-                else style.border_color
-            )
-            border_thickness = (
-                style.hover_border_thickness
-                if (self.mouse_over and style.hover_border_thickness is not None)
-                else style.border_thickness
-            )
-
-        # Determine foreground color
-        if not self._clickable:
-            fg_color = (
-                style.unclickable_fg_color
-                if style.unclickable_fg_color is not None
-                else style.fg_color
-            )
-        else:
-            fg_color = (
-                style.fg_hover_color
-                if (self.mouse_over and style.fg_hover_color is not None)
-                else style.fg_color
-            )
-
         # Draw background quad:
         canvas.add_quad(
-            dst_xy=(x + ml, y + mt),
+            dst_xy=(
+                x + ml + bl,
+                y + mt + bt,
+            ),
             dst_wh=dst_wh,
             src_xy=src_xy,
             src_wh=src_wh,
-            color=bg_color,
+            color=style.bg_color,
             image=bg_image,
-            border_color=border_color,
-            border_thickness=border_thickness,
+            border_color=style.border_color,
+            border_thickness=style.border_thickness,
         )
 
         # Draw text:
@@ -1080,17 +1137,19 @@ class GuiWidget(BaseResource):
                 font=style.font,
                 font_size_px=style.font_size_dip,
                 font_weight=style.font_weight,
-                dst_xy=(x + ml + pl, y + mt + pt),
-                dst_wh=(w - ml - mr - pl - pr, h - mt - mb - pt - pb),
-                color=fg_color,
+                dst_xy=(
+                    x + ml + bl + pl,
+                    y + mt + bt + pt,
+                ),
+                dst_wh=(
+                    w - ml - mr - bl - br - pl - pr,
+                    h - mt - mb - bt - bb - pt - pb,
+                ),
+                color=style.fg_color,
                 wrap=style.wrap,
                 horizontal_alignment=style.text_horizontal_alignment,
                 vertical_alignment=style.text_vertical_alignment,
             )
-
-    def _on_dispose_resource(self) -> None:
-        for child in self._child_widget_list:
-            child.dispose_resource()
 
 
 def _decode_glfw_action(action: int) -> ButtonAction:

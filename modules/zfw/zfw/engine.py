@@ -150,10 +150,22 @@ class Engine(BaseResource):
         print("</gpu-debug-info>")
 
     def update(self):
-        if self._window:
-            GuiWindow.poll_events()
-            # Check if window was resized and recreate surface/swapchain if needed
-            self._window.handle_resize()
+        if not self._window:
+            return
+
+        # This specific update order is important, and is documented in the docstring
+        # for `GuiWidget`.
+
+        # Update style:
+        self._window.update_style()
+
+        # Update layout:
+        self._window.update_layout()
+
+        # Receive input events:
+        GuiWindow.poll_events()
+
+        # Ready to 'render()'.
 
     def render(self):
         """Context manager for rendering a frame with quads."""
