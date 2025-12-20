@@ -49,7 +49,7 @@ class Engine(BaseResource):
             self._window = GuiWindow(
                 gui_context=self._gui_context,
                 width=1280,
-                height=960,
+                height=720,
                 title=app_name,
                 theme=gui_theme,
             )
