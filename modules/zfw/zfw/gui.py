@@ -2,15 +2,26 @@
 GUI widgets and window management.
 
 Each widget...
-- Is an event router for GuiEvents: it can receive and publish GuiEvents.
-- Has an axis-aligned position and size in device-independent pixels (DIP) relative to
-  its parent widget.
-- Can render itself on a Canvas.
-- May have child widgets that extend outside its bounds.
+-   Is multipurpose: usable as label, button, container, etc based on styling.
+-   Has a "state": default/hover/unclickable affecting style.
+    Default is normal state and is a base for other state-dependent styles.
+-   Contains a background image, text, borders, children in a grid layout.
+-   CSS-like styling via style classes and overrides (hover, unclickable, etc).
+-   Grid layout via constraint solver (kiwisolver).
+-   Event processing loop order:
+    1.  Update style based on previous state (hover, clicked, etc).
+        The margin, border, and padding may affect the state (hover, clicked, etc) by
+        affecting the bounding box of the widget or its layout children.
+    2.  Update layout constraints based on style (margin, border, padding, etc). Solve.
+        This ensures the widget and its children have up-to-date positions and sizes
+        given the current layout.
+    3.  Update state (hover, clicked, etc) using input events and style: mouse move,
+        mouse button, key press, etc.
+    4.  Render self and children.
 
 Widget stacking order:
-- parent always below children
-- among siblings, later added always above earlier added
+- parent always below children.
+- among siblings, later added always above earlier added.
 """
 
 __all__ = [
@@ -244,11 +255,8 @@ def _eval_style(
     d = {}
     for class_name in class_names:
         per_state_style_dicts = theme[class_name]
-
         d |= per_state_style_dicts.get("default", {})
-
-        if state != "default":
-            d |= per_state_style_dicts.get(state, {})
+        d |= per_state_style_dicts.get(state, {})
 
     return GuiWidgetStyle(**d)
 
@@ -670,23 +678,6 @@ class GuiWindow(BaseResource):
 
 
 class GuiWidget(BaseResource):
-    """
-    A single multi-purpose GUI widget.
-    - Contains a background image, text, borders, children in a grid layout.
-    - CSS-like styling via style classes and overrides (hover, unclickable, etc).
-    - Event processing loop order:
-        1.  Update style based on previous state (hover, clicked, etc).
-            The margin, border, and padding may affect the state (hover, clicked, etc)
-            by affecting the bounding box of the widget or its layout children.
-        2.  Update layout constraints based on style (margin, border, padding, etc).
-            Solve layout constraints.
-            This ensures the widget and its children have up-to-date positions and
-            sizes given the current layout.
-        3.  Update internal state (hover, clicked, etc) using input events and style:
-            mouse move, mouse button, key press, etc.
-        4.  Render self and children.
-    """
-
     _parent_widget: "GuiWidget | None"
     _window: "GuiWindow"
     _gui_context: "GuiContext"
