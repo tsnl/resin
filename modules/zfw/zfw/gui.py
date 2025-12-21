@@ -617,7 +617,7 @@ class GuiWindow(BaseResource):
         self._central_widget._receive_mouse_button_action(
             button=button,
             action=action,
-            click_handled=False if action == "release" else None,
+            click_handled=False,
         )
 
     def _on_glfw_cursor_pos_event(
@@ -1047,29 +1047,27 @@ class GuiWidget(BaseResource):
         self,
         button: MouseButton,
         action: ButtonAction,
-        click_handled: bool | None,
-    ):
+        click_handled: bool,
+    ) -> bool:
         if action == "press":
-            assert click_handled is None, "click_handled must be None for press action"
+            assert not click_handled, "click_handled must be False for press action"
 
             # Set pressed state if mouse is over this widget
-            if self._mouse_over:
-                self._mouse_button_pressed_locally = True
+            self._mouse_button_pressed_locally = self._mouse_over
+
             # Propagate press events to children first (topmost first)
             for child in reversed(self._child_widget_list):
-                if child._receive_mouse_button_action(
+                child._receive_mouse_button_action(
                     button=button,
                     action=action,
-                    click_handled=None,
-                ):
-                    return True
-            return self._mouse_button_pressed_locally
-        elif action == "release":
-            assert click_handled is not None, (
-                "click_handled must be provided for release action"
-            )
+                    click_handled=False,
+                )
 
+            # Press action does not handle clicks, so always return False
+            return False
+        elif action == "release":
             # Clear pressed state
+            was_pressed_locally = self._mouse_button_pressed_locally
             self._mouse_button_pressed_locally = False
 
             # Propagate to children first (topmost first) if not click_handled:
@@ -1080,26 +1078,17 @@ class GuiWidget(BaseResource):
                     click_handled=click_handled,
                 )
 
-            # Invoke the click handler if mouse is over and click not yet handled.
-            if self._mouse_over and not click_handled:
+            # Invoke the click handler if...
+            # - click not yet handled
+            # - mouse is over this widget
+            # - this widget was pressed locally (otherwise, it's not a valid click)
+            if not click_handled and self._mouse_over and was_pressed_locally:
                 click_handled = self._on_click(button=button)
 
-            # Return whether the click was handled.
+            # Return whether click was handled
             return click_handled
         else:
-            assert click_handled is None, (
-                "click_handled must be None for non-press/release actions"
-            )
-
-            # Handle other actions (repeat, etc.) by propagating to children
-            for child in reversed(self._child_widget_list):
-                if child._receive_mouse_button_action(
-                    button=button,
-                    action=action,
-                    click_handled=None,
-                ):
-                    return True
-            return False
+            raise NotImplementedError(f"Unknown button action: {action!r}")
 
     def _intersect_point(self, x: int, y: int) -> bool:
         rx, ry, rw, rh = self._xywh
