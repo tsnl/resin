@@ -22,7 +22,7 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
             row=0,
             col=0,
             col_span=3,
-            style_classes=["h1"],
+            style_classes=["h1", "title"],
             text="Universal Paperclips",
         )
         self._new_game_button_widget = zfw.GuiWidget(
@@ -280,6 +280,12 @@ _THEME = {
         "hover": {
             "bg_color": (1.0, 1.0, 1.0, 1.0),
         },
+    },
+    "title": {
+        "default": {
+            "bg_color": (0.0, 0.0, 0.0, 1.0),
+            "fg_color": (1.0, 1.0, 1.0, 1.0),
+        }
     },
     "module": {
         "default": {
