@@ -1,23 +1,25 @@
 """
 GUI widgets and window management.
 
-Each widget...
--   Is multipurpose: usable as label, button, container, etc based on styling.
--   Has a "state": default/hover/unclickable affecting style.
-    Default is normal state and is a base for other state-dependent styles.
--   Contains a background image, text, borders, children in a grid layout.
--   CSS-like styling via style classes and overrides (hover, unclickable, etc).
--   Grid layout via constraint solver (kiwisolver).
--   Event processing loop order:
-    1.  Update style based on previous state (hover, clicked, etc).
-        The margin, border, and padding may affect the state (hover, clicked, etc) by
-        affecting the bounding box of the widget or its layout children.
-    2.  Update layout constraints based on style (margin, border, padding, etc). Solve.
-        This ensures the widget and its children have up-to-date positions and sizes
-        given the current layout.
-    3.  Update state (hover, clicked, etc) using input events and style: mouse move,
-        mouse button, key press, etc.
-    4.  Render self and children.
+Philosophy: each widget is a multipurpose element that can be styled to behave as a
+label, button, container, etc. The key difference between these roles is the style,
+which may depend on the widget's "state" (default, hover, unclickable, etc), and which
+callbacks the user decides to connect to its events.
+
+Each widget has a grid layout for its children, with constraints solved via kiwisolver.
+
+Styles are CSS-like, with style classes and state-dependent overrides.
+
+Order of operations per frame:
+1.  Update style based on previous state (hover, clicked, etc).
+    The margin, border, and padding may affect the state (hover, clicked, etc) by
+    affecting the bounding box of the widget or its layout children.
+2.  Update layout constraints based on style (margin, border, padding, etc). Solve.
+    This ensures the widget and its children have up-to-date positions and sizes
+    given the current layout.
+3.  Update state (hover, clicked, etc) using input events and style: mouse move,
+    mouse button, key press, etc.
+4.  Render self and children.
 
 Widget stacking order:
 - parent always below children.
