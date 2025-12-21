@@ -89,15 +89,17 @@ class RendererTestEngine(BaseResource):
         )
 
     def draw(self, canvas: Canvas):
-        fence = GpuFence(device=self.gpu_device)
+        command_encoder = GpuCommandEncoder(
+            device=self.gpu_device,
+            queue_type="graphics",
+        )
         self.renderer.draw(
+            command_encoder=command_encoder,
             canvas=canvas,
             target=self.target,
-            fence=fence,
-            wait_semaphores=[],
-            done_semaphores=[],
         )
-        fence.wait()
+
+        command_encoder.submit().wait()
 
 
 def test_renderer_quads():

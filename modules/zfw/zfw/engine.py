@@ -1,7 +1,7 @@
 import sys
 
 from .basic import BaseResource, SupportsWrite
-from .gpu import GpuContext, GpuDevice, GpuSwapChain
+from .gpu import GpuContext, GpuDevice, GpuSwapChain, GpuCommandEncoder
 from .renderer import Renderer, RendererContext, Canvas
 from .gui import GuiWindow, GuiContext, GuiTheme
 
@@ -179,12 +179,27 @@ class Engine(BaseResource):
             self._canvas.clear()
             self._window.render(canvas=self._canvas)
 
+            command_encoder = GpuCommandEncoder(
+                device=self.gpu_device,
+                queue_type="graphics",
+            )
             self._renderer.draw(
+                command_encoder=command_encoder,
                 canvas=self._canvas,
                 target=target.image,
-                wait_semaphores=[target.render_wait_semaphore],
-                done_semaphores=[target.render_done_semaphore],
+            )
+            command_encoder.transition_image_layout(
+                image=target.image,
+                layout=(
+                    "present-src"
+                    if self.gpu_device.present_support_enabled
+                    else "transfer-src-optimal"
+                ),
+            )
+            command_encoder.submit(
                 fence=target.render_done_fence,
+                wait_semaphores=[target.render_wait_semaphore],
+                signal_semaphores=[target.render_done_semaphore],
             )
 
         self._rendered_frame_count += 1

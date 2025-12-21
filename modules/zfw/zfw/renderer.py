@@ -145,11 +145,9 @@ class Renderer(BaseResource):
     def draw(
         self,
         *,
+        command_encoder: GpuCommandEncoder,
         canvas: "Canvas",
         target: GpuImage,
-        wait_semaphores: list[GpuSemaphore],
-        done_semaphores: list[GpuSemaphore],
-        fence: GpuFence,
     ):
         """
         Render the given array of quads to the given target `GpuImage`.
@@ -161,11 +159,9 @@ class Renderer(BaseResource):
             atlas.flush()
 
         self._quad_renderer.draw(
+            command_encoder=command_encoder,
             quads=canvas.as_quad_array(),
             target=target,
-            wait_semaphores=wait_semaphores,
-            done_semaphores=done_semaphores,
-            fence=fence,
         )
 
     def atlas(self, channels: "RendererAtlasChannels") -> "RendererAtlas":
@@ -690,22 +686,15 @@ class QuadRenderer(BaseResource):
     def draw(
         self,
         *,
+        command_encoder: GpuCommandEncoder,
         quads: "QuadArray",
         target: GpuImage,
-        wait_semaphores: list[GpuSemaphore],
-        done_semaphores: list[GpuSemaphore],
-        fence: GpuFence,
     ):
         """
         Render the given array of quads to the given target `GpuImage`.
 
         The quads array should have dtype RENDERER_QUAD_DTYPE.
         """
-
-        command_encoder = GpuCommandEncoder(
-            device=self.gpu_device,
-            queue_type="graphics",
-        )
 
         command_encoder.transition_image_layout(
             image=target,
@@ -756,21 +745,6 @@ class QuadRenderer(BaseResource):
             depth_image=depth_image,
             target=target,
             instance_count=len(quads),
-        )
-
-        command_encoder.transition_image_layout(
-            image=target,
-            layout=(
-                "present-src"
-                if self.gpu_device.present_support_enabled
-                else "transfer-src-optimal"
-            ),
-        )
-
-        command_encoder.submit(
-            fence=fence,
-            wait_semaphores=wait_semaphores,
-            signal_semaphores=done_semaphores,
         )
 
     def _new_quads_vertex_shader(self) -> GpuShader:
@@ -1389,7 +1363,7 @@ class TextQuadWriter(BaseResource):
 
 
 #
-# RendererCanvas:
+# Canvas: 2D scene
 #
 
 
@@ -1630,3 +1604,16 @@ class Canvas:
             align_y=vertical_alignment,
             optical_alignment=optical_alignment,
         )
+
+
+#
+# PbrRenderer
+#
+
+
+class PbrRenderer(BaseResource):
+    pass
+
+
+class PbrScene:
+    pass
