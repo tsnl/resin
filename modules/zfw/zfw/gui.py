@@ -328,6 +328,8 @@ class GuiWindow(BaseResource):
         self._height_dip = height_dip
         self._width_px = 0
         self._height_px = 0
+        self._min_width_dip = 640
+        self._min_height_dip = 540
         self._title = title
         self._resizable = resizable
         self._theme = theme or _DEFAULT_THEME
@@ -363,6 +365,15 @@ class GuiWindow(BaseResource):
         )
         if not glfw_window:
             raise GlfwError("Failed to create GLFW window")
+
+        # Set the minimium size to 640x540 dip:
+        glfw.set_window_size_limits(
+            window=glfw_window,
+            minwidth=max(self._min_width_dip, self._width_dip),
+            minheight=max(self._min_height_dip, self._height_dip),
+            maxwidth=glfw.DONT_CARE,
+            maxheight=glfw.DONT_CARE,
+        )
 
         # If raw mouse motion is supported, enable it by default.
         if glfw.raw_mouse_motion_supported():
