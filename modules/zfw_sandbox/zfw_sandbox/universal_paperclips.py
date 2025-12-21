@@ -1,7 +1,5 @@
 import zfw
 
-from .bundled_data import BUNDLED_DATA_PATH
-
 
 #
 # GUI

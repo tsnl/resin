@@ -45,8 +45,6 @@ from kiwisolver import (
     Expression as KiwiExpression,
     Term as KiwiTerm,
 )
-
-
 import glfw
 
 from .basic import (

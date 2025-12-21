@@ -4,16 +4,11 @@ Universal Paperclips CLI - Phase 1 implementation.
 TODO: background image: https://unsplash.com/photos/aerial-view-of-green-trees-and-road-during-daytime-ZeDw8ck4XEM
 """
 
-import argparse
-import sys
-
 import zfw
 
-from .bundled_data import BUNDLED_DATA_PATH
 
 from .universal_paperclips import (
     UniversalPaperclipsMainMenuWidget,
-    UniversalPaperclipsWidget,
 )
 
 
