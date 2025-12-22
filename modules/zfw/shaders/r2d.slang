@@ -2,54 +2,35 @@
 // Bindings:
 //
 
-import atlas;
+import core.b0_basic;
+import core.b1_atlas;
 
-//
-// Bindings:
-//
-
-import atlas;
-
-// Bind Group 0: common uniforms
-
-struct R2dUniform
+struct QuadListHeader
 {
-    int2 framebufferSizePx;
-    float totalQuadCount;
-    uint atlasSizePx;
-}
+    uint count;
+    uint _rsv0;
+    uint _rsv1;
+    uint _rsv2;
+};
 
-[[vk::binding(0, 0)]]
-ConstantBuffer<R2dUniform> commonUniform;
-
-// Bind Group 2: per-batch data
-
-struct R2dQuad
+struct Quad
 {
     Array<int2, 4> dstPx;   // 4 corners * 2 coords: TL, TR, BR, BL
     Array<float2, 4> srcUv; // 4 corners * 2 coords: TL, TR, BR, BL
     float4 tintColor;       // RGBA
     float4 borderColor;     // RGBA
-    int4 borderThickness; // T, R, B, L
+    int4 borderThickness;   // T, R, B, L
     float height;           // height
     uint imageId;           // RGBA image ID in the atlas
     uint _rsv0;             // reserved
     uint _rsv1;             // reserved
 };
 
-struct R2dBatchUniform
-{
-    uint instanceCount;
-    uint isOpaque;
-    uint isMono;
-    uint _rsv2;
-};
-
 [[vk::binding(0, 2)]]
-StructuredBuffer<R2dQuad> quads;
+StructuredBuffer<Quad> quadArray;
 
 [[vk::binding(1, 2)]]
-ConstantBuffer<R2dBatchUniform> batchUniform;
+ConstantBuffer<QuadListHeader> quadArrayHeader;
 
 //
 // Vertex Shader
@@ -70,7 +51,7 @@ struct VSOutput
 VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
     // Fetch quad data.
-    R2dQuad quad = quads[instanceId];
+    Quad quad = quadArray[instanceId];
 
     // Compute quad corner in pixels:
     uint cornerIdx = vertexCornerIdx(vertexId);
@@ -79,7 +60,7 @@ VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     // Emit vertex data.
     VSOutput output;
     output.position.xy = framebufferPxToNdcVec2(vertexPosPx);
-    output.position.z = (1.0 + quad.height) / (1.0 + commonUniform.totalQuadCount);
+    output.position.z = (1.0 + quad.height) / (1.0 + quadArrayHeader.count);
     output.position.w = 1.0;
     output.instanceId = instanceId;
     output.uv = quad.srcUv[cornerIdx];
@@ -107,8 +88,8 @@ uint vertexCornerIdx(uint vertexIdx)
 float2 framebufferPxToNdcVec2(int2 posPx)
 {
     float2 ndc;
-    ndc.x = (float(posPx.x) / float(commonUniform.framebufferSizePx.x)) * 2.0 - 1.0;
-    ndc.y = (float(posPx.y) / float(commonUniform.framebufferSizePx.y)) * 2.0 - 1.0;
+    ndc.x = (float(posPx.x) / float(u.framebufferSizePx.x)) * 2.0 - 1.0;
+    ndc.y = (float(posPx.y) / float(u.framebufferSizePx.y)) * 2.0 - 1.0;
     return ndc;
 }
 
@@ -119,7 +100,7 @@ float2 framebufferPxToNdcVec2(int2 posPx)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    R2dQuad quad = quads[input.instanceId];
+    Quad quad = quadArray[input.instanceId];
 
     int2 quadHalfSizePx = (quad.dstPx[2] - quad.dstPx[0]) / 2;
     int2 quadCenterPx = quad.dstPx[0] + quadHalfSizePx;
@@ -130,8 +111,7 @@ float4 fragmentMain(VSOutput input) : SV_Target
     // Fragments between inner and outer rects are in the border.
     if (intersectRectPoint(innerRectCoordsPx, int2(input.positionPx)))
     {
-        bool isMono = (batchUniform.isMono != 0);
-        float4 color = sampleAtlasRgba(quad.imageId, input.uv, commonUniform.atlasSizePx);
+        float4 color = sampleAtlasRgba(quad.imageId, input.uv);
         return color * input.tintColor;
     }
     else
@@ -144,7 +124,7 @@ float4 fragmentMain(VSOutput input) : SV_Target
 // Common:
 //
 
-int2[4] getCornerEgressPxArray(R2dQuad quad)
+int2[4] getCornerEgressPxArray(Quad quad)
 {
     // Precompute corner border egress in pixels.
     const int2 cornerBorderEgressPx[4] = {
@@ -156,7 +136,7 @@ int2[4] getCornerEgressPxArray(R2dQuad quad)
     return cornerBorderEgressPx;
 }
 
-int2[4] getCornerCoordsPxArray(R2dQuad quad, int egressScalar)
+int2[4] getCornerCoordsPxArray(Quad quad, int egressScalar)
 {
     const int2 egressPx[4] = getCornerEgressPxArray(quad);
     const int2 cornerCoordsPx[4] = {

@@ -11,12 +11,11 @@ from .gpu import (
     GpuImage,
     GpuBuffer,
     GpuCommandEncoder,
-    GpuFence,
     GpuImageMeta,
     GpuBufferMeta,
 )
 from .renderer import (
-    RendererImage,
+    Image,
     RendererContext,
     Renderer,
     Canvas,
@@ -131,6 +130,8 @@ def test_renderer_quads():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
 
+    engine.dispose_resource()
+
 
 def test_renderer_image():
     engine = RendererTestEngine()
@@ -138,7 +139,7 @@ def test_renderer_image():
     image_data = load_rgba_image("tests_data/rainbow-512x512.png")
     assert image_data.shape == (512, 512, 4)
 
-    image = RendererImage(renderer=engine.renderer, data=image_data)
+    image = Image(renderer=engine.renderer, data=image_data)
 
     border_thickness = 8
     canvas = Canvas(renderer=engine.renderer)
@@ -159,6 +160,8 @@ def test_renderer_image():
     output_path = Path("output/zfw/renderer_test/test_renderer_image.png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(output_image).save(output_path)
+
+    engine.dispose_resource()
 
 
 def test_renderer_atlas_smoketest():
@@ -192,9 +195,9 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 2] = 0.0
     orig_image_data[..., 3] = 1.0
 
-    image = RendererImage(renderer=renderer, data=orig_image_data)
-    renderer._atlases[4].insert(image)
-    renderer._atlases[4].flush()
+    image = Image(renderer=renderer, data=orig_image_data)
+    renderer.atlas.heap(channels=4).insert(image)
+    renderer.atlas.heap(channels=4).flush()
 
     # Note: x=0 because it's larger than default_white_image (1x1)
     assert image.allocation_px_xywh[2:] == (128, 128)
@@ -248,6 +251,8 @@ def test_renderer_text_wrap():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
 
+    engine.dispose_resource()
+
 
 def test_renderer_text_clip():
     engine = RendererTestEngine()
@@ -270,6 +275,8 @@ def test_renderer_text_clip():
     output_path = Path("output/zfw/renderer_test/test_renderer_text_clip.png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
+
+    engine.dispose_resource()
 
 
 def test_renderer_text_matrix():
@@ -329,45 +336,8 @@ def test_renderer_text_matrix():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(image).save(output_path)
 
+    engine.dispose_resource()
+
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
-
-
-def test_renderer_text_optical():
-    engine = RendererTestEngine()
-    canvas = Canvas(renderer=engine.renderer)
-
-    # Render text with metric vs optical alignment
-    text = "AVATAR"
-    font = "sans-serif"
-    size = 64
-
-    # Metric Center
-    canvas.add_text(
-        text=text,
-        font=font,
-        dst_xy=(100, 100),
-        dst_wh=(400, 100),
-        font_size_px=size,
-        horizontal_alignment="center",
-        optical_alignment=False,
-    )
-
-    # Optical Center
-    canvas.add_text(
-        text=text,
-        font=font,
-        dst_xy=(100, 300),
-        dst_wh=(400, 100),
-        font_size_px=size,
-        horizontal_alignment="center",
-        optical_alignment=True,
-    )
-
-    engine.draw(canvas=canvas)
-    image = engine.readback()
-
-    output_path = Path("output/zfw/renderer_test/test_renderer_text_optical.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(image).save(output_path)

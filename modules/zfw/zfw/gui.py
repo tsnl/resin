@@ -59,7 +59,7 @@ from .basic import (
     JsonObject,
     LogicError,
 )
-from .renderer import Canvas, RendererImage
+from .renderer import Canvas, Image
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuDevice, GpuSurface, GpuSwapChain
 from .typed_vulkan import raw_ffi
@@ -71,7 +71,7 @@ type GuiImageLayout = Literal["fit", "crop", "stretch"]
 
 def _compute_image_src_xy_wh(
     dst_wh: tuple[int, int],
-    image: RendererImage | None,
+    image: Image | None,
     layout: GuiImageLayout,
     user_src_xy: tuple[int, int] = (0, 0),
     user_src_wh: tuple[int, int] | None = None,
@@ -722,11 +722,11 @@ class GuiWidget(BaseResource):
 
     # Content:
     _text: str | None
-    _image: RendererImage | None
+    _image: Image | None
     _image_src_xy: tuple[int, int]
     _image_src_wh: tuple[int, int] | None
     _image_layout: GuiImageLayout
-    _image_hover: RendererImage | None
+    _image_hover: Image | None
     _image_hover_src_xy: tuple[int, int]
     _image_hover_src_wh: tuple[int, int] | None
     _image_hover_layout: GuiImageLayout
@@ -758,11 +758,11 @@ class GuiWidget(BaseResource):
         grid_rows: tuple[int, ...] | None = None,
         grid_cols: tuple[int, ...] | None = None,
         text: str | None = None,
-        image: RendererImage | None = None,
+        image: Image | None = None,
         image_src_xy: tuple[int, int] = (0, 0),
         image_src_wh: tuple[int, int] | None = None,
         image_layout: GuiImageLayout = "fit",
-        image_hover: RendererImage | None = None,
+        image_hover: Image | None = None,
         image_hover_src_xy: tuple[int, int] = (0, 0),
         image_hover_src_wh: tuple[int, int] | None = None,
         image_hover_layout: GuiImageLayout | None = None,

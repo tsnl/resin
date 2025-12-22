@@ -3011,8 +3011,8 @@ class GpuRenderPassCommandEncoder(BaseResource):
         self,
         *,
         vertex_count: int,
-        instance_count: int = 1,
         first_vertex: int = 0,
+        instance_count: int = 1,
         first_instance: int = 0,
     ) -> None:
         vkCmdDraw(

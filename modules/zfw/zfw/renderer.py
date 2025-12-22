@@ -1,9 +1,9 @@
 __all__ = [
+    "Image",
+    "ImageHeap",
     "QuadArray",
     "Renderer",
-    "RendererAtlas",
     "RendererContext",
-    "RendererImage",
 ]
 
 from collections import OrderedDict
@@ -30,13 +30,11 @@ from .gpu import (
     GpuDescriptorSetLayout,
     GpuDescriptorSetLayoutBinding,
     GpuDevice,
-    GpuFence,
     GpuImage,
     GpuImageMeta,
     GpuPipeline,
     GpuPipelineLayout,
     GpuSampler,
-    GpuSemaphore,
     GpuShader,
 )
 from . import typed_freetype as ft  # Must import before uharfbuzz
@@ -61,13 +59,13 @@ class RendererContext(BaseResource):
 class Renderer(BaseResource):
     _context: RendererContext
     _gpu_device: GpuDevice
-    _atlases: dict["RendererAtlasChannels", "RendererAtlas"]
-    _atlas_descriptor_set_layout: GpuDescriptorSetLayout
-    _atlas_descriptor_set: GpuDescriptorSet
-    _default_white_image: "RendererImage"
-    _quad_renderer: "QuadRenderer"
-    _text_quad_writer: "TextQuadWriter"
     _scale: float
+    _basic_uniform: "BasicUniform"
+    _atlas: "Atlas"
+    _default_white_image: "Image"
+    _r2d: "Renderer2d"
+    _r3d: "Renderer3d"
+    _text_canvas_writer: "TextCanvasWriter"
 
     def __init__(
         self,
@@ -82,65 +80,29 @@ class Renderer(BaseResource):
         self._gpu_device = gpu_device
         self._scale = scale
 
-        self._atlases = {
-            1: RendererAtlas(renderer=self, channels=1),
-            4: RendererAtlas(renderer=self, channels=4),
-        }
+        self._basic_uniform = BasicUniform(renderer=self)
+        self._atlas = Atlas(renderer=self)
 
-        self._atlas_descriptor_set_layout = GpuDescriptorSetLayout(
-            device=self._gpu_device,
-            bindings=OrderedDict(
-                {
-                    "atlasMono": GpuDescriptorSetLayoutBinding(
-                        type="sampled-image", count=self._atlases[1]._max_pages
-                    ),
-                    "atlasRgba": GpuDescriptorSetLayoutBinding(
-                        type="sampled-image", count=self._atlases[4]._max_pages
-                    ),
-                    "rectsMono": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
-                    "rectsRgba": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
-                    "sampler": GpuDescriptorSetLayoutBinding(type="sampler"),
-                }.items()
-            ),
-        )
-        self._sampler = GpuSampler(
-            device=self._gpu_device,
-            mag_filter="nearest",
-            min_filter="nearest",
-        )
-        self._atlas_descriptor_set = GpuDescriptorSet(
-            device=self._gpu_device,
-            layout=self._atlas_descriptor_set_layout,
-            bindings={
-                "atlasMono": self._atlases[1]._page_gpu_image_list,
-                "atlasRgba": self._atlases[4]._page_gpu_image_list,
-                "rectsMono": self._atlases[1]._uv_rect_array_device_buf,
-                "rectsRgba": self._atlases[4]._uv_rect_array_device_buf,
-                "sampler": self._sampler,
-            },
-        )
-
-        self._default_white_image = RendererImage(
+        self._default_white_image = Image(
             renderer=self,
             data=np.ones((1, 1, 4), dtype=np.float32),
         )
 
-        self._quad_renderer = QuadRenderer(renderer=self, gpu_device=gpu_device)
+        self._r2d = Renderer2d(renderer=self)
+        self._r3d = Renderer3d(renderer=self)
 
-        self._text_quad_writer = TextQuadWriter(renderer=self)
+        self._text_canvas_writer = TextCanvasWriter(renderer=self)
 
     @property
     def scale(self) -> float:
         return self._scale
 
     def _on_dispose_resource(self) -> None:
-        self._quad_renderer.dispose_resource()
-        self._atlas_descriptor_set.dispose_resource()
-        self._atlas_descriptor_set_layout.dispose_resource()
+        self._r3d.dispose_resource()
+        self._r2d.dispose_resource()
 
-        # Dispose atlases:
-        for _, atlas in self._atlases.items():
-            atlas.dispose_resource()
+        self._atlas.dispose_resource()
+        self._basic_uniform.dispose_resource()
 
     def draw(
         self,
@@ -155,26 +117,131 @@ class Renderer(BaseResource):
         The quads array should have dtype RENDERER_QUAD_DTYPE.
         """
 
-        for atlas in self._atlases.values():
-            atlas.flush()
+        # Upload:
+        #
 
-        self._quad_renderer.draw(
+        # Update common uniforms in `b0_basic`:
+        self._basic_uniform.flush(
+            command_encoder=command_encoder,
+            framebuffer_size_px=(target.width, target.height),
+        )
+
+        # Update texture atlas in `b1_atlas.slang`:
+        # TODO: take command encoder as argument
+        self._atlas.flush()
+
+        # Draw:
+        #
+
+        # Ensure target is in correct layout
+        command_encoder.transition_image_layout(
+            image=target,
+            layout="color-attachment-optimal",
+        )
+
+        # Run r2d pipelines:
+        self._r2d.draw(
             command_encoder=command_encoder,
             quads=canvas.as_quad_array(),
             target=target,
         )
 
-    def atlas(self, channels: "RendererAtlasChannels") -> "RendererAtlas":
-        return self._atlases[channels]
+    @property
+    def atlas(self) -> "Atlas":
+        return self._atlas
 
 
 #
-# RendererAtlas, RendererImage
+# BasicUniform
 #
 
 
-class RendererImage:
-    _atlas: "RendererAtlas"
+class BasicUniform(BaseResource):
+    DTYPE = np.dtype(
+        [
+            ("framebuffer_size_px", np.uint32, (2,)),
+            ("_rsv0", np.uint32),
+            ("_rsv1", np.uint32),
+        ]
+    )
+
+    _renderer: "Renderer"
+    _gpu_device: GpuDevice
+    _buffer_meta: GpuBufferMeta
+    _staging_buffer: GpuBuffer
+    _device_buffer: GpuBuffer
+    _descriptor_set_layout: GpuDescriptorSetLayout
+    _descriptor_set: GpuDescriptorSet
+
+    def __init__(self, *, renderer: "Renderer"):
+        super().__init__(parent_resource=renderer)
+
+        self._renderer = renderer
+        self._gpu_device = renderer._gpu_device
+
+        self._buffer_meta = GpuBufferMeta(
+            element_count=1,
+            element_dtype=BasicUniform.DTYPE,
+        )
+        self._staging_buffer = GpuBuffer(
+            device=self._gpu_device,
+            usages=["staging", "copy-src"],
+            meta=self._buffer_meta,
+        )
+        self._device_buffer = GpuBuffer(
+            device=self._gpu_device,
+            usages=["uniform", "copy-dst"],
+            meta=self._buffer_meta,
+        )
+        self._descriptor_set_layout = GpuDescriptorSetLayout(
+            device=self._gpu_device,
+            bindings=OrderedDict(
+                {
+                    "u": GpuDescriptorSetLayoutBinding(
+                        type="uniform-buffer",
+                        stages=["vertex", "fragment"],
+                    ),
+                }.items()
+            ),
+        )
+        self._descriptor_set = GpuDescriptorSet(
+            device=self._gpu_device,
+            layout=self._descriptor_set_layout,
+            bindings={"u": self._device_buffer},
+        )
+
+    def _on_dispose_resource(self) -> None:
+        self._descriptor_set.dispose_resource()
+        self._descriptor_set_layout.dispose_resource()
+        self._device_buffer.dispose_resource()
+        self._staging_buffer.dispose_resource()
+        super()._on_dispose_resource()
+
+    def flush(
+        self,
+        *,
+        command_encoder: GpuCommandEncoder,
+        framebuffer_size_px: tuple[int, int],
+    ) -> None:
+        data = np.empty((1,), dtype=BasicUniform.DTYPE)
+        data[0]["framebuffer_size_px"] = framebuffer_size_px
+
+        self._staging_buffer.memory.write(data=data)
+
+        command_encoder.copy_buffer_to_buffer(
+            src=self._staging_buffer,
+            dst=self._device_buffer,
+            size=self._buffer_meta.element_size,
+        )
+
+
+#
+# Image, Atlas
+#
+
+
+class Image:
+    _atlas: "ImageHeap"
     _index: int
     _allocation_uv_xywh: tuple[float, float, float, float] | None
     _allocation_px_xywh: tuple[int, int, int, int] | None
@@ -184,7 +251,7 @@ class RendererImage:
         if data.ndim == 2:
             data = data[:, :, np.newaxis]
 
-        self._atlas = renderer._atlases[data.shape[2]]
+        self._atlas = renderer._atlas.heap(channels=data.shape[2])
         self._data = data.copy()
         self._data.flags.writeable = False
         self._index = -1
@@ -223,18 +290,93 @@ class RendererImage:
         return int(self._allocation_uv_xywh[1])
 
 
-type RendererAtlasChannels = Literal[1, 4]
+type ImageChannels = Literal[1, 4]
 
 
-class RendererAtlas(BaseResource):
+class Atlas(BaseResource):
+    _gpu_device: GpuDevice
+    _mono_heap: "ImageHeap"
+    _rgba_heap: "ImageHeap"
+    _heap_index: dict[ImageChannels, "ImageHeap"]
+    _descriptor_set_layout: GpuDescriptorSetLayout
+    _descriptor_set: GpuDescriptorSet
+
+    def __init__(self, *, renderer: "Renderer"):
+        super().__init__(parent_resource=renderer)
+        self._gpu_device = renderer._gpu_device
+        self._mono_heap = ImageHeap(renderer=renderer, channels=1)
+        self._rgba_heap = ImageHeap(renderer=renderer, channels=4)
+        self._heap_index = {1: self._mono_heap, 4: self._rgba_heap}
+
+        self._descriptor_set_layout = GpuDescriptorSetLayout(
+            device=self._gpu_device,
+            bindings=OrderedDict(
+                {
+                    "atlasMono": GpuDescriptorSetLayoutBinding(
+                        type="sampled-image",
+                        count=self._mono_heap._max_pages,
+                    ),
+                    "atlasRgba": GpuDescriptorSetLayoutBinding(
+                        type="sampled-image",
+                        count=self._rgba_heap._max_pages,
+                    ),
+                    "rectsMono": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
+                    "rectsRgba": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
+                    "sampler": GpuDescriptorSetLayoutBinding(type="sampler"),
+                }.items()
+            ),
+        )
+        self._sampler = GpuSampler(
+            device=self._gpu_device,
+            mag_filter="nearest",
+            min_filter="nearest",
+        )
+        self._descriptor_set = GpuDescriptorSet(
+            device=self._gpu_device,
+            layout=self._descriptor_set_layout,
+            bindings={
+                "atlasMono": self._mono_heap._page_gpu_image_list,
+                "atlasRgba": self._rgba_heap._page_gpu_image_list,
+                "rectsMono": self._mono_heap._uv_rect_array_device_buf,
+                "rectsRgba": self._rgba_heap._uv_rect_array_device_buf,
+                "sampler": self._sampler,
+            },
+        )
+
+    def _on_dispose_resource(self) -> None:
+        self._descriptor_set.dispose_resource()
+        self._descriptor_set_layout.dispose_resource()
+
+        self._sampler.dispose_resource()
+
+        self._mono_heap.dispose_resource()
+        self._rgba_heap.dispose_resource()
+
+        super()._on_dispose_resource()
+
+    def heap(self, *, channels: ImageChannels) -> "ImageHeap":
+        return self._heap_index[channels]
+
+    def flush(self) -> None:
+        # TODO: take a command encoder as argument
+        self._mono_heap.flush()
+        self._rgba_heap.flush()
+
+
+class ImageHeap(BaseResource):
+    """
+    A GPU texture array that stores multiple images of the same number of channels and
+    same format.
+    """
+
     _renderer: Renderer
     _gpu_device: GpuDevice
-    _channels: RendererAtlasChannels
+    _channels: ImageChannels
     _page_size: int
     _max_pages: int
     _max_rects: int
-    _images: list[RendererImage]
-    _unallocated_images: list[RendererImage]
+    _images: list[Image]
+    _unallocated_images: list[Image]
     _page_cursor_array: np.ndarray
     _page_count: int
     _page_pixel_data: np.ndarray
@@ -245,7 +387,7 @@ class RendererAtlas(BaseResource):
         self,
         *,
         renderer: Renderer,
-        channels: RendererAtlasChannels,
+        channels: ImageChannels,
         max_pages: int = 4,
         page_size: int = 4096,
         max_rects: int = 1 << 20,
@@ -259,8 +401,8 @@ class RendererAtlas(BaseResource):
         self._max_pages = max_pages
         self._max_rects = max_rects
 
-        self._images: list[RendererImage] = []
-        self._unallocated_images: list[RendererImage] = []
+        self._images: list[Image] = []
+        self._unallocated_images: list[Image] = []
 
         self._page_cursor_array = np.zeros(
             (max_pages,),
@@ -302,18 +444,25 @@ class RendererAtlas(BaseResource):
             for _ in range(self._max_pages)
         ]
 
-    def insert(self, image: RendererImage):
+    def _on_dispose_resource(self) -> None:
+        for gpu_image in self._page_gpu_image_list:
+            gpu_image.dispose_resource()
+        self._uv_rect_array_device_buf.dispose_resource()
+        super()._on_dispose_resource()
+
+    def insert(self, image: Image):
         assert image._data.shape[2] == self._channels
         image._index = len(self._images)
         self._images.append(image)
         self._unallocated_images.append(image)
 
-    def flush(self):
+    def flush(self) -> None:
         if not self._unallocated_images:
             return
 
         self._unallocated_images.sort(
-            key=lambda img: img._data.shape[0] * img._data.shape[1], reverse=True
+            key=lambda img: img._data.shape[0] * img._data.shape[1],
+            reverse=True,
         )
 
         failed_to_alloc = False
@@ -333,7 +482,7 @@ class RendererAtlas(BaseResource):
         self._upload_rects()
         self._unallocated_images.clear()
 
-    def _alloc_image(self, img: RendererImage) -> bool:
+    def _alloc_image(self, img: Image) -> bool:
         h_px, w_px = img._data.shape[0], img._data.shape[1]
         w = w_px / self._page_size
         h = h_px / self._page_size
@@ -376,7 +525,7 @@ class RendererAtlas(BaseResource):
 
     def _set_image_rect(
         self,
-        img: RendererImage,
+        img: Image,
         page_index: int,
         x: float,
         y: float,
@@ -411,9 +560,9 @@ class RendererAtlas(BaseResource):
 
         for img in all_images:
             if not self._alloc_image(img):
-                raise MemoryError("Out of atlas memory during compaction")
+                raise MemoryError("Out of image-heap memory during compaction")
 
-    def _upload_pages(self, dirty_images: list[RendererImage]):
+    def _upload_pages(self, dirty_images: list[Image]):
         if not dirty_images:
             return
 
@@ -432,7 +581,7 @@ class RendererAtlas(BaseResource):
         )
 
         # Group by page
-        pages: dict[int, list[RendererImage]] = {}
+        pages: dict[int, list[Image]] = {}
         for img in dirty_images:
             pages.setdefault(img.page_index, []).append(img)
 
@@ -512,28 +661,23 @@ UV_RECT_DTYPE = np.dtype(
 #
 
 
-class QuadRenderer(BaseResource):
+class Renderer2d(BaseResource):
     """
-    Encapsulates the quads rendering pipeline with all GPU resources and logic.
+    A GPU-accelerated 2D renderer that just draws textured quads orthographically
+    projected into screen space. Takes a `Canvas` as input, which describes the quads
+    to draw.
 
-    All coordinates and dimensions in QuadRenderer operate in physical pixels
-    (device pixels), not logical/device-independent pixels. The RendererCanvas
-    API handles conversion from logical to physical coordinates.
+    All coordinates and dimensions are PHYSICAL pixels, NOT LOGICAL pixels.
+    The "Canvas" class takes care of converting logical pixels to physical pixels with
+    a configured HiDPI or LoDPI scale factor.
     """
 
-    COMMON_UNIFORM_DTYPE = np.dtype(
+    QUAD_LIST_HEADER_DTYPE = np.dtype(
         [
-            ("framebuffer_size_px", np.uint32, (2,)),
-            ("total_quad_count", np.float32),
-            ("atlas_size_px", np.uint32),
-        ]
-    )
-    BATCH_UNIFORM_DTYPE = np.dtype(
-        [
-            ("instance_count", np.uint32),
-            ("is_opaque", np.uint32),
-            ("is_mono", np.uint32),
+            ("count", np.uint32),
+            ("_rsv0", np.uint32),
             ("_rsv1", np.uint32),
+            ("_rsv2", np.uint32),
         ]
     )
     QUAD_DTYPE = np.dtype(
@@ -553,65 +697,56 @@ class QuadRenderer(BaseResource):
     renderer: "Renderer"
     gpu_device: GpuDevice
 
+    # Shaders and pipeline:
     _vertex_shader: GpuShader
     _fragment_shader: GpuShader
+    _descriptor_set_layout: GpuDescriptorSetLayout
     _pipeline_layout: GpuPipelineLayout
-    _common_uniform_staging_buf: GpuBuffer
-    _common_uniform_device_buf: GpuBuffer
-    _common_uniform_descriptor_set: GpuDescriptorSet
     _cached_gpu_pipeline: GpuPipeline | None
     _cached_depth_image: GpuImage | None
 
+    # Quad array buffers:
     _quad_capacity: int
+    _quad_array_buffer_meta: GpuBufferMeta | None
     _quad_array_staging_buf: GpuBuffer | None
     _quad_array_device_buf: GpuBuffer | None
-    _batch_uniform_staging_buf: GpuBuffer | None
-    _batch_uniform_device_buf: GpuBuffer | None
-    _batch_descriptor_set: GpuDescriptorSet | None
+    _quad_array_header_buffer_meta: GpuBufferMeta | None
+    _quad_array_header_staging_buf: GpuBuffer | None
+    _quad_array_header_device_buf: GpuBuffer | None
+    _descriptor_set: GpuDescriptorSet | None
 
-    def __init__(
-        self,
-        *,
-        renderer: "Renderer",
-        gpu_device: GpuDevice,
-    ):
+    def __init__(self, *, renderer: "Renderer"):
         super().__init__(parent_resource=renderer)
         self.renderer = renderer
-        self.gpu_device = gpu_device
+        self.gpu_device = renderer._gpu_device
 
-        self._vertex_shader = self._new_quads_vertex_shader()
-        self._fragment_shader = self._new_quads_fragment_shader()
-        self._pipeline_layout = self._new_quads_pipeline_layout()
-        self._common_uniform_staging_buf = self._new_common_uniform_buffer(staging=True)
-        self._common_uniform_device_buf = self._new_common_uniform_buffer(staging=False)
-        self._common_uniform_descriptor_set = self._new_common_uniform_descriptor_set()
+        self._vertex_shader = self._new_vertex_shader()
+        self._fragment_shader = self._new_fragment_shader()
+        self._descriptor_set_layout = self._new_descriptor_set_layout()
+        self._pipeline_layout = self._new_pipeline_layout()
         self._cached_gpu_pipeline = None
         self._cached_depth_image = None
 
         self._quad_capacity = 0
         self._quad_array_staging_buf = None
         self._quad_array_device_buf = None
-        self._batch_uniform_staging_buf = None
-        self._batch_uniform_device_buf = None
-        self._batch_descriptor_set = None
+        self._quad_array_header_staging_buf = None
+        self._quad_array_header_device_buf = None
+        self._descriptor_set = None
 
     def _on_dispose_resource(self) -> None:
         self._vertex_shader.dispose_resource()
         self._fragment_shader.dispose_resource()
 
         self._pipeline_layout.dispose_resource()
+        self._descriptor_set_layout.dispose_resource()
 
-        self._common_uniform_descriptor_set.dispose_resource()
-
-        self._common_uniform_staging_buf.dispose_resource()
-        self._common_uniform_device_buf.dispose_resource()
-
-        if self._batch_descriptor_set is not None:
-            self._batch_descriptor_set.dispose_resource()
-        if self._batch_uniform_staging_buf is not None:
-            self._batch_uniform_staging_buf.dispose_resource()
-        if self._batch_uniform_device_buf is not None:
-            self._batch_uniform_device_buf.dispose_resource()
+        if self._descriptor_set is not None:
+            self._descriptor_set.dispose_resource()
+        if self._quad_array_header_staging_buf is not None:
+            self._quad_array_header_staging_buf.dispose_resource()
+        if self._quad_array_header_device_buf is not None:
+            self._quad_array_header_device_buf.dispose_resource()
         if self._quad_array_staging_buf is not None:
             self._quad_array_staging_buf.dispose_resource()
         if self._quad_array_device_buf is not None:
@@ -622,64 +757,76 @@ class QuadRenderer(BaseResource):
         if self._cached_gpu_pipeline is not None:
             self._cached_gpu_pipeline.dispose_resource()
 
-    def _ensure_batch_capacity(self, capacity: int):
+    def _maybe_realloc_quad_array_buffers(self, capacity: int):
+        # Early out if current capacity is sufficient
         if capacity <= self._quad_capacity:
             return
 
-        # Dispose old resources
-        if self._batch_descriptor_set is not None:
-            self._batch_descriptor_set.dispose_resource()
-        if self._batch_uniform_staging_buf is not None:
-            self._batch_uniform_staging_buf.dispose_resource()
-        if self._batch_uniform_device_buf is not None:
-            self._batch_uniform_device_buf.dispose_resource()
+        # Dispose old quad array resources
+        #
+
+        # Quad array header buffers:
+        if self._quad_array_header_staging_buf is not None:
+            self._quad_array_header_staging_buf.dispose_resource()
+        if self._quad_array_header_device_buf is not None:
+            self._quad_array_header_device_buf.dispose_resource()
+
+        # Quad array buffers:
         if self._quad_array_staging_buf is not None:
             self._quad_array_staging_buf.dispose_resource()
         if self._quad_array_device_buf is not None:
             self._quad_array_device_buf.dispose_resource()
 
-        # Create new resources
+        # Descriptor set:
+        if self._descriptor_set is not None:
+            self._descriptor_set.dispose_resource()
+
+        # Allocate new quad array resources
+        #
+
+        # Compute new capacity:
         new_capacity = max(8, round_up_to_po2(capacity))
         self._quad_capacity = new_capacity
 
-        self._batch_uniform_device_buf = GpuBuffer(
+        # Create quad array header buffers:
+        self._quad_array_header_buffer_meta = GpuBufferMeta(
+            element_count=1,
+            element_dtype=Renderer2d.QUAD_LIST_HEADER_DTYPE,
+        )
+        self._quad_array_header_device_buf = GpuBuffer(
             device=self.gpu_device,
             usages=["uniform", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=1,
-                element_dtype=QuadRenderer.BATCH_UNIFORM_DTYPE,
-            ),
+            meta=self._quad_array_header_buffer_meta,
         )
-        self._batch_uniform_staging_buf = GpuBuffer(
+        self._quad_array_header_staging_buf = GpuBuffer(
             device=self.gpu_device,
             usages=["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=1,
-                element_dtype=QuadRenderer.BATCH_UNIFORM_DTYPE,
-            ),
+            meta=self._quad_array_header_buffer_meta,
+        )
+
+        # Create quad array buffers:
+        self._quad_array_buffer_meta = GpuBufferMeta(
+            element_count=new_capacity,
+            element_dtype=Renderer2d.QUAD_DTYPE,
         )
         self._quad_array_device_buf = GpuBuffer(
             device=self.gpu_device,
             usages=["storage", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=new_capacity,
-                element_dtype=QuadRenderer.QUAD_DTYPE,
-            ),
+            meta=self._quad_array_buffer_meta,
         )
         self._quad_array_staging_buf = GpuBuffer(
             device=self.gpu_device,
             usages=["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=new_capacity,
-                element_dtype=QuadRenderer.QUAD_DTYPE,
-            ),
+            meta=self._quad_array_buffer_meta,
         )
-        self._batch_descriptor_set = GpuDescriptorSet(
+
+        # Finally, pull device buffers together into a new descriptor set:
+        self._descriptor_set = GpuDescriptorSet(
             device=self.gpu_device,
-            layout=self._pipeline_layout.descriptor_set_layouts[2],
+            layout=self._descriptor_set_layout,
             bindings={
-                "quads": self._quad_array_device_buf,
-                "batchUniform": self._batch_uniform_device_buf,
+                "quadArray": self._quad_array_device_buf,
+                "quadArrayHeader": self._quad_array_header_device_buf,
             },
         )
 
@@ -696,47 +843,35 @@ class QuadRenderer(BaseResource):
         The quads array should have dtype RENDERER_QUAD_DTYPE.
         """
 
-        command_encoder.transition_image_layout(
-            image=target,
-            layout="color-attachment-optimal",
-        )
-
         assert "color-attachment" in target.usages
 
+        # Get or create pipeline and depth image for this target:
         gpu_pipeline = self._get_gpu_pipeline(target=target)
         depth_image = self._get_depth_image(width=target.width, height=target.height)
 
-        self._ensure_batch_capacity(len(quads))
+        # Ensure quad array buffers have enough capacity:
+        self._maybe_realloc_quad_array_buffers(len(quads))
 
-        if len(quads) > 0:
-            # Quads:
-            assert self._quad_array_staging_buf is not None
-            assert self._quad_array_device_buf is not None
-            self._quad_array_staging_buf.memory.write(data=quads)
-            command_encoder.copy_buffer_to_buffer(
-                src=self._quad_array_staging_buf,
-                dst=self._quad_array_device_buf,
-                size=len(quads) * QuadRenderer.QUAD_DTYPE.itemsize,
-            )
+        # Write quad array header buffer:
+        assert self._quad_array_header_staging_buf is not None
+        assert self._quad_array_header_device_buf is not None
+        uniform_array = np.empty((1,), dtype=Renderer2d.QUAD_LIST_HEADER_DTYPE)
+        uniform_array[0]["count"] = int(len(quads))
+        self._quad_array_header_staging_buf.memory.write(data=uniform_array)
+        command_encoder.copy_buffer_to_buffer(
+            src=self._quad_array_header_staging_buf,
+            dst=self._quad_array_header_device_buf,
+            size=uniform_array.nbytes,
+        )
 
-            # Batch uniform:
-            assert self._batch_uniform_staging_buf is not None
-            assert self._batch_uniform_device_buf is not None
-            uniform_array = np.empty((1,), dtype=QuadRenderer.BATCH_UNIFORM_DTYPE)
-            uniform_array[0]["instance_count"] = int(len(quads))
-            uniform_array[0]["is_opaque"] = 1  # TODO: support transparency
-            uniform_array[0]["is_mono"] = 0
-            self._batch_uniform_staging_buf.memory.write(data=uniform_array)
-            command_encoder.copy_buffer_to_buffer(
-                src=self._batch_uniform_staging_buf,
-                dst=self._batch_uniform_device_buf,
-                size=QuadRenderer.BATCH_UNIFORM_DTYPE.itemsize,
-            )
-
-        self._write_common_uniform(
-            encoder=command_encoder,
-            target=target,
-            total_quad_count=len(quads),
+        # Write quad array buffer:
+        assert self._quad_array_staging_buf is not None
+        assert self._quad_array_device_buf is not None
+        self._quad_array_staging_buf.memory.write(data=quads)
+        command_encoder.copy_buffer_to_buffer(
+            src=self._quad_array_staging_buf,
+            dst=self._quad_array_device_buf,
+            size=quads.nbytes,
         )
 
         self._draw(
@@ -747,69 +882,45 @@ class QuadRenderer(BaseResource):
             instance_count=len(quads),
         )
 
-    def _new_quads_vertex_shader(self) -> GpuShader:
+    def _new_vertex_shader(self) -> GpuShader:
         return GpuShader(
             device=self.gpu_device,
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.vert.spv",
             stage="vertex",
         )
 
-    def _new_quads_fragment_shader(self) -> GpuShader:
+    def _new_fragment_shader(self) -> GpuShader:
         return GpuShader(
             device=self.gpu_device,
             spirv_path=BUNDLED_DATA_PATH / "shaders" / "r2d.frag.spv",
             stage="fragment",
         )
 
-    def _new_quads_pipeline_layout(self) -> GpuPipelineLayout:
-        return GpuPipelineLayout(
+    def _new_descriptor_set_layout(self) -> GpuDescriptorSetLayout:
+        return GpuDescriptorSetLayout(
             device=self.gpu_device,
-            descriptor_set_layouts=[
-                GpuDescriptorSetLayout(
-                    device=self.gpu_device,
-                    bindings=OrderedDict(
-                        {
-                            "commonUniform": GpuDescriptorSetLayoutBinding(
-                                type="uniform-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                        }.items()
+            bindings=OrderedDict(
+                {
+                    "quadArray": GpuDescriptorSetLayoutBinding(
+                        type="storage-buffer",
+                        stages=["vertex", "fragment"],
                     ),
-                ),
-                self.renderer._atlas_descriptor_set_layout,
-                GpuDescriptorSetLayout(
-                    device=self.gpu_device,
-                    bindings=OrderedDict(
-                        {
-                            "quads": GpuDescriptorSetLayoutBinding(
-                                type="storage-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                            "batchUniform": GpuDescriptorSetLayoutBinding(
-                                type="uniform-buffer",
-                                stages=["vertex", "fragment"],
-                            ),
-                        }.items()
+                    "quadArrayHeader": GpuDescriptorSetLayoutBinding(
+                        type="uniform-buffer",
+                        stages=["vertex", "fragment"],
                     ),
-                ),
-            ],
-        )
-
-    def _new_common_uniform_buffer(self, *, staging: bool) -> GpuBuffer:
-        return GpuBuffer(
-            device=self.gpu_device,
-            usages=["uniform", "copy-dst"] if not staging else ["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=1,
-                element_dtype=QuadRenderer.COMMON_UNIFORM_DTYPE,
+                }.items()
             ),
         )
 
-    def _new_common_uniform_descriptor_set(self) -> GpuDescriptorSet:
-        return GpuDescriptorSet(
+    def _new_pipeline_layout(self) -> GpuPipelineLayout:
+        return GpuPipelineLayout(
             device=self.gpu_device,
-            layout=self._pipeline_layout.descriptor_set_layouts[0],
-            bindings={"commonUniform": self._common_uniform_device_buf},
+            descriptor_set_layouts=[
+                self.renderer._basic_uniform._descriptor_set_layout,
+                self.renderer._atlas._descriptor_set_layout,
+                self._descriptor_set_layout,
+            ],
         )
 
     def _get_gpu_pipeline(self, target: GpuImage) -> GpuPipeline:
@@ -863,24 +974,6 @@ class QuadRenderer(BaseResource):
             meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
         )
 
-    def _write_common_uniform(
-        self,
-        *,
-        encoder: GpuCommandEncoder,
-        target: GpuImage,
-        total_quad_count: int,
-    ):
-        uniform_data = np.zeros((1,), dtype=QuadRenderer.COMMON_UNIFORM_DTYPE)
-        uniform_data[0]["framebuffer_size_px"] = [target.width, target.height]
-        uniform_data[0]["total_quad_count"] = float(total_quad_count)
-        uniform_data[0]["atlas_size_px"] = self.renderer._atlases[4]._page_size
-        self._common_uniform_staging_buf.memory.write(data=uniform_data)
-        encoder.copy_buffer_to_buffer(
-            src=self._common_uniform_staging_buf,
-            dst=self._common_uniform_device_buf,
-            size=QuadRenderer.COMMON_UNIFORM_DTYPE.itemsize,
-        )
-
     def _draw(
         self,
         *,
@@ -898,35 +991,34 @@ class QuadRenderer(BaseResource):
             render_pass.bind_pipeline(pipeline=pipeline)
             render_pass.bind_descriptor_set(
                 set_index=0,
-                descriptor_set=self._common_uniform_descriptor_set,
+                descriptor_set=self.renderer._basic_uniform._descriptor_set,
             )
             render_pass.bind_descriptor_set(
                 set_index=1,
-                descriptor_set=self.renderer._atlas_descriptor_set,
+                descriptor_set=self.renderer._atlas._descriptor_set,
             )
 
             if instance_count > 0:
-                assert self._batch_descriptor_set is not None
+                assert self._descriptor_set is not None
                 render_pass.bind_descriptor_set(
                     set_index=2,
-                    descriptor_set=self._batch_descriptor_set,
+                    descriptor_set=self._descriptor_set,
                 )
                 render_pass.draw(
                     vertex_count=6,
-                    instance_count=instance_count,
                     first_vertex=0,
+                    instance_count=instance_count,
                     first_instance=0,
                 )
 
 
-assert QuadRenderer.COMMON_UNIFORM_DTYPE.itemsize == 4 * 4
-assert QuadRenderer.BATCH_UNIFORM_DTYPE.itemsize == 4 * 4
-assert QuadRenderer.QUAD_DTYPE.itemsize == 32 * 4
+assert Renderer2d.QUAD_LIST_HEADER_DTYPE.itemsize == 4 * 4
+assert Renderer2d.QUAD_DTYPE.itemsize == 32 * 4
 
 
 class QuadArray(np.ndarray):
     def __new__(cls, shape: tuple[int, ...] | int) -> "QuadArray":
-        return np.zeros(shape, dtype=QuadRenderer.QUAD_DTYPE).view(cls)
+        return np.zeros(shape, dtype=Renderer2d.QUAD_DTYPE).view(cls)
 
 
 #
@@ -934,13 +1026,13 @@ class QuadArray(np.ndarray):
 #
 
 
-class TextQuadWriter(BaseResource):
+class TextCanvasWriter(BaseResource):
     _renderer: Renderer
     _all_fonts: list[Font]
     _hb_font_map: dict[Font, hb.Font]
     _ft_image_cache: dict[
         tuple[Font, int, int, int],
-        tuple["RendererImage | None", int, int],
+        tuple["Image | None", int, int],
     ]
     _ft_weight_axis_index: dict[Font, int]
 
@@ -951,11 +1043,11 @@ class TextQuadWriter(BaseResource):
 
         self._all_fonts = ["sans-serif", "serif", "monospaced"]
         self._hb_font_map = {
-            font: TextQuadWriter._load_harfbuzz_font(font)  #
+            font: TextCanvasWriter._load_harfbuzz_font(font)  #
             for font in self._all_fonts
         }
         self._ft_face_map = {
-            font: TextQuadWriter._load_freetype_font(font)  #
+            font: TextCanvasWriter._load_freetype_font(font)  #
             for font in self._all_fonts
         }
         self._ft_image_cache = {}
@@ -985,7 +1077,7 @@ class TextQuadWriter(BaseResource):
 
     @staticmethod
     def _load_harfbuzz_font(font: Font) -> hb.Font:
-        file_path = TextQuadWriter._get_font_file_path(font)
+        file_path = TextCanvasWriter._get_font_file_path(font)
 
         with open(file_path, "rb") as f:
             hb_blob = f.read()
@@ -996,7 +1088,7 @@ class TextQuadWriter(BaseResource):
 
     @staticmethod
     def _load_freetype_font(font: Font) -> ft.Face:
-        file_path = TextQuadWriter._get_font_file_path(font)
+        file_path = TextCanvasWriter._get_font_file_path(font)
         ft_face = ft.Face(str(file_path))
         return ft_face
 
@@ -1039,7 +1131,7 @@ class TextQuadWriter(BaseResource):
         glyph_index: int,
         font_size_px: int,
         font_weight: int,
-    ) -> tuple["RendererImage | None", int, int]:
+    ) -> tuple["Image | None", int, int]:
         # Use renderer's scale factor for HiDPI support
         renderer_scale = self._renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
@@ -1083,7 +1175,7 @@ class TextQuadWriter(BaseResource):
         data[..., 3] = gray_norm
 
         # Create RendererImage
-        image = RendererImage(renderer=self._renderer, data=data)
+        image = Image(renderer=self._renderer, data=data)
         result = (image, bitmap_left, bitmap_top)
         self._ft_image_cache[image_cache_key] = result
 
@@ -1369,13 +1461,7 @@ class TextQuadWriter(BaseResource):
 
 class Canvas:
     """
-    A canvas for accumulating quads to be rendered.
-
-    The public API (add_quad_dip, add_text_dip) accepts coordinates in logical
-    (device-independent) pixels. These are converted to physical pixels
-    internally based on the renderer's scale factor.
-
-    For direct physical pixel control, use add_quad_ppx().
+    A list of textured quads to be rendered.
     """
 
     def __init__(self, renderer: Renderer, capacity: int = 64):
@@ -1432,7 +1518,7 @@ class Canvas:
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
         border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
-        image: RendererImage | None = None,
+        image: Image | None = None,
         _dip: bool = True,
     ) -> None:
         """
@@ -1515,7 +1601,7 @@ class Canvas:
     def _resolve_src_wh(
         dst_wh: tuple[int, int] | None,
         src_wh: tuple[int, int] | None,
-        image: RendererImage | None,
+        image: Image | None,
     ) -> tuple[int, int]:
         if image is not None:
             # Image present: check if src_wh is given to crop, else use full image size
@@ -1545,7 +1631,7 @@ class Canvas:
     def _eval_src_uv_xywh(
         src_xy: tuple[int, int],
         src_wh: tuple[int, int],
-        image: RendererImage | None,
+        image: Image | None,
     ) -> tuple[float, float, float, float]:
         if image is None:
             return (0.0, 0.0, 1.0, 1.0)
@@ -1588,7 +1674,7 @@ class Canvas:
         rather than the logical metric bounds.
         """
 
-        font_cache = self.renderer._text_quad_writer
+        font_cache = self.renderer._text_canvas_writer
 
         font_cache._add_quads_to_canvas(
             canvas=self,
@@ -1607,13 +1693,20 @@ class Canvas:
 
 
 #
-# PbrRenderer
+# Rendererer3d
 #
 
 
-class PbrRenderer(BaseResource):
-    pass
+class Renderer3d(BaseResource):
+    """
+    A GPU-accelerated 3D renderer.
+    """
+
+    def __init__(self, *, renderer: Renderer):
+        super().__init__(parent_resource=renderer)
+        self._renderer = renderer
+        self._gpu_device = renderer._gpu_device
 
 
-class PbrScene:
+class Scene:
     pass
