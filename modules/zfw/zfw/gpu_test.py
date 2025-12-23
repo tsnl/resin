@@ -3,6 +3,7 @@ import pytest
 
 from .gpu import (
     GpuBuffer,
+    GpuBufferImageCopyRegion,
     GpuBufferMeta,
     GpuBufferUsage,
     GpuCommandEncoder,
@@ -77,7 +78,17 @@ def test_image_roundtrip():
     # copy host_buf_1 to image
     cmd = GpuCommandEncoder(device=dev, queue_type="transfer")
     cmd.transition_image_layout(image=image, layout="transfer-dst-optimal")
-    cmd.copy_buffer_to_image(dst=image, src=host_buf_1)
+    cmd.copy_buffer_to_image(
+        dst=image,
+        src=host_buf_1,
+        regions=[
+            GpuBufferImageCopyRegion(
+                buffer_offset=0,
+                image_offset=(0, 0, 0),
+                image_extent=(meta.shape[1], meta.shape[0], 1),
+            )
+        ],
+    )
     cmd.submit().wait()
 
     # copy image to host_buf_2

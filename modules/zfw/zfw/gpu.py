@@ -7,6 +7,7 @@ Required Vulkan version:
 """
 
 __all__ = [
+    "GpuBufferImageCopyRegion",
     "GpuContext",
     "GpuDescriptorSet",
     "GpuDescriptorSetLayout",
@@ -39,6 +40,7 @@ from .basic import BaseResource, ColorSpace
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
     VK_ACCESS_SHADER_READ_BIT,
     VK_ACCESS_TRANSFER_READ_BIT,
     VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1259,10 +1261,20 @@ type GpuImageUsage = Literal[
 type GpuImageLayout = Literal[
     "present-src",
     "color-attachment-optimal",
+    "depth-stencil-attachment-optimal",
     "texture-binding",
     "transfer-src-optimal",
     "transfer-dst-optimal",
 ]
+
+
+@dataclass
+class GpuBufferImageCopyRegion:
+    """Describes a region to copy from a buffer to an image."""
+
+    buffer_offset: int
+    image_offset: tuple[int, int, int]
+    image_extent: tuple[int, int, int]
 
 
 def vk_image_usage(usages: list[GpuImageUsage]) -> int:
@@ -1497,7 +1509,18 @@ class GpuImage(BaseResource):
         staging_buffer.memory.write(data=data)
 
         cmd = GpuCommandEncoder(device=self.device, queue_type="transfer")
-        cmd.copy_buffer_to_image(src=staging_buffer, dst=self)
+        cmd.transition_image_layout(image=self, layout="transfer-dst-optimal")
+        cmd.copy_buffer_to_image(
+            src=staging_buffer,
+            dst=self,
+            regions=[
+                GpuBufferImageCopyRegion(
+                    buffer_offset=0,
+                    image_offset=(0, 0, 0),
+                    image_extent=(self.meta.shape[1], self.meta.shape[0], 1),
+                )
+            ],
+        )
         cmd.submit().wait()
 
 
@@ -1878,47 +1901,39 @@ class GpuCommandEncoder(BaseResource):
         *,
         src: GpuBuffer,
         dst: GpuImage,
-        buffer_offset: int = 0,
-        image_offset: tuple[int, int, int] = (0, 0, 0),
-        image_extent: tuple[int, int, int] | None = None,
+        regions: list["GpuBufferImageCopyRegion"],
     ) -> None:
+        vk_regions = [
+            VkBufferImageCopy(
+                bufferOffset=r.buffer_offset,
+                bufferRowLength=0,
+                bufferImageHeight=0,
+                imageSubresource=VkImageSubresourceLayers(
+                    aspectMask=dst.aspect_mask,
+                    mipLevel=0,
+                    baseArrayLayer=0,
+                    layerCount=1,
+                ),
+                imageOffset=VkOffset3D(
+                    x=r.image_offset[0],
+                    y=r.image_offset[1],
+                    z=r.image_offset[2],
+                ),
+                imageExtent=VkExtent3D(
+                    width=r.image_extent[0],
+                    height=r.image_extent[1],
+                    depth=r.image_extent[2],
+                ),
+            )
+            for r in regions
+        ]
         vkCmdCopyBufferToImage(
             commandBuffer=self.vk_command_buffer,
             srcBuffer=src.vk_buffer,
             dstImage=dst.vk_image,
             dstImageLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            regionCount=1,
-            pRegions=[
-                VkBufferImageCopy(
-                    bufferOffset=buffer_offset,
-                    bufferRowLength=0,
-                    bufferImageHeight=0,
-                    imageSubresource=VkImageSubresourceLayers(
-                        aspectMask=dst.aspect_mask,
-                        mipLevel=0,
-                        baseArrayLayer=0,
-                        layerCount=1,
-                    ),
-                    imageOffset=VkOffset3D(
-                        x=image_offset[0],
-                        y=image_offset[1],
-                        z=image_offset[2],
-                    ),
-                    imageExtent=(
-                        VkExtent3D(
-                            width=dst.meta.shape[1],
-                            height=dst.meta.shape[0],
-                            depth=1,
-                        )
-                        if image_extent is None
-                        else VkExtent3D(
-                            width=image_extent[0],
-                            height=image_extent[1],
-                            depth=image_extent[2],
-                        )
-                    ),
-                )
-            ],
+            regionCount=len(vk_regions),
+            pRegions=vk_regions,
         )
 
     def copy_image_to_buffer(
@@ -2100,6 +2115,7 @@ class GpuCommandEncoder(BaseResource):
             else (
                 {
                     "color-attachment-optimal": VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    "depth-stencil-attachment-optimal": VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                     "present-src": VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                     "texture-binding": VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     "transfer-src-optimal": VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -2140,6 +2156,8 @@ class GpuCommandEncoder(BaseResource):
         dst_access_mask = 0
         if new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
             dst_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+        elif new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+            dst_access_mask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
         elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
             dst_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
         elif new_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:

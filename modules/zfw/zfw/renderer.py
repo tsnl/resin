@@ -24,6 +24,7 @@ from .bundled_data import BUNDLED_DATA_PATH
 from .excepts import LogicError
 from .gpu import (
     GpuBuffer,
+    GpuBufferImageCopyRegion,
     GpuBufferMeta,
     GpuBufferUsage,
     GpuCommandEncoder,
@@ -811,34 +812,43 @@ class ImageHeap(BaseResource):
         # Use ring-buffered staging buffers for this frame
         page_staging_list = self._page_staging_buffer_ring[frame_index]
 
-        # Upload per-page
+        # Upload per-page with batched copy regions to avoid WRITE_AFTER_WRITE hazards
         for page_index, images in pages.items():
             page_staging = page_staging_list[page_index]
             offset = 0
 
-            # Transition once per page before issuing copies
+            # Build all copy regions and write staging data
+            regions: list[GpuBufferImageCopyRegion] = []
+            for img in images:
+                page_staging.memory.write(data=img._data, offset=offset)
+                regions.append(
+                    GpuBufferImageCopyRegion(
+                        buffer_offset=offset,
+                        image_offset=(
+                            img.allocation_px_xywh[0],
+                            img.allocation_px_xywh[1],
+                            0,
+                        ),
+                        image_extent=(
+                            img.allocation_px_xywh[2],
+                            img.allocation_px_xywh[3],
+                            1,
+                        ),
+                    )
+                )
+                offset += img._data.nbytes
+
+            # Transition once per page before issuing the batched copy
             command_encoder.transition_image_layout(
                 image=self._page_gpu_image_list[page_index],
                 layout="transfer-dst-optimal",
             )
-            for img in images:
-                page_staging.memory.write(data=img._data, offset=offset)
-                command_encoder.copy_buffer_to_image(
-                    src=page_staging,
-                    dst=self._page_gpu_image_list[page_index],
-                    buffer_offset=offset,
-                    image_offset=(
-                        img.allocation_px_xywh[0],
-                        img.allocation_px_xywh[1],
-                        0,
-                    ),
-                    image_extent=(
-                        img.allocation_px_xywh[2],
-                        img.allocation_px_xywh[3],
-                        1,
-                    ),
-                )
-                offset += img._data.nbytes
+            # Single batched copy command for all regions
+            command_encoder.copy_buffer_to_image(
+                src=page_staging,
+                dst=self._page_gpu_image_list[page_index],
+                regions=regions,
+            )
 
     def _upload_rects(
         self,
@@ -1185,6 +1195,12 @@ class Renderer2d(BaseResource):
         # Get the descriptor set for BasicUniform for this frame
         basic_uniform_ds = self.renderer._basic_uniform._descriptor_set_ring.get(
             frame_index
+        )
+
+        # Transition depth image to depth-stencil-attachment-optimal before rendering
+        encoder.transition_image_layout(
+            image=depth_image,
+            layout="depth-stencil-attachment-optimal",
         )
 
         with encoder.render(
