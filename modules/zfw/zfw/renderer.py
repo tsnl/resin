@@ -73,7 +73,6 @@ class Renderer(BaseResource):
     _default_white_image: "Image"
     _r2d: "Renderer2d"
     _r3d: "Renderer3d"
-    _text_canvas_writer: "TextCanvasWriter"
 
     def __init__(
         self,
@@ -101,8 +100,6 @@ class Renderer(BaseResource):
 
         self._r2d = Renderer2d(renderer=self)
         self._r3d = Renderer3d(renderer=self)
-
-        self._text_canvas_writer = TextCanvasWriter(renderer=self)
 
     @property
     def scale(self) -> float:
@@ -919,7 +916,7 @@ UV_RECT_DTYPE = np.dtype(
 
 
 #
-# QuadRenderer
+# Renderer2d
 #
 
 
@@ -1267,36 +1264,33 @@ class QuadArray(np.ndarray):
 
 
 #
-# TextQuadWriter
+# Canvas: 2D scene
 #
 
 
-class TextCanvasWriter(BaseResource):
-    _renderer: Renderer
-    _all_fonts: list[Font]
-    _hb_font_map: dict[Font, hb.Font]
-    _ft_image_cache: dict[
-        tuple[Font, int, int, int],
-        tuple["Image | None", int, int],
-    ]
-    _ft_weight_axis_index: dict[Font, int]
+class Canvas:
+    """
+    A list of textured quads to be rendered.
+    """
 
-    def __init__(self, renderer: Renderer) -> None:
-        super().__init__(parent_resource=renderer)
+    def __init__(self, renderer: Renderer, capacity: int = 64):
+        self.renderer = renderer
+        self._quad_array = QuadArray(capacity)
+        self._quad_count = 0
 
-        self._renderer = renderer
-
-        self._all_fonts = ["sans-serif", "serif", "monospaced"]
-        self._hb_font_map = {
-            font: TextCanvasWriter._load_harfbuzz_font(font)  #
-            for font in self._all_fonts
+        # Font rendering support
+        self._all_fonts: list[Font] = ["sans-serif", "serif", "monospaced"]
+        self._hb_font_map: dict[Font, hb.Font] = {
+            font: self._load_harfbuzz_font(font) for font in self._all_fonts
         }
-        self._ft_face_map = {
-            font: TextCanvasWriter._load_freetype_font(font)  #
-            for font in self._all_fonts
+        self._ft_face_map: dict[Font, ft.Face] = {
+            font: self._load_freetype_font(font) for font in self._all_fonts
         }
-        self._ft_image_cache = {}
-        self._ft_weight_axis_index = {}
+        self._ft_image_cache: dict[
+            tuple[Font, int, int, int],
+            tuple[Image | None, int, int],
+        ] = {}
+        self._ft_weight_axis_index: dict[Font, int] = {}
 
         for font in self._all_fonts:
             face = self._ft_face_map[font]
@@ -1308,6 +1302,45 @@ class TextCanvasWriter(BaseResource):
                         break
             except Exception:
                 pass
+
+    #
+    # Getters and properties:
+    #
+
+    def __len__(self) -> int:
+        return self._quad_count
+
+    @property
+    def capacity(self) -> int:
+        return len(self._quad_array)
+
+    def as_quad_array(self) -> QuadArray:
+        return self._quad_array[: self._quad_count].view(QuadArray)
+
+    #
+    # clear, reserve
+    #
+
+    def clear(self):
+        self._quad_count = 0
+
+    def reserve(self, new_capacity: int):
+        """Ensure that the quad list has at least the given capacity."""
+        if new_capacity <= self.capacity:
+            return
+        self.reserve_exact(new_capacity=round_up_to_po2(new_capacity))
+
+    def reserve_exact(self, new_capacity: int):
+        """Like 'reserve', but will never allocate more than requested."""
+        if new_capacity <= self.capacity:
+            return
+        new_array = QuadArray(new_capacity)
+        new_array[: len(self._quad_array)] = self._quad_array
+        self._quad_array = new_array
+
+    #
+    # font loading helpers
+    #
 
     @staticmethod
     def _get_font_file_path(font: Font) -> Path:
@@ -1322,7 +1355,7 @@ class TextCanvasWriter(BaseResource):
 
     @staticmethod
     def _load_harfbuzz_font(font: Font) -> hb.Font:
-        file_path = TextCanvasWriter._get_font_file_path(font)
+        file_path = Canvas._get_font_file_path(font)
 
         with open(file_path, "rb") as f:
             hb_blob = f.read()
@@ -1333,99 +1366,327 @@ class TextCanvasWriter(BaseResource):
 
     @staticmethod
     def _load_freetype_font(font: Font) -> ft.Face:
-        file_path = TextCanvasWriter._get_font_file_path(font)
+        file_path = Canvas._get_font_file_path(font)
         ft_face = ft.Face(str(file_path))
         return ft_face
 
-    def _set_freetype_weight(self, font: Font, weight: int) -> None:
-        if font not in self._ft_weight_axis_index:
+    #
+    # add_quad
+    #
+
+    def add_quad(
+        self,
+        *,
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int] | None = None,
+        src_xy: tuple[int, int] = (0, 0),
+        src_wh: tuple[int, int] | None = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+        border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
+        image: Image | None = None,
+        _dip: bool = True,
+    ) -> None:
+        """
+        Adds a single quad using logical (device-independent) pixel coordinates.
+
+        Coordinates are converted to physical pixels internally based on the
+        renderer's scale factor.
+        """
+
+        # If dip is True, convert to physical pixel coordinates
+        if _dip:
+            scale = self.renderer.scale
+
+            # Resolve src_wh (in physical pixels, from image)
+            src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
+
+            # Compute dst_wh in logical pixels
+            dst_wh_logical = Canvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
+
+            # Convert logical to physical
+            dst_xy = (int(dst_xy[0] * scale), int(dst_xy[1] * scale))
+            dst_wh = (
+                int(dst_wh_logical[0] * scale),
+                int(dst_wh_logical[1] * scale),
+            )
+            border_thickness = (
+                int(border_thickness[0] * scale),
+                int(border_thickness[1] * scale),
+                int(border_thickness[2] * scale),
+                int(border_thickness[3] * scale),
+            )
+        else:
+            src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
+            dst_wh = Canvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
+
+        # Ensure capacity
+        if len(self) >= self.capacity:
+            self.reserve(1 + len(self))
+        assert len(self) < self.capacity
+
+        # Reserve index
+        index = self._quad_count
+        self._quad_count += 1
+
+        # Physical pixel coordinates - no scaling
+        x, y = dst_xy
+        w, h = dst_wh
+
+        self._quad_array[index]["dst_px"][0] = [x, y]
+        self._quad_array[index]["dst_px"][1] = [x + w, y]
+        self._quad_array[index]["dst_px"][2] = [x + w, y + h]
+        self._quad_array[index]["dst_px"][3] = [x, y + h]
+
+        # write: src_uv
+        resolved_src_wh = (
+            src_wh
+            if src_wh is not None
+            else (image.px_width if image else w, image.px_height if image else h)
+        )
+        uv_xywh = Canvas._eval_src_uv_xywh(src_xy, resolved_src_wh, image)
+        uv_x, uv_y, uv_w, uv_h = uv_xywh
+        self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
+        self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
+        self._quad_array[index]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
+        self._quad_array[index]["src_uv"][3] = [uv_x, uv_y + uv_h]
+
+        # write: image_id
+        quad_image = image or self.renderer._default_white_image
+        self._quad_array[index]["image_id"] = quad_image.image_id
+
+        # write: flags (bit 0: 1 for linear, 0 for nearest)
+        flags = 0
+        if quad_image.sampler == "linear":
+            flags |= Renderer2d.QUAD_FLAG_USE_LINEAR_SAMPLER
+        self._quad_array[index]["flags"] = flags
+
+        # write: color, border_color, border_thickness
+        self._quad_array[index]["color"] = color
+        self._quad_array[index]["border_color"] = border_color
+        self._quad_array[index]["border_thickness"] = list(border_thickness)
+
+        # write: height
+        self._quad_array[index]["height"] = float(index)
+
+    #
+    # add_text
+    #
+
+    def add_text(
+        self,
+        *,
+        text: str,
+        font: "Font",
+        dst_xy: tuple[int, int],
+        dst_wh: tuple[int, int],
+        font_size_px: int = 16,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        wrap: bool = True,
+        font_weight: int = 400,
+        horizontal_alignment: HorizontalAlignment = "left",
+        vertical_alignment: VerticalAlignment = "top",
+        optical_alignment: bool = True,
+    ):
+        """
+        Adds quads for rendering the given text string with the given font.
+
+        Supports horizontal and vertical alignment within the destination rectangle.
+
+        If `optical_alignment` is True, aligns based on the visible ink bounds
+        rather than the logical metric bounds.
+        """
+        if not text:
             return
 
-        face = self._ft_face_map[font]
-        axis_idx = self._ft_weight_axis_index[font]
-        coords = list(face.get_var_design_coords())
-        coords[axis_idx] = float(weight)
-        face.set_var_design_coords(coords)
+        # Strategy: Accumulate pen position in 26.6 fixed-point to preserve
+        # subpixel precision. Only round to integer pixels when placing glyphs.
+        # This prevents accumulated rounding error.
 
-    def _shape_text(
-        self,
-        font: Font,
-        text: str,
-        font_size_px: int,
-        font_weight: int,
-    ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
-        hb_font = self._hb_font_map[font]
-        # Use renderer's scale factor for HiDPI support
-        renderer_scale = self._renderer.scale
+        renderer_scale = self.renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
-        scale = effective_size_px * 64  # HarfBuzz uses 26.6 fixed point
-        hb_font.scale = (scale, scale)
-        hb_font.set_variations({"wght": font_weight})
-
-        hb_buffer = hb.Buffer()
-        hb_buffer.add_str(text)
-        hb_buffer.guess_segment_properties()
-
-        hb.shape(hb_font, hb_buffer)
-
-        return hb_buffer.glyph_infos, hb_buffer.glyph_positions
-
-    def _get_glyph_image(
-        self,
-        font: Font,
-        glyph_index: int,
-        font_size_px: int,
-        font_weight: int,
-    ) -> tuple["Image | None", int, int]:
-        # Use renderer's scale factor for HiDPI support
-        renderer_scale = self._renderer.scale
-        effective_size_px = int(font_size_px * renderer_scale)
-        image_cache_key = (font, glyph_index, effective_size_px, font_weight)
-
-        if image_cache_key in self._ft_image_cache:
-            return self._ft_image_cache[image_cache_key]
 
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, effective_size_px)
         self._set_freetype_weight(font, font_weight)
-        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
+        metrics = ft_face.size
 
-        bitmap_left = ft_face.glyph.bitmap_left
-        bitmap_top = ft_face.glyph.bitmap_top
-        bitmap = ft_face.glyph.bitmap
+        # FreeType metrics are in 26.6 fixed point - keep in 26.6
+        ascender_26_6 = metrics.ascender
+        height_26_6 = metrics.height
 
-        if not bitmap.buffer or bitmap.width == 0 or bitmap.rows == 0:
-            result = (None, 0, 0)
-            self._ft_image_cache[image_cache_key] = result
-            return result
+        infos, positions = self._shape_text(font, text, font_size_px, font_weight)
 
-        h, w = bitmap.rows, bitmap.width
-        pitch = bitmap.pitch
+        dst_x, dst_y = dst_xy
+        dst_w, dst_h = dst_wh
 
-        # Load buffer as (h, pitch)
-        buffer_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, pitch)
+        # Convert destination rect to physical 26.6 fixed-point
+        dst_x_26_6 = int(dst_x * renderer_scale * 64)
+        dst_y_26_6 = int(dst_y * renderer_scale * 64)
+        dst_w_26_6 = int(dst_w * renderer_scale * 64)
+        dst_h_26_6 = int(dst_h * renderer_scale * 64)
 
-        # Prepare RGBA data array
-        data = np.empty((h, w, 4), dtype=np.float32)
+        # Physical pixel versions for clipping (integers)
+        dst_x_phys = int(dst_x * renderer_scale)
+        dst_y_phys = int(dst_y * renderer_scale)
+        dst_w_phys = int(dst_w * renderer_scale)
+        dst_h_phys = int(dst_h * renderer_scale)
 
-        # Slice to remove padding if any
-        if pitch != w:
-            buffer_array = buffer_array[:, :w]
+        lines = self._layout_text_lines(infos, positions, text, wrap, dst_w_26_6)
 
-        # Grayscale glyph: use gray value for all RGB channels and alpha
-        gray_norm = buffer_array / 255.0
-        data[..., 0] = 1.0
-        data[..., 1] = 1.0
-        data[..., 2] = 1.0
-        data[..., 3] = gray_norm
+        total_text_height_26_6 = len(lines) * height_26_6
 
-        # Create RendererImage
-        image = Image(renderer=self._renderer, data=data, sampler="nearest")
-        result = (image, bitmap_left, bitmap_top)
-        self._ft_image_cache[image_cache_key] = result
+        # Vertical alignment
+        start_y_26_6 = dst_y_26_6
+        if vertical_alignment == "middle":
+            start_y_26_6 += (dst_h_26_6 - total_text_height_26_6) // 2
+        elif vertical_alignment == "bottom":
+            start_y_26_6 += dst_h_26_6 - total_text_height_26_6
 
-        # Done:
-        return result
+        pen_y_26_6 = start_y_26_6 + ascender_26_6
+
+        for start_idx, end_idx, line_width_26_6 in lines:
+            # Horizontal alignment
+            pen_x_26_6 = dst_x_26_6
+
+            if optical_alignment:
+                min_ink, max_ink = self._get_line_optical_bounds(
+                    font, infos, positions, start_idx, end_idx
+                )
+                optical_width = max_ink - min_ink
+
+                if horizontal_alignment == "center":
+                    pen_x_26_6 += (dst_w_26_6 - optical_width) // 2 - min_ink
+                elif horizontal_alignment == "right":
+                    pen_x_26_6 += dst_w_26_6 - max_ink
+                elif horizontal_alignment == "left":
+                    pen_x_26_6 -= min_ink
+            else:
+                if horizontal_alignment == "center":
+                    pen_x_26_6 += (dst_w_26_6 - line_width_26_6) // 2
+                elif horizontal_alignment == "right":
+                    pen_x_26_6 += dst_w_26_6 - line_width_26_6
+
+            for i in range(start_idx, end_idx):
+                info = infos[i]
+                pos = positions[i]
+
+                codepoint = info.codepoint
+                # cluster = info.cluster
+
+                # HarfBuzz positions are in 26.6 fixed point - use directly
+                x_advance_26_6 = pos.x_advance
+                y_advance_26_6 = pos.y_advance
+                x_offset_26_6 = pos.x_offset
+                y_offset_26_6 = pos.y_offset
+
+                image, bitmap_left, bitmap_top = self._get_glyph_image(
+                    font, codepoint, font_size_px, font_weight
+                )
+
+                if image is not None:
+                    # Convert pen position to physical pixels for this glyph
+                    # Round 26.6 to nearest integer pixel
+                    pen_x_phys = (pen_x_26_6 + 32) >> 6
+                    pen_y_phys = (pen_y_26_6 + 32) >> 6
+                    x_offset_phys = (x_offset_26_6 + 32) >> 6
+                    y_offset_phys = (y_offset_26_6 + 32) >> 6
+
+                    # bitmap_left and bitmap_top are already in physical pixels
+                    # Glyph quad position in physical pixels
+                    qx_phys = pen_x_phys + x_offset_phys + bitmap_left
+                    qy_phys = pen_y_phys - bitmap_top - y_offset_phys
+
+                    # Glyph dimensions in physical pixels
+                    qw_phys = image.px_width
+                    qh_phys = image.px_height
+
+                    # Intersection with dst rect (in physical pixels)
+                    ix_phys = max(qx_phys, dst_x_phys)
+                    iy_phys = max(qy_phys, dst_y_phys)
+                    ir_phys = min(qx_phys + qw_phys, dst_x_phys + dst_w_phys)
+                    ib_phys = min(qy_phys + qh_phys, dst_y_phys + dst_h_phys)
+
+                    if ir_phys > ix_phys and ib_phys > iy_phys:
+                        # Clipping offset and size in physical pixels (for src rect)
+                        src_off_x = ix_phys - qx_phys
+                        src_off_y = iy_phys - qy_phys
+                        src_w = ir_phys - ix_phys
+                        src_h = ib_phys - iy_phys
+
+                        # Ensure we don't exceed the image bounds
+                        src_w = min(src_w, qw_phys - src_off_x)
+                        src_h = min(src_h, qh_phys - src_off_y)
+
+                        # Add quad with physical pixel coordinates
+                        self.add_quad(
+                            dst_xy=(ix_phys, iy_phys),
+                            dst_wh=(src_w, src_h),
+                            src_xy=(src_off_x, src_off_y),
+                            src_wh=(src_w, src_h),
+                            color=color,
+                            image=image,
+                            _dip=False,
+                        )
+
+                # Accumulate in 26.6 to preserve precision
+                pen_x_26_6 += x_advance_26_6
+                pen_y_26_6 += y_advance_26_6
+
+            pen_y_26_6 += height_26_6
+
+    @staticmethod
+    def _resolve_src_wh(
+        dst_wh: tuple[int, int] | None,
+        src_wh: tuple[int, int] | None,
+        image: Image | None,
+    ) -> tuple[int, int]:
+        if image is not None:
+            # Image present: check if src_wh is given to crop, else use full image size
+            if src_wh is not None:
+                return src_wh
+            else:
+                return image.px_width, image.px_height
+
+        # No image: src_wh is irrelevant even if given. Use dst_wh.
+        if dst_wh is not None:
+            return dst_wh
+
+        # Neither image nor dst_wh given: error
+        raise LogicError("Cannot determine quad size: supply dst_wh or image.")
+
+    @staticmethod
+    def _eval_dst_px_wh(
+        dst_wh: tuple[int, int] | None,
+        src_wh: tuple[int, int],
+    ) -> tuple[int, int]:
+        if dst_wh is not None:
+            return dst_wh
+        else:
+            return src_wh
+
+    @staticmethod
+    def _eval_src_uv_xywh(
+        src_xy: tuple[int, int],
+        src_wh: tuple[int, int],
+        image: Image | None,
+    ) -> tuple[float, float, float, float]:
+        if image is None:
+            return (0.0, 0.0, 1.0, 1.0)
+
+        src_uv_xy = (
+            src_xy[0] / image.px_width,
+            src_xy[1] / image.px_height,
+        )
+        src_uv_wh = (
+            src_wh[0] / image.px_width,
+            src_wh[1] / image.px_height,
+        )
+        return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])
+
+    #
+    # Text layout
+    #
 
     def _layout_text_lines(
         self,
@@ -1537,410 +1798,99 @@ class TextCanvasWriter(BaseResource):
 
         return min_x, max_x
 
-    def _add_quads_to_canvas(
-        self,
-        *,
-        canvas: "Canvas",
-        text: str,
-        font: Font,
-        font_size_px: int,
-        color: tuple[float, float, float, float],
-        dst_xy: tuple[int, int],
-        dst_wh: tuple[int, int],
-        wrap: bool,
-        font_weight: int,
-        align_x: HorizontalAlignment,
-        align_y: VerticalAlignment,
-        optical_alignment: bool,
-    ):
-        if not text:
+    #
+    # Glyph images
+    #
+
+    def _set_freetype_weight(self, font: Font, weight: int) -> None:
+        if font not in self._ft_weight_axis_index:
             return
 
-        # Strategy: Accumulate pen position in 26.6 fixed-point to preserve
-        # subpixel precision. Only round to integer pixels when placing glyphs.
-        # This prevents accumulated rounding error.
+        face = self._ft_face_map[font]
+        axis_idx = self._ft_weight_axis_index[font]
+        coords = list(face.get_var_design_coords())
+        coords[axis_idx] = float(weight)
+        face.set_var_design_coords(coords)
 
-        renderer_scale = self._renderer.scale
+    def _shape_text(
+        self,
+        font: Font,
+        text: str,
+        font_size_px: int,
+        font_weight: int,
+    ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
+        hb_font = self._hb_font_map[font]
+        # Use renderer's scale factor for HiDPI support
+        renderer_scale = self.renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
+        scale = effective_size_px * 64  # HarfBuzz uses 26.6 fixed point
+        hb_font.scale = (scale, scale)
+        hb_font.set_variations({"wght": font_weight})
+
+        hb_buffer = hb.Buffer()
+        hb_buffer.add_str(text)
+        hb_buffer.guess_segment_properties()
+
+        hb.shape(hb_font, hb_buffer)
+
+        return hb_buffer.glyph_infos, hb_buffer.glyph_positions
+
+    def _get_glyph_image(
+        self,
+        font: Font,
+        glyph_index: int,
+        font_size_px: int,
+        font_weight: int,
+    ) -> tuple[Image | None, int, int]:
+        # Use renderer's scale factor for HiDPI support
+        renderer_scale = self.renderer.scale
+        effective_size_px = int(font_size_px * renderer_scale)
+        image_cache_key = (font, glyph_index, effective_size_px, font_weight)
+
+        if image_cache_key in self._ft_image_cache:
+            return self._ft_image_cache[image_cache_key]
 
         ft_face = self._ft_face_map[font]
         ft_face.set_pixel_sizes(0, effective_size_px)
         self._set_freetype_weight(font, font_weight)
-        metrics = ft_face.size
-
-        # FreeType metrics are in 26.6 fixed point - keep in 26.6
-        ascender_26_6 = metrics.ascender
-        height_26_6 = metrics.height
-
-        infos, positions = self._shape_text(font, text, font_size_px, font_weight)
-
-        dst_x, dst_y = dst_xy
-        dst_w, dst_h = dst_wh
-
-        # Convert destination rect to physical 26.6 fixed-point
-        dst_x_26_6 = int(dst_x * renderer_scale * 64)
-        dst_y_26_6 = int(dst_y * renderer_scale * 64)
-        dst_w_26_6 = int(dst_w * renderer_scale * 64)
-        dst_h_26_6 = int(dst_h * renderer_scale * 64)
-
-        # Physical pixel versions for clipping (integers)
-        dst_x_phys = int(dst_x * renderer_scale)
-        dst_y_phys = int(dst_y * renderer_scale)
-        dst_w_phys = int(dst_w * renderer_scale)
-        dst_h_phys = int(dst_h * renderer_scale)
-
-        lines = self._layout_text_lines(infos, positions, text, wrap, dst_w_26_6)
-
-        total_text_height_26_6 = len(lines) * height_26_6
-
-        # Vertical alignment
-        start_y_26_6 = dst_y_26_6
-        if align_y == "middle":
-            start_y_26_6 += (dst_h_26_6 - total_text_height_26_6) // 2
-        elif align_y == "bottom":
-            start_y_26_6 += dst_h_26_6 - total_text_height_26_6
-
-        pen_y_26_6 = start_y_26_6 + ascender_26_6
-
-        for start_idx, end_idx, line_width_26_6 in lines:
-            # Horizontal alignment
-            pen_x_26_6 = dst_x_26_6
-
-            if optical_alignment:
-                min_ink, max_ink = self._get_line_optical_bounds(
-                    font, infos, positions, start_idx, end_idx
-                )
-                optical_width = max_ink - min_ink
-
-                if align_x == "center":
-                    pen_x_26_6 += (dst_w_26_6 - optical_width) // 2 - min_ink
-                elif align_x == "right":
-                    pen_x_26_6 += dst_w_26_6 - max_ink
-                elif align_x == "left":
-                    pen_x_26_6 -= min_ink
-            else:
-                if align_x == "center":
-                    pen_x_26_6 += (dst_w_26_6 - line_width_26_6) // 2
-                elif align_x == "right":
-                    pen_x_26_6 += dst_w_26_6 - line_width_26_6
-
-            for i in range(start_idx, end_idx):
-                info = infos[i]
-                pos = positions[i]
-
-                codepoint = info.codepoint
-                # cluster = info.cluster
-
-                # HarfBuzz positions are in 26.6 fixed point - use directly
-                x_advance_26_6 = pos.x_advance
-                y_advance_26_6 = pos.y_advance
-                x_offset_26_6 = pos.x_offset
-                y_offset_26_6 = pos.y_offset
-
-                image, bitmap_left, bitmap_top = self._get_glyph_image(
-                    font, codepoint, font_size_px, font_weight
-                )
-
-                if image is not None:
-                    # Convert pen position to physical pixels for this glyph
-                    # Round 26.6 to nearest integer pixel
-                    pen_x_phys = (pen_x_26_6 + 32) >> 6
-                    pen_y_phys = (pen_y_26_6 + 32) >> 6
-                    x_offset_phys = (x_offset_26_6 + 32) >> 6
-                    y_offset_phys = (y_offset_26_6 + 32) >> 6
-
-                    # bitmap_left and bitmap_top are already in physical pixels
-                    # Glyph quad position in physical pixels
-                    qx_phys = pen_x_phys + x_offset_phys + bitmap_left
-                    qy_phys = pen_y_phys - bitmap_top - y_offset_phys
-
-                    # Glyph dimensions in physical pixels
-                    qw_phys = image.px_width
-                    qh_phys = image.px_height
-
-                    # Intersection with dst rect (in physical pixels)
-                    ix_phys = max(qx_phys, dst_x_phys)
-                    iy_phys = max(qy_phys, dst_y_phys)
-                    ir_phys = min(qx_phys + qw_phys, dst_x_phys + dst_w_phys)
-                    ib_phys = min(qy_phys + qh_phys, dst_y_phys + dst_h_phys)
-
-                    if ir_phys > ix_phys and ib_phys > iy_phys:
-                        # Clipping offset and size in physical pixels (for src rect)
-                        src_off_x = ix_phys - qx_phys
-                        src_off_y = iy_phys - qy_phys
-                        src_w = ir_phys - ix_phys
-                        src_h = ib_phys - iy_phys
-
-                        # Ensure we don't exceed the image bounds
-                        src_w = min(src_w, image.px_width - src_off_x)
-                        src_h = min(src_h, image.px_height - src_off_y)
-
-                        # Destination size in physical pixels (1:1 mapping with source)
-                        glyph_dst_w = src_w
-                        glyph_dst_h = src_h
-
-                        if src_w > 0 and src_h > 0:
-                            # Use physical pixel coordinates directly to avoid
-                            # scaling artifacts with nearest-neighbor sampling
-                            canvas.add_quad(
-                                dst_xy=(ix_phys, iy_phys),
-                                dst_wh=(glyph_dst_w, glyph_dst_h),
-                                src_xy=(src_off_x, src_off_y),
-                                src_wh=(src_w, src_h),
-                                color=color,
-                                image=image,
-                                _dip=False,
-                            )
-
-                # Accumulate in 26.6 to preserve precision
-                pen_x_26_6 += x_advance_26_6
-                pen_y_26_6 += y_advance_26_6
-
-            pen_y_26_6 += height_26_6
-
-
-#
-# Canvas: 2D scene
-#
-
-
-class Canvas:
-    """
-    A list of textured quads to be rendered.
-    """
-
-    def __init__(self, renderer: Renderer, capacity: int = 64):
-        self.renderer = renderer
-        self._quad_array = QuadArray(capacity)
-        self._quad_count = 0
-
-    #
-    # Getters and properties:
-    #
-
-    def __len__(self) -> int:
-        return self._quad_count
-
-    @property
-    def capacity(self) -> int:
-        return len(self._quad_array)
-
-    def as_quad_array(self) -> QuadArray:
-        return self._quad_array[: self._quad_count].view(QuadArray)
-
-    #
-    # clear, reserve
-    #
-
-    def clear(self):
-        self._quad_count = 0
-
-    def reserve(self, new_capacity: int):
-        """Ensure that the quad list has at least the given capacity."""
-        if new_capacity <= self.capacity:
-            return
-        self.reserve_exact(new_capacity=round_up_to_po2(new_capacity))
-
-    def reserve_exact(self, new_capacity: int):
-        """Like 'reserve', but will never allocate more than requested."""
-        if new_capacity <= self.capacity:
-            return
-        new_array = QuadArray(new_capacity)
-        new_array[: len(self._quad_array)] = self._quad_array
-        self._quad_array = new_array
-
-    #
-    # add_quad
-    #
-
-    def add_quad(
-        self,
-        *,
-        dst_xy: tuple[int, int],
-        dst_wh: tuple[int, int] | None = None,
-        src_xy: tuple[int, int] = (0, 0),
-        src_wh: tuple[int, int] | None = None,
-        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
-        border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
-        image: Image | None = None,
-        _dip: bool = True,
-    ) -> None:
-        """
-        Adds a single quad using logical (device-independent) pixel coordinates.
-
-        Coordinates are converted to physical pixels internally based on the
-        renderer's scale factor.
-        """
-
-        # If dip is True, convert to physical pixel coordinates
-        if _dip:
-            scale = self.renderer.scale
-
-            # Resolve src_wh (in physical pixels, from image)
-            src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
-
-            # Compute dst_wh in logical pixels
-            dst_wh_logical = Canvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
-
-            # Convert logical to physical
-            dst_xy = (int(dst_xy[0] * scale), int(dst_xy[1] * scale))
-            dst_wh = (
-                int(dst_wh_logical[0] * scale),
-                int(dst_wh_logical[1] * scale),
-            )
-            border_thickness = (
-                int(border_thickness[0] * scale),
-                int(border_thickness[1] * scale),
-                int(border_thickness[2] * scale),
-                int(border_thickness[3] * scale),
-            )
-        else:
-            src_wh_resolved = Canvas._resolve_src_wh(dst_wh, src_wh, image)
-            dst_wh = Canvas._eval_dst_px_wh(dst_wh, src_wh_resolved)
-
-        # Ensure capacity
-        if len(self) >= self.capacity:
-            self.reserve(1 + len(self))
-        assert len(self) < self.capacity
-
-        # Reserve index
-        index = self._quad_count
-        self._quad_count += 1
-
-        # Physical pixel coordinates - no scaling
-        x, y = dst_xy
-        w, h = dst_wh
-
-        self._quad_array[index]["dst_px"][0] = [x, y]
-        self._quad_array[index]["dst_px"][1] = [x + w, y]
-        self._quad_array[index]["dst_px"][2] = [x + w, y + h]
-        self._quad_array[index]["dst_px"][3] = [x, y + h]
-
-        # write: src_uv
-        resolved_src_wh = (
-            src_wh
-            if src_wh is not None
-            else (image.px_width if image else w, image.px_height if image else h)
-        )
-        uv_xywh = Canvas._eval_src_uv_xywh(src_xy, resolved_src_wh, image)
-        uv_x, uv_y, uv_w, uv_h = uv_xywh
-        self._quad_array[index]["src_uv"][0] = [uv_x, uv_y]
-        self._quad_array[index]["src_uv"][1] = [uv_x + uv_w, uv_y]
-        self._quad_array[index]["src_uv"][2] = [uv_x + uv_w, uv_y + uv_h]
-        self._quad_array[index]["src_uv"][3] = [uv_x, uv_y + uv_h]
-
-        # write: image_id
-        quad_image = image or self.renderer._default_white_image
-        self._quad_array[index]["image_id"] = quad_image.image_id
-
-        # write: flags (bit 0: 1 for linear, 0 for nearest)
-        flags = 0
-        if quad_image.sampler == "linear":
-            flags |= Renderer2d.QUAD_FLAG_USE_LINEAR_SAMPLER
-        self._quad_array[index]["flags"] = flags
-
-        # write: color, border_color, border_thickness
-        self._quad_array[index]["color"] = color
-        self._quad_array[index]["border_color"] = border_color
-        self._quad_array[index]["border_thickness"] = list(border_thickness)
-
-        # write: height
-        self._quad_array[index]["height"] = float(index)
-
-    @staticmethod
-    def _resolve_src_wh(
-        dst_wh: tuple[int, int] | None,
-        src_wh: tuple[int, int] | None,
-        image: Image | None,
-    ) -> tuple[int, int]:
-        if image is not None:
-            # Image present: check if src_wh is given to crop, else use full image size
-            if src_wh is not None:
-                return src_wh
-            else:
-                return image.px_width, image.px_height
-
-        # No image: src_wh is irrelevant even if given. Use dst_wh.
-        if dst_wh is not None:
-            return dst_wh
-
-        # Neither image nor dst_wh given: error
-        raise LogicError("Cannot determine quad size: supply dst_wh or image.")
-
-    @staticmethod
-    def _eval_dst_px_wh(
-        dst_wh: tuple[int, int] | None,
-        src_wh: tuple[int, int],
-    ) -> tuple[int, int]:
-        if dst_wh is not None:
-            return dst_wh
-        else:
-            return src_wh
-
-    @staticmethod
-    def _eval_src_uv_xywh(
-        src_xy: tuple[int, int],
-        src_wh: tuple[int, int],
-        image: Image | None,
-    ) -> tuple[float, float, float, float]:
-        if image is None:
-            return (0.0, 0.0, 1.0, 1.0)
-
-        src_uv_xy = (
-            src_xy[0] / image.px_width,
-            src_xy[1] / image.px_height,
-        )
-        src_uv_wh = (
-            src_wh[0] / image.px_width,
-            src_wh[1] / image.px_height,
-        )
-        return (src_uv_xy[0], src_uv_xy[1], src_uv_wh[0], src_uv_wh[1])
-
-    #
-    # add_text
-    #
-
-    def add_text(
-        self,
-        *,
-        text: str,
-        font: "Font",
-        dst_xy: tuple[int, int],
-        dst_wh: tuple[int, int],
-        font_size_px: int = 16,
-        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        wrap: bool = True,
-        font_weight: int = 400,
-        horizontal_alignment: HorizontalAlignment = "left",
-        vertical_alignment: VerticalAlignment = "top",
-        optical_alignment: bool = True,
-    ):
-        """
-        Adds quads for rendering the given text string with the given font.
-
-        Supports horizontal and vertical alignment within the destination rectangle.
-
-        If `optical_alignment` is True, aligns based on the visible ink bounds
-        rather than the logical metric bounds.
-        """
-
-        font_cache = self.renderer._text_canvas_writer
-
-        font_cache._add_quads_to_canvas(
-            canvas=self,
-            text=text,
-            font=font,
-            font_size_px=font_size_px,
-            color=color,
-            dst_xy=dst_xy,
-            dst_wh=dst_wh,
-            wrap=wrap,
-            font_weight=font_weight,
-            align_x=horizontal_alignment,
-            align_y=vertical_alignment,
-            optical_alignment=optical_alignment,
-        )
+        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
+
+        bitmap_left = ft_face.glyph.bitmap_left
+        bitmap_top = ft_face.glyph.bitmap_top
+        bitmap = ft_face.glyph.bitmap
+
+        if not bitmap.buffer or bitmap.width == 0 or bitmap.rows == 0:
+            result = (None, 0, 0)
+            self._ft_image_cache[image_cache_key] = result
+            return result
+
+        h, w = bitmap.rows, bitmap.width
+        pitch = bitmap.pitch
+
+        # Load buffer as (h, pitch)
+        buffer_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, pitch)
+
+        # Prepare RGBA data array
+        data = np.empty((h, w, 4), dtype=np.float32)
+
+        # Slice to remove padding if any
+        if pitch != w:
+            buffer_array = buffer_array[:, :w]
+
+        # Grayscale glyph: use gray value for all RGB channels and alpha
+        gray_norm = buffer_array / 255.0
+        data[..., 0] = 1.0
+        data[..., 1] = 1.0
+        data[..., 2] = 1.0
+        data[..., 3] = gray_norm
+
+        # Create RendererImage
+        image = Image(renderer=self.renderer, data=data, sampler="nearest")
+        result = (image, bitmap_left, bitmap_top)
+        self._ft_image_cache[image_cache_key] = result
+
+        # Done:
+        return result
 
 
 #
