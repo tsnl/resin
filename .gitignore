@@ -17,3 +17,6 @@ __pycache__
 
 # `bundled_data` is always excluded. Built by `zfw-build`.
 bundled_data
+
+# Ignore '*.actual.png' files from expect tests.
+*.actual.png

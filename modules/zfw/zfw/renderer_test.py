@@ -5,7 +5,6 @@ import warnings
 import numpy as np
 import PIL.Image
 import pytest
-from skimage.metrics import structural_similarity as ssim
 
 from .basic import BaseResource, Font
 from .gpu import (
@@ -31,8 +30,7 @@ TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 def assert_image_matches_reference(
     actual_image: np.ndarray,
     test_name: str,
-    match_type: Literal["exact", "ssim"] = "ssim",
-    ssim_threshold: float = 0.99,
+    match_type: Literal["exact"],
 ) -> None:
     """
     Compare an actual rendered image against an expected reference image.
@@ -40,12 +38,6 @@ def assert_image_matches_reference(
     If no reference exists, creates it and passes the test.
     If reference exists, compares using exact or SSIM matching.
     On mismatch, saves the actual image as <name>.actual.png and raises AssertionError.
-
-    Args:
-        actual_image: The rendered image to test (numpy array)
-        test_name: Name of the test (used for file naming)
-        match_type: Either "exact" for pixel-perfect matching or "ssim" for structural similarity
-        ssim_threshold: Minimum SSIM score required (0-1), only used when match_type="ssim"
     """
     expect_dir = Path("tests/expect/zfw/renderer_test")
     expect_dir.mkdir(parents=True, exist_ok=True)
@@ -87,28 +79,13 @@ def assert_image_matches_reference(
                 f"{diff_pixels}/{total_pixels} pixels differ. "
                 f"Actual image saved to {actual_path}"
             )
-    elif match_type == "ssim":
-        # Convert to float32 for SSIM calculation
-        actual_float = actual_image.astype(np.float32) / 255.0
-        expected_float = expected_image.astype(np.float32) / 255.0
-
-        # Calculate SSIM per channel and average
-        ssim_score = ssim(
-            expected_float,
-            actual_float,
-            channel_axis=2,
-            data_range=1.0,
-        )
-
-        if ssim_score < ssim_threshold:
-            PIL.Image.fromarray(actual_image).save(actual_path)
-            raise AssertionError(
-                f"SSIM match failed for {test_name}: "
-                f"score {ssim_score:.4f} < threshold {ssim_threshold}. "
-                f"Actual image saved to {actual_path}"
-            )
     else:
         raise ValueError(f"Unknown match_type: {match_type}")
+
+    # If we reach here, the images matched
+    # Clean up any previous actual image
+    if actual_path.exists():
+        actual_path.unlink()
 
 
 class RendererTestEngine(BaseResource):
@@ -214,7 +191,11 @@ def test_renderer_quads():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    assert_image_matches_reference(image, "test_renderer_quads")
+    assert_image_matches_reference(
+        image,
+        "test_renderer_quads",
+        match_type="exact",
+    )
 
     engine.dispose_resource()
 
@@ -247,7 +228,11 @@ def test_renderer_image():
     engine.draw(canvas=canvas)
     output_image = engine.readback()
 
-    assert_image_matches_reference(output_image, "test_renderer_image")
+    assert_image_matches_reference(
+        output_image,
+        "test_renderer_image",
+        match_type="exact",
+    )
 
     engine.dispose_resource()
 
@@ -320,7 +305,11 @@ def test_renderer_text_basic():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    assert_image_matches_reference(image, "test_renderer_text_basic")
+    assert_image_matches_reference(
+        image,
+        "test_renderer_text_basic",
+        match_type="exact",
+    )
 
     engine.dispose_resource()
 
@@ -343,7 +332,11 @@ def test_renderer_text_wrap():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    assert_image_matches_reference(image, "test_renderer_text_wrap")
+    assert_image_matches_reference(
+        image,
+        "test_renderer_text_wrap",
+        match_type="exact",
+    )
 
     engine.dispose_resource()
 
@@ -366,7 +359,11 @@ def test_renderer_text_clip():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    assert_image_matches_reference(image, "test_renderer_text_clip")
+    assert_image_matches_reference(
+        image,
+        "test_renderer_text_clip",
+        match_type="exact",
+    )
 
     engine.dispose_resource()
 
@@ -424,7 +421,11 @@ def test_renderer_text_matrix():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    assert_image_matches_reference(image, "test_renderer_text_matrix")
+    assert_image_matches_reference(
+        image,
+        "test_renderer_text_matrix",
+        match_type="exact",
+    )
 
     engine.dispose_resource()
 

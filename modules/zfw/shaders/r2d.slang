@@ -30,7 +30,6 @@ struct Quad
     uint imageId;           // RGBA image ID in the atlas
     uint flags;             // bit 0: 1=linear, 0=nearest
     uint _rsv0;             // reserved
-    uint _rsv1;             // reserved
 };
 
 [[vk::binding(0, 2)]]
