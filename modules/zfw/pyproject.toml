@@ -24,6 +24,7 @@ dev = [
     "requests",
     "pillow>=10.0.0",
     "zfw_build",
+    "scikit-image",
 ]
 
 

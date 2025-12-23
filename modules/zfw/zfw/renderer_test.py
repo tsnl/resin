@@ -1,8 +1,11 @@
 from pathlib import Path
+from typing import Literal
+import warnings
 
 import numpy as np
 import PIL.Image
 import pytest
+from skimage.metrics import structural_similarity as ssim
 
 from .basic import BaseResource, Font
 from .gpu import (
@@ -23,6 +26,89 @@ from .renderer import (
 from .images import load_rgba_image
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
+
+
+def assert_image_matches_reference(
+    actual_image: np.ndarray,
+    test_name: str,
+    match_type: Literal["exact", "ssim"] = "ssim",
+    ssim_threshold: float = 0.99,
+) -> None:
+    """
+    Compare an actual rendered image against an expected reference image.
+
+    If no reference exists, creates it and passes the test.
+    If reference exists, compares using exact or SSIM matching.
+    On mismatch, saves the actual image as <name>.actual.png and raises AssertionError.
+
+    Args:
+        actual_image: The rendered image to test (numpy array)
+        test_name: Name of the test (used for file naming)
+        match_type: Either "exact" for pixel-perfect matching or "ssim" for structural similarity
+        ssim_threshold: Minimum SSIM score required (0-1), only used when match_type="ssim"
+    """
+    expect_dir = Path("tests/expect/zfw/renderer_test")
+    expect_dir.mkdir(parents=True, exist_ok=True)
+
+    expect_path = expect_dir / f"{test_name}.png"
+    actual_path = expect_dir / f"{test_name}.actual.png"
+
+    # Also save to output directory for convenience
+    output_path = Path("output/zfw/renderer_test") / f"{test_name}.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    PIL.Image.fromarray(actual_image).save(output_path)
+
+    if not expect_path.exists():
+        # No reference exists - create it and pass
+        PIL.Image.fromarray(actual_image).save(expect_path)
+        warnings.warn(f"{test_name}: no expect found: image created: {expect_path}")
+        return
+
+    # Load expected image
+    expected_image = np.array(PIL.Image.open(expect_path))
+
+    # Check shapes match
+    if actual_image.shape != expected_image.shape:
+        PIL.Image.fromarray(actual_image).save(actual_path)
+        raise AssertionError(
+            f"Image shape mismatch for {test_name}: "
+            f"expected {expected_image.shape}, got {actual_image.shape}. "
+            f"Actual image saved to {actual_path}"
+        )
+
+    # Compare images
+    if match_type == "exact":
+        if not np.array_equal(actual_image, expected_image):
+            PIL.Image.fromarray(actual_image).save(actual_path)
+            diff_pixels = np.sum(actual_image != expected_image)
+            total_pixels = actual_image.size
+            raise AssertionError(
+                f"Exact pixel match failed for {test_name}: "
+                f"{diff_pixels}/{total_pixels} pixels differ. "
+                f"Actual image saved to {actual_path}"
+            )
+    elif match_type == "ssim":
+        # Convert to float32 for SSIM calculation
+        actual_float = actual_image.astype(np.float32) / 255.0
+        expected_float = expected_image.astype(np.float32) / 255.0
+
+        # Calculate SSIM per channel and average
+        ssim_score = ssim(
+            expected_float,
+            actual_float,
+            channel_axis=2,
+            data_range=1.0,
+        )
+
+        if ssim_score < ssim_threshold:
+            PIL.Image.fromarray(actual_image).save(actual_path)
+            raise AssertionError(
+                f"SSIM match failed for {test_name}: "
+                f"score {ssim_score:.4f} < threshold {ssim_threshold}. "
+                f"Actual image saved to {actual_path}"
+            )
+    else:
+        raise ValueError(f"Unknown match_type: {match_type}")
 
 
 class RendererTestEngine(BaseResource):
@@ -128,9 +214,7 @@ def test_renderer_quads():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    output_path = Path("output/zfw/renderer_test/test_renderer_quads.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(image).save(output_path)
+    assert_image_matches_reference(image, "test_renderer_quads")
 
     engine.dispose_resource()
 
@@ -163,9 +247,7 @@ def test_renderer_image():
     engine.draw(canvas=canvas)
     output_image = engine.readback()
 
-    output_path = Path("output/zfw/renderer_test/test_renderer_image.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(output_image).save(output_path)
+    assert_image_matches_reference(output_image, "test_renderer_image")
 
     engine.dispose_resource()
 
@@ -238,9 +320,9 @@ def test_renderer_text_basic():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    output_path = Path("output/zfw/renderer_test/test_renderer_text_basic.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(image).save(output_path)
+    assert_image_matches_reference(image, "test_renderer_text_basic")
+
+    engine.dispose_resource()
 
 
 def test_renderer_text_wrap():
@@ -261,9 +343,7 @@ def test_renderer_text_wrap():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    output_path = Path("output/zfw/renderer_test/test_renderer_text_wrap.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(image).save(output_path)
+    assert_image_matches_reference(image, "test_renderer_text_wrap")
 
     engine.dispose_resource()
 
@@ -286,9 +366,7 @@ def test_renderer_text_clip():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    output_path = Path("output/zfw/renderer_test/test_renderer_text_clip.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(image).save(output_path)
+    assert_image_matches_reference(image, "test_renderer_text_clip")
 
     engine.dispose_resource()
 
@@ -346,9 +424,7 @@ def test_renderer_text_matrix():
     engine.draw(canvas=canvas)
     image = engine.readback()
 
-    output_path = Path("output/zfw/renderer_test/test_renderer_text_matrix.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(image).save(output_path)
+    assert_image_matches_reference(image, "test_renderer_text_matrix")
 
     engine.dispose_resource()
 
