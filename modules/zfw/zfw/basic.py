@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
+import rich.logging
 
 from .excepts import LogicError
 
@@ -357,34 +358,6 @@ type Json = JsonObject | JsonArray | str | int | float | bool | None
 #
 
 
-class ColoredLoggingFormatter(logging.Formatter):
-    """Custom formatter that adds color to console output."""
-
-    # ANSI color codes
-    COLORS = {
-        logging.DEBUG: "\033[36m",  # Cyan
-        logging.INFO: "\033[32m",  # Green
-        logging.WARNING: "\033[33m",  # Yellow
-        logging.ERROR: "\033[31m",  # Red
-        logging.CRITICAL: "\033[35m",  # Magenta
-    }
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-
-    def format(self, record: logging.LogRecord) -> str:
-        levelname = record.levelname
-        color = self.COLORS.get(record.levelno, self.RESET)
-
-        # Format: [TIMESTAMP] LEVEL: message
-        timestamp = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
-        colored_levelname = f"[{timestamp}] {self.BOLD}{color}{levelname}{self.RESET}"
-
-        record.levelname = colored_levelname
-        result = super().format(record)
-        record.levelname = levelname  # Restore original levelname
-        return result
-
-
 def logger(name: str) -> logging.Logger:
     """
     Get a logger instance for the given module name.
@@ -421,12 +394,13 @@ def setup_logging(
 
     # Console handler (stderr)
     if console:
-        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler = rich.logging.RichHandler()
         console_handler.setLevel(level)
-        console_formatter = ColoredLoggingFormatter(
-            fmt="[%(asctime)s] %(levelname)s: %(name)s - %(message)s"
-        )
-        console_handler.setFormatter(console_formatter)
+        # console_formatter = logging.Formatter(
+        #     fmt="%(asctime)s|%(levelname)s|%(name)s| %(message)s",
+        #     datefmt="%Y-%m-%d %H:%M:%S",
+        # )
+        # console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
 
     # File handler
@@ -436,7 +410,7 @@ def setup_logging(
         file_handler = logging.FileHandler(file, mode="a", encoding="utf-8")
         file_handler.setLevel(level)
         file_formatter = logging.Formatter(
-            fmt="[%(asctime)s] %(levelname)s: %(name)s - %(message)s",
+            fmt="%(asctime)s|%(levelname)s|%(name)s|%(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
         file_handler.setFormatter(file_formatter)

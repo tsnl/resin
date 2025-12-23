@@ -620,6 +620,7 @@ dependencies = [
     { name = "kiwisolver" },
     { name = "numpy" },
     { name = "pillow" },
+    { name = "rich" },
     { name = "uharfbuzz" },
     { name = "vulkan" },
 ]
@@ -647,6 +648,7 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.1,<10.0.0" },
     { name = "requests", marker = "extra == 'dev'" },
+    { name = "rich", specifier = ">=14.2.0" },
     { name = "rich", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.5" },
     { name = "scikit-image", marker = "extra == 'dev'" },

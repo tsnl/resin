@@ -318,6 +318,10 @@ from .typed_vulkan import (
 _logger = logger(__name__)
 
 
+#
+# Debug Utils Messenger Callback
+#
+
 # Filters out specific validation messages by their pMessageIdName.
 # These are suppressed because they are noisy and not actionable:
 # - "BestPractices-specialuse-extension":
@@ -325,8 +329,11 @@ _logger = logger(__name__)
 #   enabled in production builds.
 #   We know VK_EXT_debug_utils is for debugging; we deliberately enable it during
 #   development.
+# - "Loader Message":
+#   Emitted by the Vulkan loader about errors with driver selection. Suppress.
 _FILTERED_VALIDATION_MESSAGE_NAMES: set[str] = {
     "BestPractices-specialuse-extension",
+    "Loader Message",
 }
 
 
@@ -376,7 +383,7 @@ def _debug_utils_messenger_callback(
     severity: int,
     message_type: int,
     callback_data,
-    user_data,  # noqa: ARG001
+    user_data,
 ) -> int:
     """
     Custom debug messenger callback that filters unwanted validation messages.
@@ -388,29 +395,27 @@ def _debug_utils_messenger_callback(
     with appropriate context (message type and ID).
     """
 
-    # callback_data is a VkDebugUtilsMessengerCallbackDataEXT
-    message_id_name = raw_ffi.string(callback_data.pMessageIdName)
-    message_id_name = (
-        message_id_name
-        if isinstance(message_id_name, str)
-        else bytes(message_id_name).decode("utf-8")
-    )
+    _ = user_data
 
+    def string(ptr):
+        s = raw_ffi.string(ptr)
+        return s if isinstance(s, str) else bytes(s).decode("utf-8")
+
+    # callback_data is a VkDebugUtilsMessengerCallbackDataEXT
+    message_id_name = string(callback_data.pMessageIdName)
     if message_id_name in _FILTERED_VALIDATION_MESSAGE_NAMES:
-        # Suppress this message
-        return 0  # VK_FALSE
+        return False
 
     # Extract and format the message
-    message = raw_ffi.string(callback_data.pMessage)
-    message = message if isinstance(message, str) else bytes(message).decode("utf-8")
+    message = string(callback_data.pMessage)
     message_type_str = _vulkan_message_type_to_string(message_type)
     log_level = _vulkan_severity_to_log_level(severity)
 
     # Log with appropriate context
-    full_message = f"[{message_type_str}] [{message_id_name}] {message}"
+    full_message = f"{message} {message_type_str=}, {message_id_name=} "
     _logger.log(log_level, full_message)
 
-    return 0  # VK_FALSE
+    return False
 
 
 #
