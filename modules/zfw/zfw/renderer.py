@@ -1,6 +1,5 @@
 __all__ = [
     "Image",
-    "ImageHeap",
     "QuadArray",
     "Renderer",
     "RendererContext",
@@ -69,7 +68,7 @@ class Renderer(BaseResource):
     _max_frames_in_flight: int
     _scale: float
     _basic_uniform: "BasicUniform"
-    _atlas: "Atlas"
+    _image_heap: "ImageHeap"
     _default_white_image: "Image"
     _r2d: "Renderer2d"
     _r3d: "Renderer3d"
@@ -90,7 +89,7 @@ class Renderer(BaseResource):
         self._scale = scale
 
         self._basic_uniform = BasicUniform(renderer=self)
-        self._atlas = Atlas(renderer=self)
+        self._image_heap = ImageHeap(renderer=self)
 
         self._default_white_image = Image(
             renderer=self,
@@ -113,7 +112,7 @@ class Renderer(BaseResource):
         self._r3d.dispose_resource()
         self._r2d.dispose_resource()
 
-        self._atlas.dispose_resource()
+        self._image_heap.dispose_resource()
         self._basic_uniform.dispose_resource()
 
     def draw(
@@ -141,8 +140,8 @@ class Renderer(BaseResource):
             frame_index=frame_index,
         )
 
-        # Update texture atlas in `b1_atlas.slang`:
-        self._atlas.flush(command_encoder=command_encoder, frame_index=frame_index)
+        # Update texture atlas in `b1_image_heap.slang`:
+        self._image_heap.flush(command_encoder=command_encoder, frame_index=frame_index)
 
         # Draw:
         #
@@ -162,8 +161,8 @@ class Renderer(BaseResource):
         )
 
     @property
-    def atlas(self) -> "Atlas":
-        return self._atlas
+    def atlas(self) -> "ImageHeap":
+        return self._image_heap
 
 
 ##--------------------------------------------------------------------------------------
@@ -404,7 +403,7 @@ class Renderer2d(BaseResource):
             device=self.gpu_device,
             descriptor_set_layouts=[
                 self.renderer._basic_uniform._descriptor_set_layout,
-                self.renderer._atlas._descriptor_set_layout,
+                self.renderer._image_heap._descriptor_set_layout,
                 self._descriptor_set_layout,
             ],
         )
@@ -493,7 +492,7 @@ class Renderer2d(BaseResource):
             )
             render_pass.bind_descriptor_set(
                 set_index=1,
-                descriptor_set=self.renderer._atlas._descriptor_set,
+                descriptor_set=self.renderer._image_heap._descriptor_set,
             )
 
             if instance_count > 0:
@@ -640,7 +639,7 @@ class Canvas:
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
         border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0),  # TRBL
-        image: Image | None = None,
+        image: "Image | None" = None,
         _dip: bool = True,
     ) -> None:
         """
@@ -895,7 +894,7 @@ class Canvas:
     def _resolve_src_wh(
         dst_wh: tuple[int, int] | None,
         src_wh: tuple[int, int] | None,
-        image: Image | None,
+        image: "Image | None",
     ) -> tuple[int, int]:
         if image is not None:
             # Image present: check if src_wh is given to crop, else use full image size
@@ -925,7 +924,7 @@ class Canvas:
     def _eval_src_uv_xywh(
         src_xy: tuple[int, int],
         src_wh: tuple[int, int],
-        image: Image | None,
+        image: "Image | None",
     ) -> tuple[float, float, float, float]:
         if image is None:
             return (0.0, 0.0, 1.0, 1.0)
@@ -1097,7 +1096,7 @@ class Canvas:
         glyph_index: int,
         font_size_px: int,
         font_weight: int,
-    ) -> tuple[Image | None, int, int]:
+    ) -> tuple["Image | None", int, int]:
         # Use renderer's scale factor for HiDPI support
         renderer_scale = self.renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
@@ -1262,8 +1261,12 @@ class BasicUniform(BaseResource):
 #
 
 
+type ImageChannels = Literal[1, 4]
+type SamplerType = Literal["linear", "nearest"]
+
+
 class Image:
-    _atlas: "ImageHeap"
+    _atlas: "HomogeneousImageHeap"
     _index: int
     _allocation_uv_xywh: tuple[float, float, float, float] | None
     _allocation_px_xywh: tuple[int, int, int, int] | None
@@ -1280,7 +1283,7 @@ class Image:
         if data.ndim == 2:
             data = data[:, :, np.newaxis]
 
-        self._atlas = renderer._atlas.heap(channels=data.shape[2])
+        self._atlas = renderer._image_heap.heap(channels=data.shape[2])
         self._data = data.copy()
         self._data.flags.writeable = False
         self._index = -1
@@ -1324,23 +1327,19 @@ class Image:
         return self._sampler
 
 
-type ImageChannels = Literal[1, 4]
-type SamplerType = Literal["linear", "nearest"]
-
-
-class Atlas(BaseResource):
+class ImageHeap(BaseResource):
     _gpu_device: GpuDevice
-    _mono_heap: "ImageHeap"
-    _rgba_heap: "ImageHeap"
-    _heap_index: dict[ImageChannels, "ImageHeap"]
+    _mono_heap: "HomogeneousImageHeap"
+    _rgba_heap: "HomogeneousImageHeap"
+    _heap_index: dict[ImageChannels, "HomogeneousImageHeap"]
     _descriptor_set_layout: GpuDescriptorSetLayout
     _descriptor_set: GpuDescriptorSet
 
     def __init__(self, *, renderer: "Renderer"):
         super().__init__(parent_resource=renderer)
         self._gpu_device = renderer._gpu_device
-        self._mono_heap = ImageHeap(renderer=renderer, channels=1)
-        self._rgba_heap = ImageHeap(renderer=renderer, channels=4)
+        self._mono_heap = HomogeneousImageHeap(renderer=renderer, channels=1)
+        self._rgba_heap = HomogeneousImageHeap(renderer=renderer, channels=4)
         self._heap_index = {1: self._mono_heap, 4: self._rgba_heap}
 
         self._descriptor_set_layout = GpuDescriptorSetLayout(
@@ -1397,7 +1396,7 @@ class Atlas(BaseResource):
 
         super()._on_dispose_resource()
 
-    def heap(self, *, channels: ImageChannels) -> "ImageHeap":
+    def heap(self, *, channels: ImageChannels) -> "HomogeneousImageHeap":
         return self._heap_index[channels]
 
     def flush(self, *, command_encoder: GpuCommandEncoder, frame_index: int) -> None:
@@ -1405,7 +1404,7 @@ class Atlas(BaseResource):
         self._rgba_heap.flush(command_encoder=command_encoder, frame_index=frame_index)
 
 
-class ImageHeap(BaseResource):
+class HomogeneousImageHeap(BaseResource):
     """
     A GPU texture array that stores multiple images of the same number of channels and
     same format.
@@ -1423,6 +1422,7 @@ class ImageHeap(BaseResource):
     _page_count: int
     _page_pixel_data: np.ndarray
     _page_gpu_image_list: list[GpuImage]
+
     # Ring-buffered staging buffers (one list per frame slot):
     _page_staging_buffer_ring: list[list[GpuBuffer]]
     _uv_rect_array_device_buf: GpuBuffer
@@ -1782,7 +1782,7 @@ UV_RECT_DTYPE = np.dtype(
 
 
 ##--------------------------------------------------------------------------------------
-## Utilities for raw GPU resource organization
+## Utilities for GPU resource organization
 ##--------------------------------------------------------------------------------------
 
 

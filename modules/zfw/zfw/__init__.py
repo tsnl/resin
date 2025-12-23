@@ -33,7 +33,7 @@ __all__ = [
     "GuiWidgetStyle",
     "GuiWindow",
     "Image",
-    "ImageHeap",
+    "HomogeneousImageHeap",
     "Json",
     "JsonArray",
     "JsonObject",
@@ -86,7 +86,7 @@ from .gpu import (
 )
 from .renderer import (
     Renderer,
-    ImageHeap,
+    HomogeneousImageHeap,
     RendererContext,
     Image,
     QuadArray,

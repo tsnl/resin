@@ -1,8 +1,13 @@
-//! Atlas texture sampling utilities @ descriptor set 1.
+//! Image heap @ descriptor set 1.
 //!
-//! Bindless texture arrays are used to store the atlas pages.
-//! Each image in the atlas is represented by a rectangle in one of the pages.
-//! The rectangle UV coordinates and dimensions are stored in structured buffers.
+//! Images are stored in rectangles within image arrays. Each array element is called a
+//! "page". Each image is confined to a rectangle within a page and is identified by an
+//! image ID. The image ID is an index into a "rectangles" table that provides the UV
+//! coordinates of the rectangle and the page index.
+//!
+//! NOTE: One quirk of how we store rectangles: the V coordinate encodes both the page
+//! index and the V coordinate within the rectangle. The integer part of V is the page
+//! index, and the fractional part is the V coordinate within the rectangle.
 
 struct UvRect
 {

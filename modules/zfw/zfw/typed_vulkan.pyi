@@ -136,6 +136,13 @@ VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT: int
 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT: int
 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT: int
 
+@dataclass
+class VkDebugUtilsMessengerCreateInfoEXT:
+    pNext: Any
+    messageSeverity: VkFlags
+    messageType: VkFlags
+    pfnUserCallback: Callable
+
 #
 # VkInstance
 #

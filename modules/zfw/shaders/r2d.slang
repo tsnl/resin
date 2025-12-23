@@ -3,7 +3,7 @@
 //
 
 import core.b0_basic;
-import core.b1_atlas;
+import core.b1_image_heap;
 
 //
 // Constants:
