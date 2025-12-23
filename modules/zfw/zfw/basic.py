@@ -6,13 +6,18 @@ __all__ = [
     "KeyModifier",
     "SupportsWrite",
     "expect",
+    "logger",
     "round_up_to_po2",
+    "setup_logging",
 ]
 
 from abc import ABC
 from typing import Protocol, TypeVar, Self, Literal, Sequence
 from weakref import ref as WeakRef
 import warnings
+import logging
+import sys
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -345,3 +350,94 @@ type VerticalAlignment = Literal["top", "middle", "bottom"]
 type JsonObject = dict[str, Json]
 type JsonArray = Sequence[Json]
 type Json = JsonObject | JsonArray | str | int | float | bool | None
+
+
+#
+# Logging utilities
+#
+
+
+class ColoredLoggingFormatter(logging.Formatter):
+    """Custom formatter that adds color to console output."""
+
+    # ANSI color codes
+    COLORS = {
+        logging.DEBUG: "\033[36m",  # Cyan
+        logging.INFO: "\033[32m",  # Green
+        logging.WARNING: "\033[33m",  # Yellow
+        logging.ERROR: "\033[31m",  # Red
+        logging.CRITICAL: "\033[35m",  # Magenta
+    }
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+
+    def format(self, record: logging.LogRecord) -> str:
+        levelname = record.levelname
+        color = self.COLORS.get(record.levelno, self.RESET)
+
+        # Format: [TIMESTAMP] LEVEL: message
+        timestamp = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
+        colored_levelname = f"[{timestamp}] {self.BOLD}{color}{levelname}{self.RESET}"
+
+        record.levelname = colored_levelname
+        result = super().format(record)
+        record.levelname = levelname  # Restore original levelname
+        return result
+
+
+def logger(name: str) -> logging.Logger:
+    """
+    Get a logger instance for the given module name.
+
+    Args:
+        name: The logger name, typically __name__.
+
+    Returns:
+        A configured logger instance.
+    """
+    return logging.getLogger(name)
+
+
+def setup_logging(
+    level: int = logging.INFO,
+    file: Path | None = None,
+    console: bool = True,
+) -> None:
+    """
+    Configure logging for the entire application.
+
+    Args:
+        level: Logging level (e.g., logging.DEBUG, logging.INFO).
+        log_file: Path to log file. If None and file_enabled=True, creates a default.
+        console_enabled: Whether to log to console.
+        file_enabled: Whether to log to file.
+    """
+    # Get root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Remove any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+
+    # Console handler (stderr)
+    if console:
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(level)
+        console_formatter = ColoredLoggingFormatter(
+            fmt="[%(asctime)s] %(levelname)s: %(name)s - %(message)s"
+        )
+        console_handler.setFormatter(console_formatter)
+        root_logger.addHandler(console_handler)
+
+    # File handler
+    if file:
+        file.parent.mkdir(parents=True, exist_ok=True)
+
+        file_handler = logging.FileHandler(file, mode="a", encoding="utf-8")
+        file_handler.setLevel(level)
+        file_formatter = logging.Formatter(
+            fmt="[%(asctime)s] %(levelname)s: %(name)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)

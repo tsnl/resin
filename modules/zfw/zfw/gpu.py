@@ -6,6 +6,8 @@ Required Vulkan version:
     https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_dynamic_rendering.html
 """
 
+from __future__ import annotations
+
 __all__ = [
     "GpuBufferImageCopyRegion",
     "GpuContext",
@@ -25,6 +27,7 @@ __all__ = [
 ]
 
 import json
+import logging
 import os
 import sys
 from collections import OrderedDict, defaultdict
@@ -36,8 +39,9 @@ from typing import Callable, Literal, Any
 import numpy as np
 import numpy.typing as npt
 
-from .basic import BaseResource, ColorSpace, SupportsWrite
+from .basic import BaseResource, ColorSpace, SupportsWrite, logger
 from .excepts import LogicError, PlatformSupportError
+
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -191,7 +195,6 @@ from .typed_vulkan import (
     VkLayerSettingEXT,
     VkLayerSettingsCreateInfoEXT,
     VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-    VK_LAYER_SETTING_TYPE_STRING_EXT,
     VkMemoryAllocateInfo,
     VkMemoryRequirements,
     VkOffset2D,
@@ -235,6 +238,14 @@ from .typed_vulkan import (
     VkSwapchainKHR,
     VkViewport,
     VkWriteDescriptorSet,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+    VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
+    VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+    VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+    VkDebugUtilsMessengerCreateInfoEXT,
     vk_api_version_str,
     vkAllocateCommandBuffers,
     vkAllocateDescriptorSets,
@@ -302,6 +313,106 @@ from .typed_vulkan import (
     VkValidationFeaturesEXT,
 )
 
+
+# Module logger
+_logger = logger(__name__)
+
+
+# Filters out specific validation messages by their pMessageIdName.
+# These are suppressed because they are noisy and not actionable:
+# - "BestPractices-specialuse-extension":
+#   Complains that VK_EXT_debug_utils is a special-use extension and should not be
+#   enabled in production builds.
+#   We know VK_EXT_debug_utils is for debugging; we deliberately enable it during
+#   development.
+_FILTERED_VALIDATION_MESSAGE_NAMES: set[str] = {
+    "BestPractices-specialuse-extension",
+}
+
+
+def _vulkan_severity_to_log_level(severity: int) -> int:
+    """
+    Translate Vulkan debug utils message severity to Python logging level.
+
+    Args:
+        severity: VkDebugUtilsMessageSeverityFlagBitsEXT value.
+
+    Returns:
+        A Python logging level (e.g., logging.ERROR, logging.WARNING).
+    """
+    if severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+        return logging.ERROR
+    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+        return logging.WARNING
+    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+        return logging.INFO
+    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+        return logging.DEBUG
+    else:
+        return logging.INFO
+
+
+def _vulkan_message_type_to_string(message_type: int) -> str:
+    """
+    Translate Vulkan debug utils message type to a human-readable string.
+
+    Args:
+        message_type: VkDebugUtilsMessageTypeFlagBitsEXT value.
+
+    Returns:
+        A string describing the message type.
+    """
+    types = []
+    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
+        types.append("GENERAL")
+    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
+        types.append("VALIDATION")
+    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
+        types.append("PERFORMANCE")
+    return " | ".join(types) if types else "UNKNOWN"
+
+
+def _debug_utils_messenger_callback(
+    severity: int,
+    message_type: int,
+    callback_data,
+    user_data,  # noqa: ARG001
+) -> int:
+    """
+    Custom debug messenger callback that filters unwanted validation messages.
+
+    This is used during instance creation to suppress noisy warnings that are
+    emitted before the layer's message_id_filter setting takes effect.
+
+    Translates Vulkan severity levels to Python logging levels and logs messages
+    with appropriate context (message type and ID).
+    """
+
+    # callback_data is a VkDebugUtilsMessengerCallbackDataEXT
+    message_id_name = raw_ffi.string(callback_data.pMessageIdName)
+    message_id_name = (
+        message_id_name
+        if isinstance(message_id_name, str)
+        else bytes(message_id_name).decode("utf-8")
+    )
+
+    if message_id_name in _FILTERED_VALIDATION_MESSAGE_NAMES:
+        # Suppress this message
+        return 0  # VK_FALSE
+
+    # Extract and format the message
+    message = raw_ffi.string(callback_data.pMessage)
+    message = message if isinstance(message, str) else bytes(message).decode("utf-8")
+    message_type_str = _vulkan_message_type_to_string(message_type)
+    log_level = _vulkan_severity_to_log_level(severity)
+
+    # Log with appropriate context
+    full_message = f"[{message_type_str}] [{message_id_name}] {message}"
+    _logger.log(log_level, full_message)
+
+    return 0  # VK_FALSE
+
+
 #
 # GpuContext
 #
@@ -347,6 +458,7 @@ class GpuContext(BaseResource):
         if enable_present_support:
             self._load_extra_proc("vkGetPhysicalDeviceSurfaceSupportKHR")
             self._load_extra_proc("vkGetPhysicalDeviceSurfaceFormatsKHR")
+            self._load_extra_proc("vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
             self._load_extra_proc("vkDestroySurfaceKHR")
             self._load_extra_proc("vkCreateSwapchainKHR")
             self._load_extra_proc("vkDestroySwapchainKHR")
@@ -392,16 +504,6 @@ class GpuContext(BaseResource):
             # WARNING: Do not factor this into a helper function: VkLayerSettingsEXT
             # contains weak pointers that must remain valid until instance creation.
             sync_validate_c: Any = raw_ffi.new("VkBool32 *", 1)
-            message_id_filter = [
-                "BestPractices-specialuse-extension",
-            ]
-            message_id_filter_c: Any = raw_ffi.new(
-                "char*[]",
-                [
-                    raw_ffi.new("char[]", message_id.encode("utf-8"))
-                    for message_id in message_id_filter
-                ],
-            )
             layer_settings = [
                 # Enable synchronization validation:
                 VkLayerSettingEXT(
@@ -410,14 +512,6 @@ class GpuContext(BaseResource):
                     type=VK_LAYER_SETTING_TYPE_BOOL32_EXT,
                     valueCount=1,
                     pValues=sync_validate_c,
-                ),
-                # Mute noisy messages:
-                VkLayerSettingEXT(
-                    pLayerName="VK_LAYER_KHRONOS_validation",
-                    pSettingName="message_id_filter",
-                    type=VK_LAYER_SETTING_TYPE_STRING_EXT,
-                    valueCount=len(message_id_filter),
-                    pValues=message_id_filter_c,
                 ),
             ]
             p_next = VkLayerSettingsCreateInfoEXT(
@@ -435,6 +529,23 @@ class GpuContext(BaseResource):
                 pNext=p_next,
                 enabledValidationFeatureCount=len(validation_feature_enables),
                 pEnabledValidationFeatures=validation_feature_enables,
+            )
+
+            # Set up a custom debug messenger that filters unwanted messages.
+            # This is necessary because message_id_filter in VkLayerSettingsEXT
+            # does not suppress messages emitted during vkCreateInstance itself.
+            p_next = VkDebugUtilsMessengerCreateInfoEXT(
+                pNext=p_next,
+                messageSeverity=(
+                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
+                    | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                ),
+                messageType=(
+                    VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+                    | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+                    | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
+                ),
+                pfnUserCallback=_debug_utils_messenger_callback,
             )
 
         if enable_present_support:
@@ -562,6 +673,16 @@ class GpuContext(BaseResource):
         surface: VkSurfaceKHR,
     ) -> list[VkSurfaceFormatKHR]:
         return self.ext_fn("vkGetPhysicalDeviceSurfaceFormatsKHR")(
+            physical_device, surface
+        )
+
+    def vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        self,
+        physical_device: VkPhysicalDevice,
+        surface: VkSurfaceKHR,
+    ) -> Any:
+        """Query surface capabilities (required before creating swapchain)."""
+        return self.ext_fn("vkGetPhysicalDeviceSurfaceCapabilitiesKHR")(
             physical_device, surface
         )
 
@@ -2203,7 +2324,8 @@ class GpuCommandEncoder(BaseResource):
         elif image.current_vk_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
             src_access_mask = VK_ACCESS_SHADER_READ_BIT
         elif image.current_vk_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            src_access_mask = VK_ACCESS_MEMORY_WRITE_BIT
+            # PRESENT_SRC layout - presentation engine only reads, no pending writes
+            src_access_mask = 0
         else:
             # For UNDEFINED or other layouts, use generic memory write
             src_access_mask = VK_ACCESS_MEMORY_WRITE_BIT
@@ -3210,6 +3332,11 @@ class GpuSwapChain(BaseResource):
         vk_format, vk_color_space = self._select_surface_format(device, surface)
         self.vk_format = vk_format
         self.vk_color_space = vk_color_space
+        # Query surface capabilities (required before creating swapchain per best practices)
+        device.context.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+            device.physical_device.vk_physical_device,
+            surface.vk_surface,
+        )
         self.vk_swap_chain = self._create_swap_chain(surface, image_count)
         self.images = self._wrap_swap_chain_images(surface)
         self.slots = self._create_slots()

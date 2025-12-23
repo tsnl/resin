@@ -20,3 +20,6 @@ bundled_data
 
 # Ignore '*.actual.png' files from expect tests.
 *.actual.png
+
+# Ignore log files
+*.log

@@ -1,9 +1,14 @@
+from pathlib import Path
 import sys
+import logging
 
-from .basic import BaseResource, SupportsWrite, expect
+from .basic import BaseResource, SupportsWrite, expect, logger, setup_logging
 from .gpu import GpuContext, GpuDevice, GpuSwapChain, GpuCommandEncoder
 from .renderer import Renderer, RendererContext, Canvas
 from .gui import GuiWindow, GuiContext, GuiTheme
+
+
+_logger = logger(__name__)
 
 
 class Engine(BaseResource):
@@ -26,6 +31,14 @@ class Engine(BaseResource):
         gui_theme: GuiTheme | None = None,
     ):
         super().__init__(parent_resource=None)
+
+        # Setup logging:
+        setup_logging(
+            level=logging.DEBUG if debug else logging.INFO,
+            console=True,
+            file=Path("zfw.log"),
+        )
+        _logger.info(f"Starting ZFW Engine: {app_name=}, {debug=}, {enable_gui=}")
 
         # Create contexts:
         self._gpu_context = GpuContext(

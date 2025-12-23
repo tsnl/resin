@@ -49,6 +49,7 @@ import glfw
 
 from .basic import (
     BaseResource,
+    logger,
     MouseButton,
     ButtonAction,
     Font,
@@ -63,7 +64,12 @@ from .renderer import Canvas, Image
 from .excepts import GlfwError
 from .gpu import GpuContext, GpuDevice, GpuSurface, GpuSwapChain
 from .typed_vulkan import raw_ffi
+
+
 from .events import EventHub
+
+
+_logger = logger(__name__)
 
 
 type GuiImageLayout = Literal["fit", "crop", "stretch"]

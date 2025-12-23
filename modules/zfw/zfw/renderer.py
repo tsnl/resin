@@ -15,6 +15,7 @@ import numpy as np
 
 from .basic import (
     BaseResource,
+    logger,
     round_up_to_po2,
     Font,
     HorizontalAlignment,
@@ -42,6 +43,9 @@ from .gpu import (
 )
 from . import typed_freetype as ft  # Must import before uharfbuzz
 from . import typed_uharfbuzz as hb
+
+
+_logger = logger(__name__)
 
 
 #

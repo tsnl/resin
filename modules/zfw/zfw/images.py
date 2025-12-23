@@ -1,9 +1,9 @@
 __all__ = [
+    "compute_psnr",
     "convert_linear_to_srgb",
     "convert_srgb_to_linear",
     "convert_srgb_to_linear",
     "load_rgba_image",
-    "compute_psnr",
 ]
 
 from pathlib import Path
@@ -11,7 +11,10 @@ from pathlib import Path
 import PIL.Image
 import numpy as np
 
-from .basic import ColorSpace
+from .basic import ColorSpace, logger
+
+
+_logger = logger(__name__)
 
 
 def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:

@@ -3,7 +3,10 @@ __all__ = [
     "EventHub",
 ]
 
+import logging
 from typing import Callable
+
+_logger = logging.getLogger(__name__)
 
 
 class EventHub[TEvent]:

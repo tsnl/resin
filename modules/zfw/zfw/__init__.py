@@ -44,6 +44,8 @@ __all__ = [
     "SupportsWrite",
     "convert_srgb_to_linear",
     "load_rgba_image",
+    "logger",
+    "setup_logging",
 ]
 
 from .basic import (
@@ -55,6 +57,8 @@ from .basic import (
     JsonArray,
     JsonObject,
     MouseButton,
+    logger,
+    setup_logging,
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .engine import Engine
