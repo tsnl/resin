@@ -37,7 +37,6 @@ __all__ = [
 
 from dataclasses import dataclass
 from typing import Literal
-import warnings
 
 from kiwisolver import (
     Solver as KiwiSolver,
@@ -389,10 +388,9 @@ class GuiWindow(BaseResource):
                 glfw.TRUE,
             )
         else:
-            warnings.warn(
-                "Raw mouse motion is not supported on this system: 'joystick' cursor "
-                "mode may be less accurate.",
-                category=RuntimeWarning,
+            _logger.warning(
+                "Raw mouse motion is not supported on this window: 'joystick' cursor "
+                "mode may be less accurate. See GLFW documentation for details.",
             )
 
         # Bind event handlers:

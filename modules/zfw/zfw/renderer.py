@@ -6,7 +6,6 @@ __all__ = [
     "RendererContext",
 ]
 
-import warnings
 from collections import OrderedDict
 from pathlib import Path
 from typing import Literal, Callable
@@ -703,11 +702,9 @@ class ImageHeap(BaseResource):
             # Compaction requires a blocking sync to avoid race conditions:
             # we must wait for all in-flight frames to finish before modifying
             # the shared page images.
-            warnings.warn(
+            _logger.warning(
                 "ImageHeap compaction triggered. This causes a GPU sync and may "
                 "impact performance. Consider increasing max_pages or page_size.",
-                RuntimeWarning,
-                stacklevel=2,
             )
 
             # Create a temporary command encoder, submit, and wait.

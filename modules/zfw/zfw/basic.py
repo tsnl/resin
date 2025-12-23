@@ -14,9 +14,7 @@ __all__ = [
 from abc import ABC
 from typing import Protocol, TypeVar, Self, Literal, Sequence
 from weakref import ref as WeakRef
-import warnings
 import logging
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -114,8 +112,8 @@ class BaseResource(ABC):
             self._parent_resource is not None
             and self._parent_resource._resource_is_disposed
         ):
-            warnings.warn(
-                f"Cannot dispose resource {self} after its parent {self._parent_resource}",
+            _logger.warning(
+                f"Cannot dispose resource after its parent: {self=} {self._parent_resource=}",
             )
 
         # Dispose children in reverse order of creation.
@@ -354,7 +352,7 @@ type Json = JsonObject | JsonArray | str | int | float | bool | None
 
 
 #
-# Logging utilities
+# Logging utilities (and own logger)
 #
 
 
@@ -415,3 +413,6 @@ def setup_logging(
         )
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
+
+
+_logger = logger(__name__)

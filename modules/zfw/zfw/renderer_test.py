@@ -1,11 +1,10 @@
 from pathlib import Path
-import warnings
 
 import numpy as np
 import PIL.Image
 import pytest
 
-from .basic import BaseResource, Font
+from .basic import BaseResource, Font, logger
 from .gpu import (
     GpuContext,
     GpuDevice,
@@ -24,6 +23,8 @@ from .renderer import (
 from .images import load_rgba_image, compute_psnr
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
+
+_logger = logger(__name__)
 
 
 def assert_image_matches_reference(
@@ -52,7 +53,7 @@ def assert_image_matches_reference(
     if not expect_path.exists():
         # No reference exists - create it and pass
         PIL.Image.fromarray(actual_image).save(expect_path)
-        warnings.warn(f"{test_name}: no expect found: image created: {expect_path}")
+        _logger.warning(f"{test_name}: no expect found: image created: {expect_path}")
         return
 
     # Load expected image
