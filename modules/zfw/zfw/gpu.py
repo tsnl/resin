@@ -181,6 +181,9 @@ from .typed_vulkan import (
     VkImageViewCreateInfo,
     VkInstance,
     VkInstanceCreateInfo,
+    VkLayerSettingEXT,
+    VkLayerSettingsCreateInfoEXT,
+    VK_LAYER_SETTING_TYPE_BOOL32_EXT,
     VkMemoryAllocateInfo,
     VkMemoryRequirements,
     VkOffset2D,
@@ -286,6 +289,7 @@ from .typed_vulkan import (
     vkUnmapMemory,
     vkUpdateDescriptorSets,
     vkWaitForFences,
+    raw_ffi,
 )
 
 if TYPE_CHECKING:
@@ -359,14 +363,33 @@ class GpuContext(BaseResource):
         enable_present_support: bool,
         enable_portability_subset: bool,
     ) -> VkInstance:
-        layers = []
-        extensions = []
+        layers: list[str] = []
+        extensions: list[str] = []
         flags = 0
+        pNext = None
 
         if enable_debug_layers:
             layers.append("VK_LAYER_KHRONOS_validation")
             extensions.append("VK_EXT_debug_utils")
             extensions.append("VK_EXT_debug_report")
+
+            # Enable synchronization validation via VK_EXT_layer_settings
+            # This catches synchronization errors like missing barriers
+            # Use raw_ffi to create the VkBool32 value (pValues is void*)
+            sync_validate_value = raw_ffi.new("VkBool32 *", 1)
+            layer_settings = [
+                VkLayerSettingEXT(
+                    pLayerName="VK_LAYER_KHRONOS_validation",
+                    pSettingName="validate_sync",
+                    type=VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+                    valueCount=1,
+                    pValues=sync_validate_value,
+                ),
+            ]
+            pNext = VkLayerSettingsCreateInfoEXT(
+                settingCount=len(layer_settings),
+                pSettings=layer_settings,
+            )
 
         if enable_present_support:
             extensions.append("VK_KHR_surface")
@@ -379,6 +402,7 @@ class GpuContext(BaseResource):
 
         return vkCreateInstance(
             pCreateInfo=VkInstanceCreateInfo(
+                pNext=pNext,
                 pApplicationInfo=VkApplicationInfo(
                     pApplicationName=app_name,
                     pEngineName="zfw",

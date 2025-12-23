@@ -85,6 +85,22 @@ class VkViewport:
     maxDepth: float
 
 #
+# VkLayerSettingsCreateInfoEXT
+#
+
+class VkLayerSettingEXT:
+    pLayerName: str
+    pSettingName: str
+    type: int
+    valueCount: int
+    pValues: list
+
+class VkLayerSettingsCreateInfoEXT:
+    flags: VkFlags
+    settingCount: int
+    pSettings: list[VkLayerSettingEXT]
+
+#
 # VkInstance
 #
 
