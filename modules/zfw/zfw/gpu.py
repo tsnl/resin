@@ -191,6 +191,7 @@ from .typed_vulkan import (
     VkLayerSettingEXT,
     VkLayerSettingsCreateInfoEXT,
     VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+    VK_LAYER_SETTING_TYPE_STRING_EXT,
     VkMemoryAllocateInfo,
     VkMemoryRequirements,
     VkOffset2D,
@@ -199,6 +200,7 @@ from .typed_vulkan import (
     VkPhysicalDeviceDynamicRenderingFeatures,
     VkPhysicalDeviceMemoryProperties,
     VkPhysicalDeviceProperties,
+    VkPhysicalDeviceVulkan11Features,
     VkPhysicalDeviceVulkan12Features,
     VkPipeline,
     VkPipelineColorBlendAttachmentState,
@@ -334,10 +336,11 @@ class GpuContext(BaseResource):
         self.enable_portability_subset = enable_portability_subset
 
         self.vk_instance = GpuContext._help_create_instance(
-            app_name,
-            enable_debug_layer_support,
-            enable_present_support,
-            enable_portability_subset,
+            app_name=app_name,
+            enable_debug_layers=enable_debug_layer_support,
+            enable_present_support=enable_present_support,
+            enable_portability_subset=enable_portability_subset,
+            enable_gpu_assisted_validation=False,
         )
         self.vk_extra_proc_tab = {}
 
@@ -363,10 +366,12 @@ class GpuContext(BaseResource):
 
     @staticmethod
     def _help_create_instance(
+        *,
         app_name: str,
         enable_debug_layers: bool,
         enable_present_support: bool,
         enable_portability_subset: bool,
+        enable_gpu_assisted_validation: bool,
     ) -> VkInstance:
         layers: list[str] = []
         extensions: list[str] = []
@@ -379,22 +384,40 @@ class GpuContext(BaseResource):
 
             # Enable standard debug extensions
             extensions.append("VK_EXT_debug_utils")
-            extensions.append("VK_EXT_debug_report")
-            extensions.append("VK_EXT_validation_features")
+            extensions.append("VK_EXT_layer_settings")
 
             # Enable synchronization validation via VK_EXT_layer_settings
             # This catches synchronization errors like missing barriers
             # Use raw_ffi to create the VkBool32 value (pValues is void*)
             # WARNING: Do not factor this into a helper function: VkLayerSettingsEXT
             # contains weak pointers that must remain valid until instance creation.
-            sync_validate_value: Any = raw_ffi.new("VkBool32 *", 1)
+            sync_validate_c: Any = raw_ffi.new("VkBool32 *", 1)
+            message_id_filter = [
+                "BestPractices-specialuse-extension",
+            ]
+            message_id_filter_c: Any = raw_ffi.new(
+                "char*[]",
+                [
+                    raw_ffi.new("char[]", message_id.encode("utf-8"))
+                    for message_id in message_id_filter
+                ],
+            )
             layer_settings = [
+                # Enable synchronization validation:
                 VkLayerSettingEXT(
                     pLayerName="VK_LAYER_KHRONOS_validation",
                     pSettingName="validate_sync",
                     type=VK_LAYER_SETTING_TYPE_BOOL32_EXT,
                     valueCount=1,
-                    pValues=sync_validate_value,
+                    pValues=sync_validate_c,
+                ),
+                # Mute noisy messages:
+                VkLayerSettingEXT(
+                    pLayerName="VK_LAYER_KHRONOS_validation",
+                    pSettingName="message_id_filter",
+                    type=VK_LAYER_SETTING_TYPE_STRING_EXT,
+                    valueCount=len(message_id_filter),
+                    pValues=message_id_filter_c,
                 ),
             ]
             p_next = VkLayerSettingsCreateInfoEXT(
@@ -404,14 +427,14 @@ class GpuContext(BaseResource):
 
             # Enable additional validation features via VK_EXT_validation_features
             validation_feature_enables = (
-                GpuContext._compute_instance_validation_feature_enables()
+                GpuContext._compute_instance_validation_feature_enables(
+                    enable_gpu_assisted_validation=enable_gpu_assisted_validation,
+                )
             )
             p_next = VkValidationFeaturesEXT(
                 pNext=p_next,
                 enabledValidationFeatureCount=len(validation_feature_enables),
                 pEnabledValidationFeatures=validation_feature_enables,
-                disabledValidationFeatureCount=0,
-                pDisabledValidationFeatures=None,
             )
 
         if enable_present_support:
@@ -429,7 +452,7 @@ class GpuContext(BaseResource):
                 pApplicationInfo=VkApplicationInfo(
                     pApplicationName=app_name,
                     pEngineName="zfw",
-                    apiVersion=VK_API_VERSION_1_4,  # newest supported version
+                    apiVersion=VK_API_VERSION_1_4,  # 1.4
                 ),
                 enabledLayerCount=len(layers),
                 ppEnabledLayerNames=layers,
@@ -441,14 +464,15 @@ class GpuContext(BaseResource):
         )
 
     @staticmethod
-    def _compute_instance_validation_feature_enables() -> list[int]:
+    def _compute_instance_validation_feature_enables(
+        enable_gpu_assisted_validation: bool,
+    ) -> list[int]:
         validation_feature_enables = [
             VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
             VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
         ]
 
-        # GPU-assisted validation is not supported on MoltenVK (macOS).
-        if sys.platform != "darwin":
+        if enable_gpu_assisted_validation:
             validation_feature_enables.extend(
                 [
                     VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
@@ -968,10 +992,7 @@ class GpuDevice(BaseResource):
     @staticmethod
     def _help_compute_extensions(context: GpuContext) -> list[str]:
         """Compute the list of required device extensions."""
-        extensions = [
-            "VK_KHR_dynamic_rendering",  # Vulkan 1.3
-            "VK_KHR_shader_draw_parameters",  # needed for Slang shaders
-        ]
+        extensions = []
         if context.enable_present_support:
             extensions.append("VK_KHR_swapchain")
         if context.enable_portability_subset:
@@ -988,7 +1009,12 @@ class GpuDevice(BaseResource):
         """Create a VkDevice with the specified configuration."""
         queue_create_info_list = qfis.compute_queue_create_info_list()
 
+        vulkan_11_features = VkPhysicalDeviceVulkan11Features(
+            pNext=None,
+            shaderDrawParameters=True,
+        )
         vulkan_12_features = VkPhysicalDeviceVulkan12Features(
+            pNext=vulkan_11_features,
             runtimeDescriptorArray=True,
             shaderSampledImageArrayNonUniformIndexing=True,
         )

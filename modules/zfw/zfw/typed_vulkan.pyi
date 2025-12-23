@@ -103,6 +103,7 @@ class VkLayerSettingsCreateInfoEXT:
     flags: VkFlags = 0
 
 VK_LAYER_SETTING_TYPE_BOOL32_EXT: int
+VK_LAYER_SETTING_TYPE_STRING_EXT: int
 
 #
 # VkValidationFeaturesEXT
@@ -346,13 +347,19 @@ class VkPhysicalDeviceLimits:
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceDynamicRenderingFeatures.html
 @dataclass
 class VkPhysicalDeviceDynamicRenderingFeatures:
-    pNext: "VkPhysicalDeviceVulkan12Features | None"
+    pNext: "VkPhysicalDeviceVulkan12Features | VkPhysicalDeviceVulkan11Features | None"
     dynamicRendering: bool
 
 @dataclass
 class VkPhysicalDeviceVulkan12Features:
+    pNext: "VkPhysicalDeviceVulkan11Features | None"
     runtimeDescriptorArray: bool
     shaderSampledImageArrayNonUniformIndexing: bool
+
+@dataclass
+class VkPhysicalDeviceVulkan11Features:
+    pNext: "None"
+    shaderDrawParameters: bool
 
 # VkPhysicalDeviceFeatures
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFeatures.html
