@@ -127,8 +127,7 @@ class Renderer(BaseResource):
         )
 
         # Update texture atlas in `b1_atlas.slang`:
-        # TODO: take command encoder as argument
-        self._atlas.flush()
+        self._atlas.flush(command_encoder=command_encoder)
 
         # Draw:
         #
@@ -357,10 +356,9 @@ class Atlas(BaseResource):
     def heap(self, *, channels: ImageChannels) -> "ImageHeap":
         return self._heap_index[channels]
 
-    def flush(self) -> None:
-        # TODO: take a command encoder as argument
-        self._mono_heap.flush()
-        self._rgba_heap.flush()
+    def flush(self, *, command_encoder: GpuCommandEncoder) -> None:
+        self._mono_heap.flush(command_encoder=command_encoder)
+        self._rgba_heap.flush(command_encoder=command_encoder)
 
 
 class ImageHeap(BaseResource):
@@ -381,7 +379,9 @@ class ImageHeap(BaseResource):
     _page_count: int
     _page_pixel_data: np.ndarray
     _page_gpu_image_list: list[GpuImage]
+    _page_staging_buffer_list: list[GpuBuffer]
     _uv_rect_array_device_buf: GpuBuffer
+    _uv_rect_array_staging_buf: GpuBuffer
 
     def __init__(
         self,
@@ -420,10 +420,19 @@ class ImageHeap(BaseResource):
             dtype=np.float32,
         )
         self._page_gpu_image_list = self._create_page_gpu_images()
+        self._page_staging_buffer_list = self._create_page_staging_buffers()
 
         self._uv_rect_array_device_buf = GpuBuffer(
             device=self._gpu_device,
             usages=["storage", "copy-dst"],
+            meta=GpuBufferMeta(
+                element_count=max_rects,
+                element_dtype=UV_RECT_DTYPE,
+            ),
+        )
+        self._uv_rect_array_staging_buf = GpuBuffer(
+            device=self._gpu_device,
+            usages=["staging", "copy-src"],
             meta=GpuBufferMeta(
                 element_count=max_rects,
                 element_dtype=UV_RECT_DTYPE,
@@ -444,10 +453,27 @@ class ImageHeap(BaseResource):
             for _ in range(self._max_pages)
         ]
 
+    def _create_page_staging_buffers(self) -> list[GpuBuffer]:
+        page_element_count = self._page_size * self._page_size * self._channels
+        return [
+            GpuBuffer(
+                device=self._gpu_device,
+                usages=["staging", "copy-src"],
+                meta=GpuBufferMeta(
+                    element_count=page_element_count,
+                    element_dtype=np.float32,
+                ),
+            )
+            for _ in range(self._max_pages)
+        ]
+
     def _on_dispose_resource(self) -> None:
         for gpu_image in self._page_gpu_image_list:
             gpu_image.dispose_resource()
+        for staging_buf in self._page_staging_buffer_list:
+            staging_buf.dispose_resource()
         self._uv_rect_array_device_buf.dispose_resource()
+        self._uv_rect_array_staging_buf.dispose_resource()
         super()._on_dispose_resource()
 
     def insert(self, image: Image):
@@ -456,31 +482,37 @@ class ImageHeap(BaseResource):
         self._images.append(image)
         self._unallocated_images.append(image)
 
-    def flush(self) -> None:
+    def flush(self, *, command_encoder: GpuCommandEncoder) -> None:
         if not self._unallocated_images:
             return
 
+        # Sort unallocated images by area (largest first)
         self._unallocated_images.sort(
             key=lambda img: img._data.shape[0] * img._data.shape[1],
             reverse=True,
         )
 
-        failed_to_alloc = False
-        dirty_images = []
+        # First, we'll consider all unallocated images as "dirty" (i.e. needing upload)
+        # and will try to allocate them.
+        dirty_images = self._unallocated_images
+        self._unallocated_images = []
 
-        for img in self._unallocated_images:
+        # Try to allocate unallocated images
+        failed_to_alloc = False
+        for img in dirty_images:
             if not self._alloc_image(img):
                 failed_to_alloc = True
                 break
-            dirty_images.append(img)
 
+        # If any failed to allocate, compact and re-allocate all images.
+        # In this case, all images (including those previously allocated) are dirty.
         if failed_to_alloc:
             self._compact()
-            dirty_images = self._images  # All images dirty
+            dirty_images = self._images
 
-        self._upload_pages(dirty_images)
-        self._upload_rects()
-        self._unallocated_images.clear()
+        # Upload dirty images and rects buffer:
+        self._upload_pages(dirty_images=dirty_images, command_encoder=command_encoder)
+        self._upload_rects(command_encoder=command_encoder)
 
     def _alloc_image(self, img: Image) -> bool:
         h_px, w_px = img._data.shape[0], img._data.shape[1]
@@ -562,40 +594,34 @@ class ImageHeap(BaseResource):
             if not self._alloc_image(img):
                 raise MemoryError("Out of image-heap memory during compaction")
 
-    def _upload_pages(self, dirty_images: list[Image]):
+    def _upload_pages(
+        self,
+        *,
+        dirty_images: list[Image],
+        command_encoder: GpuCommandEncoder,
+    ):
         if not dirty_images:
             return
-
-        staging_buffer = GpuBuffer(
-            device=self._gpu_device,
-            usages=["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=self._page_size * self._page_size * self._channels,
-                element_dtype=np.float32,
-            ),
-        )
-
-        command_encoder = GpuCommandEncoder(
-            device=self._gpu_device,
-            queue_type="transfer",
-        )
 
         # Group by page
         pages: dict[int, list[Image]] = {}
         for img in dirty_images:
             pages.setdefault(img.page_index, []).append(img)
 
+        # Upload per-page
         for page_index, images in pages.items():
+            page_staging = self._page_staging_buffer_list[page_index]
             offset = 0
-            for img in images:
-                staging_buffer.memory.write(data=img._data, offset=offset)
 
-                command_encoder.transition_image_layout(
-                    image=self._page_gpu_image_list[page_index],
-                    layout="transfer-dst-optimal",
-                )
+            # Transition once per page before issuing copies
+            command_encoder.transition_image_layout(
+                image=self._page_gpu_image_list[page_index],
+                layout="transfer-dst-optimal",
+            )
+            for img in images:
+                page_staging.memory.write(data=img._data, offset=offset)
                 command_encoder.copy_buffer_to_image(
-                    src=staging_buffer,
+                    src=page_staging,
                     dst=self._page_gpu_image_list[page_index],
                     buffer_offset=offset,
                     image_offset=(
@@ -611,39 +637,20 @@ class ImageHeap(BaseResource):
                 )
                 offset += img._data.nbytes
 
-            # Must submit per page because we reuse the staging buffer
-            command_encoder.submit().wait()
-            command_encoder = GpuCommandEncoder(
-                device=self._gpu_device,
-                queue_type="transfer",
-            )
-
-        staging_buffer.dispose_resource()
-
-    def _upload_rects(self):
+    def _upload_rects(self, *, command_encoder: GpuCommandEncoder):
+        # Build rect array
         rects = np.zeros((len(self._images),), dtype=UV_RECT_DTYPE)
         for i, img in enumerate(self._images):
             if img._allocation_uv_xywh is not None:
                 rects[i] = img._allocation_uv_xywh
 
-        staging_buffer = GpuBuffer(
-            device=self._gpu_device,
-            usages=["staging", "copy-src"],
-            meta=GpuBufferMeta.from_array(rects),
-        )
-        staging_buffer.memory.write(data=rects)
-
-        command_encoder = GpuCommandEncoder(
-            device=self._gpu_device,
-            queue_type="transfer",
-        )
+        # Upload rect array
+        self._uv_rect_array_staging_buf.memory.write(data=rects)
         command_encoder.copy_buffer_to_buffer(
-            src=staging_buffer,
+            src=self._uv_rect_array_staging_buf,
             dst=self._uv_rect_array_device_buf,
             size=rects.nbytes,
         )
-        command_encoder.submit().wait()
-        staging_buffer.dispose_resource()
 
 
 UV_RECT_DTYPE = np.dtype(

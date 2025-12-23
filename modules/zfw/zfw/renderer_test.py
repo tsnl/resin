@@ -197,7 +197,10 @@ def test_renderer_atlas_smoketest():
 
     image = Image(renderer=renderer, data=orig_image_data)
     renderer.atlas.heap(channels=4).insert(image)
-    renderer.atlas.heap(channels=4).flush()
+
+    encoder = GpuCommandEncoder(device=gpu_device, queue_type="transfer")
+    renderer.atlas.heap(channels=4).flush(command_encoder=encoder)
+    encoder.submit().wait()
 
     # Note: x=0 because it's larger than default_white_image (1x1)
     assert image.allocation_px_xywh[2:] == (128, 128)
