@@ -6,9 +6,10 @@ __all__ = [
     "RendererContext",
 ]
 
+import warnings
 from collections import OrderedDict
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Callable
 
 import numpy as np
 
@@ -24,6 +25,7 @@ from .excepts import LogicError
 from .gpu import (
     GpuBuffer,
     GpuBufferMeta,
+    GpuBufferUsage,
     GpuCommandEncoder,
     GpuContext,
     GpuDescriptorSet,
@@ -59,6 +61,7 @@ class RendererContext(BaseResource):
 class Renderer(BaseResource):
     _context: RendererContext
     _gpu_device: GpuDevice
+    _max_frames_in_flight: int
     _scale: float
     _basic_uniform: "BasicUniform"
     _atlas: "Atlas"
@@ -72,12 +75,14 @@ class Renderer(BaseResource):
         *,
         context: RendererContext,
         gpu_device: GpuDevice,
+        max_frames_in_flight: int,
         scale: float = 1.0,
     ):
         super().__init__(parent_resource=context)
 
         self._context = context
         self._gpu_device = gpu_device
+        self._max_frames_in_flight = max_frames_in_flight
         self._scale = scale
 
         self._basic_uniform = BasicUniform(renderer=self)
@@ -97,6 +102,10 @@ class Renderer(BaseResource):
     def scale(self) -> float:
         return self._scale
 
+    @property
+    def max_frames_in_flight(self) -> int:
+        return self._max_frames_in_flight
+
     def _on_dispose_resource(self) -> None:
         self._r3d.dispose_resource()
         self._r2d.dispose_resource()
@@ -110,12 +119,14 @@ class Renderer(BaseResource):
         command_encoder: GpuCommandEncoder,
         canvas: "Canvas",
         target: GpuImage,
+        frame_index: int,
     ):
         """
         Render the given array of quads to the given target `GpuImage`.
 
         The quads array should have dtype RENDERER_QUAD_DTYPE.
         """
+        assert frame_index < self._max_frames_in_flight
 
         # Upload:
         #
@@ -124,10 +135,11 @@ class Renderer(BaseResource):
         self._basic_uniform.flush(
             command_encoder=command_encoder,
             framebuffer_size_px=(target.width, target.height),
+            frame_index=frame_index,
         )
 
         # Update texture atlas in `b1_atlas.slang`:
-        self._atlas.flush(command_encoder=command_encoder)
+        self._atlas.flush(command_encoder=command_encoder, frame_index=frame_index)
 
         # Draw:
         #
@@ -143,6 +155,7 @@ class Renderer(BaseResource):
             command_encoder=command_encoder,
             quads=canvas.as_quad_array(),
             target=target,
+            frame_index=frame_index,
         )
 
     @property
@@ -166,11 +179,9 @@ class BasicUniform(BaseResource):
 
     _renderer: "Renderer"
     _gpu_device: GpuDevice
-    _buffer_meta: GpuBufferMeta
-    _staging_buffer: GpuBuffer
-    _device_buffer: GpuBuffer
+    _buffer_ring: "GpuBufferRing"
     _descriptor_set_layout: GpuDescriptorSetLayout
-    _descriptor_set: GpuDescriptorSet
+    _descriptor_set_ring: "GpuDescriptorSetRing"
 
     def __init__(self, *, renderer: "Renderer"):
         super().__init__(parent_resource=renderer)
@@ -178,19 +189,15 @@ class BasicUniform(BaseResource):
         self._renderer = renderer
         self._gpu_device = renderer._gpu_device
 
-        self._buffer_meta = GpuBufferMeta(
+        buffer_meta = GpuBufferMeta(
             element_count=1,
             element_dtype=BasicUniform.DTYPE,
         )
-        self._staging_buffer = GpuBuffer(
+        self._buffer_ring = GpuBufferRing(
             device=self._gpu_device,
-            usages=["staging", "copy-src"],
-            meta=self._buffer_meta,
-        )
-        self._device_buffer = GpuBuffer(
-            device=self._gpu_device,
-            usages=["uniform", "copy-dst"],
-            meta=self._buffer_meta,
+            meta=buffer_meta,
+            ring_capacity=renderer._max_frames_in_flight,
+            device_usages=["uniform", "copy-dst"],
         )
         self._descriptor_set_layout = GpuDescriptorSetLayout(
             device=self._gpu_device,
@@ -203,17 +210,17 @@ class BasicUniform(BaseResource):
                 }.items()
             ),
         )
-        self._descriptor_set = GpuDescriptorSet(
+        self._descriptor_set_ring = GpuDescriptorSetRing(
             device=self._gpu_device,
             layout=self._descriptor_set_layout,
-            bindings={"u": self._device_buffer},
+            ring_capacity=renderer._max_frames_in_flight,
+            bindings_fn=lambda i: {"u": self._buffer_ring.get_device_buffer(i)},
         )
 
     def _on_dispose_resource(self) -> None:
-        self._descriptor_set.dispose_resource()
+        self._descriptor_set_ring.dispose_resource()
         self._descriptor_set_layout.dispose_resource()
-        self._device_buffer.dispose_resource()
-        self._staging_buffer.dispose_resource()
+        self._buffer_ring.dispose_resource()
         super()._on_dispose_resource()
 
     def flush(
@@ -221,17 +228,164 @@ class BasicUniform(BaseResource):
         *,
         command_encoder: GpuCommandEncoder,
         framebuffer_size_px: tuple[int, int],
-    ) -> None:
+        frame_index: int,
+    ) -> GpuDescriptorSet:
         data = np.empty((1,), dtype=BasicUniform.DTYPE)
         data[0]["framebuffer_size_px"] = framebuffer_size_px
 
-        self._staging_buffer.memory.write(data=data)
+        self._buffer_ring.write(frame_index, data)
+        self._buffer_ring.flush(frame_index, command_encoder)
 
+        return self._descriptor_set_ring.get(frame_index)
+
+
+#
+# Ring buffer helpers for multi-frame-in-flight synchronization:
+#
+
+
+class GpuBufferRing(BaseResource):
+    """
+    A ring of staging + device buffer pairs for safe multi-frame-in-flight rendering.
+
+    Each frame uses a different slot to avoid race conditions where the GPU is still
+    reading from a buffer while the CPU is writing to it for the next frame.
+    """
+
+    _device: GpuDevice
+    _meta: GpuBufferMeta
+    _ring_capacity: int
+    _staging_usages: list[GpuBufferUsage]
+    _device_usages: list[GpuBufferUsage]
+    _staging_buffers: list[GpuBuffer]
+    _device_buffers: list[GpuBuffer]
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        meta: GpuBufferMeta,
+        ring_capacity: int,
+        staging_usages: list[GpuBufferUsage] | None = None,
+        device_usages: list[GpuBufferUsage],
+    ):
+        super().__init__(parent_resource=None)
+        self._device = device
+        self._meta = meta
+        self._ring_capacity = ring_capacity
+        self._staging_usages = staging_usages or ["staging", "copy-src"]
+        self._device_usages = device_usages
+
+        self._staging_buffers = [
+            GpuBuffer(
+                device=device,
+                usages=self._staging_usages,
+                meta=meta,
+            )
+            for _ in range(ring_capacity)
+        ]
+        self._device_buffers = [
+            GpuBuffer(
+                device=device,
+                usages=self._device_usages,
+                meta=meta,
+            )
+            for _ in range(ring_capacity)
+        ]
+
+    def _on_dispose_resource(self) -> None:
+        for buf in self._staging_buffers:
+            buf.dispose_resource()
+        for buf in self._device_buffers:
+            buf.dispose_resource()
+        super()._on_dispose_resource()
+
+    @property
+    def meta(self) -> GpuBufferMeta:
+        return self._meta
+
+    @property
+    def ring_capacity(self) -> int:
+        return self._ring_capacity
+
+    def write(self, index: int, data: np.ndarray) -> None:
+        """Write data to the staging buffer at the given ring index."""
+        assert 0 <= index < self._ring_capacity
+        self._staging_buffers[index].memory.write(data=data)
+
+    def flush(
+        self,
+        index: int,
+        command_encoder: GpuCommandEncoder,
+        size: int | None = None,
+    ) -> GpuBuffer:
+        """
+        Copy from staging to device buffer at the given ring index.
+        Returns the device buffer for binding.
+        """
+        assert 0 <= index < self._ring_capacity
+        copy_size = size if size is not None else self._meta.size
         command_encoder.copy_buffer_to_buffer(
-            src=self._staging_buffer,
-            dst=self._device_buffer,
-            size=self._buffer_meta.element_size,
+            src=self._staging_buffers[index],
+            dst=self._device_buffers[index],
+            size=copy_size,
         )
+        return self._device_buffers[index]
+
+    def get_device_buffer(self, index: int) -> GpuBuffer:
+        """Get the device buffer at the given ring index without flushing."""
+        assert 0 <= index < self._ring_capacity
+        return self._device_buffers[index]
+
+
+class GpuDescriptorSetRing(BaseResource):
+    """
+    A ring of descriptor sets for safe multi-frame-in-flight rendering.
+
+    Each frame uses a different descriptor set slot to allow different buffer
+    bindings per frame.
+    """
+
+    _device: GpuDevice
+    _layout: GpuDescriptorSetLayout
+    _ring_capacity: int
+    _descriptor_sets: list[GpuDescriptorSet]
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        layout: GpuDescriptorSetLayout,
+        ring_capacity: int,
+        bindings_fn: Callable[[int], dict],
+    ):
+        super().__init__(parent_resource=None)
+        self._device = device
+        self._layout = layout
+        self._ring_capacity = ring_capacity
+
+        self._descriptor_sets = [
+            GpuDescriptorSet(
+                device=device,
+                layout=layout,
+                bindings=bindings_fn(i),
+            )
+            for i in range(ring_capacity)
+        ]
+
+    def _on_dispose_resource(self) -> None:
+        for ds in self._descriptor_sets:
+            ds.dispose_resource()
+        super()._on_dispose_resource()
+
+    @property
+    def ring_capacity(self) -> int:
+        return self._ring_capacity
+
+    def get(self, index: int) -> GpuDescriptorSet:
+        """Get the descriptor set at the given ring index."""
+        assert 0 <= index < self._ring_capacity
+        return self._descriptor_sets[index]
 
 
 #
@@ -356,9 +510,9 @@ class Atlas(BaseResource):
     def heap(self, *, channels: ImageChannels) -> "ImageHeap":
         return self._heap_index[channels]
 
-    def flush(self, *, command_encoder: GpuCommandEncoder) -> None:
-        self._mono_heap.flush(command_encoder=command_encoder)
-        self._rgba_heap.flush(command_encoder=command_encoder)
+    def flush(self, *, command_encoder: GpuCommandEncoder, frame_index: int) -> None:
+        self._mono_heap.flush(command_encoder=command_encoder, frame_index=frame_index)
+        self._rgba_heap.flush(command_encoder=command_encoder, frame_index=frame_index)
 
 
 class ImageHeap(BaseResource):
@@ -379,9 +533,10 @@ class ImageHeap(BaseResource):
     _page_count: int
     _page_pixel_data: np.ndarray
     _page_gpu_image_list: list[GpuImage]
-    _page_staging_buffer_list: list[GpuBuffer]
+    # Ring-buffered staging buffers (one list per frame slot):
+    _page_staging_buffer_ring: list[list[GpuBuffer]]
     _uv_rect_array_device_buf: GpuBuffer
-    _uv_rect_array_staging_buf: GpuBuffer
+    _uv_rect_array_staging_ring: list[GpuBuffer]
 
     def __init__(
         self,
@@ -420,7 +575,11 @@ class ImageHeap(BaseResource):
             dtype=np.float32,
         )
         self._page_gpu_image_list = self._create_page_gpu_images()
-        self._page_staging_buffer_list = self._create_page_staging_buffers()
+        # Ring-buffered staging buffers:
+        self._page_staging_buffer_ring = [
+            self._create_page_staging_buffers()
+            for _ in range(renderer._max_frames_in_flight)
+        ]
 
         self._uv_rect_array_device_buf = GpuBuffer(
             device=self._gpu_device,
@@ -430,14 +589,18 @@ class ImageHeap(BaseResource):
                 element_dtype=UV_RECT_DTYPE,
             ),
         )
-        self._uv_rect_array_staging_buf = GpuBuffer(
-            device=self._gpu_device,
-            usages=["staging", "copy-src"],
-            meta=GpuBufferMeta(
-                element_count=max_rects,
-                element_dtype=UV_RECT_DTYPE,
-            ),
-        )
+        # Ring-buffered rect staging buffers:
+        self._uv_rect_array_staging_ring = [
+            GpuBuffer(
+                device=self._gpu_device,
+                usages=["staging", "copy-src"],
+                meta=GpuBufferMeta(
+                    element_count=max_rects,
+                    element_dtype=UV_RECT_DTYPE,
+                ),
+            )
+            for _ in range(renderer._max_frames_in_flight)
+        ]
 
     def _create_page_gpu_images(self) -> list[GpuImage]:
         return [
@@ -470,10 +633,12 @@ class ImageHeap(BaseResource):
     def _on_dispose_resource(self) -> None:
         for gpu_image in self._page_gpu_image_list:
             gpu_image.dispose_resource()
-        for staging_buf in self._page_staging_buffer_list:
-            staging_buf.dispose_resource()
+        for staging_list in self._page_staging_buffer_ring:
+            for staging_buf in staging_list:
+                staging_buf.dispose_resource()
         self._uv_rect_array_device_buf.dispose_resource()
-        self._uv_rect_array_staging_buf.dispose_resource()
+        for staging_buf in self._uv_rect_array_staging_ring:
+            staging_buf.dispose_resource()
         super()._on_dispose_resource()
 
     def insert(self, image: Image):
@@ -482,7 +647,7 @@ class ImageHeap(BaseResource):
         self._images.append(image)
         self._unallocated_images.append(image)
 
-    def flush(self, *, command_encoder: GpuCommandEncoder) -> None:
+    def flush(self, *, command_encoder: GpuCommandEncoder, frame_index: int) -> None:
         if not self._unallocated_images:
             return
 
@@ -507,12 +672,46 @@ class ImageHeap(BaseResource):
         # If any failed to allocate, compact and re-allocate all images.
         # In this case, all images (including those previously allocated) are dirty.
         if failed_to_alloc:
+            # Compaction requires a blocking sync to avoid race conditions:
+            # we must wait for all in-flight frames to finish before modifying
+            # the shared page images.
+            warnings.warn(
+                "ImageHeap compaction triggered. This causes a GPU sync and may "
+                "impact performance. Consider increasing max_pages or page_size.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+            # Create a temporary command encoder, submit, and wait.
+            blocking_encoder = GpuCommandEncoder(
+                device=self._gpu_device,
+                queue_type="transfer",
+            )
             self._compact()
             dirty_images = self._images
-
-        # Upload dirty images and rects buffer:
-        self._upload_pages(dirty_images=dirty_images, command_encoder=command_encoder)
-        self._upload_rects(command_encoder=command_encoder)
+            self._upload_pages(
+                dirty_images=dirty_images,
+                command_encoder=blocking_encoder,
+                frame_index=frame_index,
+            )
+            self._upload_rects(
+                dirty_images=dirty_images,
+                command_encoder=blocking_encoder,
+                frame_index=frame_index,
+            )
+            blocking_encoder.submit().wait()
+        else:
+            # No compaction needed: upload only the newly allocated images.
+            self._upload_pages(
+                dirty_images=dirty_images,
+                command_encoder=command_encoder,
+                frame_index=frame_index,
+            )
+            self._upload_rects(
+                dirty_images=dirty_images,
+                command_encoder=command_encoder,
+                frame_index=frame_index,
+            )
 
     def _alloc_image(self, img: Image) -> bool:
         h_px, w_px = img._data.shape[0], img._data.shape[1]
@@ -599,6 +798,7 @@ class ImageHeap(BaseResource):
         *,
         dirty_images: list[Image],
         command_encoder: GpuCommandEncoder,
+        frame_index: int,
     ):
         if not dirty_images:
             return
@@ -608,9 +808,12 @@ class ImageHeap(BaseResource):
         for img in dirty_images:
             pages.setdefault(img.page_index, []).append(img)
 
+        # Use ring-buffered staging buffers for this frame
+        page_staging_list = self._page_staging_buffer_ring[frame_index]
+
         # Upload per-page
         for page_index, images in pages.items():
-            page_staging = self._page_staging_buffer_list[page_index]
+            page_staging = page_staging_list[page_index]
             offset = 0
 
             # Transition once per page before issuing copies
@@ -637,19 +840,37 @@ class ImageHeap(BaseResource):
                 )
                 offset += img._data.nbytes
 
-    def _upload_rects(self, *, command_encoder: GpuCommandEncoder):
-        # Build rect array
-        rects = np.zeros((len(self._images),), dtype=UV_RECT_DTYPE)
-        for i, img in enumerate(self._images):
+    def _upload_rects(
+        self,
+        *,
+        dirty_images: list[Image],
+        command_encoder: GpuCommandEncoder,
+        frame_index: int,
+    ):
+        if not dirty_images:
+            return
+
+        # Find the minimum index among dirty images for partial update
+        min_index = min(img._index for img in dirty_images)
+
+        # Build rect array starting from min_index
+        rect_count = len(self._images) - min_index
+        rects = np.zeros((rect_count,), dtype=UV_RECT_DTYPE)
+        for i, img in enumerate(self._images[min_index:]):
             if img._allocation_uv_xywh is not None:
                 rects[i] = img._allocation_uv_xywh
 
-        # Upload rect array
-        self._uv_rect_array_staging_buf.memory.write(data=rects)
+        # Use ring-buffered staging buffer for this frame
+        staging_buf = self._uv_rect_array_staging_ring[frame_index]
+
+        # Upload rect array with offset
+        staging_buf.memory.write(data=rects)
+        offset_bytes = min_index * UV_RECT_DTYPE.itemsize
         command_encoder.copy_buffer_to_buffer(
-            src=self._uv_rect_array_staging_buf,
+            src=staging_buf,
             dst=self._uv_rect_array_device_buf,
             size=rects.nbytes,
+            dst_offset=offset_bytes,
         )
 
 
@@ -712,15 +933,11 @@ class Renderer2d(BaseResource):
     _cached_gpu_pipeline: GpuPipeline | None
     _cached_depth_image: GpuImage | None
 
-    # Quad array buffers:
+    # Quad array ring buffers:
     _quad_capacity: int
-    _quad_array_buffer_meta: GpuBufferMeta | None
-    _quad_array_staging_buf: GpuBuffer | None
-    _quad_array_device_buf: GpuBuffer | None
-    _quad_array_header_buffer_meta: GpuBufferMeta | None
-    _quad_array_header_staging_buf: GpuBuffer | None
-    _quad_array_header_device_buf: GpuBuffer | None
-    _descriptor_set: GpuDescriptorSet | None
+    _quad_array_buffer_ring: GpuBufferRing | None
+    _quad_array_header_buffer_ring: GpuBufferRing | None
+    _descriptor_set_ring: GpuDescriptorSetRing | None
 
     def __init__(self, *, renderer: "Renderer"):
         super().__init__(parent_resource=renderer)
@@ -735,11 +952,9 @@ class Renderer2d(BaseResource):
         self._cached_depth_image = None
 
         self._quad_capacity = 0
-        self._quad_array_staging_buf = None
-        self._quad_array_device_buf = None
-        self._quad_array_header_staging_buf = None
-        self._quad_array_header_device_buf = None
-        self._descriptor_set = None
+        self._quad_array_buffer_ring = None
+        self._quad_array_header_buffer_ring = None
+        self._descriptor_set_ring = None
 
     def _on_dispose_resource(self) -> None:
         self._vertex_shader.dispose_resource()
@@ -748,16 +963,12 @@ class Renderer2d(BaseResource):
         self._pipeline_layout.dispose_resource()
         self._descriptor_set_layout.dispose_resource()
 
-        if self._descriptor_set is not None:
-            self._descriptor_set.dispose_resource()
-        if self._quad_array_header_staging_buf is not None:
-            self._quad_array_header_staging_buf.dispose_resource()
-        if self._quad_array_header_device_buf is not None:
-            self._quad_array_header_device_buf.dispose_resource()
-        if self._quad_array_staging_buf is not None:
-            self._quad_array_staging_buf.dispose_resource()
-        if self._quad_array_device_buf is not None:
-            self._quad_array_device_buf.dispose_resource()
+        if self._descriptor_set_ring is not None:
+            self._descriptor_set_ring.dispose_resource()
+        if self._quad_array_header_buffer_ring is not None:
+            self._quad_array_header_buffer_ring.dispose_resource()
+        if self._quad_array_buffer_ring is not None:
+            self._quad_array_buffer_ring.dispose_resource()
 
         if self._cached_depth_image is not None:
             self._cached_depth_image.dispose_resource()
@@ -772,21 +983,12 @@ class Renderer2d(BaseResource):
         # Dispose old quad array resources
         #
 
-        # Quad array header buffers:
-        if self._quad_array_header_staging_buf is not None:
-            self._quad_array_header_staging_buf.dispose_resource()
-        if self._quad_array_header_device_buf is not None:
-            self._quad_array_header_device_buf.dispose_resource()
-
-        # Quad array buffers:
-        if self._quad_array_staging_buf is not None:
-            self._quad_array_staging_buf.dispose_resource()
-        if self._quad_array_device_buf is not None:
-            self._quad_array_device_buf.dispose_resource()
-
-        # Descriptor set:
-        if self._descriptor_set is not None:
-            self._descriptor_set.dispose_resource()
+        if self._descriptor_set_ring is not None:
+            self._descriptor_set_ring.dispose_resource()
+        if self._quad_array_header_buffer_ring is not None:
+            self._quad_array_header_buffer_ring.dispose_resource()
+        if self._quad_array_buffer_ring is not None:
+            self._quad_array_buffer_ring.dispose_resource()
 
         # Allocate new quad array resources
         #
@@ -794,46 +996,41 @@ class Renderer2d(BaseResource):
         # Compute new capacity:
         new_capacity = max(8, round_up_to_po2(capacity))
         self._quad_capacity = new_capacity
+        ring_capacity = self.renderer._max_frames_in_flight
 
-        # Create quad array header buffers:
-        self._quad_array_header_buffer_meta = GpuBufferMeta(
-            element_count=1,
-            element_dtype=Renderer2d.QUAD_LIST_HEADER_DTYPE,
-        )
-        self._quad_array_header_device_buf = GpuBuffer(
+        # Create quad array header ring buffer:
+        self._quad_array_header_buffer_ring = GpuBufferRing(
             device=self.gpu_device,
-            usages=["uniform", "copy-dst"],
-            meta=self._quad_array_header_buffer_meta,
-        )
-        self._quad_array_header_staging_buf = GpuBuffer(
-            device=self.gpu_device,
-            usages=["staging", "copy-src"],
-            meta=self._quad_array_header_buffer_meta,
+            meta=GpuBufferMeta(
+                element_count=1,
+                element_dtype=Renderer2d.QUAD_LIST_HEADER_DTYPE,
+            ),
+            ring_capacity=ring_capacity,
+            device_usages=["uniform", "copy-dst"],
         )
 
-        # Create quad array buffers:
-        self._quad_array_buffer_meta = GpuBufferMeta(
-            element_count=new_capacity,
-            element_dtype=Renderer2d.QUAD_DTYPE,
-        )
-        self._quad_array_device_buf = GpuBuffer(
+        # Create quad array ring buffer:
+        self._quad_array_buffer_ring = GpuBufferRing(
             device=self.gpu_device,
-            usages=["storage", "copy-dst"],
-            meta=self._quad_array_buffer_meta,
-        )
-        self._quad_array_staging_buf = GpuBuffer(
-            device=self.gpu_device,
-            usages=["staging", "copy-src"],
-            meta=self._quad_array_buffer_meta,
+            meta=GpuBufferMeta(
+                element_count=new_capacity,
+                element_dtype=Renderer2d.QUAD_DTYPE,
+            ),
+            ring_capacity=ring_capacity,
+            device_usages=["storage", "copy-dst"],
         )
 
-        # Finally, pull device buffers together into a new descriptor set:
-        self._descriptor_set = GpuDescriptorSet(
+        # Create descriptor set ring:
+        # Capture the ring buffers explicitly to satisfy type checker
+        quad_buffer_ring = self._quad_array_buffer_ring
+        header_buffer_ring = self._quad_array_header_buffer_ring
+        self._descriptor_set_ring = GpuDescriptorSetRing(
             device=self.gpu_device,
             layout=self._descriptor_set_layout,
-            bindings={
-                "quadArray": self._quad_array_device_buf,
-                "quadArrayHeader": self._quad_array_header_device_buf,
+            ring_capacity=ring_capacity,
+            bindings_fn=lambda i: {
+                "quadArray": quad_buffer_ring.get_device_buffer(i),
+                "quadArrayHeader": header_buffer_ring.get_device_buffer(i),
             },
         )
 
@@ -843,6 +1040,7 @@ class Renderer2d(BaseResource):
         command_encoder: GpuCommandEncoder,
         quads: "QuadArray",
         target: GpuImage,
+        frame_index: int,
     ):
         """
         Render the given array of quads to the given target `GpuImage`.
@@ -860,25 +1058,17 @@ class Renderer2d(BaseResource):
         self._maybe_realloc_quad_array_buffers(len(quads))
 
         # Write quad array header buffer:
-        assert self._quad_array_header_staging_buf is not None
-        assert self._quad_array_header_device_buf is not None
+        assert self._quad_array_header_buffer_ring is not None
         uniform_array = np.empty((1,), dtype=Renderer2d.QUAD_LIST_HEADER_DTYPE)
         uniform_array[0]["count"] = int(len(quads))
-        self._quad_array_header_staging_buf.memory.write(data=uniform_array)
-        command_encoder.copy_buffer_to_buffer(
-            src=self._quad_array_header_staging_buf,
-            dst=self._quad_array_header_device_buf,
-            size=uniform_array.nbytes,
-        )
+        self._quad_array_header_buffer_ring.write(frame_index, uniform_array)
+        self._quad_array_header_buffer_ring.flush(frame_index, command_encoder)
 
         # Write quad array buffer:
-        assert self._quad_array_staging_buf is not None
-        assert self._quad_array_device_buf is not None
-        self._quad_array_staging_buf.memory.write(data=quads)
-        command_encoder.copy_buffer_to_buffer(
-            src=self._quad_array_staging_buf,
-            dst=self._quad_array_device_buf,
-            size=quads.nbytes,
+        assert self._quad_array_buffer_ring is not None
+        self._quad_array_buffer_ring.write(frame_index, quads)
+        self._quad_array_buffer_ring.flush(
+            frame_index, command_encoder, size=quads.nbytes
         )
 
         self._draw(
@@ -887,6 +1077,7 @@ class Renderer2d(BaseResource):
             depth_image=depth_image,
             target=target,
             instance_count=len(quads),
+            frame_index=frame_index,
         )
 
     def _new_vertex_shader(self) -> GpuShader:
@@ -989,7 +1180,13 @@ class Renderer2d(BaseResource):
         depth_image: GpuImage,
         target: GpuImage,
         instance_count: int,
+        frame_index: int,
     ):
+        # Get the descriptor set for BasicUniform for this frame
+        basic_uniform_ds = self.renderer._basic_uniform._descriptor_set_ring.get(
+            frame_index
+        )
+
         with encoder.render(
             color_attachment=target,
             depth_attachment=depth_image,
@@ -998,7 +1195,7 @@ class Renderer2d(BaseResource):
             render_pass.bind_pipeline(pipeline=pipeline)
             render_pass.bind_descriptor_set(
                 set_index=0,
-                descriptor_set=self.renderer._basic_uniform._descriptor_set,
+                descriptor_set=basic_uniform_ds,
             )
             render_pass.bind_descriptor_set(
                 set_index=1,
@@ -1006,10 +1203,10 @@ class Renderer2d(BaseResource):
             )
 
             if instance_count > 0:
-                assert self._descriptor_set is not None
+                assert self._descriptor_set_ring is not None
                 render_pass.bind_descriptor_set(
                     set_index=2,
-                    descriptor_set=self._descriptor_set,
+                    descriptor_set=self._descriptor_set_ring.get(frame_index),
                 )
                 render_pass.draw(
                     vertex_count=6,

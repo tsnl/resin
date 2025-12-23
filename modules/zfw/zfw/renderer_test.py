@@ -45,6 +45,7 @@ class RendererTestEngine(BaseResource):
         self.renderer = Renderer(
             context=self.renderer_context,
             gpu_device=self.gpu_device,
+            max_frames_in_flight=1,
         )
 
         self.target = GpuImage(
@@ -96,6 +97,7 @@ class RendererTestEngine(BaseResource):
             command_encoder=command_encoder,
             canvas=canvas,
             target=self.target,
+            frame_index=0,
         )
 
         command_encoder.submit().wait()
@@ -182,6 +184,7 @@ def test_renderer_atlas_smoketest():
     renderer = Renderer(
         context=renderer_context,
         gpu_device=gpu_device,
+        max_frames_in_flight=1,
     )
 
     orig_image_data = np.empty((128, 128, 4), dtype=np.float32)
@@ -199,7 +202,7 @@ def test_renderer_atlas_smoketest():
     renderer.atlas.heap(channels=4).insert(image)
 
     encoder = GpuCommandEncoder(device=gpu_device, queue_type="transfer")
-    renderer.atlas.heap(channels=4).flush(command_encoder=encoder)
+    renderer.atlas.heap(channels=4).flush(command_encoder=encoder, frame_index=0)
     encoder.submit().wait()
 
     # Note: x=0 because it's larger than default_white_image (1x1)

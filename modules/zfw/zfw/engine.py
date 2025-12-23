@@ -1,6 +1,6 @@
 import sys
 
-from .basic import BaseResource, SupportsWrite
+from .basic import BaseResource, SupportsWrite, expect
 from .gpu import GpuContext, GpuDevice, GpuSwapChain, GpuCommandEncoder
 from .renderer import Renderer, RendererContext, Canvas
 from .gui import GuiWindow, GuiContext, GuiTheme
@@ -42,19 +42,18 @@ class Engine(BaseResource):
             gpu_context=self._gpu_context,
         )
 
-        if enable_gui:
-            assert self._gui_context is not None
-
-            # Create window, GPU surface:
-            self._window = GuiWindow(
-                gui_context=self._gui_context,
+        # Create window, GPU surface:
+        self._window = (
+            GuiWindow(
+                gui_context=expect(self._gui_context),
                 width_dip=1280,
                 height_dip=720,
                 title=app_name,
                 theme=gui_theme,
             )
-        else:
-            self._window = None
+            if enable_gui
+            else None
+        )
 
         # Create GPU device (using surface if window exists):
         physical_device = next(iter(self._gpu_context.enumerate_physical_devices()))
@@ -81,6 +80,7 @@ class Engine(BaseResource):
         self._renderer = Renderer(
             context=self._render_context,
             gpu_device=self._gpu_device,
+            max_frames_in_flight=swapchain_image_count,
             scale=scale,
         )
 
@@ -187,6 +187,7 @@ class Engine(BaseResource):
                 command_encoder=command_encoder,
                 canvas=self._canvas,
                 target=target.image,
+                frame_index=target.slot_index,
             )
             command_encoder.transition_image_layout(
                 image=target.image,
