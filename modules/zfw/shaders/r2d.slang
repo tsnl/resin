@@ -5,6 +5,12 @@
 import core.b0_basic;
 import core.b1_atlas;
 
+//
+// Constants:
+//
+
+static const uint QUAD_FLAG_USE_LINEAR_SAMPLER = 0x1;
+
 struct QuadListHeader
 {
     uint count;
@@ -22,6 +28,7 @@ struct Quad
     int4 borderThickness;   // T, R, B, L
     float height;           // height
     uint imageId;           // RGBA image ID in the atlas
+    uint flags;             // bit 0: 1=linear, 0=nearest
     uint _rsv0;             // reserved
     uint _rsv1;             // reserved
 };
@@ -111,7 +118,8 @@ float4 fragmentMain(VSOutput input) : SV_Target
     // Fragments between inner and outer rects are in the border.
     if (intersectRectPoint(innerRectCoordsPx, int2(input.positionPx)))
     {
-        float4 color = sampleAtlasRgba(quad.imageId, input.uv);
+        bool useLinear = (quad.flags & QUAD_FLAG_USE_LINEAR_SAMPLER) != 0;
+        float4 color = sampleAtlasRgba(quad.imageId, input.uv, useLinear);
         return color * input.tintColor;
     }
     else

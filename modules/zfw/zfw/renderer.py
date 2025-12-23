@@ -43,6 +43,7 @@ from .gpu import (
 from . import typed_freetype as ft  # Must import before uharfbuzz
 from . import typed_uharfbuzz as hb
 
+
 #
 # Renderer API:
 #
@@ -92,6 +93,7 @@ class Renderer(BaseResource):
         self._default_white_image = Image(
             renderer=self,
             data=np.ones((1, 1, 4), dtype=np.float32),
+            sampler="nearest",
         )
 
         self._r2d = Renderer2d(renderer=self)
@@ -399,8 +401,15 @@ class Image:
     _index: int
     _allocation_uv_xywh: tuple[float, float, float, float] | None
     _allocation_px_xywh: tuple[int, int, int, int] | None
+    _sampler: "SamplerType"
 
-    def __init__(self, *, renderer: "Renderer", data: np.ndarray):
+    def __init__(
+        self,
+        *,
+        renderer: "Renderer",
+        data: np.ndarray,
+        sampler: "SamplerType",
+    ):
         assert data.ndim in (2, 3)
         if data.ndim == 2:
             data = data[:, :, np.newaxis]
@@ -411,6 +420,7 @@ class Image:
         self._index = -1
         self._allocation_uv_xywh = None
         self._allocation_px_xywh = None
+        self._sampler = sampler
 
         self._atlas.insert(self)
 
@@ -443,8 +453,13 @@ class Image:
         assert self._allocation_uv_xywh is not None
         return int(self._allocation_uv_xywh[1])
 
+    @property
+    def sampler(self) -> "SamplerType":
+        return self._sampler
+
 
 type ImageChannels = Literal[1, 4]
+type SamplerType = Literal["linear", "nearest"]
 
 
 class Atlas(BaseResource):
@@ -476,14 +491,20 @@ class Atlas(BaseResource):
                     ),
                     "rectsMono": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
                     "rectsRgba": GpuDescriptorSetLayoutBinding(type="storage-buffer"),
-                    "sampler": GpuDescriptorSetLayoutBinding(type="sampler"),
+                    "nearestSampler": GpuDescriptorSetLayoutBinding(type="sampler"),
+                    "linearSampler": GpuDescriptorSetLayoutBinding(type="sampler"),
                 }.items()
             ),
         )
-        self._sampler = GpuSampler(
+        self._nearest_sampler = GpuSampler(
             device=self._gpu_device,
             mag_filter="nearest",
             min_filter="nearest",
+        )
+        self._linear_sampler = GpuSampler(
+            device=self._gpu_device,
+            mag_filter="linear",
+            min_filter="linear",
         )
         self._descriptor_set = GpuDescriptorSet(
             device=self._gpu_device,
@@ -493,7 +514,8 @@ class Atlas(BaseResource):
                 "atlasRgba": self._rgba_heap._page_gpu_image_list,
                 "rectsMono": self._mono_heap._uv_rect_array_device_buf,
                 "rectsRgba": self._rgba_heap._uv_rect_array_device_buf,
-                "sampler": self._sampler,
+                "nearestSampler": self._nearest_sampler,
+                "linearSampler": self._linear_sampler,
             },
         )
 
@@ -501,7 +523,8 @@ class Atlas(BaseResource):
         self._descriptor_set.dispose_resource()
         self._descriptor_set_layout.dispose_resource()
 
-        self._sampler.dispose_resource()
+        self._nearest_sampler.dispose_resource()
+        self._linear_sampler.dispose_resource()
 
         self._mono_heap.dispose_resource()
         self._rgba_heap.dispose_resource()
@@ -927,10 +950,11 @@ class Renderer2d(BaseResource):
             ("border_thickness", np.uint32, (4,)),
             ("height", np.float32),
             ("image_id", np.uint32),
+            ("flags", np.uint32),
             ("_rsv0", np.uint32),
-            ("_rsv1", np.uint32),
         ]
     )
+    QUAD_FLAG_USE_LINEAR_SAMPLER = 0x1
 
     renderer: "Renderer"
     gpu_device: GpuDevice
@@ -1395,7 +1419,7 @@ class TextCanvasWriter(BaseResource):
         data[..., 3] = gray_norm
 
         # Create RendererImage
-        image = Image(renderer=self._renderer, data=data)
+        image = Image(renderer=self._renderer, data=data, sampler="nearest")
         result = (image, bitmap_left, bitmap_top)
         self._ft_image_cache[image_cache_key] = result
 
@@ -1808,6 +1832,12 @@ class Canvas:
         # write: image_id
         quad_image = image or self.renderer._default_white_image
         self._quad_array[index]["image_id"] = quad_image.image_id
+
+        # write: flags (bit 0: 1 for linear, 0 for nearest)
+        flags = 0
+        if quad_image.sampler == "linear":
+            flags |= Renderer2d.QUAD_FLAG_USE_LINEAR_SAMPLER
+        self._quad_array[index]["flags"] = flags
 
         # write: color, border_color, border_thickness
         self._quad_array[index]["color"] = color

@@ -141,7 +141,11 @@ def test_renderer_image():
     image_data = load_rgba_image("tests_data/rainbow-512x512.png")
     assert image_data.shape == (512, 512, 4)
 
-    image = Image(renderer=engine.renderer, data=image_data)
+    image = Image(
+        renderer=engine.renderer,
+        data=image_data,
+        sampler="nearest",
+    )
 
     border_thickness = 8
     canvas = Canvas(renderer=engine.renderer)
@@ -198,7 +202,11 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 2] = 0.0
     orig_image_data[..., 3] = 1.0
 
-    image = Image(renderer=renderer, data=orig_image_data)
+    image = Image(
+        renderer=renderer,
+        data=orig_image_data,
+        sampler="nearest",
+    )
     renderer.atlas.heap(channels=4).insert(image)
 
     encoder = GpuCommandEncoder(device=gpu_device, queue_type="transfer")
