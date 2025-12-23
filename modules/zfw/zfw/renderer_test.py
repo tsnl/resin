@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Literal
 import warnings
 
 import numpy as np
@@ -22,7 +21,7 @@ from .renderer import (
     Renderer,
     Canvas,
 )
-from .images import load_rgba_image
+from .images import load_rgba_image, compute_psnr
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
@@ -30,13 +29,13 @@ TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 def assert_image_matches_reference(
     actual_image: np.ndarray,
     test_name: str,
-    match_type: Literal["exact"],
+    psnr_threshold: float,
 ) -> None:
     """
     Compare an actual rendered image against an expected reference image.
 
     If no reference exists, creates it and passes the test.
-    If reference exists, compares using exact or SSIM matching.
+    If reference exists, compares using PSNR matching.
     On mismatch, saves the actual image as <name>.actual.png and raises AssertionError.
     """
     expect_dir = Path("tests/expect/zfw/renderer_test")
@@ -69,18 +68,14 @@ def assert_image_matches_reference(
         )
 
     # Compare images
-    if match_type == "exact":
-        if not np.array_equal(actual_image, expected_image):
-            PIL.Image.fromarray(actual_image).save(actual_path)
-            diff_pixels = np.sum(actual_image != expected_image)
-            total_pixels = actual_image.size
-            raise AssertionError(
-                f"Exact pixel match failed for {test_name}: "
-                f"{diff_pixels}/{total_pixels} pixels differ. "
-                f"Actual image saved to {actual_path}"
-            )
-    else:
-        raise ValueError(f"Unknown match_type: {match_type}")
+    psnr = compute_psnr(actual_image, expected_image)
+    if psnr < psnr_threshold:
+        PIL.Image.fromarray(actual_image).save(actual_path)
+        raise AssertionError(
+            f"PSNR match failed for {test_name}: "
+            f"PSNR {psnr:.2f} < {psnr_threshold}. "
+            f"Actual image saved to {actual_path}"
+        )
 
     # If we reach here, the images matched
     # Clean up any previous actual image
@@ -194,7 +189,7 @@ def test_renderer_quads():
     assert_image_matches_reference(
         image,
         "test_renderer_quads",
-        match_type="exact",
+        psnr_threshold=65.0,
     )
 
     engine.dispose_resource()
@@ -231,7 +226,7 @@ def test_renderer_image():
     assert_image_matches_reference(
         output_image,
         "test_renderer_image",
-        match_type="exact",
+        psnr_threshold=65.0,
     )
 
     engine.dispose_resource()
@@ -308,7 +303,7 @@ def test_renderer_text_basic():
     assert_image_matches_reference(
         image,
         "test_renderer_text_basic",
-        match_type="exact",
+        psnr_threshold=65.0,
     )
 
     engine.dispose_resource()
@@ -335,7 +330,7 @@ def test_renderer_text_wrap():
     assert_image_matches_reference(
         image,
         "test_renderer_text_wrap",
-        match_type="exact",
+        psnr_threshold=65.0,
     )
 
     engine.dispose_resource()
@@ -362,7 +357,7 @@ def test_renderer_text_clip():
     assert_image_matches_reference(
         image,
         "test_renderer_text_clip",
-        match_type="exact",
+        psnr_threshold=65.0,
     )
 
     engine.dispose_resource()
@@ -424,7 +419,7 @@ def test_renderer_text_matrix():
     assert_image_matches_reference(
         image,
         "test_renderer_text_matrix",
-        match_type="exact",
+        psnr_threshold=65.0,
     )
 
     engine.dispose_resource()

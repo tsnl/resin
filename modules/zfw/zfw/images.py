@@ -3,6 +3,7 @@ __all__ = [
     "convert_srgb_to_linear",
     "convert_srgb_to_linear",
     "load_rgba_image",
+    "compute_psnr",
 ]
 
 from pathlib import Path
@@ -11,6 +12,35 @@ import PIL.Image
 import numpy as np
 
 from .basic import ColorSpace
+
+
+def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:
+    """
+    Compute the Peak Signal-to-Noise Ratio (PSNR) between two images.
+
+    :param img1: First image array.
+    :param img2: Second image array.
+    :return: PSNR value in dB.
+    """
+    if img1.shape != img2.shape:
+        raise ValueError(f"Image shapes must match: {img1.shape} vs {img2.shape}")
+
+    # Ensure we work with floats to avoid overflow/wrapping with uint8
+    img1_f = img1.astype(np.float64)
+    img2_f = img2.astype(np.float64)
+
+    mse = np.mean((img1_f - img2_f) ** 2)
+    if mse == 0:
+        return float("inf")
+
+    # Determine max_i based on data type of original images
+    if img1.dtype == np.uint8:
+        max_i = 255.0
+    else:
+        # Assume float 0-1 if not uint8
+        max_i = 1.0
+
+    return 20 * np.log10(max_i / np.sqrt(mse))
 
 
 def load_rgba_image(
