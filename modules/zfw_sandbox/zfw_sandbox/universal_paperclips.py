@@ -1,6 +1,9 @@
 import zfw
 
 
+_logger = zfw.logger(__name__)
+
+
 #
 # GUI
 #
@@ -126,6 +129,10 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
         # TODO: computational resources module at (2, 1)
 
         # TODO: projects module at (4, 1)
+
+        @self._make_paperclip_button_widget.click_event.subscribe()
+        def make_paperclip_button_click(button: zfw.MouseButton):
+            _logger.info("Make Paperclip button clicked")
 
 
 class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
