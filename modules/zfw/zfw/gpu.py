@@ -31,16 +31,17 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import Callable, Literal, Any
 
 import numpy as np
 import numpy.typing as npt
 
-from .basic import BaseResource, ColorSpace
+from .basic import BaseResource, ColorSpace, SupportsWrite
 from .excepts import LogicError, PlatformSupportError
 from .typed_vulkan import (
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    VK_ACCESS_MEMORY_WRITE_BIT,
     VK_ACCESS_SHADER_READ_BIT,
     VK_ACCESS_TRANSFER_READ_BIT,
     VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -299,9 +300,6 @@ from .typed_vulkan import (
     VkValidationFeaturesEXT,
 )
 
-if TYPE_CHECKING:
-    from _typeshed import SupportsWrite
-
 #
 # GpuContext
 #
@@ -373,10 +371,13 @@ class GpuContext(BaseResource):
         layers: list[str] = []
         extensions: list[str] = []
         flags = 0
-        pNext = None
+        p_next = None
 
         if enable_debug_layers:
+            # Enable standard validation layer
             layers.append("VK_LAYER_KHRONOS_validation")
+
+            # Enable standard debug extensions
             extensions.append("VK_EXT_debug_utils")
             extensions.append("VK_EXT_debug_report")
             extensions.append("VK_EXT_validation_features")
@@ -384,7 +385,9 @@ class GpuContext(BaseResource):
             # Enable synchronization validation via VK_EXT_layer_settings
             # This catches synchronization errors like missing barriers
             # Use raw_ffi to create the VkBool32 value (pValues is void*)
-            sync_validate_value = raw_ffi.new("VkBool32 *", 1)
+            # WARNING: Do not factor this into a helper function: VkLayerSettingsEXT
+            # contains weak pointers that must remain valid until instance creation.
+            sync_validate_value: Any = raw_ffi.new("VkBool32 *", 1)
             layer_settings = [
                 VkLayerSettingEXT(
                     pLayerName="VK_LAYER_KHRONOS_validation",
@@ -394,19 +397,17 @@ class GpuContext(BaseResource):
                     pValues=sync_validate_value,
                 ),
             ]
-            pNext = VkLayerSettingsCreateInfoEXT(
+            p_next = VkLayerSettingsCreateInfoEXT(
                 settingCount=len(layer_settings),
                 pSettings=layer_settings,
             )
 
-            validation_feature_enables = [
-                VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
-            ]
-            pNext = VkValidationFeaturesEXT(
-                pNext=pNext,
+            # Enable additional validation features via VK_EXT_validation_features
+            validation_feature_enables = (
+                GpuContext._compute_instance_validation_feature_enables()
+            )
+            p_next = VkValidationFeaturesEXT(
+                pNext=p_next,
                 enabledValidationFeatureCount=len(validation_feature_enables),
                 pEnabledValidationFeatures=validation_feature_enables,
                 disabledValidationFeatureCount=0,
@@ -424,7 +425,7 @@ class GpuContext(BaseResource):
 
         return vkCreateInstance(
             pCreateInfo=VkInstanceCreateInfo(
-                pNext=pNext,
+                pNext=p_next,
                 pApplicationInfo=VkApplicationInfo(
                     pApplicationName=app_name,
                     pEngineName="zfw",
@@ -438,6 +439,24 @@ class GpuContext(BaseResource):
             ),
             pAllocator=None,
         )
+
+    @staticmethod
+    def _compute_instance_validation_feature_enables() -> list[int]:
+        validation_feature_enables = [
+            VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
+            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
+        ]
+
+        # GPU-assisted validation is not supported on MoltenVK (macOS).
+        if sys.platform != "darwin":
+            validation_feature_enables.extend(
+                [
+                    VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+                    VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+                ]
+            )
+
+        return validation_feature_enables
 
     @staticmethod
     def _help_compute_required_platform_instance_extensions_for_present_support() -> (
@@ -1422,8 +1441,6 @@ class GpuImage(BaseResource):
         vk_format: VkFormat,
     ) -> tuple[VkImage, GpuMemory]:
         """Create a VkImage and allocate/bind memory for it."""
-        # Determine which queue families will access the image:
-        queue_family_indices = list({idx for _, idx in device.qfis})
 
         image = vkCreateImage(
             device=device.vk_device,
@@ -1438,8 +1455,8 @@ class GpuImage(BaseResource):
                 tiling=VK_IMAGE_TILING_OPTIMAL,
                 usage=vk_image_usage(usages),
                 sharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                queueFamilyIndexCount=len(queue_family_indices),
-                pQueueFamilyIndices=queue_family_indices,
+                queueFamilyIndexCount=0,
+                pQueueFamilyIndices=None,
                 initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
             ),
             pAllocator=None,
@@ -1770,9 +1787,6 @@ class GpuBuffer(BaseResource):
 
         assert meta.size > 0, "Cannot create a buffer with size 0"
 
-        # Determine which queue families will access the buffer:
-        queue_family_indices = list({idx for _, idx in device.qfis})
-
         buffer = vkCreateBuffer(
             device=device.vk_device,
             pCreateInfo=VkBufferCreateInfo(
@@ -1780,8 +1794,8 @@ class GpuBuffer(BaseResource):
                 size=meta.size,
                 usage=vk_buffer_usage(usages),
                 sharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                queueFamilyIndexCount=len(queue_family_indices),
-                pQueueFamilyIndices=queue_family_indices,
+                queueFamilyIndexCount=0,
+                pQueueFamilyIndices=None,
             ),
             pAllocator=None,
         )
@@ -2148,14 +2162,25 @@ class GpuCommandEncoder(BaseResource):
         if image.current_vk_layout == new_layout:
             return
 
-        # # Determine access masks based on old and new layouts
-        # src_access_mask = 0
-        # if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-        #     src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-        # elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-        #     src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
-        # elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-        #     src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
+        # Determine access masks based on old and new layouts
+        src_access_mask = 0
+        if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+        elif (
+            image.current_vk_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        ):
+            src_access_mask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
+        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
+        elif image.current_vk_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            src_access_mask = VK_ACCESS_SHADER_READ_BIT
+        elif image.current_vk_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+            src_access_mask = VK_ACCESS_MEMORY_WRITE_BIT
+        else:
+            # For UNDEFINED or other layouts, use generic memory write
+            src_access_mask = VK_ACCESS_MEMORY_WRITE_BIT
 
         # Determine stage mask based on queue type
         stage_mask = 0
@@ -2165,6 +2190,15 @@ class GpuCommandEncoder(BaseResource):
             stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
         elif self.submit_queue_type == "transfer":
             stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT
+            # On transfer queue, we can only use transfer-related access flags
+            # Override src_access_mask if it's not compatible with transfer queue
+            if src_access_mask not in (
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                0,
+            ):
+                # Use memory write as fallback for non-transfer access masks
+                src_access_mask = 0
         else:
             raise LogicError(
                 f"Unsupported queue type for image layout transition: "
@@ -2202,7 +2236,7 @@ class GpuCommandEncoder(BaseResource):
             imageMemoryBarrierCount=1,
             pImageMemoryBarriers=[
                 VkImageMemoryBarrier(
-                    srcAccessMask=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    srcAccessMask=src_access_mask,
                     dstAccessMask=dst_access_mask,
                     oldLayout=image.current_vk_layout,
                     newLayout=new_layout,

@@ -94,7 +94,7 @@ class VkLayerSettingEXT:
     pSettingName: str
     type: int
     valueCount: int
-    pValues: list[Any]
+    pValues: list[cffi.CData]
 
 @dataclass
 class VkLayerSettingsCreateInfoEXT:
