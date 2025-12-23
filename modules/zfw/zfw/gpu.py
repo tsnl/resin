@@ -136,6 +136,10 @@ from .typed_vulkan import (
     VK_SHARING_MODE_EXCLUSIVE,
     VK_STENCIL_OP_KEEP,
     VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+    VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
+    VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+    VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+    VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
     VkApplicationInfo,
     VkBuffer,
     VkBufferCopy,
@@ -292,6 +296,7 @@ from .typed_vulkan import (
     vkUpdateDescriptorSets,
     vkWaitForFences,
     raw_ffi,
+    VkValidationFeaturesEXT,
 )
 
 if TYPE_CHECKING:
@@ -374,6 +379,7 @@ class GpuContext(BaseResource):
             layers.append("VK_LAYER_KHRONOS_validation")
             extensions.append("VK_EXT_debug_utils")
             extensions.append("VK_EXT_debug_report")
+            extensions.append("VK_EXT_validation_features")
 
             # Enable synchronization validation via VK_EXT_layer_settings
             # This catches synchronization errors like missing barriers
@@ -391,6 +397,20 @@ class GpuContext(BaseResource):
             pNext = VkLayerSettingsCreateInfoEXT(
                 settingCount=len(layer_settings),
                 pSettings=layer_settings,
+            )
+
+            validation_feature_enables = [
+                VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
+                VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
+                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+            ]
+            pNext = VkValidationFeaturesEXT(
+                pNext=pNext,
+                enabledValidationFeatureCount=len(validation_feature_enables),
+                pEnabledValidationFeatures=validation_feature_enables,
+                disabledValidationFeatureCount=0,
+                pDisabledValidationFeatures=None,
             )
 
         if enable_present_support:

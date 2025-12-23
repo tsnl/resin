@@ -88,17 +88,38 @@ class VkViewport:
 # VkLayerSettingsCreateInfoEXT
 #
 
+@dataclass
 class VkLayerSettingEXT:
     pLayerName: str
     pSettingName: str
     type: int
     valueCount: int
-    pValues: list
+    pValues: list[Any]
 
+@dataclass
 class VkLayerSettingsCreateInfoEXT:
-    flags: VkFlags
     settingCount: int
     pSettings: list[VkLayerSettingEXT]
+    flags: VkFlags = 0
+
+VK_LAYER_SETTING_TYPE_BOOL32_EXT: int
+
+#
+# VkValidationFeaturesEXT
+#
+
+@dataclass
+class VkValidationFeaturesEXT:
+    pNext: VkLayerSettingsCreateInfoEXT | None = None
+    enabledValidationFeatureCount: int = 0
+    pEnabledValidationFeatures: list[int] | None = None
+    disabledValidationFeatureCount: int = 0
+    pDisabledValidationFeatures: list[int] | None = None
+
+VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT: int
+VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT: int
+VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT: int
+VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT: int
 
 #
 # VkInstance
@@ -121,6 +142,7 @@ class VkApplicationInfo:
 @dataclass
 class VkInstanceCreateInfo:
     pApplicationInfo: VkApplicationInfo | None
+    pNext: VkValidationFeaturesEXT | None = None
     enabledLayerCount: int = 0
     ppEnabledLayerNames: list[str] = []
     enabledExtensionCount: int = 0
