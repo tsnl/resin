@@ -1553,7 +1553,8 @@ class HomogeneousImageHeap(BaseResource):
 
         # Note that the actual image data may still be read by in-flight render
         # workloads. We do not immediately clear the allocation data. Instead, we only
-        # overwrite allocation data on compaction, which blocks.
+        # overwrite allocation data on compaction, which waits for the GPU to idle
+        # before mutating.
 
     def _create_page_gpu_images(self) -> list[GpuImage]:
         return [
@@ -1623,6 +1624,9 @@ class HomogeneousImageHeap(BaseResource):
                 "ImageHeap compaction triggered. This causes a GPU sync and may "
                 "impact performance. Consider increasing max_pages or page_size.",
             )
+
+            # Wait for in-flight GPU work to complete.
+            self._gpu_device.wait_idle()
 
             # Create a temporary command encoder, submit, and wait.
             # Note that all images are dirty in this case.
