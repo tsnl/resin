@@ -3576,3 +3576,156 @@ def vk_shader_stages(stages: list[GpuStage]) -> int:
             case _:
                 raise LogicError(f"Invalid shader stage: {stage!r}")
     return result
+
+
+#
+# GpuEzBuffer: convenience wrapper
+#
+
+
+class GpuEzBuffer(BaseResource):
+    """
+    GpuEzBuffer is a convenience wrapper around a pair of staging and device buffers,
+    along with a numpy array for CPU-side data manipulation.
+
+    The only way to obtain a GpuBuffer for GPU operations is to call `flush()`, which
+    copies the CPU-side data to the staging buffer, then issues a copy command to the
+    device buffer. This ensures proper synchronization and data transfer.
+    """
+
+    _device: GpuDevice
+    _data: np.ndarray
+    _length: int
+    _buffer_meta: GpuBufferMeta
+    _buffer_usages: list["GpuBufferUsage"]
+    _staging_buffer: GpuBuffer
+    _device_buffer: GpuBuffer
+
+    def __init__(
+        self,
+        *,
+        device: GpuDevice,
+        capacity: int,
+        dtype: np.dtype,
+        usages: list["GpuBufferUsage"],
+    ):
+        super().__init__(parent_resource=device)
+        self._device = device
+        self._data = np.empty((capacity,), dtype=dtype)
+        self._length = 0
+        self._buffer_meta = GpuBufferMeta(element_count=capacity, element_dtype=dtype)
+        self._buffer_usages = usages
+        self._staging_buffer, self._device_buffer = self._make_buffer_pair()
+
+    def _on_dispose_resource(self) -> None:
+        super()._on_dispose_resource()
+
+    def __len__(self) -> int:
+        return self._length
+
+    @property
+    def device(self) -> GpuDevice:
+        return self._device
+
+    @property
+    def capacity(self) -> int:
+        return self._buffer_meta.element_count
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self._data.dtype
+
+    @property
+    def array(self) -> np.ndarray:
+        return self._data[: self._length]
+
+    def reserve(self, *, new_capacity: int) -> None:
+        """
+        Ensure the buffer has at least `new_capacity` elements.
+        """
+
+        if new_capacity <= self._capacity:
+            return
+
+        # Dispose old buffers
+        self._device_buffer.dispose_resource()
+        self._staging_buffer.dispose_resource()
+
+        # Update to new buffers:
+        self._capacity = new_capacity
+        self._buffer_meta = GpuBufferMeta(
+            element_count=new_capacity,
+            element_dtype=self.dtype,
+        )
+        self._staging_buffer, self._device_buffer = self._make_buffer_pair()
+
+    def resize(self, *, new_length: int) -> None:
+        """
+        Resize the buffer to `new_length`, reserving more capacity if necessary.
+        """
+
+        if new_length > self.capacity:
+            self.reserve(new_capacity=new_length)
+        self._length = new_length
+
+    def extend(self, *, values: np.ndarray) -> None:
+        """
+        Appends multiple values to the buffer, resizing if necessary.
+        """
+
+        assert values.dtype == self.dtype, (
+            f"Value dtype mismatch: expected {self.dtype}, got {values.dtype}"
+        )
+
+        old_length = self._length
+        new_length = old_length + len(values)
+        self.resize(new_length=new_length)
+        self._data[old_length:new_length] = values
+
+    def _make_buffer_pair(self) -> tuple[GpuBuffer, GpuBuffer]:
+        staging_buffer = GpuBuffer(
+            device=self._device,
+            usages=["staging", "copy-src"],
+            meta=self._buffer_meta,
+        )
+        device_buffer = GpuBuffer(
+            device=self._device,
+            usages=self._buffer_usages + ["copy-dst"],
+            meta=self._buffer_meta,
+        )
+        return staging_buffer, device_buffer
+
+    def flush(
+        self,
+        *,
+        command_encoder: GpuCommandEncoder,
+        write_start: int = 0,
+        write_count: int | None = None,
+    ) -> "GpuBuffer":
+        """
+        Flush the CPU-side data to the GPU device buffer.
+        """
+
+        write_count = write_count if write_count is not None else self._length
+
+        # No-op if nothing to write
+        if write_count == 0:
+            return self._device_buffer
+
+        # Copy data to staging buffer
+        with self._staging_buffer.memory.map() as mv:
+            dst = np.frombuffer(mv, self.dtype)[write_start : write_start + write_count]
+            src = self._data[write_start : write_start + write_count]
+            np.copyto(dst, src)
+
+        # Issue copy command from staging to device buffer
+        command_encoder.copy_buffer_to_buffer(
+            src=self._staging_buffer,
+            dst=self._device_buffer,
+            src_offset=write_start * self.dtype.itemsize,
+            dst_offset=write_start * self.dtype.itemsize,
+            size=write_count * self.dtype.itemsize,
+        )
+
+        # Return the device buffer:
+        return self._device_buffer

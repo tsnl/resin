@@ -22,6 +22,7 @@ from .basic import (
 from .bundled_data import BUNDLED_DATA_PATH
 from .excepts import LogicError
 from .gpu import (
+    GpuEzBuffer,
     GpuBuffer,
     GpuBufferImageCopyRegion,
     GpuBufferMeta,
@@ -1852,41 +1853,35 @@ class HomogeneousGeometryHeap(BaseResource):
     _renderer: Renderer
     _gpu_device: GpuDevice
 
-    _vertex_dtype: np.dtype
-    _vertex_device_buffer: GpuBuffer
-    _vertex_storage_buffer: GpuBuffer
-    _index_device_buffer: GpuBuffer
-    _index_storage_buffer: GpuBuffer
+    _vertex_capacity: int
+    _index_capacity: int
 
-    def __init__(self, *, renderer: Renderer, vertex_dtype: np.dtype):
+    _vertex_ez_buf: "GpuEzBuffer"
+    _index_ez_buf: "GpuEzBuffer"
+
+    def __init__(
+        self,
+        *,
+        renderer: Renderer,
+        vertex_dtype: np.dtype,
+        vertex_capacity: int = 1 << 20,
+        index_capacity: int = 1 << 20,
+    ):
         super().__init__(parent_resource=renderer)
         self._renderer = renderer
         self._gpu_device = renderer._gpu_device
 
-        self._vertex_dtype = vertex_dtype
-        self._vertex_device_buffer = GpuBuffer(
+        self._vertex_ez_buf = GpuEzBuffer(
             device=self._gpu_device,
+            dtype=vertex_dtype,
+            capacity=vertex_capacity,
             usages=["vertex", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=1 << 20,
-                element_dtype=vertex_dtype,
-            ),
         )
-        self._vertex_storage_buffer = GpuBuffer(
+        self._index_ez_buf = GpuEzBuffer(
             device=self._gpu_device,
-            usages=["storage", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=1 << 20,
-                element_dtype=vertex_dtype,
-            ),
-        )
-        self._index_device_buffer = GpuBuffer(
-            device=self._gpu_device,
+            dtype=np.dtype(np.uint32),
+            capacity=index_capacity,
             usages=["index", "copy-dst"],
-            meta=GpuBufferMeta(
-                element_count=1 << 20,
-                element_dtype=np.uint32,
-            ),
         )
 
 
