@@ -270,10 +270,12 @@ def test_renderer_atlas_smoketest():
         data=orig_image_data,
         sampler="nearest",
     )
-    renderer.atlas.heap(channels=4).insert(image)
+    renderer.atlas.homogeneous_heap(channels=4).insert(image)
 
     encoder = GpuCommandEncoder(device=gpu_device, queue_type="transfer")
-    renderer.atlas.heap(channels=4).flush(command_encoder=encoder, frame_index=0)
+    renderer.atlas.homogeneous_heap(channels=4).flush(
+        command_encoder=encoder, frame_index=0
+    )
     encoder.submit().wait()
 
     # Note: x=0 because it's larger than default_white_image (1x1)

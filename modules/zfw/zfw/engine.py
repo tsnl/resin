@@ -137,6 +137,8 @@ class Engine(BaseResource):
         # Resources
         #
 
+        self._canvas.dispose_resource()
+
         if self._window:
             self._window.dispose_resource()
 

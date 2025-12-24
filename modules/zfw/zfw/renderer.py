@@ -565,12 +565,14 @@ class QuadArray(np.ndarray):
 #
 
 
-class Canvas:
+class Canvas(BaseResource):
     """
     A list of textured quads to be rendered.
     """
 
     def __init__(self, renderer: Renderer, capacity: int = 64):
+        super().__init__(parent_resource=renderer)
+
         self.renderer = renderer
         self._quad_array = QuadArray(capacity)
         self._quad_count = 0
@@ -591,14 +593,23 @@ class Canvas:
 
         for font in self._all_fonts:
             face = self._ft_face_map[font]
-            try:
-                info = face.get_variation_info()
-                for i, axis in enumerate(info.axes):
-                    if axis.tag == "wght":
-                        self._ft_weight_axis_index[font] = i
-                        break
-            except Exception:
-                pass
+            info = face.get_variation_info()
+            for i, axis in enumerate(info.axes):
+                if axis.tag == "wght":
+                    self._ft_weight_axis_index[font] = i
+                    break
+
+    #
+    # Disposal:
+    #
+
+    def _on_dispose_resource(self) -> None:
+        # Dispose cached glyph images
+        for img_tuple in self._ft_image_cache.values():
+            img, _, _ = img_tuple
+            if img is not None:
+                img.dispose_resource()
+        self._ft_image_cache.clear()
 
     #
     # Getters and properties:
@@ -1220,7 +1231,15 @@ class Scene(BaseResource):
 ##--------------------------------------------------------------------------------------
 ## Resources
 ##--------------------------------------------------------------------------------------
-
+## In the context of our renderer, "resources" are...
+## - GPU-resident objects, e.g. buffers, images, and associated descriptor sets.
+## - Used across sub-renderers, i.e. both Renderer2d and Renderer3d.
+## - Automatically managed by a "heap", immutable once created, accessed bindlessly.
+##
+## Resource list:
+## - BasicUniform: per-frame uniform data (e.g. framebuffer size).
+## - Image: used for texture sampling in 2D and 3D rendering.
+## - Geometry: used for 3D mesh data.
 
 #
 # BasicUniform
@@ -1313,7 +1332,7 @@ class BasicUniform(BaseResource):
 
 
 #
-# Image, Atlas
+# Image, ImageHeap
 #
 
 
@@ -1321,9 +1340,9 @@ type ImageChannels = Literal[1, 4]
 type SamplerType = Literal["linear", "nearest"]
 
 
-class Image:
-    _atlas: "HomogeneousImageHeap"
-    _index: int
+class Image(BaseResource):
+    _heap: "HomogeneousImageHeap"
+    _image_id: int
     _allocation_uv_xywh: tuple[float, float, float, float] | None
     _allocation_px_xywh: tuple[int, int, int, int] | None
     _sampler: "SamplerType"
@@ -1335,25 +1354,30 @@ class Image:
         data: np.ndarray,
         sampler: "SamplerType",
     ):
+        super().__init__(parent_resource=renderer)
+
         assert data.ndim in (2, 3)
         if data.ndim == 2:
             data = data[:, :, np.newaxis]
 
-        self._atlas = renderer._image_heap.heap(channels=data.shape[2])
+        self._heap = renderer._image_heap.homogeneous_heap(channels=data.shape[2])
         self._data = data.copy()
         self._data.flags.writeable = False
-        self._index = -1
+        self._image_id = -1
         self._allocation_uv_xywh = None
         self._allocation_px_xywh = None
         self._sampler = sampler
 
-        self._atlas.insert(self)
+        self._heap.insert(self)
+
+    def _on_dispose_resource(self) -> None:
+        self._heap._notify_image_disposed(self)
 
     @property
     def image_id(self) -> int:
-        if self._index < 0:
+        if self._image_id < 0:
             raise LogicError("Image not yet allocated in atlas")
-        return self._index
+        return self._image_id
 
     @property
     def px_width(self) -> int:
@@ -1452,7 +1476,7 @@ class ImageHeap(BaseResource):
 
         super()._on_dispose_resource()
 
-    def heap(self, *, channels: ImageChannels) -> "HomogeneousImageHeap":
+    def homogeneous_heap(self, *, channels: ImageChannels) -> "HomogeneousImageHeap":
         return self._heap_index[channels]
 
     def flush(self, *, command_encoder: GpuCommandEncoder, frame_index: int) -> None:
@@ -1472,7 +1496,8 @@ class HomogeneousImageHeap(BaseResource):
     _page_size: int
     _max_pages: int
     _max_rects: int
-    _images: list[Image]
+    _images: list[Image | None]
+    _free_image_indices: list[int]
     _unallocated_images: list[Image]
     _page_cursor_array: np.ndarray
     _page_count: int
@@ -1504,7 +1529,8 @@ class HomogeneousImageHeap(BaseResource):
         self._max_pages = max_pages
         self._max_rects = max_rects
 
-        self._images: list[Image] = []
+        self._images = []
+        self._free_image_indices = []
         self._unallocated_images: list[Image] = []
 
         self._page_cursor_array = np.zeros(
@@ -1557,6 +1583,11 @@ class HomogeneousImageHeap(BaseResource):
             usages=["staging", "copy-src"],
         )
 
+    def _notify_image_disposed(self, image: Image) -> None:
+        # Mark image slot as free
+        self._images[image._image_id] = None
+        self._free_image_indices.append(image._image_id)
+
     def _create_page_gpu_images(self) -> list[GpuImage]:
         return [
             GpuImage(
@@ -1580,9 +1611,16 @@ class HomogeneousImageHeap(BaseResource):
         super()._on_dispose_resource()
 
     def insert(self, image: Image):
+        assert image._image_id < 0
         assert image._data.shape[2] == self._channels
-        image._index = len(self._images)
-        self._images.append(image)
+
+        if self._free_image_indices:
+            image._image_id = self._free_image_indices.pop()
+            self._images[image._image_id] = image
+        else:
+            image._image_id = len(self._images)
+            self._images.append(image)
+
         self._unallocated_images.append(image)
 
     def flush(self, *, command_encoder: GpuCommandEncoder, frame_index: int) -> None:
@@ -1619,12 +1657,13 @@ class HomogeneousImageHeap(BaseResource):
             )
 
             # Create a temporary command encoder, submit, and wait.
+            # Note that all images are dirty in this case.
             blocking_encoder = GpuCommandEncoder(
                 device=self._gpu_device,
                 queue_type="transfer",
             )
             self._compact()
-            dirty_images = self._images
+            dirty_images = [img for img in self._images if img is not None]
             self._upload_pages(
                 dirty_images=dirty_images,
                 command_encoder=blocking_encoder,
@@ -1721,11 +1760,18 @@ class HomogeneousImageHeap(BaseResource):
         # Sort ALL images by size
         all_images = sorted(
             self._images,
-            key=lambda img: img._data.shape[0] * img._data.shape[1],
+            key=lambda img: (
+                (img._data.shape[0] * img._data.shape[1])  # area
+                if img is not None
+                else -1
+            ),
             reverse=True,
         )
 
+        # Re-allocate all images
         for img in all_images:
+            if img is None:
+                continue
             if not self._alloc_image(img):
                 raise MemoryError("Out of image-heap memory during compaction")
 
@@ -1796,13 +1842,13 @@ class HomogeneousImageHeap(BaseResource):
             return
 
         # Find the minimum index among dirty images for partial update
-        min_index = min(img._index for img in dirty_images)
+        min_index = min(img._image_id for img in dirty_images)
 
         # Build rect array starting from min_index
         rect_count = len(self._images) - min_index
         rects = np.zeros((rect_count,), dtype=UV_RECT_DTYPE)
         for i, img in enumerate(self._images[min_index:]):
-            if img._allocation_uv_xywh is not None:
+            if img and img._allocation_uv_xywh is not None:
                 rects[i] = img._allocation_uv_xywh
 
         # Use ring-buffered staging buffer for this frame
@@ -1827,6 +1873,19 @@ UV_RECT_DTYPE = np.dtype(
         ("h", np.float32),  # 0 < y_uv + h <= 1
     ]
 )
+
+
+#
+# Geometry, GeometryHeap
+#
+
+
+class Geometry:
+    pass
+
+
+class GeometryHeap(BaseResource):
+    pass
 
 
 ##--------------------------------------------------------------------------------------
