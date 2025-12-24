@@ -37,6 +37,9 @@ pkgs.mkShell {
     # amdgpu_top
     amdgpu_top
 
+    # astcenc: ASTC texture compressor/decompressor
+    astc-encoder
+
     # Basic
     unzip
     zstd

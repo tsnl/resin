@@ -104,7 +104,6 @@ class RendererTestEngine(BaseResource):
         self.renderer = Renderer(
             context=self.renderer_context,
             gpu_device=self.gpu_device,
-            max_frames_in_flight=1,
         )
 
         self.target = GpuImage(
@@ -156,7 +155,6 @@ class RendererTestEngine(BaseResource):
             command_encoder=command_encoder,
             canvas=canvas,
             target=self.target,
-            frame_index=0,
         )
 
         command_encoder.submit().wait()
@@ -251,7 +249,6 @@ def test_renderer_atlas_smoketest():
     renderer = Renderer(
         context=renderer_context,
         gpu_device=gpu_device,
-        max_frames_in_flight=1,
     )
 
     orig_image_data = np.empty((128, 128, 4), dtype=np.float32)
@@ -265,17 +262,18 @@ def test_renderer_atlas_smoketest():
     orig_image_data[..., 2] = 0.0
     orig_image_data[..., 3] = 1.0
 
+    # Create image in atlas: the `Image` constructor will also insert it into the atlas.
+    # However, the atlas must still be flushed to GPU memory before use.
+    # Note that the allocation occurs lazily, so the actual allocation happens on flush.
     image = Image(
         renderer=renderer,
         data=orig_image_data,
         sampler="nearest",
     )
-    renderer.atlas.homogeneous_heap(channels=4).insert(image)
 
+    # Flush atlas to GPU to finalize allocation.
     encoder = GpuCommandEncoder(device=gpu_device, queue_type="transfer")
-    renderer.atlas.homogeneous_heap(channels=4).flush(
-        command_encoder=encoder, frame_index=0
-    )
+    renderer.atlas.homogeneous_heap(channels=4).flush(command_encoder=encoder)
     encoder.submit().wait()
 
     # Note: x=0 because it's larger than default_white_image (1x1)

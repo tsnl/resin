@@ -4,6 +4,14 @@ A game engine for fun and profit, written in pure Python.
 
 ## Quick Start
 
+If you're on NixOS, just use the provided `shell.nix` to get started.
+
+Otherwise, you will need:
+-   `uv`
+-   Vulkan SDK 1.4.335.1
+    -   `slangc` accessible via the `PATH` (usually comes with the Vulkan SDK)
+-   `astcenc`
+
 We use `uv` for project management.
 
 ```bash

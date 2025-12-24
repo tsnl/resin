@@ -125,6 +125,7 @@ from .typed_vulkan import (
     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
     VK_PIPELINE_STAGE_TRANSFER_BIT,
     VK_POLYGON_MODE_FILL,
     VK_PRESENT_MODE_FIFO_KHR,
@@ -1242,12 +1243,26 @@ class GpuDevice(BaseResource):
         vk_queue = self.vk_queues[self.qfis[queue_type]]
         wait_sems = [s.vk_semaphore for s in (wait_semaphores or [])]
         signal_sems = [s.vk_semaphore for s in (signal_semaphores or [])]
+        # Choose a sensible destination stage mask based on the queue type.
+        # This ensures external semaphore waits actually synchronize the first
+        # stage that uses the waited resource (e.g., swapchain image as color attachment).
+        if wait_sems:
+            if queue_type == "graphics":
+                dst_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            elif queue_type == "transfer":
+                dst_stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT
+            elif queue_type == "compute":
+                dst_stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            else:
+                # Fallback to a conservative stage if not matched
+                dst_stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+            wait_dst_stage_mask = [dst_stage_mask] * len(wait_sems)
+        else:
+            wait_dst_stage_mask = None
         submit_info = VkSubmitInfo(
             waitSemaphoreCount=len(wait_sems),
             pWaitSemaphores=wait_sems or None,
-            pWaitDstStageMask=[VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT] * len(wait_sems)
-            if wait_sems
-            else None,
+            pWaitDstStageMask=wait_dst_stage_mask,
             commandBufferCount=len(command_buffers),
             pCommandBuffers=command_buffers,
             signalSemaphoreCount=len(signal_sems),

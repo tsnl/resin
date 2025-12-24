@@ -93,7 +93,6 @@ class Engine(BaseResource):
         self._renderer = Renderer(
             context=self._render_context,
             gpu_device=self._gpu_device,
-            max_frames_in_flight=swapchain_image_count,
             scale=scale,
         )
 
@@ -202,7 +201,6 @@ class Engine(BaseResource):
                 command_encoder=command_encoder,
                 canvas=self._canvas,
                 target=target.image,
-                frame_index=target.slot_index,
             )
             command_encoder.transition_image_layout(
                 image=target.image,
