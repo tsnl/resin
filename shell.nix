@@ -34,6 +34,9 @@ pkgs.mkShell {
     # RenderDoc
     renderdoc
 
+    # amdgpu_top
+    amdgpu_top
+
     # Basic
     unzip
     zstd
