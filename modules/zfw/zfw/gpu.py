@@ -60,6 +60,9 @@ from .typed_vulkan import (
     VK_BLEND_OP_ADD,
     VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+    VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -1824,11 +1827,14 @@ class GpuBufferMeta:
 
 
 type GpuBufferUsage = Literal[
-    "staging",
     "copy-src",
     "copy-dst",
     "uniform",
     "storage",
+    "indirect",
+    "vertex",
+    "index",
+    "staging",
 ]
 
 
@@ -1845,6 +1851,12 @@ def vk_buffer_usage(usages: list[GpuBufferUsage]) -> int:
                 result |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
             case "storage":
                 result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+            case "indirect":
+                result |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
+            case "vertex":
+                result |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+            case "index":
+                result |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT
             case "staging":
                 pass  # staging doesn't add a usage flag, it affects memory locality
             case _:
@@ -1859,12 +1871,12 @@ def vk_buffer_device_local(usages: list[GpuBufferUsage]) -> bool:
         match usage:
             case "staging":
                 required = False
-            case "uniform" | "storage":
+            case "uniform" | "storage" | "indirect" | "vertex" | "index":
                 required = True
             case "copy-src" | "copy-dst":
                 continue  # no constraint
             case _:
-                raise LogicError(f"Invalid buffer usage: {usage!r}")
+                raise LogicError(f"Invalid/unknown buffer usage: {usage!r}")
 
         if device_local is not None and required != device_local:
             raise LogicError(
