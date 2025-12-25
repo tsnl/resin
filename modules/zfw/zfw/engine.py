@@ -8,7 +8,7 @@ from .renderer import Renderer, RendererContext, Canvas
 from .gui import GuiWindow, GuiContext, GuiTheme
 
 
-_logger = logger(__name__)
+LOG = logger(__name__)
 
 
 class Engine(BaseResource):
@@ -38,7 +38,7 @@ class Engine(BaseResource):
             console=True,
             file=Path("zfw.log"),
         )
-        _logger.info(f"Starting ZFW Engine: {app_name=}, {debug=}, {enable_gui=}")
+        LOG.info(f"Starting ZFW Engine: {app_name=}, {debug=}, {enable_gui=}")
 
         # Create contexts:
         self._gpu_context = GpuContext(
@@ -131,28 +131,28 @@ class Engine(BaseResource):
     def renderer(self) -> Renderer:
         return self._renderer
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         #
         # Resources
         #
 
-        self._canvas.dispose_resource()
+        self._canvas.dispose()
 
         if self._window:
-            self._window.dispose_resource()
+            self._window.dispose()
 
-        self._gpu_device.dispose_resource()
+        self._gpu_device.dispose()
 
         #
         # Contexts:
         #
 
-        self._render_context.dispose_resource()
+        self._render_context.dispose()
 
         if self._gui_context:
-            self._gui_context.dispose_resource()
+            self._gui_context.dispose()
 
-        self._gpu_context.dispose_resource()
+        self._gpu_context.dispose()
 
     def print_gpu_debug_info(
         self,

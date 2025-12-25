@@ -48,12 +48,12 @@ class MainMenuWidget(zfw.GuiWidget):
                 )
             engine.window.push_central_widget(self._universal_paperclips_widget)
 
-    def _on_dispose_resource(self) -> None:
-        super()._on_dispose_resource()
-        self._title_widget.dispose_resource()
-        self._universal_paperclips_button.dispose_resource()
+    def _on_dispose(self) -> None:
+        super()._on_dispose()
+        self._title_widget.dispose()
+        self._universal_paperclips_button.dispose()
         if self._universal_paperclips_widget is not None:
-            self._universal_paperclips_widget.dispose_resource()
+            self._universal_paperclips_widget.dispose()
 
 
 def main():
@@ -73,8 +73,8 @@ def main():
         engine.update()
         engine.render()
 
-    start_widget.dispose_resource()
-    engine.dispose_resource()
+    start_widget.dispose()
+    engine.dispose()
 
 
 if __name__ == "__main__":

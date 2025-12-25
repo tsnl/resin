@@ -6,7 +6,7 @@ __all__ = [
 import logging
 from typing import Callable
 
-_logger = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 class EventHub[TEvent]:

@@ -99,9 +99,9 @@ class BaseResource(ABC):
         if self._parent_resource is not None:
             parent = self._parent_resource
             del parent
-        self.dispose_resource()
+        self.dispose()
 
-    def dispose_resource(self) -> None:
+    def dispose(self) -> None:
         # If already disposed, no-op.
         if self._resource_is_disposed:
             return
@@ -112,7 +112,7 @@ class BaseResource(ABC):
             self._parent_resource is not None
             and self._parent_resource._resource_is_disposed
         ):
-            _logger.warning(
+            LOG.warning(
                 f"Cannot dispose resource after its parent: {self=} {self._parent_resource=}",
             )
 
@@ -120,20 +120,20 @@ class BaseResource(ABC):
         for child_ref in reversed(self._child_resources):
             child = child_ref()
             if child is not None:
-                child.dispose_resource()
+                child.dispose()
         self._child_resources.clear()
 
         # Dispose self.
-        self._on_dispose_resource()
+        self._on_dispose()
         self._parent_resource = None
         self._resource_is_disposed = True
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         pass
 
 
 #
-# expect: check for None values
+# unwrap: check for None values
 #
 
 
@@ -415,4 +415,4 @@ def setup_logging(
         root_logger.addHandler(file_handler)
 
 
-_logger = logger(__name__)
+LOG = logger(__name__)

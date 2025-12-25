@@ -43,7 +43,7 @@ from . import typed_freetype as ft  # Must import before uharfbuzz
 from . import typed_uharfbuzz as hb
 
 
-_logger = logger(__name__)
+LOG = logger(__name__)
 
 
 ##--------------------------------------------------------------------------------------
@@ -101,12 +101,12 @@ class Renderer(BaseResource):
     def scale(self) -> float:
         return self._scale
 
-    def _on_dispose_resource(self) -> None:
-        self._r3d.dispose_resource()
-        self._r2d.dispose_resource()
+    def _on_dispose(self) -> None:
+        self._r3d.dispose()
+        self._r2d.dispose()
 
-        self._image_heap.dispose_resource()
-        self._basic_uniform.dispose_resource()
+        self._image_heap.dispose()
+        self._basic_uniform.dispose()
 
     def draw(
         self,
@@ -236,28 +236,28 @@ class Renderer2d(BaseResource):
         self._quad_array_header_device_buf = None
         self._descriptor_set = None
 
-    def _on_dispose_resource(self) -> None:
-        self._vertex_shader.dispose_resource()
-        self._fragment_shader.dispose_resource()
+    def _on_dispose(self) -> None:
+        self._vertex_shader.dispose()
+        self._fragment_shader.dispose()
 
-        self._pipeline_layout.dispose_resource()
-        self._descriptor_set_layout.dispose_resource()
+        self._pipeline_layout.dispose()
+        self._descriptor_set_layout.dispose()
 
         if self._descriptor_set is not None:
-            self._descriptor_set.dispose_resource()
+            self._descriptor_set.dispose()
         if self._quad_array_header_staging_buf is not None:
-            self._quad_array_header_staging_buf.dispose_resource()
+            self._quad_array_header_staging_buf.dispose()
         if self._quad_array_header_device_buf is not None:
-            self._quad_array_header_device_buf.dispose_resource()
+            self._quad_array_header_device_buf.dispose()
         if self._quad_array_staging_buf is not None:
-            self._quad_array_staging_buf.dispose_resource()
+            self._quad_array_staging_buf.dispose()
         if self._quad_array_device_buf is not None:
-            self._quad_array_device_buf.dispose_resource()
+            self._quad_array_device_buf.dispose()
 
         if self._cached_depth_image is not None:
-            self._cached_depth_image.dispose_resource()
+            self._cached_depth_image.dispose()
         if self._cached_gpu_pipeline is not None:
-            self._cached_gpu_pipeline.dispose_resource()
+            self._cached_gpu_pipeline.dispose()
 
     def _maybe_realloc_quad_array_buffers(self, capacity: int):
         # Early out if current capacity is sufficient
@@ -268,15 +268,15 @@ class Renderer2d(BaseResource):
         #
 
         if self._descriptor_set is not None:
-            self._descriptor_set.dispose_resource()
+            self._descriptor_set.dispose()
         if self._quad_array_header_staging_buf is not None:
-            self._quad_array_header_staging_buf.dispose_resource()
+            self._quad_array_header_staging_buf.dispose()
         if self._quad_array_header_device_buf is not None:
-            self._quad_array_header_device_buf.dispose_resource()
+            self._quad_array_header_device_buf.dispose()
         if self._quad_array_staging_buf is not None:
-            self._quad_array_staging_buf.dispose_resource()
+            self._quad_array_staging_buf.dispose()
         if self._quad_array_device_buf is not None:
-            self._quad_array_device_buf.dispose_resource()
+            self._quad_array_device_buf.dispose()
 
         # Allocate new quad array resources
         #
@@ -574,12 +574,12 @@ class Canvas(BaseResource):
     # Disposal:
     #
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         # Dispose cached glyph images
         for img_tuple in self._ft_image_cache.values():
             img, _, _ = img_tuple
             if img is not None:
-                img.dispose_resource()
+                img.dispose()
         self._ft_image_cache.clear()
 
     #
@@ -1195,8 +1195,8 @@ class Scene(BaseResource):
         self._renderer = renderer
         self._gpu_device = renderer._gpu_device
 
-    def _on_dispose_resource(self) -> None:
-        super()._on_dispose_resource()
+    def _on_dispose(self) -> None:
+        super()._on_dispose()
 
 
 ##--------------------------------------------------------------------------------------
@@ -1270,12 +1270,12 @@ class BasicUniform(BaseResource):
             bindings={"u": self._device_buf},
         )
 
-    def _on_dispose_resource(self) -> None:
-        self._descriptor_set.dispose_resource()
-        self._descriptor_set_layout.dispose_resource()
-        self._staging_buf.dispose_resource()
-        self._device_buf.dispose_resource()
-        super()._on_dispose_resource()
+    def _on_dispose(self) -> None:
+        self._descriptor_set.dispose()
+        self._descriptor_set_layout.dispose()
+        self._staging_buf.dispose()
+        self._device_buf.dispose()
+        super()._on_dispose()
 
     def flush(
         self,
@@ -1335,7 +1335,7 @@ class Image(BaseResource):
 
         self._heap.insert(self)
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         self._heap._notify_image_disposed(self)
 
     @property
@@ -1429,17 +1429,17 @@ class ImageHeap(BaseResource):
             },
         )
 
-    def _on_dispose_resource(self) -> None:
-        self._descriptor_set.dispose_resource()
-        self._descriptor_set_layout.dispose_resource()
+    def _on_dispose(self) -> None:
+        self._descriptor_set.dispose()
+        self._descriptor_set_layout.dispose()
 
-        self._nearest_sampler.dispose_resource()
-        self._linear_sampler.dispose_resource()
+        self._nearest_sampler.dispose()
+        self._linear_sampler.dispose()
 
-        self._mono_heap.dispose_resource()
-        self._rgba_heap.dispose_resource()
+        self._mono_heap.dispose()
+        self._rgba_heap.dispose()
 
-        super()._on_dispose_resource()
+        super()._on_dispose()
 
     def homogeneous_heap(self, *, channels: ImageChannels) -> "HomogeneousImageHeap":
         return self._heap_index[channels]
@@ -1571,14 +1571,14 @@ class HomogeneousImageHeap(BaseResource):
             for _ in range(self._max_pages)
         ]
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         for gpu_image in self._page_gpu_image_list:
-            gpu_image.dispose_resource()
+            gpu_image.dispose()
         for staging_buf in self._page_staging_buffers:
-            staging_buf.dispose_resource()
-        self._uv_rect_array_device_buf.dispose_resource()
-        self._uv_rect_array_staging_buf.dispose_resource()
-        super()._on_dispose_resource()
+            staging_buf.dispose()
+        self._uv_rect_array_device_buf.dispose()
+        self._uv_rect_array_staging_buf.dispose()
+        super()._on_dispose()
 
     def insert(self, image: Image):
         assert image._image_id < 0
@@ -1621,7 +1621,7 @@ class HomogeneousImageHeap(BaseResource):
             # Compaction requires a blocking sync to avoid race conditions:
             # we must wait for the GPU to finish before modifying
             # the shared page images.
-            _logger.warning(
+            LOG.warning(
                 "ImageHeap compaction triggered. This causes a GPU sync and may "
                 "impact performance. Consider increasing max_pages or page_size.",
             )

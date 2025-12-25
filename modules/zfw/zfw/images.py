@@ -14,7 +14,7 @@ import numpy as np
 from .basic import ColorSpace, logger
 
 
-_logger = logger(__name__)
+LOG = logger(__name__)
 
 
 def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:

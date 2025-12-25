@@ -68,7 +68,7 @@ from .typed_vulkan import raw_ffi
 from .events import EventHub
 
 
-_logger = logger(__name__)
+LOG = logger(__name__)
 
 
 type GuiImageLayout = Literal["fit", "crop", "stretch"]
@@ -290,7 +290,7 @@ class GuiContext(BaseResource):
         if not ok:
             raise GlfwError("Failed to initialize GLFW")
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         glfw.terminate()
 
 
@@ -388,7 +388,7 @@ class GuiWindow(BaseResource):
                 glfw.TRUE,
             )
         else:
-            _logger.warning(
+            LOG.warning(
                 "Raw mouse motion is not supported on this window: 'joystick' cursor "
                 "mode may be less accurate. See GLFW documentation for details.",
             )
@@ -444,7 +444,7 @@ class GuiWindow(BaseResource):
     def _recreate_gpu_surface(self) -> None:
         """Recreate the GPU surface after a window resize event."""
         # Dispose the old surface
-        self._gpu_surface.dispose_resource()
+        self._gpu_surface.dispose()
         # Create a new surface with the current framebuffer size
         self._gpu_surface = self._new_gpu_surface()
 
@@ -452,10 +452,10 @@ class GuiWindow(BaseResource):
     # Resource disposal:
     #
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         if self._gpu_swap_chain is not None:
-            self._gpu_swap_chain.dispose_resource()
-        super()._on_dispose_resource()
+            self._gpu_swap_chain.dispose()
+        super()._on_dispose()
         glfw.destroy_window(self._glfw_window_handle)
 
     #
@@ -480,7 +480,7 @@ class GuiWindow(BaseResource):
         # Dispose old swapchain if it exists
         if self._gpu_swap_chain is not None:
             self._gpu_device.wait_idle()
-            self._gpu_swap_chain.dispose_resource()
+            self._gpu_swap_chain.dispose()
 
         # Create new swapchain
         self._gpu_swap_chain = GpuSwapChain(
@@ -870,9 +870,9 @@ class GuiWidget(BaseResource):
     # Dispose resources:
     #
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         for child in self._child_widget_list:
-            child.dispose_resource()
+            child.dispose()
 
     #
     # Event hubs:

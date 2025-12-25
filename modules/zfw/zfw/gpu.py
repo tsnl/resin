@@ -319,7 +319,7 @@ from .typed_vulkan import (
 
 
 # Module logger
-_logger = logger(__name__)
+LOG = logger(__name__)
 
 
 #
@@ -417,7 +417,7 @@ def _debug_utils_messenger_callback(
 
     # Log with appropriate context
     full_message = f"{message} {message_type_str=}, {message_id_name=} "
-    _logger.log(log_level, full_message)
+    LOG.log(log_level, full_message)
 
     return False
 
@@ -656,7 +656,7 @@ class GpuContext(BaseResource):
                 "Wayland or X11 on a Linux host: are you running a window server?"
             )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         if hasattr(self, "_vk_instance"):
             vkDestroyInstance(self.vk_instance, pAllocator=None)
 
@@ -814,7 +814,7 @@ class GpuPhysicalDevice(BaseResource):
         self.vk_properties = vk_properties
         self.vk_memory_properties = vk_memory_properties
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         pass  # no private resources to free
 
     @property
@@ -1212,7 +1212,7 @@ class GpuDevice(BaseResource):
         }
         return defaults | (descriptor_pool_config or {})
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         # Destroy default descriptor pool first:
         vkDestroyDescriptorPool(
             device=self.vk_device,
@@ -1351,7 +1351,7 @@ class GpuMemory(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkFreeMemory(self.device.vk_device, self.vk_device_memory, pAllocator=None)
 
     @contextmanager
@@ -1684,7 +1684,7 @@ class GpuImage(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         if self._owns_vk_image_view:
             vkDestroyImageView(
                 self.device.vk_device, self.vk_image_view, pAllocator=None
@@ -1755,7 +1755,7 @@ class GpuSemaphore(BaseResource):
             f"<GpuSemaphore object at {hex(id(self))} with handle {self.vk_semaphore}>"
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkDestroySemaphore(self.device.vk_device, self.vk_semaphore, pAllocator=None)
 
 
@@ -1782,7 +1782,7 @@ class GpuFence(BaseResource):
     def __repr__(self) -> str:
         return f"<GpuFence object at {hex(id(self))} with handle {self.vk_fence}>"
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         self.wait()
         vkDestroyFence(self.device.vk_device, self.vk_fence, pAllocator=None)
 
@@ -1998,9 +1998,9 @@ class GpuBuffer(BaseResource):
 
         return buffer, memory
 
-    def _on_dispose_resource(self):
+    def _on_dispose(self):
         if self.memory is not None:
-            self.memory.dispose_resource()
+            self.memory.dispose()
 
         vkDestroyBuffer(self.device.vk_device, self.vk_buffer, pAllocator=None)
 
@@ -2065,7 +2065,7 @@ class GpuCommandEncoder(BaseResource):
     def _end_command_buffer(self, vk_command_buffer: VkCommandBuffer) -> None:
         vkEndCommandBuffer(commandBuffer=vk_command_buffer)
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         # If not submitted, end the command buffer:
         if self._submit_fence is None:
             self._end_command_buffer(self.vk_command_buffer)
@@ -2073,7 +2073,7 @@ class GpuCommandEncoder(BaseResource):
         # Wait for submission to complete:
         if self._submit_fence is not None:
             if self._submit_fence_is_owned:
-                self._submit_fence.dispose_resource()
+                self._submit_fence.dispose()
             else:
                 self._submit_fence.wait()
             self._submit_fence = None
@@ -2509,7 +2509,7 @@ class GpuShader(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkDestroyShaderModule(
             device=self.device.vk_device,
             shaderModule=self.vk_shader_module,
@@ -2604,7 +2604,7 @@ class GpuSampler(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkDestroySampler(
             device=self.device.vk_device,
             sampler=self.vk_sampler,
@@ -2671,7 +2671,7 @@ class GpuPipelineLayout(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkDestroyPipelineLayout(
             device=self.device.vk_device,
             pipelineLayout=self.vk_pipeline_layout,
@@ -2725,7 +2725,7 @@ class GpuDescriptorSetLayout(BaseResource):
             pAllocator=None,
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkDestroyDescriptorSetLayout(
             device=self.device.vk_device,
             descriptorSetLayout=self.vk_descriptor_set_layout,
@@ -3214,7 +3214,7 @@ class GpuPipeline(BaseResource):
             pAllocator=None,
         )[0]
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         vkDestroyPipeline(
             device=self.device.vk_device,
             pipeline=self.vk_pipeline,
@@ -3233,7 +3233,7 @@ class GpuRenderPassCommandEncoder(BaseResource):
         self.command_encoder = command_encoder
         self.bound_pipeline = None
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         pass
 
     def bind_pipeline(self, *, pipeline: GpuPipeline) -> None:
@@ -3326,7 +3326,7 @@ class GpuSurface(BaseResource):
         self.width = width
         self.height = height
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         self.context.vkDestroySurfaceKHR(
             instance=self.context.vk_instance,
             surface=self.vk_surface,
@@ -3448,7 +3448,7 @@ class GpuSwapChain(BaseResource):
             f"<GpuSwapChain object at {hex(id(self))} with handle {self.vk_swap_chain}>"
         )
 
-    def _on_dispose_resource(self) -> None:
+    def _on_dispose(self) -> None:
         self.device.wait_idle()
 
         for slot in self.slots:
@@ -3518,10 +3518,10 @@ class GpuSwapChainSlot(BaseResource):
         self.image_available_semaphore = GpuSemaphore(device=swap_chain.device)
         self.render_done_semaphore = GpuSemaphore(device=swap_chain.device)
 
-    def _on_dispose_resource(self) -> None:
-        self.in_flight_fence.dispose_resource()
-        self.image_available_semaphore.dispose_resource()
-        self.render_done_semaphore.dispose_resource()
+    def _on_dispose(self) -> None:
+        self.in_flight_fence.dispose()
+        self.image_available_semaphore.dispose()
+        self.render_done_semaphore.dispose()
 
 
 @dataclass
@@ -3586,7 +3586,7 @@ def vk_shader_stages(stages: list[GpuStage]) -> int:
 class GpuEzBuffer(BaseResource):
     """
     GpuEzBuffer is a convenience wrapper around a pair of staging and device buffers,
-    along with a numpy array for CPU-side data manipulation.
+    along with a numpy array for CPU-side data manipulation. Ez = "Easy".
 
     The only way to obtain a GpuBuffer for GPU operations is to call `flush()`, which
     copies the CPU-side data to the staging buffer, then issues a copy command to the
@@ -3617,8 +3617,8 @@ class GpuEzBuffer(BaseResource):
         self._buffer_usages = usages
         self._staging_buffer, self._device_buffer = self._make_buffer_pair()
 
-    def _on_dispose_resource(self) -> None:
-        super()._on_dispose_resource()
+    def _on_dispose(self) -> None:
+        super()._on_dispose()
 
     def __len__(self) -> int:
         return self._length
@@ -3648,8 +3648,8 @@ class GpuEzBuffer(BaseResource):
             return
 
         # Dispose old buffers
-        self._device_buffer.dispose_resource()
-        self._staging_buffer.dispose_resource()
+        self._device_buffer.dispose()
+        self._staging_buffer.dispose()
 
         # Update to new buffers:
         self._capacity = new_capacity

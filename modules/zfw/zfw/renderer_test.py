@@ -24,7 +24,7 @@ from .images import load_rgba_image, compute_psnr
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
-_logger = logger(__name__)
+LOG = logger(__name__)
 
 
 def assert_image_matches_reference(
@@ -53,7 +53,7 @@ def assert_image_matches_reference(
     if not expect_path.exists():
         # No reference exists - create it and pass
         PIL.Image.fromarray(actual_image).save(expect_path)
-        _logger.warning(f"{test_name}: no expect found: image created: {expect_path}")
+        LOG.warning(f"{test_name}: no expect found: image created: {expect_path}")
         return
 
     # Load expected image
@@ -116,14 +116,14 @@ class RendererTestEngine(BaseResource):
             ),
         )
 
-    def _on_dispose_resource(self) -> None:
-        self.target.dispose_resource()
+    def _on_dispose(self) -> None:
+        self.target.dispose()
 
-        self.renderer.dispose_resource()
-        self.gpu_device.dispose_resource()
+        self.renderer.dispose()
+        self.gpu_device.dispose()
 
-        self.renderer_context.dispose_resource()
-        self.gpu_context.dispose_resource()
+        self.renderer_context.dispose()
+        self.gpu_context.dispose()
 
     def readback(self) -> np.ndarray:
         buffer = GpuBuffer(
@@ -191,7 +191,7 @@ def test_renderer_quads():
         psnr_threshold=65.0,
     )
 
-    engine.dispose_resource()
+    engine.dispose()
 
 
 def test_renderer_image():
@@ -228,7 +228,7 @@ def test_renderer_image():
         psnr_threshold=65.0,
     )
 
-    engine.dispose_resource()
+    engine.dispose()
 
 
 def test_renderer_atlas_smoketest():
@@ -279,10 +279,10 @@ def test_renderer_atlas_smoketest():
     # Note: x=0 because it's larger than default_white_image (1x1)
     assert image.allocation_px_xywh[2:] == (128, 128)
 
-    renderer.dispose_resource()
-    gpu_device.dispose_resource()
-    renderer_context.dispose_resource()
-    gpu_context.dispose_resource()
+    renderer.dispose()
+    gpu_device.dispose()
+    renderer_context.dispose()
+    gpu_context.dispose()
 
 
 def test_renderer_text_basic():
@@ -307,7 +307,7 @@ def test_renderer_text_basic():
         psnr_threshold=65.0,
     )
 
-    engine.dispose_resource()
+    engine.dispose()
 
 
 def test_renderer_text_wrap():
@@ -334,7 +334,7 @@ def test_renderer_text_wrap():
         psnr_threshold=65.0,
     )
 
-    engine.dispose_resource()
+    engine.dispose()
 
 
 def test_renderer_text_clip():
@@ -361,7 +361,7 @@ def test_renderer_text_clip():
         psnr_threshold=65.0,
     )
 
-    engine.dispose_resource()
+    engine.dispose()
 
 
 def test_renderer_text_matrix():
@@ -423,7 +423,7 @@ def test_renderer_text_matrix():
         psnr_threshold=65.0,
     )
 
-    engine.dispose_resource()
+    engine.dispose()
 
 
 if __name__ == "__main__":

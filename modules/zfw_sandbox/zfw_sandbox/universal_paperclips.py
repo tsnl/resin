@@ -1,7 +1,7 @@
 import zfw
 
 
-_logger = zfw.logger(__name__)
+LOG = zfw.logger(__name__)
 
 
 #
@@ -132,7 +132,7 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
 
         @self._make_paperclip_button_widget.click_event.subscribe()
         def make_paperclip_button_click(button: zfw.MouseButton):
-            _logger.info("Make Paperclip button clicked")
+            LOG.info("Make Paperclip button clicked")
 
 
 class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
