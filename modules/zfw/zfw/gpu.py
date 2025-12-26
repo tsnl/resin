@@ -1542,17 +1542,17 @@ def vk_image_aspect(usages: list[GpuImageUsage]) -> int:
 
 class GpuImage(BaseResource):
     device: GpuDevice
-    vk_image: VkImage
-    vk_image_view: VkImageView
-    vk_format: VkFormat
-    memory: GpuMemory | None
-    meta: GpuImageMeta
-    aspect_mask: int
     usages: list[GpuImageUsage]
+    meta: GpuImageMeta
     _owns_vk_image: bool
     _owns_vk_image_view: bool
-    initial_vk_layout: VkImageLayout
-    current_vk_layout: VkImageLayout
+    _vk_aspect_mask: int
+    _vk_format: VkFormat
+    _vk_image: VkImage
+    _memory: GpuMemory | None
+    _vk_image_view: VkImageView
+    _initial_vk_layout: VkImageLayout
+    _current_vk_layout: VkImageLayout
 
     def __init__(
         self,
@@ -1565,6 +1565,7 @@ class GpuImage(BaseResource):
         custom_vk_format: VkFormat | None = None,
     ) -> None:
         super().__init__(parent_resource=device)
+
         self.device = device
         self.usages = usages
         self.meta = meta
@@ -1572,35 +1573,35 @@ class GpuImage(BaseResource):
         self._owns_vk_image = custom_vk_image_handle is None
         self._owns_vk_image_view = custom_vk_image_view is None
 
-        self.aspect_mask = vk_image_aspect(usages)
-        self.vk_format = (
+        self._vk_aspect_mask = vk_image_aspect(usages)
+        self._vk_format = (
             custom_vk_format  # user override supplied
             if custom_vk_format is not None
             else meta.infer_vk_format(usages)
         )
-        self.vk_image, self.memory = (
+        self._vk_image, self._memory = (
             self._help_create_image(
                 device=device,
                 meta=meta,
                 usages=usages,
-                vk_format=self.vk_format,
+                vk_format=self._vk_format,
             )
             if custom_vk_image_handle is None
             else (custom_vk_image_handle, None)
         )
-        self.vk_image_view = (
+        self._vk_image_view = (
             self._help_create_image_view(
                 device=device,
-                vk_image=self.vk_image,
-                vk_format=self.vk_format,
-                aspect_mask=self.aspect_mask,
+                vk_image=self._vk_image,
+                vk_format=self._vk_format,
+                aspect_mask=self._vk_aspect_mask,
             )
             if custom_vk_image_view is None
             else custom_vk_image_view
         )
 
-        self.initial_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
-        self.current_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
+        self._initial_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
+        self._current_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
 
     @staticmethod
     def _help_create_image(
@@ -1687,13 +1688,13 @@ class GpuImage(BaseResource):
     def _on_dispose(self) -> None:
         if self._owns_vk_image_view:
             vkDestroyImageView(
-                self.device.vk_device, self.vk_image_view, pAllocator=None
+                self.device.vk_device, self._vk_image_view, pAllocator=None
             )
         if self._owns_vk_image:
-            vkDestroyImage(self.device.vk_device, self.vk_image, pAllocator=None)
+            vkDestroyImage(self.device.vk_device, self._vk_image, pAllocator=None)
 
     def __repr__(self) -> str:
-        return f"<GpuImage object at {hex(id(self))} with handle {self.vk_image}>"
+        return f"<GpuImage object at {hex(id(self))} with handle {self._vk_image}>"
 
     @property
     def width(self) -> int:
@@ -1729,6 +1730,9 @@ class GpuImage(BaseResource):
             ],
         )
         cmd.submit().wait()
+
+    def get_unique_image_id(self) -> int:
+        return hash(self._vk_image)
 
 
 #
@@ -2122,7 +2126,7 @@ class GpuCommandEncoder(BaseResource):
                 bufferRowLength=0,
                 bufferImageHeight=0,
                 imageSubresource=VkImageSubresourceLayers(
-                    aspectMask=dst.aspect_mask,
+                    aspectMask=dst._vk_aspect_mask,
                     mipLevel=0,
                     baseArrayLayer=0,
                     layerCount=1,
@@ -2143,7 +2147,7 @@ class GpuCommandEncoder(BaseResource):
         vkCmdCopyBufferToImage(
             commandBuffer=self.vk_command_buffer,
             srcBuffer=src.vk_buffer,
-            dstImage=dst.vk_image,
+            dstImage=dst._vk_image,
             dstImageLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             regionCount=len(vk_regions),
             pRegions=vk_regions,
@@ -2157,7 +2161,7 @@ class GpuCommandEncoder(BaseResource):
     ) -> None:
         vkCmdCopyImageToBuffer(
             commandBuffer=self.vk_command_buffer,
-            srcImage=src.vk_image,
+            srcImage=src._vk_image,
             srcImageLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             dstBuffer=dst.vk_buffer,
             regionCount=1,
@@ -2167,7 +2171,7 @@ class GpuCommandEncoder(BaseResource):
                     bufferRowLength=0,
                     bufferImageHeight=0,
                     imageSubresource=VkImageSubresourceLayers(
-                        aspectMask=src.aspect_mask,
+                        aspectMask=src._vk_aspect_mask,
                         mipLevel=0,
                         baseArrayLayer=0,
                         layerCount=1,
@@ -2190,22 +2194,22 @@ class GpuCommandEncoder(BaseResource):
     ) -> None:
         vkCmdCopyImage(
             commandBuffer=self.vk_command_buffer,
-            srcImage=src.vk_image,
+            srcImage=src._vk_image,
             srcImageLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            dstImage=dst.vk_image,
+            dstImage=dst._vk_image,
             dstImageLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             regionCount=1,
             pRegions=[
                 VkImageCopy(
                     srcSubresource=VkImageSubresourceLayers(
-                        aspectMask=src.aspect_mask,
+                        aspectMask=src._vk_aspect_mask,
                         mipLevel=0,
                         baseArrayLayer=0,
                         layerCount=1,
                     ),
                     srcOffset=VkOffset3D(x=0, y=0, z=0),
                     dstSubresource=VkImageSubresourceLayers(
-                        aspectMask=dst.aspect_mask,
+                        aspectMask=dst._vk_aspect_mask,
                         mipLevel=0,
                         baseArrayLayer=0,
                         layerCount=1,
@@ -2232,7 +2236,7 @@ class GpuCommandEncoder(BaseResource):
         if color_attachment is not None:
             color_infos.append(
                 VkRenderingAttachmentInfo(
-                    imageView=color_attachment.vk_image_view,
+                    imageView=color_attachment._vk_image_view,
                     imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     resolveMode=VkResolveModeFlagBits.__value__(0),
                     resolveImageView=None,
@@ -2258,7 +2262,7 @@ class GpuCommandEncoder(BaseResource):
         depth_info = None
         if depth_attachment is not None:
             depth_info = VkRenderingAttachmentInfo(
-                imageView=depth_attachment.vk_image_view,
+                imageView=depth_attachment._vk_image_view,
                 imageLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 resolveMode=VkResolveModeFlagBits.__value__(0),
                 resolveImageView=None,
@@ -2307,11 +2311,11 @@ class GpuCommandEncoder(BaseResource):
 
         # Update tracked layouts after rendering
         if color_attachment is not None:
-            color_attachment.current_vk_layout = (
+            color_attachment._current_vk_layout = (
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
             )
         if depth_attachment is not None:
-            depth_attachment.current_vk_layout = (
+            depth_attachment._current_vk_layout = (
                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
             )
 
@@ -2338,24 +2342,24 @@ class GpuCommandEncoder(BaseResource):
         )
 
         # Skip if already in the correct layout
-        if image.current_vk_layout == new_layout:
+        if image._current_vk_layout == new_layout:
             return
 
         # Determine access masks based on old and new layouts
         src_access_mask = 0
-        if image.current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+        if image._current_vk_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
             src_access_mask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
         elif (
-            image.current_vk_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            image._current_vk_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
         ):
             src_access_mask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+        elif image._current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
             src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT
-        elif image.current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        elif image._current_vk_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
             src_access_mask = VK_ACCESS_TRANSFER_READ_BIT
-        elif image.current_vk_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+        elif image._current_vk_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
             src_access_mask = VK_ACCESS_SHADER_READ_BIT
-        elif image.current_vk_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+        elif image._current_vk_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
             # PRESENT_SRC layout - presentation engine only reads, no pending writes
             src_access_mask = 0
         else:
@@ -2418,13 +2422,13 @@ class GpuCommandEncoder(BaseResource):
                 VkImageMemoryBarrier(
                     srcAccessMask=src_access_mask,
                     dstAccessMask=dst_access_mask,
-                    oldLayout=image.current_vk_layout,
+                    oldLayout=image._current_vk_layout,
                     newLayout=new_layout,
                     srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
                     dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
-                    image=image.vk_image,
+                    image=image._vk_image,
                     subresourceRange=VkImageSubresourceRange(
-                        aspectMask=image.aspect_mask,
+                        aspectMask=image._vk_aspect_mask,
                         baseMipLevel=0,
                         levelCount=1,
                         baseArrayLayer=0,
@@ -2435,7 +2439,7 @@ class GpuCommandEncoder(BaseResource):
         )
 
         # Update tracked layout
-        image.current_vk_layout = new_layout
+        image._current_vk_layout = new_layout
 
     def submit(
         self,
@@ -2798,7 +2802,8 @@ class GpuDescriptorSet(BaseResource):
 
     @staticmethod
     def _help_allocate_descriptor_set(
-        device: GpuDevice, layout: GpuDescriptorSetLayout
+        device: GpuDevice,
+        layout: GpuDescriptorSetLayout,
     ) -> VkDescriptorSet:
         alloc_info = VkDescriptorSetAllocateInfo(
             descriptorPool=device.vk_descriptor_pool,
@@ -2845,7 +2850,7 @@ type GpuDescriptorSetBinding = """
     GpuSamplerDescriptorSetBinding
 """
 type GpuBufferDescriptorSetBinding = GpuBuffer
-type GpuSampledImageDescriptorSetBinding = list[GpuImage]
+type GpuSampledImageDescriptorSetBinding = GpuImage
 type GpuSamplerDescriptorSetBinding = GpuSampler
 
 
@@ -2876,20 +2881,19 @@ def descriptor_set_write_for_binding(
 ):
     match binding_layout.type:
         case "sampled-image":
-            assert isinstance(binding, list)
+            assert isinstance(binding, GpuImage)
             return VkWriteDescriptorSet(
                 dstSet=vk_set,
                 dstBinding=binding_index,
                 dstArrayElement=0,
-                descriptorCount=len(binding),
+                descriptorCount=1,
                 descriptorType=vk_descriptor_type(binding_layout.type),
                 pImageInfo=[
                     VkDescriptorImageInfo(
                         sampler=None,
-                        imageView=image.vk_image_view,
+                        imageView=binding._vk_image_view,
                         imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     )
-                    for image in binding
                 ],
                 pBufferInfo=None,
                 pTexelBufferView=None,
@@ -2935,7 +2939,10 @@ def descriptor_set_write_for_binding(
 
 
 type GpuDescriptorType = Literal[
-    "sampled-image", "sampler", "storage-buffer", "uniform-buffer"
+    "sampled-image",
+    "sampler",
+    "storage-buffer",
+    "uniform-buffer",
 ]
 
 
@@ -3639,6 +3646,9 @@ class GpuEzBuffer(BaseResource):
     def array(self) -> np.ndarray:
         return self._data[: self._length]
 
+    def clear(self) -> None:
+        self._length = 0
+
     def reserve(self, *, new_capacity: int) -> None:
         """
         Ensure the buffer has at least `new_capacity` elements.
@@ -3695,13 +3705,21 @@ class GpuEzBuffer(BaseResource):
         )
         return staging_buffer, device_buffer
 
+    @property
+    def device_buffer(self) -> "GpuBuffer":
+        """
+        Returns the device-side buffer. Note that this buffer will not contain
+        up-to-date data until `flush()` is called.
+        """
+        return self._device_buffer
+
     def flush(
         self,
         *,
         command_encoder: GpuCommandEncoder,
         write_start: int = 0,
         write_count: int | None = None,
-    ) -> "GpuBuffer":
+    ):
         """
         Flush the CPU-side data to the GPU device buffer.
         """

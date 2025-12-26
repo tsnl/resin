@@ -434,7 +434,7 @@ class Renderer2d(BaseResource):
     def _get_cached_gpu_pipeline(self, target: GpuImage) -> GpuPipeline | None:
         if self._cached_gpu_pipeline is None:
             return None
-        if self._cached_gpu_pipeline.vk_color_format != target.vk_format:
+        if self._cached_gpu_pipeline.vk_color_format != target._vk_format:
             return None
         if self._cached_gpu_pipeline.viewport_width != target.width:
             return None
@@ -447,7 +447,7 @@ class Renderer2d(BaseResource):
             device=self.gpu_device,
             vertex_shader=self._vertex_shader,
             fragment_shader=self._fragment_shader,
-            vk_color_format=target.vk_format,
+            vk_color_format=target._vk_format,
             enable_depth_test=False,
             enable_alpha_blending=True,
             viewport_width=target.width,
