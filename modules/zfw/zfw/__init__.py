@@ -1,8 +1,9 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
     "BaseResource",
-    "Canvas",
     "ColorSpace",
+    "Draw2dContext",
+    "Draw2dRenderer",
     "Engine",
     "EventHub",
     "Font",
@@ -32,15 +33,10 @@ __all__ = [
     "GuiWidget",
     "GuiWidgetStyle",
     "GuiWindow",
-    "HomogeneousImageHeap",
-    "Image",
     "Json",
     "JsonArray",
     "JsonObject",
     "MouseButton",
-    "QuadArray",
-    "Renderer",
-    "RendererContext",
     "SupportsWrite",
     "convert_srgb_to_linear",
     "load_rgba_image",
@@ -84,13 +80,9 @@ from .gpu import (
     GpuShader,
     GpuSwapChain,
 )
-from .renderer import (
-    Renderer,
-    HomogeneousImageHeap,
-    RendererContext,
-    Image,
-    QuadArray,
-    Canvas,
+from .draw_2d import (
+    Draw2dContext,
+    Draw2dRenderer,
 )
 from .images import load_rgba_image, convert_srgb_to_linear
 from .gui import (

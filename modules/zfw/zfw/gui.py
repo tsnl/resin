@@ -59,9 +59,9 @@ from .basic import (
     JsonObject,
     LogicError,
 )
-from .renderer import Canvas, Image
+from .draw_2d import Draw2dRenderer
 from .excepts import GlfwError
-from .gpu import GpuContext, GpuDevice, GpuSurface, GpuSwapChain
+from .gpu import GpuContext, GpuDevice, GpuImage, GpuSurface, GpuSwapChain
 from .typed_vulkan import raw_ffi
 
 
@@ -76,13 +76,13 @@ type GuiImageLayout = Literal["fit", "crop", "stretch"]
 
 def _compute_image_src_xy_wh(
     dst_wh: tuple[int, int],
-    image: Image | None,
+    image: GpuImage | None,
     layout: GuiImageLayout,
     user_src_xy: tuple[int, int] = (0, 0),
     user_src_wh: tuple[int, int] | None = None,
 ) -> tuple[tuple[int, int], tuple[int, int] | None]:
     """
-    Compute the src_xy and src_wh to pass to Canvas.add_quad() based on the layout mode.
+    Compute the src_xy and src_wh to pass to Draw2dRenderer.add_quad() based on the layout mode.
 
     Args:
         dst_wh: The destination widget size in pixels
@@ -92,15 +92,15 @@ def _compute_image_src_xy_wh(
         user_src_wh: User-specified source rectangle size, or None to use full image
 
     Returns:
-        A tuple of (src_xy, src_wh) to pass to Canvas.add_quad()
+        A tuple of (src_xy, src_wh) to pass to Draw2dRenderer.add_quad()
     """
     if image is None:
         # No image: return defaults
         return user_src_xy, user_src_wh
 
     # Determine the source rectangle
-    src_w = user_src_wh[0] if user_src_wh is not None else image.px_width
-    src_h = user_src_wh[1] if user_src_wh is not None else image.px_height
+    src_w = user_src_wh[0] if user_src_wh is not None else image.width
+    src_h = user_src_wh[1] if user_src_wh is not None else image.height
     src_xy = user_src_xy
     src_wh = (src_w, src_h)
 
@@ -698,10 +698,10 @@ class GuiWindow(BaseResource):
     # Render:
     #
 
-    def render(self, canvas: Canvas) -> None:
+    def render(self, renderer: Draw2dRenderer) -> None:
         if self._central_widget is None:
             return
-        self._central_widget._render(canvas)
+        self._central_widget._render(renderer)
 
 
 class GuiWidget(BaseResource):
@@ -726,11 +726,11 @@ class GuiWidget(BaseResource):
 
     # Content:
     _text: str | None
-    _image: Image | None
+    _image: GpuImage | None
     _image_src_xy: tuple[int, int]
     _image_src_wh: tuple[int, int] | None
     _image_layout: GuiImageLayout
-    _image_hover: Image | None
+    _image_hover: GpuImage | None
     _image_hover_src_xy: tuple[int, int]
     _image_hover_src_wh: tuple[int, int] | None
     _image_hover_layout: GuiImageLayout
@@ -762,11 +762,11 @@ class GuiWidget(BaseResource):
         grid_rows: tuple[int, ...] | None = None,
         grid_cols: tuple[int, ...] | None = None,
         text: str | None = None,
-        image: Image | None = None,
+        image: GpuImage | None = None,
         image_src_xy: tuple[int, int] = (0, 0),
         image_src_wh: tuple[int, int] | None = None,
         image_layout: GuiImageLayout = "fit",
-        image_hover: Image | None = None,
+        image_hover: GpuImage | None = None,
         image_hover_src_xy: tuple[int, int] = (0, 0),
         image_hover_src_wh: tuple[int, int] | None = None,
         image_hover_layout: GuiImageLayout | None = None,
@@ -1126,15 +1126,15 @@ class GuiWidget(BaseResource):
     # Render:
     #
 
-    def _render(self, canvas: Canvas) -> None:
+    def _render(self, renderer: Draw2dRenderer) -> None:
         # Render self.
-        self._render_self(canvas)
+        self._render_self(renderer)
 
         # Render children, in order, after self.
         for child in self._child_widget_list:
-            child._render(canvas)
+            child._render(renderer)
 
-    def _render_self(self, canvas: Canvas) -> None:
+    def _render_self(self, renderer: Draw2dRenderer) -> None:
         # Get the latest style:
         style = self._style
 
@@ -1168,7 +1168,7 @@ class GuiWidget(BaseResource):
         )
 
         # Draw background quad:
-        canvas.add_quad(
+        renderer.add_quad(
             dst_xy=(
                 x + ml + bl,
                 y + mt + bt,
@@ -1184,7 +1184,7 @@ class GuiWidget(BaseResource):
 
         # Draw text:
         if self._text is not None:
-            canvas.add_text(
+            renderer.add_text(
                 text=self._text,
                 font=style.font,
                 font_size_px=style.font_size_dip,

@@ -124,7 +124,6 @@ from .typed_vulkan import (
     VK_PIPELINE_BIND_POINT_GRAPHICS,
     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
     VK_PIPELINE_STAGE_TRANSFER_BIT,
     VK_POLYGON_MODE_FILL,
@@ -142,6 +141,7 @@ from .typed_vulkan import (
     VK_SAMPLER_MIPMAP_MODE_LINEAR,
     VK_SHADER_STAGE_FRAGMENT_BIT,
     VK_SHADER_STAGE_VERTEX_BIT,
+    VK_SHARING_MODE_CONCURRENT,
     VK_SHARING_MODE_EXCLUSIVE,
     VK_STENCIL_OP_KEEP,
     VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
@@ -1613,6 +1613,20 @@ class GpuImage(BaseResource):
     ) -> tuple[VkImage, GpuMemory]:
         """Create a VkImage and allocate/bind memory for it."""
 
+        # Use concurrent sharing mode if graphics and transfer use different queue families
+        # This avoids validation warnings when images are uploaded via transfer queue
+        # and then used on graphics queue
+        graphics_qfi = device.qfis["graphics"]
+        transfer_qfi = device.qfis["transfer"]
+
+        if graphics_qfi == transfer_qfi:
+            sharing_mode = VK_SHARING_MODE_EXCLUSIVE
+            queue_family_indices = None
+        else:
+            sharing_mode = VK_SHARING_MODE_CONCURRENT
+            # Include all unique queue family indices
+            queue_family_indices = list(set(device.qfis.type_to_qfi_map.values()))
+
         image = vkCreateImage(
             device=device.vk_device,
             pCreateInfo=VkImageCreateInfo(
@@ -1625,9 +1639,11 @@ class GpuImage(BaseResource):
                 samples=VK_SAMPLE_COUNT_1_BIT,
                 tiling=VK_IMAGE_TILING_OPTIMAL,
                 usage=vk_image_usage(usages),
-                sharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                queueFamilyIndexCount=0,
-                pQueueFamilyIndices=None,
+                sharingMode=sharing_mode,
+                queueFamilyIndexCount=len(queue_family_indices)
+                if queue_family_indices
+                else 0,
+                pQueueFamilyIndices=queue_family_indices,
                 initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
             ),
             pAllocator=None,
@@ -1970,15 +1986,29 @@ class GpuBuffer(BaseResource):
 
         assert meta.size > 0, "Cannot create a buffer with size 0"
 
+        # Use concurrent sharing mode if graphics and transfer use different queue families
+        graphics_qfi = device.qfis["graphics"]
+        transfer_qfi = device.qfis["transfer"]
+
+        if graphics_qfi == transfer_qfi:
+            sharing_mode = VK_SHARING_MODE_EXCLUSIVE
+            queue_family_indices = None
+        else:
+            sharing_mode = VK_SHARING_MODE_CONCURRENT
+            # Include all unique queue family indices
+            queue_family_indices = list(set(device.qfis.type_to_qfi_map.values()))
+
         buffer = vkCreateBuffer(
             device=device.vk_device,
             pCreateInfo=VkBufferCreateInfo(
                 flags=0,
                 size=meta.size,
                 usage=vk_buffer_usage(usages),
-                sharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                queueFamilyIndexCount=0,
-                pQueueFamilyIndices=None,
+                sharingMode=sharing_mode,
+                queueFamilyIndexCount=len(queue_family_indices)
+                if queue_family_indices
+                else 0,
+                pQueueFamilyIndices=queue_family_indices,
             ),
             pAllocator=None,
         )
@@ -2865,7 +2895,7 @@ def compatible_descriptor_types_for_binding(
             if "storage" in binding.usages:
                 res.add("storage-buffer")
             return res
-        case list() if all(isinstance(x, GpuImage) for x in binding):
+        case GpuImage():
             return {"sampled-image"}
         case GpuSampler():
             return {"sampler"}
@@ -3407,6 +3437,22 @@ class GpuSwapChain(BaseResource):
     def _create_swap_chain(
         self, surface: GpuSurface, image_count: int
     ) -> VkSwapchainKHR:
+        # Use concurrent sharing mode if graphics and present use different queue families
+        graphics_qfi = self.device.qfis["graphics"]
+        present_qfi = (
+            self.device.qfis["present"]
+            if "present" in self.device.qfis
+            else graphics_qfi
+        )
+
+        if graphics_qfi == present_qfi:
+            sharing_mode = VK_SHARING_MODE_EXCLUSIVE
+            queue_family_indices = None
+        else:
+            sharing_mode = VK_SHARING_MODE_CONCURRENT
+            # Include all unique queue family indices
+            queue_family_indices = list(set(self.device.qfis.type_to_qfi_map.values()))
+
         return self.device.context.vkCreateSwapchainKHR(
             device=self.device.vk_device,
             pCreateInfo=VkSwapchainCreateInfoKHR(
@@ -3418,9 +3464,11 @@ class GpuSwapChain(BaseResource):
                 imageExtent=VkExtent2D(width=surface.width, height=surface.height),
                 imageArrayLayers=1,
                 imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                imageSharingMode=VK_SHARING_MODE_EXCLUSIVE,
-                queueFamilyIndexCount=0,
-                pQueueFamilyIndices=None,
+                imageSharingMode=sharing_mode,
+                queueFamilyIndexCount=len(queue_family_indices)
+                if queue_family_indices
+                else 0,
+                pQueueFamilyIndices=queue_family_indices,
                 preTransform=VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
                 compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
                 presentMode=VK_PRESENT_MODE_FIFO_KHR,
@@ -3654,15 +3702,19 @@ class GpuEzBuffer(BaseResource):
         Ensure the buffer has at least `new_capacity` elements.
         """
 
-        if new_capacity <= self._capacity:
+        if new_capacity <= self.capacity:
             return
 
         # Dispose old buffers
         self._device_buffer.dispose()
         self._staging_buffer.dispose()
 
+        # Resize internal data array:
+        new_data = np.empty((new_capacity,), dtype=self.dtype)
+        new_data[: self._length] = self._data[: self._length]
+        self._data = new_data
+
         # Update to new buffers:
-        self._capacity = new_capacity
         self._buffer_meta = GpuBufferMeta(
             element_count=new_capacity,
             element_dtype=self.dtype,

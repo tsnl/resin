@@ -4,7 +4,7 @@ import logging
 
 from .basic import BaseResource, SupportsWrite, expect, logger, setup_logging
 from .gpu import GpuContext, GpuDevice, GpuSwapChain, GpuCommandEncoder
-from .renderer import Renderer, RendererContext, Canvas
+from .draw_2d import Draw2dContext, Draw2dRenderer
 from .gui import GuiWindow, GuiContext, GuiTheme
 
 
@@ -14,12 +14,11 @@ LOG = logger(__name__)
 class Engine(BaseResource):
     _gpu_context: GpuContext
     _gui_context: GuiContext | None
-    _render_context: RendererContext
+    _render_context: Draw2dContext
     _window: GuiWindow | None
     _gpu_device: GpuDevice
-    _renderer: Renderer
+    _renderer: Draw2dRenderer
     _rendered_frame_count: int
-    _canvas: Canvas
 
     def __init__(
         self,
@@ -51,7 +50,7 @@ class Engine(BaseResource):
             GuiContext(gpu_context=self._gpu_context) if enable_gui else None
         )
 
-        self._render_context = RendererContext(
+        self._render_context = Draw2dContext(
             gpu_context=self._gpu_context,
         )
 
@@ -90,13 +89,11 @@ class Engine(BaseResource):
         else:
             scale = 1.0
 
-        self._renderer = Renderer(
+        self._renderer = Draw2dRenderer(
             context=self._render_context,
-            gpu_device=self._gpu_device,
+            device=self._gpu_device,
             scale=scale,
         )
-
-        self._canvas = Canvas(renderer=self._renderer)
 
         # State:
         self._rendered_frame_count = 0
@@ -106,13 +103,13 @@ class Engine(BaseResource):
         return self._gpu_context
 
     @property
+    def draw_2d_context(self) -> Draw2dContext:
+        return self._render_context
+
+    @property
     def gui_context(self) -> GuiContext:
         assert self._gui_context is not None
         return self._gui_context
-
-    @property
-    def render_context(self) -> RendererContext:
-        return self._render_context
 
     @property
     def window(self) -> GuiWindow:
@@ -128,7 +125,7 @@ class Engine(BaseResource):
         return self._window._gpu_swap_chain if self._window else None
 
     @property
-    def renderer(self) -> Renderer:
+    def renderer(self) -> Draw2dRenderer:
         return self._renderer
 
     def _on_dispose(self) -> None:
@@ -136,7 +133,7 @@ class Engine(BaseResource):
         # Resources
         #
 
-        self._canvas.dispose()
+        self._renderer.dispose()
 
         if self._window:
             self._window.dispose()
@@ -190,8 +187,8 @@ class Engine(BaseResource):
             self._window.show()
 
         with self._window._gpu_swap_chain.present() as target:
-            self._canvas.clear()
-            self._window.render(canvas=self._canvas)
+            self._renderer.clear()
+            self._window.render(renderer=self._renderer)
 
             command_encoder = GpuCommandEncoder(
                 device=self.gpu_device,
@@ -199,7 +196,6 @@ class Engine(BaseResource):
             )
             self._renderer.draw(
                 command_encoder=command_encoder,
-                canvas=self._canvas,
                 target=target.image,
             )
             command_encoder.transition_image_layout(

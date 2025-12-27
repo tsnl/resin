@@ -14,11 +14,9 @@ from .gpu import (
     GpuImageMeta,
     GpuBufferMeta,
 )
-from .renderer import (
-    Image,
-    RendererContext,
-    Renderer,
-    Canvas,
+from .draw_2d import (
+    Draw2dContext,
+    Draw2dRenderer,
 )
 from .images import load_rgba_image, compute_psnr
 
@@ -39,14 +37,14 @@ def assert_image_matches_reference(
     If reference exists, compares using PSNR matching.
     On mismatch, saves the actual image as <name>.actual.png and raises AssertionError.
     """
-    expect_dir = Path("tests/expect/zfw/renderer_test")
+    expect_dir = Path("tests/expect/zfw/draw_2d_test")
     expect_dir.mkdir(parents=True, exist_ok=True)
 
     expect_path = expect_dir / f"{test_name}.png"
     actual_path = expect_dir / f"{test_name}.actual.png"
 
     # Also save to output directory for convenience
-    output_path = Path("output/zfw/renderer_test") / f"{test_name}.png"
+    output_path = Path("output/zfw/draw_2d_test") / f"{test_name}.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     PIL.Image.fromarray(actual_image).save(output_path)
 
@@ -84,26 +82,24 @@ def assert_image_matches_reference(
         actual_path.unlink()
 
 
-class RendererTestEngine(BaseResource):
+class Draw2dTestEngine(BaseResource):
     def __init__(self):
         super().__init__(parent_resource=None)
         self.gpu_context = GpuContext(
-            app_name="zfw renderer_test",
+            app_name="zfw draw_2d_test",
             enable_debug_layer_support=True,
             enable_present_support=False,
         )
-        self.renderer_context = RendererContext(
-            gpu_context=self.gpu_context,
-        )
+        self.draw_2d_context = Draw2dContext(gpu_context=self.gpu_context)
 
         self.gpu_device = GpuDevice(
             context=self.gpu_context,
             physical_device=self.gpu_context.enumerate_physical_devices()[0],
             surface=None,
         )
-        self.renderer = Renderer(
-            context=self.renderer_context,
-            gpu_device=self.gpu_device,
+        self.renderer = Draw2dRenderer(
+            context=self.draw_2d_context,
+            device=self.gpu_device,
         )
 
         self.target = GpuImage(
@@ -122,7 +118,7 @@ class RendererTestEngine(BaseResource):
         self.renderer.dispose()
         self.gpu_device.dispose()
 
-        self.renderer_context.dispose()
+        self.draw_2d_context.dispose()
         self.gpu_context.dispose()
 
     def readback(self) -> np.ndarray:
@@ -146,69 +142,102 @@ class RendererTestEngine(BaseResource):
             (TEST_IMAGE_H, TEST_IMAGE_W, 4)
         )
 
-    def draw(self, canvas: Canvas):
+    def draw(self):
         command_encoder = GpuCommandEncoder(
             device=self.gpu_device,
             queue_type="graphics",
         )
         self.renderer.draw(
             command_encoder=command_encoder,
-            canvas=canvas,
             target=self.target,
         )
 
         command_encoder.submit().wait()
 
 
-def test_renderer_quads():
-    engine = RendererTestEngine()
+def test_draw_2d_quads():
+    engine = Draw2dTestEngine()
 
-    canvas = Canvas(renderer=engine.renderer)
-    canvas.add_quad(
+    renderer = engine.renderer
+    renderer.add_quad(
         dst_xy=(32, 64),
         dst_wh=(512, 256),
         color=(1.0, 1.0, 1.0, 1.0),
         border_thickness=(0, 0, 8, 0),
         border_color=(0.0, 0.1, 0.8, 1.0),
     )
-    canvas.add_quad(
+    renderer.add_quad(
         dst_xy=(40, 72),
         dst_wh=(64, 64),
         color=(0.0, 0.2, 0.0, 1.0),
     )
-    canvas.add_quad(
+    renderer.add_quad(
         dst_xy=(112, 72),
         dst_wh=(64, 64),
         color=(0.0, 0.2, 0.0, 0.5),
     )
 
-    engine.draw(canvas=canvas)
+    engine.draw()
     image = engine.readback()
 
     assert_image_matches_reference(
         image,
-        "test_renderer_quads",
+        "test_draw_2d_quads",
         psnr_threshold=65.0,
     )
 
     engine.dispose()
 
 
-def test_renderer_image():
-    engine = RendererTestEngine()
+def test_draw_2d_image():
+    engine = Draw2dTestEngine()
 
     image_data = load_rgba_image("tests_data/rainbow-512x512.png")
     assert image_data.shape == (512, 512, 4)
 
-    image = Image(
-        renderer=engine.renderer,
-        data=image_data,
-        sampler="nearest",
+    # Create a GpuImage for the texture
+    gpu_image = GpuImage(
+        device=engine.gpu_device,
+        usages=["texture-binding", "transfer-dst"],
+        meta=GpuImageMeta(
+            shape=(512, 512, 4),
+            dtype=np.float32,
+            color_space="linear",
+        ),
     )
 
+    # Upload image data
+    staging_buf = GpuBuffer(
+        device=engine.gpu_device,
+        usages=["staging", "copy-src"],
+        meta=GpuBufferMeta(
+            element_count=image_data.size,
+            element_dtype=image_data.dtype,
+        ),
+    )
+    staging_buf.memory.write(data=image_data)
+
+    encoder = GpuCommandEncoder(device=engine.gpu_device, queue_type="transfer")
+    encoder.transition_image_layout(image=gpu_image, layout="transfer-dst-optimal")
+    from .gpu import GpuBufferImageCopyRegion
+
+    encoder.copy_buffer_to_image(
+        src=staging_buf,
+        dst=gpu_image,
+        regions=[
+            GpuBufferImageCopyRegion(
+                buffer_offset=0,
+                image_offset=(0, 0, 0),
+                image_extent=(512, 512, 1),
+            )
+        ],
+    )
+    encoder.submit().wait()
+    staging_buf.dispose()
+
     border_thickness = 8
-    canvas = Canvas(renderer=engine.renderer)
-    canvas.add_quad(
+    renderer = engine.renderer
+    renderer.add_quad(
         dst_xy=(
             (TEST_IMAGE_W - image_data.shape[1] - border_thickness) // 2,
             (TEST_IMAGE_H - image_data.shape[0] - border_thickness) // 2,
@@ -216,80 +245,27 @@ def test_renderer_image():
         color=(1.0, 1.0, 1.0, 1.0),
         border_thickness=(8, 8, 8, 8),
         border_color=(1.0, 1.0, 0.0, 1.0),
-        image=image,
+        image=gpu_image,
     )
 
-    engine.draw(canvas=canvas)
+    engine.draw()
     output_image = engine.readback()
 
     assert_image_matches_reference(
         output_image,
-        "test_renderer_image",
+        "test_draw_2d_image",
         psnr_threshold=65.0,
     )
 
+    gpu_image.dispose()
     engine.dispose()
 
 
-def test_renderer_atlas_smoketest():
-    gpu_context = GpuContext(
-        app_name="zfw.renderer_test.test_renderer_atlas",
-        enable_debug_layer_support=True,
-        enable_present_support=False,
-    )
-    renderer_context = RendererContext(
-        gpu_context=gpu_context,
-    )
+def test_draw_2d_text_basic():
+    engine = Draw2dTestEngine()
+    renderer = engine.renderer
 
-    gpu_device = GpuDevice(
-        context=gpu_context,
-        physical_device=gpu_context.enumerate_physical_devices()[0],
-        surface=None,
-    )
-    renderer = Renderer(
-        context=renderer_context,
-        gpu_device=gpu_device,
-    )
-
-    orig_image_data = np.empty((128, 128, 4), dtype=np.float32)
-    xs, ys = np.meshgrid(
-        np.linspace(0.0, 1.0, num=128, endpoint=False),
-        np.linspace(0.0, 1.0, num=128, endpoint=False),
-        indexing="xy",
-    )
-    orig_image_data[..., 0] = xs
-    orig_image_data[..., 1] = ys
-    orig_image_data[..., 2] = 0.0
-    orig_image_data[..., 3] = 1.0
-
-    # Create image in atlas: the `Image` constructor will also insert it into the atlas.
-    # However, the atlas must still be flushed to GPU memory before use.
-    # Note that the allocation occurs lazily, so the actual allocation happens on flush.
-    image = Image(
-        renderer=renderer,
-        data=orig_image_data,
-        sampler="nearest",
-    )
-
-    # Flush atlas to GPU to finalize allocation.
-    encoder = GpuCommandEncoder(device=gpu_device, queue_type="transfer")
-    renderer.atlas.homogeneous_heap(channels=4).flush(command_encoder=encoder)
-    encoder.submit().wait()
-
-    # Note: x=0 because it's larger than default_white_image (1x1)
-    assert image.allocation_px_xywh[2:] == (128, 128)
-
-    renderer.dispose()
-    gpu_device.dispose()
-    renderer_context.dispose()
-    gpu_context.dispose()
-
-
-def test_renderer_text_basic():
-    engine = RendererTestEngine()
-    canvas = Canvas(renderer=engine.renderer)
-
-    canvas.add_text(
+    renderer.add_text(
         text="Hello, world",
         font="sans-serif",
         dst_xy=(50, 50),
@@ -298,24 +274,24 @@ def test_renderer_text_basic():
         color=(1.0, 1.0, 1.0, 1.0),
     )
 
-    engine.draw(canvas=canvas)
+    engine.draw()
     image = engine.readback()
 
     assert_image_matches_reference(
         image,
-        "test_renderer_text_basic",
+        "test_draw_2d_text_basic",
         psnr_threshold=65.0,
     )
 
     engine.dispose()
 
 
-def test_renderer_text_wrap():
-    engine = RendererTestEngine()
-    canvas = Canvas(renderer=engine.renderer)
+def test_draw_2d_text_wrap():
+    engine = Draw2dTestEngine()
+    renderer = engine.renderer
 
     long_text = "This is a long text that should wrap to the next line because the width is limited."
-    canvas.add_text(
+    renderer.add_text(
         text=long_text,
         font="serif",
         dst_xy=(50, 200),
@@ -325,24 +301,24 @@ def test_renderer_text_wrap():
         wrap=True,
     )
 
-    engine.draw(canvas=canvas)
+    engine.draw()
     image = engine.readback()
 
     assert_image_matches_reference(
         image,
-        "test_renderer_text_wrap",
+        "test_draw_2d_text_wrap",
         psnr_threshold=65.0,
     )
 
     engine.dispose()
 
 
-def test_renderer_text_clip():
-    engine = RendererTestEngine()
-    canvas = Canvas(renderer=engine.renderer)
+def test_draw_2d_text_clip():
+    engine = Draw2dTestEngine()
+    renderer = engine.renderer
 
     # Text that overflows but wrap is False
-    canvas.add_text(
+    renderer.add_text(
         text="This text should be clipped because it is too long for the box.",
         font="sans-serif",
         dst_xy=(50, 400),
@@ -352,21 +328,21 @@ def test_renderer_text_clip():
         wrap=False,
     )
 
-    engine.draw(canvas=canvas)
+    engine.draw()
     image = engine.readback()
 
     assert_image_matches_reference(
         image,
-        "test_renderer_text_clip",
+        "test_draw_2d_text_clip",
         psnr_threshold=65.0,
     )
 
     engine.dispose()
 
 
-def test_renderer_text_matrix():
-    engine = RendererTestEngine()
-    canvas = Canvas(renderer=engine.renderer)
+def test_draw_2d_text_matrix():
+    engine = Draw2dTestEngine()
+    renderer = engine.renderer
 
     fonts: list[Font] = ["sans-serif", "serif"]
     sizes = [12, 18, 24]
@@ -391,7 +367,7 @@ def test_renderer_text_matrix():
                 box_h = row_height
 
                 # Background quad with border
-                canvas.add_quad(
+                renderer.add_quad(
                     dst_xy=(current_x, current_y),
                     dst_wh=(box_w, box_h),
                     color=(0.1, 0.1, 0.1, 1.0),
@@ -399,7 +375,7 @@ def test_renderer_text_matrix():
                     border_thickness=(1, 1, 1, 1),
                 )
 
-                canvas.add_text(
+                renderer.add_text(
                     text=text,
                     font=font,
                     dst_xy=(current_x + 5, current_y + 5),
@@ -414,12 +390,12 @@ def test_renderer_text_matrix():
 
             current_y += row_height + padding
 
-    engine.draw(canvas=canvas)
+    engine.draw()
     image = engine.readback()
 
     assert_image_matches_reference(
         image,
-        "test_renderer_text_matrix",
+        "test_draw_2d_text_matrix",
         psnr_threshold=65.0,
     )
 
