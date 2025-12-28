@@ -3699,7 +3699,7 @@ class GpuEzBuffer(BaseResource):
     def clear(self) -> None:
         self._length = 0
 
-    def reserve(self, *, new_capacity: int) -> None:
+    def reserve_exact(self, *, new_capacity: int) -> None:
         """
         Ensure the buffer has at least `new_capacity` elements.
         """
@@ -3729,7 +3729,8 @@ class GpuEzBuffer(BaseResource):
         """
 
         if new_length > self.capacity:
-            self.reserve(new_capacity=new_length)
+            self.reserve_exact(new_capacity=new_length)
+
         self._length = new_length
 
     def extend(self, *, values: np.ndarray) -> None:

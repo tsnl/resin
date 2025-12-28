@@ -133,17 +133,27 @@ class Engine(BaseResource):
         # Resources
         #
 
-        self._maybe_dispose_field("_renderer")
-        self._maybe_dispose_field("_window")
-        self._maybe_dispose_field("_gpu_device")
+        if renderer := getattr(self, "_renderer", None):
+            renderer.dispose()
+
+        if window := getattr(self, "_window", None):
+            window.dispose()
+
+        if gpu_device := getattr(self, "_gpu_device", None):
+            gpu_device.dispose()
 
         #
         # Contexts:
         #
 
-        self._maybe_dispose_field("_render_context")
-        self._maybe_dispose_field("_gui_context")
-        self._maybe_dispose_field("_gpu_context")
+        if render_context := getattr(self, "_render_context", None):
+            render_context.dispose()
+
+        if gui_context := getattr(self, "_gui_context", None):
+            gui_context.dispose()
+
+        if gpu_context := getattr(self, "_gpu_context", None):
+            gpu_context.dispose()
 
     def print_gpu_debug_info(
         self,

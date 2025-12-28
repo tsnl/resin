@@ -131,22 +131,6 @@ class BaseResource(ABC):
     def _on_dispose(self) -> None:
         pass
 
-    def _maybe_dispose_field(self, field_name: str) -> None:
-        """
-        Helper method to safely dispose data members that are resources, even if they
-        might not be initialized (e.g. due to exceptions in the constructor).
-
-        Instead of
-            self._some_resource.dispose()
-        Write
-            self._dispose_field("_some_resource")
-
-        Note that the field may be optional (None), in which case no disposal is done.
-        """
-
-        if field := getattr(self, field_name, None):
-            field.dispose()
-
 
 #
 # unwrap: check for None values

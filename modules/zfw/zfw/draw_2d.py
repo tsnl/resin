@@ -174,34 +174,22 @@ class Draw2dRenderer(BaseResource):
         # Load shaders:
         self._text_vertex_shader = GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH
-            / "shaders"
-            / "draw_2d"
-            / "draw_2d_quad_text.vert.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_2d/draw_2d_quad_text.vert.spv",
             stage="vertex",
         )
         self._text_fragment_shader = GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH
-            / "shaders"
-            / "draw_2d"
-            / "draw_2d_quad_text.frag.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_2d/draw_2d_quad_text.frag.spv",
             stage="fragment",
         )
         self._rgba_vertex_shader = GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH
-            / "shaders"
-            / "draw_2d"
-            / "draw_2d_quad_rgba.vert.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_2d/draw_2d_quad_rgba.vert.spv",
             stage="vertex",
         )
         self._rgba_fragment_shader = GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH
-            / "shaders"
-            / "draw_2d"
-            / "draw_2d_quad_rgba.frag.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_2d/draw_2d_quad_rgba.frag.spv",
             stage="fragment",
         )
 
@@ -1135,6 +1123,9 @@ class QuadBatch(BaseResource):
         render_pass: GpuRenderPassCommandEncoder,
     ) -> None:
         """Draw the batch (inside render pass, after flush)."""
+
+        assert self._descriptor_set is not None
+
         if self._quad_count == 0:
             return
 
