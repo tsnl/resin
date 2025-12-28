@@ -34,6 +34,9 @@ pkgs.mkShell {
     # RenderDoc
     renderdoc
 
+    # Radeon GPU Profiler
+    rgp
+
     # amdgpu_top
     amdgpu_top
 

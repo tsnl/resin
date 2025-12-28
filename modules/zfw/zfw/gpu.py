@@ -39,7 +39,7 @@ from typing import Callable, Literal, Any
 import numpy as np
 import numpy.typing as npt
 
-from .basic import BaseResource, ColorSpace, SupportsWrite, logger
+from .basic import BaseResource, ColorSpace, SupportsWrite, expect, logger
 from .excepts import LogicError, PlatformSupportError
 
 from .typed_vulkan import (
@@ -1561,16 +1561,22 @@ class GpuImage(BaseResource):
         *,
         device: GpuDevice,
         usages: list[GpuImageUsage],
-        meta: GpuImageMeta,
+        meta: GpuImageMeta | None = None,
+        data: np.ndarray | None = None,
         custom_vk_image_handle: VkImage | None = None,
         custom_vk_image_view: VkImageView | None = None,
         custom_vk_format: VkFormat | None = None,
     ) -> None:
+        if not ((meta is not None) ^ (data is not None)):
+            raise LogicError(
+                "Either meta XOR data must be provided when creating a GpuImage."
+            )
+
         super().__init__(parent_resource=device)
 
         self.device = device
         self.usages = usages
-        self.meta = meta
+        self.meta = meta or GpuImageMeta.from_array(expect(data))
 
         self._owns_vk_image = custom_vk_image_handle is None
         self._owns_vk_image_view = custom_vk_image_view is None
@@ -1579,12 +1585,12 @@ class GpuImage(BaseResource):
         self._vk_format = (
             custom_vk_format  # user override supplied
             if custom_vk_format is not None
-            else meta.infer_vk_format(usages)
+            else self.meta.infer_vk_format(usages)
         )
         self._vk_image, self._memory = (
             self._help_create_image(
                 device=device,
-                meta=meta,
+                meta=self.meta,
                 usages=usages,
                 vk_format=self._vk_format,
             )
@@ -1604,6 +1610,9 @@ class GpuImage(BaseResource):
 
         self._initial_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
         self._current_vk_layout = VK_IMAGE_LAYOUT_UNDEFINED
+
+        if data is not None:
+            self.write(data=data)
 
     @staticmethod
     def _help_create_image(
@@ -1748,6 +1757,8 @@ class GpuImage(BaseResource):
             ],
         )
         cmd.submit().wait()
+
+        staging_buffer.dispose()
 
     def get_unique_image_id(self) -> int:
         return hash(self._vk_image)
@@ -3771,7 +3782,7 @@ class GpuEzBuffer(BaseResource):
     def flush(
         self,
         *,
-        command_encoder: GpuCommandEncoder,
+        command_encoder: GpuCommandEncoder | None = None,
         write_start: int = 0,
         write_count: int | None = None,
     ):
@@ -3779,6 +3790,11 @@ class GpuEzBuffer(BaseResource):
         Flush the CPU-side data to the GPU device buffer.
         """
 
+        using_temp_command_encoder = command_encoder is None
+        command_encoder = command_encoder or GpuCommandEncoder(
+            device=self._device,
+            queue_type="transfer",
+        )
         write_count = write_count if write_count is not None else self._length
 
         # No-op if nothing to write
@@ -3799,6 +3815,10 @@ class GpuEzBuffer(BaseResource):
             dst_offset=write_start * self.dtype.itemsize,
             size=write_count * self.dtype.itemsize,
         )
+
+        # If we created a temporary command encoder, submit it now
+        if using_temp_command_encoder:
+            command_encoder.submit().wait()
 
         # Return the device buffer:
         return self._device_buffer

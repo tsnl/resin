@@ -1,15 +1,18 @@
 from collections import OrderedDict
+from dataclasses import dataclass
 import numpy as np
 
 from .basic import BaseResource
 from .gpu import (
     GpuCommandEncoder,
     GpuDescriptorSet,
+    GpuDescriptorSetBinding,
     GpuDescriptorSetLayout,
     GpuDescriptorSetLayoutBinding,
     GpuDevice,
     GpuEzBuffer,
     GpuImage,
+    GpuImageMeta,
     GpuSampler,
 )
 
@@ -39,6 +42,13 @@ class Draw3dRenderer(BaseResource):
     # GPU resources:
     material_gpu_descriptor_set_layout: GpuDescriptorSetLayout
     material_linear_sampler: GpuSampler
+    material_default_color_image: GpuImage
+    material_default_normal_image: GpuImage
+    material_default_metalness_image: GpuImage
+    material_default_roughness_image: GpuImage
+
+    # Mesh list for rendering:
+    meshes: list["Draw3dMesh"]
 
     def __init__(self, context: Draw3dContext, gpu_device: GpuDevice):
         super().__init__(parent_resource=context)
@@ -51,7 +61,7 @@ class Draw3dRenderer(BaseResource):
             device=self.gpu_device,
             bindings=OrderedDict(
                 {
-                    "colorTint": GpuDescriptorSetLayoutBinding(
+                    "tint": GpuDescriptorSetLayoutBinding(
                         type="uniform-buffer",
                         stages=["fragment"],
                     ),
@@ -59,24 +69,12 @@ class Draw3dRenderer(BaseResource):
                         type="sampled-image",
                         stages=["fragment"],
                     ),
-                    "normalTint": GpuDescriptorSetLayoutBinding(
-                        type="uniform-buffer",
-                        stages=["fragment"],
-                    ),
                     "normalImage": GpuDescriptorSetLayoutBinding(
                         type="sampled-image",
                         stages=["fragment"],
                     ),
-                    "metalnessTint": GpuDescriptorSetLayoutBinding(
-                        type="uniform-buffer",
-                        stages=["fragment"],
-                    ),
                     "metalnessImage": GpuDescriptorSetLayoutBinding(
                         type="sampled-image",
-                        stages=["fragment"],
-                    ),
-                    "roughnessTint": GpuDescriptorSetLayoutBinding(
-                        type="uniform-buffer",
                         stages=["fragment"],
                     ),
                     "roughnessImage": GpuDescriptorSetLayoutBinding(
@@ -95,6 +93,35 @@ class Draw3dRenderer(BaseResource):
             min_filter="linear",
             mag_filter="linear",
         )
+        self.material_default_color_image = GpuImage(
+            device=self.gpu_device,
+            usages=["texture-binding"],
+            data=np.ones((32, 32, 4), dtype=np.float32),
+        )
+        self.material_default_normal_image = GpuImage(
+            device=self.gpu_device,
+            usages=["texture-binding"],
+            data=np.full(
+                (32, 32, 4),
+                fill_value=(0.0, 0.0, 1.0, 1.0),
+                dtype=np.float32,
+            ),
+        )
+        self.material_default_metalness_image = GpuImage(
+            device=self.gpu_device,
+            usages=["texture-binding"],
+            data=np.ones(shape=(32, 32, 1), dtype=np.float32),
+        )
+        self.material_default_roughness_image = GpuImage(
+            device=self.gpu_device,
+            usages=["texture-binding"],
+            data=np.ones(shape=(32, 32, 1), dtype=np.float32),
+        )
+
+        self.meshes = []
+
+    def clear(self) -> None:
+        self.meshes.clear()
 
 
 #
@@ -135,7 +162,7 @@ class Draw3dGeometry(BaseResource):
             dtype=VERTEX_DTYPE,
             usages=["vertex"],
         )
-        self.vertex_buffer.array[:] = vertex_data
+        self.vertex_buffer.extend(values=vertex_data)
 
         self.index_buffer = GpuEzBuffer(
             device=self.gpu_device,
@@ -143,16 +170,11 @@ class Draw3dGeometry(BaseResource):
             dtype=np.dtype(np.uint16),
             usages=["index"],
         )
-        self.index_buffer.array[:] = index_data
+        self.index_buffer.extend(values=index_data)
 
         # Flush buffers to GPU
-        command_encoder = GpuCommandEncoder(
-            device=self.gpu_device,
-            queue_type="transfer",
-        )
-        self.vertex_buffer.flush(command_encoder=command_encoder)
-        self.index_buffer.flush(command_encoder=command_encoder)
-        command_encoder.submit().wait()
+        self.vertex_buffer.flush()
+        self.index_buffer.flush()
 
     def _on_dispose(self) -> None:
         if vertex_buffer := getattr(self, "vertex_buffer", None):
@@ -171,7 +193,7 @@ VERTEX_DTYPE = np.dtype(
 
 
 #
-# Material
+# Draw3dMaterial
 #
 
 
@@ -181,13 +203,10 @@ class Draw3dMaterial(BaseResource):
     gpu_device: GpuDevice
 
     # Material properties
-    color_tint: tuple[float, float, float]
+    tint_buffer: GpuEzBuffer
     color_image: GpuImage | None
-    normal_tint: tuple[float, float, float]
     normal_image: GpuImage | None
-    metalness_tint: float
     metalness_image: GpuImage | None
-    roughness_tint: float
     roughness_image: GpuImage | None
 
     # Descriptor set:
@@ -198,7 +217,6 @@ class Draw3dMaterial(BaseResource):
         renderer: Draw3dRenderer,
         color_tint: tuple[float, float, float] = (1.0, 1.0, 1.0),
         color_image: GpuImage | None = None,
-        normal_tint: tuple[float, float, float] = (0.0, 0.0, 1.0),
         normal_image: GpuImage | None = None,
         metalness_tint: float = 1.0,
         metalness_image: GpuImage | None = None,
@@ -210,14 +228,76 @@ class Draw3dMaterial(BaseResource):
         self.renderer = renderer
         self.gpu_device = renderer.gpu_device
 
-        self.color_tint = color_tint
+        self.tint_buffer = GpuEzBuffer(
+            device=self.gpu_device,
+            capacity=1,
+            dtype=TINT_BUFFER_DTYPE,
+            usages=["uniform"],
+        )
+        self.tint_buffer.extend(
+            values=np.array(
+                [
+                    (
+                        (*color_tint, 1.0),
+                        metalness_tint,
+                        roughness_tint,
+                    ),
+                ],
+                dtype=TINT_BUFFER_DTYPE,
+            )
+        )
+        self.tint_buffer.flush()
+
         self.color_image = color_image
-        self.normal_tint = normal_tint
         self.normal_image = normal_image
-        self.metalness_tint = metalness_tint
         self.metalness_image = metalness_image
-        self.roughness_tint = roughness_tint
         self.roughness_image = roughness_image
 
-        raise NotImplementedError()
-        # self.descriptor_set = GpuDescriptorSet(device=self.gpu_device, bindings={})
+        self.descriptor_set = GpuDescriptorSet(
+            device=self.gpu_device,
+            bindings={
+                "tint": self.tint_buffer.device_buffer,
+                "colorImage": (
+                    self.color_image or self.renderer.material_default_color_image
+                ),
+                "normalImage": (
+                    self.normal_image or self.renderer.material_default_normal_image
+                ),
+                "metalnessImage": (
+                    self.metalness_image
+                    or self.renderer.material_default_metalness_image
+                ),
+                "roughnessImage": (
+                    self.roughness_image
+                    or self.renderer.material_default_roughness_image
+                ),
+                "sampler": self.renderer.material_linear_sampler,
+            },
+            layout=self.renderer.material_gpu_descriptor_set_layout,
+        )
+
+    def _on_dispose(self) -> None:
+        if descriptor_set := getattr(self, "descriptor_set", None):
+            descriptor_set.dispose()
+
+
+TINT_BUFFER_DTYPE = np.dtype(
+    [
+        ("color", np.float32, 4),
+        ("metalness", np.float32, 1),
+        ("roughness", np.float32, 1),
+    ]
+)
+
+
+#
+# Draw3dMesh
+#
+
+
+@dataclass
+class Draw3dMesh:
+    geometry: Draw3dGeometry
+    material: Draw3dMaterial
+    transform: np.ndarray  # 4x4 matrix
+    # TODO: support more mesh properties, e.g. visible, casts_shadow, transparent, etc.

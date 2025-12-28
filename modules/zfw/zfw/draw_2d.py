@@ -310,7 +310,6 @@ class Draw2dRenderer(BaseResource):
     ##----------------------------------------------------------------------------------
 
     def clear(self) -> None:
-        """Clear all queued quads for a new frame."""
         self._quad_count = 0
 
         for batch in self._text_quad_batches:
@@ -1233,7 +1232,10 @@ class GlyphAtlas(BaseResource):
         font_size_px: int,
         font_weight: int,
     ) -> GlyphEntry | None:
-        """Get a glyph entry, rasterizing and adding to atlas if needed."""
+        """
+        Get a glyph entry, rasterizing and adding to atlas if needed.
+        """
+
         renderer_scale = self.renderer.scale
         effective_size_px = int(font_size_px * renderer_scale)
         cache_key = (font, glyph_index, effective_size_px, font_weight)
