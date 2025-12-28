@@ -47,9 +47,6 @@ class Draw3dRenderer(BaseResource):
     material_default_metalness_image: GpuImage
     material_default_roughness_image: GpuImage
 
-    # Mesh list for rendering:
-    meshes: list["Draw3dMesh"]
-
     def __init__(self, context: Draw3dContext, gpu_device: GpuDevice):
         super().__init__(parent_resource=context)
 
@@ -118,10 +115,44 @@ class Draw3dRenderer(BaseResource):
             data=np.ones(shape=(32, 32, 1), dtype=np.float32),
         )
 
-        self.meshes = []
+        self.geometry_id_to_instance_map = {}
+        self.material_id_to_instance_map = {}
+        self.mesh_instances = {}
 
-    def clear(self) -> None:
-        self.meshes.clear()
+    def _on_dispose(self) -> None:
+        if it := getattr(self, "material_gpu_descriptor_set_layout", None):
+            it.dispose()
+
+        if it := getattr(self, "material_linear_sampler", None):
+            it.dispose()
+
+        if it := getattr(self, "material_default_color_image", None):
+            it.dispose()
+
+        if it := getattr(self, "material_default_normal_image", None):
+            it.dispose()
+
+        if it := getattr(self, "material_default_metalness_image", None):
+            it.dispose()
+
+        if it := getattr(self, "material_default_roughness_image", None):
+            it.dispose()
+
+    def draw(
+        self,
+        *,
+        command_encoder: GpuCommandEncoder,
+        mesh_instances: dict[tuple["Draw3dGeometry", "Draw3dMaterial"], np.ndarray],
+    ) -> None:
+        """
+        Draws the given mesh instances.
+
+        :param command_encoder: The GPU command encoder to record commands to.
+        :param mesh_instances: A mapping of (geometry, material) pairs to an Nx4x4 array
+            of model matrices for N instances of that geometry with that material.
+        """
+
+        raise NotImplementedError()
 
 
 #
@@ -288,16 +319,3 @@ TINT_BUFFER_DTYPE = np.dtype(
         ("roughness", np.float32, 1),
     ]
 )
-
-
-#
-# Draw3dMesh
-#
-
-
-@dataclass
-class Draw3dMesh:
-    geometry: Draw3dGeometry
-    material: Draw3dMaterial
-    transform: np.ndarray  # 4x4 matrix
-    # TODO: support more mesh properties, e.g. visible, casts_shadow, transparent, etc.
