@@ -402,6 +402,8 @@ def _debug_utils_messenger_callback(
     _ = user_data
 
     def string(ptr):
+        if not ptr:
+            return ""
         s = raw_ffi.string(ptr)
         return s if isinstance(s, str) else bytes(s).decode("utf-8")
 

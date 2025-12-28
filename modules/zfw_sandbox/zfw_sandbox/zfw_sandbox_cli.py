@@ -1,8 +1,4 @@
-"""
-Universal Paperclips CLI - Phase 1 implementation.
-
-TODO: background image: https://unsplash.com/photos/aerial-view-of-green-trees-and-road-during-daytime-ZeDw8ck4XEM
-"""
+import argparse
 
 import zfw
 
@@ -57,9 +53,17 @@ class MainMenuWidget(zfw.GuiWidget):
 
 
 def main():
+    ap = argparse.ArgumentParser(description="ZFW Sandbox CLI")
+    ap.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run in debug mode (Vulkan validation layers, verbose debug logging, etc)",
+    )
+    args = ap.parse_args()
+
     engine = zfw.Engine(
         app_name="ZFW Sandbox",
-        debug=True,
+        debug=args.debug,
         swapchain_image_count=3,
         enable_gui=True,
     )
