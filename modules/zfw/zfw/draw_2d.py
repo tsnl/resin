@@ -355,6 +355,7 @@ class Draw2dRenderer(BaseResource):
         Coordinates are converted to physical pixels internally based on the
         renderer's scale factor if `_dip=True`.
         """
+
         # Determine the image to use:
         gpu_image = image if image is not None else self._default_white_image
 
@@ -450,16 +451,13 @@ class Draw2dRenderer(BaseResource):
         font_weight: int = 400,
         horizontal_alignment: HorizontalAlignment = "left",
         vertical_alignment: VerticalAlignment = "top",
-        optical_alignment: bool = True,
     ) -> None:
         """
         Add quads for rendering the given text string with the given font.
 
         Supports horizontal and vertical alignment within the destination rectangle.
-
-        If `optical_alignment` is True, aligns based on the visible ink bounds
-        rather than the logical metric bounds.
         """
+
         if not text:
             return
 
@@ -515,23 +513,19 @@ class Draw2dRenderer(BaseResource):
             # Horizontal alignment:
             pen_x_26_6 = dst_x_26_6
 
-            if optical_alignment:
-                min_ink, max_ink = self._get_line_optical_bounds(
-                    font, infos, positions, start_idx, end_idx
-                )
-                optical_width = max_ink - min_ink
+            min_ink, max_ink = self._get_line_optical_bounds(
+                font, infos, positions, start_idx, end_idx
+            )
+            optical_width = max_ink - min_ink
 
-                if horizontal_alignment == "center":
-                    pen_x_26_6 += (dst_w_26_6 - optical_width) // 2 - min_ink
-                elif horizontal_alignment == "right":
-                    pen_x_26_6 += dst_w_26_6 - max_ink
-                elif horizontal_alignment == "left":
-                    pen_x_26_6 -= min_ink
+            if horizontal_alignment == "center":
+                pen_x_26_6 += (dst_w_26_6 - optical_width) // 2 - min_ink
+            elif horizontal_alignment == "right":
+                pen_x_26_6 += dst_w_26_6 - max_ink
+            elif horizontal_alignment == "left":
+                pen_x_26_6 -= min_ink
             else:
-                if horizontal_alignment == "center":
-                    pen_x_26_6 += (dst_w_26_6 - line_width_26_6) // 2
-                elif horizontal_alignment == "right":
-                    pen_x_26_6 += dst_w_26_6 - line_width_26_6
+                raise NotImplementedError(f"{horizontal_alignment=}")
 
             for i in range(start_idx, end_idx):
                 info = infos[i]
