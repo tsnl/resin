@@ -12,6 +12,7 @@ from .gpu import (
     GpuImage,
     GpuImageMeta,
 )
+from .excepts import LogicError
 
 
 def make_context() -> tuple[GpuContext, GpuDevice]:
@@ -183,7 +184,6 @@ def test_buffer_meta_subarray_dtype():
     Because of this, GpuBufferMeta rejects subarray dtypes. Use flat dtypes
     (e.g., float32) and handle shaping at a higher level.
     """
-    from zfw.excepts import LogicError
 
     # 4x4 float32 matrix dtype: 16 floats = 64 bytes per matrix
     mat4x4_dtype = np.dtype(("<f4", (4, 4)))

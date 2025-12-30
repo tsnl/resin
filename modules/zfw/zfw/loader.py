@@ -4,12 +4,14 @@ __all__ = [
 ]
 
 import base64
+import io
 from pathlib import Path
 
 import numpy as np
+import PIL.Image
 import pygltflib
 
-from .basic import expect, logger, BaseResource
+from .basic import BaseResource, expect, logger
 from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
@@ -21,6 +23,19 @@ from .images import load_rgba_image
 
 
 LOG = logger(__name__)
+
+# Coordinate system transformation matrix: glTF (Y-up, Z-forward) to Z-up, Y-forward.
+# This is a -90° rotation around the X-axis.
+# Maps: X -> X, Y -> Z, Z -> -Y
+GLTF_TO_ZUP_MATRIX = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
+    dtype=np.float32,
+)
 
 
 #
@@ -80,6 +95,8 @@ class GltfScene(BaseResource):
 def load_gltf(
     renderer: Draw3dRenderer,
     path: Path | str,
+    *,
+    transform_coordinate_system: bool = False,
 ) -> list[GltfScene]:
     """
     Load a glTF file and return a list of scenes.
@@ -89,6 +106,9 @@ def load_gltf(
 
     :param renderer: The Draw3dRenderer to create resources with.
     :param path: Path to the glTF or GLB file.
+    :param transform_coordinate_system: If True, transform from glTF's coordinate
+        system (Y-up, Z-forward, X-right) to Z-up, Y-forward, X-right. This applies
+        a -90° rotation around the X-axis to all geometry and instance transforms.
     :return: List of GltfScene objects, one per scene in the glTF file.
     """
     path = Path(path)
@@ -118,7 +138,9 @@ def load_gltf(
 
     for scene_idx in scene_indices:
         scene = gltf.scenes[scene_idx]
-        meshes = _process_scene(gltf, scene, geometries, materials)
+        meshes = _process_scene(
+            gltf, scene, geometries, materials, transform_coordinate_system
+        )
 
         # Only include geometries/materials/images that are actually used in this scene
         used_geometries = set()
@@ -158,8 +180,6 @@ def _load_blob_data(gltf: pygltflib.GLTF2, path: Path) -> list[bytes]:
                 raise ValueError(f"Buffer {buffer_idx} has no URI and no binary blob")
         elif buffer.uri.startswith("data:"):
             # Base64 embedded data
-            import base64
-
             header, data = buffer.uri.split(",", 1)
             blob_data.append(base64.b64decode(data))
         else:
@@ -236,10 +256,6 @@ def _load_images(
     base_path: Path,
 ) -> list[GpuImage]:
     """Load all images from the glTF file as GPU textures."""
-    import io
-
-    import PIL.Image
-
     gpu_images: list[GpuImage] = []
 
     for image_idx, image in enumerate(gltf.images or []):
@@ -464,6 +480,7 @@ def _process_scene(
     scene: pygltflib.Scene,
     geometries: dict[tuple[int, int], Draw3dGeometry],
     materials: list[Draw3dMaterial],
+    transform_coordinate_system: bool,
 ) -> dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]:
     """
     Process a glTF scene and collect all mesh instances with world transforms.
@@ -511,9 +528,15 @@ def _process_scene(
             traverse_node(child_idx, world_transform)
 
     # Start traversal from scene root nodes
-    identity = np.eye(4, dtype=np.float32)
+    # If transforming coordinate system, start with the conversion matrix
+    # so all transforms are in the new coordinate system
+    if transform_coordinate_system:
+        root_transform = GLTF_TO_ZUP_MATRIX.copy()
+    else:
+        root_transform = np.eye(4, dtype=np.float32)
+
     for root_idx in scene.nodes or []:
-        traverse_node(root_idx, identity)
+        traverse_node(root_idx, root_transform)
 
     # Convert instance lists to numpy arrays
     meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray] = {}

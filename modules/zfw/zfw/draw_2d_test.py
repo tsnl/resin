@@ -13,6 +13,7 @@ from .gpu import (
     GpuCommandEncoder,
     GpuImageMeta,
     GpuBufferMeta,
+    GpuBufferImageCopyRegion,
 )
 from .draw_2d import (
     Draw2dContext,
@@ -219,7 +220,6 @@ def test_draw_2d_image():
 
     encoder = GpuCommandEncoder(device=engine.gpu_device, queue_type="transfer")
     encoder.transition_image_layout(image=gpu_image, layout="transfer-dst-optimal")
-    from .gpu import GpuBufferImageCopyRegion
 
     encoder.copy_buffer_to_image(
         src=staging_buf,

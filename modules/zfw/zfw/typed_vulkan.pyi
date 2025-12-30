@@ -94,7 +94,7 @@ class VkLayerSettingEXT:
     pSettingName: str
     type: int
     valueCount: int
-    pValues: list[cffi.CData]
+    pValues: list[Any]
 
 @dataclass
 class VkLayerSettingsCreateInfoEXT:
@@ -164,7 +164,7 @@ class VkApplicationInfo:
 @dataclass
 class VkInstanceCreateInfo:
     pApplicationInfo: VkApplicationInfo | None
-    pNext: VkValidationFeaturesEXT | None = None
+    pNext: VkDebugUtilsMessengerCreateInfoEXT | VkValidationFeaturesEXT | None = None
     enabledLayerCount: int = 0
     ppEnabledLayerNames: list[str] = []
     enabledExtensionCount: int = 0

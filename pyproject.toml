@@ -1,12 +1,11 @@
 [tool.uv.workspace]
-members = [
-    "modules/zfw",
-    "modules/zfw_build",
-    "modules/zfw_sandbox",
-]
+members = ["modules/zfw", "modules/zfw_build", "modules/zfw_sandbox"]
 
 [tool.ruff.lint]
 extend-select = [
     # unsorted dunder all
     "RUF022",
+
+    # import-outside-top-level
+    "PLC0415",
 ]
