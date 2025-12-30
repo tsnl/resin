@@ -562,38 +562,21 @@ class Draw3dRenderer(BaseResource):
             rp.bind_descriptor_set(set_index=1, set_=env_ds)
             rp.draw(vertex_count=3, instance_count=1)
 
-        # Layer 2: Draw meshes with depth test
+        # Layer 2: Draw meshes
         with command_encoder.render(
             color_attachment=target,
             depth_attachment=depth_image,
             clear_color=None,  # Load previous content (environment background)
             clear_depth=True,  # Clear depth buffer (fresh start for mesh rendering)
         ) as rp:
-            # Set pipeline:
             rp.bind_pipeline(pipeline=main_pipeline)
-
-            # Bind camera descriptor set:
-            rp.bind_descriptor_set(
-                set_index=0,
-                set_=self.camera_uniform_ds,
-            )
-
-            # Bind global per-instance transforms descriptor set:
-            rp.bind_descriptor_set(
-                set_index=1,
-                set_=self.instance_transforms_gpu_ds,
-            )
-
-            # Bind environment map descriptor set:
+            rp.bind_descriptor_set(set_index=0, set_=self.camera_uniform_ds)
+            rp.bind_descriptor_set(set_index=1, set_=self.instance_transforms_gpu_ds)
             rp.bind_descriptor_set(set_index=3, set_=env_ds)
 
             # For each material, bind material and draw all associated geometries:
             for material, geometry_dict in per_material_span_batches.items():
-                # Bind material descriptor set:
-                rp.bind_descriptor_set(
-                    set_index=2,
-                    set_=material.descriptor_set,
-                )
+                rp.bind_descriptor_set(set_index=2, set_=material.descriptor_set)
 
                 # Bind each geometry and draw:
                 for geometry, instance_span in geometry_dict.items():
