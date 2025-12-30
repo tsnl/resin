@@ -2320,7 +2320,21 @@ class GpuCommandEncoder(BaseResource):
         color_attachment: GpuImage | None = None,
         depth_attachment: GpuImage | None = None,
         clear_color: Literal["black", "transparent"] | None = None,
+        clear_depth: bool | None = None,
     ):
+        """
+        Begin a render pass.
+
+        :param color_attachment: The color attachment to render to.
+        :param depth_attachment: The depth attachment to use.
+        :param clear_color: If set, clears the color attachment to the specified color.
+            If None, loads the previous content.
+        :param clear_depth: If True, clears the depth attachment. If False, loads.
+            If None (default), follows clear_color behavior.
+        """
+        # Determine depth clear behavior
+        should_clear_depth = clear_depth if clear_depth is not None else (clear_color is not None)
+
         color_infos: list[VkRenderingAttachmentInfo] = []
         if color_attachment is not None:
             color_infos.append(
@@ -2358,7 +2372,7 @@ class GpuCommandEncoder(BaseResource):
                 resolveImageLayout=VK_IMAGE_LAYOUT_UNDEFINED,
                 loadOp=(
                     VK_ATTACHMENT_LOAD_OP_CLEAR
-                    if clear_color
+                    if should_clear_depth
                     else VK_ATTACHMENT_LOAD_OP_LOAD
                 ),
                 storeOp=VK_ATTACHMENT_STORE_OP_STORE,

@@ -553,11 +553,12 @@ class Draw3dRenderer(BaseResource):
             rp.bind_descriptor_set(set_index=1, set_=env_ds)
             rp.draw(vertex_count=3, instance_count=1)
 
-        # Step 2: Draw meshes with depth test (don't clear - draw over environment)
+        # Step 2: Draw meshes with depth test (don't clear color - draw over environment)
         with command_encoder.render(
             color_attachment=target,
             depth_attachment=depth_image,
             clear_color=None,  # Load previous content (environment background)
+            clear_depth=True,  # Clear depth buffer (fresh start for mesh rendering)
         ) as rp:
             # Set pipeline:
             rp.bind_pipeline(pipeline=main_pipeline)
