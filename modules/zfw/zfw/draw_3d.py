@@ -468,6 +468,12 @@ class Draw3dCameraIntrinsics:
         """
         Compute a 4x4 perspective projection matrix for rendering.
 
+        Uses reverse-Z for Vulkan's [0, 1] depth range:
+        - Near plane maps to depth 1.0
+        - Far plane maps to depth 0.0
+
+        This provides better depth precision for distant objects.
+
         :param aspect_ratio: The aspect ratio (width / height) of the target image.
         :return: A 4x4 projection matrix, row-major.
         """
@@ -476,11 +482,15 @@ class Draw3dCameraIntrinsics:
         n = self.clip_near
         m = self.clip_far  # m for 'max'
 
+        # Reverse-Z projection for Vulkan [0, 1] depth range:
+        # z_ndc = (A * z_eye + B) / (-z_eye)
+        # At z_eye = -n: z_ndc = 1  =>  A = n / (m - n)
+        # At z_eye = -m: z_ndc = 0  =>  B = n * m / (m - n)
         return np.array(
             [
                 [f / a, 0.0, 0.0, 0.0],
                 [0.0, f, 0.0, 0.0],
-                [0.0, 0.0, (m + n) / (n - m), (2 * m * n) / (n - m)],
+                [0.0, 0.0, n / (m - n), (n * m) / (m - n)],
                 [0.0, 0.0, -1.0, 0.0],
             ],
             dtype=np.float32,

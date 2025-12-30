@@ -90,12 +90,20 @@ VSOutput vertexMain(VSInput input, uint instanceId: SV_InstanceID)
     float4 clipPos = mul(pv, worldPos);
 
     // Transform normal to world space (assuming uniform scale, otherwise use inverse transpose)
-    // Extract the upper-left 3x3 of the model matrix for normal transformation
-    float3x3 normalMatrix = float3x3(
-        model[0].xyz,
-        model[1].xyz,
-        model[2].xyz);
-    float3 worldNormal = normalize(mul(normalMatrix, input.normal));
+    // In HLSL/Slang, matrix[i] gives the i-th column, not row.
+    // For mul(M, v) where v is a column vector, we need rows as: row0, row1, row2.
+    // Since model[i] gives column i, we need to transpose by constructing from:
+    //   row0 = (model[0][0], model[1][0], model[2][0])
+    //   row1 = (model[0][1], model[1][1], model[2][1])
+    //   row2 = (model[0][2], model[1][2], model[2][2])
+    // Or equivalently, use mul(normal, normalMatrix) with columns.
+    float3 worldNormal = normalize(
+        float3(
+            dot(input.normal, float3(model[0][0], model[1][0], model[2][0])),
+            dot(input.normal, float3(model[0][1], model[1][1], model[2][1])),
+            dot(input.normal, float3(model[0][2], model[1][2], model[2][2]))
+        )
+    );
 
     VSOutput output;
     output.position = clipPos;

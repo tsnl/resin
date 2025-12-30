@@ -112,18 +112,19 @@ def make_cube_geometry(renderer: Draw3dRenderer) -> Draw3dGeometry:
 
     # Indices: 6 faces * 2 triangles * 3 vertices = 36 indices
     # Each face uses vertices [4*i, 4*i+1, 4*i+2, 4*i+3]
-    # Two triangles per face: (0,1,2) and (0,2,3)
+    # Two triangles per face: (0,2,1) and (0,3,2) - counter-clockwise winding
+    # when viewed from outside the cube (matching VK_FRONT_FACE_COUNTER_CLOCKWISE)
     indices = []
     for face in range(6):
         base = face * 4
         indices.extend(
             [
                 base + 0,
-                base + 1,
-                base + 2,  # first triangle
-                base + 0,
                 base + 2,
-                base + 3,  # second triangle
+                base + 1,  # first triangle (CCW)
+                base + 0,
+                base + 3,
+                base + 2,  # second triangle (CCW)
             ]
         )
     index_data = np.array(indices, dtype=np.uint16)
