@@ -50,6 +50,9 @@ All coordinate systems are **right-handed**.
 | Clip space  | 3D  | NDC, [-1,+1]^3 | +X right, +Y up, -Z forward                   |
 | Image space | 2D  | Pixels         | +Y down (rows), +X right (cols), origin at TL |
 
+The above table means that **cameras look down -Z**, and that the projection matrix maps
+the near plane to Z=-1 and the far plane to Z=+1 in clip space.
+
 **Colors are in linear space using sRGB primaries** unless otherwise noted. APIs 
 explicitly specify when colors are in sRGB space, and we try to convert to linear space
 as early as possible.
