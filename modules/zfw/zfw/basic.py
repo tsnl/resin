@@ -57,7 +57,7 @@ class BaseResource(ABC):
     done with care to avoid disposing a parent before its children.
     """
 
-    def __init__(self, *, parent_resource: "BaseResource | None"):
+    def __init__(self, *, parent_resource: "BaseResource | None" = None):
         super().__init__()
 
         self._parent_resource: "BaseResource | None" = parent_resource

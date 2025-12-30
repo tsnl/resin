@@ -1,0 +1,3 @@
+[submodule "tests_data/glTF-Sample-Assets"]
+	path = tests_data/glTF-Sample-Assets
+	url = https://github.com/KhronosGroup/glTF-Sample-Assets

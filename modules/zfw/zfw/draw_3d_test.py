@@ -26,6 +26,7 @@ from .draw_3d import (
     Draw3dCameraIntrinsics,
     VERTEX_DTYPE,
 )
+from .loader import load_gltf
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
@@ -311,6 +312,86 @@ def test_draw_3d_red_cube():
     engine.dispose()
 
     # Test passes if we reach here without errors
+    assert True
+
+
+def test_draw_3d_gltf_avocado():
+    """
+    Test rendering the Avocado glTF sample model.
+
+    This tests the glTF loader with a simple model that has textures.
+    """
+    # Path to the Avocado model in glTF-Sample-Assets
+    # __file__ is modules/zfw/zfw/draw_3d_test.py
+    # Go up 4 levels: zfw/ -> zfw/ -> modules/ -> (project root)
+    avocado_path = (
+        Path(__file__).parent.parent.parent.parent
+        / "tests_data"
+        / "glTF-Sample-Assets"
+        / "Models"
+        / "Avocado"
+        / "glTF"
+        / "Avocado.gltf"
+    )
+
+    if not avocado_path.exists():
+        pytest.skip(f"Avocado model not found at {avocado_path}")
+
+    engine = Draw3dTestEngine()
+
+    # Load glTF scenes
+    scenes = load_gltf(renderer=engine.renderer, path=avocado_path)
+    assert len(scenes) > 0, "Expected at least one scene"
+
+    scene = scenes[0]
+    assert len(scene.meshes) > 0, "Expected at least one mesh"
+
+    # Camera transform: position to view the avocado
+    # Avocado is small (~0.08 units), so we position camera close
+    camera_transform = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.03],  # Slightly above center
+            [0.0, 0.0, 1.0, 0.15],  # Close to the model
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    # Camera intrinsics
+    camera_intrinsics = Draw3dCameraIntrinsics(
+        vertical_fov=np.radians(45.0),
+        clip_near=0.001,
+        clip_far=10.0,
+    )
+
+    # Draw
+    command_encoder = GpuCommandEncoder(
+        device=engine.gpu_device,
+        queue_type="graphics",
+    )
+    engine.renderer.draw(
+        command_encoder=command_encoder,
+        meshes=scene.meshes,
+        camera_transform=camera_transform,
+        camera_intrinsics=camera_intrinsics,
+        target=engine.target,
+    )
+    command_encoder.submit().wait()
+
+    # Read back and save image
+    image = engine.readback()
+
+    output_dir = Path("output/zfw/draw_3d_test")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "test_draw_3d_gltf_avocado.png"
+    PIL.Image.fromarray(image).save(output_path)
+    LOG.info(f"Saved rendered image to {output_path}")
+
+    # Clean up
+    scene.dispose()
+    engine.dispose()
+
     assert True
 
 
