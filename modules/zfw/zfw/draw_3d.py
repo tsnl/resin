@@ -486,10 +486,13 @@ class Draw3dCameraIntrinsics:
         # z_ndc = (A * z_eye + B) / (-z_eye)
         # At z_eye = -n: z_ndc = 1  =>  A = n / (m - n)
         # At z_eye = -m: z_ndc = 0  =>  B = n * m / (m - n)
+        #
+        # Note: Vulkan's clip space has Y pointing down, so we negate the Y
+        # component to flip the image right-side up.
         return np.array(
             [
                 [f / a, 0.0, 0.0, 0.0],
-                [0.0, f, 0.0, 0.0],
+                [0.0, -f, 0.0, 0.0],
                 [0.0, 0.0, n / (m - n), (n * m) / (m - n)],
                 [0.0, 0.0, -1.0, 0.0],
             ],
