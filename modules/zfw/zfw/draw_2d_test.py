@@ -19,7 +19,8 @@ from .draw_2d import (
     Draw2dContext,
     Draw2dRenderer,
 )
-from .images import load_rgba_image, compute_psnr
+from .images import compute_psnr
+from .loader import load_rgba_image
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 

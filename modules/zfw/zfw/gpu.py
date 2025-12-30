@@ -2333,7 +2333,9 @@ class GpuCommandEncoder(BaseResource):
             If None (default), follows clear_color behavior.
         """
         # Determine depth clear behavior
-        should_clear_depth = clear_depth if clear_depth is not None else (clear_color is not None)
+        should_clear_depth = (
+            clear_depth if clear_depth is not None else (clear_color is not None)
+        )
 
         color_infos: list[VkRenderingAttachmentInfo] = []
         if color_attachment is not None:

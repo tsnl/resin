@@ -1,9 +1,8 @@
 __all__ = [
     "compute_psnr",
+    "convert_color",
     "convert_linear_to_srgb",
     "convert_srgb_to_linear",
-    "convert_srgb_to_linear",
-    "load_rgba_image",
 ]
 
 from pathlib import Path
@@ -46,28 +45,6 @@ def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:
     return 20 * np.log10(max_i / np.sqrt(mse))
 
 
-def load_rgba_image(
-    file_path: Path | str,
-    file_color_space: ColorSpace = "srgb",
-    output_color_space: ColorSpace = "linear",
-) -> np.ndarray:
-    """
-    Loads an RGBA image as a normalized NumPy array in linear color space.
-
-    :param file_path: The path to the image file to load.
-    """
-
-    src = np.array(PIL.Image.open(file_path).convert("RGBA"))
-    src_normalized = src.astype(np.float32) / 255.0
-    dst_rgb_linear = convert_color(
-        src_normalized[..., :3],
-        src_color_space=file_color_space,
-        dst_color_space=output_color_space,
-    )
-    dst_alpha = src_normalized[..., 3:4]
-    return np.concatenate((dst_rgb_linear, dst_alpha), axis=-1)
-
-
 def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     """
     Saves an RGBA image from a normalized NumPy array in linear color space.
@@ -88,7 +65,9 @@ def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
 
 
 def convert_color(
-    data: np.ndarray, src_color_space: ColorSpace, dst_color_space: ColorSpace
+    data: np.ndarray,
+    src_color_space: ColorSpace,
+    dst_color_space: ColorSpace,
 ) -> np.ndarray:
     """
     Convert an image between color spaces.

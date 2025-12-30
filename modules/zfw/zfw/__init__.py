@@ -5,11 +5,11 @@ __all__ = [
     "ColorSpace",
     "Draw2dContext",
     "Draw2dRenderer",
-    "Draw3dContext",
-    "Draw3dRenderer",
     "Draw3dCameraIntrinsics",
+    "Draw3dContext",
     "Draw3dGeometry",
     "Draw3dMaterial",
+    "Draw3dRenderer",
     "EventHub",
     "Font",
     "GpuBuffer",
@@ -101,7 +101,8 @@ from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
 )
-from .images import load_rgba_image, convert_srgb_to_linear
+from .loader import load_rgba_image
+from .images import convert_srgb_to_linear
 from .gui import (
     GuiWindow,
     GuiWidget,

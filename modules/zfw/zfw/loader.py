@@ -1,17 +1,19 @@
 __all__ = [
     "GltfScene",
     "load_gltf",
+    "load_rgba_image",
+    "load_rgba_image_from_bytes",
 ]
 
 import base64
 import io
 from pathlib import Path
 
-import numpy as np
 import PIL.Image
+import numpy as np
 import pygltflib
 
-from .basic import BaseResource, expect, logger
+from .basic import BaseResource, ColorSpace, expect, logger
 from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
@@ -19,10 +21,73 @@ from .draw_3d import (
     VERTEX_DTYPE,
 )
 from .gpu import GpuImage
-from .images import load_rgba_image
+from .images import convert_color
 
 
 LOG = logger(__name__)
+
+
+#
+# Image Loading
+#
+
+
+def load_rgba_image(
+    file_path_or_url: Path | str,
+    input_color_space: ColorSpace = "srgb",
+    output_color_space: ColorSpace = "linear",
+) -> np.ndarray:
+    """
+    Loads an RGBA image as a normalized NumPy array.
+
+    :param file_path_or_url: The path to the image file, or a data URL (data:...) to load.
+    :param input_color_space: The color space of the input image.
+    :param output_color_space: The desired output color space.
+    :return: RGBA image as float32 array with shape (H, W, 4).
+    """
+    file_path_or_url = str(file_path_or_url)
+
+    if file_path_or_url.startswith("data:"):
+        # Data URL: data:[<mediatype>][;base64],<data>
+        _, data = file_path_or_url.split(",", 1)
+        raw_bytes = base64.b64decode(data)
+        src = np.array(PIL.Image.open(io.BytesIO(raw_bytes)).convert("RGBA"))
+    else:
+        src = np.array(PIL.Image.open(file_path_or_url).convert("RGBA"))
+
+    src_normalized = src.astype(np.float32) / 255.0
+    dst_rgb = convert_color(
+        src_normalized[..., :3],
+        src_color_space=input_color_space,
+        dst_color_space=output_color_space,
+    )
+    dst_alpha = src_normalized[..., 3:4]
+    return np.concatenate((dst_rgb, dst_alpha), axis=-1)
+
+
+def load_rgba_image_from_bytes(
+    raw_bytes: bytes,
+    input_color_space: ColorSpace = "srgb",
+    output_color_space: ColorSpace = "linear",
+) -> np.ndarray:
+    """
+    Loads an RGBA image from raw bytes as a normalized NumPy array.
+
+    :param raw_bytes: The raw image bytes (e.g., PNG or JPEG data).
+    :param input_color_space: The color space of the input image.
+    :param output_color_space: The desired output color space.
+    :return: RGBA image as float32 array with shape (H, W, 4).
+    """
+    src = np.array(PIL.Image.open(io.BytesIO(raw_bytes)).convert("RGBA"))
+    src_normalized = src.astype(np.float32) / 255.0
+    dst_rgb = convert_color(
+        src_normalized[..., :3],
+        src_color_space=input_color_space,
+        dst_color_space=output_color_space,
+    )
+    dst_alpha = src_normalized[..., 3:4]
+    return np.concatenate((dst_rgb, dst_alpha), axis=-1)
+
 
 # Coordinate system transformation matrix: glTF (Y-up, Z-forward) to Z-up, Y-forward.
 # This is a -90° rotation around the X-axis.
@@ -124,8 +189,9 @@ def load_gltf(
     blob_data = _load_blob_data(gltf, path)
 
     # Create shared resources: images, materials, geometries
-    gpu_images = _load_images(renderer, gltf, blob_data, path.parent)
-    materials = _load_materials(renderer, gltf, gpu_images)
+    # Note: _load_image_sources returns deferred loaders, GPU images are created in _load_materials
+    image_sources = _load_image_sources(gltf, blob_data, path.parent)
+    materials, gpu_images = _load_materials(renderer, gltf, image_sources)
     geometries = _load_geometries(renderer, gltf, blob_data)
 
     # Process each scene
@@ -249,17 +315,50 @@ def _get_accessor_data(
     return data
 
 
-def _load_images(
-    renderer: Draw3dRenderer,
+class _ImageSource:
+    """Stores raw image bytes or file path for deferred loading with color space."""
+
+    def __init__(
+        self,
+        *,
+        raw_bytes: bytes | None = None,
+        file_path: Path | None = None,
+    ):
+        self.raw_bytes = raw_bytes
+        self.file_path = file_path
+
+    def load(self, input_color_space: ColorSpace) -> np.ndarray:
+        """Load the image with the specified input color space, output as linear."""
+        if self.raw_bytes is not None:
+            return load_rgba_image_from_bytes(
+                self.raw_bytes,
+                input_color_space=input_color_space,
+                output_color_space="linear",
+            )
+        elif self.file_path is not None:
+            return load_rgba_image(
+                self.file_path,
+                input_color_space=input_color_space,
+                output_color_space="linear",
+            )
+        else:
+            raise ValueError("ImageSource has no raw_bytes or file_path")
+
+
+def _load_image_sources(
     gltf: pygltflib.GLTF2,
     blob_data: list[bytes],
     base_path: Path,
-) -> list[GpuImage]:
-    """Load all images from the glTF file as GPU textures."""
-    gpu_images: list[GpuImage] = []
+) -> list[_ImageSource]:
+    """Load all image sources from the glTF file.
+
+    Returns ImageSource objects that can be loaded later with the appropriate
+    color space for each texture usage.
+    """
+    image_sources: list[_ImageSource] = []
 
     for image_idx, image in enumerate(gltf.images or []):
-        image_data: np.ndarray | None = None
+        source: _ImageSource | None = None
 
         if image.bufferView is not None:
             # Image data embedded in buffer
@@ -268,55 +367,101 @@ def _load_images(
             byte_offset = buffer_view.byteOffset or 0
             byte_length = buffer_view.byteLength
             raw_bytes = buffer_bytes[byte_offset : byte_offset + byte_length]
-
-            pil_image = PIL.Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-            image_data = np.array(pil_image, dtype=np.float32) / 255.0
+            source = _ImageSource(raw_bytes=raw_bytes)
 
         elif (image_uri := image.uri) is not None:
             if image_uri.startswith("data:"):
                 # Base64 embedded image
-                header, data = image_uri.split(",", 1)  # type: ignore
+                _, data = image_uri.split(",", 1)
                 raw_bytes = base64.b64decode(data)
-                pil_image = PIL.Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-                image_data = np.array(pil_image, dtype=np.float32) / 255.0
+                source = _ImageSource(raw_bytes=raw_bytes)
             else:
                 # External file
-                image_path = base_path / image.uri
-                image_data = load_rgba_image(
-                    image_path,
-                    file_color_space="srgb",
-                    output_color_space="linear",
-                )
+                source = _ImageSource(file_path=base_path / image.uri)
 
-        if image_data is not None:
-            gpu_image = GpuImage(
-                device=renderer.gpu_device,
-                usages=["texture-binding"],
-                data=image_data,
-            )
-            gpu_images.append(gpu_image)
-            LOG.debug(f"Loaded image {image_idx}: {image_data.shape}")
+        if source is not None:
+            image_sources.append(source)
+            LOG.debug(f"Found image source {image_idx}")
         else:
-            LOG.warning(f"Could not load image {image_idx}")
-            # Create a default white image as placeholder
-            gpu_images.append(
-                GpuImage(
-                    device=renderer.gpu_device,
-                    usages=["texture-binding"],
-                    data=np.ones((1, 1, 4), dtype=np.float32),
-                )
-            )
+            LOG.warning(f"Could not find image source {image_idx}")
+            # Create a placeholder that will return white
+            image_sources.append(_ImageSource(raw_bytes=_WHITE_1X1_PNG))
 
-    return gpu_images
+    return image_sources
+
+
+# 1x1 white PNG for placeholder images
+_WHITE_1X1_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5/hPwAIAgL/4d1j8wAAAABJRU5ErkJggg=="
+)
+
+
+def _create_gpu_image(renderer: Draw3dRenderer, data: np.ndarray) -> GpuImage:
+    """Create a GpuImage from numpy array data."""
+    return GpuImage(
+        device=renderer.gpu_device,
+        usages=["texture-binding"],
+        data=data,
+    )
+
+
+def _extract_channel_as_rgba(image_data: np.ndarray, channel: int) -> np.ndarray:
+    """Extract a single channel from RGBA image data and return as RGBA.
+
+    The extracted channel value is placed in the R channel, with G=B=0 and A=1.
+    This allows the shader to sample .r to get the value.
+    """
+    h, w = image_data.shape[:2]
+    result = np.zeros((h, w, 4), dtype=np.float32)
+    result[:, :, 0] = image_data[:, :, channel]  # Put channel value in R
+    result[:, :, 3] = 1.0  # Alpha = 1
+    return result
 
 
 def _load_materials(
     renderer: Draw3dRenderer,
     gltf: pygltflib.GLTF2,
-    gpu_images: list[GpuImage],
-) -> list[Draw3dMaterial]:
-    """Load all materials from the glTF file."""
+    image_sources: list[_ImageSource],
+) -> tuple[list[Draw3dMaterial], list[GpuImage]]:
+    """Load all materials from the glTF file.
+
+    Returns a tuple of (materials, gpu_images) where gpu_images contains all
+    GPU textures created for the materials (for resource tracking/disposal).
+
+    Color space handling:
+    - Base color textures: loaded as sRGB (converted to linear)
+    - Metallic-roughness textures: loaded as linear (no conversion)
+    - Normal maps: loaded as linear (no conversion)
+    """
     materials: list[Draw3dMaterial] = []
+    gpu_images: list[GpuImage] = []
+
+    # Cache for GPU images created from source arrays (to avoid duplicates)
+    # Maps (source_index, color_space, channel_or_none) to GpuImage
+    # channel_or_none: None for full RGBA, 0-3 for extracted channel
+    gpu_image_cache: dict[tuple[int, ColorSpace, int | None], GpuImage] = {}
+
+    def get_or_create_gpu_image(
+        source_idx: int,
+        input_color_space: ColorSpace,
+        channel: int | None = None,
+    ) -> GpuImage:
+        """Get or create a GpuImage, with caching to avoid duplicates."""
+        cache_key = (source_idx, input_color_space, channel)
+        if cache_key in gpu_image_cache:
+            return gpu_image_cache[cache_key]
+
+        source_data = image_sources[source_idx].load(input_color_space)
+        if channel is not None:
+            # Extract single channel as RGBA (value in R channel)
+            data = _extract_channel_as_rgba(source_data, channel)
+        else:
+            data = source_data
+
+        gpu_image = _create_gpu_image(renderer, data)
+        gpu_image_cache[cache_key] = gpu_image
+        gpu_images.append(gpu_image)
+        return gpu_image
 
     for material_idx, material in enumerate(gltf.materials or []):
         color_tint = (1.0, 1.0, 1.0)
@@ -342,8 +487,13 @@ def _load_materials(
                 tex_idx = pbr.baseColorTexture.index
                 if tex_idx is not None and gltf.textures:
                     texture = gltf.textures[tex_idx]
-                    if texture.source is not None and texture.source < len(gpu_images):
-                        color_image = gpu_images[texture.source]
+                    if texture.source is not None and texture.source < len(
+                        image_sources
+                    ):
+                        # Base color is stored in sRGB
+                        color_image = get_or_create_gpu_image(
+                            texture.source, input_color_space="srgb"
+                        )
 
             # Metallic-roughness
             if pbr.metallicFactor is not None:
@@ -355,19 +505,28 @@ def _load_materials(
                 tex_idx = pbr.metallicRoughnessTexture.index
                 if tex_idx is not None and gltf.textures:
                     texture = gltf.textures[tex_idx]
-                    if texture.source is not None and texture.source < len(gpu_images):
-                        # glTF stores metallic in B channel, roughness in G channel
-                        # For now, use the same image for both
-                        metalness_image = gpu_images[texture.source]
-                        roughness_image = gpu_images[texture.source]
+                    if texture.source is not None and texture.source < len(
+                        image_sources
+                    ):
+                        # glTF stores metallic in B channel (index 2),
+                        # roughness in G channel (index 1)
+                        # Metallic-roughness is stored in linear space
+                        metalness_image = get_or_create_gpu_image(
+                            texture.source, input_color_space="linear", channel=2
+                        )
+                        roughness_image = get_or_create_gpu_image(
+                            texture.source, input_color_space="linear", channel=1
+                        )
 
-        # Normal map
+        # Normal map (stored in linear space)
         if material.normalTexture is not None:
             tex_idx = material.normalTexture.index
             if tex_idx is not None and gltf.textures:
                 texture = gltf.textures[tex_idx]
-                if texture.source is not None and texture.source < len(gpu_images):
-                    normal_image = gpu_images[texture.source]
+                if texture.source is not None and texture.source < len(image_sources):
+                    normal_image = get_or_create_gpu_image(
+                        texture.source, input_color_space="linear"
+                    )
 
         draw_material = Draw3dMaterial(
             renderer=renderer,
@@ -386,7 +545,7 @@ def _load_materials(
     if not materials:
         materials.append(Draw3dMaterial(renderer=renderer))
 
-    return materials
+    return materials, gpu_images
 
 
 def _load_geometries(
@@ -436,6 +595,9 @@ def _load_geometries(
             # Texture coordinates (optional)
             if attributes.TEXCOORD_0 is not None:
                 texcoords = _get_accessor_data(gltf, blob_data, attributes.TEXCOORD_0)
+                # Wrap texture coordinates to [0, 1) range to simulate repeat wrapping
+                # This handles models that use texcoords outside the 0-1 range
+                texcoords = np.mod(texcoords, 1.0)
             else:
                 texcoords = np.zeros((vertex_count, 2), dtype=np.float32)
 

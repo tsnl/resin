@@ -27,15 +27,16 @@ Widget stacking order:
 """
 
 __all__ = [
-    "GuiWindow",
-    "GuiWidget",
-    "GuiTheme",
-    "GuiWidgetStyle",
     "GuiCursorMode",
+    "GuiTheme",
+    "GuiWidget",
+    "GuiWidgetStyle",
+    "GuiWindow",
 ]
 
 from dataclasses import dataclass
 from typing import Literal, Callable
+import time
 
 import numpy as np
 from kiwisolver import (
@@ -67,7 +68,7 @@ from .draw_3d import (
     Draw3dMaterial,
 )
 from .gpu import GpuContext, GpuDevice, GpuImage, GpuSwapChain, GpuCommandEncoder
-from .window import Window, WindowContext
+from .window import Window
 
 from .events import EventHub
 
@@ -656,7 +657,6 @@ class GuiWindow(BaseResource):
 
     def update(self) -> None:
         """Update style, layout, poll input events, and call widget update hooks."""
-        import time
 
         # Compute delta time
         current_time = time.perf_counter()

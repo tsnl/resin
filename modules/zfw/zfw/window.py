@@ -6,8 +6,8 @@ separating windowing concerns from GUI and rendering logic.
 """
 
 __all__ = [
-    "WindowContext",
     "Window",
+    "WindowContext",
 ]
 
 from typing import Callable

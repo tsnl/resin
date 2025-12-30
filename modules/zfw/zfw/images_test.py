@@ -2,8 +2,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .loader import load_rgba_image
 from .images import (
-    load_rgba_image,
     save_rgba_image,
     convert_srgb_to_linear,
     convert_linear_to_srgb,
@@ -16,12 +16,12 @@ def test_image_roundtrip():
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    im0 = load_rgba_image(file_path=INPUT_PATH)
+    im0 = load_rgba_image(INPUT_PATH)
     assert im0.shape == (512, 512, 4)
 
     save_rgba_image(file_path=OUTPUT_PATH, data=im0)
 
-    im1 = load_rgba_image(file_path=OUTPUT_PATH)
+    im1 = load_rgba_image(OUTPUT_PATH)
     assert im1.shape == im0.shape
     np.testing.assert_allclose(im0, im1, rtol=1e-4, atol=1e-2)
 

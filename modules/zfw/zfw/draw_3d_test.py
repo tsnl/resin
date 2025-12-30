@@ -27,7 +27,7 @@ from .draw_3d import (
     VERTEX_DTYPE,
 )
 from .loader import load_gltf
-from .images import load_rgba_image
+from .loader import load_rgba_image
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
@@ -418,7 +418,7 @@ def test_draw_3d_environment_map():
     # Load environment map as sRGB (for debugging, we load JPG directly)
     env_data = load_rgba_image(
         env_jpg_path,
-        file_color_space="srgb",
+        input_color_space="srgb",
         output_color_space="linear",
     )
     env_image = GpuImage(
@@ -511,7 +511,7 @@ def test_draw_3d_damaged_helmet():
     # Load environment map as sRGB (for debugging, we load JPG directly)
     env_data = load_rgba_image(
         env_jpg_path,
-        file_color_space="srgb",
+        input_color_space="srgb",
         output_color_space="linear",
     )
     env_image = GpuImage(
