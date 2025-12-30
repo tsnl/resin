@@ -55,13 +55,9 @@ data_packs = [
 ]
 
 [[tool.zfw_build.shaders]]
-source = "shaders/r2d.slang"
+source = "shaders/draw_2d_quad_text.slang"
 stages = { vertex = "vertexMain", fragment = "fragmentMain" }
 
 [[tool.zfw_build.shaders]]
-source = "shaders/draw_2d/draw_2d_quad_text.slang"
-stages = { vertex = "vertexMain", fragment = "fragmentMain" }
-
-[[tool.zfw_build.shaders]]
-source = "shaders/draw_2d/draw_2d_quad_rgba.slang"
+source = "shaders/draw_2d_quad_rgba.slang"
 stages = { vertex = "vertexMain", fragment = "fragmentMain" }

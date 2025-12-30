@@ -1402,11 +1402,24 @@ class GpuMemory(BaseResource):
 #
 
 
-@dataclass
 class GpuImageMeta:
     shape: tuple[int, int, int]  # (height, width, channels)
-    dtype: npt.DTypeLike
+    dtype: np.dtype
     color_space: ColorSpace = "linear"
+
+    def __init__(
+        self,
+        *,
+        shape: tuple[int, int, int],  # (height, width, channels)
+        dtype: npt.DTypeLike,
+        color_space: ColorSpace = "linear",
+    ) -> None:
+        self.shape = shape
+        self.dtype = np.dtype(dtype)
+        self.color_space = color_space
+
+        if self.dtype.ndim != 0:
+            raise LogicError(f"Expected scalar dtype for image meta: {dtype=}")
 
     @staticmethod
     def from_array(
@@ -1435,7 +1448,7 @@ class GpuImageMeta:
         color_space = self.color_space
 
         if is_depth_attachment:
-            match (dtype, depth):
+            match (dtype.type, depth):
                 case (np.float32, 1):
                     return VK_FORMAT_D32_SFLOAT
                 case _:
@@ -1443,7 +1456,7 @@ class GpuImageMeta:
                         f"Invalid depth attachment image meta: {dtype=}, {depth=}"
                     )
         else:
-            match (dtype, depth, color_space):
+            match (dtype.type, depth, color_space):
                 case (np.uint8, 4, "linear"):
                     return VK_FORMAT_R8G8B8A8_UNORM
                 case (np.uint8, 4, "srgb"):
