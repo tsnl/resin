@@ -15,6 +15,11 @@ Otherwise, you will need:
 We use `uv` for project management.
 
 ```bash
+# Pull all submodules and LFS assets
+$ git submodule update --init --recursive
+$ git submodule foreach git lfs pull
+$ git lfs pull
+
 # Create a virtual environment with the right Python version, install all dependencies.
 $ uv sync
 
