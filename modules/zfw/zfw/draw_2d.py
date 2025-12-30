@@ -91,7 +91,6 @@ class Draw2dRenderer(BaseResource):
     _rgba_fragment_shader: GpuShader
     _cached_text_pipeline: GpuPipeline | None
     _cached_rgba_pipeline: GpuPipeline | None
-    _cached_depth_image: GpuImage | None
 
     # Sampler:
     _nearest_sampler: GpuSampler
@@ -787,9 +786,6 @@ class Draw2dRenderer(BaseResource):
         text_pipeline = self._get_text_pipeline(target)
         rgba_pipeline = self._get_rgba_pipeline(target)
 
-        # Get or create depth image:
-        depth_image = self._get_depth_image(target.width, target.height)
-
         # Flush all batches (copy staging -> device buffers) BEFORE render pass:
         for batch in self._rgba_quad_batches.values():
             if batch.quad_count > 0:
@@ -811,15 +807,11 @@ class Draw2dRenderer(BaseResource):
             image=target,
             layout="color-attachment-optimal",
         )
-        command_encoder.transition_image_layout(
-            image=depth_image,
-            layout="depth-stencil-attachment-optimal",
-        )
 
         # Begin render pass:
         with command_encoder.render(
             color_attachment=target,
-            depth_attachment=depth_image,
+            depth_attachment=None,
             clear_color="black",
         ) as render_pass:
             # Draw RGBA batches:
@@ -879,24 +871,6 @@ class Draw2dRenderer(BaseResource):
             layout=self._pipeline_layout,
         )
         return self._cached_rgba_pipeline
-
-    def _get_depth_image(self, width: int, height: int) -> GpuImage:
-        if (
-            self._cached_depth_image is not None
-            and self._cached_depth_image.width == width
-            and self._cached_depth_image.height == height
-        ):
-            return self._cached_depth_image
-
-        if self._cached_depth_image is not None:
-            self._cached_depth_image.dispose()
-
-        self._cached_depth_image = GpuImage(
-            device=self.gpu_device,
-            usages=["depth-attachment"],
-            meta=GpuImageMeta(shape=(height, width, 1), dtype="<f4"),
-        )
-        return self._cached_depth_image
 
 
 ##--------------------------------------------------------------------------------------
