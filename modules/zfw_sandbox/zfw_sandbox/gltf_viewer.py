@@ -45,17 +45,23 @@ ENVIRONMENTS = [
 # Theme for the viewer HUD
 _VIEWER_THEME: zfw.GuiTheme = {
     ".central": {
-        "background": (0, 0, 0, 0),  # Transparent to show 3D behind
+        "default": {
+            "background": (0, 0, 0, 0),  # Transparent to show 3D behind
+        },
     },
     ".hud-bar": {
-        "background": (20, 20, 20, 180),  # Semi-transparent dark bar
-        "padding-x": 16,
-        "padding-y": 8,
+        "default": {
+            "background": (20, 20, 20, 180),  # Semi-transparent dark bar
+            "padding-x": 16,
+            "padding-y": 8,
+        },
     },
     ".hud-label": {
-        "background": (0, 0, 0, 0),
-        "padding-x": 0,
-        "padding-y": 0,
+        "default": {
+            "background": (0, 0, 0, 0),
+            "padding-x": 0,
+            "padding-y": 0,
+        },
     },
 }
 
@@ -148,19 +154,28 @@ class FreeCameraController:
 
     def update(self, dt: float) -> None:
         """Update camera position based on movement keys."""
-        # Compute forward and right vectors
+        # Compute forward and right vectors based on yaw and pitch
+        # Forward: the direction the camera is looking
+        # For a standard FPS camera:
+        #   - yaw=0 looks along -Z
+        #   - pitch=0 is horizontal
+        #   - pitch>0 looks up
+        cy, sy = math.cos(self.yaw), math.sin(self.yaw)
+        cp, sp = math.cos(self.pitch), math.sin(self.pitch)
+
+        # Forward direction (where camera looks)
         forward = np.array(
-            [
-                math.cos(self.pitch) * math.sin(self.yaw),
-                -math.sin(self.pitch),
-                -math.cos(self.pitch) * math.cos(self.yaw),
-            ],
+            [-sy * cp, sp, -cy * cp],
             dtype=np.float32,
         )
+
+        # Right direction (always horizontal for FPS-style movement)
         right = np.array(
-            [math.cos(self.yaw), 0.0, math.sin(self.yaw)],
+            [cy, 0.0, -sy],
             dtype=np.float32,
         )
+
+        # Up is world up (Y+)
         up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
         # Compute movement direction
@@ -185,21 +200,33 @@ class FreeCameraController:
             self.position += move_dir * self.move_speed * dt
 
     def get_transform(self) -> np.ndarray:
-        """Get the camera's 4x4 world transform matrix (row-major)."""
+        """Get the camera's 4x4 world transform matrix.
+
+        Returns a matrix where:
+        - Columns 0-2 are the camera's X, Y, Z basis vectors in world space
+        - Column 3 is the camera's position in world space
+        """
         # Compute rotation matrix from yaw and pitch
+        # Must be consistent with update() vectors
         cy, sy = math.cos(self.yaw), math.sin(self.yaw)
         cp, sp = math.cos(self.pitch), math.sin(self.pitch)
 
-        # Camera axes (forward is -Z in camera space)
-        right = np.array([cy, 0.0, sy])
-        up = np.array([sy * sp, cp, -cy * sp])
-        forward = np.array([sy * cp, -sp, -cy * cp])
+        # Camera axes in world space
+        # Right: X-axis of camera (always horizontal)
+        right = np.array([cy, 0.0, -sy], dtype=np.float32)
 
-        # Build transform matrix (row-major)
+        # Forward: -Z axis of camera (where it looks)
+        forward = np.array([-sy * cp, sp, -cy * cp], dtype=np.float32)
+
+        # Up: Y-axis of camera
+        up = np.array([sy * sp, cp, cy * sp], dtype=np.float32)
+
+        # Build transform matrix
+        # Columns are the camera's basis vectors in world space
         transform = np.eye(4, dtype=np.float32)
-        transform[0, :3] = right
-        transform[1, :3] = up
-        transform[2, :3] = -forward  # Camera looks along -Z
+        transform[:3, 0] = right  # X-axis (right)
+        transform[:3, 1] = up  # Y-axis (up)
+        transform[:3, 2] = -forward  # Z-axis (camera looks along -Z, so negate forward)
         transform[:3, 3] = self.position
 
         return transform
