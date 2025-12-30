@@ -24,6 +24,8 @@ __all__ = [
     "GpuShader",
     "GpuSurface",
     "GpuSwapChain",
+    "GpuVertexAttribute",
+    "GpuVertexBufferLayout",
 ]
 
 import json
@@ -91,6 +93,8 @@ from .typed_vulkan import (
     VK_FORMAT_R8G8B8A8_SRGB,
     VK_FORMAT_R8G8B8A8_UNORM,
     VK_FORMAT_R32_SFLOAT,
+    VK_FORMAT_R32G32_SFLOAT,
+    VK_FORMAT_R32G32B32_SFLOAT,
     VK_FORMAT_R32G32B32A32_SFLOAT,
     VK_FORMAT_UNDEFINED,
     VK_FRONT_FACE_COUNTER_CLOCKWISE,
@@ -242,7 +246,11 @@ from .typed_vulkan import (
     VkSurfaceKHR,
     VkSwapchainCreateInfoKHR,
     VkSwapchainKHR,
+    VkVertexInputAttributeDescription,
+    VkVertexInputBindingDescription,
     VkViewport,
+    VK_VERTEX_INPUT_RATE_VERTEX,
+    VK_VERTEX_INPUT_RATE_INSTANCE,
     VkWriteDescriptorSet,
     VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
     VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
@@ -1774,6 +1782,10 @@ class GpuImage(BaseResource):
                 )
             ],
         )
+        # Transition to shader-read-only layout if the image is used for texture binding.
+        # This ensures the image is ready for sampling after upload.
+        if "texture-binding" in self.usages:
+            cmd.transition_image_layout(image=self, layout="texture-binding")
         cmd.submit().wait()
 
         staging_buffer.dispose()
@@ -1873,6 +1885,19 @@ class GpuBufferMeta:
         super().__init__()
         self.element_count = element_count
         self.element_dtype = np.dtype(element_dtype)
+
+        # Reject subarray dtypes - they have surprising behavior with numpy arrays.
+        # When creating an array with a subarray dtype like ('<f4', (4, 4)):
+        # - numpy expands the shape to include subarray dimensions
+        # - the array's .dtype becomes the BASE dtype (float32), not the subarray
+        # - this breaks dtype checking and buffer operations
+        # Use flat arrays instead and handle shaping at a higher level.
+        if self.element_dtype.ndim != 0:
+            raise LogicError(
+                f"GpuBufferMeta does not support subarray dtypes. "
+                f"Got dtype {self.element_dtype!r} with ndim={self.element_dtype.ndim}. "
+                f"Use a flat dtype (e.g., float32) and handle shaping at a higher level."
+            )
 
         if self.size <= 0:
             raise LogicError(
@@ -3020,6 +3045,41 @@ def vk_descriptor_type(t: GpuDescriptorType):
 
 
 #
+# GpuVertexBufferLayout:
+#
+
+type GpuVertexAttributeFormat = Literal[
+    "float32", "float32x2", "float32x3", "float32x4"
+]
+
+
+@dataclass
+class GpuVertexAttribute:
+    """Describes a single vertex attribute within a vertex buffer."""
+
+    format: GpuVertexAttributeFormat
+    offset: int
+
+
+@dataclass
+class GpuVertexBufferLayout:
+    """Describes the layout of a vertex buffer."""
+
+    stride: int
+    attributes: list[GpuVertexAttribute]
+    step_mode: Literal["vertex", "instance"] = "vertex"
+
+
+def _vk_vertex_format(fmt: GpuVertexAttributeFormat) -> VkFormat:
+    return {
+        "float32": VK_FORMAT_R32_SFLOAT,
+        "float32x2": VK_FORMAT_R32G32_SFLOAT,
+        "float32x3": VK_FORMAT_R32G32B32_SFLOAT,
+        "float32x4": VK_FORMAT_R32G32B32A32_SFLOAT,
+    }[fmt]
+
+
+#
 # GpuPipeline:
 #
 
@@ -3044,6 +3104,7 @@ class GpuPipeline(BaseResource):
         viewport_width: int,
         viewport_height: int,
         layout: GpuPipelineLayout,
+        vertex_buffer_layouts: list[GpuVertexBufferLayout] | None = None,
     ):
         super().__init__(parent_resource=device)
         self.device = device
@@ -3059,6 +3120,7 @@ class GpuPipeline(BaseResource):
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             layout=layout,
+            vertex_buffer_layouts=vertex_buffer_layouts or [],
         )
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
@@ -3087,13 +3149,55 @@ class GpuPipeline(BaseResource):
         ]
 
     @staticmethod
-    def _help_create_vertex_input_state() -> VkPipelineVertexInputStateCreateInfo:
+    def _help_create_vertex_input_state(
+        vertex_buffer_layouts: list[GpuVertexBufferLayout],
+    ) -> VkPipelineVertexInputStateCreateInfo:
+        if not vertex_buffer_layouts:
+            return VkPipelineVertexInputStateCreateInfo(
+                flags=0,
+                vertexBindingDescriptionCount=0,
+                pVertexBindingDescriptions=None,
+                vertexAttributeDescriptionCount=0,
+                pVertexAttributeDescriptions=None,
+            )
+
+        # Build binding descriptions (one per vertex buffer)
+        binding_descriptions: list[VkVertexInputBindingDescription] = []
+        for binding_index, layout in enumerate(vertex_buffer_layouts):
+            input_rate = (
+                VK_VERTEX_INPUT_RATE_INSTANCE
+                if layout.step_mode == "instance"
+                else VK_VERTEX_INPUT_RATE_VERTEX
+            )
+            binding_descriptions.append(
+                VkVertexInputBindingDescription(
+                    binding=binding_index,
+                    stride=layout.stride,
+                    inputRate=input_rate,
+                )
+            )
+
+        # Build attribute descriptions (flatten across all buffers)
+        attribute_descriptions: list[VkVertexInputAttributeDescription] = []
+        location = 0
+        for binding_index, layout in enumerate(vertex_buffer_layouts):
+            for attr in layout.attributes:
+                attribute_descriptions.append(
+                    VkVertexInputAttributeDescription(
+                        location=location,
+                        binding=binding_index,
+                        format=_vk_vertex_format(attr.format),
+                        offset=attr.offset,
+                    )
+                )
+                location += 1
+
         return VkPipelineVertexInputStateCreateInfo(
             flags=0,
-            vertexBindingDescriptionCount=0,
-            pVertexBindingDescriptions=None,
-            vertexAttributeDescriptionCount=0,
-            pVertexAttributeDescriptions=None,
+            vertexBindingDescriptionCount=len(binding_descriptions),
+            pVertexBindingDescriptions=binding_descriptions,
+            vertexAttributeDescriptionCount=len(attribute_descriptions),
+            pVertexAttributeDescriptions=attribute_descriptions,
         )
 
     @staticmethod
@@ -3230,11 +3334,14 @@ class GpuPipeline(BaseResource):
         viewport_width: int,
         viewport_height: int,
         layout: GpuPipelineLayout,
+        vertex_buffer_layouts: list[GpuVertexBufferLayout],
     ) -> VkPipeline:
         shader_stages = GpuPipeline._help_create_shader_stages(
             vertex_shader, fragment_shader
         )
-        vertex_input_state = GpuPipeline._help_create_vertex_input_state()
+        vertex_input_state = GpuPipeline._help_create_vertex_input_state(
+            vertex_buffer_layouts
+        )
         input_assembly_state = GpuPipeline._help_create_input_assembly_state()
         viewport_state = GpuPipeline._help_create_viewport_state(
             viewport_width, viewport_height
@@ -3761,7 +3868,7 @@ class GpuEzBuffer(BaseResource):
 
     @property
     def dtype(self) -> np.dtype:
-        return self._data.dtype
+        return self._buffer_meta.element_dtype
 
     @property
     def array(self) -> np.ndarray:

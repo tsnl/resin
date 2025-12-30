@@ -2303,15 +2303,38 @@ class VkPipelineShaderStageCreateInfo:
     pName: str
     pSpecializationInfo: Any | None
 
+# VkVertexInputRate
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputRate.html
+type VkVertexInputRate = int
+VK_VERTEX_INPUT_RATE_VERTEX: VkVertexInputRate = 0
+VK_VERTEX_INPUT_RATE_INSTANCE: VkVertexInputRate = 1
+
+# VkVertexInputBindingDescription
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputBindingDescription.html
+@dataclass
+class VkVertexInputBindingDescription:
+    binding: int
+    stride: int
+    inputRate: VkVertexInputRate
+
+# VkVertexInputAttributeDescription
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputAttributeDescription.html
+@dataclass
+class VkVertexInputAttributeDescription:
+    location: int
+    binding: int
+    format: VkFormat
+    offset: int
+
 # VkPipelineVertexInputStateCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineVertexInputStateCreateInfo.html
 @dataclass
 class VkPipelineVertexInputStateCreateInfo:
     flags: int
     vertexBindingDescriptionCount: int
-    pVertexBindingDescriptions: Any | None
+    pVertexBindingDescriptions: list[VkVertexInputBindingDescription] | None
     vertexAttributeDescriptionCount: int
-    pVertexAttributeDescriptions: Any | None
+    pVertexAttributeDescriptions: list[VkVertexInputAttributeDescription] | None
 
 # VkPipelineInputAssemblyStateCreateInfo
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineInputAssemblyStateCreateInfo.html

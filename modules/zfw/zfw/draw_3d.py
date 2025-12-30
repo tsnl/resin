@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .basic import BaseResource
+from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuCommandEncoder,
     GpuDescriptorSet,
@@ -11,7 +12,13 @@ from .gpu import (
     GpuDevice,
     GpuEzBuffer,
     GpuImage,
+    GpuImageMeta,
+    GpuPipeline,
+    GpuPipelineLayout,
     GpuSampler,
+    GpuShader,
+    GpuVertexAttribute,
+    GpuVertexBufferLayout,
 )
 
 
@@ -56,6 +63,13 @@ class Draw3dRenderer(BaseResource):
     instance_transforms_gpu_ds_layout: GpuDescriptorSetLayout
     instance_transforms_gpu_ds: GpuDescriptorSet
 
+    # Pipeline resources:
+    _pipeline_layout: GpuPipelineLayout
+    _vertex_shader: GpuShader
+    _fragment_shader: GpuShader
+    _cached_pipeline: GpuPipeline | None
+    _cached_depth_image: GpuImage | None
+
     def __init__(self, context: Draw3dContext, gpu_device: GpuDevice):
         super().__init__(parent_resource=context)
 
@@ -77,8 +91,8 @@ class Draw3dRenderer(BaseResource):
         )
         self.camera_pv_matrix_uniform_buffer = GpuEzBuffer(
             device=self.gpu_device,
-            capacity=1,
-            dtype=MAT4X4F_DTYPE,
+            capacity=16,  # One 4x4 matrix = 16 floats
+            dtype=np.float32,
             usages=["uniform"],
         )
         self.camera_pv_matrix_uniform_ds = GpuDescriptorSet(
@@ -155,8 +169,8 @@ class Draw3dRenderer(BaseResource):
         MAX_INSTANCES = 16 << 10  # 16K instances
         self.instance_transforms_buffer = GpuEzBuffer(
             device=self.gpu_device,
-            capacity=MAX_INSTANCES,
-            dtype=MAT4X4F_DTYPE,
+            capacity=MAX_INSTANCES * 16,  # 16 floats per 4x4 matrix
+            dtype=np.float32,
             usages=["storage"],
         )
         self.instance_transforms_gpu_ds_layout = GpuDescriptorSetLayout(
@@ -178,22 +192,70 @@ class Draw3dRenderer(BaseResource):
             layout=self.instance_transforms_gpu_ds_layout,
         )
 
+        # Pipeline layout and shaders
+        self._pipeline_layout = GpuPipelineLayout(
+            device=self.gpu_device,
+            descriptor_set_layouts=[
+                self.camera_pv_matrix_uniform_ds_layout,
+                self.instance_transforms_gpu_ds_layout,
+                self.material_ds_layout,
+            ],
+        )
+
+        self._vertex_shader = GpuShader(
+            device=self.gpu_device,
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d.vert.spv",
+            stage="vertex",
+        )
+        self._fragment_shader = GpuShader(
+            device=self.gpu_device,
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d.frag.spv",
+            stage="fragment",
+        )
+
+        self._cached_pipeline = None
+        self._cached_depth_image = None
+
     def _on_dispose(self) -> None:
-        if it := getattr(self, "material_gpu_descriptor_set_layout", None):
+        # Dispose cached pipeline and depth image
+        if it := getattr(self, "_cached_pipeline", None):
+            it.dispose()
+        if it := getattr(self, "_cached_depth_image", None):
             it.dispose()
 
+        # Dispose shaders
+        if it := getattr(self, "_vertex_shader", None):
+            it.dispose()
+        if it := getattr(self, "_fragment_shader", None):
+            it.dispose()
+
+        # Dispose pipeline layout
+        if it := getattr(self, "_pipeline_layout", None):
+            it.dispose()
+
+        # Dispose descriptor set layouts
+        if it := getattr(self, "camera_pv_matrix_uniform_ds_layout", None):
+            it.dispose()
+        if it := getattr(self, "instance_transforms_gpu_ds_layout", None):
+            it.dispose()
+        if it := getattr(self, "material_ds_layout", None):
+            it.dispose()
+
+        # Dispose buffers
+        if it := getattr(self, "camera_pv_matrix_uniform_buffer", None):
+            it.dispose()
+        if it := getattr(self, "instance_transforms_buffer", None):
+            it.dispose()
+
+        # Dispose material resources
         if it := getattr(self, "material_linear_sampler", None):
             it.dispose()
-
         if it := getattr(self, "material_default_color_image", None):
             it.dispose()
-
         if it := getattr(self, "material_default_normal_image", None):
             it.dispose()
-
         if it := getattr(self, "material_default_metalness_image", None):
             it.dispose()
-
         if it := getattr(self, "material_default_roughness_image", None):
             it.dispose()
 
@@ -210,13 +272,12 @@ class Draw3dRenderer(BaseResource):
         Draws the given mesh instances.
 
         :param command_encoder: The GPU command encoder to record commands to.
-        :param mesh_instances: A mapping of (geometry, material) pairs to an Nx4x4
-            tensor of N 4x4 model matrices for N instances of that geometry with that
-            material. The matrices are in world space, row-major.
+        :param meshes: A mapping of (geometry, material) pairs to a flat float32
+            array of N 4x4 model matrices (N*16 floats). Each matrix should be
+            in column-major layout (transposed from numpy's row-major default).
         :param camera_transform: A 4x4 matrix representing the camera's world transform.
-            The matrix is in world-space, row-major.
-        :param camera_focal_length: The camera's focal length, in meters.
-        :param camera_sensor_height: The camera's sensor height, in meters.
+            The matrix is in world-space, row-major (standard numpy convention).
+        :param camera_intrinsics: Camera intrinsic parameters (FOV, clip planes).
         :param target: The GPU image to render to. Used to compute aspect ratio.
         """
 
@@ -226,37 +287,79 @@ class Draw3dRenderer(BaseResource):
         camera_view = np.linalg.inv(camera_transform)
         camera_pv = camera_proj @ camera_view
 
-        # Update camera uniform buffer:
+        # Update camera uniform buffer, transposing to column-major layout:
+        # IMPORTANT: Slang/HLSL float4x4 uses column-major layout by default.
+        # NumPy arrays are row-major, so we transpose before flattening.
+        camera_pv_flat = np.ascontiguousarray(camera_pv.T, dtype=np.float32).ravel()
         self.camera_pv_matrix_uniform_buffer.clear()
-        self.camera_pv_matrix_uniform_buffer.extend(
-            values=np.array([camera_pv], dtype=MAT4X4F_DTYPE)
-        )
+        self.camera_pv_matrix_uniform_buffer.extend(values=camera_pv_flat)
         self.camera_pv_matrix_uniform_buffer.flush(command_encoder=command_encoder)
 
+        # Transpose model matrices to column-major layout and ravel, preparing instance
+        # transforms buffer for GPU upload:
+        meshes_column_major = {}
+        for key, model_matrices in meshes.items():
+            if model_matrices.dtype.type != np.float32:
+                raise ValueError("Model matrices array must have dtype float32")
+            if model_matrices.ndim != 3 or model_matrices.shape[1:] != (4, 4):
+                raise ValueError("Model matrices array must have shape (N, 4, 4)")
+            meshes_column_major[key] = model_matrices.transpose(0, 2, 1).reshape(-1)
+
         # Group mesh instances: matrix_batches[material][geometry] = model_matrices
-        per_material_matrix_batches: defaultdict[
+        per_material_col_major_matrix_batches: defaultdict[
             Draw3dMaterial,
             dict[Draw3dGeometry, np.ndarray],
         ] = defaultdict(dict)
-        for (geometry, material), model_matrices in meshes.items():
-            per_material_matrix_batches[material][geometry] = model_matrices
+        for (geometry, material), model_matrices in meshes_column_major.items():
+            per_material_col_major_matrix_batches[material][geometry] = model_matrices
 
         # Write each model_matrices array to a subspan of the global instance transforms
         # buffer, extending the buffer as we go. Record the spans for each batch. These
         # become dynamic offsets when binding the instance transforms buffer.
+        # Note: model_matrices is a flat float32 array (N matrices = N*16 floats).
+        # The spans are stored as (matrix_offset, matrix_count) for draw_indexed.
         per_material_span_batches: defaultdict[
             Draw3dMaterial,
             dict[Draw3dGeometry, tuple[int, int]],
         ] = defaultdict(dict)
         self.instance_transforms_buffer.clear()
-        for material, geometry_dict in per_material_matrix_batches.items():
+        matrix_offset = 0
+        for material, geometry_dict in per_material_col_major_matrix_batches.items():
             for geometry, model_matrices in geometry_dict.items():
-                span = self.instance_transforms_buffer.extend(values=model_matrices)
-                per_material_span_batches[material][geometry] = span
+                float_count = len(model_matrices)
+                assert float_count % 16 == 0, "4x4 model matrices must have 16 floats"
+                matrix_count = float_count // 16
+                per_material_span_batches[material][geometry] = (
+                    matrix_offset,
+                    matrix_count,
+                )
+                matrix_offset += matrix_count
+                self.instance_transforms_buffer.extend(values=model_matrices)
         self.instance_transforms_buffer.flush(command_encoder=command_encoder)
 
+        # Get or create pipeline and depth image:
+        pipeline = self._get_pipeline(target)
+        depth_image = self._get_depth_image(target.width, target.height)
+
+        # Transition images to correct layouts:
+        command_encoder.transition_image_layout(
+            image=target,
+            layout="color-attachment-optimal",
+        )
+        command_encoder.transition_image_layout(
+            image=depth_image,
+            layout="depth-stencil-attachment-optimal",
+        )
+
         # Draw all mesh instances:
-        with command_encoder.render(color_attachment=target) as rp:
+        with command_encoder.render(
+            color_attachment=target,
+            depth_attachment=depth_image,
+            clear_color="black",
+        ) as rp:
+            # Set pipeline:
+            rp.bind_pipeline(pipeline=pipeline)
+
             # Bind camera descriptor set:
             rp.bind_descriptor_set(
                 set_index=0,
@@ -287,6 +390,64 @@ class Draw3dRenderer(BaseResource):
                         first_instance=matrix_span_offset,
                         instance_count=matrix_span_count,
                     )
+
+    def _get_pipeline(self, target: GpuImage) -> GpuPipeline:
+        """Get or create a pipeline for the given render target."""
+        if self._cached_pipeline is not None:
+            if (
+                self._cached_pipeline.vk_color_format == target._vk_format
+                and self._cached_pipeline.viewport_width == target.width
+                and self._cached_pipeline.viewport_height == target.height
+            ):
+                return self._cached_pipeline
+            self._cached_pipeline.dispose()
+
+        # Vertex layout matching VERTEX_DTYPE:
+        # - position: float32x3 at offset 0
+        # - normal: float32x3 at offset 12
+        # - texcoord0: float32x2 at offset 24
+        # Total stride: 32 bytes
+        vertex_layout = GpuVertexBufferLayout(
+            stride=VERTEX_DTYPE.itemsize,
+            attributes=[
+                GpuVertexAttribute(format="float32x3", offset=0),  # position
+                GpuVertexAttribute(format="float32x3", offset=12),  # normal
+                GpuVertexAttribute(format="float32x2", offset=24),  # texcoord0
+            ],
+        )
+
+        self._cached_pipeline = GpuPipeline(
+            device=self.gpu_device,
+            vertex_shader=self._vertex_shader,
+            fragment_shader=self._fragment_shader,
+            vk_color_format=target._vk_format,
+            enable_depth_test=True,
+            enable_alpha_blending=False,
+            viewport_width=target.width,
+            viewport_height=target.height,
+            layout=self._pipeline_layout,
+            vertex_buffer_layouts=[vertex_layout],
+        )
+        return self._cached_pipeline
+
+    def _get_depth_image(self, width: int, height: int) -> GpuImage:
+        """Get or create a depth image for the given dimensions."""
+        if (
+            self._cached_depth_image is not None
+            and self._cached_depth_image.width == width
+            and self._cached_depth_image.height == height
+        ):
+            return self._cached_depth_image
+
+        if self._cached_depth_image is not None:
+            self._cached_depth_image.dispose()
+
+        self._cached_depth_image = GpuImage(
+            device=self.gpu_device,
+            usages=["depth-attachment"],
+            meta=GpuImageMeta(shape=(height, width, 1), dtype="<f4"),
+        )
+        return self._cached_depth_image
 
 
 @dataclass
@@ -324,9 +485,6 @@ class Draw3dCameraIntrinsics:
             ],
             dtype=np.float32,
         )
-
-
-MAT4X4F_DTYPE = np.dtype(("<f4", (4, 4)))
 
 
 #
@@ -446,6 +604,7 @@ class Draw3dMaterial(BaseResource):
                         (*color_tint, 1.0),
                         metalness_tint,
                         roughness_tint,
+                        (0.0, 0.0),  # padding
                     ),
                 ],
                 dtype=TINT_BUFFER_DTYPE,
@@ -484,12 +643,15 @@ class Draw3dMaterial(BaseResource):
     def _on_dispose(self) -> None:
         if descriptor_set := getattr(self, "descriptor_set", None):
             descriptor_set.dispose()
+        if tint_buffer := getattr(self, "tint_buffer", None):
+            tint_buffer.dispose()
 
 
 TINT_BUFFER_DTYPE = np.dtype(
     [
         ("color", np.float32, 4),
-        ("metalness", np.float32, 1),
-        ("roughness", np.float32, 1),
+        ("metalness", np.float32),
+        ("roughness", np.float32),
+        ("_pad0", np.float32, 2),
     ]
 )

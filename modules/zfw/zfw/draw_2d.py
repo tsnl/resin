@@ -278,7 +278,10 @@ class Draw2dRenderer(BaseResource):
         self._linear_sampler.dispose()
 
     def _upload_image_data(self, gpu_image: GpuImage, data: np.ndarray) -> None:
-        """Upload image data to GPU using a synchronous transfer."""
+        """
+        Upload image data to GPU using a synchronous transfer.
+        """
+
         staging_buf = GpuBuffer(
             device=self.gpu_device,
             usages=["staging", "copy-src"],

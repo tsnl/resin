@@ -283,6 +283,10 @@ __all__ = [
     "VkSemaphore",
     "VkSemaphoreCreateInfo",
     "VkShaderModule",
+    "VkVertexInputAttributeDescription",
+    "VkVertexInputBindingDescription",
+    "VK_VERTEX_INPUT_RATE_VERTEX",
+    "VK_VERTEX_INPUT_RATE_INSTANCE",
     "VkShaderModule",
     "VkShaderModuleCreateInfo",
     "VkStencilOpState",
@@ -608,6 +612,8 @@ from vulkan import (
     VkSubmitInfo,
     VkSurfaceFormatKHR,
     VkSwapchainCreateInfoKHR,
+    VkVertexInputAttributeDescription,
+    VkVertexInputBindingDescription,
     VkViewport,
     VkWriteDescriptorSet,
     vkAllocateCommandBuffers,
@@ -994,6 +1000,10 @@ VK_FORMAT_ASTC_12x10_UNORM_BLOCK: VkFormat = 181
 VK_FORMAT_ASTC_12x10_SRGB_BLOCK: VkFormat = 182
 VK_FORMAT_ASTC_12x12_UNORM_BLOCK: VkFormat = 183
 VK_FORMAT_ASTC_12x12_SRGB_BLOCK: VkFormat = 184
+
+type VkVertexInputRate = int
+VK_VERTEX_INPUT_RATE_VERTEX: VkVertexInputRate = 0
+VK_VERTEX_INPUT_RATE_INSTANCE: VkVertexInputRate = 1
 
 type VkColorComponentFlags = int
 

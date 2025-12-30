@@ -107,5 +107,104 @@ def test_image_roundtrip():
     assert np.array_equal(data0, data1)
 
 
+# =============================================================================
+# GpuBufferMeta tests
+# =============================================================================
+
+
+def test_buffer_meta_trivial_dtype():
+    """
+    Test GpuBufferMeta with trivial (scalar) dtypes like float32, int32.
+    """
+    # float32: 4 bytes per element
+    meta_f32 = GpuBufferMeta(element_count=10, element_dtype=np.float32)
+    assert meta_f32.element_count == 10
+    assert meta_f32.element_dtype == np.dtype(np.float32)
+    assert meta_f32.element_size == 4
+    assert meta_f32.size == 40
+
+    # int32: 4 bytes per element
+    meta_i32 = GpuBufferMeta(element_count=5, element_dtype=np.int32)
+    assert meta_i32.element_count == 5
+    assert meta_i32.element_dtype == np.dtype(np.int32)
+    assert meta_i32.element_size == 4
+    assert meta_i32.size == 20
+
+    # float64: 8 bytes per element
+    meta_f64 = GpuBufferMeta(element_count=3, element_dtype=np.float64)
+    assert meta_f64.element_count == 3
+    assert meta_f64.element_dtype == np.dtype(np.float64)
+    assert meta_f64.element_size == 8
+    assert meta_f64.size == 24
+
+
+def test_buffer_meta_structured_dtype():
+    """
+    Test GpuBufferMeta with structured dtypes (named fields).
+
+    Structured dtypes are common for vertex buffers with multiple attributes
+    like position, normal, texcoord packed together.
+    """
+    # Vertex dtype with position (3 floats), normal (3 floats), texcoord (2 floats)
+    # Total: 8 floats = 32 bytes per vertex
+    vertex_dtype = np.dtype(
+        [
+            ("position", np.float32, 3),
+            ("normal", np.float32, 3),
+            ("texcoord", np.float32, 2),
+        ]
+    )
+
+    meta = GpuBufferMeta(element_count=100, element_dtype=vertex_dtype)
+    assert meta.element_count == 100
+    assert meta.element_dtype == vertex_dtype
+    assert meta.element_size == 32
+    assert meta.size == 3200
+
+    # Verify from_array works correctly with structured dtype
+    vertices = np.zeros(100, dtype=vertex_dtype)
+    meta_from_arr = GpuBufferMeta.from_array(vertices)
+    assert meta_from_arr.element_count == 100
+    assert meta_from_arr.element_dtype == vertex_dtype
+    assert meta_from_arr.element_size == 32
+    assert meta_from_arr.size == 3200
+
+
+def test_buffer_meta_subarray_dtype():
+    """
+    Test that GpuBufferMeta rejects subarray dtypes.
+
+    Subarray dtypes like ('<f4', (4, 4)) have surprising behavior in numpy:
+    - When you create an array with `np.zeros(n, dtype=subarray_dtype)`, numpy
+      expands the shape to include the subarray dimensions.
+    - The resulting array's .dtype is the BASE dtype (e.g., float32), not the
+      subarray dtype.
+
+    Because of this, GpuBufferMeta rejects subarray dtypes. Use flat dtypes
+    (e.g., float32) and handle shaping at a higher level.
+    """
+    from zfw.excepts import LogicError
+
+    # 4x4 float32 matrix dtype: 16 floats = 64 bytes per matrix
+    mat4x4_dtype = np.dtype(("<f4", (4, 4)))
+
+    # Verify the dtype properties that make it problematic
+    assert mat4x4_dtype.ndim == 2  # This is a subarray dtype
+    assert mat4x4_dtype.itemsize == 64
+    assert mat4x4_dtype.base == np.dtype(np.float32)
+    assert mat4x4_dtype.shape == (4, 4)
+
+    # GpuBufferMeta should reject this dtype
+    with pytest.raises(LogicError, match="does not support subarray dtypes"):
+        GpuBufferMeta(element_count=10, element_dtype=mat4x4_dtype)
+
+    # Demonstrate the correct alternative: use flat float32
+    # For 10 matrices of 4x4 floats, use 160 float32 elements
+    meta = GpuBufferMeta(element_count=160, element_dtype=np.float32)
+    assert meta.element_count == 160
+    assert meta.element_size == 4
+    assert meta.size == 640  # Same total size as 10 matrices
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
