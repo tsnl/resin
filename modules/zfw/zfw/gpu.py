@@ -82,7 +82,9 @@ from .typed_vulkan import (
     VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
     VK_DESCRIPTOR_TYPE_SAMPLER,
     VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
     VK_FENCE_CREATE_SIGNALED_BIT,
     VK_FILTER_LINEAR,
     VK_FILTER_NEAREST,
@@ -111,6 +113,8 @@ from .typed_vulkan import (
     VK_IMAGE_USAGE_STORAGE_BIT,
     VK_IMAGE_USAGE_TRANSFER_DST_BIT,
     VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    VK_INDEX_TYPE_UINT16,
+    VK_INDEX_TYPE_UINT32,
     VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
     VK_LOGIC_OP_COPY,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -259,12 +263,15 @@ from .typed_vulkan import (
     vkBindImageMemory,
     vkCmdBeginRendering,
     vkCmdBindDescriptorSets,
+    vkCmdBindVertexBuffers,
+    vkCmdBindIndexBuffer,
     vkCmdBindPipeline,
     vkCmdCopyBuffer,
     vkCmdCopyBufferToImage,
     vkCmdCopyImage,
     vkCmdCopyImageToBuffer,
     vkCmdDraw,
+    vkCmdDrawIndexed,
     vkCmdEndRendering,
     vkCmdPipelineBarrier,
     vkCreateBuffer,
@@ -1847,12 +1854,15 @@ class GpuFence(BaseResource):
 #
 
 
-@dataclass
 class GpuBufferMeta:
     element_count: int
-    element_dtype: npt.DTypeLike
+    element_dtype: np.dtype
 
-    def __post_init__(self):
+    def __init__(self, *, element_count: int, element_dtype: npt.DTypeLike) -> None:
+        super().__init__()
+        self.element_count = element_count
+        self.element_dtype = np.dtype(element_dtype)
+
         if self.size <= 0:
             raise LogicError(
                 f"GpuBufferMeta must have positive size, got {self.size} bytes"
@@ -1864,7 +1874,7 @@ class GpuBufferMeta:
 
     @property
     def element_size(self) -> int:
-        return np.dtype(self.element_dtype).itemsize
+        return self.element_dtype.itemsize
 
     @staticmethod
     def from_array(array: np.ndarray) -> "GpuBufferMeta":
@@ -2055,7 +2065,7 @@ class GpuBuffer(BaseResource):
         self.memory.write(data=data)
 
     def read(self) -> np.ndarray:
-        return self.memory.read(dtype=np.dtype(self.meta.element_dtype))
+        return self.memory.read(dtype=self.meta.element_dtype)
 
 
 #
@@ -3302,21 +3312,15 @@ class GpuRenderPassCommandEncoder(BaseResource):
         self,
         *,
         set_index: int,
-        descriptor_set: GpuDescriptorSet,
-        dynamic_offsets: list[int] | None = None,
+        set_: GpuDescriptorSet,
     ) -> None:
-        self.bind_descriptor_sets(
-            first_set=set_index,
-            sets=[descriptor_set],
-            dynamic_offsets=dynamic_offsets,
-        )
+        self.bind_descriptor_sets(first_set=set_index, sets=[set_])
 
     def bind_descriptor_sets(
         self,
         *,
         first_set: int,
         sets: list[GpuDescriptorSet],
-        dynamic_offsets: list[int] | None = None,
     ) -> None:
         if self.bound_pipeline is None:
             raise LogicError(
@@ -3329,8 +3333,35 @@ class GpuRenderPassCommandEncoder(BaseResource):
             firstSet=first_set,
             descriptorSetCount=len(sets),
             pDescriptorSets=[s.vk_descriptor_set for s in sets],
-            dynamicOffsetCount=(len(dynamic_offsets) if dynamic_offsets else 0),
-            pDynamicOffsets=(dynamic_offsets if dynamic_offsets else None),
+            dynamicOffsetCount=0,
+            pDynamicOffsets=None,
+        )
+
+    def bind_vertex_buffer(self, *, buffer: GpuBuffer, offset: int = 0) -> None:
+        vkCmdBindVertexBuffers(
+            commandBuffer=self.command_encoder.vk_command_buffer,
+            firstBinding=0,
+            bindingCount=1,
+            pBuffers=[buffer.vk_buffer],
+            pOffsets=[offset],
+        )
+
+    def bind_index_buffer(
+        self,
+        *,
+        buffer: GpuBuffer,
+        offset: int = 0,
+    ) -> None:
+        vk_index_type = {
+            np.uint16: VK_INDEX_TYPE_UINT16,
+            np.uint32: VK_INDEX_TYPE_UINT32,
+        }[buffer.meta.element_dtype.type]
+
+        vkCmdBindIndexBuffer(
+            commandBuffer=self.command_encoder.vk_command_buffer,
+            buffer=buffer.vk_buffer,
+            offset=offset,
+            indexType=vk_index_type,
         )
 
     def draw(
@@ -3346,6 +3377,24 @@ class GpuRenderPassCommandEncoder(BaseResource):
             vertexCount=vertex_count,
             instanceCount=instance_count,
             firstVertex=first_vertex,
+            firstInstance=first_instance,
+        )
+
+    def draw_indexed(
+        self,
+        *,
+        index_count: int,
+        first_index: int = 0,
+        vertex_offset: int = 0,
+        instance_count: int = 1,
+        first_instance: int = 0,
+    ) -> None:
+        vkCmdDrawIndexed(
+            commandBuffer=self.command_encoder.vk_command_buffer,
+            indexCount=index_count,
+            instanceCount=instance_count,
+            firstIndex=first_index,
+            vertexOffset=vertex_offset,
             firstInstance=first_instance,
         )
 
@@ -3674,7 +3723,7 @@ class GpuEzBuffer(BaseResource):
         *,
         device: GpuDevice,
         capacity: int,
-        dtype: np.dtype,
+        dtype: npt.DTypeLike,
         usages: list["GpuBufferUsage"],
     ):
         super().__init__(parent_resource=device)
@@ -3744,9 +3793,11 @@ class GpuEzBuffer(BaseResource):
 
         self._length = new_length
 
-    def extend(self, *, values: np.ndarray) -> None:
+    def extend(self, *, values: np.ndarray) -> tuple[int, int]:
         """
         Appends multiple values to the buffer, resizing if necessary.
+
+        Returns an (offset, count) tuple indicating where the new values were added.
         """
 
         assert values.dtype == self.dtype, (
@@ -3757,6 +3808,7 @@ class GpuEzBuffer(BaseResource):
         new_length = old_length + len(values)
         self.resize(new_length=new_length)
         self._data[old_length:new_length] = values
+        return old_length, len(values)
 
     def _make_buffer_pair(self) -> tuple[GpuBuffer, GpuBuffer]:
         staging_buffer = GpuBuffer(
@@ -3788,6 +3840,10 @@ class GpuEzBuffer(BaseResource):
     ):
         """
         Flush the CPU-side data to the GPU device buffer.
+
+        If `command_encoder` is provided, you must submit it manually after this call.
+        If not provided, a temporary command encoder will be created and submitted
+        automatically, blocking until the write is complete.
         """
 
         using_temp_command_encoder = command_encoder is None
@@ -3816,7 +3872,7 @@ class GpuEzBuffer(BaseResource):
             size=write_count * self.dtype.itemsize,
         )
 
-        # If we created a temporary command encoder, submit it now
+        # If we created a temporary command encoder, submit it now.
         if using_temp_command_encoder:
             command_encoder.submit().wait()
 

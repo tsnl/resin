@@ -1716,13 +1716,49 @@ def vkCmdBindDescriptorSets(
     pDynamicOffsets: list[int] | None,
 ) -> None: ...
 
+# VkIndexType
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkIndexType.html
+type VkIndexType = int
+VK_INDEX_TYPE_UINT16: VkIndexType = 0
+VK_INDEX_TYPE_UINT32: VkIndexType = 1
+VK_INDEX_TYPE_UINT8: VkIndexType = 1000265000  # Vulkan 1.4
+VK_INDEX_TYPE_NONE_KHR: VkIndexType = 1000165000  # VK_KHR_acceleration_structure
+
 # vkCmdBindVertexBuffers
-# http://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindVertexBuffers
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindVertexBuffers.html
+def vkCmdBindVertexBuffers(
+    commandBuffer: "VkCommandBuffer",
+    firstBinding: int,
+    bindingCount: int,
+    pBuffers: list[VkBuffer],
+    pOffsets: list[VkDeviceSize],
+) -> None: ...
+
+# vkCmdBindIndexBuffer
+# https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindIndexBuffer.html
+def vkCmdBindIndexBuffer(
+    commandBuffer: "VkCommandBuffer",
+    buffer: VkBuffer,
+    offset: VkDeviceSize,
+    indexType: VkIndexType,
+) -> None: ...
+
+# vkCmdDraw
 def vkCmdDraw(
     commandBuffer: "VkCommandBuffer",
     vertexCount: int,
     instanceCount: int,
     firstVertex: int,
+    firstInstance: int,
+) -> None: ...
+
+# vkCmdDrawIndexed
+def vkCmdDrawIndexed(
+    commandBuffer: "VkCommandBuffer",
+    indexCount: int,
+    instanceCount: int,
+    firstIndex: int,
+    vertexOffset: int,
     firstInstance: int,
 ) -> None: ...
 

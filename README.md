@@ -36,3 +36,20 @@ $ uv run --with zfw -- pyright
 ## Project Structure
 
 -  `modules/` Python packages for libraries, apps, and build tools.
+
+## Conventions
+
+All units conform to the International System of Units (SI). We use meters for distance,
+seconds for time, radians for angles, and so on.
+
+All coordinate systems are **right-handed**.
+
+| Name        | Dim | Units          | Interpretation                                |
+| ----------- | --- | -------------- | --------------------------------------------- |
+| World space | 3D  | Meters         | +Z up, +Y forward, +X right                   |
+| Clip space  | 3D  | NDC, [-1,+1]^3 | +X right, +Y up, -Z forward                   |
+| Image space | 2D  | Pixels         | +Y down (rows), +X right (cols), origin at TL |
+
+**Colors are in linear space using sRGB primaries** unless otherwise noted. APIs 
+explicitly specify when colors are in sRGB space, and we try to convert to linear space
+as early as possible.

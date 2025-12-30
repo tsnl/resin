@@ -224,13 +224,13 @@ class Draw2dRenderer(BaseResource):
                     break
 
         # Create default white image:
-        white_data = np.ones((1, 1, 4), dtype=np.float32)
+        white_data = np.ones((1, 1, 4), dtype="<f4")
         self._default_white_image = GpuImage(
             device=self.gpu_device,
             usages=["texture-binding", "transfer-dst"],
             meta=GpuImageMeta(
                 shape=(1, 1, 4),
-                dtype=np.float32,
+                dtype="<f4",
                 color_space="linear",
             ),
         )
@@ -891,7 +891,7 @@ class Draw2dRenderer(BaseResource):
         self._cached_depth_image = GpuImage(
             device=self.gpu_device,
             usages=["depth-attachment"],
-            meta=GpuImageMeta(shape=(height, width, 1), dtype=np.float32),
+            meta=GpuImageMeta(shape=(height, width, 1), dtype="<f4"),
         )
         return self._cached_depth_image
 
@@ -902,24 +902,24 @@ class Draw2dRenderer(BaseResource):
 
 QUAD_DTYPE = np.dtype(
     [
-        ("dst_xywh_px", np.int32, 4),
-        ("src_xywh_uv", np.float32, 4),
-        ("depth", np.float32),
-        ("border_thickness_t", np.int32),
-        ("border_thickness_r", np.int32),
-        ("border_thickness_b", np.int32),
-        ("border_thickness_l", np.int32),
-        ("_pad0", np.int32),
-        ("_pad1", np.int32),
-        ("_pad2", np.int32),
-        ("color", np.float32, 4),
-        ("border_color", np.float32, 4),
+        ("dst_xywh_px", "<i4", 4),
+        ("src_xywh_uv", "<f4", 4),
+        ("depth", "<f4"),
+        ("border_thickness_t", "<i4"),
+        ("border_thickness_r", "<i4"),
+        ("border_thickness_b", "<i4"),
+        ("border_thickness_l", "<i4"),
+        ("_pad0", "<i4"),
+        ("_pad1", "<i4"),
+        ("_pad2", "<i4"),
+        ("color", "<f4", 4),
+        ("border_color", "<f4", 4),
     ]
 )
 
 UNIFORM_DTYPE = np.dtype(
     [
-        ("framebuffer_size_px", np.int32, 2),
+        ("framebuffer_size_px", "<i4", 2),
         ("quad_count", np.uint32),
         ("_rsv0", np.uint32),
     ]
@@ -1128,9 +1128,7 @@ class QuadBatch(BaseResource):
         if self._quad_count == 0:
             return
 
-        render_pass.bind_descriptor_set(
-            set_index=0, descriptor_set=self._descriptor_set
-        )
+        render_pass.bind_descriptor_set(set_index=0, set_=self._descriptor_set)
         render_pass.draw(vertex_count=6, instance_count=self._quad_count)
 
 
@@ -1200,13 +1198,13 @@ class GlyphAtlas(BaseResource):
             usages=["texture-binding", "transfer-dst"],
             meta=GpuImageMeta(
                 shape=(page_size, page_size, 1),
-                dtype=np.float32,
+                dtype="<f4",
                 color_space="linear",
             ),
         )
 
         # CPU-side pixel data:
-        self._pixel_data = np.zeros((page_size, page_size, 1), dtype=np.float32)
+        self._pixel_data = np.zeros((page_size, page_size, 1), dtype="<f4")
 
         # Glyph cache: (font, glyph_index, size, weight) -> GlyphEntry
         self._glyph_cache = {}
@@ -1266,7 +1264,7 @@ class GlyphAtlas(BaseResource):
             buffer_array = buffer_array[:, :w]
 
         # Normalize to float:
-        glyph_data = buffer_array.astype(np.float32) / 255.0
+        glyph_data = buffer_array.astype("<f4") / 255.0
 
         # Allocate in atlas:
         entry = self._allocate_glyph(
@@ -1342,7 +1340,7 @@ class GlyphAtlas(BaseResource):
                 usages=["staging", "copy-src"],
                 meta=GpuBufferMeta(
                     element_count=self.page_size * self.page_size,
-                    element_dtype=np.float32,
+                    element_dtype="<f4",
                 ),
             )
 
