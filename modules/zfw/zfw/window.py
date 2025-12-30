@@ -31,7 +31,9 @@ LOG = logger(__name__)
 
 
 type KeyCallback = Callable[[Key | None, int, ButtonAction, list[KeyModifier]], None]
-type MouseButtonCallback = Callable[[MouseButton, ButtonAction, list[KeyModifier]], None]
+type MouseButtonCallback = Callable[
+    [MouseButton, ButtonAction, list[KeyModifier]], None
+]
 type CursorPosCallback = Callable[[float, float], None]
 type FramebufferSizeCallback = Callable[[int, int], None]
 

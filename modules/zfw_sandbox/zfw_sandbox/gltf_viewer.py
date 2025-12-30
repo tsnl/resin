@@ -333,10 +333,10 @@ class GltfViewerWidget(zfw.GuiWidget):
         LOG.info(f"Loading environment: {env_name}")
         env_pixels = zfw.load_rgba_image(env_path)
         env_height, env_width = env_pixels.shape[:2]
-        
+
         # Convert from float32 linear to uint8 for GPU upload
         env_pixels_u8 = (np.clip(env_pixels, 0.0, 1.0) * 255).astype(np.uint8)
-        
+
         self._environment_map = zfw.GpuImage(
             device=self._gui_window.gpu_device,
             usages=["texture-binding", "transfer-dst"],
@@ -406,7 +406,9 @@ class GltfViewerWidget(zfw.GuiWidget):
 
         return super()._receive_mouse_button_action(button, action, click_handled)
 
-    def _receive_mouse_position_change(self, mouse_x_dip: int, mouse_y_dip: int) -> None:
+    def _receive_mouse_position_change(
+        self, mouse_x_dip: int, mouse_y_dip: int
+    ) -> None:
         # Handle mouse look when captured
         if self._mouse_captured:
             dx = mouse_x_dip - self._last_mouse_x

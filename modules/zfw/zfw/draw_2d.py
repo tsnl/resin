@@ -777,7 +777,7 @@ class Draw2dRenderer(BaseResource):
         clear_color: Literal["black", "transparent"] | None = "black",
     ) -> None:
         """Render all queued quads to the given target image.
-        
+
         Args:
             command_encoder: The command encoder to use.
             target: The target image to render to.

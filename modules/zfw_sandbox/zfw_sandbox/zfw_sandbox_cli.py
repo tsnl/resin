@@ -62,8 +62,12 @@ class MainMenuWidget(zfw.GuiWidget):
             if self._gltf_viewer_widget is None:
                 # Get paths for models and environments
                 workspace_root = Path(__file__).parent.parent.parent.parent
-                models_path = workspace_root / "tests_data" / "glTF-Sample-Assets" / "Models"
-                environments_path = workspace_root / "tests_data" / "glTF-Sample-Environments"
+                models_path = (
+                    workspace_root / "tests_data" / "glTF-Sample-Assets" / "Models"
+                )
+                environments_path = (
+                    workspace_root / "tests_data" / "glTF-Sample-Environments"
+                )
                 self._gltf_viewer_widget = GltfViewerWidget(
                     gui_window=gui_window,
                     models_path=models_path,
