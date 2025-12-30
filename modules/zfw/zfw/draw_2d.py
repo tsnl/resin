@@ -774,8 +774,16 @@ class Draw2dRenderer(BaseResource):
         *,
         command_encoder: GpuCommandEncoder,
         target: GpuImage,
+        clear_color: Literal["black", "transparent"] | None = "black",
     ) -> None:
-        """Render all queued quads to the given target image."""
+        """Render all queued quads to the given target image.
+        
+        Args:
+            command_encoder: The command encoder to use.
+            target: The target image to render to.
+            clear_color: The color to clear the target to before rendering.
+                If None, the target is not cleared (renders on top of existing content).
+        """
         if self._quad_count == 0:
             return
 
@@ -812,7 +820,7 @@ class Draw2dRenderer(BaseResource):
         with command_encoder.render(
             color_attachment=target,
             depth_attachment=None,
-            clear_color="black",
+            clear_color=clear_color,
         ) as render_pass:
             # Draw RGBA batches:
             render_pass.bind_pipeline(pipeline=rgba_pipeline)

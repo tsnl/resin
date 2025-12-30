@@ -27,24 +27,23 @@ Widget stacking order:
 """
 
 __all__ = [
-    "GuiContext",
-    "GuiCursorMode",
-    "GuiTheme",
-    "GuiWidget",
-    "GuiWidgetStyle",
     "GuiWindow",
+    "GuiWidget",
+    "GuiTheme",
+    "GuiWidgetStyle",
+    "GuiCursorMode",
 ]
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Callable
 
+import numpy as np
 from kiwisolver import (
     Solver as KiwiSolver,
     Variable as KiwiVariable,
     Expression as KiwiExpression,
     Term as KiwiTerm,
 )
-import glfw
 
 from .basic import (
     BaseResource,
@@ -52,18 +51,23 @@ from .basic import (
     MouseButton,
     ButtonAction,
     Font,
-    KeyModifier,
     Key,
+    KeyModifier,
     HorizontalAlignment,
     VerticalAlignment,
     JsonObject,
     LogicError,
 )
-from .draw_2d import Draw2dRenderer
-from .excepts import GlfwError
-from .gpu import GpuContext, GpuDevice, GpuImage, GpuSurface, GpuSwapChain
-from .typed_vulkan import raw_ffi
-
+from .draw_2d import Draw2dContext, Draw2dRenderer
+from .draw_3d import (
+    Draw3dContext,
+    Draw3dRenderer,
+    Draw3dCameraIntrinsics,
+    Draw3dGeometry,
+    Draw3dMaterial,
+)
+from .gpu import GpuContext, GpuDevice, GpuImage, GpuSwapChain, GpuCommandEncoder
+from .window import Window, WindowContext
 
 from .events import EventHub
 
@@ -72,6 +76,7 @@ LOG = logger(__name__)
 
 
 type GuiImageLayout = Literal["fit", "crop", "stretch"]
+type GuiCursorMode = Literal["cursor", "joystick"]
 
 
 def _compute_image_src_xy_wh(
@@ -274,209 +279,116 @@ def _eval_style(
     return GuiWidgetStyle(**d)
 
 
-class GuiContext(BaseResource):
-    def __init__(
-        self,
-        *,
-        gpu_context: GpuContext,
-        parent_resource: BaseResource | None = None,
-    ) -> None:
-        super().__init__(parent_resource=parent_resource)
-
-        self._gpu_context = gpu_context
-        self._kiwi_solver = KiwiSolver()
-
-        ok = glfw.init()
-        if not ok:
-            raise GlfwError("Failed to initialize GLFW")
-
-    def _on_dispose(self) -> None:
-        glfw.terminate()
-
-
-type GuiCursorMode = Literal["cursor", "joystick"]
-
-
 class GuiWindow(BaseResource):
-    _width_dip: int
-    _height_dip: int
-    _width_px: int
-    _height_px: int
-    _title: str
-    _theme: GuiTheme
-    _glfw_window_handle: glfw._GLFWwindow
-    _gpu_surface: GpuSurface
-    _gpu_device: GpuDevice | None
+    """
+    A GUI window that wraps a Window and provides 2D/3D rendering plus widget management.
+
+    Takes a Window and GpuDevice as arguments instead of managing GLFW directly.
+    """
+
+    _window: Window
+    _gpu_device: GpuDevice
     _gpu_swap_chain: GpuSwapChain | None
     _swapchain_image_count: int
+    _theme: GuiTheme
     _last_mouse_x: float
     _last_mouse_y: float
-    _gui_context: GuiContext
     _central_widget: "GuiWidget | None"
     _central_widget_stack: list["GuiWidget"]
     _kiwi_solver: KiwiSolver
 
+    # Renderers
+    _draw_2d_context: Draw2dContext
+    _draw_2d_renderer: Draw2dRenderer
+    _draw_3d_context: Draw3dContext
+    _draw_3d_renderer: Draw3dRenderer
+
+    # 3D viewport camera
+    _camera_transform: np.ndarray | None
+    _camera_intrinsics: Draw3dCameraIntrinsics | None
+    _environment_map: GpuImage | None
+
+    # 3D mesh collection for current frame
+    _meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]
+
+    # Key event callback
+    _key_event_callback: (
+        Callable[[Key | None, int, ButtonAction, list[KeyModifier]], None] | None
+    )
+
+    # Frame timing
+    _last_frame_time: float
+
     def __init__(
         self,
         *,
-        gui_context: GuiContext,
-        width_dip: int,
-        height_dip: int,
-        title: str,
-        resizable: bool = True,
+        window: Window,
+        gpu_context: GpuContext,
+        gpu_device: GpuDevice,
+        draw_2d_context: Draw2dContext,
+        draw_3d_context: Draw3dContext,
+        swapchain_image_count: int = 3,
         theme: GuiTheme | None = None,
     ) -> None:
-        super().__init__(parent_resource=gui_context)
+        super().__init__(parent_resource=window)
 
-        self._gui_context = gui_context
-        self._width_dip = width_dip
-        self._height_dip = height_dip
-        self._width_px = 0
-        self._height_px = 0
-        self._min_width_dip = 640
-        self._min_height_dip = 540
-        self._title = title
-        self._resizable = resizable
+        self._window = window
+        self._gpu_device = gpu_device
         self._theme = theme or _DEFAULT_THEME
+        self._swapchain_image_count = swapchain_image_count
 
-        self._glfw_window_handle = self._new_glfw_window()
-        self._gpu_surface = self._new_gpu_surface()
-        self._gpu_device = None
-        self._gpu_swap_chain = None
-        self._swapchain_image_count = 3
+        self._last_mouse_x = 0.0
+        self._last_mouse_y = 0.0
 
-        self._last_mouse_x: float = 0.0
-        self._last_mouse_y: float = 0.0
-
-        # Create central widget that occupies the full window
+        # Create central widget stack
         self._central_widget = None
         self._central_widget_stack = []
 
         # For Kiwi solver: window size variables
+        self._kiwi_solver = KiwiSolver()
         self._w_var = KiwiVariable("window_width")
         self._h_var = KiwiVariable("window_height")
 
-    def _new_glfw_window(self) -> glfw._GLFWwindow:
-        # Create GLFW window:
-        glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
-        glfw.window_hint(glfw.RESIZABLE, int(self._resizable))
-        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-        glfw_window = glfw.create_window(
-            width=self._width_dip,
-            height=self._height_dip,
-            title=self._title,
-            monitor=None,
-            share=None,
-        )
-        if not glfw_window:
-            raise GlfwError("Failed to create GLFW window")
-
-        # Set the minimium size to 640x540 dip:
-        glfw.set_window_size_limits(
-            window=glfw_window,
-            minwidth=max(self._min_width_dip, self._width_dip),
-            minheight=max(self._min_height_dip, self._height_dip),
-            maxwidth=glfw.DONT_CARE,
-            maxheight=glfw.DONT_CARE,
-        )
-
-        # If raw mouse motion is supported, enable it by default.
-        if glfw.raw_mouse_motion_supported():
-            glfw.set_input_mode(
-                glfw_window,
-                glfw.RAW_MOUSE_MOTION,
-                glfw.TRUE,
-            )
-        else:
-            LOG.warning(
-                "Raw mouse motion is not supported on this window: 'joystick' cursor "
-                "mode may be less accurate. See GLFW documentation for details.",
-            )
-
-        # Bind event handlers:
-        glfw.set_key_callback(
-            window=glfw_window,
-            cbfun=self._on_glfw_key_event,
-        )
-        glfw.set_mouse_button_callback(
-            window=glfw_window,
-            cbfun=self._on_glfw_mouse_button_event,
-        )
-        glfw.set_cursor_pos_callback(
-            window=glfw_window,
-            cbfun=self._on_glfw_cursor_pos_event,
-        )
-        glfw.set_framebuffer_size_callback(
-            window=glfw_window,
-            cbfun=self._on_framebuffer_resize_event,
-        )
-
-        # Update window sizes:
-        width_px, height_px = glfw.get_framebuffer_size(glfw_window)
-        self._width_px = width_px
-        self._height_px = height_px
-
-        # Return the created GLFW window handle
-        return glfw_window
-
-    def _new_gpu_surface(self) -> GpuSurface:
-        if not self._gui_context._gpu_context.enable_present_support:
-            raise RuntimeError("GPU context does not support presentation")
-
-        surface_ptr = raw_ffi.new("VkSurfaceKHR[1]")
-        result = glfw.create_window_surface(
-            instance=self._gui_context._gpu_context.vk_instance,
-            window=self._glfw_window_handle,
-            allocator=None,
-            surface=surface_ptr,
-        )
-        if result != 0:
-            raise RuntimeError(f"Failed to create window surface: VkResult: {result}")
-        width, height = glfw.get_framebuffer_size(self._glfw_window_handle)
-        return GpuSurface(
-            context=self._gui_context._gpu_context,
-            parent_resource=self,
-            vk_surface=surface_ptr[0],
-            width=width,
-            height=height,
-        )
-
-    def _recreate_gpu_surface(self) -> None:
-        """Recreate the GPU surface after a window resize event."""
-        # Dispose the old surface
-        self._gpu_surface.dispose()
-        # Create a new surface with the current framebuffer size
-        self._gpu_surface = self._new_gpu_surface()
-
-    #
-    # Resource disposal:
-    #
-
-    def _on_dispose(self) -> None:
-        if self._gpu_swap_chain is not None:
-            self._gpu_swap_chain.dispose()
-        super()._on_dispose()
-        glfw.destroy_window(self._glfw_window_handle)
-
-    #
-    # Swapchain management, setting a GPU device:
-    #
-
-    def set_gpu_device(
-        self,
-        gpu_device: GpuDevice,
-        swapchain_image_count: int = 3,
-    ) -> None:
-        """Set the GPU device and create the swapchain."""
-        self._gpu_device = gpu_device
-        self._swapchain_image_count = swapchain_image_count
+        # Create swapchain
+        self._gpu_swap_chain = None
         self._create_swapchain()
+
+        # Create 2D renderer
+        self._draw_2d_context = draw_2d_context
+        scale_x, _ = window.content_scale
+        self._draw_2d_renderer = Draw2dRenderer(
+            context=draw_2d_context,
+            device=gpu_device,
+            scale=scale_x,
+        )
+
+        # Create 3D renderer
+        self._draw_3d_context = draw_3d_context
+        self._draw_3d_renderer = Draw3dRenderer(
+            context=draw_3d_context,
+            gpu_device=gpu_device,
+        )
+
+        # 3D camera state
+        self._camera_transform = None
+        self._camera_intrinsics = None
+        self._environment_map = None
+        self._meshes = {}
+
+        # Key event callback
+        self._key_event_callback = None
+
+        # Frame timing
+        self._last_frame_time = 0.0
+
+        # Set up window callbacks
+        self._window.set_key_callback(self._on_key_event)
+        self._window.set_mouse_button_callback(self._on_mouse_button_event)
+        self._window.set_cursor_pos_callback(self._on_cursor_pos_event)
+        self._window.set_framebuffer_size_callback(self._on_framebuffer_resize_event)
 
     def _create_swapchain(self) -> None:
         """Create the GPU swapchain."""
-        if self._gpu_device is None:
-            return
-
         # Dispose old swapchain if it exists
         if self._gpu_swap_chain is not None:
             self._gpu_device.wait_idle()
@@ -485,9 +397,58 @@ class GuiWindow(BaseResource):
         # Create new swapchain
         self._gpu_swap_chain = GpuSwapChain(
             device=self._gpu_device,
-            surface=self._gpu_surface,
+            surface=self._window.gpu_surface,
             image_count=self._swapchain_image_count,
         )
+
+    #
+    # Resource disposal:
+    #
+
+    def _on_dispose(self) -> None:
+        if self._draw_3d_renderer is not None:
+            self._draw_3d_renderer.dispose()
+        if self._draw_2d_renderer is not None:
+            self._draw_2d_renderer.dispose()
+        if self._gpu_swap_chain is not None:
+            self._gpu_swap_chain.dispose()
+        super()._on_dispose()
+
+    #
+    # Properties:
+    #
+
+    @property
+    def window(self) -> Window:
+        return self._window
+
+    @property
+    def gpu_device(self) -> GpuDevice:
+        return self._gpu_device
+
+    @property
+    def draw_2d_renderer(self) -> Draw2dRenderer:
+        return self._draw_2d_renderer
+
+    @property
+    def draw_3d_renderer(self) -> Draw3dRenderer:
+        return self._draw_3d_renderer
+
+    @property
+    def width_dip(self) -> int:
+        return self._window.width_dip
+
+    @property
+    def height_dip(self) -> int:
+        return self._window.height_dip
+
+    @property
+    def content_scale(self) -> tuple[float, float]:
+        return self._window.content_scale
+
+    @property
+    def theme(self) -> GuiTheme:
+        return self._theme
 
     #
     # Central widget management:
@@ -520,43 +481,79 @@ class GuiWindow(BaseResource):
             self._central_widget = None
 
     #
-    # Window management:
+    # Window management (delegated to Window):
     #
 
     def should_close(self) -> bool:
-        return glfw.window_should_close(self._glfw_window_handle)
+        return self._window.should_close()
 
-    def show(self):
-        glfw.show_window(self._glfw_window_handle)
+    def show(self) -> None:
+        self._window.show()
 
-    def hide(self):
-        glfw.hide_window(self._glfw_window_handle)
+    def hide(self) -> None:
+        self._window.hide()
 
-    def set_cursor_mode(self, cursor_mode: "GuiCursorMode"):
+    def set_cursor_mode(self, cursor_mode: GuiCursorMode) -> None:
         """
         Sets the mouse input mode for the window.
         - "cursor": cursor input, mouse movement handled by the OS.
         - "joystick": cursor hidden, mouse movement captured by the window.
         """
-        match cursor_mode:
-            case "joystick":
-                glfw.set_input_mode(
-                    self._glfw_window_handle,
-                    glfw.CURSOR,
-                    glfw.CURSOR_DISABLED,
-                )
-            case "cursor":
-                glfw.set_input_mode(
-                    self._glfw_window_handle,
-                    glfw.CURSOR,
-                    glfw.CURSOR_NORMAL,
-                )
-            case _:
-                raise ValueError(f"Invalid cursor mode: {cursor_mode!r}")
+        self._window.set_cursor_mode(cursor_mode)
 
-    @property
-    def content_scale(self) -> tuple[float, float]:
-        return glfw.get_window_content_scale(self._glfw_window_handle)
+    @staticmethod
+    def poll_events() -> None:
+        Window.poll_events()
+
+    #
+    # 3D viewport camera and rendering:
+    #
+
+    def set_3d_camera(
+        self,
+        transform: np.ndarray,
+        intrinsics: Draw3dCameraIntrinsics,
+    ) -> None:
+        """Set the camera for 3D viewport rendering."""
+        self._camera_transform = transform
+        self._camera_intrinsics = intrinsics
+
+    def set_environment_map(self, environment_map: GpuImage | None) -> None:
+        """Set the environment map for IBL lighting."""
+        self._environment_map = environment_map
+
+    def add_3d_mesh(
+        self,
+        geometry: Draw3dGeometry,
+        material: Draw3dMaterial,
+        model_matrices: np.ndarray,
+    ) -> None:
+        """
+        Add mesh instances to render in the 3D viewport.
+
+        :param geometry: The geometry to render.
+        :param material: The material to apply.
+        :param model_matrices: A (N, 4, 4) array of model transforms in row-major layout.
+        """
+        key = (geometry, material)
+        if key in self._meshes:
+            # Concatenate with existing matrices
+            self._meshes[key] = np.concatenate(
+                [self._meshes[key], model_matrices], axis=0
+            )
+        else:
+            self._meshes[key] = model_matrices
+
+    def clear_3d_meshes(self) -> None:
+        """Clear all 3D meshes for the next frame."""
+        self._meshes = {}
+
+    def set_key_event_callback(
+        self,
+        callback: "Callable[[Key | None, int, ButtonAction, list[KeyModifier]], None] | None",
+    ) -> None:
+        """Set a callback for key events."""
+        self._key_event_callback = callback
 
     #
     # Phase 1: update style:
@@ -571,18 +568,18 @@ class GuiWindow(BaseResource):
     # Phase 2: update layout
     #
 
-    def update_layout(self):
+    def update_layout(self) -> None:
         if self._central_widget is None:
             return
 
-        solver = self._gui_context._kiwi_solver
+        solver = self._kiwi_solver
 
         solver.reset()
 
         solver.addEditVariable(self._w_var, "strong")
         solver.addEditVariable(self._h_var, "strong")
-        solver.suggestValue(self._w_var, self._width_dip)
-        solver.suggestValue(self._h_var, self._height_dip)
+        solver.suggestValue(self._w_var, self._window.width_dip)
+        solver.suggestValue(self._h_var, self._window.height_dip)
 
         self._central_widget._update_layout_constraints(
             solver,
@@ -598,36 +595,26 @@ class GuiWindow(BaseResource):
     # Phase 3: input events:
     #
 
-    @staticmethod
-    def poll_events():
-        glfw.poll_events()
-
-    def _on_glfw_key_event(
+    def _on_key_event(
         self,
-        _glfw_window_handle: glfw._GLFWwindow,
-        key: int,
+        key: Key | None,
         scancode: int,
-        action: int,
-        mods: int,
+        action: ButtonAction,
+        mods: list[KeyModifier],
     ) -> None:
-        if not self._central_widget:
-            return
+        if self._key_event_callback is not None:
+            self._key_event_callback(key, scancode, action, mods)
 
         # TODO: Handle key events in GuiWidget if needed
-        pass
 
-    def _on_glfw_mouse_button_event(
+    def _on_mouse_button_event(
         self,
-        _glfw_window_handle: glfw._GLFWwindow,
-        glfw_button: int,
-        glfw_action: int,
-        mods: int,
+        button: MouseButton,
+        action: ButtonAction,
+        mods: list[KeyModifier],
     ) -> None:
         if not self._central_widget:
             return
-
-        button = _decode_glfw_mouse_button(glfw_button)
-        action = _decode_glfw_action(glfw_action)
 
         self._central_widget._receive_mouse_button_action(
             button=button,
@@ -635,9 +622,8 @@ class GuiWindow(BaseResource):
             click_handled=False,
         )
 
-    def _on_glfw_cursor_pos_event(
+    def _on_cursor_pos_event(
         self,
-        _glfw_window_handle: glfw._GLFWwindow,
         x: float,
         y: float,
     ) -> None:
@@ -656,58 +642,111 @@ class GuiWindow(BaseResource):
 
     def _on_framebuffer_resize_event(
         self,
-        _glfw_window_handle: glfw._GLFWwindow,
         width_px: int,
         height_px: int,
-    ):
-        xs, ys = glfw.get_window_content_scale(self._glfw_window_handle)
-        self._width_dip = int(round(width_px / xs))
-        self._height_dip = int(round(height_px / ys))
-        self._width_px = width_px
-        self._height_px = height_px
-        self._handle_resize_for_gpu_surface()
-
-    def _handle_resize_for_gpu_surface(self) -> bool:
-        """
-        Check if the window was resized and recreate the GPU surface if needed.
-
-        Returns True if a resize occurred and the surface was recreated, False otherwise.
-        """
-        # Get current framebuffer size
-        current_width = self._gpu_surface.width
-        current_height = self._gpu_surface.height
-        framebuffer_width = self._width_px
-        framebuffer_height = self._height_px
-
-        # Ignore resize if dimensions are zero (window minimized or not yet sized)
-        if framebuffer_width <= 0 or framebuffer_height <= 0:
-            return False
-
-        # Check if size has changed
-        if current_width != framebuffer_width or current_height != framebuffer_height:
-            # Recreate the GPU surface with the new size
-            self._recreate_gpu_surface()
-            # Recreate the swapchain if device is set
-            if self._gpu_device is not None:
-                self._create_swapchain()
-            return True
-
-        return False
+    ) -> None:
+        # Handle resize for GPU surface
+        if self._window.handle_resize_for_gpu_surface():
+            # Recreate swapchain if surface was recreated
+            self._create_swapchain()
 
     #
-    # Render:
+    # Update and Render:
     #
 
-    def render(self, renderer: Draw2dRenderer) -> None:
-        if self._central_widget is None:
+    def update(self) -> None:
+        """Update style, layout, poll input events, and call widget update hooks."""
+        import time
+
+        # Compute delta time
+        current_time = time.perf_counter()
+        if self._last_frame_time == 0.0:
+            dt = 0.0
+        else:
+            dt = current_time - self._last_frame_time
+        self._last_frame_time = current_time
+
+        # This specific update order is important, and is documented in the docstring
+        # for `GuiWidget`.
+
+        # Update style:
+        self.update_style()
+
+        # Update layout:
+        self.update_layout()
+
+        # Receive input events:
+        self.poll_events()
+
+        # Call widget update hooks:
+        if self._central_widget is not None:
+            self._central_widget._update(dt)
+
+        # Ready to 'render()'.
+
+    def render(self) -> None:
+        """Render the GUI window with 3D viewport and 2D widgets."""
+        if self._gpu_swap_chain is None:
             return
-        self._central_widget._render(renderer)
+
+        with self._gpu_swap_chain.present() as target:
+            command_encoder = GpuCommandEncoder(
+                device=self._gpu_device,
+                queue_type="graphics",
+            )
+
+            # Render 3D viewport first (behind GUI widgets)
+            if (
+                self._camera_transform is not None
+                and self._camera_intrinsics is not None
+            ):
+                self._draw_3d_renderer.draw(
+                    command_encoder=command_encoder,
+                    meshes=self._meshes,
+                    camera_transform=self._camera_transform,
+                    camera_intrinsics=self._camera_intrinsics,
+                    target=target.image,
+                    environment_map=self._environment_map,
+                )
+
+                # Render 2D GUI on top of 3D (without clearing)
+                self._draw_2d_renderer.clear()
+                if self._central_widget is not None:
+                    self._central_widget._render(self._draw_2d_renderer)
+                self._draw_2d_renderer.draw(
+                    command_encoder=command_encoder,
+                    target=target.image,
+                    clear_color=None,  # Don't clear, render on top of 3D
+                )
+            else:
+                # No 3D rendering, just render 2D GUI with clearing
+                self._draw_2d_renderer.clear()
+                if self._central_widget is not None:
+                    self._central_widget._render(self._draw_2d_renderer)
+                self._draw_2d_renderer.draw(
+                    command_encoder=command_encoder,
+                    target=target.image,
+                )
+
+            # Transition image for presentation
+            command_encoder.transition_image_layout(
+                image=target.image,
+                layout=(
+                    "present-src"
+                    if self._gpu_device.present_support_enabled
+                    else "transfer-src-optimal"
+                ),
+            )
+            command_encoder.submit(
+                fence=target.render_done_fence,
+                wait_semaphores=[target.render_wait_semaphore],
+                signal_semaphores=[target.render_done_semaphore],
+            )
 
 
 class GuiWidget(BaseResource):
     _parent_widget: "GuiWidget | None"
-    _window: "GuiWindow"
-    _gui_context: "GuiContext"
+    _gui_window: "GuiWindow"
     _child_widget_list: list["GuiWidget"]
     _mouse_over: bool
     _latest_local_mouse_pos: tuple[int, int]
@@ -753,7 +792,7 @@ class GuiWidget(BaseResource):
         self,
         *,
         parent_widget: "GuiWidget | None" = None,
-        window: "GuiWindow | None" = None,
+        gui_window: "GuiWindow | None" = None,
         theme: GuiTheme | None = None,
         row: int = 0,
         col: int = 0,
@@ -774,19 +813,22 @@ class GuiWidget(BaseResource):
         clickable: bool = True,
         parent_resource: "BaseResource | None" = None,
     ) -> None:
-        if not window and not parent_widget:
-            raise ValueError("Either parent_window or parent_widget must be provided")
-        if window and parent_widget:
-            raise ValueError("Either parent_window or parent_widget should be provided")
+        if not gui_window and not parent_widget:
+            raise ValueError("Either gui_window or parent_widget must be provided")
+        if gui_window and parent_widget:
+            raise ValueError("Either gui_window or parent_widget should be provided")
 
         super().__init__(parent_resource=(parent_resource or parent_widget))
 
-        self._parent_widget, self._window = GuiWidget._resolve_parent_widget_and_window(
-            parent_widget=parent_widget,
-            window=window,
+        self._parent_widget, self._gui_window = (
+            GuiWidget._resolve_parent_widget_and_window(
+                parent_widget=parent_widget,
+                gui_window=gui_window,
+            )
         )
-        self._gui_context = self._window._gui_context
-        self._theme = GuiWidget._resolve_theme(theme=theme, parent_widget=parent_widget)
+        self._theme = GuiWidget._resolve_theme(
+            theme=theme, parent_widget=parent_widget, gui_window=gui_window
+        )
 
         self._child_widget_list = []
         self._mouse_over = False
@@ -841,27 +883,31 @@ class GuiWidget(BaseResource):
     @staticmethod
     def _resolve_parent_widget_and_window(
         parent_widget: "GuiWidget | None",
-        window: "GuiWindow | None",
+        gui_window: "GuiWindow | None",
     ) -> tuple["GuiWidget | None", "GuiWindow"]:
-        if not window and not parent_widget:
-            raise ValueError("Either parent_window or parent_widget must be provided")
-        if window and parent_widget:
-            raise ValueError("Either parent_window or parent_widget should be provided")
+        if not gui_window and not parent_widget:
+            raise ValueError("Either gui_window or parent_widget must be provided")
+        if gui_window and parent_widget:
+            raise ValueError("Either gui_window or parent_widget should be provided")
         if parent_widget:
-            return parent_widget, parent_widget._window
+            return parent_widget, parent_widget._gui_window
         else:
-            assert window is not None
-            return None, window
+            assert gui_window is not None
+            return None, gui_window
 
     @staticmethod
     def _resolve_theme(
         theme: GuiTheme | None,
         parent_widget: "GuiWidget | None",
+        gui_window: "GuiWindow | None",
     ) -> GuiTheme:
-        return _eval_theme(
-            parent_widget._theme if parent_widget is not None else _DEFAULT_THEME,
-            theme or {},
-        )
+        if parent_widget is not None:
+            base_theme = parent_widget._theme
+        elif gui_window is not None:
+            base_theme = gui_window.theme
+        else:
+            base_theme = _DEFAULT_THEME
+        return _eval_theme(base_theme, theme or {})
 
     def _add_child_widget(self, child_widget: "GuiWidget") -> None:
         self._child_widget_list.append(child_widget)
@@ -1123,6 +1169,23 @@ class GuiWidget(BaseResource):
         return True
 
     #
+    # Update:
+    #
+
+    def _update(self, dt: float) -> None:
+        """Update this widget and its children. Called once per frame."""
+        # Update self first.
+        self._update_self(dt)
+
+        # Update children, in order, after self.
+        for child in self._child_widget_list:
+            child._update(dt)
+
+    def _update_self(self, dt: float) -> None:
+        """Override this method to add custom per-frame update logic."""
+        pass
+
+    #
     # Render:
     #
 
@@ -1202,170 +1265,3 @@ class GuiWidget(BaseResource):
                 horizontal_alignment=style.text_horizontal_alignment,
                 vertical_alignment=style.text_vertical_alignment,
             )
-
-
-def _decode_glfw_action(action: int) -> ButtonAction:
-    d: dict[int, ButtonAction] = {
-        glfw.PRESS: "press",
-        glfw.RELEASE: "release",
-        glfw.REPEAT: "repeat",
-    }
-    return d[action]
-
-
-def _decode_glfw_mods(mods: int) -> list[KeyModifier]:
-    result: list[KeyModifier] = []
-    if mods & glfw.MOD_SHIFT:
-        result.append("shift")
-    if mods & glfw.MOD_CONTROL:
-        result.append("control")
-    if mods & glfw.MOD_ALT:
-        result.append("alt")
-    if mods & glfw.MOD_SUPER:
-        result.append("super")
-    return result
-
-
-def _decode_glfw_key(key: int) -> Key | None:
-    # Map GLFW key codes to key names matching the Key literal type
-    glfw_key_map: dict[int, Key] = {
-        # Printable keys (US layout)
-        glfw.KEY_SPACE: "space",
-        glfw.KEY_APOSTROPHE: "apostrophe",
-        glfw.KEY_COMMA: "comma",
-        glfw.KEY_MINUS: "minus",
-        glfw.KEY_PERIOD: "period",
-        glfw.KEY_SLASH: "slash",
-        glfw.KEY_0: "0",
-        glfw.KEY_1: "1",
-        glfw.KEY_2: "2",
-        glfw.KEY_3: "3",
-        glfw.KEY_4: "4",
-        glfw.KEY_5: "5",
-        glfw.KEY_6: "6",
-        glfw.KEY_7: "7",
-        glfw.KEY_8: "8",
-        glfw.KEY_9: "9",
-        glfw.KEY_SEMICOLON: "semicolon",
-        glfw.KEY_EQUAL: "equal",
-        glfw.KEY_A: "a",
-        glfw.KEY_B: "b",
-        glfw.KEY_C: "c",
-        glfw.KEY_D: "d",
-        glfw.KEY_E: "e",
-        glfw.KEY_F: "f",
-        glfw.KEY_G: "g",
-        glfw.KEY_H: "h",
-        glfw.KEY_I: "i",
-        glfw.KEY_J: "j",
-        glfw.KEY_K: "k",
-        glfw.KEY_L: "l",
-        glfw.KEY_M: "m",
-        glfw.KEY_N: "n",
-        glfw.KEY_O: "o",
-        glfw.KEY_P: "p",
-        glfw.KEY_Q: "q",
-        glfw.KEY_R: "r",
-        glfw.KEY_S: "s",
-        glfw.KEY_T: "t",
-        glfw.KEY_U: "u",
-        glfw.KEY_V: "v",
-        glfw.KEY_W: "w",
-        glfw.KEY_X: "x",
-        glfw.KEY_Y: "y",
-        glfw.KEY_Z: "z",
-        glfw.KEY_LEFT_BRACKET: "left-bracket",
-        glfw.KEY_BACKSLASH: "backslash",
-        glfw.KEY_RIGHT_BRACKET: "right-bracket",
-        glfw.KEY_GRAVE_ACCENT: "grave-accent",
-        glfw.KEY_WORLD_1: "world-1",
-        glfw.KEY_WORLD_2: "world-2",
-        # Function keys and special keys
-        glfw.KEY_ESCAPE: "escape",
-        glfw.KEY_ENTER: "enter",
-        glfw.KEY_TAB: "tab",
-        glfw.KEY_BACKSPACE: "backspace",
-        glfw.KEY_INSERT: "insert",
-        glfw.KEY_DELETE: "delete",
-        glfw.KEY_RIGHT: "right",
-        glfw.KEY_LEFT: "left",
-        glfw.KEY_DOWN: "down",
-        glfw.KEY_UP: "up",
-        glfw.KEY_PAGE_UP: "page-up",
-        glfw.KEY_PAGE_DOWN: "page-down",
-        glfw.KEY_HOME: "home",
-        glfw.KEY_END: "end",
-        glfw.KEY_CAPS_LOCK: "caps-lock",
-        glfw.KEY_SCROLL_LOCK: "scroll-lock",
-        glfw.KEY_NUM_LOCK: "num-lock",
-        glfw.KEY_PRINT_SCREEN: "print-screen",
-        glfw.KEY_PAUSE: "pause",
-        glfw.KEY_F1: "f1",
-        glfw.KEY_F2: "f2",
-        glfw.KEY_F3: "f3",
-        glfw.KEY_F4: "f4",
-        glfw.KEY_F5: "f5",
-        glfw.KEY_F6: "f6",
-        glfw.KEY_F7: "f7",
-        glfw.KEY_F8: "f8",
-        glfw.KEY_F9: "f9",
-        glfw.KEY_F10: "f10",
-        glfw.KEY_F11: "f11",
-        glfw.KEY_F12: "f12",
-        glfw.KEY_F13: "f13",
-        glfw.KEY_F14: "f14",
-        glfw.KEY_F15: "f15",
-        glfw.KEY_F16: "f16",
-        glfw.KEY_F17: "f17",
-        glfw.KEY_F18: "f18",
-        glfw.KEY_F19: "f19",
-        glfw.KEY_F20: "f20",
-        glfw.KEY_F21: "f21",
-        glfw.KEY_F22: "f22",
-        glfw.KEY_F23: "f23",
-        glfw.KEY_F24: "f24",
-        glfw.KEY_F25: "f25",
-        # Keypad keys
-        glfw.KEY_KP_0: "kp-0",
-        glfw.KEY_KP_1: "kp-1",
-        glfw.KEY_KP_2: "kp-2",
-        glfw.KEY_KP_3: "kp-3",
-        glfw.KEY_KP_4: "kp-4",
-        glfw.KEY_KP_5: "kp-5",
-        glfw.KEY_KP_6: "kp-6",
-        glfw.KEY_KP_7: "kp-7",
-        glfw.KEY_KP_8: "kp-8",
-        glfw.KEY_KP_9: "kp-9",
-        glfw.KEY_KP_DECIMAL: "kp-decimal",
-        glfw.KEY_KP_DIVIDE: "kp-divide",
-        glfw.KEY_KP_MULTIPLY: "kp-multiply",
-        glfw.KEY_KP_SUBTRACT: "kp-subtract",
-        glfw.KEY_KP_ADD: "kp-add",
-        glfw.KEY_KP_ENTER: "kp-enter",
-        glfw.KEY_KP_EQUAL: "kp-equal",
-        # Modifier keys
-        glfw.KEY_LEFT_SHIFT: "left-shift",
-        glfw.KEY_LEFT_CONTROL: "left-control",
-        glfw.KEY_LEFT_ALT: "left-alt",
-        glfw.KEY_LEFT_SUPER: "left-super",
-        glfw.KEY_RIGHT_SHIFT: "right-shift",
-        glfw.KEY_RIGHT_CONTROL: "right-control",
-        glfw.KEY_RIGHT_ALT: "right-alt",
-        glfw.KEY_RIGHT_SUPER: "right-super",
-        glfw.KEY_MENU: "menu",
-    }
-    return glfw_key_map.get(key, None)
-
-
-def _decode_glfw_mouse_button(button: int) -> MouseButton:
-    glfw_mouse_button_map: dict[int, MouseButton] = {
-        glfw.MOUSE_BUTTON_1: "left",
-        glfw.MOUSE_BUTTON_2: "right",
-        glfw.MOUSE_BUTTON_3: "middle",
-        glfw.MOUSE_BUTTON_4: "button-4",
-        glfw.MOUSE_BUTTON_5: "button-5",
-        glfw.MOUSE_BUTTON_6: "button-6",
-        glfw.MOUSE_BUTTON_7: "button-7",
-        glfw.MOUSE_BUTTON_8: "button-8",
-    }
-    return glfw_mouse_button_map[button]

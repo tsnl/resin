@@ -10,15 +10,15 @@ LOG = zfw.logger(__name__)
 
 
 class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
-    def __init__(self, engine: zfw.Engine):
+    def __init__(self, gui_window: zfw.GuiWindow):
         super().__init__(
-            window=engine.window,
+            gui_window=gui_window,
             grid_rows=(-4, -1, -1, -1, -1, -1, -1),
             grid_cols=(-1, -1, -1),
             style_classes=["central"],
             theme=_THEME,
         )
-        self._engine = engine
+        self._gui_window = gui_window
 
         self._title_widget = zfw.GuiWidget(
             parent_widget=self,
@@ -59,8 +59,8 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
 
         @self._new_game_button_widget.click_event.subscribe()
         def new_game_button_click(button: zfw.MouseButton):
-            self._engine.window.push_central_widget(
-                UniversalPaperclipsWidget(engine=self._engine),
+            self._gui_window.push_central_widget(
+                UniversalPaperclipsWidget(gui_window=self._gui_window),
             )
 
         @self._load_game_button_widget.click_event.subscribe()
@@ -73,13 +73,13 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
 
         @self._quit_button_widget.click_event.subscribe()
         def quit_button_click(button: zfw.MouseButton):
-            engine.window.pop_central_widget()
+            gui_window.pop_central_widget()
 
 
 class UniversalPaperclipsWidget(zfw.GuiWidget):
-    def __init__(self, engine: zfw.Engine):
+    def __init__(self, gui_window: zfw.GuiWindow):
         super().__init__(
-            window=engine.window,
+            gui_window=gui_window,
             grid_rows=(200, 40, 40, -1, -1, -1),
             grid_cols=(-1, -1, -1),
             style_classes=["central"],
@@ -111,7 +111,6 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
         )
 
         self._business_module_widget = UniversalPaperclipsBusinessModuleWidget(
-            engine=engine,
             parent=self,
             row=3,
             col=0,
@@ -119,7 +118,6 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
 
         self._manufacturing_module_widget = (
             UniversalPaperclipsManufacturingModuleWidget(
-                engine=engine,
                 parent=self,
                 row=4,
                 col=0,
@@ -138,7 +136,6 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
 class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
     def __init__(
         self,
-        engine: zfw.Engine,
         parent: zfw.GuiWidget,
         row: int,
         col: int,
@@ -161,7 +158,6 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             col=col,
             style_classes=["module"],
         )
-        self._engine = engine
 
         self._title_widget = zfw.GuiWidget(
             parent_widget=self,
@@ -252,7 +248,6 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
 class UniversalPaperclipsManufacturingModuleWidget(zfw.GuiWidget):
     def __init__(
         self,
-        engine: zfw.Engine,
         parent: zfw.GuiWidget,
         row: int,
         col: int,
@@ -265,7 +260,6 @@ class UniversalPaperclipsManufacturingModuleWidget(zfw.GuiWidget):
             col=col,
             style_classes=["module"],
         )
-        self._engine = engine
 
         self._title_widget = zfw.GuiWidget(
             parent_widget=self,

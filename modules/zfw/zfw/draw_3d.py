@@ -98,6 +98,9 @@ class Draw3dRenderer(BaseResource):
     _env_fragment_shader: GpuShader
     _cached_env_pipeline: GpuPipeline | None
 
+    # Cache for environment descriptor sets (keyed by GpuImage id)
+    _environment_ds_cache: dict[int, GpuDescriptorSet]
+
     def __init__(self, context: Draw3dContext, gpu_device: GpuDevice):
         super().__init__(parent_resource=context)
 
@@ -333,6 +336,9 @@ class Draw3dRenderer(BaseResource):
 
         self._cached_env_pipeline = None
 
+        # Environment descriptor set cache
+        self._environment_ds_cache = {}
+
     def _on_dispose(self) -> None:
         # Dispose cached pipelines and depth image
         if it := getattr(self, "_cached_main_pipeline", None):
@@ -396,23 +402,26 @@ class Draw3dRenderer(BaseResource):
         if it := getattr(self, "default_environment_image", None):
             it.dispose()
 
-    def create_environment_descriptor_set(
+    def get_environment_descriptor_set(
         self, environment_map: GpuImage
     ) -> GpuDescriptorSet:
         """
-        Create a descriptor set for an environment map.
+        Get or create a descriptor set for an environment map.
 
         :param environment_map: The environment map image (equirectangular projection).
         :return: A descriptor set binding the environment map.
         """
-        return GpuDescriptorSet(
-            device=self.gpu_device,
-            bindings={
-                "environmentMap": environment_map,
-                "environmentSampler": self.environment_sampler,
-            },
-            layout=self.environment_ds_layout,
-        )
+        cache_key = id(environment_map)
+        if cache_key not in self._environment_ds_cache:
+            self._environment_ds_cache[cache_key] = GpuDescriptorSet(
+                device=self.gpu_device,
+                bindings={
+                    "environmentMap": environment_map,
+                    "environmentSampler": self.environment_sampler,
+                },
+                layout=self.environment_ds_layout,
+            )
+        return self._environment_ds_cache[cache_key]
 
     def draw(
         self,
@@ -523,7 +532,7 @@ class Draw3dRenderer(BaseResource):
 
         # Get or create environment descriptor set
         if environment_map is not None:
-            env_ds = self.create_environment_descriptor_set(environment_map)
+            env_ds = self.get_environment_descriptor_set(environment_map)
         else:
             env_ds = self.default_environment_ds
 
