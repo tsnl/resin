@@ -222,7 +222,13 @@ def test_draw_3d_red_cube():
     )
 
     # Camera transform: position at (0, 0, 3), looking at origin
-    # This is the world transform of the camera (not view matrix)
+    # This is the world transform of the camera (not view matrix).
+    # Camera convention: looks down -Z in local space, +Y is up.
+    # With identity rotation, camera at z=3 looks toward +Z (away from origin).
+    # To look at origin, we need the VIEW matrix, not transform.
+    # But this API takes camera_transform, so view = inv(camera_transform).
+    # For camera at (0,0,3) looking at origin with identity rotation:
+    #   view transforms origin to (0,0,-3) in view space.
     camera_transform = np.array(
         [
             [1.0, 0.0, 0.0, 0.0],
