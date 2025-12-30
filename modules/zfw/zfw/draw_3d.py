@@ -551,7 +551,7 @@ class Draw3dRenderer(BaseResource):
                 layout="texture-binding",
             )
 
-        # Step 1: Draw environment background (no depth test)
+        # Layer 1: Draw environment map background at infinity
         with command_encoder.render(
             color_attachment=target,
             depth_attachment=None,
@@ -562,7 +562,7 @@ class Draw3dRenderer(BaseResource):
             rp.bind_descriptor_set(set_index=1, set_=env_ds)
             rp.draw(vertex_count=3, instance_count=1)
 
-        # Step 2: Draw meshes with depth test (don't clear color - draw over environment)
+        # Layer 2: Draw meshes with depth test
         with command_encoder.render(
             color_attachment=target,
             depth_attachment=depth_image,
@@ -709,7 +709,7 @@ class Draw3dCameraIntrinsics:
     clip_far: float = 1e3
     """Far clipping plane distance."""
 
-    ibl_samples: int = 4
+    ibl_samples: int = 1
     """Number of samples for IBL specular importance sampling. Default is 4."""
 
     def _projection_matrix(self, aspect_ratio: float) -> np.ndarray:

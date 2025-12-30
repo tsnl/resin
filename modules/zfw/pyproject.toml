@@ -15,6 +15,7 @@ dependencies = [
     "kiwisolver>=1.4.9",
     "rich>=14.2.0",
     "pygltflib>=1.16.0",
+    "pydantic>=2.12.5",
 ]
 
 [project.optional-dependencies]
