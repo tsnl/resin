@@ -6,13 +6,11 @@ from .basic import BaseResource
 from .gpu import (
     GpuCommandEncoder,
     GpuDescriptorSet,
-    GpuDescriptorSetBinding,
     GpuDescriptorSetLayout,
     GpuDescriptorSetLayoutBinding,
     GpuDevice,
     GpuEzBuffer,
     GpuImage,
-    GpuImageMeta,
     GpuSampler,
 )
 
