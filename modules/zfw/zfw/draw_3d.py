@@ -37,6 +37,17 @@ class Draw3dContext(BaseResource):
 #
 
 
+# Camera uniform buffer dtype matching the shader CameraUniform struct
+CAMERA_UNIFORM_DTYPE = np.dtype(
+    [
+        ("projectionView", np.float32, (4, 4)),
+        ("inverseProjectionView", np.float32, (4, 4)),
+        ("cameraPosition", np.float32, 3),
+        ("iblSamples", np.uint32),
+    ]
+)
+
+
 class Draw3dRenderer(BaseResource):
     # References to parent resources
     context: Draw3dContext
@@ -44,10 +55,15 @@ class Draw3dRenderer(BaseResource):
     # GPU device for this renderer:
     gpu_device: GpuDevice
 
-    # GPU resources: camera uniform
-    camera_pv_matrix_uniform_ds_layout: GpuDescriptorSetLayout
-    camera_pv_matrix_uniform_buffer: GpuEzBuffer
-    camera_pv_matrix_uniform_ds: GpuDescriptorSet
+    # GPU resources: camera uniform (for main mesh rendering)
+    camera_uniform_ds_layout: GpuDescriptorSetLayout
+    camera_uniform_buffer: GpuEzBuffer
+    camera_uniform_ds: GpuDescriptorSet
+
+    # GPU resources: environment camera uniform (for environment rendering)
+    env_camera_uniform_ds_layout: GpuDescriptorSetLayout
+    env_camera_uniform_buffer: GpuEzBuffer
+    env_camera_uniform_ds: GpuDescriptorSet
 
     # GPU resources: material descriptor set layout and default resources
     material_ds_layout: GpuDescriptorSetLayout
@@ -63,12 +79,24 @@ class Draw3dRenderer(BaseResource):
     instance_transforms_gpu_ds_layout: GpuDescriptorSetLayout
     instance_transforms_gpu_ds: GpuDescriptorSet
 
-    # Pipeline resources:
-    _pipeline_layout: GpuPipelineLayout
-    _vertex_shader: GpuShader
-    _fragment_shader: GpuShader
-    _cached_pipeline: GpuPipeline | None
+    # GPU resources: environment map descriptor set layout
+    environment_ds_layout: GpuDescriptorSetLayout
+    environment_sampler: GpuSampler
+    default_environment_image: GpuImage
+    default_environment_ds: GpuDescriptorSet
+
+    # Pipeline resources for main mesh rendering:
+    _main_pipeline_layout: GpuPipelineLayout
+    _main_vertex_shader: GpuShader
+    _main_fragment_shader: GpuShader
+    _cached_main_pipeline: GpuPipeline | None
     _cached_depth_image: GpuImage | None
+
+    # Pipeline resources for environment background rendering:
+    _env_pipeline_layout: GpuPipelineLayout
+    _env_vertex_shader: GpuShader
+    _env_fragment_shader: GpuShader
+    _cached_env_pipeline: GpuPipeline | None
 
     def __init__(self, context: Draw3dContext, gpu_device: GpuDevice):
         super().__init__(parent_resource=context)
@@ -77,30 +105,59 @@ class Draw3dRenderer(BaseResource):
 
         self.gpu_device = gpu_device
 
-        # Camera uniform
-        self.camera_pv_matrix_uniform_ds_layout = GpuDescriptorSetLayout(
+        # Camera uniform for main mesh rendering (includes inverse PV, position, IBL samples)
+        self.camera_uniform_ds_layout = GpuDescriptorSetLayout(
             device=self.gpu_device,
             bindings=OrderedDict(
                 {
-                    "cameraPv": GpuDescriptorSetLayoutBinding(
+                    "cameraUniform": GpuDescriptorSetLayoutBinding(
                         type="uniform-buffer",
-                        stages=["vertex"],
+                        stages=["vertex", "fragment"],
                     ),
                 }.items()
             ),
         )
-        self.camera_pv_matrix_uniform_buffer = GpuEzBuffer(
+        # Size: 4x4 matrix (64 bytes) + 4x4 matrix (64 bytes) + vec3 + uint (16 bytes) = 144 bytes
+        # But buffer stores as float32 count: 16 + 16 + 4 = 36 floats
+        self.camera_uniform_buffer = GpuEzBuffer(
             device=self.gpu_device,
-            capacity=16,  # One 4x4 matrix = 16 floats
+            capacity=1,
+            dtype=CAMERA_UNIFORM_DTYPE,
+            usages=["uniform"],
+        )
+        self.camera_uniform_ds = GpuDescriptorSet(
+            device=self.gpu_device,
+            bindings={
+                "cameraUniform": self.camera_uniform_buffer.device_buffer,
+            },
+            layout=self.camera_uniform_ds_layout,
+        )
+
+        # Environment camera uniform (for environment background rendering)
+        self.env_camera_uniform_ds_layout = GpuDescriptorSetLayout(
+            device=self.gpu_device,
+            bindings=OrderedDict(
+                {
+                    "cameraUniform": GpuDescriptorSetLayoutBinding(
+                        type="uniform-buffer",
+                        stages=["vertex", "fragment"],
+                    ),
+                }.items()
+            ),
+        )
+        # Environment camera needs: inverse PV (64 bytes) + camera position + padding (16 bytes)
+        self.env_camera_uniform_buffer = GpuEzBuffer(
+            device=self.gpu_device,
+            capacity=20,  # 16 floats for inverse PV + 4 floats for position+padding
             dtype=np.float32,
             usages=["uniform"],
         )
-        self.camera_pv_matrix_uniform_ds = GpuDescriptorSet(
+        self.env_camera_uniform_ds = GpuDescriptorSet(
             device=self.gpu_device,
             bindings={
-                "cameraPv": self.camera_pv_matrix_uniform_buffer.device_buffer,
+                "cameraUniform": self.env_camera_uniform_buffer.device_buffer,
             },
-            layout=self.camera_pv_matrix_uniform_ds_layout,
+            layout=self.env_camera_uniform_ds_layout,
         )
 
         # Material descriptor set layout and default resources
@@ -192,57 +249,131 @@ class Draw3dRenderer(BaseResource):
             layout=self.instance_transforms_gpu_ds_layout,
         )
 
-        # Pipeline layout and shaders
-        self._pipeline_layout = GpuPipelineLayout(
+        # Environment map descriptor set layout and default resources
+        self.environment_ds_layout = GpuDescriptorSetLayout(
+            device=self.gpu_device,
+            bindings=OrderedDict(
+                {
+                    "environmentMap": GpuDescriptorSetLayoutBinding(
+                        type="sampled-image",
+                        stages=["fragment"],
+                    ),
+                    "environmentSampler": GpuDescriptorSetLayoutBinding(
+                        type="sampler",
+                        stages=["fragment"],
+                    ),
+                }.items()
+            ),
+        )
+        self.environment_sampler = GpuSampler(
+            device=self.gpu_device,
+            min_filter="linear",
+            mag_filter="linear",
+            address_mode="repeat",
+        )
+        # Default environment: neutral gray
+        self.default_environment_image = GpuImage(
+            device=self.gpu_device,
+            usages=["texture-binding"],
+            data=np.full((32, 32, 4), fill_value=0.5, dtype=np.float32),
+        )
+        self.default_environment_ds = GpuDescriptorSet(
+            device=self.gpu_device,
+            bindings={
+                "environmentMap": self.default_environment_image,
+                "environmentSampler": self.environment_sampler,
+            },
+            layout=self.environment_ds_layout,
+        )
+
+        # Main mesh pipeline layout and shaders
+        self._main_pipeline_layout = GpuPipelineLayout(
             device=self.gpu_device,
             descriptor_set_layouts=[
-                self.camera_pv_matrix_uniform_ds_layout,
+                self.camera_uniform_ds_layout,
                 self.instance_transforms_gpu_ds_layout,
                 self.material_ds_layout,
+                self.environment_ds_layout,
             ],
         )
 
-        self._vertex_shader = GpuShader(
+        self._main_vertex_shader = GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d.vert.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d_main.vert.spv",
             stage="vertex",
         )
-        self._fragment_shader = GpuShader(
+        self._main_fragment_shader = GpuShader(
             device=self.gpu_device,
-            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d.frag.spv",
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d_main.frag.spv",
             stage="fragment",
         )
 
-        self._cached_pipeline = None
+        self._cached_main_pipeline = None
         self._cached_depth_image = None
 
+        # Environment background pipeline layout and shaders
+        self._env_pipeline_layout = GpuPipelineLayout(
+            device=self.gpu_device,
+            descriptor_set_layouts=[
+                self.env_camera_uniform_ds_layout,
+                self.environment_ds_layout,
+            ],
+        )
+
+        self._env_vertex_shader = GpuShader(
+            device=self.gpu_device,
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d_environment.vert.spv",
+            stage="vertex",
+        )
+        self._env_fragment_shader = GpuShader(
+            device=self.gpu_device,
+            spirv_path=BUNDLED_DATA_PATH / "shaders/draw_3d_environment.frag.spv",
+            stage="fragment",
+        )
+
+        self._cached_env_pipeline = None
+
     def _on_dispose(self) -> None:
-        # Dispose cached pipeline and depth image
-        if it := getattr(self, "_cached_pipeline", None):
+        # Dispose cached pipelines and depth image
+        if it := getattr(self, "_cached_main_pipeline", None):
+            it.dispose()
+        if it := getattr(self, "_cached_env_pipeline", None):
             it.dispose()
         if it := getattr(self, "_cached_depth_image", None):
             it.dispose()
 
         # Dispose shaders
-        if it := getattr(self, "_vertex_shader", None):
+        if it := getattr(self, "_main_vertex_shader", None):
             it.dispose()
-        if it := getattr(self, "_fragment_shader", None):
+        if it := getattr(self, "_main_fragment_shader", None):
+            it.dispose()
+        if it := getattr(self, "_env_vertex_shader", None):
+            it.dispose()
+        if it := getattr(self, "_env_fragment_shader", None):
             it.dispose()
 
-        # Dispose pipeline layout
-        if it := getattr(self, "_pipeline_layout", None):
+        # Dispose pipeline layouts
+        if it := getattr(self, "_main_pipeline_layout", None):
+            it.dispose()
+        if it := getattr(self, "_env_pipeline_layout", None):
             it.dispose()
 
         # Dispose descriptor set layouts
-        if it := getattr(self, "camera_pv_matrix_uniform_ds_layout", None):
+        if it := getattr(self, "camera_uniform_ds_layout", None):
+            it.dispose()
+        if it := getattr(self, "env_camera_uniform_ds_layout", None):
             it.dispose()
         if it := getattr(self, "instance_transforms_gpu_ds_layout", None):
             it.dispose()
         if it := getattr(self, "material_ds_layout", None):
             it.dispose()
+        if it := getattr(self, "environment_ds_layout", None):
+            it.dispose()
 
         # Dispose buffers
-        if it := getattr(self, "camera_pv_matrix_uniform_buffer", None):
+        if it := getattr(self, "camera_uniform_buffer", None):
+            it.dispose()
+        if it := getattr(self, "env_camera_uniform_buffer", None):
             it.dispose()
         if it := getattr(self, "instance_transforms_buffer", None):
             it.dispose()
@@ -259,6 +390,30 @@ class Draw3dRenderer(BaseResource):
         if it := getattr(self, "material_default_roughness_image", None):
             it.dispose()
 
+        # Dispose environment resources
+        if it := getattr(self, "environment_sampler", None):
+            it.dispose()
+        if it := getattr(self, "default_environment_image", None):
+            it.dispose()
+
+    def create_environment_descriptor_set(
+        self, environment_map: GpuImage
+    ) -> GpuDescriptorSet:
+        """
+        Create a descriptor set for an environment map.
+
+        :param environment_map: The environment map image (equirectangular projection).
+        :return: A descriptor set binding the environment map.
+        """
+        return GpuDescriptorSet(
+            device=self.gpu_device,
+            bindings={
+                "environmentMap": environment_map,
+                "environmentSampler": self.environment_sampler,
+            },
+            layout=self.environment_ds_layout,
+        )
+
     def draw(
         self,
         *,
@@ -267,9 +422,10 @@ class Draw3dRenderer(BaseResource):
         camera_transform: np.ndarray,
         camera_intrinsics: "Draw3dCameraIntrinsics",
         target: GpuImage,
+        environment_map: GpuImage | None = None,
     ) -> None:
         """
-        Draws the given mesh instances.
+        Draws the given mesh instances with PBR and IBL.
 
         :param command_encoder: The GPU command encoder to record commands to.
         :param meshes: A mapping of (geometry, material) pairs to a flat float32
@@ -277,8 +433,10 @@ class Draw3dRenderer(BaseResource):
             in column-major layout (transposed from numpy's row-major default).
         :param camera_transform: A 4x4 matrix representing the camera's world transform.
             The matrix is in world-space, row-major (standard numpy convention).
-        :param camera_intrinsics: Camera intrinsic parameters (FOV, clip planes).
+        :param camera_intrinsics: Camera intrinsic parameters (FOV, clip planes, IBL samples).
         :param target: The GPU image to render to. Used to compute aspect ratio.
+        :param environment_map: Optional environment map for IBL (equirectangular projection).
+            If None, a default gray environment is used.
         """
 
         # Compute camera parameters:
@@ -286,14 +444,35 @@ class Draw3dRenderer(BaseResource):
         camera_proj = camera_intrinsics._projection_matrix(camera_aspect_ratio)
         camera_view = np.linalg.inv(camera_transform)
         camera_pv = camera_proj @ camera_view
+        camera_inv_pv = np.linalg.inv(camera_pv)
+        camera_position = camera_transform[:3, 3]
 
-        # Update camera uniform buffer, transposing to column-major layout:
+        # Update camera uniform buffer for main mesh rendering
         # IMPORTANT: Slang/HLSL float4x4 uses column-major layout by default.
         # NumPy arrays are row-major, so we transpose before flattening.
-        camera_pv_flat = np.ascontiguousarray(camera_pv.T, dtype=np.float32).ravel()
-        self.camera_pv_matrix_uniform_buffer.clear()
-        self.camera_pv_matrix_uniform_buffer.extend(values=camera_pv_flat)
-        self.camera_pv_matrix_uniform_buffer.flush(command_encoder=command_encoder)
+        camera_uniform_data = np.array(
+            [
+                (
+                    camera_pv.T,  # projectionView (column-major)
+                    camera_inv_pv.T,  # inverseProjectionView (column-major)
+                    camera_position,  # cameraPosition
+                    camera_intrinsics.ibl_samples,  # iblSamples
+                )
+            ],
+            dtype=CAMERA_UNIFORM_DTYPE,
+        )
+        self.camera_uniform_buffer.clear()
+        self.camera_uniform_buffer.extend(values=camera_uniform_data)
+        self.camera_uniform_buffer.flush(command_encoder=command_encoder)
+
+        # Update environment camera uniform buffer
+        env_camera_data = np.zeros(20, dtype=np.float32)
+        env_camera_data[:16] = camera_inv_pv.T.ravel()  # inverseProjectionView
+        env_camera_data[16:19] = camera_position  # cameraPosition
+        env_camera_data[19] = 0.0  # padding
+        self.env_camera_uniform_buffer.clear()
+        self.env_camera_uniform_buffer.extend(values=env_camera_data)
+        self.env_camera_uniform_buffer.flush(command_encoder=command_encoder)
 
         # Transpose model matrices to column-major layout and ravel, preparing instance
         # transforms buffer for GPU upload:
@@ -337,9 +516,16 @@ class Draw3dRenderer(BaseResource):
                 self.instance_transforms_buffer.extend(values=model_matrices)
         self.instance_transforms_buffer.flush(command_encoder=command_encoder)
 
-        # Get or create pipeline and depth image:
-        pipeline = self._get_pipeline(target)
+        # Get or create pipelines and depth image:
+        env_pipeline = self._get_env_pipeline(target)
+        main_pipeline = self._get_main_pipeline(target)
         depth_image = self._get_depth_image(target.width, target.height)
+
+        # Get or create environment descriptor set
+        if environment_map is not None:
+            env_ds = self.create_environment_descriptor_set(environment_map)
+        else:
+            env_ds = self.default_environment_ds
 
         # Transition images to correct layouts:
         command_encoder.transition_image_layout(
@@ -350,20 +536,36 @@ class Draw3dRenderer(BaseResource):
             image=depth_image,
             layout="depth-stencil-attachment-optimal",
         )
+        if environment_map is not None:
+            command_encoder.transition_image_layout(
+                image=environment_map,
+                layout="texture-binding",
+            )
 
-        # Draw all mesh instances:
+        # Step 1: Draw environment background (no depth test)
+        with command_encoder.render(
+            color_attachment=target,
+            depth_attachment=None,
+            clear_color="black",
+        ) as rp:
+            rp.bind_pipeline(pipeline=env_pipeline)
+            rp.bind_descriptor_set(set_index=0, set_=self.env_camera_uniform_ds)
+            rp.bind_descriptor_set(set_index=1, set_=env_ds)
+            rp.draw(vertex_count=3, instance_count=1)
+
+        # Step 2: Draw meshes with depth test (don't clear - draw over environment)
         with command_encoder.render(
             color_attachment=target,
             depth_attachment=depth_image,
-            clear_color="black",
+            clear_color=None,  # Load previous content (environment background)
         ) as rp:
             # Set pipeline:
-            rp.bind_pipeline(pipeline=pipeline)
+            rp.bind_pipeline(pipeline=main_pipeline)
 
             # Bind camera descriptor set:
             rp.bind_descriptor_set(
                 set_index=0,
-                set_=self.camera_pv_matrix_uniform_ds,
+                set_=self.camera_uniform_ds,
             )
 
             # Bind global per-instance transforms descriptor set:
@@ -371,6 +573,9 @@ class Draw3dRenderer(BaseResource):
                 set_index=1,
                 set_=self.instance_transforms_gpu_ds,
             )
+
+            # Bind environment map descriptor set:
+            rp.bind_descriptor_set(set_index=3, set_=env_ds)
 
             # For each material, bind material and draw all associated geometries:
             for material, geometry_dict in per_material_span_batches.items():
@@ -391,16 +596,20 @@ class Draw3dRenderer(BaseResource):
                         instance_count=matrix_span_count,
                     )
 
-    def _get_pipeline(self, target: GpuImage) -> GpuPipeline:
-        """Get or create a pipeline for the given render target."""
-        if self._cached_pipeline is not None:
+        # Clean up temporary descriptor set if we created one
+        if environment_map is not None:
+            env_ds.dispose()
+
+    def _get_main_pipeline(self, target: GpuImage) -> GpuPipeline:
+        """Get or create a pipeline for main mesh rendering."""
+        if self._cached_main_pipeline is not None:
             if (
-                self._cached_pipeline.vk_color_format == target._vk_format
-                and self._cached_pipeline.viewport_width == target.width
-                and self._cached_pipeline.viewport_height == target.height
+                self._cached_main_pipeline.vk_color_format == target._vk_format
+                and self._cached_main_pipeline.viewport_width == target.width
+                and self._cached_main_pipeline.viewport_height == target.height
             ):
-                return self._cached_pipeline
-            self._cached_pipeline.dispose()
+                return self._cached_main_pipeline
+            self._cached_main_pipeline.dispose()
 
         # Vertex layout matching VERTEX_DTYPE:
         # - position: float32x3 at offset 0
@@ -416,19 +625,45 @@ class Draw3dRenderer(BaseResource):
             ],
         )
 
-        self._cached_pipeline = GpuPipeline(
+        self._cached_main_pipeline = GpuPipeline(
             device=self.gpu_device,
-            vertex_shader=self._vertex_shader,
-            fragment_shader=self._fragment_shader,
+            vertex_shader=self._main_vertex_shader,
+            fragment_shader=self._main_fragment_shader,
             vk_color_format=target._vk_format,
             enable_depth_test=True,
             enable_alpha_blending=False,
             viewport_width=target.width,
             viewport_height=target.height,
-            layout=self._pipeline_layout,
+            layout=self._main_pipeline_layout,
             vertex_buffer_layouts=[vertex_layout],
         )
-        return self._cached_pipeline
+        return self._cached_main_pipeline
+
+    def _get_env_pipeline(self, target: GpuImage) -> GpuPipeline:
+        """Get or create a pipeline for environment background rendering."""
+        if self._cached_env_pipeline is not None:
+            if (
+                self._cached_env_pipeline.vk_color_format == target._vk_format
+                and self._cached_env_pipeline.viewport_width == target.width
+                and self._cached_env_pipeline.viewport_height == target.height
+            ):
+                return self._cached_env_pipeline
+            self._cached_env_pipeline.dispose()
+
+        # No vertex buffers needed - fullscreen triangle generated in shader
+        self._cached_env_pipeline = GpuPipeline(
+            device=self.gpu_device,
+            vertex_shader=self._env_vertex_shader,
+            fragment_shader=self._env_fragment_shader,
+            vk_color_format=target._vk_format,
+            enable_depth_test=False,
+            enable_alpha_blending=False,
+            viewport_width=target.width,
+            viewport_height=target.height,
+            layout=self._env_pipeline_layout,
+            vertex_buffer_layouts=[],
+        )
+        return self._cached_env_pipeline
 
     def _get_depth_image(self, width: int, height: int) -> GpuImage:
         """Get or create a depth image for the given dimensions."""
@@ -463,6 +698,9 @@ class Draw3dCameraIntrinsics:
 
     clip_far: float = 1e3
     """Far clipping plane distance."""
+
+    ibl_samples: int = 4
+    """Number of samples for IBL specular importance sampling. Default is 4."""
 
     def _projection_matrix(self, aspect_ratio: float) -> np.ndarray:
         """

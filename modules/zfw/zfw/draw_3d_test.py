@@ -27,10 +27,17 @@ from .draw_3d import (
     VERTEX_DTYPE,
 )
 from .loader import load_gltf
+from .images import load_rgba_image
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
 LOG = logger(__name__)
+
+
+# Path to test data
+TESTS_DATA_PATH = Path(__file__).parent.parent.parent.parent / "tests_data"
+GLTF_SAMPLE_ASSETS_PATH = TESTS_DATA_PATH / "glTF-Sample-Assets"
+GLTF_SAMPLE_ENVIRONMENTS_PATH = TESTS_DATA_PATH / "glTF-Sample-Environments"
 
 
 def make_cube_geometry(renderer: Draw3dRenderer) -> Draw3dGeometry:
@@ -389,6 +396,176 @@ def test_draw_3d_gltf_avocado():
     LOG.info(f"Saved rendered image to {output_path}")
 
     # Clean up
+    scene.dispose()
+    engine.dispose()
+
+    assert True
+
+
+def test_draw_3d_environment_map():
+    """
+    Test rendering just the environment map background.
+
+    This tests the environment map shader with an equirectangular HDR environment.
+    """
+    # Check for environment maps
+    env_jpg_path = GLTF_SAMPLE_ENVIRONMENTS_PATH / "neutral.jpg"
+    if not env_jpg_path.exists():
+        pytest.skip(f"Environment map not found at {env_jpg_path}")
+
+    engine = Draw3dTestEngine()
+
+    # Load environment map as sRGB (for debugging, we load JPG directly)
+    env_data = load_rgba_image(
+        env_jpg_path,
+        file_color_space="srgb",
+        output_color_space="linear",
+    )
+    env_image = GpuImage(
+        device=engine.gpu_device,
+        usages=["texture-binding"],
+        data=env_data,
+    )
+
+    # Camera transform: looking forward (along -Z in camera space)
+    # Position doesn't matter for environment background, but rotation does
+    camera_transform = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    # Camera intrinsics
+    camera_intrinsics = Draw3dCameraIntrinsics(
+        vertical_fov=np.radians(60.0),
+        clip_near=0.1,
+        clip_far=100.0,
+    )
+
+    # Draw with empty meshes (just environment)
+    command_encoder = GpuCommandEncoder(
+        device=engine.gpu_device,
+        queue_type="graphics",
+    )
+    engine.renderer.draw(
+        command_encoder=command_encoder,
+        meshes={},  # No meshes, just environment
+        camera_transform=camera_transform,
+        camera_intrinsics=camera_intrinsics,
+        target=engine.target,
+        environment_map=env_image,
+    )
+    command_encoder.submit().wait()
+
+    # Read back and save image
+    image = engine.readback()
+
+    output_dir = Path("output/zfw/draw_3d_test")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "test_draw_3d_environment_map.png"
+    PIL.Image.fromarray(image).save(output_path)
+    LOG.info(f"Saved rendered image to {output_path}")
+
+    # Clean up
+    env_image.dispose()
+    engine.dispose()
+
+    assert True
+
+
+def test_draw_3d_damaged_helmet():
+    """
+    Test rendering the DamagedHelmet glTF model with PBR and IBL.
+
+    This tests the full PBR pipeline with environment-based lighting.
+    """
+    # Path to the DamagedHelmet model
+    helmet_path = (
+        GLTF_SAMPLE_ASSETS_PATH
+        / "Models"
+        / "DamagedHelmet"
+        / "glTF"
+        / "DamagedHelmet.gltf"
+    )
+
+    if not helmet_path.exists():
+        pytest.skip(f"DamagedHelmet model not found at {helmet_path}")
+
+    # Check for environment map
+    env_jpg_path = GLTF_SAMPLE_ENVIRONMENTS_PATH / "footprint_court.jpg"
+    if not env_jpg_path.exists():
+        pytest.skip(f"Environment map not found at {env_jpg_path}")
+
+    engine = Draw3dTestEngine()
+
+    # Load glTF scene
+    scenes = load_gltf(renderer=engine.renderer, path=helmet_path)
+    assert len(scenes) > 0, "Expected at least one scene"
+    scene = scenes[0]
+    assert len(scene.meshes) > 0, "Expected at least one mesh"
+
+    # Load environment map as sRGB (for debugging, we load JPG directly)
+    env_data = load_rgba_image(
+        env_jpg_path,
+        file_color_space="srgb",
+        output_color_space="linear",
+    )
+    env_image = GpuImage(
+        device=engine.gpu_device,
+        usages=["texture-binding"],
+        data=env_data,
+    )
+
+    # Camera transform: position to view the helmet
+    # DamagedHelmet is roughly 2 units in size, centered at origin
+    camera_transform = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.5],  # Slightly above center
+            [0.0, 0.0, 1.0, 3.0],  # Back from the model
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    # Camera intrinsics with IBL samples
+    camera_intrinsics = Draw3dCameraIntrinsics(
+        vertical_fov=np.radians(45.0),
+        clip_near=0.1,
+        clip_far=100.0,
+        ibl_samples=16,  # More samples for better quality
+    )
+
+    # Draw
+    command_encoder = GpuCommandEncoder(
+        device=engine.gpu_device,
+        queue_type="graphics",
+    )
+    engine.renderer.draw(
+        command_encoder=command_encoder,
+        meshes=scene.meshes,
+        camera_transform=camera_transform,
+        camera_intrinsics=camera_intrinsics,
+        target=engine.target,
+        environment_map=env_image,
+    )
+    command_encoder.submit().wait()
+
+    # Read back and save image
+    image = engine.readback()
+
+    output_dir = Path("output/zfw/draw_3d_test")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "test_draw_3d_damaged_helmet.png"
+    PIL.Image.fromarray(image).save(output_path)
+    LOG.info(f"Saved rendered image to {output_path}")
+
+    # Clean up
+    env_image.dispose()
     scene.dispose()
     engine.dispose()
 
