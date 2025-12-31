@@ -1,66 +1,74 @@
-//! Base module for draw_2d quad shaders.
+//! 2D quad shader for Draw2dRenderer.
 //!
-//! Provides common structures and functions used by both text and RGBA quad shaders.
+//! Renders textured 2D quads with support for borders and alpha blending.
+//!
+//! Bindings:
+//! - Descriptor Set 0:
+//!   - binding 0: Uniform buffer with viewport size
+//! - Descriptor Set 1:
+//!   - binding 0: Storage buffer with quad data
+//!   - binding 1: Sampled image (texture)
+//!   - binding 2: Sampler
 
 //
-// Uniform
+// Uniform (Descriptor Set 0, Binding 0)
 //
 
-public struct Draw2dUniform
+struct Uniform
 {
-    public int2 framebufferSizePx;
-    public uint quadCount;
-    public uint _rsv0;
+    float2 viewportSizePx;
+    float2 _rsv;
 };
 
+[[vk::binding(0, 0)]]
+ConstantBuffer<Uniform> uniform_;
+
 //
-// Quad
+// Quad (Descriptor Set 1, Binding 0)
 //
 
-public struct Quad
+struct Quad
 {
-    // Destination rectangle in pixels (x, y, w, h):
-    public int4 dstXywhPx;
-    // Source rectangle in UV coordinates (x, y, w, h):
-    public float4 srcXywhUv;
-    // Depth value for sorting:
-    public float depth;
-    // Border thickness (T, R, B, L) in pixels:
-    public int borderThicknessT;
-    public int borderThicknessR;
-    public int borderThicknessB;
-    // Padding to align color to 16-byte boundary:
-    public int borderThicknessL;
-    public int _pad0;
-    public int _pad1;
-    public int _pad2;
-    // Tint color (R, G, B, A), 0.0-1.0 (linear space):
-    public float4 color;
-    // Border color (R, G, B, A), 0.0-1.0 (linear space):
-    public float4 borderColor;
+    int4 dstXywhPx;
+    float4 srcXywhUv;
+    float4 fillColor;
+    int4 borderThickness; // TRBL
+    float4 borderColor;
+    float depth;
+    uint flags;
+    int2 _rsv;
 };
+
+[[vk::binding(0, 1)]]
+StructuredBuffer<Quad> quads;
+
+[[vk::binding(1, 1)]]
+Texture2D<float4> quadTexture;
+
+[[vk::binding(2, 1)]]
+SamplerState quadSampler;
 
 //
 // Vertex Shader Output
 //
 
-public struct VSOutput
+struct VSOutput
 {
-    public float4 position : SV_Position;
-    public nointerpolation uint instanceId : SV_InstanceID;
-    public float2 uv : TEXCOORD0;
-    public nointerpolation float4 tintColor : TEXCOORD1;
-    public nointerpolation float4 borderColor : TEXCOORD2;
-    public nointerpolation int4 borderThickness : TEXCOORD3;
-    public float2 positionPx : TEXCOORD4;
-    public int4 dstXywhPx : TEXCOORD5;
+    float4 position : SV_Position;
+    nointerpolation uint instanceId : TEXCOORD0;
+    float2 uv : TEXCOORD1;
+    nointerpolation float4 fillColor : TEXCOORD2;
+    nointerpolation float4 borderColor : TEXCOORD3;
+    nointerpolation int4 borderThickness : TEXCOORD4;
+    float2 positionPx : TEXCOORD5;
+    nointerpolation int4 dstXywhPx : TEXCOORD6;
 };
 
 //
-// Common Functions
+// Helpers
 //
 
-public uint vertexCornerIdx(uint vertexIdx)
+uint vertexCornerIdx(uint vertexIdx)
 {
     // Corners: 0=TL, 1=TR, 2=BR, 3=BL
     // Vertices: (0=TL, 1=TR, 2=BR), (0=TL, 2=BR, 3=BL)
@@ -74,7 +82,7 @@ public uint vertexCornerIdx(uint vertexIdx)
     return vertexIdx % 3 + vertexIdx / 4;
 }
 
-public int2 getCornerPosPx(int4 dstXywhPx, uint cornerIdx)
+int2 getCornerPosPx(int4 dstXywhPx, uint cornerIdx)
 {
     // Corners: 0=TL, 1=TR, 2=BR, 3=BL
     int x = dstXywhPx.x;
@@ -97,7 +105,7 @@ public int2 getCornerPosPx(int4 dstXywhPx, uint cornerIdx)
     }
 }
 
-public float2 getCornerUv(float4 srcXywhUv, uint cornerIdx)
+float2 getCornerUv(float4 srcXywhUv, uint cornerIdx)
 {
     // Corners: 0=TL, 1=TR, 2=BR, 3=BL
     float u = srcXywhUv.x;
@@ -120,43 +128,15 @@ public float2 getCornerUv(float4 srcXywhUv, uint cornerIdx)
     }
 }
 
-public float2 framebufferPxToNdc(int2 posPx, int2 framebufferSizePx)
+float2 framebufferPxToNdc(int2 posPx, float2 framebufferSizePx)
 {
     float2 ndc;
-    ndc.x = (float(posPx.x) / float(framebufferSizePx.x)) * 2.0 - 1.0;
-    ndc.y = (float(posPx.y) / float(framebufferSizePx.y)) * 2.0 - 1.0;
+    ndc.x = (float(posPx.x) / framebufferSizePx.x) * 2.0 - 1.0;
+    ndc.y = (float(posPx.y) / framebufferSizePx.y) * 2.0 - 1.0;
     return ndc;
 }
 
-public VSOutput computeVertexOutput(
-    Draw2dUniform uniform,
-    Quad quad,
-    uint vertexId,
-    uint instanceId)
-{
-    uint cornerIdx = vertexCornerIdx(vertexId);
-    int2 vertexPosPx = getCornerPosPx(quad.dstXywhPx, cornerIdx);
-    float2 vertexUv = getCornerUv(quad.srcXywhUv, cornerIdx);
-
-    VSOutput output;
-    output.position.xy = framebufferPxToNdc(vertexPosPx, uniform.framebufferSizePx);
-    output.position.z = (1.0 + quad.depth) / (1.0 + float(uniform.quadCount));
-    output.position.w = 1.0;
-    output.instanceId = instanceId;
-    output.uv = vertexUv;
-    output.tintColor = quad.color;
-    output.borderColor = quad.borderColor;
-    output.borderThickness = int4(
-        quad.borderThicknessT,
-        quad.borderThicknessR,
-        quad.borderThicknessB,
-        quad.borderThicknessL);
-    output.positionPx = float2(vertexPosPx);
-    output.dstXywhPx = quad.dstXywhPx;
-    return output;
-}
-
-public bool isInBorder(VSOutput input)
+bool isInBorder(VSOutput input)
 {
     // Check if the fragment is in the border region.
     // Border is defined by borderThickness: T, R, B, L.
@@ -180,29 +160,6 @@ public bool isInBorder(VSOutput input)
     return true;
 }
 
-//! RGBA quad shader for draw_2d.
-//!
-//! Binds an RGBA texture atlas where the texture gives per-pixel RGBA color.
-//! The color is tinted (multiplied) by the quad's RGBA color.
-
-import draw_2d_quad_base;
-
-//
-// Bindings (Descriptor Set 0)
-//
-
-[[vk::binding(0, 0)]]
-ConstantBuffer<Draw2dUniform> uniform;
-
-[[vk::binding(1, 0)]]
-StructuredBuffer<Quad> quads;
-
-[[vk::binding(2, 0)]]
-Texture2D<float4> atlasTexture;
-
-[[vk::binding(3, 0)]]
-SamplerState atlasSampler;
-
 //
 // Vertex Shader
 //
@@ -211,7 +168,24 @@ SamplerState atlasSampler;
 VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 {
     Quad quad = quads[instanceId];
-    return computeVertexOutput(uniform, quad, vertexId, instanceId);
+
+    uint cornerIdx = vertexCornerIdx(vertexId);
+    int2 vertexPosPx = getCornerPosPx(quad.dstXywhPx, cornerIdx);
+    float2 vertexUv = getCornerUv(quad.srcXywhUv, cornerIdx);
+
+    VSOutput output;
+    output.position.xy = framebufferPxToNdc(vertexPosPx, uniform_.viewportSizePx);
+    output.position.z = quad.depth / 65536.0; // Normalize depth to [0, 1]
+    output.position.w = 1.0;
+    output.instanceId = instanceId;
+    output.uv = vertexUv;
+    output.fillColor = quad.fillColor;
+    output.borderColor = quad.borderColor;
+    output.borderThickness = quad.borderThickness;
+    output.positionPx = float2(vertexPosPx);
+    output.dstXywhPx = quad.dstXywhPx;
+
+    return output;
 }
 
 //
@@ -227,9 +201,9 @@ float4 fragmentMain(VSOutput input) : SV_Target
         return input.borderColor;
     }
 
-    // Sample the RGBA atlas
-    float4 texColor = atlasTexture.Sample(atlasSampler, input.uv);
+    // Sample the texture
+    float4 texColor = quadTexture.Sample(quadSampler, input.uv);
 
-    // Tint with the quad's color (multiply)
-    return texColor * input.tintColor;
+    // Tint with the quad's fill color (multiply)
+    return texColor * input.fillColor;
 }

@@ -4,19 +4,17 @@ import numpy as np
 import PIL.Image
 import pytest
 
-from .basic import BaseResource, Font, logger
+from .basic import BaseResource, logger
 from .gpu import (
+    GpuBuffer,
+    GpuBufferMeta,
+    GpuCommandEncoder,
     GpuContext,
     GpuDevice,
     GpuImage,
-    GpuBuffer,
-    GpuCommandEncoder,
-    GpuImageMeta,
-    GpuBufferMeta,
-    GpuBufferImageCopyRegion,
 )
 from .draw_2d import Draw2dRenderer, Draw2dTarget, Draw2dQuad
-from .images import compute_psnr
+from .images import compute_psnr, convert_color
 from .loader import load_rgba_image
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
@@ -82,101 +80,118 @@ def assert_image_matches_reference(
 
 
 class Draw2dTestEngine(BaseResource):
-    def __init__(self):
+    """Test harness for Draw2d tests."""
+
+    gpu_context: GpuContext
+    gpu_device: GpuDevice
+    renderer: Draw2dRenderer
+    target: Draw2dTarget
+
+    def __init__(self) -> None:
         super().__init__(parent_resource=None)
+
         self.gpu_context = GpuContext(
             app_name="zfw draw_2d_test",
             enable_debug_layer_support=True,
             enable_present_support=False,
         )
-        self.draw_2d_context = Draw2dContext(gpu_context=self.gpu_context)
 
         self.gpu_device = GpuDevice(
             context=self.gpu_context,
             physical_device=self.gpu_context.enumerate_physical_devices()[0],
             surface=None,
         )
+
         self.renderer = Draw2dRenderer(
-            context=self.draw_2d_context,
-            device=self.gpu_device,
+            gpu_device=self.gpu_device,
+            target_width_px=TEST_IMAGE_W,
+            target_height_px=TEST_IMAGE_H,
         )
 
-        self.target = GpuImage(
-            device=self.gpu_device,
-            usages=["color-attachment", "transfer-src"],
-            meta=GpuImageMeta(
-                shape=(TEST_IMAGE_H, TEST_IMAGE_W, 4),
-                dtype=np.uint8,
-                color_space="srgb",
-            ),
-        )
+        self.target = Draw2dTarget(renderer=self.renderer)
 
     def _on_dispose(self) -> None:
-        self.target.dispose()
-
         self.renderer.dispose()
         self.gpu_device.dispose()
-
-        self.draw_2d_context.dispose()
         self.gpu_context.dispose()
 
     def readback(self) -> np.ndarray:
+        """Read back the rendered image as a uint8 RGBA array in sRGB color space."""
+        color_image = self.target.color_image
         buffer = GpuBuffer(
             device=self.gpu_device,
             usages=["copy-dst", "staging"],
             meta=GpuBufferMeta(
-                element_count=(TEST_IMAGE_H * TEST_IMAGE_W * 4),
-                element_dtype=np.uint8,
+                element_count=(color_image.height * color_image.width * 4),
+                element_dtype=np.float32,
             ),
         )
         encoder = GpuCommandEncoder(device=self.gpu_device, queue_type="transfer")
         encoder.transition_image_layout(
-            image=self.target,
+            image=color_image,
             layout="transfer-src-optimal",
         )
-        encoder.copy_image_to_buffer(src=self.target, dst=buffer)
+        encoder.copy_image_to_buffer(src=color_image, dst=buffer)
         encoder.submit().wait()
 
-        return buffer.memory.read(dtype=np.uint8).reshape(
-            (TEST_IMAGE_H, TEST_IMAGE_W, 4)
+        # Read as float32:
+        data_f32 = buffer.memory.read(dtype=np.float32).reshape(
+            (color_image.height, color_image.width, 4)
         )
 
-    def draw(self):
+        # Convert from linear to sRGB:
+        data_f32_srgb = convert_color(
+            data=data_f32,
+            src_color_space="linear",
+            dst_color_space="srgb",
+        )
+
+        # Clamp to [0, 1] and convert to uint8
+        data_u8_srgb = (np.clip(data_f32_srgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+        # Cleanup and return:
+        buffer.dispose()
+        return data_u8_srgb
+
+    def draw(self, quads: list[Draw2dQuad]) -> None:
+        """Render the given quads."""
         command_encoder = GpuCommandEncoder(
             device=self.gpu_device,
             queue_type="graphics",
         )
-        self.renderer.draw(
+        self.renderer.record_gpu_commands(
             command_encoder=command_encoder,
             target=self.target,
+            quads=quads,
         )
-
         command_encoder.submit().wait()
 
 
 def test_draw_2d_quads():
+    """Test rendering colored quads with borders."""
     engine = Draw2dTestEngine()
 
-    renderer = engine.renderer
-    renderer.add_quad(
-        dst_xy=(32, 64),
-        dst_wh=(512, 256),
-        color=(1.0, 1.0, 1.0, 1.0),
-        border_thickness=(0, 0, 8, 0),
-        border_color=(0.0, 0.1, 0.8, 1.0),
-    )
-    renderer.add_quad(
-        dst_xy=(40, 72),
-        dst_wh=(64, 64),
-        color=(0.0, 0.2, 0.0, 1.0),
-    )
-    renderer.add_quad(
-        dst_xy=(112, 72),
-        dst_wh=(64, 64),
-        color=(0.0, 0.2, 0.0, 0.5),
-    )
+    quads = [
+        # Large white quad with blue bottom border
+        Draw2dQuad(
+            dst_xywh_px=(32, 64, 512, 256),
+            fill_color=(1.0, 1.0, 1.0, 1.0),
+            border_thickness_px=(0, 0, 8, 0),
+            border_color=(0.0, 0.1, 0.8, 1.0),
+        ),
+        # Small green opaque quad
+        Draw2dQuad(
+            dst_xywh_px=(40, 72, 64, 64),
+            fill_color=(0.0, 0.2, 0.0, 1.0),
+        ),
+        # Small green semi-transparent quad
+        Draw2dQuad(
+            dst_xywh_px=(112, 72, 64, 64),
+            fill_color=(0.0, 0.2, 0.0, 0.5),
+        ),
+    ]
 
-    engine.draw()
+    engine.draw(quads)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -189,64 +204,37 @@ def test_draw_2d_quads():
 
 
 def test_draw_2d_image():
+    """Test rendering a textured quad with an image."""
     engine = Draw2dTestEngine()
 
+    # Load test image
     image_data = load_rgba_image("tests_data/rainbow-512x512.png")
     assert image_data.shape == (512, 512, 4)
 
     # Create a GpuImage for the texture
     gpu_image = GpuImage(
         device=engine.gpu_device,
-        usages=["texture-binding", "transfer-dst"],
-        meta=GpuImageMeta(
-            shape=(512, 512, 4),
-            dtype=np.float32,
-            color_space="linear",
-        ),
+        usages=["texture-binding"],
+        data=image_data,
     )
-
-    # Upload image data
-    staging_buf = GpuBuffer(
-        device=engine.gpu_device,
-        usages=["staging", "copy-src"],
-        meta=GpuBufferMeta(
-            element_count=image_data.size,
-            element_dtype=image_data.dtype,
-        ),
-    )
-    staging_buf.memory.write(data=image_data)
-
-    encoder = GpuCommandEncoder(device=engine.gpu_device, queue_type="transfer")
-    encoder.transition_image_layout(image=gpu_image, layout="transfer-dst-optimal")
-
-    encoder.copy_buffer_to_image(
-        src=staging_buf,
-        dst=gpu_image,
-        regions=[
-            GpuBufferImageCopyRegion(
-                buffer_offset=0,
-                image_offset=(0, 0, 0),
-                image_extent=(512, 512, 1),
-            )
-        ],
-    )
-    encoder.submit().wait()
-    staging_buf.dispose()
 
     border_thickness = 8
-    renderer = engine.renderer
-    renderer.add_quad(
-        dst_xy=(
-            (TEST_IMAGE_W - image_data.shape[1] - border_thickness) // 2,
-            (TEST_IMAGE_H - image_data.shape[0] - border_thickness) // 2,
+    quads = [
+        Draw2dQuad(
+            dst_xywh_px=(
+                (TEST_IMAGE_W - image_data.shape[1] - border_thickness) // 2,
+                (TEST_IMAGE_H - image_data.shape[0] - border_thickness) // 2,
+                image_data.shape[1],
+                image_data.shape[0],
+            ),
+            fill_image=gpu_image,
+            fill_color=(1.0, 1.0, 1.0, 1.0),
+            border_thickness_px=(8, 8, 8, 8),
+            border_color=(1.0, 1.0, 0.0, 1.0),
         ),
-        color=(1.0, 1.0, 1.0, 1.0),
-        border_thickness=(8, 8, 8, 8),
-        border_color=(1.0, 1.0, 0.0, 1.0),
-        image=gpu_image,
-    )
+    ]
 
-    engine.draw()
+    engine.draw(quads)
     output_image = engine.readback()
 
     assert_image_matches_reference(
@@ -256,147 +244,6 @@ def test_draw_2d_image():
     )
 
     gpu_image.dispose()
-    engine.dispose()
-
-
-def test_draw_2d_text_basic():
-    engine = Draw2dTestEngine()
-    renderer = engine.renderer
-
-    renderer.add_text(
-        text="Hello, world",
-        font="sans-serif",
-        dst_xy=(50, 50),
-        dst_wh=(400, 100),
-        font_size_px=48,
-        color=(1.0, 1.0, 1.0, 1.0),
-    )
-
-    engine.draw()
-    image = engine.readback()
-
-    assert_image_matches_reference(
-        image,
-        "test_draw_2d_text_basic",
-        psnr_threshold=65.0,
-    )
-
-    engine.dispose()
-
-
-def test_draw_2d_text_wrap():
-    engine = Draw2dTestEngine()
-    renderer = engine.renderer
-
-    long_text = "This is a long text that should wrap to the next line because the width is limited."
-    renderer.add_text(
-        text=long_text,
-        font="serif",
-        dst_xy=(50, 200),
-        dst_wh=(300, 400),
-        font_size_px=32,
-        color=(1.0, 0.8, 0.2, 1.0),
-        wrap=True,
-    )
-
-    engine.draw()
-    image = engine.readback()
-
-    assert_image_matches_reference(
-        image,
-        "test_draw_2d_text_wrap",
-        psnr_threshold=65.0,
-    )
-
-    engine.dispose()
-
-
-def test_draw_2d_text_clip():
-    engine = Draw2dTestEngine()
-    renderer = engine.renderer
-
-    # Text that overflows but wrap is False
-    renderer.add_text(
-        text="This text should be clipped because it is too long for the box.",
-        font="sans-serif",
-        dst_xy=(50, 400),
-        dst_wh=(200, 50),
-        font_size_px=32,
-        color=(0.5, 0.5, 1.0, 1.0),
-        wrap=False,
-    )
-
-    engine.draw()
-    image = engine.readback()
-
-    assert_image_matches_reference(
-        image,
-        "test_draw_2d_text_clip",
-        psnr_threshold=65.0,
-    )
-
-    engine.dispose()
-
-
-def test_draw_2d_text_matrix():
-    engine = Draw2dTestEngine()
-    renderer = engine.renderer
-
-    fonts: list[Font] = ["sans-serif", "serif"]
-    sizes = [12, 18, 24]
-    weights = [100, 400, 700, 900]
-
-    start_x = 20
-    start_y = 20
-    padding = 10
-
-    current_y = start_y
-
-    for font in fonts:
-        for size in sizes:
-            row_height = size + 20
-            current_x = start_x
-
-            for weight in weights:
-                text = f"{font} {size}px w{weight}"
-
-                # Estimate width
-                box_w = 280
-                box_h = row_height
-
-                # Background quad with border
-                renderer.add_quad(
-                    dst_xy=(current_x, current_y),
-                    dst_wh=(box_w, box_h),
-                    color=(0.1, 0.1, 0.1, 1.0),
-                    border_color=(0.5, 0.5, 0.5, 1.0),
-                    border_thickness=(1, 1, 1, 1),
-                )
-
-                renderer.add_text(
-                    text=text,
-                    font=font,
-                    dst_xy=(current_x + 5, current_y + 5),
-                    dst_wh=(box_w - 10, box_h - 10),
-                    font_size_px=size,
-                    font_weight=weight,
-                    color=(1.0, 1.0, 1.0, 1.0),
-                    wrap=False,
-                )
-
-                current_x += box_w + padding
-
-            current_y += row_height + padding
-
-    engine.draw()
-    image = engine.readback()
-
-    assert_image_matches_reference(
-        image,
-        "test_draw_2d_text_matrix",
-        psnr_threshold=65.0,
-    )
-
     engine.dispose()
 
 

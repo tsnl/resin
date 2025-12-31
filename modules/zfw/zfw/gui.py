@@ -59,7 +59,7 @@ from .basic import (
     JsonObject,
     LogicError,
 )
-from .draw_2d import Draw2dContext, Draw2dRenderer
+from .draw_2d import Draw2dRenderer
 from .draw_3d import (
     Draw3dContext,
     Draw3dRenderer,
@@ -299,7 +299,6 @@ class GuiWindow(BaseResource):
     _kiwi_solver: KiwiSolver
 
     # Renderers
-    _draw_2d_context: Draw2dContext
     _draw_2d_renderer: Draw2dRenderer
     _draw_3d_context: Draw3dContext
     _draw_3d_renderer: Draw3dRenderer
@@ -326,7 +325,6 @@ class GuiWindow(BaseResource):
         window: Window,
         gpu_context: GpuContext,
         gpu_device: GpuDevice,
-        draw_2d_context: Draw2dContext,
         draw_3d_context: Draw3dContext,
         swapchain_image_count: int = 3,
         theme: GuiTheme | None = None,
@@ -355,10 +353,8 @@ class GuiWindow(BaseResource):
         self._create_swapchain()
 
         # Create 2D renderer
-        self._draw_2d_context = draw_2d_context
         scale_x, _ = window.content_scale
         self._draw_2d_renderer = Draw2dRenderer(
-            context=draw_2d_context,
             device=gpu_device,
             scale=scale_x,
         )

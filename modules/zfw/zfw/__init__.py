@@ -4,7 +4,9 @@ __all__ = [
     "ButtonAction",
     "ColorSpace",
     "Draw2dContext",
+    "Draw2dQuad",
     "Draw2dRenderer",
+    "Draw2dTarget",
     "Draw3dCameraIntrinsics",
     "Draw3dContext",
     "Draw3dGeometry",
@@ -91,8 +93,9 @@ from .gpu import (
     GpuSwapChain,
 )
 from .draw_2d import (
-    Draw2dContext,
+    Draw2dQuad,
     Draw2dRenderer,
+    Draw2dTarget,
 )
 from .draw_3d import (
     Draw3dContext,

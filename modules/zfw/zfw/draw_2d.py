@@ -127,6 +127,17 @@ class Draw2dRenderer(BaseResource):
             layout=self._gpu_pipeline_layout,
         )
 
+        self._gpu_default_white_image = GpuImage(
+            device=gpu_device,
+            usages=["texture-binding"],
+            data=np.ones((1, 1, 4), dtype=np.float32),
+        )
+        self._gpu_default_sampler = GpuSampler(
+            device=gpu_device,
+            min_filter="linear",
+            mag_filter="linear",
+        )
+
         self._target_list = []
 
     def resize(self, *, target_width_px: int, target_height_px: int):
@@ -172,6 +183,8 @@ class Draw2dRenderer(BaseResource):
         for target in self._target_list:
             target.dispose()
 
+        self._gpu_default_sampler.dispose()
+        self._gpu_default_white_image.dispose()
         self._gpu_pipeline.dispose()
         self._gpu_fragment_shader_module.dispose()
         self._gpu_vertex_shader_module.dispose()
@@ -240,6 +253,10 @@ class Draw2dTarget(BaseResource):
         command_encoder: GpuCommandEncoder,
         quads: list["Draw2dQuad"],
     ):
+        # Batch the quads:
+        quads_with_depth = Draw2dTarget._augment_quads_with_depth(quads=quads)
+        group_quads, group_spans = self._compute_batches(quads=quads_with_depth)
+
         # Flush uniform data for this target:
         uniform_descriptor_set = self._uniform.flush_data_and_get_descriptor_set(
             command_encoder=command_encoder,
@@ -247,11 +264,23 @@ class Draw2dTarget(BaseResource):
             target_height_px=self._gpu_color_image.height,
         )
 
-        # Compute batches:
-        batch_draw_args = self._compute_batches(
-            command_encoder=command_encoder,
-            quads=quads,
-        )
+        # Flush grouped quad data to per-group buffers and get descriptor sets:
+        group_descriptor_sets = {
+            image: self._get_quad_group(
+                image=image,
+            ).flush_data_and_get_descriptor_set(
+                command_encoder=command_encoder,
+                quads=quads,
+            )
+            for image, quads in group_quads.items()
+        }
+        batches = [
+            (
+                group_descriptor_sets[image],
+                span,
+            )
+            for image, span in group_spans
+        ]
 
         # Record draw calls:
         with command_encoder.render(
@@ -262,7 +291,7 @@ class Draw2dTarget(BaseResource):
         ) as rp:
             rp.bind_pipeline(pipeline=self._renderer._gpu_pipeline)
             rp.bind_descriptor_set(set_=uniform_descriptor_set, set_index=0)
-            for batch_descriptor_set, batch_span in batch_draw_args:
+            for batch_descriptor_set, batch_span in batches:
                 rp.bind_descriptor_set(set_=batch_descriptor_set, set_index=1)
                 rp.draw(
                     vertex_count=6,
@@ -273,9 +302,11 @@ class Draw2dTarget(BaseResource):
     def _compute_batches(
         self,
         *,
-        command_encoder: GpuCommandEncoder,
-        quads: list["Draw2dQuad"],
-    ) -> list[tuple["GpuDescriptorSet", "Span"]]:
+        quads: list["QuadWithDepth"],
+    ) -> tuple[
+        dict[GpuImage | None, list["QuadWithDepth"]],
+        list[tuple[GpuImage | None, "Span"]],
+    ]:
         """
         Computes batches of quads, each of which shares the same image and can be drawn
         in a single multi-instance draw call.
@@ -298,39 +329,15 @@ class Draw2dTarget(BaseResource):
         Goal: given a global, flat quad list, compute a list of group spans.
         """
 
-        # First, augment quads with depth information (since we will be re-ordering
-        # and depth depends on original order):
-        aug_quads = Draw2dTarget._augment_quads_with_depth(quads=quads)
+        # Group quads into global spans that share the same image.
+        global_spans = Draw2dTarget._compute_global_spans(quads=quads)
 
-        # Next, group quads into global spans that share the same image.
-        global_spans = Draw2dTarget._compute_global_spans(quads=aug_quads)
-
-        # Next, convert global spans into group spans while accumulating all the quads
+        # Convert global spans into group spans while accumulating all the quads
         # per-group:
-        group_quads, group_spans = Draw2dTarget._compute_group_spans_from_global_spans(
-            quads=aug_quads,
+        return Draw2dTarget._compute_group_spans_from_global_spans(
+            quads=quads,
             global_spans=global_spans,
         )
-
-        # Next, acquire QuadGroup descriptor sets for each group:
-        group_descriptor_sets = {
-            image: self._get_quad_group(
-                image=image,
-            ).flush_data_and_get_descriptor_set(
-                command_encoder=command_encoder,
-                quads=quads,
-            )
-            for image, quads in group_quads.items()
-        }
-
-        # Finally, assemble the batch draw arguments:
-        return [
-            (
-                group_descriptor_sets[image],
-                span,
-            )
-            for image, span in group_spans
-        ]
 
     @staticmethod
     def _augment_quads_with_depth(
