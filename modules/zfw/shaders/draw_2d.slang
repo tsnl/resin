@@ -165,7 +165,7 @@ bool isInBorder(VSOutput input)
 //
 
 [shader("vertex")]
-VSOutput vertexMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
+VSOutput vertexMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID)
 {
     Quad quad = quads[instanceId];
 
