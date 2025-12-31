@@ -502,6 +502,7 @@ class GuiWindow(BaseResource):
             viewport_width=swapchain_width,
             viewport_height=swapchain_height,
             layout=self._present_pipeline_layout,
+            vk_color_format=self._gpu_swap_chain.vk_format,
         )
         self._present_sampler = GpuSampler(
             device=self._gpu_device,

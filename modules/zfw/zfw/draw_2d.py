@@ -226,7 +226,7 @@ class Draw2dTarget(BaseResource):
 
         self._gpu_color_image = GpuImage(
             device=renderer._gpu_device,
-            usages=["color-attachment", "transfer-src"],
+            usages=["color-attachment", "texture-binding", "transfer-src"],
             meta=GpuImageMeta(
                 shape=(
                     self._renderer._target_height_px,
