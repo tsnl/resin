@@ -887,7 +887,7 @@ class GuiWindow(BaseResource):
             ]
             with command_encoder.render(
                 color_attachment=swapchain_target.image,
-                clear_color=None,
+                clear_color="black",  # Use clear to avoid LOAD_OP_LOAD sync hazard
             ) as rp:
                 rp.bind_pipeline(pipeline=self._present_pipeline)
                 rp.bind_descriptor_set(set_=present_descriptor_set, set_index=0)
