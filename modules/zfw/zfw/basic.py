@@ -2,6 +2,9 @@ __all__ = [
     "BaseResource",
     "ButtonAction",
     "ColorSpace",
+    "Font",
+    "FontSize",
+    "FontWeight",
     "Key",
     "KeyModifier",
     "SupportsWrite",
@@ -197,6 +200,8 @@ def camel_to_snake(name: str) -> str:
 
 type ColorSpace = Literal["srgb", "linear"]
 type Font = Literal["sans-serif", "serif", "monospaced"]
+type FontWeight = Literal["light", "regular", "bold"]
+type FontSize = Literal["regular", "large", "extra-large"]
 type Key = Literal[
     # Printable keys (US layout)
     "space",

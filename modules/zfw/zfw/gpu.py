@@ -1658,7 +1658,7 @@ class GpuImage(BaseResource):
 
         if graphics_qfi == transfer_qfi:
             sharing_mode = VK_SHARING_MODE_EXCLUSIVE
-            queue_family_indices = None
+            queue_family_indices = []
         else:
             sharing_mode = VK_SHARING_MODE_CONCURRENT
             # Include all unique queue family indices
@@ -1677,9 +1677,7 @@ class GpuImage(BaseResource):
                 tiling=VK_IMAGE_TILING_OPTIMAL,
                 usage=vk_image_usage(usages),
                 sharingMode=sharing_mode,
-                queueFamilyIndexCount=len(queue_family_indices)
-                if queue_family_indices
-                else 0,
+                queueFamilyIndexCount=len(queue_family_indices),
                 pQueueFamilyIndices=queue_family_indices,
                 initialLayout=VK_IMAGE_LAYOUT_UNDEFINED,
             ),

@@ -1,3 +1,10 @@
+"""
+Draw2d is a low-level 2D renderer for textured quads.
+
+You probably want to use the higher-level `draw_2d_ex` module instead that builds on top
+of this one with more features.
+"""
+
 __all__ = [
     "Draw2dQuad",
     "Draw2dRenderer",
@@ -138,8 +145,8 @@ class Draw2dRenderer(BaseResource):
         )
         self._gpu_default_sampler = GpuSampler(
             device=gpu_device,
-            min_filter="linear",
-            mag_filter="linear",
+            min_filter="nearest",
+            mag_filter="nearest",
         )
 
         self._target_list = []
