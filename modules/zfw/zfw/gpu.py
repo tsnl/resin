@@ -14,11 +14,11 @@ __all__ = [
     "GpuDescriptorSet",
     "GpuDescriptorSetLayout",
     "GpuDevice",
+    "GpuGraphicsPipeline",
     "GpuImage",
     "GpuImageMeta",
     "GpuImageUsage",
     "GpuPhysicalDevice",
-    "GpuPipeline",
     "GpuPipelineLayout",
     "GpuSampler",
     "GpuShader",
@@ -3100,10 +3100,11 @@ def _vk_vertex_format(fmt: GpuVertexAttributeFormat) -> VkFormat:
 #
 
 
-class GpuPipeline(BaseResource):
+class GpuGraphicsPipeline(BaseResource):
     device: GpuDevice
     vk_pipeline: VkPipeline
     vk_color_format: VkFormat
+    vk_depth_format: VkFormat
     viewport_width: int
     viewport_height: int
     layout: GpuPipelineLayout
@@ -3114,23 +3115,24 @@ class GpuPipeline(BaseResource):
         device: GpuDevice,
         vertex_shader: GpuShader,
         fragment_shader: GpuShader,
-        vk_color_format: VkFormat,
         enable_depth_test: bool,
         enable_alpha_blending: bool,
         viewport_width: int,
         viewport_height: int,
         layout: GpuPipelineLayout,
         vertex_buffer_layouts: list[GpuVertexBufferLayout] | None = None,
+        vk_color_format: VkFormat | None = None,
     ):
         super().__init__(parent_resource=device)
         self.device = device
-        self.vk_color_format = vk_color_format
+        self.vk_color_format = vk_color_format or VK_FORMAT_R32G32B32A32_SFLOAT
+        self.vk_depth_format = VK_FORMAT_D32_SFLOAT
         self.vk_pipeline = self._help_create_pipeline(
             device=device,
             vertex_shader=vertex_shader,
             fragment_shader=fragment_shader,
-            vk_color_format=vk_color_format,
-            vk_depth_format=VK_FORMAT_D32_SFLOAT,
+            vk_color_format=self.vk_color_format,
+            vk_depth_format=self.vk_depth_format,
             enable_depth_test=enable_depth_test,
             enable_alpha_blending=enable_alpha_blending,
             viewport_width=viewport_width,
@@ -3352,22 +3354,22 @@ class GpuPipeline(BaseResource):
         layout: GpuPipelineLayout,
         vertex_buffer_layouts: list[GpuVertexBufferLayout],
     ) -> VkPipeline:
-        shader_stages = GpuPipeline._help_create_shader_stages(
+        shader_stages = GpuGraphicsPipeline._help_create_shader_stages(
             vertex_shader, fragment_shader
         )
-        vertex_input_state = GpuPipeline._help_create_vertex_input_state(
+        vertex_input_state = GpuGraphicsPipeline._help_create_vertex_input_state(
             vertex_buffer_layouts
         )
-        input_assembly_state = GpuPipeline._help_create_input_assembly_state()
-        viewport_state = GpuPipeline._help_create_viewport_state(
+        input_assembly_state = GpuGraphicsPipeline._help_create_input_assembly_state()
+        viewport_state = GpuGraphicsPipeline._help_create_viewport_state(
             viewport_width, viewport_height
         )
-        rasterization_state = GpuPipeline._help_create_rasterization_state()
-        multisample_state = GpuPipeline._help_create_multisample_state()
-        color_blend_state = GpuPipeline._help_create_color_blend_state(
+        rasterization_state = GpuGraphicsPipeline._help_create_rasterization_state()
+        multisample_state = GpuGraphicsPipeline._help_create_multisample_state()
+        color_blend_state = GpuGraphicsPipeline._help_create_color_blend_state(
             enable_alpha_blending=enable_alpha_blending
         )
-        depth_state = GpuPipeline._help_create_depth_stencil_state(
+        depth_state = GpuGraphicsPipeline._help_create_depth_stencil_state(
             enable_depth_test=enable_depth_test
         )
 
@@ -3419,7 +3421,7 @@ class GpuPipeline(BaseResource):
 class GpuRenderPassCommandEncoder(BaseResource):
     device: GpuDevice
     command_encoder: GpuCommandEncoder
-    bound_pipeline: GpuPipeline | None
+    bound_pipeline: GpuGraphicsPipeline | None
 
     def __init__(self, *, device: GpuDevice, command_encoder: GpuCommandEncoder):
         super().__init__(parent_resource=command_encoder)
@@ -3430,7 +3432,7 @@ class GpuRenderPassCommandEncoder(BaseResource):
     def _on_dispose(self) -> None:
         pass
 
-    def bind_pipeline(self, *, pipeline: GpuPipeline) -> None:
+    def bind_pipeline(self, *, pipeline: GpuGraphicsPipeline) -> None:
         if self.bound_pipeline is pipeline:
             return
 
@@ -3893,13 +3895,16 @@ class GpuEzBuffer(BaseResource):
     def clear(self) -> None:
         self._length = 0
 
-    def reserve_exact(self, *, new_capacity: int) -> None:
+    def reserve_exact(self, *, new_capacity: int) -> bool:
         """
         Ensure the buffer has at least `new_capacity` elements.
+
+        Returns a boolean value indicating whether the underlying GPU buffers were
+        recreated.
         """
 
         if new_capacity <= self.capacity:
-            return
+            return False
 
         # Dispose old buffers
         self._device_buffer.dispose()
@@ -3917,21 +3922,32 @@ class GpuEzBuffer(BaseResource):
         )
         self._staging_buffer, self._device_buffer = self._make_buffer_pair()
 
-    def resize(self, *, new_length: int) -> None:
+        # Indicate that buffers were recreated:
+        return True
+
+    def resize(self, *, new_length: int) -> bool:
         """
         Resize the buffer to `new_length`, reserving more capacity if necessary.
+
+        Returns a boolean value indicating whether the underlying GPU buffers were
+        recreated.
         """
 
         if new_length > self.capacity:
-            self.reserve_exact(new_capacity=new_length)
+            buffers_recreated = self.reserve_exact(new_capacity=new_length)
+        else:
+            buffers_recreated = False
 
         self._length = new_length
 
-    def extend(self, *, values: np.ndarray) -> tuple[int, int]:
+        return buffers_recreated
+
+    def extend(self, *, values: np.ndarray) -> bool:
         """
         Appends multiple values to the buffer, resizing if necessary.
 
-        Returns an (offset, count) tuple indicating where the new values were added.
+        Returns a boolean value indicating whether the underlying GPU buffers were
+        recreated.
         """
 
         assert values.dtype == self.dtype, (
@@ -3940,9 +3956,9 @@ class GpuEzBuffer(BaseResource):
 
         old_length = self._length
         new_length = old_length + len(values)
-        self.resize(new_length=new_length)
+        buffers_recreated = self.resize(new_length=new_length)
         self._data[old_length:new_length] = values
-        return old_length, len(values)
+        return buffers_recreated
 
     def _make_buffer_pair(self) -> tuple[GpuBuffer, GpuBuffer]:
         staging_buffer = GpuBuffer(
@@ -3960,8 +3976,13 @@ class GpuEzBuffer(BaseResource):
     @property
     def device_buffer(self) -> "GpuBuffer":
         """
-        Returns the device-side buffer. Note that this buffer will not contain
-        up-to-date data until `flush()` is called.
+        Returns the device-side buffer.
+
+        WARNING: this buffer will not contain up-to-date data until `flush()` is called.
+
+        WARNING: this buffer may become invalid if `reserve_exact()`, `resize()`, or
+        `extend()` are called. Check the return value of those methods to see if the
+        buffer was invalidated.
         """
         return self._device_buffer
 

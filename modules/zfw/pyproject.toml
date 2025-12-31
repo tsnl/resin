@@ -71,3 +71,7 @@ stages = { vertex = "vertexMain", fragment = "fragmentMain" }
 [[tool.zfw_build.shaders]]
 source = "shaders/draw_3d_environment.slang"
 stages = { vertex = "vertexMain", fragment = "fragmentMain" }
+
+[[tool.zfw_build.shaders]]
+source = "shaders/draw_2d.slang"
+stages = { vertex = "vertexMain", fragment = "fragmentMain" }

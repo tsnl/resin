@@ -13,7 +13,7 @@ from .gpu import (
     GpuEzBuffer,
     GpuImage,
     GpuImageMeta,
-    GpuPipeline,
+    GpuGraphicsPipeline,
     GpuPipelineLayout,
     GpuSampler,
     GpuShader,
@@ -89,14 +89,14 @@ class Draw3dRenderer(BaseResource):
     _main_pipeline_layout: GpuPipelineLayout
     _main_vertex_shader: GpuShader
     _main_fragment_shader: GpuShader
-    _cached_main_pipeline: GpuPipeline | None
+    _cached_main_pipeline: GpuGraphicsPipeline | None
     _cached_depth_image: GpuImage | None
 
     # Pipeline resources for environment background rendering:
     _env_pipeline_layout: GpuPipelineLayout
     _env_vertex_shader: GpuShader
     _env_fragment_shader: GpuShader
-    _cached_env_pipeline: GpuPipeline | None
+    _cached_env_pipeline: GpuGraphicsPipeline | None
 
     # Cache for environment descriptor sets (keyed by GpuImage id)
     _environment_ds_cache: dict[int, GpuDescriptorSet]
@@ -593,7 +593,7 @@ class Draw3dRenderer(BaseResource):
         if environment_map is not None:
             env_ds.dispose()
 
-    def _get_main_pipeline(self, target: GpuImage) -> GpuPipeline:
+    def _get_main_pipeline(self, target: GpuImage) -> GpuGraphicsPipeline:
         """Get or create a pipeline for main mesh rendering."""
         if self._cached_main_pipeline is not None:
             if (
@@ -618,7 +618,7 @@ class Draw3dRenderer(BaseResource):
             ],
         )
 
-        self._cached_main_pipeline = GpuPipeline(
+        self._cached_main_pipeline = GpuGraphicsPipeline(
             device=self.gpu_device,
             vertex_shader=self._main_vertex_shader,
             fragment_shader=self._main_fragment_shader,
@@ -632,7 +632,7 @@ class Draw3dRenderer(BaseResource):
         )
         return self._cached_main_pipeline
 
-    def _get_env_pipeline(self, target: GpuImage) -> GpuPipeline:
+    def _get_env_pipeline(self, target: GpuImage) -> GpuGraphicsPipeline:
         """Get or create a pipeline for environment background rendering."""
         if self._cached_env_pipeline is not None:
             if (
@@ -644,7 +644,7 @@ class Draw3dRenderer(BaseResource):
             self._cached_env_pipeline.dispose()
 
         # No vertex buffers needed - fullscreen triangle generated in shader
-        self._cached_env_pipeline = GpuPipeline(
+        self._cached_env_pipeline = GpuGraphicsPipeline(
             device=self.gpu_device,
             vertex_shader=self._env_vertex_shader,
             fragment_shader=self._env_fragment_shader,

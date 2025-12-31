@@ -557,7 +557,7 @@ class GuiWindow(BaseResource):
         self._key_event_callback = callback
 
     #
-    # Phase 1: update style:
+    # Update phase 1: update style:
     #
 
     def update_style(self) -> None:
@@ -566,22 +566,27 @@ class GuiWindow(BaseResource):
         self._central_widget._update_style()
 
     #
-    # Phase 2: update layout
+    # Update phase 2: update layout:
     #
 
     def update_layout(self) -> None:
+        # TODO: Can we get rid of Kiwi here?
+
         if self._central_widget is None:
             return
 
         solver = self._kiwi_solver
 
+        # Reset solver:
         solver.reset()
 
+        # Setup window size constraints:
         solver.addEditVariable(self._w_var, "strong")
         solver.addEditVariable(self._h_var, "strong")
         solver.suggestValue(self._w_var, self._window.width_dip)
         solver.suggestValue(self._h_var, self._window.height_dip)
 
+        # Setup widget layout constraints:
         self._central_widget._update_layout_constraints(
             solver,
             0.0,
@@ -590,10 +595,11 @@ class GuiWindow(BaseResource):
             self._h_var,
         )
 
+        # Solve:
         solver.updateVariables()
 
     #
-    # Phase 3: input events:
+    # Update phase 3: process input events:
     #
 
     def _on_key_event(

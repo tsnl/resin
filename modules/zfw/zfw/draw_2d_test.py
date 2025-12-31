@@ -15,10 +15,7 @@ from .gpu import (
     GpuBufferMeta,
     GpuBufferImageCopyRegion,
 )
-from .draw_2d import (
-    Draw2dContext,
-    Draw2dRenderer,
-)
+from .draw_2d import Draw2dRenderer, Draw2dTarget, Draw2dQuad
 from .images import compute_psnr
 from .loader import load_rgba_image
 
