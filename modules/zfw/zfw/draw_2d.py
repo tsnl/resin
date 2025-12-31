@@ -6,6 +6,7 @@ __all__ = [
 
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -41,6 +42,7 @@ class Draw2dRenderer(BaseResource):
     _gpu_device: GpuDevice
     _target_width_px: int
     _target_height_px: int
+    _clear_color: Literal["transparent", "black"] | None
 
     _gpu_uniform_descriptor_set_layout: GpuDescriptorSetLayout
     _gpu_quad_batch_descriptor_set_layout: GpuDescriptorSetLayout
@@ -61,12 +63,14 @@ class Draw2dRenderer(BaseResource):
         gpu_device: GpuDevice,
         target_width_px: int,
         target_height_px: int,
+        clear_color: Literal["transparent", "black"] | None = "transparent",
     ):
         super().__init__()
 
         self._gpu_device = gpu_device
         self._target_width_px = target_width_px
         self._target_height_px = target_height_px
+        self._clear_color = clear_color
 
         self._gpu_uniform_descriptor_set_layout = GpuDescriptorSetLayout(
             device=gpu_device,
@@ -253,9 +257,20 @@ class Draw2dTarget(BaseResource):
         command_encoder: GpuCommandEncoder,
         quads: list["Draw2dQuad"],
     ):
-        # Batch the quads:
+        # Prepare batches on the CPU:
+        #
+
         quads_with_depth = Draw2dTarget._augment_quads_with_depth(quads=quads)
         group_quads, group_spans = self._compute_batches(quads=quads_with_depth)
+
+        # Record GPU commands:
+        #
+
+        # Transition the target image to color-attachment layout:
+        command_encoder.transition_image_layout(
+            image=self._gpu_color_image,
+            layout="color-attachment-optimal",
+        )
 
         # Flush uniform data for this target:
         uniform_descriptor_set = self._uniform.flush_data_and_get_descriptor_set(
@@ -275,19 +290,14 @@ class Draw2dTarget(BaseResource):
             for image, quads in group_quads.items()
         }
         batches = [
-            (
-                group_descriptor_sets[image],
-                span,
-            )
+            (group_descriptor_sets[image], span)  #
             for image, span in group_spans
         ]
 
         # Record draw calls:
         with command_encoder.render(
             color_attachment=self._gpu_color_image,
-            depth_attachment=None,
-            clear_color="transparent",
-            clear_depth=True,
+            clear_color=self._renderer._clear_color,
         ) as rp:
             rp.bind_pipeline(pipeline=self._renderer._gpu_pipeline)
             rp.bind_descriptor_set(set_=uniform_descriptor_set, set_index=0)

@@ -106,6 +106,7 @@ class Draw2dTestEngine(BaseResource):
             gpu_device=self.gpu_device,
             target_width_px=TEST_IMAGE_W,
             target_height_px=TEST_IMAGE_H,
+            clear_color="black",
         )
 
         self.target = Draw2dTarget(renderer=self.renderer)
