@@ -355,8 +355,9 @@ class GuiWindow(BaseResource):
         # Create 2D renderer
         scale_x, _ = window.content_scale
         self._draw_2d_renderer = Draw2dRenderer(
-            device=gpu_device,
-            scale=scale_x,
+            gpu_device=gpu_device,
+            target_width_px=int(window.width_dip * scale_x),
+            target_height_px=int(window.height_dip * scale_x),
         )
 
         # Create 3D renderer

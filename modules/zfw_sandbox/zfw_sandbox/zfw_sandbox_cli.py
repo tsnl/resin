@@ -132,11 +132,6 @@ def main():
         surface=window.gpu_surface,
     )
 
-    # Create 2D render context
-    draw_2d_context = zfw.Draw2dContext(
-        gpu_context=gpu_context,
-    )
-
     # Create 3D render context
     draw_3d_context = zfw.Draw3dContext()
 
@@ -145,7 +140,6 @@ def main():
         window=window,
         gpu_context=gpu_context,
         gpu_device=gpu_device,
-        draw_2d_context=draw_2d_context,
         draw_3d_context=draw_3d_context,
         swapchain_image_count=3,
     )
@@ -164,7 +158,6 @@ def main():
     start_widget.dispose()
     gui_window.dispose()
     draw_3d_context.dispose()
-    draw_2d_context.dispose()
     gpu_device.dispose()
     window.dispose()
     window_context.dispose()
