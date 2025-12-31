@@ -16,7 +16,7 @@ from .gpu import (
 from .draw_2d import Draw2dTarget
 from .draw_2d_ex import (
     Draw2dExCanvas,
-    Draw2dExQuad,
+    QuadPrimitive,
     Draw2dExRenderer,
 )
 from .images import compute_psnr, convert_color
@@ -189,7 +189,7 @@ def test_draw_2d_ex_quads():
 
     # Large white quad with blue bottom border
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(32, 64, 512, 256),
             fill_color=(1.0, 1.0, 1.0, 1.0),
             border_thickness_dip=(0, 0, 8, 0),
@@ -198,14 +198,14 @@ def test_draw_2d_ex_quads():
     )
     # Small green opaque quad
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(40, 72, 64, 64),
             fill_color=(0.0, 0.2, 0.0, 1.0),
         )
     )
     # Small green semi-transparent quad
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(112, 72, 64, 64),
             fill_color=(0.0, 0.2, 0.0, 0.5),
         )
@@ -241,7 +241,7 @@ def test_draw_2d_ex_image():
 
     border_thickness = 8
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(
                 (TEST_IMAGE_W - image_data.shape[1] - border_thickness) // 2,
                 (TEST_IMAGE_H - image_data.shape[0] - border_thickness) // 2,
@@ -344,7 +344,7 @@ def test_draw_2d_ex_text_on_quad():
 
     # Background quad
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(100, 100, 400, 200),
             fill_color=(0.2, 0.2, 0.5, 1.0),
             border_thickness_dip=(4, 4, 4, 4),
@@ -384,7 +384,7 @@ def test_draw_2d_ex_layered_quads_and_text():
 
     # First layer: large background quad
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(50, 50, 600, 400),
             fill_color=(0.1, 0.1, 0.1, 1.0),
         )
@@ -403,7 +403,7 @@ def test_draw_2d_ex_layered_quads_and_text():
 
     # Third layer: overlapping colored quad
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(100, 150, 300, 150),
             fill_color=(0.8, 0.2, 0.2, 0.9),
             border_thickness_dip=(2, 2, 2, 2),
@@ -426,7 +426,7 @@ def test_draw_2d_ex_layered_quads_and_text():
 
     # Fifth layer: another quad that overlaps the red one
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(250, 200, 300, 150),
             fill_color=(0.2, 0.6, 0.2, 0.9),
             border_thickness_dip=(2, 2, 2, 2),
@@ -493,7 +493,7 @@ def test_draw_2d_ex_font_matrix():
 
                 # Background quad with border
                 canvas.add_quad(
-                    Draw2dExQuad(
+                    QuadPrimitive(
                         dst_xywh_dip=(current_x, current_y, box_w, box_h),
                         fill_color=(0.15, 0.15, 0.15, 1.0),
                         border_thickness_dip=(1, 1, 1, 1),
@@ -538,7 +538,7 @@ def test_draw_2d_ex_scale_matrix():
 
     # At scale 2.0, a 100x50 DIP quad becomes 200x100 physical pixels
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(50, 50, 200, 100),
             fill_color=(0.3, 0.3, 0.6, 1.0),
             border_thickness_dip=(2, 2, 2, 2),
@@ -560,7 +560,7 @@ def test_draw_2d_ex_scale_matrix():
 
     # Another quad at a different position (in DIP space)
     canvas.add_quad(
-        Draw2dExQuad(
+        QuadPrimitive(
             dst_xywh_dip=(50, 180, 200, 100),
             fill_color=(0.6, 0.3, 0.3, 1.0),
             border_thickness_dip=(2, 2, 2, 2),
@@ -622,7 +622,7 @@ def test_draw_2d_ex_text_alignment():
 
         # Background box
         canvas.add_quad(
-            Draw2dExQuad(
+            QuadPrimitive(
                 dst_xywh_dip=(x, y, box_w, box_h),
                 fill_color=(0.2, 0.2, 0.2, 1.0),
                 border_thickness_dip=(1, 1, 1, 1),

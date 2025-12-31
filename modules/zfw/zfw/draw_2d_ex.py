@@ -9,7 +9,7 @@ It provides:
 
 __all__ = [
     "Draw2dExCanvas",
-    "Draw2dExQuad",
+    "QuadPrimitive",
     "Draw2dExRenderer",
 ]
 
@@ -135,7 +135,7 @@ class Draw2dExCanvas:
         """Clear all primitives from the canvas."""
         self._primitives.clear()
 
-    def add_quad(self, quad: "Draw2dExQuad") -> None:
+    def add_quad(self, quad: "QuadPrimitive") -> None:
         """
         Add a quad to the canvas.
 
@@ -174,7 +174,7 @@ class Draw2dExCanvas:
             vertical_alignment: Vertical text alignment.
         """
         self._primitives.append(
-            _TextPrimitive(
+            TextPrimitive(
                 text=text,
                 font=font,
                 dst_xy_dip=dst_xy_dip,
@@ -211,15 +211,21 @@ class Draw2dExCanvas:
 
 
 # Pixel sizes for each FontSize (at scale=1.0)
-FONT_SIZE_PX: dict[FontSize, int] = {
-    "regular": 16,
-    "large": 24,
-    "extra-large": 32,
+FONT_SIZE_PX: dict[tuple[Font, FontSize], int] = {
+    ("sans-serif", "regular"): 14,
+    ("sans-serif", "large"): 24,
+    ("sans-serif", "extra-large"): 32,
+    ("serif", "regular"): 16,
+    ("serif", "large"): 24,
+    ("serif", "extra-large"): 32,
+    ("monospaced", "regular"): 14,
+    ("monospaced", "large"): 24,
+    ("monospaced", "extra-large"): 32,
 }
 
 # Weight values for variable fonts
 FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
-    "light": 300,
+    "light": 100,
     "regular": 400,
     "bold": 700,
 }
@@ -230,7 +236,7 @@ GLYPH_CHARSET = "".join(chr(c) for c in range(32, 127))  # ASCII printable
 
 
 #
-# Implementation
+# Implementation: CanvasPrimitive
 #
 
 
@@ -243,7 +249,7 @@ class CanvasPrimitive(ABC):
 
 
 @dataclass(frozen=True, kw_only=True)
-class Draw2dExQuad(CanvasPrimitive):
+class QuadPrimitive(CanvasPrimitive):
     """
     A quad in device-independent pixel coordinates.
 
@@ -294,7 +300,7 @@ class Draw2dExQuad(CanvasPrimitive):
 
 
 @dataclass(frozen=True, kw_only=True)
-class _TextPrimitive(CanvasPrimitive):
+class TextPrimitive(CanvasPrimitive):
     """Internal representation of a text primitive."""
 
     text: str
@@ -319,7 +325,7 @@ class _TextPrimitive(CanvasPrimitive):
             return []
 
         atlas = renderer._glyph_atlas
-        font_size_px = FONT_SIZE_PX[self.font_size]
+        font_size_px = FONT_SIZE_PX[self.font, self.font_size]
         weight_value = FONT_WEIGHT_VALUE[self.font_weight]
 
         # Get text shaper for this configuration:
@@ -573,9 +579,9 @@ class _TextPrimitive(CanvasPrimitive):
         return min_x, max_x
 
 
-# -----------------------------------------------------------------------------
-# Glyph Atlas
-# -----------------------------------------------------------------------------
+#
+# Implementation: Glyph Atlas
+#
 
 
 @dataclass(frozen=True)
@@ -722,7 +728,7 @@ class GlyphAtlas(BaseResource):
         scale: float,
     ) -> None:
         """Generate glyphs for a specific font configuration."""
-        font_size_px = FONT_SIZE_PX[font_size]
+        font_size_px = FONT_SIZE_PX[font, font_size]
         weight_value = FONT_WEIGHT_VALUE[font_weight]
         effective_size_px = int(font_size_px * scale)
 
@@ -848,9 +854,9 @@ class GlyphAtlas(BaseResource):
         )
 
 
-# -----------------------------------------------------------------------------
-# Text Shaper
-# -----------------------------------------------------------------------------
+#
+# Implementation: Text Shaper
+#
 
 
 class TextShaper:

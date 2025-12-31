@@ -299,7 +299,7 @@ _THEME = {
             "bg_color": (1.0, 1.0, 1.0, 0.0),
             "fg_color": (0.0, 0.0, 0.0, 1.0),
             "font": "serif",
-            "font_size_dip": 18,
+            "font_size": "regular",
             "padding": (2, 5, 2, 5),
             "text_horizontal_alignment": "left",
             "text_vertical_alignment": "middle",
@@ -317,7 +317,7 @@ _THEME = {
         "default": {
             "bg_color": (1.0,) * 4,
             "fg_color": (0.0, 0.0, 0.0, 1.0),
-            "font_size_dip": 28,
+            "font_size": "extra-large",
             "font": "serif",
             "text_horizontal_alignment": "center",
             "text_vertical_alignment": "middle",
@@ -327,7 +327,7 @@ _THEME = {
         "default": {
             "bg_color": (1.0,) * 4,
             "fg_color": (0.0, 0.0, 0.0, 1.0),
-            "font_size_dip": 22,
+            "font_size": "large",
             "font": "serif",
             "border_color": (0.0, 0.0, 0.0, 1.0),
             "border_thickness": (0, 0, 2, 0),

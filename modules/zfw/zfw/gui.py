@@ -34,6 +34,7 @@ __all__ = [
     "GuiWindow",
 ]
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Literal, Callable
 import time
@@ -52,6 +53,8 @@ from .basic import (
     MouseButton,
     ButtonAction,
     Font,
+    FontSize,
+    FontWeight,
     Key,
     KeyModifier,
     HorizontalAlignment,
@@ -59,7 +62,8 @@ from .basic import (
     JsonObject,
     LogicError,
 )
-from .draw_2d import Draw2dRenderer
+from .draw_2d import Draw2dTarget
+from .draw_2d_ex import Draw2dExCanvas, QuadPrimitive, Draw2dExRenderer
 from .draw_3d import (
     Draw3dContext,
     Draw3dRenderer,
@@ -67,7 +71,21 @@ from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
 )
-from .gpu import GpuContext, GpuDevice, GpuImage, GpuSwapChain, GpuCommandEncoder
+from .bundled_data import BUNDLED_DATA_PATH
+from .gpu import (
+    GpuContext,
+    GpuDescriptorSet,
+    GpuDescriptorSetLayout,
+    GpuDescriptorSetLayoutBinding,
+    GpuDevice,
+    GpuGraphicsPipeline,
+    GpuImage,
+    GpuPipelineLayout,
+    GpuSampler,
+    GpuShader,
+    GpuSwapChain,
+    GpuCommandEncoder,
+)
 from .window import Window
 
 from .events import EventHub
@@ -153,8 +171,8 @@ def _compute_image_src_xy_wh(
 @dataclass
 class GuiWidgetStyle:
     font: Font = "sans-serif"
-    font_size_dip: int = 14
-    font_weight: int = 400
+    font_size: FontSize = "regular"
+    font_weight: FontWeight = "regular"
     bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     fg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
@@ -226,16 +244,16 @@ _DEFAULT_THEME: GuiTheme = {
     },
     "h1": {
         "default": {
-            "font_size_dip": 32,
-            "font_weight": 1000,
+            "font_size": "extra-large",
+            "font_weight": "bold",
             "fg_color": (1.0, 1.0, 1.0, 1.0),  # White text
             "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
         },
     },
     "h2": {
         "default": {
-            "font_size_dip": 24,
-            "font_weight": 800,
+            "font_size": "large",
+            "font_weight": "bold",
             "fg_color": (0.0, 0.0, 0.0, 1.0),
         },
     },
@@ -299,9 +317,19 @@ class GuiWindow(BaseResource):
     _kiwi_solver: KiwiSolver
 
     # Renderers
-    _draw_2d_renderer: Draw2dRenderer
+    _draw_2d_renderer: Draw2dExRenderer
+    _draw_2d_targets: list[Draw2dTarget]  # One per swapchain image
     _draw_3d_context: Draw3dContext
     _draw_3d_renderer: Draw3dRenderer
+
+    # Present pipeline (for blitting 2D target to swapchain)
+    _present_descriptor_set_layout: GpuDescriptorSetLayout
+    _present_pipeline_layout: GpuPipelineLayout
+    _present_vertex_shader: GpuShader
+    _present_fragment_shader: GpuShader
+    _present_pipeline: GpuGraphicsPipeline
+    _present_sampler: GpuSampler
+    _present_descriptor_sets: list[GpuDescriptorSet]  # One per swapchain image
 
     # 3D viewport camera
     _camera_transform: np.ndarray | None
@@ -350,15 +378,27 @@ class GuiWindow(BaseResource):
 
         # Create swapchain
         self._gpu_swap_chain = None
+        self._draw_2d_targets = []
         self._create_swapchain()
 
         # Create 2D renderer
         scale_x, _ = window.content_scale
-        self._draw_2d_renderer = Draw2dRenderer(
+        self._draw_2d_renderer = Draw2dExRenderer(
             gpu_device=gpu_device,
             target_width_px=int(window.width_dip * scale_x),
             target_height_px=int(window.height_dip * scale_x),
+            clear_color="transparent",
         )
+
+        # Create one Draw2dTarget per swapchain image for multi-frame-in-flight
+        for _ in range(swapchain_image_count):
+            self._draw_2d_targets.append(
+                Draw2dTarget(renderer=self._draw_2d_renderer.inner)
+            )
+
+        # Create present pipeline for blitting 2D target to swapchain
+        self._present_descriptor_sets = []
+        self._create_present_pipeline()
 
         # Create 3D renderer
         self._draw_3d_context = draw_3d_context
@@ -392,12 +432,104 @@ class GuiWindow(BaseResource):
             self._gpu_device.wait_idle()
             self._gpu_swap_chain.dispose()
 
+        # Dispose old targets
+        for target in self._draw_2d_targets:
+            target.dispose()
+        self._draw_2d_targets.clear()
+
         # Create new swapchain
         self._gpu_swap_chain = GpuSwapChain(
             device=self._gpu_device,
             surface=self._window.gpu_surface,
             image_count=self._swapchain_image_count,
         )
+
+        # Recreate targets if renderer exists
+        if hasattr(self, "_draw_2d_renderer") and self._draw_2d_renderer is not None:
+            for _ in range(self._swapchain_image_count):
+                self._draw_2d_targets.append(
+                    Draw2dTarget(renderer=self._draw_2d_renderer.inner)
+                )
+
+        # Recreate present descriptor sets
+        if hasattr(self, "_present_descriptor_set_layout"):
+            self._create_present_descriptor_sets()
+
+    def _create_present_pipeline(self) -> None:
+        """Create the present pipeline for blitting 2D target to swapchain."""
+
+        self._present_descriptor_set_layout = GpuDescriptorSetLayout(
+            device=self._gpu_device,
+            bindings=OrderedDict(
+                {
+                    "sourceTexture": GpuDescriptorSetLayoutBinding(
+                        type="sampled-image",
+                        stages=["fragment"],
+                    ),
+                    "sourceSampler": GpuDescriptorSetLayoutBinding(
+                        type="sampler",
+                        stages=["fragment"],
+                    ),
+                }.items()
+            ),
+        )
+        self._present_pipeline_layout = GpuPipelineLayout(
+            device=self._gpu_device,
+            descriptor_set_layouts=[self._present_descriptor_set_layout],
+        )
+        self._present_vertex_shader = GpuShader(
+            device=self._gpu_device,
+            spirv_path=(BUNDLED_DATA_PATH / "shaders/gui_present.vert.spv"),
+            stage="vertex",
+        )
+        self._present_fragment_shader = GpuShader(
+            device=self._gpu_device,
+            spirv_path=(BUNDLED_DATA_PATH / "shaders/gui_present.frag.spv"),
+            stage="fragment",
+        )
+
+        # Get swapchain dimensions for viewport
+        assert self._gpu_swap_chain is not None
+        swapchain_width = self._gpu_swap_chain.width
+        swapchain_height = self._gpu_swap_chain.height
+
+        self._present_pipeline = GpuGraphicsPipeline(
+            device=self._gpu_device,
+            vertex_shader=self._present_vertex_shader,
+            fragment_shader=self._present_fragment_shader,
+            enable_depth_test=False,
+            enable_alpha_blending=False,
+            viewport_width=swapchain_width,
+            viewport_height=swapchain_height,
+            layout=self._present_pipeline_layout,
+        )
+        self._present_sampler = GpuSampler(
+            device=self._gpu_device,
+            min_filter="nearest",
+            mag_filter="nearest",
+        )
+
+        # Create descriptor sets for each target
+        self._create_present_descriptor_sets()
+
+    def _create_present_descriptor_sets(self) -> None:
+        """Create descriptor sets for the present pipeline, one per target."""
+        # Dispose old descriptor sets
+        for ds in self._present_descriptor_sets:
+            ds.dispose()
+        self._present_descriptor_sets.clear()
+
+        # Create new descriptor sets
+        for target in self._draw_2d_targets:
+            ds = GpuDescriptorSet(
+                device=self._gpu_device,
+                bindings={
+                    "sourceTexture": target.color_image,
+                    "sourceSampler": self._present_sampler,
+                },
+                layout=self._present_descriptor_set_layout,
+            )
+            self._present_descriptor_sets.append(ds)
 
     #
     # Resource disposal:
@@ -406,6 +538,18 @@ class GuiWindow(BaseResource):
     def _on_dispose(self) -> None:
         if self._draw_3d_renderer is not None:
             self._draw_3d_renderer.dispose()
+        for ds in self._present_descriptor_sets:
+            ds.dispose()
+        self._present_descriptor_sets.clear()
+        self._present_sampler.dispose()
+        self._present_pipeline.dispose()
+        self._present_fragment_shader.dispose()
+        self._present_vertex_shader.dispose()
+        self._present_pipeline_layout.dispose()
+        self._present_descriptor_set_layout.dispose()
+        for target in self._draw_2d_targets:
+            target.dispose()
+        self._draw_2d_targets.clear()
         if self._draw_2d_renderer is not None:
             self._draw_2d_renderer.dispose()
         if self._gpu_swap_chain is not None:
@@ -425,7 +569,7 @@ class GuiWindow(BaseResource):
         return self._gpu_device
 
     @property
-    def draw_2d_renderer(self) -> Draw2dRenderer:
+    def draw_2d_renderer(self) -> Draw2dExRenderer:
         return self._draw_2d_renderer
 
     @property
@@ -692,11 +836,18 @@ class GuiWindow(BaseResource):
         if self._gpu_swap_chain is None:
             return
 
-        with self._gpu_swap_chain.present() as target:
+        with self._gpu_swap_chain.present() as swapchain_target:
             command_encoder = GpuCommandEncoder(
                 device=self._gpu_device,
                 queue_type="graphics",
             )
+
+            # Get the Draw2dTarget for this swapchain image
+            draw_2d_target = self._draw_2d_targets[swapchain_target.image_index]
+
+            # Create canvas for this frame
+            scale_x, _ = self._window.content_scale
+            canvas = Draw2dExCanvas(renderer=self._draw_2d_renderer, scale=scale_x)
 
             # Render 3D viewport first (behind GUI widgets)
             if (
@@ -708,32 +859,42 @@ class GuiWindow(BaseResource):
                     meshes=self._meshes,
                     camera_transform=self._camera_transform,
                     camera_intrinsics=self._camera_intrinsics,
-                    target=target.image,
+                    target=swapchain_target.image,
                     environment_map=self._environment_map,
                 )
 
-                # Render 2D GUI on top of 3D (without clearing)
-                self._draw_2d_renderer.clear()
-                if self._central_widget is not None:
-                    self._central_widget._render(self._draw_2d_renderer)
-                self._draw_2d_renderer.draw(
-                    command_encoder=command_encoder,
-                    target=target.image,
-                    clear_color=None,  # Don't clear, render on top of 3D
-                )
-            else:
-                # No 3D rendering, just render 2D GUI with clearing
-                self._draw_2d_renderer.clear()
-                if self._central_widget is not None:
-                    self._central_widget._render(self._draw_2d_renderer)
-                self._draw_2d_renderer.draw(
-                    command_encoder=command_encoder,
-                    target=target.image,
-                )
+            # Render 2D GUI on top of 3D
+            if self._central_widget is not None:
+                self._central_widget._render(canvas)
+            self._draw_2d_renderer.record_gpu_commands(
+                command_encoder=command_encoder,
+                target=draw_2d_target,
+                canvas=canvas,
+            )
+
+            # Present the 2D target to swapchain using present pipeline
+            command_encoder.transition_image_layout(
+                image=swapchain_target.image,
+                layout="color-attachment-optimal",
+            )
+            command_encoder.transition_image_layout(
+                image=draw_2d_target.color_image,
+                layout="texture-binding",
+            )
+            present_descriptor_set = self._present_descriptor_sets[
+                swapchain_target.image_index
+            ]
+            with command_encoder.render(
+                color_attachment=swapchain_target.image,
+                clear_color=None,
+            ) as rp:
+                rp.bind_pipeline(pipeline=self._present_pipeline)
+                rp.bind_descriptor_set(set_=present_descriptor_set, set_index=0)
+                rp.draw(vertex_count=3, first_instance=0, instance_count=1)
 
             # Transition image for presentation
             command_encoder.transition_image_layout(
-                image=target.image,
+                image=swapchain_target.image,
                 layout=(
                     "present-src"
                     if self._gpu_device.present_support_enabled
@@ -741,9 +902,9 @@ class GuiWindow(BaseResource):
                 ),
             )
             command_encoder.submit(
-                fence=target.render_done_fence,
-                wait_semaphores=[target.render_wait_semaphore],
-                signal_semaphores=[target.render_done_semaphore],
+                fence=swapchain_target.render_done_fence,
+                wait_semaphores=[swapchain_target.render_wait_semaphore],
+                signal_semaphores=[swapchain_target.render_done_semaphore],
             )
 
 
@@ -1192,15 +1353,15 @@ class GuiWidget(BaseResource):
     # Render:
     #
 
-    def _render(self, renderer: Draw2dRenderer) -> None:
+    def _render(self, canvas: Draw2dExCanvas) -> None:
         # Render self.
-        self._render_self(renderer)
+        self._render_self(canvas)
 
         # Render children, in order, after self.
         for child in self._child_widget_list:
-            child._render(renderer)
+            child._render(canvas)
 
-    def _render_self(self, renderer: Draw2dRenderer) -> None:
+    def _render_self(self, canvas: Draw2dExCanvas) -> None:
         # Get the latest style:
         style = self._style
 
@@ -1233,33 +1394,40 @@ class GuiWidget(BaseResource):
             user_src_wh=image_src_wh,
         )
 
+        # Compute src_xywh_px for quad
+        src_xywh_px: tuple[int, int, int, int] | None = None
+        if src_xy is not None and src_wh is not None:
+            src_xywh_px = (src_xy[0], src_xy[1], src_wh[0], src_wh[1])
+
         # Draw background quad:
-        renderer.add_quad(
-            dst_xy=(
-                x + ml + bl,
-                y + mt + bt,
-            ),
-            dst_wh=dst_wh,
-            src_xy=src_xy,
-            src_wh=src_wh,
-            color=style.bg_color,
-            image=bg_image,
-            border_color=style.border_color,
-            border_thickness=style.border_thickness,
+        canvas.add_quad(
+            QuadPrimitive(
+                dst_xywh_dip=(
+                    x + ml + bl,
+                    y + mt + bt,
+                    dst_wh[0],
+                    dst_wh[1],
+                ),
+                src_xywh_px=src_xywh_px,
+                fill_color=style.bg_color,
+                fill_image=bg_image,
+                border_color=style.border_color,
+                border_thickness_dip=style.border_thickness,
+            )
         )
 
         # Draw text:
         if self._text is not None:
-            renderer.add_text(
+            canvas.add_text(
                 text=self._text,
                 font=style.font,
-                font_size_px=style.font_size_dip,
+                font_size=style.font_size,
                 font_weight=style.font_weight,
-                dst_xy=(
+                dst_xy_dip=(
                     x + ml + bl + pl,
                     y + mt + bt + pt,
                 ),
-                dst_wh=(
+                dst_wh_dip=(
                     w - ml - mr - bl - br - pl - pr,
                     h - mt - mb - bt - bb - pt - pb,
                 ),

@@ -493,7 +493,7 @@ _VIEWER_THEME: zfw.GuiTheme = {
             "bg_color": (0.0, 0.0, 0.0, 0.0),
             "fg_color": (1.0, 1.0, 1.0, 1.0),
             "font": "monospaced",
-            "font_size_dip": 14,
+            "font_size": "regular",
             "padding": (5, 10, 5, 10),
             "text_horizontal_alignment": "left",
             "text_vertical_alignment": "middle",
