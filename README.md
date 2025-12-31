@@ -1,4 +1,4 @@
-# `zfw` -- Zero Framework
+# `zfw`
 
 A game engine for fun and profit, written in pure Python.
 
