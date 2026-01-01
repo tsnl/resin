@@ -17,11 +17,18 @@ pub struct Draw2dRenderer {
 
     pipeline: wgpu::RenderPipeline,
 
-    default_white_texture: Rgba32FloatTexture,
+    default_white_texture: Rgba8UnormTexture,
     sampler: wgpu::Sampler,
 }
 impl Draw2dRenderer {
-    pub fn create(device: wgpu::Device, queue: wgpu::Queue, target_size_wh: [u16; 2]) -> Arc<Self> {
+    pub fn create(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_size_wh: [u16; 2],
+    ) -> Arc<Self> {
+        let device = device.clone();
+        let queue = queue.clone();
+
         // Layout:
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Draw2dRenderer.QuadBatch.BindGroupLayout"),
@@ -75,7 +82,7 @@ impl Draw2dRenderer {
                 module: &shader_module,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba32Float,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -103,10 +110,10 @@ impl Draw2dRenderer {
         // Bind resources:
         let default_white_texture = {
             let texture =
-                Rgba32FloatTexture::new(&device, [1, 1], "Draw2dRenderer.DefaultWhiteTexture");
+                Rgba8UnormTexture::new(&device, [32, 32], "Draw2dRenderer.DefaultWhiteTexture");
             queue.write_texture(
                 texture.texel_copy_texture_info(),
-                bytemuck::cast_slice(&[1.0_f32; 4]),
+                bytemuck::cast_slice(&[0xFF_u8; 4 * 32 * 32]),
                 texture.texel_copy_buffer_layout(),
                 texture.extent_3d(),
             );
@@ -157,14 +164,13 @@ impl Draw2dRenderer {
 /// Draw2dFrame encapsulates a single frame in flight for 2D drawing, including mutable state.
 /// Users are responsible for ensuring that a Draw2dFrame instance is not used across multiple frames in flight.
 pub struct Draw2dFrame {
-    output_image: Rgba32FloatTexture,
-
+    output_image: Rgba8UnormTexture,
     quad_group_cache: HashMap<wgpu::Texture, QuadGroup>,
 }
 impl Draw2dFrame {
     pub fn new(device: &wgpu::Device, target_size_wh: [u16; 2]) -> Self {
         let output_image =
-            Rgba32FloatTexture::new(device, target_size_wh, "Draw2dFrame.OutputImage");
+            Rgba8UnormTexture::new(device, target_size_wh, "Draw2dFrame.OutputImage");
         let quad_batch_cache = Default::default();
         Self {
             output_image,
@@ -176,7 +182,7 @@ impl Draw2dFrame {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
-        default_white_texture: &Rgba32FloatTexture,
+        default_white_texture: &Rgba8UnormTexture,
         pipeline: &wgpu::RenderPipeline,
         target_size_wh: [u16; 2],
         command_encoder: &mut wgpu::CommandEncoder,
@@ -249,9 +255,7 @@ impl Draw2dFrame {
     ) -> wgpu::BindGroup {
         self.quad_group_cache
             .entry(key.clone())
-            .or_insert_with(|| {
-                QuadGroup::new(device, key, quads.len(), bind_group_layout, sampler)
-            })
+            .or_insert_with(|| QuadGroup::new(device, key, quads.len(), bind_group_layout, sampler))
             .update(device, command_encoder, bind_group_layout, sampler, quads)
     }
 }
@@ -333,8 +337,8 @@ impl QuadBatchList {
 /// Each group is subdivided into "batches" that can be drawn in a single draw call.
 struct QuadGroup {
     atlas: wgpu::Texture,
-    dev_buffer: StorageBuffer<PodQuad>,
-    host_buffer: StagingBuffer<PodQuad>,
+    device_buffer: StorageBuffer<PodQuad>,
+    staging_buffer: StagingBuffer<PodQuad>,
     bind_group: wgpu::BindGroup,
     capacity: usize,
 }
@@ -348,9 +352,9 @@ impl QuadGroup {
     ) -> Self {
         let capacity = min_capacity.next_power_of_two();
         let atlas = atlas.clone();
-        let dev_buffer =
-            StorageBuffer::<PodQuad>::new(device, capacity, "Draw2dFrame.QuadBatch.StorageBuffer");
-        let host_buffer =
+        let device_buffer =
+            StorageBuffer::<PodQuad>::new(device, capacity, "Draw2dFrame.QuadBatch.DeviceBuffer");
+        let staging_buffer =
             StagingBuffer::<PodQuad>::new(device, capacity, "Draw2dFrame.QuadBatch.StagingBuffer");
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Draw2dFrame.QuadBatch.BindGroup"),
@@ -358,7 +362,7 @@ impl QuadGroup {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: dev_buffer.wgpu_buffer().as_entire_binding(),
+                    resource: device_buffer.wgpu_buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -374,8 +378,8 @@ impl QuadGroup {
         });
         Self {
             atlas,
-            dev_buffer,
-            host_buffer,
+            device_buffer,
+            staging_buffer,
             bind_group,
             capacity,
         }
@@ -397,9 +401,9 @@ impl QuadGroup {
         );
 
         // Write data to device buffer via staging buffer:
-        self.host_buffer.write(data);
-        self.host_buffer
-            .copy_to_buffer(&self.dev_buffer, command_encoder);
+        self.staging_buffer.write(data);
+        self.staging_buffer
+            .copy_to_buffer(&self.device_buffer, command_encoder);
 
         // Done: return the latest bind group
         self.bind_group.clone()
@@ -507,5 +511,75 @@ impl PodQuad {
             border_color_rgba,
             _rsv: [0; 4],
         }
+    }
+}
+
+//
+// Tests:
+//
+
+#[cfg(test)]
+mod tests {
+    use std::iter;
+
+    use super::*;
+
+    #[test]
+    fn test_pod_quad_size() {
+        assert_eq!(std::mem::size_of::<PodQuad>(), 32);
+    }
+
+    #[test]
+    fn basic_render_test() {
+        let wgpu_instance = wgpu::Instance::new(&Default::default());
+        let adapter =
+            pollster::block_on(wgpu_instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }));
+        let (device, queue) =
+            pollster::block_on(adapter.unwrap().request_device(&wgpu::DeviceDescriptor {
+                label: Some("TestDevice"),
+                ..Default::default()
+            }))
+            .unwrap();
+
+        let renderer = Draw2dRenderer::create(&device, &queue, [256, 256]);
+        let mut frame = Draw2dFrame::new(&device, [256, 256]);
+        let readback_buffer =
+            ReadbackBuffer::<[u8; 4]>::new(&device, 256 * 256, "TestReadbackBuffer");
+
+        let mut command_encoder =
+            renderer
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("TestCommandEncoder"),
+                });
+        {
+            let quads = vec![Draw2dQuad {
+                dst_xy_px: [32, 32],
+                dst_wh_px: Some([128, 128]),
+                fill_color_rgba: [0xFF, 0x00, 0x00, 0xFF],
+                ..Default::default()
+            }];
+            renderer.record(&quads, &mut frame, &mut command_encoder);
+
+            readback_buffer.copy_from_texture(&frame.output_image, &mut command_encoder);
+        }
+        queue.submit(iter::once(command_encoder.finish()));
+
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+        image::DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(
+                256,
+                256,
+                bytemuck::cast_vec(readback_buffer.read().into_vec()),
+            )
+            .unwrap(),
+        )
+        .save("test_output.png")
+        .unwrap();
     }
 }

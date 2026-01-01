@@ -5,8 +5,4 @@ mod gpu_util;
 pub use draw_2d::*;
 pub use gpu_util::*;
 
-use std::{
-    collections::HashMap,
-    ops::Range,
-    sync::Arc,
-};
+use std::{collections::HashMap, ops::Range, sync::Arc};

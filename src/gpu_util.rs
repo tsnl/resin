@@ -1,12 +1,18 @@
-
 //
 // Buffer wrappers: StorageBuffer, UniformBuffer, VertexBuffer, IndexBuffer, StagingBuffer, ReadbackBuffer
 //
 
+use std::alloc::Layout;
+
 pub trait BufferWrapper {
+    type Element;
+
     fn wgpu_buffer(&self) -> &wgpu::Buffer;
     fn len(&self) -> usize;
 
+    fn size_in_bytes(&self) -> wgpu::BufferAddress {
+        (self.len() * std::mem::size_of::<Self::Element>()) as wgpu::BufferAddress
+    }
     fn copy_to_buffer<T: BufferWrapper>(
         &self,
         dst: &T,
@@ -17,7 +23,7 @@ pub trait BufferWrapper {
             0,
             dst.wgpu_buffer(),
             0,
-            (self.len() * std::mem::size_of::<u8>()) as wgpu::BufferAddress,
+            dst.size_in_bytes(),
         );
     }
     fn copy_to_texture<T: TextureWrapper>(
@@ -34,6 +40,20 @@ pub trait BufferWrapper {
             dst.extent_3d(),
         );
     }
+    fn copy_from_texture<T: TextureWrapper>(
+        &self,
+        src: &T,
+        command_encoder: &mut wgpu::CommandEncoder,
+    ) {
+        command_encoder.copy_texture_to_buffer(
+            src.texel_copy_texture_info(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: self.wgpu_buffer(),
+                layout: src.texel_copy_buffer_layout(),
+            },
+            src.extent_3d(),
+        );
+    }
     fn binding_size() -> Option<wgpu::BufferSize> {
         Some(wgpu::BufferSize::new(std::mem::size_of::<u8>() as u64).unwrap())
     }
@@ -48,6 +68,7 @@ macro_rules! buffer_wrapper {
             count: usize,
         }
         impl<T: bytemuck::Pod> BufferWrapper for $name<T> {
+            type Element = T;
             fn wgpu_buffer(&self) -> &wgpu::Buffer {
                 &self.buffer
             }
@@ -71,6 +92,24 @@ macro_rules! buffer_wrapper {
                 }
             }
         }
+
+        impl<T: bytemuck::Pod> $name<T> {
+            /// map_sync is private and should only be used by StagingBuffer and ReadbackBuffer
+            fn map_sync(&self, map_mode: wgpu::MapMode) {
+                let buffer_slice = self.buffer.slice(..);
+                let (tx, rx) = oneshot::channel();
+                buffer_slice.map_async(map_mode, move |result| {
+                    if let Err(e) = result {
+                        panic!("Failed to map staging buffer for write: {:?}", e);
+                    }
+                    tx.send(()).unwrap();
+                });
+                self.device
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .unwrap();
+                rx.recv().unwrap();
+            }
+        }
     }
 }
 buffer_wrapper!(pub struct StorageBuffer { wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST });
@@ -81,35 +120,23 @@ buffer_wrapper!(pub struct StagingBuffer { wgpu::BufferUsages::MAP_WRITE | wgpu:
 buffer_wrapper!(pub struct ReadbackBuffer { wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST });
 
 impl<T: bytemuck::Pod + Send> StagingBuffer<T> {
-    pub fn map_sync(&self, map_mode: wgpu::MapMode) {
-        let buffer_slice = self.buffer.slice(..);
-        let (tx, rx) = oneshot::channel();
-        buffer_slice.map_async(map_mode, move |result| {
-            if let Err(e) = result {
-                panic!("Failed to map staging buffer for write: {:?}", e);
-            }
-            tx.send(()).unwrap();
-        });
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
-        rx.recv().unwrap();
-    }
     pub fn write(&self, data: &[T]) {
         assert_eq!(data.len(), self.len());
         self.map_sync(wgpu::MapMode::Write);
         let mut mapped_range = self.buffer.get_mapped_range_mut(..);
         mapped_range.copy_from_slice(bytemuck::cast_slice(data));
+        drop(mapped_range);
         self.buffer.unmap();
     }
+}
+impl<T: bytemuck::Pod + Send> ReadbackBuffer<T> {
     pub fn read(&self) -> Box<[T]> {
         self.map_sync(wgpu::MapMode::Read);
         let mapped_range = self.buffer.get_mapped_range(..);
-        let data = bytemuck::cast_slice(&mapped_range)
+        let res = bytemuck::cast_slice(&mapped_range)
             .to_vec()
             .into_boxed_slice();
-        self.buffer.unmap();
-        data
+        res
     }
 }
 
@@ -137,7 +164,11 @@ pub trait TextureWrapper {
             offset: 0,
             bytes_per_row: Some({
                 // TODO: When we support BC formats, this needs to be adjusted to account for block sizes.
-                self.width() as u32 * self.format().target_pixel_byte_cost().unwrap()
+                self.width() as u32
+                    * match self.format() {
+                        wgpu::TextureFormat::Rgba8Unorm => 4,
+                        _ => todo!(),
+                    }
             }),
             rows_per_image: None,
         }
@@ -190,7 +221,6 @@ macro_rules! texture2d_wrapper {
     };
 }
 
-texture2d_wrapper!(pub struct Rgba32FloatTexture { wgpu::TextureFormat::Rgba32Float });
 texture2d_wrapper!(pub struct Rgba8UnormTexture { wgpu::TextureFormat::Rgba8Unorm });
 
 //
