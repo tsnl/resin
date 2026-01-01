@@ -1,6 +1,7 @@
 __all__ = [
     "GltfScene",
     "load_gltf",
+    "load_image",
     "load_rgba_image",
     "load_rgba_image_from_bytes",
 ]
@@ -8,6 +9,7 @@ __all__ = [
 import base64
 import io
 from pathlib import Path
+from typing import Literal
 
 import PIL.Image
 import numpy as np
@@ -30,31 +32,61 @@ LOG = logger(__name__)
 #
 # Image Loading
 #
+# FIXME: PIL only reads uint8 images. Need a custom image reader (and probably BC
+# support).
+#
+
+
+def load_image(
+    *,
+    file_path: Path,
+    expected_channel_count: Literal[1, 4],
+    input_color_space: ColorSpace = "srgb",
+    output_color_space: ColorSpace = "linear",
+) -> np.ndarray:
+    match expected_channel_count:
+        case 1:
+            if input_color_space != "linear" or output_color_space != "linear":
+                LOG.error(
+                    "Color space conversion requested for mono image: "
+                    "ignoring and loading as linear: please fix the caller."
+                )
+            return load_mono_image(file_path)
+        case 4:
+            return load_rgba_image(
+                file_path,
+                input_color_space=input_color_space,
+                output_color_space=output_color_space,
+            )
+
+
+def load_mono_image(file_path: Path) -> np.ndarray:
+    """
+    Loads a mono (grayscale) image as a normalized NumPy array. Assumed linear color
+    space.
+
+    :param file_path: The path to the image file
+    :return: Mono image as float32 array with shape (H, W, 1).
+    """
+    src = np.array(PIL.Image.open(file_path).convert("L"))
+    src_normalized = src.astype(np.float32) / 255.0
+    return src_normalized[:, :, np.newaxis]
 
 
 def load_rgba_image(
-    file_path_or_url: Path | str,
+    file_path: Path,
     input_color_space: ColorSpace = "srgb",
     output_color_space: ColorSpace = "linear",
 ) -> np.ndarray:
     """
     Loads an RGBA image as a normalized NumPy array.
 
-    :param file_path_or_url: The path to the image file, or a data URL (data:...) to load.
+    :param file_path: The path to the image file
     :param input_color_space: The color space of the input image.
     :param output_color_space: The desired output color space.
     :return: RGBA image as float32 array with shape (H, W, 4).
     """
-    file_path_or_url = str(file_path_or_url)
-
-    if file_path_or_url.startswith("data:"):
-        # Data URL: data:[<mediatype>][;base64],<data>
-        _, data = file_path_or_url.split(",", 1)
-        raw_bytes = base64.b64decode(data)
-        src = np.array(PIL.Image.open(io.BytesIO(raw_bytes)).convert("RGBA"))
-    else:
-        src = np.array(PIL.Image.open(file_path_or_url).convert("RGBA"))
-
+    src = np.array(PIL.Image.open(file_path).convert("RGBA"))
     src_normalized = src.astype(np.float32) / 255.0
     dst_rgb = convert_color(
         src_normalized[..., :3],
@@ -370,9 +402,10 @@ def _load_image_sources(
             source = _ImageSource(raw_bytes=raw_bytes)
 
         elif (image_uri := image.uri) is not None:
+            source = _ImageSource(file_path=image)
             if image_uri.startswith("data:"):
                 # Base64 embedded image
-                _, data = image_uri.split(",", 1)
+                _, data = image_uri.split(",", 1)  # type: ignore
                 raw_bytes = base64.b64decode(data)
                 source = _ImageSource(raw_bytes=raw_bytes)
             else:

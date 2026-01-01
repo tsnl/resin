@@ -331,112 +331,6 @@ from .typed_vulkan import (
 )
 
 
-# Module logger
-LOG = logger(__name__)
-
-
-#
-# Debug Utils Messenger Callback
-#
-
-# Filters out specific validation messages by their pMessageIdName.
-# These are suppressed because they are noisy and not actionable:
-# - "BestPractices-specialuse-extension":
-#   Complains that VK_EXT_debug_utils is a special-use extension and should not be
-#   enabled in production builds.
-#   We know VK_EXT_debug_utils is for debugging; we deliberately enable it during
-#   development.
-# - "Loader Message":
-#   Emitted by the Vulkan loader about errors with driver selection. Suppress.
-_FILTERED_VALIDATION_MESSAGE_NAMES: set[str] = {
-    "BestPractices-specialuse-extension",
-    "Loader Message",
-}
-
-
-def _vulkan_severity_to_log_level(severity: int) -> int:
-    """
-    Translate Vulkan debug utils message severity to Python logging level.
-
-    Args:
-        severity: VkDebugUtilsMessageSeverityFlagBitsEXT value.
-
-    Returns:
-        A Python logging level (e.g., logging.ERROR, logging.WARNING).
-    """
-    if severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-        return logging.ERROR
-    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-        return logging.WARNING
-    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-        return logging.INFO
-    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-        return logging.DEBUG
-    else:
-        return logging.INFO
-
-
-def _vulkan_message_type_to_string(message_type: int) -> str:
-    """
-    Translate Vulkan debug utils message type to a human-readable string.
-
-    Args:
-        message_type: VkDebugUtilsMessageTypeFlagBitsEXT value.
-
-    Returns:
-        A string describing the message type.
-    """
-    types = []
-    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
-        types.append("GENERAL")
-    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
-        types.append("VALIDATION")
-    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
-        types.append("PERFORMANCE")
-    return " | ".join(types) if types else "UNKNOWN"
-
-
-def _debug_utils_messenger_callback(
-    severity: int,
-    message_type: int,
-    callback_data,
-    user_data,
-) -> int:
-    """
-    Custom debug messenger callback that filters unwanted validation messages.
-
-    This is used during instance creation to suppress noisy warnings that are
-    emitted before the layer's message_id_filter setting takes effect.
-
-    Translates Vulkan severity levels to Python logging levels and logs messages
-    with appropriate context (message type and ID).
-    """
-
-    _ = user_data
-
-    def string(ptr):
-        if not ptr:
-            return ""
-        s = raw_ffi.string(ptr)
-        return s if isinstance(s, str) else bytes(s).decode("utf-8")
-
-    # callback_data is a VkDebugUtilsMessengerCallbackDataEXT
-    message_id_name = string(callback_data.pMessageIdName)
-    if message_id_name in _FILTERED_VALIDATION_MESSAGE_NAMES:
-        return False
-
-    # Extract and format the message
-    message = string(callback_data.pMessage)
-    message_type_str = _vulkan_message_type_to_string(message_type)
-    log_level = _vulkan_severity_to_log_level(severity)
-
-    # Log with appropriate context
-    full_message = f"{message} {message_type_str=}, {message_id_name=} "
-    LOG.log(log_level, full_message)
-
-    return False
-
-
 #
 # GpuContext
 #
@@ -4031,3 +3925,112 @@ class GpuEzBuffer(BaseResource):
 
         # Return the device buffer:
         return self._device_buffer
+
+
+#
+# Debug Utils Messenger Callback
+#
+
+# Filters out specific validation messages by their pMessageIdName.
+# These are suppressed because they are noisy and not actionable:
+# - "BestPractices-specialuse-extension":
+#   Complains that VK_EXT_debug_utils is a special-use extension and should not be
+#   enabled in production builds.
+#   We know VK_EXT_debug_utils is for debugging; we deliberately enable it during
+#   development.
+# - "Loader Message":
+#   Emitted by the Vulkan loader about errors with driver selection. Suppress.
+_FILTERED_VALIDATION_MESSAGE_NAMES: set[str] = {
+    "BestPractices-specialuse-extension",
+    "Loader Message",
+}
+
+
+def _vulkan_severity_to_log_level(severity: int) -> int:
+    """
+    Translate Vulkan debug utils message severity to Python logging level.
+
+    Args:
+        severity: VkDebugUtilsMessageSeverityFlagBitsEXT value.
+
+    Returns:
+        A Python logging level (e.g., logging.ERROR, logging.WARNING).
+    """
+    if severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+        return logging.ERROR
+    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+        return logging.WARNING
+    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+        return logging.INFO
+    elif severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+        return logging.DEBUG
+    else:
+        return logging.INFO
+
+
+def _vulkan_message_type_to_string(message_type: int) -> str:
+    """
+    Translate Vulkan debug utils message type to a human-readable string.
+
+    Args:
+        message_type: VkDebugUtilsMessageTypeFlagBitsEXT value.
+
+    Returns:
+        A string describing the message type.
+    """
+    types = []
+    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
+        types.append("GENERAL")
+    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
+        types.append("VALIDATION")
+    if message_type & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
+        types.append("PERFORMANCE")
+    return " | ".join(types) if types else "UNKNOWN"
+
+
+def _debug_utils_messenger_callback(
+    severity: int,
+    message_type: int,
+    callback_data,
+    user_data,
+) -> int:
+    """
+    Custom debug messenger callback that filters unwanted validation messages.
+
+    This is used during instance creation to suppress noisy warnings that are
+    emitted before the layer's message_id_filter setting takes effect.
+
+    Translates Vulkan severity levels to Python logging levels and logs messages
+    with appropriate context (message type and ID).
+    """
+
+    _ = user_data
+
+    def string(ptr):
+        if not ptr:
+            return ""
+        s = raw_ffi.string(ptr)
+        return s if isinstance(s, str) else bytes(s).decode("utf-8")
+
+    # callback_data is a VkDebugUtilsMessengerCallbackDataEXT
+    message_id_name = string(callback_data.pMessageIdName)
+    if message_id_name in _FILTERED_VALIDATION_MESSAGE_NAMES:
+        return False
+
+    # Extract and format the message
+    message = string(callback_data.pMessage)
+    message_type_str = _vulkan_message_type_to_string(message_type)
+    log_level = _vulkan_severity_to_log_level(severity)
+
+    # Log with appropriate context
+    full_message = f"{message} {message_type_str=}, {message_id_name=} "
+    LOG.log(log_level, full_message)
+
+    return False
+
+
+#
+# Logging
+#
+
+LOG = logger(__name__)

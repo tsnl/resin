@@ -16,6 +16,8 @@ dependencies = [
     "rich>=14.2.0",
     "pygltflib>=1.16.0",
     "pydantic>=2.12.5",
+    "msgpack>=1.1.2",
+    "orjson>=3.11.5",
 ]
 
 [project.optional-dependencies]
