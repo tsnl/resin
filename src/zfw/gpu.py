@@ -346,7 +346,6 @@ class GpuContext(BaseResource):
     enable_debug_layer_support: bool
     enable_present_support: bool
     enable_ray_tracing_support: bool
-    enable_portability_subset: bool
     vk_instance: VkInstance
     vk_extra_proc_tab: dict[str, Callable]
 
@@ -358,27 +357,17 @@ class GpuContext(BaseResource):
         enable_debug_layer_support: bool = True,
         enable_present_support: bool = True,
         enable_ray_tracing_support: bool = True,
-        enable_portability_subset_override: bool | None = None,
     ) -> None:
         super().__init__(parent_resource=parent_resource)
-
-        enable_portability_subset = (
-            enable_portability_subset_override
-            if enable_portability_subset_override is not None
-            else (sys.platform == "darwin")  # -> inferred
-        )
 
         self.enable_debug_layer_support = enable_debug_layer_support
         self.enable_present_support = enable_present_support
         self.enable_ray_tracing_support = enable_ray_tracing_support
-        self.enable_portability_subset = enable_portability_subset
 
         self.vk_instance = GpuContext._help_create_instance(
             app_name=app_name,
             enable_debug_layers=enable_debug_layer_support,
             enable_present_support=enable_present_support,
-            enable_ray_tracing_support=enable_ray_tracing_support,
-            enable_portability_subset=enable_portability_subset,
             enable_gpu_assisted_validation=False,
         )
         self.vk_extra_proc_tab = {}
@@ -410,8 +399,6 @@ class GpuContext(BaseResource):
         app_name: str,
         enable_debug_layers: bool,
         enable_present_support: bool,
-        enable_ray_tracing_support: bool,
-        enable_portability_subset: bool,
         enable_gpu_assisted_validation: bool,
     ) -> VkInstance:
         layers: list[str] = []
@@ -480,11 +467,6 @@ class GpuContext(BaseResource):
         if enable_present_support:
             extensions.append("VK_KHR_surface")
             extensions += GpuContext._help_compute_required_platform_instance_extensions_for_present_support()
-
-        if enable_portability_subset:
-            extensions.append("VK_KHR_portability_enumeration")
-            extensions.append("VK_KHR_get_physical_device_properties2")
-            flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
 
         return vkCreateInstance(
             pCreateInfo=VkInstanceCreateInfo(
@@ -968,6 +950,10 @@ class GpuQueueFamilyIndices:
 class GpuDevice(BaseResource):
     context: GpuContext
     physical_device: GpuPhysicalDevice
+
+    present_support_enabled: bool
+    ray_tracing_support_enabled: bool
+
     qfis: GpuQueueFamilyIndices
     vk_device: VkDevice
     vk_command_pools: dict[int, VkCommandPool]
@@ -975,8 +961,6 @@ class GpuDevice(BaseResource):
     descriptor_pool_config: dict["GpuDescriptorType", int] | None
     max_descriptor_pool_set_count: int
     vk_descriptor_pool: VkDescriptorPool
-    present_support_enabled: bool
-    ray_tracing_support_enabled: bool
 
     def __init__(
         self,
@@ -986,7 +970,6 @@ class GpuDevice(BaseResource):
         surface: "GpuSurface | None",
         descriptor_pool_config: dict["GpuDescriptorType", int] | None = None,
         max_descriptor_pool_set_count: int = 1024,
-        enable_ray_tracing_support: bool = True,
     ) -> None:
         super().__init__(parent_resource=context)
 
@@ -995,21 +978,22 @@ class GpuDevice(BaseResource):
         physical_device.check_vulkan_1_3_support()
         self.physical_device = physical_device
 
+        self.present_support_enabled = self.context.enable_present_support
+        self.present_support_enabled &= bool(surface)
+        self.ray_tracing_support_enabled = self.context.enable_ray_tracing_support
+
         self.qfis = GpuQueueFamilyIndices.find(physical_device, surface=surface)
+
         self.vk_device = self._help_create_device(
             physical_device=physical_device,
             qfis=self.qfis,
-            extensions=self._help_compute_extensions(
-                context=context, enable_ray_tracing=enable_ray_tracing_support
-            ),
-            enable_ray_tracing=enable_ray_tracing_support,
+            enable_present_support=self.present_support_enabled,
+            enable_ray_tracing=self.ray_tracing_support_enabled,
         )
         self.vk_command_pools = self._help_create_command_pools(
             vk_device=self.vk_device, qfis=self.qfis
         )
         self.vk_queues = self._help_get_queues(vk_device=self.vk_device, qfis=self.qfis)
-        self.present_support_enabled = surface is not None
-        self.ray_tracing_support_enabled = enable_ray_tracing_support
         self.descriptor_pool_config = self._help_compute_descriptor_pool_config(
             descriptor_pool_config
         )
@@ -1046,15 +1030,19 @@ class GpuDevice(BaseResource):
         )
 
     @staticmethod
-    def _help_compute_extensions(
-        context: GpuContext, *, enable_ray_tracing: bool
-    ) -> list[str]:
-        """Compute the list of required device extensions."""
+    def _help_create_device(
+        *,
+        physical_device: GpuPhysicalDevice,
+        qfis: GpuQueueFamilyIndices,
+        enable_ray_tracing: bool,
+        enable_present_support: bool,
+    ) -> VkDevice:
+        """Create a VkDevice with the specified configuration."""
+        queue_create_info_list = qfis.compute_queue_create_info_list()
+
         extensions = []
-        if context.enable_present_support:
+        if enable_present_support:
             extensions.append("VK_KHR_swapchain")
-        if context.enable_portability_subset:
-            extensions.append("VK_KHR_portability_subset")  # macOS
         if enable_ray_tracing:
             extensions += [
                 # Ray tracing requires these KHR device extensions
@@ -1062,18 +1050,6 @@ class GpuDevice(BaseResource):
                 "VK_KHR_acceleration_structure",
                 "VK_KHR_ray_tracing_pipeline",
             ]
-        return extensions
-
-    @staticmethod
-    def _help_create_device(
-        *,
-        physical_device: GpuPhysicalDevice,
-        qfis: GpuQueueFamilyIndices,
-        extensions: list[str],
-        enable_ray_tracing: bool,
-    ) -> VkDevice:
-        """Create a VkDevice with the specified configuration."""
-        queue_create_info_list = qfis.compute_queue_create_info_list()
 
         vulkan_11_features = VkPhysicalDeviceVulkan11Features(
             pNext=None,
