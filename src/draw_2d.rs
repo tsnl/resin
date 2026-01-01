@@ -437,7 +437,7 @@ impl QuadGroup {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct PodQuad {
     dst_xy_ndc: [f32; 2],           // 4x2=8: 0..8
     dst_wh_ndc: [f32; 2],           // 4x2=8: 8..16
