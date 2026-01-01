@@ -19,15 +19,5 @@ __pycache__
 /build
 /target
 
-# Ignore '*.actual.png' files from expect tests.
-*.actual.png
-
 # Ignore log files
 *.log
-
-
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
