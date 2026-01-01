@@ -215,33 +215,34 @@ impl Draw2dFrame {
         };
 
         // Draw:
-        for (texture, draw_range) in quad_batch_list.draw_ranges.iter() {
-            let texture = texture
-                .clone()
-                .unwrap_or(default_white_texture.wgpu_texture().clone());
-            let bind_group = group_bind_groups.get(&texture).unwrap();
+        {
+            let mut rp = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Draw2dFrame.RenderPass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self
+                        .output_image
+                        .wgpu_texture()
+                        .create_view(&Default::default()),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_pipeline(pipeline);
 
-            {
-                let mut rp = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Draw2dFrame.RenderPass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self
-                            .output_image
-                            .wgpu_texture()
-                            .create_view(&Default::default()),
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                rp.set_pipeline(pipeline);
+            for (texture, draw_range) in quad_batch_list.draw_ranges.iter() {
+                let texture = texture
+                    .clone()
+                    .unwrap_or(default_white_texture.wgpu_texture().clone());
+                let bind_group = group_bind_groups.get(&texture).unwrap();
+
                 rp.set_bind_group(0, bind_group, &[]);
                 rp.draw(0..6, (draw_range.start as u32)..(draw_range.end as u32));
             }
@@ -581,13 +582,13 @@ mod tests {
             let quads = vec![
                 Draw2dQuad {
                     dst_xy_px: [10, 10],
-                    dst_wh_px: Some([492, 492]),
+                    dst_wh_px: Some([497, 497]),
                     fill_color_rgba: [1.0, 0.0, 0.0, 1.0],
                     ..Default::default()
                 },
                 Draw2dQuad {
-                    dst_xy_px: [522, 10],
-                    dst_wh_px: Some([492, 492]),
+                    dst_xy_px: [517, 10],
+                    dst_wh_px: Some([497, 497]),
                     fill_texture: Some(rainbow_texture.wgpu_texture().clone()),
                     fill_color_rgba: [1.0, 1.0, 1.0, 1.0],
                     ..Default::default()
