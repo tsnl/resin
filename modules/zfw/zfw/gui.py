@@ -24,6 +24,10 @@ Order of operations per frame:
 Widget stacking order:
 - parent always below children.
 - among siblings, later added always above earlier added.
+
+FIXME: Currently, 3D viewport rendering is broken. We rewrote the 2D renderer such that
+we can render-to-texture and then display as a quad. This is the right way to handle
+viewports. Need to rewrite this module after rewriting the 3D renderer.
 """
 
 __all__ = [
@@ -850,23 +854,10 @@ class GuiWindow(BaseResource):
             scale_x, _ = self._window.content_scale
             canvas = Draw2dExCanvas(renderer=self._draw_2d_renderer, scale=scale_x)
 
-            # Render 3D viewport first (behind GUI widgets)
-            if (
-                self._camera_transform is not None
-                and self._camera_intrinsics is not None
-            ):
-                self._draw_3d_renderer.draw(
-                    command_encoder=command_encoder,
-                    meshes=self._meshes,
-                    camera_transform=self._camera_transform,
-                    camera_intrinsics=self._camera_intrinsics,
-                    target=swapchain_target.image,
-                    environment_map=self._environment_map,
-                )
-
-            # Render 2D GUI on top of 3D
+            # Draw to canvas:
             if self._central_widget is not None:
                 self._central_widget._render(canvas)
+
             self._draw_2d_renderer.record_gpu_commands(
                 command_encoder=command_encoder,
                 target=draw_2d_target,
@@ -887,7 +878,7 @@ class GuiWindow(BaseResource):
             ]
             with command_encoder.render(
                 color_attachment=swapchain_target.image,
-                clear_color="black",  # Use clear to avoid LOAD_OP_LOAD sync hazard
+                clear_color="black",
             ) as rp:
                 rp.bind_pipeline(pipeline=self._present_pipeline)
                 rp.bind_descriptor_set(set_=present_descriptor_set, set_index=0)
