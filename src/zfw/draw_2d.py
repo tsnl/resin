@@ -185,14 +185,14 @@ class Draw2dRenderer(BaseResource):
                 target_height_px=target_height_px,
             )
 
-    def record_gpu_commands(
+    def record(
         self,
         *,
         command_encoder: GpuCommandEncoder,
         target: "Draw2dTarget",
         quads: list["Draw2dQuad"],
     ):
-        target._record_gpu_commands(command_encoder=command_encoder, quads=quads)
+        target._record(command_encoder=command_encoder, quads=quads)
 
     def _on_dispose(self) -> None:
         for target in self._target_list:
@@ -247,6 +247,11 @@ class Draw2dTarget(BaseResource):
         # Register with renderer:
         self._renderer._target_list.append(self)
 
+    def _on_dispose(self) -> None:
+        self._uniform.dispose()
+        for qb in self._quad_batch_cache.values():
+            qb.dispose()
+
     @property
     def color_image(self) -> GpuImage:
         return self._gpu_color_image
@@ -262,7 +267,7 @@ class Draw2dTarget(BaseResource):
             ),
         )
 
-    def _record_gpu_commands(
+    def _record(
         self,
         *,
         command_encoder: GpuCommandEncoder,

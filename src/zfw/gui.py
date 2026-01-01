@@ -66,7 +66,7 @@ from .basic import (
     JsonObject,
     LogicError,
 )
-from .draw_2d import Draw2dTarget
+from .draw_2d import Draw2dRenderer, Draw2dTarget
 from .draw_2d_ext import (
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
@@ -326,7 +326,8 @@ class GuiWindow(BaseResource):
     _kiwi_solver: KiwiSolver
 
     # Renderers
-    _draw_2d_renderer: Draw2dExtCanvas
+    _draw_2d_renderer: Draw2dRenderer
+    _draw_2d_canvas: Draw2dExtCanvas
     _draw_2d_targets: list[Draw2dTarget]  # One per swapchain image
     _draw_3d_context: Draw3dContext
     _draw_3d_renderer: Draw3dRenderer
@@ -392,18 +393,18 @@ class GuiWindow(BaseResource):
 
         # Create 2D renderer
         scale_x, _ = window.content_scale
-        self._draw_2d_renderer = Draw2dExtCanvas(
+        self._draw_2d_renderer = Draw2dRenderer(
             gpu_device=gpu_device,
             target_width_px=int(window.width_dip * scale_x),
             target_height_px=int(window.height_dip * scale_x),
-            clear_color="transparent",
+        )
+        self._draw_2d_canvas = Draw2dExtCanvas(
+            renderer=self._draw_2d_renderer,
         )
 
         # Create one Draw2dTarget per swapchain image for multi-frame-in-flight
         for _ in range(swapchain_image_count):
-            self._draw_2d_targets.append(
-                Draw2dTarget(renderer=self._draw_2d_renderer.inner)
-            )
+            self._draw_2d_targets.append(Draw2dTarget(renderer=self._draw_2d_renderer))
 
         # Create present pipeline for blitting 2D target to swapchain
         self._present_descriptor_sets = []
@@ -454,10 +455,10 @@ class GuiWindow(BaseResource):
         )
 
         # Recreate targets if renderer exists
-        if hasattr(self, "_draw_2d_renderer") and self._draw_2d_renderer is not None:
+        if hasattr(self, "_draw_2d_renderer") and self._draw_2d_canvas is not None:
             for _ in range(self._swapchain_image_count):
                 self._draw_2d_targets.append(
-                    Draw2dTarget(renderer=self._draw_2d_renderer.inner)
+                    Draw2dTarget(renderer=self._draw_2d_renderer)
                 )
 
         # Recreate present descriptor sets
@@ -560,8 +561,8 @@ class GuiWindow(BaseResource):
         for target in self._draw_2d_targets:
             target.dispose()
         self._draw_2d_targets.clear()
-        if self._draw_2d_renderer is not None:
-            self._draw_2d_renderer.dispose()
+        if self._draw_2d_canvas is not None:
+            self._draw_2d_canvas.dispose()
         if self._gpu_swap_chain is not None:
             self._gpu_swap_chain.dispose()
         super()._on_dispose()
@@ -580,7 +581,7 @@ class GuiWindow(BaseResource):
 
     @property
     def draw_2d_renderer(self) -> Draw2dExtCanvas:
-        return self._draw_2d_renderer
+        return self._draw_2d_canvas
 
     @property
     def draw_3d_renderer(self) -> Draw3dRenderer:
@@ -863,11 +864,11 @@ class GuiWindow(BaseResource):
             if self._central_widget is not None:
                 self._central_widget._render(primitives)
 
-            self._draw_2d_renderer.quads(
+            quads = self._draw_2d_canvas.quads(primitives=primitives, scale=scale_x)
+            self._draw_2d_renderer.record(
                 command_encoder=command_encoder,
                 target=draw_2d_target,
-                primitives=primitives,
-                scale=scale_x,
+                quads=quads,
             )
 
             # Present the 2D target to swapchain using present pipeline

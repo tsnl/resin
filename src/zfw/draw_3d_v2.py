@@ -22,11 +22,11 @@ class Draw3dTarget(BaseResource):
     def __init__(
         self,
         renderer: "Draw3dRenderer",
-        width_px: int,
-        height_px: int,
+        target_width_px: int,
+        target_height_px: int,
     ) -> None:
         super().__init__(parent_resource=renderer)
 
         self._renderer = renderer
-        self._width_px = width_px
-        self._height_px = height_px
+        self._width_px = target_width_px
+        self._height_px = target_height_px

@@ -169,7 +169,7 @@ class Draw2dExTestEngine(BaseResource):
             device=self.gpu_device,
             queue_type="graphics",
         )
-        self.renderer.record_gpu_commands(
+        self.renderer.record(
             command_encoder=command_encoder,
             target=self.target,
             quads=self.canvas.quads(primitives=primitives, scale=self._scale),
