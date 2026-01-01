@@ -1,4 +1,3 @@
-use simd_math::SimdUVec2;
 use wgpu::include_wgsl;
 
 use super::*;
@@ -194,7 +193,7 @@ impl Draw2dFrame {
             for (texture, group_quads) in quad_batch_list.bind_groups {
                 let texture = texture.unwrap_or(default_white_texture.wgpu_texture().clone());
                 let bind_group = self.acquire_quad_group(
-                    &device,
+                    device,
                     command_encoder,
                     &texture,
                     &group_quads,
@@ -251,7 +250,7 @@ impl Draw2dFrame {
         self.quad_group_cache
             .entry(key.clone())
             .or_insert_with(|| {
-                QuadGroup::new(device, &key, quads.len(), bind_group_layout, sampler)
+                QuadGroup::new(device, key, quads.len(), bind_group_layout, sampler)
             })
             .update(device, command_encoder, bind_group_layout, sampler, quads)
     }
