@@ -8,12 +8,10 @@ use super::*;
 
 pub struct Draw2dRenderer {
     device: wgpu::Device,
-    queue: wgpu::Queue,
 
     target_size_wh: [u16; 2],
 
     bind_group_layout: wgpu::BindGroupLayout,
-    pipeline_layout: wgpu::PipelineLayout,
 
     pipeline: wgpu::RenderPipeline,
 
@@ -27,7 +25,6 @@ impl Draw2dRenderer {
         target_size_wh: [u16; 2],
     ) -> Arc<Self> {
         let device = device.clone();
-        let queue = queue.clone();
 
         // Layout:
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -133,10 +130,8 @@ impl Draw2dRenderer {
         // Done:
         Arc::new(Self {
             device,
-            queue,
             target_size_wh,
             bind_group_layout,
-            pipeline_layout,
             pipeline,
             default_white_texture,
             sampler,
@@ -469,7 +464,7 @@ impl PodQuad {
                     .unwrap_or([1, 1])
             };
         }
-        macro_rules! ndc2 {
+        macro_rules! ndc2_xy {
             ($a:expr) => {{
                 [
                     ($a[0] as f32 / framebuffer_size_wh[0] as f32) * 2.0 - 1.0,
@@ -477,7 +472,7 @@ impl PodQuad {
                 ]
             }};
         }
-        macro_rules! ndc2_size {
+        macro_rules! ndc2_wh {
             ($a:expr) => {{
                 [
                     ($a[0] as f32 / framebuffer_size_wh[0] as f32) * 2.0,
@@ -505,8 +500,8 @@ impl PodQuad {
             }};
         }
 
-        let dst_xy_ndc = ndc2!(original.dst_xy_px);
-        let dst_wh_ndc = ndc2_size!(original.dst_wh_px.unwrap_or(framebuffer_size_wh));
+        let dst_xy_ndc = ndc2_xy!(original.dst_xy_px);
+        let dst_wh_ndc = ndc2_wh!(original.dst_wh_px.unwrap_or(framebuffer_size_wh));
         let src_xy_uv = uv!(original.src_xy_px.unwrap_or([0, 0]));
         let src_wh_uv = uv!(original.src_wh_px.unwrap_or(texture_size!()));
         let fill_color_rgba = original.fill_color_rgba;
