@@ -527,7 +527,7 @@ impl PodQuad {
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
+    use std::{fs, iter, path::PathBuf};
 
     use super::*;
 
@@ -607,6 +607,8 @@ mod tests {
 
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
+        let output_path = PathBuf::from("output/draw_2d/basic_render_test.png");
+        fs::create_dir_all(output_path.parent().unwrap()).unwrap();
         image::DynamicImage::ImageRgba8(
             image::RgbaImage::from_raw(
                 1024,
@@ -615,7 +617,7 @@ mod tests {
             )
             .unwrap(),
         )
-        .save("test_output.png")
+        .save(output_path)
         .unwrap();
     }
 }
