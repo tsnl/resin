@@ -35,7 +35,7 @@ LOG = logger(__name__)
 
 
 # Path to test data
-TESTS_DATA_PATH = Path(__file__).parent.parent.parent.parent / "tests_data"
+TESTS_DATA_PATH = Path(__file__).parent.parent.parent / "tests_data"
 GLTF_SAMPLE_ASSETS_PATH = TESTS_DATA_PATH / "glTF-Sample-Assets"
 GLTF_SAMPLE_ENVIRONMENTS_PATH = TESTS_DATA_PATH / "glTF-Sample-Environments"
 
@@ -328,12 +328,8 @@ def test_draw_3d_gltf_avocado():
 
     This tests the glTF loader with a simple model that has textures.
     """
-    # Path to the Avocado model in glTF-Sample-Assets
-    # __file__ is modules/zfw/zfw/draw_3d_test.py
-    # Go up 4 levels: zfw/ -> zfw/ -> modules/ -> (project root)
     avocado_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "tests_data"
+        TESTS_DATA_PATH
         / "glTF-Sample-Assets"
         / "Models"
         / "Avocado"
