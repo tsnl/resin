@@ -1,14 +1,14 @@
 // draw_2d.wgsl
 
 struct PodQuad {
-    dst_xy_ndc: u32,         // Packed i16 [x2]
-    dst_wh_ndc: u32,         // Packed i16 [x2]
-    src_xy_uv: u32,          // Packed u16 [x2]
-    src_wh_uv: u32,          // Packed u16 [x2]
-    fill_color_rgba: u32,    // Packed u8 [x4]
-    border_thickness_px: u32, // Packed u8 [x4]
-    border_color_rgba: u32,  // Packed u8 [x4]
-    _rsv: u32,               // Packed u8 [x4] padding
+    dst_xy_ndc: vec2<f32>,
+    dst_wh_ndc: vec2<f32>,
+    src_xy_uv: vec2<f32>,
+    src_wh_uv: vec2<f32>,
+    fill_color_rgba: vec4<f32>,
+    border_thickness_ndc: vec2<f32>,
+    border_color_rgba: vec4<f32>,
+    _rsv: vec4<f32>,
 }
 
 @group(0) @binding(0) var<storage, read> quads: array<PodQuad>;
@@ -17,111 +17,66 @@ struct PodQuad {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) fill_color: vec4<f32>,
+    @location(0) @interpolate(flat) instance_idx: u32,
+    @location(1) uv: vec2<f32>,
+    @location(2) @interpolate(flat) fill_color: vec4<f32>,
+    @location(3) @interpolate(flat) border_thickness_ndc: vec2<f32>,
+    @location(4) @interpolate(flat) border_color: vec4<f32>,
 }
 
-// Unpack two i16 values from a u32
-fn unpack_i16x2(packed: u32) -> vec2<i32> {
-    let x = i32(packed & 0xFFFFu);
-    let y = i32((packed >> 16u) & 0xFFFFu);
-    return vec2<i32>(x, y);
-}
-
-// Unpack two u16 values from a u32
-fn unpack_u16x2(packed: u32) -> vec2<u32> {
-    let x = packed & 0xFFFFu;
-    let y = (packed >> 16u) & 0xFFFFu;
-    return vec2<u32>(x, y);
-}
-
-// Unpack four u8 values from a u32
-fn unpack_u8x4(packed: u32) -> vec4<u32> {
-    let x = packed & 0xFFu;
-    let y = (packed >> 8u) & 0xFFu;
-    let z = (packed >> 16u) & 0xFFu;
-    let w = (packed >> 24u) & 0xFFu;
-    return vec4<u32>(x, y, z, w);
-}
-
-// Convert fixed-point i16 to float
-fn fx_i16_to_f32(v: i32) -> f32 {
-    // Reinterpret as signed 16-bit by sign-extending
-    let sign_extended = (v << 16) >> 16;
-    return f32(sign_extended) / 32768.0;
-}
-
-// Convert fixed-point u16 to float
-fn fx_u16_to_f32(v: u32) -> f32 {
-    return f32(v) / 65535.0;
-}
-
-// Convert u8 to float [0..1]
-fn u8_to_f32(v: u32) -> f32 {
-    return f32(v) / 255.0;
+fn vertex_array_index(vertex_idx: u32) -> u32
+{
+    // Corners: 0=TL, 1=TR, 2=BR, 3=BL
+    // Vertices: (0=TL, 1=TR, 2=BR), (0=TL, 2=BR, 3=BL)
+    // Mapping:
+    // * vertexIdx: 0 -> cornerIdx: 0 = (v=0 % 3)=0 + (v=0 // 4)=0
+    // * vertexIdx: 1 -> cornerIdx: 1 = (v=1 % 3)=1 + (v=1 // 4)=0
+    // * vertexIdx: 2 -> cornerIdx: 2 = (v=2 % 3)=2 + (v=2 // 4)=0
+    // * vertexIdx: 3 -> cornerIdx: 0 = (v=3 % 3)=0 + (v=3 // 4)=0
+    // * vertexIdx: 4 -> cornerIdx: 2 = (v=4 % 3)=1 + (v=4 // 4)=1
+    // * vertexIdx: 5 -> cornerIdx: 3 = (v=5 % 3)=2 + (v=5 // 4)=1
+    return vertex_idx % 3 + vertex_idx / 4;
 }
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_idx: u32, @builtin(instance_index) instance_idx: u32) -> VertexOutput {
-    let quad = quads[instance_idx];
-
-    // Unpack values from packed u32 fields
-    let dst_xy_packed = unpack_i16x2(quad.dst_xy_ndc);
-    let dst_wh_packed = unpack_i16x2(quad.dst_wh_ndc);
-    let src_xy_packed = unpack_u16x2(quad.src_xy_uv);
-    let src_wh_packed = unpack_u16x2(quad.src_wh_uv);
-    let fill_color_packed = unpack_u8x4(quad.fill_color_rgba);
-
-    // Decode fixed-point values
-    let dst_xy = vec2<f32>(
-        fx_i16_to_f32(dst_xy_packed.x),
-        fx_i16_to_f32(dst_xy_packed.y)
-    );
-    let dst_wh = vec2<f32>(
-        fx_i16_to_f32(dst_wh_packed.x),
-        fx_i16_to_f32(dst_wh_packed.y)
-    );
-    let src_xy = vec2<f32>(
-        fx_u16_to_f32(src_xy_packed.x),
-        fx_u16_to_f32(src_xy_packed.y)
-    );
-    let src_wh = vec2<f32>(
-        fx_u16_to_f32(src_wh_packed.x),
-        fx_u16_to_f32(src_wh_packed.y)
-    );
-
-    // Generate quad vertices (two triangles: 0,1,2 and 2,1,3)
-    var local_pos: vec2<f32>;
-    var local_uv: vec2<f32>;
-
-    switch vertex_idx {
-        case 0u: { local_pos = vec2<f32>(0.0, 0.0); local_uv = vec2<f32>(0.0, 0.0); }
-        case 1u: { local_pos = vec2<f32>(1.0, 0.0); local_uv = vec2<f32>(1.0, 0.0); }
-        case 2u: { local_pos = vec2<f32>(0.0, 1.0); local_uv = vec2<f32>(0.0, 1.0); }
-        case 3u: { local_pos = vec2<f32>(0.0, 1.0); local_uv = vec2<f32>(0.0, 1.0); }
-        case 4u: { local_pos = vec2<f32>(1.0, 0.0); local_uv = vec2<f32>(1.0, 0.0); }
-        default: { local_pos = vec2<f32>(1.0, 1.0); local_uv = vec2<f32>(1.0, 1.0); }
-    }
-
-    // Calculate position in NDC
-    let ndc_pos = dst_xy + local_pos * dst_wh;
-
-    // Calculate UV coordinates
-    let uv = src_xy + local_uv * src_wh;
-
-    // Decode fill color
-    let fill_color = vec4<f32>(
-        u8_to_f32(fill_color_packed.x),
-        u8_to_f32(fill_color_packed.y),
-        u8_to_f32(fill_color_packed.z),
-        u8_to_f32(fill_color_packed.w)
-    );
-
     var output: VertexOutput;
-    output.position = vec4<f32>(ndc_pos, 0.0, 1.0);
-    output.uv = uv;
-    output.fill_color = fill_color;
 
+    // Load quad and common vertex data:
+    let quad = quads[instance_idx];
+    let corner_idx = vertex_array_index(vertex_idx);
+
+    // output.position:
+    let vertex_array = array<vec2<f32>, 4>(
+        vec2<f32>(quad.dst_xy_ndc) + vec2<f32>(0.0, 0.0) * quad.dst_wh_ndc,
+        vec2<f32>(quad.dst_xy_ndc) + vec2<f32>(1.0, 0.0) * quad.dst_wh_ndc,
+        vec2<f32>(quad.dst_xy_ndc) + vec2<f32>(1.0, 1.0) * quad.dst_wh_ndc,
+        vec2<f32>(quad.dst_xy_ndc) + vec2<f32>(0.0, 1.0) * quad.dst_wh_ndc,
+    );
+    output.position = vec4<f32>(vertex_array[corner_idx], 0.0, 1.0);
+
+    // output.instance_idx:
+    output.instance_idx = instance_idx;
+
+    // output.uv:
+    let uv_array = array<vec2<f32>, 4>(
+        vec2<f32>(quad.src_xy_uv) + vec2<f32>(0.0, 0.0) * quad.src_wh_uv,
+        vec2<f32>(quad.src_xy_uv) + vec2<f32>(1.0, 0.0) * quad.src_wh_uv,
+        vec2<f32>(quad.src_xy_uv) + vec2<f32>(1.0, 1.0) * quad.src_wh_uv,
+        vec2<f32>(quad.src_xy_uv) + vec2<f32>(0.0, 1.0) * quad.src_wh_uv,
+    );
+    output.uv = uv_array[corner_idx];
+
+    // output.fill_color:
+    output.fill_color = quad.fill_color_rgba;
+
+    // output.border_thickness_ndc:
+    output.border_thickness_ndc = quad.border_thickness_ndc;
+
+    // output.border_color:
+    output.border_color = quad.border_color_rgba;
+
+    // Done:
     return output;
 }
 

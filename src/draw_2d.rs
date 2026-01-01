@@ -266,9 +266,9 @@ pub struct Draw2dQuad {
     pub src_xy_px: Option<[u16; 2]>,
     pub src_wh_px: Option<[u16; 2]>,
     pub fill_texture: Option<wgpu::Texture>,
-    pub fill_color_rgba: [u8; 4],
-    pub border_thickness_px: [u8; 4],
-    pub border_color_rgba: [u8; 4],
+    pub fill_color_rgba: [f32; 4],
+    pub border_thickness_px: [u16; 4],
+    pub border_color_rgba: [f32; 4],
 }
 impl Default for Draw2dQuad {
     fn default() -> Self {
@@ -278,9 +278,9 @@ impl Default for Draw2dQuad {
             src_xy_px: None,
             src_wh_px: None,
             fill_texture: None,
-            fill_color_rgba: [0xFF; 4],
+            fill_color_rgba: [1.0; 4],
             border_thickness_px: [0; 4],
-            border_color_rgba: [0x00; 4],
+            border_color_rgba: [1.0; 4],
         }
     }
 }
@@ -440,14 +440,14 @@ impl QuadGroup {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct PodQuad {
-    dst_xy_ndc: [i16; 2],         // 2x2=4: 0..4
-    dst_wh_ndc: [i16; 2],         // 2x2=4: 4..8
-    src_xy_uv: [u16; 2],          // 2x2=4: 8..12
-    src_wh_uv: [u16; 2],          // 2x2=4: 12..16
-    fill_color_rgba: [u8; 4],     // 1x4=4: 16..20
-    border_thickness_px: [u8; 4], // 1x4=4: 20..24
-    border_color_rgba: [u8; 4],   // 1x4=4: 24..28
-    _rsv: [u8; 4],                // 1x4=4: 28..32
+    dst_xy_ndc: [f32; 2],           // 4x2=8: 0..8
+    dst_wh_ndc: [f32; 2],           // 4x2=8: 8..16
+    src_xy_uv: [f32; 2],            // 4x2=8: 16..24
+    src_wh_uv: [f32; 2],            // 4x2=8: 24..32
+    fill_color_rgba: [f32; 4],      // 4x4=16: 32..48
+    border_thickness_ndc: [f32; 4], // 4x4=16: 48..64
+    border_color_rgba: [f32; 4],    // 4x4=16: 64..80
+    _rsv: [f32; 4],                 // 4x4=16: 80..96
 }
 impl PodQuad {
     fn new(original: &Draw2dQuad, framebuffer_size_wh: [u16; 2]) -> Self {
@@ -465,40 +465,44 @@ impl PodQuad {
                     .unwrap_or([1, 1])
             };
         }
-        macro_rules! ndc {
-            ($a:expr) => {
-                [
+        macro_rules! ndc2 {
+            ($a:expr) => {{
+                let res = [
                     ($a[0] as f32 / framebuffer_size_wh[0] as f32) * 2.0 - 1.0,
                     -($a[1] as f32 / framebuffer_size_wh[1] as f32) * 2.0 + 1.0,
+                ];
+                eprintln!("ndc2!: {:?} -> {res:?}", $a);
+                res
+            }};
+        }
+        macro_rules! ndc_trbl {
+            ($a:expr) => {
+                [
+                    -($a[0] as f32 / framebuffer_size_wh[1] as f32) * 2.0,
+                    ($a[1] as f32 / framebuffer_size_wh[0] as f32) * 2.0,
+                    -($a[2] as f32 / framebuffer_size_wh[1] as f32) * 2.0,
+                    ($a[3] as f32 / framebuffer_size_wh[0] as f32) * 2.0,
                 ]
             };
         }
         macro_rules! uv {
             ($a:expr) => {{
                 let tex_wh = texture_size!();
-                [
+                let res = [
                     $a[0] as f32 / tex_wh[0] as f32,
                     $a[1] as f32 / tex_wh[1] as f32,
-                ]
+                ];
+                eprintln!("uv!: {:?} -> {res:?}", $a);
+                res
             }};
         }
-        macro_rules! fx_i16 {
-            ($v:expr) => {
-                [fp32_to_fx_i16($v[0]), fp32_to_fx_i16($v[1])]
-            };
-        }
-        macro_rules! fx_u16 {
-            ($v:expr) => {
-                [fp32_to_fx_u16($v[0]), fp32_to_fx_u16($v[1])]
-            };
-        }
 
-        let dst_xy_ndc = fx_i16!(ndc!(original.dst_xy_px));
-        let dst_wh_ndc = fx_i16!(ndc!(original.dst_wh_px.unwrap_or(framebuffer_size_wh)));
-        let src_xy_uv = fx_u16!(uv!(original.src_xy_px.unwrap_or([0, 0])));
-        let src_wh_uv = fx_u16!(uv!(original.src_wh_px.unwrap_or(texture_size!())));
+        let dst_xy_ndc = ndc2!(original.dst_xy_px);
+        let dst_wh_ndc = ndc2!(original.dst_wh_px.unwrap_or(framebuffer_size_wh));
+        let src_xy_uv = uv!(original.src_xy_px.unwrap_or([0, 0]));
+        let src_wh_uv = uv!(original.src_wh_px.unwrap_or(texture_size!()));
         let fill_color_rgba = original.fill_color_rgba;
-        let border_thickness_px = original.border_thickness_px;
+        let border_thickness_ndc = ndc_trbl!(original.border_thickness_px);
         let border_color_rgba = original.border_color_rgba;
 
         Self {
@@ -507,9 +511,9 @@ impl PodQuad {
             src_xy_uv,
             src_wh_uv,
             fill_color_rgba,
-            border_thickness_px,
+            border_thickness_ndc,
             border_color_rgba,
-            _rsv: [0; 4],
+            _rsv: [0.0; 4],
         }
     }
 }
@@ -526,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_pod_quad_size() {
-        assert_eq!(std::mem::size_of::<PodQuad>(), 32);
+        assert_eq!(std::mem::size_of::<PodQuad>(), 96);
     }
 
     #[test]
@@ -558,9 +562,9 @@ mod tests {
                 });
         {
             let quads = vec![Draw2dQuad {
-                dst_xy_px: [32, 32],
+                dst_xy_px: [0, 0],
                 dst_wh_px: Some([128, 128]),
-                fill_color_rgba: [0xFF, 0x00, 0x00, 0xFF],
+                fill_color_rgba: [1.0, 0.0, 0.0, 1.0],
                 ..Default::default()
             }];
             renderer.record(&quads, &mut frame, &mut command_encoder);
@@ -581,5 +585,7 @@ mod tests {
         )
         .save("test_output.png")
         .unwrap();
+
+        panic!("OK");
     }
 }
