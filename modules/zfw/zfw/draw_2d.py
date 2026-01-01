@@ -17,7 +17,7 @@ from typing import Literal
 
 import numpy as np
 
-from .basic import BaseResource, round_up_to_po2
+from .basic import BaseResource, logger, round_up_to_po2
 from .bundled_data import BUNDLED_DATA_PATH
 from .gpu import (
     GpuBuffer,
@@ -771,3 +771,10 @@ class Span:
     @property
     def end(self) -> int:
         return self.begin + self.size
+
+
+#
+# Logging:
+#
+
+LOG = logger(__name__)

@@ -40,9 +40,6 @@ from . import typed_freetype as ft
 from . import typed_uharfbuzz as hb
 
 
-LOG = logger(__name__)
-
-
 #
 # API:
 #
@@ -854,3 +851,10 @@ class TextShaper:
     def get_glyph_extents(self, glyph: int) -> hb.GlyphExtents:
         """Get glyph extents for optical bounds calculation."""
         return self._hb_font.get_glyph_extents(glyph)
+
+
+#
+# Logging
+#
+
+LOG = logger(__name__)
