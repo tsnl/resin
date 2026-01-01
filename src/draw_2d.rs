@@ -560,7 +560,9 @@ mod tests {
             rainbow_texture.texel_copy_buffer_layout(),
             rainbow_texture.size(),
         );
-        // ^- FIXME: need to convert to linear for correct alpha blending
+        // FIXME: need to convert loaded textures to linear colorspace for correct alpha blending
+
+        // TODO: add a test-case to ensure our sorting logic works as expected
 
         let renderer = Draw2dRenderer::create(&device, &queue, [1024, 1024]);
         let mut frame = Draw2dFrame::new(&device, [1024, 1024]);
