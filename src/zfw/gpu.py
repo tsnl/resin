@@ -977,8 +977,9 @@ class GpuDevice(BaseResource):
         physical_device.check_vulkan_1_3_support()
         self.physical_device = physical_device
 
-        self.present_support_enabled = self.context.enable_present_support
-        self.present_support_enabled &= bool(surface)
+        self.present_support_enabled = (
+            bool(surface) and self.context.enable_present_support
+        )
         self.ray_tracing_support_enabled = self.context.enable_ray_tracing_support
 
         self.qfis = GpuQueueFamilyIndices.find(physical_device, surface=surface)
