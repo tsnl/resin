@@ -15,8 +15,9 @@ from .gpu import (
 )
 from .draw_2d import Draw2dTarget
 from .draw_2d_ex import (
-    Draw2dExCanvas,
-    QuadPrimitive,
+    Draw2dExBasePrimitive,
+    Draw2dExQuadPrimitive,
+    Draw2dExTextPrimitive,
     Draw2dExRenderer,
 )
 from .images import compute_psnr, convert_color
@@ -121,10 +122,6 @@ class Draw2dExTestEngine(BaseResource):
         self.gpu_device.dispose()
         self.gpu_context.dispose()
 
-    def create_canvas(self) -> Draw2dExCanvas:
-        """Create a new canvas with the engine's scale factor."""
-        return Draw2dExCanvas(renderer=self.renderer, scale=self._scale)
-
     def readback(self) -> np.ndarray:
         """Read back the rendered image as a uint8 RGBA array in sRGB color space."""
         color_image = self.target.color_image
@@ -163,16 +160,17 @@ class Draw2dExTestEngine(BaseResource):
         buffer.dispose()
         return data_u8_srgb
 
-    def draw(self, canvas: Draw2dExCanvas) -> None:
-        """Render the given canvas."""
+    def draw(self, primitives: list[Draw2dExBasePrimitive]) -> None:
+        """Render the given primitives."""
         command_encoder = GpuCommandEncoder(
             device=self.gpu_device,
             queue_type="graphics",
         )
         self.renderer.record_gpu_commands(
             command_encoder=command_encoder,
-            canvas=canvas,
+            primitives=primitives,
             target=self.target,
+            scale=self._scale,
         )
         command_encoder.submit().wait()
 
@@ -185,11 +183,11 @@ class Draw2dExTestEngine(BaseResource):
 def test_draw_2d_ex_quads():
     """Test rendering colored quads with borders (parity with draw_2d)."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     # Large white quad with blue bottom border
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(32, 64, 512, 256),
             fill_color=(1.0, 1.0, 1.0, 1.0),
             border_thickness_dip=(0, 0, 8, 0),
@@ -197,21 +195,21 @@ def test_draw_2d_ex_quads():
         )
     )
     # Small green opaque quad
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(40, 72, 64, 64),
             fill_color=(0.0, 0.2, 0.0, 1.0),
         )
     )
     # Small green semi-transparent quad
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(112, 72, 64, 64),
             fill_color=(0.0, 0.2, 0.0, 0.5),
         )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -226,7 +224,7 @@ def test_draw_2d_ex_quads():
 def test_draw_2d_ex_image():
     """Test rendering a textured quad with an image (parity with draw_2d)."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     # Load test image
     image_data = load_rgba_image("tests_data/rainbow-512x512.png")
@@ -240,8 +238,8 @@ def test_draw_2d_ex_image():
     )
 
     border_thickness = 8
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(
                 (TEST_IMAGE_W - image_data.shape[1] - border_thickness) // 2,
                 (TEST_IMAGE_H - image_data.shape[0] - border_thickness) // 2,
@@ -255,7 +253,7 @@ def test_draw_2d_ex_image():
         )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     output_image = engine.readback()
 
     assert_image_matches_reference(
@@ -276,19 +274,24 @@ def test_draw_2d_ex_image():
 def test_draw_2d_ex_text_basic():
     """Test basic text rendering."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
-    canvas.add_text(
-        text="Hello, world!",
-        font="sans-serif",
-        dst_xy_dip=(50, 50),
-        dst_wh_dip=(400, 100),
-        font_size="large",
-        font_weight="regular",
-        color=(1.0, 1.0, 1.0, 1.0),
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="Hello, world!",
+            font="sans-serif",
+            dst_xy_dip=(50, 50),
+            dst_wh_dip=(400, 100),
+            font_size="large",
+            font_weight="regular",
+            color=(1.0, 1.0, 1.0, 1.0),
+            wrap=True,
+            horizontal_alignment="left",
+            vertical_alignment="top",
+        )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -303,24 +306,28 @@ def test_draw_2d_ex_text_basic():
 def test_draw_2d_ex_text_wrap():
     """Test text wrapping."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     long_text = (
         "This is a long text that should wrap to the next line "
         "because the width is limited."
     )
-    canvas.add_text(
-        text=long_text,
-        font="serif",
-        dst_xy_dip=(50, 200),
-        dst_wh_dip=(300, 400),
-        font_size="large",
-        font_weight="regular",
-        color=(1.0, 0.8, 0.2, 1.0),
-        wrap=True,
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text=long_text,
+            font="serif",
+            dst_xy_dip=(50, 200),
+            dst_wh_dip=(300, 400),
+            font_size="large",
+            font_weight="regular",
+            color=(1.0, 0.8, 0.2, 1.0),
+            wrap=True,
+            horizontal_alignment="left",
+            vertical_alignment="top",
+        )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -340,11 +347,11 @@ def test_draw_2d_ex_text_wrap():
 def test_draw_2d_ex_text_on_quad():
     """Test text rendered on top of a colored quad (z-ordering)."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     # Background quad
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(100, 100, 400, 200),
             fill_color=(0.2, 0.2, 0.5, 1.0),
             border_thickness_dip=(4, 4, 4, 4),
@@ -353,19 +360,22 @@ def test_draw_2d_ex_text_on_quad():
     )
 
     # Text on top of the quad
-    canvas.add_text(
-        text="Text on Quad",
-        font="sans-serif",
-        dst_xy_dip=(110, 110),
-        dst_wh_dip=(380, 180),
-        font_size="extra-large",
-        font_weight="bold",
-        color=(1.0, 1.0, 1.0, 1.0),
-        horizontal_alignment="center",
-        vertical_alignment="middle",
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="Text on Quad",
+            font="sans-serif",
+            dst_xy_dip=(110, 110),
+            dst_wh_dip=(380, 180),
+            font_size="extra-large",
+            font_weight="bold",
+            color=(1.0, 1.0, 1.0, 1.0),
+            wrap=True,
+            horizontal_alignment="center",
+            vertical_alignment="middle",
+        )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -380,30 +390,35 @@ def test_draw_2d_ex_text_on_quad():
 def test_draw_2d_ex_layered_quads_and_text():
     """Test multiple layers of quads and text with correct z-ordering."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     # First layer: large background quad
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(50, 50, 600, 400),
             fill_color=(0.1, 0.1, 0.1, 1.0),
         )
     )
 
     # Second layer: text label
-    canvas.add_text(
-        text="Background Layer",
-        font="sans-serif",
-        dst_xy_dip=(60, 60),
-        dst_wh_dip=(200, 30),
-        font_size="regular",
-        font_weight="light",
-        color=(0.5, 0.5, 0.5, 1.0),
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="Background Layer",
+            font="sans-serif",
+            dst_xy_dip=(60, 60),
+            dst_wh_dip=(200, 30),
+            font_size="regular",
+            font_weight="light",
+            color=(0.5, 0.5, 0.5, 1.0),
+            wrap=True,
+            horizontal_alignment="left",
+            vertical_alignment="top",
+        )
     )
 
     # Third layer: overlapping colored quad
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(100, 150, 300, 150),
             fill_color=(0.8, 0.2, 0.2, 0.9),
             border_thickness_dip=(2, 2, 2, 2),
@@ -412,21 +427,24 @@ def test_draw_2d_ex_layered_quads_and_text():
     )
 
     # Fourth layer: text on top of the red quad
-    canvas.add_text(
-        text="Red Panel",
-        font="serif",
-        dst_xy_dip=(110, 160),
-        dst_wh_dip=(280, 130),
-        font_size="large",
-        font_weight="bold",
-        color=(1.0, 1.0, 1.0, 1.0),
-        horizontal_alignment="center",
-        vertical_alignment="middle",
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="Red Panel",
+            font="serif",
+            dst_xy_dip=(110, 160),
+            dst_wh_dip=(280, 130),
+            font_size="large",
+            font_weight="bold",
+            color=(1.0, 1.0, 1.0, 1.0),
+            wrap=True,
+            horizontal_alignment="center",
+            vertical_alignment="middle",
+        )
     )
 
     # Fifth layer: another quad that overlaps the red one
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(250, 200, 300, 150),
             fill_color=(0.2, 0.6, 0.2, 0.9),
             border_thickness_dip=(2, 2, 2, 2),
@@ -435,19 +453,22 @@ def test_draw_2d_ex_layered_quads_and_text():
     )
 
     # Sixth layer: text on top of the green quad
-    canvas.add_text(
-        text="Green Panel",
-        font="serif",
-        dst_xy_dip=(260, 210),
-        dst_wh_dip=(280, 130),
-        font_size="large",
-        font_weight="bold",
-        color=(1.0, 1.0, 1.0, 1.0),
-        horizontal_alignment="center",
-        vertical_alignment="middle",
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="Green Panel",
+            font="serif",
+            dst_xy_dip=(260, 210),
+            dst_wh_dip=(280, 130),
+            font_size="large",
+            font_weight="bold",
+            color=(1.0, 1.0, 1.0, 1.0),
+            wrap=True,
+            horizontal_alignment="center",
+            vertical_alignment="middle",
+        )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -467,7 +488,7 @@ def test_draw_2d_ex_layered_quads_and_text():
 def test_draw_2d_ex_font_matrix():
     """Test matrix of font configurations: fonts × sizes × weights."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     fonts: list[Font] = ["sans-serif", "serif", "monospaced"]
     sizes: list[FontSize] = ["regular", "large", "extra-large"]
@@ -492,8 +513,8 @@ def test_draw_2d_ex_font_matrix():
                 box_h = row_height
 
                 # Background quad with border
-                canvas.add_quad(
-                    QuadPrimitive(
+                primitives.append(
+                    Draw2dExQuadPrimitive(
                         dst_xywh_dip=(current_x, current_y, box_w, box_h),
                         fill_color=(0.15, 0.15, 0.15, 1.0),
                         border_thickness_dip=(1, 1, 1, 1),
@@ -502,23 +523,26 @@ def test_draw_2d_ex_font_matrix():
                 )
 
                 # Text label
-                canvas.add_text(
-                    text=text,
-                    font=font,
-                    dst_xy_dip=(current_x + 5, current_y + 2),
-                    dst_wh_dip=(box_w - 10, box_h - 4),
-                    font_size=size,
-                    font_weight=weight,
-                    color=(1.0, 1.0, 1.0, 1.0),
-                    wrap=False,
-                    vertical_alignment="middle",
+                primitives.append(
+                    Draw2dExTextPrimitive(
+                        text=text,
+                        font=font,
+                        dst_xy_dip=(current_x + 5, current_y + 2),
+                        dst_wh_dip=(box_w - 10, box_h - 4),
+                        font_size=size,
+                        font_weight=weight,
+                        color=(1.0, 1.0, 1.0, 1.0),
+                        wrap=False,
+                        horizontal_alignment="left",
+                        vertical_alignment="middle",
+                    )
                 )
 
                 current_x += box_w + padding
 
             current_y += row_height + padding
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -534,11 +558,11 @@ def test_draw_2d_ex_scale_matrix():
     """Test rendering at different scale factors."""
     # Test at scale 2.0
     engine = Draw2dExTestEngine(scale=2.0)
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     # At scale 2.0, a 100x50 DIP quad becomes 200x100 physical pixels
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(50, 50, 200, 100),
             fill_color=(0.3, 0.3, 0.6, 1.0),
             border_thickness_dip=(2, 2, 2, 2),
@@ -546,21 +570,24 @@ def test_draw_2d_ex_scale_matrix():
         )
     )
 
-    canvas.add_text(
-        text="Scale 2.0",
-        font="sans-serif",
-        dst_xy_dip=(60, 60),
-        dst_wh_dip=(180, 80),
-        font_size="large",
-        font_weight="bold",
-        color=(1.0, 1.0, 1.0, 1.0),
-        horizontal_alignment="center",
-        vertical_alignment="middle",
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="Scale 2.0",
+            font="sans-serif",
+            dst_xy_dip=(60, 60),
+            dst_wh_dip=(180, 80),
+            font_size="large",
+            font_weight="bold",
+            color=(1.0, 1.0, 1.0, 1.0),
+            wrap=True,
+            horizontal_alignment="center",
+            vertical_alignment="middle",
+        )
     )
 
     # Another quad at a different position (in DIP space)
-    canvas.add_quad(
-        QuadPrimitive(
+    primitives.append(
+        Draw2dExQuadPrimitive(
             dst_xywh_dip=(50, 180, 200, 100),
             fill_color=(0.6, 0.3, 0.3, 1.0),
             border_thickness_dip=(2, 2, 2, 2),
@@ -568,19 +595,22 @@ def test_draw_2d_ex_scale_matrix():
         )
     )
 
-    canvas.add_text(
-        text="HiDPI Test",
-        font="serif",
-        dst_xy_dip=(60, 190),
-        dst_wh_dip=(180, 80),
-        font_size="regular",
-        font_weight="regular",
-        color=(1.0, 1.0, 1.0, 1.0),
-        horizontal_alignment="center",
-        vertical_alignment="middle",
+    primitives.append(
+        Draw2dExTextPrimitive(
+            text="HiDPI Test",
+            font="serif",
+            dst_xy_dip=(60, 190),
+            dst_wh_dip=(180, 80),
+            font_size="regular",
+            font_weight="regular",
+            color=(1.0, 1.0, 1.0, 1.0),
+            wrap=True,
+            horizontal_alignment="center",
+            vertical_alignment="middle",
+        )
     )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(
@@ -595,7 +625,7 @@ def test_draw_2d_ex_scale_matrix():
 def test_draw_2d_ex_text_alignment():
     """Test text alignment options."""
     engine = Draw2dExTestEngine()
-    canvas = engine.create_canvas()
+    primitives: list[Draw2dExBasePrimitive] = []
 
     alignments = [
         ("left", "top"),
@@ -621,8 +651,8 @@ def test_draw_2d_ex_text_alignment():
         y = start_y + row * (box_h + padding)
 
         # Background box
-        canvas.add_quad(
-            QuadPrimitive(
+        primitives.append(
+            Draw2dExQuadPrimitive(
                 dst_xywh_dip=(x, y, box_w, box_h),
                 fill_color=(0.2, 0.2, 0.2, 1.0),
                 border_thickness_dip=(1, 1, 1, 1),
@@ -631,19 +661,22 @@ def test_draw_2d_ex_text_alignment():
         )
 
         # Aligned text
-        canvas.add_text(
-            text=f"{h_align[0].upper()}{v_align[0].upper()}",
-            font="monospaced",
-            dst_xy_dip=(x + 5, y + 5),
-            dst_wh_dip=(box_w - 10, box_h - 10),
-            font_size="large",
-            font_weight="regular",
-            color=(1.0, 1.0, 1.0, 1.0),
-            horizontal_alignment=h_align,  # type: ignore
-            vertical_alignment=v_align,  # type: ignore
+        primitives.append(
+            Draw2dExTextPrimitive(
+                text=f"{h_align[0].upper()}{v_align[0].upper()}",
+                font="monospaced",
+                dst_xy_dip=(x + 5, y + 5),
+                dst_wh_dip=(box_w - 10, box_h - 10),
+                font_size="large",
+                font_weight="regular",
+                color=(1.0, 1.0, 1.0, 1.0),
+                wrap=True,
+                horizontal_alignment=h_align,  # type: ignore
+                vertical_alignment=v_align,  # type: ignore
+            )
         )
 
-    engine.draw(canvas)
+    engine.draw(primitives)
     image = engine.readback()
 
     assert_image_matches_reference(

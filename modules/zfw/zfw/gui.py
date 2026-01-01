@@ -67,7 +67,12 @@ from .basic import (
     LogicError,
 )
 from .draw_2d import Draw2dTarget
-from .draw_2d_ex import Draw2dExCanvas, QuadPrimitive, Draw2dExRenderer
+from .draw_2d_ex import (
+    Draw2dExBasePrimitive,
+    Draw2dExQuadPrimitive,
+    Draw2dExTextPrimitive,
+    Draw2dExRenderer,
+)
 from .draw_3d import (
     Draw3dContext,
     Draw3dRenderer,
@@ -850,18 +855,19 @@ class GuiWindow(BaseResource):
             # Get the Draw2dTarget for this swapchain image
             draw_2d_target = self._draw_2d_targets[swapchain_target.image_index]
 
-            # Create canvas for this frame
+            # Create primitives list for this frame
+            primitives: list[Draw2dExBasePrimitive] = []
             scale_x, _ = self._window.content_scale
-            canvas = Draw2dExCanvas(renderer=self._draw_2d_renderer, scale=scale_x)
 
-            # Draw to canvas:
+            # Draw to primitives:
             if self._central_widget is not None:
-                self._central_widget._render(canvas)
+                self._central_widget._render(primitives)
 
             self._draw_2d_renderer.record_gpu_commands(
                 command_encoder=command_encoder,
                 target=draw_2d_target,
-                canvas=canvas,
+                primitives=primitives,
+                scale=scale_x,
             )
 
             # Present the 2D target to swapchain using present pipeline
@@ -1345,15 +1351,15 @@ class GuiWidget(BaseResource):
     # Render:
     #
 
-    def _render(self, canvas: Draw2dExCanvas) -> None:
+    def _render(self, primitives: list[Draw2dExBasePrimitive]) -> None:
         # Render self.
-        self._render_self(canvas)
+        self._render_self(primitives)
 
         # Render children, in order, after self.
         for child in self._child_widget_list:
-            child._render(canvas)
+            child._render(primitives)
 
-    def _render_self(self, canvas: Draw2dExCanvas) -> None:
+    def _render_self(self, primitives: list[Draw2dExBasePrimitive]) -> None:
         # Get the latest style:
         style = self._style
 
@@ -1392,8 +1398,8 @@ class GuiWidget(BaseResource):
             src_xywh_px = (src_xy[0], src_xy[1], src_wh[0], src_wh[1])
 
         # Draw background quad:
-        canvas.add_quad(
-            QuadPrimitive(
+        primitives.append(
+            Draw2dExQuadPrimitive(
                 dst_xywh_dip=(
                     x + ml + bl,
                     y + mt + bt,
@@ -1410,21 +1416,23 @@ class GuiWidget(BaseResource):
 
         # Draw text:
         if self._text is not None:
-            canvas.add_text(
-                text=self._text,
-                font=style.font,
-                font_size=style.font_size,
-                font_weight=style.font_weight,
-                dst_xy_dip=(
-                    x + ml + bl + pl,
-                    y + mt + bt + pt,
-                ),
-                dst_wh_dip=(
-                    w - ml - mr - bl - br - pl - pr,
-                    h - mt - mb - bt - bb - pt - pb,
-                ),
-                color=style.fg_color,
-                wrap=style.wrap,
-                horizontal_alignment=style.text_horizontal_alignment,
-                vertical_alignment=style.text_vertical_alignment,
+            primitives.append(
+                Draw2dExTextPrimitive(
+                    text=self._text,
+                    font=style.font,
+                    font_size=style.font_size,
+                    font_weight=style.font_weight,
+                    dst_xy_dip=(
+                        x + ml + bl + pl,
+                        y + mt + bt + pt,
+                    ),
+                    dst_wh_dip=(
+                        w - ml - mr - bl - br - pl - pr,
+                        h - mt - mb - bt - bb - pt - pb,
+                    ),
+                    color=style.fg_color,
+                    wrap=style.wrap,
+                    horizontal_alignment=style.text_horizontal_alignment,
+                    vertical_alignment=style.text_vertical_alignment,
+                )
             )

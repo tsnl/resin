@@ -8,8 +8,9 @@ It provides:
 """
 
 __all__ = [
-    "Draw2dExCanvas",
-    "QuadPrimitive",
+    "Draw2dExBasePrimitive",
+    "Draw2dExQuadPrimitive",
+    "Draw2dExTextPrimitive",
     "Draw2dExRenderer",
 ]
 
@@ -93,116 +94,21 @@ class Draw2dExRenderer(BaseResource):
         *,
         command_encoder: GpuCommandEncoder,
         target: "Draw2dTarget",
-        canvas: "Draw2dExCanvas",
+        primitives: list["Draw2dExBasePrimitive"],
+        scale: float = 1.0,
     ) -> None:
+        # Build quads from primitives
+        quads: list[Draw2dQuad] = []
+        for primitive in primitives:
+            quads.extend(primitive._to_draw2d_quads(renderer=self, scale=scale))
         self._inner.record_gpu_commands(
             command_encoder=command_encoder,
             target=target,
-            quads=canvas._build_quads(),
+            quads=quads,
         )
 
     def _on_dispose(self) -> None:
         self._inner.dispose()
-
-
-class Draw2dExCanvas:
-    """
-    A canvas for collecting 2D drawing primitives.
-
-    Coordinates are in device-independent pixels (DIPs) and are converted
-    to physical pixels using the scale factor when rendering.
-
-    A canvas has no size or boundary - it's simply a list of primitives.
-    Primitives are rendered in the order they are added.
-    """
-
-    _renderer: Draw2dExRenderer
-    _scale: float
-    _primitives: list["CanvasPrimitive"]
-
-    def __init__(self, *, renderer: Draw2dExRenderer, scale: float = 1.0):
-        super().__init__()
-        self._renderer = renderer
-        self._scale = scale
-        self._primitives = []
-
-    @property
-    def scale(self) -> float:
-        """The scale factor for this canvas."""
-        return self._scale
-
-    def clear(self) -> None:
-        """Clear all primitives from the canvas."""
-        self._primitives.clear()
-
-    def add_quad(self, quad: "QuadPrimitive") -> None:
-        """
-        Add a quad to the canvas.
-
-        Args:
-            quad: The quad to add.
-        """
-        self._primitives.append(quad)
-
-    def add_text(
-        self,
-        *,
-        text: str,
-        font: Font,
-        dst_xy_dip: tuple[int, int],
-        dst_wh_dip: tuple[int, int],
-        font_size: FontSize = "regular",
-        font_weight: FontWeight = "regular",
-        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        wrap: bool = True,
-        horizontal_alignment: HorizontalAlignment = "left",
-        vertical_alignment: VerticalAlignment = "top",
-    ) -> None:
-        """
-        Add text to the canvas.
-
-        Args:
-            text: The text string to render.
-            font: The font family to use.
-            dst_xy_dip: Destination position in DIPs (x, y).
-            dst_wh_dip: Destination size in DIPs (width, height).
-            font_size: The font size preset.
-            font_weight: The font weight preset.
-            color: RGBA color (0.0-1.0 range).
-            wrap: Whether to wrap text at the destination width.
-            horizontal_alignment: Horizontal text alignment.
-            vertical_alignment: Vertical text alignment.
-        """
-        self._primitives.append(
-            TextPrimitive(
-                text=text,
-                font=font,
-                dst_xy_dip=dst_xy_dip,
-                dst_wh_dip=dst_wh_dip,
-                font_size=font_size,
-                font_weight=font_weight,
-                color=color,
-                wrap=wrap,
-                horizontal_alignment=horizontal_alignment,
-                vertical_alignment=vertical_alignment,
-            )
-        )
-
-    def _build_quads(self) -> list[Draw2dQuad]:
-        """
-        Build the final list of Draw2dQuad objects for rendering.
-
-        Primitives are converted in the order they were added to preserve
-        correct z-ordering.
-        """
-        result: list[Draw2dQuad] = []
-        scale = self._scale
-
-        for primitive in self._primitives:
-            quads = primitive.to_draw2d_quads(renderer=self._renderer, scale=scale)
-            result.extend(quads)
-
-        return result
 
 
 #
@@ -225,7 +131,7 @@ FONT_SIZE_PX: dict[tuple[Font, FontSize], int] = {
 
 # Weight values for variable fonts
 FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
-    "light": 100,
+    "light": 200,
     "regular": 400,
     "bold": 700,
 }
@@ -241,15 +147,15 @@ GLYPH_CHARSET = "".join(chr(c) for c in range(32, 127))  # ASCII printable
 
 
 @dataclass(frozen=True, kw_only=True)
-class CanvasPrimitive(ABC):
+class Draw2dExBasePrimitive(ABC):
     @abstractmethod
-    def to_draw2d_quads(
+    def _to_draw2d_quads(
         self, *, renderer: Draw2dExRenderer, scale: float
     ) -> list[Draw2dQuad]: ...
 
 
 @dataclass(frozen=True, kw_only=True)
-class QuadPrimitive(CanvasPrimitive):
+class Draw2dExQuadPrimitive(Draw2dExBasePrimitive):
     """
     A quad in device-independent pixel coordinates.
 
@@ -264,7 +170,7 @@ class QuadPrimitive(CanvasPrimitive):
     border_thickness_dip: tuple[int, int, int, int] = (0, 0, 0, 0)  # TRBL
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 
-    def to_draw2d_quads(
+    def _to_draw2d_quads(
         self,
         *,
         renderer: Draw2dExRenderer,
@@ -300,7 +206,7 @@ class QuadPrimitive(CanvasPrimitive):
 
 
 @dataclass(frozen=True, kw_only=True)
-class TextPrimitive(CanvasPrimitive):
+class Draw2dExTextPrimitive(Draw2dExBasePrimitive):
     """Internal representation of a text primitive."""
 
     text: str
@@ -314,7 +220,7 @@ class TextPrimitive(CanvasPrimitive):
     horizontal_alignment: HorizontalAlignment
     vertical_alignment: VerticalAlignment
 
-    def to_draw2d_quads(
+    def _to_draw2d_quads(
         self,
         *,
         renderer: Draw2dExRenderer,
