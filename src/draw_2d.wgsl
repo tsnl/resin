@@ -17,12 +17,13 @@ struct PodQuad {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) @interpolate(flat) instance_idx: u32,
-    @location(1) uv: vec2<f32>,
-    @location(2) @interpolate(flat) fill_color: vec4<f32>,
-    @location(3) @interpolate(flat) border_color: vec4<f32>,
-    @location(4) @interpolate(flat) quad_dst_xy_ndc: vec2<f32>,
-    @location(5) @interpolate(flat) quad_dst_wh_ndc: vec2<f32>,
+    @location(0) position_ndc: vec2<f32>,
+    @location(1) @interpolate(flat) instance_idx: u32,
+    @location(2) uv: vec2<f32>,
+    @location(3) @interpolate(flat) fill_color: vec4<f32>,
+    @location(4) @interpolate(flat) border_color: vec4<f32>,
+    @location(5) @interpolate(flat) quad_dst_xy_ndc: vec2<f32>,
+    @location(6) @interpolate(flat) quad_dst_wh_ndc: vec2<f32>,
 }
 struct Thickness {
     t: f32,
@@ -68,12 +69,13 @@ fn vs_main(@builtin(vertex_index) vertex_idx: u32, @builtin(instance_index) inst
         quad.border_thickness_ndc.w,
     );
     let vertex_border_array = array<vec2<f32>, 4>(
-        vec2<f32>(-border_thickness.l, border_thickness.t),   // TL
-        vec2<f32>(border_thickness.r, border_thickness.t),   // TR
-        vec2<f32>(border_thickness.r, -border_thickness.b),  // BR
-        vec2<f32>(-border_thickness.l, -border_thickness.b),  // BL
+        vec2<f32>(-border_thickness.l, -border_thickness.t),   // TL
+        vec2<f32>(border_thickness.r, -border_thickness.t),   // TR
+        vec2<f32>(border_thickness.r,  border_thickness.b),  // BR
+        vec2<f32>(-border_thickness.l, border_thickness.b),  // BL
     );
-    output.position = vec4<f32>(vertex_array[corner_idx], 0.0, 1.0);
+    output.position_ndc = vertex_array[corner_idx] + vertex_border_array[corner_idx];
+    output.position = vec4<f32>(output.position_ndc, 0.0, 1.0);
 
     // output.instance_idx:
     output.instance_idx = instance_idx;
@@ -107,13 +109,13 @@ fn vs_main(@builtin(vertex_index) vertex_idx: u32, @builtin(instance_index) inst
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let half_wh_ndc = input.quad_dst_wh_ndc * 0.5;
     let centroid_ndc = input.quad_dst_xy_ndc + half_wh_ndc;
-    let dist_xy_ndc = abs(input.position.xy - centroid_ndc);
-    if all(dist_xy_ndc <= half_wh_ndc) {
+    let dist_xy_ndc = abs(input.position_ndc - centroid_ndc);
+    if all(dist_xy_ndc <= abs(half_wh_ndc)) {
         // Fill area
         let tex_color = textureSampleLevel(tex, tex_sampler, input.uv, 0.0);
         return tex_color * input.fill_color;
     } else {
         // Border area since outside the main rect.
-        return input.border_color
+        return input.border_color;
     }
 }

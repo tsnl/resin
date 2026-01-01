@@ -590,6 +590,14 @@ mod tests {
                     fill_color_rgba: [1.0, 1.0, 1.0, 1.0],
                     ..Default::default()
                 },
+                Draw2dQuad {
+                    dst_xy_px: [20, 527],
+                    dst_wh_px: Some([477, 477]),
+                    fill_color_rgba: [0.0, 1.0, 0.0, 1.0],
+                    border_thickness_px: [5, 10, 15, 20],
+                    border_color_rgba: [0.0, 0.5, 0.0, 1.0],
+                    ..Default::default()
+                },
             ];
             renderer.record(&quads, &mut frame, &mut command_encoder);
 
