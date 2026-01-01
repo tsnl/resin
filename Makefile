@@ -70,6 +70,7 @@ $(BUNDLED_DATA)/shaders:
 
 .PHONY: build-fonts
 build-fonts:
+	mkdir -p $(BUNDLED_DATA)/fonts
 	cp res/fonts/* $(BUNDLED_DATA)/fonts/
 
 #
