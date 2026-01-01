@@ -38,7 +38,6 @@ __all__ = [
     "GuiWindow",
 ]
 
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Literal, Callable
 import time
@@ -80,18 +79,11 @@ from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
 )
-from .bundled_data import BUNDLED_DATA_PATH
+from .compositor import Compositor, CompositorInput
 from .gpu import (
     GpuContext,
-    GpuDescriptorSet,
-    GpuDescriptorSetLayout,
-    GpuDescriptorSetLayoutBinding,
     GpuDevice,
-    GpuGraphicsPipeline,
     GpuImage,
-    GpuPipelineLayout,
-    GpuSampler,
-    GpuShader,
     GpuSwapChain,
     GpuCommandEncoder,
 )
@@ -331,15 +323,8 @@ class GuiWindow(BaseResource):
     _draw_2d_targets: list[Draw2dTarget]  # One per swapchain image
     _draw_3d_context: Draw3dContext
     _draw_3d_renderer: Draw3dRenderer
-
-    # Present pipeline (for blitting 2D target to swapchain)
-    _present_descriptor_set_layout: GpuDescriptorSetLayout
-    _present_pipeline_layout: GpuPipelineLayout
-    _present_vertex_shader: GpuShader
-    _present_fragment_shader: GpuShader
-    _present_pipeline: GpuGraphicsPipeline
-    _present_sampler: GpuSampler
-    _present_descriptor_sets: list[GpuDescriptorSet]  # One per swapchain image
+    _compositor: Compositor
+    _compositor_inputs: list[CompositorInput]
 
     # 3D viewport camera
     _camera_transform: np.ndarray | None
@@ -406,9 +391,17 @@ class GuiWindow(BaseResource):
         for _ in range(swapchain_image_count):
             self._draw_2d_targets.append(Draw2dTarget(renderer=self._draw_2d_renderer))
 
-        # Create present pipeline for blitting 2D target to swapchain
-        self._present_descriptor_sets = []
-        self._create_present_pipeline()
+        # Compositor for blitting 2D target to swapchain
+        assert self._gpu_swap_chain is not None
+        self._compositor = Compositor(
+            gpu_device=gpu_device,
+            viewport_width=self._gpu_swap_chain.width,
+            viewport_height=self._gpu_swap_chain.height,
+            vk_color_format=self._gpu_swap_chain.vk_format,
+            parent_resource=self,
+        )
+        self._compositor_inputs = []
+        self._sync_compositor_inputs_with_targets()
 
         # Create 3D renderer
         self._draw_3d_context = draw_3d_context
@@ -460,87 +453,35 @@ class GuiWindow(BaseResource):
                 self._draw_2d_targets.append(
                     Draw2dTarget(renderer=self._draw_2d_renderer)
                 )
-
-        # Recreate present descriptor sets
-        if hasattr(self, "_present_descriptor_set_layout"):
-            self._create_present_descriptor_sets()
-
-    def _create_present_pipeline(self) -> None:
-        """Create the present pipeline for blitting 2D target to swapchain."""
-
-        self._present_descriptor_set_layout = GpuDescriptorSetLayout(
-            device=self._gpu_device,
-            bindings=OrderedDict(
-                {
-                    "sourceTexture": GpuDescriptorSetLayoutBinding(
-                        type="sampled-image",
-                        stages=["fragment"],
-                    ),
-                    "sourceSampler": GpuDescriptorSetLayoutBinding(
-                        type="sampler",
-                        stages=["fragment"],
-                    ),
-                }.items()
-            ),
-        )
-        self._present_pipeline_layout = GpuPipelineLayout(
-            device=self._gpu_device,
-            descriptor_set_layouts=[self._present_descriptor_set_layout],
-        )
-        self._present_vertex_shader = GpuShader(
-            device=self._gpu_device,
-            spirv_path=(BUNDLED_DATA_PATH / "shaders/gui_present.vert.spv"),
-            stage="vertex",
-        )
-        self._present_fragment_shader = GpuShader(
-            device=self._gpu_device,
-            spirv_path=(BUNDLED_DATA_PATH / "shaders/gui_present.frag.spv"),
-            stage="fragment",
-        )
-
-        # Get swapchain dimensions for viewport
-        assert self._gpu_swap_chain is not None
-        swapchain_width = self._gpu_swap_chain.width
-        swapchain_height = self._gpu_swap_chain.height
-
-        self._present_pipeline = GpuGraphicsPipeline(
-            device=self._gpu_device,
-            vertex_shader=self._present_vertex_shader,
-            fragment_shader=self._present_fragment_shader,
-            enable_depth_test=False,
-            enable_alpha_blending=False,
-            viewport_width=swapchain_width,
-            viewport_height=swapchain_height,
-            layout=self._present_pipeline_layout,
-            vk_color_format=self._gpu_swap_chain.vk_format,
-        )
-        self._present_sampler = GpuSampler(
-            device=self._gpu_device,
-            min_filter="nearest",
-            mag_filter="nearest",
-        )
-
-        # Create descriptor sets for each target
-        self._create_present_descriptor_sets()
-
-    def _create_present_descriptor_sets(self) -> None:
-        """Create descriptor sets for the present pipeline, one per target."""
-        # Dispose old descriptor sets
-        for ds in self._present_descriptor_sets:
-            ds.dispose()
-        self._present_descriptor_sets.clear()
-
-        # Create new descriptor sets
-        for target in self._draw_2d_targets:
-            ds = GpuDescriptorSet(
-                device=self._gpu_device,
-                bindings={
-                    "sourceTexture": target.color_image,
-                    "sourceSampler": self._present_sampler,
-                },
-                layout=self._present_descriptor_set_layout,
+        if hasattr(self, "_compositor"):
+            self._compositor.resize(
+                viewport_width=self._gpu_swap_chain.width,
+                viewport_height=self._gpu_swap_chain.height,
+                color_format=self._gpu_swap_chain.vk_format,
             )
-            self._present_descriptor_sets.append(ds)
+            self._sync_compositor_inputs_with_targets()
+
+    def _sync_compositor_inputs_with_targets(self) -> None:
+        if not hasattr(self, "_compositor"):
+            return
+
+        target_count = len(self._draw_2d_targets)
+        if len(self._compositor_inputs) > target_count:
+            extras = self._compositor_inputs[target_count:]
+            for compositor_input in extras:
+                compositor_input.dispose()
+            self._compositor_inputs = self._compositor_inputs[:target_count]
+
+        for idx, target in enumerate(self._draw_2d_targets):
+            if idx < len(self._compositor_inputs):
+                self._compositor_inputs[idx].set_image(target.output)
+            else:
+                self._compositor_inputs.append(
+                    CompositorInput(
+                        compositor=self._compositor,
+                        image=target.output,
+                    )
+                )
 
     #
     # Resource disposal:
@@ -549,15 +490,10 @@ class GuiWindow(BaseResource):
     def _on_dispose(self) -> None:
         if self._draw_3d_renderer is not None:
             self._draw_3d_renderer.dispose()
-        for ds in self._present_descriptor_sets:
-            ds.dispose()
-        self._present_descriptor_sets.clear()
-        self._present_sampler.dispose()
-        self._present_pipeline.dispose()
-        self._present_fragment_shader.dispose()
-        self._present_vertex_shader.dispose()
-        self._present_pipeline_layout.dispose()
-        self._present_descriptor_set_layout.dispose()
+        for compositor_input in getattr(self, "_compositor_inputs", []):
+            compositor_input.dispose()
+        if hasattr(self, "_compositor"):
+            self._compositor.dispose()
         for target in self._draw_2d_targets:
             target.dispose()
         self._draw_2d_targets.clear()
@@ -809,6 +745,22 @@ class GuiWindow(BaseResource):
             # Recreate swapchain if surface was recreated
             self._create_swapchain()
 
+        # Handle resize for 2D renderer
+        self._draw_2d_renderer.resize(
+            target_width_px=width_px,
+            target_height_px=height_px,
+        )
+        for target in self._draw_2d_targets:
+            target.resize()
+        self._sync_compositor_inputs_with_targets()
+
+        if hasattr(self, "_compositor") and self._gpu_swap_chain is not None:
+            self._compositor.resize(
+                viewport_width=self._gpu_swap_chain.width,
+                viewport_height=self._gpu_swap_chain.height,
+                color_format=self._gpu_swap_chain.vk_format,
+            )
+
     #
     # Update and Render:
     #
@@ -872,24 +824,12 @@ class GuiWindow(BaseResource):
             )
 
             # Present the 2D target to swapchain using present pipeline
-            command_encoder.transition_image_layout(
-                image=swapchain_target.image,
-                layout="color-attachment-optimal",
+            compositor_input = self._compositor_inputs[swapchain_target.image_index]
+            self._compositor.record(
+                command_encoder=command_encoder,
+                output_image=swapchain_target.image,
+                input=compositor_input,
             )
-            command_encoder.transition_image_layout(
-                image=draw_2d_target.color_image,
-                layout="texture-binding",
-            )
-            present_descriptor_set = self._present_descriptor_sets[
-                swapchain_target.image_index
-            ]
-            with command_encoder.render(
-                color_attachment=swapchain_target.image,
-                clear_color="black",
-            ) as rp:
-                rp.bind_pipeline(pipeline=self._present_pipeline)
-                rp.bind_descriptor_set(set_=present_descriptor_set, set_index=0)
-                rp.draw(vertex_count=3, first_instance=0, instance_count=1)
 
             # Transition image for presentation
             command_encoder.transition_image_layout(

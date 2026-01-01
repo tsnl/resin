@@ -118,7 +118,7 @@ class Draw2dTestEngine(BaseResource):
 
     def readback(self) -> np.ndarray:
         """Read back the rendered image as a uint8 RGBA array in sRGB color space."""
-        color_image = self.target.color_image
+        color_image = self.target.output
         buffer = GpuBuffer(
             device=self.gpu_device,
             usages=["copy-dst", "staging"],

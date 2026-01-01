@@ -1,4 +1,4 @@
-//! GUI present shader for GuiWindow.
+//! Compositor shader for fullscreen blit.
 //!
 //! A simple fullscreen pass that copies a source image to the output 1:1.
 //! Used to present the 2D render target to the swapchain.

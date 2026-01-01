@@ -62,8 +62,6 @@ class Draw2dRenderer(BaseResource):
     _gpu_default_white_image: GpuImage
     _gpu_default_sampler: GpuSampler
 
-    _target_list: list["Draw2dTarget"]
-
     def __init__(
         self,
         *,
@@ -162,10 +160,10 @@ class Draw2dRenderer(BaseResource):
         ):
             return
 
-        self._gpu_device.wait_idle()
-
         self._target_width_px = target_width_px
         self._target_height_px = target_height_px
+
+        self._gpu_device.wait_idle()
 
         self._gpu_pipeline.dispose()
         self._gpu_pipeline = GpuGraphicsPipeline(
@@ -179,12 +177,6 @@ class Draw2dRenderer(BaseResource):
             layout=self._gpu_pipeline_layout,
         )
 
-        for target in self._target_list:
-            target._resize_impl(
-                target_width_px=target_width_px,
-                target_height_px=target_height_px,
-            )
-
     def record(
         self,
         *,
@@ -195,9 +187,6 @@ class Draw2dRenderer(BaseResource):
         target._record(command_encoder=command_encoder, quads=quads)
 
     def _on_dispose(self) -> None:
-        for target in self._target_list:
-            target.dispose()
-
         self._gpu_default_sampler.dispose()
         self._gpu_default_white_image.dispose()
         self._gpu_pipeline.dispose()
@@ -218,7 +207,7 @@ class Draw2dTarget(BaseResource):
 
     _renderer: Draw2dRenderer
 
-    _gpu_color_image: GpuImage
+    _output: GpuImage
 
     _uniform: "Uniform"
     _quad_batch_cache: dict[GpuImage | None, "QuadGroup"]
@@ -228,18 +217,7 @@ class Draw2dTarget(BaseResource):
 
         self._renderer = renderer
 
-        self._gpu_color_image = GpuImage(
-            device=renderer._gpu_device,
-            usages=["color-attachment", "texture-binding", "transfer-src"],
-            meta=GpuImageMeta(
-                shape=(
-                    self._renderer._target_height_px,
-                    self._renderer._target_width_px,
-                    4,
-                ),
-                dtype=np.float32,
-            ),
-        )
+        self._output = self._new_output_image()
 
         self._uniform = Uniform(renderer=renderer)
         self._quad_batch_cache = {}
@@ -253,16 +231,23 @@ class Draw2dTarget(BaseResource):
             qb.dispose()
 
     @property
-    def color_image(self) -> GpuImage:
-        return self._gpu_color_image
+    def output(self) -> GpuImage:
+        return self._output
 
-    def _resize_impl(self, *, target_width_px: int, target_height_px: int):
-        self._gpu_color_image.dispose()
-        self._gpu_color_image = GpuImage(
+    def resize(self):
+        self._output.dispose()
+        self._output = self._new_output_image()
+
+    def _new_output_image(self) -> GpuImage:
+        return GpuImage(
             device=self._renderer._gpu_device,
-            usages=["color-attachment", "transfer-src"],
+            usages=["color-attachment", "transfer-src", "texture-binding"],
             meta=GpuImageMeta(
-                shape=(target_height_px, target_width_px, 4),
+                shape=(
+                    self._renderer._target_height_px,
+                    self._renderer._target_width_px,
+                    4,
+                ),
                 dtype=np.float32,
             ),
         )
@@ -284,15 +269,15 @@ class Draw2dTarget(BaseResource):
 
         # Transition the target image to color-attachment layout:
         command_encoder.transition_image_layout(
-            image=self._gpu_color_image,
+            image=self._output,
             layout="color-attachment-optimal",
         )
 
         # Flush uniform data for this target:
         uniform_descriptor_set = self._uniform.flush_data_and_get_descriptor_set(
             command_encoder=command_encoder,
-            target_width_px=self._gpu_color_image.width,
-            target_height_px=self._gpu_color_image.height,
+            target_width_px=self._output.width,
+            target_height_px=self._output.height,
         )
 
         # Flush grouped quad data to per-group buffers and get descriptor sets:
@@ -312,7 +297,7 @@ class Draw2dTarget(BaseResource):
 
         # Record draw calls:
         with command_encoder.render(
-            color_attachment=self._gpu_color_image,
+            color_attachment=self._output,
             clear_color=self._renderer._clear_color,
         ) as rp:
             rp.bind_pipeline(pipeline=self._renderer._gpu_pipeline)
