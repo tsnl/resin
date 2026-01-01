@@ -1,0 +1,33 @@
+# OS:
+.DS_Store
+
+# Python:
+.mypy_cache
+.venv
+__pycache__
+*.egg-info
+
+# Jupyter
+.ipynb_checkpoints
+
+# Compiled shaders (generated during build)
+*.spv
+
+# Build and test artifacts
+/output
+/dist
+/build
+/target
+
+# Ignore '*.actual.png' files from expect tests.
+*.actual.png
+
+# Ignore log files
+*.log
+
+
+# Added by cargo
+#
+# already existing elements were commented out
+
+#/target
