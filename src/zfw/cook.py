@@ -29,6 +29,8 @@ CookedAtlasType = Literal["glyph_cache"]
 
 @dataclass(kw_only=True, frozen=True)
 class CookedAtlas:
+    PATH_SUFFIX: str = ".zfw_atlas"
+
     atlas_type: CookedAtlasType = "glyph_cache"
     atlas_data: np.ndarray  # (h, w, 4) RGBA f32 image or (h, w, 1) mono f32 image
     image_xywh_list: list[tuple[int, int, int, int]]
@@ -46,6 +48,11 @@ class CookedAtlas:
         load_license_text: bool = False,
         load_glyph_metrics: bool = True,
     ) -> "CookedAtlas":
+        if path.suffix != CookedAtlas.PATH_SUFFIX:
+            raise ValueError(
+                f"CookedAtlas load path must have suffix {CookedAtlas.PATH_SUFFIX!r}: "
+                f"{path=}"
+            )
         if not path.is_dir():
             raise FileNotFoundError(f"Cooked atlas path not found: {path}")
 
@@ -99,6 +106,12 @@ class CookedAtlas:
         )
 
     def save(self, path: Path) -> None:
+        if path.suffix != CookedAtlas.PATH_SUFFIX:
+            raise ValueError(
+                f"CookedAtlas save path must have {CookedAtlas.PATH_SUFFIX!r} suffix: "
+                f"{path=}"
+            )
+
         path.mkdir(parents=True, exist_ok=True)
 
         # Save index.json
@@ -158,7 +171,7 @@ class CookedAtlasGlyphCacheExtFile(pydantic.BaseModel):
     data: list[tuple[CookedAtlasGlyphCacheKey, "CookedAtlasGlyphInfo"]]
 
 
-@pydantic.dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True)
 class CookedAtlasGlyphCacheKey:
     glyph_index: int
     font_name: Font

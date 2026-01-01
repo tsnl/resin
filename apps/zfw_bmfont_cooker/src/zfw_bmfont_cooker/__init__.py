@@ -377,6 +377,7 @@ def main() -> None:
             continue
 
         output_dir = BUNDLED_DATA_PATH / "fonts" / font_name
+        output_dir = output_dir.with_suffix(CookedAtlas.PATH_SUFFIX)
 
         cooker = GlyphAtlasCooker(
             font=font_name,

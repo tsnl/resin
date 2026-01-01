@@ -4,7 +4,7 @@ Round-trip tests for CookedAtlas.
 
 from fractions import Fraction
 from pathlib import Path
-from tempfile import TemporaryDirectory
+import shutil
 
 import numpy as np
 import pytest
@@ -86,18 +86,22 @@ def test_cooked_atlas_roundtrip_glyph_cache():
     assert original.as_glyph_cache is not None
 
     # Save and load
-    with TemporaryDirectory() as tmpdir:
-        save_path = Path(tmpdir) / "test_atlas"
-        original.save(save_path)
+    save_path = Path(
+        "output/zfw/cook_test/test_cooked_atlas_roundtrip_glyph_cache.zfw_atlas"
+    )
+    if save_path.exists():
+        shutil.rmtree(save_path)
 
-        # Load it back
-        loaded = CookedAtlas.load(
-            path=save_path,
-            color_space="linear",
-            load_readme_text=True,
-            load_license_text=True,
-            load_glyph_metrics=True,
-        )
+    original.save(save_path)
+
+    # Load it back
+    loaded = CookedAtlas.load(
+        path=save_path,
+        color_space="linear",
+        load_readme_text=True,
+        load_license_text=True,
+        load_glyph_metrics=True,
+    )
 
     # Verify atlas data (with tolerance for PNG compression)
     assert loaded.atlas_data.shape == original.atlas_data.shape
@@ -150,18 +154,21 @@ def test_cooked_atlas_roundtrip_without_glyph_cache():
     )
 
     # Save and load
-    with TemporaryDirectory() as tmpdir:
-        save_path = Path(tmpdir) / "test_atlas_no_glyph"
-        original.save(save_path)
+    save_path = Path(
+        "output/zfw/cook_test/test_cooked_atlas_roundtrip_no_glyph_cache.zfw_atlas"
+    )
+    if save_path.exists():
+        shutil.rmtree(save_path)
+    original.save(save_path)
 
-        # Load it back
-        loaded = CookedAtlas.load(
-            path=save_path,
-            color_space="srgb",
-            load_readme_text=False,
-            load_license_text=False,
-            load_glyph_metrics=False,
-        )
+    # Load it back
+    loaded = CookedAtlas.load(
+        path=save_path,
+        color_space="srgb",
+        load_readme_text=False,
+        load_license_text=False,
+        load_glyph_metrics=False,
+    )
 
     # Verify basic data
     assert loaded.atlas_data.shape == original.atlas_data.shape
@@ -197,18 +204,23 @@ def test_cooked_atlas_mono_channel():
     )
 
     # Save and load
-    with TemporaryDirectory() as tmpdir:
-        save_path = Path(tmpdir) / "test_atlas_mono"
-        original.save(save_path)
 
-        # Load it back
-        loaded = CookedAtlas.load(
-            path=save_path,
-            color_space="linear",
-            load_readme_text=True,
-            load_license_text=False,
-            load_glyph_metrics=False,
-        )
+    save_path = Path(
+        "output/zfw/cook_test/test_cooked_atlas_roundtrip_mono_channel.zfw_atlas"
+    )
+    if save_path.exists():
+        shutil.rmtree(save_path)
+
+    original.save(save_path)
+
+    # Load it back
+    loaded = CookedAtlas.load(
+        path=save_path,
+        color_space="linear",
+        load_readme_text=True,
+        load_license_text=False,
+        load_glyph_metrics=False,
+    )
 
     # Verify shape is preserved
     assert loaded.atlas_data.shape == original.atlas_data.shape

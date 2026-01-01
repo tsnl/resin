@@ -561,7 +561,9 @@ class GlyphAtlas(BaseResource):
         all_fonts: list[Font] = ["sans-serif", "serif", "monospaced"]
 
         for font in all_fonts:
-            atlas_dir = BUNDLED_DATA_PATH / "fonts" / font
+            atlas_dir = (BUNDLED_DATA_PATH / "fonts" / font).with_suffix(
+                CookedAtlas.PATH_SUFFIX
+            )
 
             if not atlas_dir.exists():
                 raise FileNotFoundError(
