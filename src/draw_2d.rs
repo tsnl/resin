@@ -177,6 +177,9 @@ impl Draw2dFrame {
             quad_group_cache: quad_batch_cache,
         }
     }
+    pub fn output_image(&self) -> &Rgba8UnormTexture {
+        &self.output_image
+    }
     fn record(
         &mut self,
         device: &wgpu::Device,
