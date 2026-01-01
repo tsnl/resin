@@ -15,6 +15,9 @@ If you're on NixOS, just use the provided `shell.nix` to get started.
     -   [Vulkan `VK_KHR_ray_tracing_extension` tutorial](https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/)
     -   [Vulkan mini path-tracer](https://github.com/nvpro-samples/vk_mini_path_tracer/)
     -   [Megakernels Considered Harmful](https://research.nvidia.com/sites/default/files/pubs/2013-07_Megakernels-Considered-Harmful/laine2013hpg_paper.pdf)
+    -   [Jacco's Blog - How to Build a BVH](https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics/)
+    -   [PBR Book - Bounding Volume Hierarchies - The Surface Area Heuristic](https://www.pbr-book.org/3ed-2018/Primitives_and_Intersection_Acceleration/Bounding_Volume_Hierarchies#TheSurfaceAreaHeuristic)
+
 
 ## Conventions
 

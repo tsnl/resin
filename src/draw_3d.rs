@@ -29,6 +29,19 @@ struct PodBvhNode {
     children: [u32; 2],
     aabb: [[f32; 3]; 2],
 }
+impl PodBvhNode {
+    fn aabb(&self) -> SimdRect3 {
+        SimdRect3::new(SimdVec3::from(self.aabb[0]), SimdVec3::from(self.aabb[1]))
+    }
+    fn sah_cost(&self) -> f32 {
+        let area = self.aabb().extent().reduce_sum();
+        let tri_count = (self.triangles_span[1] - self.triangles_span[0]) as f32;
+        area * tri_count
+    }
+    fn triangles_range(&self) -> Range<usize> {
+        self.triangles_span[0] as usize..self.triangles_span[1] as usize
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -73,34 +86,20 @@ struct PodVertex {
     uv: [f32; 2],
 }
 
-fn build_bvh(triangles: &mut [PodTriangle], out: &mut Vec<PodBvhNode>) {
-    /// Searches all possible partitions and finds the best one according to the surface area heuristic metric.
-    /// Returns the best split dimension, the best split triangle index, and the best (lowest) SAH cost.
-    fn find_best_partition(triangles: &[PodTriangle]) -> (usize, usize, f32) {
+fn try_partition_bvh_node(
+    root_node: usize,
+    triangles: &mut [PodTriangle],
+    nodes: &mut Vec<PodBvhNode>,
+) {
+    // Find the best partition
+    let (best_dim, best_i, best_cost) = {
         let mut best_dim = 0;
         let mut best_i = 0;
         let mut best_cost = f32::INFINITY;
 
         for dim in [0, 1, 2] {
-            for i in 0..triangles.len() {
-                let split = triangles[i].centroid[dim];
-
-                let mut lt_aabb = SimdRect3::union_identity();
-                let mut rt_aabb = SimdRect3::union_identity();
-
-                for triangle in triangles.iter() {
-                    let c = triangle.centroid[dim];
-                    if c < split {
-                        // left
-                        lt_aabb |= triangle.aabb();
-                    } else {
-                        // right
-                        rt_aabb |= triangle.aabb();
-                    }
-                }
-
-                let cost = lt_aabb.extent().reduce_sum() * lt_aabb.extent().reduce_sum();
-
+            for i in nodes[root_node].triangles_range() {
+                let cost = evaluate_sah(triangles, dim, triangles[i].centroid[dim]);
                 if cost < best_cost {
                     best_dim = dim;
                     best_i = i;
@@ -110,10 +109,45 @@ fn build_bvh(triangles: &mut [PodTriangle], out: &mut Vec<PodBvhNode>) {
         }
 
         (best_i, best_dim, best_cost)
+    };
+
+    // If the best cost is not better than the current node's cost, do not partition further.
+    if best_cost >= nodes[root_node].sah_cost() {
+        return;
     }
 
-    let (best_dim, best_i, best_cost) = find_best_partition(triangles);
-    // TODO: compare best_cost to the current surface area to determine whether to terminate.
+    // Partition the triangles based on the best split, moving them in place within the triangles slice.
+    {
+        todo!()
+    }
 
-    todo!()
+    // Recurse on the two new child nodes.
+    {
+        todo!();
+    }
+}
+
+/// Calculates the surface area heuristic cost for a given AABB and triangle count.
+/// * https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics/
+/// * https://www.pbr-book.org/3ed-2018/Primitives_and_Intersection_Acceleration/Bounding_Volume_Hierarchies#TheSurfaceAreaHeuristic
+fn evaluate_sah(triangles: &[PodTriangle], dim: usize, split: f32) -> f32 {
+    let mut lt_aabb = SimdRect3::union_identity();
+    let mut lt_count = 0.0;
+    let mut rt_aabb = SimdRect3::union_identity();
+    let mut rt_count = 0.0;
+
+    for triangle in triangles.iter() {
+        let c = triangle.centroid[dim];
+        if c < split {
+            // left
+            lt_aabb |= triangle.aabb();
+            lt_count += 1.0;
+        } else {
+            // right
+            rt_aabb |= triangle.aabb();
+            rt_count += 1.0;
+        }
+    }
+
+    (lt_aabb.extent().reduce_sum() * lt_count) + (rt_aabb.extent().reduce_sum() * rt_count)
 }
