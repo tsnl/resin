@@ -4,6 +4,8 @@ __all__ = [
     "ButtonAction",
     "ColorSpace",
     "CookedAtlas",
+    "CookedAtlasGlyphCacheKey",
+    "CookedAtlasGlyphInfo",
     "Draw2dQuad",
     "Draw2dRenderer",
     "Draw2dTarget",
@@ -123,4 +125,4 @@ from .window import (
 )
 from .events import EventHub
 
-from .cook import CookedAtlas
+from .cook import CookedAtlas, CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey

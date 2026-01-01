@@ -31,7 +31,7 @@ from .basic import (
     logger,
 )
 from .bundled_data import BUNDLED_DATA_PATH
-from .cook import CookedAtlas, CookedAtlasGlyphCacheKey
+from .cook import CookedAtlas
 from .draw_2d import Draw2dQuad, Draw2dRenderer, Draw2dTarget
 from .gpu import (
     GpuCommandEncoder,
@@ -533,7 +533,7 @@ class GlyphAtlas(BaseResource):
 
     # Text shapers per font:
     _shapers: dict[Font, "TextShaper"]
-    
+
     # Pre-computed font metrics: (font, font_size, font_weight, scale) -> FontMetrics
     _font_metrics: dict[tuple[Font, FontSize, FontWeight, Fraction], FontMetrics]
 
@@ -601,16 +601,16 @@ class GlyphAtlas(BaseResource):
             )
             self._gpu_images[font] = gpu_image
 
-# Build glyph cache from the cooked atlas and extract metrics
+            # Build glyph cache from the cooked atlas and extract metrics
             glyph_cache: dict[str, GlyphEntry | None] = {}
             if cooked.as_glyph_cache:
                 for key, info in cooked.as_glyph_cache.items():
                     # Get xywh from image list using image_id
                     xywh = cooked.image_xywh_list[info.image_id]
-                    
+
                     # Create string key for internal cache (matching get_glyph format)
                     cache_key = f"{key.glyph_index},{key.font_size},{key.font_weight},{key.scale.numerator}/{key.scale.denominator}"
-                    
+
                     entry = GlyphEntry(
                         atlas_x=xywh[0],
                         atlas_y=xywh[1],
@@ -620,9 +620,14 @@ class GlyphAtlas(BaseResource):
                         bitmap_top=info.bitmap_top,
                     )
                     glyph_cache[cache_key] = entry
-                    
+
                     # Store font metrics (one per configuration)
-                    metrics_key = (key.font_name, key.font_size, key.font_weight, key.scale)
+                    metrics_key = (
+                        key.font_name,
+                        key.font_size,
+                        key.font_weight,
+                        key.scale,
+                    )
                     if metrics_key not in self._font_metrics:
                         self._font_metrics[metrics_key] = FontMetrics(
                             ascender_26_6=info.ascender_26_6,
@@ -659,7 +664,7 @@ class GlyphAtlas(BaseResource):
             return None
 
         return font_cache.get(cache_key)
-    
+
     def get_font_metrics(
         self,
         *,

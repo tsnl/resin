@@ -227,7 +227,7 @@ def test_draw_2d_ex_image():
     primitives: list[Draw2dExBasePrimitive] = []
 
     # Load test image
-    image_data = load_rgba_image("tests_data/rainbow-512x512.png")
+    image_data = load_rgba_image(Path("tests_data/rainbow-512x512.png"))
     assert image_data.shape == (512, 512, 4)
 
     # Create a GpuImage for the texture

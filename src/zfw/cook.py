@@ -2,20 +2,18 @@ __all__ = [
     "CookedAtlas",
 ]
 
-from abc import ABC
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 import numpy as np
 import orjson
 import pydantic
-from pydantic import Field
 import PIL.Image
 
 from .excepts import LogicError
-from .basic import ColorSpace, Font, FontSize, FontWeight, JsonObject
+from .basic import ColorSpace, Font, FontSize, FontWeight
 from .loader import load_image
 
 

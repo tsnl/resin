@@ -10,10 +10,17 @@ from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
-import pydantic
 
-from zfw import logger, Font, FontSize, FontWeight, CookedAtlas, BUNDLED_DATA_PATH
-from zfw.cook import CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey
+from zfw import (
+    logger,
+    Font,
+    FontSize,
+    FontWeight,
+    CookedAtlas,
+    BUNDLED_DATA_PATH,
+    CookedAtlasGlyphInfo,
+    CookedAtlasGlyphCacheKey,
+)
 import zfw.typed_uharfbuzz as hb
 
 from . import typed_freetype as ft
