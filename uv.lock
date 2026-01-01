@@ -769,7 +769,6 @@ name = "zfw"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "freetype-py" },
     { name = "glfw" },
     { name = "kiwisolver" },
     { name = "msgpack" },
@@ -796,7 +795,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "freetype-py", specifier = ">=2.5.1" },
     { name = "glfw", specifier = ">=2.10.0,<3.0.0" },
     { name = "kiwisolver", specifier = ">=1.4.9" },
     { name = "msgpack", specifier = ">=1.1.2" },
@@ -823,11 +821,15 @@ name = "zfw-bmfont-cooker"
 version = "0.1.0"
 source = { editable = "apps/zfw_bmfont_cooker" }
 dependencies = [
+    { name = "freetype-py" },
     { name = "zfw" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "zfw", editable = "." }]
+requires-dist = [
+    { name = "freetype-py", specifier = ">=2.5.1" },
+    { name = "zfw", editable = "." },
+]
 
 [[package]]
 name = "zfw-sandbox"

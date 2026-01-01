@@ -14,8 +14,9 @@ import pydantic
 
 from zfw import logger, Font, FontSize, FontWeight, CookedAtlas, BUNDLED_DATA_PATH
 from zfw.cook import CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey
-import zfw.typed_freetype as ft
 import zfw.typed_uharfbuzz as hb
+
+from . import typed_freetype as ft
 
 
 LOG = logger(__name__)

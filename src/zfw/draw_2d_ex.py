@@ -38,7 +38,6 @@ from .gpu import (
     GpuDevice,
     GpuImage,
 )
-from . import typed_freetype as ft
 from . import typed_uharfbuzz as hb
 
 
@@ -209,11 +208,16 @@ class Draw2dExTextPrimitive(Draw2dExBasePrimitive):  #
             font_weight=weight_value,
         )
 
-        # Get font metrics:
-        metrics = shaper.get_metrics(
-            font_size_px=effective_size_px,
-            font_weight=weight_value,
+        # Get font metrics from pre-cooked glyph cache:
+        metrics = atlas.get_font_metrics(
+            font=self.font,
+            font_size=self.font_size,
+            font_weight=self.font_weight,
+            scale=scale,
         )
+        if metrics is None:
+            # Fallback: no pre-cooked metrics for this configuration
+            return []
 
         # Convert destination rect to physical 26.6 fixed-point:
         dst_x_26_6 = int(self.dst_xy_dip[0] * scale * 64)
@@ -529,6 +533,9 @@ class GlyphAtlas(BaseResource):
 
     # Text shapers per font:
     _shapers: dict[Font, "TextShaper"]
+    
+    # Pre-computed font metrics: (font, font_size, font_weight, scale) -> FontMetrics
+    _font_metrics: dict[tuple[Font, FontSize, FontWeight, Fraction], FontMetrics]
 
     def __init__(
         self,
@@ -542,6 +549,7 @@ class GlyphAtlas(BaseResource):
         self._gpu_device = gpu_device
         self._glyph_cache = {}
         self._gpu_images = {}
+        self._font_metrics = {}
 
         # Create shapers:
         self._shapers = {}
@@ -593,16 +601,16 @@ class GlyphAtlas(BaseResource):
             )
             self._gpu_images[font] = gpu_image
 
-            # Build glyph cache from the cooked atlas
+# Build glyph cache from the cooked atlas and extract metrics
             glyph_cache: dict[str, GlyphEntry | None] = {}
             if cooked.as_glyph_cache:
                 for key, info in cooked.as_glyph_cache.items():
                     # Get xywh from image list using image_id
                     xywh = cooked.image_xywh_list[info.image_id]
-
+                    
                     # Create string key for internal cache (matching get_glyph format)
                     cache_key = f"{key.glyph_index},{key.font_size},{key.font_weight},{key.scale.numerator}/{key.scale.denominator}"
-
+                    
                     entry = GlyphEntry(
                         atlas_x=xywh[0],
                         atlas_y=xywh[1],
@@ -612,6 +620,14 @@ class GlyphAtlas(BaseResource):
                         bitmap_top=info.bitmap_top,
                     )
                     glyph_cache[cache_key] = entry
+                    
+                    # Store font metrics (one per configuration)
+                    metrics_key = (key.font_name, key.font_size, key.font_weight, key.scale)
+                    if metrics_key not in self._font_metrics:
+                        self._font_metrics[metrics_key] = FontMetrics(
+                            ascender_26_6=info.ascender_26_6,
+                            height_26_6=info.height_26_6,
+                        )
 
             self._glyph_cache[font] = glyph_cache
 
@@ -643,6 +659,19 @@ class GlyphAtlas(BaseResource):
             return None
 
         return font_cache.get(cache_key)
+    
+    def get_font_metrics(
+        self,
+        *,
+        font: Font,
+        font_size: FontSize,
+        font_weight: FontWeight,
+        scale: float,
+    ) -> FontMetrics | None:
+        """Get pre-computed font metrics from glyph cache."""
+        scale_frac = Fraction(scale).limit_denominator(1000)
+        metrics_key = (font, font_size, font_weight, scale_frac)
+        return self._font_metrics.get(metrics_key)
 
 
 #
@@ -654,38 +683,22 @@ class TextShaper:
     """
     Text shaper for a specific font family.
 
-    Wraps HarfBuzz for shaping and FreeType for metrics.
+    Wraps HarfBuzz for shaping. Metrics come from pre-cooked glyph atlas.
     """
 
     _font: Font
     _hb_font: hb.Font
-    _ft_face: ft.Face
-    _ft_weight_axis_index: int | None
 
     def __init__(self, *, font: Font):
         self._font = font
 
-        # Load fonts:
+        # Load font for HarfBuzz:
         file_path = self._get_font_file_path(font)
 
         with open(file_path, "rb") as f:
             hb_blob = f.read()
         hb_face = hb.Face(hb_blob)
         self._hb_font = hb.Font(hb_face)
-
-        self._ft_face = ft.Face(str(file_path))
-
-        # Find weight axis:
-        self._ft_weight_axis_index = None
-        info = self._ft_face.get_variation_info()
-        for i, axis in enumerate(info.axes):
-            if axis.tag == "wght":
-                self._ft_weight_axis_index = i
-                break
-
-    @property
-    def ft_face(self) -> ft.Face:
-        return self._ft_face
 
     @staticmethod
     def _get_font_file_path(font: Font) -> Path:
@@ -694,15 +707,6 @@ class TextShaper:
             "serif": BUNDLED_DATA_PATH / "fonts/Lora.ttf",
             "monospaced": BUNDLED_DATA_PATH / "fonts/SourceCodePro.ttf",
         }[font]
-
-    def set_freetype_weight(self, weight: int) -> None:
-        """Set the FreeType weight axis."""
-        if self._ft_weight_axis_index is None:
-            return
-
-        coords = list(self._ft_face.get_var_design_coords())
-        coords[self._ft_weight_axis_index] = float(weight)
-        self._ft_face.set_var_design_coords(coords)
 
     def shape_text(
         self,
@@ -723,22 +727,6 @@ class TextShaper:
         hb.shape(self._hb_font, hb_buffer)
 
         return hb_buffer.glyph_infos, hb_buffer.glyph_positions
-
-    def get_metrics(
-        self,
-        *,
-        font_size_px: int,
-        font_weight: int,
-    ) -> FontMetrics:
-        """Get font metrics for a specific size and weight."""
-        self._ft_face.set_pixel_sizes(0, font_size_px)
-        self.set_freetype_weight(font_weight)
-
-        metrics = self._ft_face.size
-        return FontMetrics(
-            ascender_26_6=metrics.ascender,
-            height_26_6=metrics.height,
-        )
 
     def get_glyph_extents(self, glyph: int) -> hb.GlyphExtents:
         """Get glyph extents for optical bounds calculation."""

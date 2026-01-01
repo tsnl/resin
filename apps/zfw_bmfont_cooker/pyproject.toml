@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Bitmap font cooker for ZFW SDK - pre-generates glyph atlases."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["zfw"]
+dependencies = [
+    "zfw",
+    "freetype-py>=2.5.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
