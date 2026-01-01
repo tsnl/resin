@@ -10,8 +10,8 @@ It provides:
 __all__ = [
     "Draw2dExBasePrimitive",
     "Draw2dExQuadPrimitive",
-    "Draw2dExTextPrimitive",
     "Draw2dExRenderer",
+    "Draw2dExTextPrimitive",
 ]
 
 from abc import ABC, abstractmethod
@@ -111,41 +111,6 @@ class Draw2dExRenderer(BaseResource):
         self._inner.dispose()
 
 
-#
-# Configuration
-#
-
-
-# Pixel sizes for each FontSize (at scale=1.0)
-FONT_SIZE_PX: dict[tuple[Font, FontSize], int] = {
-    ("sans-serif", "regular"): 14,
-    ("sans-serif", "large"): 24,
-    ("sans-serif", "extra-large"): 32,
-    ("serif", "regular"): 16,
-    ("serif", "large"): 24,
-    ("serif", "extra-large"): 32,
-    ("monospaced", "regular"): 14,
-    ("monospaced", "large"): 24,
-    ("monospaced", "extra-large"): 32,
-}
-
-# Weight values for variable fonts
-FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
-    "light": 200,
-    "regular": 400,
-    "bold": 700,
-}
-
-# Characters to pre-rasterize for the glyph atlas
-# ASCII printable characters plus some common punctuation
-GLYPH_CHARSET = "".join(chr(c) for c in range(32, 127))  # ASCII printable
-
-
-#
-# Implementation: CanvasPrimitive
-#
-
-
 @dataclass(frozen=True, kw_only=True)
 class Draw2dExBasePrimitive(ABC):
     @abstractmethod
@@ -206,7 +171,7 @@ class Draw2dExQuadPrimitive(Draw2dExBasePrimitive):
 
 
 @dataclass(frozen=True, kw_only=True)
-class Draw2dExTextPrimitive(Draw2dExBasePrimitive):
+class Draw2dExTextPrimitive(Draw2dExBasePrimitive):  #
     """Internal representation of a text primitive."""
 
     text: str
@@ -483,6 +448,36 @@ class Draw2dExTextPrimitive(Draw2dExBasePrimitive):
             return 0, 0
 
         return min_x, max_x
+
+
+#
+# Configuration
+#
+
+
+# Pixel sizes for each FontSize (at scale=1.0)
+FONT_SIZE_PX: dict[tuple[Font, FontSize], int] = {
+    ("sans-serif", "regular"): 14,
+    ("sans-serif", "large"): 24,
+    ("sans-serif", "extra-large"): 32,
+    ("serif", "regular"): 16,
+    ("serif", "large"): 24,
+    ("serif", "extra-large"): 32,
+    ("monospaced", "regular"): 14,
+    ("monospaced", "large"): 24,
+    ("monospaced", "extra-large"): 32,
+}
+
+# Weight values for variable fonts
+FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
+    "light": 200,
+    "regular": 400,
+    "bold": 700,
+}
+
+# Characters to pre-rasterize for the glyph atlas
+# ASCII printable characters plus some common punctuation
+GLYPH_CHARSET = "".join(chr(c) for c in range(32, 127))  # ASCII printable
 
 
 #
