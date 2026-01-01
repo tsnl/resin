@@ -12,9 +12,9 @@ It provides:
 
 __all__ = [
     "Draw2dExtBasePrimitive",
+    "Draw2dExtCanvas",
     "Draw2dExtQuadPrimitive",
     "Draw2dExtTextPrimitive",
-    "Draw2dExtCanvas",
 ]
 
 from abc import ABC, abstractmethod
@@ -35,12 +35,8 @@ from .basic import (
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .cook import CookedAtlas
-from .draw_2d import Draw2dQuad, Draw2dRenderer, Draw2dTarget
-from .gpu import (
-    GpuCommandEncoder,
-    GpuDevice,
-    GpuImage,
-)
+from .draw_2d import Draw2dQuad, Draw2dRenderer
+from .gpu import GpuDevice, GpuImage
 from . import typed_uharfbuzz as hb
 
 
