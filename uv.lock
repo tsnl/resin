@@ -5,6 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 members = [
     "zfw",
+    "zfw-bmfont-cooker",
     "zfw-sandbox",
 ]
 
@@ -816,6 +817,17 @@ requires-dist = [
     { name = "vulkan", specifier = ">=1.3.275.1,<2.0.0.0" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "zfw-bmfont-cooker"
+version = "0.1.0"
+source = { editable = "apps/zfw_bmfont_cooker" }
+dependencies = [
+    { name = "zfw" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "zfw", editable = "." }]
 
 [[package]]
 name = "zfw-sandbox"

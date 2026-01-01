@@ -3,6 +3,7 @@ __all__ = [
     "BaseResource",
     "ButtonAction",
     "ColorSpace",
+    "CookedAtlas",
     "Draw2dQuad",
     "Draw2dRenderer",
     "Draw2dTarget",
@@ -13,6 +14,8 @@ __all__ = [
     "Draw3dRenderer",
     "EventHub",
     "Font",
+    "FontSize",
+    "FontWeight",
     "GpuBuffer",
     "GpuBufferMeta",
     "GpuCommandEncoder",
@@ -58,6 +61,8 @@ from .basic import (
     ButtonAction,
     SupportsWrite,
     Font,
+    FontSize,
+    FontWeight,
     ColorSpace,
     Json,
     JsonArray,
@@ -117,3 +122,5 @@ from .window import (
     WindowContext,
 )
 from .events import EventHub
+
+from .cook import CookedAtlas

@@ -24,9 +24,12 @@ from .loader import load_image
 class CookedAtlas:
     atlas_data: np.ndarray  # (h, w, 4) RGBA f32 image or (h, w, 1) mono f32 image
     image_xywh: dict[str, tuple[int, int, int, int]]
-    color_space: ColorSpace
-    readme_text: str | None
-    license_text: str | None
+    image_metadata: dict[str, dict] | None = (
+        None  # Additional metadata per image (e.g., bitmap_left, bitmap_top)
+    )
+    color_space: ColorSpace = "linear"
+    readme_text: str | None = None
+    license_text: str | None = None
 
     @staticmethod
     def load(
@@ -69,6 +72,7 @@ class CookedAtlas:
         return CookedAtlas(
             atlas_data=atlas_data,
             image_xywh=index.images,
+            image_metadata=index.metadata,
             color_space=color_space,
             readme_text=readme_text,
             license_text=license_text,
@@ -77,11 +81,40 @@ class CookedAtlas:
     def save(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
-        # Save atlas.png
+        # Save atlas.png first (create PIL Image from atlas_data)
+        if self.atlas_data.dtype != np.uint8:
+            # Assume linear float [0, 1], convert to uint8
+            atlas_uint8 = (np.clip(self.atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
+        else:
+            atlas_uint8 = self.atlas_data
+
+        # PIL requires HWC format for multi-channel
+        if len(atlas_uint8.shape) == 3:
+            if atlas_uint8.shape[2] == 4:
+                pil_mode = "RGBA"
+            elif atlas_uint8.shape[2] == 3:
+                pil_mode = "RGB"
+            elif atlas_uint8.shape[2] == 1:
+                pil_mode = "L"
+                atlas_uint8 = atlas_uint8[:, :, 0]
+            else:
+                raise ValueError(
+                    f"Unsupported number of channels: {atlas_uint8.shape[2]}"
+                )
+        else:
+            pil_mode = "L"
+
+        pil_image = PIL.Image.fromarray(atlas_uint8, mode=pil_mode)
+        pil_image.save(path / "atlas.png", format="PNG")
+
+        # Save index.json
         with open(path / "index.json", "wb") as f:
             index = CookedAtlasIndexFile(
                 images=self.image_xywh,
-                channel_count=self.atlas_data.shape[2],
+                metadata=self.image_metadata,
+                channel_count=self.atlas_data.shape[2]
+                if len(self.atlas_data.shape) > 2
+                else 1,
                 color_space=self.color_space,
             )
             f.write(orjson.dumps(index.model_dump()))
@@ -96,11 +129,9 @@ class CookedAtlas:
             with open(path / "LICENSE.txt", "w", encoding="utf-8") as f:
                 f.write(self.license_text)
 
-        # Save atlas.png
-        PIL.Image.open(path / "atlas.png").save(path / "atlas.png", format="PNG")
-
 
 class CookedAtlasIndexFile(pydantic.BaseModel):
     images: dict[str, tuple[int, int, int, int]]
+    metadata: dict[str, dict] | None = None
     channel_count: Literal[1, 4]
     color_space: ColorSpace

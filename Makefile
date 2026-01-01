@@ -73,7 +73,10 @@ $(BUNDLED_DATA)/shaders:
 .PHONY: build-fonts
 build-fonts:
 	mkdir -p $(BUNDLED_DATA)/fonts
-	cp res/fonts/* $(BUNDLED_DATA)/fonts/
+	cp res/fonts/Inter/Inter.ttf $(BUNDLED_DATA)/fonts/
+	cp res/fonts/Lora/Lora.ttf $(BUNDLED_DATA)/fonts/
+	cp res/fonts/SourceCodePro/SourceCodePro.ttf $(BUNDLED_DATA)/fonts/
+	uv run --package zfw_bmfont_cooker zfw-bmfont-cooker
 
 #
 # Deploy:

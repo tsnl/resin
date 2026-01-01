@@ -16,6 +16,7 @@ __all__ = [
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ from .basic import (
     logger,
 )
 from .bundled_data import BUNDLED_DATA_PATH
+from .cook import CookedAtlas
 from .draw_2d import Draw2dQuad, Draw2dRenderer, Draw2dTarget
 from .gpu import (
     GpuCommandEncoder,
@@ -325,7 +327,7 @@ class Draw2dExTextPrimitive(Draw2dExBasePrimitive):  #
                             Draw2dQuad(
                                 dst_xywh_px=(ix_phys, iy_phys, src_w, src_h),
                                 src_xywh_px=src_xywh_px,
-                                fill_image=atlas.gpu_image,
+                                fill_image=atlas.get_gpu_image(self.font),
                                 fill_color=self.color,
                                 border_thickness_px=(0, 0, 0, 0),
                                 border_color=(0.0, 0.0, 0.0, 0.0),
@@ -506,50 +508,40 @@ class GlyphAtlas(BaseResource):
     """
     Pre-generated glyph atlas containing all glyphs needed for text rendering.
 
-    Glyphs are rasterized at context creation time for all combinations of:
+    Glyphs are loaded from pre-cooked bitmap font atlases at context creation time.
+    The atlases are created offline for all combinations of:
     - Font families (sans-serif, serif, monospaced)
     - Font weights (light, regular, bold)
     - Font sizes (regular, large, extra-large)
     - Common ASCII characters
-
-    The atlas is never repacked after creation.
+    - Scale factors (1.0, 2.0)
     """
 
     _renderer: Draw2dExRenderer
     _gpu_device: GpuDevice
-    _page_size: int
-    _gpu_image: GpuImage | None
-    _pixel_data: np.ndarray
 
-    # Glyph cache: (font, glyph_index, font_size, font_weight, scale) -> GlyphEntry
-    _glyph_cache: dict[tuple[Font, int, FontSize, FontWeight, float], GlyphEntry | None]
+    # Glyph cache: string key -> GlyphEntry
+    # Key format: "glyph_index,font_size,font_weight,scale_num/scale_den"
+    _glyph_cache: dict[Font, dict[str, GlyphEntry | None]]
+
+    # GPU images per font
+    _gpu_images: dict[Font, GpuImage]
 
     # Text shapers per font:
     _shapers: dict[Font, "TextShaper"]
-
-    # Packing state:
-    _cursor_x: int
-    _cursor_y: int
-    _row_height: int
 
     def __init__(
         self,
         *,
         renderer: Draw2dExRenderer,
         gpu_device: GpuDevice,
-        page_size: int = 4096,
     ):
         super().__init__(parent_resource=renderer)
 
         self._renderer = renderer
         self._gpu_device = gpu_device
-        self._page_size = page_size
-        self._gpu_image = None
-
-        # CPU-side pixel data (RGBA uint8):
-        self._pixel_data = np.zeros((page_size, page_size, 4), dtype=np.uint8)
-
         self._glyph_cache = {}
+        self._gpu_images = {}
 
         # Create shapers:
         self._shapers = {}
@@ -557,25 +549,76 @@ class GlyphAtlas(BaseResource):
         for font in all_fonts:
             self._shapers[font] = TextShaper(font=font)
 
-        # Packing state:
-        self._cursor_x = 0
-        self._cursor_y = 0
-        self._row_height = 0
-
-        # Pre-generate glyphs:
-        self._pre_generate_glyphs()
-
-        # Upload to GPU:
-        self._upload_to_gpu()
+        # Load pre-cooked atlases:
+        self._load_cooked_atlases()
 
     def _on_dispose(self) -> None:
-        if self._gpu_image is not None:
-            self._gpu_image.dispose()
+        for gpu_image in self._gpu_images.values():
+            gpu_image.dispose()
 
-    @property
-    def gpu_image(self) -> GpuImage:
-        assert self._gpu_image is not None
-        return self._gpu_image
+    def _load_cooked_atlases(self) -> None:
+        """Load pre-cooked glyph atlases from disk."""
+        all_fonts: list[Font] = ["sans-serif", "serif", "monospaced"]
+
+        for font in all_fonts:
+            atlas_dir = BUNDLED_DATA_PATH / "fonts" / font
+
+            if not atlas_dir.exists():
+                raise FileNotFoundError(
+                    f"Cooked atlas not found for font '{font}' at {atlas_dir}. "
+                    f"Run 'make build-fonts' to generate bitmap font atlases."
+                )
+
+            # Load the cooked atlas
+            cooked = CookedAtlas.load(
+                path=atlas_dir,
+                color_space="linear",
+                load_readme_text=False,
+                load_license_text=False,
+            )
+
+            # Convert to uint8 if needed
+            atlas_data = cooked.atlas_data
+            if atlas_data.dtype != np.uint8:
+                # Assume linear float [0, 1], convert to uint8
+                atlas_data = (np.clip(atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
+
+            # Upload to GPU
+            gpu_image = GpuImage(
+                device=self._gpu_device,
+                usages=["texture-binding"],
+                data=atlas_data,
+            )
+            self._gpu_images[font] = gpu_image
+
+            # Build glyph cache from the cooked atlas
+            glyph_cache: dict[str, GlyphEntry | None] = {}
+            for key_str, xywh in cooked.image_xywh.items():
+                if key_str == "":  # Skip empty entries
+                    continue
+
+                # Get metadata for bitmap offsets
+                metadata = {}
+                if cooked.image_metadata and key_str in cooked.image_metadata:
+                    metadata = cooked.image_metadata[key_str]
+
+                entry = GlyphEntry(
+                    atlas_x=xywh[0],
+                    atlas_y=xywh[1],
+                    width=xywh[2],
+                    height=xywh[3],
+                    bitmap_left=metadata.get("bitmap_left", 0),
+                    bitmap_top=metadata.get("bitmap_top", 0),
+                )
+                glyph_cache[key_str] = entry
+
+            self._glyph_cache[font] = glyph_cache
+
+            LOG.info(f"Loaded glyph atlas for font '{font}' from {atlas_dir}")
+
+    def get_gpu_image(self, font: Font) -> GpuImage:
+        """Get GPU image for a specific font."""
+        return self._gpu_images[font]
 
     def get_shaper(self, font: Font) -> "TextShaper":
         return self._shapers[font]
@@ -590,166 +633,15 @@ class GlyphAtlas(BaseResource):
         scale: float,
     ) -> GlyphEntry | None:
         """Get a pre-generated glyph entry."""
-        cache_key = (font, glyph_index, font_size, font_weight, scale)
-        return self._glyph_cache.get(cache_key)
+        # Convert scale to rational representation
+        scale_frac = Fraction(scale).limit_denominator(1000)
+        cache_key = f"{glyph_index},{font_size},{font_weight},{scale_frac.numerator}/{scale_frac.denominator}"
 
-    def _pre_generate_glyphs(self) -> None:
-        """Pre-generate all glyphs for all font configurations."""
-        all_fonts: list[Font] = ["sans-serif", "serif", "monospaced"]
-        all_sizes: list[FontSize] = ["regular", "large", "extra-large"]
-        all_weights: list[FontWeight] = ["light", "regular", "bold"]
-
-        # Standard scale factors to pre-generate:
-        scales = [1.0, 2.0]
-
-        for font in all_fonts:
-            shaper = self._shapers[font]
-
-            for font_size in all_sizes:
-                for font_weight in all_weights:
-                    for scale in scales:
-                        self._generate_glyphs_for_config(
-                            shaper=shaper,
-                            font=font,
-                            font_size=font_size,
-                            font_weight=font_weight,
-                            scale=scale,
-                        )
-
-    def _generate_glyphs_for_config(
-        self,
-        *,
-        shaper: "TextShaper",
-        font: Font,
-        font_size: FontSize,
-        font_weight: FontWeight,
-        scale: float,
-    ) -> None:
-        """Generate glyphs for a specific font configuration."""
-        font_size_px = FONT_SIZE_PX[font, font_size]
-        weight_value = FONT_WEIGHT_VALUE[font_weight]
-        effective_size_px = int(font_size_px * scale)
-
-        # Shape the charset to get glyph indices:
-        infos, _ = shaper.shape_text(
-            text=GLYPH_CHARSET,
-            font_size_px=effective_size_px,
-            font_weight=weight_value,
-        )
-
-        # Get unique glyph indices:
-        glyph_indices = set(info.codepoint for info in infos)
-
-        for glyph_index in glyph_indices:
-            cache_key = (font, glyph_index, font_size, font_weight, scale)
-            if cache_key in self._glyph_cache:
-                continue
-
-            # Rasterize the glyph:
-            entry = self._rasterize_glyph(
-                shaper=shaper,
-                glyph_index=glyph_index,
-                font_size_px=effective_size_px,
-                font_weight=weight_value,
-            )
-            self._glyph_cache[cache_key] = entry
-
-    def _rasterize_glyph(
-        self,
-        *,
-        shaper: "TextShaper",
-        glyph_index: int,
-        font_size_px: int,
-        font_weight: int,
-    ) -> GlyphEntry | None:
-        """Rasterize a single glyph and add to atlas."""
-        ft_face = shaper.ft_face
-        ft_face.set_pixel_sizes(0, font_size_px)
-        shaper.set_freetype_weight(font_weight)
-
-        ft_face.load_glyph(glyph_index, ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_NORMAL)
-
-        bitmap_left = ft_face.glyph.bitmap_left
-        bitmap_top = ft_face.glyph.bitmap_top
-        bitmap = ft_face.glyph.bitmap
-
-        if not bitmap.buffer or bitmap.width == 0 or bitmap.rows == 0:
+        font_cache = self._glyph_cache.get(font)
+        if font_cache is None:
             return None
 
-        h, w = bitmap.rows, bitmap.width
-        pitch = bitmap.pitch
-
-        # Load buffer:
-        buffer_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(h, pitch)
-        if pitch != w:
-            buffer_array = buffer_array[:, :w]
-
-        # Allocate space in atlas:
-        entry = self._allocate_glyph(
-            width=w,
-            height=h,
-            bitmap_left=bitmap_left,
-            bitmap_top=bitmap_top,
-            data=buffer_array,
-        )
-
-        return entry
-
-    def _allocate_glyph(
-        self,
-        *,
-        width: int,
-        height: int,
-        bitmap_left: int,
-        bitmap_top: int,
-        data: np.ndarray,
-    ) -> GlyphEntry | None:
-        """Allocate space for a glyph and copy its data."""
-        # Add padding:
-        pad = 1
-
-        # Try to fit on current row:
-        if self._cursor_x + width + pad > self._page_size:
-            # Move to next row:
-            self._cursor_x = 0
-            self._cursor_y += self._row_height + pad
-            self._row_height = 0
-
-        # Check if we have space:
-        if self._cursor_y + height + pad > self._page_size:
-            LOG.warning("Glyph atlas full, cannot allocate more glyphs")
-            return None
-
-        # Allocate:
-        x = self._cursor_x
-        y = self._cursor_y
-
-        # Copy data (grayscale to RGBA white with alpha):
-        self._pixel_data[y : y + height, x : x + width, 0] = 0xFF  # R
-        self._pixel_data[y : y + height, x : x + width, 1] = 0xFF  # G
-        self._pixel_data[y : y + height, x : x + width, 2] = 0xFF  # B
-        self._pixel_data[y : y + height, x : x + width, 3] = data  # A
-
-        # Update cursor:
-        self._cursor_x += width + pad
-        self._row_height = max(self._row_height, height)
-
-        return GlyphEntry(
-            atlas_x=x,
-            atlas_y=y,
-            width=width,
-            height=height,
-            bitmap_left=bitmap_left,
-            bitmap_top=bitmap_top,
-        )
-
-    def _upload_to_gpu(self) -> None:
-        """Upload the atlas pixel data to the GPU."""
-        self._gpu_image = GpuImage(
-            device=self._gpu_device,
-            usages=["texture-binding"],
-            data=self._pixel_data,
-        )
+        return font_cache.get(cache_key)
 
 
 #
