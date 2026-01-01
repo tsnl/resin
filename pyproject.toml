@@ -29,7 +29,6 @@ dev = [
     "scikit-image",
 ]
 
-
 [build-system]
 requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
 build-backend = "uv_build"
@@ -37,6 +36,9 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 package-data = { "zfw" = ["bundled_data/**/*"] }
 source-exclude = ["*_test.py"]
+
+[tool.uv.workspace]
+members = ["apps/*"]
 
 #
 # Ruff configuration

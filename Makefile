@@ -53,6 +53,8 @@ build: build-shaders build-fonts
 build-shaders: \
 	$(BUNDLED_DATA)/shaders/draw_2d.vert.spv \
 	$(BUNDLED_DATA)/shaders/draw_2d.frag.spv \
+	$(BUNDLED_DATA)/shaders/gui_present.vert.spv \
+	$(BUNDLED_DATA)/shaders/gui_present.frag.spv \
 	$(BUNDLED_DATA)/shaders/draw_3d_main.vert.spv \
 	$(BUNDLED_DATA)/shaders/draw_3d_main.frag.spv \
 	$(BUNDLED_DATA)/shaders/draw_3d_environment.vert.spv \
