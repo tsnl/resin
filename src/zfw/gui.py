@@ -67,11 +67,11 @@ from .basic import (
     LogicError,
 )
 from .draw_2d import Draw2dTarget
-from .draw_2d_ex import (
-    Draw2dExBasePrimitive,
-    Draw2dExQuadPrimitive,
-    Draw2dExTextPrimitive,
-    Draw2dExRenderer,
+from .draw_2d_ext import (
+    Draw2dExtBasePrimitive,
+    Draw2dExtQuadPrimitive,
+    Draw2dExtTextPrimitive,
+    Draw2dExtCanvas,
 )
 from .draw_3d import (
     Draw3dContext,
@@ -326,7 +326,7 @@ class GuiWindow(BaseResource):
     _kiwi_solver: KiwiSolver
 
     # Renderers
-    _draw_2d_renderer: Draw2dExRenderer
+    _draw_2d_renderer: Draw2dExtCanvas
     _draw_2d_targets: list[Draw2dTarget]  # One per swapchain image
     _draw_3d_context: Draw3dContext
     _draw_3d_renderer: Draw3dRenderer
@@ -392,7 +392,7 @@ class GuiWindow(BaseResource):
 
         # Create 2D renderer
         scale_x, _ = window.content_scale
-        self._draw_2d_renderer = Draw2dExRenderer(
+        self._draw_2d_renderer = Draw2dExtCanvas(
             gpu_device=gpu_device,
             target_width_px=int(window.width_dip * scale_x),
             target_height_px=int(window.height_dip * scale_x),
@@ -579,7 +579,7 @@ class GuiWindow(BaseResource):
         return self._gpu_device
 
     @property
-    def draw_2d_renderer(self) -> Draw2dExRenderer:
+    def draw_2d_renderer(self) -> Draw2dExtCanvas:
         return self._draw_2d_renderer
 
     @property
@@ -856,14 +856,14 @@ class GuiWindow(BaseResource):
             draw_2d_target = self._draw_2d_targets[swapchain_target.image_index]
 
             # Create primitives list for this frame
-            primitives: list[Draw2dExBasePrimitive] = []
+            primitives: list[Draw2dExtBasePrimitive] = []
             scale_x, _ = self._window.content_scale
 
             # Draw to primitives:
             if self._central_widget is not None:
                 self._central_widget._render(primitives)
 
-            self._draw_2d_renderer.record_gpu_commands(
+            self._draw_2d_renderer.quads(
                 command_encoder=command_encoder,
                 target=draw_2d_target,
                 primitives=primitives,
@@ -1351,7 +1351,7 @@ class GuiWidget(BaseResource):
     # Render:
     #
 
-    def _render(self, primitives: list[Draw2dExBasePrimitive]) -> None:
+    def _render(self, primitives: list[Draw2dExtBasePrimitive]) -> None:
         # Render self.
         self._render_self(primitives)
 
@@ -1359,7 +1359,7 @@ class GuiWidget(BaseResource):
         for child in self._child_widget_list:
             child._render(primitives)
 
-    def _render_self(self, primitives: list[Draw2dExBasePrimitive]) -> None:
+    def _render_self(self, primitives: list[Draw2dExtBasePrimitive]) -> None:
         # Get the latest style:
         style = self._style
 
@@ -1399,7 +1399,7 @@ class GuiWidget(BaseResource):
 
         # Draw background quad:
         primitives.append(
-            Draw2dExQuadPrimitive(
+            Draw2dExtQuadPrimitive(
                 dst_xywh_dip=(
                     x + ml + bl,
                     y + mt + bt,
@@ -1417,7 +1417,7 @@ class GuiWidget(BaseResource):
         # Draw text:
         if self._text is not None:
             primitives.append(
-                Draw2dExTextPrimitive(
+                Draw2dExtTextPrimitive(
                     text=self._text,
                     font=style.font,
                     font_size=style.font_size,

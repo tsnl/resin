@@ -151,6 +151,10 @@ class Draw2dRenderer(BaseResource):
 
         self._target_list = []
 
+    @property
+    def gpu_device(self) -> GpuDevice:
+        return self._gpu_device
+
     def resize(self, *, target_width_px: int, target_height_px: int):
         if (
             self._target_width_px == target_width_px

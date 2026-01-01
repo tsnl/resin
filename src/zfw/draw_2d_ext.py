@@ -1,17 +1,20 @@
 """
-Draw2dEx is a higher-level 2D renderer built on top of draw_2d.
+Draw2dExt offers a higher-level interface for 2D drawing compared to Draw2d.
+
+It helps generate Draw2dQuad instances in physical pixel coordinates from higher-level
+primitives specified in device-independent pixel coordinates and text primitives.
 
 It provides:
-- Device-independent pixel (DIP) coordinates with configurable scale factor
-- Text rendering with pre-generated glyph atlases
-- A canvas abstraction for collecting primitives
+-   HiDPI support: you specify logical (device-independent) pixel coordinates, it
+    handles conversion to physical pixels using a configured scale factor.
+-   Efficient text rendering with pre-generated bitmap glyph atlases.
 """
 
 __all__ = [
-    "Draw2dExBasePrimitive",
-    "Draw2dExQuadPrimitive",
-    "Draw2dExRenderer",
-    "Draw2dExTextPrimitive",
+    "Draw2dExtBasePrimitive",
+    "Draw2dExtQuadPrimitive",
+    "Draw2dExtTextPrimitive",
+    "Draw2dExtCanvas",
 ]
 
 from abc import ABC, abstractmethod
@@ -46,79 +49,39 @@ from . import typed_uharfbuzz as hb
 #
 
 
-class Draw2dExRenderer(BaseResource):
-    """
-    Extended 2D renderer that builds on Draw2dRenderer.
-
-    Provides device-independent pixel coordinates and text rendering support
-    through pre-generated glyph atlases.
-    """
-
+class Draw2dExtCanvas(BaseResource):
     _glyph_atlas: "GlyphAtlas"
-    _inner: Draw2dRenderer
 
-    def __init__(
-        self,
-        *,
-        gpu_device: GpuDevice,
-        target_width_px: int,
-        target_height_px: int,
-        clear_color: str | None = "transparent",
-    ):
+    def __init__(self, *, renderer: Draw2dRenderer):
         super().__init__(parent_resource=None)
 
-        self._glyph_atlas = GlyphAtlas(renderer=self, gpu_device=gpu_device)
-        self._inner = Draw2dRenderer(
-            gpu_device=gpu_device,
-            target_width_px=target_width_px,
-            target_height_px=target_height_px,
-            clear_color=clear_color,  # type: ignore
-        )
+        self._glyph_atlas = GlyphAtlas(canvas=self, gpu_device=renderer.gpu_device)
 
-    @property
-    def inner(self) -> Draw2dRenderer:
-        """The underlying Draw2dRenderer."""
-        return self._inner
-
-    def resize(self, *, target_width_px: int, target_height_px: int) -> None:
-        """Resize the render target."""
-        self._inner.resize(
-            target_width_px=target_width_px,
-            target_height_px=target_height_px,
-        )
-
-    def record_gpu_commands(
+    def quads(
         self,
         *,
-        command_encoder: GpuCommandEncoder,
-        target: "Draw2dTarget",
-        primitives: list["Draw2dExBasePrimitive"],
+        primitives: list["Draw2dExtBasePrimitive"],
         scale: float = 1.0,
-    ) -> None:
-        # Build quads from primitives
+    ) -> list[Draw2dQuad]:
         quads: list[Draw2dQuad] = []
         for primitive in primitives:
-            quads.extend(primitive._to_draw2d_quads(renderer=self, scale=scale))
-        self._inner.record_gpu_commands(
-            command_encoder=command_encoder,
-            target=target,
-            quads=quads,
-        )
+            quads += primitive._generate_primitive_quads(canvas=self, scale=scale)
+        return quads
 
     def _on_dispose(self) -> None:
-        self._inner.dispose()
+        self._glyph_atlas.dispose()
 
 
 @dataclass(frozen=True, kw_only=True)
-class Draw2dExBasePrimitive(ABC):
+class Draw2dExtBasePrimitive(ABC):
     @abstractmethod
-    def _to_draw2d_quads(
-        self, *, renderer: Draw2dExRenderer, scale: float
+    def _generate_primitive_quads(
+        self, *, canvas: Draw2dExtCanvas, scale: float
     ) -> list[Draw2dQuad]: ...
 
 
 @dataclass(frozen=True, kw_only=True)
-class Draw2dExQuadPrimitive(Draw2dExBasePrimitive):
+class Draw2dExtQuadPrimitive(Draw2dExtBasePrimitive):
     """
     A quad in device-independent pixel coordinates.
 
@@ -133,10 +96,10 @@ class Draw2dExQuadPrimitive(Draw2dExBasePrimitive):
     border_thickness_dip: tuple[int, int, int, int] = (0, 0, 0, 0)  # TRBL
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 
-    def _to_draw2d_quads(
+    def _generate_primitive_quads(
         self,
         *,
-        renderer: Draw2dExRenderer,
+        canvas: Draw2dExtCanvas,
         scale: float,
     ) -> list[Draw2dQuad]:
         """Convert to a Draw2dQuad with physical pixel coordinates."""
@@ -169,7 +132,7 @@ class Draw2dExQuadPrimitive(Draw2dExBasePrimitive):
 
 
 @dataclass(frozen=True, kw_only=True)
-class Draw2dExTextPrimitive(Draw2dExBasePrimitive):  #
+class Draw2dExtTextPrimitive(Draw2dExtBasePrimitive):  #
     """Internal representation of a text primitive."""
 
     text: str
@@ -183,17 +146,17 @@ class Draw2dExTextPrimitive(Draw2dExBasePrimitive):  #
     horizontal_alignment: HorizontalAlignment
     vertical_alignment: VerticalAlignment
 
-    def _to_draw2d_quads(
+    def _generate_primitive_quads(
         self,
         *,
-        renderer: Draw2dExRenderer,
+        canvas: Draw2dExtCanvas,
         scale: float,
     ) -> list[Draw2dQuad]:
         """Convert text to a list of glyph quads."""
         if not self.text:
             return []
 
-        atlas = renderer._glyph_atlas
+        atlas = canvas._glyph_atlas
         font_size_px = FONT_SIZE_PX[self.font, self.font_size]
         weight_value = FONT_WEIGHT_VALUE[self.font_weight]
 
@@ -521,7 +484,7 @@ class GlyphAtlas(BaseResource):
     - Scale factors (1.0, 2.0)
     """
 
-    _renderer: Draw2dExRenderer
+    _renderer: Draw2dExtCanvas
     _gpu_device: GpuDevice
 
     # Glyph cache: string key -> GlyphEntry
@@ -540,12 +503,12 @@ class GlyphAtlas(BaseResource):
     def __init__(
         self,
         *,
-        renderer: Draw2dExRenderer,
+        canvas: Draw2dExtCanvas,
         gpu_device: GpuDevice,
     ):
-        super().__init__(parent_resource=renderer)
+        super().__init__(parent_resource=canvas)
 
-        self._renderer = renderer
+        self._renderer = canvas
         self._gpu_device = gpu_device
         self._glyph_cache = {}
         self._gpu_images = {}
