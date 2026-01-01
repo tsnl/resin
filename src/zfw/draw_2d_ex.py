@@ -31,7 +31,7 @@ from .basic import (
     logger,
 )
 from .bundled_data import BUNDLED_DATA_PATH
-from .cook import CookedAtlas
+from .cook import CookedAtlas, CookedAtlasGlyphCacheKey
 from .draw_2d import Draw2dQuad, Draw2dRenderer, Draw2dTarget
 from .gpu import (
     GpuCommandEncoder,
@@ -593,24 +593,23 @@ class GlyphAtlas(BaseResource):
 
             # Build glyph cache from the cooked atlas
             glyph_cache: dict[str, GlyphEntry | None] = {}
-            for key_str, xywh in cooked.image_xywh.items():
-                if key_str == "":  # Skip empty entries
-                    continue
+            if cooked.as_glyph_cache:
+                for key, info in cooked.as_glyph_cache.items():
+                    # Get xywh from image list using image_id
+                    xywh = cooked.image_xywh_list[info.image_id]
 
-                # Get metadata for bitmap offsets
-                metadata = {}
-                if cooked.image_metadata and key_str in cooked.image_metadata:
-                    metadata = cooked.image_metadata[key_str]
+                    # Create string key for internal cache (matching get_glyph format)
+                    cache_key = f"{key.glyph_index},{key.font_size},{key.font_weight},{key.scale.numerator}/{key.scale.denominator}"
 
-                entry = GlyphEntry(
-                    atlas_x=xywh[0],
-                    atlas_y=xywh[1],
-                    width=xywh[2],
-                    height=xywh[3],
-                    bitmap_left=metadata.get("bitmap_left", 0),
-                    bitmap_top=metadata.get("bitmap_top", 0),
-                )
-                glyph_cache[key_str] = entry
+                    entry = GlyphEntry(
+                        atlas_x=xywh[0],
+                        atlas_y=xywh[1],
+                        width=xywh[2],
+                        height=xywh[3],
+                        bitmap_left=info.bitmap_left,
+                        bitmap_top=info.bitmap_top,
+                    )
+                    glyph_cache[cache_key] = entry
 
             self._glyph_cache[font] = glyph_cache
 
