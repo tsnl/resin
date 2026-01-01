@@ -37,7 +37,7 @@ pub trait BufferWrapper {
                 layout: dst.texel_copy_buffer_layout(),
             },
             dst.texel_copy_texture_info(),
-            dst.extent_3d(),
+            dst.size(),
         );
     }
     fn copy_from_texture<T: TextureWrapper>(
@@ -51,7 +51,7 @@ pub trait BufferWrapper {
                 buffer: self.wgpu_buffer(),
                 layout: src.texel_copy_buffer_layout(),
             },
-            src.extent_3d(),
+            src.size(),
         );
     }
     fn binding_size() -> Option<wgpu::BufferSize> {
@@ -147,7 +147,7 @@ impl<T: bytemuck::Pod + Send> ReadbackBuffer<T> {
 pub trait TextureWrapper {
     fn wgpu_texture(&self) -> &wgpu::Texture;
 
-    fn extent_3d(&self) -> wgpu::Extent3d {
+    fn size(&self) -> wgpu::Extent3d {
         self.wgpu_texture().size()
     }
     fn width(&self) -> u16 {

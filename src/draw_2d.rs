@@ -115,7 +115,7 @@ impl Draw2dRenderer {
                 texture.texel_copy_texture_info(),
                 bytemuck::cast_slice(&[0xFF_u8; 4 * 32 * 32]),
                 texture.texel_copy_buffer_layout(),
-                texture.extent_3d(),
+                texture.size(),
             );
             texture
         };
@@ -556,10 +556,20 @@ mod tests {
             }))
             .unwrap();
 
-        let renderer = Draw2dRenderer::create(&device, &queue, [256, 256]);
-        let mut frame = Draw2dFrame::new(&device, [256, 256]);
+        let rainbow_image = image::open("tests/data/rainbow-512x512.png").unwrap();
+        let rainbow_texture = Rgba8UnormTexture::new(&device, [512, 512], "TestRainbowImage");
+        queue.write_texture(
+            rainbow_texture.texel_copy_texture_info(),
+            rainbow_image.as_bytes(),
+            rainbow_texture.texel_copy_buffer_layout(),
+            rainbow_texture.size(),
+        );
+        // ^- FIXME: need to convert to linear for correct alpha blending
+
+        let renderer = Draw2dRenderer::create(&device, &queue, [1024, 1024]);
+        let mut frame = Draw2dFrame::new(&device, [1024, 1024]);
         let readback_buffer =
-            ReadbackBuffer::<[u8; 4]>::new(&device, 256 * 256, "TestReadbackBuffer");
+            ReadbackBuffer::<[u8; 4]>::new(&device, 1024 * 1024, "TestReadbackBuffer");
 
         let mut command_encoder =
             renderer
@@ -568,12 +578,21 @@ mod tests {
                     label: Some("TestCommandEncoder"),
                 });
         {
-            let quads = vec![Draw2dQuad {
-                dst_xy_px: [0, 0],
-                dst_wh_px: Some([128, 128]),
-                fill_color_rgba: [1.0, 0.0, 0.0, 1.0],
-                ..Default::default()
-            }];
+            let quads = vec![
+                Draw2dQuad {
+                    dst_xy_px: [10, 10],
+                    dst_wh_px: Some([492, 492]),
+                    fill_color_rgba: [1.0, 0.0, 0.0, 1.0],
+                    ..Default::default()
+                },
+                Draw2dQuad {
+                    dst_xy_px: [522, 10],
+                    dst_wh_px: Some([492, 492]),
+                    fill_texture: Some(rainbow_texture.wgpu_texture().clone()),
+                    fill_color_rgba: [1.0, 1.0, 1.0, 1.0],
+                    ..Default::default()
+                },
+            ];
             renderer.record(&quads, &mut frame, &mut command_encoder);
 
             readback_buffer.copy_from_texture(&frame.output_image, &mut command_encoder);
@@ -584,15 +603,13 @@ mod tests {
 
         image::DynamicImage::ImageRgba8(
             image::RgbaImage::from_raw(
-                256,
-                256,
+                1024,
+                1024,
                 bytemuck::cast_vec(readback_buffer.read().into_vec()),
             )
             .unwrap(),
         )
         .save("test_output.png")
         .unwrap();
-
-        panic!("OK");
     }
 }
