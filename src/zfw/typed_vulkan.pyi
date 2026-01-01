@@ -376,11 +376,45 @@ class VkPhysicalDeviceVulkan12Features:
     pNext: "VkPhysicalDeviceVulkan11Features | None"
     runtimeDescriptorArray: bool
     shaderSampledImageArrayNonUniformIndexing: bool
+    bufferDeviceAddress: bool = False
+    bufferDeviceAddressCaptureReplay: bool = False
+    bufferDeviceAddressMultiDevice: bool = False
 
 @dataclass
 class VkPhysicalDeviceVulkan11Features:
     pNext: "None"
     shaderDrawParameters: bool
+
+# VkPhysicalDeviceBufferDeviceAddressFeatures
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceBufferDeviceAddressFeatures.html
+@dataclass
+class VkPhysicalDeviceBufferDeviceAddressFeatures:
+    pNext: Any | None = None
+    bufferDeviceAddress: bool = False
+    bufferDeviceAddressCaptureReplay: bool = False
+    bufferDeviceAddressMultiDevice: bool = False
+
+# VkPhysicalDeviceAccelerationStructureFeaturesKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceAccelerationStructureFeaturesKHR.html
+@dataclass
+class VkPhysicalDeviceAccelerationStructureFeaturesKHR:
+    pNext: Any | None = None
+    accelerationStructure: bool = False
+    accelerationStructureCaptureReplay: bool = False
+    accelerationStructureIndirectBuild: bool = False
+    accelerationStructureHostCommands: bool = False
+    descriptorBindingAccelerationStructureUpdateAfterBind: bool = False
+
+# VkPhysicalDeviceRayTracingPipelineFeaturesKHR
+# https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceRayTracingPipelineFeaturesKHR.html
+@dataclass
+class VkPhysicalDeviceRayTracingPipelineFeaturesKHR:
+    pNext: Any | None = None
+    rayTracingPipeline: bool = False
+    rayTracingPipelineShaderGroupHandleCaptureReplay: bool = False
+    rayTracingPipelineShaderGroupHandleCaptureReplayMixed: bool = False
+    rayTracingPipelineTraceRaysIndirect: bool = False
+    rayTraversalPrimitiveCulling: bool = False
 
 # VkPhysicalDeviceFeatures
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFeatures.html
@@ -546,7 +580,15 @@ type VkDeviceCreateFlags = VkFlags
 # https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceCreateInfo.html
 @dataclass
 class VkDeviceCreateInfo:
-    pNext: VkPhysicalDeviceDynamicRenderingFeatures | None = None
+    pNext: (
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR
+        | VkPhysicalDeviceAccelerationStructureFeaturesKHR
+        | VkPhysicalDeviceBufferDeviceAddressFeatures
+        | VkPhysicalDeviceDynamicRenderingFeatures
+        | VkPhysicalDeviceVulkan12Features
+        | VkPhysicalDeviceVulkan11Features
+        | None
+    ) = None
     flags: VkDeviceCreateFlags = 0
     queueCreateInfoCount: int = 0
     pQueueCreateInfos: list[Any] = []
