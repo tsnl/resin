@@ -91,7 +91,7 @@ impl Draw2dRenderer {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
+                front_face: wgpu::FrontFace::Cw,
                 cull_mode: Some(wgpu::Face::Back),
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
@@ -470,12 +470,18 @@ impl PodQuad {
         }
         macro_rules! ndc2 {
             ($a:expr) => {{
-                let res = [
+                [
                     ($a[0] as f32 / framebuffer_size_wh[0] as f32) * 2.0 - 1.0,
                     -($a[1] as f32 / framebuffer_size_wh[1] as f32) * 2.0 + 1.0,
-                ];
-                eprintln!("ndc2!: {:?} -> {res:?}", $a);
-                res
+                ]
+            }};
+        }
+        macro_rules! ndc2_size {
+            ($a:expr) => {{
+                [
+                    ($a[0] as f32 / framebuffer_size_wh[0] as f32) * 2.0,
+                    -($a[1] as f32 / framebuffer_size_wh[1] as f32) * 2.0,
+                ]
             }};
         }
         macro_rules! ndc_trbl {
@@ -491,17 +497,15 @@ impl PodQuad {
         macro_rules! uv {
             ($a:expr) => {{
                 let tex_wh = texture_size!();
-                let res = [
+                [
                     $a[0] as f32 / tex_wh[0] as f32,
                     $a[1] as f32 / tex_wh[1] as f32,
-                ];
-                eprintln!("uv!: {:?} -> {res:?}", $a);
-                res
+                ]
             }};
         }
 
         let dst_xy_ndc = ndc2!(original.dst_xy_px);
-        let dst_wh_ndc = ndc2!(original.dst_wh_px.unwrap_or(framebuffer_size_wh));
+        let dst_wh_ndc = ndc2_size!(original.dst_wh_px.unwrap_or(framebuffer_size_wh));
         let src_xy_uv = uv!(original.src_xy_px.unwrap_or([0, 0]));
         let src_wh_uv = uv!(original.src_wh_px.unwrap_or(texture_size!()));
         let fill_color_rgba = original.fill_color_rgba;

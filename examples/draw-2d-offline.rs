@@ -25,8 +25,8 @@ fn main() {
     });
     {
         let quads = vec![Draw2dQuad {
-            dst_xy_px: [0, 0],
-            dst_wh_px: Some([128, 128]),
+            dst_xy_px: [32, 32],
+            dst_wh_px: Some([64, 128]),
             fill_color_rgba: [1.0, 0.0, 0.0, 1.0],
             ..Default::default()
         }];
