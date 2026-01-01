@@ -797,10 +797,9 @@ class TextShaper:
     @staticmethod
     def _get_font_file_path(font: Font) -> Path:
         return {
-            "sans-serif": BUNDLED_DATA_PATH / "data/font-Inter_4_1/InterVariable.ttf",
-            "serif": BUNDLED_DATA_PATH / "data/font-Lora/Lora-VariableFont_wght.ttf",
-            "monospaced": BUNDLED_DATA_PATH
-            / "data/font-SourceCodePro/SourceCodePro-VariableFont_wght.ttf",
+            "sans-serif": BUNDLED_DATA_PATH / "fonts/Inter.ttf",
+            "serif": BUNDLED_DATA_PATH / "fonts/Lora.ttf",
+            "monospaced": BUNDLED_DATA_PATH / "fonts/SourceCodePro.ttf",
         }[font]
 
     def set_freetype_weight(self, weight: int) -> None:

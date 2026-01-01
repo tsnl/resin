@@ -1,3 +1,9 @@
+BUNDLED_DATA=src/zfw/bundled_data
+
+#
+# Default:
+#
+
 default: wheel
 
 #
@@ -12,6 +18,7 @@ sandbox: sync
 tests: sync
 	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
 
+
 #
 # Develop:
 #
@@ -19,13 +26,6 @@ tests: sync
 .PHONY: sync
 sync: build
 	uv sync --all-extras
-
-.PHONY: build build-zfw build-zfw_sandbox
-build: build-zfw build-zfw_sandbox
-build-zfw:
-	uv run --package zfw_build zfw-build -p modules/zfw
-build-zfw_sandbox:
-	uv run --package zfw_build zfw-build -p modules/zfw_sandbox
 
 .PHONY: check
 check:
@@ -37,6 +37,40 @@ check:
 format:
 	uv run --package zfw --extra dev -- ruff format .
 	uv run --package zfw --extra dev -- ruff check --fix .
+
+
+#
+# Build:
+#
+
+.PHONY: build
+build: build-shaders build-fonts
+
+# Shaders:
+#
+
+.PHONY: build-shaders
+build-shaders: \
+	$(BUNDLED_DATA)/shaders/draw_2d.vert.spv \
+	$(BUNDLED_DATA)/shaders/draw_2d.frag.spv \
+	$(BUNDLED_DATA)/shaders/draw_3d_main.vert.spv \
+	$(BUNDLED_DATA)/shaders/draw_3d_main.frag.spv \
+	$(BUNDLED_DATA)/shaders/draw_3d_environment.vert.spv \
+	$(BUNDLED_DATA)/shaders/draw_3d_environment.frag.spv
+
+$(BUNDLED_DATA)/shaders/%.vert.spv: src/shaders/%.slang $(BUNDLED_DATA)/shaders
+	slangc $< -o $@ -target spirv -profile vs_6_0 -entry vertexMain
+$(BUNDLED_DATA)/shaders/%.frag.spv: src/shaders/%.slang $(BUNDLED_DATA)/shaders
+	slangc $< -o $@ -target spirv -profile ps_6_0 -entry fragmentMain
+$(BUNDLED_DATA)/shaders:
+	mkdir -p $@
+
+# Fonts:
+#
+
+.PHONY: build-fonts
+build-fonts:
+	cp res/fonts/* $(BUNDLED_DATA)/fonts/
 
 #
 # Deploy:

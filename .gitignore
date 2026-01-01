@@ -15,7 +15,7 @@ __pycache__
 /dist
 /build
 
-# `bundled_data` is always excluded. Built by `zfw-build`.
+# `bundled_data` is always excluded from Git and is generated during the build process.
 bundled_data
 
 # Ignore '*.actual.png' files from expect tests.

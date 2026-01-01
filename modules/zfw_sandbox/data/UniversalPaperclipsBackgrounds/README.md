@@ -1,1 +1,0 @@
-- `hills.jpg`: Photo by <a href="https://unsplash.com/@ethandow?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Ethan Dow</a> on <a href="https://unsplash.com/photos/aerial-view-of-green-trees-and-road-during-daytime-ZeDw8ck4XEM?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Unsplash</a>
