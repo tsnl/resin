@@ -1,0 +1,3 @@
+[submodule "deps/simd_math"]
+	path = deps/simd_math
+	url = https://github.com/tsnl/simd_math

@@ -2024,6 +2024,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "simd_math"
+version = "1.0.2"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3093,6 +3100,7 @@ dependencies = [
  "image",
  "oneshot",
  "pollster",
+ "simd_math",
  "wgpu",
  "winit",
 ]
