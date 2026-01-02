@@ -35,6 +35,7 @@ def assert_image_matches_reference(
     If reference exists, compares using PSNR matching.
     On mismatch, saves the actual image as <name>.actual.png and raises AssertionError.
     """
+
     expect_dir = Path("tests/expect/zfw/draw_2d_ext_test")
     expect_dir.mkdir(parents=True, exist_ok=True)
 
@@ -139,11 +140,19 @@ class Draw2dExTestEngine(BaseDisposable):
         # Submit and wait
         self.queue.submit([command_encoder.finish()])
 
-        # Read as uint8:
+        # Read as uint8
         data_raw = self.readback_buffer.read()
 
-        # Reshape and return
-        return data_raw.reshape(
+        # Convert from linear to sRGB
+        data_raw_srgb_f32 = convert_color(
+            data=data_raw.astype(np.float32) / 255.0,
+            src_color_space="linear",
+            dst_color_space="srgb",
+        )
+        data_raw_srgb = (np.clip(data_raw_srgb_f32, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+        # Reshape and return as uint8 sRGB
+        return data_raw_srgb.reshape(
             (int(TEST_IMAGE_H * self._scale), int(TEST_IMAGE_W * self._scale), 4)
         )
 
@@ -211,9 +220,22 @@ def test_draw_2d_ext_image():
     engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
-    # Load test image
+    # Load test image (returns float32 linear color space)
     image_data = load_rgba_image(Path("tests/data/rainbow-512x512.png"))
     assert image_data.shape == (512, 512, 4)
+
+    # Convert from linear to sRGB and to uint8 for rgba8unorm texture
+    image_data_srgb = convert_color(
+        image_data[..., :3],
+        src_color_space="linear",
+        dst_color_space="srgb",
+    )
+    image_data_srgb_with_alpha = np.concatenate(
+        (image_data_srgb, image_data[..., 3:4]), axis=-1
+    )
+    image_data_uint8 = (np.clip(image_data_srgb_with_alpha, 0.0, 1.0) * 255.0).astype(
+        np.uint8
+    )
 
     # Create a WebGPU texture for the image
     image_texture = Rgba8UnormTexture(
@@ -223,7 +245,7 @@ def test_draw_2d_ext_image():
     )
     engine.queue.write_texture(
         image_texture.texel_copy_texture_info(),
-        image_data.tobytes(),
+        image_data_uint8.tobytes(),
         image_texture.texel_copy_buffer_layout(),
         image_texture.size(),
     )

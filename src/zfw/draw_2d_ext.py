@@ -36,7 +36,7 @@ from .basic import (
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .cook import CookedAtlas
-from .draw_2d import Draw2dQuad, Draw2dRenderer
+from .draw_2d import Draw2dQuad
 from .gpu_util import Rgba8UnormTexture
 from . import typed_uharfbuzz as hb
 
