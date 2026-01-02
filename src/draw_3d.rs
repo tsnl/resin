@@ -247,10 +247,10 @@ impl Draw3dRenderer {
         &self,
         scene: &Draw3dScene,
         frame: &mut Draw3dFrame,
-        command_encoder: &wgpu::CommandEncoder,
+        command_encoder: &mut wgpu::CommandEncoder,
     ) {
         let read_lock = self.acquire_renderer_gpu_resources_read_lock();
-        frame.render(read_lock);
+        frame.record(read_lock, command_encoder, scene);
     }
 
     /// Acquires a write lock that ensures no GPU rendering is in progress.
@@ -320,10 +320,13 @@ impl Draw3dFrame {
             instance_heap_staging_buffer,
         }
     }
-    fn render(&self, read_lock: RwLockReadGuard<()>) {
+    fn record(
+        &self,
+        _read_lock: RwLockReadGuard<()>,
+        command_encoder: &mut wgpu::CommandEncoder,
+        scene: &Draw3dScene,
+    ) {
         todo!();
-
-        _ = read_lock; // keep the lock alive for the duration of the render
     }
 }
 
