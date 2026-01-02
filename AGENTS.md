@@ -9,11 +9,12 @@ Python
 - Our code-base is statically typed and must type-check successfully.
   - Use the configured LSP aggressively: it should work well.
   - Run `make check` and `make format` often to automatically and quickly sort imports, `__all__` lists, etc.
-  - Your code should typecheck without any errors or warnings before your task is complete. Never use `# type: ignore` or disable type-checking for any reason: ask for help instead.
+  - NEVER use `# type: ignore` or `# noqa` comments to silence type-checker or linter warnings.
+  - NEVER use `Any` type. NEVER use `cast()`.
 - We target Python 3.14+, so use the most modern syntax and features available.
   - Always use Python3.12+ `type Name = Aliased` statements instead of type aliases.
-  - Always use `|` for union types instead of `Union[]`, and `T | None` instead of `Optional[T]`. If `"T"` is specified as a string, note that you can write `"T | None"`.
-  - Always use `list[T]`, `dict[K, V]`, etc. instead of `List[T]`, `Dict[K, V]`, etc.
+  - Always use `|` for union types instead of `Union[]`, and `T | None` instead of `Optional[T]`. If `"T"` is specified as a string, note that you can write `"T | None"`. Always use `list[T]`, `dict[K, V]`, etc. instead of `List[T]`, `Dict[K, V]`, etc.
+  - Prefer generic type syntax over `Generic[T]` subclasses.
   - Never `from __future__ import annotations`.
 
 Test-driven development

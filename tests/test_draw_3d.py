@@ -14,10 +14,10 @@ def test_basic_draw_3d():
     renderer = Draw3dRenderer(device, queue, (1024, 1024))
     frame = Draw3dFrame(renderer)
     readback_buffer = ReadbackBuffer(
-        device,
-        1024 * 1024,
-        "BasicDraw3dTest.ReadbackBuffer",
-        ctypes.c_float * 4,
+        device=device,
+        count=1024 * 1024,
+        label="BasicDraw3dTest.ReadbackBuffer",
+        dtype=(ctypes.c_float, 4),
     )
 
     scene = Draw3dScene()

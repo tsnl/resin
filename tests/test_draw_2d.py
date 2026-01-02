@@ -1,6 +1,9 @@
+import logging
+import pytest
 import wgpu
 import wgpu.backends.wgpu_native
 from zfw import (
+    setup_logging,
     Draw2dRenderer,
     Draw2dFrame,
     Draw2dQuad,
@@ -18,7 +21,11 @@ def test_basic_draw_2d():
     queue = device.queue
 
     rainbow_image = Image.open("tests/data/rainbow-512x512.png").convert("RGBA")
-    rainbow_texture = Rgba8UnormTexture(device, (512, 512), "TestRainbowImage")
+    rainbow_texture = Rgba8UnormTexture(
+        device=device,
+        size_wh=(512, 512),
+        label="TestRainbowImage",
+    )
 
     queue.write_texture(
         rainbow_texture.texel_copy_texture_info(),
@@ -28,9 +35,12 @@ def test_basic_draw_2d():
     )
 
     renderer = Draw2dRenderer.create(device, queue, (1024, 1024))
-    frame = Draw2dFrame(device, (1024, 1024))
+    frame = Draw2dFrame(device=device, target_size_wh=(1024, 1024))
     readback_buffer = ReadbackBuffer(
-        device, 1024 * 1024, "BasicDraw2dTest.ReadbackBuffer", ctypes.c_uint8 * 4
+        device=device,
+        count=1024 * 1024,
+        label="BasicDraw2dTest.ReadbackBuffer",
+        dtype=ctypes.c_uint8 * 4,
     )
 
     command_encoder = device.create_command_encoder(
@@ -71,3 +81,8 @@ def test_basic_draw_2d():
 
     img = Image.frombytes("RGBA", (1024, 1024), data)
     img.save(output_path)
+
+
+if __name__ == "__main__":
+    setup_logging(level=logging.DEBUG)
+    pytest.main([__file__])

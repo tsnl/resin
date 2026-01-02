@@ -1,44 +1,72 @@
+__all__ = [
+    "BufferWrapper",
+    "IndexBuffer",
+    "ReadbackBuffer",
+    "Rgba8UnormTexture",
+    "Rgba32FloatTexture",
+    "StagingBuffer",
+    "StorageBuffer",
+    "TextureWrapper",
+    "UniformBuffer",
+    "VertexBuffer",
+]
+
+import numpy as np
+import numpy.typing as npt
+
 import wgpu
-import ctypes
-import struct
-from typing import Type, TypeVar, Generic, Optional, Union
 
-T = TypeVar("T")
+from .basic import logger
 
 
-class BufferWrapper(Generic[T]):
+#
+# BufferWrapper
+#
+
+
+class BufferWrapper:
     def __init__(
         self,
+        *,
         device: wgpu.GPUDevice,
         count: int,
+        dtype: npt.DTypeLike,
         label: str,
         usage: int,
-        element_type: Type[T],
     ):
+        super().__init__()
+
         self.device = device
-        self.count = count
-        self.element_type = element_type
-        self.size_in_bytes = count * ctypes.sizeof(element_type)
+        self.dtype = np.dtype(dtype)
+        self.size_in_bytes = count * self.dtype.itemsize
         self.buffer = device.create_buffer(
-            label=label, size=self.size_in_bytes, usage=usage, mapped_at_creation=False
+            label=label,
+            size=self.size_in_bytes,
+            usage=usage,
+            mapped_at_creation=False,
         )
+
+        LOG.debug(f"{self.dtype=}, {self.dtype.type=}")
 
     def wgpu_buffer(self) -> wgpu.GPUBuffer:
         return self.buffer
 
-    def len(self) -> int:
-        return self.count
-
     def copy_to_buffer(
-        self, dst: "BufferWrapper", command_encoder: wgpu.GPUCommandEncoder
-    ):
+        self,
+        *,
+        dst: "BufferWrapper",
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
         command_encoder.copy_buffer_to_buffer(
             self.wgpu_buffer(), 0, dst.wgpu_buffer(), 0, dst.size_in_bytes
         )
 
     def copy_to_texture(
-        self, dst: "TextureWrapper", command_encoder: wgpu.GPUCommandEncoder
-    ):
+        self,
+        *,
+        dst: "TextureWrapper",
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
         command_encoder.copy_buffer_to_texture(
             {"buffer": self.wgpu_buffer(), **dst.texel_copy_buffer_layout()},
             dst.texel_copy_texture_info(),
@@ -47,130 +75,146 @@ class BufferWrapper(Generic[T]):
 
     def copy_from_texture(
         self, src: "TextureWrapper", command_encoder: wgpu.GPUCommandEncoder
-    ):
+    ) -> None:
         command_encoder.copy_texture_to_buffer(
             src.texel_copy_texture_info(),
             {"buffer": self.wgpu_buffer(), **src.texel_copy_buffer_layout()},
             src.size(),
         )
 
-    def clear(self, command_encoder: wgpu.GPUCommandEncoder):
+    def clear(self, *, command_encoder: wgpu.GPUCommandEncoder) -> None:
         command_encoder.clear_buffer(self.wgpu_buffer(), 0, None)
 
-    def map_sync(self, map_mode: int):
+    def map_sync(self, *, map_mode: int) -> None:
         self.buffer.map_sync(map_mode, 0, self.size_in_bytes)
 
 
-class StorageBuffer(BufferWrapper[T]):
+class StorageBuffer(BufferWrapper):
     def __init__(
-        self, device: wgpu.GPUDevice, count: int, label: str, element_type: Type[T]
+        self,
+        *,
+        device: wgpu.GPUDevice,
+        count: int,
+        dtype: npt.DTypeLike,
+        label: str,
     ):
         super().__init__(
-            device,
-            count,
-            label,
-            wgpu.BufferUsage.STORAGE
-            | wgpu.BufferUsage.COPY_SRC
-            | wgpu.BufferUsage.COPY_DST,
-            element_type,
+            device=device,
+            count=count,
+            dtype=dtype,
+            label=label,
+            usage=(
+                wgpu.BufferUsage.STORAGE
+                | wgpu.BufferUsage.COPY_SRC
+                | wgpu.BufferUsage.COPY_DST
+            ),
         )
 
 
-class UniformBuffer(BufferWrapper[T]):
+class UniformBuffer(BufferWrapper):
     def __init__(
-        self, device: wgpu.GPUDevice, count: int, label: str, element_type: Type[T]
+        self,
+        *,
+        device: wgpu.GPUDevice,
+        count: int,
+        dtype: npt.DTypeLike,
+        label: str,
     ):
         super().__init__(
-            device,
-            count,
-            label,
-            wgpu.BufferUsage.UNIFORM
-            | wgpu.BufferUsage.COPY_SRC
-            | wgpu.BufferUsage.COPY_DST,
-            element_type,
+            device=device,
+            count=count,
+            dtype=dtype,
+            label=label,
+            usage=(
+                wgpu.BufferUsage.UNIFORM
+                | wgpu.BufferUsage.COPY_SRC
+                | wgpu.BufferUsage.COPY_DST
+            ),
         )
 
 
-class VertexBuffer(BufferWrapper[T]):
+class VertexBuffer(BufferWrapper):
     def __init__(
-        self, device: wgpu.GPUDevice, count: int, label: str, element_type: Type[T]
+        self, device: wgpu.GPUDevice, count: int, dtype: npt.DTypeLike, label: str
     ):
         super().__init__(
-            device,
-            count,
-            label,
-            wgpu.BufferUsage.VERTEX
-            | wgpu.BufferUsage.COPY_SRC
-            | wgpu.BufferUsage.COPY_DST,
-            element_type,
+            device=device,
+            count=count,
+            dtype=dtype,
+            label=label,
+            usage=(
+                wgpu.BufferUsage.VERTEX
+                | wgpu.BufferUsage.COPY_SRC
+                | wgpu.BufferUsage.COPY_DST
+            ),
         )
 
 
-class IndexBuffer(BufferWrapper[T]):
+class IndexBuffer(BufferWrapper):
     def __init__(
-        self, device: wgpu.GPUDevice, count: int, label: str, element_type: Type[T]
+        self, device: wgpu.GPUDevice, count: int, dtype: npt.DTypeLike, label: str
     ):
         super().__init__(
-            device,
-            count,
-            label,
-            wgpu.BufferUsage.INDEX
-            | wgpu.BufferUsage.COPY_SRC
-            | wgpu.BufferUsage.COPY_DST,
-            element_type,
+            device=device,
+            count=count,
+            dtype=dtype,
+            label=label,
+            usage=(
+                wgpu.BufferUsage.INDEX
+                | wgpu.BufferUsage.COPY_SRC
+                | wgpu.BufferUsage.COPY_DST
+            ),
         )
 
 
-class StagingBuffer(BufferWrapper[T]):
+class StagingBuffer(BufferWrapper):
     def __init__(
-        self, device: wgpu.GPUDevice, count: int, label: str, element_type: Type[T]
+        self, device: wgpu.GPUDevice, count: int, dtype: npt.DTypeLike, label: str
     ):
         super().__init__(
-            device,
-            count,
-            label,
-            wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-            element_type,
+            device=device,
+            count=count,
+            dtype=dtype,
+            label=label,
+            usage=(wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC),
         )
 
-    def write(self, data: list[T] | bytes | ctypes.Array):
-        # data should be a list of ctypes objects or bytes
-        self.map_sync(wgpu.MapMode.WRITE)
-
-        if isinstance(data, bytes):
-            bytes_data = data
-        elif isinstance(data, (list, tuple)):
-            # Assuming data is list of ctypes structures
-            bytes_data = b"".join(bytes(item) for item in data)
-        else:
-            # Assume ctypes array or similar
-            bytes_data = bytes(data)
-
-        self.buffer.write_mapped(bytes_data)
+    def write(self, *, data: npt.ArrayLike) -> None:
+        self.map_sync(map_mode=wgpu.MapMode.WRITE)
+        self.buffer.write_mapped(data)
         self.buffer.unmap()
 
 
-class ReadbackBuffer(BufferWrapper[T]):
+class ReadbackBuffer(BufferWrapper):
     def __init__(
-        self, device: wgpu.GPUDevice, count: int, label: str, element_type: Type[T]
+        self,
+        device: wgpu.GPUDevice,
+        count: int,
+        dtype: npt.DTypeLike,
+        label: str,
     ):
         super().__init__(
-            device,
-            count,
-            label,
-            wgpu.BufferUsage.MAP_READ | wgpu.BufferUsage.COPY_DST,
-            element_type,
+            device=device,
+            count=count,
+            dtype=dtype,
+            label=label,
+            usage=(wgpu.BufferUsage.MAP_READ | wgpu.BufferUsage.COPY_DST),
         )
 
-    def read(self) -> bytes:
-        self.map_sync(wgpu.MapMode.READ)
-        result = self.buffer.read_mapped(copy=True)
+    def read(self) -> npt.NDArray:
+        self.map_sync(map_mode=wgpu.MapMode.READ)
+        result = np.asarray(self.buffer.read_mapped(copy=True)).astype(self.dtype.type)
         self.buffer.unmap()
-        return bytes(result)
+        return result
+
+
+#
+# TextureWrapper
+#
 
 
 class TextureWrapper:
-    def __init__(self, device: wgpu.GPUDevice, texture: wgpu.GPUTexture):
+    def __init__(self, *, device: wgpu.GPUDevice, texture: wgpu.GPUTexture):
         self.device = device
         self.texture = texture
 
@@ -220,7 +264,7 @@ class TextureWrapper:
 
 
 class Rgba8UnormTexture(TextureWrapper):
-    def __init__(self, device: wgpu.GPUDevice, size_wh: tuple[int, int], label: str):
+    def __init__(self, *, device: wgpu.GPUDevice, size_wh: tuple[int, int], label: str):
         texture = device.create_texture(
             label=label,
             size=(size_wh[0], size_wh[1], 1),
@@ -228,17 +272,19 @@ class Rgba8UnormTexture(TextureWrapper):
             sample_count=1,
             dimension=wgpu.TextureDimension.d2,
             format=wgpu.TextureFormat.rgba8unorm,
-            usage=wgpu.TextureUsage.COPY_SRC
-            | wgpu.TextureUsage.COPY_DST
-            | wgpu.TextureUsage.TEXTURE_BINDING
-            | wgpu.TextureUsage.STORAGE_BINDING
-            | wgpu.TextureUsage.RENDER_ATTACHMENT,
+            usage=(
+                wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.COPY_DST
+                | wgpu.TextureUsage.TEXTURE_BINDING
+                | wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.RENDER_ATTACHMENT
+            ),
         )
-        super().__init__(device, texture)
+        super().__init__(device=device, texture=texture)
 
 
 class Rgba32FloatTexture(TextureWrapper):
-    def __init__(self, device: wgpu.GPUDevice, size_wh: tuple[int, int], label: str):
+    def __init__(self, *, device: wgpu.GPUDevice, size_wh: tuple[int, int], label: str):
         texture = device.create_texture(
             label=label,
             size=(size_wh[0], size_wh[1], 1),
@@ -246,20 +292,19 @@ class Rgba32FloatTexture(TextureWrapper):
             sample_count=1,
             dimension=wgpu.TextureDimension.d2,
             format=wgpu.TextureFormat.rgba32float,
-            usage=wgpu.TextureUsage.COPY_SRC
-            | wgpu.TextureUsage.COPY_DST
-            | wgpu.TextureUsage.TEXTURE_BINDING
-            | wgpu.TextureUsage.STORAGE_BINDING
-            | wgpu.TextureUsage.RENDER_ATTACHMENT,
+            usage=(
+                wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.COPY_DST
+                | wgpu.TextureUsage.TEXTURE_BINDING
+                | wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.RENDER_ATTACHMENT
+            ),
         )
-        super().__init__(device, texture)
+        super().__init__(device=device, texture=texture)
 
 
-def fp32_to_fx_u16(value: float) -> int:
-    normalized = max(0.0, min(1.0, value))
-    return int(round(normalized * 65535.0))
+#
+# Logger
+#
 
-
-def fp32_to_fx_i16(value: float) -> int:
-    val = (max(-1.0, min(1.0, value)) + 1.0) / 2.0
-    return fp32_to_fx_u16(val)
+LOG = logger(__name__)
