@@ -12,7 +12,7 @@ fn basic_draw_3d_test() {
     }));
     let (device, queue) =
         pollster::block_on(adapter.unwrap().request_device(&wgpu::DeviceDescriptor {
-            label: Some("TestDevice"),
+            label: Some("BasicDraw3dTest.Device"),
             ..Default::default()
         }))
         .unwrap();

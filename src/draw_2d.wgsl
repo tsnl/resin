@@ -1,5 +1,3 @@
-// draw_2d.wgsl
-
 struct PodQuad {
     dst_xy_ndc: vec2<f32>,
     dst_wh_ndc: vec2<f32>,

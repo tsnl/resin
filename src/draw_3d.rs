@@ -1,3 +1,5 @@
+use simd_math::SimdUnitQuat;
+
 use super::*;
 
 pub struct Draw3dRenderer {
@@ -23,8 +25,8 @@ pub struct Draw3dRenderer {
 impl Draw3dRenderer {
     const INSTANCE_CAPACITY: usize = 1 << 10;
     const GEOMETRY_CAPACITY: usize = 1 << 8;
-    const BVH_NODE_CAPACITY: usize = 1 << 20;
-    const TRIANGLE_CAPACITY: usize = 1 << 22;
+    const BVH_NODE_CAPACITY: usize = 1 << 18;
+    const TRIANGLE_CAPACITY: usize = 1 << 20;
 
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, target_size_wh_px: [u16; 2]) -> Self {
         let device = device.clone();
@@ -250,10 +252,12 @@ pub struct Draw3dFrame {
     device: wgpu::Device,
 
     output_image: Rgba32FloatTexture,
-    camera_device_buffer: StorageBuffer<PodCamera>,
+    camera_device_buffer: UniformBuffer<PodCamera>,
     camera_staging_buffer: StagingBuffer<PodCamera>,
-    instance_heap_device_buffer: StorageBuffer<PodInstance>,
-    instance_heap_staging_buffer: StagingBuffer<PodInstance>,
+    instances_meta_device_buffer: UniformBuffer<PodInstancesMeta>,
+    instances_meta_staging_buffer: StagingBuffer<PodInstancesMeta>,
+    instances_list_device_buffer: StorageBuffer<PodInstance>,
+    instances_list_staging_buffer: StagingBuffer<PodInstance>,
 }
 impl Draw3dFrame {
     pub fn new(renderer: &Draw3dRenderer) -> Self {
@@ -264,16 +268,19 @@ impl Draw3dFrame {
             renderer.target_size_wh_px,
             "Draw3dFrame.OutputImage",
         );
-        let camera_device_buffer =
-            StorageBuffer::<PodCamera>::new(&device, 1, "Draw3dFrame.CameraDeviceBuffer");
+        let camera_device_buffer = UniformBuffer::new(&device, 1, "Draw3dFrame.CameraDeviceBuffer");
         let camera_staging_buffer =
-            StagingBuffer::<PodCamera>::new(&device, 1, "Draw3dFrame.CameraStagingBuffer");
-        let instance_heap_device_buffer = StorageBuffer::<PodInstance>::new(
+            StagingBuffer::new(&device, 1, "Draw3dFrame.CameraStagingBuffer");
+        let instances_meta_device_buffer =
+            UniformBuffer::new(&device, 1, "Draw3dFrame.InstancesMetaDeviceBuffer");
+        let instances_meta_staging_buffer =
+            StagingBuffer::new(&device, 1, "Draw3dFrame.InstancesMetaStagingBuffer");
+        let instances_list_device_buffer = StorageBuffer::new(
             &device,
             Draw3dRenderer::INSTANCE_CAPACITY,
             "Draw3dFrame.InstanceHeapDeviceBuffer",
         );
-        let instance_heap_staging_buffer = StagingBuffer::<PodInstance>::new(
+        let instances_list_staging_buffer = StagingBuffer::new(
             &device,
             Draw3dRenderer::INSTANCE_CAPACITY,
             "Draw3dFrame.InstanceHeapStagingBuffer",
@@ -284,8 +291,10 @@ impl Draw3dFrame {
             output_image,
             camera_device_buffer,
             camera_staging_buffer,
-            instance_heap_device_buffer,
-            instance_heap_staging_buffer,
+            instances_meta_device_buffer,
+            instances_meta_staging_buffer,
+            instances_list_device_buffer,
+            instances_list_staging_buffer,
         }
     }
     pub fn output_image(&self) -> &Rgba32FloatTexture {
@@ -325,7 +334,7 @@ pub struct Draw3dVertex {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 struct PodCamera {
-    transform: [f32; 7],
+    transform: PodTransform,
     fov_y_rad: f32,
     aspect_ratio: f32,
     target_size_w_px: u32,
@@ -333,15 +342,22 @@ struct PodCamera {
 }
 
 //
-// TODO: TLAS
+// Instances:
 //
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+struct PodInstancesMeta {
+    count: u32,
+    _rsv: [u32; 3],
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 struct PodInstance {
     geometry_id: u32,
     material_id: u32,
-    transform: [f32; 7],
+    transform: PodTransform,
 }
 
 //
@@ -380,7 +396,6 @@ impl PodBvhNode {
 struct PodTriangle {
     vertices: [PodVertex; 3],
     centroid: [f32; 3],
-    aabb: [[f32; 3]; 2],
 }
 impl PodTriangle {
     fn new(vertices: [PodVertex; 3]) -> Self {
@@ -392,21 +407,14 @@ impl PodTriangle {
             let res = acc / SimdVec3::splat(3.0);
             res.into()
         };
-        let aabb = {
-            let mut aabb = SimdRect3::union_identity();
-            for v in &vertices {
-                aabb |= SimdVec3::from(v.position);
-            }
-            [aabb.min().into(), aabb.max().into()]
-        };
-        Self {
-            vertices,
-            centroid,
-            aabb,
-        }
+        Self { vertices, centroid }
     }
     fn aabb(&self) -> SimdRect3 {
-        SimdRect3::new(SimdVec3::from(self.aabb[0]), SimdVec3::from(self.aabb[1]))
+        let mut aabb = SimdRect3::union_identity();
+        for v in &self.vertices {
+            aabb |= SimdVec3::from(v.position);
+        }
+        aabb
     }
 }
 
@@ -609,5 +617,50 @@ impl From<Range<usize>> for PodSpan {
             begin: range.start as u32,
             end: range.end as u32,
         }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+struct PodAabb {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+impl Into<SimdRect3> for PodAabb {
+    fn into(self) -> SimdRect3 {
+        SimdRect3::new(SimdVec3::from(self.min), SimdVec3::from(self.max))
+    }
+}
+impl From<SimdRect3> for PodAabb {
+    fn from(aabb: SimdRect3) -> Self {
+        Self {
+            min: aabb.min().into(),
+            max: aabb.max().into(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+struct PodTransform {
+    position: [f32; 3],
+    _rsv: u32,
+    rotation: [f32; 4],
+}
+impl From<SimdTransform> for PodTransform {
+    fn from(t: SimdTransform) -> Self {
+        Self {
+            position: t.position().into(),
+            _rsv: 0,
+            rotation: t.rotation().into(),
+        }
+    }
+}
+impl Into<SimdTransform> for PodTransform {
+    fn into(self) -> SimdTransform {
+        SimdTransform::new(
+            SimdVec3::from(self.position),
+            SimdUnitQuat::from(self.rotation),
+        )
     }
 }
