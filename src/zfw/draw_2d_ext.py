@@ -23,6 +23,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
+import wgpu
 
 from .basic import (
     BaseDisposable,
@@ -36,6 +37,7 @@ from .basic import (
 from .bundled_data import BUNDLED_DATA_PATH
 from .cook import CookedAtlas
 from .draw_2d import Draw2dQuad, Draw2dRenderer
+from .gpu_util import Rgba8UnormTexture
 from . import typed_uharfbuzz as hb
 
 
@@ -47,10 +49,10 @@ from . import typed_uharfbuzz as hb
 class Draw2dExtCanvas(BaseDisposable):
     _glyph_atlas: "GlyphAtlas"
 
-    def __init__(self, *, renderer: Draw2dRenderer):
+    def __init__(self, *, device: wgpu.GPUDevice, queue: wgpu.GPUQueue):
         super().__init__()
 
-        self._glyph_atlas = GlyphAtlas(canvas=self, gpu_device=renderer.gpu_device)
+        self._glyph_atlas = GlyphAtlas(canvas=self, device=device, queue=queue)
 
     def quads(
         self,
@@ -85,8 +87,8 @@ class Draw2dExtQuadPrimitive(Draw2dExtBasePrimitive):
     """
 
     dst_xywh_dip: tuple[int, int, int, int] | None = None  # None = full target
-    src_xywh_px: tuple[int, int, int, int] | None = None  # None = full image
-    fill_image: GpuImage | None = None  # None = white 1x1 texture
+    src_xy_px: tuple[int, int] | None = None  # None = full image
+    fill_texture: wgpu.GPUTexture | None = None  # None = white 1x1 texture
     fill_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     border_thickness_dip: tuple[int, int, int, int] = (0, 0, 0, 0)  # TRBL
     border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
@@ -98,11 +100,14 @@ class Draw2dExtQuadPrimitive(Draw2dExtBasePrimitive):
         scale: float,
     ) -> list[Draw2dQuad]:
         """Convert to a Draw2dQuad with physical pixel coordinates."""
-        dst_xywh_px: tuple[int, int, int, int] | None = None
+        dst_xy_px: tuple[int, int] = (0, 0)
+        dst_wh_px: tuple[int, int] | None = None
         if self.dst_xywh_dip is not None:
-            dst_xywh_px = (
+            dst_xy_px = (
                 int(self.dst_xywh_dip[0] * scale),
                 int(self.dst_xywh_dip[1] * scale),
+            )
+            dst_wh_px = (
                 int(self.dst_xywh_dip[2] * scale),
                 int(self.dst_xywh_dip[3] * scale),
             )
@@ -116,12 +121,14 @@ class Draw2dExtQuadPrimitive(Draw2dExtBasePrimitive):
 
         return [
             Draw2dQuad(
-                dst_xywh_px=dst_xywh_px,
-                src_xywh_px=self.src_xywh_px,
-                fill_image=self.fill_image,
-                fill_color=self.fill_color,
+                dst_xy_px=dst_xy_px,
+                dst_wh_px=dst_wh_px,
+                src_xy_px=self.src_xy_px,
+                src_wh_px=None,
+                fill_texture=self.fill_texture,
+                fill_color_rgba=self.fill_color,
                 border_thickness_px=border_thickness_px,
-                border_color=self.border_color,
+                border_color_rgba=self.border_color,
             )
         ]
 
@@ -278,21 +285,21 @@ class Draw2dExtTextPrimitive(Draw2dExtBasePrimitive):  #
                         src_h = min(ib_phys - iy_phys, qh_phys - src_off_y)
 
                         # Source rect in atlas (physical pixels):
-                        src_xywh_px = (
+                        src_xy_px = (
                             glyph_entry.atlas_x + src_off_x,
                             glyph_entry.atlas_y + src_off_y,
-                            src_w,
-                            src_h,
                         )
 
                         result.append(
                             Draw2dQuad(
-                                dst_xywh_px=(ix_phys, iy_phys, src_w, src_h),
-                                src_xywh_px=src_xywh_px,
-                                fill_image=atlas.get_gpu_image(self.font),
-                                fill_color=self.color,
+                                dst_xy_px=(ix_phys, iy_phys),
+                                dst_wh_px=(src_w, src_h),
+                                src_xy_px=src_xy_px,
+                                src_wh_px=(src_w, src_h),
+                                fill_texture=atlas.get_gpu_texture(self.font),
+                                fill_color_rgba=self.color,
                                 border_thickness_px=(0, 0, 0, 0),
-                                border_color=(0.0, 0.0, 0.0, 0.0),
+                                border_color_rgba=(0.0, 0.0, 0.0, 0.0),
                             )
                         )
 
@@ -479,15 +486,15 @@ class GlyphAtlas(BaseDisposable):
     - Scale factors (1.0, 2.0)
     """
 
-    _renderer: Draw2dExtCanvas
-    _gpu_device: GpuDevice
+    _device: wgpu.GPUDevice
+    _queue: wgpu.GPUQueue
 
     # Glyph cache: string key -> GlyphEntry
     # Key format: "glyph_index,font_size,font_weight,scale_num/scale_den"
     _glyph_cache: dict[Font, dict[str, GlyphEntry | None]]
 
-    # GPU images per font
-    _gpu_images: dict[Font, GpuImage]
+    # GPU textures per font
+    _gpu_textures: dict[Font, wgpu.GPUTexture]
 
     # Text shapers per font:
     _shapers: dict[Font, "TextShaper"]
@@ -499,14 +506,15 @@ class GlyphAtlas(BaseDisposable):
         self,
         *,
         canvas: Draw2dExtCanvas,
-        gpu_device: GpuDevice,
+        device: wgpu.GPUDevice,
+        queue: wgpu.GPUQueue,
     ):
-        super().__init__(parent_resource=canvas)
+        super().__init__()
 
-        self._renderer = canvas
-        self._gpu_device = gpu_device
+        self._device = device
+        self._queue = queue
         self._glyph_cache = {}
-        self._gpu_images = {}
+        self._gpu_textures = {}
         self._font_metrics = {}
 
         # Create shapers:
@@ -519,8 +527,7 @@ class GlyphAtlas(BaseDisposable):
         self._load_cooked_atlases()
 
     def _on_dispose(self) -> None:
-        for gpu_image in self._gpu_images.values():
-            gpu_image.dispose()
+        pass  # WebGPU textures are automatically cleaned up
 
     def _load_cooked_atlases(self) -> None:
         """Load pre-cooked glyph atlases from disk."""
@@ -551,13 +558,21 @@ class GlyphAtlas(BaseDisposable):
                 # Assume linear float [0, 1], convert to uint8
                 atlas_data = (np.clip(atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
 
-            # Upload to GPU
-            gpu_image = GpuImage(
-                device=self._gpu_device,
-                usages=["texture-binding"],
-                data=atlas_data,
+            # Create texture and upload data
+            rgba_texture = Rgba8UnormTexture(
+                device=self._device,
+                size_wh=(atlas_data.shape[1], atlas_data.shape[0]),
+                label=f"GlyphAtlas.{font}",
             )
-            self._gpu_images[font] = gpu_image
+
+            self._queue.write_texture(
+                rgba_texture.texel_copy_texture_info(),
+                atlas_data.tobytes(),
+                rgba_texture.texel_copy_buffer_layout(),
+                rgba_texture.size(),
+            )
+
+            self._gpu_textures[font] = rgba_texture.wgpu_texture()
 
             # Build glyph cache from the cooked atlas and extract metrics
             glyph_cache: dict[str, GlyphEntry | None] = {}
@@ -596,9 +611,9 @@ class GlyphAtlas(BaseDisposable):
 
             LOG.info(f"Loaded glyph atlas for font '{font}' from {atlas_dir}")
 
-    def get_gpu_image(self, font: Font) -> GpuImage:
-        """Get GPU image for a specific font."""
-        return self._gpu_images[font]
+    def get_gpu_texture(self, font: Font) -> wgpu.GPUTexture:
+        """Get GPU texture for a specific font."""
+        return self._gpu_textures[font]
 
     def get_shaper(self, font: Font) -> "TextShaper":
         return self._shapers[font]

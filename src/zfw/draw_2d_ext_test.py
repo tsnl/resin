@@ -3,9 +3,11 @@ from pathlib import Path
 import numpy as np
 import PIL.Image
 import pytest
+import wgpu
+import wgpu.backends.wgpu_native
 
-from .basic import BaseDisposable, logger
-from .draw_2d import Draw2dRenderer, Draw2dFrame
+from .basic import BaseDisposable, Font, FontSize, FontWeight, logger
+from .draw_2d import Draw2dRenderer, Draw2dFrame, Draw2dQuad
 from .draw_2d_ext import (
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
@@ -14,6 +16,7 @@ from .draw_2d_ext import (
 )
 from .images import compute_psnr, convert_color
 from .loader import load_rgba_image
+from .gpu_util import ReadbackBuffer, Rgba8UnormTexture
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
@@ -80,94 +83,81 @@ def assert_image_matches_reference(
 class Draw2dExTestEngine(BaseDisposable):
     """Test harness for Draw2dEx tests."""
 
-    gpu_context: GpuContext
-    gpu_device: GpuDevice
+    device: wgpu.GPUDevice
+    queue: wgpu.GPUQueue
     renderer: Draw2dRenderer
+    target: Draw2dFrame
     canvas: Draw2dExtCanvas
+    readback_buffer: ReadbackBuffer
 
     def __init__(self, *, scale: float = 1.0) -> None:
         super().__init__()
 
         self._scale = scale
 
-        self.gpu_context = GpuContext(
-            app_name="zfw draw_2d_ext_test",
-            enable_debug_layer_support=True,
-            enable_present_support=False,
-        )
+        # Initialize WebGPU
+        adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
+        self.device = adapter.request_device_sync(label="Draw2dExTestEngine")
+        self.queue = self.device.queue
 
-        self.gpu_device = GpuDevice(
-            context=self.gpu_context,
-            physical_device=self.gpu_context.enumerate_physical_devices()[0],
-            surface=None,
+        # Create renderer and frame
+        self.renderer = Draw2dRenderer.create(
+            self.device,
+            self.queue,
+            (int(TEST_IMAGE_W * self._scale), int(TEST_IMAGE_H * self._scale)),
         )
+        self.target = Draw2dFrame(
+            device=self.device,
+            target_size_wh=(
+                int(TEST_IMAGE_W * self._scale),
+                int(TEST_IMAGE_H * self._scale),
+            ),
+        )
+        self.canvas = Draw2dExtCanvas(device=self.device, queue=self.queue)
 
-        self.renderer = Draw2dRenderer(
-            gpu_device=self.gpu_device,
-            target_width_px=int(TEST_IMAGE_W * self._scale),
-            target_height_px=int(TEST_IMAGE_H * self._scale),
-            clear_color="transparent",
+        # Readback buffer for image data
+        self.readback_buffer = ReadbackBuffer(
+            device=self.device,
+            count=int(TEST_IMAGE_W * TEST_IMAGE_H * self._scale * self._scale * 4),
+            label="Draw2dExTestEngine.ReadbackBuffer",
+            dtype=np.uint8,
         )
-        self.target = Draw2dFrame(renderer=self.renderer)
-        self.canvas = Draw2dExtCanvas(renderer=self.renderer)
 
     def _on_dispose(self) -> None:
         self.canvas.dispose()
-        self.target.dispose()
-        self.renderer.dispose()
-        self.gpu_device.dispose()
-        self.gpu_context.dispose()
 
     def readback(self) -> np.ndarray:
         """Read back the rendered image as a uint8 RGBA array in sRGB color space."""
-        color_image = self.target.output
-        buffer = GpuBuffer(
-            device=self.gpu_device,
-            usages=["copy-dst", "staging"],
-            meta=GpuBufferMeta(
-                element_count=(color_image.height * color_image.width * 4),
-                element_dtype=np.float32,
-            ),
-        )
-        encoder = GpuCommandEncoder(device=self.gpu_device, queue_type="transfer")
-        encoder.transition_image_layout(
-            image=color_image,
-            layout="transfer-src-optimal",
-        )
-        encoder.copy_image_to_buffer(src=color_image, dst=buffer)
-        encoder.submit().wait()
+        color_image = self.target.get_output_image()
 
-        # Read as float32:
-        data_f32 = buffer.memory.read(dtype=np.float32).reshape(
-            (color_image.height, color_image.width, 4)
+        # Create command encoder for readback
+        command_encoder = self.device.create_command_encoder(label="Readback")
+
+        # Copy from texture to staging buffer
+        self.readback_buffer.copy_from_texture(color_image, command_encoder)
+
+        # Submit and wait
+        self.queue.submit([command_encoder.finish()])
+
+        # Read as uint8:
+        data_raw = self.readback_buffer.read()
+
+        # Reshape and return
+        return data_raw.reshape(
+            (int(TEST_IMAGE_H * self._scale), int(TEST_IMAGE_W * self._scale), 4)
         )
-
-        # Convert from linear to sRGB:
-        data_f32_srgb = convert_color(
-            data=data_f32,
-            src_color_space="linear",
-            dst_color_space="srgb",
-        )
-
-        # Clamp to [0, 1] and convert to uint8
-        data_u8_srgb = (np.clip(data_f32_srgb, 0.0, 1.0) * 255.0).astype(np.uint8)
-
-        # Cleanup and return:
-        buffer.dispose()
-        return data_u8_srgb
 
     def draw(self, primitives: list[Draw2dExtBasePrimitive]) -> None:
         """Render the given primitives."""
-        command_encoder = GpuCommandEncoder(
-            device=self.gpu_device,
-            queue_type="graphics",
+        command_encoder = self.device.create_command_encoder(
+            label="Draw2dExTestEngine.CommandEncoder"
         )
         self.renderer.record(
-            command_encoder=command_encoder,
-            target=self.target,
             quads=self.canvas.quads(primitives=primitives, scale=self._scale),
+            frame=self.target,
+            command_encoder=command_encoder,
         )
-        command_encoder.submit().wait()
+        self.queue.submit([command_encoder.finish()])
 
 
 # -----------------------------------------------------------------------------
@@ -222,14 +212,20 @@ def test_draw_2d_ext_image():
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Load test image
-    image_data = load_rgba_image(Path("tests_data/rainbow-512x512.png"))
+    image_data = load_rgba_image(Path("tests/data/rainbow-512x512.png"))
     assert image_data.shape == (512, 512, 4)
 
-    # Create a GpuImage for the texture
-    gpu_image = GpuImage(
-        device=engine.gpu_device,
-        usages=["texture-binding"],
-        data=image_data,
+    # Create a WebGPU texture for the image
+    image_texture = Rgba8UnormTexture(
+        device=engine.device,
+        size_wh=(image_data.shape[1], image_data.shape[0]),
+        label="TestImage",
+    )
+    engine.queue.write_texture(
+        image_texture.texel_copy_texture_info(),
+        image_data.tobytes(),
+        image_texture.texel_copy_buffer_layout(),
+        image_texture.size(),
     )
 
     border_thickness = 8
@@ -241,7 +237,7 @@ def test_draw_2d_ext_image():
                 image_data.shape[1],
                 image_data.shape[0],
             ),
-            fill_image=gpu_image,
+            fill_texture=image_texture.wgpu_texture(),
             fill_color=(1.0, 1.0, 1.0, 1.0),
             border_thickness_dip=(8, 8, 8, 8),
             border_color=(1.0, 1.0, 0.0, 1.0),
@@ -257,7 +253,6 @@ def test_draw_2d_ext_image():
         psnr_threshold=65.0,
     )
 
-    gpu_image.dispose()
     engine.dispose()
 
 
