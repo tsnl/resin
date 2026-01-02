@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bytemuck = "1.24.0"
+gltf = "1.4.1"
 image = "0.25.9"
 oneshot = "0.1.11"
 parking_lot = "0.12.5"

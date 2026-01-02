@@ -19,8 +19,6 @@ pub struct Draw3dRenderer {
     allocated_geometry_count: usize,
     allocated_bvh_node_count: usize,
     allocated_triangle_count: usize,
-
-    draw_resources_rw_lock: RwLock<()>,
 }
 impl Draw3dRenderer {
     const INSTANCE_CAPACITY: usize = 1 << 10;
@@ -170,9 +168,7 @@ impl Draw3dRenderer {
         let allocated_bvh_node_count = 0;
         let allocated_triangle_count = 0;
 
-        let draw_resources_rw_lock = RwLock::new(());
-
-        // Initialization: clear all buffers to 0:
+        // Initialization:
         {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Draw3dRenderer.InitializationEncoder"),
@@ -189,6 +185,7 @@ impl Draw3dRenderer {
                 .unwrap();
         }
 
+        // Done:
         Self {
             device,
             target_size_wh_px,
@@ -204,18 +201,14 @@ impl Draw3dRenderer {
             allocated_geometry_count,
             allocated_bvh_node_count,
             allocated_triangle_count,
-            draw_resources_rw_lock,
         }
     }
 
     pub fn add_geometry(
-        &self,
+        &mut self,
         vertex_buffer: &[Draw3dVertex],
         index_buffer: &[[u32; 3]],
     ) -> Draw3dGeometryHandle {
-        // Acquire write lock to ensure no GPU rendering is in progress:
-        let _write_lock = self.acquire_renderer_gpu_resources_write_lock();
-
         // Build triangles:
         let mut triangles = Vec::with_capacity(index_buffer.len() / 3);
         for triangle_indices in index_buffer {
@@ -249,32 +242,7 @@ impl Draw3dRenderer {
         frame: &mut Draw3dFrame,
         command_encoder: &mut wgpu::CommandEncoder,
     ) {
-        let read_lock = self.acquire_renderer_gpu_resources_read_lock();
-        frame.record(read_lock, command_encoder, scene);
-    }
-
-    /// Acquires a write lock that ensures no GPU rendering is in progress.
-    /// This function will block until all GPU work has finished.
-    /// Useful for mutating infrequently changed GPU resources that are shared by multiple frames
-    /// in flight.
-    /// TODO: Do we still need to poll the GPU device? Is acquiring the write lock sufficient to
-    /// ensure no GPU work _for this renderer_ is in flight? Why stall other GPU work?
-    fn acquire_renderer_gpu_resources_write_lock(&'_ self) -> RwLockWriteGuard<'_, ()> {
-        let render_lock = self.draw_resources_rw_lock.write();
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
-        render_lock
-    }
-
-    /// Acquires a read lock that allows GPU rendering to proceed.
-    /// This function will block if a write lock is held, preventing new frames in flight from
-    /// starting until the write lock is released.
-    /// The returned lock also prevents the write lock from being acquired until it is dropped,
-    /// meaning that GPU rendering can proceed safely while the lock is held.
-    /// The Draw3dFrame.render() function uses this lock internally to avoid race conditions.
-    fn acquire_renderer_gpu_resources_read_lock(&'_ self) -> RwLockReadGuard<'_, ()> {
-        self.draw_resources_rw_lock.read()
+        frame.record(command_encoder, scene);
     }
 }
 
@@ -320,19 +288,18 @@ impl Draw3dFrame {
             instance_heap_staging_buffer,
         }
     }
-    fn record(
-        &self,
-        _read_lock: RwLockReadGuard<()>,
-        command_encoder: &mut wgpu::CommandEncoder,
-        scene: &Draw3dScene,
-    ) {
+    pub fn output_image(&self) -> &Rgba32FloatTexture {
+        &self.output_image
+    }
+    fn record(&self, command_encoder: &mut wgpu::CommandEncoder, scene: &Draw3dScene) {
         todo!();
     }
 }
 
+#[derive(Default)]
 pub struct Draw3dScene {
     meshes: HashMap<Draw3dMeshHandle, Vec<SimdTransform>>,
-    environment_map: Rgba32FloatTexture,
+    environment_map: Option<Rgba32FloatTexture>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
