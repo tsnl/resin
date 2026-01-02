@@ -1,0 +1,17 @@
+[project]
+name = "zfw_sandbox"
+version = "0.1.0"
+description = "Example application for the ZFW SDK."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["zfw"]
+
+[build-system]
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
+
+[project.scripts]
+zfw-sandbox = "zfw_sandbox.zfw_sandbox_cli:main"
+
+[tool.uv.sources]
+zfw = { workspace = true }
