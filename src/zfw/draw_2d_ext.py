@@ -613,9 +613,12 @@ class GlyphAtlas(BaseResource):
         font_weight: FontWeight,
         scale: float,
     ) -> GlyphEntry | None:
-        """Get a pre-generated glyph entry."""
+        """
+        Get a pre-generated glyph entry.
+        """
+
         # Convert scale to rational representation
-        scale_frac = Fraction(scale).limit_denominator(1000)
+        scale_frac = Fraction(scale).limit_denominator(16)
         cache_key = f"{glyph_index},{font_size},{font_weight},{scale_frac.numerator}/{scale_frac.denominator}"
 
         font_cache = self._glyph_cache.get(font)
