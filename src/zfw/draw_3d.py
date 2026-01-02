@@ -17,17 +17,344 @@ from .gpu_util import (
     StagingBuffer,
 )
 
+
+#
+# Renderer
+#
+
+
+class Draw3dRenderer:
+    INSTANCE_CAPACITY = 1 << 10
+    GEOMETRY_CAPACITY = 1 << 8
+    BVH_NODE_CAPACITY = 1 << 18
+    TRIANGLE_CAPACITY = 1 << 20
+
+    def __init__(
+        self,
+        device: wgpu.GPUDevice,
+        queue: wgpu.GPUQueue,
+        target_size_wh_px: tuple[int, int],
+    ):
+        self.device = device
+        self.target_size_wh_px = target_size_wh_px
+
+        self.renderer_bind_group_layout = device.create_bind_group_layout(
+            label="Draw3dRenderer.RendererBindGroupLayout",
+            entries=[
+                wgpu.BindGroupLayoutEntry(
+                    binding=0,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=1,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=2,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                ),
+            ],
+        )
+
+        self.per_frame_bind_group_layout = device.create_bind_group_layout(
+            label="Draw3dRenderer.PerFrameBindGroupLayout",
+            entries=[
+                wgpu.BindGroupLayoutEntry(
+                    binding=0,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    storage_texture={
+                        "access": wgpu.StorageTextureAccess.write_only,
+                        "format": wgpu.TextureFormat.rgba32float,
+                        "view_dimension": wgpu.TextureViewDimension.d2,
+                    },
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=1,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer={"type": wgpu.BufferBindingType.uniform},
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=2,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer={"type": wgpu.BufferBindingType.uniform},
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=3,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                ),
+            ],
+        )
+
+        pipeline_layout = device.create_pipeline_layout(
+            label="Draw3dRenderer.PipelineLayout",
+            bind_group_layouts=[
+                self.renderer_bind_group_layout,
+                self.per_frame_bind_group_layout,
+            ],
+        )
+
+        with open(__file__.replace(".py", ".wgsl"), "r") as f:
+            shader_source = f.read()
+
+        draw_shader = device.create_shader_module(code=shader_source)
+
+        self.pipeline = device.create_compute_pipeline(
+            label="Draw3dRenderer.DrawPipeline",
+            layout=pipeline_layout,
+            compute=wgpu.ProgrammableStage(module=draw_shader, entry_point="main"),
+        )
+
+        self.geometry_heap_device_buffer = StorageBuffer(
+            device=device,
+            count=self.GEOMETRY_CAPACITY,
+            dtype=POD_GEOMETRY_DTYPE,
+            label="Draw3dRenderer.GeometryHeapDeviceBuffer",
+        )
+        self.bvh_node_heap_device_buffer = StorageBuffer(
+            device=device,
+            count=self.BVH_NODE_CAPACITY,
+            dtype=POD_BVH_NODE_DTYPE,
+            label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
+        )
+        self.triangle_heap_device_buffer = StorageBuffer(
+            device=device,
+            count=self.TRIANGLE_CAPACITY,
+            dtype=POD_TRIANGLE_NODE_DTYPE,
+            label="Draw3dRenderer.TriangleHeapDeviceBuffer",
+        )
+
+        self.renderer_bind_group = device.create_bind_group(
+            label="Draw3dRenderer.RendererBindGroup",
+            layout=self.renderer_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.geometry_heap_device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.geometry_heap_device_buffer.size_in_bytes,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.bvh_node_heap_device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.bvh_node_heap_device_buffer.size_in_bytes,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.triangle_heap_device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.triangle_heap_device_buffer.size_in_bytes,
+                    ),
+                ),
+            ],
+        )
+
+        self.allocated_geometry_count = 0
+        self.allocated_bvh_node_count = 0
+        self.allocated_triangle_count = 0
+
+        # Initialization
+        encoder = device.create_command_encoder(
+            label="Draw3dRenderer.InitializationEncoder"
+        )
+        self.geometry_heap_device_buffer.clear(command_encoder=encoder)
+        self.bvh_node_heap_device_buffer.clear(command_encoder=encoder)
+        self.triangle_heap_device_buffer.clear(command_encoder=encoder)
+        queue.submit([encoder.finish()])
+
+    def add_geometry(
+        self,
+        vertex_buffer: list[Draw3dVertex],
+        index_buffer: list[tuple[int, int, int]],
+    ) -> int:
+        """Add geometry to renderer and build BVH."""
+        # Create triangles
+        triangles = []
+        for triangle_indices in index_buffer:
+            vertices = [
+                vertex_buffer[triangle_indices[0]].to_pod(),
+                vertex_buffer[triangle_indices[1]].to_pod(),
+                vertex_buffer[triangle_indices[2]].to_pod(),
+            ]
+            triangles.append(create_pod_triangle(vertices))
+
+        # Collect centroids and compute AABBs for each triangle
+        centroids = np.zeros((len(triangles), 3), dtype=np.float32)
+        aabbs: list[Aabb] = []
+        for i, tri in enumerate(triangles):
+            centroids[i] = tri["centroid"].astype(np.float32)
+            # Compute AABB for this triangle
+            positions = np.array(
+                [v["position"].astype(np.float32) for v in tri["vertices"]],
+                dtype=np.float32,
+            )
+            aabbs.append(aabb_min_max(positions))
+
+        # Build BVH
+        bvh_nodes: list["POD_BVH_NODE_DTYPE"] = []
+        indices = np.arange(len(triangles), dtype=np.uint32)
+        root_aabb = aabb_union(*aabbs)
+        emplace_bvh_node(bvh_nodes, indices, root_aabb)
+        try_partition_bvh_node(0, indices, centroids, aabbs, bvh_nodes)
+
+        # TODO: Allocate space in heaps and upload
+        raise NotImplementedError("TODO")
+
+    def record(
+        self,
+        scene: Draw3dScene,
+        frame: "Draw3dFrame",
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
+        frame.record(
+            self.pipeline,
+            self.renderer_bind_group,
+            self.target_size_wh_px,
+            command_encoder,
+            scene,
+        )
+
+
+class Draw3dFrame:
+    def __init__(self, renderer: Draw3dRenderer) -> None:
+        self.device = renderer.device
+
+        self.output_image = Rgba32FloatTexture(
+            device=self.device,
+            size_wh=renderer.target_size_wh_px,
+            label="Draw3dFrame.OutputImage",
+        )
+        self.frame_info_device_buffer = UniformBuffer(
+            device=self.device,
+            count=1,
+            dtype=POD_FRAME_INFO_DTYPE,
+            label="Draw3dFrame.FrameInfoDeviceBuffer",
+        )
+        self.frame_info_staging_buffer = StagingBuffer(
+            device=self.device,
+            count=1,
+            dtype=POD_FRAME_INFO_DTYPE,
+            label="Draw3dFrame.FrameInfoStagingBuffer",
+        )
+        self.camera_device_buffer = UniformBuffer(
+            device=self.device,
+            count=1,
+            dtype=POD_CAMERA_DTYPE,
+            label="Draw3dFrame.CameraDeviceBuffer",
+        )
+        self.camera_staging_buffer = StagingBuffer(
+            device=self.device,
+            count=1,
+            dtype=POD_CAMERA_DTYPE,
+            label="Draw3dFrame.CameraStagingBuffer",
+        )
+        self.instances_list_device_buffer = StorageBuffer(
+            device=self.device,
+            count=Draw3dRenderer.INSTANCE_CAPACITY,
+            dtype=POD_INSTANCE_DTYPE,
+            label="Draw3dFrame.InstanceHeapDeviceBuffer",
+        )
+        self.instances_list_staging_buffer = StagingBuffer(
+            device=self.device,
+            count=Draw3dRenderer.INSTANCE_CAPACITY,
+            dtype=POD_INSTANCE_DTYPE,
+            label="Draw3dFrame.InstanceHeapStagingBuffer",
+        )
+
+        self.bind_group = self.device.create_bind_group(
+            label="Draw3dFrame.BindGroup",
+            layout=renderer.per_frame_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=self.output_image.wgpu_texture().create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.frame_info_device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.frame_info_device_buffer.size_in_bytes,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.camera_device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.camera_device_buffer.size_in_bytes,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=3,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.instances_list_device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.instances_list_device_buffer.size_in_bytes,
+                    ),
+                ),
+            ],
+        )
+
+    def get_output_image(self) -> Rgba32FloatTexture:
+        return self.output_image
+
+    def record(
+        self,
+        pipeline: wgpu.GPUComputePipeline,
+        renderer_bind_group: wgpu.GPUBindGroup,
+        target_size_wh: tuple[int, int],
+        command_encoder: wgpu.GPUCommandEncoder,
+        scene: Draw3dScene,
+    ) -> None:
+        frame_info = np.array(
+            (0, target_size_wh[0], target_size_wh[1], 0),
+            dtype=POD_FRAME_INFO_DTYPE,
+        )
+
+        self.frame_info_staging_buffer.write(
+            data=np.array([frame_info], dtype=POD_FRAME_INFO_DTYPE)
+        )
+        self.frame_info_staging_buffer.copy_to_buffer(
+            dst=self.frame_info_device_buffer,
+            command_encoder=command_encoder,
+        )
+
+        # TODO: Marshall and write camera data, instances, etc
+        _ = scene
+
+        compute_pass = command_encoder.begin_compute_pass(
+            label="Draw3dFrame.ComputePass"
+        )
+        compute_pass.set_pipeline(pipeline)
+        compute_pass.set_bind_group(0, renderer_bind_group, [], 0, 0)
+        compute_pass.set_bind_group(1, self.bind_group, [], 0, 0)
+        compute_pass.dispatch_workgroups(
+            math.ceil(target_size_wh[0] / 8), math.ceil(target_size_wh[1] / 8), 1
+        )
+        compute_pass.end()
+
+
 #
 # POD Types (NumPy structured dtypes)
 #
 
-PodSpan = np.dtype([("begin", np.uint32), ("end", np.uint32)])
+POD_SPAN_DTYPE = np.dtype([("begin", np.uint32), ("end", np.uint32)])
 
-PodAabb = np.dtype([("min", np.float32, (3,)), ("max", np.float32, (3,))])
+POD_AABB_DTYPE = np.dtype([("min", np.float32, (3,)), ("max", np.float32, (3,))])
 
-PodTransform = np.dtype([("matrix", np.float32, (3, 4))])
+POD_TRANSFORM_DTYPE = np.dtype([("matrix", np.float32, (3, 4))])
 
-PodVertex = np.dtype(
+POD_VERTEX_DTYPE = np.dtype(
     [
         ("position", np.float32, (3,)),
         ("normal", np.float32, (3,)),
@@ -35,29 +362,29 @@ PodVertex = np.dtype(
     ]
 )
 
-PodTriangle = np.dtype(
+POD_TRIANGLE_NODE_DTYPE = np.dtype(
     [
-        ("vertices", PodVertex, (3,)),
+        ("vertices", POD_VERTEX_DTYPE, (3,)),
         ("centroid", np.float32, (3,)),
     ]
 )
 
-PodBvhNode = np.dtype(
+POD_BVH_NODE_DTYPE = np.dtype(
     [
-        ("span", PodSpan),
+        ("span", POD_SPAN_DTYPE),
         ("children", np.uint32, (2,)),
         ("aabb", np.float32, (2, 3)),
     ]
 )
 
-PodGeometry = np.dtype(
+POD_GEOMETRY_DTYPE = np.dtype(
     [
-        ("bvh_node_span_in_heap", PodSpan),
-        ("triangle_span_in_heap", PodSpan),
+        ("bvh_node_span_in_heap", POD_SPAN_DTYPE),
+        ("triangle_span_in_heap", POD_SPAN_DTYPE),
     ]
 )
 
-PodFrameInfo = np.dtype(
+POD_FRAME_INFO_DTYPE = np.dtype(
     [
         ("count", np.uint32),
         ("target_size_w_px", np.uint32),
@@ -66,9 +393,9 @@ PodFrameInfo = np.dtype(
     ]
 )
 
-PodCamera = np.dtype(
+POD_CAMERA_DTYPE = np.dtype(
     [
-        ("transform", PodTransform),
+        ("transform", POD_TRANSFORM_DTYPE),
         ("fov_y_rad", np.float32),
         ("aspect_ratio", np.float32),
         ("target_size_w_px", np.uint32),
@@ -76,11 +403,11 @@ PodCamera = np.dtype(
     ]
 )
 
-PodInstance = np.dtype(
+POD_INSTANCE_DTYPE = np.dtype(
     [
         ("geometry_id", np.uint32),
         ("material_id", np.uint32),
-        ("transform", PodTransform),
+        ("transform", POD_TRANSFORM_DTYPE),
     ]
 )
 
@@ -103,7 +430,7 @@ class Draw3dVertex:
                 np.array(self.normal, dtype=np.float32),
                 np.array(self.uv, dtype=np.float32),
             ),
-            dtype=PodVertex,
+            dtype=POD_VERTEX_DTYPE,
         )
         return record
 
@@ -127,10 +454,10 @@ def create_pod_triangle(vertices: list[np.ndarray]) -> np.ndarray:
         centroid += v["position"]
     centroid /= 3.0
 
-    vertices_array = np.array([v for v in vertices], dtype=PodVertex)
+    vertices_array = np.array([v for v in vertices], dtype=POD_VERTEX_DTYPE)
     record = np.array(
         (vertices_array, centroid),
-        dtype=PodTriangle,
+        dtype=POD_TRIANGLE_NODE_DTYPE,
     )
     return record
 
@@ -141,11 +468,11 @@ def create_pod_bvh_node(
     """Create PodBvhNode record."""
     record = np.array(
         (
-            np.array((begin, end), dtype=PodSpan),
+            np.array((begin, end), dtype=POD_SPAN_DTYPE),
             np.array([0, 0], dtype=np.uint32),
             np.array([aabb_min, aabb_max], dtype=np.float32),
         ),
-        dtype=PodBvhNode,
+        dtype=POD_BVH_NODE_DTYPE,
     )
     return record
 
@@ -319,329 +646,3 @@ def try_partition_bvh_node(
 
     try_partition_bvh_node(lt_index, res.lt_indices, centroids, aabbs, nodes)
     try_partition_bvh_node(rt_index, res.rt_indices, centroids, aabbs, nodes)
-
-
-#
-# Renderer
-#
-
-
-class Draw3dRenderer:
-    INSTANCE_CAPACITY = 1 << 10
-    GEOMETRY_CAPACITY = 1 << 8
-    BVH_NODE_CAPACITY = 1 << 18
-    TRIANGLE_CAPACITY = 1 << 20
-
-    def __init__(
-        self,
-        device: wgpu.GPUDevice,
-        queue: wgpu.GPUQueue,
-        target_size_wh_px: tuple[int, int],
-    ):
-        self.device = device
-        self.target_size_wh_px = target_size_wh_px
-
-        self.renderer_bind_group_layout = device.create_bind_group_layout(
-            label="Draw3dRenderer.RendererBindGroupLayout",
-            entries=[
-                {
-                    "binding": 0,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "buffer": {"type": wgpu.BufferBindingType.read_only_storage},
-                },
-                {
-                    "binding": 1,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "buffer": {"type": wgpu.BufferBindingType.read_only_storage},
-                },
-                {
-                    "binding": 2,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "buffer": {"type": wgpu.BufferBindingType.read_only_storage},
-                },
-            ],
-        )
-
-        self.per_frame_bind_group_layout = device.create_bind_group_layout(
-            label="Draw3dRenderer.PerFrameBindGroupLayout",
-            entries=[
-                {
-                    "binding": 0,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "storage_texture": {
-                        "access": wgpu.StorageTextureAccess.write_only,
-                        "format": wgpu.TextureFormat.rgba32float,
-                        "view_dimension": wgpu.TextureViewDimension.d2,
-                    },
-                },
-                {
-                    "binding": 1,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "buffer": {"type": wgpu.BufferBindingType.uniform},
-                },
-                {
-                    "binding": 2,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "buffer": {"type": wgpu.BufferBindingType.uniform},
-                },
-                {
-                    "binding": 3,
-                    "visibility": wgpu.ShaderStage.COMPUTE,
-                    "buffer": {"type": wgpu.BufferBindingType.read_only_storage},
-                },
-            ],
-        )
-
-        pipeline_layout = device.create_pipeline_layout(
-            label="Draw3dRenderer.PipelineLayout",
-            bind_group_layouts=[
-                self.renderer_bind_group_layout,
-                self.per_frame_bind_group_layout,
-            ],
-        )
-
-        with open(__file__.replace(".py", ".wgsl"), "r") as f:
-            shader_source = f.read()
-
-        draw_shader = device.create_shader_module(code=shader_source)
-
-        self.pipeline = device.create_compute_pipeline(
-            label="Draw3dRenderer.DrawPipeline",
-            layout=pipeline_layout,
-            compute={"module": draw_shader, "entry_point": "main"},
-        )
-
-        self.geometry_heap_device_buffer = StorageBuffer(
-            device=device,
-            count=self.GEOMETRY_CAPACITY,
-            dtype=PodGeometry,
-            label="Draw3dRenderer.GeometryHeapDeviceBuffer",
-        )
-        self.bvh_node_heap_device_buffer = StorageBuffer(
-            device=device,
-            count=self.BVH_NODE_CAPACITY,
-            dtype=PodBvhNode,
-            label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
-        )
-        self.triangle_heap_device_buffer = StorageBuffer(
-            device=device,
-            count=self.TRIANGLE_CAPACITY,
-            dtype=PodTriangle,
-            label="Draw3dRenderer.TriangleHeapDeviceBuffer",
-        )
-
-        self.renderer_bind_group = device.create_bind_group(
-            label="Draw3dRenderer.RendererBindGroup",
-            layout=self.renderer_bind_group_layout,
-            entries=[
-                {
-                    "binding": 0,
-                    "resource": {
-                        "buffer": self.geometry_heap_device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.geometry_heap_device_buffer.size_in_bytes,
-                    },
-                },
-                {
-                    "binding": 1,
-                    "resource": {
-                        "buffer": self.bvh_node_heap_device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.bvh_node_heap_device_buffer.size_in_bytes,
-                    },
-                },
-                {
-                    "binding": 2,
-                    "resource": {
-                        "buffer": self.triangle_heap_device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.triangle_heap_device_buffer.size_in_bytes,
-                    },
-                },
-            ],
-        )
-
-        self.allocated_geometry_count = 0
-        self.allocated_bvh_node_count = 0
-        self.allocated_triangle_count = 0
-
-        # Initialization
-        encoder = device.create_command_encoder(
-            label="Draw3dRenderer.InitializationEncoder"
-        )
-        self.geometry_heap_device_buffer.clear(command_encoder=encoder)
-        self.bvh_node_heap_device_buffer.clear(command_encoder=encoder)
-        self.triangle_heap_device_buffer.clear(command_encoder=encoder)
-        queue.submit([encoder.finish()])
-
-    def add_geometry(
-        self,
-        vertex_buffer: list[Draw3dVertex],
-        index_buffer: list[tuple[int, int, int]],
-    ) -> int:
-        """Add geometry to renderer and build BVH."""
-        # Create triangles
-        triangles = []
-        for triangle_indices in index_buffer:
-            vertices = [
-                vertex_buffer[triangle_indices[0]].to_pod(),
-                vertex_buffer[triangle_indices[1]].to_pod(),
-                vertex_buffer[triangle_indices[2]].to_pod(),
-            ]
-            triangles.append(create_pod_triangle(vertices))
-
-        # Collect centroids and compute AABBs for each triangle
-        centroids = np.zeros((len(triangles), 3), dtype=np.float32)
-        aabbs: list[Aabb] = []
-        for i, tri in enumerate(triangles):
-            centroids[i] = tri["centroid"].astype(np.float32)
-            # Compute AABB for this triangle
-            positions = np.array(
-                [v["position"].astype(np.float32) for v in tri["vertices"]],
-                dtype=np.float32,
-            )
-            aabbs.append(aabb_min_max(positions))
-
-        # Build BVH
-        bvh_nodes: list[PodBvhNode] = []
-        indices = np.arange(len(triangles), dtype=np.uint32)
-        root_aabb = aabb_union(*aabbs)
-        emplace_bvh_node(bvh_nodes, indices, root_aabb)
-        try_partition_bvh_node(0, indices, centroids, aabbs, bvh_nodes)
-
-        # TODO: Allocate space in heaps and upload
-        raise NotImplementedError("TODO")
-
-    def record(
-        self,
-        scene: Draw3dScene,
-        frame: "Draw3dFrame",
-        command_encoder: wgpu.GPUCommandEncoder,
-    ) -> None:
-        frame.record(
-            self.pipeline,
-            self.renderer_bind_group,
-            self.target_size_wh_px,
-            command_encoder,
-            scene,
-        )
-
-
-class Draw3dFrame:
-    def __init__(self, renderer: Draw3dRenderer) -> None:
-        self.device = renderer.device
-
-        self.output_image = Rgba32FloatTexture(
-            device=self.device,
-            size_wh=renderer.target_size_wh_px,
-            label="Draw3dFrame.OutputImage",
-        )
-        self.frame_info_device_buffer = UniformBuffer(
-            device=self.device,
-            count=1,
-            dtype=PodFrameInfo,
-            label="Draw3dFrame.FrameInfoDeviceBuffer",
-        )
-        self.frame_info_staging_buffer = StagingBuffer(
-            device=self.device,
-            count=1,
-            dtype=PodFrameInfo,
-            label="Draw3dFrame.FrameInfoStagingBuffer",
-        )
-        self.camera_device_buffer = UniformBuffer(
-            device=self.device,
-            count=1,
-            dtype=PodCamera,
-            label="Draw3dFrame.CameraDeviceBuffer",
-        )
-        self.camera_staging_buffer = StagingBuffer(
-            device=self.device,
-            count=1,
-            dtype=PodCamera,
-            label="Draw3dFrame.CameraStagingBuffer",
-        )
-        self.instances_list_device_buffer = StorageBuffer(
-            device=self.device,
-            count=Draw3dRenderer.INSTANCE_CAPACITY,
-            dtype=PodInstance,
-            label="Draw3dFrame.InstanceHeapDeviceBuffer",
-        )
-        self.instances_list_staging_buffer = StagingBuffer(
-            device=self.device,
-            count=Draw3dRenderer.INSTANCE_CAPACITY,
-            dtype=PodInstance,
-            label="Draw3dFrame.InstanceHeapStagingBuffer",
-        )
-
-        self.bind_group = self.device.create_bind_group(
-            label="Draw3dFrame.BindGroup",
-            layout=renderer.per_frame_bind_group_layout,
-            entries=[
-                {
-                    "binding": 0,
-                    "resource": self.output_image.wgpu_texture().create_view(),
-                },
-                {
-                    "binding": 1,
-                    "resource": {
-                        "buffer": self.frame_info_device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.frame_info_device_buffer.size_in_bytes,
-                    },
-                },
-                {
-                    "binding": 2,
-                    "resource": {
-                        "buffer": self.camera_device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.camera_device_buffer.size_in_bytes,
-                    },
-                },
-                {
-                    "binding": 3,
-                    "resource": {
-                        "buffer": self.instances_list_device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.instances_list_device_buffer.size_in_bytes,
-                    },
-                },
-            ],
-        )
-
-    def get_output_image(self) -> Rgba32FloatTexture:
-        return self.output_image
-
-    def record(
-        self,
-        pipeline: wgpu.GPUComputePipeline,
-        renderer_bind_group: wgpu.GPUBindGroup,
-        target_size_wh: tuple[int, int],
-        command_encoder: wgpu.GPUCommandEncoder,
-        scene: Draw3dScene,
-    ) -> None:
-        frame_info = np.array(
-            (0, target_size_wh[0], target_size_wh[1], 0),
-            dtype=PodFrameInfo,
-        )
-
-        self.frame_info_staging_buffer.write(
-            data=np.array([frame_info], dtype=PodFrameInfo)
-        )
-        self.frame_info_staging_buffer.copy_to_buffer(
-            dst=self.frame_info_device_buffer,
-            command_encoder=command_encoder,
-        )
-
-        # TODO: Marshall and write camera data, instances, etc
-        _ = scene
-
-        compute_pass = command_encoder.begin_compute_pass(
-            label="Draw3dFrame.ComputePass"
-        )
-        compute_pass.set_pipeline(pipeline)
-        compute_pass.set_bind_group(0, renderer_bind_group, [], 0, 0)
-        compute_pass.set_bind_group(1, self.bind_group, [], 0, 0)
-        compute_pass.dispatch_workgroups(
-            math.ceil(target_size_wh[0] / 8), math.ceil(target_size_wh[1] / 8), 1
-        )
-        compute_pass.end()

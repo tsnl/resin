@@ -6,18 +6,21 @@ Pre-generates glyph atlases for all font configurations.
 
 __all__ = ["main"]
 
+import argparse
 from fractions import Fraction
 from pathlib import Path
+import sys
+from typing import cast
 
 import numpy as np
 
 from zfw import (
+    setup_logging,
     logger,
     Font,
     FontSize,
     FontWeight,
     CookedAtlas,
-    BUNDLED_DATA_PATH,
     CookedAtlasGlyphInfo,
     CookedAtlasGlyphCacheKey,
 )
@@ -47,6 +50,12 @@ FONT_SIZE_PX: dict[tuple[Font, FontSize], int] = {
     ("monospaced", "extra-large"): 32,
 }
 
+FONT_TO_FONT_NAME_DICT: dict[Font, str] = {
+    cast(Font, "sans-serif"): "Inter",
+    cast(Font, "serif"): "Lora",
+    cast(Font, "monospaced"): "SourceCodePro",
+}
+
 # Weight values for variable fonts
 FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
     "light": 200,
@@ -56,22 +65,6 @@ FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
 
 # Characters to pre-rasterize for the glyph atlas
 GLYPH_CHARSET = "".join(chr(c) for c in range(32, 127))  # ASCII printable
-
-
-# Font definitions: (font_name, font_file_path, license_file_path)
-FONT_DEFINITIONS: list[tuple[Font, Path, Path]] = [
-    (
-        "sans-serif",
-        Path("res/fonts/Inter/Inter.ttf"),
-        Path("res/fonts/Inter/LICENSE.txt"),
-    ),
-    ("serif", Path("res/fonts/Lora/Lora.ttf"), Path("res/fonts/Lora/LICENSE.txt")),
-    (
-        "monospaced",
-        Path("res/fonts/SourceCodePro/SourceCodePro.ttf"),
-        Path("res/fonts/SourceCodePro/LICENSE.txt"),
-    ),
-]
 
 
 class GlyphEntry:
@@ -101,9 +94,17 @@ class GlyphAtlasCooker:
     font_path: Path
     output_dir: Path
 
-    def __init__(self, *, font: Font, font_path: Path, output_dir: Path):
+    def __init__(
+        self,
+        *,
+        font: Font,
+        font_path: Path,
+        license_path: Path,
+        output_dir: Path,
+    ):
         self.font = font
         self.font_path = font_path
+        self.license_path = license_path
         self.output_dir = output_dir
 
         self._page_width = 2048  # 2048x2048 pixel atlas
@@ -338,8 +339,7 @@ class GlyphAtlasCooker:
     def _save_atlas(self) -> None:
         """Save the atlas to disk using CookedAtlas."""
         # Load license text
-        license_path = self.font_path.parent / "LICENSE.txt"
-        with open(license_path, "r") as f:
+        with open(self.license_path, "r") as f:
             license_text = f.read()
 
         # Create a simple README
@@ -367,34 +367,56 @@ class GlyphAtlasCooker:
         LOG.info(f"Saved font atlas for {self.font} to {self.output_dir}")
 
 
-def main() -> None:
+def main_impl() -> int:
     """Main entry point."""
+
+    setup_logging()
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("output", type=Path)
+    args = ap.parse_args()
 
     project_root = Path.cwd()
 
-    for font_name, font_rel_path, license_rel_path in FONT_DEFINITIONS:
-        font_path = project_root / font_rel_path
-        license_path = project_root / license_rel_path
+    output_path: Path = args.output
+    if output_path.suffix != CookedAtlas.PATH_SUFFIX:
+        LOG.error(f"Output path must have suffix {CookedAtlas.PATH_SUFFIX!r}")
+        return 1
 
-        if not font_path.exists():
-            LOG.error(f"Font file not found: {font_path}")
-            continue
+    font = cast(Font, output_path.stem.removesuffix(CookedAtlas.PATH_SUFFIX))
+    font_name = FONT_TO_FONT_NAME_DICT.get(font)
+    if font_name is None:
+        LOG.error(f"Unknown font: {font!r}")
+        return 1
 
-        if not license_path.exists():
-            LOG.error(f"License file not found: {license_path}")
-            continue
+    font_dir = project_root / "res/fonts" / font_name
+    if not font_dir.is_dir():
+        LOG.error(f"Font folder not found: {font_dir}")
+        return 1
 
-        output_dir = BUNDLED_DATA_PATH / "fonts" / font_name
-        output_dir = output_dir.with_suffix(CookedAtlas.PATH_SUFFIX)
+    font_ttf_path = font_dir / f"{font_name}.ttf"
+    if not font_ttf_path.exists():
+        LOG.error(f"Font file not found: {font_ttf_path}")
+        return 1
 
-        cooker = GlyphAtlasCooker(
-            font=font_name,
-            font_path=font_path,
-            output_dir=output_dir,
-        )
-        cooker.cook()
+    license_path = font_dir / "LICENSE.txt"
+    if not license_path.exists():
+        LOG.error(f"License file not found: {license_path}")
+        return 1
 
-    LOG.info("Bitmap font cooking complete!")
+    cooker = GlyphAtlasCooker(
+        font=font,
+        font_path=font_ttf_path,
+        output_dir=output_path,
+        license_path=license_path,
+    )
+    cooker.cook()
+
+    return 0
+
+
+def main():
+    sys.exit(main_impl())
 
 
 if __name__ == "__main__":

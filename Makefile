@@ -11,11 +11,11 @@ default: wheel
 #
 
 .PHONY: sandbox
-sandbox: sync
+sandbox: sync build
 	uv run --package zfw_sandbox zfw-sandbox --debug
 
 .PHONY: tests
-tests: sync
+tests: sync build
 	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
 
 
@@ -24,7 +24,7 @@ tests: sync
 #
 
 .PHONY: sync
-sync: build
+sync:
 	uv sync --all-extras
 
 .PHONY: check
@@ -50,17 +50,37 @@ build: build-fonts
 #
 
 .PHONY: build-fonts
-build-fonts:
-	mkdir -p $(BUNDLED_DATA)/fonts
-	cp res/fonts/Inter/Inter.ttf $(BUNDLED_DATA)/fonts/
-	cp res/fonts/Lora/Lora.ttf $(BUNDLED_DATA)/fonts/
-	cp res/fonts/SourceCodePro/SourceCodePro.ttf $(BUNDLED_DATA)/fonts/
-	uv run --package zfw_bmfont_cooker zfw-bmfont-cooker
+build-fonts: \
+	$(BUNDLED_DATA)/fonts/monospaced.zfw_atlas \
+	$(BUNDLED_DATA)/fonts/SourceCodePro.ttf \
+	$(BUNDLED_DATA)/fonts/sans-serif.zfw_atlas \
+	$(BUNDLED_DATA)/fonts/Inter.ttf \
+	$(BUNDLED_DATA)/fonts/serif.zfw_atlas \
+	$(BUNDLED_DATA)/fonts/Lora.ttf
+
+$(BUNDLED_DATA)/fonts/monospaced.zfw_atlas: sync $(BUNDLED_DATA)/fonts
+	uv run --package zfw_bmfont_cooker zfw-bmfont-cooker $@
+$(BUNDLED_DATA)/fonts/SourceCodePro.ttf: $(BUNDLED_DATA)/fonts
+	cp res/fonts/SourceCodePro/SourceCodePro.ttf $<
+
+$(BUNDLED_DATA)/fonts/sans-serif.zfw_atlas: sync $(BUNDLED_DATA)/fonts
+	uv run --package zfw_bmfont_cooker zfw-bmfont-cooker $@
+$(BUNDLED_DATA)/fonts/Inter.ttf: $(BUNDLED_DATA)/fonts
+	cp res/fonts/Inter/Inter.ttf $<
+
+$(BUNDLED_DATA)/fonts/serif.zfw_atlas: sync $(BUNDLED_DATA)/fonts
+	uv run --package zfw_bmfont_cooker zfw-bmfont-cooker $@
+$(BUNDLED_DATA)/fonts/Lora.ttf: $(BUNDLED_DATA)/fonts
+	cp res/fonts/Lora/Lora.ttf $<
+
+$(BUNDLED_DATA)/fonts:
+	mkdir -p $@
+
 
 #
 # Deploy:
 #
 
 .PHONY: wheel
-wheel: sync check tests
+wheel: sync build check tests
 	uv build --all
