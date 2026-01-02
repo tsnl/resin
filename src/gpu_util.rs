@@ -2,8 +2,6 @@
 // Buffer wrappers: StorageBuffer, UniformBuffer, VertexBuffer, IndexBuffer, StagingBuffer, ReadbackBuffer
 //
 
-use std::alloc::Layout;
-
 pub trait BufferWrapper {
     type Element;
 
@@ -56,6 +54,9 @@ pub trait BufferWrapper {
     }
     fn binding_size() -> Option<wgpu::BufferSize> {
         Some(wgpu::BufferSize::new(std::mem::size_of::<u8>() as u64).unwrap())
+    }
+    fn clear(&self, command_encoder: &mut wgpu::CommandEncoder) {
+        command_encoder.clear_buffer(self.wgpu_buffer(), 0, None);
     }
 }
 
@@ -222,6 +223,7 @@ macro_rules! texture2d_wrapper {
 }
 
 texture2d_wrapper!(pub struct Rgba8UnormTexture { wgpu::TextureFormat::Rgba8Unorm });
+texture2d_wrapper!(pub struct Rgba32FloatTexture { wgpu::TextureFormat::Rgba32Float });
 
 //
 // Fixed-point encoding:

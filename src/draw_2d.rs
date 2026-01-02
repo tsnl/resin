@@ -163,6 +163,7 @@ pub struct Draw2dFrame {
     quad_group_cache: HashMap<wgpu::Texture, QuadGroup>,
 }
 impl Draw2dFrame {
+    // TODO: Update to take a Renderer as an argument instead of device + target_size_wh
     pub fn new(device: &wgpu::Device, target_size_wh: [u16; 2]) -> Self {
         let output_image =
             Rgba8UnormTexture::new(device, target_size_wh, "Draw2dFrame.OutputImage");

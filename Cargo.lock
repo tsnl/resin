@@ -3099,6 +3099,7 @@ dependencies = [
  "bytemuck",
  "image",
  "oneshot",
+ "parking_lot",
  "pollster",
  "simd_math",
  "wgpu",
