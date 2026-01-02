@@ -226,10 +226,11 @@ class Draw2dTarget(BaseResource):
         self._renderer._target_list.append(self)
 
     def _on_dispose(self) -> None:
+        self._output.dispose()
+
         self._uniform.dispose()
         for qb in self._quad_batch_cache.values():
             qb.dispose()
-        self._output.dispose()
 
     @property
     def output(self) -> GpuImage:

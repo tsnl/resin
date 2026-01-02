@@ -114,6 +114,7 @@ class Draw2dExTestEngine(BaseResource):
             gpu_device=self.gpu_device,
             target_width_px=int(TEST_IMAGE_W * self._scale),
             target_height_px=int(TEST_IMAGE_H * self._scale),
+            clear_color="transparent",
         )
         self.target = Draw2dTarget(renderer=self.renderer)
         self.canvas = Draw2dExtCanvas(renderer=self.renderer)
