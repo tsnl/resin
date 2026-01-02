@@ -16,7 +16,7 @@ sandbox: sync build
 
 .PHONY: tests
 tests: sync build
-	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
+	uv run --package zfw --extra dev python -m pytest -n auto -vs --tb=short .
 
 
 #
