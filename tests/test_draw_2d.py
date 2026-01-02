@@ -1,7 +1,12 @@
 import logging
+from pathlib import Path
+
+import numpy as np
 import pytest
 import wgpu
 import wgpu.backends.wgpu_native
+
+from tests.image_ref_tests import assert_image_matches_reference
 from zfw import (
     setup_logging,
     Draw2dRenderer,
@@ -9,18 +14,26 @@ from zfw import (
     Draw2dQuad,
     ReadbackBuffer,
     Rgba8UnormTexture,
+    convert_color,
+    load_rgba_image,
 )
-from PIL import Image
-import os
-import ctypes
 
 
 def test_basic_draw_2d():
+    """Test basic 2D rendering with quads and textures."""
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
     device = adapter.request_device_sync(label="TestDevice")
     queue = device.queue
 
-    rainbow_image = Image.open("tests/data/rainbow-512x512.png").convert("RGBA")
+    # Load rainbow test image
+    rainbow_image_data = load_rgba_image(Path("tests/data/rainbow-512x512.png"))
+    assert rainbow_image_data.shape == (512, 512, 4)
+
+    # Convert from linear to sRGB and to uint8 for rgba8unorm texture
+    rainbow_image_data_uint8 = (np.clip(rainbow_image_data, 0.0, 1.0) * 255.0).astype(
+        np.uint8
+    )
+
     rainbow_texture = Rgba8UnormTexture(
         device=device,
         size_wh=(512, 512),
@@ -29,7 +42,7 @@ def test_basic_draw_2d():
 
     queue.write_texture(
         rainbow_texture.texel_copy_texture_info(),
-        rainbow_image.tobytes(),
+        rainbow_image_data_uint8.tobytes(),
         rainbow_texture.texel_copy_buffer_layout(),
         rainbow_texture.size(),
     )
@@ -38,9 +51,9 @@ def test_basic_draw_2d():
     frame = Draw2dFrame(device=device, target_size_wh=(1024, 1024))
     readback_buffer = ReadbackBuffer(
         device=device,
-        count=1024 * 1024,
+        count=1024 * 1024 * 4,
         label="BasicDraw2dTest.ReadbackBuffer",
-        dtype=ctypes.c_uint8 * 4,
+        dtype=np.uint8,
     )
 
     command_encoder = device.create_command_encoder(
@@ -73,14 +86,23 @@ def test_basic_draw_2d():
 
     queue.submit([command_encoder.finish()])
 
-    # Readback
-    data = readback_buffer.read()
+    # Readback and convert from linear to sRGB
+    data_raw = readback_buffer.read()
+    data_raw_f32 = data_raw.astype(np.float32) / 255.0
+    data_srgb_f32 = convert_color(
+        data=data_raw_f32,
+        src_color_space="linear",
+        dst_color_space="srgb",
+    )
+    data_srgb = (np.clip(data_srgb_f32, 0.0, 1.0) * 255.0).astype(np.uint8)
+    image = data_srgb.reshape((1024, 1024, 4))
 
-    output_path = "output/draw_2d/basic_render_test.png"
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    img = Image.frombytes("RGBA", (1024, 1024), data)
-    img.save(output_path)
+    assert_image_matches_reference(
+        image,
+        "test_basic_draw_2d",
+        psnr_threshold=65.0,
+        test_subdir="draw_2d_test",
+    )
 
 
 if __name__ == "__main__":

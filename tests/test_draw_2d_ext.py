@@ -2,24 +2,22 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import PIL.Image
 import pytest
 import wgpu
 
+from tests.image_ref_tests import assert_image_matches_reference
 from zfw import (
     setup_logging,
     BaseDisposable,
     Font,
     FontSize,
     FontWeight,
-    logger,
     Draw2dRenderer,
     Draw2dFrame,
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
     Draw2dExtTextPrimitive,
     Draw2dExtCanvas,
-    compute_psnr,
     convert_color,
     load_rgba_image,
     ReadbackBuffer,
@@ -27,66 +25,6 @@ from zfw import (
 )
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
-
-LOG = logger(__name__)
-
-
-def assert_image_matches_reference(
-    actual_image: np.ndarray,
-    test_name: str,
-    psnr_threshold: float,
-) -> None:
-    """
-    Compare an actual rendered image against an expected reference image.
-
-    If no reference exists, creates it and passes the test.
-    If reference exists, compares using PSNR matching.
-    On mismatch, saves the actual image as <name>.actual.png and raises AssertionError.
-    """
-
-    expect_dir = Path("tests/expect/zfw/draw_2d_ext_test")
-    expect_dir.mkdir(parents=True, exist_ok=True)
-
-    expect_path = expect_dir / f"{test_name}.png"
-    actual_path = expect_dir / f"{test_name}.actual.png"
-
-    # Also save to output directory for convenience
-    output_path = Path("output/zfw/draw_2d_ext_test") / f"{test_name}.png"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(actual_image).save(output_path)
-
-    if not expect_path.exists():
-        # No reference exists - create it and pass
-        PIL.Image.fromarray(actual_image).save(expect_path)
-        LOG.warning(f"{test_name}: no expect found: image created: {expect_path}")
-        return
-
-    # Load expected image
-    expected_image = np.array(PIL.Image.open(expect_path))
-
-    # Check shapes match
-    if actual_image.shape != expected_image.shape:
-        PIL.Image.fromarray(actual_image).save(actual_path)
-        raise AssertionError(
-            f"Image shape mismatch for {test_name}: "
-            f"expected {expected_image.shape}, got {actual_image.shape}. "
-            f"Actual image saved to {actual_path}"
-        )
-
-    # Compare images
-    psnr = compute_psnr(actual_image, expected_image)
-    if psnr < psnr_threshold:
-        PIL.Image.fromarray(actual_image).save(actual_path)
-        raise AssertionError(
-            f"PSNR match failed for {test_name}: "
-            f"PSNR {psnr:.2f} < {psnr_threshold}. "
-            f"Actual image saved to {actual_path}"
-        )
-
-    # If we reach here, the images matched
-    # Clean up any previous actual image
-    if actual_path.exists():
-        actual_path.unlink()
 
 
 class Draw2dExTestEngine(BaseDisposable):
@@ -220,6 +158,7 @@ def test_draw_2d_ext_quads():
         image,
         "test_draw_2d_ext_quads",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -235,17 +174,7 @@ def test_draw_2d_ext_image():
     assert image_data.shape == (512, 512, 4)
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture
-    image_data_srgb = convert_color(
-        image_data[..., :3],
-        src_color_space="linear",
-        dst_color_space="srgb",
-    )
-    image_data_srgb_with_alpha = np.concatenate(
-        (image_data_srgb, image_data[..., 3:4]), axis=-1
-    )
-    image_data_uint8 = (np.clip(image_data_srgb_with_alpha, 0.0, 1.0) * 255.0).astype(
-        np.uint8
-    )
+    image_data_uint8 = (np.clip(image_data, 0.0, 1.0) * 255.0).astype(np.uint8)
 
     # Create a WebGPU texture for the image
     image_texture = Rgba8UnormTexture(
@@ -283,6 +212,7 @@ def test_draw_2d_ext_image():
         output_image,
         "test_draw_2d_ext_image",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -320,6 +250,7 @@ def test_draw_2d_ext_text_basic():
         image,
         "test_draw_2d_ext_text_basic",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -356,6 +287,7 @@ def test_draw_2d_ext_text_wrap():
         image,
         "test_draw_2d_ext_text_wrap",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -404,6 +336,7 @@ def test_draw_2d_ext_text_on_quad():
         image,
         "test_draw_2d_ext_text_on_quad",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -497,6 +430,7 @@ def test_draw_2d_ext_layered_quads_and_text():
         image,
         "test_draw_2d_ext_layered_quads_and_text",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -571,6 +505,7 @@ def test_draw_2d_ext_font_matrix():
         image,
         "test_draw_2d_ext_font_matrix",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -639,6 +574,7 @@ def test_draw_2d_ext_scale_matrix():
         image,
         "test_draw_2d_ext_scale_matrix",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()
@@ -705,6 +641,7 @@ def test_draw_2d_ext_text_alignment():
         image,
         "test_draw_2d_ext_text_alignment",
         psnr_threshold=65.0,
+        test_subdir="draw_2d_ext_test",
     )
 
     engine.dispose()

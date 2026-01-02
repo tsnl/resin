@@ -37,7 +37,6 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 package-data = { "zfw" = ["bundled_data/**/*", "*.wgsl"] }
-source-exclude = ["*_test.py"]
 
 [tool.uv.workspace]
 members = ["apps/*"]
