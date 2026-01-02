@@ -5,6 +5,6 @@ Models to train:
     (the new keyframes) and generate smooth, physically plausible motion.
 -   Copilot for artists: MCP for an assistant that can assemble 3D scenes from text 
     prompts and an existing catalogue of assets.
--   Learned importance sampler for path tracing. Condition on nearby irradiance probes,
-    real-time probes for depth and/or material ID, etc.
+-   Learned importance sampler for path tracing.
 -   Custom DLSS.
+

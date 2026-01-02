@@ -1,6 +1,3 @@
 [submodule "tests_data/glTF-Sample-Assets"]
 	path = tests_data/glTF-Sample-Assets
 	url = https://github.com/KhronosGroup/glTF-Sample-Assets
-[submodule "doc/vk_raytracing_tutorial_KHR"]
-	path = doc/vk_raytracing_tutorial_KHR
-	url = https://github.com/nvpro-samples/vk_raytracing_tutorial_KHR

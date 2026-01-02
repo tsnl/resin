@@ -38,7 +38,6 @@ $ uv run --with zfw -- pyright
     -   [Dynamic rendering blog post](https://www.khronos.org/blog/streamlining-render-passes)
     -   [Irradiance Caching](https://www.ludicon.com/castano/blog/articles/irradiance-caching-part-1/)
     -   [Vulkan `VK_KHR_ray_tracing_extension` tutorial](https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/)
-    -   [Vulkan mini path-tracer](https://github.com/nvpro-samples/vk_mini_path_tracer/)
 
 ## Project Structure
 

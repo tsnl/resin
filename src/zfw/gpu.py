@@ -4,10 +4,6 @@ GPU abstraction layer.
 Required Vulkan version:
 -   Vulkan 1.3 for VK_KHR_dynamic_rendering
     https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_dynamic_rendering.html
--   Vulkan 1.2 for VK_KHR_buffer_device_address (required for ray tracing)
-    https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_buffer_device_address.html
--   Vulkan 1.2 for VK_KHR_spirv_1_4 (required for ray tracing)
-    https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_spirv_1_4.html
 """
 
 from __future__ import annotations
@@ -214,10 +210,8 @@ from .typed_vulkan import (
     VkOffset3D,
     VkPhysicalDevice,
     VkPhysicalDeviceDynamicRenderingFeatures,
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR,
     VkPhysicalDeviceMemoryProperties,
     VkPhysicalDeviceProperties,
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR,
     VkPhysicalDeviceVulkan11Features,
     VkPhysicalDeviceVulkan12Features,
     VkPipeline,
@@ -344,7 +338,6 @@ from .typed_vulkan import (
 class GpuContext(BaseResource):
     enable_debug_layer_support: bool
     enable_present_support: bool
-    enable_ray_tracing_support: bool
     enable_portability_subset: bool
     vk_instance: VkInstance
     vk_extra_proc_tab: dict[str, Callable]
@@ -356,7 +349,6 @@ class GpuContext(BaseResource):
         app_name: str = "Zfw App",
         enable_debug_layer_support: bool = True,
         enable_present_support: bool = True,
-        enable_ray_tracing_support: bool = True,
         enable_portability_subset_override: bool | None = None,
     ) -> None:
         super().__init__(parent_resource=parent_resource)
@@ -369,14 +361,12 @@ class GpuContext(BaseResource):
 
         self.enable_debug_layer_support = enable_debug_layer_support
         self.enable_present_support = enable_present_support
-        self.enable_ray_tracing_support = enable_ray_tracing_support
         self.enable_portability_subset = enable_portability_subset
 
         self.vk_instance = GpuContext._help_create_instance(
             app_name=app_name,
             enable_debug_layers=enable_debug_layer_support,
             enable_present_support=enable_present_support,
-            enable_ray_tracing_support=enable_ray_tracing_support,
             enable_portability_subset=enable_portability_subset,
             enable_gpu_assisted_validation=False,
         )
@@ -409,7 +399,6 @@ class GpuContext(BaseResource):
         app_name: str,
         enable_debug_layers: bool,
         enable_present_support: bool,
-        enable_ray_tracing_support: bool,
         enable_portability_subset: bool,
         enable_gpu_assisted_validation: bool,
     ) -> VkInstance:
@@ -975,7 +964,6 @@ class GpuDevice(BaseResource):
     max_descriptor_pool_set_count: int
     vk_descriptor_pool: VkDescriptorPool
     present_support_enabled: bool
-    ray_tracing_support_enabled: bool
 
     def __init__(
         self,
@@ -985,7 +973,6 @@ class GpuDevice(BaseResource):
         surface: "GpuSurface | None",
         descriptor_pool_config: dict["GpuDescriptorType", int] | None = None,
         max_descriptor_pool_set_count: int = 1024,
-        enable_ray_tracing_support: bool = True,
     ) -> None:
         super().__init__(parent_resource=context)
 
@@ -998,17 +985,13 @@ class GpuDevice(BaseResource):
         self.vk_device = self._help_create_device(
             physical_device=physical_device,
             qfis=self.qfis,
-            extensions=self._help_compute_extensions(
-                context=context, enable_ray_tracing=enable_ray_tracing_support
-            ),
-            enable_ray_tracing=enable_ray_tracing_support,
+            extensions=self._help_compute_extensions(context),
         )
         self.vk_command_pools = self._help_create_command_pools(
             vk_device=self.vk_device, qfis=self.qfis
         )
         self.vk_queues = self._help_get_queues(vk_device=self.vk_device, qfis=self.qfis)
         self.present_support_enabled = surface is not None
-        self.ray_tracing_support_enabled = enable_ray_tracing_support
         self.descriptor_pool_config = self._help_compute_descriptor_pool_config(
             descriptor_pool_config
         )
@@ -1045,22 +1028,13 @@ class GpuDevice(BaseResource):
         )
 
     @staticmethod
-    def _help_compute_extensions(
-        context: GpuContext, *, enable_ray_tracing: bool
-    ) -> list[str]:
+    def _help_compute_extensions(context: GpuContext) -> list[str]:
         """Compute the list of required device extensions."""
         extensions = []
         if context.enable_present_support:
             extensions.append("VK_KHR_swapchain")
         if context.enable_portability_subset:
             extensions.append("VK_KHR_portability_subset")  # macOS
-        if enable_ray_tracing:
-            extensions += [
-                # Ray tracing requires these KHR device extensions
-                "VK_KHR_deferred_host_operations",
-                "VK_KHR_acceleration_structure",
-                "VK_KHR_ray_tracing_pipeline",
-            ]
         return extensions
 
     @staticmethod
@@ -1069,7 +1043,6 @@ class GpuDevice(BaseResource):
         physical_device: GpuPhysicalDevice,
         qfis: GpuQueueFamilyIndices,
         extensions: list[str],
-        enable_ray_tracing: bool,
     ) -> VkDevice:
         """Create a VkDevice with the specified configuration."""
         queue_create_info_list = qfis.compute_queue_create_info_list()
@@ -1082,44 +1055,15 @@ class GpuDevice(BaseResource):
             pNext=vulkan_11_features,
             runtimeDescriptorArray=True,
             shaderSampledImageArrayNonUniformIndexing=True,
-            bufferDeviceAddress=True,
-            bufferDeviceAddressCaptureReplay=False,
-            bufferDeviceAddressMultiDevice=False,
         )
         dynamic_rendering_features = VkPhysicalDeviceDynamicRenderingFeatures(
             pNext=vulkan_12_features,
             dynamicRendering=True,
         )
-        feature_chain_head: Any = dynamic_rendering_features
-
-        if enable_ray_tracing:
-            acceleration_structure_features = (
-                VkPhysicalDeviceAccelerationStructureFeaturesKHR(
-                    pNext=feature_chain_head,
-                    accelerationStructure=True,
-                    accelerationStructureCaptureReplay=False,
-                    accelerationStructureIndirectBuild=False,
-                    accelerationStructureHostCommands=False,
-                    descriptorBindingAccelerationStructureUpdateAfterBind=False,
-                )
-            )
-            ray_tracing_pipeline_features = (
-                VkPhysicalDeviceRayTracingPipelineFeaturesKHR(
-                    pNext=acceleration_structure_features,
-                    rayTracingPipeline=True,
-                    rayTracingPipelineShaderGroupHandleCaptureReplay=False,
-                    rayTracingPipelineShaderGroupHandleCaptureReplayMixed=False,
-                    rayTracingPipelineTraceRaysIndirect=False,
-                    rayTraversalPrimitiveCulling=False,
-                )
-            )
-            feature_chain_head = ray_tracing_pipeline_features
-        else:
-            feature_chain_head = dynamic_rendering_features
         return vkCreateDevice(
             physical_device.vk_physical_device,
             VkDeviceCreateInfo(
-                pNext=feature_chain_head,
+                pNext=dynamic_rendering_features,
                 enabledExtensionCount=len(extensions),
                 ppEnabledExtensionNames=extensions,
                 queueCreateInfoCount=len(queue_create_info_list),

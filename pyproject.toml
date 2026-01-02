@@ -45,9 +45,6 @@ members = ["apps/*"]
 # Ruff configuration
 #
 
-[tool.ruff]
-exclude = ["doc/vk_raytracing_tutorial_KHR"]
-
 [tool.ruff.lint]
 extend-select = [
     # unsorted dunder all
