@@ -11,7 +11,7 @@ pub struct Draw3dRenderer {
     pipeline_layout: wgpu::PipelineLayout,
 
     draw_shader: wgpu::ShaderModule,
-    draw_pipeline: wgpu::ComputePipeline,
+    pipeline: wgpu::ComputePipeline,
 
     geometry_heap_device_buffer: StorageBuffer<PodGeometry>,
     bvh_node_heap_device_buffer: StorageBuffer<PodBvhNode>,
@@ -85,20 +85,31 @@ impl Draw3dRenderer {
                         },
                         count: None,
                     },
-                    // camera buffer:
+                    // frame info buffer:
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
                         count: None,
                     },
-                    // instance heap buffer:
+                    // camera buffer:
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // instances heap buffer:
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -195,7 +206,7 @@ impl Draw3dRenderer {
             per_frame_bind_group_layout,
             pipeline_layout,
             draw_shader,
-            draw_pipeline,
+            pipeline: draw_pipeline,
             geometry_heap_device_buffer,
             bvh_node_heap_device_buffer,
             triangle_heap_device_buffer,
@@ -244,7 +255,13 @@ impl Draw3dRenderer {
         frame: &mut Draw3dFrame,
         command_encoder: &mut wgpu::CommandEncoder,
     ) {
-        frame.record(command_encoder, scene);
+        frame.record(
+            &self.pipeline,
+            &self.renderer_bind_group,
+            self.target_size_wh_px,
+            command_encoder,
+            scene,
+        );
     }
 }
 
@@ -252,12 +269,14 @@ pub struct Draw3dFrame {
     device: wgpu::Device,
 
     output_image: Rgba32FloatTexture,
+    frame_info_device_buffer: UniformBuffer<PodFrameInfo>,
+    frame_info_staging_buffer: StagingBuffer<PodFrameInfo>,
     camera_device_buffer: UniformBuffer<PodCamera>,
     camera_staging_buffer: StagingBuffer<PodCamera>,
-    instances_meta_device_buffer: UniformBuffer<PodInstancesMeta>,
-    instances_meta_staging_buffer: StagingBuffer<PodInstancesMeta>,
     instances_list_device_buffer: StorageBuffer<PodInstance>,
     instances_list_staging_buffer: StagingBuffer<PodInstance>,
+
+    bind_group: wgpu::BindGroup,
 }
 impl Draw3dFrame {
     pub fn new(renderer: &Draw3dRenderer) -> Self {
@@ -268,13 +287,13 @@ impl Draw3dFrame {
             renderer.target_size_wh_px,
             "Draw3dFrame.OutputImage",
         );
+        let frame_info_device_buffer =
+            UniformBuffer::new(&device, 1, "Draw3dFrame.FrameInfoDeviceBuffer");
+        let frame_info_staging_buffer =
+            StagingBuffer::new(&device, 1, "Draw3dFrame.FrameInfoStagingBuffer");
         let camera_device_buffer = UniformBuffer::new(&device, 1, "Draw3dFrame.CameraDeviceBuffer");
         let camera_staging_buffer =
             StagingBuffer::new(&device, 1, "Draw3dFrame.CameraStagingBuffer");
-        let instances_meta_device_buffer =
-            UniformBuffer::new(&device, 1, "Draw3dFrame.InstancesMetaDeviceBuffer");
-        let instances_meta_staging_buffer =
-            StagingBuffer::new(&device, 1, "Draw3dFrame.InstancesMetaStagingBuffer");
         let instances_list_device_buffer = StorageBuffer::new(
             &device,
             Draw3dRenderer::INSTANCE_CAPACITY,
@@ -286,22 +305,88 @@ impl Draw3dFrame {
             "Draw3dFrame.InstanceHeapStagingBuffer",
         );
 
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Draw3dFrame.BindGroup"),
+            layout: &renderer.per_frame_bind_group_layout,
+            entries: &[
+                // output image:
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &output_image.wgpu_texture().create_view(&Default::default()),
+                    ),
+                },
+                // frame info buffer:
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: frame_info_device_buffer.wgpu_buffer().as_entire_binding(),
+                },
+                // camera buffer:
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: camera_device_buffer.wgpu_buffer().as_entire_binding(),
+                },
+                // instance heap buffer:
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: instances_list_device_buffer
+                        .wgpu_buffer()
+                        .as_entire_binding(),
+                },
+            ],
+        });
+
         Self {
             device,
             output_image,
             camera_device_buffer,
             camera_staging_buffer,
-            instances_meta_device_buffer,
-            instances_meta_staging_buffer,
+            frame_info_device_buffer,
+            frame_info_staging_buffer,
             instances_list_device_buffer,
             instances_list_staging_buffer,
+            bind_group,
         }
     }
     pub fn output_image(&self) -> &Rgba32FloatTexture {
         &self.output_image
     }
-    fn record(&self, command_encoder: &mut wgpu::CommandEncoder, scene: &Draw3dScene) {
-        todo!();
+    fn record(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        renderer_bind_group: &wgpu::BindGroup,
+        target_size_wh: [u16; 2],
+        command_encoder: &mut wgpu::CommandEncoder,
+        scene: &Draw3dScene,
+    ) {
+        // Marshall and write frame info:
+        let frame_info = PodFrameInfo {
+            count: 0, // TODO
+            target_size_w_px: target_size_wh[0] as u32,
+            target_size_h_px: target_size_wh[1] as u32,
+            _rsv: 0,
+        };
+        self.frame_info_staging_buffer.write(&[frame_info]);
+        self.frame_info_staging_buffer
+            .copy_to_buffer(&self.frame_info_device_buffer, command_encoder);
+
+        // TODO: Marshall and write camera data, instances, etc
+
+        // Record and dispatch compute pass:
+        {
+            let mut cp = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Draw3dFrame.ComputePass"),
+                ..Default::default()
+            });
+            cp.set_pipeline(pipeline);
+            cp.set_bind_group(0, renderer_bind_group, &[]);
+            cp.set_bind_group(1, &self.bind_group, &[]);
+            cp.dispatch_workgroups(
+                target_size_wh[0].div_ceil(8) as u32,
+                target_size_wh[1].div_ceil(8) as u32,
+                1,
+            );
+        }
     }
 }
 
@@ -328,29 +413,21 @@ pub struct Draw3dVertex {
 }
 
 //
-// Camera
+// Frame info (uniform)
 //
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-struct PodCamera {
-    transform: PodTransform,
-    fov_y_rad: f32,
-    aspect_ratio: f32,
+struct PodFrameInfo {
+    count: u32,
     target_size_w_px: u32,
     target_size_h_px: u32,
+    _rsv: u32,
 }
 
 //
 // Instances:
 //
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-struct PodInstancesMeta {
-    count: u32,
-    _rsv: [u32; 3],
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -586,6 +663,20 @@ fn emplace_bvh_node(nodes: &mut Vec<PodBvhNode>, span: Range<usize>, aabb: SimdR
         children: [0, 0],
     });
     index
+}
+
+//
+// Camera
+//
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+struct PodCamera {
+    transform: PodTransform,
+    fov_y_rad: f32,
+    aspect_ratio: f32,
+    target_size_w_px: u32,
+    target_size_h_px: u32,
 }
 
 //

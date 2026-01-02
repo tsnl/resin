@@ -35,15 +35,18 @@ fn basic_draw_3d_test() {
 
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
+    let readback_data: Box<[[f32; 4]]> = readback_buffer.read();
+    let readback_data: Box<[f32]> = bytemuck::cast_slice_box(readback_data);
+
+    let tonemapped_readback_data = readback_data
+        .into_iter()
+        .map(|c| (c * 255.0) as u8)
+        .collect();
+
     let output_path = PathBuf::from("output/draw_3d/basic_render_test.png");
     fs::create_dir_all(output_path.parent().unwrap()).unwrap();
     image::DynamicImage::ImageRgba8(
-        image::RgbaImage::from_raw(
-            1024,
-            1024,
-            bytemuck::cast_vec(readback_buffer.read().into_vec()),
-        )
-        .unwrap(),
+        image::RgbaImage::from_raw(1024, 1024, tonemapped_readback_data).unwrap(),
     )
     .save(output_path)
     .unwrap();

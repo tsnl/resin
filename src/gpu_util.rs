@@ -168,6 +168,7 @@ pub trait TextureWrapper {
                 self.width() as u32
                     * match self.format() {
                         wgpu::TextureFormat::Rgba8Unorm => 4,
+                        wgpu::TextureFormat::Rgba32Float => 16,
                         _ => todo!(),
                     }
             }),
