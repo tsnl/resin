@@ -1,5 +1,7 @@
 __all__ = [
     "CookedAtlas",
+    "CookedAtlasGlyphCacheKey",
+    "CookedAtlasGlyphInfo",
 ]
 
 from dataclasses import dataclass

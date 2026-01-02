@@ -7,9 +7,6 @@
 __pycache__
 *.egg-info
 
-# Jupyter
-.ipynb_checkpoints
-
 # Compiled shaders (generated during build)
 *.spv
 
@@ -17,7 +14,13 @@ __pycache__
 /output
 /dist
 /build
-/target
+
+# `bundled_data` is always excluded from Git and is generated during the build process.
+src/zfw/bundled_data/*
+!src/zfw/bundled_data/__init__.py
+
+# Ignore '*.actual.png' files from expect tests.
+*.actual.png
 
 # Ignore log files
 *.log

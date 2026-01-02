@@ -44,28 +44,7 @@ format:
 #
 
 .PHONY: build
-build: # build-shaders build-fonts
-
-# Shaders:
-#
-
-.PHONY: build-shaders
-build-shaders: \
-	$(BUNDLED_DATA)/shaders/draw_2d.vert.spv \
-	$(BUNDLED_DATA)/shaders/draw_2d.frag.spv \
-	$(BUNDLED_DATA)/shaders/compositor.vert.spv \
-	$(BUNDLED_DATA)/shaders/compositor.frag.spv \
-	$(BUNDLED_DATA)/shaders/draw_3d_main.vert.spv \
-	$(BUNDLED_DATA)/shaders/draw_3d_main.frag.spv \
-	$(BUNDLED_DATA)/shaders/draw_3d_environment.vert.spv \
-	$(BUNDLED_DATA)/shaders/draw_3d_environment.frag.spv
-
-$(BUNDLED_DATA)/shaders/%.vert.spv: src/shaders/%.slang $(BUNDLED_DATA)/shaders
-	slangc $< -o $@ -target spirv -profile vs_6_0 -entry vertexMain
-$(BUNDLED_DATA)/shaders/%.frag.spv: src/shaders/%.slang $(BUNDLED_DATA)/shaders
-	slangc $< -o $@ -target spirv -profile ps_6_0 -entry fragmentMain
-$(BUNDLED_DATA)/shaders:
-	mkdir -p $@
+build: build-fonts
 
 # Fonts:
 #

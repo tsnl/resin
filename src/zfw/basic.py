@@ -1,5 +1,5 @@
 __all__ = [
-    "BaseResource",
+    "BaseDisposable",
     "ButtonAction",
     "ColorSpace",
     "Font",
@@ -16,7 +16,6 @@ __all__ = [
 
 from abc import ABC
 from typing import Protocol, TypeVar, Self, Literal, Sequence
-from weakref import ref as WeakRef
 import logging
 from pathlib import Path
 
@@ -40,6 +39,30 @@ _T_contra = TypeVar("_T_contra", contravariant=True)
 
 class SupportsWrite(Protocol[_T_contra]):
     def write(self, s: _T_contra, /) -> object: ...
+
+
+#
+# Disposable
+#
+
+
+class BaseDisposable:
+    _is_disposed: bool
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._is_disposed = False
+
+    def dispose(self) -> None:
+        """Dispose of the resource, freeing any associated GPU memory."""
+        if self._is_disposed:
+            return
+        self._is_disposed = True
+        self._on_dispose()
+
+    def _on_dispose(self) -> None:
+        """Hook called when dispose() is called."""
+        pass
 
 
 #
@@ -80,7 +103,7 @@ class StructuredNDArray(np.ndarray, ABC):
         return np.zeros(shape, dtype=cls.DTYPE).view(cls)
 
     @classmethod
-    def of(cls, arr: npt.NDArrayLike) -> Self:
+    def of(cls, arr: npt.ArrayLike) -> Self:
         return np.asarray(arr, dtype=cls.DTYPE).view(cls)
 
 

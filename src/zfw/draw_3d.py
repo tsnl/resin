@@ -1,5 +1,4 @@
 import wgpu
-import ctypes
 import math
 import numpy as np
 from typing import Optional, Dict
@@ -19,97 +18,71 @@ __all__ = [
 ]
 
 #
-# POD Types
+# POD Types (NumPy structured dtypes)
 #
 
+PodSpan = np.dtype([("begin", np.uint32), ("end", np.uint32)])
 
-class PodSpan(ctypes.Structure):
-    _fields_ = [("begin", ctypes.c_uint32), ("end", ctypes.c_uint32)]
+PodAabb = np.dtype([("min", np.float32, (3,)), ("max", np.float32, (3,))])
 
-    def __len__(self):
-        return self.end - self.begin
+PodTransform = np.dtype([("matrix", np.float32, (3, 4))])
 
-
-class PodAabb(ctypes.Structure):
-    _fields_ = [("min", ctypes.c_float * 3), ("max", ctypes.c_float * 3)]
-
-
-class PodTransform(ctypes.Structure):
-    """Transform as 3x4 matrix (row major)."""
-
-    _fields_ = [
-        ("matrix", (ctypes.c_float * 4) * 3),  # 3 rows, 4 columns each
+PodVertex = np.dtype(
+    [
+        ("position", np.float32, (3,)),
+        ("normal", np.float32, (3,)),
+        ("uv", np.float32, (2,)),
     ]
+)
 
+PodTriangle = np.dtype(
+    [
+        ("vertices", PodVertex, (3,)),
+        ("centroid", np.float32, (3,)),
+    ]
+)
 
-class PodBvhNode(ctypes.Structure):
-    _fields_ = [
+PodBvhNode = np.dtype(
+    [
         ("span", PodSpan),
-        ("children", ctypes.c_uint32 * 2),
-        ("aabb", (ctypes.c_float * 3) * 2),
+        ("children", np.uint32, (2,)),
+        ("aabb", np.float32, (2, 3)),
     ]
+)
 
-
-class PodVertex(ctypes.Structure):
-    _fields_ = [
-        ("position", ctypes.c_float * 3),
-        ("normal", ctypes.c_float * 3),
-        ("uv", ctypes.c_float * 2),
-    ]
-
-
-class PodTriangle(ctypes.Structure):
-    _fields_ = [
-        ("vertices", PodVertex * 3),
-        ("centroid", ctypes.c_float * 3),
-    ]
-
-    @staticmethod
-    def new(vertices: list[PodVertex]) -> "PodTriangle":
-        """Create triangle from vertices and compute centroid."""
-        centroid = np.zeros(3, dtype=np.float32)
-        for v in vertices:
-            centroid += np.array(v.position, dtype=np.float32)
-        centroid /= 3.0
-
-        t = PodTriangle()
-        t.vertices = (PodVertex * 3)(*vertices)
-        t.centroid = (ctypes.c_float * 3)(*centroid)
-        return t
-
-
-class PodGeometry(ctypes.Structure):
-    _fields_ = [
+PodGeometry = np.dtype(
+    [
         ("bvh_node_span_in_heap", PodSpan),
         ("triangle_span_in_heap", PodSpan),
     ]
+)
 
-
-class PodFrameInfo(ctypes.Structure):
-    _fields_ = [
-        ("count", ctypes.c_uint32),
-        ("target_size_w_px", ctypes.c_uint32),
-        ("target_size_h_px", ctypes.c_uint32),
-        ("_rsv", ctypes.c_uint32),
+PodFrameInfo = np.dtype(
+    [
+        ("count", np.uint32),
+        ("target_size_w_px", np.uint32),
+        ("target_size_h_px", np.uint32),
+        ("_rsv", np.uint32),
     ]
+)
 
-
-class PodCamera(ctypes.Structure):
-    _fields_ = [
+PodCamera = np.dtype(
+    [
         ("transform", PodTransform),
-        ("fov_y_rad", ctypes.c_float),
-        ("aspect_ratio", ctypes.c_float),
-        ("target_size_w_px", ctypes.c_uint32),
-        ("target_size_h_px", ctypes.c_uint32),
+        ("fov_y_rad", np.float32),
+        ("aspect_ratio", np.float32),
+        ("target_size_w_px", np.uint32),
+        ("target_size_h_px", np.uint32),
     ]
+)
 
-
-class PodInstance(ctypes.Structure):
-    _fields_ = [
-        ("geometry_id", ctypes.c_uint32),
-        ("material_id", ctypes.c_uint32),
+PodInstance = np.dtype(
+    [
+        ("geometry_id", np.uint32),
+        ("material_id", np.uint32),
         ("transform", PodTransform),
     ]
+)
 
 
 #
@@ -123,12 +96,16 @@ class Draw3dVertex:
     normal: tuple[float, float, float]
     uv: tuple[float, float]
 
-    def to_pod(self) -> PodVertex:
-        return PodVertex(
-            position=(ctypes.c_float * 3)(*self.position),
-            normal=(ctypes.c_float * 3)(*self.normal),
-            uv=(ctypes.c_float * 2)(*self.uv),
+    def to_pod(self) -> np.ndarray:
+        record = np.array(
+            (
+                np.array(self.position, dtype=np.float32),
+                np.array(self.normal, dtype=np.float32),
+                np.array(self.uv, dtype=np.float32),
+            ),
+            dtype=PodVertex,
         )
+        return record
 
 
 @dataclass
@@ -136,6 +113,41 @@ class Draw3dScene:
     # meshes: Dict[mesh_handle] -> List of transforms as (N, 3, 4) arrays
     meshes: Dict[int, np.ndarray] = field(default_factory=dict)
     environment_map: Optional[Rgba32FloatTexture] = None
+
+
+#
+# Helper functions for creating Pod records
+#
+
+
+def create_pod_triangle(vertices: list[np.ndarray]) -> np.ndarray:
+    """Create PodTriangle from vertices and compute centroid."""
+    centroid = np.zeros(3, dtype=np.float32)
+    for v in vertices:
+        centroid += v["position"]
+    centroid /= 3.0
+
+    vertices_array = np.array([v for v in vertices], dtype=PodVertex)
+    record = np.array(
+        (vertices_array, centroid),
+        dtype=PodTriangle,
+    )
+    return record
+
+
+def create_pod_bvh_node(
+    begin: int, end: int, aabb_min: np.ndarray, aabb_max: np.ndarray
+) -> np.ndarray:
+    """Create PodBvhNode record."""
+    record = np.array(
+        (
+            np.array((begin, end), dtype=PodSpan),
+            np.array([0, 0], dtype=np.uint32),
+            np.array([aabb_min, aabb_max], dtype=np.float32),
+        ),
+        dtype=PodBvhNode,
+    )
+    return record
 
 
 #
@@ -255,17 +267,11 @@ def partition_triangles(
     return TrianglesPartitionResult(lt_indices, lt_aabb, rt_indices, rt_aabb)
 
 
-def emplace_bvh_node(nodes: list[PodBvhNode], indices: np.ndarray, aabb: Aabb) -> int:
+def emplace_bvh_node(nodes: list, indices: np.ndarray, aabb: Aabb) -> int:
     """Add a BVH node."""
     index = len(nodes)
 
-    node = PodBvhNode()
-    node.span.begin = 0  # Will be set later during upload
-    node.span.end = len(indices)
-    node.children = (ctypes.c_uint32 * 2)(0, 0)
-    node.aabb[0] = (ctypes.c_float * 3)(*aabb[0])
-    node.aabb[1] = (ctypes.c_float * 3)(*aabb[1])
-
+    node = create_pod_bvh_node(0, len(indices), aabb[0], aabb[1])
     nodes.append(node)
     return index
 
@@ -275,12 +281,13 @@ def try_partition_bvh_node(
     indices: np.ndarray,
     centroids: np.ndarray,
     aabbs: list[Aabb],
-    nodes: list[PodBvhNode],
+    nodes: list,
 ) -> None:
     """Recursively partition BVH node."""
     # Assert leaf
     assert (
-        nodes[root_node_idx].children[0] == 0 and nodes[root_node_idx].children[1] == 0
+        nodes[root_node_idx]["children"][0] == 0
+        and nodes[root_node_idx]["children"][1] == 0
     )
 
     if len(indices) <= 1:
@@ -290,8 +297,8 @@ def try_partition_bvh_node(
 
     # SAH cost for current node
     node_aabb = (
-        np.array([n for n in nodes[root_node_idx].aabb[0]], dtype=np.float32),
-        np.array([n for n in nodes[root_node_idx].aabb[1]], dtype=np.float32),
+        nodes[root_node_idx]["aabb"][0].astype(np.float32),
+        nodes[root_node_idx]["aabb"][1].astype(np.float32),
     )
     node_cost = aabb_extent_sum(node_aabb) * len(indices)
 
@@ -307,8 +314,8 @@ def try_partition_bvh_node(
     rt_index = emplace_bvh_node(nodes, res.rt_indices, res.rt_aabb)
 
     # Update children of root node
-    nodes[root_node_idx].children[0] = lt_index
-    nodes[root_node_idx].children[1] = rt_index
+    nodes[root_node_idx]["children"][0] = lt_index
+    nodes[root_node_idx]["children"][1] = rt_index
 
     try_partition_bvh_node(lt_index, res.lt_indices, centroids, aabbs, nodes)
     try_partition_bvh_node(rt_index, res.rt_indices, centroids, aabbs, nodes)
@@ -481,16 +488,16 @@ class Draw3dRenderer:
                 vertex_buffer[triangle_indices[1]].to_pod(),
                 vertex_buffer[triangle_indices[2]].to_pod(),
             ]
-            triangles.append(PodTriangle.new(vertices))
+            triangles.append(create_pod_triangle(vertices))
 
         # Collect centroids and compute AABBs for each triangle
         centroids = np.zeros((len(triangles), 3), dtype=np.float32)
         aabbs: list[Aabb] = []
         for i, tri in enumerate(triangles):
-            centroids[i] = np.array(tri.centroid, dtype=np.float32)
+            centroids[i] = tri["centroid"].astype(np.float32)
             # Compute AABB for this triangle
             positions = np.array(
-                [np.array(v.position, dtype=np.float32) for v in tri.vertices],
+                [v["position"].astype(np.float32) for v in tri["vertices"]],
                 dtype=np.float32,
             )
             aabbs.append(aabb_min_max(positions))
@@ -612,13 +619,14 @@ class Draw3dFrame:
         command_encoder: wgpu.GPUCommandEncoder,
         scene: Draw3dScene,
     ) -> None:
-        frame_info = PodFrameInfo(
-            count=0,  # TODO
-            target_size_w_px=target_size_wh[0],
-            target_size_h_px=target_size_wh[1],
+        frame_info = np.array(
+            (0, target_size_wh[0], target_size_wh[1], 0),
+            dtype=PodFrameInfo,
         )
 
-        self.frame_info_staging_buffer.write(data=frame_info)
+        self.frame_info_staging_buffer.write(
+            data=np.array([frame_info], dtype=PodFrameInfo)
+        )
         self.frame_info_staging_buffer.copy_to_buffer(
             dst=self.frame_info_device_buffer,
             command_encoder=command_encoder,

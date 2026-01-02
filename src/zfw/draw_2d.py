@@ -1,14 +1,17 @@
-import wgpu
-import ctypes
-import numpy as np
 from dataclasses import dataclass
-from .gpu_util import Rgba8UnormTexture, StorageBuffer, StagingBuffer
 
 __all__ = [
     "Draw2dFrame",
     "Draw2dQuad",
     "Draw2dRenderer",
 ]
+
+
+import wgpu
+import numpy as np
+import numpy.typing as npt
+
+from .gpu_util import Rgba8UnormTexture, StorageBuffer, StagingBuffer
 
 
 class Draw2dRenderer:
@@ -218,7 +221,7 @@ class Draw2dFrame:
         device: wgpu.GPUDevice,
         command_encoder: wgpu.GPUCommandEncoder,
         key: wgpu.GPUTexture,
-        quads: list[PodQuad],
+        quads: npt.NDArray,
         bind_group_layout: wgpu.GPUBindGroupLayout,
         sampler: wgpu.GPUSampler,
     ) -> wgpu.GPUBindGroup:
@@ -252,75 +255,81 @@ class Draw2dQuad:
 # Implementation:
 #
 
-
-class PodQuad(ctypes.Structure):
-    _fields_ = [
-        ("dst_xy_ndc", ctypes.c_float * 2),
-        ("dst_wh_ndc", ctypes.c_float * 2),
-        ("src_xy_uv", ctypes.c_float * 2),
-        ("src_wh_uv", ctypes.c_float * 2),
-        ("fill_color_rgba", ctypes.c_float * 4),
-        ("border_thickness_ndc", ctypes.c_float * 4),
-        ("border_color_rgba", ctypes.c_float * 4),
-        ("_rsv", ctypes.c_float * 4),
+POD_QUAD_DTYPE = np.dtype(
+    [
+        ("dst_xy_ndc", np.float32, (2,)),
+        ("dst_wh_ndc", np.float32, (2,)),
+        ("src_xy_uv", np.float32, (2,)),
+        ("src_wh_uv", np.float32, (2,)),
+        ("fill_color_rgba", np.float32, (4,)),
+        ("border_thickness_ndc", np.float32, (4,)),
+        ("border_color_rgba", np.float32, (4,)),
+        ("_rsv", np.float32, (4,)),
     ]
+)
 
-    @staticmethod
-    def from_quad(
-        original: Draw2dQuad, framebuffer_size_wh: tuple[int, int]
-    ) -> "PodQuad":
-        def texture_size():
-            if original.fill_texture:
-                return (original.fill_texture.width, original.fill_texture.height)
-            return (1, 1)
 
-        def ndc2_xy(a):
-            return (
-                (a[0] / framebuffer_size_wh[0]) * 2.0 - 1.0,
-                -(a[1] / framebuffer_size_wh[1]) * 2.0 + 1.0,
-            )
+def pod_quad_from_draw2d_quad(
+    original: Draw2dQuad, framebuffer_size_wh: tuple[int, int]
+) -> np.ndarray:
+    """Convert Draw2dQuad to PodQuad numpy record."""
 
-        def ndc2_wh(a):
-            return (
-                (a[0] / framebuffer_size_wh[0]) * 2.0,
-                -(a[1] / framebuffer_size_wh[1]) * 2.0,
-            )
+    def texture_size():
+        if original.fill_texture:
+            return (original.fill_texture.width, original.fill_texture.height)
+        return (1, 1)
 
-        def ndc_trbl(a):
-            return (
-                -(a[0] / framebuffer_size_wh[1]) * 2.0,
-                (a[1] / framebuffer_size_wh[0]) * 2.0,
-                -(a[2] / framebuffer_size_wh[1]) * 2.0,
-                (a[3] / framebuffer_size_wh[0]) * 2.0,
-            )
-
-        def uv(a):
-            tex_wh = texture_size()
-            return (
-                a[0] / tex_wh[0],
-                a[1] / tex_wh[1],
-            )
-
-        dst_wh = original.dst_wh_px if original.dst_wh_px else framebuffer_size_wh
-        src_xy = original.src_xy_px if original.src_xy_px else (0, 0)
-        src_wh = original.src_wh_px if original.src_wh_px else texture_size()
-
-        dst_xy_ndc = ndc2_xy(original.dst_xy_px)
-        dst_wh_ndc = ndc2_wh(dst_wh)
-        src_xy_uv = uv(src_xy)
-        src_wh_uv = uv(src_wh)
-        border_thickness_ndc = ndc_trbl(original.border_thickness_px)
-
-        return PodQuad(
-            dst_xy_ndc=(ctypes.c_float * 2)(*dst_xy_ndc),
-            dst_wh_ndc=(ctypes.c_float * 2)(*dst_wh_ndc),
-            src_xy_uv=(ctypes.c_float * 2)(*src_xy_uv),
-            src_wh_uv=(ctypes.c_float * 2)(*src_wh_uv),
-            fill_color_rgba=(ctypes.c_float * 4)(*original.fill_color_rgba),
-            border_thickness_ndc=(ctypes.c_float * 4)(*border_thickness_ndc),
-            border_color_rgba=(ctypes.c_float * 4)(*original.border_color_rgba),
-            _rsv=(ctypes.c_float * 4)(0, 0, 0, 0),
+    def ndc2_xy(a):
+        return (
+            (a[0] / framebuffer_size_wh[0]) * 2.0 - 1.0,
+            -(a[1] / framebuffer_size_wh[1]) * 2.0 + 1.0,
         )
+
+    def ndc2_wh(a):
+        return (
+            (a[0] / framebuffer_size_wh[0]) * 2.0,
+            -(a[1] / framebuffer_size_wh[1]) * 2.0,
+        )
+
+    def ndc_trbl(a):
+        return (
+            -(a[0] / framebuffer_size_wh[1]) * 2.0,
+            (a[1] / framebuffer_size_wh[0]) * 2.0,
+            -(a[2] / framebuffer_size_wh[1]) * 2.0,
+            (a[3] / framebuffer_size_wh[0]) * 2.0,
+        )
+
+    def uv(a):
+        tex_wh = texture_size()
+        return (
+            a[0] / tex_wh[0],
+            a[1] / tex_wh[1],
+        )
+
+    dst_wh = original.dst_wh_px if original.dst_wh_px else framebuffer_size_wh
+    src_xy = original.src_xy_px if original.src_xy_px else (0, 0)
+    src_wh = original.src_wh_px if original.src_wh_px else texture_size()
+
+    dst_xy_ndc = ndc2_xy(original.dst_xy_px)
+    dst_wh_ndc = ndc2_wh(dst_wh)
+    src_xy_uv = uv(src_xy)
+    src_wh_uv = uv(src_wh)
+    border_thickness_ndc = ndc_trbl(original.border_thickness_px)
+
+    record = np.array(
+        (
+            np.array(dst_xy_ndc, dtype=np.float32),
+            np.array(dst_wh_ndc, dtype=np.float32),
+            np.array(src_xy_uv, dtype=np.float32),
+            np.array(src_wh_uv, dtype=np.float32),
+            np.array(original.fill_color_rgba, dtype=np.float32),
+            np.array(border_thickness_ndc, dtype=np.float32),
+            np.array(original.border_color_rgba, dtype=np.float32),
+            np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        ),
+        dtype=POD_QUAD_DTYPE,
+    )
+    return record
 
 
 class QuadGroup:
@@ -337,13 +346,13 @@ class QuadGroup:
         self.device_buffer = StorageBuffer(
             device=device,
             count=self.capacity,
-            dtype=PodQuad,
+            dtype=POD_QUAD_DTYPE,
             label="Draw2dFrame.QuadBatch.DeviceBuffer",
         )
         self.staging_buffer = StagingBuffer(
             device=device,
             count=self.capacity,
-            dtype=PodQuad,
+            dtype=POD_QUAD_DTYPE,
             label="Draw2dFrame.QuadBatch.StagingBuffer",
         )
 
@@ -377,7 +386,7 @@ class QuadGroup:
         command_encoder: wgpu.GPUCommandEncoder,
         quad_batch_bind_group_layout: wgpu.GPUBindGroupLayout,
         quad_batch_sampler: wgpu.GPUSampler,
-        data: list[PodQuad],
+        data: npt.NDArray,
     ) -> wgpu.GPUBindGroup:
         self.realloc_if_needed(
             device=device,
@@ -386,7 +395,9 @@ class QuadGroup:
             quad_batch_sampler=quad_batch_sampler,
         )
 
-        self.staging_buffer.write(data=np.asarray(data))
+        # Convert list of numpy records to numpy array
+        data_array = np.array(data, dtype=POD_QUAD_DTYPE)
+        self.staging_buffer.write(data=data_array)
         self.staging_buffer.copy_to_buffer(
             dst=self.device_buffer,
             command_encoder=command_encoder,
@@ -423,7 +434,7 @@ class QuadGroup:
 class QuadBatchList:
     def __init__(self, quads: list[Draw2dQuad], framebuffer_size_wh: tuple[int, int]):
         self.draw_ranges: list[tuple[wgpu.GPUTexture | None, range]] = []
-        self.bind_groups: dict[wgpu.GPUTexture | None, list[PodQuad]] = {}
+        self.bind_groups: dict[wgpu.GPUTexture | None, npt.NDArray] = {}
 
         if not quads:
             return
@@ -442,18 +453,22 @@ class QuadBatchList:
             else:
                 runs.append(range(i, i + 1))
 
+        group_quad_dict = {}
         for run in runs:
             image = quads[run.start].fill_texture
 
-            if image not in self.bind_groups:
-                self.bind_groups[image] = []
+            if image not in group_quad_dict:
+                group_quad_dict[image] = []
 
-            group_quads = self.bind_groups[image]
+            group_quads = group_quad_dict[image]
             group_offset = len(group_quads)
             group_length = len(run)
 
             for i in run:
-                group_quads.append(PodQuad.from_quad(quads[i], framebuffer_size_wh))
+                quad = pod_quad_from_draw2d_quad(quads[i], framebuffer_size_wh)
+                group_quads.append(quad)
+
+            self.bind_groups[image] = np.array(group_quads, dtype=POD_QUAD_DTYPE)
 
             self.draw_ranges.append(
                 (image, range(group_offset, group_offset + group_length))
