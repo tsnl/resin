@@ -1,3 +1,22 @@
+//
+// Bindings:
+//
+
+// Renderer bind group:
+@group(0) @binding(0) var<storage, read> geometry_heap: array<PodGeometry>;
+@group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
+@group(0) @binding(2) var<storage, read> triangle_heap: array<PodTriangle>;
+
+// Per-frame bind group:
+@group(1) @binding(0) var output_image: texture_storage_2d<rgba32float, write>;
+@group(1) @binding(1) var<uniform> frame_info: PodFrameInfo;
+@group(1) @binding(2) var<storage, read> camera: PodCamera;
+@group(1) @binding(3) var<storage, read> instances: array<PodInstance>;
+
+//
+// Pod types: used for CPU-GPU data exchange.
+//
+
 struct PodFrameInfo {
     count: u32,
     target_w_px: u32,
@@ -52,14 +71,9 @@ struct PodTransform {
     rotation: array<f32, 4>,
 }
 
-@group(0) @binding(0) var<storage, read> geometry_heap: array<PodGeometry>;
-@group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
-@group(0) @binding(2) var<storage, read> triangle_heap: array<PodTriangle>;
-
-@group(1) @binding(0) var output_image: texture_storage_2d<rgba32float, write>;
-@group(1) @binding(1) var<uniform> frame_info: PodFrameInfo;
-@group(1) @binding(2) var<storage, read> camera: PodCamera;
-@group(1) @binding(3) var<storage, read> instances: array<PodInstance>;
+//
+// Entry point:
+//
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
