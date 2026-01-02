@@ -1,22 +1,30 @@
+import logging
 from pathlib import Path
 
 import numpy as np
 import PIL.Image
 import pytest
 import wgpu
-import wgpu.backends.wgpu_native
 
-from .basic import BaseDisposable, Font, FontSize, FontWeight, logger
-from .draw_2d import Draw2dRenderer, Draw2dFrame, Draw2dQuad
-from .draw_2d_ext import (
+from zfw import (
+    setup_logging,
+    BaseDisposable,
+    Font,
+    FontSize,
+    FontWeight,
+    logger,
+    Draw2dRenderer,
+    Draw2dFrame,
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
     Draw2dExtTextPrimitive,
     Draw2dExtCanvas,
+    compute_psnr,
+    convert_color,
+    load_rgba_image,
+    ReadbackBuffer,
+    Rgba8UnormTexture,
 )
-from .images import compute_psnr, convert_color
-from .loader import load_rgba_image
-from .gpu_util import ReadbackBuffer, Rgba8UnormTexture
 
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
@@ -93,6 +101,8 @@ class Draw2dExTestEngine(BaseDisposable):
 
     def __init__(self, *, scale: float = 1.0) -> None:
         super().__init__()
+
+        setup_logging(level=logging.ERROR)
 
         self._scale = scale
 

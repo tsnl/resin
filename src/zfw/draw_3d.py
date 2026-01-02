@@ -1,3 +1,10 @@
+__all__ = [
+    "Draw3dFrame",
+    "Draw3dRenderer",
+    "Draw3dScene",
+    "Draw3dVertex",
+]
+
 import wgpu
 import math
 import numpy as np
@@ -9,13 +16,6 @@ from .gpu_util import (
     UniformBuffer,
     StagingBuffer,
 )
-
-__all__ = [
-    "Draw3dFrame",
-    "Draw3dRenderer",
-    "Draw3dScene",
-    "Draw3dVertex",
-]
 
 #
 # POD Types (NumPy structured dtypes)

@@ -1,11 +1,10 @@
-from dataclasses import dataclass
-
 __all__ = [
     "Draw2dFrame",
     "Draw2dQuad",
     "Draw2dRenderer",
 ]
 
+from dataclasses import dataclass
 
 import wgpu
 import numpy as np

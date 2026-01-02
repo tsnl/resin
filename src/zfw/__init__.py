@@ -1,11 +1,16 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
+    "BaseDisposable",
     "BufferWrapper",
     "ButtonAction",
     "ColorSpace",
     "CookedAtlas",
     "CookedAtlasGlyphCacheKey",
     "CookedAtlasGlyphInfo",
+    "Draw2dExtBasePrimitive",
+    "Draw2dExtCanvas",
+    "Draw2dExtQuadPrimitive",
+    "Draw2dExtTextPrimitive",
     "Draw2dFrame",
     "Draw2dQuad",
     "Draw2dRenderer",
@@ -28,7 +33,12 @@ __all__ = [
     "TextureWrapper",
     "UniformBuffer",
     "VertexBuffer",
+    "compute_psnr",
+    "convert_color",
+    "convert_linear_to_srgb",
+    "convert_srgb_to_linear",
     "expect",
+    "load_rgba_image",
     "logger",
     "round_up_to_po2",
     "setup_logging",
@@ -41,6 +51,7 @@ from .basic import (
     FontSize,
     FontWeight,
     Key,
+    BaseDisposable,
     KeyModifier,
     SupportsWrite,
     expect,
@@ -52,6 +63,12 @@ from .draw_2d import (
     Draw2dFrame,
     Draw2dQuad,
     Draw2dRenderer,
+)
+from .draw_2d_ext import (
+    Draw2dExtBasePrimitive,
+    Draw2dExtQuadPrimitive,
+    Draw2dExtTextPrimitive,
+    Draw2dExtCanvas,
 )
 from .draw_3d import (
     Draw3dFrame,
@@ -73,3 +90,10 @@ from .gpu_util import (
 )
 from .cook import CookedAtlas, CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey
 from .bundled_data import BUNDLED_DATA_PATH
+from .images import (
+    compute_psnr,
+    convert_color,
+    convert_linear_to_srgb,
+    convert_srgb_to_linear,
+)
+from .loader import load_rgba_image
