@@ -66,14 +66,18 @@ _VIEWER_THEME: zfw.GuiTheme = {
 
 
 class FreeCameraController:
-    """Free-look camera controller with WASD + mouse."""
+    """Free-look camera controller with WASD + mouse.
+
+    Camera coordinate system (local): +X right, +Y forward, +Z up
+    World coordinate system: +X right, +Y forward, +Z up
+    """
 
     def __init__(
         self,
         *,
-        position: tuple[float, float, float] = (0.0, 0.0, 3.0),
-        yaw: float = 0.0,  # radians, looking along -Z when 0
-        pitch: float = 0.0,  # radians, looking forward when 0
+        position: tuple[float, float, float] = (0.0, -3.0, 0.0),
+        yaw: float = 0.0,  # radians, rotation around Z axis (0 = looking along +Y)
+        pitch: float = 0.0,  # radians, rotation around X axis (0 = horizontal, + = up, - = down)
         move_speed: float = 2.0,
         look_speed: float = 0.002,
     ):
@@ -144,40 +148,32 @@ class FreeCameraController:
 
     def handle_mouse_move(self, dx: float, dy: float) -> None:
         """Handle mouse movement for looking around."""
-        self.yaw -= dx * self.look_speed
-        self.pitch -= dy * self.look_speed
+        # Yaw: rotate around world Z axis (left/right look)
+        self.yaw += dx * self.look_speed
 
-        # Clamp pitch to avoid gimbal lock
-        max_pitch = math.pi / 2 - 0.01
-        self.pitch = max(-max_pitch, min(max_pitch, self.pitch))
+        # Pitch: rotate around camera's local X axis (up/down look)
+        # dy is positive when mouse moves down, so we add (not subtract) to make it intuitive
+        self.pitch += dy * self.look_speed
+
+        # Clamp pitch to prevent flipping over
+        self.pitch = np.clip(self.pitch, -math.pi / 2 + 0.01, math.pi / 2 - 0.01)
 
     def update(self, dt: float) -> None:
         """Update camera position based on movement keys."""
-        # Compute forward and right vectors based on yaw and pitch
-        # Forward: the direction the camera is looking
-        # For a standard FPS camera:
-        #   - yaw=0 looks along -Z
-        #   - pitch=0 is horizontal
-        #   - pitch>0 looks up
-        cy, sy = math.cos(self.yaw), math.sin(self.yaw)
-        cp, sp = math.cos(self.pitch), math.sin(self.pitch)
+        # Movement directions in world space (horizontal XY plane)
+        cos_yaw = math.cos(self.yaw)
+        sin_yaw = math.sin(self.yaw)
 
-        # Forward direction (where camera looks)
-        forward = np.array(
-            [-sy * cp, sp, -cy * cp],
-            dtype=np.float32,
-        )
+        # Forward/backward in XY plane (ignoring pitch)
+        forward = np.array([sin_yaw, cos_yaw, 0.0], dtype=np.float32)
 
-        # Right direction (always horizontal for FPS-style movement)
-        right = np.array(
-            [cy, 0.0, -sy],
-            dtype=np.float32,
-        )
+        # Right is perpendicular to forward in XY plane
+        right = np.array([cos_yaw, -sin_yaw, 0.0], dtype=np.float32)
 
-        # Up is world up (Y+)
-        up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        # Up is always world +Z
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-        # Compute movement direction
+        # Accumulate movement
         move_dir = np.zeros(3, dtype=np.float32)
         if self.forward_pressed:
             move_dir += forward
@@ -192,40 +188,46 @@ class FreeCameraController:
         if self.down_pressed:
             move_dir -= up
 
-        # Normalize and apply movement
+        # Normalize and apply
         length = np.linalg.norm(move_dir)
         if length > 0:
             move_dir /= length
             self.position += move_dir * self.move_speed * dt
 
     def get_transform(self) -> np.ndarray:
-        """Get the camera's 4x4 world transform matrix.
+        """Get the camera's 4x4 world-to-camera transform matrix.
 
-        Returns a matrix where:
-        - Columns 0-2 are the camera's X, Y, Z basis vectors in world space
-        - Column 3 is the camera's position in world space
+        Returns a matrix where columns represent camera's local axes in world space:
+        - Column 0: camera's +X (right) in world space
+        - Column 1: camera's +Y (forward) in world space
+        - Column 2: camera's +Z (up) in world space
+        - Column 3: camera position in world space
         """
-        # Compute rotation matrix from yaw and pitch
-        # Must be consistent with update() vectors
-        cy, sy = math.cos(self.yaw), math.sin(self.yaw)
-        cp, sp = math.cos(self.pitch), math.sin(self.pitch)
+        cos_yaw = math.cos(self.yaw)
+        sin_yaw = math.sin(self.yaw)
+        cos_pitch = math.cos(self.pitch)
+        sin_pitch = math.sin(self.pitch)
 
-        # Camera axes in world space
-        # Right: X-axis of camera (always horizontal)
-        right = np.array([cy, 0.0, -sy], dtype=np.float32)
+        # Camera's local X axis (right) in world space
+        # Yaw rotates this in the XY plane
+        right = np.array([cos_yaw, -sin_yaw, 0.0], dtype=np.float32)
 
-        # Forward: -Z axis of camera (where it looks)
-        forward = np.array([-sy * cp, sp, -cy * cp], dtype=np.float32)
+        # Camera's local Y axis (forward/look direction) in world space
+        # Combines yaw (horizontal rotation) and pitch (vertical tilt)
+        forward = np.array(
+            [sin_yaw * cos_pitch, cos_yaw * cos_pitch, sin_pitch],
+            dtype=np.float32,
+        )
 
-        # Up: Y-axis of camera
-        up = np.array([sy * sp, cp, cy * sp], dtype=np.float32)
+        # Camera's local Z axis (up) in world space
+        # Perpendicular to both right and forward
+        up = np.cross(forward, right)
 
-        # Build transform matrix
-        # Columns are the camera's basis vectors in world space
+        # Build the transform matrix (camera-to-world)
         transform = np.eye(4, dtype=np.float32)
-        transform[:3, 0] = right  # X-axis (right)
-        transform[:3, 1] = up  # Y-axis (up)
-        transform[:3, 2] = -forward  # Z-axis (camera looks along -Z, so negate forward)
+        transform[:3, 0] = right
+        transform[:3, 1] = forward
+        transform[:3, 2] = up
         transform[:3, 3] = self.position
 
         return transform
@@ -257,17 +259,19 @@ class GltfViewerWidget(zfw.GuiWidget):
         # State
         self._current_model_index = 0
         self._current_env_index = 0
-        self._camera = FreeCameraController(position=(0.0, 0.0, 3.0))
+        self._camera = FreeCameraController(position=(0.0, -3.0, 0.0))
         self._mouse_captured = False
         self._last_mouse_x = 0.0
         self._last_mouse_y = 0.0
 
         # 3D resources
-        self._meshes: dict[
-            tuple[zfw.Draw3dGeometry, zfw.Draw3dMaterial],
-            np.ndarray,
-        ] | None = None
-        self._environment_map: zfw.GuiImage | None = None
+        self._meshes: (
+            dict[
+                tuple[zfw.Draw3dGeometry, zfw.Draw3dMaterial],
+                np.ndarray,
+            ]
+            | None
+        ) = None
 
         # HUD widgets
         self._top_bar = zfw.GuiWidget(
@@ -307,7 +311,7 @@ class GltfViewerWidget(zfw.GuiWidget):
             row=0,
             col=0,
             style_classes=["hud-label"],
-            text="Click to look | WASD+Space/Shift to move | 1-9 change model | F1-F9 change env | ESC to release mouse",
+            text="Click to look | WASD+Space/Shift to move | 1-9 change model | ESC to release mouse",
         )
 
         # Setup key event handler
@@ -315,7 +319,6 @@ class GltfViewerWidget(zfw.GuiWidget):
 
         # Load initial model and environment
         self._load_model()
-        self._load_environment()
 
     def _load_model(self) -> None:
         """Load the currently selected model."""
@@ -331,67 +334,10 @@ class GltfViewerWidget(zfw.GuiWidget):
             return
 
         LOG.info(f"Loading model: {model_name}")
-        self._meshes = zfw.load_gltf(
-            self._gui_window.draw_3d_renderer,
-            model_path,
-            transform_coordinate_system=False,
-        )
+        self._meshes = zfw.load_gltf(self._gui_window.draw_3d_renderer, model_path)
 
         # Update label
         self._model_label._text = f"Model: {model_name}"
-
-    def _load_environment(self) -> None:
-        """Load the currently selected environment map."""
-        # Dispose old environment
-        if self._environment_map is not None:
-            self._environment_map.dispose()
-            self._environment_map = None
-
-        # Load new environment
-        env_name, env_file = ENVIRONMENTS[self._current_env_index]
-        env_path = self._environments_path / env_file
-
-        if not env_path.exists():
-            LOG.warning(f"Environment not found: {env_path}")
-            return
-
-        LOG.info(f"Loading environment: {env_name}")
-        env_pixels = zfw.load_rgba_image(env_path)
-        env_height, env_width = env_pixels.shape[:2]
-
-        # Convert from float32 linear to uint8 for GPU upload
-        env_pixels_u8 = (np.clip(env_pixels, 0.0, 1.0) * 255).astype(np.uint8)
-
-        # Create WebGPU texture
-        import wgpu
-        self._environment_map = self._gui_window.device.create_texture(
-            size=(env_width, env_height, 1),
-            format=wgpu.TextureFormat.rgba8unorm,
-            usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
-            label=f"EnvironmentMap:{env_name}",
-        )
-
-        # Upload pixels
-        self._gui_window.queue.write_texture(
-            destination=wgpu.TexelCopyTextureInfo(
-                texture=self._environment_map,
-                mip_level=0,
-                origin=(0, 0, 0),
-            ),
-            data=env_pixels_u8,
-            data_layout=wgpu.TexelCopyBufferLayout(
-                offset=0,
-                bytes_per_row=env_width * 4,
-                rows_per_image=env_height,
-            ),
-            size=(env_width, env_height, 1),
-        )
-
-        # Update GUI
-        self._gui_window.set_environment_map(self._environment_map)
-
-        # Update label
-        self._env_label._text = f"Env: {env_name}"
 
     def _on_key_event(
         self,
@@ -413,17 +359,6 @@ class GltfViewerWidget(zfw.GuiWidget):
             if idx < len(MODELS):
                 self._current_model_index = idx
                 self._load_model()
-            return
-
-        # Handle environment switching (F1-F9)
-        if key is not None and key.startswith("f") and len(key) <= 2:
-            try:
-                idx = int(key[1:]) - 1
-                if 0 <= idx < len(ENVIRONMENTS):
-                    self._current_env_index = idx
-                    self._load_environment()
-            except ValueError:
-                pass
             return
 
         # Handle escape to release mouse
@@ -483,13 +418,6 @@ class GltfViewerWidget(zfw.GuiWidget):
                 max_distance=100.0,
             ),
         )
-
-    def _on_dispose(self) -> None:
-        # Note: Meshes (geometry/materials) are managed by the Draw3dRenderer
-        # and don't need explicit disposal here
-        if self._environment_map is not None:
-            self._environment_map.destroy()
-        super()._on_dispose()
 
 
 _VIEWER_THEME: zfw.GuiTheme = {

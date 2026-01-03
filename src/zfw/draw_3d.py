@@ -300,7 +300,9 @@ class Draw3dFrame:
             label="Draw3dFrame.OutputImage",
             size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
             format=wgpu.TextureFormat.rgba32float,
-            usage=wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_SRC | wgpu.TextureUsage.TEXTURE_BINDING,
+            usage=wgpu.TextureUsage.STORAGE_BINDING
+            | wgpu.TextureUsage.COPY_SRC
+            | wgpu.TextureUsage.TEXTURE_BINDING,
         )
         self.frame_info_device_buffer = self._device.create_buffer(
             label="Draw3dFrame.FrameInfoDeviceBuffer",

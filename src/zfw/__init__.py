@@ -19,6 +19,7 @@ __all__ = [
     "Draw3dMaterial",
     "Draw3dRenderer",
     "Draw3dScene",
+    "GuiTheme",
     "Draw3dScene",
     "Font",
     "FontSize",
@@ -87,5 +88,5 @@ from .images import (
     convert_srgb_to_linear,
 )
 from .loader import load_rgba_image, load_gltf
-from .gui import GuiWidget, GuiWindow
+from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
