@@ -10,7 +10,7 @@
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba32float, write>;
 @group(1) @binding(1) var<uniform> frame_info: PodFrameInfo;
-@group(1) @binding(2) var<storage, read> camera: PodCamera;
+@group(1) @binding(2) var<uniform> camera: PodCamera;
 @group(1) @binding(3) var<storage, read> instances: array<PodInstance>;
 
 //
@@ -67,9 +67,9 @@ struct PodAabb {
 }
 
 struct PodTransform {
-    row0: array<f32, 4>,
-    row1: array<f32, 4>,
-    row2: array<f32, 4>,
+    row0: vec4<f32>,
+    row1: vec4<f32>,
+    row2: vec4<f32>,
 }
 fn mat4x4_from_pod_transform(t: PodTransform) -> mat4x4<f32> {
     let col0 = vec4<f32>(t.row0[0], t.row1[0], t.row2[0], 0.0);
@@ -88,7 +88,7 @@ const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
 
 struct Ray {
     origin: vec3<f32>,
-    direction: vec3<f32>,
+    direction: vec3<f32>,   // Does not need to be normalized, but never 0
 }
 
 struct Aabb {
@@ -101,9 +101,9 @@ struct Aabb {
 fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
     let lo = aabb.min;
     let hi = aabb.max;
-    
+
     let inv_dir = 1.0 / ray.direction;
-        
+
     let t_lo = (lo - ray.origin) * inv_dir;
     let t_hi = (hi - ray.origin) * inv_dir;
 
@@ -189,17 +189,54 @@ fn hit_tri(ray: Ray, v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>) -> vec4<f32> {
     );
 }
 
+fn transform_ray(ray: Ray, transform: mat4x4<f32>) -> Ray {
+    let origin_h = vec4<f32>(ray.origin, 1.0);
+    let direction_h = vec4<f32>(ray.direction, 0.0);
+    let transformed_origin_h = transform * origin_h;
+    let transformed_direction_h = transform * direction_h;
+    return Ray(transformed_origin_h.xyz, transformed_direction_h.xyz);
+}
+
 //
 // Entry point:
 //
+
+fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
+    // Compute 2D NDC coordinates of the pixel in the output image:
+    let target_size_wh_px_f = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
+    let pixel_coord_px_f = vec2<f32>(pixel_coord_px);
+    let pixel_coord_ndc = vec2<f32>(
+        (pixel_coord_px_f.x / target_size_wh_px_f.x) * 2.0 - 1.0,
+        1.0 - (pixel_coord_px_f.y / target_size_wh_px_f.y) * 2.0,
+    );
+
+    // Compute 3D camera-space coordinates of the pixel on the sensor plane at unit focal length.
+    // NOTE: Camera looks down +Y axis, with +X to the right and +Z up.
+    let sensor_hw_at_unit_focal_length = tan(camera.fov_y_rad / 2.0) * camera.aspect_ratio;
+    let sensor_hh_at_unit_focal_length = tan(camera.fov_y_rad / 2.0);
+    let sensor_pixel_camera_space = vec3<f32>(
+        pixel_coord_ndc.x * sensor_hw_at_unit_focal_length,     // sensor right
+        -1.0,                                                   // sensor plane at unit focal length
+        pixel_coord_ndc.y * sensor_hh_at_unit_focal_length,     // sensor up
+    );
+
+    // Create ray in camera space, then transform to world space.
+    let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), -sensor_pixel_camera_space);
+    let camera_transform = mat4x4_from_pod_transform(camera.transform);
+    return transform_ray(camera_space_ray, camera_transform);
+}
+
+fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
+    let ray = gen_primary_ray(pixel_xy);
+    return vec4<f32>(normalize(ray.direction), 1.0);
+}
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if global_id.x >= frame_info.target_size_w_px || global_id.y >= frame_info.target_size_h_px {
         return;
     }
-    let r = f32(global_id.x) / f32(frame_info.target_size_w_px);
-    let g = f32(global_id.y) / f32(frame_info.target_size_h_px);
-    let b = 1.0 - r;
-    textureStore(output_image, global_id.xy, vec4<f32>(r, g, b, 1.0));
+
+    let pixel_color = pixel_main(global_id.xy);
+    textureStore(output_image, vec2<i32>(global_id.xy), pixel_color);
 }
