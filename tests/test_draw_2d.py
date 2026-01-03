@@ -47,7 +47,7 @@ def test_basic_draw_2d(gpu: GpuFixture):
         rainbow_texture.size(),
     )
 
-    renderer = Draw2dRenderer.create(device, queue, (1024, 1024))
+    renderer = Draw2dRenderer(device, queue, (1024, 1024))
     frame = Draw2dFrame(device=device, target_size_wh=(1024, 1024))
     readback_buffer = ReadbackBuffer(
         device=device,

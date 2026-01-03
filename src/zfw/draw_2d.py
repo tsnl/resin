@@ -26,29 +26,29 @@ class Draw2dRenderer:
         self.bind_group_layout = device.create_bind_group_layout(
             label="Draw2dRenderer.QuadBatch.BindGroupLayout",
             entries=[
-                {
-                    "binding": 0,
-                    "visibility": wgpu.ShaderStage.VERTEX,
-                    "buffer": {
-                        "type": wgpu.BufferBindingType.read_only_storage,
-                    },
-                },
-                {
-                    "binding": 1,
-                    "visibility": wgpu.ShaderStage.FRAGMENT,
-                    "sampler": {
-                        "type": wgpu.SamplerBindingType.filtering,
-                    },
-                },
-                {
-                    "binding": 2,
-                    "visibility": wgpu.ShaderStage.FRAGMENT,
-                    "texture": {
-                        "sample_type": wgpu.TextureSampleType.float,
-                        "view_dimension": wgpu.TextureViewDimension.d2,
-                        "multisampled": False,
-                    },
-                },
+                wgpu.BindGroupLayoutEntry(
+                    binding=0,
+                    visibility=wgpu.ShaderStage.VERTEX,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=1,
+                    visibility=wgpu.ShaderStage.FRAGMENT,
+                    sampler=wgpu.SamplerBindingLayout(
+                        type=wgpu.SamplerBindingType.filtering,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=2,
+                    visibility=wgpu.ShaderStage.FRAGMENT,
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                        multisampled=False,
+                    ),
+                ),
             ],
         )
 
@@ -65,37 +65,37 @@ class Draw2dRenderer:
         self.pipeline = device.create_render_pipeline(
             label="Draw2dRenderer.Pipeline",
             layout=pipeline_layout,
-            vertex={
-                "module": shader_module,
-                "entry_point": "vs_main",
-            },
-            fragment={
-                "module": shader_module,
-                "entry_point": "fs_main",
-                "targets": [
-                    {
-                        "format": wgpu.TextureFormat.rgba8unorm,
-                        "blend": {
-                            "color": {
-                                "src_factor": wgpu.BlendFactor.src_alpha,
-                                "dst_factor": wgpu.BlendFactor.one_minus_src_alpha,
-                                "operation": wgpu.BlendOperation.add,
-                            },
-                            "alpha": {
-                                "src_factor": wgpu.BlendFactor.one,
-                                "dst_factor": wgpu.BlendFactor.one_minus_src_alpha,
-                                "operation": wgpu.BlendOperation.add,
-                            },
-                        },
-                        "write_mask": wgpu.ColorWrite.ALL,
-                    }
+            vertex=wgpu.VertexState(
+                module=shader_module,
+                entry_point="vs_main",
+            ),
+            fragment=wgpu.FragmentState(
+                module=shader_module,
+                entry_point="fs_main",
+                targets=[
+                    wgpu.ColorTargetState(
+                        format=wgpu.TextureFormat.rgba8unorm,
+                        blend=wgpu.BlendState(
+                            color=wgpu.BlendComponent(
+                                src_factor=wgpu.BlendFactor.src_alpha,
+                                dst_factor=wgpu.BlendFactor.one_minus_src_alpha,
+                                operation=wgpu.BlendOperation.add,
+                            ),
+                            alpha=wgpu.BlendComponent(
+                                src_factor=wgpu.BlendFactor.one,
+                                dst_factor=wgpu.BlendFactor.one_minus_src_alpha,
+                                operation=wgpu.BlendOperation.add,
+                            ),
+                        ),
+                        write_mask=wgpu.ColorWrite.ALL,
+                    )
                 ],
-            },
-            primitive={
-                "topology": wgpu.PrimitiveTopology.triangle_list,
-                "front_face": wgpu.FrontFace.cw,
-                "cull_mode": wgpu.CullMode.back,
-            },
+            ),
+            primitive=wgpu.PrimitiveState(
+                topology=wgpu.PrimitiveTopology.triangle_list,
+                front_face=wgpu.FrontFace.cw,
+                cull_mode=wgpu.CullMode.back,
+            ),
         )
 
         self.default_white_texture = Rgba8UnormTexture(
@@ -119,15 +119,6 @@ class Draw2dRenderer:
             min_filter=wgpu.FilterMode.nearest,
             mipmap_filter=wgpu.MipmapFilterMode.nearest,
         )
-
-    @classmethod
-    def create(
-        cls,
-        device: wgpu.GPUDevice,
-        queue: wgpu.GPUQueue,
-        target_size_wh: tuple[int, int],
-    ) -> "Draw2dRenderer":
-        return cls(device, queue, target_size_wh)
 
     def record(
         self,
@@ -192,13 +183,13 @@ class Draw2dFrame:
         render_pass = command_encoder.begin_render_pass(
             label="Draw2dFrame.RenderPass",
             color_attachments=[
-                {
-                    "view": self.output_image.wgpu_texture().create_view(),
-                    "resolve_target": None,
-                    "load_op": wgpu.LoadOp.clear,
-                    "store_op": wgpu.StoreOp.store,
-                    "clear_value": (0, 0, 0, 0),
-                }
+                wgpu.RenderPassColorAttachment(
+                    view=self.output_image.wgpu_texture().create_view(),
+                    resolve_target=None,
+                    load_op=wgpu.LoadOp.clear,
+                    store_op=wgpu.StoreOp.store,
+                    clear_value=(0, 0, 0, 0),
+                )
             ],
         )
 
@@ -359,22 +350,22 @@ class QuadGroup:
             label="Draw2dFrame.QuadBatch.BindGroup",
             layout=quad_batch_bind_group_layout,
             entries=[
-                {
-                    "binding": 0,
-                    "resource": {
-                        "buffer": self.device_buffer.wgpu_buffer(),
-                        "offset": 0,
-                        "size": self.device_buffer.size_in_bytes,
-                    },
-                },
-                {
-                    "binding": 1,
-                    "resource": quad_batch_sampler,
-                },
-                {
-                    "binding": 2,
-                    "resource": atlas.create_view(),
-                },
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.device_buffer.wgpu_buffer(),
+                        offset=0,
+                        size=self.device_buffer.size_in_bytes,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=quad_batch_sampler,
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=atlas.create_view(),
+                ),
             ],
         )
 

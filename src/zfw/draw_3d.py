@@ -44,17 +44,23 @@ class Draw3dRenderer:
                 wgpu.BindGroupLayoutEntry(
                     binding=0,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=1,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=2,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
                 ),
             ],
         )
@@ -65,26 +71,32 @@ class Draw3dRenderer:
                 wgpu.BindGroupLayoutEntry(
                     binding=0,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    storage_texture={
-                        "access": wgpu.StorageTextureAccess.write_only,
-                        "format": wgpu.TextureFormat.rgba32float,
-                        "view_dimension": wgpu.TextureViewDimension.d2,
-                    },
+                    storage_texture=wgpu.StorageTextureBindingLayout(
+                        access=wgpu.StorageTextureAccess.write_only,
+                        format=wgpu.TextureFormat.rgba32float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                    ),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=1,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer={"type": wgpu.BufferBindingType.uniform},
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.uniform
+                    ),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=2,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer={"type": wgpu.BufferBindingType.uniform},
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.uniform
+                    ),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=3,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer={"type": wgpu.BufferBindingType.read_only_storage},
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
                 ),
             ],
         )

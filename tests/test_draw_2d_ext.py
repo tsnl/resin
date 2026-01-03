@@ -54,7 +54,7 @@ class Draw2dExTestEngine(BaseDisposable):
         self.queue = self.device.queue
 
         # Create renderer and frame
-        self.renderer = Draw2dRenderer.create(
+        self.renderer = Draw2dRenderer(
             self.device,
             self.queue,
             (int(TEST_IMAGE_W * self._scale), int(TEST_IMAGE_H * self._scale)),
