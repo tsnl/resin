@@ -91,6 +91,61 @@ struct PodTransform {
     row3: vec4<f32>,
 }
 
+fn get_triangle_vertices_positions(triangle_id: u32) -> mat3x3<f32> {
+    let pod_triangle = triangle_heap[triangle_id];
+    let v0 = vec3<f32>(
+        pod_triangle.vertices[0].position[0],
+        pod_triangle.vertices[0].position[1],
+        pod_triangle.vertices[0].position[2],
+    );
+    let v1 = vec3<f32>(
+        pod_triangle.vertices[1].position[0],
+        pod_triangle.vertices[1].position[1],
+        pod_triangle.vertices[1].position[2],
+    );
+    let v2 = vec3<f32>(
+        pod_triangle.vertices[2].position[0],
+        pod_triangle.vertices[2].position[1],
+        pod_triangle.vertices[2].position[2],
+    );
+    return mat3x3<f32>(v0, v1, v2);
+}
+fn get_triangle_vertices_normals(triangle_id: u32) -> mat3x3<f32> {
+    let pod_triangle = triangle_heap[triangle_id];
+    let v0 = vec3<f32>(
+        pod_triangle.vertices[0].normal[0],
+        pod_triangle.vertices[0].normal[1],
+        pod_triangle.vertices[0].normal[2],
+    );
+    let v1 = vec3<f32>(
+        pod_triangle.vertices[1].normal[0],
+        pod_triangle.vertices[1].normal[1],
+        pod_triangle.vertices[1].normal[2],
+    );
+    let v2 = vec3<f32>(
+        pod_triangle.vertices[2].normal[0],
+        pod_triangle.vertices[2].normal[1],
+        pod_triangle.vertices[2].normal[2],
+    );
+    return mat3x3<f32>(v0, v1, v2);
+}
+fn get_triangle_vertices_texcoords(triangle_id: u32) -> mat3x2<f32> {
+    let pod_triangle = triangle_heap[triangle_id];
+    let v0 = vec2<f32>(
+        pod_triangle.vertices[0].uv[0],
+        pod_triangle.vertices[0].uv[1],
+    );
+    let v1 = vec2<f32>(
+        pod_triangle.vertices[1].uv[0],
+        pod_triangle.vertices[1].uv[1],
+    );
+    let v2 = vec2<f32>(
+        pod_triangle.vertices[2].uv[0],
+        pod_triangle.vertices[2].uv[1],
+    );
+    return mat3x2<f32>(v0, v1, v2);
+}
+
 //
 // Linalg
 //
@@ -230,7 +285,7 @@ fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
     let triangle_span = geometry_heap[geometry_id].triangle_span_in_heap;
     var closest_hit_record = new_invalid_geometry_hit_record();
     for (var triangle_id = triangle_span.begin; triangle_id < triangle_span.end; triangle_id++) {
-        let triangle_vertices = load_triangle_vertices_positions(triangle_id);
+        let triangle_vertices = get_triangle_vertices_positions(triangle_id);
         let hit_result = hit_triangle(ray, triangle_vertices);
         if hit_result.w > 0.0 && hit_result.w < closest_hit_record.triangle_raycast_result.w {
             closest_hit_record.triangle_raycast_result = hit_result;
@@ -238,25 +293,6 @@ fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
         }
     }
     return closest_hit_record;
-}
-fn load_triangle_vertices_positions(triangle_id: u32) -> mat3x3<f32> {
-    let pod_triangle = triangle_heap[triangle_id];
-    let v0 = vec3<f32>(
-        pod_triangle.vertices[0].position[0],
-        pod_triangle.vertices[0].position[1],
-        pod_triangle.vertices[0].position[2],
-    );
-    let v1 = vec3<f32>(
-        pod_triangle.vertices[1].position[0],
-        pod_triangle.vertices[1].position[1],
-        pod_triangle.vertices[1].position[2],
-    );
-    let v2 = vec3<f32>(
-        pod_triangle.vertices[2].position[0],
-        pod_triangle.vertices[2].position[1],
-        pod_triangle.vertices[2].position[2],
-    );
-    return mat3x3<f32>(v0, v1, v2);
 }
 
 /// Triangle-ray intersection test
@@ -364,7 +400,7 @@ struct HitDetails {
     world_hit_position: vec3<f32>,
     world_hit_distance: f32,
     barycentric_coordinates: vec3<f32>,
-    uv: vec3<f32>,
+    texcoords: vec2<f32>,
     tbn: mat3x3<f32>,
 }
 fn compute_hit_details(hit: HitRecord) -> HitDetails {
@@ -372,8 +408,68 @@ fn compute_hit_details(hit: HitRecord) -> HitDetails {
     hit_details.world_hit_position = hit.world_hit_position;
     hit_details.world_hit_distance = hit.world_hit_distance;
     hit_details.barycentric_coordinates = hit.barycentric_coordinates.xyz;
-    // TODO: Compute UVs and TBN
+    hit_details.texcoords = compute_hit_details_texcoords(hit);
+    hit_details.tbn = compute_hit_details_tbn_matrix(hit);
     return hit_details;
+}
+fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
+    let uv = get_triangle_vertices_texcoords(hit.triangle_id);
+    let bc = hit.barycentric_coordinates;
+    let interpolated_uv = bc.x * uv[0] + bc.y * uv[1] + bc.z * uv[2];
+    return interpolated_uv;
+}
+fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
+    let triangle = triangle_heap[hit.triangle_id];
+    let instance = instances[hit.instance_id];
+    
+    // Load vertex data:
+    let pos = get_triangle_vertices_positions(hit.triangle_id);
+    let normal = get_triangle_vertices_normals(hit.triangle_id);
+    let uv = get_triangle_vertices_texcoords(hit.triangle_id);
+
+    // Interpolate normal in model space using barycentric coordinates
+    let bc = hit.barycentric_coordinates;
+    let model_normal = normalize(bc.x * normal[0] + bc.y * normal[1] + bc.z * normal[2]);
+    
+    // Compute tangent and bitangent in model space using edge vectors and UV deltas
+    let edge1 = pos[1] - pos[0];
+    let edge2 = pos[2] - pos[0];
+    let delta_uv1 = uv[1] - uv[0];
+    let delta_uv2 = uv[2] - uv[0];
+    
+    let uv_det = delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x;
+    let r = 1.0 / uv_det;
+    let model_tangent = (edge1 * delta_uv2.y - edge2 * delta_uv1.y) * r;
+    let model_bitangent = (edge2 * delta_uv1.x - edge1 * delta_uv2.x) * r;
+    
+    // Transform to world space, accounting for non-uniform scale
+    let transform = h_mat4x4_from_pod_transform(instance.transform);
+    let inv_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
+    
+    // For normals with non-uniform scale, use inverse transpose of the 3x3 rotation/scale part
+    let normal_transform = transpose(mat3x3<f32>(inv_transform[0].xyz, inv_transform[1].xyz, inv_transform[2].xyz));
+    
+    // For tangent/bitangent (surface directions), use the regular 3x3 transform
+    let tangent_transform = mat3x3<f32>(transform[0].xyz, transform[1].xyz, transform[2].xyz);
+    
+    // Apply transforms
+    var world_normal = normalize(normal_transform * model_normal);
+    var world_tangent = normalize(tangent_transform * model_tangent);
+    var world_bitangent = normalize(tangent_transform * model_bitangent);
+    
+    // Gram-Schmidt orthonormalization to ensure TBN is orthonormal after transformation
+    // Re-orthogonalize tangent against normal
+    world_tangent = normalize(world_tangent - dot(world_tangent, world_normal) * world_normal);
+
+    // Re-orthogonalize bitangent against both normal and tangent
+    world_bitangent = normalize(
+        world_bitangent 
+        - dot(world_bitangent, world_normal) * world_normal 
+        - dot(world_bitangent, world_tangent) * world_tangent
+    );
+    
+    // Return TBN matrix with T, B, N as column vectors
+    return mat3x3<f32>(world_tangent, world_bitangent, world_normal);
 }
 
 //
