@@ -42,7 +42,6 @@ struct PodBvhNode {
 }
 struct PodTriangle {
     vertices: array<PodVertex, 3>,
-    centroid: array<f32, 3>,
 }
 struct PodVertex {
     position: array<f32, 3>,

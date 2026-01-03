@@ -74,7 +74,6 @@ from .draw_3d import (
     Draw3dFrame,
     Draw3dRenderer,
     Draw3dScene,
-    Draw3dVertex,
 )
 from .cook import CookedAtlas, CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey
 from .bundled_data import BUNDLED_DATA_PATH

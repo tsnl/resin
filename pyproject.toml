@@ -18,6 +18,7 @@ dependencies = [
     "msgpack>=1.1.2",
     "orjson>=3.11.5",
     "wgpu>=0.19.0",
+    "jaxtyping>=0.3.4",
 ]
 
 [project.optional-dependencies]
@@ -58,4 +59,8 @@ extend-select = [
 
     # import-outside-top-level
     "PLC0415",
+]
+ignore = [
+    # Syntax error in forward annotation (for JaxTyping)
+    "F722",
 ]

@@ -99,12 +99,24 @@ def round_up_to_po2(x: int) -> int:
 class StructuredNDArray(np.ndarray, ABC):
     DTYPE: np.dtype
 
-    def __new__(cls, shape: tuple[int, ...] | int) -> Self:
-        return np.zeros(shape, dtype=cls.DTYPE).view(cls)
+    def __new__(
+        cls,
+        data: npt.ArrayLike,
+        *,
+        copy: bool | np._CopyMode | None = True,
+    ) -> Self:
+        """
+        Replacement for np.array() that returns an instance of this subclass.
+        """
+
+        return np.array(data, dtype=cls.DTYPE, copy=copy).view(cls)
 
     @classmethod
-    def of(cls, arr: npt.ArrayLike) -> Self:
-        return np.asarray(arr, dtype=cls.DTYPE).view(cls)
+    def array_size(cls, *, shape: tuple[int, ...]) -> int:
+        n = 1
+        for dim in shape:
+            n *= dim
+        return n * cls.DTYPE.itemsize
 
 
 #

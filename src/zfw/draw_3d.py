@@ -2,7 +2,6 @@ __all__ = [
     "Draw3dFrame",
     "Draw3dRenderer",
     "Draw3dScene",
-    "Draw3dVertex",
 ]
 
 import math
@@ -10,7 +9,10 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 import numpy as np
+import jaxtyping as jt
 import wgpu
+
+from .basic import BaseDisposable, StructuredNDArray
 
 #
 # Renderer
@@ -18,19 +20,33 @@ import wgpu
 
 
 class Draw3dRenderer:
-    INSTANCE_CAPACITY = 1 << 10
-    GEOMETRY_CAPACITY = 1 << 8
-    BVH_NODE_CAPACITY = 1 << 18
-    TRIANGLE_CAPACITY = 1 << 20
+    device: wgpu.GPUDevice
+
+    target_size_wh_px: tuple[int, int]
+
+    instance_capacity: int
+    geometry_capacity: int
+    bvh_node_capacity: int
+    triangle_capacity: int
 
     def __init__(
         self,
         device: wgpu.GPUDevice,
         queue: wgpu.GPUQueue,
         target_size_wh_px: tuple[int, int],
+        instance_capacity: int = 1 << 10,
+        geometry_capacity: int = 1 << 8,
+        bvh_node_capacity: int = 1 << 18,
+        triangle_capacity: int = 1 << 20,
     ):
         self.device = device
+
         self.target_size_wh_px = target_size_wh_px
+
+        self.instance_capacity = instance_capacity
+        self.geometry_capacity = geometry_capacity
+        self.bvh_node_capacity = bvh_node_capacity
+        self.triangle_capacity = triangle_capacity
 
         self.renderer_bind_group_layout = device.create_bind_group_layout(
             label="Draw3dRenderer.RendererBindGroupLayout",
@@ -116,17 +132,17 @@ class Draw3dRenderer:
 
         self.geometry_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.GeometryHeapDeviceBuffer",
-            size=self.GEOMETRY_CAPACITY * POD_GEOMETRY_DTYPE.itemsize,
+            size=PodGeometryArray.array_size(shape=(self.geometry_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
         self.bvh_node_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
-            size=self.BVH_NODE_CAPACITY * POD_BVH_NODE_DTYPE.itemsize,
+            size=PodBvhNodeArray.array_size(shape=(self.bvh_node_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
         self.triangle_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.TriangleHeapDeviceBuffer",
-            size=self.TRIANGLE_CAPACITY * POD_TRIANGLE_NODE_DTYPE.itemsize,
+            size=PodVertexArray.array_size(shape=(self.triangle_capacity, 3)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
 
@@ -174,43 +190,34 @@ class Draw3dRenderer:
         encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
         queue.submit([encoder.finish()])
 
-    def add_geometry(
-        self,
-        vertex_buffer: list[Draw3dVertex],
-        index_buffer: list[tuple[int, int, int]],
-    ) -> int:
-        """Add geometry to renderer and build BVH."""
-        # Create triangles
-        triangles = []
-        for triangle_indices in index_buffer:
-            vertices = [
-                vertex_buffer[triangle_indices[0]].to_pod(),
-                vertex_buffer[triangle_indices[1]].to_pod(),
-                vertex_buffer[triangle_indices[2]].to_pod(),
-            ]
-            triangles.append(create_pod_triangle(vertices))
+    def _add_geometry(self, vertices: PodVertexArray) -> int:
+        assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
 
-        # Collect centroids and compute AABBs for each triangle
-        centroids = np.zeros((len(triangles), 3), dtype=np.float32)
-        aabbs: list[Aabb] = []
-        for i, tri in enumerate(triangles):
-            centroids[i] = tri["centroid"].astype(np.float32)
-            # Compute AABB for this triangle
-            positions = np.array(
-                [v["position"].astype(np.float32) for v in tri["vertices"]],
-                dtype=np.float32,
-            )
-            aabbs.append(aabb_min_max(positions))
+        vertex_count = vertices.shape[0]
+        triangle_count = vertex_count // 3
 
-        # Build BVH
-        bvh_nodes: list["POD_BVH_NODE_DTYPE"] = []
-        indices = np.arange(len(triangles), dtype=np.uint32)
-        root_aabb = aabb_union(*aabbs)
-        emplace_bvh_node(bvh_nodes, indices, root_aabb)
-        try_partition_bvh_node(0, indices, centroids, aabbs, bvh_nodes)
+        # Allocate:
+        allocation_offset_in_triangles = self.allocated_triangle_count
+        allocation_offset_in_bytes = (
+            allocation_offset_in_triangles * PodVertexArray.DTYPE.itemsize * 3
+        )
+        self.allocated_triangle_count += triangle_count
+        if self.allocated_triangle_count > self.triangle_capacity:
+            raise RuntimeError("Draw3dRenderer triangle heap capacity exceeded.")
 
-        # TODO: Allocate space in heaps and upload
-        raise NotImplementedError("TODO")
+        # Upload:
+        self.triangle_heap_device_buffer.map_sync(
+            mode=wgpu.MapMode.WRITE,
+            offset=allocation_offset_in_bytes,
+            size=vertices.nbytes,
+        )
+        self.triangle_heap_device_buffer.write_mapped(
+            data=vertices,
+            buffer_offset=allocation_offset_in_bytes,
+        )
+
+        # Return offset in triangles:
+        return allocation_offset_in_triangles
 
     def record(
         self,
@@ -228,47 +235,49 @@ class Draw3dRenderer:
 
 
 class Draw3dFrame:
-    def __init__(self, renderer: Draw3dRenderer) -> None:
-        self.device = renderer.device
+    renderer: Draw3dRenderer
 
-        self.output_image = self.device.create_texture(
+    def __init__(self, renderer: Draw3dRenderer) -> None:
+        self.renderer = renderer
+
+        self.output_image = self._device.create_texture(
             label="Draw3dFrame.OutputImage",
             size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
             format=wgpu.TextureFormat.rgba32float,
             usage=wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_SRC,
         )
-        self.frame_info_device_buffer = self.device.create_buffer(
+        self.frame_info_device_buffer = self._device.create_buffer(
             label="Draw3dFrame.FrameInfoDeviceBuffer",
-            size=POD_FRAME_INFO_DTYPE.itemsize,
+            size=PodFrameInfoArray.array_size(shape=(1,)),
             usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
         )
-        self.frame_info_staging_buffer = self.device.create_buffer(
+        self.frame_info_staging_buffer = self._device.create_buffer(
             label="Draw3dFrame.FrameInfoStagingBuffer",
-            size=POD_FRAME_INFO_DTYPE.itemsize,
+            size=PodFrameInfoArray.array_size(shape=(1,)),
             usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
-        self.camera_device_buffer = self.device.create_buffer(
+        self.camera_device_buffer = self._device.create_buffer(
             label="Draw3dFrame.CameraDeviceBuffer",
-            size=POD_CAMERA_DTYPE.itemsize,
+            size=PodCameraArray.array_size(shape=(1,)),
             usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
         )
-        self.camera_staging_buffer = self.device.create_buffer(
+        self.camera_staging_buffer = self._device.create_buffer(
             label="Draw3dFrame.CameraStagingBuffer",
-            size=POD_CAMERA_DTYPE.itemsize,
+            size=PodCameraArray.array_size(shape=(1,)),
             usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
-        self.instances_list_device_buffer = self.device.create_buffer(
+        self.instances_list_device_buffer = self._device.create_buffer(
             label="Draw3dFrame.InstanceHeapDeviceBuffer",
-            size=Draw3dRenderer.INSTANCE_CAPACITY * POD_INSTANCE_DTYPE.itemsize,
+            size=PodInstanceArray.array_size(shape=(self.renderer.instance_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.instances_list_staging_buffer = self.device.create_buffer(
+        self.instances_list_staging_buffer = self._device.create_buffer(
             label="Draw3dFrame.InstanceHeapStagingBuffer",
-            size=Draw3dRenderer.INSTANCE_CAPACITY * POD_INSTANCE_DTYPE.itemsize,
+            size=PodInstanceArray.array_size(shape=(self.renderer.instance_capacity,)),
             usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
 
-        self.bind_group = self.device.create_bind_group(
+        self.bind_group = self._device.create_bind_group(
             label="Draw3dFrame.BindGroup",
             layout=renderer.per_frame_bind_group_layout,
             entries=[
@@ -303,6 +312,10 @@ class Draw3dFrame:
             ],
         )
 
+    @property
+    def _device(self) -> wgpu.GPUDevice:
+        return self.renderer.device
+
     def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
 
@@ -316,12 +329,12 @@ class Draw3dFrame:
     ) -> None:
         frame_info = np.array(
             (0, target_size_wh[0], target_size_wh[1], 0),
-            dtype=POD_FRAME_INFO_DTYPE,
+            dtype=PodFrameInfoArray.DTYPE,
         )
 
         self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
         self.frame_info_staging_buffer.write_mapped(
-            data=np.array([frame_info], dtype=POD_FRAME_INFO_DTYPE)
+            data=np.array([frame_info], dtype=PodFrameInfoArray.DTYPE),
         )
         self.frame_info_staging_buffer.unmap()
 
@@ -348,137 +361,172 @@ class Draw3dFrame:
         compute_pass.end()
 
 
-#
-# POD Types (NumPy structured dtypes)
-#
+class Draw3dGeometry(BaseDisposable):
+    renderer: Draw3dRenderer
 
-POD_SPAN_DTYPE = np.dtype([("begin", np.uint32), ("end", np.uint32)])
+    triangle_count: int
+    vertex_count: int
 
-POD_AABB_DTYPE = np.dtype([("min", np.float32, (3,)), ("max", np.float32, (3,))])
+    geometry_heap_offset_in_triangles: int
 
-POD_TRANSFORM_DTYPE = np.dtype([("matrix", np.float32, (3, 4))])
+    def __init__(
+        self,
+        renderer: Draw3dRenderer,
+        *,
+        v_p_array: jt.Float32[jt.Array, "nv 3"],
+        v_n_array: jt.Float32[jt.Array, "nv 3"],
+        v_t_array: jt.Float32[jt.Array, "nv 2"],
+        t_indices: jt.UInt32[jt.Array, "nt 3"],
+    ) -> None:
+        super().__init__()
 
-POD_VERTEX_DTYPE = np.dtype(
-    [
-        ("position", np.float32, (3,)),
-        ("normal", np.float32, (3,)),
-        ("uv", np.float32, (2,)),
-    ]
-)
+        self.renderer = renderer
+        self.triangle_count = t_indices.shape[0]
+        self.vertex_count = self.triangle_count * 3
 
-POD_TRIANGLE_NODE_DTYPE = np.dtype(
-    [
-        ("vertices", POD_VERTEX_DTYPE, (3,)),
-        ("centroid", np.float32, (3,)),
-    ]
-)
+        # Interleave the vertex arrays:
+        v = np.concatenate([v_p_array, v_n_array, v_t_array], axis=-1)
+        v = v.view(dtype=PodVertexArray.DTYPE).squeeze()
+        assert v.shape == (self.vertex_count,) and v.dtype == PodVertexArray.DTYPE
 
-POD_BVH_NODE_DTYPE = np.dtype(
-    [
-        ("span", POD_SPAN_DTYPE),
-        ("children", np.uint32, (2,)),
-        ("aabb", np.float32, (2, 3)),
-    ]
-)
+        # Compute BVH, reordering indices as needed:
+        # TODO
 
-POD_GEOMETRY_DTYPE = np.dtype(
-    [
-        ("bvh_node_span_in_heap", POD_SPAN_DTYPE),
-        ("triangle_span_in_heap", POD_SPAN_DTYPE),
-    ]
-)
+        # Get rid of the index buffer: load the vertices for each triangle:
+        v = PodVertexArray(v[t_indices])
+        assert v.shape == (self.triangle_count, 3) and v.dtype == PodVertexArray.DTYPE
 
-POD_FRAME_INFO_DTYPE = np.dtype(
-    [
-        ("count", np.uint32),
-        ("target_size_w_px", np.uint32),
-        ("target_size_h_px", np.uint32),
-        ("_rsv", np.uint32),
-    ]
-)
-
-POD_CAMERA_DTYPE = np.dtype(
-    [
-        ("transform", POD_TRANSFORM_DTYPE),
-        ("fov_y_rad", np.float32),
-        ("aspect_ratio", np.float32),
-        ("target_size_w_px", np.uint32),
-        ("target_size_h_px", np.uint32),
-    ]
-)
-
-POD_INSTANCE_DTYPE = np.dtype(
-    [
-        ("geometry_id", np.uint32),
-        ("material_id", np.uint32),
-        ("transform", POD_TRANSFORM_DTYPE),
-    ]
-)
+        # Allocate space in renderer heaps, upload data
+        self.geometry_heap_offset_in_triangles = renderer._add_geometry(v)
 
 
-#
-# High Level Types
-#
+class Draw3dMaterial(BaseDisposable):
+    renderer: Draw3dRenderer
 
+    color_map: jt.Float32[np.ndarray, "h w 3"] | None
+    color_factor: tuple[float, float, float]
+    normal_map: jt.Float32[np.ndarray, "h w 3"] | None
+    metalness_map: jt.Float32[np.ndarray, "h w 1"] | None
+    metalness_factor: float
+    roughness_map: jt.Float32[np.ndarray, "h w 1"] | None
+    roughness_factor: float
 
-@dataclass
-class Draw3dVertex:
-    position: tuple[float, float, float]
-    normal: tuple[float, float, float]
-    uv: tuple[float, float]
+    def __init__(
+        self,
+        renderer: Draw3dRenderer,
+        *,
+        color_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
+        color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        normal_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
+        metalness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        metalness_factor: float = 1.0,
+        roughness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        roughness_factor: float = 1.0,
+    ) -> None:
+        super().__init__()
 
-    def to_pod(self) -> np.ndarray:
-        record = np.array(
-            (
-                np.array(self.position, dtype=np.float32),
-                np.array(self.normal, dtype=np.float32),
-                np.array(self.uv, dtype=np.float32),
-            ),
-            dtype=POD_VERTEX_DTYPE,
-        )
-        return record
+        self.renderer = renderer
+
+        self.color_map = color_map
+        self.color_factor = color_factor
+        self.normal_map = normal_map
+        self.metalness_map = metalness_map
+        self.metalness_factor = metalness_factor
+        self.roughness_map = roughness_map
+        self.roughness_factor = roughness_factor
+
+        # TODO: upload material data to GPU
 
 
 @dataclass
 class Draw3dScene:
-    # meshes: Dict[mesh_handle] -> List of transforms as (N, 3, 4) arrays
-    meshes: Dict[int, np.ndarray] = field(default_factory=dict)
-    environment_map: Optional[wgpu.GPUTexture] = None
+    meshes: dict[
+        tuple[Draw3dGeometry, Draw3dMaterial],
+        jt.Float32[np.ndarray, "n 3 4"],
+    ] = field(default_factory=dict)
+
+    environment_map: jt.Float32[np.ndarray, "eh ew 3"] | None = None
 
 
 #
-# Helper functions for creating Pod records
+# POD Types (NumPy structured dtypes)
 #
 
+POD_SPAN_DTYPE = np.dtype(
+    [
+        ("begin", np.uint32),
+        ("end", np.uint32),
+    ]
+)
 
-def create_pod_triangle(vertices: list[np.ndarray]) -> np.ndarray:
-    """Create PodTriangle from vertices and compute centroid."""
-    centroid = np.zeros(3, dtype=np.float32)
-    for v in vertices:
-        centroid += v["position"]
-    centroid /= 3.0
+POD_AABB_DTYPE = np.dtype(
+    [
+        ("min", np.float32, (3,)),
+        ("max", np.float32, (3,)),
+    ]
+)
 
-    vertices_array = np.array([v for v in vertices], dtype=POD_VERTEX_DTYPE)
-    record = np.array(
-        (vertices_array, centroid),
-        dtype=POD_TRIANGLE_NODE_DTYPE,
+
+class PodVertexArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("position", np.float32, (3,)),
+            ("normal", np.float32, (3,)),
+            ("uv", np.float32, (2,)),
+        ]
     )
-    return record
 
 
-def create_pod_bvh_node(
-    begin: int, end: int, aabb_min: np.ndarray, aabb_max: np.ndarray
-) -> np.ndarray:
-    """Create PodBvhNode record."""
-    record = np.array(
-        (
-            np.array((begin, end), dtype=POD_SPAN_DTYPE),
-            np.array([0, 0], dtype=np.uint32),
-            np.array([aabb_min, aabb_max], dtype=np.float32),
-        ),
-        dtype=POD_BVH_NODE_DTYPE,
+class PodBvhNodeArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("triangle_span", POD_SPAN_DTYPE),
+            ("children", np.uint32, (2,)),
+            ("aabb", POD_AABB_DTYPE),
+        ]
     )
-    return record
+
+
+class PodGeometryArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("bvh_node_span", POD_SPAN_DTYPE),
+            ("triangle_span", POD_SPAN_DTYPE),
+        ]
+    )
+
+
+class PodFrameInfoArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("count", np.uint32),
+            ("target_size_w_px", np.uint32),
+            ("target_size_h_px", np.uint32),
+            ("_rsv", np.uint32),
+        ]
+    )
+
+
+class PodCameraArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
+            ("fov_y_rad", np.float32),
+            ("aspect_ratio", np.float32),
+            ("target_size_w_px", np.uint32),
+            ("target_size_h_px", np.uint32),
+        ]
+    )
+
+
+class PodInstanceArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("geometry_id", np.uint32),
+            ("material_id", np.uint32),
+            ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
+        ]
+    )
 
 
 #
@@ -596,15 +644,6 @@ def partition_triangles(
     )
 
     return TrianglesPartitionResult(lt_indices, lt_aabb, rt_indices, rt_aabb)
-
-
-def emplace_bvh_node(nodes: list, indices: np.ndarray, aabb: Aabb) -> int:
-    """Add a BVH node."""
-    index = len(nodes)
-
-    node = create_pod_bvh_node(0, len(indices), aabb[0], aabb[1])
-    nodes.append(node)
-    return index
 
 
 def try_partition_bvh_node(
