@@ -251,6 +251,9 @@ class Window(BaseDisposable):
     def _on_dispose(self) -> None:
         super()._on_dispose()
         self._canvas_context.unconfigure()
+        # Delete the canvas context reference before destroying the window to ensure
+        # proper cleanup order and avoid use-after-free during garbage collection
+        del self._canvas_context
         glfw.destroy_window(self._glfw_window_handle)
 
     #
