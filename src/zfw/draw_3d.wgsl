@@ -71,11 +71,34 @@ struct PodTransform {
     row1: vec4<f32>,
     row2: vec4<f32>,
 }
-fn mat4x4_from_pod_transform(t: PodTransform) -> mat4x4<f32> {
+
+//
+// Linalg
+//
+
+fn h_mat4x4_from_pod_transform(t: PodTransform) -> mat4x4<f32> {
     let col0 = vec4<f32>(t.row0[0], t.row1[0], t.row2[0], 0.0);
     let col1 = vec4<f32>(t.row0[1], t.row1[1], t.row2[1], 0.0);
     let col2 = vec4<f32>(t.row0[2], t.row1[2], t.row2[2], 0.0);
     let col3 = vec4<f32>(t.row0[3], t.row1[3], t.row2[3], 1.0);
+    return mat4x4<f32>(col0, col1, col2, col3);
+}
+fn h_mat4x4_inverse(m: mat4x4<f32>) -> mat4x4<f32> {
+    // Assumes affine transform matrix.
+    let r = mat3x3<f32>(
+        m[0].xyz,
+        m[1].xyz,
+        m[2].xyz,
+    );
+    let t = m[3].xyz;
+
+    let r_inv = transpose(r);
+    let t_inv = -r_inv * t;
+
+    let col0 = vec4<f32>(r_inv[0][0], r_inv[1][0], r_inv[2][0], 0.0);
+    let col1 = vec4<f32>(r_inv[0][1], r_inv[1][1], r_inv[2][1], 0.0);
+    let col2 = vec4<f32>(r_inv[0][2], r_inv[1][2], r_inv[2][2], 0.0);
+    let col3 = vec4<f32>(t_inv.x, t_inv.y, t_inv.z, 1.0);
     return mat4x4<f32>(col0, col1, col2, col3);
 }
 
@@ -198,7 +221,7 @@ fn transform_ray(ray: Ray, transform: mat4x4<f32>) -> Ray {
 }
 
 //
-// Entry point:
+// Primary ray generation
 //
 
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
@@ -222,13 +245,56 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 
     // Create ray in camera space, then transform to world space.
     let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), -sensor_pixel_camera_space);
-    let camera_transform = mat4x4_from_pod_transform(camera.transform);
+    let camera_transform = h_mat4x4_from_pod_transform(camera.transform);
     return transform_ray(camera_space_ray, camera_transform);
 }
 
+//
+// Entry point:
+//
+
 fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     let ray = gen_primary_ray(pixel_xy);
-    return vec4<f32>(normalize(ray.direction), 1.0);
+    
+    for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id = instance_id + 1u) {
+        let instance = instances[instance_id];
+        let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
+        let inv_instance_transform = h_mat4x4_inverse(instance_transform);
+        let local_ray = transform_ray(ray, inv_instance_transform);
+
+        let geometry = geometry_heap[instance.geometry_id];
+        let bvh_span = geometry.bvh_node_span_in_heap;
+        
+        // For simplicity, we just iterate over all triangles in the geometry.
+        let triangle_span = geometry.triangle_span_in_heap;
+        for (var tri_index = triangle_span.begin; tri_index < triangle_span.end; tri_index = tri_index + 1) {
+            let triangle = triangle_heap[tri_index];
+            let v0 = vec3<f32>(
+                triangle.vertices[0].position[0],
+                triangle.vertices[0].position[1],
+                triangle.vertices[0].position[2],
+            );
+            let v1 = vec3<f32>(
+                triangle.vertices[1].position[0],
+                triangle.vertices[1].position[1],
+                triangle.vertices[1].position[2],
+            );
+            let v2 = vec3<f32>(
+                triangle.vertices[2].position[0],
+                triangle.vertices[2].position[1],
+                triangle.vertices[2].position[2],
+            );
+
+            let hit_result = hit_tri(local_ray, v0, v1, v2);
+            if hit_result.w < F32_INFINITY {
+                // Hit!
+                return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red for hit
+            }
+        }
+    }
+    
+    // No hit
+    return vec4<f32>(0.8, 0.8, 0.8, 1.0); // Light grey for no hit
 }
 
 @compute @workgroup_size(8, 8, 1)

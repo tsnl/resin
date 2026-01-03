@@ -185,7 +185,7 @@ class Draw3dRenderer:
         encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
         queue.submit([encoder.finish()])
 
-    def _add_geometry(self, vertices: PodVertexArray) -> int:
+    def _add_triangles(self, vertices: PodVertexArray) -> int:
         assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
 
         vertex_count = vertices.shape[0]
@@ -224,6 +224,52 @@ class Draw3dRenderer:
 
         # Return offset in triangles:
         return allocation_offset_in_triangles
+
+    def _add_geometry(
+        self,
+        triangle_span_begin: int,
+        triangle_count: int,
+    ):
+        data = PodGeometryArray.empty(shape=(1,))
+
+        data["triangle_span"]["begin"][0] = triangle_span_begin
+        data["triangle_span"]["end"][0] = triangle_span_begin + triangle_count
+
+        # TODO: build BVH for the geometry
+        data["bvh_node_span"][0]["begin"] = 0
+        data["bvh_node_span"][0]["end"] = 0
+
+        # Allocate:
+        allocation_offset = self.allocated_geometry_count
+        self.allocated_geometry_count += 1
+        if self.allocated_geometry_count > self.geometry_capacity:
+            raise RuntimeError("Draw3dRenderer geometry heap capacity exceeded.")
+
+        # Upload via staging buffer:
+        staging_buffer = self.device.create_buffer(
+            label="Draw3dRenderer.GeometryUploadStagingBuffer",
+            size=PodGeometryArray.array_size(shape=(1,)),
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        staging_buffer.write_mapped(data=data)
+        staging_buffer.unmap()
+
+        encoder = self.device.create_command_encoder(
+            label="Draw3dRenderer.GeometryUploadEncoder"
+        )
+        encoder.copy_buffer_to_buffer(
+            source=staging_buffer,
+            source_offset=0,
+            destination=self.geometry_heap_device_buffer,
+            destination_offset=allocation_offset
+            * PodGeometryArray.array_size(shape=(1,)),
+            size=PodGeometryArray.array_size(shape=(1,)),
+        )
+        self.queue.submit([encoder.finish()])
+
+        # Return offset in geometry:
+        return allocation_offset
 
     def record(
         self,
@@ -337,7 +383,7 @@ class Draw3dFrame:
 
         self._upload_frame_info(instance_count, encoder)
         self._upload_camera_info(scene.camera, encoder)
-        # TODO: upload more data as needed
+        self._upload_instances_info(scene.meshes, encoder)
 
         compute_pass = encoder.begin_compute_pass(label="Draw3dFrame.ComputePass")
         compute_pass.set_pipeline(pipeline)
@@ -394,6 +440,41 @@ class Draw3dFrame:
             size=camera_data.nbytes,
         )
 
+    def _upload_instances_info(
+        self,
+        instances: dict[
+            tuple["Draw3dGeometry", "Draw3dMaterial"],
+            jt.Float32[np.ndarray, "n 3 4"],
+        ],
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
+        total_instance_count = sum(len(t) for t in instances.values())
+        if total_instance_count > self.renderer.instance_capacity:
+            raise RuntimeError("Draw3dRenderer instance heap capacity exceeded.")
+
+        data = PodInstanceArray.empty(shape=(total_instance_count,))
+        offset = 0
+        for (geometry, material), transforms in instances.items():
+            n = transforms.shape[0]
+            data["geometry_id"][offset : offset + n] = (
+                geometry.geometry_heap_offset_in_triangles
+            )
+            data["material_id"][offset : offset + n] = 0  # TODO: material ID
+            data["transform"][offset : offset + n] = transforms
+            offset += n
+
+        self.instances_list_staging_buffer.map_sync(wgpu.MapMode.WRITE)
+        self.instances_list_staging_buffer.write_mapped(data=data)
+        self.instances_list_staging_buffer.unmap()
+
+        command_encoder.copy_buffer_to_buffer(
+            source=self.instances_list_staging_buffer,
+            source_offset=0,
+            destination=self.instances_list_device_buffer,
+            destination_offset=0,
+            size=data.nbytes,
+        )
+
 
 class Draw3dGeometry(BaseDisposable):
     renderer: Draw3dRenderer
@@ -401,6 +482,7 @@ class Draw3dGeometry(BaseDisposable):
     triangle_count: int
     vertex_count: int
 
+    geometry_id: int
     geometry_heap_offset_in_triangles: int
 
     def __init__(
@@ -434,7 +516,11 @@ class Draw3dGeometry(BaseDisposable):
         assert v.shape == (self.triangle_count * 3,) and v.dtype == PodVertexArray.DTYPE
 
         # Allocate space in renderer heaps, upload data
-        self.geometry_heap_offset_in_triangles = renderer._add_geometry(v)
+        self.geometry_heap_offset_in_triangles = renderer._add_triangles(v)
+        self.geometry_id = renderer._add_geometry(
+            self.geometry_heap_offset_in_triangles,
+            self.triangle_count,
+        )
 
 
 class Draw3dMaterial(BaseDisposable):

@@ -25,15 +25,15 @@ def test_basic_draw_3d():
 
     meshes = load_gltf(
         renderer=renderer,
-        path="tests/data/glTF-Sample-Assets/Models/Box/glTF/Box.gltf",
+        # path="tests/data/glTF-Sample-Assets/Models/Avocado/glTF/Avocado.gltf",
+        path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
-
     scene = Draw3dScene(
         camera=Draw3dCamera(
             transform=np.array(
                 [
                     [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, -3.0],
+                    [0.0, 1.0, 0.0, -5.0],
                     [0.0, 0.0, 1.0, 0.0],
                 ],
                 dtype=np.float32,
