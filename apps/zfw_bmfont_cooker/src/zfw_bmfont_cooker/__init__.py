@@ -366,8 +366,6 @@ class GlyphAtlasCooker:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         atlas.save(self.output_dir)
 
-        LOG.info(f"Saved font atlas for {self.font} to {self.output_dir}")
-
 
 def main_impl() -> int:
     """Main entry point."""
@@ -376,11 +374,22 @@ def main_impl() -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("output", type=Path)
+    ap.add_argument(
+        "--output-is-stamp-file",
+        action="store_true",
+        help="Remove last path component before validating extension",
+    )
     args = ap.parse_args()
 
     project_root = Path.cwd()
 
     output_path: Path = args.output
+    stamp_file_path: Path | None = None
+
+    if args.output_is_stamp_file:
+        stamp_file_path = output_path
+        output_path = output_path.parent
+
     if output_path.suffix != COOKED_ATLAS_PATH_SUFFIX:
         LOG.error(f"Output path must have suffix {COOKED_ATLAS_PATH_SUFFIX!r}")
         return 1
@@ -413,6 +422,11 @@ def main_impl() -> int:
         license_path=license_path,
     )
     cooker.cook()
+
+    # Create stamp file if requested
+    if stamp_file_path is not None:
+        stamp_file_path.parent.mkdir(parents=True, exist_ok=True)
+        stamp_file_path.touch()
 
     return 0
 
