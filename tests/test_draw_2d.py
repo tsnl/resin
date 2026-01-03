@@ -124,7 +124,7 @@ def test_basic_draw_2d(gpu: GpuFixture):
         image,
         "test_basic_draw_2d",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_test",
+        test_subdir="test_draw_2d",
     )
 
 

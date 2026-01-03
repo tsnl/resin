@@ -87,11 +87,11 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
 
     Args:
         data: Array of shape (H, W, C) with float32 values in [0, 1].
-        filename: Output path relative to output/draw_3d/.
+        filename: Output path relative to output/zfw/draw_3d/.
         format: Image format ("RGB", "RGBA", or "L" for grayscale).
     """
     img_data = (data * 255.0).astype(np.uint8)
-    output_path = f"output/draw_3d/{filename}"
+    output_path = f"output/zfw/test_draw_3d/{filename}"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     img = Image.fromarray(img_data, format)
     img.save(output_path)
@@ -346,35 +346,22 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Extract channels
     depth_normalized = data[:, :, 0]
-    alpha_channel = data[:, :, 3]
 
-    # Analyze depth statistics
-    hit_mask = alpha_channel > 0  # Pixels that hit something
-    hit_count = np.sum(hit_mask)
-    total_pixels = FRAME_W * FRAME_H
-    hit_percentage = 100.0 * hit_count / total_pixels
+    # Check center region for hits (cube should be visible there)
+    center_region = depth_normalized[
+        FRAME_H // 2 - 50 : FRAME_H // 2 + 50,
+        FRAME_W // 2 - 50 : FRAME_W // 2 + 50,
+    ]
+    center_hits = np.sum(center_region < 1.0)
+    center_total = center_region.size
+    center_hit_pct = 100.0 * center_hits / center_total
 
-    if hit_count > 0:
-        hit_depths = depth_normalized[hit_mask] * scene.camera.max_distance
-        min_depth = np.min(hit_depths)
-        max_depth = np.max(hit_depths)
-        mean_depth = np.mean(hit_depths)
-
-        # Check center region for hits (cube should be visible there)
-        center_region = depth_normalized[
-            FRAME_H // 2 - 50 : FRAME_H // 2 + 50,
-            FRAME_W // 2 - 50 : FRAME_W // 2 + 50,
-        ]
-        center_hits = np.sum(center_region < 1.0)
-        center_total = center_region.size
-        center_hit_pct = 100.0 * center_hits / center_total
-
-        # For a cube at distance 5, we expect some hits
-        # The cube is 2x2x2 at origin, so should be visible
-        # Assert that we get at least some hits in the center region
-        assert center_hit_pct > 10.0, (
-            f"Expected significant hits in center region, got {center_hit_pct:.1f}%"
-        )
+    # For a cube at distance 5, we expect some hits
+    # The cube is 2x2x2 at origin, so should be visible
+    # Assert that we get at least some hits in the center region
+    assert center_hit_pct > 10.0, (
+        f"Expected significant hits in center region, got {center_hit_pct:.1f}%"
+    )
 
 
 def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):

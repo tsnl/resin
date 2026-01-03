@@ -167,7 +167,7 @@ def test_draw_2d_ext_quads(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_quads",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
