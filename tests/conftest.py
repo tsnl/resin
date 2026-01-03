@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import wgpu
 
-from zfw import load_rgba_image
+from zfw import load_rgba_image, setup_logging
 
 
 @dataclass
@@ -31,3 +31,8 @@ def rainbow_512x512_image() -> np.ndarray:
     assert image_data.shape == (512, 512, 4)
     image_data.setflags(write=False)
     return image_data
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _setup_logging():
+    setup_logging()

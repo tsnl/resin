@@ -277,9 +277,10 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
         let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
         let inv_instance_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
         
-        // Transform ray to local space
+        // Transform ray to model space by applying inverse instance transform
         let local_ray = transform_ray(ray, inv_instance_transform);
 
+        // Access geometry
         let geometry = geometry_heap[instance.geometry_id];
         
         // For simplicity, we just iterate over all triangles in the geometry.

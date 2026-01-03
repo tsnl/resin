@@ -1,3 +1,5 @@
+from datetime import datetime
+import time
 from typing import Generator
 import pytest
 import wgpu
@@ -13,6 +15,7 @@ from zfw import (
     Draw3dScene,
     Draw3dCamera,
     load_gltf,
+    logger,
 )
 
 
@@ -36,6 +39,7 @@ def _render_and_readback(
     scene: Draw3dScene,
     w: int,
     h: int,
+    measure_runtime: bool = False,
 ) -> np.ndarray:
     """Render a scene and read back the result as a numpy array.
 
@@ -43,6 +47,8 @@ def _render_and_readback(
         Array of shape (H, W, 4) with float32 values.
     """
     readback_buffer = _create_readback_buffer(gpu.device, w, h)
+
+    start_time = time.monotonic_ns()
 
     command_encoder = gpu.device.create_command_encoder(label="CommandEncoder")
     renderer.record(scene, frame, command_encoder)
@@ -61,6 +67,13 @@ def _render_and_readback(
         copy_size=frame.get_output_image().size,
     )
     gpu.queue.submit([command_encoder.finish()])
+
+    end_time = time.monotonic_ns()
+
+    if measure_runtime:
+        elapsed_ms = (end_time - start_time) / 1_000_000.0
+        LOG.info(f"Render took {elapsed_ms:.2f} ms")
+        print(f"MEASURE_RUNTIME: Render took {elapsed_ms:.2f} ms")
 
     readback_buffer.map_sync(wgpu.MapMode.READ)
     data = np.asarray(readback_buffer.read_mapped()).view(dtype=np.float32)
@@ -92,6 +105,25 @@ def renderer(gpu: GpuFixture) -> Generator[Draw3dRenderer, None, None]:
 def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
     frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
+
+    # scene = _load_two_avocados_scene(renderer)
+    scene = _load_damaged_helmet_scene(renderer)
+
+    data = _render_and_readback(
+        gpu,
+        renderer,
+        frame,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        measure_runtime=True,
+    )
+    data *= 1.0
+    _save_debug_image(data, "test_basic_draw_3d.png")
+
+
+def _load_two_avocados_scene(renderer: Draw3dRenderer) -> Draw3dScene:
+    """Helper to load a scene with two avocado models."""
 
     meshes = load_gltf(
         renderer=renderer,
@@ -148,9 +180,36 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
         meshes=meshes,
     )
 
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
-    data *= 1.0
-    _save_debug_image(data, "test_basic_draw_3d.png")
+    return scene
+
+
+def _load_damaged_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
+    """Helper to load a scene with the damaged helmet model."""
+
+    meshes = load_gltf(
+        renderer=renderer,
+        path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
+    )
+
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -3.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(45.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=5.0,
+        ),
+        meshes=meshes,
+    )
+
+    return scene
 
 
 def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
@@ -369,3 +428,6 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
         y_coords = hit_world_pos[:, 1]
         y_std = np.std(y_coords)
         y_mean = np.mean(y_coords)
+
+
+LOG = logger(__name__)
