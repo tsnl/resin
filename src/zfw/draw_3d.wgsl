@@ -121,7 +121,6 @@ struct Ray {
     origin: vec3<f32>,
     direction: vec3<f32>,   // Does not need to be normalized, but never 0
 }
-
 struct Aabb {
     min: vec3<f32>,
     max: vec3<f32>,
@@ -129,7 +128,7 @@ struct Aabb {
 
 /// Triangle-AABB intersection test.
 /// Returns distance to nearest hit, or infinity if no hit.
-fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
+fn raycast_aabb(ray: Ray, aabb: Aabb) -> f32 {
     let lo = aabb.min;
     let hi = aabb.max;
 
@@ -155,7 +154,7 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
 
 /// Triangle-ray intersection test
 /// Returns barycentric coordinates (XYZ) and distance (W) of closest hit. If no hit, (W) is infinity.
-fn hit_tri(ray: Ray, triangle_vertices: mat3x3<f32>) -> vec4<f32> {
+fn raycast_triangle(ray: Ray, triangle_vertices: mat3x3<f32>) -> vec4<f32> {
     let v0 = triangle_vertices[0];
     let v1 = triangle_vertices[1];
     let v2 = triangle_vertices[2];
@@ -264,7 +263,7 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 // Ray tracing:
 //
 
-fn load_triangle_vertices(triangle_id: u32) -> mat3x3<f32> {
+fn load_triangle_vertices_positions(triangle_id: u32) -> mat3x3<f32> {
     let pod_triangle = triangle_heap[triangle_id];
     let v0 = vec3<f32>(
         pod_triangle.vertices[0].position[0],
@@ -284,9 +283,96 @@ fn load_triangle_vertices(triangle_id: u32) -> mat3x3<f32> {
     return mat3x3<f32>(v0, v1, v2);
 }
 
+fn compute_world_hit_position(ray: Ray, hit_result: vec4<f32>, instance_transform: mat4x4<f32>) -> vec3<f32> {
+    let local_hit_position = ray.origin + hit_result.w * ray.direction;
+    let world_hit_position_h = instance_transform * vec4<f32>(local_hit_position, 1.0);
+    return world_hit_position_h.xyz / world_hit_position_h.w;
+}
+
+struct HitRecord {
+    world_hit_position: vec3<f32>,
+    world_hit_distance: f32,
+    barycentric_coordinates: vec3<f32>,
+    instance_transform: mat4x4<f32>,
+    instance_transform_inv: mat4x4<f32>,
+    triangle_id: u32,
+    geometry_id: u32,
+    instance_id: u32,
+}
+
+fn compute_hit_details(ray: Ray, triangle_id: u32, hit_result: vec4<f32>, instance_transform: mat4x4<f32>) -> HitDetails {
+    let local_hit_position = ray.origin + hit_result.w * ray.direction;
+    let world_hit_position = (instance_transform * vec4<f32>(local_hit_position, 1.0)).xyz;
+    let barycentric_coordinates = hit_result.xyz;
+    let world_hit_distance = length(world_hit_position - ray.origin);
+
+    var hit_details: HitDetails;
+    hit_details.world_hit_position = world_hit_position;
+    hit_details.barycentric_coordinates = barycentric_coordinates;
+    hit_details.world_hit_distance = world_hit_distance;
+    return hit_details;
+}
+struct HitDetails {
+    world_hit_position: vec3<f32>,
+    world_hit_distance: f32,
+    barycentric_coordinates: vec3<f32>,
+    uv: vec3<f32>,
+    tbn: mat3x3<f32>,
+}
+
 //
 // Entry point:
 //
+
+/// Raycast the given ray against the given instance.
+/// Since the ray is constant, we can easily compare the 'w' coefficient of the hit results to find the closest hit.
+fn raycast_instance(ray: Ray, instance_id: u32) -> HitRecord {
+    var closest_hit: HitRecord;
+    closest_hit.world_hit_distance = F32_INFINITY;
+
+    var closest_hit_w: f32 = F32_INFINITY;
+
+    let instance = instances[instance_id];
+    let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
+    let inv_instance_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
+    
+    let geometry_id = instance.geometry_id;
+    let geometry = geometry_heap[geometry_id];
+    
+    // Transform ray into model space by applying the inverse of the instance's transform.
+    // This lets us raycast against the geometry without transforming all the vertices per-instance.
+    let local_ray = transform_ray(ray, inv_instance_transform);
+
+    let triangle_span = geometry.triangle_span_in_heap;
+    for (var triangle_id = triangle_span.begin; triangle_id < triangle_span.end; triangle_id++) {
+        let triangle_vertices = load_triangle_vertices_positions(triangle_id);
+        let hit_result = raycast_triangle(local_ray, triangle_vertices);
+        
+        // If hit is invalid or farther than closest hit so far, skip
+        if hit_result.w < 0.0 {
+            continue;
+        }
+        if hit_result.w >= closest_hit_w {
+            continue;
+        }
+
+        // Valid hit and closer than previous closest hit: update closest hit record
+        let world_hit_position = compute_world_hit_position(ray, hit_result, instance_transform);
+        let world_hit_distance = length(world_hit_position - ray.origin);
+        if world_hit_distance < closest_hit.world_hit_distance {
+            closest_hit.world_hit_distance = world_hit_distance;
+            closest_hit.world_hit_position = world_hit_position;
+            closest_hit.barycentric_coordinates = hit_result.xyz;
+            closest_hit.instance_transform = instance_transform;
+            closest_hit.instance_transform_inv = inv_instance_transform;
+            closest_hit.triangle_id = triangle_id;
+            closest_hit.geometry_id = geometry_id;
+            closest_hit.instance_id = instance_id;
+        }
+    }
+
+    return closest_hit;
+}
 
 fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     let debug_emit_primary_ray_direction = (frame_info.flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
@@ -295,44 +381,15 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
 
     let ray = gen_primary_ray(pixel_xy);
     
-    var closest_hit_distance = F32_INFINITY;
-    var closest_hit_world_pos = vec3<f32>(0.0);
-    var hit_count = 0u;
+    var closest_hit: HitRecord;
+    closest_hit.world_hit_distance = F32_INFINITY;
     
-    for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id = instance_id + 1u) {
-        let instance = instances[instance_id];
-        let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
-        let inv_instance_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
-        
-        // Transform ray to model space by applying inverse instance transform
-        let local_ray = transform_ray(ray, inv_instance_transform);
-
-        // Access geometry
-        let geometry = geometry_heap[instance.geometry_id];
-        
-        // For simplicity, we just iterate over all triangles in the geometry.
-        let triangle_span = geometry.triangle_span_in_heap;
-        for (var tri_index = triangle_span.begin; tri_index < triangle_span.end; tri_index = tri_index + 1u) {
-            let triangle_vertices = load_triangle_vertices(tri_index);
-
-            // Test ray against triangle in local space
-            let hit_result = hit_tri(local_ray, triangle_vertices);
-            if hit_result.w > 0.0 {
-                // Compute hit position in local space
-                let local_hit_pos = local_ray.origin + hit_result.w * local_ray.direction;
-
-                // Transform to world space
-                let world_hit_pos_h = instance_transform * vec4<f32>(local_hit_pos, 1.0);
-                let world_hit_pos = world_hit_pos_h.xyz / world_hit_pos_h.w;
-                // Compute world-space distance from camera
-                let world_distance = length(world_hit_pos - ray.origin);
-                
-                if world_distance < closest_hit_distance {
-                    closest_hit_distance = world_distance;
-                    closest_hit_world_pos = world_hit_pos;
-                    hit_count = hit_count + 1u;
-                }
-            }
+    // Raycast against all instances:
+    // TODO: Use TLAS to accelerate this.
+    for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id++) {
+        let hit_record = raycast_instance(ray, instance_id);
+        if hit_record.world_hit_distance < closest_hit.world_hit_distance {
+            closest_hit = hit_record;
         }
     }
 
@@ -345,31 +402,31 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     // DEBUG: emit hit world position
     if debug_emit_hit_world_pos {
         var alpha = 0.0;
-        if closest_hit_distance < F32_INFINITY {
+        if closest_hit.world_hit_distance < F32_INFINITY {
             alpha = 1.0;
         }
         // Map world position to [0,1] for visualization (assume scene is within [-10,10] cube)
-        let pos_normalized = (closest_hit_world_pos + 10.0) / 20.0;
+        let pos_normalized = (closest_hit.world_hit_position + 10.0) / 20.0;
         return vec4<f32>(pos_normalized, alpha);
     }
     
     // DEBUG: Visualize hits
     if debug_emit_depth_in_r {
         var alpha = 0.0;
-        if closest_hit_distance < F32_INFINITY {
+        if closest_hit.world_hit_distance < F32_INFINITY {
             alpha = 1.0;
         }
-        let depth_normalized = clamp(closest_hit_distance / camera.max_distance, 0.0, 1.0);
+        let depth_normalized = clamp(closest_hit.world_hit_distance / camera.max_distance, 0.0, 1.0);
         return vec4<f32>(depth_normalized, 0.0, 0.0, alpha);
     }
     
     // If hit, return red
-    if closest_hit_distance < F32_INFINITY {
+    if closest_hit.world_hit_distance < F32_INFINITY {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
 
-    // No hit - show light grey
-    return vec4<f32>(0.5, 0.5, 0.5, 1.0);
+    // No hit: return alpha
+    return vec4<f32>(0.0);
 }
 
 @compute @workgroup_size(8, 8, 1)
