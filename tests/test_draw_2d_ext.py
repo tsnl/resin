@@ -18,8 +18,6 @@ from zfw import (
     Draw2dExtTextPrimitive,
     Draw2dExtCanvas,
     convert_color,
-    ReadbackBuffer,
-    Rgba8UnormTexture,
 )
 
 from conftest import GpuFixture
@@ -37,7 +35,7 @@ class Draw2dExTestEngine(BaseDisposable):
     renderer: Draw2dRenderer
     target: Draw2dFrame
     canvas: Draw2dExtCanvas
-    readback_buffer: ReadbackBuffer
+    readback_buffer: wgpu.GPUBuffer
 
     def __init__(self, *, gpu: GpuFixture, scale: float = 1.0) -> None:
         super().__init__()
@@ -67,11 +65,10 @@ class Draw2dExTestEngine(BaseDisposable):
         self.canvas = Draw2dExtCanvas(device=self.device, queue=self.queue)
 
         # Readback buffer for image data
-        self.readback_buffer = ReadbackBuffer(
-            device=self.device,
-            count=int(TEST_IMAGE_W * TEST_IMAGE_H * self._scale * self._scale * 4),
+        self.readback_buffer = self.device.create_buffer(
+            size=int(TEST_IMAGE_W * TEST_IMAGE_H * self._scale * self._scale * 4),
+            usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
             label="Draw2dExTestEngine.ReadbackBuffer",
-            dtype=np.uint8,
         )
 
     def _on_dispose(self) -> None:
@@ -85,13 +82,27 @@ class Draw2dExTestEngine(BaseDisposable):
         command_encoder = self.device.create_command_encoder(label="Readback")
 
         # Copy from texture to staging buffer
-        self.readback_buffer.copy_from_texture(color_image, command_encoder)
+        command_encoder.copy_texture_to_buffer(
+            source=wgpu.TexelCopyTextureInfo(
+                texture=color_image,
+                mip_level=0,
+                origin=(0, 0, 0),
+            ),
+            destination=wgpu.TexelCopyBufferInfo(
+                buffer=self.readback_buffer,
+                bytes_per_row=int(TEST_IMAGE_W * self._scale) * 4,
+                rows_per_image=int(TEST_IMAGE_H * self._scale),
+            ),
+            copy_size=color_image.size,
+        )
 
         # Submit and wait
         self.queue.submit([command_encoder.finish()])
 
         # Read as uint8
-        data_raw = self.readback_buffer.read()
+        self.readback_buffer.map_sync(wgpu.MapMode.READ)
+        data_raw = np.asarray(self.readback_buffer.read_mapped())
+        self.readback_buffer.unmap()
 
         # Convert from linear to sRGB
         data_raw_srgb_f32 = convert_color(
@@ -183,16 +194,26 @@ def test_draw_2d_ext_image(
     image_data_uint8 = (np.clip(image_data, 0.0, 1.0) * 255.0).astype(np.uint8)
 
     # Create a WebGPU texture for the image
-    image_texture = Rgba8UnormTexture(
-        device=engine.device,
-        size_wh=(image_data.shape[1], image_data.shape[0]),
-        label="TestImage",
+    image_texture = engine.device.create_texture(
+        label="RainbowImage",
+        size=(image_data.shape[1], image_data.shape[0], 1),
+        format="rgba8unorm",
+        usage=wgpu.TextureUsage.COPY_DST | wgpu.TextureUsage.TEXTURE_BINDING,
     )
     engine.queue.write_texture(
-        image_texture.texel_copy_texture_info(),
-        image_data_uint8.tobytes(),
-        image_texture.texel_copy_buffer_layout(),
-        image_texture.size(),
+        destination=wgpu.TexelCopyTextureInfo(
+            texture=image_texture,
+            origin=(0, 0, 0),
+            mip_level=0,
+            aspect=wgpu.TextureAspect.all,
+        ),
+        data=image_data_uint8.tobytes(),
+        data_layout=wgpu.TexelCopyBufferLayout(
+            offset=0,
+            bytes_per_row=image_data.shape[1] * 4,
+            rows_per_image=image_data.shape[0],
+        ),
+        size=image_texture.size,
     )
 
     border_thickness = 8
@@ -204,7 +225,7 @@ def test_draw_2d_ext_image(
                 image_data.shape[1],
                 image_data.shape[0],
             ),
-            fill_texture=image_texture.wgpu_texture(),
+            fill_texture=image_texture,
             fill_color=(1.0, 1.0, 1.0, 1.0),
             border_thickness_dip=(8, 8, 8, 8),
             border_color=(1.0, 1.0, 0.0, 1.0),

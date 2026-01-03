@@ -10,8 +10,6 @@ import wgpu
 import numpy as np
 import numpy.typing as npt
 
-from .gpu_util import Rgba8UnormTexture, StorageBuffer, StagingBuffer
-
 
 class Draw2dRenderer:
     def __init__(
@@ -98,16 +96,26 @@ class Draw2dRenderer:
             ),
         )
 
-        self.default_white_texture = Rgba8UnormTexture(
-            device=device,
-            size_wh=(32, 32),
+        self.default_white_texture = self.device.create_texture(
             label="Draw2dRenderer.DefaultWhiteTexture",
+            size=(32, 32, 1),
+            dimension=wgpu.TextureDimension.d2,
+            format=wgpu.TextureFormat.rgba8unorm,
+            usage=wgpu.TextureUsage.COPY_DST | wgpu.TextureUsage.TEXTURE_BINDING,
         )
         queue.write_texture(
-            self.default_white_texture.texel_copy_texture_info(),
-            bytes([0xFF] * (4 * 32 * 32)),
-            self.default_white_texture.texel_copy_buffer_layout(),
-            self.default_white_texture.size(),
+            destination=wgpu.TexelCopyTextureInfo(
+                texture=self.default_white_texture,
+                mip_level=0,
+                origin=(0, 0, 0),
+            ),
+            data=bytes([0xFF] * (4 * 32 * 32)),
+            data_layout=wgpu.TexelCopyBufferLayout(
+                offset=0,
+                bytes_per_row=4 * 32,
+                rows_per_image=32,
+            ),
+            size=(32, 32, 1),
         )
 
         self.sampler = device.create_sampler(
@@ -140,14 +148,16 @@ class Draw2dRenderer:
 
 class Draw2dFrame:
     def __init__(self, *, device: wgpu.GPUDevice, target_size_wh: tuple[int, int]):
-        self.output_image = Rgba8UnormTexture(
-            device=device,
-            size_wh=target_size_wh,
+        self.output_image = device.create_texture(
             label="Draw2dFrame.OutputImage",
+            size=(target_size_wh[0], target_size_wh[1], 1),
+            dimension=wgpu.TextureDimension.d2,
+            format=wgpu.TextureFormat.rgba8unorm,
+            usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC,
         )
         self.quad_group_cache: dict[wgpu.GPUTexture, "QuadGroup"] = {}
 
-    def get_output_image(self) -> Rgba8UnormTexture:
+    def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
 
     def record(
@@ -156,7 +166,7 @@ class Draw2dFrame:
         device: wgpu.GPUDevice,
         bind_group_layout: wgpu.GPUBindGroupLayout,
         sampler: wgpu.GPUSampler,
-        default_white_texture: Rgba8UnormTexture,
+        default_white_texture: wgpu.GPUTexture,
         pipeline: wgpu.GPURenderPipeline,
         target_size_wh: tuple[int, int],
         command_encoder: wgpu.GPUCommandEncoder,
@@ -167,9 +177,7 @@ class Draw2dFrame:
         group_bind_groups: dict[wgpu.GPUTexture, wgpu.GPUBindGroup] = {}
 
         for texture, group_quads in quad_batch_list.bind_groups.items():
-            actual_texture = (
-                texture if texture is not None else default_white_texture.wgpu_texture()
-            )
+            actual_texture = texture if texture is not None else default_white_texture
             bind_group = self.acquire_quad_group(
                 device,
                 command_encoder,
@@ -184,7 +192,7 @@ class Draw2dFrame:
             label="Draw2dFrame.RenderPass",
             color_attachments=[
                 wgpu.RenderPassColorAttachment(
-                    view=self.output_image.wgpu_texture().create_view(),
+                    view=self.output_image.create_view(),
                     resolve_target=None,
                     load_op=wgpu.LoadOp.clear,
                     store_op=wgpu.StoreOp.store,
@@ -196,9 +204,7 @@ class Draw2dFrame:
         render_pass.set_pipeline(pipeline)
 
         for texture, draw_range in quad_batch_list.draw_ranges:
-            actual_texture = (
-                texture if texture is not None else default_white_texture.wgpu_texture()
-            )
+            actual_texture = texture or default_white_texture
             bind_group = group_bind_groups[actual_texture]
 
             render_pass.set_bind_group(0, bind_group, [], 0, 0)
@@ -333,17 +339,15 @@ class QuadGroup:
     ):
         self.capacity = 1 << (min_capacity - 1).bit_length()  # next_power_of_two
         self.atlas = atlas
-        self.device_buffer = StorageBuffer(
-            device=device,
-            count=self.capacity,
-            dtype=POD_QUAD_DTYPE,
+        self.device_buffer = device.create_buffer(
             label="Draw2dFrame.QuadBatch.DeviceBuffer",
+            size=self.capacity * POD_QUAD_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.staging_buffer = StagingBuffer(
-            device=device,
-            count=self.capacity,
-            dtype=POD_QUAD_DTYPE,
+        self.staging_buffer = device.create_buffer(
             label="Draw2dFrame.QuadBatch.StagingBuffer",
+            size=self.capacity * POD_QUAD_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
 
         self.bind_group = device.create_bind_group(
@@ -353,9 +357,9 @@ class QuadGroup:
                 wgpu.BindGroupEntry(
                     binding=0,
                     resource=wgpu.BufferBinding(
-                        buffer=self.device_buffer.wgpu_buffer(),
+                        buffer=self.device_buffer,
                         offset=0,
-                        size=self.device_buffer.size_in_bytes,
+                        size=self.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
@@ -385,12 +389,18 @@ class QuadGroup:
             quad_batch_sampler=quad_batch_sampler,
         )
 
-        # Convert list of numpy records to numpy array
         data_array = np.array(data, dtype=POD_QUAD_DTYPE)
-        self.staging_buffer.write(data=data_array)
-        self.staging_buffer.copy_to_buffer(
-            dst=self.device_buffer,
-            command_encoder=command_encoder,
+
+        self.staging_buffer.map_sync(wgpu.MapMode.WRITE, 0, data_array.nbytes)
+        self.staging_buffer.write_mapped(data=data_array)
+        self.staging_buffer.unmap()
+
+        command_encoder.copy_buffer_to_buffer(
+            source=self.staging_buffer,
+            source_offset=0,
+            destination=self.device_buffer,
+            destination_offset=0,
+            size=data_array.nbytes,
         )
 
         return self.bind_group

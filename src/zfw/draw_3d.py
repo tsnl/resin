@@ -5,18 +5,12 @@ __all__ = [
     "Draw3dVertex",
 ]
 
-import wgpu
 import math
-import numpy as np
-from typing import Optional, Dict
 from dataclasses import dataclass, field
-from .gpu_util import (
-    Rgba32FloatTexture,
-    StorageBuffer,
-    UniformBuffer,
-    StagingBuffer,
-)
+from typing import Dict, Optional
 
+import numpy as np
+import wgpu
 
 #
 # Renderer
@@ -120,23 +114,20 @@ class Draw3dRenderer:
             compute=wgpu.ProgrammableStage(module=draw_shader, entry_point="main"),
         )
 
-        self.geometry_heap_device_buffer = StorageBuffer(
-            device=device,
-            count=self.GEOMETRY_CAPACITY,
-            dtype=POD_GEOMETRY_DTYPE,
+        self.geometry_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.GeometryHeapDeviceBuffer",
+            size=self.GEOMETRY_CAPACITY * POD_GEOMETRY_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.bvh_node_heap_device_buffer = StorageBuffer(
-            device=device,
-            count=self.BVH_NODE_CAPACITY,
-            dtype=POD_BVH_NODE_DTYPE,
+        self.bvh_node_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
+            size=self.BVH_NODE_CAPACITY * POD_BVH_NODE_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.triangle_heap_device_buffer = StorageBuffer(
-            device=device,
-            count=self.TRIANGLE_CAPACITY,
-            dtype=POD_TRIANGLE_NODE_DTYPE,
+        self.triangle_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.TriangleHeapDeviceBuffer",
+            size=self.TRIANGLE_CAPACITY * POD_TRIANGLE_NODE_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
 
         self.renderer_bind_group = device.create_bind_group(
@@ -146,25 +137,25 @@ class Draw3dRenderer:
                 wgpu.BindGroupEntry(
                     binding=0,
                     resource=wgpu.BufferBinding(
-                        buffer=self.geometry_heap_device_buffer.wgpu_buffer(),
+                        buffer=self.geometry_heap_device_buffer,
                         offset=0,
-                        size=self.geometry_heap_device_buffer.size_in_bytes,
+                        size=self.geometry_heap_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
-                        buffer=self.bvh_node_heap_device_buffer.wgpu_buffer(),
+                        buffer=self.bvh_node_heap_device_buffer,
                         offset=0,
-                        size=self.bvh_node_heap_device_buffer.size_in_bytes,
+                        size=self.bvh_node_heap_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
-                        buffer=self.triangle_heap_device_buffer.wgpu_buffer(),
+                        buffer=self.triangle_heap_device_buffer,
                         offset=0,
-                        size=self.triangle_heap_device_buffer.size_in_bytes,
+                        size=self.triangle_heap_device_buffer.size,
                     ),
                 ),
             ],
@@ -174,13 +165,13 @@ class Draw3dRenderer:
         self.allocated_bvh_node_count = 0
         self.allocated_triangle_count = 0
 
-        # Initialization
+        # Initialization: clear device buffers to zero
         encoder = device.create_command_encoder(
             label="Draw3dRenderer.InitializationEncoder"
         )
-        self.geometry_heap_device_buffer.clear(command_encoder=encoder)
-        self.bvh_node_heap_device_buffer.clear(command_encoder=encoder)
-        self.triangle_heap_device_buffer.clear(command_encoder=encoder)
+        encoder.clear_buffer(self.geometry_heap_device_buffer, offset=0)
+        encoder.clear_buffer(self.bvh_node_heap_device_buffer, offset=0)
+        encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
         queue.submit([encoder.finish()])
 
     def add_geometry(
@@ -240,46 +231,41 @@ class Draw3dFrame:
     def __init__(self, renderer: Draw3dRenderer) -> None:
         self.device = renderer.device
 
-        self.output_image = Rgba32FloatTexture(
-            device=self.device,
-            size_wh=renderer.target_size_wh_px,
+        self.output_image = self.device.create_texture(
             label="Draw3dFrame.OutputImage",
+            size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
+            format=wgpu.TextureFormat.rgba32float,
+            usage=wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_SRC,
         )
-        self.frame_info_device_buffer = UniformBuffer(
-            device=self.device,
-            count=1,
-            dtype=POD_FRAME_INFO_DTYPE,
+        self.frame_info_device_buffer = self.device.create_buffer(
             label="Draw3dFrame.FrameInfoDeviceBuffer",
+            size=POD_FRAME_INFO_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
         )
-        self.frame_info_staging_buffer = StagingBuffer(
-            device=self.device,
-            count=1,
-            dtype=POD_FRAME_INFO_DTYPE,
+        self.frame_info_staging_buffer = self.device.create_buffer(
             label="Draw3dFrame.FrameInfoStagingBuffer",
+            size=POD_FRAME_INFO_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
-        self.camera_device_buffer = UniformBuffer(
-            device=self.device,
-            count=1,
-            dtype=POD_CAMERA_DTYPE,
+        self.camera_device_buffer = self.device.create_buffer(
             label="Draw3dFrame.CameraDeviceBuffer",
+            size=POD_CAMERA_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
         )
-        self.camera_staging_buffer = StagingBuffer(
-            device=self.device,
-            count=1,
-            dtype=POD_CAMERA_DTYPE,
+        self.camera_staging_buffer = self.device.create_buffer(
             label="Draw3dFrame.CameraStagingBuffer",
+            size=POD_CAMERA_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
-        self.instances_list_device_buffer = StorageBuffer(
-            device=self.device,
-            count=Draw3dRenderer.INSTANCE_CAPACITY,
-            dtype=POD_INSTANCE_DTYPE,
+        self.instances_list_device_buffer = self.device.create_buffer(
             label="Draw3dFrame.InstanceHeapDeviceBuffer",
+            size=Draw3dRenderer.INSTANCE_CAPACITY * POD_INSTANCE_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.instances_list_staging_buffer = StagingBuffer(
-            device=self.device,
-            count=Draw3dRenderer.INSTANCE_CAPACITY,
-            dtype=POD_INSTANCE_DTYPE,
+        self.instances_list_staging_buffer = self.device.create_buffer(
             label="Draw3dFrame.InstanceHeapStagingBuffer",
+            size=Draw3dRenderer.INSTANCE_CAPACITY * POD_INSTANCE_DTYPE.itemsize,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
         )
 
         self.bind_group = self.device.create_bind_group(
@@ -288,36 +274,36 @@ class Draw3dFrame:
             entries=[
                 wgpu.BindGroupEntry(
                     binding=0,
-                    resource=self.output_image.wgpu_texture().create_view(),
+                    resource=self.output_image.create_view(),
                 ),
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
-                        buffer=self.frame_info_device_buffer.wgpu_buffer(),
+                        buffer=self.frame_info_device_buffer,
                         offset=0,
-                        size=self.frame_info_device_buffer.size_in_bytes,
+                        size=self.frame_info_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
-                        buffer=self.camera_device_buffer.wgpu_buffer(),
+                        buffer=self.camera_device_buffer,
                         offset=0,
-                        size=self.camera_device_buffer.size_in_bytes,
+                        size=self.camera_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=3,
                     resource=wgpu.BufferBinding(
-                        buffer=self.instances_list_device_buffer.wgpu_buffer(),
+                        buffer=self.instances_list_device_buffer,
                         offset=0,
-                        size=self.instances_list_device_buffer.size_in_bytes,
+                        size=self.instances_list_device_buffer.size,
                     ),
                 ),
             ],
         )
 
-    def get_output_image(self) -> Rgba32FloatTexture:
+    def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
 
     def record(
@@ -333,12 +319,18 @@ class Draw3dFrame:
             dtype=POD_FRAME_INFO_DTYPE,
         )
 
-        self.frame_info_staging_buffer.write(
+        self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
+        self.frame_info_staging_buffer.write_mapped(
             data=np.array([frame_info], dtype=POD_FRAME_INFO_DTYPE)
         )
-        self.frame_info_staging_buffer.copy_to_buffer(
-            dst=self.frame_info_device_buffer,
-            command_encoder=command_encoder,
+        self.frame_info_staging_buffer.unmap()
+
+        command_encoder.copy_buffer_to_buffer(
+            source=self.frame_info_staging_buffer,
+            source_offset=0,
+            destination_offset=0,
+            destination=self.frame_info_device_buffer,
+            size=frame_info.nbytes,
         )
 
         # TODO: Marshall and write camera data, instances, etc
@@ -451,7 +443,7 @@ class Draw3dVertex:
 class Draw3dScene:
     # meshes: Dict[mesh_handle] -> List of transforms as (N, 3, 4) arrays
     meshes: Dict[int, np.ndarray] = field(default_factory=dict)
-    environment_map: Optional[Rgba32FloatTexture] = None
+    environment_map: Optional[wgpu.GPUTexture] = None
 
 
 #

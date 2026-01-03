@@ -37,7 +37,6 @@ from .basic import (
 from .bundled_data import BUNDLED_DATA_PATH
 from .cook import CookedAtlas
 from .draw_2d import Draw2dQuad
-from .gpu_util import Rgba8UnormTexture
 from . import typed_uharfbuzz as hb
 
 
@@ -559,20 +558,29 @@ class GlyphAtlas(BaseDisposable):
                 atlas_data = (np.clip(atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
 
             # Create texture and upload data
-            rgba_texture = Rgba8UnormTexture(
-                device=self._device,
-                size_wh=(atlas_data.shape[1], atlas_data.shape[0]),
+            rgba_texture = self._device.create_texture(
                 label=f"GlyphAtlas.{font}",
+                size=(atlas_data.shape[1], atlas_data.shape[0], 1),
+                format="rgba8unorm",
+                usage=wgpu.TextureUsage.COPY_DST | wgpu.TextureUsage.TEXTURE_BINDING,
             )
 
             self._queue.write_texture(
-                rgba_texture.texel_copy_texture_info(),
-                atlas_data.tobytes(),
-                rgba_texture.texel_copy_buffer_layout(),
-                rgba_texture.size(),
+                destination=wgpu.TexelCopyTextureInfo(
+                    texture=rgba_texture,
+                    mip_level=0,
+                    origin=(0, 0, 0),
+                ),
+                data=atlas_data.tobytes(),
+                data_layout=wgpu.TexelCopyBufferLayout(
+                    offset=0,
+                    bytes_per_row=atlas_data.shape[1] * 4,
+                    rows_per_image=atlas_data.shape[0],
+                ),
+                size=(atlas_data.shape[1], atlas_data.shape[0], 1),
             )
 
-            self._gpu_textures[font] = rgba_texture.wgpu_texture()
+            self._gpu_textures[font] = rgba_texture
 
             # Build glyph cache from the cooked atlas and extract metrics
             glyph_cache: dict[str, GlyphEntry | None] = {}

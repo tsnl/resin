@@ -76,18 +76,6 @@ from .draw_3d import (
     Draw3dScene,
     Draw3dVertex,
 )
-from .gpu_util import (
-    BufferWrapper,
-    IndexBuffer,
-    ReadbackBuffer,
-    Rgba32FloatTexture,
-    Rgba8UnormTexture,
-    StagingBuffer,
-    StorageBuffer,
-    TextureWrapper,
-    UniformBuffer,
-    VertexBuffer,
-)
 from .cook import CookedAtlas, CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey
 from .bundled_data import BUNDLED_DATA_PATH
 from .images import (
