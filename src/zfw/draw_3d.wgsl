@@ -113,7 +113,7 @@ fn h_mat4x4_inverse(m: mat4x4<f32>) -> mat4x4<f32> {
 // Ray
 //
 
-const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-6;
+const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-7;
 const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
 
 struct Ray {
@@ -246,7 +246,7 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     let sensor_hh_at_unit_focal_length = tan(camera.fov_y_rad / 2.0);
     let sensor_pixel_camera_space = vec3<f32>(
         pixel_coord_ndc.x * sensor_hw_at_unit_focal_length,     // sensor right
-        1.0,                                                     // sensor plane at unit focal length (forward)
+        1.0,                                                    // sensor plane at unit focal length (forward)
         pixel_coord_ndc.y * sensor_hh_at_unit_focal_length,     // sensor up
     );
 
