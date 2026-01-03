@@ -333,7 +333,7 @@ class Draw3dFrame:
         encoder: wgpu.GPUCommandEncoder,
         scene: Draw3dScene,
     ) -> None:
-        instance_count = sum(len(transforms) for transforms in scene.instances.values())
+        instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
         self._upload_frame_info(instance_count, encoder)
         self._upload_camera_info(scene.camera, encoder)
@@ -479,7 +479,7 @@ class Draw3dMaterial(BaseDisposable):
 class Draw3dScene:
     camera: Draw3dCamera
 
-    instances: dict[
+    meshes: dict[
         tuple[Draw3dGeometry, Draw3dMaterial],
         jt.Float32[np.ndarray, "n 3 4"],
     ] = field(default_factory=dict)

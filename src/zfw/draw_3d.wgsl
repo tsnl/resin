@@ -80,6 +80,116 @@ fn mat4x4_from_pod_transform(t: PodTransform) -> mat4x4<f32> {
 }
 
 //
+// Ray
+//
+
+const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-6;
+const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
+
+struct Ray {
+    origin: vec3<f32>,
+    direction: vec3<f32>,
+}
+
+struct Aabb {
+    min: vec3<f32>,
+    max: vec3<f32>,
+}
+
+/// Triangle-AABB intersection test.
+/// Returns distance to nearest hit, or infinity if no hit.
+fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
+    let lo = aabb.min;
+    let hi = aabb.max;
+    
+    let inv_dir = 1.0 / ray.direction;
+        
+    let t_lo = (lo - ray.origin) * inv_dir;
+    let t_hi = (hi - ray.origin) * inv_dir;
+
+    let t_close_percoeff = min(t_lo, t_hi);
+    let t_far_percoeff = max(t_lo, t_hi);
+
+    let t_close = max(max(t_close_percoeff.x, t_close_percoeff.y), t_close_percoeff.z);
+    let t_far = min(min(t_far_percoeff.x, t_far_percoeff.y), t_far_percoeff.z);
+
+    if t_close > t_far || t_far < 0.0 {
+        // No intersection, or intersection is behind the ray origin.
+        return F32_INFINITY;
+    } else {
+        // Intersection exists, return the distance to the nearest intersection point.
+        return max(t_close, 0.0);
+    }
+}
+
+/// Triangle-ray intersection test
+/// Returns barycentric coordinates (XYZ) and distance (W) of closest hit. If no hit, (W) is infinity.
+fn hit_tri(ray: Ray, v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>) -> vec4<f32> {
+    // https://en.wikipedia.org/wiki/Möller–Trumbore_intersection_algorithm
+    // Core idea: express ray hit (if exists) in barycentric coordinates.
+    //  i.e. p_hit = (ray.o + t * ray.d) = (v0 + u (v1 - v0) + v (v2 - v0))
+    // Now, we want to solve for u, v.
+    // We are in the triangle (and have a hit) if
+    // - u >= 0, v >= 0
+    // - u + v <= 1
+    // - ray.t > 0 (indicating a "forward" hit for the ray)
+
+    // Calculate edges e1, e2 for barycentric coordinates:
+    let e1 = v1 - v0;
+    let e2 = v2 - v0;
+
+    // Check if the ray is (almost) parallel to the triangle plane, and if so, early out.
+    // Save 'a' for later.
+    let h = cross(ray.direction, e2);
+    let a = dot(e1, h);
+    if abs(a) < TRIANGLE_RAY_INTERSECTION_EPSILON {
+        // Ray parallel to triangle
+        return vec4<f32>(0.0, 0.0, 0.0, F32_INFINITY);
+    }
+
+    // Let 's' be vector to the ray origin from vertex v0.
+    //  s + td = u.e1 + v.e2
+    // Rearranging, we get
+    //  s = -t.d + u.e1 + v.e2
+    // This is a system of linear equations where we solve for t, u, v.
+    // We can now invert the 3x3 matrix [-d, e1, e2].
+    // Note that 'a', which we already have, is the determinant.
+    let s = ray.origin - v0;
+    let f = 1.0 / a;
+
+    // Evaluate 'u', early out if u is invalid:
+    let v1_barycentric_coordinate = f * dot(s, h);
+    if !(0.0 <= v1_barycentric_coordinate && v1_barycentric_coordinate <= 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, F32_INFINITY);
+    }
+
+    // Evaluate 'v', early out if v is invalid or if u + v > 1.0 (out of triangle):
+    let q = cross(s, e1);
+    let v2_barycentric_coordinate = f * dot(ray.direction, q);
+    if v2_barycentric_coordinate < 0.0
+        || v1_barycentric_coordinate + v2_barycentric_coordinate > 1.0
+    {
+        return vec4<f32>(0.0, 0.0, 0.0, F32_INFINITY);
+    }
+
+    // Compute 't' for distance travelled by the ray, filter out backward hits (negative t):
+    let t = f * dot(e2, q);
+    if t < TRIANGLE_RAY_INTERSECTION_EPSILON {
+        return vec4<f32>(0.0, 0.0, 0.0, F32_INFINITY);
+    }
+
+    // Hit successful:
+    let v0_barycentric_coordinate =
+        1.0 - (v1_barycentric_coordinate + v2_barycentric_coordinate);
+    return vec4<f32>(
+        v0_barycentric_coordinate,
+        v1_barycentric_coordinate,
+        v2_barycentric_coordinate,
+        t,
+    );
+}
+
+//
 // Entry point:
 //
 

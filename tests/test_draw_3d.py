@@ -1,5 +1,5 @@
 import wgpu
-from zfw import Draw3dRenderer, Draw3dFrame, Draw3dScene, Draw3dCamera
+from zfw import Draw3dRenderer, Draw3dFrame, Draw3dScene, Draw3dCamera, load_gltf
 from PIL import Image
 import os
 import ctypes
@@ -23,12 +23,25 @@ def test_basic_draw_3d():
         label="BasicDraw3dTest.ReadbackBuffer",
     )
 
+    meshes = load_gltf(
+        renderer=renderer,
+        path="tests/data/glTF-Sample-Assets/Models/Box/glTF/Box.gltf",
+    )
+
     scene = Draw3dScene(
         camera=Draw3dCamera(
-            transform=np.eye(4, dtype=np.float32)[:3, :],
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -3.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                ],
+                dtype=np.float32,
+            ),
             fov_y_rad=np.radians(60.0),
             aspect_ratio=FRAME_W / FRAME_H,
-        )
+        ),
+        meshes=meshes,
     )
 
     command_encoder = device.create_command_encoder(

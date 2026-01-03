@@ -140,7 +140,7 @@ def load_gltf(
     renderer: "Draw3dRenderer",
     path: Path | str,
     *,
-    transform_coordinate_system: bool = False,
+    transform_coordinate_system: bool = True,
 ) -> dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]:
     """
     Load a glTF file and return a meshes dict for rendering.
