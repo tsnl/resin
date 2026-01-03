@@ -6,6 +6,29 @@ A game engine for fun and profit, written in pure Python.
 
 If you're on NixOS, just use the provided `shell.nix` to get started.
 
+```bash
+# First time setup
+git submodule update --init --recursive
+git submodule foreach git lfs pull
+git lfs pull
+```
+
+```bash
+# Create a virtual environment with the right Python version, install all dependencies.
+make -j sync
+
+# Run the example
+make -j sandbox
+```
+
+```bash
+# Run the tests
+make -j tests
+
+# Lint and Typecheck
+make -j check
+```
+
 ## Resources
 
 -   Rendering
