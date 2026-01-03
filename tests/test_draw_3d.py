@@ -1,4 +1,12 @@
+from typing import Generator
+import pytest
 import wgpu
+from PIL import Image
+import os
+import ctypes
+import numpy as np
+from conftest import GpuFixture
+
 from zfw import (
     Draw3dRenderer,
     Draw3dFrame,
@@ -6,24 +14,24 @@ from zfw import (
     Draw3dCamera,
     load_gltf,
 )
-from PIL import Image
-import os
-import ctypes
-import numpy as np
 
 
 FRAME_W = 1024
 FRAME_H = 1024
 
 
-def test_basic_draw_3d():
-    adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = adapter.request_device_sync(label="BasicDraw3dTest.Device")
-    queue = device.queue
+@pytest.fixture(scope="module")
+def renderer(gpu: GpuFixture) -> Generator[Draw3dRenderer, None, None]:
+    yield Draw3dRenderer(gpu.device, gpu.queue, (FRAME_W, FRAME_H))
 
-    renderer = Draw3dRenderer(device, queue, (FRAME_W, FRAME_H))
+
+def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
-    readback_buffer = device.create_buffer(
+
+    # DEBUG:
+    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
+
+    readback_buffer = gpu.device.create_buffer(
         size=FRAME_W * FRAME_H * 4 * ctypes.sizeof(ctypes.c_float),
         usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
         label="BasicDraw3dTest.ReadbackBuffer",
@@ -50,7 +58,7 @@ def test_basic_draw_3d():
         meshes=meshes,
     )
 
-    command_encoder = device.create_command_encoder(
+    command_encoder = gpu.device.create_command_encoder(
         label="BasicDraw2dTest.CommandEncoder"
     )
 
@@ -70,7 +78,7 @@ def test_basic_draw_3d():
         copy_size=frame.get_output_image().size,
     )
 
-    queue.submit([command_encoder.finish()])
+    gpu.queue.submit([command_encoder.finish()])
 
     readback_buffer.map_sync(wgpu.MapMode.READ)
     data = np.asarray(readback_buffer.read_mapped()).view(dtype=np.float32)
@@ -88,18 +96,12 @@ def test_basic_draw_3d():
     img.save(output_path)
 
 
-def test_primary_ray_generation():
+def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
     """Test that primary rays are generated correctly with proper FOV coverage."""
-    adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = adapter.request_device_sync(label="PrimaryRayTest.Device")
-    queue = device.queue
-
     # Use smaller image for easier testing
-    test_w, test_h = 256, 256
-    renderer = Draw3dRenderer(device, queue, (test_w, test_h))
     frame = Draw3dFrame(renderer)
-    readback_buffer = device.create_buffer(
-        size=test_w * test_h * 4 * ctypes.sizeof(ctypes.c_float),
+    readback_buffer = gpu.device.create_buffer(
+        size=FRAME_W * FRAME_H * 4 * ctypes.sizeof(ctypes.c_float),
         usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
         label="PrimaryRayTest.ReadbackBuffer",
     )
@@ -116,17 +118,19 @@ def test_primary_ray_generation():
                 dtype=np.float32,
             ),
             fov_y_rad=np.radians(60.0),
-            aspect_ratio=test_w / test_h,
+            aspect_ratio=FRAME_W / FRAME_H,
         ),
         meshes={},  # No geometry needed for ray direction test
     )
 
-    command_encoder = device.create_command_encoder(
+    command_encoder = gpu.device.create_command_encoder(
         label="PrimaryRayTest.CommandEncoder"
     )
 
     # Enable primary ray direction debug flag
-    frame.set_debug_flags(emit_primary_ray_direction=True)
+    frame.set_debug_flags(
+        emit_primary_ray_direction=True,
+    )
     renderer.record(scene, frame, command_encoder)
     command_encoder.copy_texture_to_buffer(
         source=wgpu.TexelCopyTextureInfo(
@@ -136,21 +140,21 @@ def test_primary_ray_generation():
             aspect=wgpu.TextureAspect.all,
         ),
         destination=wgpu.TexelCopyBufferInfo(
-            bytes_per_row=test_w * 4 * ctypes.sizeof(ctypes.c_float),
-            rows_per_image=test_h,
+            bytes_per_row=FRAME_W * 4 * ctypes.sizeof(ctypes.c_float),
+            rows_per_image=FRAME_H,
             buffer=readback_buffer,
         ),
         copy_size=frame.get_output_image().size,
     )
 
-    queue.submit([command_encoder.finish()])
+    gpu.queue.submit([command_encoder.finish()])
 
     readback_buffer.map_sync(wgpu.MapMode.READ)
     data = np.asarray(readback_buffer.read_mapped()).view(dtype=np.float32)
     readback_buffer.unmap()
 
     # Reshape to (H, W, 4), extract RGB (ray direction mapped to [0,1])
-    data = data.reshape((test_h, test_w, 4))[:, :, :3]
+    data = data.reshape((FRAME_H, FRAME_W, 4))[:, :, :3]
 
     # Save debug image
     img_data = (data * 255.0).astype(np.uint8)
@@ -163,7 +167,7 @@ def test_primary_ray_generation():
     directions = data * 2.0 - 1.0
 
     # Test center pixel: should point straight forward (+Y)
-    center_dir = directions[test_h // 2, test_w // 2]
+    center_dir = directions[FRAME_H // 2, FRAME_W // 2]
     center_dir_normalized = center_dir / np.linalg.norm(center_dir)
     assert np.allclose(center_dir_normalized, [0.0, 1.0, 0.0], atol=0.01), (
         f"Center ray should point down +Y, got {center_dir_normalized}"
@@ -189,7 +193,7 @@ def test_primary_ray_generation():
     )
 
     # Top-right corner
-    tr_dir = directions[0, test_w - 1]
+    tr_dir = directions[0, FRAME_W - 1]
     tr_dir_normalized = tr_dir / np.linalg.norm(tr_dir)
     assert tr_dir_normalized[0] > 0.4, (
         f"Top-right X should be positive, got {tr_dir_normalized}"
@@ -202,7 +206,7 @@ def test_primary_ray_generation():
     )
 
     # Bottom-left corner
-    bl_dir = directions[test_h - 1, 0]
+    bl_dir = directions[FRAME_H - 1, 0]
     bl_dir_normalized = bl_dir / np.linalg.norm(bl_dir)
     assert bl_dir_normalized[0] < -0.4, (
         f"Bottom-left X should be negative, got {bl_dir_normalized}"
@@ -215,7 +219,7 @@ def test_primary_ray_generation():
     )
 
     # Bottom-right corner
-    br_dir = directions[test_h - 1, test_w - 1]
+    br_dir = directions[FRAME_H - 1, FRAME_W - 1]
     br_dir_normalized = br_dir / np.linalg.norm(br_dir)
     assert br_dir_normalized[0] > 0.4, (
         f"Bottom-right X should be positive, got {br_dir_normalized}"
@@ -234,10 +238,10 @@ def test_primary_ray_generation():
         f"Corner angle {np.degrees(corner_angle):.1f}° should be ~42.4°"
     )
 
-    print("Primary ray generation test passed!")
-    print(f"  Center: {center_dir_normalized}")
-    print(f"  TL: {tl_dir_normalized}")
-    print(f"  TR: {tr_dir_normalized}")
-    print(f"  BL: {bl_dir_normalized}")
-    print(f"  BR: {br_dir_normalized}")
-    print(f"  Corner angle: {np.degrees(corner_angle):.1f}°")
+    # print("Primary ray generation test passed!")
+    # print(f"  Center: {center_dir_normalized}")
+    # print(f"  TL: {tl_dir_normalized}")
+    # print(f"  TR: {tr_dir_normalized}")
+    # print(f"  BL: {bl_dir_normalized}")
+    # print(f"  BR: {br_dir_normalized}")
+    # print(f"  Corner angle: {np.degrees(corner_angle):.1f}°")

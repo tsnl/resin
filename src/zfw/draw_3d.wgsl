@@ -257,16 +257,10 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 //
 
 fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
+    let debug_emit_primary_ray_direction = (frame_info.flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
+    let debug_emit_depth_in_r = (frame_info.flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
+
     let ray = gen_primary_ray(pixel_xy);
-    
-    // Debug: emit primary ray direction if flag is set
-    if (frame_info.flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u {
-        let dir_normalized = normalize(ray.direction);
-        return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
-    }
-    
-    // Check if we should emit depth in red channel
-    let should_emit_depth = (frame_info.flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
     
     var closest_hit_distance = F32_INFINITY;
     var hit_count = 0u;
@@ -306,27 +300,26 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
             }
         }
     }
-    
-    // Visualize hits
-    if closest_hit_distance < F32_INFINITY {
-        if should_emit_depth {
-            // Emit normalized depth in red channel
-            let depth_normalized = closest_hit_distance / camera.max_distance;
-            return vec4<f32>(depth_normalized, 0.0, 0.0, 1.0);
-        } else {
-            // Hit! Show depth as greyscale
-            let depth_vis = 1.0 / (1.0 + closest_hit_distance * 0.1);
-            return vec4<f32>(depth_vis, depth_vis, depth_vis, 1.0);
-        }
+
+    // DEBUG: emit primary ray direction if flag is set
+    if debug_emit_primary_ray_direction {
+        let dir_normalized = normalize(ray.direction);
+        return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
     }
     
-    if should_emit_depth {
-        // No hit - emit max value (1.0) in red channel
+    // DEBUG: Visualize hits
+    if debug_emit_depth_in_r {
+        let depth_normalized = clamp(closest_hit_distance / camera.max_distance, 0.0, 1.0);
+        return vec4<f32>(depth_normalized, 0.0, 0.0, 1.0);
+    }
+    
+    // If hit, return red
+    if closest_hit_distance < F32_INFINITY {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
-    
-    // No hit - show sky blue
-    return vec4<f32>(0.5, 0.7, 0.9, 1.0);
+
+    // No hit - show light grey
+    return vec4<f32>(0.5, 0.5, 0.5, 1.0);
 }
 
 @compute @workgroup_size(8, 8, 1)
