@@ -129,11 +129,6 @@ def engine(gpu: GpuFixture) -> Generator[Draw2dExTestEngine, None, None]:
     eng.dispose()
 
 
-# -----------------------------------------------------------------------------
-# Parity Tests (mirror draw_2d_test.py)
-# -----------------------------------------------------------------------------
-
-
 def test_draw_2d_ext_quads(engine: Draw2dExTestEngine):
     """Test rendering colored quads with borders (parity with draw_2d)."""
     primitives: list[Draw2dExtBasePrimitive] = []
@@ -175,12 +170,15 @@ def test_draw_2d_ext_quads(engine: Draw2dExTestEngine):
     engine.dispose()
 
 
-def test_draw_2d_ext_image(engine: Draw2dExTestEngine):
+def test_draw_2d_ext_image(
+    engine: Draw2dExTestEngine,
+    rainbow_512x512_image: np.ndarray,
+):
     """Test rendering a textured quad with an image (parity with draw_2d)."""
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Load test image (returns float32 linear color space)
-    image_data = load_rgba_image(Path("tests/data/rainbow-512x512.png"))
+    image_data = rainbow_512x512_image
     assert image_data.shape == (512, 512, 4)
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture
@@ -299,11 +297,6 @@ def test_draw_2d_ext_text_wrap(engine: Draw2dExTestEngine):
     )
 
     engine.dispose()
-
-
-# -----------------------------------------------------------------------------
-# Text on Quads (New Functionality)
-# -----------------------------------------------------------------------------
 
 
 def test_draw_2d_ext_text_on_quad(engine: Draw2dExTestEngine):
