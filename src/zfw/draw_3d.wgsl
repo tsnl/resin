@@ -403,6 +403,43 @@ fn compute_hit_color(hit: HitRecord) -> vec4<f32> {
     return vec4<f32>(intensity, intensity, intensity, 1.0);
 }
 
+fn compute_miss_color(ray: Ray) -> vec4<f32> {
+    // Create a sky gradient with brightest spot at azimuth 45°, altitude 45°
+    let dir = normalize(ray.direction);
+    
+    // Compute altitude (elevation angle from horizontal plane)
+    let altitude = asin(dir.y);  // -π/2 to π/2
+    
+    // Compute azimuth (horizontal angle)
+    let azimuth = atan2(dir.x, dir.z);  // -π to π
+    
+    // Target: azimuth 45° = π/4, altitude 45° = π/4
+    let target_azimuth = 0.785398;  // π/4
+    let target_altitude = 0.785398;  // π/4
+    
+    // Angular distance from brightest spot
+    let azimuth_diff = azimuth - target_azimuth;
+    let altitude_diff = altitude - target_altitude;
+    let angular_distance = sqrt(azimuth_diff * azimuth_diff + altitude_diff * altitude_diff);
+    
+    // Brightness falloff from the sun spot
+    let sun_brightness = exp(-angular_distance * 2.0);
+    
+    // Base sky color gradient (horizon to zenith)
+    let horizon_color = vec3<f32>(0.6, 0.7, 0.9);  // Light blue
+    let zenith_color = vec3<f32>(0.2, 0.4, 0.8);   // Deeper blue
+    let t = clamp((dir.y + 1.0) * 0.5, 0.0, 1.0);
+    let sky_color = mix(horizon_color, zenith_color, t);
+    
+    // Sun color (warm yellow-white)
+    let sun_color = vec3<f32>(1.0, 0.95, 0.8);
+    
+    // Blend sun and sky
+    let final_color = mix(sky_color, sun_color, sun_brightness * 0.8);
+    
+    return vec4<f32>(final_color, 1.0);
+}
+
 struct HitDetails {
     world_hit_position: vec3<f32>,
     world_hit_distance: f32,
@@ -543,7 +580,7 @@ fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
     if is_hit_record_valid(closest_hit) {
         return compute_hit_color(closest_hit);
     } else {
-        return vec4<f32>(0.0);
+        return compute_miss_color(ray);
     }
 }
 
