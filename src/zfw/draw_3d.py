@@ -291,6 +291,7 @@ class Draw3dFrame:
 
     def __init__(self, renderer: Draw3dRenderer) -> None:
         self.renderer = renderer
+        self._debug_flags = 0
 
         self.output_image = self._device.create_texture(
             label="Draw3dFrame.OutputImage",
@@ -371,6 +372,24 @@ class Draw3dFrame:
     def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
 
+    def set_debug_flags(
+        self,
+        *,
+        emit_primary_ray_direction: bool = False,
+        emit_closest_hit_depth_in_r: bool = False,
+    ) -> None:
+        """Set debug visualization flags.
+
+        Args:
+            emit_primary_ray_direction: If True, output normalized ray direction as RGB.
+            emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
+        """
+        self._debug_flags = 0
+        if emit_primary_ray_direction:
+            self._debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
+        if emit_closest_hit_depth_in_r:
+            self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
+
     def record(
         self,
         pipeline: wgpu.GPUComputePipeline,
@@ -381,7 +400,7 @@ class Draw3dFrame:
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
-        self._upload_frame_info(instance_count, encoder)
+        self._upload_frame_info(instance_count, encoder, self._debug_flags)
         self._upload_camera_info(scene.camera, encoder)
         self._upload_instances_info(scene.meshes, encoder)
 
@@ -400,11 +419,13 @@ class Draw3dFrame:
         self,
         instance_count: int,
         command_encoder: wgpu.GPUCommandEncoder,
+        flags: int = 0,
     ) -> None:
         frame_info_data = PodFrameInfoArray.empty(shape=(1,))
         frame_info_data["instance_count"] = instance_count
         frame_info_data["target_size_w_px"] = self.renderer.target_size_wh_px[0]
         frame_info_data["target_size_h_px"] = self.renderer.target_size_wh_px[1]
+        frame_info_data["flags"] = flags
 
         self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
         self.frame_info_staging_buffer.write_mapped(data=frame_info_data)
@@ -427,6 +448,7 @@ class Draw3dFrame:
         camera_data["transform"] = camera.transform
         camera_data["fov_y_rad"] = camera.fov_y_rad
         camera_data["aspect_ratio"] = camera.aspect_ratio
+        camera_data["max_distance"] = camera.max_distance
 
         self.camera_staging_buffer.map_sync(wgpu.MapMode.WRITE)
         self.camera_staging_buffer.write_mapped(data=camera_data)
@@ -452,13 +474,15 @@ class Draw3dFrame:
         if total_instance_count > self.renderer.instance_capacity:
             raise RuntimeError("Draw3dRenderer instance heap capacity exceeded.")
 
+        if total_instance_count == 0:
+            # No instances to upload
+            return
+
         data = PodInstanceArray.empty(shape=(total_instance_count,))
         offset = 0
         for (geometry, material), transforms in instances.items():
             n = transforms.shape[0]
-            data["geometry_id"][offset : offset + n] = (
-                geometry.geometry_heap_offset_in_triangles
-            )
+            data["geometry_id"][offset : offset + n] = geometry.geometry_id
             data["material_id"][offset : offset + n] = 0  # TODO: material ID
             data["transform"][offset : offset + n] = transforms
             offset += n
@@ -578,6 +602,7 @@ class Draw3dCamera:
     transform: jt.Float32[np.ndarray, "3 4"]
     fov_y_rad: float
     aspect_ratio: float
+    max_distance: float = 1e3
 
 
 #
@@ -634,9 +659,14 @@ class PodFrameInfoArray(StructuredNDArray):
             ("instance_count", np.uint32),
             ("target_size_w_px", np.uint32),
             ("target_size_h_px", np.uint32),
-            ("_rsv", np.uint32),
+            ("flags", np.uint32),
         ]
     )
+
+
+# Frame info flags (private)
+_FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
+_FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
 
 
 class PodCameraArray(StructuredNDArray):
@@ -645,8 +675,8 @@ class PodCameraArray(StructuredNDArray):
             ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
             ("fov_y_rad", np.float32),
             ("aspect_ratio", np.float32),
-            ("_rsv0", np.uint32),
-            ("_rsv1", np.uint32),
+            ("max_distance", np.float32),
+            ("_rsv", np.uint32),
         ]
     )
 
@@ -661,163 +691,163 @@ class PodInstanceArray(StructuredNDArray):
     )
 
 
-#
-# BVH Construction
-#
+# #
+# # BVH Construction
+# #
 
-type Aabb = tuple[np.ndarray, np.ndarray]  # (min, max) as float32 arrays of shape (3,)
-
-
-def aabb_min_max(arr: np.ndarray) -> Aabb:
-    """Compute AABB from array of points (N, 3)."""
-    return (
-        np.min(arr, axis=0).astype(np.float32),
-        np.max(arr, axis=0).astype(np.float32),
-    )
+# type Aabb = tuple[np.ndarray, np.ndarray]  # (min, max) as float32 arrays of shape (3,)
 
 
-def aabb_union(*aabbs: Aabb) -> Aabb:
-    """Union multiple AABBs."""
-    mins = np.stack([a[0] for a in aabbs], axis=0)
-    maxs = np.stack([a[1] for a in aabbs], axis=0)
-    return (
-        np.min(mins, axis=0).astype(np.float32),
-        np.max(maxs, axis=0).astype(np.float32),
-    )
+# def aabb_min_max(arr: np.ndarray) -> Aabb:
+#     """Compute AABB from array of points (N, 3)."""
+#     return (
+#         np.min(arr, axis=0).astype(np.float32),
+#         np.max(arr, axis=0).astype(np.float32),
+#     )
 
 
-def aabb_extent_sum(aabb: Aabb) -> float:
-    """Sum of extent dimensions."""
-    extent = aabb[1] - aabb[0]
-    return float(np.sum(extent))
+# def aabb_union(*aabbs: Aabb) -> Aabb:
+#     """Union multiple AABBs."""
+#     mins = np.stack([a[0] for a in aabbs], axis=0)
+#     maxs = np.stack([a[1] for a in aabbs], axis=0)
+#     return (
+#         np.min(mins, axis=0).astype(np.float32),
+#         np.max(maxs, axis=0).astype(np.float32),
+#     )
 
 
-def evaluate_sah(
-    centroids: np.ndarray, aabbs: list[Aabb], dim: int, split: float
-) -> float:
-    """Evaluate SAH cost for a split."""
-    mask_lt = centroids[:, dim] < split
-
-    if not np.any(mask_lt) or not np.any(~mask_lt):
-        return float("inf")
-
-    lt_aabb = aabb_union(*[aabbs[i] for i in np.where(mask_lt)[0]])
-    rt_aabb = aabb_union(*[aabbs[i] for i in np.where(~mask_lt)[0]])
-
-    lt_count = float(np.sum(mask_lt))
-    rt_count = float(np.sum(~mask_lt))
-
-    return aabb_extent_sum(lt_aabb) * lt_count + aabb_extent_sum(rt_aabb) * rt_count
+# def aabb_extent_sum(aabb: Aabb) -> float:
+#     """Sum of extent dimensions."""
+#     extent = aabb[1] - aabb[0]
+#     return float(np.sum(extent))
 
 
-@dataclass
-class BestPartitionParams:
-    dim: int
-    pivot: float
-    cost: float
+# def evaluate_sah(
+#     centroids: np.ndarray, aabbs: list[Aabb], dim: int, split: float
+# ) -> float:
+#     """Evaluate SAH cost for a split."""
+#     mask_lt = centroids[:, dim] < split
+
+#     if not np.any(mask_lt) or not np.any(~mask_lt):
+#         return float("inf")
+
+#     lt_aabb = aabb_union(*[aabbs[i] for i in np.where(mask_lt)[0]])
+#     rt_aabb = aabb_union(*[aabbs[i] for i in np.where(~mask_lt)[0]])
+
+#     lt_count = float(np.sum(mask_lt))
+#     rt_count = float(np.sum(~mask_lt))
+
+#     return aabb_extent_sum(lt_aabb) * lt_count + aabb_extent_sum(rt_aabb) * rt_count
 
 
-def find_best_partition_params(
-    centroids: np.ndarray, aabbs: list[Aabb]
-) -> BestPartitionParams:
-    """Find best split plane."""
-    best_dim = 0
-    best_val = float("nan")
-    best_cost = float("inf")
-
-    for dim in [0, 1, 2]:
-        # Test split at each centroid coordinate
-        for split_val in np.unique(centroids[:, dim]):
-            cost = evaluate_sah(centroids, aabbs, dim, float(split_val))
-            if cost < best_cost:
-                best_dim = dim
-                best_val = float(split_val)
-                best_cost = cost
-
-    return BestPartitionParams(best_dim, best_val, best_cost)
+# @dataclass
+# class BestPartitionParams:
+#     dim: int
+#     pivot: float
+#     cost: float
 
 
-@dataclass
-class TrianglesPartitionResult:
-    lt_indices: np.ndarray  # Indices of left triangles
-    lt_aabb: Aabb
-    rt_indices: np.ndarray  # Indices of right triangles
-    rt_aabb: Aabb
+# def find_best_partition_params(
+#     centroids: np.ndarray, aabbs: list[Aabb]
+# ) -> BestPartitionParams:
+#     """Find best split plane."""
+#     best_dim = 0
+#     best_val = float("nan")
+#     best_cost = float("inf")
+
+#     for dim in [0, 1, 2]:
+#         # Test split at each centroid coordinate
+#         for split_val in np.unique(centroids[:, dim]):
+#             cost = evaluate_sah(centroids, aabbs, dim, float(split_val))
+#             if cost < best_cost:
+#                 best_dim = dim
+#                 best_val = float(split_val)
+#                 best_cost = cost
+
+#     return BestPartitionParams(best_dim, best_val, best_cost)
 
 
-def partition_triangles(
-    indices: np.ndarray,
-    centroids: np.ndarray,
-    aabbs: list[Aabb],
-    dim: int,
-    pivot: float,
-) -> TrianglesPartitionResult:
-    """Partition triangles by split plane."""
-    mask_lt = centroids[indices, dim] < pivot
-
-    lt_indices = indices[mask_lt]
-    rt_indices = indices[~mask_lt]
-
-    lt_aabb = (
-        aabb_union(*[aabbs[i] for i in lt_indices])
-        if len(lt_indices) > 0
-        else (
-            np.array([0, 0, 0], dtype=np.float32),
-            np.array([0, 0, 0], dtype=np.float32),
-        )
-    )
-    rt_aabb = (
-        aabb_union(*[aabbs[i] for i in rt_indices])
-        if len(rt_indices) > 0
-        else (
-            np.array([0, 0, 0], dtype=np.float32),
-            np.array([0, 0, 0], dtype=np.float32),
-        )
-    )
-
-    return TrianglesPartitionResult(lt_indices, lt_aabb, rt_indices, rt_aabb)
+# @dataclass
+# class TrianglesPartitionResult:
+#     lt_indices: np.ndarray  # Indices of left triangles
+#     lt_aabb: Aabb
+#     rt_indices: np.ndarray  # Indices of right triangles
+#     rt_aabb: Aabb
 
 
-def try_partition_bvh_node(
-    root_node_idx: int,
-    indices: np.ndarray,
-    centroids: np.ndarray,
-    aabbs: list[Aabb],
-    nodes: list,
-) -> None:
-    """Recursively partition BVH node."""
-    # Assert leaf
-    assert (
-        nodes[root_node_idx]["children"][0] == 0
-        and nodes[root_node_idx]["children"][1] == 0
-    )
+# def partition_triangles(
+#     indices: np.ndarray,
+#     centroids: np.ndarray,
+#     aabbs: list[Aabb],
+#     dim: int,
+#     pivot: float,
+# ) -> TrianglesPartitionResult:
+#     """Partition triangles by split plane."""
+#     mask_lt = centroids[indices, dim] < pivot
 
-    if len(indices) <= 1:
-        return
+#     lt_indices = indices[mask_lt]
+#     rt_indices = indices[~mask_lt]
 
-    params = find_best_partition_params(centroids[indices], aabbs)
+#     lt_aabb = (
+#         aabb_union(*[aabbs[i] for i in lt_indices])
+#         if len(lt_indices) > 0
+#         else (
+#             np.array([0, 0, 0], dtype=np.float32),
+#             np.array([0, 0, 0], dtype=np.float32),
+#         )
+#     )
+#     rt_aabb = (
+#         aabb_union(*[aabbs[i] for i in rt_indices])
+#         if len(rt_indices) > 0
+#         else (
+#             np.array([0, 0, 0], dtype=np.float32),
+#             np.array([0, 0, 0], dtype=np.float32),
+#         )
+#     )
 
-    # SAH cost for current node
-    node_aabb = (
-        nodes[root_node_idx]["aabb"][0].astype(np.float32),
-        nodes[root_node_idx]["aabb"][1].astype(np.float32),
-    )
-    node_cost = aabb_extent_sum(node_aabb) * len(indices)
+#     return TrianglesPartitionResult(lt_indices, lt_aabb, rt_indices, rt_aabb)
 
-    if params.cost >= node_cost:
-        return
 
-    res = partition_triangles(indices, centroids, aabbs, params.dim, params.pivot)
+# def try_partition_bvh_node(
+#     root_node_idx: int,
+#     indices: np.ndarray,
+#     centroids: np.ndarray,
+#     aabbs: list[Aabb],
+#     nodes: list,
+# ) -> None:
+#     """Recursively partition BVH node."""
+#     # Assert leaf
+#     assert (
+#         nodes[root_node_idx]["children"][0] == 0
+#         and nodes[root_node_idx]["children"][1] == 0
+#     )
 
-    if len(res.lt_indices) == 0 or len(res.rt_indices) == 0:
-        return
+#     if len(indices) <= 1:
+#         return
 
-    lt_index = emplace_bvh_node(nodes, res.lt_indices, res.lt_aabb)
-    rt_index = emplace_bvh_node(nodes, res.rt_indices, res.rt_aabb)
+#     params = find_best_partition_params(centroids[indices], aabbs)
 
-    # Update children of root node
-    nodes[root_node_idx]["children"][0] = lt_index
-    nodes[root_node_idx]["children"][1] = rt_index
+#     # SAH cost for current node
+#     node_aabb = (
+#         nodes[root_node_idx]["aabb"][0].astype(np.float32),
+#         nodes[root_node_idx]["aabb"][1].astype(np.float32),
+#     )
+#     node_cost = aabb_extent_sum(node_aabb) * len(indices)
 
-    try_partition_bvh_node(lt_index, res.lt_indices, centroids, aabbs, nodes)
-    try_partition_bvh_node(rt_index, res.rt_indices, centroids, aabbs, nodes)
+#     if params.cost >= node_cost:
+#         return
+
+#     res = partition_triangles(indices, centroids, aabbs, params.dim, params.pivot)
+
+#     if len(res.lt_indices) == 0 or len(res.rt_indices) == 0:
+#         return
+
+#     lt_index = emplace_bvh_node(nodes, res.lt_indices, res.lt_aabb)
+#     rt_index = emplace_bvh_node(nodes, res.rt_indices, res.rt_aabb)
+
+#     # Update children of root node
+#     nodes[root_node_idx]["children"][0] = lt_index
+#     nodes[root_node_idx]["children"][1] = rt_index
+
+#     try_partition_bvh_node(lt_index, res.lt_indices, centroids, aabbs, nodes)
+#     try_partition_bvh_node(rt_index, res.rt_indices, centroids, aabbs, nodes)

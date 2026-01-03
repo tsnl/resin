@@ -21,8 +21,11 @@ struct PodFrameInfo {
     instance_count: u32,
     target_size_w_px: u32,
     target_size_h_px: u32,
-    _rsv: u32,
+    flags: u32,
 }
+
+const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
+const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
 
 struct PodInstance {
     geometry_id: u32,
@@ -53,8 +56,8 @@ struct PodCamera {
     transform: PodTransform,
     fov_y_rad: f32,
     aspect_ratio: f32,
-    _rsv0: u32,
-    _rsv1: u32,
+    max_distance: f32,
+    _rsv: u32,
 }
 
 struct PodSpan {
@@ -95,10 +98,10 @@ fn h_mat4x4_inverse(m: mat4x4<f32>) -> mat4x4<f32> {
     let r_inv = transpose(r);
     let t_inv = -r_inv * t;
 
-    let col0 = vec4<f32>(r_inv[0][0], r_inv[1][0], r_inv[2][0], 0.0);
-    let col1 = vec4<f32>(r_inv[0][1], r_inv[1][1], r_inv[2][1], 0.0);
-    let col2 = vec4<f32>(r_inv[0][2], r_inv[1][2], r_inv[2][2], 0.0);
-    let col3 = vec4<f32>(t_inv.x, t_inv.y, t_inv.z, 1.0);
+    let col0 = vec4<f32>(r_inv[0], 0.0);
+    let col1 = vec4<f32>(r_inv[1], 0.0);
+    let col2 = vec4<f32>(r_inv[2], 0.0);
+    let col3 = vec4<f32>(t_inv, 1.0);
     return mat4x4<f32>(col0, col1, col2, col3);
 }
 
@@ -239,12 +242,12 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     let sensor_hh_at_unit_focal_length = tan(camera.fov_y_rad / 2.0);
     let sensor_pixel_camera_space = vec3<f32>(
         pixel_coord_ndc.x * sensor_hw_at_unit_focal_length,     // sensor right
-        -1.0,                                                   // sensor plane at unit focal length
+        1.0,                                                     // sensor plane at unit focal length (forward)
         pixel_coord_ndc.y * sensor_hh_at_unit_focal_length,     // sensor up
     );
 
     // Create ray in camera space, then transform to world space.
-    let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), -sensor_pixel_camera_space);
+    let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), sensor_pixel_camera_space);
     let camera_transform = h_mat4x4_from_pod_transform(camera.transform);
     return transform_ray(camera_space_ray, camera_transform);
 }
@@ -256,6 +259,18 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     let ray = gen_primary_ray(pixel_xy);
     
+    // Debug: emit primary ray direction if flag is set
+    if (frame_info.flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u {
+        let dir_normalized = normalize(ray.direction);
+        return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
+    }
+    
+    // Check if we should emit depth in red channel
+    let should_emit_depth = (frame_info.flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
+    
+    var closest_hit_distance = F32_INFINITY;
+    var hit_count = 0u;
+    
     for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id = instance_id + 1u) {
         let instance = instances[instance_id];
         let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
@@ -263,11 +278,10 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
         let local_ray = transform_ray(ray, inv_instance_transform);
 
         let geometry = geometry_heap[instance.geometry_id];
-        let bvh_span = geometry.bvh_node_span_in_heap;
         
         // For simplicity, we just iterate over all triangles in the geometry.
         let triangle_span = geometry.triangle_span_in_heap;
-        for (var tri_index = triangle_span.begin; tri_index < triangle_span.end; tri_index = tri_index + 1) {
+        for (var tri_index = triangle_span.begin; tri_index < triangle_span.end; tri_index = tri_index + 1u) {
             let triangle = triangle_heap[tri_index];
             let v0 = vec3<f32>(
                 triangle.vertices[0].position[0],
@@ -286,15 +300,33 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
             );
 
             let hit_result = hit_tri(local_ray, v0, v1, v2);
-            if hit_result.w < F32_INFINITY {
-                // Hit!
-                return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red for hit
+            if hit_result.w > 0.0 && hit_result.w < closest_hit_distance {
+                closest_hit_distance = hit_result.w;
+                hit_count = hit_count + 1u;
             }
         }
     }
     
-    // No hit
-    return vec4<f32>(0.8, 0.8, 0.8, 1.0); // Light grey for no hit
+    // Visualize hits
+    if closest_hit_distance < F32_INFINITY {
+        if should_emit_depth {
+            // Emit normalized depth in red channel
+            let depth_normalized = closest_hit_distance / camera.max_distance;
+            return vec4<f32>(depth_normalized, 0.0, 0.0, 1.0);
+        } else {
+            // Hit! Show depth as greyscale
+            let depth_vis = 1.0 / (1.0 + closest_hit_distance * 0.1);
+            return vec4<f32>(depth_vis, depth_vis, depth_vis, 1.0);
+        }
+    }
+    
+    if should_emit_depth {
+        // No hit - emit max value (1.0) in red channel
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+    
+    // No hit - show sky blue
+    return vec4<f32>(0.5, 0.7, 0.9, 1.0);
 }
 
 @compute @workgroup_size(8, 8, 1)
