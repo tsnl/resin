@@ -34,10 +34,10 @@ def test_gltf_loader_basic(gpu: GpuFixture):
         assert isinstance(geometry, Draw3dGeometry)
         assert isinstance(material, Draw3dMaterial)
 
-        # Verify transform array shape (N, 3, 4)
+        # Verify transform array shape (N, 4, 4)
         assert isinstance(transforms, np.ndarray)
         assert transforms.ndim == 3
-        assert transforms.shape[1:] == (3, 4)
+        assert transforms.shape[1:] == (4, 4)
         assert transforms.dtype == np.float32
 
         # For Box model, expect at least one instance

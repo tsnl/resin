@@ -97,6 +97,39 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
         renderer=renderer,
         path="tests/data/glTF-Sample-Assets/Models/Avocado/glTF/Avocado.gltf",
     )
+
+    assert len(meshes) == 1
+    mesh, transforms = next(iter(meshes.items()))
+    assert transforms.shape[0] == 1
+    model_transform = transforms[0]
+
+    meshes = {
+        mesh: np.array(
+            [
+                model_transform
+                @ np.array(
+                    [
+                        [1.0, 0.0, 0.0, 0.05],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                    dtype=np.float32,
+                ),
+                model_transform
+                @ np.array(
+                    [
+                        [1.0, 0.0, 0.0, -0.05],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                    dtype=np.float32,
+                ),
+            ]
+        )
+    }
+
     scene = Draw3dScene(
         camera=Draw3dCamera(
             transform=np.array(
@@ -104,6 +137,7 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, -0.25],
                     [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
                 ],
                 dtype=np.float32,
             ),
@@ -126,14 +160,7 @@ def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
     # Simple camera: identity transform (at origin, looking down +Y)
     scene = Draw3dScene(
         camera=Draw3dCamera(
-            transform=np.array(
-                [
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.0],
-                ],
-                dtype=np.float32,
-            ),
+            transform=np.eye(4, dtype=np.float32),
             fov_y_rad=np.radians(60.0),
             aspect_ratio=FRAME_W / FRAME_H,
         ),
@@ -241,6 +268,7 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, -5.0],
                     [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
                 ],
                 dtype=np.float32,
             ),
@@ -308,6 +336,7 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, -5.0],
                     [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
                 ],
                 dtype=np.float32,
             ),

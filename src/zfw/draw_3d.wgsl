@@ -77,6 +77,7 @@ struct PodTransform {
     row0: vec4<f32>,
     row1: vec4<f32>,
     row2: vec4<f32>,
+    row3: vec4<f32>,
 }
 
 //

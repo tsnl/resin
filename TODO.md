@@ -8,7 +8,7 @@
   - [x] API, planning CPU-side code to set things up.
   - [x] Dispatch compute workgroups, write test gradient to output image.
 - [ ] Primary rays
-  - [ ] Naive ray-triangle intersection with primary rays, incl. instanced meshes.
+  - [x] Naive ray-triangle intersection with primary rays, incl. instanced meshes.
   - [x] Construct BVHs for BLAS
   - [ ] BVH-accelerated ray-triangle intersection with primary rays, ensure no regressions.
   - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.

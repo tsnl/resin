@@ -470,7 +470,7 @@ class Draw3dFrame:
         self,
         instances: dict[
             tuple["Draw3dGeometry", "Draw3dMaterial"],
-            jt.Float32[np.ndarray, "n 3 4"],
+            jt.Float32[np.ndarray, "n 4 4"],
         ],
         command_encoder: wgpu.GPUCommandEncoder,
     ) -> None:
@@ -492,14 +492,9 @@ class Draw3dFrame:
 
             # Compute inverse transforms
             for i in range(n):
-                transform_3x4 = transforms[i]  # Shape (3, 4)
-                # Build 4x4 homogeneous matrix
-                transform_4x4 = np.eye(4, dtype=np.float32)
-                transform_4x4[:3, :] = transform_3x4
-                # Compute inverse
+                transform_4x4 = transforms[i]  # Shape (4, 4)
                 inv_transform_4x4 = np.linalg.inv(transform_4x4)
-                # Store 3x4 portion
-                data["inv_transform"][offset + i] = inv_transform_4x4[:3, :]
+                data["inv_transform"][offset + i] = inv_transform_4x4
 
             offset += n
 
@@ -607,7 +602,7 @@ class Draw3dScene:
 
     meshes: dict[
         tuple[Draw3dGeometry, Draw3dMaterial],
-        jt.Float32[np.ndarray, "n 3 4"],
+        jt.Float32[np.ndarray, "n 4 4"],
     ] = field(default_factory=dict)
 
     environment_map: jt.Float32[np.ndarray, "eh ew 3"] | None = None
@@ -615,7 +610,7 @@ class Draw3dScene:
 
 @dataclass
 class Draw3dCamera:
-    transform: jt.Float32[np.ndarray, "3 4"]
+    transform: jt.Float32[np.ndarray, "4 4"]
     fov_y_rad: float
     aspect_ratio: float
     max_distance: float = 1e3
@@ -689,7 +684,7 @@ _FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
 class PodCameraArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
+            ("transform", np.float32, (4, 4)),
             ("fov_y_rad", np.float32),
             ("aspect_ratio", np.float32),
             ("max_distance", np.float32),
@@ -705,8 +700,8 @@ class PodInstanceArray(StructuredNDArray):
             ("material_id", np.uint32),
             ("_pad0", np.uint32),
             ("_pad1", np.uint32),
-            ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
-            ("inv_transform", np.float32, (3, 4)),  # row-major 3x4 inverse matrix
+            ("transform", np.float32, (4, 4)),  # row-major 4x4 matrix
+            ("inv_transform", np.float32, (4, 4)),  # row-major 4x4 inverse matrix
         ]
     )
 

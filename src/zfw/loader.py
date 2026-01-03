@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal
 import PIL.Image
 import numpy as np
 import pygltflib
+import jaxtyping as jt
 
 from .basic import ColorSpace, logger
 from .draw_3d import Draw3dGeometry, Draw3dMaterial
@@ -141,12 +142,14 @@ def load_gltf(
     path: Path | str,
     *,
     transform_coordinate_system: bool = True,
-) -> dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]:
+) -> dict[tuple[Draw3dGeometry, Draw3dMaterial], jt.Float32[np.ndarray, "N 4 4"]]:
     """
     Load a glTF file and return a meshes dict for rendering.
 
     Returns a meshes dict mapping (geometry, material) pairs to instance transforms
-    (Nx3x4 arrays), suitable for passing to Draw3dScene.
+    (Nx4x4 arrays), suitable for passing to Draw3dScene. Matrices are in row-major order,
+    and should have [0, 0, 0, 1] in the last row to represent affine transforms in homogeneous
+    coordinates.
 
     :param renderer: The Draw3dRenderer to create resources with.
     :param path: Path to the glTF or GLB file.
@@ -619,8 +622,8 @@ def _process_scene(
                 instance_key = (geometry, material)
                 if instance_key not in instances:
                     instances[instance_key] = []
-                # Extract 3x4 transform (drop last row which is [0, 0, 0, 1])
-                instances[instance_key].append(world_transform[:3, :].copy())
+
+                instances[instance_key].append(world_transform)
 
         # Traverse children
         for child_idx in node.children or []:
