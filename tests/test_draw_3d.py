@@ -425,12 +425,12 @@ def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
 
-    # Camera at Y=-5 with X offset of +0.05, looking forward (+Y) toward cube at origin
+    # Camera at Y=-5 with X offset of +0.50, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
         camera=Draw3dCamera(
             transform=np.array(
                 [
-                    [1.0, 0.0, 0.0, 0.05],
+                    [1.0, 0.0, 0.0, 0.5],
                     [0.0, 1.0, 0.0, -5.0],
                     [0.0, 0.0, 1.0, 0.0],
                     [0.0, 0.0, 0.0, 1.0],
@@ -481,13 +481,13 @@ def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
 
-    # Camera at Y=-4.95 (closer by 0.05), looking forward (+Y) toward cube at origin
+    # Camera at Y=-4.5 (closer by 0.5), looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
         camera=Draw3dCamera(
             transform=np.array(
                 [
                     [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, -4.95],
+                    [0.0, 1.0, 0.0, -4.5],
                     [0.0, 0.0, 1.0, 0.0],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
@@ -566,14 +566,14 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
 
-    # Camera at Y=-5 with Z offset of +0.05, looking forward (+Y) toward cube at origin
+    # Camera at Y=-5 with Z offset of +0.5, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
         camera=Draw3dCamera(
             transform=np.array(
                 [
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, -5.0],
-                    [0.0, 0.0, 1.0, 0.05],
+                    [0.0, 0.0, 1.0, 0.5],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
                 dtype=np.float32,
