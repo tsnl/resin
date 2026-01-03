@@ -233,7 +233,7 @@ def test_draw_2d_ext_image(
         output_image,
         "test_draw_2d_ext_image",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
@@ -270,7 +270,7 @@ def test_draw_2d_ext_text_basic(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_text_basic",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
@@ -306,7 +306,7 @@ def test_draw_2d_ext_text_wrap(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_text_wrap",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
@@ -349,7 +349,7 @@ def test_draw_2d_ext_text_on_quad(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_text_on_quad",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
@@ -442,7 +442,7 @@ def test_draw_2d_ext_layered_quads_and_text(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_layered_quads_and_text",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
@@ -516,7 +516,7 @@ def test_draw_2d_ext_font_matrix(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_font_matrix",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()
@@ -582,7 +582,7 @@ def test_draw_2d_ext_text_alignment(engine: Draw2dExTestEngine):
         image,
         "test_draw_2d_ext_text_alignment",
         psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
+        test_subdir="test_draw_2d_ext",
     )
 
     engine.dispose()

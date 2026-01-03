@@ -416,4 +416,201 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
         y_mean = np.mean(y_coords)
 
 
+def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
+    """Test that positive X camera offset shifts the depth centroid left."""
+    frame = Draw3dFrame(renderer)
+
+    meshes = load_gltf(
+        renderer=renderer,
+        path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
+    )
+
+    # Camera at Y=-5 with X offset of +0.05, looking forward (+Y) toward cube at origin
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.05],
+                    [0.0, 1.0, 0.0, -5.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=10.0,
+        ),
+        meshes=meshes,
+    )
+
+    # Enable depth debug flag
+    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+
+    # Save output
+    _save_debug_image(data, "test_coordinate_system_offset_px.png", format="RGBA")
+
+    # Extract depth channel (R) and alpha
+    depth_normalized = data[:, :, 0]
+    alpha_channel = data[:, :, 3]
+
+    # Find pixels with hits (alpha > 0)
+    hit_mask = alpha_channel > 0
+    assert np.sum(hit_mask) > 0, "Expected some hits on the cube"
+
+    # Calculate centroid of depth pixels
+    y_indices, x_indices = np.where(hit_mask)
+    centroid_x = np.mean(x_indices)
+    centroid_y = np.mean(y_indices)
+
+    # Positive X offset should shift centroid to the left (smaller X pixel coordinate)
+    # Center of frame is at FRAME_W / 2
+    assert centroid_x < FRAME_W / 2, (
+        f"Positive X camera offset should shift cube left, "
+        f"centroid at X={centroid_x:.1f} should be < {FRAME_W / 2}"
+    )
+
+
+def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
+    """Test that positive Y camera offset makes the cube appear larger."""
+    frame = Draw3dFrame(renderer)
+
+    meshes = load_gltf(
+        renderer=renderer,
+        path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
+    )
+
+    # Camera at Y=-4.95 (closer by 0.05), looking forward (+Y) toward cube at origin
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -4.95],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=10.0,
+        ),
+        meshes=meshes,
+    )
+
+    # Enable depth debug flag
+    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+
+    # Save output
+    _save_debug_image(data, "test_coordinate_system_offset_py.png", format="RGBA")
+
+    # Extract alpha channel
+    alpha_channel = data[:, :, 3]
+
+    # Find bounding box of non-zero alpha pixels
+    hit_mask = alpha_channel > 0
+    assert np.sum(hit_mask) > 0, "Expected some hits on the cube"
+
+    y_indices, x_indices = np.where(hit_mask)
+    bbox_width = np.max(x_indices) - np.min(x_indices)
+    bbox_height = np.max(y_indices) - np.min(y_indices)
+    bbox_area = bbox_width * bbox_height
+
+    # Store the bbox area for comparison
+    # For a reference, render at Y=-5 (baseline)
+    scene_baseline = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -5.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=10.0,
+        ),
+        meshes=meshes,
+    )
+
+    data_baseline = _render_and_readback(
+        gpu, renderer, frame, scene_baseline, FRAME_W, FRAME_H
+    )
+    alpha_baseline = data_baseline[:, :, 3]
+    hit_mask_baseline = alpha_baseline > 0
+
+    y_baseline, x_baseline = np.where(hit_mask_baseline)
+    bbox_width_baseline = np.max(x_baseline) - np.min(x_baseline)
+    bbox_height_baseline = np.max(y_baseline) - np.min(y_baseline)
+    bbox_area_baseline = bbox_width_baseline * bbox_height_baseline
+
+    # Moving camera closer (positive Y) should make the cube appear larger
+    assert bbox_area > bbox_area_baseline, (
+        f"Positive Y camera offset (closer) should make cube larger, "
+        f"area={bbox_area} should be > baseline={bbox_area_baseline}"
+    )
+
+
+def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
+    """Test that positive Z camera offset shifts the depth centroid downward."""
+    frame = Draw3dFrame(renderer)
+
+    meshes = load_gltf(
+        renderer=renderer,
+        path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
+    )
+
+    # Camera at Y=-5 with Z offset of +0.05, looking forward (+Y) toward cube at origin
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -5.0],
+                    [0.0, 0.0, 1.0, 0.05],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=10.0,
+        ),
+        meshes=meshes,
+    )
+
+    # Enable depth debug flag
+    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+
+    # Save output
+    _save_debug_image(data, "test_coordinate_system_offset_pz.png", format="RGBA")
+
+    # Extract depth channel (R) and alpha
+    depth_normalized = data[:, :, 0]
+    alpha_channel = data[:, :, 3]
+
+    # Find pixels with hits (alpha > 0)
+    hit_mask = alpha_channel > 0
+    assert np.sum(hit_mask) > 0, "Expected some hits on the cube"
+
+    # Calculate centroid of depth pixels
+    y_indices, x_indices = np.where(hit_mask)
+    centroid_x = np.mean(x_indices)
+    centroid_y = np.mean(y_indices)
+
+    # Positive Z offset should shift centroid downward (larger Y pixel coordinate)
+    # Center of frame is at FRAME_H / 2
+    assert centroid_y > FRAME_H / 2, (
+        f"Positive Z camera offset should shift cube down, "
+        f"centroid at Y={centroid_y:.1f} should be > {FRAME_H / 2}"
+    )
+
+
 LOG = logger(__name__)
