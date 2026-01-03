@@ -152,8 +152,8 @@ class FreeCameraController:
         self.yaw += dx * self.look_speed
 
         # Pitch: rotate around camera's local X axis (up/down look)
-        # dy is positive when mouse moves down, so we add (not subtract) to make it intuitive
-        self.pitch += dy * self.look_speed
+        # dy is positive when mouse moves down, so we subtract to make it intuitive
+        self.pitch -= dy * self.look_speed
 
         # Clamp pitch to prevent flipping over
         self.pitch = np.clip(self.pitch, -math.pi / 2 + 0.01, math.pi / 2 - 0.01)
@@ -220,8 +220,8 @@ class FreeCameraController:
         )
 
         # Camera's local Z axis (up) in world space
-        # Perpendicular to both right and forward
-        up = np.cross(forward, right)
+        # Perpendicular to both right and forward (right-handed: X × Y = Z)
+        up = np.cross(right, forward)
 
         # Build the transform matrix (camera-to-world)
         transform = np.eye(4, dtype=np.float32)
