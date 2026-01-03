@@ -21,7 +21,7 @@
 const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
 
 /// Epsilon value for triangle-ray intersection tests, used when ray is nearly parallel to triangle plane.
-const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-6;
+const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-8;
 
 
 //

@@ -397,24 +397,6 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
 
     _save_debug_image(data, "test_world_position.png", format="RGBA")
 
-    # Extract RGB (world position mapped to [0,1] via (pos+10)/20)
-    world_pos_normalized = data[:, :, :3]
-    alpha_channel = data[:, :, 3]
-
-    # Convert back to world space: [0,1] -> [-10,10]
-    world_positions = world_pos_normalized * 20.0 - 10.0
-
-    hit_mask = alpha_channel > 0
-    hit_count = np.sum(hit_mask)
-
-    if hit_count > 0:
-        hit_world_pos = world_positions[hit_mask]
-
-        # Check if all hit positions have the same Y coordinate (would indicate plane bug)
-        y_coords = hit_world_pos[:, 1]
-        y_std = np.std(y_coords)
-        y_mean = np.mean(y_coords)
-
 
 def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
     """Test that positive X camera offset shifts the depth centroid left."""
@@ -452,7 +434,6 @@ def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
     _save_debug_image(data, "test_coordinate_system_offset_px.png", format="RGBA")
 
     # Extract depth channel (R) and alpha
-    depth_normalized = data[:, :, 0]
     alpha_channel = data[:, :, 3]
 
     # Find pixels with hits (alpha > 0)
@@ -460,9 +441,8 @@ def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
     assert np.sum(hit_mask) > 0, "Expected some hits on the cube"
 
     # Calculate centroid of depth pixels
-    y_indices, x_indices = np.where(hit_mask)
+    _, x_indices = np.where(hit_mask)
     centroid_x = np.mean(x_indices)
-    centroid_y = np.mean(y_indices)
 
     # Positive X offset should shift centroid to the left (smaller X pixel coordinate)
     # Center of frame is at FRAME_W / 2
@@ -593,7 +573,6 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
     _save_debug_image(data, "test_coordinate_system_offset_pz.png", format="RGBA")
 
     # Extract depth channel (R) and alpha
-    depth_normalized = data[:, :, 0]
     alpha_channel = data[:, :, 3]
 
     # Find pixels with hits (alpha > 0)
@@ -602,7 +581,6 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Calculate centroid of depth pixels
     y_indices, x_indices = np.where(hit_mask)
-    centroid_x = np.mean(x_indices)
     centroid_y = np.mean(y_indices)
 
     # Positive Z offset should shift centroid downward (larger Y pixel coordinate)
