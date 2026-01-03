@@ -101,7 +101,7 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
             transform=np.array(
                 [
                     [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, -100.0],
+                    [0.0, 1.0, 0.0, -0.25],
                     [0.0, 0.0, 1.0, 0.0],
                 ],
                 dtype=np.float32,
