@@ -18,10 +18,10 @@
 //
 
 struct PodFrameInfo {
-    count: u32,
-    target_w_px: u32,
-    target_h_px: u32,
-    _rsv2: u32,
+    instance_count: u32,
+    target_size_w_px: u32,
+    target_size_h_px: u32,
+    _rsv: u32,
 }
 
 struct PodInstance {
@@ -85,11 +85,11 @@ fn mat4x4_from_pod_transform(t: PodTransform) -> mat4x4<f32> {
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    if global_id.x >= frame_info.target_w_px || global_id.y >= frame_info.target_h_px {
+    if global_id.x >= frame_info.target_size_w_px || global_id.y >= frame_info.target_size_h_px {
         return;
     }
-    let r = f32(global_id.x) / f32(frame_info.target_w_px);
-    let g = f32(global_id.y) / f32(frame_info.target_h_px);
+    let r = f32(global_id.x) / f32(frame_info.target_size_w_px);
+    let g = f32(global_id.y) / f32(frame_info.target_size_h_px);
     let b = 1.0 - r;
     textureStore(output_image, global_id.xy, vec4<f32>(r, g, b, 1.0));
 }

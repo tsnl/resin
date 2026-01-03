@@ -194,8 +194,8 @@ class Draw2dFrame:
                 wgpu.RenderPassColorAttachment(
                     view=self.output_image.create_view(),
                     resolve_target=None,
-                    load_op=wgpu.LoadOp.clear,
-                    store_op=wgpu.StoreOp.store,
+                    load_op="clear",
+                    store_op="store",
                     clear_value=(0, 0, 0, 0),
                 )
             ],
@@ -228,7 +228,7 @@ class Draw2dFrame:
 
         return self.quad_group_cache[key].update(
             device=device,
-            command_encoder=command_encoder,
+            encoder=command_encoder,
             quad_batch_bind_group_layout=bind_group_layout,
             quad_batch_sampler=sampler,
             data=quads,
@@ -377,7 +377,7 @@ class QuadGroup:
         self,
         *,
         device: wgpu.GPUDevice,
-        command_encoder: wgpu.GPUCommandEncoder,
+        encoder: wgpu.GPUCommandEncoder,
         quad_batch_bind_group_layout: wgpu.GPUBindGroupLayout,
         quad_batch_sampler: wgpu.GPUSampler,
         data: npt.NDArray,
@@ -395,7 +395,7 @@ class QuadGroup:
         self.staging_buffer.write_mapped(data=data_array)
         self.staging_buffer.unmap()
 
-        command_encoder.copy_buffer_to_buffer(
+        encoder.copy_buffer_to_buffer(
             source=self.staging_buffer,
             source_offset=0,
             destination=self.device_buffer,

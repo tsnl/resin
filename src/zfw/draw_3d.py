@@ -6,7 +6,6 @@ __all__ = [
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 import numpy as np
 import jaxtyping as jt
@@ -90,23 +89,17 @@ class Draw3dRenderer:
                 wgpu.BindGroupLayoutEntry(
                     binding=1,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(
-                        type=wgpu.BufferBindingType.uniform
-                    ),
+                    buffer=wgpu.BufferBindingLayout(type="uniform"),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=2,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(
-                        type=wgpu.BufferBindingType.uniform
-                    ),
+                    buffer=wgpu.BufferBindingLayout(type="uniform"),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=3,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(
-                        type=wgpu.BufferBindingType.read_only_storage
-                    ),
+                    buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
                 ),
             ],
         )
@@ -324,18 +317,16 @@ class Draw3dFrame:
         pipeline: wgpu.GPUComputePipeline,
         renderer_bind_group: wgpu.GPUBindGroup,
         target_size_wh: tuple[int, int],
-        command_encoder: wgpu.GPUCommandEncoder,
+        encoder: wgpu.GPUCommandEncoder,
         scene: Draw3dScene,
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.instances.values())
 
-        self._upload_frame_info(instance_count, command_encoder)
-        self._upload_camera_info(scene.camera, command_encoder)
+        self._upload_frame_info(instance_count, encoder)
+        self._upload_camera_info(scene.camera, encoder)
         # TODO: upload more data as needed
 
-        compute_pass = command_encoder.begin_compute_pass(
-            label="Draw3dFrame.ComputePass"
-        )
+        compute_pass = encoder.begin_compute_pass(label="Draw3dFrame.ComputePass")
         compute_pass.set_pipeline(pipeline)
         compute_pass.set_bind_group(0, renderer_bind_group, [], 0, 0)
         compute_pass.set_bind_group(1, self.bind_group, [], 0, 0)
@@ -360,9 +351,6 @@ class Draw3dFrame:
         self.frame_info_staging_buffer.write_mapped(data=frame_info_data)
         self.frame_info_staging_buffer.unmap()
 
-        command_encoder = self._device.create_command_encoder(
-            label="Draw3dFrame.UploadFrameInfoEncoder"
-        )
         command_encoder.copy_buffer_to_buffer(
             source=self.frame_info_staging_buffer,
             source_offset=0,
