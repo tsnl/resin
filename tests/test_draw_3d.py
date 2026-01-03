@@ -322,6 +322,7 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
         print(
             f"  Geometry: {geom.triangle_count} triangles, {transforms.shape[0]} instances"
         )
+        print(f"  First instance transform:\n{transforms[0]}")
 
     # Camera at Y=-5, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
@@ -339,21 +340,6 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
         ),
         meshes=meshes,
     )
-
-    print(f"Scene has {len(scene.meshes)} mesh instances")
-
-    # First: check instance count
-    frame.set_debug_flags(emit_instance_count=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
-    instance_count_viz = data[0, 0, 0]  # Should be same for all pixels
-    print(f"Instance count from GPU: {instance_count_viz * 10.0:.0f}")
-
-    # Check first triangle vertex
-    frame.set_debug_flags(emit_first_triangle_v0=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
-    v0_normalized = data[0, 0, :3]
-    v0 = v0_normalized * 20.0 - 10.0
-    print(f"First triangle v0: ({v0[0]:.2f}, {v0[1]:.2f}, {v0[2]:.2f})")
 
     # Enable world position debug flag
     frame.set_debug_flags(emit_hit_world_position=True)

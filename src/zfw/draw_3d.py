@@ -378,8 +378,6 @@ class Draw3dFrame:
         emit_primary_ray_direction: bool = False,
         emit_closest_hit_depth_in_r: bool = False,
         emit_hit_world_position: bool = False,
-        emit_instance_count: bool = False,
-        emit_first_triangle_v0: bool = False,
     ) -> None:
         """Set debug visualization flags.
 
@@ -387,8 +385,6 @@ class Draw3dFrame:
             emit_primary_ray_direction: If True, output normalized ray direction as RGB.
             emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
             emit_hit_world_position: If True, output world-space hit position as RGB.
-            emit_instance_count: If True, output instance count as red channel.
-            emit_first_triangle_v0: If True, output first vertex of first triangle as RGB.
         """
         self._debug_flags = 0
         if emit_primary_ray_direction:
@@ -397,10 +393,6 @@ class Draw3dFrame:
             self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
         if emit_hit_world_position:
             self._debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
-        if emit_instance_count:
-            self._debug_flags |= _FRAME_FLAG_EMIT_INSTANCE_COUNT
-        if emit_first_triangle_v0:
-            self._debug_flags |= _FRAME_FLAG_EMIT_FIRST_TRIANGLE_V0
 
     def record(
         self,
@@ -497,6 +489,18 @@ class Draw3dFrame:
             data["geometry_id"][offset : offset + n] = geometry.geometry_id
             data["material_id"][offset : offset + n] = 0  # TODO: material ID
             data["transform"][offset : offset + n] = transforms
+
+            # Compute inverse transforms
+            for i in range(n):
+                transform_3x4 = transforms[i]  # Shape (3, 4)
+                # Build 4x4 homogeneous matrix
+                transform_4x4 = np.eye(4, dtype=np.float32)
+                transform_4x4[:3, :] = transform_3x4
+                # Compute inverse
+                inv_transform_4x4 = np.linalg.inv(transform_4x4)
+                # Store 3x4 portion
+                data["inv_transform"][offset + i] = inv_transform_4x4[:3, :]
+
             offset += n
 
         self.instances_list_staging_buffer.map_sync(wgpu.MapMode.WRITE)
@@ -680,8 +684,6 @@ class PodFrameInfoArray(StructuredNDArray):
 _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
 _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
 _FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
-_FRAME_FLAG_EMIT_INSTANCE_COUNT = 1 << 3
-_FRAME_FLAG_EMIT_FIRST_TRIANGLE_V0 = 1 << 4
 
 
 class PodCameraArray(StructuredNDArray):
@@ -701,7 +703,10 @@ class PodInstanceArray(StructuredNDArray):
         [
             ("geometry_id", np.uint32),
             ("material_id", np.uint32),
+            ("_pad0", np.uint32),
+            ("_pad1", np.uint32),
             ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
+            ("inv_transform", np.float32, (3, 4)),  # row-major 3x4 inverse matrix
         ]
     )
 

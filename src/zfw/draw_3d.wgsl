@@ -27,14 +27,14 @@ struct PodFrameInfo {
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
 const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
 const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
-const FLAG_EMIT_INSTANCE_COUNT: u32 = 8u;
-const FLAG_EMIT_FIRST_TRIANGLE_V0: u32 = 16u;
-const FLAG_EMIT_INSTANCE_TRANSFORM_TRANSLATION: u32 = 32u;
 
 struct PodInstance {
     geometry_id: u32,
     material_id: u32,
+    _pad0: u32,
+    _pad1: u32,
     transform: PodTransform,
+    inv_transform: PodTransform,
 }
 
 struct PodGeometry {
@@ -264,42 +264,6 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     let debug_emit_primary_ray_direction = (frame_info.flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
     let debug_emit_depth_in_r = (frame_info.flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
     let debug_emit_hit_world_pos = (frame_info.flags & FLAG_EMIT_HIT_WORLD_POSITION) != 0u;
-    let debug_emit_instance_count = (frame_info.flags & FLAG_EMIT_INSTANCE_COUNT) != 0u;
-    let debug_emit_first_tri_v0 = (frame_info.flags & FLAG_EMIT_FIRST_TRIANGLE_V0) != 0u;
-    let debug_emit_instance_transform_translation = (frame_info.flags & FLAG_EMIT_INSTANCE_TRANSFORM_TRANSLATION) != 0u;
-
-    // DEBUG: emit first instance transform translation
-    if debug_emit_instance_transform_translation && frame_info.instance_count > 0u {
-        let instance = instances[0];
-        let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
-        let translation = instance_transform[3].xyz;
-        // Map to [0,1] assuming translation in [-10,10]
-        let translation_normalized = (translation + 10.0) / 20.0;
-        return vec4<f32>(translation_normalized, 1.0);
-    }
-
-    // DEBUG: emit first triangle's first vertex
-    if debug_emit_first_tri_v0 && frame_info.instance_count > 0u {
-        let instance = instances[0];
-        let geometry = geometry_heap[instance.geometry_id];
-        if geometry.triangle_span_in_heap.end > geometry.triangle_span_in_heap.begin {
-            let triangle = triangle_heap[geometry.triangle_span_in_heap.begin];
-            let v0 = vec3<f32>(
-                triangle.vertices[0].position[0],
-                triangle.vertices[0].position[1],
-                triangle.vertices[0].position[2],
-            );
-            // Map to [0,1] assuming vertices in [-10,10]
-            let v0_normalized = (v0 + 10.0) / 20.0;
-            return vec4<f32>(v0_normalized, 1.0);
-        }
-    }
-
-    // DEBUG: emit instance count
-    if debug_emit_instance_count {
-        let instance_count_normalized = f32(frame_info.instance_count) / 10.0;
-        return vec4<f32>(instance_count_normalized, 0.0, 0.0, 1.0);
-    }
 
     let ray = gen_primary_ray(pixel_xy);
     
@@ -307,9 +271,14 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     var closest_hit_world_pos = vec3<f32>(0.0);
     var hit_count = 0u;
     
-    // TEMPORARILY IGNORING INSTANCE TRANSFORMS FOR DEBUGGING
     for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id = instance_id + 1u) {
         let instance = instances[instance_id];
+        let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
+        let inv_instance_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
+        
+        // Transform ray to local space
+        let local_ray = transform_ray(ray, inv_instance_transform);
+
         let geometry = geometry_heap[instance.geometry_id];
         
         // For simplicity, we just iterate over all triangles in the geometry.
@@ -332,13 +301,22 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
                 triangle.vertices[2].position[2],
             );
 
-            // Test ray against triangle directly (no transform)
-            let hit_result = hit_tri(ray, v0, v1, v2);
-            if hit_result.w > 0.0 && hit_result.w < closest_hit_distance {
-                closest_hit_distance = hit_result.w;
-                // Compute hit position directly in world space (since no transform)
-                closest_hit_world_pos = ray.origin + hit_result.w * ray.direction;
-                hit_count = hit_count + 1u;
+            // Test ray against triangle in local space
+            let hit_result = hit_tri(local_ray, v0, v1, v2);
+            if hit_result.w > 0.0 {
+                // Compute hit position in local space
+                let local_hit_pos = local_ray.origin + hit_result.w * local_ray.direction;
+                // Transform to world space
+                let world_hit_pos_h = instance_transform * vec4<f32>(local_hit_pos, 1.0);
+                let world_hit_pos = world_hit_pos_h.xyz / world_hit_pos_h.w;
+                // Compute world-space distance from camera
+                let world_distance = length(world_hit_pos - ray.origin);
+                
+                if world_distance < closest_hit_distance {
+                    closest_hit_distance = world_distance;
+                    closest_hit_world_pos = world_hit_pos;
+                    hit_count = hit_count + 1u;
+                }
             }
         }
     }
