@@ -155,7 +155,11 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
 
 /// Triangle-ray intersection test
 /// Returns barycentric coordinates (XYZ) and distance (W) of closest hit. If no hit, (W) is infinity.
-fn hit_tri(ray: Ray, v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>) -> vec4<f32> {
+fn hit_tri(ray: Ray, triangle_vertices: mat3x3<f32>) -> vec4<f32> {
+    let v0 = triangle_vertices[0];
+    let v1 = triangle_vertices[1];
+    let v2 = triangle_vertices[2];
+
     // https://en.wikipedia.org/wiki/Möller–Trumbore_intersection_algorithm
     // Core idea: express ray hit (if exists) in barycentric coordinates.
     //  i.e. p_hit = (ray.o + t * ray.d) = (v0 + u (v1 - v0) + v (v2 - v0))
@@ -228,10 +232,6 @@ fn transform_ray(ray: Ray, transform: mat4x4<f32>) -> Ray {
     return Ray(transformed_origin_h.xyz, transformed_direction_h.xyz);
 }
 
-//
-// Primary ray generation
-//
-
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     // Compute 2D NDC coordinates of the pixel in the output image:
     let target_size_wh_px_f = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
@@ -243,6 +243,9 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 
     // Compute 3D camera-space coordinates of the pixel on the sensor plane at unit focal length.
     // NOTE: Camera looks down +Y axis, with +X to the right and +Z up.
+    // NOTE: In a pinhole camera, the sensor plane is behind the pinhole and the image is inverted. To simplify, we 
+    // place the sensor plane in front of the pinhole. The ray still originates from origin in camera space, this is 
+    // just used to calculate the ray direction.
     let sensor_hw_at_unit_focal_length = tan(camera.fov_y_rad / 2.0) * camera.aspect_ratio;
     let sensor_hh_at_unit_focal_length = tan(camera.fov_y_rad / 2.0);
     let sensor_pixel_camera_space = vec3<f32>(
@@ -255,6 +258,30 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), sensor_pixel_camera_space);
     let camera_transform = h_mat4x4_from_pod_transform(camera.transform);
     return transform_ray(camera_space_ray, camera_transform);
+}
+
+//
+// Ray tracing:
+//
+
+fn load_triangle_vertices(triangle_id: u32) -> mat3x3<f32> {
+    let pod_triangle = triangle_heap[triangle_id];
+    let v0 = vec3<f32>(
+        pod_triangle.vertices[0].position[0],
+        pod_triangle.vertices[0].position[1],
+        pod_triangle.vertices[0].position[2],
+    );
+    let v1 = vec3<f32>(
+        pod_triangle.vertices[1].position[0],
+        pod_triangle.vertices[1].position[1],
+        pod_triangle.vertices[1].position[2],
+    );
+    let v2 = vec3<f32>(
+        pod_triangle.vertices[2].position[0],
+        pod_triangle.vertices[2].position[1],
+        pod_triangle.vertices[2].position[2],
+    );
+    return mat3x3<f32>(v0, v1, v2);
 }
 
 //
@@ -286,28 +313,14 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
         // For simplicity, we just iterate over all triangles in the geometry.
         let triangle_span = geometry.triangle_span_in_heap;
         for (var tri_index = triangle_span.begin; tri_index < triangle_span.end; tri_index = tri_index + 1u) {
-            let triangle = triangle_heap[tri_index];
-            let v0 = vec3<f32>(
-                triangle.vertices[0].position[0],
-                triangle.vertices[0].position[1],
-                triangle.vertices[0].position[2],
-            );
-            let v1 = vec3<f32>(
-                triangle.vertices[1].position[0],
-                triangle.vertices[1].position[1],
-                triangle.vertices[1].position[2],
-            );
-            let v2 = vec3<f32>(
-                triangle.vertices[2].position[0],
-                triangle.vertices[2].position[1],
-                triangle.vertices[2].position[2],
-            );
+            let triangle_vertices = load_triangle_vertices(tri_index);
 
             // Test ray against triangle in local space
-            let hit_result = hit_tri(local_ray, v0, v1, v2);
+            let hit_result = hit_tri(local_ray, triangle_vertices);
             if hit_result.w > 0.0 {
                 // Compute hit position in local space
                 let local_hit_pos = local_ray.origin + hit_result.w * local_ray.direction;
+
                 // Transform to world space
                 let world_hit_pos_h = instance_transform * vec4<f32>(local_hit_pos, 1.0);
                 let world_hit_pos = world_hit_pos_h.xyz / world_hit_pos_h.w;

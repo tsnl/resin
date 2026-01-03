@@ -13,7 +13,7 @@
   - [ ] BVH-accelerated ray-triangle intersection with primary rays, ensure no regressions.
   - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
 - [ ] Basic shading
-  - [ ] Compute barycentric coordinates
+  - [x] Compute barycentric coordinates
   - [ ] Interpolate normals, get smooth lambertian shading.
   - [ ] Texture mapping support (?)
   - [ ] Sample environment map on ray miss.
