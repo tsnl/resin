@@ -73,7 +73,7 @@ def _render_and_readback(
     if measure_runtime:
         elapsed_ms = (end_time - start_time) * 1e-6
         LOG.info(f"Render took {elapsed_ms:.2f} ms")
-        rich.print(f"[dark_blue][render took {elapsed_ms:.2f} ms][/dark_blue]", end=" ")
+        rich.print(f"[dark_blue]render took {elapsed_ms:.2f} ms[/dark_blue]", end=" ")
 
     readback_buffer.map_sync(wgpu.MapMode.READ)
     data = np.asarray(readback_buffer.read_mapped()).view(dtype=np.float32)
