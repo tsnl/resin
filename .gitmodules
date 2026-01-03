@@ -1,6 +1,3 @@
-[submodule "deps/simd_math"]
-	path = deps/simd_math
-	url = https://github.com/tsnl/simd_math
 [submodule "tests/data/glTF-Sample-Assets"]
 	path = tests/data/glTF-Sample-Assets
 	url = https://github.com/KhronosGroup/glTF-Sample-Assets

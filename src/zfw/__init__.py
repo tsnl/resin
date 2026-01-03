@@ -31,6 +31,7 @@ __all__ = [
     "convert_linear_to_srgb",
     "convert_srgb_to_linear",
     "expect",
+    "load_gltf",
     "load_rgba_image",
     "logger",
     "round_up_to_po2",
@@ -79,4 +80,4 @@ from .images import (
     convert_linear_to_srgb,
     convert_srgb_to_linear,
 )
-from .loader import load_rgba_image
+from .loader import load_rgba_image, load_gltf

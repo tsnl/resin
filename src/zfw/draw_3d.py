@@ -20,6 +20,7 @@ from .basic import BaseDisposable, StructuredNDArray
 
 class Draw3dRenderer:
     device: wgpu.GPUDevice
+    queue: wgpu.GPUQueue
 
     target_size_wh_px: tuple[int, int]
 
@@ -39,6 +40,7 @@ class Draw3dRenderer:
         triangle_capacity: int = 1 << 20,
     ):
         self.device = device
+        self.queue = queue
 
         self.target_size_wh_px = target_size_wh_px
 
@@ -198,16 +200,27 @@ class Draw3dRenderer:
         if self.allocated_triangle_count > self.triangle_capacity:
             raise RuntimeError("Draw3dRenderer triangle heap capacity exceeded.")
 
-        # Upload:
-        self.triangle_heap_device_buffer.map_sync(
-            mode=wgpu.MapMode.WRITE,
-            offset=allocation_offset_in_bytes,
+        # Upload via staging buffer:
+        staging_buffer = self.device.create_buffer(
+            label="Draw3dRenderer.GeometryUploadStagingBuffer",
+            size=vertices.nbytes,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        staging_buffer.write_mapped(data=vertices)
+        staging_buffer.unmap()
+
+        encoder = self.device.create_command_encoder(
+            label="Draw3dRenderer.GeometryUploadEncoder"
+        )
+        encoder.copy_buffer_to_buffer(
+            source=staging_buffer,
+            source_offset=0,
+            destination=self.triangle_heap_device_buffer,
+            destination_offset=allocation_offset_in_bytes,
             size=vertices.nbytes,
         )
-        self.triangle_heap_device_buffer.write_mapped(
-            data=vertices,
-            buffer_offset=allocation_offset_in_bytes,
-        )
+        self.queue.submit([encoder.finish()])
 
         # Return offset in triangles:
         return allocation_offset_in_triangles
@@ -403,12 +416,11 @@ class Draw3dGeometry(BaseDisposable):
 
         self.renderer = renderer
         self.triangle_count = t_indices.shape[0]
-        self.vertex_count = self.triangle_count * 3
 
         # Interleave the vertex arrays:
         v = np.concatenate([v_p_array, v_n_array, v_t_array], axis=-1)
         v = v.view(dtype=PodVertexArray.DTYPE).squeeze()
-        assert v.shape == (self.vertex_count,) and v.dtype == PodVertexArray.DTYPE
+        assert v.shape == (v_p_array.shape[0],) and v.dtype == PodVertexArray.DTYPE
 
         # Compute BVH, reordering indices as needed:
         # TODO
@@ -416,6 +428,10 @@ class Draw3dGeometry(BaseDisposable):
         # Get rid of the index buffer: load the vertices for each triangle:
         v = PodVertexArray(v[t_indices])
         assert v.shape == (self.triangle_count, 3) and v.dtype == PodVertexArray.DTYPE
+
+        # Flatten to 1D array for _add_geometry
+        v = v.reshape(-1).view(PodVertexArray)
+        assert v.shape == (self.triangle_count * 3,) and v.dtype == PodVertexArray.DTYPE
 
         # Allocate space in renderer heaps, upload data
         self.geometry_heap_offset_in_triangles = renderer._add_geometry(v)
