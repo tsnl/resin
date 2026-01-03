@@ -1,4 +1,3 @@
-from datetime import datetime
 import time
 from typing import Generator
 import pytest
@@ -105,7 +104,6 @@ def renderer(gpu: GpuFixture) -> Generator[Draw3dRenderer, None, None]:
 
 def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
-    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
 
     # scene = _load_two_avocados_scene(renderer)
     scene = _load_damaged_helmet_scene(renderer)

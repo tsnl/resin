@@ -14,7 +14,7 @@
   - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
 - [ ] Basic shading
   - [x] Compute barycentric coordinates
-  - [ ] Interpolate normals, get smooth lambertian shading.
+  - [x] Interpolate normals, get smooth lambertian shading.
   - [ ] Texture mapping support (?)
   - [ ] Sample environment map on ray miss.
 - [ ] Secondary rays, PBR shading

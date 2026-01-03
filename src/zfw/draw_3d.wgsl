@@ -21,7 +21,7 @@
 const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
 
 /// Epsilon value for triangle-ray intersection tests, used when ray is nearly parallel to triangle plane.
-const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-7;
+const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-6;
 
 
 //
@@ -396,6 +396,13 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
 // PBR shading (WIP):
 //
 
+fn compute_hit_color(hit: HitRecord) -> vec4<f32> {
+    let sun_direction = normalize(vec3<f32>(-1.0, -1.0, -0.5));
+    var hit_details = compute_hit_details(hit);
+    let intensity = clamp(dot(hit_details.tbn[2], sun_direction), 0.05, 1.0);
+    return vec4<f32>(intensity, intensity, intensity, 1.0);
+}
+
 struct HitDetails {
     world_hit_position: vec3<f32>,
     world_hit_distance: f32,
@@ -526,16 +533,15 @@ fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
 //
 
 fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
-
     let ray = gen_primary_ray(pixel_xy);
     let closest_hit = hit(ray);
-
+    
     if frame_info.debug_flags != 0u {
         return debug_output(closest_hit);
     }
     
     if is_hit_record_valid(closest_hit) {
-        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        return compute_hit_color(closest_hit);
     } else {
         return vec4<f32>(0.0);
     }
