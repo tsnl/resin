@@ -94,15 +94,14 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     meshes = load_gltf(
         renderer=renderer,
-        # path="tests/data/glTF-Sample-Assets/Models/Avocado/glTF/Avocado.gltf",
-        path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
+        path="tests/data/glTF-Sample-Assets/Models/Avocado/glTF/Avocado.gltf",
     )
     scene = Draw3dScene(
         camera=Draw3dCamera(
             transform=np.array(
                 [
                     [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, -1000.0],
+                    [0.0, 1.0, 0.0, -100.0],
                     [0.0, 0.0, 1.0, 0.0],
                 ],
                 dtype=np.float32,
@@ -260,12 +259,6 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
     depth_normalized = data[:, :, 0]
     alpha_channel = data[:, :, 3]
 
-    # Debug: Check alpha channel values
-    unique_alphas = np.unique(alpha_channel)
-    print(f"Unique alpha values: {unique_alphas}")
-    alpha_min, alpha_max = np.min(alpha_channel), np.max(alpha_channel)
-    print(f"Alpha range: [{alpha_min:.3f}, {alpha_max:.3f}]")
-
     # Analyze depth statistics
     hit_mask = alpha_channel > 0  # Pixels that hit something
     hit_count = np.sum(hit_mask)
@@ -278,11 +271,6 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
         max_depth = np.max(hit_depths)
         mean_depth = np.mean(hit_depths)
 
-        print("Depth test results:")
-        print(f"  Hit pixels: {hit_count}/{total_pixels} ({hit_percentage:.1f}%)")
-        print(f"  Depth range: {min_depth:.2f} to {max_depth:.2f}")
-        print(f"  Mean depth: {mean_depth:.2f}")
-
         # Check center region for hits (cube should be visible there)
         center_region = depth_normalized[
             FRAME_H // 2 - 50 : FRAME_H // 2 + 50,
@@ -292,20 +280,12 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
         center_total = center_region.size
         center_hit_pct = 100.0 * center_hits / center_total
 
-        print(
-            f"  Center region hits: {center_hits}/{center_total} ({center_hit_pct:.1f}%)"
-        )
-
         # For a cube at distance 5, we expect some hits
         # The cube is 2x2x2 at origin, so should be visible
         # Assert that we get at least some hits in the center region
         assert center_hit_pct > 10.0, (
             f"Expected significant hits in center region, got {center_hit_pct:.1f}%"
         )
-    else:
-        print(f"Depth test results: No hits detected")
-        # This might indicate a problem with the ray tracer
-        print("WARNING: No ray-triangle intersections detected!")
 
 
 def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
@@ -316,13 +296,6 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
         renderer=renderer,
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
-
-    print(f"\nLoaded {len(meshes)} meshes")
-    for (geom, mat), transforms in meshes.items():
-        print(
-            f"  Geometry: {geom.triangle_count} triangles, {transforms.shape[0]} instances"
-        )
-        print(f"  First instance transform:\n{transforms[0]}")
 
     # Camera at Y=-5, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
@@ -357,28 +330,10 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
     hit_mask = alpha_channel > 0
     hit_count = np.sum(hit_mask)
 
-    print(f"\nWorld position test results:")
-    print(f"  Hit pixels: {hit_count}/{FRAME_W * FRAME_H}")
-
     if hit_count > 0:
         hit_world_pos = world_positions[hit_mask]
-        print(
-            f"  X range: [{np.min(hit_world_pos[:, 0]):.2f}, {np.max(hit_world_pos[:, 0]):.2f}]"
-        )
-        print(
-            f"  Y range: [{np.min(hit_world_pos[:, 1]):.2f}, {np.max(hit_world_pos[:, 1]):.2f}]"
-        )
-        print(
-            f"  Z range: [{np.min(hit_world_pos[:, 2]):.2f}, {np.max(hit_world_pos[:, 2]):.2f}]"
-        )
 
         # Check if all hit positions have the same Y coordinate (would indicate plane bug)
         y_coords = hit_world_pos[:, 1]
         y_std = np.std(y_coords)
         y_mean = np.mean(y_coords)
-        print(f"  Y coordinate: mean={y_mean:.4f}, std={y_std:.4f}")
-
-        if y_std < 0.01:
-            print(
-                f"  WARNING: All hits at same Y={y_mean:.4f} - suggests plane intersection bug!"
-            )
