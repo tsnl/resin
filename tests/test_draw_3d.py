@@ -114,7 +114,7 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
     data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
-    _save_debug_image(data, "basic_render_test.png")
+    _save_debug_image(data, "test_basic_draw_3d.png")
 
 
 def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
@@ -144,7 +144,7 @@ def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Extract RGB (ray direction mapped to [0,1])
     data = data[:, :, :3]
-    _save_debug_image(data, "primary_ray_test.png", format="RGB")
+    _save_debug_image(data, "test_primary_ray_generation.png", format="RGB")
 
     # Convert back to direction vectors: [0,1] -> [-1,1]
     directions = data * 2.0 - 1.0
@@ -253,16 +253,14 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
     frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
     data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
 
+    # Save output:
+    _save_debug_image(data, "test_depth_visualization.png", format="RGBA")
+
     # Extract red channel (normalized depth)
     depth_normalized = data[:, :, 0]
-    _save_debug_image(
-        np.stack([depth_normalized, depth_normalized, depth_normalized], axis=-1),
-        "depth_test.png",
-        format="RGB",
-    )
 
     # Analyze depth statistics
-    hit_mask = depth_normalized < 1.0  # Pixels that hit something
+    hit_mask = data[:, :, 3] > 0  # Pixels that hit something
     hit_count = np.sum(hit_mask)
     total_pixels = FRAME_W * FRAME_H
     hit_percentage = 100.0 * hit_count / total_pixels
@@ -273,7 +271,7 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
         max_depth = np.max(hit_depths)
         mean_depth = np.mean(hit_depths)
 
-        print(f"Depth test results:")
+        print("Depth test results:")
         print(f"  Hit pixels: {hit_count}/{total_pixels} ({hit_percentage:.1f}%)")
         print(f"  Depth range: {min_depth:.2f} to {max_depth:.2f}")
         print(f"  Mean depth: {mean_depth:.2f}")

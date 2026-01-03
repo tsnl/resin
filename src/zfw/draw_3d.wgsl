@@ -309,8 +309,12 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     
     // DEBUG: Visualize hits
     if debug_emit_depth_in_r {
+        var alpha = 0.0;
+        if closest_hit_distance < F32_INFINITY {
+            alpha = 1.0;
+        }
         let depth_normalized = clamp(closest_hit_distance / camera.max_distance, 0.0, 1.0);
-        return vec4<f32>(depth_normalized, 0.0, 0.0, 1.0);
+        return vec4<f32>(depth_normalized, 0.0, 0.0, alpha);
     }
     
     // If hit, return red
