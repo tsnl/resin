@@ -1,5 +1,5 @@
 import wgpu
-from zfw import Draw3dRenderer, Draw3dFrame, Draw3dScene
+from zfw import Draw3dRenderer, Draw3dFrame, Draw3dScene, Draw3dCamera
 from PIL import Image
 import os
 import ctypes
@@ -23,7 +23,13 @@ def test_basic_draw_3d():
         label="BasicDraw3dTest.ReadbackBuffer",
     )
 
-    scene = Draw3dScene()
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.eye(4, dtype=np.float32)[:3, :],
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+        )
+    )
 
     command_encoder = device.create_command_encoder(
         label="BasicDraw2dTest.CommandEncoder"

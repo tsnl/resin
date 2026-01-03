@@ -112,6 +112,10 @@ class StructuredNDArray(np.ndarray, ABC):
         return np.array(data, dtype=cls.DTYPE, copy=copy).view(cls)
 
     @classmethod
+    def empty(cls, shape: tuple[int, ...]) -> Self:
+        return np.empty(shape, dtype=cls.DTYPE).view(cls)
+
+    @classmethod
     def array_size(cls, *, shape: tuple[int, ...]) -> int:
         n = 1
         for dim in shape:

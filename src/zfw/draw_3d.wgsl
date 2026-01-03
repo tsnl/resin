@@ -53,8 +53,8 @@ struct PodCamera {
     transform: PodTransform,
     fov_y_rad: f32,
     aspect_ratio: f32,
-    target_size_w_px: u32,
-    target_size_h_px: u32,
+    _rsv0: u32,
+    _rsv1: u32,
 }
 
 struct PodSpan {
@@ -65,9 +65,18 @@ struct PodAabb {
     min: array<f32, 3>,
     max: array<f32, 3>,
 }
+
 struct PodTransform {
-    position: array<f32, 4>,
-    rotation: array<f32, 4>,
+    row0: array<f32, 4>,
+    row1: array<f32, 4>,
+    row2: array<f32, 4>,
+}
+fn mat4x4_from_pod_transform(t: PodTransform) -> mat4x4<f32> {
+    let col0 = vec4<f32>(t.row0[0], t.row1[0], t.row2[0], 0.0);
+    let col1 = vec4<f32>(t.row0[1], t.row1[1], t.row2[1], 0.0);
+    let col2 = vec4<f32>(t.row0[2], t.row1[2], t.row2[2], 0.0);
+    let col3 = vec4<f32>(t.row0[3], t.row1[3], t.row2[3], 1.0);
+    return mat4x4<f32>(col0, col1, col2, col3);
 }
 
 //

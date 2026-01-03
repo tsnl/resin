@@ -327,27 +327,11 @@ class Draw3dFrame:
         command_encoder: wgpu.GPUCommandEncoder,
         scene: Draw3dScene,
     ) -> None:
-        frame_info = np.array(
-            (0, target_size_wh[0], target_size_wh[1], 0),
-            dtype=PodFrameInfoArray.DTYPE,
-        )
+        instance_count = sum(len(transforms) for transforms in scene.instances.values())
 
-        self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
-        self.frame_info_staging_buffer.write_mapped(
-            data=np.array([frame_info], dtype=PodFrameInfoArray.DTYPE),
-        )
-        self.frame_info_staging_buffer.unmap()
-
-        command_encoder.copy_buffer_to_buffer(
-            source=self.frame_info_staging_buffer,
-            source_offset=0,
-            destination_offset=0,
-            destination=self.frame_info_device_buffer,
-            size=frame_info.nbytes,
-        )
-
-        # TODO: Marshall and write camera data, instances, etc
-        _ = scene
+        self._upload_frame_info(instance_count, command_encoder)
+        self._upload_camera_info(scene.camera, command_encoder)
+        # TODO: upload more data as needed
 
         compute_pass = command_encoder.begin_compute_pass(
             label="Draw3dFrame.ComputePass"
@@ -356,9 +340,58 @@ class Draw3dFrame:
         compute_pass.set_bind_group(0, renderer_bind_group, [], 0, 0)
         compute_pass.set_bind_group(1, self.bind_group, [], 0, 0)
         compute_pass.dispatch_workgroups(
-            math.ceil(target_size_wh[0] / 8), math.ceil(target_size_wh[1] / 8), 1
+            workgroup_count_x=math.ceil(target_size_wh[0] / 8),
+            workgroup_count_y=math.ceil(target_size_wh[1] / 8),
+            workgroup_count_z=1,
         )
         compute_pass.end()
+
+    def _upload_frame_info(
+        self,
+        instance_count: int,
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
+        frame_info_data = PodFrameInfoArray.empty(shape=(1,))
+        frame_info_data["instance_count"] = instance_count
+        frame_info_data["target_size_w_px"] = self.renderer.target_size_wh_px[0]
+        frame_info_data["target_size_h_px"] = self.renderer.target_size_wh_px[1]
+
+        self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
+        self.frame_info_staging_buffer.write_mapped(data=frame_info_data)
+        self.frame_info_staging_buffer.unmap()
+
+        command_encoder = self._device.create_command_encoder(
+            label="Draw3dFrame.UploadFrameInfoEncoder"
+        )
+        command_encoder.copy_buffer_to_buffer(
+            source=self.frame_info_staging_buffer,
+            source_offset=0,
+            destination=self.frame_info_device_buffer,
+            destination_offset=0,
+            size=frame_info_data.nbytes,
+        )
+
+    def _upload_camera_info(
+        self,
+        camera: "Draw3dCamera",
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
+        camera_data = PodCameraArray.empty(shape=(1,))
+        camera_data["transform"] = camera.transform
+        camera_data["fov_y_rad"] = camera.fov_y_rad
+        camera_data["aspect_ratio"] = camera.aspect_ratio
+
+        self.camera_staging_buffer.map_sync(wgpu.MapMode.WRITE)
+        self.camera_staging_buffer.write_mapped(data=camera_data)
+        self.camera_staging_buffer.unmap()
+
+        command_encoder.copy_buffer_to_buffer(
+            source=self.camera_staging_buffer,
+            source_offset=0,
+            destination=self.camera_device_buffer,
+            destination_offset=0,
+            size=camera_data.nbytes,
+        )
 
 
 class Draw3dGeometry(BaseDisposable):
@@ -438,14 +471,23 @@ class Draw3dMaterial(BaseDisposable):
         # TODO: upload material data to GPU
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Draw3dScene:
-    meshes: dict[
+    camera: Draw3dCamera
+
+    instances: dict[
         tuple[Draw3dGeometry, Draw3dMaterial],
         jt.Float32[np.ndarray, "n 3 4"],
     ] = field(default_factory=dict)
 
     environment_map: jt.Float32[np.ndarray, "eh ew 3"] | None = None
+
+
+@dataclass
+class Draw3dCamera:
+    transform: jt.Float32[np.ndarray, "3 4"]
+    fov_y_rad: float
+    aspect_ratio: float
 
 
 #
@@ -499,7 +541,7 @@ class PodGeometryArray(StructuredNDArray):
 class PodFrameInfoArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("count", np.uint32),
+            ("instance_count", np.uint32),
             ("target_size_w_px", np.uint32),
             ("target_size_h_px", np.uint32),
             ("_rsv", np.uint32),
@@ -513,8 +555,8 @@ class PodCameraArray(StructuredNDArray):
             ("transform", np.float32, (3, 4)),  # row-major 3x4 matrix
             ("fov_y_rad", np.float32),
             ("aspect_ratio", np.float32),
-            ("target_size_w_px", np.uint32),
-            ("target_size_h_px", np.uint32),
+            ("_rsv0", np.uint32),
+            ("_rsv1", np.uint32),
         ]
     )
 
