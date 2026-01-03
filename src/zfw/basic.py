@@ -7,6 +7,7 @@ __all__ = [
     "FontWeight",
     "Key",
     "KeyModifier",
+    "MouseButton",
     "SupportsWrite",
     "expect",
     "logger",

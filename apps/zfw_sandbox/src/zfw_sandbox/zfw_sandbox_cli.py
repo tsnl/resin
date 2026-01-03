@@ -2,6 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import wgpu
 import zfw
 
 
@@ -61,12 +62,12 @@ class MainMenuWidget(zfw.GuiWidget):
         def gltf_viewer_button_click(button: zfw.MouseButton):
             if self._gltf_viewer_widget is None:
                 # Get paths for models and environments
-                workspace_root = Path(__file__).parent.parent.parent.parent
+                workspace_root = Path(__file__).parent.parent.parent.parent.parent
                 models_path = (
-                    workspace_root / "tests_data" / "glTF-Sample-Assets" / "Models"
+                    workspace_root / "tests" / "data" / "glTF-Sample-Assets" / "Models"
                 )
                 environments_path = (
-                    workspace_root / "tests_data" / "glTF-Sample-Environments"
+                    workspace_root / "tests" / "data" / "glTF-Sample-Environments"
                 )
                 self._gltf_viewer_widget = GltfViewerWidget(
                     gui_window=gui_window,
@@ -105,63 +106,44 @@ def main():
     LOG = zfw.logger(__name__)
     LOG.info(f"Starting ZFW Sandbox: debug={args.debug}")
 
-    # Create GPU context
-    gpu_context = zfw.GpuContext(
-        app_name="ZFW Sandbox",
-        enable_debug_layer_support=args.debug,
-        enable_present_support=True,
-    )
+    # Create WebGPU device
+    adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
+    device = adapter.request_device_sync(label="ZFWSandboxDevice")
 
     # Create window context (manages GLFW)
     window_context = zfw.WindowContext()
 
-    # Create window
+    # Create window with device
     window = zfw.Window(
-        gpu_context=gpu_context,
+        device=device,
         window_context=window_context,
         width_dip=1280,
         height_dip=720,
         title="ZFW Sandbox",
     )
 
-    # Create GPU device
-    physical_device = next(iter(gpu_context.enumerate_physical_devices()))
-    gpu_device = zfw.GpuDevice(
-        context=gpu_context,
-        physical_device=physical_device,
-        surface=window.gpu_surface,
-    )
-
-    # Create 3D render context
-    draw_3d_context = zfw.Draw3dContext()
-
     # Create GUI window
     gui_window = zfw.GuiWindow(
         window=window,
-        gpu_context=gpu_context,
-        gpu_device=gpu_device,
-        draw_3d_context=draw_3d_context,
-        swapchain_image_count=3,
+        device=device,
     )
 
     # Create main menu widget
     start_widget = MainMenuWidget(gui_window=gui_window)
     gui_window.set_central_widget(start_widget)
-    gui_window.show()
+    window.show()
 
     # Main loop
-    while not gui_window.should_close():
+    while not window.should_close():
         gui_window.update()
         gui_window.render()
+        zfw.Window.poll_events()
 
     # Cleanup
     start_widget.dispose()
     gui_window.dispose()
-    draw_3d_context.dispose()
-    gpu_device.dispose()
     window.dispose()
     window_context.dispose()
-    gpu_context.dispose()
 
 
 if __name__ == "__main__":

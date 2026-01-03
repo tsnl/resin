@@ -17,5 +17,8 @@ Python
   - Prefer generic type syntax over `Generic[T]` subclasses.
   - Never `from __future__ import annotations`.
 
+Code style
+- Always re-export public symbols under `zfw` directly. E.g. instead of `from zfw.basic import logger`, use `from zfw import logger`.
+
 Test-driven development
 - Run `make tests` often. It's really fast and will catch many issues early. No need to ask for permission.

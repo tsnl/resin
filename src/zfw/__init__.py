@@ -23,9 +23,14 @@ __all__ = [
     "Font",
     "FontSize",
     "FontWeight",
+    "GuiWidget",
+    "GuiWindow",
     "Key",
     "KeyModifier",
+    "MouseButton",
     "SupportsWrite",
+    "Window",
+    "WindowContext",
     "compute_psnr",
     "convert_color",
     "convert_linear_to_srgb",
@@ -50,6 +55,7 @@ from .basic import (
     SupportsWrite,
     expect,
     logger,
+    MouseButton,
     round_up_to_po2,
     setup_logging,
 )
@@ -81,3 +87,5 @@ from .images import (
     convert_srgb_to_linear,
 )
 from .loader import load_rgba_image, load_gltf
+from .gui import GuiWidget, GuiWindow
+from .window import Window, WindowContext

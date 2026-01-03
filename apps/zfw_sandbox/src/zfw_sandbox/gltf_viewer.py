@@ -8,7 +8,6 @@ import math
 import numpy as np
 
 import zfw
-from zfw.loader import load_gltf, GltfScene
 
 
 LOG = zfw.logger(__name__)
@@ -264,8 +263,11 @@ class GltfViewerWidget(zfw.GuiWidget):
         self._last_mouse_y = 0.0
 
         # 3D resources
-        self._scene: GltfScene | None = None
-        self._environment_map: zfw.GpuImage | None = None
+        self._meshes: dict[
+            tuple[zfw.Draw3dGeometry, zfw.Draw3dMaterial],
+            np.ndarray,
+        ] | None = None
+        self._environment_map: zfw.GuiImage | None = None
 
         # HUD widgets
         self._top_bar = zfw.GuiWidget(
@@ -317,10 +319,8 @@ class GltfViewerWidget(zfw.GuiWidget):
 
     def _load_model(self) -> None:
         """Load the currently selected model."""
-        # Dispose old scene
-        if self._scene is not None:
-            self._scene.dispose()
-            self._scene = None
+        # Clear old meshes
+        self._meshes = None
 
         # Load new scene
         model_name, model_file = MODELS[self._current_model_index]
@@ -331,13 +331,11 @@ class GltfViewerWidget(zfw.GuiWidget):
             return
 
         LOG.info(f"Loading model: {model_name}")
-        scenes = load_gltf(
+        self._meshes = zfw.load_gltf(
             self._gui_window.draw_3d_renderer,
             model_path,
             transform_coordinate_system=False,
         )
-        if scenes:
-            self._scene = scenes[0]
 
         # Update label
         self._model_label._text = f"Model: {model_name}"
@@ -364,14 +362,30 @@ class GltfViewerWidget(zfw.GuiWidget):
         # Convert from float32 linear to uint8 for GPU upload
         env_pixels_u8 = (np.clip(env_pixels, 0.0, 1.0) * 255).astype(np.uint8)
 
-        self._environment_map = zfw.GpuImage(
-            device=self._gui_window.gpu_device,
-            usages=["texture-binding", "transfer-dst"],
-            meta=zfw.GpuImageMeta(shape=(env_height, env_width, 4), dtype="u1"),
+        # Create WebGPU texture
+        import wgpu
+        self._environment_map = self._gui_window.device.create_texture(
+            size=(env_width, env_height, 1),
+            format=wgpu.TextureFormat.rgba8unorm,
+            usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
+            label=f"EnvironmentMap:{env_name}",
         )
 
         # Upload pixels
-        self._environment_map.write(data=env_pixels_u8)
+        self._gui_window.queue.write_texture(
+            destination=wgpu.TexelCopyTextureInfo(
+                texture=self._environment_map,
+                mip_level=0,
+                origin=(0, 0, 0),
+            ),
+            data=env_pixels_u8,
+            data_layout=wgpu.TexelCopyBufferLayout(
+                offset=0,
+                bytes_per_row=env_width * 4,
+                rows_per_image=env_height,
+            ),
+            size=(env_width, env_height, 1),
+        )
 
         # Update GUI
         self._gui_window.set_environment_map(self._environment_map)
@@ -454,26 +468,27 @@ class GltfViewerWidget(zfw.GuiWidget):
 
         # Clear and add meshes
         self._gui_window.clear_3d_meshes()
-        if self._scene is not None:
-            for (geometry, material), transforms in self._scene.meshes.items():
+        if self._meshes is not None:
+            for (geometry, material), transforms in self._meshes.items():
                 self._gui_window.add_3d_mesh(geometry, material, transforms)
 
         # Set camera
+        aspect_ratio = self._gui_window.width_dip / self._gui_window.height_dip
         self._gui_window.set_3d_camera(
             transform=self._camera.get_transform(),
-            intrinsics=zfw.Draw3dCameraIntrinsics(
-                vertical_fov=math.radians(60),
-                clip_near=0.01,
-                clip_far=100.0,
-                ibl_samples=16,
+            intrinsics=zfw.Draw3dCamera(
+                transform=self._camera.get_transform(),
+                fov_y_rad=math.radians(60),
+                aspect_ratio=aspect_ratio,
+                max_distance=100.0,
             ),
         )
 
     def _on_dispose(self) -> None:
-        if self._scene is not None:
-            self._scene.dispose()
+        # Note: Meshes (geometry/materials) are managed by the Draw3dRenderer
+        # and don't need explicit disposal here
         if self._environment_map is not None:
-            self._environment_map.dispose()
+            self._environment_map.destroy()
         super()._on_dispose()
 
 

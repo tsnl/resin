@@ -5,10 +5,14 @@ __all__ = [
 ]
 
 from dataclasses import dataclass
+from typing import Literal
 
 import wgpu
 import numpy as np
 import numpy.typing as npt
+
+
+type Draw2dTextureFormat = Literal["rgba8unorm", "rgba8unorm-srgb"]
 
 
 class Draw2dRenderer:
@@ -17,9 +21,11 @@ class Draw2dRenderer:
         device: wgpu.GPUDevice,
         queue: wgpu.GPUQueue,
         target_size_wh: tuple[int, int],
+        target_format: Draw2dTextureFormat = "rgba8unorm",
     ):
         self.device = device
         self.target_size_wh = target_size_wh
+        self.target_format = target_format
 
         self.bind_group_layout = device.create_bind_group_layout(
             label="Draw2dRenderer.QuadBatch.BindGroupLayout",
@@ -35,14 +41,14 @@ class Draw2dRenderer:
                     binding=1,
                     visibility=wgpu.ShaderStage.FRAGMENT,
                     sampler=wgpu.SamplerBindingLayout(
-                        type=wgpu.SamplerBindingType.filtering,
+                        type=wgpu.SamplerBindingType.non_filtering,
                     ),
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=2,
                     visibility=wgpu.ShaderStage.FRAGMENT,
                     texture=wgpu.TextureBindingLayout(
-                        sample_type=wgpu.TextureSampleType.float,
+                        sample_type=wgpu.TextureSampleType.unfilterable_float,
                         view_dimension=wgpu.TextureViewDimension.d2,
                         multisampled=False,
                     ),
@@ -72,7 +78,7 @@ class Draw2dRenderer:
                 entry_point="fs_main",
                 targets=[
                     wgpu.ColorTargetState(
-                        format=wgpu.TextureFormat.rgba8unorm,
+                        format=self.target_format,
                         blend=wgpu.BlendState(
                             color=wgpu.BlendComponent(
                                 src_factor=wgpu.BlendFactor.src_alpha,
@@ -147,12 +153,12 @@ class Draw2dRenderer:
 
 
 class Draw2dFrame:
-    def __init__(self, *, device: wgpu.GPUDevice, target_size_wh: tuple[int, int]):
-        self.output_image = device.create_texture(
+    def __init__(self, *, renderer: Draw2dRenderer):
+        self.output_image = renderer.device.create_texture(
             label="Draw2dFrame.OutputImage",
-            size=(target_size_wh[0], target_size_wh[1], 1),
+            size=(renderer.target_size_wh[0], renderer.target_size_wh[1], 1),
             dimension=wgpu.TextureDimension.d2,
-            format=wgpu.TextureFormat.rgba8unorm,
+            format=renderer.target_format,
             usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC,
         )
         self.quad_group_cache: dict[wgpu.GPUTexture, "QuadGroup"] = {}
@@ -196,7 +202,7 @@ class Draw2dFrame:
                     resolve_target=None,
                     load_op="clear",
                     store_op="store",
-                    clear_value=(0, 0, 0, 0),
+                    clear_value=(0.0, 0.0, 0.0, 0.0),
                 )
             ],
         )

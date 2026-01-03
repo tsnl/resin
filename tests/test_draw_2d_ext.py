@@ -55,13 +55,7 @@ class Draw2dExTestEngine(BaseDisposable):
             self.queue,
             (int(TEST_IMAGE_W * self._scale), int(TEST_IMAGE_H * self._scale)),
         )
-        self.target = Draw2dFrame(
-            device=self.device,
-            target_size_wh=(
-                int(TEST_IMAGE_W * self._scale),
-                int(TEST_IMAGE_H * self._scale),
-            ),
-        )
+        self.target = Draw2dFrame(renderer=self.renderer)
         self.canvas = Draw2dExtCanvas(device=self.device, queue=self.queue)
 
         # Readback buffer for image data

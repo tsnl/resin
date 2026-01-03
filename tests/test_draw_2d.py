@@ -56,7 +56,7 @@ def test_basic_draw_2d(gpu: GpuFixture):
     )
 
     renderer = Draw2dRenderer(device, queue, (1024, 1024))
-    frame = Draw2dFrame(device=device, target_size_wh=(1024, 1024))
+    frame = Draw2dFrame(renderer=renderer)
     readback_buffer = device.create_buffer(
         size=1024 * 1024 * 4,
         usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
