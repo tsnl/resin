@@ -377,18 +377,30 @@ class Draw3dFrame:
         *,
         emit_primary_ray_direction: bool = False,
         emit_closest_hit_depth_in_r: bool = False,
+        emit_hit_world_position: bool = False,
+        emit_instance_count: bool = False,
+        emit_first_triangle_v0: bool = False,
     ) -> None:
         """Set debug visualization flags.
 
         Args:
             emit_primary_ray_direction: If True, output normalized ray direction as RGB.
             emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
+            emit_hit_world_position: If True, output world-space hit position as RGB.
+            emit_instance_count: If True, output instance count as red channel.
+            emit_first_triangle_v0: If True, output first vertex of first triangle as RGB.
         """
         self._debug_flags = 0
         if emit_primary_ray_direction:
             self._debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
         if emit_closest_hit_depth_in_r:
             self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
+        if emit_hit_world_position:
+            self._debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
+        if emit_instance_count:
+            self._debug_flags |= _FRAME_FLAG_EMIT_INSTANCE_COUNT
+        if emit_first_triangle_v0:
+            self._debug_flags |= _FRAME_FLAG_EMIT_FIRST_TRIANGLE_V0
 
     def record(
         self,
@@ -667,6 +679,9 @@ class PodFrameInfoArray(StructuredNDArray):
 # Frame info flags (private)
 _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
 _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
+_FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
+_FRAME_FLAG_EMIT_INSTANCE_COUNT = 1 << 3
+_FRAME_FLAG_EMIT_FIRST_TRIANGLE_V0 = 1 << 4
 
 
 class PodCameraArray(StructuredNDArray):

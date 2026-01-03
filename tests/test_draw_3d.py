@@ -256,11 +256,18 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
     # Save output:
     _save_debug_image(data, "test_depth_visualization.png", format="RGBA")
 
-    # Extract red channel (normalized depth)
+    # Extract channels
     depth_normalized = data[:, :, 0]
+    alpha_channel = data[:, :, 3]
+
+    # Debug: Check alpha channel values
+    unique_alphas = np.unique(alpha_channel)
+    print(f"Unique alpha values: {unique_alphas}")
+    alpha_min, alpha_max = np.min(alpha_channel), np.max(alpha_channel)
+    print(f"Alpha range: [{alpha_min:.3f}, {alpha_max:.3f}]")
 
     # Analyze depth statistics
-    hit_mask = data[:, :, 3] > 0  # Pixels that hit something
+    hit_mask = alpha_channel > 0  # Pixels that hit something
     hit_count = np.sum(hit_mask)
     total_pixels = FRAME_W * FRAME_H
     hit_percentage = 100.0 * hit_count / total_pixels
@@ -299,3 +306,93 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
         print(f"Depth test results: No hits detected")
         # This might indicate a problem with the ray tracer
         print("WARNING: No ray-triangle intersections detected!")
+
+
+def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
+    """Test world position visualization to see what's actually being hit."""
+    frame = Draw3dFrame(renderer)
+
+    meshes = load_gltf(
+        renderer=renderer,
+        path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
+    )
+
+    print(f"\nLoaded {len(meshes)} meshes")
+    for (geom, mat), transforms in meshes.items():
+        print(
+            f"  Geometry: {geom.triangle_count} triangles, {transforms.shape[0]} instances"
+        )
+
+    # Camera at Y=-5, looking forward (+Y) toward cube at origin
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -5.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+        ),
+        meshes=meshes,
+    )
+
+    print(f"Scene has {len(scene.meshes)} mesh instances")
+
+    # First: check instance count
+    frame.set_debug_flags(emit_instance_count=True)
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    instance_count_viz = data[0, 0, 0]  # Should be same for all pixels
+    print(f"Instance count from GPU: {instance_count_viz * 10.0:.0f}")
+
+    # Check first triangle vertex
+    frame.set_debug_flags(emit_first_triangle_v0=True)
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    v0_normalized = data[0, 0, :3]
+    v0 = v0_normalized * 20.0 - 10.0
+    print(f"First triangle v0: ({v0[0]:.2f}, {v0[1]:.2f}, {v0[2]:.2f})")
+
+    # Enable world position debug flag
+    frame.set_debug_flags(emit_hit_world_position=True)
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+
+    _save_debug_image(data, "test_world_position.png", format="RGBA")
+
+    # Extract RGB (world position mapped to [0,1] via (pos+10)/20)
+    world_pos_normalized = data[:, :, :3]
+    alpha_channel = data[:, :, 3]
+
+    # Convert back to world space: [0,1] -> [-10,10]
+    world_positions = world_pos_normalized * 20.0 - 10.0
+
+    hit_mask = alpha_channel > 0
+    hit_count = np.sum(hit_mask)
+
+    print(f"\nWorld position test results:")
+    print(f"  Hit pixels: {hit_count}/{FRAME_W * FRAME_H}")
+
+    if hit_count > 0:
+        hit_world_pos = world_positions[hit_mask]
+        print(
+            f"  X range: [{np.min(hit_world_pos[:, 0]):.2f}, {np.max(hit_world_pos[:, 0]):.2f}]"
+        )
+        print(
+            f"  Y range: [{np.min(hit_world_pos[:, 1]):.2f}, {np.max(hit_world_pos[:, 1]):.2f}]"
+        )
+        print(
+            f"  Z range: [{np.min(hit_world_pos[:, 2]):.2f}, {np.max(hit_world_pos[:, 2]):.2f}]"
+        )
+
+        # Check if all hit positions have the same Y coordinate (would indicate plane bug)
+        y_coords = hit_world_pos[:, 1]
+        y_std = np.std(y_coords)
+        y_mean = np.mean(y_coords)
+        print(f"  Y coordinate: mean={y_mean:.4f}, std={y_std:.4f}")
+
+        if y_std < 0.01:
+            print(
+                f"  WARNING: All hits at same Y={y_mean:.4f} - suggests plane intersection bug!"
+            )
