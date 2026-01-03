@@ -1,5 +1,6 @@
 __all__ = [
     "BUNDLED_DATA_PATH",
+    "COOKED_ATLAS_PATH_SUFFIX",
     "BaseDisposable",
     "ButtonAction",
     "ColorSpace",
@@ -79,7 +80,12 @@ from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
 )
-from .cook import CookedAtlas, CookedAtlasGlyphInfo, CookedAtlasGlyphCacheKey
+from .cook import (
+    CookedAtlas,
+    CookedAtlasGlyphInfo,
+    CookedAtlasGlyphCacheKey,
+    COOKED_ATLAS_PATH_SUFFIX,
+)
 from .bundled_data import BUNDLED_DATA_PATH
 from .images import (
     compute_psnr,

@@ -35,7 +35,7 @@ from .basic import (
     logger,
 )
 from .bundled_data import BUNDLED_DATA_PATH
-from .cook import CookedAtlas
+from .cook import COOKED_ATLAS_PATH_SUFFIX, CookedAtlas
 from .draw_2d import Draw2dQuad
 from . import typed_uharfbuzz as hb
 
@@ -534,7 +534,7 @@ class GlyphAtlas(BaseDisposable):
 
         for font in all_fonts:
             atlas_dir = (BUNDLED_DATA_PATH / "fonts" / font).with_suffix(
-                CookedAtlas.PATH_SUFFIX
+                COOKED_ATLAS_PATH_SUFFIX
             )
 
             if not atlas_dir.exists():

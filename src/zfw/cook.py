@@ -1,4 +1,5 @@
 __all__ = [
+    "COOKED_ATLAS_PATH_SUFFIX",
     "CookedAtlas",
     "CookedAtlasGlyphCacheKey",
     "CookedAtlasGlyphInfo",
@@ -24,14 +25,15 @@ from .loader import load_image
 #
 
 
-CookedAtlasType = Literal["glyph_cache"]
+CookedAtlasType = Literal["glyph-cache"]
+
+
+COOKED_ATLAS_PATH_SUFFIX: str = ".zfw_atlas"
 
 
 @dataclass(kw_only=True, frozen=True)
 class CookedAtlas:
-    PATH_SUFFIX: str = ".zfw_atlas"
-
-    atlas_type: CookedAtlasType = "glyph_cache"
+    atlas_type: CookedAtlasType
     atlas_data: np.ndarray  # (h, w, 4) RGBA f32 image or (h, w, 1) mono f32 image
     image_xywh_list: list[tuple[int, int, int, int]]
     color_space: ColorSpace = "linear"
@@ -48,9 +50,9 @@ class CookedAtlas:
         load_license_text: bool = False,
         load_glyph_metrics: bool = True,
     ) -> "CookedAtlas":
-        if path.suffix != CookedAtlas.PATH_SUFFIX:
+        if path.suffix != COOKED_ATLAS_PATH_SUFFIX:
             raise ValueError(
-                f"CookedAtlas load path must have suffix {CookedAtlas.PATH_SUFFIX!r}: "
+                f"CookedAtlas load path must have suffix {COOKED_ATLAS_PATH_SUFFIX!r}: "
                 f"{path=}"
             )
         if not path.is_dir():
@@ -97,6 +99,7 @@ class CookedAtlas:
             as_glyph_cache = None
 
         return CookedAtlas(
+            atlas_type="glyph-cache",
             atlas_data=atlas_data,
             image_xywh_list=image_xywh_list,
             color_space=color_space,
@@ -106,9 +109,9 @@ class CookedAtlas:
         )
 
     def save(self, path: Path) -> None:
-        if path.suffix != CookedAtlas.PATH_SUFFIX:
+        if path.suffix != COOKED_ATLAS_PATH_SUFFIX:
             raise ValueError(
-                f"CookedAtlas save path must have {CookedAtlas.PATH_SUFFIX!r} suffix: "
+                f"CookedAtlas save path must have {COOKED_ATLAS_PATH_SUFFIX!r} suffix: "
                 f"{path=}"
             )
 
@@ -148,7 +151,7 @@ class CookedAtlas:
 
         # (Optional) Save glyph cache extension data:
         if self.as_glyph_cache:
-            if self.atlas_type != "glyph_cache":
+            if self.atlas_type != "glyph-cache":
                 raise LogicError(
                     "Inconsistent CookedAtlas instance: if 'as_glyph_cache' is set, "
                     "'atlas_type' must be 'glyph_cache'."

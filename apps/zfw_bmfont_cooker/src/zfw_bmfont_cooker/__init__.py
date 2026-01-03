@@ -23,6 +23,7 @@ from zfw import (
     CookedAtlas,
     CookedAtlasGlyphInfo,
     CookedAtlasGlyphCacheKey,
+    COOKED_ATLAS_PATH_SUFFIX,
 )
 import zfw.typed_uharfbuzz as hb
 
@@ -352,6 +353,7 @@ class GlyphAtlasCooker:
 
         # Create CookedAtlas
         atlas = CookedAtlas(
+            atlas_type="glyph-cache",
             atlas_data=atlas_data,
             image_xywh_list=self._image_xywh_list,
             color_space="linear",
@@ -379,11 +381,11 @@ def main_impl() -> int:
     project_root = Path.cwd()
 
     output_path: Path = args.output
-    if output_path.suffix != CookedAtlas.PATH_SUFFIX:
-        LOG.error(f"Output path must have suffix {CookedAtlas.PATH_SUFFIX!r}")
+    if output_path.suffix != COOKED_ATLAS_PATH_SUFFIX:
+        LOG.error(f"Output path must have suffix {COOKED_ATLAS_PATH_SUFFIX!r}")
         return 1
 
-    font = cast(Font, output_path.stem.removesuffix(CookedAtlas.PATH_SUFFIX))
+    font = cast(Font, output_path.stem.removesuffix(COOKED_ATLAS_PATH_SUFFIX))
     font_name = FONT_TO_FONT_NAME_DICT.get(font)
     if font_name is None:
         LOG.error(f"Unknown font: {font!r}")
