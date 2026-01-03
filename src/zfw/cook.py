@@ -129,7 +129,12 @@ class CookedAtlas:
         pil_atlas = pil_atlas.squeeze()
         pil_mode = "RGBA" if self.atlas_data.shape[2] == 4 else "L"
         pil_image = PIL.Image.fromarray(pil_atlas, mode=pil_mode)
-        pil_image.save(path / "atlas.png", format="PNG")
+        pil_image.save(
+            path / "atlas.png",
+            format="PNG",
+            compress_level=9,
+            optimize=True,
+        )
 
         # (Optional) Save README.md
         if self.readme_text:

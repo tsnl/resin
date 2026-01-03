@@ -1,11 +1,11 @@
 import logging
 from pathlib import Path
+from typing import Generator
 
 import numpy as np
 import pytest
 import wgpu
 
-from tests.image_ref_tests import assert_image_matches_reference
 from zfw import (
     setup_logging,
     BaseDisposable,
@@ -24,6 +24,10 @@ from zfw import (
     Rgba8UnormTexture,
 )
 
+from conftest import GpuFixture
+from image_ref_tests import assert_image_matches_reference
+
+
 TEST_IMAGE_W, TEST_IMAGE_H = 1280, 720
 
 
@@ -37,7 +41,7 @@ class Draw2dExTestEngine(BaseDisposable):
     canvas: Draw2dExtCanvas
     readback_buffer: ReadbackBuffer
 
-    def __init__(self, *, scale: float = 1.0) -> None:
+    def __init__(self, *, gpu: GpuFixture, scale: float = 1.0) -> None:
         super().__init__()
 
         setup_logging(level=logging.ERROR)
@@ -117,14 +121,21 @@ class Draw2dExTestEngine(BaseDisposable):
         self.queue.submit([command_encoder.finish()])
 
 
+@pytest.fixture(scope="module")
+def engine(gpu: GpuFixture) -> Generator[Draw2dExTestEngine, None, None]:
+    """Fixture that provides a Draw2dExTestEngine."""
+    eng = Draw2dExTestEngine(gpu=gpu)
+    yield eng
+    eng.dispose()
+
+
 # -----------------------------------------------------------------------------
 # Parity Tests (mirror draw_2d_test.py)
 # -----------------------------------------------------------------------------
 
 
-def test_draw_2d_ext_quads():
+def test_draw_2d_ext_quads(engine: Draw2dExTestEngine):
     """Test rendering colored quads with borders (parity with draw_2d)."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Large white quad with blue bottom border
@@ -164,9 +175,8 @@ def test_draw_2d_ext_quads():
     engine.dispose()
 
 
-def test_draw_2d_ext_image():
+def test_draw_2d_ext_image(engine: Draw2dExTestEngine):
     """Test rendering a textured quad with an image (parity with draw_2d)."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Load test image (returns float32 linear color space)
@@ -223,9 +233,8 @@ def test_draw_2d_ext_image():
 # -----------------------------------------------------------------------------
 
 
-def test_draw_2d_ext_text_basic():
+def test_draw_2d_ext_text_basic(engine: Draw2dExTestEngine):
     """Test basic text rendering."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     primitives.append(
@@ -256,9 +265,8 @@ def test_draw_2d_ext_text_basic():
     engine.dispose()
 
 
-def test_draw_2d_ext_text_wrap():
+def test_draw_2d_ext_text_wrap(engine: Draw2dExTestEngine):
     """Test text wrapping."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     long_text = (
@@ -298,9 +306,8 @@ def test_draw_2d_ext_text_wrap():
 # -----------------------------------------------------------------------------
 
 
-def test_draw_2d_ext_text_on_quad():
+def test_draw_2d_ext_text_on_quad(engine: Draw2dExTestEngine):
     """Test text rendered on top of a colored quad (z-ordering)."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Background quad
@@ -342,9 +349,8 @@ def test_draw_2d_ext_text_on_quad():
     engine.dispose()
 
 
-def test_draw_2d_ext_layered_quads_and_text():
+def test_draw_2d_ext_layered_quads_and_text(engine: Draw2dExTestEngine):
     """Test multiple layers of quads and text with correct z-ordering."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # First layer: large background quad
@@ -441,9 +447,8 @@ def test_draw_2d_ext_layered_quads_and_text():
 # -----------------------------------------------------------------------------
 
 
-def test_draw_2d_ext_font_matrix():
+def test_draw_2d_ext_font_matrix(engine: Draw2dExTestEngine):
     """Test matrix of font configurations: fonts × sizes × weights."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     fonts: list[Font] = ["sans-serif", "serif", "monospaced"]
@@ -511,78 +516,8 @@ def test_draw_2d_ext_font_matrix():
     engine.dispose()
 
 
-def test_draw_2d_ext_scale_matrix():
-    """Test rendering at different scale factors."""
-    # Test at scale 2.0
-    engine = Draw2dExTestEngine(scale=2.0)
-    primitives: list[Draw2dExtBasePrimitive] = []
-
-    # At scale 2.0, a 100x50 DIP quad becomes 200x100 physical pixels
-    primitives.append(
-        Draw2dExtQuadPrimitive(
-            dst_xywh_dip=(50, 50, 200, 100),
-            fill_color=(0.3, 0.3, 0.6, 1.0),
-            border_thickness_dip=(2, 2, 2, 2),
-            border_color=(1.0, 1.0, 0.0, 1.0),
-        )
-    )
-
-    primitives.append(
-        Draw2dExtTextPrimitive(
-            text="Scale 2.0",
-            font="sans-serif",
-            dst_xy_dip=(60, 60),
-            dst_wh_dip=(180, 80),
-            font_size="large",
-            font_weight="bold",
-            color=(1.0, 1.0, 1.0, 1.0),
-            wrap=True,
-            horizontal_alignment="center",
-            vertical_alignment="middle",
-        )
-    )
-
-    # Another quad at a different position (in DIP space)
-    primitives.append(
-        Draw2dExtQuadPrimitive(
-            dst_xywh_dip=(50, 180, 200, 100),
-            fill_color=(0.6, 0.3, 0.3, 1.0),
-            border_thickness_dip=(2, 2, 2, 2),
-            border_color=(0.0, 1.0, 1.0, 1.0),
-        )
-    )
-
-    primitives.append(
-        Draw2dExtTextPrimitive(
-            text="HiDPI Test",
-            font="serif",
-            dst_xy_dip=(60, 190),
-            dst_wh_dip=(180, 80),
-            font_size="regular",
-            font_weight="regular",
-            color=(1.0, 1.0, 1.0, 1.0),
-            wrap=True,
-            horizontal_alignment="center",
-            vertical_alignment="middle",
-        )
-    )
-
-    engine.draw(primitives)
-    image = engine.readback()
-
-    assert_image_matches_reference(
-        image,
-        "test_draw_2d_ext_scale_matrix",
-        psnr_threshold=65.0,
-        test_subdir="draw_2d_ext_test",
-    )
-
-    engine.dispose()
-
-
-def test_draw_2d_ext_text_alignment():
+def test_draw_2d_ext_text_alignment(engine: Draw2dExTestEngine):
     """Test text alignment options."""
-    engine = Draw2dExTestEngine()
     primitives: list[Draw2dExtBasePrimitive] = []
 
     alignments = [

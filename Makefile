@@ -16,8 +16,9 @@ sandbox: sync build
 
 .PHONY: tests
 tests: sync build
-	uv run --package zfw --extra dev python -m pytest -n auto -vs --tb=short .
-
+	uv run --package zfw --extra dev python -m pytest --profile -vs --tb=short .
+	uv run flameprof --width 4096 prof/combined.prof > prof/combined.svg
+	uv run flameprof --width 4096 prof/test_basic_draw_2d.prof > prof/test_basic_draw_2d.svg
 
 #
 # Develop:

@@ -25,11 +25,13 @@ dev = [
     "pyright>=1.1.407",
     "ruff>=0.14.5",
     "pytest>=9.0.1,<10.0.0",
-    "pytest-xdist[psutil]>=3.8.0",
+    "pytest-profiling>=1.8.1",
     "rich",
     "requests",
     "pillow>=10.0.0",
     "scikit-image",
+    "ipykernel>=7.1.0",
+    "flameprof>=0.4",
 ]
 
 [build-system]
@@ -41,6 +43,9 @@ package-data = { "zfw" = ["bundled_data/**/*", "*.wgsl"] }
 
 [tool.uv.workspace]
 members = ["apps/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 #
 # Ruff configuration

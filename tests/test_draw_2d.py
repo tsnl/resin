@@ -1,10 +1,9 @@
+from dataclasses import dataclass
 import logging
 from pathlib import Path
 
 import numpy as np
 import pytest
-import wgpu
-import wgpu.backends.wgpu_native
 
 from tests.image_ref_tests import assert_image_matches_reference
 from zfw import (
@@ -18,12 +17,13 @@ from zfw import (
     load_rgba_image,
 )
 
+from conftest import GpuFixture
 
-def test_basic_draw_2d():
+
+def test_basic_draw_2d(gpu: GpuFixture):
     """Test basic 2D rendering with quads and textures."""
-    adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = adapter.request_device_sync(label="TestDevice")
-    queue = device.queue
+    device = gpu.device
+    queue = gpu.queue
 
     # Load rainbow test image
     rainbow_image_data = load_rgba_image(Path("tests/data/rainbow-512x512.png"))
