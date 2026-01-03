@@ -137,45 +137,6 @@ GLTF_TO_ZUP_MATRIX = np.array(
 
 
 def load_gltf(
-    #     """
-    #     A loaded glTF scene ready for rendering.
-    #     Contains a meshes dict mapping (geometry, material) pairs to instance
-    #     transforms, suitable for passing directly to Draw3dRenderer.draw().
-    #     """
-    #     meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]
-    #     """
-    #     Mapping of (geometry, material) pairs to per-instance transforms.
-    #     Each transform array has shape (N, 4, 4) with N instance transforms in row-major order.
-    #     """
-    #     geometries: list[Draw3dGeometry]
-    #     """All geometry objects created for this scene (for disposal)."""
-    #     materials: list[Draw3dMaterial]
-    #     """All material objects created for this scene (for disposal)."""
-    #     images: list[GpuImage]
-    #     """All GPU images created for this scene (for disposal)."""
-    #     def __init__(
-    #         self,
-    #         *,
-    #         meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray],
-    #         geometries: list[Draw3dGeometry],
-    #         materials: list[Draw3dMaterial],
-    #         images: list[GpuImage],
-    #         parent_resource: BaseResource | None = None,
-    #     ):
-    #         super().__init__(parent_resource=parent_resource)
-    #         self.meshes = meshes
-    #         self.geometries = geometries
-    #         self.materials = materials
-    #         self.images = images
-    #     def _on_dispose(self) -> None:
-    #         """Dispose all resources created for this scene."""
-    #         for geometry in self.geometries:
-    #             geometry.dispose()
-    #         for material in self.materials:
-    #             material.dispose()
-    #         for image in self.images:
-    #             image.dispose()
-    # def load_gltf(
     renderer: "Draw3dRenderer",
     path: Path | str,
     *,
@@ -261,6 +222,7 @@ def _get_accessor_data(
 ) -> np.ndarray:
     """Extract numpy array data from a glTF accessor."""
     accessor = gltf.accessors[accessor_idx]
+    assert isinstance(accessor.bufferView, int)
     buffer_view = gltf.bufferViews[accessor.bufferView]
 
     # Component type mapping
@@ -370,7 +332,7 @@ def _load_image_sources(
         elif (image_uri := image.uri) is not None:
             if image_uri.startswith("data:"):
                 # Base64 embedded image
-                _, data = image_uri.split(",", 1)
+                _, data = image_uri.split(",", 1)  # type: ignore[var-annotated]
                 raw_bytes = base64.b64decode(data)
                 source = _ImageSource(raw_bytes=raw_bytes)
             else:
