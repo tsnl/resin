@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from typing import Generator
 
 import numpy as np
@@ -19,7 +18,6 @@ from zfw import (
     Draw2dExtTextPrimitive,
     Draw2dExtCanvas,
     convert_color,
-    load_rgba_image,
     ReadbackBuffer,
     Rgba8UnormTexture,
 )

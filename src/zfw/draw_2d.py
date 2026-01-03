@@ -308,14 +308,14 @@ def pod_quad_from_draw2d_quad(
 
     record = np.array(
         (
-            np.array(dst_xy_ndc, dtype=np.float32),
-            np.array(dst_wh_ndc, dtype=np.float32),
-            np.array(src_xy_uv, dtype=np.float32),
-            np.array(src_wh_uv, dtype=np.float32),
-            np.array(original.fill_color_rgba, dtype=np.float32),
-            np.array(border_thickness_ndc, dtype=np.float32),
-            np.array(original.border_color_rgba, dtype=np.float32),
-            np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
+            dst_xy_ndc,
+            dst_wh_ndc,
+            src_xy_uv,
+            src_wh_uv,
+            original.fill_color_rgba,
+            border_thickness_ndc,
+            original.border_color_rgba,
+            [0.0, 0.0, 0.0, 0.0],
         ),
         dtype=POD_QUAD_DTYPE,
     )
