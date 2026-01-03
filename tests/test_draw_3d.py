@@ -91,6 +91,7 @@ def renderer(gpu: GpuFixture) -> Generator[Draw3dRenderer, None, None]:
 
 def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
+    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
 
     meshes = load_gltf(
         renderer=renderer,
@@ -108,11 +109,13 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
             ),
             fov_y_rad=np.radians(60.0),
             aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=0.50,
         ),
         meshes=meshes,
     )
 
     data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data *= 1.0
     _save_debug_image(data, "test_basic_draw_3d.png")
 
 
