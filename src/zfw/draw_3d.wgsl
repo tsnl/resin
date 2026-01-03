@@ -21,7 +21,7 @@ struct PodFrameInfo {
     instance_count: u32,
     target_size_w_px: u32,
     target_size_h_px: u32,
-    flags: u32,
+    debug_flags: u32,
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
@@ -60,7 +60,7 @@ struct PodCamera {
     transform: PodTransform,
     fov_y_rad: f32,
     aspect_ratio: f32,
-    max_distance: f32,
+    clip_aabb_max: f32,
     _rsv: u32,
 }
 
@@ -108,6 +108,21 @@ fn h_mat4x4_inverse(m: mat4x4<f32>) -> mat4x4<f32> {
     let col2 = vec4<f32>(r_inv[2], 0.0);
     let col3 = vec4<f32>(t_inv, 1.0);
     return mat4x4<f32>(col0, col1, col2, col3);
+}
+fn h_mat4x4_transform_position(m: mat4x4<f32>, p: vec3<f32>) -> vec3<f32> {
+    let p_h = vec4<f32>(p, 1.0);
+    let transformed_p_h = m * p_h;
+    return transformed_p_h.xyz / transformed_p_h.w;
+}
+fn h_mat4x4_transform_direction(m: mat4x4<f32>, d: vec3<f32>) -> vec3<f32> {
+    let d_h = vec4<f32>(d, 0.0);
+    let transformed_d_h = m * d_h;
+    return transformed_d_h.xyz;
+}
+fn h_mat4x4_transform_ray(m: mat4x4<f32>, ray: Ray) -> Ray {
+    let transformed_origin = h_mat4x4_transform_position(m, ray.origin);
+    let transformed_direction = h_mat4x4_transform_direction(m, ray.direction);
+    return Ray(transformed_origin, transformed_direction);
 }
 
 //
@@ -223,14 +238,6 @@ fn raycast_triangle(ray: Ray, triangle_vertices: mat3x3<f32>) -> vec4<f32> {
     );
 }
 
-fn transform_ray(ray: Ray, transform: mat4x4<f32>) -> Ray {
-    let origin_h = vec4<f32>(ray.origin, 1.0);
-    let direction_h = vec4<f32>(ray.direction, 0.0);
-    let transformed_origin_h = transform * origin_h;
-    let transformed_direction_h = transform * direction_h;
-    return Ray(transformed_origin_h.xyz, transformed_direction_h.xyz);
-}
-
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     // Compute 2D NDC coordinates of the pixel in the output image:
     let target_size_wh_px_f = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
@@ -256,49 +263,13 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     // Create ray in camera space, then transform to world space.
     let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), sensor_pixel_camera_space);
     let camera_transform = h_mat4x4_from_pod_transform(camera.transform);
-    return transform_ray(camera_space_ray, camera_transform);
+    return h_mat4x4_transform_ray(camera_transform, camera_space_ray);
 }
 
 //
-// Ray tracing:
+// Shading: HitRecord -> Color
 //
 
-fn load_triangle_vertices_positions(triangle_id: u32) -> mat3x3<f32> {
-    let pod_triangle = triangle_heap[triangle_id];
-    let v0 = vec3<f32>(
-        pod_triangle.vertices[0].position[0],
-        pod_triangle.vertices[0].position[1],
-        pod_triangle.vertices[0].position[2],
-    );
-    let v1 = vec3<f32>(
-        pod_triangle.vertices[1].position[0],
-        pod_triangle.vertices[1].position[1],
-        pod_triangle.vertices[1].position[2],
-    );
-    let v2 = vec3<f32>(
-        pod_triangle.vertices[2].position[0],
-        pod_triangle.vertices[2].position[1],
-        pod_triangle.vertices[2].position[2],
-    );
-    return mat3x3<f32>(v0, v1, v2);
-}
-
-fn compute_world_hit_position(ray: Ray, hit_result: vec4<f32>, instance_transform: mat4x4<f32>) -> vec3<f32> {
-    let local_hit_position = ray.origin + hit_result.w * ray.direction;
-    let world_hit_position_h = instance_transform * vec4<f32>(local_hit_position, 1.0);
-    return world_hit_position_h.xyz / world_hit_position_h.w;
-}
-
-struct HitRecord {
-    world_hit_position: vec3<f32>,
-    world_hit_distance: f32,
-    barycentric_coordinates: vec3<f32>,
-    instance_transform: mat4x4<f32>,
-    instance_transform_inv: mat4x4<f32>,
-    triangle_id: u32,
-    geometry_id: u32,
-    instance_id: u32,
-}
 
 fn compute_hit_details(ray: Ray, triangle_id: u32, hit_result: vec4<f32>, instance_transform: mat4x4<f32>) -> HitDetails {
     let local_hit_position = ray.origin + hit_result.w * ray.direction;
@@ -321,107 +292,181 @@ struct HitDetails {
 }
 
 //
-// Entry point:
+// Raycast: Ray -> HitRecord
 //
 
-/// Raycast the given ray against the given instance.
-/// Since the ray is constant, we can easily compare the 'w' coefficient of the hit results to find the closest hit.
-fn raycast_instance(ray: Ray, instance_id: u32) -> HitRecord {
-    var closest_hit: HitRecord;
-    closest_hit.world_hit_distance = F32_INFINITY;
-
-    var closest_hit_w: f32 = F32_INFINITY;
-
+/// Record of a ray hit against an instance. Product of ray-world intersection tests.
+struct HitRecord {
+    world_hit_position: vec3<f32>,
+    world_hit_distance: f32,
+    barycentric_coordinates: vec3<f32>,
+    ray: Ray,
+    triangle_id: u32,
+    geometry_id: u32,
+    instance_id: u32,
+}
+fn new_invalid_hit_record(ray: Ray) -> HitRecord {
+    var hit: HitRecord;
+    hit.world_hit_distance = F32_INFINITY;
+    hit.ray = ray;
+    return hit;
+}
+fn is_hit_record_valid(hit: HitRecord) -> bool {
+    return hit.world_hit_distance < F32_INFINITY;
+}
+fn hit(ray: Ray) -> HitRecord {
+    // Raycast against all instances, find closest hit.
+    // TODO: Use TLAS to accelerate this.
+    var closest_hit = new_invalid_hit_record(ray);
+    for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id++) {
+        let hit_record = hit_instance(ray, instance_id);
+        if hit_record.world_hit_distance < closest_hit.world_hit_distance {
+            closest_hit = hit_record;
+        }
+    }
+    return closest_hit;
+}
+fn hit_instance(ray: Ray, instance_id: u32) -> HitRecord {
     let instance = instances[instance_id];
     let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
     let inv_instance_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
     
     let geometry_id = instance.geometry_id;
-    let geometry = geometry_heap[geometry_id];
     
     // Transform ray into model space by applying the inverse of the instance's transform.
     // This lets us raycast against the geometry without transforming all the vertices per-instance.
-    let local_ray = transform_ray(ray, inv_instance_transform);
+    let local_ray = h_mat4x4_transform_ray(inv_instance_transform, ray);
+    let local_hit = hit_geometry(local_ray, geometry_id);
 
-    let triangle_span = geometry.triangle_span_in_heap;
-    for (var triangle_id = triangle_span.begin; triangle_id < triangle_span.end; triangle_id++) {
-        let triangle_vertices = load_triangle_vertices_positions(triangle_id);
-        let hit_result = raycast_triangle(local_ray, triangle_vertices);
-        
-        // If hit is invalid or farther than closest hit so far, skip
-        if hit_result.w < 0.0 {
-            continue;
-        }
-        if hit_result.w >= closest_hit_w {
-            continue;
-        }
-
-        // Valid hit and closer than previous closest hit: update closest hit record
-        let world_hit_position = compute_world_hit_position(ray, hit_result, instance_transform);
-        let world_hit_distance = length(world_hit_position - ray.origin);
-        if world_hit_distance < closest_hit.world_hit_distance {
-            closest_hit.world_hit_distance = world_hit_distance;
-            closest_hit.world_hit_position = world_hit_position;
-            closest_hit.barycentric_coordinates = hit_result.xyz;
-            closest_hit.instance_transform = instance_transform;
-            closest_hit.instance_transform_inv = inv_instance_transform;
-            closest_hit.triangle_id = triangle_id;
-            closest_hit.geometry_id = geometry_id;
-            closest_hit.instance_id = instance_id;
-        }
+    // If hit is not valid, early out.
+    if !is_geometry_hit_record_valid(local_hit) {
+        return new_invalid_hit_record(ray);
     }
 
-    return closest_hit;
+    // Local hit is valid. Transform local hit position back to world space.
+    var hit_record: HitRecord;
+    hit_record.world_hit_position = h_mat4x4_transform_position(
+        instance_transform,
+        local_ray.origin + local_hit.triangle_raycast_result.w * local_ray.direction,
+    );
+    hit_record.world_hit_distance = length(hit_record.world_hit_position - ray.origin);
+    hit_record.barycentric_coordinates = local_hit.triangle_raycast_result.xyz;
+    hit_record.ray = ray;
+    hit_record.triangle_id = local_hit.triangle_id;
+    hit_record.geometry_id = geometry_id;
+    hit_record.instance_id = instance_id;
+    return hit_record;
 }
 
-fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
-    let debug_emit_primary_ray_direction = (frame_info.flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
-    let debug_emit_depth_in_r = (frame_info.flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
-    let debug_emit_hit_world_pos = (frame_info.flags & FLAG_EMIT_HIT_WORLD_POSITION) != 0u;
+/// Record of a ray hit against geometry (no instance transform applied).
+struct GeometryHitRecord {
+    triangle_raycast_result: vec4<f32>, // XYZ = barycentric coords, W = distance
+    triangle_id: u32,
+}
+fn new_invalid_geometry_hit_record() -> GeometryHitRecord {
+    var hit: GeometryHitRecord;
+    hit.triangle_raycast_result = vec4<f32>(0.0, 0.0, 0.0, F32_INFINITY);
+    return hit;
+}
+fn is_geometry_hit_record_valid(hit: GeometryHitRecord) -> bool {
+    return hit.triangle_raycast_result.w < F32_INFINITY;
+}
+fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
+    let triangle_span = geometry_heap[geometry_id].triangle_span_in_heap;
+    var closest_hit_record = new_invalid_geometry_hit_record();
+    for (var triangle_id = triangle_span.begin; triangle_id < triangle_span.end; triangle_id++) {
+        let triangle_vertices = load_triangle_vertices_positions(triangle_id);
+        let hit_result = raycast_triangle(ray, triangle_vertices);
+        if hit_result.w > 0.0 && hit_result.w < closest_hit_record.triangle_raycast_result.w {
+            closest_hit_record.triangle_raycast_result = hit_result;
+            closest_hit_record.triangle_id = triangle_id;
+        }
+    }
+    return closest_hit_record;
+}
+fn load_triangle_vertices_positions(triangle_id: u32) -> mat3x3<f32> {
+    let pod_triangle = triangle_heap[triangle_id];
+    let v0 = vec3<f32>(
+        pod_triangle.vertices[0].position[0],
+        pod_triangle.vertices[0].position[1],
+        pod_triangle.vertices[0].position[2],
+    );
+    let v1 = vec3<f32>(
+        pod_triangle.vertices[1].position[0],
+        pod_triangle.vertices[1].position[1],
+        pod_triangle.vertices[1].position[2],
+    );
+    let v2 = vec3<f32>(
+        pod_triangle.vertices[2].position[0],
+        pod_triangle.vertices[2].position[1],
+        pod_triangle.vertices[2].position[2],
+    );
+    return mat3x3<f32>(v0, v1, v2);
+}
+
+//
+// Debug visualization:
+//
+
+fn debug_output(hit: HitRecord) -> vec4<f32> {
+    let debug_emit_primary_ray_direction = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
+    if debug_emit_primary_ray_direction {
+        return debug_visualize_primary_ray_direction(hit);
+    }
+
+    let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
+    if debug_emit_depth_in_r {
+        return debug_visualize_depth_in_r(hit);
+    }
+
+    let debug_emit_hit_world_pos = (frame_info.debug_flags & FLAG_EMIT_HIT_WORLD_POSITION) != 0u;
+    if debug_emit_hit_world_pos {
+        return debug_visualize_hit_world_position(hit);
+    }
+
+    // No debug flag matched, return magenta to indicate error.
+    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+}
+
+fn debug_visualize_primary_ray_direction(hit: HitRecord) -> vec4<f32> {
+    let dir_normalized = normalize(hit.ray.direction);
+    return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
+}
+
+fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
+    if is_hit_record_valid(hit) {
+        let depth_normalized = clamp(hit.world_hit_distance / camera.clip_aabb_max, 0.0, 1.0);
+        return vec4<f32>(depth_normalized, 0.0, 0.0, 1.0);
+    } else {
+        return vec4<f32>(0.0);
+    }
+}
+
+fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
+    let clip_aabb_min = vec3<f32>(-10.0);
+    let clip_aabb_max = vec3<f32>(10.0);
+    if is_hit_record_valid(hit) {
+        let pos_normalized = (hit.world_hit_position - clip_aabb_min) / (clip_aabb_max - clip_aabb_min);
+        return vec4<f32>(pos_normalized, 1.0);
+    } else {
+        return vec4<f32>(0.0);
+    }
+}
+
+//
+// Entry point:
+//
+
+fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
 
     let ray = gen_primary_ray(pixel_xy);
-    
-    var closest_hit: HitRecord;
-    closest_hit.world_hit_distance = F32_INFINITY;
-    
-    // Raycast against all instances:
-    // TODO: Use TLAS to accelerate this.
-    for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id++) {
-        let hit_record = raycast_instance(ray, instance_id);
-        if hit_record.world_hit_distance < closest_hit.world_hit_distance {
-            closest_hit = hit_record;
-        }
-    }
+    let closest_hit = hit(ray);
 
-    // DEBUG: emit primary ray direction if flag is set
-    if debug_emit_primary_ray_direction {
-        let dir_normalized = normalize(ray.direction);
-        return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
+    if frame_info.debug_flags != 0u {
+        return debug_output(closest_hit);
     }
     
-    // DEBUG: emit hit world position
-    if debug_emit_hit_world_pos {
-        var alpha = 0.0;
-        if closest_hit.world_hit_distance < F32_INFINITY {
-            alpha = 1.0;
-        }
-        // Map world position to [0,1] for visualization (assume scene is within [-10,10] cube)
-        let pos_normalized = (closest_hit.world_hit_position + 10.0) / 20.0;
-        return vec4<f32>(pos_normalized, alpha);
-    }
-    
-    // DEBUG: Visualize hits
-    if debug_emit_depth_in_r {
-        var alpha = 0.0;
-        if closest_hit.world_hit_distance < F32_INFINITY {
-            alpha = 1.0;
-        }
-        let depth_normalized = clamp(closest_hit.world_hit_distance / camera.max_distance, 0.0, 1.0);
-        return vec4<f32>(depth_normalized, 0.0, 0.0, alpha);
-    }
-    
-    // If hit, return red
-    if closest_hit.world_hit_distance < F32_INFINITY {
+    if is_hit_record_valid(closest_hit) {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
 
@@ -429,12 +474,17 @@ fn pixel_main(pixel_xy: vec2<u32>) -> vec4<f32> {
     return vec4<f32>(0.0);
 }
 
+//
+// Bootstrap compute shader entry point:
+//
+
 @compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn main_wrapper(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if global_id.x >= frame_info.target_size_w_px || global_id.y >= frame_info.target_size_h_px {
         return;
     }
 
-    let pixel_color = pixel_main(global_id.xy);
+    let pixel_color = main(global_id.xy);
+
     textureStore(output_image, vec2<i32>(global_id.xy), pixel_color);
 }

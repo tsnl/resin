@@ -122,7 +122,10 @@ class Draw3dRenderer:
         self.pipeline = device.create_compute_pipeline(
             label="Draw3dRenderer.DrawPipeline",
             layout=pipeline_layout,
-            compute=wgpu.ProgrammableStage(module=draw_shader, entry_point="main"),
+            compute=wgpu.ProgrammableStage(
+                module=draw_shader,
+                entry_point="main_wrapper",
+            ),
         )
 
         self.geometry_heap_device_buffer = device.create_buffer(
@@ -423,13 +426,13 @@ class Draw3dFrame:
         self,
         instance_count: int,
         command_encoder: wgpu.GPUCommandEncoder,
-        flags: int = 0,
+        debug_flags: int = 0,
     ) -> None:
         frame_info_data = PodFrameInfoArray.empty(shape=(1,))
         frame_info_data["instance_count"] = instance_count
         frame_info_data["target_size_w_px"] = self.renderer.target_size_wh_px[0]
         frame_info_data["target_size_h_px"] = self.renderer.target_size_wh_px[1]
-        frame_info_data["flags"] = flags
+        frame_info_data["debug_flags"] = debug_flags
 
         self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
         self.frame_info_staging_buffer.write_mapped(data=frame_info_data)
@@ -670,7 +673,7 @@ class PodFrameInfoArray(StructuredNDArray):
             ("instance_count", np.uint32),
             ("target_size_w_px", np.uint32),
             ("target_size_h_px", np.uint32),
-            ("flags", np.uint32),
+            ("debug_flags", np.uint32),
         ]
     )
 
