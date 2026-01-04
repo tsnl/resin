@@ -12,11 +12,11 @@
   - [x] Construct BVHs for BLAS
   - [x] BVH-accelerated ray-triangle intersection with primary rays, ensure no regressions.
   - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
-- [ ] Basic shading
+- [x] Basic shading
   - [x] Compute barycentric coordinates
   - [x] Interpolate normals, get smooth lambertian shading.
-  - [ ] Texture mapping support (?)
-  - [ ] Sample environment map on ray miss.
+  - [x] Texture mapping support
+  - [x] Sample environment map on ray miss.
 - [ ] Secondary rays, PBR shading
 
 ### Polished Resources
@@ -52,3 +52,4 @@ git checkout origin/archive/main-v2 -- src/zfw/typed_vulkan.py  src/zfw/typed_vu
 
 Stuff that needs to be cleaned up with research.
 - `ColorSpace`: how we model colors, color spaces is very messy. sRGB, linear (which primaries? Same as sRGB?), alpha premultiplied or not, etc. Need a more consistent way of handling this.
+
