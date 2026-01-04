@@ -78,7 +78,7 @@ def _render_and_readback(
         avg_ms = elapsed_ms / repeat_count
         LOG.info(f"Render took ~{avg_ms:.2f} ms")
         rich.print(
-            f"[dark_blue]render {repeat_count}x took ~{avg_ms:.2f} ms[/dark_blue]",
+            f"[dark_blue]render x {repeat_count} took ~{avg_ms:.2f} ms[/dark_blue]",
             end=" ",
         )
 
