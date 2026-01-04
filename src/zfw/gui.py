@@ -705,6 +705,7 @@ class GuiWindow(BaseDisposable):
             # Create 3D frame if needed (first frame or after resize)
             if self._draw_3d_frame is None:
                 self._draw_3d_frame = Draw3dFrame(renderer=self._draw_3d_renderer)
+                self._draw_3d_frame.set_debug_flags(emit_color=True)
 
             # Build 3D scene
             scene = Draw3dScene(

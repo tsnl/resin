@@ -777,6 +777,8 @@ class Draw3dFrame(BaseDisposable):
         emit_hit_world_position: bool = False,
         emit_closest_hit_bvh_depth_in_r: bool = False,
         emit_color: bool = False,
+        emit_hit_normal: bool = False,
+        emit_orm: bool = False,
     ) -> None:
         """Set debug visualization flags.
 
@@ -786,6 +788,8 @@ class Draw3dFrame(BaseDisposable):
             emit_hit_world_position: If True, output world-space hit position as RGB.
             emit_closest_hit_bvh_depth_in_r: If True, output normalized hit depth to BVH leaf in red channel.
             emit_primary_ray_color: If True, output sampled texture color at hit point.
+            emit_hit_normal: If True, output world-space hit normal as RGB.
+            emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
         """
         self._debug_flags = 0
         if emit_primary_ray_direction:
@@ -798,6 +802,10 @@ class Draw3dFrame(BaseDisposable):
             self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R
         if emit_color:
             self._debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_COLOR
+        if emit_hit_normal:
+            self._debug_flags |= _FRAME_FLAG_EMIT_HIT_NORMAL
+        if emit_orm:
+            self._debug_flags |= _FRAME_FLAG_EMIT_ORM
 
     def record(
         self,
@@ -1136,6 +1144,8 @@ _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
 _FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
 _FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R = 1 << 3
 _FRAME_FLAG_EMIT_PRIMARY_RAY_COLOR = 1 << 4
+_FRAME_FLAG_EMIT_HIT_NORMAL = 1 << 5
+_FRAME_FLAG_EMIT_ORM = 1 << 6
 
 
 POD_SPAN_DTYPE = np.dtype(

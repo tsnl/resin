@@ -48,10 +48,12 @@ const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
 const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
 const FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R: u32 = 8u;
 const FLAG_EMIT_PRIMARY_RAY_COLOR: u32 = 16u;
+const FLAG_EMIT_HIT_NORMAL: u32 = 32u;
+const FLAG_EMIT_ORM: u32 = 64u;
 
 const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
 const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R;
-const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_COLOR;
+const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_COLOR | FLAG_EMIT_HIT_NORMAL | FLAG_EMIT_ORM;
 
 struct PodInstance {
     geometry_id: u32,
@@ -719,13 +721,17 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
 fn post_primary_ray_gen_debug_output(ray: Ray) -> vec4<f32> {
     let debug_emit_primary_ray_direction = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
     if debug_emit_primary_ray_direction {
-        let dir_normalized = normalize(ray.direction);
-        return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
+        return debug_visualize_primary_ray_direction(ray);
     }
 
     // No debug flag matched, return magenta to indicate error.
     return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
+fn debug_visualize_primary_ray_direction(ray: Ray) -> vec4<f32> {
+    let dir_normalized = normalize(ray.direction);
+    return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
+}
+
 
 fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
     let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
@@ -746,19 +752,18 @@ fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
     // No debug flag matched, return magenta to indicate error.
     return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
-
-fn post_primary_ray_hit_details_debug_output(hit_details: HitDetails) -> vec4<f32> {
-    let debug_emit_primary_ray_color = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_COLOR) != 0u;
-    if debug_emit_primary_ray_color {
-        // Sample texture at interpolated UV coordinates
-        // Using texture ID 0 as default - adjust as needed based on material
-        return sample_texture(0u, hit_details.texcoords);
-    }
-
-    // No debug flag matched, return magenta to indicate error.
-    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+fn debug_visualize_primary_ray_color(hit_details: HitDetails) -> vec4<f32> {
+    // Sample texture at interpolated UV coordinates
+    // Using texture ID 0 as default - adjust as needed based on material
+    return sample_texture(0u, hit_details.texcoords);
 }
 
+fn debug_visualize_hit_normal(hit_details: HitDetails) -> vec4<f32> {
+    // Visualize world-space normal from TBN matrix (third column)
+    let world_normal = hit_details.tbn[2];
+    // Map from [-1, 1] to [0, 1] for visualization
+    return vec4<f32>(world_normal * 0.5 + 0.5, 1.0);
+}
 fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
     if is_hit_record_valid(hit) {
         let depth_normalized = clamp(hit.world_hit_distance / camera.clip_aabb_max, 0.0, 1.0);
@@ -766,6 +771,26 @@ fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
     } else {
         return vec4<f32>(0.0);
     }
+}
+
+fn post_primary_ray_hit_details_debug_output(hit_details: HitDetails) -> vec4<f32> {
+    let debug_emit_primary_ray_color = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_COLOR) != 0u;
+    if debug_emit_primary_ray_color {
+        return debug_visualize_primary_ray_color(hit_details);
+    }
+
+    let debug_emit_hit_normal = (frame_info.debug_flags & FLAG_EMIT_HIT_NORMAL) != 0u;
+    if debug_emit_hit_normal {
+        return debug_visualize_hit_normal(hit_details);
+    }
+
+    let debug_emit_orm = (frame_info.debug_flags & FLAG_EMIT_ORM) != 0u;
+    if debug_emit_orm {
+        return debug_visualize_orm(hit_details);
+    }
+
+    // No debug flag matched, return magenta to indicate error.
+    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
 
 fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
@@ -777,6 +802,15 @@ fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
     } else {
         return vec4<f32>(0.0);
     }
+}
+fn debug_visualize_orm(hit_details: HitDetails) -> vec4<f32> {
+    // Visualize ORM: Opacity, Roughness, Metalness in RGB channels
+    // For now, using placeholder values - will be replaced with actual material sampling
+    // TODO: Sample from material maps based on hit_details
+    let opacity = 1.0;  // Placeholder: sample from opacity/alpha texture
+    let roughness = 0.5;  // Placeholder: sample from roughness texture
+    let metalness = 0.5;  // Placeholder: sample from metalness texture
+    return vec4<f32>(opacity, roughness, metalness, 1.0);
 }
 
 //
