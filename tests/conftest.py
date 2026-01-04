@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import wgpu
 
-from zfw import load_rgba_image, setup_logging
+from zfw import load_rgba_image, setup_logging, request_wgpu_device
 
 
 @dataclass
@@ -21,7 +21,7 @@ class GpuFixture:
 def gpu() -> GpuFixture:
     """Fixture that provides a GPU device and queue."""
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = adapter.request_device_sync(label="TestDevice")
+    device = request_wgpu_device(adapter, label="TestDevice")
     queue = device.queue
     return GpuFixture(adapter=adapter, device=device, queue=queue)
 

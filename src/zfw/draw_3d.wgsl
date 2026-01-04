@@ -1,11 +1,16 @@
+enable f16;
+
 //
 // Bindings:
 //
 
 // Renderer bind group:
 @group(0) @binding(0) var<storage, read> geometry_heap: array<PodGeometry>;
-@group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
-@group(0) @binding(2) var<storage, read> triangle_heap: array<PodTriangle>;
+@group(0) @binding(1) var<storage, read> material_heap: array<PodMaterial>;
+@group(0) @binding(2) var<storage, read> bvh_node_heap: array<PodBvhNode>;
+@group(0) @binding(3) var<storage, read> triangle_heap: array<PodTriangle>;
+@group(0) @binding(4) var<storage, read> texture_heap: array<PodTextureArray>;
+@group(0) @binding(5) var<storage, read> subpixel_heap: array<f16>;
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
@@ -41,7 +46,7 @@ struct PodFrameInfo {
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
 const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
 const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
-const FLAG_DEBUG_BVH_TRAVERSAL: u32 = 8u;
+const FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R: u32 = 8u;
 
 struct PodInstance {
     geometry_id: u32,
@@ -57,11 +62,22 @@ struct PodGeometry {
     triangle_span_in_heap: PodSpan,
 }
 
+struct PodMaterial {
+    color_map_id: u32,
+    color_factor: array<f32, 3>,
+    normal_map_id: u32,
+    metalness_map_id: u32,
+    metalness_factor: f32,
+    roughness_map_id: u32,
+    roughness_factor: f32,
+}
+
 struct PodBvhNode {
     tri_span: PodSpan,
     children: array<u32, 2>,
     aabb: PodAabb,
 }
+
 struct PodTriangle {
     vertices: array<PodVertex, 3>,
 }
@@ -77,6 +93,13 @@ struct PodCamera {
     aspect_ratio: f32,
     clip_aabb_max: f32,
     _rsv: u32,
+}
+
+struct PodTextureArray {
+    width: u32,
+    height: u32,
+    depth: u32,
+    subpixel_span: PodSpan,
 }
 
 struct PodSpan {
@@ -304,7 +327,7 @@ fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
 fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
     let geometry = geometry_heap[geometry_id];
     let bvh_node_span = geometry.bvh_node_span_in_heap;
-    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_DEBUG_BVH_TRAVERSAL) != 0u;
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R) != 0u;
     
     // Stack-based BVH traversal
     // We use a fixed-size stack for iterative traversal instead of recursion
@@ -657,7 +680,7 @@ fn debug_output(hit: HitRecord) -> vec4<f32> {
         return debug_visualize_hit_world_position(hit);
     }
 
-    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_DEBUG_BVH_TRAVERSAL) != 0u;
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R) != 0u;
     if debug_bvh_traversal {
         return debug_visualize_depth_in_r(hit);
     }

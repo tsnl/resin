@@ -39,8 +39,11 @@ class Draw3dRenderer:
     draw_pipeline: wgpu.GPUComputePipeline
 
     geometry_heap_device_buffer: wgpu.GPUBuffer
+    material_heap_device_buffer: wgpu.GPUBuffer
     bvh_node_heap_device_buffer: wgpu.GPUBuffer
     triangle_heap_device_buffer: wgpu.GPUBuffer
+    texture_heap_device_buffer: wgpu.GPUBuffer
+    subpixel_heap_device_buffer: wgpu.GPUBuffer
 
     renderer_bind_group: wgpu.GPUBindGroup
 
@@ -57,9 +60,12 @@ class Draw3dRenderer:
         queue: wgpu.GPUQueue,
         target_size_wh_px: tuple[int, int],
         instance_capacity: int = 1 << 10,
-        geometry_capacity: int = 1 << 8,
+        geometry_capacity: int = 1 << 7,
+        material_capacity: int = 1 << 7,
         bvh_node_capacity: int = 1 << 20,
         triangle_capacity: int = 1 << 22,
+        image_capacity: int = 1 << 8,
+        subpixel_capacity: int = 1 << 22,
     ):
         self.device = device
         self.queue = queue
@@ -68,8 +74,11 @@ class Draw3dRenderer:
 
         self.instance_capacity = instance_capacity
         self.geometry_capacity = geometry_capacity
+        self.material_capacity = material_capacity
         self.bvh_node_capacity = bvh_node_capacity
         self.triangle_capacity = triangle_capacity
+        self.image_capacity = image_capacity
+        self.subpixel_capacity = subpixel_capacity
 
         self.renderer_bind_group_layout = device.create_bind_group_layout(
             label="Draw3dRenderer.RendererBindGroupLayout",
@@ -90,6 +99,27 @@ class Draw3dRenderer:
                 ),
                 wgpu.BindGroupLayoutEntry(
                     binding=2,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=3,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=4,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=5,
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(
                         type=wgpu.BufferBindingType.read_only_storage
@@ -154,6 +184,11 @@ class Draw3dRenderer:
             size=PodGeometryArray.array_size(shape=(self.geometry_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
+        self.material_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.MaterialHeapDeviceBuffer",
+            size=PodMaterialArray.array_size(shape=(self.material_capacity,)),
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
         self.bvh_node_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
             size=PodBvhNodeArray.array_size(shape=(self.bvh_node_capacity,)),
@@ -162,6 +197,16 @@ class Draw3dRenderer:
         self.triangle_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.TriangleHeapDeviceBuffer",
             size=PodVertexArray.array_size(shape=(self.triangle_capacity, 3)),
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
+        self.texture_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.TexturesHeapDeviceBuffer",
+            size=PodTextureArray.array_size(shape=(self.image_capacity,)),
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
+        self.subpixel_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.PixelsHeapDeviceBuffer",
+            size=self.subpixel_capacity * 2,  # just f16 values
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
 
@@ -180,17 +225,41 @@ class Draw3dRenderer:
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
+                        buffer=self.material_heap_device_buffer,
+                        offset=0,
+                        size=self.material_heap_device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
                         buffer=self.bvh_node_heap_device_buffer,
                         offset=0,
                         size=self.bvh_node_heap_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
-                    binding=2,
+                    binding=3,
                     resource=wgpu.BufferBinding(
                         buffer=self.triangle_heap_device_buffer,
                         offset=0,
                         size=self.triangle_heap_device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=4,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.texture_heap_device_buffer,
+                        offset=0,
+                        size=self.texture_heap_device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=5,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.subpixel_heap_device_buffer,
+                        offset=0,
+                        size=self.subpixel_heap_device_buffer.size,
                     ),
                 ),
             ],
@@ -501,7 +570,7 @@ class Draw3dFrame:
         emit_primary_ray_direction: bool = False,
         emit_closest_hit_depth_in_r: bool = False,
         emit_hit_world_position: bool = False,
-        debug_bvh_traversal: bool = False,
+        emit_closest_hit_bvh_depth_in_r: bool = False,
     ) -> None:
         """Set debug visualization flags.
 
@@ -509,7 +578,7 @@ class Draw3dFrame:
             emit_primary_ray_direction: If True, output normalized ray direction as RGB.
             emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
             emit_hit_world_position: If True, output world-space hit position as RGB.
-            debug_bvh_traversal: If True, visualize BVH leaf AABBs instead of actual triangles.
+            emit_closest_hit_bvh_depth_in_r: If True, output normalized hit depth to BVH leaf in red channel.
         """
         self._debug_flags = 0
         if emit_primary_ray_direction:
@@ -518,8 +587,8 @@ class Draw3dFrame:
             self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
         if emit_hit_world_position:
             self._debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
-        if debug_bvh_traversal:
-            self._debug_flags |= _FRAME_FLAG_DEBUG_BVH_TRAVERSAL
+        if emit_closest_hit_bvh_depth_in_r:
+            self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R
 
     def record(
         self,
@@ -778,6 +847,10 @@ class Draw3dMaterial(BaseDisposable):
         # TODO: upload material data to GPU
 
 
+class Draw3dImage(BaseDisposable):
+    pass
+
+
 @dataclass(kw_only=True)
 class Draw3dScene:
     camera: Draw3dCamera
@@ -802,6 +875,12 @@ class Draw3dCamera:
 # POD Types (NumPy structured dtypes)
 #
 
+_FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
+_FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
+_FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
+_FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R = 1 << 3
+
+
 POD_SPAN_DTYPE = np.dtype(
     [
         ("begin", np.uint32),
@@ -817,12 +896,38 @@ POD_AABB_DTYPE = np.dtype(
 )
 
 
-class PodVertexArray(StructuredNDArray):
+class PodInstanceArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("position", np.float32, (3,)),
-            ("normal", np.float32, (3,)),
-            ("uv", np.float32, (2,)),
+            ("geometry_id", np.uint32),
+            ("material_id", np.uint32),
+            ("_pad0", np.uint32),
+            ("_pad1", np.uint32),
+            ("transform", np.float32, (4, 4)),  # row-major 4x4 matrix
+            ("inv_transform", np.float32, (4, 4)),  # row-major 4x4 inverse matrix
+        ]
+    )
+
+
+class PodGeometryArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("bvh_node_span", POD_SPAN_DTYPE),
+            ("triangle_span", POD_SPAN_DTYPE),
+        ]
+    )
+
+
+class PodMaterialArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("color_map_id", np.uint32),
+            ("color_factor", np.float32, (3,)),
+            ("normal_map_id", np.uint32),
+            ("metalness_map_id", np.uint32),
+            ("metalness_factor", np.float32),
+            ("roughness_map_id", np.uint32),
+            ("roughness_factor", np.float32),
         ]
     )
 
@@ -837,11 +942,23 @@ class PodBvhNodeArray(StructuredNDArray):
     )
 
 
-class PodGeometryArray(StructuredNDArray):
+class PodVertexArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("bvh_node_span", POD_SPAN_DTYPE),
-            ("triangle_span", POD_SPAN_DTYPE),
+            ("position", np.float32, (3,)),
+            ("normal", np.float32, (3,)),
+            ("uv", np.float32, (2,)),
+        ]
+    )
+
+
+class PodTextureArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("width", np.uint32),
+            ("height", np.uint32),
+            ("depth", np.uint32),
+            ("subpixel_span", POD_SPAN_DTYPE),
         ]
     )
 
@@ -857,13 +974,6 @@ class PodFrameInfoArray(StructuredNDArray):
     )
 
 
-# Frame info flags (private)
-_FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
-_FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
-_FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
-_FRAME_FLAG_DEBUG_BVH_TRAVERSAL = 1 << 3
-
-
 class PodCameraArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
@@ -872,18 +982,5 @@ class PodCameraArray(StructuredNDArray):
             ("aspect_ratio", np.float32),
             ("max_distance", np.float32),
             ("_rsv", np.uint32),
-        ]
-    )
-
-
-class PodInstanceArray(StructuredNDArray):
-    DTYPE = np.dtype(
-        [
-            ("geometry_id", np.uint32),
-            ("material_id", np.uint32),
-            ("_pad0", np.uint32),
-            ("_pad1", np.uint32),
-            ("transform", np.float32, (4, 4)),  # row-major 4x4 matrix
-            ("inv_transform", np.float32, (4, 4)),  # row-major 4x4 inverse matrix
         ]
     )

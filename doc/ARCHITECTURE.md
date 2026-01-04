@@ -61,3 +61,6 @@ Issues:
 -   Too granular for lifetime to be explicit.
     -   BVH depends on Geometry, Geometry depends on Scene, etc etc: it is hard to tell
         when things get cleaned up.
+-   Too flexible: it's not obvious how stuff should be used.
+    -   Do we really need dynamic texture atlases shared between the 2D and 3D 
+        renderers?

@@ -48,6 +48,7 @@ __all__ = [
     "logger",
     "partition_points",
     "partition_triangles",
+    "request_wgpu_device",
     "round_up_to_po2",
     "setup_logging",
 ]
@@ -113,3 +114,4 @@ from .bvh import (
     partition_points,
     partition_triangles,
 )
+from .gpu import request_wgpu_device

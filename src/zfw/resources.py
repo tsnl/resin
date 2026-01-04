@@ -1,5 +1,6 @@
 """
-Resources = file-based data assets used by ZFW, such as images, 3D models, 3D materials, etc.
+Resources = file-based data assets used by ZFW, such as images, 3D models, 3D materials,
+etc.
 """
 
 __all__ = [
