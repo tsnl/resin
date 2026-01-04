@@ -22,7 +22,7 @@ Recurring problems related to resources:
 -   Ownership. Who caches? Lifetimes and resource disposal?
 -   Dependent resources. Who caches them?
 
-Proposed solution: resources are handles, module provides features
+Proposed solution: resources are handles, module provides features, single global module.
 -   `BaseResource` class underpins entire engine. `dispose_event: EventHub` broadcast.
     Dependent resources can subscribe to these messages.
 -   Immutable => hashable as a key, stable identity.
@@ -46,3 +46,18 @@ that can be used across different modules: `Image`, `Geometry`, `Material`, etc.
 > 
 > If we embrace this architecture, we could even write modules in different languages,
 > exposing methods on the handle type. Think `diplomat` for binding Rust code.
+
+> [!NOTE]
+>
+> This reminds me a lot of ECS.
+
+Issues:
+-   Cross-cutting concerns get lumped into one module. Related concerns get spread 
+    across different modules.
+    -   E.g. do we want BVH construction code to live in `geometry.py`? What about LOD
+        management?
+    -   Annoying that geometry loading isn't in the same place as a 3D renderer. It's
+        great if we want to add another renderer using the same data, but...
+-   Too granular for lifetime to be explicit.
+    -   BVH depends on Geometry, Geometry depends on Scene, etc etc: it is hard to tell
+        when things get cleaned up.
