@@ -14,6 +14,10 @@ from dataclasses import dataclass
 import numba
 import numpy.typing as npt
 import numpy as np
+import time
+
+NUMBA_CACHE_ENABLED = True
+NUMBA_PARALLEL_ENABLED = False
 
 
 @dataclass
@@ -54,6 +58,7 @@ def build_bvh(
     """
 
     # Copy `t`: if not specified, `t` will be modified in-place.
+    t0 = time.perf_counter()
     if copy_t:
         t = t.copy()
 
@@ -62,6 +67,8 @@ def build_bvh(
     # Compute triangle centroids:
     c = v[t].mean(axis=-2)
     assert c.shape == (nt, 3)
+    t1 = time.perf_counter()
+    print(f"  [Init & centroids: {(t1 - t0) * 1000:.2f}ms]")
 
     # Guess number of BVH nodes needed for initial capacity:
     # For a binary tree, worst case is 2L - 1 nodes (for L leaves).
@@ -79,13 +86,18 @@ def build_bvh(
 
     # Initialize root node at index 0.
     # When BVH nodes have '0' as their child indices, they are leaf nodes since root nodes have no parents.
+    t2 = time.perf_counter()
     bvh_count[0] += 1
-    bvh_b[0, 0], bvh_b[0, 1] = compute_triangles_aabb(v[t.flatten()])
+    # Compute root AABB from all vertices (they're all included)
+    bvh_b[0] = compute_triangles_aabb(v)
     bvh_c[0, :] = (0, 0)
     bvh_r[0, :] = 0, nt
-    bvh_s[0] = nt * compute_aabb_surface_area((bvh_b[0, 0], bvh_b[0, 1]))
+    bvh_s[0] = nt * compute_aabb_surface_area(bvh_b[0])
+    t3 = time.perf_counter()
+    print(f"  [Root AABB: {(t3 - t2) * 1000:.2f}ms]")
 
     # Recursively build BVH subtree starting from root node:
+    t4 = time.perf_counter()
     build_bvh_subtree(
         t=t,
         c=c,
@@ -98,6 +110,8 @@ def build_bvh(
         i_bvh_root=0,
         _debug_depth=0,
     )
+    t5 = time.perf_counter()
+    print(f"  [Recursive build: {(t5 - t4) * 1000:.2f}ms]")
 
     # Ensure we did not exceed allocated BVH node buffer:
     assert bvh_count[0] <= nb, "BVH node buffer overflow"
@@ -111,7 +125,7 @@ def build_bvh(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def build_bvh_subtree(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
@@ -202,12 +216,8 @@ def build_bvh_subtree(
     assert bvh_count[0] <= nb, "BVH node buffer overflow"
 
     # Write bvh_b AABBs to child nodes:
-    aabb_lt_min, aabb_lt_max = aabb_lt
-    bvh_b[i_bvh_lt, 0] = aabb_lt_min
-    bvh_b[i_bvh_lt, 1] = aabb_lt_max
-    aabb_rt_min, aabb_rt_max = aabb_rt
-    bvh_b[i_bvh_rt, 0] = aabb_rt_min
-    bvh_b[i_bvh_rt, 1] = aabb_rt_max
+    bvh_b[i_bvh_lt] = aabb_lt
+    bvh_b[i_bvh_rt] = aabb_rt
 
     # Write bvh_c child indices to parent node:
     bvh_c[i_bvh_root, 0] = i_bvh_lt
@@ -250,7 +260,7 @@ def build_bvh_subtree(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def partition_triangles_optimally(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
@@ -260,8 +270,8 @@ def partition_triangles_optimally(
     | tuple[
         npt.NDArray[np.uint32],  # i_lt
         npt.NDArray[np.uint32],  # i_rt
-        tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_lt
-        tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_rt
+        npt.NDArray[np.float32],  # aabb_lt (2, 3)
+        npt.NDArray[np.float32],  # aabb_rt (2, 3)
         float,  # sah_cost_lt
         float,  # sah_cost_rt
     ]
@@ -275,8 +285,8 @@ def partition_triangles_optimally(
     :return: A tuple containing:
         - Triangle indices for left partition.
         - Triangle indices for right partition.
-        - AABB for left partition as (v_min, v_max).
-        - AABB for right partition as (v_min, v_max).
+        - AABB for left partition as 2x3 array.
+        - AABB for right partition as 2x3 array.
     """
 
     nt = t.shape[0]
@@ -286,75 +296,43 @@ def partition_triangles_optimally(
     assert v.ndim == 2 and v.shape[1] == 3
     assert t.shape[0] == c.shape[0] == nt
 
-    # Chunk work items:
-    nt_pc = 64  # Number of triangles per chunk
-    nc = (nt + nt_pc - 1) // nt_pc  # Number of chunks
-
-    # Find optimal partition in parallel.
-    # Each chunk (work item) processes `nt_pc` triangle pivots.
-    i_lt_best = None
-    i_rt_best = None
-    aabb_lt_best = None
-    aabb_rt_best = None
-    sah_cost_lt_best = np.inf
-    sah_cost_rt_best = np.inf
+    # Find best partition across all candidates
     sah_cost_best = np.inf
-    for i_chunk in numba.prange(nc):
-        i_start = i_chunk * nt_pc
-        i_end = min((i_chunk + 1) * nt_pc, nt)
+    best_i = -1
+    best_x = -1
 
-        # Find best partition in chunk:
-        i_lt_best_in_chunk = None
-        i_rt_best_in_chunk = None
-        aabb_lt_best_in_chunk = None
-        aabb_rt_best_in_chunk = None
-        sah_cost_lt_best_in_chunk = np.inf
-        sah_cost_rt_best_in_chunk = np.inf
-        sah_cost_best_in_chunk = np.inf
-        for i in range(i_start, i_end):
-            for x in range(3):
-                (
-                    i_lt,
-                    i_rt,
-                    aabb_lt,
-                    aabb_rt,
-                    sah_cost_lt,
-                    sah_cost_rt,
-                ) = partition_triangles(t=t, c=c, v=v, i=i, x=x)
+    for i in range(nt):
+        for x in range(3):
+            (
+                i_lt,
+                i_rt,
+                aabb_lt,
+                aabb_rt,
+                sah_cost_lt,
+                sah_cost_rt,
+            ) = partition_triangles(t=t, c=c, v=v, i=i, x=x)
 
-                sah_cost = sah_cost_lt + sah_cost_rt
+            sah_cost = sah_cost_lt + sah_cost_rt
 
-                if sah_cost < sah_cost_best_in_chunk:
-                    i_lt_best_in_chunk = i_lt
-                    i_rt_best_in_chunk = i_rt
-                    aabb_lt_best_in_chunk = aabb_lt
-                    aabb_rt_best_in_chunk = aabb_rt
-                    sah_cost_lt_best_in_chunk = sah_cost_lt
-                    sah_cost_rt_best_in_chunk = sah_cost_rt
-                    sah_cost_best_in_chunk = sah_cost
+            if sah_cost < sah_cost_best:
+                sah_cost_best = sah_cost
+                best_i = i
+                best_x = x
 
-        # Update global best partition:
-        if sah_cost_best_in_chunk < sah_cost_best:
-            i_lt_best = i_lt_best_in_chunk
-            i_rt_best = i_rt_best_in_chunk
-            aabb_lt_best = aabb_lt_best_in_chunk
-            aabb_rt_best = aabb_rt_best_in_chunk
-            sah_cost_lt_best = sah_cost_lt_best_in_chunk
-            sah_cost_rt_best = sah_cost_rt_best_in_chunk
-            sah_cost_best = sah_cost_best_in_chunk
-
-    # If no valid partition found, return empty partitions:
-    if i_lt_best is None or i_rt_best is None:
+    # If no valid partition found:
+    if best_i == -1:
         return None
 
-    # Assert we found at least one partition:
-    assert i_lt_best is not None
-    assert i_rt_best is not None
-    assert aabb_lt_best is not None
-    assert aabb_rt_best is not None
-    assert sah_cost_best < np.inf
+    # Recompute the winning partition to get all the data
+    (
+        i_lt_best,
+        i_rt_best,
+        aabb_lt_best,
+        aabb_rt_best,
+        sah_cost_lt_best,
+        sah_cost_rt_best,
+    ) = partition_triangles(t=t, c=c, v=v, i=best_i, x=best_x)
 
-    # Return best partition:
     return (
         i_lt_best,
         i_rt_best,
@@ -365,7 +343,7 @@ def partition_triangles_optimally(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def partition_triangles(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
@@ -375,8 +353,8 @@ def partition_triangles(
 ) -> tuple[
     npt.NDArray[np.uint32],  # i_lt
     npt.NDArray[np.uint32],  # i_rt
-    tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_lt
-    tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_rt
+    npt.NDArray[np.float32],  # aabb_lt (2, 3)
+    npt.NDArray[np.float32],  # aabb_rt (2, 3)
     float,  # sah_cost_lt
     float,  # sah_cost_rt
 ]:
@@ -391,8 +369,8 @@ def partition_triangles(
     :return: A tuple containing:
         - Triangle indices for left partition.
         - Triangle indices for right partition.
-        - AABB for left partition as (v_min, v_max).
-        - AABB for right partition as (v_min, v_max).
+        - AABB for left partition as 2x3 array.
+        - AABB for right partition as 2x3 array.
         - Surface Area Heuristic (SAH) cost for left partition.
         - Surface Area Heuristic (SAH) cost for right partition.
     """
@@ -425,7 +403,7 @@ def partition_triangles(
     return i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def partition_points(
     p: npt.NDArray[np.float32],
     i: int,
@@ -459,47 +437,52 @@ def partition_points(
     return lt.astype(np.uint32), rt.astype(np.uint32)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def compute_triangles_aabb(
     v: npt.NDArray[np.float32],
-) -> tuple[
-    npt.NDArray[np.float32],
-    npt.NDArray[np.float32],
-]:
+) -> npt.NDArray[np.float32]:
     """
     Compute axis-aligned bounding box (AABB) for given vertices.
 
     :param v: Vertex position array of shape (nv, 3).
-    :return: A tuple containing min and max corners of the AABB.
+    :return: AABB as 2x3 array where [0] is min corner and [1] is max corner.
     """
 
     assert v.ndim == 2 and v.shape[1] == 3
 
     nv = v.shape[0]
 
-    v_min = np.array([np.inf, np.inf, np.inf], dtype=np.float32)
-    v_max = np.array([-np.inf, -np.inf, -np.inf], dtype=np.float32)
+    if nv == 0:
+        # Return infinite AABB for empty vertex set
+        aabb = np.empty((2, 3), dtype=np.float32)
+        aabb[0] = np.array([np.inf, np.inf, np.inf], dtype=np.float32)
+        aabb[1] = np.array([-np.inf, -np.inf, -np.inf], dtype=np.float32)
+        return aabb
 
-    for i in range(nv):
-        v_min = np.minimum(v_min, v[i])
-        v_max = np.maximum(v_max, v[i])
+    # Use vectorized min/max per column for much better performance
+    aabb = np.empty((2, 3), dtype=np.float32)
+    aabb[0, 0] = v[:, 0].min()
+    aabb[0, 1] = v[:, 1].min()
+    aabb[0, 2] = v[:, 2].min()
+    aabb[1, 0] = v[:, 0].max()
+    aabb[1, 1] = v[:, 1].max()
+    aabb[1, 2] = v[:, 2].max()
 
-    return v_min, v_max
+    return aabb
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def compute_aabb_surface_area(
-    aabb: tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],
+    aabb: npt.NDArray[np.float32],
 ) -> np.float32:
     """
     Compute surface area of an axis-aligned bounding box (AABB).
 
-    :param aabb: A tuple containing min and max corners of the AABB.
+    :param aabb: AABB as 2x3 array where [0] is min corner and [1] is max corner.
     :return: Surface area of the AABB.
     """
 
-    v_min, v_max = aabb
-    extent = v_max - v_min
+    extent = aabb[1] - aabb[0]
     surface_area = 2.0 * np.sum(extent)
 
     return surface_area

@@ -2,7 +2,7 @@ Platform
 - Use `make` targets to do anything if possible
   - `make sync` runs codgen via `make build` and then runs `uv sync`.
   - `make tests` runs all tests and writes test outputs (e.g. image renders).
-    - You can supply `pytest` args with `PYTEST_ARGS`, e.g.: `make test PYTEST_ARGS="-k filter"`
+    - You can supply `pytest` args with `PYTEST_ARGS`, e.g.: `make tests PYTEST_ARGS="-k filter"`
   - `make sandbox` launches a windowed interactive application.
 - Ensure you use `uv` to activate a Python environment with the right dependencies.
 

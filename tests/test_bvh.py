@@ -86,11 +86,11 @@ def _verify_leaf_nodes_contain_triangles(
             )
 
             # Verify AABB is the tightest (exact bounding box)
-            v_min_exact, v_max_exact = zfw.bvh.compute_triangles_aabb(v_leaf)
-            assert np.allclose(aabb_min, v_min_exact, atol=1e-6), (
+            aabb_exact = zfw.bvh.compute_triangles_aabb(v_leaf)
+            assert np.allclose(aabb_min, aabb_exact[0], atol=1e-6), (
                 f"{mesh_name}: Leaf node {i_node} AABB min is not tight"
             )
-            assert np.allclose(aabb_max, v_max_exact, atol=1e-6), (
+            assert np.allclose(aabb_max, aabb_exact[1], atol=1e-6), (
                 f"{mesh_name}: Leaf node {i_node} AABB max is not tight"
             )
 
