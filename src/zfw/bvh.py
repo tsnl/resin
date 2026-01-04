@@ -419,13 +419,17 @@ def compute_node_bins(
 
     cx_normalized = (c[:, x] - c_aabb[0, x]) / (c_aabb[1, x] - c_aabb[0, x] + 1e-7)
     c_bin = (cx_normalized * bin_count).astype(np.int32)
+    c_bin = np.clip(c_bin, 0, bin_count - 1)
 
     bin_freqs = np.bincount(c_bin, minlength=bin_count).astype(np.uint32)
 
     bin_aabbs = np.empty((bin_count, 2, 3), dtype=np.float32)
+    bin_aabbs[:, 0, :] = +np.inf
+    bin_aabbs[:, 1, :] = -np.inf
     for i_bin in range(bin_count):
-        bin_t_sel = c_bin == i_bin
-        bin_aabbs[i_bin] = compute_points_aabb(v[t[bin_t_sel].ravel()])
+        if bin_freqs[i_bin] > 0:
+            bin_t_sel = c_bin == i_bin
+            bin_aabbs[i_bin] = compute_points_aabb(v[t[bin_t_sel].ravel()])
 
     return bin_freqs, bin_aabbs, bin_width
 
@@ -667,6 +671,7 @@ def cum_union_aabbs(aabbs: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     cum_aabbs[:, 0] = +np.inf
     cum_aabbs[:, 1] = -np.inf
 
+    cum_aabbs[0] = aabbs[0]
     for i in range(1, n):
         cum_aabbs[i] = aabb_union(cum_aabbs[i - 1], aabbs[i])
 
