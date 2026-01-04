@@ -50,6 +50,8 @@ class Draw3dRenderer:
     allocated_geometry_count: int
     allocated_bvh_node_count: int
     allocated_triangle_count: int
+    allocated_image_count: int
+    allocated_subpixel_count: int
 
     geometry_cache: dict["GeometryResource", "Draw3dGeometry"]
     material_cache: dict["MaterialResource", "Draw3dMaterial"]
@@ -268,6 +270,8 @@ class Draw3dRenderer:
         self.allocated_geometry_count = 0
         self.allocated_bvh_node_count = 0
         self.allocated_triangle_count = 0
+        self.allocated_image_count = 0
+        self.allocated_subpixel_count = 0
 
         # Cache for converting GeometryResource/MaterialResource to Draw3d objects
         # Maps resource objects to their Draw3d counterparts
@@ -410,6 +414,102 @@ class Draw3dRenderer:
         self.queue.submit([encoder.finish()])
 
         # Return offset in geometry:
+        return allocation_offset
+
+    def _add_texture(
+        self,
+        *,
+        width: int,
+        height: int,
+        depth: int,
+        subpixel_span_begin: int,
+        subpixel_span_count: int,
+    ) -> int:
+        """Create a single PodTextureArray entry and upload it to the texture heap.
+
+        Returns the allocated texture index (offset in texture array elements).
+        """
+        # Prepare singleton PodTextureArray
+        data = PodTextureArray.empty(shape=(1,))
+        data["width"][0] = np.uint32(width)
+        data["height"][0] = np.uint32(height)
+        data["depth"][0] = np.uint32(depth)
+        data["subpixel_span"][0]["begin"] = np.uint32(subpixel_span_begin)
+        data["subpixel_span"][0]["end"] = np.uint32(
+            subpixel_span_begin + subpixel_span_count
+        )
+
+        # Allocate one texture slot
+        allocation_offset = self.allocated_image_count
+        self.allocated_image_count += 1
+        if self.allocated_image_count > self.image_capacity:
+            raise RuntimeError("Draw3dRenderer image heap capacity exceeded.")
+
+        # Upload via staging buffer:
+        staging_size = PodTextureArray.array_size(shape=(1,))
+        staging_buffer = self.device.create_buffer(
+            label="Draw3dRenderer.TextureUploadStagingBuffer",
+            size=staging_size,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        staging_buffer.write_mapped(data=data)
+        staging_buffer.unmap()
+
+        encoder = self.device.create_command_encoder(
+            label="Draw3dRenderer.TextureUploadEncoder"
+        )
+        encoder.copy_buffer_to_buffer(
+            source=staging_buffer,
+            source_offset=0,
+            destination=self.texture_heap_device_buffer,
+            destination_offset=(allocation_offset * staging_size),
+            size=staging_size,
+        )
+        self.queue.submit([encoder.finish()])
+
+        staging_buffer.destroy()
+
+        # Return offset in texture array elements:
+        return allocation_offset
+
+    def _add_subpixels(self, subpixels: np.ndarray) -> int:
+        assert subpixels.ndim == 1 and subpixels.dtype == np.float16
+
+        element_count = subpixels.size
+
+        # Allocate:
+        allocation_offset = self.allocated_subpixel_count
+        allocation_offset_in_bytes = allocation_offset * np.dtype(np.float16).itemsize
+        self.allocated_subpixel_count += element_count
+        if self.allocated_subpixel_count > self.subpixel_capacity:
+            raise RuntimeError("Draw3dRenderer subpixel heap capacity exceeded.")
+
+        # Upload via staging buffer:
+        staging_buffer = self.device.create_buffer(
+            label="Draw3dRenderer.SubpixelUploadStagingBuffer",
+            size=subpixels.nbytes,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        staging_buffer.write_mapped(data=subpixels)
+        staging_buffer.unmap()
+
+        encoder = self.device.create_command_encoder(
+            label="Draw3dRenderer.SubpixelUploadEncoder"
+        )
+        encoder.copy_buffer_to_buffer(
+            source=staging_buffer,
+            source_offset=0,
+            destination=self.subpixel_heap_device_buffer,
+            destination_offset=allocation_offset_in_bytes,
+            size=subpixels.nbytes,
+        )
+        self.queue.submit([encoder.finish()])
+
+        staging_buffer.destroy()
+
+        # Return offset in subpixel f16 elements:
         return allocation_offset
 
     def record(
@@ -845,10 +945,6 @@ class Draw3dMaterial(BaseDisposable):
         self.roughness_factor = roughness_factor
 
         # TODO: upload material data to GPU
-
-
-class Draw3dImage(BaseDisposable):
-    pass
 
 
 @dataclass(kw_only=True)
