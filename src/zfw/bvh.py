@@ -5,7 +5,7 @@ Utilities for BVH construction.
 __all__ = [
     "Bvh",
     "build_bvh",
-    "compute_triangles_aabb",
+    "compute_points_aabb",
     "partition_points",
     "partition_triangles",
 ]
@@ -101,10 +101,10 @@ def build_bvh(
     t2 = time.perf_counter()
     bvh_count[0] += 1
     # Compute root AABB from all triangles
-    bvh_b[0] = compute_triangles_aabb(v=v[t.ravel()])
+    bvh_b[0] = compute_points_aabb(v=v[t.ravel()])
     bvh_c[0, :] = (0, 0)
     bvh_r[0, :] = 0, nt
-    bvh_s[0] = nt * compute_aabb_surface_area(bvh_b[0])
+    bvh_s[0] = nt * single_aabb_surface_area(bvh_b[0])
     t3 = time.perf_counter()
     LOG.log(
         msg=f"BVH construction: root AABB: {(t3 - t2) * 1000:.2f}ms",
@@ -160,7 +160,7 @@ def build_bvh_subtree(
     Given a BVH node, subdivides it into a binary subtree by partitioning its triangles.
 
     :param t: Triangle index array of shape (nt, 3). Each element indexes into `v`.
-    :param c: Triangle centroid index array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
+    :param c: Triangle centroid array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
     :param v: Vertex position array of shape (nv, 3).
     :param bvh_count: Number of nodes in the BVH (scalar).
     :param bvh_b: BVH per-node AABBs of shape (nb, 2, 3). Each node has min and max corners.
@@ -190,13 +190,14 @@ def build_bvh_subtree(
     bvh_r_root = bvh_r[i_bvh_root]
 
     # Find optimal partition for triangles in the root node:
-    optimal_partition = partition_triangles_optimally(t=t_root, c=c_root, v=v)
-
-    # If no valid partition found (all triangles have same centroid), don't subdivide:
-    if optimal_partition is None:
-        assert np.all(bvh_c[i_bvh_root] == 0)
-        return
-
+    partition_parameters: tuple[int, float] = find_partition_parameters(
+        t=t_root,
+        c=c_root,
+        v=v,
+        aabb=bvh_b[i_bvh_root],
+        bin_count=8,
+    )
+    partition_axis, partition_value = partition_parameters
     (
         i_lt_in_t_root,
         i_rt_in_t_root,
@@ -204,9 +205,16 @@ def build_bvh_subtree(
         aabb_rt,
         sah_cost_lt,
         sah_cost_rt,
-    ) = optimal_partition
+    ) = partition_triangles(
+        t=t_root,
+        c=c_root,
+        v=v,
+        z=partition_value,
+        x=partition_axis,
+    )
 
-    # If the surface area heuristic (SAH) cost is not improved, do not subdivide:
+    # If the surface area heuristic (SAH) cost is not improved, do not subdivide.
+    # This includes the case where no partitioning was possible (all triangles on one side).
     if sah_cost_lt + sah_cost_rt >= bvh_s[i_bvh_root]:
         assert np.all(bvh_c[i_bvh_root] == 0)
         return
@@ -279,44 +287,181 @@ def build_bvh_subtree(
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def partition_triangles_optimally(
+def find_partition_parameters(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
     v: npt.NDArray[np.float32],  # (nv, 3)
-) -> (
-    None
-    | tuple[
-        npt.NDArray[np.uint32],  # i_lt
-        npt.NDArray[np.uint32],  # i_rt
-        npt.NDArray[np.float32],  # aabb_lt (2, 3)
-        npt.NDArray[np.float32],  # aabb_rt (2, 3)
-        float,  # sah_cost_lt
-        float,  # sah_cost_rt
-    ]
-):
+    aabb: npt.NDArray[np.float32],  # (2, 3)
+    bin_count: int = 256,
+) -> tuple[int, float]:
     """
-    Finds the optimal partitioning of triangles based on their centroids.
+    Finds good partitioning parameters (pivot index and axis) for triangles based on their centroids.
+    Uses either exhaustive search or approximate binning based on the `bin_count` parameter.
 
     :param t: Triangle index array of shape (nt, 3).
-    :param c: Triangle centroid index array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
+    :param c: Triangle centroid array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
     :param v: Vertex position array of shape (nv, 3). Each element in 't' indexes into this array.
+    :param aabb: Axis-aligned bounding box of the triangles, shape (2, 3).
+    :param bin_count: Number of bins to use for approximate binning. If <=0, uses exhaustive search.
     :return: A tuple containing:
-        - Triangle indices for left partition.
-        - Triangle indices for right partition.
-        - AABB for left partition as 2x3 array.
-        - AABB for right partition as 2x3 array.
+        - Centroid axis index (0, 1, or 2) for partitioning.
+        - Partition split value.
+    """
+
+    if bin_count <= 0:
+        return find_partition_parameters_with_exhaustive_search(
+            t=t, c=c, v=v, aabb=aabb
+        )
+    else:
+        return find_partition_parameters_with_approximate_binning(
+            t=t, c=c, v=v, aabb=aabb, bin_count=bin_count
+        )
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def find_partition_parameters_with_approximate_binning(
+    t: npt.NDArray[np.uint32],  # (nt, 3)
+    c: npt.NDArray[np.float32],  # (nt, 3)
+    v: npt.NDArray[np.float32],  # (nv, 3)
+    aabb: npt.NDArray[np.float32],  # (2, 3)
+    bin_count: int = 256,
+) -> tuple[int, float]:
+    """
+    Finds good partitioning parameters (pivot index and axis) for triangles based on their centroids.
+
+    Uses binning to find an approximate partition quickly. As bin_count -> ∞, results approach those of exhaustive
+    search.
+
+    :param t: Triangle index array of shape (nt, 3).
+    :param c: Triangle centroid array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
+    :param v: Vertex position array of shape (nv, 3). Each element in 't' indexes into this array.
+    :param aabb: Axis-aligned bounding box of the triangles, shape (2, 3).
+    :return: A tuple containing:
+        - Centroid axis index (0, 1, or 2) for partitioning.
+        - Partition split value
+    """
+
+    c_aabb = compute_points_aabb(c)
+
+    best_sah_cost = np.inf
+    best_sah_axis = 0
+    best_sah_value = 0.0
+
+    for x in range(3):
+        # Compute bins:
+        bin_freqs, bin_aabbs, bin_width = compute_node_bins(
+            t=t,
+            c=c,
+            v=v,
+            c_aabb=c_aabb,
+            x=x,
+            bin_count=bin_count,
+        )
+
+        # Sweep over bins to find cumulative AABBs and frequencies:
+        bin_freqs_cum_asc = np.cumsum(bin_freqs)
+        bin_freqs_cum_desc = np.cumsum(bin_freqs[::-1])[::-1]
+        bin_aabbs_cum_asc = cum_union_aabbs(bin_aabbs)
+        bin_aabbs_cum_desc = cum_union_aabbs(bin_aabbs[::-1])[::-1]
+        bin_areas_cum_asc = aabbs_surface_areas(bin_aabbs_cum_asc)
+        bin_areas_cum_desc = aabbs_surface_areas(bin_aabbs_cum_desc)
+
+        # Evaluate SAH cost for each possible split in parallel:
+        lt_sah_costs = bin_freqs_cum_asc * bin_areas_cum_asc
+        rt_sah_costs = bin_freqs_cum_desc * bin_areas_cum_desc
+        sah_costs = lt_sah_costs + rt_sah_costs
+
+        # Find best split for this axis:
+        axis_best_bin_idx = np.argmin(sah_costs)
+        axis_best_sah_cost = sah_costs[axis_best_bin_idx]
+
+        # If this axis is better than previous best, record it:
+        if axis_best_sah_cost < best_sah_cost:
+            best_sah_cost = axis_best_sah_cost
+            best_sah_axis = x
+
+            # Compute split value as the right of the bin
+            best_sah_value = (1.0 + axis_best_bin_idx) * bin_width + c_aabb[0, x]
+
+    return best_sah_axis, best_sah_value
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def compute_node_bins(
+    t: npt.NDArray[np.uint32],  # (nt, 3)
+    c: npt.NDArray[np.float32],  # (nt, 3)
+    v: npt.NDArray[np.float32],  # (nv, 3)
+    c_aabb: npt.NDArray[np.float32],
+    x: int,
+    bin_count: int,
+) -> tuple[
+    npt.NDArray[np.uint32],  # bin_freqs (bin_count,)
+    npt.NDArray[np.float32],  # bin_aabbs (bin_count, 2, 3)
+    float,  # bin_width
+]:
+    """
+    Bins triangle centroids along a given axis into the specified number of bins, returning the per-bin frequencies and
+    per-bin _triangle_ AABBs (not centroid AABBs).
+
+    :param t: Triangle index array of shape (nt, 3).
+    :param c: Triangle centroid array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
+    :param v: Vertex position array of shape (nv, 3). Each element in 't' indexes into this array.
+    :param c_aabb: Axis-aligned bounding box of all the centroids, shape (2, 3).
+    :param x: Centroid axis index (0, 1, or 2) along which to organize bins.
+    :param bin_count: Number of bins to use.
+    :return: A tuple containing:
+        - Bin frequencies as array of shape (bin_count,).
+        - Bin triangle AABBs as array of shape (bin_count, 2, 3).
+        - Bin width as float.
+    """
+
+    bin_width = (c_aabb[1, x] - c_aabb[0, x]) / bin_count
+
+    cx_normalized = (c[:, x] - c_aabb[0, x]) / (c_aabb[1, x] - c_aabb[0, x] + 1e-7)
+    c_bin = (cx_normalized * bin_count).astype(np.int32)
+
+    bin_freqs = np.bincount(c_bin, minlength=bin_count).astype(np.uint32)
+
+    bin_aabbs = np.empty((bin_count, 2, 3), dtype=np.float32)
+    for i_bin in range(bin_count):
+        bin_t_sel = c_bin == i_bin
+        bin_aabbs[i_bin] = compute_points_aabb(v[t[bin_t_sel].ravel()])
+
+    return bin_freqs, bin_aabbs, bin_width
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def find_partition_parameters_with_exhaustive_search(
+    t: npt.NDArray[np.uint32],  # (nt, 3)
+    c: npt.NDArray[np.float32],  # (nt, 3)
+    v: npt.NDArray[np.float32],  # (nv, 3)
+    aabb: npt.NDArray[np.float32],  # (2, 3)
+) -> tuple[int, float]:
+    """
+    Finds the optimal partitioning parameters (pivot index and axis) for triangles based on their centroids.
+
+    Uses an exhaustive search over all possible splits to find the best partition. Slow, but gives high-quality results.
+
+    :param t: Triangle index array of shape (nt, 3).
+    :param c: Triangle centroid array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
+    :param v: Vertex position array of shape (nv, 3). Each element in 't' indexes into this array.
+    :param aabb: Axis-aligned bounding box of the triangles, shape (2, 3).
+    :return: A tuple containing:
+        - Centroid axis index (0, 1, or 2) for partitioning.
+        - Partition split value
     """
 
     nt = t.shape[0]
+
+    _ = aabb
 
     assert t.ndim == 2 and t.shape[1] == 3
     assert c.ndim == 2 and c.shape[1] == 3
     assert v.ndim == 2 and v.shape[1] == 3
     assert t.shape[0] == c.shape[0] == nt
 
-    # Find best partition across all candidates
     sah_cost_best = np.inf
-    best_i = -1
+    best_v = np.inf
     best_x = -1
 
     for i in range(nt):
@@ -328,37 +473,18 @@ def partition_triangles_optimally(
                 aabb_rt,
                 sah_cost_lt,
                 sah_cost_rt,
-            ) = partition_triangles(t=t, c=c, v=v, i=i, x=x)
+            ) = partition_triangles(t=t, c=c, v=v, z=c[i, x], x=x)
+
+            _ = i_lt, i_rt, aabb_lt, aabb_rt
 
             sah_cost = sah_cost_lt + sah_cost_rt
 
             if sah_cost < sah_cost_best:
                 sah_cost_best = sah_cost
-                best_i = i
+                best_v = c[i, x]
                 best_x = x
 
-    # If no valid partition found:
-    if best_i == -1:
-        return None
-
-    # Recompute the winning partition to get all the data
-    (
-        i_lt_best,
-        i_rt_best,
-        aabb_lt_best,
-        aabb_rt_best,
-        sah_cost_lt_best,
-        sah_cost_rt_best,
-    ) = partition_triangles(t=t, c=c, v=v, i=best_i, x=best_x)
-
-    return (
-        i_lt_best,
-        i_rt_best,
-        aabb_lt_best,
-        aabb_rt_best,
-        sah_cost_lt_best,
-        sah_cost_rt_best,
-    )
+    return best_x, best_v
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
@@ -366,7 +492,7 @@ def partition_triangles(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
     v: npt.NDArray[np.float32],  # (nv, 3)
-    i: int,  # [0, nt)
+    z: float,  # [0, nt)
     x: int,  # [0, 2)
 ) -> tuple[
     npt.NDArray[np.uint32],  # i_lt
@@ -381,8 +507,8 @@ def partition_triangles(
 
     :param t: Triangle index array of shape (nt, 3).
     :param v: Vertex position array of shape (nv, 3). Each element in 't' indexes into this array.
-    :param c: Triangle centroid index array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
-    :param i: Triangle pivot index for partitioning.
+    :param c: Triangle centroid array of shape (nt, 3). Equal to `v[t].mean(axis=-2)`.
+    :param z: Value to partition triangles on.
     :param x: Triangle axis index (0, 1, or 2) for partitioning.
     :return: A tuple containing:
         - Triangle indices for left partition.
@@ -399,21 +525,20 @@ def partition_triangles(
     assert c.ndim == 2 and c.shape[1] == 3
     assert v.ndim == 2 and v.shape[1] == 3
     assert t.shape[0] == c.shape[0] == nt
-    assert 0 <= i < nt
     assert 0 <= x < 3
 
-    i_lt, i_rt = partition_points(p=c, i=i, x=x)
+    i_lt, i_rt = partition_points(p=c, z=z, x=x)
 
     nt_lt = i_lt.shape[0]
     nt_rt = i_rt.shape[0]
 
     v_lt = v[t[i_lt].ravel()]
-    aabb_lt = compute_triangles_aabb(v_lt)
-    aabb_surface_area_lt = compute_aabb_surface_area(aabb_lt)
+    aabb_lt = compute_points_aabb(v_lt)
+    aabb_surface_area_lt = single_aabb_surface_area(aabb_lt)
 
     v_rt = v[t[i_rt].ravel()]
-    aabb_rt = compute_triangles_aabb(v_rt)
-    aabb_surface_area_rt = compute_aabb_surface_area(aabb_rt)
+    aabb_rt = compute_points_aabb(v_rt)
+    aabb_surface_area_rt = single_aabb_surface_area(aabb_rt)
 
     sah_cost_lt = nt_lt * aabb_surface_area_lt if nt_lt > 0 else np.inf
     sah_cost_rt = nt_rt * aabb_surface_area_rt if nt_rt > 0 else np.inf
@@ -424,7 +549,7 @@ def partition_triangles(
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
 def partition_points(
     p: npt.NDArray[np.float32],
-    i: int,
+    z: float,
     x: int,
 ) -> tuple[
     npt.NDArray[np.uint32],
@@ -443,7 +568,7 @@ def partition_points(
 
     n = p.shape[0]
 
-    lt_mask = p[:, x] < p[i, x]
+    lt_mask = p[:, x] < z
     rt_mask = ~lt_mask
 
     assert lt_mask.shape == (n,)
@@ -456,11 +581,10 @@ def partition_points(
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def compute_triangles_aabb(
-    v: npt.NDArray[np.float32],
-) -> npt.NDArray[np.float32]:
+def compute_points_aabb(v: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     """
-    Compute axis-aligned bounding box (AABB) for given vertices.
+    Compute axis-aligned bounding box (AABB) for given points. If those points are vertices of triangles, the AABB
+    encloses the triangles.
 
     :param v: Vertex position array of shape (nv, 3).
     :return: AABB as 2x3 array where [0] is min corner and [1] is max corner.
@@ -490,7 +614,27 @@ def compute_triangles_aabb(
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def compute_aabb_surface_area(
+def aabbs_surface_areas(
+    aabbs: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    """
+    Compute surface areas of axis-aligned bounding boxes (AABBs).
+
+    :param aabbs: Array of AABBs of shape (n, 2, 3) where [0] is min corner and [1] is max corner.
+    :return: Surface areas of the AABBs as array of shape (n,).
+    """
+
+    n = aabbs.shape[0]
+    surface_areas = np.empty((n,), dtype=np.float32)
+
+    for i in range(n):
+        surface_areas[i] = single_aabb_surface_area(aabbs[i])
+
+    return surface_areas
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def single_aabb_surface_area(
     aabb: npt.NDArray[np.float32],
 ) -> np.float32:
     """
@@ -504,6 +648,48 @@ def compute_aabb_surface_area(
     surface_area = 2.0 * np.sum(extent)
 
     return surface_area
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def cum_union_aabbs(aabbs: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+    """
+    Computes cumulative union of AABBs from a list of AABBs.
+
+    :param aabbs: Array of AABBs of shape (n, 2, 3).
+    :return: Cumulative AABBs of shape (n, 2, 3).
+    """
+
+    n = aabbs.shape[0]
+    if n == 0:
+        return aabbs
+
+    cum_aabbs = np.empty((n, 2, 3), dtype=np.float32)
+    cum_aabbs[:, 0] = +np.inf
+    cum_aabbs[:, 1] = -np.inf
+
+    for i in range(1, n):
+        cum_aabbs[i] = aabb_union(cum_aabbs[i - 1], aabbs[i])
+
+    return cum_aabbs
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def aabb_union(
+    aabb1: npt.NDArray[np.float32],
+    aabb2: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    """
+    Computes the union of two AABBs.
+
+    :param aabb1: First AABB as 2x3 array.
+    :param aabb2: Second AABB as 2x3 array.
+    :return: Union AABB as 2x3 array.
+    """
+
+    aabb_union = np.empty((2, 3), dtype=np.float32)
+    aabb_union[0] = np.minimum(aabb1[0], aabb2[0])
+    aabb_union[1] = np.maximum(aabb1[1], aabb2[1])
+    return aabb_union
 
 
 LOG = logger(__name__)

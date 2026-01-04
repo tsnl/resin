@@ -37,8 +37,8 @@ __all__ = [
     "Window",
     "WindowContext",
     "build_bvh",
+    "compute_points_aabb",
     "compute_psnr",
-    "compute_triangles_aabb",
     "convert_color",
     "convert_linear_to_srgb",
     "convert_srgb_to_linear",
@@ -48,7 +48,6 @@ __all__ = [
     "logger",
     "partition_points",
     "partition_triangles",
-    "partition_triangles_optimally",
     "round_up_to_po2",
     "setup_logging",
 ]
@@ -110,8 +109,7 @@ from .window import Window, WindowContext
 from .bvh import (
     Bvh,
     build_bvh,
-    compute_triangles_aabb,
+    compute_points_aabb,
     partition_points,
     partition_triangles,
-    partition_triangles_optimally,
 )

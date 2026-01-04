@@ -25,18 +25,18 @@ def test_compute_triangles_aabb_performance():
         v_triangles = v[t.flatten()]
 
         # Time the AABB computation (cold - first run with JIT)
-        aabb1 = zfw.compute_triangles_aabb(v_triangles)
+        aabb1 = zfw.compute_points_aabb(v_triangles)
 
         # Time the AABB computation (warm - second run without JIT)
         start_time = time.monotonic_ns()
-        aabb2 = zfw.compute_triangles_aabb(v_triangles)
+        aabb2 = zfw.compute_points_aabb(v_triangles)
         end_time = time.monotonic_ns()
         elapsed_ms_warm = (end_time - start_time) * 1e-6
 
         # Run it multiple times to get average
         num_iterations = 100
         for _ in range(num_iterations):
-            _ = zfw.compute_triangles_aabb(v_triangles)
+            _ = zfw.compute_points_aabb(v_triangles)
 
         # Verify AABBs are the same
         assert np.allclose(aabb1, aabb2), "AABBs should be identical"
@@ -128,7 +128,7 @@ def _verify_leaf_nodes_contain_triangles(
             )
 
             # Verify AABB is the tightest (exact bounding box)
-            aabb_exact = zfw.bvh.compute_triangles_aabb(v_leaf)
+            aabb_exact = zfw.bvh.compute_points_aabb(v_leaf)
             assert np.allclose(aabb_min, aabb_exact[0], atol=1e-6), (
                 f"{mesh_name}: Leaf node {i_node} AABB min is not tight"
             )
@@ -274,7 +274,11 @@ def test_partition_triangles():
 
     # Partition triangles at pivot index 2 along x-axis:
     i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt = zfw.partition_triangles(
-        t=t, v=v, c=c, i=2, x=0
+        t=t,
+        v=v,
+        c=c,
+        z=c[2, 0],
+        x=0,
     )
 
     # Check left partition:
@@ -300,7 +304,7 @@ def test_partition_points():
     # Test all pivots and axes:
     for i in range(n):
         for x in range(3):
-            i_lt, i_rt = zfw.partition_points(p=p, i=i, x=x)
+            i_lt, i_rt = zfw.partition_points(p=p, z=p[i, x], x=x)
             assert i_lt.shape[0] + i_rt.shape[0] == n
             assert np.all(i_lt < i)
             assert np.all(i_rt >= i)
@@ -316,7 +320,7 @@ def test_compute_triangles_abbb():
         dtype=np.float32,
     )
 
-    v_min, v_max = zfw.bvh.compute_triangles_aabb(v)
+    v_min, v_max = zfw.bvh.compute_points_aabb(v)
 
     assert np.allclose(np.asarray(v_min), [-1.0, 0.0, -2.0])
     assert np.allclose(np.asarray(v_max), [1.0, 2.0, 4.0])
