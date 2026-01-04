@@ -1,6 +1,8 @@
 import zfw
 
+import time
 import numpy as np
+import rich
 from pathlib import Path
 
 
@@ -34,13 +36,22 @@ def test_build_bvh():
             v = geometry.v_p_array
             t = geometry.t_indices
 
-            # Build BVH
+            # Build BVH with timing
+            start_time = time.monotonic_ns()
             bvh = zfw.build_bvh(t=t, v=v)
+            end_time = time.monotonic_ns()
+            elapsed_ms = (end_time - start_time) * 1e-6
+
+            rich.print(
+                f"[dark_blue]BVH build for {mesh_name}: {elapsed_ms:.2f} ms "
+                f"({t.shape[0]} triangles, {bvh.node_count} nodes)[/dark_blue]"
+            )
 
             # Run all verification checks
             _verify_leaf_nodes_contain_triangles(bvh, v, t, mesh_name)
             _verify_all_triangles_represented(bvh, t, mesh_name)
             _verify_intermediate_node_aabbs(bvh, mesh_name)
+            _verify_children_have_fewer_triangles(bvh, mesh_name)
 
 
 def _verify_leaf_nodes_contain_triangles(
@@ -148,6 +159,46 @@ def _verify_intermediate_node_aabbs(
             assert np.allclose(aabb_parent_max, union_max, atol=1e-6), (
                 f"{mesh_name}: Intermediate node {i_node} AABB max is not "
                 "the exact union of children"
+            )
+
+
+def _verify_children_have_fewer_triangles(
+    bvh: zfw.Bvh,
+    mesh_name: str,
+) -> None:
+    """
+    Verify that for each intermediate BVH node:
+    - Each child has fewer triangles than its parent
+    """
+    for i_node in range(bvh.node_count):
+        # Check if this is an intermediate node (has children)
+        if not np.all(bvh.children[i_node] == 0):
+            i_child_left, i_child_right = bvh.children[i_node]
+
+            # Get triangle counts
+            parent_tri_start, parent_tri_end = bvh.tri_span[i_node]
+            parent_tri_count = parent_tri_end - parent_tri_start
+
+            left_tri_start, left_tri_end = bvh.tri_span[i_child_left]
+            left_tri_count = left_tri_end - left_tri_start
+
+            right_tri_start, right_tri_end = bvh.tri_span[i_child_right]
+            right_tri_count = right_tri_end - right_tri_start
+
+            # Verify each child has fewer triangles than parent
+            assert left_tri_count < parent_tri_count, (
+                f"{mesh_name}: Left child node {i_child_left} has {left_tri_count} "
+                f"triangles, not less than parent node {i_node} with {parent_tri_count}"
+            )
+            assert right_tri_count < parent_tri_count, (
+                f"{mesh_name}: Right child node {i_child_right} has {right_tri_count} "
+                f"triangles, not less than parent node {i_node} with {parent_tri_count}"
+            )
+
+            # Verify children sum to parent count
+            assert left_tri_count + right_tri_count == parent_tri_count, (
+                f"{mesh_name}: Children triangle counts ({left_tri_count} + {right_tri_count}) "
+                f"don't sum to parent count {parent_tri_count}"
             )
 
 

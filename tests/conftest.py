@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -35,4 +36,4 @@ def rainbow_512x512_image() -> np.ndarray:
 
 @pytest.fixture(scope="session", autouse=True)
 def _setup_logging():
-    setup_logging()
+    setup_logging(level=logging.WARNING)

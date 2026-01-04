@@ -64,8 +64,11 @@ def build_bvh(
     assert c.shape == (nt, 3)
 
     # Guess number of BVH nodes needed for initial capacity:
-    alloc_triangles_per_bvh_node = 4
-    nb = int(np.ceil(t.shape[0] / alloc_triangles_per_bvh_node))
+    # For a binary tree, worst case is 2L - 1 nodes (for L leaves).
+    # Assume each leaf has at least one triangle.
+    ESTIMATED_TRIANGLES_PER_LEAF = 1
+    nl = (nt + ESTIMATED_TRIANGLES_PER_LEAF - 1) // ESTIMATED_TRIANGLES_PER_LEAF
+    nb = max(128, 2 * nl - 1)
 
     # Allocate BVH arrays:
     bvh_count = np.zeros((1,), dtype=np.uint32)
@@ -77,9 +80,7 @@ def build_bvh(
     # Initialize root node at index 0.
     # When BVH nodes have '0' as their child indices, they are leaf nodes since root nodes have no parents.
     bvh_count[0] += 1
-    aabb_root_min, aabb_root_max = compute_triangles_aabb(v[t.flatten()])
-    bvh_b[0, 0] = aabb_root_min
-    bvh_b[0, 1] = aabb_root_max
+    bvh_b[0, 0], bvh_b[0, 1] = compute_triangles_aabb(v[t.flatten()])
     bvh_c[0, :] = (0, 0)
     bvh_r[0, :] = 0, nt
     bvh_s[0] = nt * compute_aabb_surface_area((bvh_b[0, 0], bvh_b[0, 1]))
@@ -95,6 +96,7 @@ def build_bvh(
         bvh_r=bvh_r,
         bvh_s=bvh_s,
         i_bvh_root=0,
+        _debug_depth=0,
     )
 
     # Ensure we did not exceed allocated BVH node buffer:
@@ -120,6 +122,7 @@ def build_bvh_subtree(
     bvh_r: npt.NDArray[np.uint32],  # (nb, 2)
     bvh_s: npt.NDArray[np.float32],  # (nb,)
     i_bvh_root: int,  # [0, bvh_n.item())
+    _debug_depth: int = 0,
 ):
     """
     Given a BVH node, subdivides it into a binary subtree by partitioning its triangles.
@@ -137,6 +140,7 @@ def build_bvh_subtree(
 
     nt = t.shape[0]
     nb = bvh_b.shape[0]
+    _ = _debug_depth
 
     assert t.ndim == 2 and t.shape[1] == 3
     assert c.ndim == 2 and c.shape[1] == 3
@@ -154,6 +158,13 @@ def build_bvh_subtree(
     bvh_r_root = bvh_r[i_bvh_root]
 
     # Find optimal partition for triangles in the root node:
+    optimal_partition = partition_triangles_optimally(t=t_root, c=c_root, v=v)
+
+    # If no valid partition found (all triangles have same centroid), don't subdivide:
+    if optimal_partition is None:
+        assert np.all(bvh_c[i_bvh_root] == 0)
+        return
+
     (
         i_lt_in_t_root,
         i_rt_in_t_root,
@@ -161,7 +172,7 @@ def build_bvh_subtree(
         aabb_rt,
         sah_cost_lt,
         sah_cost_rt,
-    ) = partition_triangles_optimally(t=t_root, c=c_root, v=v)
+    ) = optimal_partition
 
     # If the surface area heuristic (SAH) cost is not improved, do not subdivide:
     if sah_cost_lt + sah_cost_rt >= bvh_s[i_bvh_root]:
@@ -223,6 +234,7 @@ def build_bvh_subtree(
         bvh_r=bvh_r,
         bvh_s=bvh_s,
         i_bvh_root=i_bvh_lt,
+        _debug_depth=_debug_depth + 1,
     )
     build_bvh_subtree(
         t=t,
@@ -234,6 +246,7 @@ def build_bvh_subtree(
         bvh_r=bvh_r,
         bvh_s=bvh_s,
         i_bvh_root=i_bvh_rt,
+        _debug_depth=_debug_depth + 1,
     )
 
 
@@ -242,14 +255,17 @@ def partition_triangles_optimally(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
     v: npt.NDArray[np.float32],  # (nv, 3)
-) -> tuple[
-    npt.NDArray[np.uint32],  # i_lt
-    npt.NDArray[np.uint32],  # i_rt
-    tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_lt
-    tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_rt
-    float,  # sah_cost_lt
-    float,  # sah_cost_rt
-]:
+) -> (
+    None
+    | tuple[
+        npt.NDArray[np.uint32],  # i_lt
+        npt.NDArray[np.uint32],  # i_rt
+        tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_lt
+        tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],  # aabb_rt
+        float,  # sah_cost_lt
+        float,  # sah_cost_rt
+    ]
+):
     """
     Finds the optimal partitioning of triangles based on their centroids.
 
@@ -326,6 +342,10 @@ def partition_triangles_optimally(
             sah_cost_lt_best = sah_cost_lt_best_in_chunk
             sah_cost_rt_best = sah_cost_rt_best_in_chunk
             sah_cost_best = sah_cost_best_in_chunk
+
+    # If no valid partition found, return empty partitions:
+    if i_lt_best is None or i_rt_best is None:
+        return None
 
     # Assert we found at least one partition:
     assert i_lt_best is not None
