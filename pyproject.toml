@@ -19,6 +19,8 @@ dependencies = [
     "orjson>=3.11.5",
     "wgpu>=0.19.0",
     "jaxtyping>=0.3.4",
+    "numba>=0.63.1",
+    "typeguard>=4.4.4",
 ]
 
 [project.optional-dependencies]

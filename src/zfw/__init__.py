@@ -34,6 +34,7 @@ __all__ = [
     "Window",
     "WindowContext",
     "compute_psnr",
+    "compute_triangles_aabb",
     "convert_color",
     "convert_linear_to_srgb",
     "convert_srgb_to_linear",
@@ -41,6 +42,9 @@ __all__ = [
     "load_gltf",
     "load_rgba_image",
     "logger",
+    "partition_points",
+    "partition_triangles",
+    "partition_triangles_optimally",
     "round_up_to_po2",
     "setup_logging",
 ]
@@ -96,3 +100,9 @@ from .images import (
 from .loader import load_rgba_image, load_gltf
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
+from .bvh import (
+    compute_triangles_aabb,
+    partition_points,
+    partition_triangles,
+    partition_triangles_optimally,
+)

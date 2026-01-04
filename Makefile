@@ -1,7 +1,13 @@
+#
+# Configuration:
+#
+
 BUNDLED_DATA=src/zfw/bundled_data
 
+PYTEST_ARGS=
+
 #
-# Default:
+# Default target: must be first:
 #
 
 default: wheel
@@ -16,11 +22,11 @@ sandbox: sync build
 
 .PHONY: tests
 tests: sync build
-	uv run --package zfw --extra dev python -m pytest -vs --tb=short .
+	uv run --package zfw --extra dev python -m pytest -vs --tb=short $(PYTEST_ARGS) .
 
 .PHONY: bench
 tests-profiling: sync build
-	uv run --package zfw --extra dev python -m pytest --profile -vs --tb=short .
+	uv run --package zfw --extra dev python -m pytest --profile -vs --tb=short $(PYTEST_ARGS) .
 	uv run flameprof --width 4096 prof/combined.prof > prof/combined.svg
 	uv run flameprof --width 4096 prof/test_basic_draw_2d.prof > prof/test_basic_draw_2d.svg
 

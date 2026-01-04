@@ -7,8 +7,10 @@ __all__ = [
 import math
 from dataclasses import dataclass, field
 
+import numba
 import numpy as np
 import jaxtyping as jt
+from typeguard import typechecked
 import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
@@ -138,9 +140,14 @@ class Draw3dRenderer:
             size=PodBvhNodeArray.array_size(shape=(self.bvh_node_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.triangle_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.TriangleHeapDeviceBuffer",
-            size=PodVertexArray.array_size(shape=(self.triangle_capacity, 3)),
+        self.triangle_vertex_offset_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.TriangleVertexOffsetHeapDeviceBuffer",
+            size=PodVertexOffsetArray.array_size(shape=(self.triangle_capacity, 3)),
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
+        self.triangle_vertex_detail_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.TriangleVertexDetailHeapDeviceBuffer",
+            size=0,  # Not used yet
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
 
@@ -167,9 +174,9 @@ class Draw3dRenderer:
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
-                        buffer=self.triangle_heap_device_buffer,
+                        buffer=self.triangle_vertex_offset_heap_device_buffer,
                         offset=0,
-                        size=self.triangle_heap_device_buffer.size,
+                        size=self.triangle_vertex_offset_heap_device_buffer.size,
                     ),
                 ),
             ],
@@ -185,11 +192,11 @@ class Draw3dRenderer:
         )
         encoder.clear_buffer(self.geometry_heap_device_buffer, offset=0)
         encoder.clear_buffer(self.bvh_node_heap_device_buffer, offset=0)
-        encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
+        encoder.clear_buffer(self.triangle_vertex_offset_heap_device_buffer, offset=0)
         queue.submit([encoder.finish()])
 
-    def _add_triangles(self, vertices: PodVertexArray) -> int:
-        assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
+    def _add_triangles(self, vertices: PodVertexOffsetArray) -> int:
+        assert vertices.ndim == 1 and vertices.dtype == PodVertexOffsetArray.DTYPE
 
         vertex_count = vertices.shape[0]
         triangle_count = vertex_count // 3
@@ -197,7 +204,7 @@ class Draw3dRenderer:
         # Allocate:
         allocation_offset_in_triangles = self.allocated_triangle_count
         allocation_offset_in_bytes = (
-            allocation_offset_in_triangles * PodVertexArray.DTYPE.itemsize * 3
+            allocation_offset_in_triangles * PodVertexOffsetArray.DTYPE.itemsize * 3
         )
         self.allocated_triangle_count += triangle_count
         if self.allocated_triangle_count > self.triangle_capacity:
@@ -219,7 +226,7 @@ class Draw3dRenderer:
         encoder.copy_buffer_to_buffer(
             source=staging_buffer,
             source_offset=0,
-            destination=self.triangle_heap_device_buffer,
+            destination=self.triangle_vertex_offset_heap_device_buffer,
             destination_offset=allocation_offset_in_bytes,
             size=vertices.nbytes,
         )
@@ -529,31 +536,52 @@ class Draw3dGeometry(BaseDisposable):
         self,
         renderer: Draw3dRenderer,
         *,
-        v_p_array: jt.Float32[jt.Array, "nv 3"],
-        v_n_array: jt.Float32[jt.Array, "nv 3"],
-        v_t_array: jt.Float32[jt.Array, "nv 2"],
         t_indices: jt.UInt32[jt.Array, "nt 3"],
+        v_p_array: jt.Float32[jt.Array, "nv 3"],
+        v_n_array: jt.Float32[jt.Array, "nv 3"] | None = None,
+        v_t_array: jt.Float32[jt.Array, "nv 2"] | None = None,
     ) -> None:
+        """
+        Constructs a Draw3dGeometry from given vertex and triangle data.
+
+        :param renderer: The Draw3dRenderer instance to use.
+        :param t_indices: Triangle indices array of shape (nt, 3) and dtype uint32.
+        :param v_p_array: Vertex positions array of shape (nv, 3) and dtype float32.
+        :param v_n_array: (Optional) Vertex normals array of shape (nv, 3) and dtype float32.
+        :param v_t_array: (Optional) Vertex texture coordinates array of shape (nv, 2) and dtype float32.
+        """
+
         super().__init__()
 
         self.renderer = renderer
         self.triangle_count = t_indices.shape[0]
 
+        pod_vertex_offset_array: PodVertexOffsetArray
+        pod_vertex_offset_array = v_p_array.view(PodVertexOffsetArray)
+
         # Interleave the vertex arrays:
         v = np.concatenate([v_p_array, v_n_array, v_t_array], axis=-1)
-        v = v.view(dtype=PodVertexArray.DTYPE).squeeze()
-        assert v.shape == (v_p_array.shape[0],) and v.dtype == PodVertexArray.DTYPE
+        v = v.view(dtype=PodVertexOffsetArray.DTYPE).squeeze()
+        assert (
+            v.shape == (v_p_array.shape[0],) and v.dtype == PodVertexOffsetArray.DTYPE
+        )
 
         # Compute BVH, reordering indices as needed:
         # TODO
 
         # Get rid of the index buffer: load the vertices for each triangle:
-        v = PodVertexArray(v[t_indices])
-        assert v.shape == (self.triangle_count, 3) and v.dtype == PodVertexArray.DTYPE
+        v = PodVertexOffsetArray(v[t_indices])
+        assert (
+            v.shape == (self.triangle_count, 3)
+            and v.dtype == PodVertexOffsetArray.DTYPE
+        )
 
         # Flatten to 1D array for _add_geometry
-        v = v.reshape(-1).view(PodVertexArray)
-        assert v.shape == (self.triangle_count * 3,) and v.dtype == PodVertexArray.DTYPE
+        v = v.reshape(-1).view(PodVertexOffsetArray)
+        assert (
+            v.shape == (self.triangle_count * 3,)
+            and v.dtype == PodVertexOffsetArray.DTYPE
+        )
 
         # Allocate space in renderer heaps, upload data
         self.geometry_heap_offset_in_triangles = renderer._add_triangles(v)
@@ -561,6 +589,65 @@ class Draw3dGeometry(BaseDisposable):
             self.geometry_heap_offset_in_triangles,
             self.triangle_count,
         )
+
+    @staticmethod
+    def _build_bvh(
+        i: jt.UInt32[jt.Array, "nt 3"],
+        v: jt.Float32[jt.Array, "nv 3"],
+    ) -> tuple[
+        PodBvhNodeArray,
+        jt.UInt32[jt.Array, "nt 3"],
+    ]:
+        """
+        Builds a BVH for the given triangles and vertices.
+
+        :param i: Original triangle indices array of shape (nt, 3).
+        :param v: Vertex position array of shape (nv, 3).
+        :return: A tuple containing the BVH node array and the reordered triangle indices.
+        """
+
+        nt = i.shape[0]
+        nv = v.shape[0]
+
+        # Compute triangle centroids
+        c: jt.Float32[jt.Array, "nt"] = v[i].mean(axis=-2)
+        assert c.shape == (nt, 3)
+
+        # For each axis, compute the SAH:
+        for axis in range(3):
+            pass
+
+        raise NotImplementedError()
+
+    @staticmethod
+    def _build_bvh_partition(
+        i: jt.UInt32[jt.Array, "nt 3"],
+        c: jt.Float32[jt.Array, "nt 3"],
+        v: jt.Float32[jt.Array, "nv 3"],
+        p: jt.Float32[jt.Array, "3"],
+        x: int,
+    ) -> tuple[
+        jt.UInt32[jt.Array, "nt 3"],
+        jt.UInt32[jt.Array, "nt 3"],
+    ]:
+        """
+        Recursively builds the BVH partition.
+
+        :param i: Triangle indices array of shape (nt, 3).
+        :param c: Triangle centroids array of shape (nt, 3).
+        :param v: Vertex position array of shape (nv, 3).
+        :param p: Pivot value for partitioning.
+        :param x: Axis index (0, 1, or 2) for partitioning.
+        :return: A tuple containing the left and right partitioned triangle indices.
+        """
+
+        lt_mask = c[:, x] < p[x]
+        rt_mask = ~lt_mask
+
+        i_lt = i[lt_mask]
+        i_rt = i[rt_mask]
+
+        return i_lt, i_rt
 
 
 class Draw3dMaterial(BaseDisposable):
@@ -640,12 +727,21 @@ POD_AABB_DTYPE = np.dtype(
 )
 
 
-class PodVertexArray(StructuredNDArray):
+class PodVertexOffsetArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("position", np.float32, (3,)),
+            ("offset", np.float32, (3,)),
+        ]
+    )
+
+
+class PodVertexDetailArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("tangent", np.float32, (3,)),
+            ("bitangent", np.float32, (3,)),
             ("normal", np.float32, (3,)),
-            ("uv", np.float32, (2,)),
+            ("texcoord", np.float32, (2,)),
         ]
     )
 
@@ -711,163 +807,6 @@ class PodInstanceArray(StructuredNDArray):
     )
 
 
-# #
-# # BVH Construction
-# #
-
-# type Aabb = tuple[np.ndarray, np.ndarray]  # (min, max) as float32 arrays of shape (3,)
-
-
-# def aabb_min_max(arr: np.ndarray) -> Aabb:
-#     """Compute AABB from array of points (N, 3)."""
-#     return (
-#         np.min(arr, axis=0).astype(np.float32),
-#         np.max(arr, axis=0).astype(np.float32),
-#     )
-
-
-# def aabb_union(*aabbs: Aabb) -> Aabb:
-#     """Union multiple AABBs."""
-#     mins = np.stack([a[0] for a in aabbs], axis=0)
-#     maxs = np.stack([a[1] for a in aabbs], axis=0)
-#     return (
-#         np.min(mins, axis=0).astype(np.float32),
-#         np.max(maxs, axis=0).astype(np.float32),
-#     )
-
-
-# def aabb_extent_sum(aabb: Aabb) -> float:
-#     """Sum of extent dimensions."""
-#     extent = aabb[1] - aabb[0]
-#     return float(np.sum(extent))
-
-
-# def evaluate_sah(
-#     centroids: np.ndarray, aabbs: list[Aabb], dim: int, split: float
-# ) -> float:
-#     """Evaluate SAH cost for a split."""
-#     mask_lt = centroids[:, dim] < split
-
-#     if not np.any(mask_lt) or not np.any(~mask_lt):
-#         return float("inf")
-
-#     lt_aabb = aabb_union(*[aabbs[i] for i in np.where(mask_lt)[0]])
-#     rt_aabb = aabb_union(*[aabbs[i] for i in np.where(~mask_lt)[0]])
-
-#     lt_count = float(np.sum(mask_lt))
-#     rt_count = float(np.sum(~mask_lt))
-
-#     return aabb_extent_sum(lt_aabb) * lt_count + aabb_extent_sum(rt_aabb) * rt_count
-
-
-# @dataclass
-# class BestPartitionParams:
-#     dim: int
-#     pivot: float
-#     cost: float
-
-
-# def find_best_partition_params(
-#     centroids: np.ndarray, aabbs: list[Aabb]
-# ) -> BestPartitionParams:
-#     """Find best split plane."""
-#     best_dim = 0
-#     best_val = float("nan")
-#     best_cost = float("inf")
-
-#     for dim in [0, 1, 2]:
-#         # Test split at each centroid coordinate
-#         for split_val in np.unique(centroids[:, dim]):
-#             cost = evaluate_sah(centroids, aabbs, dim, float(split_val))
-#             if cost < best_cost:
-#                 best_dim = dim
-#                 best_val = float(split_val)
-#                 best_cost = cost
-
-#     return BestPartitionParams(best_dim, best_val, best_cost)
-
-
-# @dataclass
-# class TrianglesPartitionResult:
-#     lt_indices: np.ndarray  # Indices of left triangles
-#     lt_aabb: Aabb
-#     rt_indices: np.ndarray  # Indices of right triangles
-#     rt_aabb: Aabb
-
-
-# def partition_triangles(
-#     indices: np.ndarray,
-#     centroids: np.ndarray,
-#     aabbs: list[Aabb],
-#     dim: int,
-#     pivot: float,
-# ) -> TrianglesPartitionResult:
-#     """Partition triangles by split plane."""
-#     mask_lt = centroids[indices, dim] < pivot
-
-#     lt_indices = indices[mask_lt]
-#     rt_indices = indices[~mask_lt]
-
-#     lt_aabb = (
-#         aabb_union(*[aabbs[i] for i in lt_indices])
-#         if len(lt_indices) > 0
-#         else (
-#             np.array([0, 0, 0], dtype=np.float32),
-#             np.array([0, 0, 0], dtype=np.float32),
-#         )
-#     )
-#     rt_aabb = (
-#         aabb_union(*[aabbs[i] for i in rt_indices])
-#         if len(rt_indices) > 0
-#         else (
-#             np.array([0, 0, 0], dtype=np.float32),
-#             np.array([0, 0, 0], dtype=np.float32),
-#         )
-#     )
-
-#     return TrianglesPartitionResult(lt_indices, lt_aabb, rt_indices, rt_aabb)
-
-
-# def try_partition_bvh_node(
-#     root_node_idx: int,
-#     indices: np.ndarray,
-#     centroids: np.ndarray,
-#     aabbs: list[Aabb],
-#     nodes: list,
-# ) -> None:
-#     """Recursively partition BVH node."""
-#     # Assert leaf
-#     assert (
-#         nodes[root_node_idx]["children"][0] == 0
-#         and nodes[root_node_idx]["children"][1] == 0
-#     )
-
-#     if len(indices) <= 1:
-#         return
-
-#     params = find_best_partition_params(centroids[indices], aabbs)
-
-#     # SAH cost for current node
-#     node_aabb = (
-#         nodes[root_node_idx]["aabb"][0].astype(np.float32),
-#         nodes[root_node_idx]["aabb"][1].astype(np.float32),
-#     )
-#     node_cost = aabb_extent_sum(node_aabb) * len(indices)
-
-#     if params.cost >= node_cost:
-#         return
-
-#     res = partition_triangles(indices, centroids, aabbs, params.dim, params.pivot)
-
-#     if len(res.lt_indices) == 0 or len(res.rt_indices) == 0:
-#         return
-
-#     lt_index = emplace_bvh_node(nodes, res.lt_indices, res.lt_aabb)
-#     rt_index = emplace_bvh_node(nodes, res.rt_indices, res.rt_aabb)
-
-#     # Update children of root node
-#     nodes[root_node_idx]["children"][0] = lt_index
-#     nodes[root_node_idx]["children"][1] = rt_index
-
-#     try_partition_bvh_node(lt_index, res.lt_indices, centroids, aabbs, nodes)
-#     try_partition_bvh_node(rt_index, res.rt_indices, centroids, aabbs, nodes)
+#
+# BVH construction
+#
