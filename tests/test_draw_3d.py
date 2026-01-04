@@ -48,32 +48,39 @@ def _render_and_readback(
     """
     readback_buffer = _create_readback_buffer(gpu.device, w, h)
 
+    repeat_count = 1 if not measure_runtime else 30
+
     start_time = time.monotonic_ns()
 
-    command_encoder = gpu.device.create_command_encoder(label="CommandEncoder")
-    renderer.record(scene, frame, command_encoder)
-    command_encoder.copy_texture_to_buffer(
-        source=wgpu.TexelCopyTextureInfo(
-            texture=frame.get_output_image(),
-            mip_level=0,
-            origin=(0, 0, 0),
-            aspect=wgpu.TextureAspect.all,
-        ),
-        destination=wgpu.TexelCopyBufferInfo(
-            bytes_per_row=w * 4 * ctypes.sizeof(ctypes.c_float),
-            rows_per_image=h,
-            buffer=readback_buffer,
-        ),
-        copy_size=frame.get_output_image().size,
-    )
-    gpu.queue.submit([command_encoder.finish()])
+    for _ in range(repeat_count):
+        command_encoder = gpu.device.create_command_encoder(label="CommandEncoder")
+        renderer.record(scene, frame, command_encoder)
+        command_encoder.copy_texture_to_buffer(
+            source=wgpu.TexelCopyTextureInfo(
+                texture=frame.get_output_image(),
+                mip_level=0,
+                origin=(0, 0, 0),
+                aspect=wgpu.TextureAspect.all,
+            ),
+            destination=wgpu.TexelCopyBufferInfo(
+                bytes_per_row=w * 4 * ctypes.sizeof(ctypes.c_float),
+                rows_per_image=h,
+                buffer=readback_buffer,
+            ),
+            copy_size=frame.get_output_image().size,
+        )
+        gpu.queue.submit([command_encoder.finish()])
 
     end_time = time.monotonic_ns()
 
     if measure_runtime:
         elapsed_ms = (end_time - start_time) * 1e-6
-        LOG.info(f"Render took {elapsed_ms:.2f} ms")
-        rich.print(f"[dark_blue]render took {elapsed_ms:.2f} ms[/dark_blue]", end=" ")
+        avg_ms = elapsed_ms / repeat_count
+        LOG.info(f"Render took ~{avg_ms:.2f} ms")
+        rich.print(
+            f"[dark_blue]render {repeat_count}x took ~{avg_ms:.2f} ms[/dark_blue]",
+            end=" ",
+        )
 
     readback_buffer.map_sync(wgpu.MapMode.READ)
     data = np.asarray(readback_buffer.read_mapped()).view(dtype=np.float32)
