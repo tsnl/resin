@@ -32,6 +32,18 @@ the baked lighting data.
 
 Move away from megakernel design to wavefront design, with multiple specialized kernels.
 
+### Vulkan for CUDA Interop
+
+Rewrite from WebGPU to Vulkan for CUDA interop, especially with PyTorch tensors.
+
+Would also give us better performance, more frames in flight.
+
+Old Vulkan wrapper:
+
+```bash
+git checkout origin/archive/main-v2 -- src/zfw/typed_vulkan.py  src/zfw/typed_vulkan.pyi  
+```
+
 ## `window`
 
 TODO: add windowing support.
