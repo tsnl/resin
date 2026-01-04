@@ -24,15 +24,8 @@ def test_compute_triangles_aabb_performance():
         # Get triangle vertices (what root AABB computation needs)
         v_triangles = v[t.flatten()]
 
-        rich.print(
-            f"[yellow]Computing AABB for {v_triangles.shape[0]} vertices ({t.shape[0]} triangles)[/yellow]"
-        )
-
         # Time the AABB computation (cold - first run with JIT)
-        start_time = time.monotonic_ns()
         aabb1 = zfw.compute_triangles_aabb(v_triangles)
-        end_time = time.monotonic_ns()
-        elapsed_ms_cold = (end_time - start_time) * 1e-6
 
         # Time the AABB computation (warm - second run without JIT)
         start_time = time.monotonic_ns()
@@ -42,19 +35,8 @@ def test_compute_triangles_aabb_performance():
 
         # Run it multiple times to get average
         num_iterations = 100
-        start_time = time.monotonic_ns()
         for _ in range(num_iterations):
             _ = zfw.compute_triangles_aabb(v_triangles)
-        end_time = time.monotonic_ns()
-        elapsed_ms_avg = (end_time - start_time) * 1e-6 / num_iterations
-
-        rich.print(
-            f"[green]AABB computation (cold/JIT): {elapsed_ms_cold:.2f} ms[/green]"
-        )
-        rich.print(f"[green]AABB computation (warm): {elapsed_ms_warm:.2f} ms[/green]")
-        rich.print(
-            f"[green]AABB computation (average of {num_iterations}): {elapsed_ms_avg:.4f} ms[/green]"
-        )
 
         # Verify AABBs are the same
         assert np.allclose(aabb1, aabb2), "AABBs should be identical"
