@@ -19,6 +19,10 @@
   - [ ] Sample environment map on ray miss.
 - [ ] Secondary rays, PBR shading
 
+### Polished Resources
+
+See `resources2.py`: WIP.
+
 ### Baked Global Illumination
 
 Add support for probe-based GI and lightmaps for indirect GI.
@@ -43,3 +47,8 @@ Old Vulkan wrapper:
 ```bash
 git checkout origin/archive/main-v2 -- src/zfw/typed_vulkan.py  src/zfw/typed_vulkan.pyi  
 ```
+
+## Sharp Edges
+
+Stuff that needs to be cleaned up with research.
+- `ColorSpace`: how we model colors, color spaces is very messy. sRGB, linear (which primaries? Same as sRGB?), alpha premultiplied or not, etc. Need a more consistent way of handling this.
