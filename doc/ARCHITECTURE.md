@@ -41,3 +41,8 @@ E.g. `class Image`
 
 In this way, the entire engine can break down into a handful of key resource classes 
 that can be used across different modules: `Image`, `Geometry`, `Material`, etc.
+
+> [!NOTE]
+> 
+> If we embrace this architecture, we could even write modules in different languages,
+> exposing methods on the handle type. Think `diplomat` for binding Rust code.

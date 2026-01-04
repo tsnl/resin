@@ -6,7 +6,6 @@ __all__ = [
 
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import numpy as np
 import jaxtyping as jt
@@ -14,9 +13,7 @@ import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
 from .bvh import Bvh, build_bvh
-
-if TYPE_CHECKING:
-    from .resources import GeometryResource, MaterialResource
+from .resources import GeometryResource, MaterialResource
 
 #
 # Renderer
@@ -33,6 +30,26 @@ class Draw3dRenderer:
     geometry_capacity: int
     bvh_node_capacity: int
     triangle_capacity: int
+
+    renderer_bind_group_layout: wgpu.GPUBindGroupLayout
+    per_frame_bind_group_layout: wgpu.GPUBindGroupLayout
+    pipeline_layout: wgpu.GPUPipelineLayout
+
+    draw_shader: wgpu.GPUShaderModule
+    draw_pipeline: wgpu.GPUComputePipeline
+
+    geometry_heap_device_buffer: wgpu.GPUBuffer
+    bvh_node_heap_device_buffer: wgpu.GPUBuffer
+    triangle_heap_device_buffer: wgpu.GPUBuffer
+
+    renderer_bind_group: wgpu.GPUBindGroup
+
+    allocated_geometry_count: int
+    allocated_bvh_node_count: int
+    allocated_triangle_count: int
+
+    geometry_cache: dict["GeometryResource", "Draw3dGeometry"]
+    material_cache: dict["MaterialResource", "Draw3dMaterial"]
 
     def __init__(
         self,
@@ -122,13 +139,12 @@ class Draw3dRenderer:
         with open(__file__.replace(".py", ".wgsl"), "r") as f:
             shader_source = f.read()
 
-        draw_shader = device.create_shader_module(code=shader_source)
-
-        self.pipeline = device.create_compute_pipeline(
+        self.draw_shader = device.create_shader_module(code=shader_source)
+        self.draw_pipeline = device.create_compute_pipeline(
             label="Draw3dRenderer.DrawPipeline",
             layout=pipeline_layout,
             compute=wgpu.ProgrammableStage(
-                module=draw_shader,
+                module=self.draw_shader,
                 entry_point="main_wrapper",
             ),
         )
@@ -186,8 +202,8 @@ class Draw3dRenderer:
 
         # Cache for converting GeometryResource/MaterialResource to Draw3d objects
         # Maps resource objects to their Draw3d counterparts
-        self._geometry_cache: dict = {}
-        self._material_cache: dict = {}
+        self._geometry_cache = {}
+        self._material_cache = {}
 
         # Initialization: clear device buffers to zero
         encoder = device.create_command_encoder(
@@ -334,7 +350,7 @@ class Draw3dRenderer:
         command_encoder: wgpu.GPUCommandEncoder,
     ) -> None:
         frame.record(
-            self.pipeline,
+            self.draw_pipeline,
             self.renderer_bind_group,
             self.target_size_wh_px,
             command_encoder,
@@ -349,17 +365,20 @@ class Draw3dRenderer:
         :param resource: The GeometryResource to convert.
         :return: A Draw3dGeometry instance.
         """
-        # Use id() for object identity-based caching
-        resource_id = id(resource)
-        if resource_id not in self._geometry_cache:
-            self._geometry_cache[resource_id] = Draw3dGeometry(
-                renderer=self,
-                v_p_array=resource.v_p_array,
-                v_n_array=resource.v_n_array,
-                v_t_array=resource.v_t_array,
-                t_indices=resource.t_indices,
-            )
-        return self._geometry_cache[resource_id]
+
+        if cached_entry := self._geometry_cache.get(resource):
+            return cached_entry
+
+        new_draw_3d_geometry = Draw3dGeometry(
+            renderer=self,
+            v_p_array=resource.v_p_array,
+            v_n_array=resource.v_n_array,
+            v_t_array=resource.v_t_array,
+            t_indices=resource.t_indices,
+        )
+        self._geometry_cache[resource] = new_draw_3d_geometry
+
+        return new_draw_3d_geometry
 
     def get_material(self, resource: "MaterialResource") -> "Draw3dMaterial":
         """
@@ -369,20 +388,23 @@ class Draw3dRenderer:
         :param resource: The MaterialResource to convert.
         :return: A Draw3dMaterial instance.
         """
-        # Use id() for object identity-based caching
-        resource_id = id(resource)
-        if resource_id not in self._material_cache:
-            self._material_cache[resource_id] = Draw3dMaterial(
-                renderer=self,
-                color_map=resource.color_map,
-                color_factor=resource.color_factor,
-                normal_map=resource.normal_map,
-                metalness_map=resource.metalness_map,
-                metalness_factor=resource.metalness_factor,
-                roughness_map=resource.roughness_map,
-                roughness_factor=resource.roughness_factor,
-            )
-        return self._material_cache[resource_id]
+
+        if cached_entry := self._material_cache.get(resource):
+            return cached_entry
+
+        new_draw_3d_material = Draw3dMaterial(
+            renderer=self,
+            color_map=resource.color_map,
+            color_factor=resource.color_factor,
+            normal_map=resource.normal_map,
+            metalness_map=resource.metalness_map,
+            metalness_factor=resource.metalness_factor,
+            roughness_map=resource.roughness_map,
+            roughness_factor=resource.roughness_factor,
+        )
+        self._material_cache[resource] = new_draw_3d_material
+
+        return new_draw_3d_material
 
 
 class Draw3dFrame:
