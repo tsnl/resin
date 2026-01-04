@@ -638,10 +638,13 @@ class Draw3dGeometry(BaseDisposable):
         self.renderer = renderer
         self.triangle_count = t_indices.shape[0]
 
-        # Construct the BVH:
+        # Construct the BVH first.
+        # This produces an updated `t_indices` array with a different triangle order.
+        # We need to use this reordered index array for all subsequent uploads.
         bvh = build_bvh(t=t_indices, v=v_p_array)
+        t_indices = bvh.t
 
-        # Upload triangles:
+        # Upload triangles, using the reordered t array:
         pod_vertices = Draw3dGeometry._marshall_triangles(
             v_p_array=v_p_array,
             v_n_array=v_n_array,
@@ -651,8 +654,7 @@ class Draw3dGeometry(BaseDisposable):
         triangle_span_begin = renderer._add_triangles(vertices=pod_vertices)
         triangle_span_count = self.triangle_count
 
-        # Adjust the BVH triangle indices to point to the global triangle heap.
-        # We need the triangles allocation in the global heap for this.
+        # Offset the BVH triangle spans to point to the global triangle heap instead of the per-geometry triangles list:
         bvh.tri_span += triangle_span_begin
 
         # Upload BVH:

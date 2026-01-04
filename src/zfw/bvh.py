@@ -18,6 +18,7 @@ import numpy as np
 
 @dataclass
 class Bvh:
+    t: npt.NDArray[np.uint32]  # (nt, 3)
     aabb: npt.NDArray[np.float32]  # (nb, 2, 3)
     children: npt.NDArray[np.uint32]  # (nb, 2)
     tri_span: npt.NDArray[np.uint32]  # (nb, 2)
@@ -35,14 +36,26 @@ class Bvh:
 def build_bvh(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     v: npt.NDArray[np.float32],  # (nv, 3)
+    copy_t: bool = True,
 ) -> Bvh:
     """
     Constructs a BVH (bounding volume hierarchy) for the given triangles and vertices.
 
+    The triangles are reordered and returned in the BVH structure.
+    Use those triangles for BVH traversal instead of the input `t`.
+
     A BVH is a binary tree where each node contains an axis-aligned bounding box (AABB)
     that encloses a subset of the triangles. Leaf nodes contain the actual triangles,
     while internal nodes partition the triangles into two child nodes.
+
+    :param t: Triangle index array of shape (nt, 3). Each element indexes into `v`.
+    :param v: Vertex position array of shape (nv, 3).
+    :return: The constructed BVH, including re-ordered triangle indices.
     """
+
+    # Copy `t`: if not specified, `t` will be modified in-place.
+    if copy_t:
+        t = t.copy()
 
     nt = t.shape[0]
 
@@ -64,7 +77,9 @@ def build_bvh(
     # Initialize root node at index 0.
     # When BVH nodes have '0' as their child indices, they are leaf nodes since root nodes have no parents.
     bvh_count[0] += 1
-    bvh_b[0, :] = compute_triangles_aabb(v[t.flatten()])
+    aabb_root_min, aabb_root_max = compute_triangles_aabb(v[t.flatten()])
+    bvh_b[0, 0] = aabb_root_min
+    bvh_b[0, 1] = aabb_root_max
     bvh_c[0, :] = (0, 0)
     bvh_r[0, :] = 0, nt
     bvh_s[0] = nt * compute_aabb_surface_area((bvh_b[0, 0], bvh_b[0, 1]))
@@ -87,6 +102,7 @@ def build_bvh(
 
     # Done:
     return Bvh(
+        t=t,
         aabb=bvh_b[: bvh_count[0]],
         children=bvh_c[: bvh_count[0]],
         tri_span=bvh_r[: bvh_count[0]],
@@ -161,7 +177,7 @@ def build_bvh_subtree(
     t_rt, c_rt, n_rt = t[i_rt].copy(), c[i_rt].copy(), i_rt.shape[0]
     assert n_lt + n_rt == bvh_r_root[1] - bvh_r_root[0]
 
-    # Write triangles indices and centroids to t and c arrays:
+    # Write triangles indices and centroids to t and c arrays, modifying in-place:
     lt_slice = slice(bvh_r_root[0], bvh_r_root[0] + n_lt)
     rt_slice = slice(bvh_r_root[0] + n_lt, bvh_r_root[1])
     t[lt_slice], c[lt_slice] = t_lt, c_lt
@@ -175,16 +191,22 @@ def build_bvh_subtree(
     assert bvh_count[0] <= nb, "BVH node buffer overflow"
 
     # Write bvh_b AABBs to child nodes:
-    bvh_b[i_bvh_lt, :] = aabb_lt
-    bvh_b[i_bvh_rt, :] = aabb_rt
+    aabb_lt_min, aabb_lt_max = aabb_lt
+    bvh_b[i_bvh_lt, 0] = aabb_lt_min
+    bvh_b[i_bvh_lt, 1] = aabb_lt_max
+    aabb_rt_min, aabb_rt_max = aabb_rt
+    bvh_b[i_bvh_rt, 0] = aabb_rt_min
+    bvh_b[i_bvh_rt, 1] = aabb_rt_max
 
     # Write bvh_c child indices to parent node:
     bvh_c[i_bvh_root, 0] = i_bvh_lt
     bvh_c[i_bvh_root, 1] = i_bvh_rt
 
     # Write bvh_r triangle ranges to child nodes:
-    bvh_r[i_bvh_lt, :] = bvh_r_root[0], bvh_r_root[0] + n_lt
-    bvh_r[i_bvh_rt, :] = bvh_r_root[0] + n_lt, bvh_r_root[1]
+    bvh_r[i_bvh_lt, 0] = bvh_r_root[0]
+    bvh_r[i_bvh_lt, 1] = bvh_r_root[0] + n_lt
+    bvh_r[i_bvh_rt, 0] = bvh_r_root[0] + n_lt
+    bvh_r[i_bvh_rt, 1] = bvh_r_root[1]
 
     # Write bvh_s SAH costs to child nodes:
     bvh_s[i_bvh_lt] = sah_cost_lt

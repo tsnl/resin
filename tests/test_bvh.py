@@ -1,6 +1,154 @@
 import zfw
 
 import numpy as np
+from pathlib import Path
+
+
+def test_build_bvh():
+    """
+    Test BVH construction on real meshes from glTF sample assets.
+    Verifies the generated BVH structure satisfies key invariants.
+    """
+    # Test meshes from glTF sample assets
+    test_meshes = [
+        "Box.gltf",
+        "Suzanne.gltf",
+    ]
+
+    base_path = Path(__file__).parent / "data" / "glTF-Sample-Assets" / "Models"
+
+    for mesh_name in test_meshes:
+        if mesh_name == "Box.gltf":
+            mesh_path = base_path / "Box" / "glTF" / "Box.gltf"
+        elif mesh_name == "Suzanne.gltf":
+            mesh_path = base_path / "Suzanne" / "glTF" / "Suzanne.gltf"
+        else:
+            continue
+
+        # Load mesh using resources
+        meshes_dict = zfw.load_gltf(mesh_path)
+        assert len(meshes_dict) > 0, f"Failed to load mesh {mesh_name}"
+
+        # Extract geometry from the first mesh (we only care about geometry, not materials)
+        for (geometry, _), _ in meshes_dict.items():
+            v = geometry.v_p_array
+            t = geometry.t_indices
+
+            # Build BVH
+            bvh = zfw.build_bvh(t=t, v=v)
+
+            # Run all verification checks
+            _verify_leaf_nodes_contain_triangles(bvh, v, t, mesh_name)
+            _verify_all_triangles_represented(bvh, t, mesh_name)
+            _verify_intermediate_node_aabbs(bvh, mesh_name)
+
+
+def _verify_leaf_nodes_contain_triangles(
+    bvh: zfw.Bvh,
+    v: np.ndarray,
+    t_original: np.ndarray,
+    mesh_name: str,
+) -> None:
+    """
+    Verify that for each leaf BVH node:
+    - All triangles in the BVH's triangle list lie within the AABB
+    - The AABB is the tightest possible (exact bounding box of the triangles)
+    """
+    for i_node in range(bvh.node_count):
+        # Check if this is a leaf node (no children)
+        if np.all(bvh.children[i_node] == 0):
+            # This is a leaf node
+            tri_start, tri_end = bvh.tri_span[i_node]
+            leaf_triangles = bvh.t[tri_start:tri_end]
+            aabb_min, aabb_max = bvh.aabb[i_node]
+
+            # Get all vertices in this leaf
+            v_leaf = v[leaf_triangles.flatten()]
+
+            # Verify all vertices are within the AABB
+            assert np.all(v_leaf >= aabb_min - 1e-6), (
+                f"{mesh_name}: Leaf node {i_node} contains vertices "
+                "outside AABB min bound"
+            )
+            assert np.all(v_leaf <= aabb_max + 1e-6), (
+                f"{mesh_name}: Leaf node {i_node} contains vertices "
+                "outside AABB max bound"
+            )
+
+            # Verify AABB is the tightest (exact bounding box)
+            v_min_exact, v_max_exact = zfw.bvh.compute_triangles_aabb(v_leaf)
+            assert np.allclose(aabb_min, v_min_exact, atol=1e-6), (
+                f"{mesh_name}: Leaf node {i_node} AABB min is not tight"
+            )
+            assert np.allclose(aabb_max, v_max_exact, atol=1e-6), (
+                f"{mesh_name}: Leaf node {i_node} AABB max is not tight"
+            )
+
+
+def _verify_all_triangles_represented(
+    bvh: zfw.Bvh,
+    t_original: np.ndarray,
+    mesh_name: str,
+) -> None:
+    """
+    Verify that all triangles from the original mesh are represented in the BVH.
+    """
+    # Collect all triangle indices from all leaf nodes
+    represented_tri_indices = set()
+
+    for i_node in range(bvh.node_count):
+        # Check if this is a leaf node
+        if np.all(bvh.children[i_node] == 0):
+            tri_start, tri_end = bvh.tri_span[i_node]
+            leaf_triangles = bvh.t[tri_start:tri_end]
+
+            # Add the global indices (0 to nt-1)
+            for global_idx in range(tri_start, tri_end):
+                represented_tri_indices.add(global_idx)
+
+    # Verify we have exactly the right number of triangles
+    assert len(represented_tri_indices) == t_original.shape[0], (
+        f"{mesh_name}: Not all triangles are represented in BVH. "
+        f"Expected {t_original.shape[0]}, got {len(represented_tri_indices)}"
+    )
+
+    # Verify all indices are in the valid range
+    assert (
+        max(represented_tri_indices) < t_original.shape[0]
+        and min(represented_tri_indices) >= 0
+    ), f"{mesh_name}: Invalid triangle indices in BVH"
+
+
+def _verify_intermediate_node_aabbs(
+    bvh: zfw.Bvh,
+    mesh_name: str,
+) -> None:
+    """
+    Verify that for each intermediate BVH node:
+    - Its AABB is the exact union of its children AABBs (within tight tolerance)
+    """
+    for i_node in range(bvh.node_count):
+        # Check if this is an intermediate node (has children)
+        if not np.all(bvh.children[i_node] == 0):
+            i_child_left, i_child_right = bvh.children[i_node]
+            aabb_parent_min, aabb_parent_max = bvh.aabb[i_node]
+
+            aabb_left_min, aabb_left_max = bvh.aabb[i_child_left]
+            aabb_right_min, aabb_right_max = bvh.aabb[i_child_right]
+
+            # Compute the union of children AABBs
+            union_min = np.minimum(aabb_left_min, aabb_right_min)
+            union_max = np.maximum(aabb_left_max, aabb_right_max)
+
+            # Verify parent AABB matches the union
+            assert np.allclose(aabb_parent_min, union_min, atol=1e-6), (
+                f"{mesh_name}: Intermediate node {i_node} AABB min is not "
+                "the exact union of children"
+            )
+            assert np.allclose(aabb_parent_max, union_max, atol=1e-6), (
+                f"{mesh_name}: Intermediate node {i_node} AABB max is not "
+                "the exact union of children"
+            )
 
 
 def test_partition_triangles():
