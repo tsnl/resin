@@ -35,7 +35,7 @@ from .basic import (
     logger,
 )
 from .bundled_data import BUNDLED_DATA_PATH
-from .cook import COOKED_ATLAS_PATH_SUFFIX, CookedAtlas
+from .resources import COOKED_ATLAS_PATH_SUFFIX, CookedAtlas
 from .draw_2d import Draw2dQuad
 from . import typed_uharfbuzz as hb
 

@@ -86,11 +86,13 @@ from .draw_3d import (
     Draw3dGeometry,
     Draw3dMaterial,
 )
-from .cook import (
+from .resources import (
     CookedAtlas,
     CookedAtlasGlyphInfo,
     CookedAtlasGlyphCacheKey,
     COOKED_ATLAS_PATH_SUFFIX,
+    load_rgba_image,
+    load_gltf,
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .images import (
@@ -99,7 +101,6 @@ from .images import (
     convert_linear_to_srgb,
     convert_srgb_to_linear,
 )
-from .loader import load_rgba_image, load_gltf
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
 from .bvh import (
