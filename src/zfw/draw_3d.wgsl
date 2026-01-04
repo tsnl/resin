@@ -47,6 +47,11 @@ const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
 const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
 const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
 const FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R: u32 = 8u;
+const FLAG_EMIT_PRIMARY_RAY_COLOR: u32 = 16u;
+
+const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
+const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R;
+const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_COLOR;
 
 struct PodInstance {
     geometry_id: u32,
@@ -538,12 +543,59 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
 }
 
 //
+// Texture sampling:
+//
+
+/// Sample a texture using nearest neighbor filtering.
+/// texture_id: Index into texture_heap
+/// uv: Texture coordinates in [0, 1]^2
+fn sample_texture(texture_id: u32, uv: vec2<f32>) -> vec4<f32> {
+    let texture_info = texture_heap[texture_id];
+    let width = texture_info.width;
+    let height = texture_info.height;
+    let depth = texture_info.depth;  // Number of channels (1, 3, or 4)
+    
+    // Clamp UV coordinates to [0, 1]
+    let uv_clamped = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    
+    // Convert to pixel coordinates (nearest neighbor)
+    let x = u32(uv_clamped.x * f32(width - 1u));
+    let y = u32(uv_clamped.y * f32(height - 1u));
+    
+    // Calculate pixel index in the texture array
+    let pixel_index = y * width + x;
+    
+    // Get subpixel data offset (channels are stored contiguously per pixel)
+    let subpixel_offset = texture_info.subpixel_span.begin + pixel_index * depth;
+    
+    // Sample channels based on depth (1=grayscale, 3=RGB, 4=RGBA)
+    // Note: subpixel_heap contains f16 values already in [0,1] range
+    if depth == 1u {
+        // Grayscale - replicate to RGB
+        let gray = f32(subpixel_heap[subpixel_offset]);
+        return vec4<f32>(gray, gray, gray, 1.0);
+    } else if depth == 3u {
+        // RGB
+        let r = f32(subpixel_heap[subpixel_offset + 0u]);
+        let g = f32(subpixel_heap[subpixel_offset + 1u]);
+        let b = f32(subpixel_heap[subpixel_offset + 2u]);
+        return vec4<f32>(r, g, b, 1.0);
+    } else {
+        // RGBA (depth == 4)
+        let r = f32(subpixel_heap[subpixel_offset + 0u]);
+        let g = f32(subpixel_heap[subpixel_offset + 1u]);
+        let b = f32(subpixel_heap[subpixel_offset + 2u]);
+        let a = f32(subpixel_heap[subpixel_offset + 3u]);
+        return vec4<f32>(r, g, b, a);
+    }
+}
+
+//
 // PBR shading (WIP):
 //
 
-fn compute_hit_color(hit: HitRecord) -> vec4<f32> {
+fn compute_hit_color(hit_details: HitDetails) -> vec4<f32> {
     let sun_direction = normalize(vec3<f32>(-1.0, -1.0, -0.5));
-    var hit_details = compute_hit_details(hit);
     let intensity = clamp(dot(hit_details.tbn[2], sun_direction), 0.05, 1.0);
     return vec4<f32>(intensity, intensity, intensity, 1.0);
 }
@@ -664,12 +716,18 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
 // Debug shading:
 //
 
-fn debug_output(hit: HitRecord) -> vec4<f32> {
+fn post_primary_ray_gen_debug_output(ray: Ray) -> vec4<f32> {
     let debug_emit_primary_ray_direction = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
     if debug_emit_primary_ray_direction {
-        return debug_visualize_primary_ray_direction(hit);
+        let dir_normalized = normalize(ray.direction);
+        return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
     }
 
+    // No debug flag matched, return magenta to indicate error.
+    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+}
+
+fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
     let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
     if debug_emit_depth_in_r {
         return debug_visualize_depth_in_r(hit);
@@ -689,9 +747,16 @@ fn debug_output(hit: HitRecord) -> vec4<f32> {
     return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
 
-fn debug_visualize_primary_ray_direction(hit: HitRecord) -> vec4<f32> {
-    let dir_normalized = normalize(hit.ray.direction);
-    return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
+fn post_primary_ray_hit_details_debug_output(hit_details: HitDetails) -> vec4<f32> {
+    let debug_emit_primary_ray_color = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_COLOR) != 0u;
+    if debug_emit_primary_ray_color {
+        // Sample texture at interpolated UV coordinates
+        // Using texture ID 0 as default - adjust as needed based on material
+        return sample_texture(0u, hit_details.texcoords);
+    }
+
+    // No debug flag matched, return magenta to indicate error.
+    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
 
 fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
@@ -720,17 +785,31 @@ fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
 
 fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
     let ray = gen_primary_ray(pixel_xy);
+    
+    // Debug checkpoint 1: After primary ray generation
+    if (frame_info.debug_flags & POST_PRIMARY_RAY_GEN_DEBUG_MASK) != 0u {
+        return post_primary_ray_gen_debug_output(ray);
+    }
+
     let closest_hit = hit(ray);
     
-    if frame_info.debug_flags != 0u {
-        return debug_output(closest_hit);
+    // Debug checkpoint 2: After ray hit testing
+    if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DEBUG_MASK) != 0u {
+        return post_primary_ray_hit_debug_output(closest_hit);
     }
-    
-    if is_hit_record_valid(closest_hit) {
-        return compute_hit_color(closest_hit);
-    } else {
+
+    if !is_hit_record_valid(closest_hit) {
         return compute_miss_color(ray);
     }
+
+    var closest_hit_details = compute_hit_details(closest_hit);
+    
+    // Debug checkpoint 3: After computing hit details
+    if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK) != 0u {
+        return post_primary_ray_hit_details_debug_output(closest_hit_details);
+    }
+
+    return compute_hit_color(closest_hit_details);
 }
 
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
