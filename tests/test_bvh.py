@@ -83,8 +83,9 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
             elapsed_ms = (end_time - start_time) * 1e-6
 
             rich.print(
-                f"[dark_blue]BVH build for {mesh_name}: {elapsed_ms:.2f} ms "
-                f"({t.shape[0]} triangles, {bvh.node_count} nodes)[/dark_blue]"
+                f"[dark_blue]BVH for {mesh_name}: {elapsed_ms:.2f} ms "
+                f"({t.shape[0]} triangles, {bvh.node_count} nodes)[/dark_blue]",
+                end=" ",
             )
 
             # Run all verification checks
