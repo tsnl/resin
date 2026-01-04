@@ -602,16 +602,22 @@ fn sample_texture(texture_id: u32, uv: vec2<f32>) -> vec4<f32> {
 
 fn compute_hit_color(hit_details: HitDetails) -> vec4<f32> {
     let sun_direction = normalize(vec3<f32>(-1.0, -1.0, -0.5));
-    let intensity = clamp(dot(hit_details.tbn[2], sun_direction), 0.05, 1.0);
-    return vec4<f32>(intensity, intensity, intensity, 1.0);
+    let color = hit_details.surface_color;
+    let normal = hit_details.surface_normal;
+    let intensity = clamp(dot(normal, sun_direction), 0.05, 1.0);
+    return vec4<f32>(color.xyz * intensity, 1.0);
 }
 
 fn compute_miss_color(ray: Ray) -> vec4<f32> {
     // If environment map is available, sample it
     if frame_info.environment_map_texture_id >= 0 {
         return sample_environment_map(ray);
+    } else {
+        return sample_procedural_environment_map(ray);
     }
-    
+}
+
+fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
     // Otherwise, use procedural sky gradient
     // Create a sky gradient with brightest spot at azimuth 45°, altitude 45°
     let dir = normalize(ray.direction);
@@ -645,7 +651,8 @@ fn compute_miss_color(ray: Ray) -> vec4<f32> {
     
     // Blend sun and sky
     let final_color = mix(sky_color, sun_color, sun_brightness * 0.8);
-    
+
+    // Done:
     return vec4<f32>(final_color, 1.0);
 }
 
@@ -677,6 +684,10 @@ struct HitDetails {
     barycentric_coordinates: vec3<f32>,
     texcoords: vec2<f32>,
     tbn: mat3x3<f32>,
+    surface_color: vec4<f32>,
+    surface_normal: vec3<f32>,
+    surface_metalness: f32,
+    surface_roughness: f32,
     instance_id: u32,
 }
 fn compute_hit_details(hit: HitRecord) -> HitDetails {
@@ -687,6 +698,10 @@ fn compute_hit_details(hit: HitRecord) -> HitDetails {
     hit_details.texcoords = compute_hit_details_texcoords(hit);
     hit_details.tbn = compute_hit_details_tbn_matrix(hit);
     hit_details.instance_id = hit.instance_id;
+    hit_details.surface_color = compute_hit_details_surface_color(hit_details);
+    hit_details.surface_normal = compute_hit_details_surface_normal(hit_details);
+    hit_details.surface_metalness = compute_hit_details_surface_metalness(hit_details);
+    hit_details.surface_roughness = compute_hit_details_surface_roughness(hit_details);
     return hit_details;
 }
 fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
@@ -747,6 +762,34 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
     // Return TBN matrix with T, B, N as column vectors
     return mat3x3<f32>(world_tangent, world_bitangent, world_normal);
 }
+fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let color = sample_texture(material.color_map_id, hit_details.texcoords);
+    let color_factor = vec3<f32>(material.color_factor[0], material.color_factor[1], material.color_factor[2]);
+    return vec4<f32>(color.xyz * color_factor, color.w);
+}
+fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let texture_normal = sample_texture(material.normal_map_id, hit_details.texcoords);
+    let normal = hit_details.tbn * normalize(vec3<f32>(texture_normal.xyz * 2.0 - 1.0));
+    return normalize(normal);   // for good measure
+}
+fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let metalness_texture = sample_texture(material.metalness_map_id, hit_details.texcoords);
+    let metalness_factor = material.metalness_factor;
+    return metalness_factor * metalness_texture.r;
+}
+fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let roughness_texture = sample_texture(material.roughness_map_id, hit_details.texcoords);
+    let roughness_factor = material.roughness_factor;
+    return roughness_factor * roughness_texture.r;
+}
 
 //
 // Debug shading:
@@ -795,10 +838,7 @@ fn debug_visualize_primary_ray_color(hit_details: HitDetails) -> vec4<f32> {
 }
 
 fn debug_visualize_hit_normal(hit_details: HitDetails) -> vec4<f32> {
-    // Visualize world-space normal from TBN matrix (third column)
-    let world_normal = hit_details.tbn[2];
-    // Map from [-1, 1] to [0, 1] for visualization
-    return vec4<f32>(world_normal * 0.5 + 0.5, 1.0);
+    return vec4<f32>((hit_details.surface_normal + 1.0) * 0.5, 1.0);
 }
 fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
     if is_hit_record_valid(hit) {
@@ -855,31 +895,24 @@ fn debug_visualize_orm(hit_details: HitDetails) -> vec4<f32> {
 
 fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
     let ray = gen_primary_ray(pixel_xy);
-    
-    // Debug checkpoint 1: After primary ray generation
     if (frame_info.debug_flags & POST_PRIMARY_RAY_GEN_DEBUG_MASK) != 0u {
         return post_primary_ray_gen_debug_output(ray);
     }
 
     let closest_hit = hit(ray);
-    
-    // Debug checkpoint 2: After ray hit testing
     if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DEBUG_MASK) != 0u {
         return post_primary_ray_hit_debug_output(closest_hit);
     }
 
     if !is_hit_record_valid(closest_hit) {
         return compute_miss_color(ray);
+    } else {
+        var closest_hit_details = compute_hit_details(closest_hit);
+        if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK) != 0u {
+            return post_primary_ray_hit_details_debug_output(closest_hit_details);
+        }
+        return compute_hit_color(closest_hit_details);
     }
-
-    var closest_hit_details = compute_hit_details(closest_hit);
-    
-    // Debug checkpoint 3: After computing hit details
-    if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK) != 0u {
-        return post_primary_ray_hit_details_debug_output(closest_hit_details);
-    }
-
-    return compute_hit_color(closest_hit_details);
 }
 
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
