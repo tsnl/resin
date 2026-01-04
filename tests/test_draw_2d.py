@@ -12,7 +12,7 @@ from zfw import (
     Draw2dFrame,
     Draw2dQuad,
     convert_color,
-    load_rgba_image,
+    load_image,
 )
 
 from conftest import GpuFixture
@@ -23,8 +23,13 @@ def test_basic_draw_2d(gpu: GpuFixture):
     device = gpu.device
     queue = gpu.queue
 
-    # Load rainbow test image
-    rainbow_image_data = load_rgba_image(Path("tests/data/rainbow-512x512.png"))
+    # Load rainbow test image as linear RGBA
+    rainbow_resource = load_image(
+        Path("tests/data/rainbow-512x512.png"),
+        image_format="rgba8unorm-srgb",
+        expected_format="rgba32float",
+    )
+    rainbow_image_data = rainbow_resource.data
     assert rainbow_image_data.shape == (512, 512, 4)
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture

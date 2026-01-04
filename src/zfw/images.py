@@ -1,4 +1,6 @@
 __all__ = [
+    "ImageFormat",
+    "ImageResource",
     "compute_psnr",
     "convert_color",
     "convert_linear_to_srgb",
@@ -6,14 +8,47 @@ __all__ = [
 ]
 
 from pathlib import Path
+from typing import Literal
 
-import PIL.Image
+import imageio.v3 as iio
 import numpy as np
 
 from .basic import ColorSpace, logger
 
+# ImageFormat: subset of WebGPU texture formats for images
+type ImageFormat = Literal[
+    "rgba32float",
+    "rgba16float",
+    "rgba8unorm",
+    "r32float",
+    "r16float",
+    "r8unorm",
+    "rgba8unorm-srgb",
+    "rgb32float",
+    "rgb16float",
+]
+
 
 LOG = logger(__name__)
+
+
+class ImageResource:
+    """Stores image data along with metadata about format and dimensions."""
+
+    def __init__(
+        self,
+        *,
+        data: np.ndarray,
+        width: int,
+        height: int,
+        depth: int,
+        image_format: ImageFormat,
+    ) -> None:
+        self.data = data
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.image_format = image_format
 
 
 def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:
@@ -52,7 +87,6 @@ def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     :param file_path: The path to save the image file to.
     :param data: The image data as a NumPy array.
     """
-
     assert data.ndim == 3, "Data must be a 3D array: (height, width, channels)"
     assert data.shape[-1] == 4, "Data must have 4 channels (RGBA)"
 
@@ -61,21 +95,33 @@ def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     srgb_normalized = convert_linear_to_srgb(linear)
     srgb_normalized = np.concatenate((srgb_normalized, alpha), axis=-1)
     srgb = (srgb_normalized * 255.0).clip(0, 255).astype(np.uint8)
-    PIL.Image.fromarray(srgb, mode="RGBA").save(file_path)
+    iio.imwrite(file_path, srgb)
 
 
 def convert_color(
     data: np.ndarray,
     src_color_space: ColorSpace,
     dst_color_space: ColorSpace,
+    src_channels: int | None = None,
 ) -> np.ndarray:
     """
     Convert an image between color spaces.
 
+    If src_channels is provided, will validate that the image has that many channels.
+    If mismatch, raises an error (no implicit channel conversion).
+
     :param data: The image data as a NumPy array.
     :param src_color_space: The source color space of the image.
     :param dst_color_space: The destination color space of the image.
+    :param src_channels: Optional expected number of channels. If provided and mismatched, raises.
+    :raises ValueError: If channel count mismatch, or unsupported color space conversion.
     """
+
+    if src_channels is not None:
+        if data.shape[-1] != src_channels:
+            raise ValueError(
+                f"Channel mismatch: expected {src_channels} channels, got {data.shape[-1]}"
+            )
 
     if src_color_space == dst_color_space:
         return data

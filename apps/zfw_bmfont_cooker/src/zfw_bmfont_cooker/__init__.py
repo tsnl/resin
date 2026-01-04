@@ -356,7 +356,7 @@ class GlyphAtlasCooker:
             atlas_type="glyph-cache",
             atlas_data=atlas_data,
             image_xywh_list=self._image_xywh_list,
-            color_space="linear",
+            image_format="r32float",
             readme_text=readme_text,
             license_text=license_text,
             as_glyph_cache=self._as_glyph_cache,

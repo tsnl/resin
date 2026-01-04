@@ -21,7 +21,6 @@ __all__ = [
     "Draw3dMaterial",
     "Draw3dRenderer",
     "Draw3dScene",
-    "Draw3dScene",
     "Font",
     "FontSize",
     "FontWeight",
@@ -29,6 +28,8 @@ __all__ = [
     "GuiTheme",
     "GuiWidget",
     "GuiWindow",
+    "ImageFormat",
+    "ImageResource",
     "Key",
     "KeyModifier",
     "MaterialResource",
@@ -44,7 +45,8 @@ __all__ = [
     "convert_srgb_to_linear",
     "expect",
     "load_gltf",
-    "load_rgba_image",
+    "load_image",
+    "load_image_from_bytes",
     "logger",
     "partition_points",
     "partition_triangles",
@@ -94,9 +96,14 @@ from .resources import (
     CookedAtlasGlyphCacheKey,
     COOKED_ATLAS_PATH_SUFFIX,
     GeometryResource,
+    ImageResource,
     MaterialResource,
-    load_rgba_image,
+    load_image,
+    load_image_from_bytes,
     load_gltf,
+)
+from .images import (
+    ImageFormat,
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .images import (

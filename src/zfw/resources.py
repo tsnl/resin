@@ -9,11 +9,11 @@ __all__ = [
     "CookedAtlasGlyphCacheKey",
     "CookedAtlasGlyphInfo",
     "GeometryResource",
+    "ImageResource",
     "MaterialResource",
     "load_gltf",
     "load_image",
-    "load_rgba_image",
-    "load_rgba_image_from_bytes",
+    "load_image_from_bytes",
 ]
 
 import base64
@@ -26,13 +26,13 @@ from typing import Literal
 import numpy as np
 import orjson
 import pydantic
-import PIL.Image
+import imageio.v3 as iio
 import pygltflib
 import jaxtyping as jt
 
 from .excepts import LogicError
-from .basic import ColorSpace, Font, FontSize, FontWeight, logger
-from .images import convert_color
+from .basic import Font, FontSize, FontWeight, logger
+from .images import ImageFormat, ImageResource, convert_color
 
 
 LOG = logger(__name__)
@@ -73,25 +73,25 @@ class GeometryResource:
 
 
 class MaterialResource:
-    """Contains NumPy arrays and factors needed to construct a Draw3dMaterial."""
+    """Contains image resources and factors needed to construct a Draw3dMaterial."""
 
-    color_map: jt.Float32[np.ndarray, "h w 3"] | None
-    """Base color texture (sRGB converted to linear)."""
+    color_map: ImageResource | None
+    """Base color texture (3-channel, linear space)."""
 
     color_factor: tuple[float, float, float]
     """Base color factor."""
 
-    normal_map: jt.Float32[np.ndarray, "h w 3"] | None
-    """Normal map texture (linear space)."""
+    normal_map: ImageResource | None
+    """Normal map texture (3-channel, linear space)."""
 
-    metalness_map: jt.Float32[np.ndarray, "h w 1"] | None
-    """Metalness texture (linear space)."""
+    metalness_map: ImageResource | None
+    """Metalness texture (1-channel, linear space)."""
 
     metalness_factor: float
     """Metalness factor."""
 
-    roughness_map: jt.Float32[np.ndarray, "h w 1"] | None
-    """Roughness texture (linear space)."""
+    roughness_map: ImageResource | None
+    """Roughness texture (1-channel, linear space)."""
 
     roughness_factor: float
     """Roughness factor."""
@@ -99,12 +99,12 @@ class MaterialResource:
     def __init__(
         self,
         *,
-        color_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
+        color_map: ImageResource | None = None,
         color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
-        normal_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
-        metalness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        normal_map: ImageResource | None = None,
+        metalness_map: ImageResource | None = None,
         metalness_factor: float = 1.0,
-        roughness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        roughness_map: ImageResource | None = None,
         roughness_factor: float = 1.0,
     ) -> None:
         self.color_map = color_map
@@ -119,93 +119,216 @@ class MaterialResource:
 #
 # Image Loading
 #
-# FIXME: PIL only reads uint8 images. Need a custom image reader (and probably BC
-# support).
-#
+
+
+def _normalize_image_to_f32(
+    data: np.ndarray,
+) -> np.ndarray:
+    """Normalize image data to float32 in [0, 1] range."""
+    if data.dtype == np.uint8:
+        return data.astype(np.float32) / 255.0
+    elif data.dtype == np.uint16:
+        return data.astype(np.float32) / 65535.0
+    elif np.issubdtype(data.dtype, np.floating):
+        return data.astype(np.float32)
+    else:
+        raise ValueError(f"Unsupported image dtype: {data.dtype}")
+
+
+def _encode_f32_to_format(
+    data: np.ndarray,
+    image_format: ImageFormat,
+) -> np.ndarray:
+    """Re-encode normalized float32 image to target format bit-depth."""
+    match image_format:
+        case "rgba32float" | "rgb32float" | "r32float":
+            return data.astype(np.float32)
+        case "rgba16float" | "rgb16float" | "r16float":
+            return data.astype(np.float16)
+        case "rgba8unorm" | "rgba8unorm-srgb" | "r8unorm":
+            return (data * 255.0).clip(0, 255).astype(np.uint8)
+        case _:
+            raise ValueError(f"Unknown image format: {image_format}")
+
+
+def _get_channel_count(image_format: ImageFormat) -> int:
+    """Get number of channels for image format."""
+    match image_format:
+        case "rgba32float" | "rgba16float" | "rgba8unorm" | "rgba8unorm-srgb":
+            return 4
+        case "rgb32float" | "rgb16float":
+            return 3
+        case "r32float" | "r16float" | "r8unorm":
+            return 1
+        case _:
+            raise ValueError(f"Unknown image format: {image_format}")
+
+
+def _convert_format(
+    data: np.ndarray,
+    input_format: ImageFormat,
+    output_format: ImageFormat,
+) -> np.ndarray:
+    """
+    Convert from one ImageFormat to another.
+
+    Steps:
+    1. Normalize input to float32
+    2. Adjust channel count if needed (e.g., RGBA -> RGB by dropping alpha)
+    3. Apply color space conversion if needed (srgb<->linear)
+    4. Re-encode to output bit-depth
+    """
+    input_channels = _get_channel_count(input_format)
+    output_channels = _get_channel_count(output_format)
+
+    # Normalize to float32
+    f32_data = _normalize_image_to_f32(data)
+
+    # Handle channel count mismatch
+    if input_channels != output_channels:
+        if input_channels == 4 and output_channels == 3:
+            # Drop alpha channel
+            f32_data = f32_data[:, :, :3]
+        elif input_channels == 3 and output_channels == 4:
+            # Add alpha channel (all 1.0)
+            alpha = np.ones((*f32_data.shape[:2], 1), dtype=f32_data.dtype)
+            f32_data = np.concatenate((f32_data, alpha), axis=-1)
+        elif input_channels == 1 and output_channels == 4:
+            # Replicate grayscale to RGBA
+            f32_data = np.repeat(f32_data, 4, axis=-1)
+        elif input_channels == 4 and output_channels == 1:
+            # Convert RGBA to grayscale (use luminance formula)
+            f32_data = (
+                0.299 * f32_data[:, :, 0:1]
+                + 0.587 * f32_data[:, :, 1:2]
+                + 0.114 * f32_data[:, :, 2:3]
+            )
+        else:
+            raise ValueError(
+                f"Unsupported channel conversion: {input_channels} -> {output_channels}"
+            )
+
+    # Apply color space conversion if needed
+    input_is_srgb = "srgb" in input_format
+    output_is_srgb = "srgb" in output_format
+
+    if input_is_srgb and not output_is_srgb:
+        # sRGB -> linear
+        f32_data = convert_color(
+            f32_data,
+            src_color_space="srgb",
+            dst_color_space="linear",
+            src_channels=f32_data.shape[-1],
+        )
+    elif not input_is_srgb and output_is_srgb:
+        # linear -> sRGB
+        f32_data = convert_color(
+            f32_data,
+            src_color_space="linear",
+            dst_color_space="srgb",
+            src_channels=f32_data.shape[-1],
+        )
+
+    # Re-encode to target format
+    return _encode_f32_to_format(f32_data, output_format)
 
 
 def load_image(
+    file_path: Path | str,
+    image_format: ImageFormat,
     *,
-    file_path: Path,
-    expected_channel_count: Literal[1, 4],
-    input_color_space: ColorSpace = "srgb",
-    output_color_space: ColorSpace = "linear",
-) -> np.ndarray:
-    match expected_channel_count:
-        case 1:
-            if input_color_space != "linear" or output_color_space != "linear":
-                LOG.error(
-                    "Color space conversion requested for mono image: "
-                    "ignoring and loading as linear: please fix the caller."
-                )
-            return load_mono_image(file_path)
-        case 4:
-            return load_rgba_image(
-                file_path,
-                input_color_space=input_color_space,
-                output_color_space=output_color_space,
-            )
-
-
-def load_mono_image(file_path: Path) -> np.ndarray:
+    expected_format: ImageFormat | None = None,
+) -> ImageResource:
     """
-    Loads a mono (grayscale) image as a normalized NumPy array. Assumed linear color
-    space.
+    Load an image from a file path.
 
-    :param file_path: The path to the image file
-    :return: Mono image as float32 array with shape (H, W, 1).
+    If expected_format is not None, performs color/format conversion from
+    image_format (input) to expected_format (output).
+
+    :param file_path: Path to the image file.
+    :param image_format: The format of the image as stored.
+    :param expected_format: Optional output format. If provided, converts the image.
+    :return: ImageResource with loaded data and metadata.
     """
-    src = np.array(PIL.Image.open(file_path).convert("L"))
-    src_normalized = src.astype(np.float32) / 255.0
-    return src_normalized[:, :, np.newaxis]
+    file_path = Path(file_path)
 
+    # Load image using imageio (preserves bit-depth)
+    raw_data = iio.imread(file_path)
 
-def load_rgba_image(
-    file_path: Path,
-    input_color_space: ColorSpace = "srgb",
-    output_color_space: ColorSpace = "linear",
-) -> np.ndarray:
-    """
-    Loads an RGBA image as a normalized NumPy array.
+    # Ensure 3D array (height, width, channels)
+    if raw_data.ndim == 2:
+        # Grayscale image - add channel dimension
+        raw_data = raw_data[:, :, np.newaxis]
 
-    :param file_path: The path to the image file
-    :param input_color_space: The color space of the input image.
-    :param output_color_space: The desired output color space.
-    :return: RGBA image as float32 array with shape (H, W, 4).
-    """
-    src = np.array(PIL.Image.open(file_path).convert("RGBA"))
-    src_normalized = src.astype(np.float32) / 255.0
-    dst_rgb = convert_color(
-        src_normalized[..., :3],
-        src_color_space=input_color_space,
-        dst_color_space=output_color_space,
+    height, width = raw_data.shape[:2]
+
+    # Apply format conversion if needed
+    if expected_format is not None and expected_format != image_format:
+        converted_data = _convert_format(raw_data, image_format, expected_format)
+        output_format = expected_format
+    else:
+        # Just normalize to float32
+        converted_data = _normalize_image_to_f32(raw_data)
+        output_format = image_format
+
+    # Determine depth (number of channels)
+    depth = converted_data.shape[2] if converted_data.ndim == 3 else 1
+
+    return ImageResource(
+        data=converted_data,
+        width=width,
+        height=height,
+        depth=depth,
+        image_format=output_format,
     )
-    dst_alpha = src_normalized[..., 3:4]
-    return np.concatenate((dst_rgb, dst_alpha), axis=-1)
 
 
-def load_rgba_image_from_bytes(
+def load_image_from_bytes(
     raw_bytes: bytes,
-    input_color_space: ColorSpace = "srgb",
-    output_color_space: ColorSpace = "linear",
-) -> np.ndarray:
+    image_format: ImageFormat,
+    *,
+    expected_format: ImageFormat | None = None,
+) -> ImageResource:
     """
-    Loads an RGBA image from raw bytes as a normalized NumPy array.
+    Load an image from raw bytes.
 
-    :param raw_bytes: The raw image bytes (e.g., PNG or JPEG data).
-    :param input_color_space: The color space of the input image.
-    :param output_color_space: The desired output color space.
-    :return: RGBA image as float32 array with shape (H, W, 4).
+    If expected_format is not None, performs color/format conversion from
+    image_format (input) to expected_format (output).
+
+    :param raw_bytes: Raw image bytes (e.g., PNG, JPEG data).
+    :param image_format: The format of the image as stored.
+    :param expected_format: Optional output format. If provided, converts the image.
+    :return: ImageResource with loaded data and metadata.
     """
-    src = np.array(PIL.Image.open(io.BytesIO(raw_bytes)).convert("RGBA"))
-    src_normalized = src.astype(np.float32) / 255.0
-    dst_rgb = convert_color(
-        src_normalized[..., :3],
-        src_color_space=input_color_space,
-        dst_color_space=output_color_space,
+    # Load image using imageio from bytes
+    raw_data = iio.imread(io.BytesIO(raw_bytes))
+
+    # Ensure 3D array (height, width, channels)
+    if raw_data.ndim == 2:
+        # Grayscale image - add channel dimension
+        raw_data = raw_data[:, :, np.newaxis]
+
+    height, width = raw_data.shape[:2]
+
+    # Apply format conversion if needed
+    if expected_format is not None and expected_format != image_format:
+        converted_data = _convert_format(raw_data, image_format, expected_format)
+        output_format = expected_format
+    else:
+        # Just normalize to float32
+        converted_data = _normalize_image_to_f32(raw_data)
+        output_format = image_format
+
+    # Determine depth (number of channels)
+    depth = converted_data.shape[2] if converted_data.ndim == 3 else 1
+
+    return ImageResource(
+        data=converted_data,
+        width=width,
+        height=height,
+        depth=depth,
+        image_format=output_format,
     )
-    dst_alpha = src_normalized[..., 3:4]
-    return np.concatenate((dst_rgb, dst_alpha), axis=-1)
 
 
 #
@@ -352,7 +475,7 @@ def _get_accessor_data(
 
 
 class _ImageSource:
-    """Stores raw image bytes or file path for deferred loading with color space."""
+    """Stores raw image bytes or file path for deferred loading with format conversion."""
 
     def __init__(
         self,
@@ -363,19 +486,27 @@ class _ImageSource:
         self.raw_bytes = raw_bytes
         self.file_path = file_path
 
-    def load(self, input_color_space: ColorSpace) -> np.ndarray:
-        """Load the image with the specified input color space, output as linear."""
+    def load(
+        self, input_format: ImageFormat, output_format: ImageFormat
+    ) -> ImageResource:
+        """
+        Load the image with format conversion.
+
+        :param input_format: Format as stored (on disk/in bytes)
+        :param output_format: Desired output format
+        :return: ImageResource with converted data
+        """
         if self.raw_bytes is not None:
-            return load_rgba_image_from_bytes(
+            return load_image_from_bytes(
                 self.raw_bytes,
-                input_color_space=input_color_space,
-                output_color_space="linear",
+                image_format=input_format,
+                expected_format=output_format,
             )
         elif self.file_path is not None:
-            return load_rgba_image(
+            return load_image(
                 self.file_path,
-                input_color_space=input_color_space,
-                output_color_space="linear",
+                image_format=input_format,
+                expected_format=output_format,
             )
         else:
             raise ValueError("ImageSource has no raw_bytes or file_path")
@@ -432,60 +563,75 @@ _WHITE_1X1_PNG = base64.b64decode(
 )
 
 
-def _extract_channel_as_rgba(image_data: np.ndarray, channel: int) -> np.ndarray:
-    """Extract a single channel from RGBA image data and return as single-channel array.
-
-    The extracted channel value is placed in a single-channel array.
-    """
-    return image_data[:, :, channel : channel + 1]
-
-
 def _load_material_resources(
     gltf: pygltflib.GLTF2,
     image_sources: list[_ImageSource],
 ) -> list[MaterialResource]:
     """Load all materials from the glTF file as MaterialResource objects.
 
-    Color space handling:
-    - Base color textures: loaded as sRGB (converted to linear)
-    - Metallic-roughness textures: loaded as linear (no conversion)
-    - Normal maps: loaded as linear (no conversion)
+    Format handling:
+    - Base color textures: RGBA sRGB on disk -> RGB linear (3 channels)
+    - Metallic-roughness textures: Linear on disk -> linear output (1 channel each)
+    - Normal maps: Linear on disk -> linear output (3 channels)
     """
     materials: list[MaterialResource] = []
 
-    # Cache for loaded image data from sources
-    # Maps (source_index, color_space, channel_or_none) to np.ndarray
-    # channel_or_none: None for full RGBA, 0-3 for extracted channel
-    image_data_cache: dict[tuple[int, ColorSpace, int | None], np.ndarray] = {}
+    # Cache for loaded ImageResource from sources
+    # Maps (source_index, output_format) to ImageResource
+    image_resource_cache: dict[tuple[int, ImageFormat], ImageResource] = {}
 
-    def get_or_load_image(
+    def get_or_load_image_resource(
         source_idx: int,
-        input_color_space: ColorSpace,
-        channel: int | None = None,
-    ) -> np.ndarray:
-        """Get or load image data, with caching to avoid duplicates."""
-        cache_key = (source_idx, input_color_space, channel)
-        if cache_key in image_data_cache:
-            return image_data_cache[cache_key]
+        output_format: ImageFormat,
+    ) -> ImageResource:
+        """Get or load image resource with format conversion, with caching."""
+        cache_key = (source_idx, output_format)
+        if cache_key in image_resource_cache:
+            return image_resource_cache[cache_key]
 
-        source_data = image_sources[source_idx].load(input_color_space)
-        if channel is not None:
-            # Extract single channel
-            data = _extract_channel_as_rgba(source_data, channel)
+        # Determine input format based on typical glTF usage
+        # For base color: sRGB RGBA on disk
+        # For metallic/roughness/normal: linear RGBA on disk
+        if output_format in ("rgb32float", "rgb16float"):
+            # This is likely for base color - came from sRGB
+            input_format: ImageFormat = "rgba8unorm-srgb"
         else:
-            data = source_data
+            # Linear formats
+            input_format = "rgba8unorm"
 
-        image_data_cache[cache_key] = data
-        return data
+        resource = image_sources[source_idx].load(input_format, output_format)
+        image_resource_cache[cache_key] = resource
+        return resource
+
+    def extract_channel(resource: ImageResource, channel: int) -> ImageResource:
+        """Extract a single channel from an ImageResource."""
+        # Extract channel and create new ImageResource
+        channel_data = resource.data[:, :, channel : channel + 1]
+
+        # Determine output format (1-channel version)
+        if "32float" in resource.image_format:
+            out_fmt: ImageFormat = "r32float"
+        elif "16float" in resource.image_format:
+            out_fmt = "r16float"
+        else:
+            out_fmt = "r8unorm"
+
+        return ImageResource(
+            data=channel_data,
+            width=resource.width,
+            height=resource.height,
+            depth=1,
+            image_format=out_fmt,
+        )
 
     for material_idx, material in enumerate(gltf.materials or []):
         color_factor = (1.0, 1.0, 1.0)
-        color_map: np.ndarray | None = None
-        normal_map: np.ndarray | None = None
+        color_map: ImageResource | None = None
+        normal_map: ImageResource | None = None
         metalness_factor = 1.0
         roughness_factor = 1.0
-        metalness_map: np.ndarray | None = None
-        roughness_map: np.ndarray | None = None
+        metalness_map: ImageResource | None = None
+        roughness_map: ImageResource | None = None
 
         # PBR metallic-roughness workflow
         pbr = material.pbrMetallicRoughness
@@ -505,11 +651,16 @@ def _load_material_resources(
                     if texture.source is not None and texture.source < len(
                         image_sources
                     ):
-                        # Base color is stored in sRGB, need RGB only
-                        rgba_data = get_or_load_image(
-                            texture.source, input_color_space="srgb"
+                        # Base color: sRGB RGBA on disk -> linear RGB output
+                        color_resource = get_or_load_image_resource(
+                            texture.source, output_format="rgb32float"
                         )
-                        color_map = rgba_data[:, :, :3]
+                        # Ensure it's 3-channel
+                        if color_resource.depth != 3:
+                            raise ValueError(
+                                f"Base color texture should have 3 channels, got {color_resource.depth}"
+                            )
+                        color_map = color_resource
 
             # Metallic-roughness
             if pbr.metallicFactor is not None:
@@ -524,15 +675,14 @@ def _load_material_resources(
                     if texture.source is not None and texture.source < len(
                         image_sources
                     ):
+                        # Load as linear RGBA
+                        mr_resource = get_or_load_image_resource(
+                            texture.source, output_format="rgba32float"
+                        )
                         # glTF stores metallic in B channel (index 2),
                         # roughness in G channel (index 1)
-                        # Metallic-roughness is stored in linear space
-                        metalness_map = get_or_load_image(
-                            texture.source, input_color_space="linear", channel=2
-                        )
-                        roughness_map = get_or_load_image(
-                            texture.source, input_color_space="linear", channel=1
-                        )
+                        metalness_map = extract_channel(mr_resource, 2)
+                        roughness_map = extract_channel(mr_resource, 1)
 
         # Normal map (stored in linear space)
         if material.normalTexture is not None:
@@ -540,10 +690,16 @@ def _load_material_resources(
             if tex_idx is not None and gltf.textures:
                 texture = gltf.textures[tex_idx]
                 if texture.source is not None and texture.source < len(image_sources):
-                    rgba_data = get_or_load_image(
-                        texture.source, input_color_space="linear"
+                    # Normal map: linear RGBA on disk -> linear RGB output
+                    normal_resource = get_or_load_image_resource(
+                        texture.source, output_format="rgb32float"
                     )
-                    normal_map = rgba_data[:, :, :3]
+                    # Ensure it's 3-channel
+                    if normal_resource.depth != 3:
+                        raise ValueError(
+                            f"Normal texture should have 3 channels, got {normal_resource.depth}"
+                        )
+                    normal_map = normal_resource
 
         material_resource = MaterialResource(
             color_factor=color_factor,
@@ -799,7 +955,7 @@ class CookedAtlas:
     atlas_type: CookedAtlasType
     atlas_data: np.ndarray  # (h, w, 4) RGBA f32 image or (h, w, 1) mono f32 image
     image_xywh_list: list[tuple[int, int, int, int]]
-    color_space: ColorSpace = "linear"
+    image_format: ImageFormat = "rgba32float"
     readme_text: str | None = None
     license_text: str | None = None
     as_glyph_cache: dict[CookedAtlasGlyphCacheKey, "CookedAtlasGlyphInfo"] | None = None
@@ -808,7 +964,7 @@ class CookedAtlas:
     def load(
         *,
         path: Path,
-        color_space: ColorSpace = "linear",
+        image_format: ImageFormat = "rgba32float",
         load_readme_text: bool = False,
         load_license_text: bool = False,
         load_glyph_metrics: bool = True,
@@ -826,14 +982,14 @@ class CookedAtlas:
             index = CookedAtlasIndexFile(**orjson.loads(f.read()))
         image_xywh_list = index.image_xywh_list
 
-        # Load atlas.png
+        # Load atlas.png with format conversion
         atlas_path = path / "atlas.png"
-        atlas_data = load_image(
-            file_path=atlas_path,
-            expected_channel_count=index.channel_count,
-            input_color_space=index.color_space,
-            output_color_space=color_space,
+        resource = load_image(
+            atlas_path,
+            image_format=index.image_format,
+            expected_format=image_format,
         )
+        atlas_data = resource.data
 
         # (Optional) Load README.md
         if load_readme_text:
@@ -865,7 +1021,7 @@ class CookedAtlas:
             atlas_type="glyph-cache",
             atlas_data=atlas_data,
             image_xywh_list=image_xywh_list,
-            color_space=color_space,
+            image_format=image_format,
             readme_text=readme_text,
             license_text=license_text,
             as_glyph_cache=as_glyph_cache,
@@ -885,22 +1041,14 @@ class CookedAtlas:
             index = CookedAtlasIndexFile(
                 cooked_atlas_type=self.atlas_type,
                 image_xywh_list=self.image_xywh_list,
-                channel_count=self.atlas_data.shape[2],
-                color_space=self.color_space,
+                image_format=self.image_format,
             )
             f.write(orjson.dumps(index.model_dump()))
 
-        # Save atlas.png
-        pil_atlas = (np.clip(self.atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
-        pil_atlas = pil_atlas.squeeze()
-        pil_mode = "RGBA" if self.atlas_data.shape[2] == 4 else "L"
-        pil_image = PIL.Image.fromarray(pil_atlas, mode=pil_mode)
-        pil_image.save(
-            path / "atlas.png",
-            format="PNG",
-            compress_level=9,
-            optimize=True,
-        )
+        # Save atlas.png using imageio
+        atlas_uint8 = (np.clip(self.atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
+        atlas_uint8 = atlas_uint8.squeeze()
+        iio.imwrite(path / "atlas.png", atlas_uint8)
 
         # (Optional) Save README.md
         if self.readme_text:
@@ -929,8 +1077,7 @@ class CookedAtlas:
 class CookedAtlasIndexFile(pydantic.BaseModel):
     cooked_atlas_type: CookedAtlasType
     image_xywh_list: list[tuple[int, int, int, int]]
-    channel_count: Literal[1, 4]
-    color_space: ColorSpace
+    image_format: ImageFormat
 
 
 #

@@ -13,14 +13,14 @@ import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
 from .bvh import Bvh, build_bvh
-from .resources import GeometryResource, MaterialResource
+from .resources import GeometryResource, ImageResource, MaterialResource
 
 #
 # Renderer
 #
 
 
-class Draw3dRenderer:
+class Draw3dRenderer(BaseDisposable):
     device: wgpu.GPUDevice
     queue: wgpu.GPUQueue
 
@@ -39,9 +39,9 @@ class Draw3dRenderer:
     draw_pipeline: wgpu.GPUComputePipeline
 
     geometry_heap_device_buffer: wgpu.GPUBuffer
-    material_heap_device_buffer: wgpu.GPUBuffer
     bvh_node_heap_device_buffer: wgpu.GPUBuffer
     triangle_heap_device_buffer: wgpu.GPUBuffer
+    material_heap_device_buffer: wgpu.GPUBuffer
     texture_heap_device_buffer: wgpu.GPUBuffer
     subpixel_heap_device_buffer: wgpu.GPUBuffer
 
@@ -50,11 +50,13 @@ class Draw3dRenderer:
     allocated_geometry_count: int
     allocated_bvh_node_count: int
     allocated_triangle_count: int
+    allocated_material_count: int
     allocated_image_count: int
     allocated_subpixel_count: int
 
     geometry_cache: dict["GeometryResource", "Draw3dGeometry"]
     material_cache: dict["MaterialResource", "Draw3dMaterial"]
+    texture_cache: dict["ImageResource", "Draw3dTexture"]
 
     def __init__(
         self,
@@ -67,7 +69,7 @@ class Draw3dRenderer:
         bvh_node_capacity: int = 1 << 20,
         triangle_capacity: int = 1 << 22,
         image_capacity: int = 1 << 8,
-        subpixel_capacity: int = 1 << 22,
+        subpixel_capacity: int = 1 << 29,
     ):
         self.device = device
         self.queue = queue
@@ -186,11 +188,6 @@ class Draw3dRenderer:
             size=PodGeometryArray.array_size(shape=(self.geometry_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.material_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.MaterialHeapDeviceBuffer",
-            size=PodMaterialArray.array_size(shape=(self.material_capacity,)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
         self.bvh_node_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
             size=PodBvhNodeArray.array_size(shape=(self.bvh_node_capacity,)),
@@ -199,6 +196,11 @@ class Draw3dRenderer:
         self.triangle_heap_device_buffer = device.create_buffer(
             label="Draw3dRenderer.TriangleHeapDeviceBuffer",
             size=PodVertexArray.array_size(shape=(self.triangle_capacity, 3)),
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
+        self.material_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.MaterialHeapDeviceBuffer",
+            size=PodMaterialArray.array_size(shape=(self.material_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
         self.texture_heap_device_buffer = device.create_buffer(
@@ -227,25 +229,25 @@ class Draw3dRenderer:
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
-                        buffer=self.material_heap_device_buffer,
-                        offset=0,
-                        size=self.material_heap_device_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=2,
-                    resource=wgpu.BufferBinding(
                         buffer=self.bvh_node_heap_device_buffer,
                         offset=0,
                         size=self.bvh_node_heap_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
-                    binding=3,
+                    binding=2,
                     resource=wgpu.BufferBinding(
                         buffer=self.triangle_heap_device_buffer,
                         offset=0,
                         size=self.triangle_heap_device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=3,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.material_heap_device_buffer,
+                        offset=0,
+                        size=self.material_heap_device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
@@ -270,6 +272,7 @@ class Draw3dRenderer:
         self.allocated_geometry_count = 0
         self.allocated_bvh_node_count = 0
         self.allocated_triangle_count = 0
+        self.allocated_material_count = 0
         self.allocated_image_count = 0
         self.allocated_subpixel_count = 0
 
@@ -277,6 +280,7 @@ class Draw3dRenderer:
         # Maps resource objects to their Draw3d counterparts
         self._geometry_cache = {}
         self._material_cache = {}
+        self._texture_cache = {}
 
         # Initialization: clear device buffers to zero
         encoder = device.create_command_encoder(
@@ -286,6 +290,16 @@ class Draw3dRenderer:
         encoder.clear_buffer(self.bvh_node_heap_device_buffer, offset=0)
         encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
         queue.submit([encoder.finish()])
+
+    def _on_dispose(self) -> None:
+        self.geometry_heap_device_buffer.destroy()
+        self.bvh_node_heap_device_buffer.destroy()
+        self.triangle_heap_device_buffer.destroy()
+        self.material_heap_device_buffer.destroy()
+        self.texture_heap_device_buffer.destroy()
+        self.subpixel_heap_device_buffer.destroy()
+
+        return super()._on_dispose()
 
     def _add_triangles(self, vertices: PodVertexArray) -> int:
         assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
@@ -473,6 +487,63 @@ class Draw3dRenderer:
         # Return offset in texture array elements:
         return allocation_offset
 
+    def _add_material(
+        self,
+        *,
+        color_map_id: int,
+        color_factor: tuple[float, float, float],
+        normal_map_id: int,
+        metalness_map_id: int,
+        metalness_factor: float,
+        roughness_map_id: int,
+        roughness_factor: float,
+    ) -> int:
+        """Create a single PodMaterialArray entry and upload it to the material heap.
+
+        Returns the allocated material index (offset in material array elements).
+        """
+        data = PodMaterialArray.empty(shape=(1,))
+        data["color_map_id"][0] = np.uint32(color_map_id)
+        data["color_factor"][0] = np.array(color_factor, dtype=np.float32)
+        data["normal_map_id"][0] = np.uint32(normal_map_id)
+        data["metalness_map_id"][0] = np.uint32(metalness_map_id)
+        data["metalness_factor"][0] = np.float32(metalness_factor)
+        data["roughness_map_id"][0] = np.uint32(roughness_map_id)
+        data["roughness_factor"][0] = np.float32(roughness_factor)
+
+        # Allocate one material slot
+        allocation_offset = self.allocated_material_count
+        self.allocated_material_count += 1
+        if self.allocated_material_count > self.material_capacity:
+            raise RuntimeError("Draw3dRenderer material heap capacity exceeded.")
+
+        # Upload via staging buffer
+        staging_size = PodMaterialArray.array_size(shape=(1,))
+        staging_buffer = self.device.create_buffer(
+            label="Draw3dRenderer.MaterialUploadStagingBuffer",
+            size=staging_size,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        staging_buffer.write_mapped(data=data)
+        staging_buffer.unmap()
+
+        encoder = self.device.create_command_encoder(
+            label="Draw3dRenderer.MaterialUploadEncoder"
+        )
+        encoder.copy_buffer_to_buffer(
+            source=staging_buffer,
+            source_offset=0,
+            destination=self.material_heap_device_buffer,
+            destination_offset=(allocation_offset * staging_size),
+            size=staging_size,
+        )
+        self.queue.submit([encoder.finish()])
+
+        staging_buffer.destroy()
+
+        return allocation_offset
+
     def _add_subpixels(self, subpixels: np.ndarray) -> int:
         assert subpixels.ndim == 1 and subpixels.dtype == np.float16
 
@@ -549,6 +620,26 @@ class Draw3dRenderer:
 
         return new_draw_3d_geometry
 
+    def get_texture(self, resource: "ImageResource") -> "Draw3dTexture":
+        """
+        Convert an ImageResource to a Draw3dTexture, using a cache to avoid
+        recreating the same texture multiple times.
+
+        :param resource: The ImageResource to convert.
+        :return: A Draw3dTexture instance.
+        """
+
+        if cached_entry := self._texture_cache.get(resource):
+            return cached_entry
+
+        new_draw_3d_texture = Draw3dTexture(
+            renderer=self,
+            resource=resource,
+        )
+        self._texture_cache[resource] = new_draw_3d_texture
+
+        return new_draw_3d_texture
+
     def get_material(self, resource: "MaterialResource") -> "Draw3dMaterial":
         """
         Convert a MaterialResource to a Draw3dMaterial, using a cache to avoid
@@ -561,14 +652,28 @@ class Draw3dRenderer:
         if cached_entry := self._material_cache.get(resource):
             return cached_entry
 
+        # Convert ImageResource objects to Draw3dTexture objects
+        color_texture = (
+            self.get_texture(resource.color_map) if resource.color_map else None
+        )
+        normal_texture = (
+            self.get_texture(resource.normal_map) if resource.normal_map else None
+        )
+        metalness_texture = (
+            self.get_texture(resource.metalness_map) if resource.metalness_map else None
+        )
+        roughness_texture = (
+            self.get_texture(resource.roughness_map) if resource.roughness_map else None
+        )
+
         new_draw_3d_material = Draw3dMaterial(
             renderer=self,
-            color_map=resource.color_map,
+            color_texture=color_texture,
             color_factor=resource.color_factor,
-            normal_map=resource.normal_map,
-            metalness_map=resource.metalness_map,
+            normal_texture=normal_texture,
+            metalness_texture=metalness_texture,
             metalness_factor=resource.metalness_factor,
-            roughness_map=resource.roughness_map,
+            roughness_texture=roughness_texture,
             roughness_factor=resource.roughness_factor,
         )
         self._material_cache[resource] = new_draw_3d_material
@@ -576,7 +681,7 @@ class Draw3dRenderer:
         return new_draw_3d_material
 
 
-class Draw3dFrame:
+class Draw3dFrame(BaseDisposable):
     renderer: Draw3dRenderer
 
     def __init__(self, renderer: Draw3dRenderer) -> None:
@@ -905,46 +1010,97 @@ class Draw3dGeometry(BaseDisposable):
         return v
 
 
+class Draw3dTexture(BaseDisposable):
+    """
+    Represents a GPU texture created from an ImageResource.
+    IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_texture() instead.
+    """
+
+    renderer: Draw3dRenderer
+    texture_id: int
+
+    def __init__(
+        self,
+        renderer: Draw3dRenderer,
+        *,
+        resource: ImageResource,
+    ) -> None:
+        super().__init__()
+
+        self.renderer = renderer
+
+        # Convert image data to float16 for GPU storage
+        subpixel_data = resource.data.astype(np.float16).flatten()
+
+        # Upload subpixels to GPU heap
+        subpixel_span_begin = renderer._add_subpixels(subpixels=subpixel_data)
+        subpixel_span_count = subpixel_data.size
+
+        # Create texture metadata and upload to texture heap
+        self.texture_id = renderer._add_texture(
+            width=resource.width,
+            height=resource.height,
+            depth=resource.depth,
+            subpixel_span_begin=subpixel_span_begin,
+            subpixel_span_count=subpixel_span_count,
+        )
+
+
 class Draw3dMaterial(BaseDisposable):
     """
     IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_material() instead.
     """
 
     renderer: Draw3dRenderer
+    material_id: int
 
-    color_map: jt.Float32[np.ndarray, "h w 3"] | None
+    color_texture: "Draw3dTexture | None"
     color_factor: tuple[float, float, float]
-    normal_map: jt.Float32[np.ndarray, "h w 3"] | None
-    metalness_map: jt.Float32[np.ndarray, "h w 1"] | None
+    normal_texture: "Draw3dTexture | None"
+    metalness_texture: "Draw3dTexture | None"
     metalness_factor: float
-    roughness_map: jt.Float32[np.ndarray, "h w 1"] | None
+    roughness_texture: "Draw3dTexture | None"
     roughness_factor: float
 
     def __init__(
         self,
         renderer: Draw3dRenderer,
         *,
-        color_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
+        color_texture: "Draw3dTexture | None" = None,
         color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
-        normal_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
-        metalness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        normal_texture: "Draw3dTexture | None" = None,
+        metalness_texture: "Draw3dTexture | None" = None,
         metalness_factor: float = 1.0,
-        roughness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        roughness_texture: "Draw3dTexture | None" = None,
         roughness_factor: float = 1.0,
     ) -> None:
         super().__init__()
 
         self.renderer = renderer
 
-        self.color_map = color_map
+        self.color_texture = color_texture
         self.color_factor = color_factor
-        self.normal_map = normal_map
-        self.metalness_map = metalness_map
+        self.normal_texture = normal_texture
+        self.metalness_texture = metalness_texture
         self.metalness_factor = metalness_factor
-        self.roughness_map = roughness_map
+        self.roughness_texture = roughness_texture
         self.roughness_factor = roughness_factor
 
-        # TODO: upload material data to GPU
+        # Upload material data to GPU
+        color_map_id = color_texture.texture_id if color_texture else 0
+        normal_map_id = normal_texture.texture_id if normal_texture else 0
+        metalness_map_id = metalness_texture.texture_id if metalness_texture else 0
+        roughness_map_id = roughness_texture.texture_id if roughness_texture else 0
+
+        self.material_id = renderer._add_material(
+            color_map_id=color_map_id,
+            color_factor=color_factor,
+            normal_map_id=normal_map_id,
+            metalness_map_id=metalness_map_id,
+            metalness_factor=metalness_factor,
+            roughness_map_id=roughness_map_id,
+            roughness_factor=roughness_factor,
+        )
 
 
 @dataclass(kw_only=True)

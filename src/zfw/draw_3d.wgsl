@@ -6,9 +6,9 @@ enable f16;
 
 // Renderer bind group:
 @group(0) @binding(0) var<storage, read> geometry_heap: array<PodGeometry>;
-@group(0) @binding(1) var<storage, read> material_heap: array<PodMaterial>;
-@group(0) @binding(2) var<storage, read> bvh_node_heap: array<PodBvhNode>;
-@group(0) @binding(3) var<storage, read> triangle_heap: array<PodTriangle>;
+@group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
+@group(0) @binding(2) var<storage, read> triangle_heap: array<PodTriangle>;
+@group(0) @binding(3) var<storage, read> material_heap: array<PodMaterial>;
 @group(0) @binding(4) var<storage, read> texture_heap: array<PodTextureArray>;
 @group(0) @binding(5) var<storage, read> subpixel_heap: array<f16>;
 

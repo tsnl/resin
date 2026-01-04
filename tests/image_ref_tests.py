@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
+import imageio.v3 as iio
 import numpy as np
-import PIL.Image
 
 from zfw import compute_psnr, logger
 
@@ -39,20 +39,20 @@ def assert_image_matches_reference(
     # Also save to output directory for convenience
     output_path = Path("output/zfw") / test_subdir / f"{test_name}.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    PIL.Image.fromarray(actual_image).save(output_path)
+    iio.imwrite(output_path, actual_image)
 
     if not expect_path.exists():
         # No reference exists - create it and pass
-        PIL.Image.fromarray(actual_image).save(expect_path)
+        iio.imwrite(expect_path, actual_image)
         LOG.warning(f"{test_name}: no expect found: image created: {expect_path}")
         return
 
     # Load expected image
-    expected_image = np.array(PIL.Image.open(expect_path))
+    expected_image = iio.imread(expect_path)
 
     # Check shapes match
     if actual_image.shape != expected_image.shape:
-        PIL.Image.fromarray(actual_image).save(actual_path)
+        iio.imwrite(actual_path, actual_image)
         raise AssertionError(
             f"Image shape mismatch for {test_name}: "
             f"expected {expected_image.shape}, got {actual_image.shape}. "
@@ -62,7 +62,7 @@ def assert_image_matches_reference(
     # Compare images
     psnr = compute_psnr(actual_image, expected_image)
     if psnr < psnr_threshold:
-        PIL.Image.fromarray(actual_image).save(actual_path)
+        iio.imwrite(actual_path, actual_image)
         raise AssertionError(
             f"PSNR match failed for {test_name}: "
             f"PSNR {psnr:.2f} < {psnr_threshold}. "

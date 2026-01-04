@@ -1,11 +1,13 @@
 import time
 from typing import Generator
+
+import imageio.v3 as iio
+import numpy as np
+import os
 import pytest
 import rich
 import wgpu
-from PIL import Image
-import os
-import numpy as np
+
 from conftest import GpuFixture
 
 from zfw import (
@@ -16,7 +18,6 @@ from zfw import (
     load_gltf,
     logger,
 )
-
 
 FRAME_W = 1024
 FRAME_H = 1024
@@ -103,8 +104,7 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
     img_data = (data * 255.0).astype(np.uint8)
     output_path = f"output/zfw/test_draw_3d/{filename}"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    img = Image.fromarray(img_data, format)
-    img.save(output_path)
+    iio.imwrite(output_path, img_data)
 
 
 @pytest.fixture(scope="module")

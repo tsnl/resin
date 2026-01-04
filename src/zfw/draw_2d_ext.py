@@ -546,7 +546,7 @@ class GlyphAtlas(BaseDisposable):
             # Load the cooked atlas
             cooked = CookedAtlas.load(
                 path=atlas_dir,
-                color_space="linear",
+                image_format="r32float",
                 load_readme_text=False,
                 load_license_text=False,
             )
