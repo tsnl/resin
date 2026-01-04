@@ -803,7 +803,7 @@ class PodVertexArray(StructuredNDArray):
 class PodBvhNodeArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("triangle_span", POD_SPAN_DTYPE),
+            ("tri_span", POD_SPAN_DTYPE),
             ("children", np.uint32, (2,)),
             ("aabb", POD_AABB_DTYPE),
         ]

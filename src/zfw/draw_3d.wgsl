@@ -54,7 +54,7 @@ struct PodGeometry {
 }
 
 struct PodBvhNode {
-    span: PodSpan,
+    tri_span: PodSpan,
     children: array<u32, 2>,
     aabb: PodAabb,
 }

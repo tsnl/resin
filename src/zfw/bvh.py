@@ -11,10 +11,13 @@ __all__ = [
 ]
 
 from dataclasses import dataclass
+import logging
 import numba
 import numpy.typing as npt
 import numpy as np
 import time
+
+from .basic import logger
 
 NUMBA_CACHE_ENABLED = True
 NUMBA_PARALLEL_ENABLED = False
@@ -41,6 +44,7 @@ def build_bvh(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     v: npt.NDArray[np.float32],  # (nv, 3)
     copy_t: bool = True,
+    metrics_log_level: int = logging.DEBUG,
 ) -> Bvh:
     """
     Constructs a BVH (bounding volume hierarchy) for the given triangles and vertices.
@@ -57,8 +61,9 @@ def build_bvh(
     :return: The constructed BVH, including re-ordered triangle indices.
     """
 
-    # Copy `t`: if not specified, `t` will be modified in-place.
     t0 = time.perf_counter()
+
+    # Copy `t`: if not specified, `t` will be modified in-place.
     if copy_t:
         t = t.copy()
 
@@ -68,7 +73,10 @@ def build_bvh(
     c = v[t].mean(axis=-2)
     assert c.shape == (nt, 3)
     t1 = time.perf_counter()
-    print(f"  [Init & centroids: {(t1 - t0) * 1000:.2f}ms]")
+    LOG.log(
+        msg=f"BVH construction: centroids: {(t1 - t0) * 1000:.2f}ms",
+        level=metrics_log_level,
+    )
 
     # Guess number of BVH nodes needed for initial capacity:
     # For a binary tree, worst case is 2L - 1 nodes (for L leaves).
@@ -94,7 +102,10 @@ def build_bvh(
     bvh_r[0, :] = 0, nt
     bvh_s[0] = nt * compute_aabb_surface_area(bvh_b[0])
     t3 = time.perf_counter()
-    print(f"  [Root AABB: {(t3 - t2) * 1000:.2f}ms]")
+    LOG.log(
+        msg=f"BVH construction: root AABB: {(t3 - t2) * 1000:.2f}ms",
+        level=metrics_log_level,
+    )
 
     # Recursively build BVH subtree starting from root node:
     t4 = time.perf_counter()
@@ -111,7 +122,10 @@ def build_bvh(
         _debug_depth=0,
     )
     t5 = time.perf_counter()
-    print(f"  [Recursive build: {(t5 - t4) * 1000:.2f}ms]")
+    LOG.log(
+        msg=f"BVH construction: recursive build: {(t5 - t4) * 1000:.2f}ms",
+        level=metrics_log_level,
+    )
 
     # Ensure we did not exceed allocated BVH node buffer:
     assert bvh_count[0] <= nb, "BVH node buffer overflow"
@@ -459,7 +473,7 @@ def compute_triangles_aabb(
         aabb[1] = np.array([-np.inf, -np.inf, -np.inf], dtype=np.float32)
         return aabb
 
-    # Use vectorized min/max per column for much better performance
+    # Use vectorized min/max per column for performance
     aabb = np.empty((2, 3), dtype=np.float32)
     aabb[0, 0] = v[:, 0].min()
     aabb[0, 1] = v[:, 1].min()
@@ -486,3 +500,6 @@ def compute_aabb_surface_area(
     surface_area = 2.0 * np.sum(extent)
 
     return surface_area
+
+
+LOG = logger(__name__)
