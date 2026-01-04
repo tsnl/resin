@@ -731,8 +731,8 @@ def _process_scene_resources(
 
 def _get_node_transform(node: pygltflib.Node) -> np.ndarray:
     """Get the local transform matrix for a node."""
+    # Matrix is stored column-major in glTF, but we need row-major
     if node.matrix is not None:
-        # Matrix is stored column-major in glTF, but we need row-major
         matrix = np.array(node.matrix, dtype=np.float32).reshape(4, 4).T
         return matrix
 

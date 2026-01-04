@@ -41,8 +41,8 @@ class Draw3dRenderer:
         target_size_wh_px: tuple[int, int],
         instance_capacity: int = 1 << 10,
         geometry_capacity: int = 1 << 8,
-        bvh_node_capacity: int = 1 << 18,
-        triangle_capacity: int = 1 << 20,
+        bvh_node_capacity: int = 1 << 20,
+        triangle_capacity: int = 1 << 22,
     ):
         self.device = device
         self.queue = queue
