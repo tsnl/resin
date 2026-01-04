@@ -1,8 +1,14 @@
+"""
+Resources = file-based data assets used by ZFW, such as images, 3D models, 3D materials, etc.
+"""
+
 __all__ = [
     "COOKED_ATLAS_PATH_SUFFIX",
     "CookedAtlas",
     "CookedAtlasGlyphCacheKey",
     "CookedAtlasGlyphInfo",
+    "GeometryResource",
+    "MaterialResource",
     "load_gltf",
     "load_image",
     "load_rgba_image",
@@ -25,11 +31,88 @@ import jaxtyping as jt
 
 from .excepts import LogicError
 from .basic import ColorSpace, Font, FontSize, FontWeight, logger
-from .draw_3d import Draw3dGeometry, Draw3dMaterial, Draw3dRenderer
 from .images import convert_color
 
 
 LOG = logger(__name__)
+
+
+#
+# Resource Types for 3D Geometry and Materials
+#
+
+
+class GeometryResource:
+    """Contains NumPy arrays needed to construct a Draw3dGeometry."""
+
+    v_p_array: jt.Float32[np.ndarray, "nv 3"]
+    """Vertex positions array."""
+
+    v_n_array: jt.Float32[np.ndarray, "nv 3"]
+    """Vertex normals array."""
+
+    v_t_array: jt.Float32[np.ndarray, "nv 2"]
+    """Vertex texture coordinates array."""
+
+    t_indices: jt.UInt32[np.ndarray, "nt 3"]
+    """Triangle indices array."""
+
+    def __init__(
+        self,
+        *,
+        v_p_array: jt.Float32[np.ndarray, "nv 3"],
+        v_n_array: jt.Float32[np.ndarray, "nv 3"],
+        v_t_array: jt.Float32[np.ndarray, "nv 2"],
+        t_indices: jt.UInt32[np.ndarray, "nt 3"],
+    ) -> None:
+        self.v_p_array = v_p_array
+        self.v_n_array = v_n_array
+        self.v_t_array = v_t_array
+        self.t_indices = t_indices
+
+
+class MaterialResource:
+    """Contains NumPy arrays and factors needed to construct a Draw3dMaterial."""
+
+    color_map: jt.Float32[np.ndarray, "h w 3"] | None
+    """Base color texture (sRGB converted to linear)."""
+
+    color_factor: tuple[float, float, float]
+    """Base color factor."""
+
+    normal_map: jt.Float32[np.ndarray, "h w 3"] | None
+    """Normal map texture (linear space)."""
+
+    metalness_map: jt.Float32[np.ndarray, "h w 1"] | None
+    """Metalness texture (linear space)."""
+
+    metalness_factor: float
+    """Metalness factor."""
+
+    roughness_map: jt.Float32[np.ndarray, "h w 1"] | None
+    """Roughness texture (linear space)."""
+
+    roughness_factor: float
+    """Roughness factor."""
+
+    def __init__(
+        self,
+        *,
+        color_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
+        color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        normal_map: jt.Float32[np.ndarray, "h w 3"] | None = None,
+        metalness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        metalness_factor: float = 1.0,
+        roughness_map: jt.Float32[np.ndarray, "h w 1"] | None = None,
+        roughness_factor: float = 1.0,
+    ) -> None:
+        self.color_map = color_map
+        self.color_factor = color_factor
+        self.normal_map = normal_map
+        self.metalness_map = metalness_map
+        self.metalness_factor = metalness_factor
+        self.roughness_map = roughness_map
+        self.roughness_factor = roughness_factor
 
 
 #
@@ -144,25 +227,22 @@ GLTF_TO_ZUP_MATRIX = np.array(
 
 
 def load_gltf(
-    renderer: "Draw3dRenderer",
     path: Path | str,
     *,
     transform_coordinate_system: bool = True,
-) -> dict[tuple[Draw3dGeometry, Draw3dMaterial], jt.Float32[np.ndarray, "N 4 4"]]:
+) -> dict[tuple[GeometryResource, MaterialResource], jt.Float32[np.ndarray, "N 4 4"]]:
     """
-    Load a glTF file and return a meshes dict for rendering.
+    Load a glTF file and return a meshes dict with resource types.
 
-    Returns a meshes dict mapping (geometry, material) pairs to instance transforms
-    (Nx4x4 arrays), suitable for passing to Draw3dScene. Matrices are in row-major order,
-    and should have [0, 0, 0, 1] in the last row to represent affine transforms in homogeneous
-    coordinates.
+    Returns a meshes dict mapping (geometry_resource, material_resource) pairs to instance
+    transforms (Nx4x4 arrays). Matrices are in row-major order, and should have [0, 0, 0, 1]
+    in the last row to represent affine transforms in homogeneous coordinates.
 
-    :param renderer: The Draw3dRenderer to create resources with.
     :param path: Path to the glTF or GLB file.
     :param transform_coordinate_system: If True, transform from glTF's coordinate
         system (Y-up, Z-forward, X-right) to Z-up, Y-forward, X-right. This applies
         a -90° rotation around the X-axis to all geometry and instance transforms.
-    :return: Dict mapping (geometry, material) to instance transforms.
+    :return: Dict mapping (geometry_resource, material_resource) to instance transforms.
     """
     path = Path(path)
     LOG.info(f"Loading glTF file: {path}")
@@ -178,8 +258,8 @@ def load_gltf(
 
     # Create shared resources: images, materials, geometries
     image_sources = _load_image_sources(gltf, blob_data, path.parent)
-    materials = _load_materials(renderer, gltf, image_sources)
-    geometries = _load_geometries(renderer, gltf, blob_data)
+    materials = _load_material_resources(gltf, image_sources)
+    geometries = _load_geometry_resources(gltf, blob_data)
 
     # Process the default scene (or first scene)
     scene_idx = gltf.scene if gltf.scene is not None else 0
@@ -188,7 +268,7 @@ def load_gltf(
         return {}
 
     scene = gltf.scenes[scene_idx]
-    meshes = _process_scene(
+    meshes = _process_scene_resources(
         gltf, scene, geometries, materials, transform_coordinate_system
     )
 
@@ -373,19 +453,18 @@ def _extract_channel_as_rgba(image_data: np.ndarray, channel: int) -> np.ndarray
     return image_data[:, :, channel : channel + 1]
 
 
-def _load_materials(
-    renderer: "Draw3dRenderer",
+def _load_material_resources(
     gltf: pygltflib.GLTF2,
     image_sources: list[_ImageSource],
-) -> list[Draw3dMaterial]:
-    """Load all materials from the glTF file.
+) -> list[MaterialResource]:
+    """Load all materials from the glTF file as MaterialResource objects.
 
     Color space handling:
     - Base color textures: loaded as sRGB (converted to linear)
     - Metallic-roughness textures: loaded as linear (no conversion)
     - Normal maps: loaded as linear (no conversion)
     """
-    materials: list[Draw3dMaterial] = []
+    materials: list[MaterialResource] = []
 
     # Cache for loaded image data from sources
     # Maps (source_index, color_space, channel_or_none) to np.ndarray
@@ -479,8 +558,7 @@ def _load_materials(
                     )
                     normal_map = rgba_data[:, :, :3]
 
-        draw_material = Draw3dMaterial(
-            renderer=renderer,
+        material_resource = MaterialResource(
             color_factor=color_factor,
             color_map=color_map,
             normal_map=normal_map,
@@ -489,28 +567,27 @@ def _load_materials(
             roughness_factor=roughness_factor,
             roughness_map=roughness_map,
         )
-        materials.append(draw_material)
+        materials.append(material_resource)
         LOG.debug(f"Loaded material {material_idx}: {material.name}")
 
     # If no materials, create a default one
     if not materials:
-        materials.append(Draw3dMaterial(renderer=renderer))
+        materials.append(MaterialResource())
 
     return materials
 
 
-def _load_geometries(
-    renderer: "Draw3dRenderer",
+def _load_geometry_resources(
     gltf: pygltflib.GLTF2,
     blob_data: list[bytes],
-) -> dict[tuple[int, int], Draw3dGeometry]:
+) -> dict[tuple[int, int], GeometryResource]:
     """
-    Load all unique geometries (mesh primitives) from the glTF file.
+    Load all unique geometries (mesh primitives) from the glTF file as GeometryResource objects.
 
-    Returns a dict mapping (mesh_index, primitive_index) to Draw3dGeometry.
+    Returns a dict mapping (mesh_index, primitive_index) to GeometryResource.
     Only TRIANGLES topology is supported.
     """
-    geometries: dict[tuple[int, int], Draw3dGeometry] = {}
+    geometries: dict[tuple[int, int], GeometryResource] = {}
 
     for mesh_idx, mesh in enumerate(gltf.meshes or []):
         for prim_idx, primitive in enumerate(mesh.primitives):
@@ -565,9 +642,8 @@ def _load_geometries(
             triangle_count = len(indices) // 3
             t_indices = indices[: triangle_count * 3].reshape(-1, 3)
 
-            # Create geometry
-            geometry = Draw3dGeometry(
-                renderer=renderer,
+            # Create geometry resource
+            geometry = GeometryResource(
                 v_p_array=positions.astype(np.float32),
                 v_n_array=normals.astype(np.float32),
                 v_t_array=texcoords.astype(np.float32),
@@ -582,20 +658,20 @@ def _load_geometries(
     return geometries
 
 
-def _process_scene(
+def _process_scene_resources(
     gltf: pygltflib.GLTF2,
     scene: pygltflib.Scene,
-    geometries: dict[tuple[int, int], Draw3dGeometry],
-    materials: list[Draw3dMaterial],
+    geometries: dict[tuple[int, int], GeometryResource],
+    materials: list[MaterialResource],
     transform_coordinate_system: bool,
-) -> dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]:
+) -> dict[tuple[GeometryResource, MaterialResource], np.ndarray]:
     """
     Process a glTF scene and collect all mesh instances with world transforms.
 
-    Returns a meshes dict suitable for Draw3dScene.
+    Returns a meshes dict with resource types.
     """
     # Collect all instances: (geometry, material) -> list of transforms
-    instances: dict[tuple[Draw3dGeometry, Draw3dMaterial], list[np.ndarray]] = {}
+    instances: dict[tuple[GeometryResource, MaterialResource], list[np.ndarray]] = {}
 
     def traverse_node(node_idx: int, parent_transform: np.ndarray) -> None:
         """Recursively traverse nodes, accumulating transforms."""
@@ -646,7 +722,7 @@ def _process_scene(
         traverse_node(root_idx, root_transform)
 
     # Convert instance lists to numpy arrays with shape (N, 3, 4)
-    meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray] = {}
+    meshes: dict[tuple[GeometryResource, MaterialResource], np.ndarray] = {}
     for key, transform_list in instances.items():
         meshes[key] = np.array(transform_list, dtype=np.float32)
 

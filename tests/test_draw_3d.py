@@ -124,10 +124,16 @@ def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
 def _load_two_avocados_scene(renderer: Draw3dRenderer) -> Draw3dScene:
     """Helper to load a scene with two avocado models."""
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/Avocado/glTF/Avocado.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     assert len(meshes) == 1
     mesh, transforms = next(iter(meshes.items()))
@@ -185,10 +191,16 @@ def _load_two_avocados_scene(renderer: Draw3dRenderer) -> Draw3dScene:
 def _load_damaged_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
     """Helper to load a scene with the damaged helmet model."""
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     scene = Draw3dScene(
         camera=Draw3dCamera(
@@ -313,10 +325,16 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
     """Test depth visualization for debugging ray-triangle intersections."""
     frame = Draw3dFrame(renderer)
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     # Camera at Y=-5, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
@@ -368,10 +386,16 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
     """Test world position visualization to see what's actually being hit."""
     frame = Draw3dFrame(renderer)
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     # Camera at Y=-5, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
@@ -402,10 +426,16 @@ def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
     """Test that positive X camera offset shifts the depth centroid left."""
     frame = Draw3dFrame(renderer)
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     # Camera at Y=-5 with X offset of +0.50, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
@@ -456,10 +486,16 @@ def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
     """Test that positive Y camera offset makes the cube appear larger."""
     frame = Draw3dFrame(renderer)
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     # Camera at Y=-4.5 (closer by 0.5), looking forward (+Y) toward cube at origin
     scene = Draw3dScene(
@@ -541,10 +577,16 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
     """Test that positive Z camera offset shifts the depth centroid downward."""
     frame = Draw3dFrame(renderer)
 
-    meshes = load_gltf(
-        renderer=renderer,
+    resource_meshes = load_gltf(
         path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
     )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = renderer.get_geometry(geom_res)
+        material = renderer.get_material(mat_res)
+        meshes[(geometry, material)] = transforms
 
     # Camera at Y=-5 with Z offset of +0.5, looking forward (+Y) toward cube at origin
     scene = Draw3dScene(

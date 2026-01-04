@@ -265,6 +265,13 @@ class GltfViewerWidget(zfw.GuiWidget):
         self._last_mouse_y = 0.0
 
         # 3D resources
+        self._resource_meshes: (
+            dict[
+                tuple[zfw.GeometryResource, zfw.MaterialResource],
+                np.ndarray,
+            ]
+            | None
+        ) = None
         self._meshes: (
             dict[
                 tuple[zfw.Draw3dGeometry, zfw.Draw3dMaterial],
@@ -323,6 +330,7 @@ class GltfViewerWidget(zfw.GuiWidget):
     def _load_model(self) -> None:
         """Load the currently selected model."""
         # Clear old meshes
+        self._resource_meshes = None
         self._meshes = None
 
         # Load new scene
@@ -334,7 +342,15 @@ class GltfViewerWidget(zfw.GuiWidget):
             return
 
         LOG.info(f"Loading model: {model_name}")
-        self._meshes = zfw.load_gltf(self._gui_window.draw_3d_renderer, model_path)
+        self._resource_meshes = zfw.load_gltf(model_path)
+
+        # Convert resource types to Draw3d objects using renderer cache
+        self._meshes = {}
+        renderer = self._gui_window.draw_3d_renderer
+        for (geom_res, mat_res), transforms in self._resource_meshes.items():
+            geometry = renderer.get_geometry(geom_res)
+            material = renderer.get_material(mat_res)
+            self._meshes[(geometry, material)] = transforms
 
         # Update label
         self._model_label._text = f"Model: {model_name}"

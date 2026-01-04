@@ -6,6 +6,7 @@ __all__ = [
 
 import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 import jaxtyping as jt
@@ -13,6 +14,9 @@ import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
 from .bvh import Bvh, build_bvh
+
+if TYPE_CHECKING:
+    from .resources import GeometryResource, MaterialResource
 
 #
 # Renderer
@@ -180,6 +184,11 @@ class Draw3dRenderer:
         self.allocated_bvh_node_count = 0
         self.allocated_triangle_count = 0
 
+        # Cache for converting GeometryResource/MaterialResource to Draw3d objects
+        # Maps resource objects to their Draw3d counterparts
+        self._geometry_cache: dict = {}
+        self._material_cache: dict = {}
+
         # Initialization: clear device buffers to zero
         encoder = device.create_command_encoder(
             label="Draw3dRenderer.InitializationEncoder"
@@ -330,6 +339,49 @@ class Draw3dRenderer:
             command_encoder,
             scene,
         )
+
+    def get_geometry(self, resource: "GeometryResource") -> "Draw3dGeometry":
+        """
+        Convert a GeometryResource to a Draw3dGeometry, using a cache to avoid
+        recreating the same geometry multiple times.
+
+        :param resource: The GeometryResource to convert.
+        :return: A Draw3dGeometry instance.
+        """
+        # Use id() for object identity-based caching
+        resource_id = id(resource)
+        if resource_id not in self._geometry_cache:
+            self._geometry_cache[resource_id] = Draw3dGeometry(
+                renderer=self,
+                v_p_array=resource.v_p_array,
+                v_n_array=resource.v_n_array,
+                v_t_array=resource.v_t_array,
+                t_indices=resource.t_indices,
+            )
+        return self._geometry_cache[resource_id]
+
+    def get_material(self, resource: "MaterialResource") -> "Draw3dMaterial":
+        """
+        Convert a MaterialResource to a Draw3dMaterial, using a cache to avoid
+        recreating the same material multiple times.
+
+        :param resource: The MaterialResource to convert.
+        :return: A Draw3dMaterial instance.
+        """
+        # Use id() for object identity-based caching
+        resource_id = id(resource)
+        if resource_id not in self._material_cache:
+            self._material_cache[resource_id] = Draw3dMaterial(
+                renderer=self,
+                color_map=resource.color_map,
+                color_factor=resource.color_factor,
+                normal_map=resource.normal_map,
+                metalness_map=resource.metalness_map,
+                metalness_factor=resource.metalness_factor,
+                roughness_map=resource.roughness_map,
+                roughness_factor=resource.roughness_factor,
+            )
+        return self._material_cache[resource_id]
 
 
 class Draw3dFrame:
@@ -560,6 +612,10 @@ class Draw3dFrame:
 
 
 class Draw3dGeometry(BaseDisposable):
+    """
+    IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_geometry() instead.
+    """
+
     renderer: Draw3dRenderer
 
     triangle_count: int
@@ -652,6 +708,10 @@ class Draw3dGeometry(BaseDisposable):
 
 
 class Draw3dMaterial(BaseDisposable):
+    """
+    IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_material() instead.
+    """
+
     renderer: Draw3dRenderer
 
     color_map: jt.Float32[np.ndarray, "h w 3"] | None
