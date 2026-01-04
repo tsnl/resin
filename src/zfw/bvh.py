@@ -20,7 +20,6 @@ import time
 from .basic import logger
 
 NUMBA_CACHE_ENABLED = True
-NUMBA_PARALLEL_ENABLED = False
 
 
 @dataclass

@@ -152,7 +152,6 @@ def _verify_all_triangles_represented(
         # Check if this is a leaf node
         if np.all(bvh.children[i_node] == 0):
             tri_start, tri_end = bvh.tri_span[i_node]
-            leaf_triangles = bvh.t[tri_start:tri_end]
 
             # Add the global indices (0 to nt-1)
             for global_idx in range(tri_start, tri_end):

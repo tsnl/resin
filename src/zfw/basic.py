@@ -325,6 +325,7 @@ def setup_logging(
     level: int = logging.INFO,
     file: Path | None = None,
     console: bool = True,
+    suppress_noisy_third_party_loggers: bool = True,
 ) -> None:
     """
     Configure logging for the entire application.
@@ -365,6 +366,17 @@ def setup_logging(
         )
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
+
+    # Suppress noisy third-party loggers
+    if suppress_noisy_third_party_loggers:
+        noisy_loggers = [
+            "numba",
+            "wgpu",
+            "PIL",
+        ]
+        for logger_name in noisy_loggers:
+            noisy_logger = logging.getLogger(logger_name)
+            noisy_logger.setLevel(logging.ERROR)
 
 
 LOG = logger(__name__)

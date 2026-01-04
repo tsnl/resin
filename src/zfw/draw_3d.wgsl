@@ -23,6 +23,9 @@ const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
 /// Epsilon value for triangle-ray intersection tests, used when ray is nearly parallel to triangle plane.
 const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-8;
 
+/// Max BVH traversal stack depth
+const MAX_STACK_DEPTH: u32 = 64u;
+    
 
 //
 // Pod types: used for CPU-GPU data exchange.
@@ -38,6 +41,7 @@ struct PodFrameInfo {
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
 const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
 const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
+const FLAG_DEBUG_BVH_TRAVERSAL: u32 = 8u;
 
 struct PodInstance {
     geometry_id: u32,
@@ -246,7 +250,7 @@ fn hit_instance(ray: Ray, instance_id: u32) -> HitRecord {
     // Transform ray into model space by applying the inverse of the instance's transform.
     // This lets us raycast against the geometry without transforming all the vertices per-instance.
     let local_ray = h_mat4x4_transform_ray(inv_instance_transform, ray);
-    let local_hit = hit_geometry(local_ray, geometry_id);
+    let local_hit = hit_geometry_with_bvh(local_ray, geometry_id);
 
     // If hit is not valid, early out.
     if !is_geometry_hit_record_valid(local_hit) {
@@ -281,8 +285,7 @@ fn new_invalid_geometry_hit_record() -> GeometryHitRecord {
 fn is_geometry_hit_record_valid(hit: GeometryHitRecord) -> bool {
     return hit.triangle_raycast_result.w < F32_INFINITY;
 }
-fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
-    let triangle_span = geometry_heap[geometry_id].triangle_span_in_heap;
+fn hit_tri_list(ray: Ray, triangle_span: PodSpan) -> GeometryHitRecord {
     var closest_hit_record = new_invalid_geometry_hit_record();
     for (var triangle_id = triangle_span.begin; triangle_id < triangle_span.end; triangle_id++) {
         let triangle_vertices = get_triangle_vertices_positions(triangle_id);
@@ -293,6 +296,85 @@ fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
         }
     }
     return closest_hit_record;
+}
+fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
+    let triangle_span = geometry_heap[geometry_id].triangle_span_in_heap;
+    return hit_tri_list(ray, triangle_span);
+}
+fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
+    let geometry = geometry_heap[geometry_id];
+    let bvh_node_span = geometry.bvh_node_span_in_heap;
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_DEBUG_BVH_TRAVERSAL) != 0u;
+    
+    // Stack-based BVH traversal
+    // We use a fixed-size stack for iterative traversal instead of recursion
+    var stack: array<u32, 64u>;
+    var stack_ptr: u32 = 0u;
+    
+    // Start with root node (first node in the BVH span)
+    if bvh_node_span.begin >= bvh_node_span.end {
+        return new_invalid_geometry_hit_record();
+    }
+    stack[stack_ptr] = bvh_node_span.begin;
+    stack_ptr += 1u;
+    
+    var closest_hit = new_invalid_geometry_hit_record();
+    
+    while stack_ptr > 0u {
+        // Pop node from stack
+        stack_ptr -= 1u;
+        let node_id = stack[stack_ptr];
+        let node = bvh_node_heap[node_id];
+        
+        // Convert PodAabb to Aabb
+        let aabb = Aabb(
+            vec3<f32>(node.aabb.min[0], node.aabb.min[1], node.aabb.min[2]),
+            vec3<f32>(node.aabb.max[0], node.aabb.max[1], node.aabb.max[2]),
+        );
+        
+        // Test ray against AABB
+        let aabb_hit_dist = hit_aabb(ray, aabb);
+        if aabb_hit_dist >= closest_hit.triangle_raycast_result.w {
+            // AABB is further than current closest hit, skip this branch
+            continue;
+        }
+        
+        // Check if this is a leaf node (both children are 0)
+        let is_leaf = node.children[0] == 0u && node.children[1] == 0u;
+        
+        if is_leaf {
+            if debug_bvh_traversal {
+                // Debug mode: return AABB hit instead of triangle hit
+                if aabb_hit_dist < closest_hit.triangle_raycast_result.w {
+                    closest_hit.triangle_raycast_result = vec4<f32>(0.0, 0.0, 0.0, aabb_hit_dist);
+                    // Pick first triangle in the leaf span
+                    if node.tri_span.begin < node.tri_span.end {
+                        closest_hit.triangle_id = node.tri_span.begin;
+                    }
+                }
+            } else {
+                // Normal mode: test triangles in the span
+                let leaf_hit = hit_tri_list(ray, node.tri_span);
+                if leaf_hit.triangle_raycast_result.w < closest_hit.triangle_raycast_result.w {
+                    closest_hit = leaf_hit;
+                }
+            }
+        } else {
+            // Internal node: push children onto stack
+            // Child indices are relative to this geometry's BVH, so offset them by the span begin
+            // Push in reverse order so closer child is processed first
+            if node.children[1] != 0u && stack_ptr < MAX_STACK_DEPTH {
+                stack[stack_ptr] = bvh_node_span.begin + node.children[1];
+                stack_ptr += 1u;
+            }
+            if node.children[0] != 0u && stack_ptr < MAX_STACK_DEPTH {
+                stack[stack_ptr] = bvh_node_span.begin + node.children[0];
+                stack_ptr += 1u;
+            }
+        }
+    }
+    
+    return closest_hit;
 }
 
 /// Triangle-ray intersection test
@@ -534,6 +616,11 @@ fn debug_output(hit: HitRecord) -> vec4<f32> {
     let debug_emit_hit_world_pos = (frame_info.debug_flags & FLAG_EMIT_HIT_WORLD_POSITION) != 0u;
     if debug_emit_hit_world_pos {
         return debug_visualize_hit_world_position(hit);
+    }
+
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_DEBUG_BVH_TRAVERSAL) != 0u;
+    if debug_bvh_traversal {
+        return debug_visualize_depth_in_r(hit);
     }
 
     // No debug flag matched, return magenta to indicate error.

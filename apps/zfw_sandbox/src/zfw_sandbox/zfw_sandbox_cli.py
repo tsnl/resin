@@ -117,8 +117,8 @@ def main():
     window = zfw.Window(
         device=device,
         window_context=window_context,
-        width_dip=1280,
-        height_dip=720,
+        width_dip=1920,
+        height_dip=1080,
         title="ZFW Sandbox",
     )
 

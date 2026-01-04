@@ -317,8 +317,9 @@ class Draw3dRenderer:
             source=staging_buffer,
             source_offset=0,
             destination=self.geometry_heap_device_buffer,
-            destination_offset=allocation_offset
-            * PodGeometryArray.array_size(shape=(1,)),
+            destination_offset=(
+                allocation_offset * PodGeometryArray.array_size(shape=(1,))
+            ),
             size=PodGeometryArray.array_size(shape=(1,)),
         )
         self.queue.submit([encoder.finish()])
@@ -478,6 +479,7 @@ class Draw3dFrame:
         emit_primary_ray_direction: bool = False,
         emit_closest_hit_depth_in_r: bool = False,
         emit_hit_world_position: bool = False,
+        debug_bvh_traversal: bool = False,
     ) -> None:
         """Set debug visualization flags.
 
@@ -485,6 +487,7 @@ class Draw3dFrame:
             emit_primary_ray_direction: If True, output normalized ray direction as RGB.
             emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
             emit_hit_world_position: If True, output world-space hit position as RGB.
+            debug_bvh_traversal: If True, visualize BVH leaf AABBs instead of actual triangles.
         """
         self._debug_flags = 0
         if emit_primary_ray_direction:
@@ -493,6 +496,8 @@ class Draw3dFrame:
             self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
         if emit_hit_world_position:
             self._debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
+        if debug_bvh_traversal:
+            self._debug_flags |= _FRAME_FLAG_DEBUG_BVH_TRAVERSAL
 
     def record(
         self,
@@ -654,7 +659,7 @@ class Draw3dGeometry(BaseDisposable):
         triangle_span_begin = renderer._add_triangles(vertices=pod_vertices)
         triangle_span_count = self.triangle_count
 
-        # Offset the BVH triangle spans to point to the global triangle heap instead of the per-geometry triangles list:
+        # Offset the BVH triangle spans to point to the global triangle heap instead of the per-geometry triangles list.
         bvh.tri_span += triangle_span_begin
 
         # Upload BVH:
@@ -834,6 +839,7 @@ class PodFrameInfoArray(StructuredNDArray):
 _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
 _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
 _FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
+_FRAME_FLAG_DEBUG_BVH_TRAVERSAL = 1 << 3
 
 
 class PodCameraArray(StructuredNDArray):

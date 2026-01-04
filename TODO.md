@@ -10,7 +10,7 @@
 - [ ] Primary rays
   - [x] Naive ray-triangle intersection with primary rays, incl. instanced meshes.
   - [x] Construct BVHs for BLAS
-  - [ ] BVH-accelerated ray-triangle intersection with primary rays, ensure no regressions.
+  - [x] BVH-accelerated ray-triangle intersection with primary rays, ensure no regressions.
   - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
 - [ ] Basic shading
   - [x] Compute barycentric coordinates
@@ -43,11 +43,3 @@ Old Vulkan wrapper:
 ```bash
 git checkout origin/archive/main-v2 -- src/zfw/typed_vulkan.py  src/zfw/typed_vulkan.pyi  
 ```
-
-## `window`
-
-TODO: add windowing support.
-
-## `python`
-
-Python bindings.
