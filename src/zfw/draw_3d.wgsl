@@ -362,14 +362,53 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
         } else {
             // Internal node: push children onto stack
             // Child indices are relative to this geometry's BVH, so offset them by the span begin
-            // Push in reverse order so closer child is processed first
-            if node.children[1] != 0u && stack_ptr < MAX_STACK_DEPTH {
-                stack[stack_ptr] = bvh_node_span.begin + node.children[1];
-                stack_ptr += 1u;
+            // Test both children's AABBs and push them in order of distance (closer first)
+            let child0_idx = node.children[0];
+            let child1_idx = node.children[1];
+            
+            var child0_dist = F32_INFINITY;
+            var child1_dist = F32_INFINITY;
+            
+            if child0_idx != 0u {
+                let child0_node = bvh_node_heap[bvh_node_span.begin + child0_idx];
+                let child0_aabb = Aabb(
+                    vec3<f32>(child0_node.aabb.min[0], child0_node.aabb.min[1], child0_node.aabb.min[2]),
+                    vec3<f32>(child0_node.aabb.max[0], child0_node.aabb.max[1], child0_node.aabb.max[2]),
+                );
+                child0_dist = hit_aabb(ray, child0_aabb);
             }
-            if node.children[0] != 0u && stack_ptr < MAX_STACK_DEPTH {
-                stack[stack_ptr] = bvh_node_span.begin + node.children[0];
-                stack_ptr += 1u;
+            
+            if child1_idx != 0u {
+                let child1_node = bvh_node_heap[bvh_node_span.begin + child1_idx];
+                let child1_aabb = Aabb(
+                    vec3<f32>(child1_node.aabb.min[0], child1_node.aabb.min[1], child1_node.aabb.min[2]),
+                    vec3<f32>(child1_node.aabb.max[0], child1_node.aabb.max[1], child1_node.aabb.max[2]),
+                );
+                child1_dist = hit_aabb(ray, child1_aabb);
+            }
+            
+            // Push children in reverse order of distance so closer child is popped first
+            // Skip children that don't intersect or are further than current closest hit
+            if child0_dist < child1_dist {
+                // Push child1 first (farther), then child0 (closer)
+                if child1_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = bvh_node_span.begin + child1_idx;
+                    stack_ptr += 1u;
+                }
+                if child0_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = bvh_node_span.begin + child0_idx;
+                    stack_ptr += 1u;
+                }
+            } else {
+                // Push child0 first (farther), then child1 (closer)
+                if child0_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = bvh_node_span.begin + child0_idx;
+                    stack_ptr += 1u;
+                }
+                if child1_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = bvh_node_span.begin + child1_idx;
+                    stack_ptr += 1u;
+                }
             }
         }
     }
@@ -462,8 +501,9 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
     let t_close_percoeff = min(t_lo, t_hi);
     let t_far_percoeff = max(t_lo, t_hi);
 
-    let t_close = max(max(t_close_percoeff.x, t_close_percoeff.y), t_close_percoeff.z);
-    let t_far = min(min(t_far_percoeff.x, t_far_percoeff.y), t_far_percoeff.z);
+    // Vectorized reduce operations for better performance
+    let t_close = max(t_close_percoeff.x, max(t_close_percoeff.y, t_close_percoeff.z));
+    let t_far = min(t_far_percoeff.x, min(t_far_percoeff.y, t_far_percoeff.z));
 
     if t_close > t_far || t_far < 0.0 {
         // No intersection, or intersection is behind the ray origin.
@@ -545,7 +585,6 @@ fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
     return interpolated_uv;
 }
 fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
-    let triangle = triangle_heap[hit.triangle_id];
     let instance = instances[hit.instance_id];
     
     // Load vertex data:
