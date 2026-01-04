@@ -68,6 +68,11 @@ def build_bvh(
         t = t.copy()
 
     nt = t.shape[0]
+    nv = v.shape[0]
+    LOG.log(
+        msg=f"Starting BVH construction: {nv=}, {nt=}",
+        level=metrics_log_level,
+    )
 
     # Compute triangle centroids:
     c = v[t].mean(axis=-2)
@@ -96,8 +101,8 @@ def build_bvh(
     # When BVH nodes have '0' as their child indices, they are leaf nodes since root nodes have no parents.
     t2 = time.perf_counter()
     bvh_count[0] += 1
-    # Compute root AABB from all vertices (they're all included)
-    bvh_b[0] = compute_triangles_aabb(v)
+    # Compute root AABB from all triangles
+    bvh_b[0] = compute_triangles_aabb(v=v[t.ravel()])
     bvh_c[0, :] = (0, 0)
     bvh_r[0, :] = 0, nt
     bvh_s[0] = nt * compute_aabb_surface_area(bvh_b[0])
@@ -403,11 +408,11 @@ def partition_triangles(
     nt_lt = i_lt.shape[0]
     nt_rt = i_rt.shape[0]
 
-    v_lt = v[t[i_lt].flatten()]
+    v_lt = v[t[i_lt].ravel()]
     aabb_lt = compute_triangles_aabb(v_lt)
     aabb_surface_area_lt = compute_aabb_surface_area(aabb_lt)
 
-    v_rt = v[t[i_rt].flatten()]
+    v_rt = v[t[i_rt].ravel()]
     aabb_rt = compute_triangles_aabb(v_rt)
     aabb_surface_area_rt = compute_aabb_surface_area(aabb_rt)
 

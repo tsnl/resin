@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -36,4 +37,5 @@ def rainbow_512x512_image() -> np.ndarray:
 
 @pytest.fixture(scope="session", autouse=True)
 def _setup_logging():
-    setup_logging(level=logging.WARNING)
+    log_level = os.environ.get("ZFW_TEST_LOG_LEVEL", "WARNING")
+    setup_logging(level=logging.getLevelNamesMapping()[log_level])
