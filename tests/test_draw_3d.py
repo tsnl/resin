@@ -15,6 +15,7 @@ from zfw import (
     Draw3dFrame,
     Draw3dScene,
     Draw3dCamera,
+    ImageResource,
     load_gltf,
     logger,
 )
@@ -640,6 +641,60 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
     assert centroid_y > FRAME_H / 2, (
         f"Positive Z camera offset should shift cube down, "
         f"centroid at Y={centroid_y:.1f} should be > {FRAME_H / 2}"
+    )
+
+
+def test_environment_map_basic(gpu: GpuFixture, renderer: Draw3dRenderer):
+    """Test environment map rendering with an empty scene."""
+    frame = Draw3dFrame(renderer)
+
+    # Load HDR environment map
+    hdr_data = iio.imread("tests/data/glTF-Sample-Environments/helipad.hdr")
+    # HDR files are loaded as RGB float32 in linear color space
+    assert hdr_data.ndim == 3
+    assert hdr_data.shape[2] == 3
+    height, width = hdr_data.shape[:2]
+
+    # Create ImageResource from HDR data
+    env_map_resource = ImageResource(
+        data=hdr_data,
+        width=width,
+        height=height,
+        depth=3,
+        image_format="rgb32float",
+    )
+
+    # Convert to Draw3dTexture
+    env_map_texture = renderer.get_texture(env_map_resource)
+
+    # Create empty scene with environment map
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.eye(4, dtype=np.float32),  # Identity transform (at origin)
+            fov_y_rad=np.radians(60.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+        ),
+        meshes={},  # Empty scene - no geometry
+        environment_map=env_map_texture,
+    )
+
+    # Render
+    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+
+    # Save debug output
+    _save_debug_image(data, "test_environment_map_basic.png", format="RGBA")
+
+    # Verify we got non-black pixels (environment map was sampled)
+    # Check that the mean brightness is above some threshold
+    brightness = np.mean(data[:, :, :3])
+    assert brightness > 0.01, (
+        f"Environment map should produce visible output, got mean brightness {brightness}"
+    )
+
+    # Verify we have some variation in the image (not all the same color)
+    std_dev = np.std(data[:, :, :3])
+    assert std_dev > 0.01, (
+        f"Environment map should have color variation, got std dev {std_dev}"
     )
 
 

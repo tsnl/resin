@@ -817,7 +817,12 @@ class Draw3dFrame(BaseDisposable):
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
-        self._upload_frame_info(instance_count, encoder, self._debug_flags)
+        environment_map_texture_id = (
+            scene.environment_map.texture_id if scene.environment_map else -1
+        )
+        self._upload_frame_info(
+            instance_count, encoder, self._debug_flags, environment_map_texture_id
+        )
         self._upload_camera_info(scene.camera, encoder)
         self._upload_instances_info(scene.meshes, encoder)
 
@@ -837,12 +842,14 @@ class Draw3dFrame(BaseDisposable):
         instance_count: int,
         command_encoder: wgpu.GPUCommandEncoder,
         debug_flags: int = 0,
+        environment_map_texture_id: int = -1,
     ) -> None:
         frame_info_data = PodFrameInfoArray.empty(shape=(1,))
         frame_info_data["instance_count"] = instance_count
         frame_info_data["target_size_w_px"] = self.renderer.target_size_wh_px[0]
         frame_info_data["target_size_h_px"] = self.renderer.target_size_wh_px[1]
         frame_info_data["debug_flags"] = debug_flags
+        frame_info_data["environment_map_texture_id"] = environment_map_texture_id
 
         self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
         self.frame_info_staging_buffer.write_mapped(data=frame_info_data)
@@ -1124,7 +1131,7 @@ class Draw3dScene:
         jt.Float32[np.ndarray, "n 4 4"],
     ] = field(default_factory=dict)
 
-    environment_map: jt.Float32[np.ndarray, "eh ew 3"] | None = None
+    environment_map: Draw3dTexture | None = None
 
 
 @dataclass
@@ -1237,6 +1244,10 @@ class PodFrameInfoArray(StructuredNDArray):
             ("target_size_w_px", np.uint32),
             ("target_size_h_px", np.uint32),
             ("debug_flags", np.uint32),
+            ("environment_map_texture_id", np.int32),
+            ("_pad0", np.uint32),
+            ("_pad1", np.uint32),
+            ("_pad2", np.uint32),
         ]
     )
 

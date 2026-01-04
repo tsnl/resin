@@ -81,6 +81,7 @@ from .draw_3d import (
     Draw3dRenderer,
     Draw3dScene,
 )
+from .images import ImageResource
 from .window import Window
 from .events import EventHub
 
@@ -320,7 +321,7 @@ class GuiWindow(BaseDisposable):
     _draw_3d_frame: Draw3dFrame | None
     _camera_transform: np.ndarray | None
     _camera_intrinsics: Draw3dCamera | None
-    _environment_map: GuiImage | None
+    _environment_map: ImageResource | None
 
     # 3D mesh collection for current frame
     _meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]
@@ -518,7 +519,7 @@ class GuiWindow(BaseDisposable):
         self._camera_transform = transform
         self._camera_intrinsics = intrinsics
 
-    def set_environment_map(self, environment_map: GuiImage | None) -> None:
+    def set_environment_map(self, environment_map: ImageResource | None) -> None:
         """Set the environment map for IBL lighting."""
         self._environment_map = environment_map
 
@@ -708,12 +709,16 @@ class GuiWindow(BaseDisposable):
                 self._draw_3d_frame.set_debug_flags(emit_color=True)
 
             # Build 3D scene
+            environment_map_texture = (
+                self._draw_3d_renderer.get_texture(self._environment_map)
+                if self._environment_map
+                else None
+            )
             scene = Draw3dScene(
                 camera=self._camera_intrinsics,
                 meshes=self._meshes,
-                environment_map=None,  # TODO: Support environment maps
+                environment_map=environment_map_texture,
             )
-
             # Record 3D rendering
             self._draw_3d_renderer.record(
                 scene=scene,

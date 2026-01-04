@@ -21,6 +21,7 @@ dependencies = [
     "numba>=0.63.1",
     "typeguard>=4.4.4",
     "imageio>=2.37.2",
+    "opencv-python>=4.0.0",
 ]
 
 [project.optional-dependencies]

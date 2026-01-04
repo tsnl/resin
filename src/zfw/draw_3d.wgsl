@@ -41,6 +41,10 @@ struct PodFrameInfo {
     target_size_w_px: u32,
     target_size_h_px: u32,
     debug_flags: u32,
+    environment_map_texture_id: i32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
@@ -603,6 +607,12 @@ fn compute_hit_color(hit_details: HitDetails) -> vec4<f32> {
 }
 
 fn compute_miss_color(ray: Ray) -> vec4<f32> {
+    // If environment map is available, sample it
+    if frame_info.environment_map_texture_id >= 0 {
+        return sample_environment_map(ray);
+    }
+    
+    // Otherwise, use procedural sky gradient
     // Create a sky gradient with brightest spot at azimuth 45°, altitude 45°
     let dir = normalize(ray.direction);
     
@@ -637,6 +647,28 @@ fn compute_miss_color(ray: Ray) -> vec4<f32> {
     let final_color = mix(sky_color, sun_color, sun_brightness * 0.8);
     
     return vec4<f32>(final_color, 1.0);
+}
+
+/// Sample an equirectangular environment map based on ray direction.
+/// The environment map is assumed to be in latitude-longitude format.
+/// Coordinate system: Z-up, Y-forward, X-right (right-handed)
+fn sample_environment_map(ray: Ray) -> vec4<f32> {
+    let dir = normalize(ray.direction);
+    
+    // Convert 3D direction to spherical coordinates for Z-up, Y-forward system
+    // Longitude (θ): horizontal angle in XY plane from +Y axis, range [-π, π]
+    // Latitude (φ): elevation angle from XY plane towards +Z, range [-π/2, π/2]
+    let theta = atan2(dir.x, dir.y);  // Horizontal angle from +Y (forward)
+    let phi = asin(dir.z);  // Elevation angle (+Z is up)
+    
+    // Convert to UV coordinates [0, 1]
+    // U maps longitude: [-π, π] -> [0, 1]
+    // V maps latitude: [-π/2, π/2] -> [0, 1] (flip so +Z up is at top of image)
+    let u = (theta + 3.14159265359) / (2.0 * 3.14159265359);
+    let v = 1.0 - ((phi + 1.5707963268) / 3.14159265359);  // Flip V so +Z is at top
+    
+    let uv = vec2<f32>(u, v);
+    return sample_texture(u32(frame_info.environment_map_texture_id), uv);
 }
 
 struct HitDetails {

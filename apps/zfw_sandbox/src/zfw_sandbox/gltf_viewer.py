@@ -29,16 +29,16 @@ MODELS = [
 
 # Available environments
 ENVIRONMENTS = [
-    ("Neutral", "neutral.jpg"),
-    ("Chromatic", "chromatic.jpg"),
-    ("Directional", "directional.jpg"),
-    ("Footprint Court", "footprint_court.jpg"),
-    ("Pisa", "pisa.jpg"),
-    ("Papermill", "papermill.jpg"),
-    ("Helipad", "helipad.jpg"),
-    ("Field", "field.jpg"),
-    ("Doge 2", "doge2.jpg"),
-    ("Ennis", "ennis.jpg"),
+    ("Neutral", "neutral.hdr"),
+    ("Chromatic", "chromatic.hdr"),
+    ("Directional", "directional.hdr"),
+    ("Footprint Court", "footprint_court.hdr"),
+    ("Pisa", "pisa.hdr"),
+    ("Papermill", "papermill.hdr"),
+    ("Helipad", "helipad.hdr"),
+    ("Field", "field.hdr"),
+    ("Doge 2", "doge2.hdr"),
+    ("Ennis", "ennis.hdr"),
 ]
 
 # Theme for the viewer HUD
@@ -279,6 +279,7 @@ class GltfViewerWidget(zfw.GuiWidget):
             ]
             | None
         ) = None
+        self._environment_resource: zfw.ImageResource | None = None
 
         # HUD widgets
         self._top_bar = zfw.GuiWidget(
@@ -318,7 +319,7 @@ class GltfViewerWidget(zfw.GuiWidget):
             row=0,
             col=0,
             style_classes=["hud-label"],
-            text="Click to look | WASD+Space/Shift to move | 1-9 change model | ESC to release mouse",
+            text="Click to look | WASD+Space/Shift to move | 1-9 change model | Q/E change environment | ESC to release mouse",
         )
 
         # Setup key event handler
@@ -326,6 +327,7 @@ class GltfViewerWidget(zfw.GuiWidget):
 
         # Load initial model and environment
         self._load_model()
+        self._load_environment()
 
     def _load_model(self) -> None:
         """Load the currently selected model."""
@@ -355,6 +357,31 @@ class GltfViewerWidget(zfw.GuiWidget):
         # Update label
         self._model_label._text = f"Model: {model_name}"
 
+    def _load_environment(self) -> None:
+        """Load the currently selected environment map."""
+        env_name, env_file = ENVIRONMENTS[self._current_env_index]
+        env_path = self._environments_path / env_file
+
+        if not env_path.exists():
+            LOG.warning(f"Environment not found: {env_path}")
+            self._environment_resource = None
+            self._gui_window.set_environment_map(None)
+            return
+
+        LOG.info(f"Loading environment: {env_name}")
+
+        # Load HDR environment map using zfw.load_image
+        self._environment_resource = zfw.load_image(
+            file_path=env_path,
+            image_format="rgb32float",
+        )
+
+        # Set environment map in GUI window
+        self._gui_window.set_environment_map(self._environment_resource)
+
+        # Update label
+        self._env_label._text = f"Env: {env_name}"
+
     def _on_key_event(
         self,
         key: zfw.Key | None,
@@ -375,6 +402,16 @@ class GltfViewerWidget(zfw.GuiWidget):
             if idx < len(MODELS):
                 self._current_model_index = idx
                 self._load_model()
+            return
+
+        # Handle environment switching (Q/E)
+        if key == "q":
+            self._current_env_index = (self._current_env_index - 1) % len(ENVIRONMENTS)
+            self._load_environment()
+            return
+        if key == "e":
+            self._current_env_index = (self._current_env_index + 1) % len(ENVIRONMENTS)
+            self._load_environment()
             return
 
         # Handle escape to release mouse
