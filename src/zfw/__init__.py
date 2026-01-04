@@ -3,6 +3,7 @@ __all__ = [
     "COOKED_ATLAS_PATH_SUFFIX",
     "BaseDisposable",
     "ButtonAction",
+    "Bvh",
     "ColorSpace",
     "CookedAtlas",
     "CookedAtlasGlyphCacheKey",
@@ -33,6 +34,7 @@ __all__ = [
     "SupportsWrite",
     "Window",
     "WindowContext",
+    "build_bvh",
     "compute_psnr",
     "compute_triangles_aabb",
     "convert_color",
@@ -101,6 +103,8 @@ from .loader import load_rgba_image, load_gltf
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
 from .bvh import (
+    Bvh,
+    build_bvh,
     compute_triangles_aabb,
     partition_points,
     partition_triangles,

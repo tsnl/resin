@@ -7,13 +7,12 @@ __all__ = [
 import math
 from dataclasses import dataclass, field
 
-import numba
 import numpy as np
 import jaxtyping as jt
-from typeguard import typechecked
 import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
+from .bvh import Bvh, build_bvh
 
 #
 # Renderer
@@ -140,14 +139,9 @@ class Draw3dRenderer:
             size=PodBvhNodeArray.array_size(shape=(self.bvh_node_capacity,)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
-        self.triangle_vertex_offset_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.TriangleVertexOffsetHeapDeviceBuffer",
-            size=PodVertexOffsetArray.array_size(shape=(self.triangle_capacity, 3)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
-        self.triangle_vertex_detail_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.TriangleVertexDetailHeapDeviceBuffer",
-            size=0,  # Not used yet
+        self.triangle_heap_device_buffer = device.create_buffer(
+            label="Draw3dRenderer.TriangleHeapDeviceBuffer",
+            size=PodVertexArray.array_size(shape=(self.triangle_capacity, 3)),
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
 
@@ -174,9 +168,9 @@ class Draw3dRenderer:
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
-                        buffer=self.triangle_vertex_offset_heap_device_buffer,
+                        buffer=self.triangle_heap_device_buffer,
                         offset=0,
-                        size=self.triangle_vertex_offset_heap_device_buffer.size,
+                        size=self.triangle_heap_device_buffer.size,
                     ),
                 ),
             ],
@@ -192,11 +186,11 @@ class Draw3dRenderer:
         )
         encoder.clear_buffer(self.geometry_heap_device_buffer, offset=0)
         encoder.clear_buffer(self.bvh_node_heap_device_buffer, offset=0)
-        encoder.clear_buffer(self.triangle_vertex_offset_heap_device_buffer, offset=0)
+        encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
         queue.submit([encoder.finish()])
 
-    def _add_triangles(self, vertices: PodVertexOffsetArray) -> int:
-        assert vertices.ndim == 1 and vertices.dtype == PodVertexOffsetArray.DTYPE
+    def _add_triangles(self, vertices: PodVertexArray) -> int:
+        assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
 
         vertex_count = vertices.shape[0]
         triangle_count = vertex_count // 3
@@ -204,7 +198,7 @@ class Draw3dRenderer:
         # Allocate:
         allocation_offset_in_triangles = self.allocated_triangle_count
         allocation_offset_in_bytes = (
-            allocation_offset_in_triangles * PodVertexOffsetArray.DTYPE.itemsize * 3
+            allocation_offset_in_triangles * PodVertexArray.DTYPE.itemsize * 3
         )
         self.allocated_triangle_count += triangle_count
         if self.allocated_triangle_count > self.triangle_capacity:
@@ -226,28 +220,70 @@ class Draw3dRenderer:
         encoder.copy_buffer_to_buffer(
             source=staging_buffer,
             source_offset=0,
-            destination=self.triangle_vertex_offset_heap_device_buffer,
+            destination=self.triangle_heap_device_buffer,
             destination_offset=allocation_offset_in_bytes,
             size=vertices.nbytes,
         )
         self.queue.submit([encoder.finish()])
 
+        staging_buffer.destroy()
+
         # Return offset in triangles:
         return allocation_offset_in_triangles
 
+    def _add_bvh_nodes(self, bvh_nodes: PodBvhNodeArray) -> int:
+        assert bvh_nodes.ndim == 1 and bvh_nodes.dtype == PodBvhNodeArray.DTYPE
+
+        node_count = bvh_nodes.shape[0]
+
+        # Allocate:
+        allocation_offset = self.allocated_bvh_node_count
+        self.allocated_bvh_node_count += node_count
+        if self.allocated_bvh_node_count > self.bvh_node_capacity:
+            raise RuntimeError("Draw3dRenderer BVH node heap capacity exceeded.")
+
+        # Upload via staging buffer:
+        staging_buffer = self.device.create_buffer(
+            label="Draw3dRenderer.BvhNodeUploadStagingBuffer",
+            size=bvh_nodes.nbytes,
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        staging_buffer.write_mapped(data=bvh_nodes)
+        staging_buffer.unmap()
+
+        encoder = self.device.create_command_encoder(
+            label="Draw3dRenderer.BvhNodeUploadEncoder"
+        )
+        encoder.copy_buffer_to_buffer(
+            source=staging_buffer,
+            source_offset=0,
+            destination=self.bvh_node_heap_device_buffer,
+            destination_offset=(
+                allocation_offset * PodBvhNodeArray.array_size(shape=(1,))
+            ),
+            size=bvh_nodes.nbytes,
+        )
+        self.queue.submit([encoder.finish()])
+
+        staging_buffer.destroy()
+
+        # Return offset in BVH nodes:
+        return allocation_offset
+
     def _add_geometry(
         self,
+        *,
         triangle_span_begin: int,
         triangle_count: int,
+        bvh_node_span_begin: int,
+        bvh_node_count: int,
     ):
         data = PodGeometryArray.empty(shape=(1,))
-
-        data["triangle_span"]["begin"][0] = triangle_span_begin
-        data["triangle_span"]["end"][0] = triangle_span_begin + triangle_count
-
-        # TODO: build BVH for the geometry
-        data["bvh_node_span"][0]["begin"] = 0
-        data["bvh_node_span"][0]["end"] = 0
+        data["triangle_span"][0]["begin"] = triangle_span_begin
+        data["triangle_span"][0]["end"] = triangle_span_begin + triangle_count
+        data["bvh_node_span"][0]["begin"] = bvh_node_span_begin
+        data["bvh_node_span"][0]["end"] = bvh_node_span_begin + bvh_node_count
 
         # Allocate:
         allocation_offset = self.allocated_geometry_count
@@ -536,118 +572,83 @@ class Draw3dGeometry(BaseDisposable):
         self,
         renderer: Draw3dRenderer,
         *,
-        t_indices: jt.UInt32[jt.Array, "nt 3"],
         v_p_array: jt.Float32[jt.Array, "nv 3"],
-        v_n_array: jt.Float32[jt.Array, "nv 3"] | None = None,
-        v_t_array: jt.Float32[jt.Array, "nv 2"] | None = None,
+        v_n_array: jt.Float32[jt.Array, "nv 3"],
+        v_t_array: jt.Float32[jt.Array, "nv 2"],
+        t_indices: jt.UInt32[jt.Array, "nt 3"],
     ) -> None:
-        """
-        Constructs a Draw3dGeometry from given vertex and triangle data.
-
-        :param renderer: The Draw3dRenderer instance to use.
-        :param t_indices: Triangle indices array of shape (nt, 3) and dtype uint32.
-        :param v_p_array: Vertex positions array of shape (nv, 3) and dtype float32.
-        :param v_n_array: (Optional) Vertex normals array of shape (nv, 3) and dtype float32.
-        :param v_t_array: (Optional) Vertex texture coordinates array of shape (nv, 2) and dtype float32.
-        """
-
         super().__init__()
 
         self.renderer = renderer
         self.triangle_count = t_indices.shape[0]
 
-        pod_vertex_offset_array: PodVertexOffsetArray
-        pod_vertex_offset_array = v_p_array.view(PodVertexOffsetArray)
+        # Construct the BVH:
+        bvh = build_bvh(t=t_indices, v=v_p_array)
 
+        # Upload triangles:
+        pod_vertices = Draw3dGeometry._marshall_triangles(
+            v_p_array=v_p_array,
+            v_n_array=v_n_array,
+            v_t_array=v_t_array,
+            t_indices=t_indices,
+        )
+        triangle_span_begin = renderer._add_triangles(vertices=pod_vertices)
+        triangle_span_count = self.triangle_count
+
+        # Adjust the BVH triangle indices to point to the global triangle heap.
+        # We need the triangles allocation in the global heap for this.
+        bvh.tri_span += triangle_span_begin
+
+        # Upload BVH:
+        pod_bvh = Draw3dGeometry._marshall_bvh(bvh)
+        bvh_node_span_begin = renderer._add_bvh_nodes(pod_bvh)
+        bvh_node_span_count = bvh.node_count
+
+        # Upload geometry record:
+        self.geometry_id = renderer._add_geometry(
+            triangle_span_begin=triangle_span_begin,
+            triangle_count=triangle_span_count,
+            bvh_node_span_begin=bvh_node_span_begin,
+            bvh_node_count=bvh_node_span_count,
+        )
+
+    @staticmethod
+    def _marshall_bvh(bvh: Bvh) -> PodBvhNodeArray:
+        # TODO: Each node will either have children or a triangle span. We can save memory by
+        # using a union-like structure here. Maybe negative values refer to triangle spans?
+
+        pod_bvh = PodBvhNodeArray.empty((bvh.node_count,))
+        for i in range(bvh.node_count):
+            pod_bvh["tri_span"]["begin"][i] = bvh.tri_span[i, 0]
+            pod_bvh["tri_span"]["end"][i] = bvh.tri_span[i, 1]
+            pod_bvh["children"][i][0] = bvh.children[i, 0]
+            pod_bvh["children"][i][1] = bvh.children[i, 1]
+            pod_bvh["aabb"]["min"][i] = bvh.aabb[i, 0]
+            pod_bvh["aabb"]["max"][i] = bvh.aabb[i, 1]
+        return pod_bvh
+
+    @staticmethod
+    def _marshall_triangles(
+        v_p_array: jt.Float32[jt.Array, "nv 3"],
+        v_n_array: jt.Float32[jt.Array, "nv 3"],
+        v_t_array: jt.Float32[jt.Array, "nv 2"],
+        t_indices: jt.UInt32[jt.Array, "nt 3"],
+    ) -> PodVertexArray:
         # Interleave the vertex arrays:
         v = np.concatenate([v_p_array, v_n_array, v_t_array], axis=-1)
-        v = v.view(dtype=PodVertexOffsetArray.DTYPE).squeeze()
-        assert (
-            v.shape == (v_p_array.shape[0],) and v.dtype == PodVertexOffsetArray.DTYPE
-        )
-
-        # Compute BVH, reordering indices as needed:
-        # TODO
+        v = v.view(dtype=PodVertexArray.DTYPE).squeeze()
+        assert v.shape == (v_p_array.shape[0],) and v.dtype == PodVertexArray.DTYPE
 
         # Get rid of the index buffer: load the vertices for each triangle:
-        v = PodVertexOffsetArray(v[t_indices])
-        assert (
-            v.shape == (self.triangle_count, 3)
-            and v.dtype == PodVertexOffsetArray.DTYPE
-        )
+        v = PodVertexArray(v[t_indices])
+        assert v.shape == (t_indices.shape[0], 3) and v.dtype == PodVertexArray.DTYPE
 
-        # Flatten to 1D array for _add_geometry
-        v = v.reshape(-1).view(PodVertexOffsetArray)
-        assert (
-            v.shape == (self.triangle_count * 3,)
-            and v.dtype == PodVertexOffsetArray.DTYPE
-        )
+        # Flatten to 1D array for _add_geometry: groups of 3 consecutive vertices form a triangle:
+        v = v.reshape(-1).view(PodVertexArray)
+        assert v.shape == (t_indices.shape[0] * 3,) and v.dtype == PodVertexArray.DTYPE
 
-        # Allocate space in renderer heaps, upload data
-        self.geometry_heap_offset_in_triangles = renderer._add_triangles(v)
-        self.geometry_id = renderer._add_geometry(
-            self.geometry_heap_offset_in_triangles,
-            self.triangle_count,
-        )
-
-    @staticmethod
-    def _build_bvh(
-        i: jt.UInt32[jt.Array, "nt 3"],
-        v: jt.Float32[jt.Array, "nv 3"],
-    ) -> tuple[
-        PodBvhNodeArray,
-        jt.UInt32[jt.Array, "nt 3"],
-    ]:
-        """
-        Builds a BVH for the given triangles and vertices.
-
-        :param i: Original triangle indices array of shape (nt, 3).
-        :param v: Vertex position array of shape (nv, 3).
-        :return: A tuple containing the BVH node array and the reordered triangle indices.
-        """
-
-        nt = i.shape[0]
-        nv = v.shape[0]
-
-        # Compute triangle centroids
-        c: jt.Float32[jt.Array, "nt"] = v[i].mean(axis=-2)
-        assert c.shape == (nt, 3)
-
-        # For each axis, compute the SAH:
-        for axis in range(3):
-            pass
-
-        raise NotImplementedError()
-
-    @staticmethod
-    def _build_bvh_partition(
-        i: jt.UInt32[jt.Array, "nt 3"],
-        c: jt.Float32[jt.Array, "nt 3"],
-        v: jt.Float32[jt.Array, "nv 3"],
-        p: jt.Float32[jt.Array, "3"],
-        x: int,
-    ) -> tuple[
-        jt.UInt32[jt.Array, "nt 3"],
-        jt.UInt32[jt.Array, "nt 3"],
-    ]:
-        """
-        Recursively builds the BVH partition.
-
-        :param i: Triangle indices array of shape (nt, 3).
-        :param c: Triangle centroids array of shape (nt, 3).
-        :param v: Vertex position array of shape (nv, 3).
-        :param p: Pivot value for partitioning.
-        :param x: Axis index (0, 1, or 2) for partitioning.
-        :return: A tuple containing the left and right partitioned triangle indices.
-        """
-
-        lt_mask = c[:, x] < p[x]
-        rt_mask = ~lt_mask
-
-        i_lt = i[lt_mask]
-        i_rt = i[rt_mask]
-
-        return i_lt, i_rt
+        # Done:
+        return v
 
 
 class Draw3dMaterial(BaseDisposable):
@@ -727,21 +728,12 @@ POD_AABB_DTYPE = np.dtype(
 )
 
 
-class PodVertexOffsetArray(StructuredNDArray):
+class PodVertexArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
-            ("offset", np.float32, (3,)),
-        ]
-    )
-
-
-class PodVertexDetailArray(StructuredNDArray):
-    DTYPE = np.dtype(
-        [
-            ("tangent", np.float32, (3,)),
-            ("bitangent", np.float32, (3,)),
+            ("position", np.float32, (3,)),
             ("normal", np.float32, (3,)),
-            ("texcoord", np.float32, (2,)),
+            ("uv", np.float32, (2,)),
         ]
     )
 
@@ -805,8 +797,3 @@ class PodInstanceArray(StructuredNDArray):
             ("inv_transform", np.float32, (4, 4)),  # row-major 4x4 inverse matrix
         ]
     )
-
-
-#
-# BVH construction
-#

@@ -18,12 +18,18 @@ import numpy as np
 
 @dataclass
 class Bvh:
-    t: npt.NDArray[np.uint32]  # (nt, 3)
-    v: npt.NDArray[np.float32]  # (nv, 3)
-    bvh_b: npt.NDArray[np.float32]  # (nb, 2, 3)
-    bvh_c: npt.NDArray[np.uint32]  # (nb, 2)
-    bvh_r: npt.NDArray[np.uint32]  # (nb, 2)
-    bvh_s: npt.NDArray[np.float32]  # (nb,)
+    aabb: npt.NDArray[np.float32]  # (nb, 2, 3)
+    children: npt.NDArray[np.uint32]  # (nb, 2)
+    tri_span: npt.NDArray[np.uint32]  # (nb, 2)
+
+    def __post_init__(self):
+        assert self.aabb.ndim == 3 and self.aabb.shape == (self.node_count, 2, 3)
+        assert self.children.ndim == 2 and self.children.shape == (self.node_count, 2)
+        assert self.tri_span.ndim == 2 and self.tri_span.shape == (self.node_count, 2)
+
+    @property
+    def node_count(self) -> int:
+        return self.aabb.shape[0]
 
 
 def build_bvh(
@@ -31,7 +37,11 @@ def build_bvh(
     v: npt.NDArray[np.float32],  # (nv, 3)
 ) -> Bvh:
     """
-    Constructs a BVH for the given triangles and vertices.
+    Constructs a BVH (bounding volume hierarchy) for the given triangles and vertices.
+
+    A BVH is a binary tree where each node contains an axis-aligned bounding box (AABB)
+    that encloses a subset of the triangles. Leaf nodes contain the actual triangles,
+    while internal nodes partition the triangles into two child nodes.
     """
 
     nt = t.shape[0]
@@ -77,12 +87,9 @@ def build_bvh(
 
     # Done:
     return Bvh(
-        t=t,
-        v=v,
-        bvh_b=bvh_b[: bvh_count[0]],
-        bvh_c=bvh_c[: bvh_count[0]],
-        bvh_r=bvh_r[: bvh_count[0]],
-        bvh_s=bvh_s[: bvh_count[0]],
+        aabb=bvh_b[: bvh_count[0]],
+        children=bvh_c[: bvh_count[0]],
+        tri_span=bvh_r[: bvh_count[0]],
     )
 
 
@@ -370,8 +377,8 @@ def partition_triangles(
     aabb_rt = compute_triangles_aabb(v_rt)
     aabb_surface_area_rt = compute_aabb_surface_area(aabb_rt)
 
-    sah_cost_lt = nt_lt * aabb_surface_area_lt
-    sah_cost_rt = nt_rt * aabb_surface_area_rt
+    sah_cost_lt = nt_lt * aabb_surface_area_lt if nt_lt > 0 else np.inf
+    sah_cost_rt = nt_rt * aabb_surface_area_rt if nt_rt > 0 else np.inf
 
     return i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt
 
