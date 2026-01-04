@@ -89,7 +89,7 @@ class Draw3dRenderer:
                     visibility=wgpu.ShaderStage.COMPUTE,
                     storage_texture=wgpu.StorageTextureBindingLayout(
                         access=wgpu.StorageTextureAccess.write_only,
-                        format=wgpu.TextureFormat.rgba32float,
+                        format=wgpu.TextureFormat.rgba16float,
                         view_dimension=wgpu.TextureViewDimension.d2,
                     ),
                 ),
@@ -395,7 +395,7 @@ class Draw3dFrame:
         self.output_image = self._device.create_texture(
             label="Draw3dFrame.OutputImage",
             size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
-            format=wgpu.TextureFormat.rgba32float,
+            format=wgpu.TextureFormat.rgba16float,
             usage=wgpu.TextureUsage.STORAGE_BINDING
             | wgpu.TextureUsage.COPY_SRC
             | wgpu.TextureUsage.TEXTURE_BINDING,

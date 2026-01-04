@@ -5,7 +5,6 @@ import rich
 import wgpu
 from PIL import Image
 import os
-import ctypes
 import numpy as np
 from conftest import GpuFixture
 
@@ -26,7 +25,7 @@ FRAME_H = 1024
 def _create_readback_buffer(device: wgpu.GPUDevice, w: int, h: int) -> wgpu.GPUBuffer:
     """Create a buffer for reading back rendered data from GPU."""
     return device.create_buffer(
-        size=w * h * 4 * ctypes.sizeof(ctypes.c_float),
+        size=w * h * 4 * 2,  # rgba16float
         usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
         label="ReadbackBuffer",
     )
@@ -63,7 +62,7 @@ def _render_and_readback(
                 aspect=wgpu.TextureAspect.all,
             ),
             destination=wgpu.TexelCopyBufferInfo(
-                bytes_per_row=w * 4 * ctypes.sizeof(ctypes.c_float),
+                bytes_per_row=w * 4 * 2,  # rgba16float
                 rows_per_image=h,
                 buffer=readback_buffer,
             ),
@@ -83,7 +82,11 @@ def _render_and_readback(
         )
 
     readback_buffer.map_sync(wgpu.MapMode.READ)
-    data = np.asarray(readback_buffer.read_mapped()).view(dtype=np.float32)
+    data = (
+        np.asarray(readback_buffer.read_mapped())
+        .view(dtype=np.float16)
+        .astype(np.float32)
+    )
     readback_buffer.unmap()
 
     return data.reshape((h, w, 4))

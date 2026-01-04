@@ -207,20 +207,6 @@ def load_rgba_image_from_bytes(
     return np.concatenate((dst_rgb, dst_alpha), axis=-1)
 
 
-# Coordinate system transformation matrix: glTF (Y-up, Z-forward) to Z-up, Y-forward.
-# This is a -90° rotation around the X-axis.
-# Maps: X -> X, Y -> Z, Z -> -Y
-GLTF_TO_ZUP_MATRIX = np.array(
-    [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, -1.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ],
-    dtype=np.float32,
-)
-
-
 #
 # GLTF loader
 #
@@ -714,7 +700,7 @@ def _process_scene_resources(
     # Start traversal from scene root nodes
     # If transforming coordinate system, start with the conversion matrix
     if transform_coordinate_system:
-        root_transform = GLTF_TO_ZUP_MATRIX.copy()
+        root_transform = GLTF_TO_Z_UP_MATRIX.copy()
     else:
         root_transform = np.eye(4, dtype=np.float32)
 
@@ -780,6 +766,20 @@ def _quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
         ],
         dtype=np.float32,
     )
+
+
+# Coordinate system transformation matrix: glTF (Y-up, Z-forward) to Z-up, Y-forward.
+# This is a -90° rotation around the X-axis.
+# Maps: X -> X, Y -> Z, Z -> -Y
+GLTF_TO_Z_UP_MATRIX = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
+    dtype=np.float32,
+)
 
 
 #
