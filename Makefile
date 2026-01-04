@@ -28,7 +28,6 @@ tests: sync build
 tests-profiling: sync build
 	uv run --package zfw --extra dev python -m pytest --profile -vs --tb=short $(PYTEST_ARGS) .
 	uv run flameprof --width 4096 prof/combined.prof > prof/combined.svg
-	uv run flameprof --width 4096 prof/test_basic_draw_2d.prof > prof/test_basic_draw_2d.svg
 
 
 #

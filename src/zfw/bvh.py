@@ -111,7 +111,7 @@ def build_bvh(
     )
 
 
-@numba.njit
+@numba.njit(cache=True)
 def build_bvh_subtree(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
@@ -250,7 +250,7 @@ def build_bvh_subtree(
     )
 
 
-@numba.njit
+@numba.njit(cache=True)
 def partition_triangles_optimally(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
@@ -365,7 +365,7 @@ def partition_triangles_optimally(
     )
 
 
-@numba.njit
+@numba.njit(cache=True)
 def partition_triangles(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     c: npt.NDArray[np.float32],  # (nt, 3)
@@ -425,7 +425,7 @@ def partition_triangles(
     return i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt
 
 
-@numba.njit
+@numba.njit(cache=True)
 def partition_points(
     p: npt.NDArray[np.float32],
     i: int,
@@ -459,7 +459,7 @@ def partition_points(
     return lt.astype(np.uint32), rt.astype(np.uint32)
 
 
-@numba.njit
+@numba.njit(cache=True)
 def compute_triangles_aabb(
     v: npt.NDArray[np.float32],
 ) -> tuple[
@@ -487,7 +487,7 @@ def compute_triangles_aabb(
     return v_min, v_max
 
 
-@numba.njit
+@numba.njit(cache=True)
 def compute_aabb_surface_area(
     aabb: tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],
 ) -> np.float32:

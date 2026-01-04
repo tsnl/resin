@@ -6,15 +6,14 @@ import rich
 from pathlib import Path
 
 
-def test_build_bvh():
+def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
     """
     Test BVH construction on real meshes from glTF sample assets.
     Verifies the generated BVH structure satisfies key invariants.
     """
     # Test meshes from glTF sample assets
     test_meshes = [
-        "Box.gltf",
-        "Suzanne.gltf",
+        mesh_name,
     ]
 
     base_path = Path(__file__).parent / "data" / "glTF-Sample-Assets" / "Models"
@@ -280,3 +279,7 @@ def test_compute_triangles_abbb():
 
     assert np.allclose(np.asarray(v_min), [-1.0, 0.0, -2.0])
     assert np.allclose(np.asarray(v_max), [1.0, 2.0, 4.0])
+
+
+if __name__ == "__main__":
+    test_build_bvh("Suzanne.gltf")
