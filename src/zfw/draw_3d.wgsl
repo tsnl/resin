@@ -645,6 +645,7 @@ struct HitDetails {
     barycentric_coordinates: vec3<f32>,
     texcoords: vec2<f32>,
     tbn: mat3x3<f32>,
+    instance_id: u32,
 }
 fn compute_hit_details(hit: HitRecord) -> HitDetails {
     var hit_details: HitDetails;
@@ -653,6 +654,7 @@ fn compute_hit_details(hit: HitRecord) -> HitDetails {
     hit_details.barycentric_coordinates = hit.barycentric_coordinates.xyz;
     hit_details.texcoords = compute_hit_details_texcoords(hit);
     hit_details.tbn = compute_hit_details_tbn_matrix(hit);
+    hit_details.instance_id = hit.instance_id;
     return hit_details;
 }
 fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
@@ -753,9 +755,11 @@ fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
     return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
 fn debug_visualize_primary_ray_color(hit_details: HitDetails) -> vec4<f32> {
-    // Sample texture at interpolated UV coordinates
-    // Using texture ID 0 as default - adjust as needed based on material
-    return sample_texture(0u, hit_details.texcoords);
+    // Get material from instance and sample its color map
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let color_map_id = material.color_map_id;
+    return sample_texture(color_map_id, hit_details.texcoords);
 }
 
 fn debug_visualize_hit_normal(hit_details: HitDetails) -> vec4<f32> {

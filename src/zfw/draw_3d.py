@@ -900,7 +900,7 @@ class Draw3dFrame(BaseDisposable):
         for (geometry, material), transforms in instances.items():
             n = transforms.shape[0]
             data["geometry_id"][offset : offset + n] = geometry.geometry_id
-            data["material_id"][offset : offset + n] = 0  # TODO: material ID
+            data["material_id"][offset : offset + n] = material.material_id
             data["transform"][offset : offset + n] = transforms
 
             # Compute inverse transforms
