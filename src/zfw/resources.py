@@ -32,7 +32,7 @@ import jaxtyping as jt
 
 from .excepts import LogicError
 from .basic import Font, FontSize, FontWeight, logger
-from .images import ImageFormat, ImageResource, convert_color
+from .images import ImageFormat, convert_color
 
 
 LOG = logger(__name__)
@@ -75,22 +75,22 @@ class GeometryResource:
 class MaterialResource:
     """Contains image resources and factors needed to construct a Draw3dMaterial."""
 
-    color_map: ImageResource | None
+    color_map: "ImageResource | None"
     """Base color texture (3-channel, linear space)."""
 
     color_factor: tuple[float, float, float]
     """Base color factor."""
 
-    normal_map: ImageResource | None
+    normal_map: "ImageResource | None"
     """Normal map texture (3-channel, linear space)."""
 
-    metalness_map: ImageResource | None
+    metalness_map: "ImageResource | None"
     """Metalness texture (1-channel, linear space)."""
 
     metalness_factor: float
     """Metalness factor."""
 
-    roughness_map: ImageResource | None
+    roughness_map: "ImageResource | None"
     """Roughness texture (1-channel, linear space)."""
 
     roughness_factor: float
@@ -99,12 +99,12 @@ class MaterialResource:
     def __init__(
         self,
         *,
-        color_map: ImageResource | None = None,
+        color_map: "ImageResource | None" = None,
         color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
-        normal_map: ImageResource | None = None,
-        metalness_map: ImageResource | None = None,
+        normal_map: "ImageResource | None" = None,
+        metalness_map: "ImageResource | None" = None,
         metalness_factor: float = 1.0,
-        roughness_map: ImageResource | None = None,
+        roughness_map: "ImageResource | None" = None,
         roughness_factor: float = 1.0,
     ) -> None:
         self.color_map = color_map
@@ -114,6 +114,25 @@ class MaterialResource:
         self.metalness_factor = metalness_factor
         self.roughness_map = roughness_map
         self.roughness_factor = roughness_factor
+
+
+class ImageResource:
+    """Stores image data along with metadata about format and dimensions."""
+
+    def __init__(
+        self,
+        *,
+        data: np.ndarray,
+        width: int,
+        height: int,
+        depth: int,
+        image_format: ImageFormat,
+    ) -> None:
+        self.data = data
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.image_format = image_format
 
 
 #
@@ -626,12 +645,12 @@ def _load_material_resources(
 
     for material_idx, material in enumerate(gltf.materials or []):
         color_factor = (1.0, 1.0, 1.0)
-        color_map: ImageResource | None = None
-        normal_map: ImageResource | None = None
+        color_map: "ImageResource | None" = None
+        normal_map: "ImageResource | None" = None
         metalness_factor = 1.0
         roughness_factor = 1.0
-        metalness_map: ImageResource | None = None
-        roughness_map: ImageResource | None = None
+        metalness_map: "ImageResource | None" = None
+        roughness_map: "ImageResource | None" = None
 
         # PBR metallic-roughness workflow
         pbr = material.pbrMetallicRoughness

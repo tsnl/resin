@@ -468,7 +468,7 @@ class GltfViewerWidget(zfw.GuiWidget):
                 transform=self._camera.get_transform(),
                 fov_y_rad=math.radians(60),
                 aspect_ratio=aspect_ratio,
-                max_distance=100.0,
+                max_distance=10.0,
             ),
         )
 

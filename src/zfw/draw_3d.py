@@ -11,7 +11,7 @@ import numpy as np
 import jaxtyping as jt
 import wgpu
 
-from .basic import BaseDisposable, StructuredNDArray
+from .basic import BaseDisposable, StructuredNDArray, logger
 from .bvh import Bvh, build_bvh
 from .resources import GeometryResource, ImageResource, MaterialResource
 
@@ -307,6 +307,10 @@ class Draw3dRenderer(BaseDisposable):
         vertex_count = vertices.shape[0]
         triangle_count = vertex_count // 3
 
+        LOG.debug(
+            f"Uploading triangles: {vertex_count} vertices, {triangle_count} triangles"
+        )
+
         # Allocate:
         allocation_offset_in_triangles = self.allocated_triangle_count
         allocation_offset_in_bytes = (
@@ -347,6 +351,8 @@ class Draw3dRenderer(BaseDisposable):
         assert bvh_nodes.ndim == 1 and bvh_nodes.dtype == PodBvhNodeArray.DTYPE
 
         node_count = bvh_nodes.shape[0]
+
+        LOG.debug(f"Uploading BVH nodes: {node_count} nodes")
 
         # Allocate:
         allocation_offset = self.allocated_bvh_node_count
@@ -439,10 +445,17 @@ class Draw3dRenderer(BaseDisposable):
         subpixel_span_begin: int,
         subpixel_span_count: int,
     ) -> int:
-        """Create a single PodTextureArray entry and upload it to the texture heap.
+        """
+        Create a single PodTextureArray entry and upload it to the texture heap.
 
         Returns the allocated texture index (offset in texture array elements).
         """
+
+        LOG.debug(
+            f"Uploading texture: {width}x{height}x{depth}, "
+            f"subpixels [{subpixel_span_begin}, {subpixel_span_begin + subpixel_span_count})"
+        )
+
         # Prepare singleton PodTextureArray
         data = PodTextureArray.empty(shape=(1,))
         data["width"][0] = np.uint32(width)
@@ -1262,3 +1275,6 @@ class PodCameraArray(StructuredNDArray):
             ("_rsv", np.uint32),
         ]
     )
+
+
+LOG = logger(__name__)

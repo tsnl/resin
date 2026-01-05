@@ -1,6 +1,5 @@
 __all__ = [
     "ImageFormat",
-    "ImageResource",
     "compute_psnr",
     "convert_color",
     "convert_linear_to_srgb",
@@ -30,25 +29,6 @@ type ImageFormat = Literal[
 
 
 LOG = logger(__name__)
-
-
-class ImageResource:
-    """Stores image data along with metadata about format and dimensions."""
-
-    def __init__(
-        self,
-        *,
-        data: np.ndarray,
-        width: int,
-        height: int,
-        depth: int,
-        image_format: ImageFormat,
-    ) -> None:
-        self.data = data
-        self.width = width
-        self.height = height
-        self.depth = depth
-        self.image_format = image_format
 
 
 def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:

@@ -11,30 +11,31 @@
   - [x] Naive ray-triangle intersection with primary rays, incl. instanced meshes.
   - [x] Construct BVHs for BLAS
   - [x] BVH-accelerated ray-triangle intersection with primary rays, ensure no regressions.
-  - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
 - [x] Basic shading
   - [x] Compute barycentric coordinates
   - [x] Interpolate normals, get smooth lambertian shading.
   - [x] Texture mapping support
   - [x] Sample environment map on ray miss.
-- [ ] Secondary rays, PBR shading
-
-### Polished Resources
-
-See `resources2.py`: WIP.
-
-### Baked Global Illumination
-
-Add support for probe-based GI and lightmaps for indirect GI.
-
-We can run the above ray-tracer offline to produce really high-quality baked lighting data.
-
-We can then run a fast rasterizer or ray-tracer with only primary rays at run-time to then sample 
-the baked lighting data.
-
-### Wavefront-based Rewrite
-
-Move away from megakernel design to wavefront design, with multiple specialized kernels.
+- [ ] Texture heap overhaul
+  - [ ] Implement BC4, BC6H texture encoding.
+  - [ ] Use a large BC6H texture array (and a separate BC4 for mono) instead of a 
+        storage buffer for all textures, using a GPU linear sampler to read data.
+  - [ ] Move the big environment map into a singleton cube map.
+  - [ ] (Future) add a separate cube map heap for light probes.
+- [ ] Secondary rays, PBR shading:
+    - [ ] IBL (environment map): prefiltered environment map.
+    - [ ] Monte Carlo path tracing, offline rendering with ∞ samples.
+- [ ] Optimization
+  - [ ] Texture heaps: BC4 for mono, BC6H for color, paged atlas allocator, 
+        deallocation.
+  - [ ] Linear buffer deallocation, free lists for resource allocator heaps.
+  - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
+- [ ] Bigger Changes
+  - [ ] Rewrite ray tracer to use wavefront design.
+  - [ ] Switch back to Vulkan: maybe even rewrite in Rust at this point.
+    - CUDA Interop for PyTorch tensors.
+    - Bindless, buffer device address.
+    - Multiple frames in flight.
 
 ### Vulkan for CUDA Interop
 
@@ -51,5 +52,5 @@ git checkout origin/archive/main-v2 -- src/zfw/typed_vulkan.py  src/zfw/typed_vu
 ## Sharp Edges
 
 Stuff that needs to be cleaned up with research.
-- `ColorSpace`: how we model colors, color spaces is very messy. sRGB, linear (which primaries? Same as sRGB?), alpha premultiplied or not, etc. Need a more consistent way of handling this.
-
+- [ ] Instead of KiwiSolver, use Google OR-Tools (or better still don't use constraint 
+      solving for GUI)
