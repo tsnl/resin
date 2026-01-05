@@ -17,9 +17,7 @@ import numpy.typing as npt
 import numpy as np
 import time
 
-from .basic import logger
-
-NUMBA_CACHE_ENABLED = True
+from .basic import logger, NUMBA_CACHE_ENABLED
 
 
 @dataclass

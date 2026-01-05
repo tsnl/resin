@@ -3,7 +3,7 @@ name = "zfw_sandbox"
 version = "0.1.0"
 description = "Example application for the ZFW SDK."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = ["zfw"]
 
 [build-system]

@@ -1,4 +1,5 @@
 __all__ = [
+    "NUMBA_CACHE_ENABLED",
     "BaseDisposable",
     "ButtonAction",
     "ColorSpace",
@@ -122,6 +123,13 @@ class StructuredNDArray(np.ndarray, ABC):
         for dim in shape:
             n *= dim
         return n * cls.DTYPE.itemsize
+
+
+#
+# Numba config
+#
+
+NUMBA_CACHE_ENABLED = True
 
 
 #
@@ -377,5 +385,9 @@ def setup_logging(
             noisy_logger = logging.getLogger(logger_name)
             noisy_logger.setLevel(logging.ERROR)
 
+
+#
+# Log for this module:
+#
 
 LOG = logger(__name__)
