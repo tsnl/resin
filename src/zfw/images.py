@@ -1,5 +1,6 @@
 __all__ = [
     "ImageFormat",
+    "compress_bc4",
     "compute_psnr",
     "convert_color",
     "convert_linear_to_srgb",
@@ -26,6 +27,7 @@ type ImageFormat = Literal[
     "rgba8unorm-srgb",
     "rgb32float",
     "rgb16float",
+    "bc4-r-unorm",
 ]
 
 

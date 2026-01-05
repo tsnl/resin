@@ -3,11 +3,10 @@ import logging
 import os
 from pathlib import Path
 
-import numpy as np
 import pytest
 import wgpu
 
-from zfw import load_image, setup_logging, request_wgpu_device
+from zfw import load_image, setup_logging, request_wgpu_device, ImageResource
 
 
 @dataclass
@@ -27,7 +26,7 @@ def gpu() -> GpuFixture:
 
 
 @pytest.fixture(scope="session")
-def rainbow_512x512_image() -> np.ndarray:
+def rainbow_512x512_image() -> ImageResource:
     """Load the rainbow test image as a float32 linear RGBA array."""
     image_resource = load_image(
         Path("tests/data/rainbow-512x512.png"),
@@ -37,7 +36,7 @@ def rainbow_512x512_image() -> np.ndarray:
     image_data = image_resource.data
     assert image_data.shape == (512, 512, 4)
     image_data.setflags(write=False)
-    return image_data
+    return image_resource
 
 
 @pytest.fixture(scope="session", autouse=True)

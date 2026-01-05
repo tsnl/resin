@@ -20,8 +20,8 @@ dependencies = [
     "jaxtyping>=0.3.4",
     "numba>=0.63.1",
     "typeguard>=4.4.4",
-    "imageio>=2.37.2",
-    "opencv-python>=4.0.0",
+    "imageio[opencv]>=2.37.2",
+    "opencv-python>=4.11.0.86",
 ]
 
 [project.optional-dependencies]

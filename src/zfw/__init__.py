@@ -38,6 +38,7 @@ __all__ = [
     "Window",
     "WindowContext",
     "build_bvh",
+    "compress_bc4",
     "compute_points_aabb",
     "compute_psnr",
     "convert_color",
@@ -102,15 +103,14 @@ from .resources import (
     load_image_from_bytes,
     load_gltf,
 )
-from .images import (
-    ImageFormat,
-)
 from .bundled_data import BUNDLED_DATA_PATH
 from .images import (
     compute_psnr,
     convert_color,
     convert_linear_to_srgb,
     convert_srgb_to_linear,
+    ImageFormat,
+    compress_bc4,
 )
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext

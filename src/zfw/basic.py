@@ -380,6 +380,8 @@ def setup_logging(
         noisy_loggers = [
             "numba",
             "wgpu",
+            "PIL",
+            "Pillow",
         ]
         for logger_name in noisy_loggers:
             noisy_logger = logging.getLogger(logger_name)

@@ -18,6 +18,7 @@ from zfw import (
     Draw2dExtTextPrimitive,
     Draw2dExtCanvas,
     convert_color,
+    ImageResource,
 )
 
 from conftest import GpuFixture
@@ -175,13 +176,13 @@ def test_draw_2d_ext_quads(engine: Draw2dExTestEngine):
 
 def test_draw_2d_ext_image(
     engine: Draw2dExTestEngine,
-    rainbow_512x512_image: np.ndarray,
+    rainbow_512x512_image: ImageResource,
 ):
     """Test rendering a textured quad with an image (parity with draw_2d)."""
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Load test image (returns float32 linear color space)
-    image_data = rainbow_512x512_image
+    image_data = rainbow_512x512_image.data
     assert image_data.shape == (512, 512, 4)
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture

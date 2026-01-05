@@ -13,6 +13,7 @@ def request_wgpu_device(
         required_features=(
             [
                 "shader-f16",
+                "texture-compression-bc",
             ]
             + (required_features or [])
         ),
