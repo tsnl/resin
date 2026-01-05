@@ -54,3 +54,4 @@ git checkout origin/archive/main-v2 -- src/zfw/typed_vulkan.py  src/zfw/typed_vu
 Stuff that needs to be cleaned up with research.
 - [ ] Instead of KiwiSolver, use Google OR-Tools (or better still don't use constraint 
       solving for GUI)
+- [ ] Move `_convert_format()` into `images.py`.

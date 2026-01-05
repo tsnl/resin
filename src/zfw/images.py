@@ -3,8 +3,11 @@ __all__ = [
     "compress_bc4",
     "compute_psnr",
     "convert_color",
+    "convert_image_format",
     "convert_linear_to_srgb",
+    "convert_rgb_to_grayscale",
     "convert_srgb_to_linear",
+    "normalize_image_to_f32",
 ]
 
 from pathlib import Path
@@ -32,6 +35,11 @@ type ImageFormat = Literal[
 
 
 LOG = logger(__name__)
+
+
+#
+# PSNR:
+#
 
 
 def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:
@@ -63,6 +71,22 @@ def compute_psnr(img1: np.ndarray, img2: np.ndarray) -> float:
     return 20 * np.log10(max_i / np.sqrt(mse))
 
 
+#
+# RGB -> Grayscale:
+#
+
+
+def convert_rgb_to_grayscale(rgb: np.ndarray) -> np.ndarray:
+    """
+    Convert an RGB image to grayscale using luminance-preserving weights.
+    :param rgb: Input RGB image as a NumPy array of shape (H, W, 3).
+    :returns: Grayscale image as a NumPy array of shape (H, W).
+    """
+    assert rgb.ndim == 3 and rgb.shape[2] == 3
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
 def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     """
     Saves an RGBA image from a normalized NumPy array in linear color space.
@@ -81,6 +105,131 @@ def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     iio.imwrite(file_path, srgb)
 
 
+#
+# convert_image_format
+#
+
+
+def convert_image_format(
+    data: np.ndarray,
+    input_format: ImageFormat,
+    output_format: ImageFormat,
+) -> np.ndarray:
+    """
+    Convert from one ImageFormat to another.
+
+    Steps:
+    1. Normalize input to float32
+    2. Adjust channel count if needed (e.g., RGBA -> RGB by dropping alpha)
+    3. Apply color space conversion if needed (srgb<->linear)
+    4. Re-encode to output bit-depth
+    """
+
+    input_channels = image_format_channel_count(input_format)
+    output_channels = image_format_channel_count(output_format)
+
+    # Normalize to float32
+    f32_data = normalize_image_to_f32(data)
+
+    # Handle channel count mismatch
+    if input_channels != output_channels:
+        if input_channels == 4 and output_channels == 3:
+            # Drop alpha channel
+            f32_data = f32_data[:, :, :3]
+        elif input_channels == 3 and output_channels == 4:
+            # Add alpha channel (all 1.0)
+            alpha = np.ones((*f32_data.shape[:2], 1), dtype=f32_data.dtype)
+            f32_data = np.concatenate((f32_data, alpha), axis=-1)
+        elif input_channels == 1 and output_channels == 4:
+            # Replicate grayscale to RGBA
+            f32_data = np.repeat(f32_data, 4, axis=-1)
+        elif input_channels == 4 and output_channels == 1:
+            # Convert RGBA to grayscale (use luminance formula)
+            f32_data = (
+                0.299 * f32_data[:, :, 0:1]
+                + 0.587 * f32_data[:, :, 1:2]
+                + 0.114 * f32_data[:, :, 2:3]
+            )
+        else:
+            raise ValueError(
+                f"Unsupported channel conversion: {input_channels} -> {output_channels}"
+            )
+
+    # Apply color space conversion if needed
+    input_is_srgb = "srgb" in input_format
+    output_is_srgb = "srgb" in output_format
+
+    if input_is_srgb and not output_is_srgb:
+        # sRGB -> linear
+        f32_data = convert_color(
+            f32_data,
+            src_color_space="srgb",
+            dst_color_space="linear",
+            src_channels=f32_data.shape[-1],
+        )
+    elif not input_is_srgb and output_is_srgb:
+        # linear -> sRGB
+        f32_data = convert_color(
+            f32_data,
+            src_color_space="linear",
+            dst_color_space="srgb",
+            src_channels=f32_data.shape[-1],
+        )
+
+    # Re-encode to target format
+    return _encode_f32_to_format(f32_data, output_format)
+
+
+def normalize_image_to_f32(
+    data: np.ndarray,
+) -> np.ndarray:
+    """Normalize image data to float32 in [0, 1] range."""
+    if data.dtype == np.uint8:
+        return data.astype(np.float32) / 255.0
+    elif data.dtype == np.uint16:
+        return data.astype(np.float32) / 65535.0
+    elif np.issubdtype(data.dtype, np.floating):
+        return data.astype(np.float32)
+    else:
+        raise ValueError(f"Unsupported image dtype: {data.dtype}")
+
+
+def _encode_f32_to_format(
+    data: np.ndarray,
+    image_format: ImageFormat,
+) -> np.ndarray:
+    """Re-encode normalized float32 image to target format bit-depth."""
+    match image_format:
+        case "rgba32float" | "rgb32float" | "r32float":
+            return data.astype(np.float32)
+        case "rgba16float" | "rgb16float" | "r16float":
+            return data.astype(np.float16)
+        case "rgba8unorm" | "rgba8unorm-srgb" | "r8unorm":
+            return (data * 255.0).clip(0, 255).astype(np.uint8)
+        case _:
+            raise ValueError(f"Unknown image format: {image_format}")
+
+
+def image_format_channel_count(image_format: ImageFormat) -> int:
+    """Get number of channels for image format."""
+    match image_format:
+        case "rgba32float" | "rgba16float" | "rgba8unorm" | "rgba8unorm-srgb":
+            return 4
+        case "rgb32float" | "rgb16float":
+            return 3
+        case "r32float" | "r16float" | "r8unorm":
+            return 1
+        case "bc4-r-unorm":
+            return 1
+        case _:
+            raise ValueError(f"Unknown image format: {image_format}")
+
+
+#
+# convert_color: deprecated API
+#
+
+
 def convert_color(
     data: np.ndarray,
     src_color_space: ColorSpace,
@@ -89,6 +238,8 @@ def convert_color(
 ) -> np.ndarray:
     """
     Convert an image between color spaces.
+
+    NOTE: Deprecated: use convert_image_format() instead.
 
     If src_channels is provided, will validate that the image has that many channels.
     If mismatch, raises an error (no implicit channel conversion).

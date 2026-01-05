@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 import wgpu
 
-from zfw import load_image, setup_logging, request_wgpu_device, ImageResource
+from zfw import (
+    load_image,
+    setup_logging,
+    request_wgpu_device,
+    ImageResource,
+    convert_rgb_to_grayscale,
+)
 
 
 @dataclass
@@ -37,6 +43,21 @@ def rainbow_512x512_image() -> ImageResource:
     assert image_data.shape == (512, 512, 4)
     image_data.setflags(write=False)
     return image_resource
+
+
+@pytest.fixture(scope="session")
+def rainbow_512x512_image_greyscale(
+    rainbow_512x512_image: ImageResource,
+) -> ImageResource:
+    image_data_rgb = rainbow_512x512_image.data[..., :3]
+    image_data_gray = convert_rgb_to_grayscale(rgb=image_data_rgb)
+    return ImageResource(
+        data=image_data_gray,
+        width=rainbow_512x512_image.width,
+        height=rainbow_512x512_image.height,
+        depth=1,
+        image_format="r32float",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

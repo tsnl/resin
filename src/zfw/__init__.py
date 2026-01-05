@@ -42,13 +42,17 @@ __all__ = [
     "compute_points_aabb",
     "compute_psnr",
     "convert_color",
+    "convert_image_format",
     "convert_linear_to_srgb",
+    "convert_rgb_to_grayscale",
+    "image_format_channel_count",
     "convert_srgb_to_linear",
     "expect",
     "load_gltf",
     "load_image",
     "load_image_from_bytes",
     "logger",
+    "normalize_image_to_f32",
     "partition_points",
     "partition_triangles",
     "request_wgpu_device",
@@ -111,6 +115,10 @@ from .images import (
     convert_srgb_to_linear,
     ImageFormat,
     compress_bc4,
+    convert_image_format,
+    normalize_image_to_f32,
+    convert_rgb_to_grayscale,
+    image_format_channel_count,
 )
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
