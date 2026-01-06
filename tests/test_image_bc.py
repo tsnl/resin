@@ -15,6 +15,7 @@ def help_render_texture_to_framebuffer(
     input_w: int,
     input_h: int,
     bytes_per_row: int,
+    grayscale: bool,
     output_path: Path,
 ) -> np.ndarray:
     with open(Path(__file__).parent / "test_image_bc.wgsl") as f:
@@ -22,34 +23,9 @@ def help_render_texture_to_framebuffer(
 
     shader_module = device.create_shader_module(code=shader_code)
 
-    pipeline_layout = device.create_pipeline_layout(
-        bind_group_layouts=[
-            device.create_bind_group_layout(
-                entries=[
-                    wgpu.BindGroupLayoutEntry(
-                        binding=0,
-                        visibility=wgpu.ShaderStage.FRAGMENT,
-                        texture=wgpu.TextureBindingLayout(
-                            sample_type="float",
-                            view_dimension="2d",
-                            multisampled=False,
-                        ),
-                    ),
-                    wgpu.BindGroupLayoutEntry(
-                        binding=1,
-                        visibility=wgpu.ShaderStage.FRAGMENT,
-                        sampler=wgpu.SamplerBindingLayout(
-                            type="filtering",
-                        ),
-                    ),
-                ]
-            )
-        ]
-    )
-
     render_pipeline = device.create_render_pipeline(
         label="TestImageBc.TestImageBc4Pipeline",
-        layout=pipeline_layout,
+        layout="auto",
         vertex=wgpu.VertexState(
             module=shader_module,
             entry_point="vs_main",
@@ -59,11 +35,7 @@ def help_render_texture_to_framebuffer(
             entry_point="fs_main",
             targets=[wgpu.ColorTargetState(format="rgba32float")],
         ),
-        primitive=wgpu.PrimitiveState(
-            topology="triangle-list",
-            front_face="ccw",
-            cull_mode="none",
-        ),
+        primitive=wgpu.PrimitiveState(topology="triangle-list"),
         depth_stencil=None,
         multisample=None,
     )
@@ -97,37 +69,13 @@ def help_render_texture_to_framebuffer(
         size=(input_w, input_h, 1),
     )
 
-    # Add debug log to inspect the texture data before writing to the GPU
-    LOG.debug(
-        "Compressed texture data shape: %s, dtype: %s",
-        compressed_texture_data.shape,
-        compressed_texture_data.dtype,
-    )
-    LOG.debug(
-        "Compressed texture data (sample): %s", compressed_texture_data.flatten()[:10]
-    )
-
-    # Debug log to verify texture data after writing to the GPU
-    LOG.debug(
-        "Texture data written to GPU (sample): %s",
-        compressed_texture_data.flatten()[:10],
-    )
-
     bind_group = device.create_bind_group(
         label="TestImageBc.HelpRenderTextureToFramebuffer.BindGroup",
         layout=render_pipeline.get_bind_group_layout(0),
         entries=[
             wgpu.BindGroupEntry(
                 binding=0,
-                resource=device.create_texture(
-                    label="TestImageBc.HelpRenderTextureToFramebuffer.TextureView",
-                    size=(input_w, input_h, 1),
-                    dimension="2d",
-                    format=attachment_texture_format,
-                    usage=(
-                        wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST
-                    ),
-                ).create_view(),
+                resource=texture.create_view(),
             ),
             wgpu.BindGroupEntry(
                 binding=1,
@@ -193,9 +141,9 @@ def help_render_texture_to_framebuffer(
 
     res = buffer_data.view(np.float32).reshape((input_h, input_w, 4))
 
-    # Add debug log to inspect the rendered image data after reading back
-    LOG.debug("Rendered image data shape: %s, dtype: %s", res.shape, res.dtype)
-    LOG.debug("Rendered image data (sample): %s", res.flatten()[:10])
+    if grayscale:
+        res = np.dstack([res[:, :, 0:1]] * 4)
+        res[:, :, 3] = 1.0  # set alpha to 1.0
 
     zfw.debug_save_rgba_image(file_path=output_path, data=res)
 
@@ -220,6 +168,7 @@ def test_help_render_texture_to_framebuffer(
         input_w=input_w,
         input_h=input_h,
         bytes_per_row=input_w * 2,
+        grayscale=True,
         output_path=Path(
             "output/zfw/test_image_bc/test_help_render_texture_to_framebuffer.png"
         ),
@@ -248,6 +197,7 @@ def test_image_bc4(
         input_w=input_w,
         input_h=input_h,
         bytes_per_row=(input_w // 4) * 8,
+        grayscale=True,
         output_path=Path("output/zfw/test_image_bc/test_image_bc4.png"),
     )
 
