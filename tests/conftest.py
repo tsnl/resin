@@ -46,7 +46,7 @@ def rainbow_512x512_image() -> ImageResource:
 
 
 @pytest.fixture(scope="session")
-def rainbow_512x512_image_greyscale(
+def rainbow_512x512_image_grayscale(
     rainbow_512x512_image: ImageResource,
 ) -> ImageResource:
     image_data_rgb = rainbow_512x512_image.data[..., :3]

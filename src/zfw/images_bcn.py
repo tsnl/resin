@@ -9,12 +9,11 @@ import numba
 from .basic import NUMBA_CACHE_ENABLED
 
 
-@numba.njit(cache=NUMBA_CACHE_ENABLED)
 def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     """
     Compress a single-channel image to BC4 format.
 
-    :param data: input image data: shape (h, w), dtype float32 with h%4 == w%4 == 0.
+    :param data: input image data: shape (h, w, 1), dtype float32 with h%4 == w%4 == 0.
     :returns: Compressed BC4 data: shape (height/4, width/4, 8), dtype uint8.
     """
 
@@ -32,9 +31,21 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     # 6 | (endpoint0 * 2 + endpoint1 * 5) / 7  | 0
     # 7 | (endpoint0 * 1 + endpoint1 * 6) / 7  | 255
 
-    h, w = input_.shape
+    h, w, d = input_.shape
     if h % 4 != 0 or w % 4 != 0:
         raise ValueError("Input image dimensions must be multiples of 4")
+    if d != 1:
+        raise ValueError("Input image must have a single channel")
+    if input_.dtype != np.float32:
+        raise ValueError("Input image must have dtype float32")
+
+    return _compress_bc4_impl(input_)
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _compress_bc4_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
+    h, w, d = input_.shape
+    assert d == 1
 
     output = np.empty((h // 4, w // 4, 8), dtype=np.uint8)
 
@@ -42,7 +53,7 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
         for bx in range(w // 4):
             y_begin = by * 4
             x_begin = bx * 4
-            input_block = input_[y_begin : y_begin + 4, x_begin : x_begin + 4]
+            input_block = input_[y_begin : y_begin + 4, x_begin : x_begin + 4, 0]
 
             endpoint_min = np.min(input_block) / 255.0
             endpoint_max = np.max(input_block) / 255.0
@@ -59,7 +70,8 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
                         (endpoint_max * 3 + endpoint_min * 4) / 7,
                         (endpoint_max * 2 + endpoint_min * 5) / 7,
                         (endpoint_max * 1 + endpoint_min * 6) / 7,
-                    ]
+                    ],
+                    dtype=np.float32,
                 ),
             )
             idx_6c, err_6c = _compress_bc4_block(
@@ -74,7 +86,8 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
                         (endpoint_min * 1 + endpoint_max * 4) / 5,
                         0.0,
                         1.0,
-                    ]
+                    ],
+                    dtype=np.float32,
                 ),
             )
 
@@ -124,16 +137,16 @@ def _pack_bc4_block(
     indices: npt.NDArray[np.uint8],
     mode_is_8c_not_6c: bool,
 ) -> npt.NDArray[np.uint8]:
-    packed = np.empty(8, dtype=np.uint8)
+    packed_indices_u64 = np.zeros(1, dtype=np.uint64)
+    for i in range(16):
+        packed_indices_u64[0] |= np.uint64(indices[i] & 0x7) << (3 * i)
 
+    packed = np.empty(8, dtype=np.uint8)
     packed[0], packed[1] = (
         (endpoint_max, endpoint_min)
         if mode_is_8c_not_6c
         else (endpoint_min, endpoint_max)
     )
-
-    packed_indices_u64 = packed[2:].view(np.uint64)
-    for i in range(16):
-        packed_indices_u64 |= np.uint64(indices[i] & 0x7) << (3 * i)
+    packed[2:] = packed_indices_u64.view(np.uint8)[:6]
 
     return packed

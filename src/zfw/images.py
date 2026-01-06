@@ -8,6 +8,7 @@ __all__ = [
     "convert_rgb_to_grayscale",
     "convert_srgb_to_linear",
     "normalize_image_to_f32",
+    "debug_save_rgba_image",
 ]
 
 from pathlib import Path
@@ -80,14 +81,15 @@ def convert_rgb_to_grayscale(rgb: np.ndarray) -> np.ndarray:
     """
     Convert an RGB image to grayscale using luminance-preserving weights.
     :param rgb: Input RGB image as a NumPy array of shape (H, W, 3).
-    :returns: Grayscale image as a NumPy array of shape (H, W).
+    :returns: Grayscale image as a NumPy array of shape (H, W, 1).
     """
     assert rgb.ndim == 3 and rgb.shape[2] == 3
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    grayscale = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return grayscale[..., np.newaxis]
 
 
-def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
+def debug_save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     """
     Saves an RGBA image from a normalized NumPy array in linear color space.
 
@@ -96,6 +98,9 @@ def save_rgba_image(*, file_path: Path | str, data: np.ndarray):
     """
     assert data.ndim == 3, "Data must be a 3D array: (height, width, channels)"
     assert data.shape[-1] == 4, "Data must have 4 channels (RGBA)"
+
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
 
     linear = data[..., :3]
     alpha = data[..., 3:4]

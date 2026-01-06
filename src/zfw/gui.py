@@ -228,8 +228,8 @@ _DEFAULT_THEME: GuiTheme = {
             "border_color": (0.0, 0.2, 0.5, 1.0),  # Darker blue border when pressed
         },
         "cancelled": {
-            "bg_color": (0.75, 0.75, 0.75, 1.0),  # Grey when cancelled
-            "border_color": (0.5, 0.5, 0.5, 1.0),  # Darker grey border when cancelled
+            "bg_color": (0.75, 0.75, 0.75, 1.0),  # Gray when cancelled
+            "border_color": (0.5, 0.5, 0.5, 1.0),  # Darker gray border when cancelled
         },
         "unclickable": {
             "fg_color": (0.35, 0.35, 0.35, 1.0),

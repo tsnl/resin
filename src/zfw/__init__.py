@@ -45,9 +45,9 @@ __all__ = [
     "convert_image_format",
     "convert_linear_to_srgb",
     "convert_rgb_to_grayscale",
-    "image_format_channel_count",
     "convert_srgb_to_linear",
     "expect",
+    "image_format_channel_count",
     "load_gltf",
     "load_image",
     "load_image_from_bytes",
@@ -57,6 +57,7 @@ __all__ = [
     "partition_triangles",
     "request_wgpu_device",
     "round_up_to_po2",
+    "debug_save_rgba_image",
     "setup_logging",
 ]
 
@@ -119,6 +120,7 @@ from .images import (
     normalize_image_to_f32,
     convert_rgb_to_grayscale,
     image_format_channel_count,
+    debug_save_rgba_image,
 )
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
