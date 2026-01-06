@@ -22,9 +22,34 @@ def help_render_texture_to_framebuffer(
 
     shader_module = device.create_shader_module(code=shader_code)
 
+    pipeline_layout = device.create_pipeline_layout(
+        bind_group_layouts=[
+            device.create_bind_group_layout(
+                entries=[
+                    wgpu.BindGroupLayoutEntry(
+                        binding=0,
+                        visibility=wgpu.ShaderStage.FRAGMENT,
+                        texture=wgpu.TextureBindingLayout(
+                            sample_type="float",
+                            view_dimension="2d",
+                            multisampled=False,
+                        ),
+                    ),
+                    wgpu.BindGroupLayoutEntry(
+                        binding=1,
+                        visibility=wgpu.ShaderStage.FRAGMENT,
+                        sampler=wgpu.SamplerBindingLayout(
+                            type="filtering",
+                        ),
+                    ),
+                ]
+            )
+        ]
+    )
+
     render_pipeline = device.create_render_pipeline(
         label="TestImageBc.TestImageBc4Pipeline",
-        layout="auto",
+        layout=pipeline_layout,
         vertex=wgpu.VertexState(
             module=shader_module,
             entry_point="vs_main",
@@ -34,7 +59,11 @@ def help_render_texture_to_framebuffer(
             entry_point="fs_main",
             targets=[wgpu.ColorTargetState(format="rgba32float")],
         ),
-        primitive=wgpu.PrimitiveState(topology="triangle-list"),
+        primitive=wgpu.PrimitiveState(
+            topology="triangle-list",
+            front_face="ccw",
+            cull_mode="none",
+        ),
         depth_stencil=None,
         multisample=None,
     )
@@ -66,6 +95,22 @@ def help_render_texture_to_framebuffer(
             rows_per_image=input_h,
         ),
         size=(input_w, input_h, 1),
+    )
+
+    # Add debug log to inspect the texture data before writing to the GPU
+    LOG.debug(
+        "Compressed texture data shape: %s, dtype: %s",
+        compressed_texture_data.shape,
+        compressed_texture_data.dtype,
+    )
+    LOG.debug(
+        "Compressed texture data (sample): %s", compressed_texture_data.flatten()[:10]
+    )
+
+    # Debug log to verify texture data after writing to the GPU
+    LOG.debug(
+        "Texture data written to GPU (sample): %s",
+        compressed_texture_data.flatten()[:10],
     )
 
     bind_group = device.create_bind_group(
@@ -147,6 +192,10 @@ def help_render_texture_to_framebuffer(
     render_target.destroy()
 
     res = buffer_data.view(np.float32).reshape((input_h, input_w, 4))
+
+    # Add debug log to inspect the rendered image data after reading back
+    LOG.debug("Rendered image data shape: %s, dtype: %s", res.shape, res.dtype)
+    LOG.debug("Rendered image data (sample): %s", res.flatten()[:10])
 
     zfw.debug_save_rgba_image(file_path=output_path, data=res)
 
