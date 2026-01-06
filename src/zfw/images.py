@@ -1,5 +1,6 @@
 __all__ = [
     "ImageFormat",
+    "encode_bc1",
     "encode_bc4",
     "compute_psnr",
     "convert_color",
@@ -18,7 +19,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from .basic import ColorSpace, logger
-from .images_bcn import encode_bc4
+from .images_bcn import encode_bc1, encode_bc4
 
 # ImageFormat: subset of WebGPU texture formats for images
 type ImageFormat = Literal[

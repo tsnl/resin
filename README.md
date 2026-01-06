@@ -42,6 +42,7 @@ make -j check
     -   [PBR Book - Bounding Volume Hierarchies - The Surface Area Heuristic](https://www.pbr-book.org/3ed-2018/Primitives_and_Intersection_Acceleration/Bounding_Volume_Hierarchies#TheSurfaceAreaHeuristic)
     -   [Introduction to BCn Texture Compression](https://acefanatic02.github.io/posts/intro_bcn_part1/)
     -   [OR-Tools - MIP Problem (for BCn Compression)](https://developers.google.com/optimization/mip/mip_example)
+    -   [A Geometric Interpretation of the Covariance Matrix](https://users.cs.utah.edu/~tch/CS4640F2019/resources/A%20geometric%20interpretation%20of%20the%20covariance%20matrix.pdf)
 
 
 ## Conventions

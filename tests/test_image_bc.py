@@ -182,7 +182,7 @@ def test_help_render_texture_to_framebuffer(
     assert np.allclose(image[:input_h, :input_w, :1], image_data, atol=1e-6)
 
 
-def test_image_bc4(
+def test_encode_bc4(
     gpu: GpuFixture,
     rainbow_512x512_image_grayscale: zfw.ImageResource,
 ):
@@ -211,6 +211,40 @@ def test_image_bc4(
         img2=image[:input_h, :input_w, :1],
     )
     assert psnr > 55.0, f"BC4 PSNR too low: {psnr:.2f} dB"
+
+
+def test_encode_bc1(
+    gpu: GpuFixture,
+    rainbow_512x512_image: zfw.ImageResource,
+):
+    assert rainbow_512x512_image.data.dtype == np.float32
+    assert rainbow_512x512_image.data.shape == (512, 512, 4)
+    input_h, input_w, _ = rainbow_512x512_image.data.shape
+
+    # Discard alpha channel to get RGB
+    rgb_data = rainbow_512x512_image.data[:, :, :3]
+
+    bc1_data = zfw.encode_bc1(rgb_data)
+    assert bc1_data.dtype == np.uint8
+    assert bc1_data.shape == (input_h // 4, input_w // 4, 8)
+
+    image = help_render_texture_to_framebuffer(
+        device=gpu.device,
+        queue=gpu.queue,
+        attachment_texture_format="bc1-rgba-unorm",
+        compressed_texture_data=bc1_data,
+        input_w=input_w,
+        input_h=input_h,
+        bytes_per_row=(input_w // 4) * 8,
+        grayscale=False,
+        output_path=Path("output/zfw/test_image_bc/test_image_bc1.png"),
+    )
+
+    psnr = zfw.compute_psnr(
+        img1=rgb_data,
+        img2=image[:input_h, :input_w, :3],
+    )
+    assert psnr > 30.0, f"BC1 PSNR too low: {psnr:.2f} dB"
 
 
 LOG = zfw.logger(__name__)
