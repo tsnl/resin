@@ -1,11 +1,11 @@
 from pathlib import Path
+
 import numpy as np
 import wgpu
+from conftest import GpuFixture
 
 import zfw
-from zfw.images_bcn import _f32_to_rgb565, _quantize_rgb565_f32, _pack_bc1_block
-
-from conftest import GpuFixture
+from zfw.images_bcn import _f32_to_rgb565, _pack_bc1_block, _quantize_rgb565_f32
 
 
 def test_f32_to_rgb565():
@@ -150,7 +150,7 @@ def help_render_texture_to_framebuffer(
     grayscale: bool,
     output_path: Path,
 ) -> np.ndarray:
-    with open(Path(__file__).parent / "test_image_bc.wgsl") as f:
+    with open(Path(__file__).parent / "test_images_bcn.wgsl") as f:
         shader_code = f.read()
 
     shader_module = device.create_shader_module(code=shader_code)
@@ -307,7 +307,7 @@ def test_help_render_texture_to_framebuffer(
         bytes_per_row=input_w * 2,
         grayscale=True,
         output_path=Path(
-            "output/zfw/test_image_bc/test_help_render_texture_to_framebuffer.png"
+            "output/zfw/test_images_bcn/test_help_render_texture_to_framebuffer.png"
         ),
     )
 
@@ -335,7 +335,7 @@ def test_encode_bc4(
         input_h=input_h,
         bytes_per_row=(input_w // 4) * 8,
         grayscale=True,
-        output_path=Path("output/zfw/test_image_bc/test_image_bc4.png"),
+        output_path=Path("output/zfw/test_images_bcn/test_image_bc4.png"),
     )
 
     psnr = zfw.compute_psnr(
@@ -369,7 +369,7 @@ def test_encode_bc1(
         input_h=input_h,
         bytes_per_row=(input_w // 4) * 8,
         grayscale=False,
-        output_path=Path("output/zfw/test_image_bc/test_image_bc1.png"),
+        output_path=Path("output/zfw/test_images_bcn/test_image_bc1.png"),
     )
 
     psnr = zfw.compute_psnr(
