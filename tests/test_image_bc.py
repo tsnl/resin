@@ -3,8 +3,140 @@ import numpy as np
 import wgpu
 
 import zfw
+from zfw.images_bcn import _f32_to_rgb565, _quantize_rgb565_f32, _pack_bc1_block
 
 from conftest import GpuFixture
+
+
+def test_f32_to_rgb565():
+    """Test RGB565 conversion round-trip."""
+    test_colors = {
+        "black": (0.0, 0.0, 0.0),
+        "white": (1.0, 1.0, 1.0),
+        "red": (1.0, 0.0, 0.0),
+        "green": (0.0, 1.0, 0.0),
+        "blue": (0.0, 0.0, 1.0),
+        "50% red": (0.5, 0.0, 0.0),
+        "50% green": (0.0, 0.5, 0.0),
+        "50% blue": (0.0, 0.0, 0.5),
+        "cornflower blue": (0.39, 0.58, 0.93),
+    }
+
+    for name, (r, g, b) in test_colors.items():
+        color_f32 = np.array([r, g, b], dtype=np.float32)
+        packed_rgb565 = _f32_to_rgb565(color_f32)
+
+        # Unpack to verify
+        r_bits = (packed_rgb565 >> 11) & 0x1F
+        g_bits = (packed_rgb565 >> 5) & 0x3F
+        b_bits = packed_rgb565 & 0x1F
+
+        # Expand back to 8-bit
+        r_expanded = ((r_bits << 3) | (r_bits >> 2)) / 255.0
+        g_expanded = ((g_bits << 2) | (g_bits >> 4)) / 255.0
+        b_expanded = ((b_bits << 3) | (b_bits >> 2)) / 255.0
+
+        print(f"{name:20} input:  ({r:.3f}, {g:.3f}, {b:.3f})")
+        print(
+            f"{' ' * 20} bits:   (R:{r_bits:2d}, G:{g_bits:2d}, B:{b_bits:2d}) -> 0x{packed_rgb565:04x}"
+        )
+        print(
+            f"{' ' * 20} output: ({r_expanded:.3f}, {g_expanded:.3f}, {b_expanded:.3f})"
+        )
+
+        # Round-trip should be reasonably close (within RGB565 precision)
+        assert abs(r - r_expanded) < 0.05, (
+            f"{name} red channel mismatch: {r} vs {r_expanded}"
+        )
+        assert abs(g - g_expanded) < 0.03, (
+            f"{name} green channel mismatch: {g} vs {g_expanded}"
+        )
+        assert abs(b - b_expanded) < 0.05, (
+            f"{name} blue channel mismatch: {b} vs {b_expanded}"
+        )
+
+
+def test_quantize_rgb565_f32():
+    """Test RGB565 quantization round-trip."""
+    test_colors = {
+        "black": (0.0, 0.0, 0.0),
+        "white": (1.0, 1.0, 1.0),
+        "red": (1.0, 0.0, 0.0),
+        "green": (0.0, 1.0, 0.0),
+        "blue": (0.0, 0.0, 1.0),
+        "50% red": (0.5, 0.0, 0.0),
+        "50% green": (0.0, 0.5, 0.0),
+        "50% blue": (0.0, 0.0, 0.5),
+        "cornflower blue": (0.39, 0.58, 0.93),
+    }
+
+    for name, (r, g, b) in test_colors.items():
+        color_f32 = np.array([r, g, b], dtype=np.float32)
+        quantized = _quantize_rgb565_f32(color_f32)
+
+        print(f"{name:20} input:     ({r:.3f}, {g:.3f}, {b:.3f})")
+        print(
+            f"{' ' * 20} quantized: ({quantized[0]:.3f}, {quantized[1]:.3f}, {quantized[2]:.3f})"
+        )
+
+        # Quantized values should be in [0, 1]
+        assert 0.0 <= quantized[0] <= 1.0
+        assert 0.0 <= quantized[1] <= 1.0
+        assert 0.0 <= quantized[2] <= 1.0
+
+        # Round-trip should be reasonably close
+        assert abs(r - quantized[0]) < 0.05, (
+            f"{name} red channel mismatch: {r} vs {quantized[0]}"
+        )
+        assert abs(g - quantized[1]) < 0.03, (
+            f"{name} green channel mismatch: {g} vs {quantized[1]}"
+        )
+        assert abs(b - quantized[2]) < 0.05, (
+            f"{name} blue channel mismatch: {b} vs {quantized[2]}"
+        )
+
+
+def test_pack_bc1_block():
+    """Test BC1 block packing round-trip."""
+    # Create simple test case: 2 endpoints and all-zero indices (all pixels use color 0)
+    endpoints = np.array(
+        [
+            [1.0, 1.0, 1.0],  # White
+            [0.0, 0.0, 0.0],  # Black
+        ],
+        dtype=np.float32,
+    )
+    indices = np.zeros(16, dtype=np.uint8)
+
+    packed = _pack_bc1_block(endpoints, indices)
+    assert packed.shape == (8,)
+    assert packed.dtype == np.uint8
+
+    # Unpack and verify (little-endian uint16)
+    endpoint0_565 = np.uint16(packed[0]) | (np.uint16(packed[1]) << 8)
+    endpoint1_565 = np.uint16(packed[2]) | (np.uint16(packed[3]) << 8)
+
+    print(f"Endpoint 0: 0x{endpoint0_565:04x}")
+    print(f"Endpoint 1: 0x{endpoint1_565:04x}")
+
+    # White should pack to 0xFFFF (R=31, G=63, B=31)
+    assert endpoint0_565 == 0xFFFF, (
+        f"White endpoint should be 0xFFFF, got 0x{endpoint0_565:04x}"
+    )
+    # Black should pack to 0x0000 (R=0, G=0, B=0)
+    assert endpoint1_565 == 0x0000, (
+        f"Black endpoint should be 0x0000, got 0x{endpoint1_565:04x}"
+    )
+
+    # All indices should be 0
+    for i in range(16):
+        bit_offset = i * 2
+        byte_index = bit_offset // 8
+        byte_offset = bit_offset % 8
+        idx = (packed[4 + byte_index] >> byte_offset) & 0x3
+        assert idx == 0, f"Index {i} should be 0, got {idx}"
+
+    print("BC1 block packing test passed!")
 
 
 def help_render_texture_to_framebuffer(

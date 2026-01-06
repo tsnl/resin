@@ -142,7 +142,9 @@ def _encode_bc1_block(
     cov_f64 = cov.astype(np.float64)
     cov_eigenvalues, cov_eigenvectors_t = np.linalg.eig(cov_f64)
     cov_eigenvectors = cov_eigenvectors_t.T
-    principal_component = cov_eigenvectors[np.argmax(cov_eigenvalues), :].astype(np.float32)
+    principal_component = cov_eigenvectors[np.argmax(cov_eigenvalues), :].astype(
+        np.float32
+    )
 
     # Identify extreme points along the principal component axis:
     # Broadcast mean to subtract from each row of block_colors
@@ -232,8 +234,11 @@ def _pack_bc1_block(
     # Convert float32 endpoints to RGB565
     endpoint0_565 = _f32_to_rgb565(endpoints[0])
     endpoint1_565 = _f32_to_rgb565(endpoints[1])
-    packed[0:2] = endpoint0_565.view(np.uint8)
-    packed[2:4] = endpoint1_565.view(np.uint8)
+    # Pack as little-endian uint16
+    packed[0] = np.uint8(endpoint0_565 & 0xFF)
+    packed[1] = np.uint8((endpoint0_565 >> 8) & 0xFF)
+    packed[2] = np.uint8(endpoint1_565 & 0xFF)
+    packed[3] = np.uint8((endpoint1_565 >> 8) & 0xFF)
     for index_offset, index in enumerate(indices):
         bit_offset = index_offset * 2
         byte_index = bit_offset // 8
@@ -243,20 +248,16 @@ def _pack_bc1_block(
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def _f32_to_rgb565(color: npt.NDArray[np.float32]) -> npt.NDArray[np.uint16]:
+def _f32_to_rgb565(color: npt.NDArray[np.float32]) -> np.uint16:
     """
     Convert float32 [0,1] RGB color to packed RGB565 format.
     :param color: RGB color: shape (3,), dtype float32 in [0,1].
-    :returns: Packed RGB565: shape (1,), dtype uint16.
+    :returns: Packed RGB565 as uint16.
     """
     r = np.uint16(np.int32(color[0] * 31.0) & 0x1F)
     g = np.uint16(np.int32(color[1] * 63.0) & 0x3F)
     b = np.uint16(np.int32(color[2] * 31.0) & 0x1F)
-    v = (r << 11) | (g << 5) | b
-
-    res = np.empty(1, dtype=np.uint16)
-    res[0] = v
-    return res
+    return (r << 11) | (g << 5) | b
 
 
 #
