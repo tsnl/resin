@@ -234,6 +234,22 @@ def _pack_bc1_block(
     # Convert float32 endpoints to RGB565
     endpoint0_565 = _f32_to_rgb565(endpoints[0])
     endpoint1_565 = _f32_to_rgb565(endpoints[1])
+
+    # Ensure endpoint0 > endpoint1 to use 4-color opaque mode (no alpha).
+    # If endpoint0 <= endpoint1, BC1 interprets the block as having 3-color + alpha mode.
+    if endpoint0_565 <= endpoint1_565:
+        # Swap endpoints
+        endpoint0_565, endpoint1_565 = endpoint1_565, endpoint0_565
+        # Remap indices: old palette [0,1,2,3] becomes [1,0,3,2]
+        # This is because swapping endpoints changes the interpolation order
+        indices = _remap_bc1_indices(indices)
+        
+        # Edge case: if both endpoints are still equal after swapping, force them different
+        if endpoint0_565 == endpoint1_565:
+            # Increment endpoint0 to ensure endpoint0 > endpoint1
+            # This is safe because we're already at the smallest value
+            endpoint0_565 = np.uint16(endpoint0_565 + 1)
+
     # Pack as little-endian uint16
     packed[0] = np.uint8(endpoint0_565 & 0xFF)
     packed[1] = np.uint8((endpoint0_565 >> 8) & 0xFF)
@@ -245,6 +261,31 @@ def _pack_bc1_block(
         byte_offset = bit_offset % 8
         packed[4 + byte_index] |= (index & 0x3) << byte_offset
     return packed
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _remap_bc1_indices(indices: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
+    """
+    Remap BC1 indices when endpoints are swapped.
+    Old palette: [ep0, ep1, (2*ep0+ep1)/3, (ep0+2*ep1)/3]
+    New palette: [ep1, ep0, (2*ep1+ep0)/3, (ep1+2*ep0)/3]
+    Index mapping: 0→1, 1→0, 2→3, 3→2
+
+    :param indices: Original indices: shape (16,), dtype uint8.
+    :returns: Remapped indices: shape (16,), dtype uint8.
+    """
+    remapped = np.empty(16, dtype=np.uint8)
+    for i in range(16):
+        idx = indices[i]
+        if idx == 0:
+            remapped[i] = 1
+        elif idx == 1:
+            remapped[i] = 0
+        elif idx == 2:
+            remapped[i] = 3
+        else:  # idx == 3
+            remapped[i] = 2
+    return remapped
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
