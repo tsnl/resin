@@ -17,11 +17,12 @@
   - [x] Texture mapping support
   - [x] Sample environment map on ray miss.
 - [ ] Texture heap overhaul
-  - [ ] Implement BC4, BC6H texture encoding.
+  - [ ] Implement BC4, ~~BC6H~~ BC1 texture encoding.
   - [ ] Use a large BC6H texture array (and a separate BC4 for mono) instead of a 
         storage buffer for all textures, using a GPU linear sampler to read data.
   - [ ] Move the big environment map into a singleton cube map.
   - [ ] (Future) add a separate cube map heap for light probes.
+  - [ ] (Future) add BC6H encoding: it's really complicated.
 - [ ] Secondary rays, PBR shading:
     - [ ] IBL (environment map): prefiltered environment map.
     - [ ] Monte Carlo path tracing, offline rendering with ∞ samples.

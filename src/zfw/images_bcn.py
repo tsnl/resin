@@ -2,14 +2,129 @@
 BC4 and BC6H image compression and decompression.
 """
 
+__all__ = [
+    "encode_bc1",
+    "encode_bc4",
+]
+
 import numpy as np
 import numpy.typing as npt
 import numba
 
 from .basic import NUMBA_CACHE_ENABLED
 
+#
+# BC1 encode: compress RGB images
+#
 
-def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
+
+def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
+    """
+    Compress a 3-channel RGB image to BC1 format.
+
+    We do not support BC1 with alpha.
+
+    :param data: input image data: shape (h, w, 3), dtype float32 with h%4 == w%4 == 0.
+    :returns: Compressed BC1 data: shape (height/4, width/4, 8), dtype uint8.
+    """
+
+    # Ref:
+    # https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression#bc1
+    # https://www.ludicon.com/castano/blog/2022/11/bc1-compression-revisited/
+
+    h, w, d = input_.shape
+    if h % 4 != 0 or w % 4 != 0:
+        raise ValueError("Input image dimensions must be multiples of 4")
+    if d != 3:
+        raise ValueError("Input image must have three channels")
+    if input_.dtype != np.float32:
+        raise ValueError("Input image must have dtype float32")
+
+    # Convert float32 [0,1] to uint8 [0,255]
+    input_u8 = np.round(input_ * 255.0).astype(np.uint8)
+
+    return _encode_bc1_impl(input_u8)
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _encode_bc1_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
+    h, w, d = input_.shape
+    assert d == 3
+
+    output = np.zeros((h // 4, w // 4, 8), dtype=np.uint8)
+
+    for by in range(h // 4):
+        for bx in range(w // 4):
+            y_begin = by * 4
+            x_begin = bx * 4
+            input_block = input_[y_begin : y_begin + 4, x_begin : x_begin + 4, :]
+
+            endpoint0 = np.int32(input_block.min())
+            endpoint1 = np.int32(input_block.max())
+
+    raise NotImplementedError()
+
+    return output
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _encode_bc1_block(
+    block: npt.NDArray[np.uint8],
+    palette: npt.NDArray[np.uint8],
+) -> tuple[npt.NDArray[np.uint8], float]:
+    indices = np.empty((4, 4), dtype=np.uint8)
+
+    for y in range(4):
+        for x in range(4):
+            a = np.int32(block[y, x, :])
+
+            i_min = 0
+            b_min = np.int32(palette[i_min])
+
+            for i in range(1, 4):
+                b = np.int32(palette[i])
+                if abs(a - b) < abs(a - b_min):
+                    i_min = i
+                    b_min = b
+
+            indices[y, x] = i_min
+
+    return indices.flatten(), error_sq_sum
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _encode_bc4_block(
+    block: npt.NDArray[np.uint8],
+    palette: npt.NDArray[np.uint8],
+) -> tuple[npt.NDArray[np.uint8], float]:
+    indices = np.empty((4, 4), dtype=np.uint8)
+    error_sq_sum = 0.0
+
+    for y in range(4):
+        for x in range(4):
+            a = np.int32(block[y, x])
+
+            i_min = 0
+            b_min = np.int32(palette[i_min])
+
+            for i in range(1, 8):
+                b = np.int32(palette[i])
+                if abs(a - b) < abs(a - b_min):
+                    i_min = i
+                    b_min = b
+
+            indices[y, x] = i_min
+            error_sq_sum += (a - b_min) ** 2
+
+    return indices.flatten(), error_sq_sum
+
+
+#
+# BC4 encode: compress mono images
+#
+
+
+def encode_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     """
     Compress a single-channel image to BC4 format.
 
@@ -19,6 +134,9 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
 
     # Tutorial on BC4:
     # https://acefanatic02.github.io/posts/intro_bcn_part1/
+
+    # Resources:
+    # https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression#bc4
 
     # i | 8-color mode (endpoint0 > endpoint1) | 6-color mode (endpoint0 <= endpoint1)
     # ---------------------------------------------------------------------------------
@@ -42,11 +160,11 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     # Convert float32 [0,1] to uint8 [0,255]
     input_u8 = np.round(input_ * 255.0).astype(np.uint8)
 
-    return _compress_bc4_impl(input_u8)
+    return _encode_bc4_impl(input_u8)
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def _compress_bc4_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
+def _encode_bc4_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
     h, w, d = input_.shape
     assert d == 1
 
@@ -58,35 +176,35 @@ def _compress_bc4_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
             x_begin = bx * 4
             input_block = input_[y_begin : y_begin + 4, x_begin : x_begin + 4, 0]
 
-            endpoint_min = np.int32(np.min(input_block))
-            endpoint_max = np.int32(np.max(input_block))
+            endpoint_min = np.int32(input_block.min())
+            endpoint_max = np.int32(input_block.max())
 
-            idx_8c, err_8c = _compress_bc4_block(
+            idx_8c, err_8c = _encode_bc4_block(
                 block=input_block,
                 palette=np.array(
                     [
                         endpoint_max,
                         endpoint_min,
-                        np.int32((endpoint_max * 6 + endpoint_min * 1) / 7),
-                        np.int32((endpoint_max * 5 + endpoint_min * 2) / 7),
-                        np.int32((endpoint_max * 4 + endpoint_min * 3) / 7),
-                        np.int32((endpoint_max * 3 + endpoint_min * 4) / 7),
-                        np.int32((endpoint_max * 2 + endpoint_min * 5) / 7),
-                        np.int32((endpoint_max * 1 + endpoint_min * 6) / 7),
+                        (endpoint_max * 6 + endpoint_min * 1) / 7,
+                        (endpoint_max * 5 + endpoint_min * 2) / 7,
+                        (endpoint_max * 4 + endpoint_min * 3) / 7,
+                        (endpoint_max * 3 + endpoint_min * 4) / 7,
+                        (endpoint_max * 2 + endpoint_min * 5) / 7,
+                        (endpoint_max * 1 + endpoint_min * 6) / 7,
                     ],
                     dtype=np.uint8,
                 ),
             )
-            idx_6c, err_6c = _compress_bc4_block(
+            idx_6c, err_6c = _encode_bc4_block(
                 input_block,
                 palette=np.array(
                     [
                         endpoint_min,
                         endpoint_max,
-                        np.int32((endpoint_min * 4 + endpoint_max * 1) / 5),
-                        np.int32((endpoint_min * 3 + endpoint_max * 2) / 5),
-                        np.int32((endpoint_min * 2 + endpoint_max * 3) / 5),
-                        np.int32((endpoint_min * 1 + endpoint_max * 4) / 5),
+                        (endpoint_min * 4 + endpoint_max * 1) / 5,
+                        (endpoint_min * 3 + endpoint_max * 2) / 5,
+                        (endpoint_min * 2 + endpoint_max * 3) / 5,
+                        (endpoint_min * 1 + endpoint_max * 4) / 5,
                         0x00,
                         0xFF,
                     ],
@@ -107,7 +225,7 @@ def _compress_bc4_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def _compress_bc4_block(
+def _encode_bc4_block(
     block: npt.NDArray[np.uint8],
     palette: npt.NDArray[np.uint8],
 ) -> tuple[npt.NDArray[np.uint8], float]:

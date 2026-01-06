@@ -190,7 +190,7 @@ def test_image_bc4(
     assert rainbow_512x512_image_grayscale.data.shape == (512, 512, 1)
     input_h, input_w, _ = rainbow_512x512_image_grayscale.data.shape
 
-    bc4_data = zfw.compress_bc4(rainbow_512x512_image_grayscale.data)
+    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale.data)
     assert bc4_data.dtype == np.uint8
     assert bc4_data.shape == (input_h // 4, input_w // 4, 8)
 
