@@ -4,7 +4,7 @@ Platform
   - `make tests` runs all tests and writes test outputs (e.g. image renders).
     - You can supply `pytest` args with `PYTEST_ARGS`, e.g.: `make tests PYTEST_ARGS="-k filter"`
   - `make sandbox` launches a windowed interactive application.
-- Ensure you use `uv` to activate a Python environment with the right dependencies.
+- To run a Python shell, use `uv run python`.
 
 Python
 - Our code-base is statically typed and must type-check successfully.

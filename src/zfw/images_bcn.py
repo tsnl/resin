@@ -42,7 +42,7 @@ def compress_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     return _compress_bc4_impl(input_)
 
 
-@numba.njit(cache=NUMBA_CACHE_ENABLED)
+# @numba.njit(cache=False)  # Disabled for debugging
 def _compress_bc4_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     h, w, d = input_.shape
     assert d == 1
@@ -103,7 +103,7 @@ def _compress_bc4_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]
     return output
 
 
-@numba.njit(cache=NUMBA_CACHE_ENABLED)
+# @numba.njit(cache=NUMBA_CACHE_ENABLED)  # Disabled for debugging
 def _compress_bc4_block(
     block: npt.NDArray[np.float32],
     palette: npt.NDArray[np.float32],
@@ -130,7 +130,7 @@ def _compress_bc4_block(
     return indices.flatten(), error_sq_sum
 
 
-@numba.njit(cache=NUMBA_CACHE_ENABLED)
+# @numba.njit(cache=NUMBA_CACHE_ENABLED)  # Disabled for debugging
 def _pack_bc4_block(
     endpoint_min: np.uint8,
     endpoint_max: np.uint8,
@@ -139,7 +139,8 @@ def _pack_bc4_block(
 ) -> npt.NDArray[np.uint8]:
     packed_indices_u64 = np.zeros(1, dtype=np.uint64)
     for i in range(16):
-        packed_indices_u64[0] |= np.uint64(indices[i] & 0x7) << (3 * i)
+        # Cast to uint64 BEFORE shifting
+        packed_indices_u64[0] |= int(indices[i] & 0x7) << (3 * i)
 
     packed = np.empty(8, dtype=np.uint8)
     packed[0], packed[1] = (
