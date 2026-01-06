@@ -54,6 +54,11 @@ def help_render_texture_to_framebuffer(
         format=attachment_texture_format,
         usage=(wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST),
     )
+    # For compressed textures, rows_per_image must be in block units
+    # BC4 uses 4x4 blocks, so divide by 4
+    is_compressed = attachment_texture_format.startswith("bc")
+    rows_per_image_value = (input_h // 4) if is_compressed else input_h
+
     queue.write_texture(
         destination=wgpu.TexelCopyTextureInfo(
             texture=texture,
@@ -64,7 +69,7 @@ def help_render_texture_to_framebuffer(
         data_layout=wgpu.TexelCopyBufferLayout(
             offset=0,
             bytes_per_row=bytes_per_row,
-            rows_per_image=input_h,
+            rows_per_image=rows_per_image_value,
         ),
         size=(input_w, input_h, 1),
     )

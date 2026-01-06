@@ -55,8 +55,8 @@ def _compress_bc4_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]
             x_begin = bx * 4
             input_block = input_[y_begin : y_begin + 4, x_begin : x_begin + 4, 0]
 
-            endpoint_min = np.min(input_block) / 255.0
-            endpoint_max = np.max(input_block) / 255.0
+            endpoint_min = np.min(input_block)
+            endpoint_max = np.max(input_block)
 
             idx_8c, err_8c = _compress_bc4_block(
                 block=input_block,
@@ -113,7 +113,7 @@ def _compress_bc4_block(
 
     for y in range(4):
         for x in range(4):
-            a = block[y, x] / 255.0
+            a = block[y, x]
 
             i_min = 0
             b_min = palette[i_min]
