@@ -31,6 +31,36 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     # Ref:
     # https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression#bc1
     # https://www.ludicon.com/castano/blog/2022/11/bc1-compression-revisited/
+    # https://fgiesen.wordpress.com/2022/11/08/whats-that-magic-computation-in-stb__refineblock/
+
+    # BC1 encoding is similar to BC4 encoding, but for RGB data.
+    # Each 4x4 block is compressed to 8 bytes:
+    # - 2 bytes: endpoint0 (RGB565)
+    # - 2 bytes: endpoint1 (RGB565)
+    # - 4 bytes: 16 2-bit indices, each selecting one of 4 colors in the palette.
+    #   - Palette: endpoint0, endpoint1, and two interpolated colors with 1/3, 2/3
+    #     weights for endpoint0 respectively.
+
+    # From Ignacio Castaño's blog:
+    # > A simple BC1 encoding strategy is to compute the initial indices using a simple
+    # > heuristic, to then recompute the endpoints solving the above equation, and
+    # > finally to update the indices based on the most recent endpoints. This process
+    # > can be repeated multiple times until the error does not go down anymore. This is
+    # > the strategy employed by the stb_dxt.h encoder, and just as I was writing this
+    # > article Fabien Giesen wrote another blog post describing that implementation in
+    # > more detail.
+
+    # From Fabien Giesen's blog:
+    # > The basic algorithm uses the same primitives most BC1 encoders use (I’ll assume
+    # > in the following you know how BC1 works): compute the average and covariance
+    # > matrix of the block of pixels, compute the principal component of the covariance
+    # > to get an initial guess for what direction the vector between the two endpoints
+    # > should point in. Then we project all pixel values onto that vector to find the
+    # > min/max support points in that direction as the initial seed endpoints (which
+    # > determines the initial palette), assign each pixel the palette entry closest to
+    # > it, and do some iterative refinement of the whole thing.
+
+    # TODO: Implement the full BC1 encoding algorithm with iterative refinement.
 
     h, w, d = input_.shape
     if h % 4 != 0 or w % 4 != 0:
