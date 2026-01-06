@@ -210,7 +210,7 @@ def test_image_bc4(
         img1=rainbow_512x512_image_grayscale.data,
         img2=image[:input_h, :input_w, :1],
     )
-    assert psnr > 50.0, f"BC4 PSNR too low: {psnr:.2f} dB"
+    assert psnr > 55.0, f"BC4 PSNR too low: {psnr:.2f} dB"
 
 
 LOG = zfw.logger(__name__)
