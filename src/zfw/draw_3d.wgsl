@@ -17,7 +17,9 @@ enable f16;
 @group(0) @binding(9) var<storage, read> metalness_texture_allocations: array<PodTextureAllocation>;
 @group(0) @binding(10) var roughness_texture_heap: texture_2d_array<f32>;
 @group(0) @binding(11) var<storage, read> roughness_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(12) var linear_sampler: sampler;
+@group(0) @binding(12) var environment_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(13) var<storage, read> environment_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(14) var linear_sampler: sampler;
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
@@ -247,6 +249,18 @@ fn sample_roughness_texture(
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
     let sample_uv = alloc_uv + uv * alloc_size;
     return textureSampleLevel(roughness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
+}
+
+fn sample_environment_texture(
+    environment_texture_id: u32,
+    uv: vec2<f32>,
+) -> vec4<f32> {
+    let alloc = environment_texture_allocations[environment_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let sample_uv = alloc_uv + uv * alloc_size;
+    return textureSampleLevel(environment_texture_heap, linear_sampler, sample_uv, page, 0.0);
 }
 
 //
@@ -626,7 +640,12 @@ fn compute_hit_color(hit_details: HitDetails) -> vec4<f32> {
 }
 
 fn compute_miss_color(ray: Ray) -> vec4<f32> {
-    return sample_procedural_environment_map(ray);
+    // If environment map is available, sample it
+    if frame_info.environment_map_texture_id >= 0 {
+        return sample_environment_map(ray);
+    } else {
+        return sample_procedural_environment_map(ray);
+    }
 }
 
 fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
@@ -666,6 +685,28 @@ fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
 
     // Done:
     return vec4<f32>(final_color, 1.0);
+}
+
+/// Sample an equirectangular environment map based on ray direction.
+/// The environment map is assumed to be in latitude-longitude format.
+/// Coordinate system: Z-up, Y-forward, X-right (right-handed)
+fn sample_environment_map(ray: Ray) -> vec4<f32> {
+    let dir = normalize(ray.direction);
+    
+    // Convert 3D direction to spherical coordinates for Z-up, Y-forward system
+    // Longitude (θ): horizontal angle in XY plane from +Y axis, range [-π, π]
+    // Latitude (φ): elevation angle from XY plane towards +Z, range [-π/2, π/2]
+    let theta = atan2(dir.x, dir.y);  // Horizontal angle from +Y (forward)
+    let phi = asin(dir.z);  // Elevation angle (+Z is up)
+    
+    // Convert to UV coordinates [0, 1]
+    // U maps longitude: [-π, π] -> [0, 1]
+    // V maps latitude: [-π/2, π/2] -> [0, 1] (flip so +Z up is at top of image)
+    let u = (theta + 3.14159265359) / (2.0 * 3.14159265359);
+    let v = 1.0 - ((phi + 1.5707963268) / 3.14159265359);  // Flip V so +Z is at top
+    
+    let uv = vec2<f32>(u, v);
+    return sample_environment_texture(u32(frame_info.environment_map_texture_id), uv);
 }
 
 

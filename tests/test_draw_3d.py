@@ -665,7 +665,7 @@ def test_environment_map_basic(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
     # Convert to Draw3dTexture
-    env_map_texture = renderer.get_texture(env_map_resource)
+    env_map_texture = renderer.get_texture(env_map_resource, usage="environment")
 
     # Create empty scene with environment map
     scene = Draw3dScene(
