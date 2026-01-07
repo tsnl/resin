@@ -130,6 +130,7 @@ class StructuredNDArray(np.ndarray, ABC):
 #
 
 NUMBA_CACHE_ENABLED = True
+NUMBA_PARALLEL_ENABLED = True
 
 
 #

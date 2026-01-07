@@ -13,7 +13,7 @@ import numpy as np
 import numpy.typing as npt
 import numba
 
-from .basic import NUMBA_CACHE_ENABLED
+from .basic import NUMBA_CACHE_ENABLED, NUMBA_PARALLEL_ENABLED
 
 #
 # BC5 encode: compress RG images: for normal maps
@@ -113,14 +113,14 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     return _encode_bc1_impl(input_)
 
 
-@numba.njit(cache=NUMBA_CACHE_ENABLED)
+@numba.njit(cache=NUMBA_CACHE_ENABLED, parallel=NUMBA_PARALLEL_ENABLED)
 def _encode_bc1_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     h, w, d = input_.shape
     assert d == 3
 
     output = np.zeros((h // 4, w // 4, 8), dtype=np.uint8)
 
-    for by in range(h // 4):
+    for by in numba.prange(h // 4):
         for bx in range(w // 4):
             y_begin = by * 4
             x_begin = bx * 4
@@ -626,14 +626,14 @@ def encode_bc4(
     return _encode_bc4_impl(input_u8)
 
 
-@numba.njit(cache=NUMBA_CACHE_ENABLED)
+@numba.njit(cache=NUMBA_CACHE_ENABLED, parallel=NUMBA_PARALLEL_ENABLED)
 def _encode_bc4_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
     h, w, d = input_.shape
     assert d == 1
 
     output = np.empty((h // 4, w // 4, 8), dtype=np.uint8)
 
-    for by in range(h // 4):
+    for by in numba.prange(h // 4):
         for bx in range(w // 4):
             y_begin = by * 4
             x_begin = bx * 4
