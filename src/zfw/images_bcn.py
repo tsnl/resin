@@ -72,14 +72,11 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     if input_.dtype != np.float32:
         raise ValueError("Input image must have dtype float32")
 
-    # Convert float32 [0,1] to uint8 [0,255]
-    input_u8 = np.round(input_ * 255.0).astype(np.uint8)
-
-    return _encode_bc1_impl(input_u8)
+    return _encode_bc1_impl(input_)
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
-def _encode_bc1_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
+def _encode_bc1_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     h, w, d = input_.shape
     assert d == 3
 
@@ -89,10 +86,7 @@ def _encode_bc1_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
         for bx in range(w // 4):
             y_begin = by * 4
             x_begin = bx * 4
-            input_block_u8 = input_[y_begin : y_begin + 4, x_begin : x_begin + 4, :]
-            # Convert to float32 [0,1] for processing
-            input_block = input_block_u8.astype(np.float32) / 255.0
-
+            input_block = input_[y_begin : y_begin + 4, x_begin : x_begin + 4, :]
             endpoints, indices = _encode_bc1_block(block=input_block)
             output[by, bx] = _pack_bc1_block(endpoints, indices)
 
@@ -102,7 +96,10 @@ def _encode_bc1_impl(input_: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
 def _encode_bc1_block(
     block: npt.NDArray[np.float32],
-) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.uint8]]:
+) -> tuple[
+    npt.NDArray[np.float32],
+    npt.NDArray[np.uint8],
+]:
     """
     Encode a single 4x4 block to BC1 format.
 
@@ -113,88 +110,127 @@ def _encode_bc1_block(
     """
 
     # Flatten the block into a list of colors:
-    block_colors = np.empty((16, 3), dtype=np.float32)
-    for y in range(4):
-        for x in range(4):
-            block_colors[y * 4 + x] = block[y, x]
+    block_colors = np.ascontiguousarray(block).reshape((16, 3))
 
     # Next, compute mean and 3x3 covariance matrix of the block, characterizing a
     # 3D Gaussian distribution of colors in the block:
-    mean = np.zeros(3, dtype=np.float32)
-    for i in range(16):
-        mean += block_colors[i]
-    mean /= 16.0
-
-    cov = np.zeros((3, 3), dtype=np.float32)
-    for i in range(16):
-        diff = block_colors[i] - mean
-        for j in range(3):
-            for k in range(3):
-                cov[j, k] += diff[j] * diff[k]
-    cov /= 16.0
+    mean = _average_rgb(block_colors)
+    cov = np.cov(block_colors.T)
 
     # Compute principal component of covariance matrix to find the largest axis of an
     # "ellipsoid" fitting the color distribution.
-    # Note that the eigenvectors returned by `np.linalg.eig` are column-major.
     # Helpful resource:
     # https://users.cs.utah.edu/~tch/CS4640F2019/resources/A%20geometric%20interpretation%20of%20the%20covariance%20matrix.pdf
-    # Numba's eig requires float64 to avoid domain change errors with float32
-    cov_f64 = cov.astype(np.float64)
-    cov_eigenvalues, cov_eigenvectors_t = np.linalg.eig(cov_f64)
-    cov_eigenvectors = cov_eigenvectors_t.T
-    principal_component = cov_eigenvectors[np.argmax(cov_eigenvalues), :].astype(
-        np.float32
-    )
+    principal_component = _compute_principal_component_of_cov_mat3x3(cov)
 
     # Identify extreme points along the principal component axis:
     # Broadcast mean to subtract from each row of block_colors
-    projections = np.empty(16, dtype=np.float32)
-    for i in range(16):
-        projections[i] = np.dot(block_colors[i] - mean, principal_component)
+    projections = _project_vec3s_onto_vec3(block_colors - mean, principal_component)
     min_idx = np.argmin(projections)
     max_idx = np.argmax(projections)
-    endpoint0_f = block_colors[min_idx]
-    endpoint1_f = block_colors[max_idx]
-
-    # Quantize endpoints to RGB565 and back to get the actual palette values in float32
     endpoints = np.empty((2, 3), dtype=np.float32)
-    endpoints[0] = _quantize_rgb565_f32(endpoint0_f)
-    endpoints[1] = _quantize_rgb565_f32(endpoint1_f)
+    endpoints[0] = block_colors[min_idx]
+    endpoints[1] = block_colors[max_idx]
+
+    indices = _eval_colors(colors=block_colors, endpoints=endpoints)
+
+    # Return:
+    return endpoints, indices
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _average_rgb(colors: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+    """
+    Compute the average color of a list of colors.
+    :param colors: input colors: shape (n, 3), dtype float32 in [0,1].
+    :returns: Average color: shape (3,), dtype float32 in [0,1].
+    """
+    n = colors.shape[0]
+    res = np.zeros(3, dtype=np.float32)
+    for i in range(n):
+        res += colors[i]
+    res /= n
+    return res
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _compute_principal_component_of_cov_mat3x3(
+    cov: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    """
+    Compute the principal component (eigenvector with largest eigenvalue) of a 3x3
+    covariance matrix.
+    :param cov: input covariance matrix: shape (3, 3), dtype float32.
+    :returns: Principal component: shape (3,), dtype float32.
+    """
+    # NOTE: Covariance matrices are real and symmetric, but numerical issues may lead to
+    # complex eigenvalues/vectors. We cast to complex128 to avoid errors, then take
+    # the real part afterwards.
+    cov_eigenvalues, cov_eigenvectors_t = np.linalg.eig(cov.astype(np.complex128))
+    cov_eigenvalues = cov_eigenvalues.real.astype(np.float32)  # type: ignore
+    cov_eigenvectors_t = cov_eigenvectors_t.real.astype(np.float32)  # type: ignore
+    cov_eigenvectors = cov_eigenvectors_t.T
+    principal_component = cov_eigenvectors[np.argmax(cov_eigenvalues), :]
+    return principal_component
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _project_vec3s_onto_vec3(
+    vecs: npt.NDArray[np.float32],
+    axis: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    """
+    Project an array of 3D vectors onto a 3D axis.
+    :param vecs: input vectors: shape (n, 3), dtype float32.
+    :param axis: projection axis: shape (3,), dtype float32.
+    :returns: Projections: shape (n,), dtype float32.
+    """
+    n = vecs.shape[0]
+    res = np.empty(n, dtype=np.float32)
+    for i in range(n):
+        res[i] = np.dot(vecs[i], axis)
+    return res
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _eval_colors(
+    colors: npt.NDArray[np.float32],
+    endpoints: npt.NDArray[np.float32],
+) -> npt.NDArray[np.uint8]:
+    """
+    Evaluate the indices of colors in the palette defined by two endpoints.
+    :param colors: input colors: shape (n, 3), dtype float32 in [0,1].
+    :param endpoints: endpoints: shape (2, 3), dtype float32 in [0,1].
+    :returns: A 2-tuple of:
+        - colors: endpoints quantized to RGB565 and back: shape (2, 3), dtype=f32
+        - indices: shape (n,), dtype uint8.
+    """
+
+    n = colors.shape[0]
 
     # Build palette with 4 colors in float32 [0,1] space
     palette = np.empty((4, 3), dtype=np.float32)
-    palette[0, :] = endpoints[0]
-    palette[1, :] = endpoints[1]
-    # Interpolate in float32 space
-    for j in range(3):
-        palette[2, j] = (2.0 * endpoints[0, j] + 1.0 * endpoints[1, j]) / 3.0
-        palette[3, j] = (1.0 * endpoints[0, j] + 2.0 * endpoints[1, j]) / 3.0
+    palette[0] = endpoints[0]
+    palette[1] = endpoints[1]
+    palette[2] = (2.0 * endpoints[0] + 1.0 * endpoints[1]) / 3.0
+    palette[3] = (1.0 * endpoints[0] + 2.0 * endpoints[1]) / 3.0
 
-    # Assign indices based on closest palette color in float32 space
-    indices = np.empty((4, 4), dtype=np.uint8)
-    for y in range(4):
-        for x in range(4):
-            color = block_colors[y * 4 + x]
+    # Select indices for each color based on closest palette color:
+    indices = np.empty((n,), dtype=np.uint8)
+    for c in range(n):
+        i_min = 0
+        e_min = np.linalg.norm(colors[c] - palette[i_min]) ** 2
 
-            i_min = 0
-            e_min = 0.0
-            for j in range(3):
-                diff = color[j] - palette[0, j]
-                e_min += diff * diff
+        for i in range(1, 4):
+            e = np.linalg.norm(colors[c] - palette[i]) ** 2
+            if e < e_min:
+                i_min = i
+                e_min = e
 
-            for i in range(1, 4):
-                e = 0.0
-                for j in range(3):
-                    diff = color[j] - palette[i, j]
-                    e += diff * diff
-                if e < e_min:
-                    i_min = i
-                    e_min = e
-
-            indices[y, x] = np.uint8(i_min)
+        indices[c] = np.uint8(i_min)
 
     # Return:
-    return endpoints, indices.ravel()
+    return indices
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
@@ -235,20 +271,23 @@ def _pack_bc1_block(
     endpoint0_565 = _f32_to_rgb565(endpoints[0])
     endpoint1_565 = _f32_to_rgb565(endpoints[1])
 
+    # Edge case: if both endpoints are equal after swapping, force them different
+    if endpoint0_565 == endpoint1_565:
+        # Increment endpoint0 to ensure endpoint0 > endpoint1
+        # This is safe because we're already at the smallest value
+        endpoint0_565 = np.uint16(endpoint0_565 + 1)
+
+        # Force all indices to 1 (selecting endpoint1)
+        indices[:] = 1
+
     # Ensure endpoint0 > endpoint1 to use 4-color opaque mode (no alpha).
     # If endpoint0 <= endpoint1, BC1 interprets the block as having 3-color + alpha mode.
-    if endpoint0_565 <= endpoint1_565:
+    elif endpoint0_565 < endpoint1_565:
         # Swap endpoints
         endpoint0_565, endpoint1_565 = endpoint1_565, endpoint0_565
         # Remap indices: old palette [0,1,2,3] becomes [1,0,3,2]
         # This is because swapping endpoints changes the interpolation order
         indices = _remap_bc1_indices(indices)
-        
-        # Edge case: if both endpoints are still equal after swapping, force them different
-        if endpoint0_565 == endpoint1_565:
-            # Increment endpoint0 to ensure endpoint0 > endpoint1
-            # This is safe because we're already at the smallest value
-            endpoint0_565 = np.uint16(endpoint0_565 + 1)
 
     # Pack as little-endian uint16
     packed[0] = np.uint8(endpoint0_565 & 0xFF)
