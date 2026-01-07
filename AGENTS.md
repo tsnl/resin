@@ -10,7 +10,7 @@ Python
 - Our code-base is statically typed and must type-check successfully.
   - Use the configured LSP aggressively: it should work well.
   - Run `make check` and `make format` often to automatically and quickly sort imports, `__all__` lists, etc.
-  - NEVER use `# type: ignore` or `# noqa` comments to silence type-checker or linter warnings.
+  - NEVER use `# type: ignore` or `# noqa` comments to silence type-checker or linter warnings. However, if you find these already in the codebase, leave them as is. 
   - NEVER use `Any` type. NEVER use `cast()`.
 - We target Python 3.14+, so use the most modern syntax and features available.
   - Always use Python3.12+ `type Name = Aliased` statements instead of type aliases.
