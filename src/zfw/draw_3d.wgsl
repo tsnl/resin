@@ -199,30 +199,54 @@ fn sample_color_texture(
     color_texture_id: u32,
     uv: vec2<f32>,
 ) -> vec3<f32> {
-    // TODO
+    let alloc = color_texture_allocations[color_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let sample_uv = alloc_uv + uv * alloc_size;
+    let sample_color = textureSampleLevel(color_texture_heap, linear_sampler, sample_uv, page, 0.0);
+    return sample_color.rgb;
 }
 
 fn sample_normal_texture(
     normal_texture_id: u32,
     uv: vec2<f32>,
 ) -> vec3<f32> {
-    // TODO
-    // NOTE: The normal texture heap contains only RG texture handles.
-    // We need to compute the B channel in the shader.
+    let alloc = normal_texture_allocations[normal_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let sample_uv = alloc_uv + uv * alloc_size;
+    let sample_rg = textureSampleLevel(normal_texture_heap, linear_sampler, sample_uv, page, 0.0);
+    // BC5 stores RG channels, compute B from unit length constraint
+    let r = sample_rg.r;
+    let g = sample_rg.g;
+    let b = sqrt(max(0.0, 1.0 - r * r - g * g));
+    return vec3<f32>(r, g, b);
 }
 
 fn sample_metalness_texture(
     metalness_texture_id: u32,
     uv: vec2<f32>,
 ) -> f32 {
-    // TODO
+    let alloc = metalness_texture_allocations[metalness_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let sample_uv = alloc_uv + uv * alloc_size;
+    return textureSampleLevel(metalness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
 }
 
 fn sample_roughness_texture(
     roughness_texture_id: u32,
     uv: vec2<f32>,
 ) -> f32 {
-    // TODO
+    let alloc = roughness_texture_allocations[roughness_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let sample_uv = alloc_uv + uv * alloc_size;
+    return textureSampleLevel(roughness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
 }
 
 //
@@ -602,12 +626,7 @@ fn compute_hit_color(hit_details: HitDetails) -> vec4<f32> {
 }
 
 fn compute_miss_color(ray: Ray) -> vec4<f32> {
-    // If environment map is available, sample it
-    if frame_info.environment_map_texture_id >= 0 {
-        return sample_environment_map(ray);
-    } else {
-        return sample_procedural_environment_map(ray);
-    }
+    return sample_procedural_environment_map(ray);
 }
 
 fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
@@ -649,27 +668,7 @@ fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
     return vec4<f32>(final_color, 1.0);
 }
 
-/// Sample an equirectangular environment map based on ray direction.
-/// The environment map is assumed to be in latitude-longitude format.
-/// Coordinate system: Z-up, Y-forward, X-right (right-handed)
-fn sample_environment_map(ray: Ray) -> vec4<f32> {
-    let dir = normalize(ray.direction);
-    
-    // Convert 3D direction to spherical coordinates for Z-up, Y-forward system
-    // Longitude (θ): horizontal angle in XY plane from +Y axis, range [-π, π]
-    // Latitude (φ): elevation angle from XY plane towards +Z, range [-π/2, π/2]
-    let theta = atan2(dir.x, dir.y);  // Horizontal angle from +Y (forward)
-    let phi = asin(dir.z);  // Elevation angle (+Z is up)
-    
-    // Convert to UV coordinates [0, 1]
-    // U maps longitude: [-π, π] -> [0, 1]
-    // V maps latitude: [-π/2, π/2] -> [0, 1] (flip so +Z up is at top of image)
-    let u = (theta + 3.14159265359) / (2.0 * 3.14159265359);
-    let v = 1.0 - ((phi + 1.5707963268) / 3.14159265359);  // Flip V so +Z is at top
-    
-    let uv = vec2<f32>(u, v);
-    return sample_texture(u32(frame_info.environment_map_texture_id), uv);
-}
+
 
 struct HitDetails {
     world_hit_position: vec3<f32>,
@@ -758,30 +757,30 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
 fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let color = sample_texture(material.color_map_id, hit_details.texcoords);
+    let color = sample_color_texture(material.color_map_id, hit_details.texcoords);
     let color_factor = vec3<f32>(material.color_factor[0], material.color_factor[1], material.color_factor[2]);
-    return vec4<f32>(color.xyz * color_factor, color.w);
+    return vec4<f32>(color * color_factor, 1.0);
 }
 fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let texture_normal = sample_texture(material.normal_map_id, hit_details.texcoords);
-    let normal = hit_details.tbn * normalize(vec3<f32>(texture_normal.xyz * 2.0 - 1.0));
+    let texture_normal = sample_normal_texture(material.normal_map_id, hit_details.texcoords);
+    let normal = hit_details.tbn * normalize(texture_normal * 2.0 - 1.0);
     return normalize(normal);   // for good measure
 }
 fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let metalness_texture = sample_texture(material.metalness_map_id, hit_details.texcoords);
+    let metalness_texture = sample_metalness_texture(material.metalness_map_id, hit_details.texcoords);
     let metalness_factor = material.metalness_factor;
-    return metalness_factor * metalness_texture.r;
+    return metalness_factor * metalness_texture;
 }
 fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let roughness_texture = sample_texture(material.roughness_map_id, hit_details.texcoords);
+    let roughness_texture = sample_roughness_texture(material.roughness_map_id, hit_details.texcoords);
     let roughness_factor = material.roughness_factor;
-    return roughness_factor * roughness_texture.r;
+    return roughness_factor * roughness_texture;
 }
 
 //
@@ -827,7 +826,8 @@ fn debug_visualize_primary_ray_color(hit_details: HitDetails) -> vec4<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
     let color_map_id = material.color_map_id;
-    return sample_texture(color_map_id, hit_details.texcoords);
+    let color = sample_color_texture(color_map_id, hit_details.texcoords);
+    return vec4<f32>(color, 1.0);
 }
 
 fn debug_visualize_hit_normal(hit_details: HitDetails) -> vec4<f32> {

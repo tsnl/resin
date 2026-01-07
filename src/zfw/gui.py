@@ -712,7 +712,10 @@ class GuiWindow(BaseDisposable):
 
             # Build 3D scene
             environment_map_texture = (
-                self._draw_3d_renderer.get_texture(self._environment_map)
+                self._draw_3d_renderer.get_texture(
+                    self._environment_map,
+                    "environment-map",
+                )
                 if self._environment_map
                 else None
             )

@@ -146,7 +146,7 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     texture=wgpu.TextureBindingLayout(
                         sample_type=wgpu.TextureSampleType.float,
-                        view_dimension=wgpu.TextureViewDimension.d2,
+                        view_dimension=wgpu.TextureViewDimension.d2_array,
                         multisampled=False,
                     ),
                 ),
@@ -163,7 +163,7 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     texture=wgpu.TextureBindingLayout(
                         sample_type=wgpu.TextureSampleType.float,
-                        view_dimension=wgpu.TextureViewDimension.d2,
+                        view_dimension=wgpu.TextureViewDimension.d2_array,
                         multisampled=False,
                     ),
                 ),
@@ -180,7 +180,7 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     texture=wgpu.TextureBindingLayout(
                         sample_type=wgpu.TextureSampleType.float,
-                        view_dimension=wgpu.TextureViewDimension.d2,
+                        view_dimension=wgpu.TextureViewDimension.d2_array,
                         multisampled=False,
                     ),
                 ),
@@ -197,7 +197,7 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     texture=wgpu.TextureBindingLayout(
                         sample_type=wgpu.TextureSampleType.float,
-                        view_dimension=wgpu.TextureViewDimension.d2,
+                        view_dimension=wgpu.TextureViewDimension.d2_array,
                         multisampled=False,
                     ),
                 ),
@@ -371,26 +371,70 @@ class Draw3dRenderer(BaseDisposable):
                 # Color texture heap
                 wgpu.BindGroupEntry(
                     binding=4,
-                    resource=self.color_texture_heap.texture,
+                    resource=self.color_texture_heap.texture.create_view(
+                        dimension=wgpu.TextureViewDimension.d2_array,
+                    ),
+                ),
+                # Color texture allocations
+                wgpu.BindGroupEntry(
+                    binding=5,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.color_texture_heap.allocation_heap.device_buffer,
+                        offset=0,
+                        size=self.color_texture_heap.allocation_heap.device_buffer.size,
+                    ),
                 ),
                 # Normal texture heap
                 wgpu.BindGroupEntry(
-                    binding=5,
-                    resource=self.normal_texture_heap.texture,
+                    binding=6,
+                    resource=self.normal_texture_heap.texture.create_view(
+                        dimension=wgpu.TextureViewDimension.d2_array,
+                    ),
+                ),
+                # Normal texture allocations
+                wgpu.BindGroupEntry(
+                    binding=7,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.normal_texture_heap.allocation_heap.device_buffer,
+                        offset=0,
+                        size=self.normal_texture_heap.allocation_heap.device_buffer.size,
+                    ),
                 ),
                 # Metalness texture heap
                 wgpu.BindGroupEntry(
-                    binding=6,
-                    resource=self.metalness_texture_heap.texture,
+                    binding=8,
+                    resource=self.metalness_texture_heap.texture.create_view(
+                        dimension=wgpu.TextureViewDimension.d2_array,
+                    ),
+                ),
+                # Metalness texture allocations
+                wgpu.BindGroupEntry(
+                    binding=9,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.metalness_texture_heap.allocation_heap.device_buffer,
+                        offset=0,
+                        size=self.metalness_texture_heap.allocation_heap.device_buffer.size,
+                    ),
                 ),
                 # Roughness texture heap
                 wgpu.BindGroupEntry(
-                    binding=7,
-                    resource=self.roughness_texture_heap.texture,
+                    binding=10,
+                    resource=self.roughness_texture_heap.texture.create_view(
+                        dimension=wgpu.TextureViewDimension.d2_array,
+                    ),
+                ),
+                # Roughness texture allocations
+                wgpu.BindGroupEntry(
+                    binding=11,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.roughness_texture_heap.allocation_heap.device_buffer,
+                        offset=0,
+                        size=self.roughness_texture_heap.allocation_heap.device_buffer.size,
+                    ),
                 ),
                 # Linear sampler
                 wgpu.BindGroupEntry(
-                    binding=8,
+                    binding=12,
                     resource=self.linear_sampler,
                 ),
             ],
@@ -1072,6 +1116,10 @@ class PerFrameBuffer[T: StructuredNDArray](BaseDisposable):
         assert data.__class__ is self.structured_array_cls
         assert data.shape[0] <= self.element_capacity
 
+        # Early return if there's no data to write
+        if data.shape[0] == 0:
+            return
+
         self.staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
         self.staging_buffer.write_mapped(data=data)
         self.staging_buffer.unmap()
@@ -1260,10 +1308,10 @@ type Draw3dTextureUsage = Literal[
 
 def _texture_format_for_draw_3d_usage(usage: Draw3dTextureUsage) -> wgpu.TextureFormat:
     mapping: dict[Draw3dTextureUsage, str] = {
-        "color": "bc1-rgba-unorm",
-        "normal": "bc5-rg-snorm",
-        "metalness": "bc4-r-unorm",
-        "roughness": "bc4-r-unorm",
+        "color": "bc1_rgba_unorm",
+        "normal": "bc5_rg_snorm",
+        "metalness": "bc4_r_unorm",
+        "roughness": "bc4_r_unorm",
     }
     return wgpu.TextureFormat[mapping[usage]]
 
@@ -1330,6 +1378,8 @@ class TextureHeap(BaseDisposable):
             element_capacity=allocation_capacity,
         )
 
+        self.allocation_list = []
+
         self.cursor_x_blk = 0
         self.cursor_y_blk = 0
         self.cursor_h_blk = 0
@@ -1369,9 +1419,12 @@ class TextureHeap(BaseDisposable):
         assert data.ndim == 3
         if data.shape[2] != 3:
             raise LogicError(f"Normal texture must have 3 channels: {data.shape[2]=}")
-        if (np.linalg.norm(data, axis=2) - 1.0).abs() > 1e-5:
-            raise LogicError("Normal texture has non-unit length vectors.")
-        return encode_bc5(input_=data[:, :, 0:2], range_="snorm")
+        # Normalize all vectors to ensure unit length
+        norms = np.linalg.norm(data, axis=2, keepdims=True)
+        # Avoid division by zero for any zero-length vectors
+        norms = np.maximum(norms, 1e-8)
+        normalized_data = data / norms
+        return encode_bc5(input_=normalized_data[:, :, 0:2], range_="snorm")
 
     @staticmethod
     def _encode_metalness_texture(data: np.ndarray) -> np.ndarray:
@@ -1415,7 +1468,6 @@ class TextureHeap(BaseDisposable):
             texture_w_blk=blocks_w,
             texture_h_blk=blocks_h,
         )
-        self.allocation_count += 1
         self.cursor_x_blk += blocks_w
         self.cursor_h_blk = max(self.cursor_h_blk, blocks_h)
         self.allocation_list.append(allocation)
@@ -1489,8 +1541,8 @@ class TextureHeapAllocation:
     texture_h_blk: int
 
     def __post_init__(self):
-        assert 0 < self.texture_x_px <= 0xFFFF
-        assert 0 < self.texture_y_px <= 0xFFFF
+        assert 0 <= self.texture_x_px <= 0xFFFF
+        assert 0 <= self.texture_y_px <= 0xFFFF
 
     @property
     def texture_x_px(self) -> int:
