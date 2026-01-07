@@ -5,13 +5,47 @@ BC4 and BC6H image compression and decompression.
 __all__ = [
     "encode_bc1",
     "encode_bc4",
+    "encode_bc5",
 ]
 
+from typing import Literal
 import numpy as np
 import numpy.typing as npt
 import numba
 
 from .basic import NUMBA_CACHE_ENABLED
+
+#
+# BC5 encode: compress RG images: for normal maps
+#
+
+
+def encode_bc5(
+    input_: npt.NDArray[np.float32],
+    range_: Literal["unorm", "snorm"] = "unorm",
+) -> npt.NDArray[np.uint8]:
+    """
+    Compress a 2-channel RG image to BC5-snorm format.
+
+    :param input_: input image data: shape (h, w, 2), dtype float32 with h%4 == w%4 == 0
+        The input data is expected to be in the range [-1, 1].
+    :param range_: Input range, which is one of:
+        -   "unorm" for unsigned normalized (0.0 to 1.0)
+        -   "snorm" for signed normalized (-1.0 to 1.0)
+    :returns: Compressed BC5 data: shape (height/4, width/4, 16), dtype uint8.
+    """
+
+    h, w, d = input_.shape
+    if h % 4 != 0 or w % 4 != 0:
+        raise ValueError("Input image dimensions must be multiples of 4")
+    if d != 2:
+        raise ValueError("Input image must have two channels")
+
+    # Note that BC5 is just two BC4 blocks interleaved.
+    bc4_r = encode_bc4(input_=input_[:, :, 0:1], range_=range_)
+    bc4_g = encode_bc4(input_=input_[:, :, 1:2], range_=range_)
+    return np.concatenate([bc4_r, bc4_g], axis=-1)
+
 
 #
 # BC1 encode: compress RGB images
@@ -24,7 +58,7 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
 
     We do not support BC1 with alpha.
 
-    :param data: input image data: shape (h, w, 3), dtype float32 with h%4 == w%4 == 0.
+    :param input_: input image data: shape (h, w, 3), dtype float32 with h%4 == w%4 == 0.
     :returns: Compressed BC1 data: shape (height/4, width/4, 8), dtype uint8.
     """
 
@@ -533,11 +567,17 @@ def _f32_to_rgb565(color: npt.NDArray[np.float32]) -> np.uint16:
 #
 
 
-def encode_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
+def encode_bc4(
+    input_: npt.NDArray[np.float32],
+    range_: Literal["unorm", "snorm"],
+) -> npt.NDArray[np.uint8]:
     """
     Compress a single-channel image to BC4 format.
 
-    :param data: input image data: shape (h, w, 1), dtype float32 with h%4 == w%4 == 0.
+    :param input_: input image data: shape (h, w, 1), dtype float32 with h%4 == w%4 == 0
+    :param range_: Input range, which is one of:
+        -   "unorm" for unsigned normalized (0.0 to 1.0)
+        -   "snorm" for signed normalized (-1.0 to 1.0)
     :returns: Compressed BC4 data: shape (height/4, width/4, 8), dtype uint8.
     """
 
@@ -566,7 +606,14 @@ def encode_bc4(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     if input_.dtype != np.float32:
         raise ValueError("Input image must have dtype float32")
 
+    # Our compression routines only work with unorm data in [0,1], so convert snorm to
+    # unorm:
+    if range_ == "snorm":
+        range_ = "unorm"
+        input_ = (input_ + 1.0) * 0.5
+
     # Convert float32 [0,1] to uint8 [0,255]
+    assert range_ == "unorm"
     input_u8 = np.round(input_ * 255.0).astype(np.uint8)
 
     return _encode_bc4_impl(input_u8)

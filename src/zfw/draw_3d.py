@@ -7,15 +7,18 @@ __all__ = [
 from contextlib import contextmanager
 import math
 from dataclasses import dataclass, field
-from typing import Generator, get_args
+from typing import Generator, Literal
 
 import numpy as np
 import jaxtyping as jt
 import wgpu
 
+
 from .basic import BaseDisposable, StructuredNDArray, logger
+from .excepts import LogicError
 from .bvh import Bvh, build_bvh
 from .resources import GeometryResource, ImageResource, MaterialResource
+from .images import encode_bc1, encode_bc4
 
 #
 # Renderer
@@ -23,6 +26,19 @@ from .resources import GeometryResource, ImageResource, MaterialResource
 
 
 class Draw3dRenderer(BaseDisposable):
+    """
+    A 3D renderer using ray tracing implemented with wgpu compute shaders.
+
+    Usage:
+    -   Create an instance of Draw3dRenderer.
+    -   Create Draw3dFrame instances for each frame to be rendered concurrently. You can
+        and should reuse Draw3dFrame instances across multiple frames.
+    -   Create Draw3dScene instances representing the scenes to be rendered. These
+        should be created anew for each frame.
+    -   For each frame, call `Draw3dRenderer.record()` with the scene, frame, and a GPU
+        command encoder (to record commands into).
+    """
+
     device: wgpu.GPUDevice
     queue: wgpu.GPUQueue
 
@@ -684,7 +700,8 @@ class Draw3dFrame(BaseDisposable):
 
 class Draw3dGeometry(BaseDisposable):
     """
-    IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_geometry() instead.
+    IMPORTANT: do not call this constructor directly: use
+    `Draw3dRenderer.get_geometry()` instead.
     """
 
     renderer: Draw3dRenderer
@@ -782,8 +799,10 @@ class Draw3dGeometry(BaseDisposable):
 
 class Draw3dTexture(BaseDisposable):
     """
+    IMPORTANT: do not call this constructor directly: use `Draw3dRenderer.get_texture()`
+    instead.
+
     Represents a GPU texture created from an ImageResource.
-    IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_texture() instead.
     """
 
     renderer: Draw3dRenderer
@@ -818,7 +837,8 @@ class Draw3dTexture(BaseDisposable):
 
 class Draw3dMaterial(BaseDisposable):
     """
-    IMPORTANT: do not call this constructor directly: use Draw3dRenderer.get_material() instead.
+    IMPORTANT: do not call this constructor directly: use
+    `Draw3dRenderer.get_material()` instead.
     """
 
     renderer: Draw3dRenderer
@@ -875,6 +895,10 @@ class Draw3dMaterial(BaseDisposable):
 
 @dataclass(kw_only=True)
 class Draw3dScene:
+    """
+    Represents a 3D scene to be rendered.
+    """
+
     camera: Draw3dCamera
 
     meshes: dict[
@@ -885,8 +909,12 @@ class Draw3dScene:
     environment_map: Draw3dTexture | None = None
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Draw3dCamera:
+    """
+    Represents a camera in the 3D scene.
+    """
+
     transform: jt.Float32[np.ndarray, "4 4"]
     fov_y_rad: float
     aspect_ratio: float
@@ -1110,6 +1138,70 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
 
         # Return offset in elements:
         return allocation_offset
+
+
+#
+# TextureHeap: helper for texture allocation in GPU texture arrays
+#
+
+
+class TextureHeap(BaseDisposable):
+    """
+    Manages a GPU texture array for storing multiple textures.
+
+    Supports 1-channel, 2-channel, or 3-channel textures, using BC4, BC5, or BC1
+    compression respectively.
+    """
+
+    device: wgpu.GPUDevice
+    label: str
+    channel_count: Literal[1, 2, 3]
+    page_size_px: int
+    page_count: int
+
+    texture: wgpu.GPUTexture
+
+    def __init__(
+        self,
+        device: wgpu.GPUDevice,
+        label: str,
+        channel_count: Literal[1, 3],
+        page_size_px: int,
+        page_count: int,
+    ) -> None:
+        super().__init__()
+
+        self.device = device
+        self.label = label
+        self.channel_count = channel_count
+        self.page_size_px = page_size_px
+        self.page_count = page_count
+
+        self.texture = device.create_texture(
+            label=f"{label}.TextureArray",
+            size=(page_size_px, page_size_px, page_count),
+            dimension=wgpu.TextureDimension.d2,
+            format=("bc4-r-unorm" if channel_count == 1 else "bc1-rgba-unorm"),
+            usage=(wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST),
+        )
+
+    def _encode_bcn(self, data: np.ndarray) -> np.ndarray:
+        if data.ndim != 3:
+            raise LogicError("Data must be a 3D array (height, width, channels).")
+
+        if data.shape[2] != self.channel_count:
+            raise LogicError(
+                f"Data channel count ({data.shape[2]}) does not match "
+                f"TextureHeap channel count ({self.channel_count})."
+            )
+
+        match self.channel_count:
+            case 3:
+                return encode_bc1(data)
+            case 1:
+                return encode_bc4(data)
+            case _:
+                raise NotImplementedError()
 
 
 #

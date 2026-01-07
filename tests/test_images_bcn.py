@@ -322,7 +322,7 @@ def test_encode_bc4(
     assert rainbow_512x512_image_grayscale.data.shape == (512, 512, 1)
     input_h, input_w, _ = rainbow_512x512_image_grayscale.data.shape
 
-    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale.data)
+    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale.data, range_="unorm")
     assert bc4_data.dtype == np.uint8
     assert bc4_data.shape == (input_h // 4, input_w // 4, 8)
 
@@ -377,6 +377,41 @@ def test_encode_bc1(
         img2=image[:input_h, :input_w, :3],
     )
     assert psnr > 45.0, f"BC1 PSNR too low: {psnr:.2f} dB"
+
+
+def test_encode_bc5_snorm(
+    gpu: GpuFixture,
+    rainbow_512x512_image: zfw.ImageResource,
+):
+    """Test BC5 (RG snorm) encoding round-trip."""
+    assert rainbow_512x512_image.data.dtype == np.float32
+    assert rainbow_512x512_image.data.shape == (512, 512, 4)
+    input_h, input_w, _ = rainbow_512x512_image.data.shape
+
+    # Create a 2-channel image in [-1, +1] from the first two RGB channels.
+    rg = rainbow_512x512_image.data[:, :, :2]
+    rg = rg.astype(np.float32)
+
+    bc5_data = zfw.encode_bc5(rg, range_="unorm")
+    assert bc5_data.dtype == np.uint8
+    assert bc5_data.shape == (input_h // 4, input_w // 4, 16)
+
+    image = help_render_texture_to_framebuffer(
+        device=gpu.device,
+        queue=gpu.queue,
+        attachment_texture_format="bc5-rg-unorm",
+        compressed_texture_data=bc5_data,
+        input_w=input_w,
+        input_h=input_h,
+        bytes_per_row=(input_w // 4) * 16,
+        grayscale=False,
+        output_path=Path("output/zfw/test_images_bcn/test_image_bc5.png"),
+    )
+
+    # Compare the two channels (R,G). The encoder input was in [-1,1], sampling
+    # yields the same range; compute PSNR on float values.
+    psnr = zfw.compute_psnr(img1=rg, img2=image[:input_h, :input_w, :2])
+    assert psnr > 45.0, f"BC5 PSNR too low: {psnr:.2f} dB"
 
 
 LOG = zfw.logger(__name__)

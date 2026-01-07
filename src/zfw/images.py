@@ -1,15 +1,16 @@
 __all__ = [
     "ImageFormat",
-    "encode_bc1",
-    "encode_bc4",
     "compute_psnr",
     "convert_color",
     "convert_image_format",
     "convert_linear_to_srgb",
     "convert_rgb_to_grayscale",
     "convert_srgb_to_linear",
-    "normalize_image_to_f32",
     "debug_save_rgba_image",
+    "encode_bc1",
+    "encode_bc4",
+    "encode_bc5",
+    "normalize_image_to_f32",
 ]
 
 from pathlib import Path
@@ -19,7 +20,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from .basic import ColorSpace, logger
-from .images_bcn import encode_bc1, encode_bc4
+from .images_bcn import encode_bc1, encode_bc4, encode_bc5
 
 # ImageFormat: subset of WebGPU texture formats for images
 type ImageFormat = Literal[
@@ -34,6 +35,8 @@ type ImageFormat = Literal[
     "rgb16float",
     "bc1-rgba-unorm",
     "bc4-r-unorm",
+    "bc5-rg-unorm",
+    "bc5-rg-snorm",
 ]
 
 
