@@ -173,17 +173,17 @@ def _refine_bc1_block(
         endpoints = np.clip(
             np.array(
                 [
-                    # Endpoint0 (min):
+                    # Endpoint0:
                     [
-                        _refine_bc1_block_o_match_5[r_mean_u8, 0] / 31.0,
-                        _refine_bc1_block_o_match_6[g_mean_u8, 0] / 63.0,
-                        _refine_bc1_block_o_match_5[b_mean_u8, 0] / 31.0,
+                        ((_refine_bc1_block_o_match_5[r_mean_u8, 0] * 33) >> 2) / 255.0,
+                        ((_refine_bc1_block_o_match_6[g_mean_u8, 0] * 65) >> 4) / 255.0,
+                        ((_refine_bc1_block_o_match_5[b_mean_u8, 0] * 33) >> 2) / 255.0,
                     ],
-                    # Endpoint1 (max):
+                    # Endpoint1:
                     [
-                        _refine_bc1_block_o_match_5[r_mean_u8, 1] / 31.0,
-                        _refine_bc1_block_o_match_6[g_mean_u8, 1] / 63.0,
-                        _refine_bc1_block_o_match_5[b_mean_u8, 1] / 31.0,
+                        ((_refine_bc1_block_o_match_5[r_mean_u8, 1] * 33) >> 2) / 255.0,
+                        ((_refine_bc1_block_o_match_6[g_mean_u8, 1] * 65) >> 4) / 255.0,
+                        ((_refine_bc1_block_o_match_5[b_mean_u8, 1] * 33) >> 2) / 255.0,
                     ],
                 ],
                 dtype=np.float32,
@@ -362,16 +362,19 @@ def _eval_colors(
 
     n = colors.shape[0]
 
-    # Build palette with 4 colors in float32 [0,1] space
-    palette = np.empty((4, 3), dtype=np.float32)
-    palette[0] = endpoints[0]
-    palette[1] = endpoints[1]
-    palette[2] = (2.0 * endpoints[0] + 1.0 * endpoints[1]) / 3.0
-    palette[3] = (1.0 * endpoints[0] + 2.0 * endpoints[1]) / 3.0
+    # Quantize endpoints to RGB565 and back to float32 [0,1].
+    # This is what the GPU decoder does.
+    ep0_q = _quantize_rgb565_f32(endpoints[0])
+    ep1_q = _quantize_rgb565_f32(endpoints[1])
 
-    # Quantize palette endpoints to RGB565 and back to float32 [0,1]:
-    for i in range(4):
-        palette[i] = _quantize_rgb565_f32(palette[i])
+    # Build palette with 4 colors from quantized endpoints.
+    # The GPU computes interpolations from the quantized endpoints.
+    # We SHOULD NOT quantize the interpolated colors again.
+    palette = np.empty((4, 3), dtype=np.float32)
+    palette[0] = ep0_q
+    palette[1] = ep1_q
+    palette[2] = (2.0 * ep0_q + 1.0 * ep1_q) / 3.0
+    palette[3] = (1.0 * ep0_q + 2.0 * ep1_q) / 3.0
 
     # Select indices for each color based on closest palette color:
     indices = np.empty((n,), dtype=np.uint8)
@@ -395,13 +398,23 @@ def _eval_colors(
 def _quantize_rgb565_f32(color: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     """
     Quantize RGB color to RGB565 precision and back to float32 [0,1].
+
+    Uses the same bit-replication expansion that GPUs use for BC1 decoding:
+    - 5-bit: (bits * 33) >> 2  (equivalent to (bits << 3) | (bits >> 2))
+    - 6-bit: (bits * 65) >> 4  (equivalent to (bits << 2) | (bits >> 4))
+
     :param color: input color: shape (3,), dtype float32 in [0,1].
     :returns: Quantized color: shape (3,), dtype float32 in [0,1].
     """
     res = np.empty(3, dtype=np.float32)
-    res[0] = np.round(color[0] * 31.0) / 31.0
-    res[1] = np.round(color[1] * 63.0) / 63.0
-    res[2] = np.round(color[2] * 31.0) / 31.0
+    # Quantize to RGB565 bits
+    r_bits = int(np.round(color[0] * 31.0))
+    g_bits = int(np.round(color[1] * 63.0))
+    b_bits = int(np.round(color[2] * 31.0))
+    # Expand back using GPU's bit-replication formula
+    res[0] = ((r_bits * 33) >> 2) / 255.0
+    res[1] = ((g_bits * 65) >> 4) / 255.0
+    res[2] = ((b_bits * 33) >> 2) / 255.0
     return res
 
 

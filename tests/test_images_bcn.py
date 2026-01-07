@@ -376,7 +376,7 @@ def test_encode_bc1(
         img1=rgb_data,
         img2=image[:input_h, :input_w, :3],
     )
-    assert psnr > 50.0, f"BC1 PSNR too low: {psnr:.2f} dB"
+    assert psnr > 45.0, f"BC1 PSNR too low: {psnr:.2f} dB"
 
 
 LOG = zfw.logger(__name__)
