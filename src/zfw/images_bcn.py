@@ -32,6 +32,7 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     # https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression#bc1
     # https://www.ludicon.com/castano/blog/2022/11/bc1-compression-revisited/
     # https://fgiesen.wordpress.com/2022/11/08/whats-that-magic-computation-in-stb__refineblock/
+    # https://github.com/nothings/stb/blob/f1c79c02822848a9bed4315b12c8c8f3761e1296/stb_dxt.h#L402
 
     # BC1 encoding is similar to BC4 encoding, but for RGB data.
     # Each 4x4 block is compressed to 8 bytes:
@@ -63,6 +64,9 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     # Fabien's power iteration method iteratively computes the principal component of
     # the covariance matrix. Here, we simply use `np.linalg.eig` to compute the
     # eigenvectors directly.
+
+    # We then follow Fabien's iterative endpoint refinement approach.
+    # TODO: Implement iterative refinement given by stb__RefineBlock
 
     h, w, d = input_.shape
     if h % 4 != 0 or w % 4 != 0:
