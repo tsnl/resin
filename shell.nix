@@ -46,6 +46,9 @@ pkgs.mkShell {
     # astcenc: ASTC texture compressor/decompressor
     astc-encoder
 
+    # npx (for Playwright MCP)
+    nodejs_24
+
     # Basic
     unzip
     zstd
