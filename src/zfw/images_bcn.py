@@ -170,23 +170,28 @@ def _refine_bc1_block(
         g_mean_u8 = np.uint8(block_colors[:, 1].mean() * 0xFF)
         b_mean_u8 = np.uint8(block_colors[:, 2].mean() * 0xFF)
 
-        endpoints = np.array(
-            [
-                # Endpoint0 (min):
+        endpoints = np.clip(
+            np.array(
                 [
-                    _refine_bc1_block_o_match_5[r_mean_u8, 0] / 31.0,
-                    _refine_bc1_block_o_match_6[g_mean_u8, 0] / 63.0,
-                    _refine_bc1_block_o_match_5[b_mean_u8, 0] / 31.0,
+                    # Endpoint0 (min):
+                    [
+                        _refine_bc1_block_o_match_5[r_mean_u8, 0] / 31.0,
+                        _refine_bc1_block_o_match_6[g_mean_u8, 0] / 63.0,
+                        _refine_bc1_block_o_match_5[b_mean_u8, 0] / 31.0,
+                    ],
+                    # Endpoint1 (max):
+                    [
+                        _refine_bc1_block_o_match_5[r_mean_u8, 1] / 31.0,
+                        _refine_bc1_block_o_match_6[g_mean_u8, 1] / 63.0,
+                        _refine_bc1_block_o_match_5[b_mean_u8, 1] / 31.0,
+                    ],
                 ],
-                # Endpoint1 (max):
-                [
-                    _refine_bc1_block_o_match_5[r_mean_u8, 1] / 31.0,
-                    _refine_bc1_block_o_match_6[g_mean_u8, 1] / 63.0,
-                    _refine_bc1_block_o_match_5[b_mean_u8, 1] / 31.0,
-                ],
-            ],
-            dtype=np.float32,
+                dtype=np.float32,
+            ),
+            0.0,
+            1.0,
         )
+        indices = np.full_like(indices, 2)  # set all indices to '2'
     else:
         # Compose the A-matrix from the indices:
         a = _convert_indices_to_coefficients(indices=indices)
