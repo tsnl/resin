@@ -350,16 +350,33 @@ def _compute_principal_component_of_cov_mat3x3(
     :param cov: input covariance matrix: shape (3, 3), dtype float32.
     :returns: Principal component: shape (3,), dtype float32.
     """
-    # NOTE: Covariance matrices are real and symmetric, but numerical issues may lead to
-    # complex eigenvalues/vectors. We cast to complex128 to avoid errors, then take
-    # the real part afterwards. The imaginary part should be zero or negligible, due to
-    # numerical error.
-    cov_eigenvalues, cov_eigenvectors_t = np.linalg.eig(cov.astype(np.complex128))
-    cov_eigenvalues = cov_eigenvalues.real.astype(np.float32)  # type: ignore
-    cov_eigenvectors_t = cov_eigenvectors_t.real.astype(np.float32)  # type: ignore
-    cov_eigenvectors = cov_eigenvectors_t.T
-    principal_component = cov_eigenvectors[np.argmax(cov_eigenvalues), :]
-    return principal_component
+
+    # Use a small, numba-friendly power iteration to compute the principal
+    # eigenvector of the symmetric 3x3 covariance matrix. This is cheaper and
+    # avoids allocating complex128 arrays.
+    v = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    # normalize initial vector
+    nrm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) ** 0.5
+    if nrm > 0.0:
+        v[0] /= nrm
+        v[1] /= nrm
+        v[2] /= nrm
+
+    # iterate a few times (fixed small count for determinism)
+    for _ in range(8):
+        w = np.empty(3, dtype=np.float32)
+        w[0] = cov[0, 0] * v[0] + cov[0, 1] * v[1] + cov[0, 2] * v[2]
+        w[1] = cov[1, 0] * v[0] + cov[1, 1] * v[1] + cov[1, 2] * v[2]
+        w[2] = cov[2, 0] * v[0] + cov[2, 1] * v[1] + cov[2, 2] * v[2]
+
+        nrm = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]) ** 0.5
+        if nrm <= 1e-8:
+            break
+        v[0] = w[0] / nrm
+        v[1] = w[1] / nrm
+        v[2] = w[2] / nrm
+
+    return v
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
@@ -414,10 +431,17 @@ def _eval_colors(
     indices = np.empty((n,), dtype=np.uint8)
     for c in range(n):
         i_min = 0
-        e_min = np.linalg.norm(colors[c] - palette[i_min]) ** 2
+        # compute squared distance to avoid an unnecessary sqrt
+        d0 = colors[c][0] - palette[i_min][0]
+        d1 = colors[c][1] - palette[i_min][1]
+        d2 = colors[c][2] - palette[i_min][2]
+        e_min = d0 * d0 + d1 * d1 + d2 * d2
 
         for i in range(1, 4):
-            e = np.linalg.norm(colors[c] - palette[i]) ** 2
+            dx = colors[c][0] - palette[i][0]
+            dy = colors[c][1] - palette[i][1]
+            dz = colors[c][2] - palette[i][2]
+            e = dx * dx + dy * dy + dz * dz
             if e < e_min:
                 i_min = i
                 e_min = e
