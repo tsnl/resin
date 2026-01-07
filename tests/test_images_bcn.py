@@ -36,13 +36,13 @@ def test_f32_to_rgb565():
         g_expanded = ((g_bits << 2) | (g_bits >> 4)) / 255.0
         b_expanded = ((b_bits << 3) | (b_bits >> 2)) / 255.0
 
-        print(f"{name:20} input:  ({r:.3f}, {g:.3f}, {b:.3f})")
-        print(
-            f"{' ' * 20} bits:   (R:{r_bits:2d}, G:{g_bits:2d}, B:{b_bits:2d}) -> 0x{packed_rgb565:04x}"
-        )
-        print(
-            f"{' ' * 20} output: ({r_expanded:.3f}, {g_expanded:.3f}, {b_expanded:.3f})"
-        )
+        # print(f"{name:20} input:  ({r:.3f}, {g:.3f}, {b:.3f})")
+        # print(
+        #     f"{' ' * 20} bits:   (R:{r_bits:2d}, G:{g_bits:2d}, B:{b_bits:2d}) -> 0x{packed_rgb565:04x}"
+        # )
+        # print(
+        #     f"{' ' * 20} output: ({r_expanded:.3f}, {g_expanded:.3f}, {b_expanded:.3f})"
+        # )
 
         # Round-trip should be reasonably close (within RGB565 precision)
         assert abs(r - r_expanded) < 0.05, (
@@ -74,10 +74,10 @@ def test_quantize_rgb565_f32():
         color_f32 = np.array([r, g, b], dtype=np.float32)
         quantized = _quantize_rgb565_f32(color_f32)
 
-        print(f"{name:20} input:     ({r:.3f}, {g:.3f}, {b:.3f})")
-        print(
-            f"{' ' * 20} quantized: ({quantized[0]:.3f}, {quantized[1]:.3f}, {quantized[2]:.3f})"
-        )
+        # print(f"{name:20} input:     ({r:.3f}, {g:.3f}, {b:.3f})")
+        # print(
+        #     f"{' ' * 20} quantized: ({quantized[0]:.3f}, {quantized[1]:.3f}, {quantized[2]:.3f})"
+        # )
 
         # Quantized values should be in [0, 1]
         assert 0.0 <= quantized[0] <= 1.0
@@ -116,8 +116,8 @@ def test_pack_bc1_block():
     endpoint0_565 = np.uint16(packed[0]) | (np.uint16(packed[1]) << 8)
     endpoint1_565 = np.uint16(packed[2]) | (np.uint16(packed[3]) << 8)
 
-    print(f"Endpoint 0: 0x{endpoint0_565:04x}")
-    print(f"Endpoint 1: 0x{endpoint1_565:04x}")
+    # print(f"Endpoint 0: 0x{endpoint0_565:04x}")
+    # print(f"Endpoint 1: 0x{endpoint1_565:04x}")
 
     # White should pack to 0xFFFF (R=31, G=63, B=31)
     assert endpoint0_565 == 0xFFFF, (
@@ -136,7 +136,7 @@ def test_pack_bc1_block():
         idx = (packed[4 + byte_index] >> byte_offset) & 0x3
         assert idx == 0, f"Index {i} should be 0, got {idx}"
 
-    print("BC1 block packing test passed!")
+    # print("BC1 block packing test passed!")
 
 
 def help_render_texture_to_framebuffer(
@@ -376,7 +376,7 @@ def test_encode_bc1(
         img1=rgb_data,
         img2=image[:input_h, :input_w, :3],
     )
-    assert psnr > 35.0, f"BC1 PSNR too low: {psnr:.2f} dB"
+    assert psnr > 50.0, f"BC1 PSNR too low: {psnr:.2f} dB"
 
 
 LOG = zfw.logger(__name__)

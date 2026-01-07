@@ -141,7 +141,7 @@ def _encode_bc1_block(
     # Identify LUT indices for each color in the block.
     # These effectively give us blend coefficients for reconstructing each color from
     # the two endpoints.
-    indices = _eval_colors(colors=block_colors, endpoints=endpoints)
+    endpoints, indices = _eval_colors(colors=block_colors, endpoints=endpoints)
 
     # Now, for iterative endpoint refinement: fix the indices (i.e. the coefficients)
     # from the previous step, and solve for better endpoints that minimize the squared
@@ -160,7 +160,7 @@ def _encode_bc1_block(
         assert endpoints.shape == (2, 3)
 
         # Re-evaluate indices with updated endpoints:
-        indices = _eval_colors(colors=block_colors, endpoints=endpoints)
+        endpoints, indices = _eval_colors(colors=block_colors, endpoints=endpoints)
 
     # Return:
     return endpoints, indices
@@ -225,13 +225,13 @@ def _project_vec3s_onto_vec3(
 def _eval_colors(
     colors: npt.NDArray[np.float32],
     endpoints: npt.NDArray[np.float32],
-) -> npt.NDArray[np.uint8]:
+) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.uint8]]:
     """
     Evaluate the indices of colors in the palette defined by two endpoints.
     :param colors: input colors: shape (n, 3), dtype float32 in [0,1].
     :param endpoints: endpoints: shape (2, 3), dtype float32 in [0,1].
     :returns: A 2-tuple of:
-        - colors: endpoints quantized to RGB565 and back: shape (2, 3), dtype=f32
+        - endpoints: endpoints quantized to RGB565 and back: shape (2, 3), dtype=f32
         - indices: shape (n,), dtype uint8.
     """
 
@@ -244,9 +244,9 @@ def _eval_colors(
     palette[2] = (2.0 * endpoints[0] + 1.0 * endpoints[1]) / 3.0
     palette[3] = (1.0 * endpoints[0] + 2.0 * endpoints[1]) / 3.0
 
-    # # Quantize palette endpoints to RGB565 and back to float32 [0,1]:
-    # for i in range(4):
-    #     palette[i] = _quantize_rgb565_f32(palette[i])
+    # Quantize palette endpoints to RGB565 and back to float32 [0,1]:
+    for i in range(4):
+        palette[i] = _quantize_rgb565_f32(palette[i])
 
     # Select indices for each color based on closest palette color:
     indices = np.empty((n,), dtype=np.uint8)
@@ -263,7 +263,7 @@ def _eval_colors(
         indices[c] = np.uint8(i_min)
 
     # Return:
-    return indices
+    return palette, indices
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
@@ -384,9 +384,9 @@ def _f32_to_rgb565(color: npt.NDArray[np.float32]) -> np.uint16:
     :param color: RGB color: shape (3,), dtype float32 in [0,1].
     :returns: Packed RGB565 as uint16.
     """
-    r = np.uint16(np.int32(color[0] * 31.0) & 0x1F)
-    g = np.uint16(np.int32(color[1] * 63.0) & 0x3F)
-    b = np.uint16(np.int32(color[2] * 31.0) & 0x1F)
+    r = np.uint16(np.int32(np.round(color[0] * 31.0)) & 0x1F)
+    g = np.uint16(np.int32(np.round(color[1] * 63.0)) & 0x3F)
+    b = np.uint16(np.int32(np.round(color[2] * 31.0)) & 0x1F)
     return (r << 11) | (g << 5) | b
 
 
