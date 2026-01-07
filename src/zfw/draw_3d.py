@@ -1444,8 +1444,6 @@ class TextureHeap(BaseDisposable):
     def _encode_texture(self, data: np.ndarray) -> np.ndarray:
         if data.ndim != 3:
             raise LogicError(f"Texture has invalid ndim: expected 3: {data.ndim=}")
-        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
-            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
 
         match self.usage:
             case "color":
@@ -1464,6 +1462,8 @@ class TextureHeap(BaseDisposable):
     @staticmethod
     def _encode_color_texture(data: np.ndarray) -> np.ndarray:
         assert data.ndim == 3
+        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
+            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 3:
             raise LogicError(f"Color texture must have 3 channels: {data.shape[2]=}")
         return encode_bc1(data)
@@ -1471,6 +1471,8 @@ class TextureHeap(BaseDisposable):
     @staticmethod
     def _encode_normal_texture(data: np.ndarray) -> np.ndarray:
         assert data.ndim == 3
+        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
+            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 3:
             raise LogicError(f"Normal texture must have 3 channels: {data.shape[2]=}")
         # Normalize all vectors to ensure unit length
@@ -1483,6 +1485,8 @@ class TextureHeap(BaseDisposable):
     @staticmethod
     def _encode_metalness_texture(data: np.ndarray) -> np.ndarray:
         assert data.ndim == 3
+        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
+            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 1:
             raise LogicError(f"Metalness texture must have 1 channel: {data.shape[2]=}")
         return encode_bc4(input_=data, range_="unorm")
@@ -1490,6 +1494,8 @@ class TextureHeap(BaseDisposable):
     @staticmethod
     def _encode_roughness_texture(data: np.ndarray) -> np.ndarray:
         assert data.ndim == 3
+        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
+            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 1:
             raise LogicError(f"Roughness texture must have 1 channel: {data.shape[2]=}")
         return encode_bc4(input_=data, range_="unorm")
