@@ -65,8 +65,8 @@ def encode_bc1(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
     # the covariance matrix. Here, we simply use `np.linalg.eig` to compute the
     # eigenvectors directly.
 
-    # We then follow Fabien's iterative endpoint refinement approach.
-    # TODO: Implement iterative refinement given by stb__RefineBlock
+    # We then follow Fabien's iterative endpoint refinement approach, fixing the indices
+    # and solving for better endpoints using least squares.
 
     h, w, d = input_.shape
     if h % 4 != 0 or w % 4 != 0:
@@ -100,6 +100,7 @@ def _encode_bc1_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
 def _encode_bc1_block(
     block: npt.NDArray[np.float32],
+    refinement_iteration_count: int = 5,
 ) -> tuple[
     npt.NDArray[np.float32],
     npt.NDArray[np.uint8],
@@ -137,7 +138,29 @@ def _encode_bc1_block(
     endpoints[0] = block_colors[min_idx]
     endpoints[1] = block_colors[max_idx]
 
+    # Identify LUT indices for each color in the block.
+    # These effectively give us blend coefficients for reconstructing each color from
+    # the two endpoints.
     indices = _eval_colors(colors=block_colors, endpoints=endpoints)
+
+    # Now, for iterative endpoint refinement: fix the indices (i.e. the coefficients)
+    # from the previous step, and solve for better endpoints that minimize the squared
+    # error across all colors in the block.
+    for _ in range(refinement_iteration_count):
+        # Compose the A-matrix from the indices:
+        a = _convert_indices_to_coefficients(indices=indices)
+
+        # Compose the b-matrix from the block colors:
+        b = block_colors
+
+        # Solve for new endpoints using least squares:
+        endpoints, _, _, _ = np.linalg.lstsq(a, b)
+
+        # Ensure endpoints shape is (2, 3):
+        assert endpoints.shape == (2, 3)
+
+        # Re-evaluate indices with updated endpoints:
+        indices = _eval_colors(colors=block_colors, endpoints=endpoints)
 
     # Return:
     return endpoints, indices
@@ -170,7 +193,8 @@ def _compute_principal_component_of_cov_mat3x3(
     """
     # NOTE: Covariance matrices are real and symmetric, but numerical issues may lead to
     # complex eigenvalues/vectors. We cast to complex128 to avoid errors, then take
-    # the real part afterwards.
+    # the real part afterwards. The imaginary part should be zero or negligible, due to
+    # numerical error.
     cov_eigenvalues, cov_eigenvectors_t = np.linalg.eig(cov.astype(np.complex128))
     cov_eigenvalues = cov_eigenvalues.real.astype(np.float32)  # type: ignore
     cov_eigenvectors_t = cov_eigenvectors_t.real.astype(np.float32)  # type: ignore
@@ -220,6 +244,10 @@ def _eval_colors(
     palette[2] = (2.0 * endpoints[0] + 1.0 * endpoints[1]) / 3.0
     palette[3] = (1.0 * endpoints[0] + 2.0 * endpoints[1]) / 3.0
 
+    # # Quantize palette endpoints to RGB565 and back to float32 [0,1]:
+    # for i in range(4):
+    #     palette[i] = _quantize_rgb565_f32(palette[i])
+
     # Select indices for each color based on closest palette color:
     indices = np.empty((n,), dtype=np.uint8)
     for c in range(n):
@@ -246,16 +274,33 @@ def _quantize_rgb565_f32(color: npt.NDArray[np.float32]) -> npt.NDArray[np.float
     :returns: Quantized color: shape (3,), dtype float32 in [0,1].
     """
     res = np.empty(3, dtype=np.float32)
-    # Quantize R channel (5 bits)
-    r_quantized = np.int32(color[0] * 31.0) & 0x1F
-    res[0] = ((r_quantized << 3) | (r_quantized >> 2)) / 255.0
-    # Quantize G channel (6 bits)
-    g_quantized = np.int32(color[1] * 63.0) & 0x3F
-    res[1] = ((g_quantized << 2) | (g_quantized >> 4)) / 255.0
-    # Quantize B channel (5 bits)
-    b_quantized = np.int32(color[2] * 31.0) & 0x1F
-    res[2] = ((b_quantized << 3) | (b_quantized >> 2)) / 255.0
+    res[0] = np.round(color[0] * 31.0) / 31.0
+    res[1] = np.round(color[1] * 63.0) / 63.0
+    res[2] = np.round(color[2] * 31.0) / 31.0
     return res
+
+
+@numba.njit(cache=NUMBA_CACHE_ENABLED)
+def _convert_indices_to_coefficients(
+    indices: npt.NDArray[np.uint8],
+) -> npt.NDArray[np.float32]:
+    """
+    Convert BC1 indices to interpolation coefficients for endpoints.
+    :param indices: shape (16,), dtype uint8.
+    :returns: Coefficients: shape (16, 2), dtype float32.
+    """
+
+    lut = np.array(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [2.0 / 3.0, 1.0 / 3.0],
+            [1.0 / 3.0, 2.0 / 3.0],
+        ],
+        dtype=np.float32,
+    )
+
+    return lut[indices]
 
 
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
