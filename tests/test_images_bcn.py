@@ -469,7 +469,7 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
         img2=image[:input_h, :input_w, :3],
     )
     LOG.info(f"DamagedHelmet BC1 compression PSNR: {psnr:.2f} dB")
-    
+
     # Compute and save difference visualization
     diff = np.abs(color_map.data - image[:input_h, :input_w, :3])
     diff_rgba = np.dstack([diff, np.ones((input_h, input_w, 1))])
@@ -481,7 +481,7 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
         ),
         data=diff_rgba,
     )
-    
+
     assert psnr > 25.0, f"BC1 PSNR too low for DamagedHelmet: {psnr:.2f} dB"
 
 

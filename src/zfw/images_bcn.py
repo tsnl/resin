@@ -441,10 +441,15 @@ def _quantize_rgb565_f32(color: npt.NDArray[np.float32]) -> npt.NDArray[np.float
     :returns: Quantized color: shape (3,), dtype float32 in [0,1].
     """
     res = np.empty(3, dtype=np.float32)
+    # Clamp to [0, 1] to prevent overflow from out-of-range values
+    # (e.g. from least-squares refinement producing negative endpoints)
+    r_clamped = max(0.0, min(1.0, color[0]))
+    g_clamped = max(0.0, min(1.0, color[1]))
+    b_clamped = max(0.0, min(1.0, color[2]))
     # Quantize to RGB565 bits
-    r_bits = int(np.round(color[0] * 31.0))
-    g_bits = int(np.round(color[1] * 63.0))
-    b_bits = int(np.round(color[2] * 31.0))
+    r_bits = int(np.round(r_clamped * 31.0))
+    g_bits = int(np.round(g_clamped * 63.0))
+    b_bits = int(np.round(b_clamped * 31.0))
     # Expand back using GPU's bit-replication formula
     res[0] = ((r_bits * 33) >> 2) / 255.0
     res[1] = ((g_bits * 65) >> 4) / 255.0
@@ -556,9 +561,11 @@ def _f32_to_rgb565(color: npt.NDArray[np.float32]) -> np.uint16:
     :param color: RGB color: shape (3,), dtype float32 in [0,1].
     :returns: Packed RGB565 as uint16.
     """
-    r = np.uint16(np.int32(np.round(color[0] * 31.0)) & 0x1F)
-    g = np.uint16(np.int32(np.round(color[1] * 63.0)) & 0x3F)
-    b = np.uint16(np.int32(np.round(color[2] * 31.0)) & 0x1F)
+    # Clamp to [0, 1] to prevent overflow from out-of-range values
+    # (e.g. from least-squares refinement producing negative endpoints)
+    r = np.uint16(int(np.round(max(0.0, min(1.0, color[0])) * 31.0)))
+    g = np.uint16(int(np.round(max(0.0, min(1.0, color[1])) * 63.0)))
+    b = np.uint16(int(np.round(max(0.0, min(1.0, color[2])) * 31.0)))
     return (r << 11) | (g << 5) | b
 
 
