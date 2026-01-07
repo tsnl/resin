@@ -4,8 +4,10 @@ __all__ = [
     "Draw3dScene",
 ]
 
+from contextlib import contextmanager
 import math
 from dataclasses import dataclass, field
+from typing import Generator, get_args
 
 import numpy as np
 import jaxtyping as jt
@@ -38,12 +40,12 @@ class Draw3dRenderer(BaseDisposable):
     draw_shader: wgpu.GPUShaderModule
     draw_pipeline: wgpu.GPUComputePipeline
 
-    geometry_heap_device_buffer: wgpu.GPUBuffer
-    bvh_node_heap_device_buffer: wgpu.GPUBuffer
-    triangle_heap_device_buffer: wgpu.GPUBuffer
-    material_heap_device_buffer: wgpu.GPUBuffer
-    texture_heap_device_buffer: wgpu.GPUBuffer
-    subpixel_heap_device_buffer: wgpu.GPUBuffer
+    geometry_heap: "LinearHeap[PodGeometryArray]"
+    bvh_node_heap: "LinearHeap[PodBvhNodeArray]"
+    triangle_heap: "LinearHeap[PodVertexArray]"
+    material_heap: "LinearHeap[PodMaterialArray]"
+    texture_heap: "LinearHeap[PodTextureArray]"
+    subpixel_heap: "LinearHeap[PodSubpixelArray]"
 
     renderer_bind_group: wgpu.GPUBindGroup
 
@@ -183,35 +185,44 @@ class Draw3dRenderer(BaseDisposable):
             ),
         )
 
-        self.geometry_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.GeometryHeapDeviceBuffer",
-            size=PodGeometryArray.array_size(shape=(self.geometry_capacity,)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        self.geometry_heap = LinearHeap[PodGeometryArray](
+            device=device,
+            label="Draw3dRenderer.GeometryHeap",
+            structured_array_cls=PodGeometryArray,
+            element_capacity=self.geometry_capacity,
+            persistent_staging_buffer_element_capacity=1,
         )
-        self.bvh_node_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.BvhNodeHeapDeviceBuffer",
-            size=PodBvhNodeArray.array_size(shape=(self.bvh_node_capacity,)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        self.bvh_node_heap = LinearHeap[PodBvhNodeArray](
+            device=device,
+            label="Draw3dRenderer.BvhNodeHeap",
+            structured_array_cls=PodBvhNodeArray,
+            element_capacity=self.bvh_node_capacity,
         )
-        self.triangle_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.TriangleHeapDeviceBuffer",
-            size=PodVertexArray.array_size(shape=(self.triangle_capacity, 3)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        self.triangle_heap = LinearHeap[PodVertexArray](
+            device=device,
+            label="Draw3dRenderer.TriangleHeap",
+            structured_array_cls=PodVertexArray,
+            element_capacity=self.triangle_capacity,
         )
-        self.material_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.MaterialHeapDeviceBuffer",
-            size=PodMaterialArray.array_size(shape=(self.material_capacity,)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        self.material_heap = LinearHeap[PodMaterialArray](
+            device=device,
+            label="Draw3dRenderer.MaterialHeap",
+            element_capacity=self.material_capacity,
+            structured_array_cls=PodMaterialArray,
+            persistent_staging_buffer_element_capacity=1,
         )
-        self.texture_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.TexturesHeapDeviceBuffer",
-            size=PodTextureArray.array_size(shape=(self.image_capacity,)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        self.texture_heap = LinearHeap[PodTextureArray](
+            device=device,
+            label="Draw3dRenderer.TextureHeap",
+            element_capacity=self.image_capacity,
+            structured_array_cls=PodTextureArray,
+            persistent_staging_buffer_element_capacity=1,
         )
-        self.subpixel_heap_device_buffer = device.create_buffer(
-            label="Draw3dRenderer.PixelsHeapDeviceBuffer",
-            size=self.subpixel_capacity * 2,  # just f16 values
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        self.subpixel_heap = LinearHeap[PodSubpixelArray](
+            device=device,
+            label="Draw3dRenderer.SubpixelHeap",
+            structured_array_cls=PodSubpixelArray,
+            element_capacity=self.subpixel_capacity,
         )
 
         self.renderer_bind_group = device.create_bind_group(
@@ -221,49 +232,49 @@ class Draw3dRenderer(BaseDisposable):
                 wgpu.BindGroupEntry(
                     binding=0,
                     resource=wgpu.BufferBinding(
-                        buffer=self.geometry_heap_device_buffer,
+                        buffer=self.geometry_heap.device_buffer,
                         offset=0,
-                        size=self.geometry_heap_device_buffer.size,
+                        size=self.geometry_heap.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
-                        buffer=self.bvh_node_heap_device_buffer,
+                        buffer=self.bvh_node_heap.device_buffer,
                         offset=0,
-                        size=self.bvh_node_heap_device_buffer.size,
+                        size=self.bvh_node_heap.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
-                        buffer=self.triangle_heap_device_buffer,
+                        buffer=self.triangle_heap.device_buffer,
                         offset=0,
-                        size=self.triangle_heap_device_buffer.size,
+                        size=self.triangle_heap.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=3,
                     resource=wgpu.BufferBinding(
-                        buffer=self.material_heap_device_buffer,
+                        buffer=self.material_heap.device_buffer,
                         offset=0,
-                        size=self.material_heap_device_buffer.size,
+                        size=self.material_heap.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=4,
                     resource=wgpu.BufferBinding(
-                        buffer=self.texture_heap_device_buffer,
+                        buffer=self.texture_heap.device_buffer,
                         offset=0,
-                        size=self.texture_heap_device_buffer.size,
+                        size=self.texture_heap.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=5,
                     resource=wgpu.BufferBinding(
-                        buffer=self.subpixel_heap_device_buffer,
+                        buffer=self.subpixel_heap.device_buffer,
                         offset=0,
-                        size=self.subpixel_heap_device_buffer.size,
+                        size=self.subpixel_heap.device_buffer.size,
                     ),
                 ),
             ],
@@ -282,112 +293,14 @@ class Draw3dRenderer(BaseDisposable):
         self._material_cache = {}
         self._texture_cache = {}
 
-        # Initialization: clear device buffers to zero
-        encoder = device.create_command_encoder(
-            label="Draw3dRenderer.InitializationEncoder"
-        )
-        encoder.clear_buffer(self.geometry_heap_device_buffer, offset=0)
-        encoder.clear_buffer(self.bvh_node_heap_device_buffer, offset=0)
-        encoder.clear_buffer(self.triangle_heap_device_buffer, offset=0)
-        queue.submit([encoder.finish()])
-
     def _on_dispose(self) -> None:
-        self.geometry_heap_device_buffer.destroy()
-        self.bvh_node_heap_device_buffer.destroy()
-        self.triangle_heap_device_buffer.destroy()
-        self.material_heap_device_buffer.destroy()
-        self.texture_heap_device_buffer.destroy()
-        self.subpixel_heap_device_buffer.destroy()
-
+        self.geometry_heap.dispose()
+        self.bvh_node_heap.dispose()
+        self.triangle_heap.dispose()
+        self.material_heap.dispose()
+        self.texture_heap.dispose()
+        self.subpixel_heap.dispose()
         return super()._on_dispose()
-
-    def _add_triangles(self, vertices: PodVertexArray) -> int:
-        assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
-
-        vertex_count = vertices.shape[0]
-        triangle_count = vertex_count // 3
-
-        LOG.debug(
-            f"Uploading triangles: {vertex_count} vertices, {triangle_count} triangles"
-        )
-
-        # Allocate:
-        allocation_offset_in_triangles = self.allocated_triangle_count
-        allocation_offset_in_bytes = (
-            allocation_offset_in_triangles * PodVertexArray.DTYPE.itemsize * 3
-        )
-        self.allocated_triangle_count += triangle_count
-        if self.allocated_triangle_count > self.triangle_capacity:
-            raise RuntimeError("Draw3dRenderer triangle heap capacity exceeded.")
-
-        # Upload via staging buffer:
-        staging_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.GeometryUploadStagingBuffer",
-            size=vertices.nbytes,
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        staging_buffer.write_mapped(data=vertices)
-        staging_buffer.unmap()
-
-        encoder = self.device.create_command_encoder(
-            label="Draw3dRenderer.GeometryUploadEncoder"
-        )
-        encoder.copy_buffer_to_buffer(
-            source=staging_buffer,
-            source_offset=0,
-            destination=self.triangle_heap_device_buffer,
-            destination_offset=allocation_offset_in_bytes,
-            size=vertices.nbytes,
-        )
-        self.queue.submit([encoder.finish()])
-
-        staging_buffer.destroy()
-
-        # Return offset in triangles:
-        return allocation_offset_in_triangles
-
-    def _add_bvh_nodes(self, bvh_nodes: PodBvhNodeArray) -> int:
-        assert bvh_nodes.ndim == 1 and bvh_nodes.dtype == PodBvhNodeArray.DTYPE
-
-        node_count = bvh_nodes.shape[0]
-
-        LOG.debug(f"Uploading BVH nodes: {node_count} nodes")
-
-        # Allocate:
-        allocation_offset = self.allocated_bvh_node_count
-        self.allocated_bvh_node_count += node_count
-        if self.allocated_bvh_node_count > self.bvh_node_capacity:
-            raise RuntimeError("Draw3dRenderer BVH node heap capacity exceeded.")
-
-        # Upload via staging buffer:
-        staging_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.BvhNodeUploadStagingBuffer",
-            size=bvh_nodes.nbytes,
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        staging_buffer.write_mapped(data=bvh_nodes)
-        staging_buffer.unmap()
-
-        encoder = self.device.create_command_encoder(
-            label="Draw3dRenderer.BvhNodeUploadEncoder"
-        )
-        encoder.copy_buffer_to_buffer(
-            source=staging_buffer,
-            source_offset=0,
-            destination=self.bvh_node_heap_device_buffer,
-            destination_offset=(
-                allocation_offset * PodBvhNodeArray.array_size(shape=(1,))
-            ),
-            size=bvh_nodes.nbytes,
-        )
-        self.queue.submit([encoder.finish()])
-
-        staging_buffer.destroy()
-
-        # Return offset in BVH nodes:
-        return allocation_offset
 
     def _add_geometry(
         self,
@@ -396,45 +309,22 @@ class Draw3dRenderer(BaseDisposable):
         triangle_count: int,
         bvh_node_span_begin: int,
         bvh_node_count: int,
-    ):
+    ) -> int:
         data = PodGeometryArray.empty(shape=(1,))
         data["triangle_span"][0]["begin"] = triangle_span_begin
         data["triangle_span"][0]["end"] = triangle_span_begin + triangle_count
         data["bvh_node_span"][0]["begin"] = bvh_node_span_begin
         data["bvh_node_span"][0]["end"] = bvh_node_span_begin + bvh_node_count
+        return self.geometry_heap.insert(data)
 
-        # Allocate:
-        allocation_offset = self.allocated_geometry_count
-        self.allocated_geometry_count += 1
-        if self.allocated_geometry_count > self.geometry_capacity:
-            raise RuntimeError("Draw3dRenderer geometry heap capacity exceeded.")
+    def _add_bvh_nodes(self, bvh_nodes: PodBvhNodeArray) -> int:
+        assert bvh_nodes.ndim == 1 and bvh_nodes.dtype == PodBvhNodeArray.DTYPE
+        return self.bvh_node_heap.insert(bvh_nodes)
 
-        # Upload via staging buffer:
-        staging_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.GeometryUploadStagingBuffer",
-            size=PodGeometryArray.array_size(shape=(1,)),
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        staging_buffer.write_mapped(data=data)
-        staging_buffer.unmap()
-
-        encoder = self.device.create_command_encoder(
-            label="Draw3dRenderer.GeometryUploadEncoder"
-        )
-        encoder.copy_buffer_to_buffer(
-            source=staging_buffer,
-            source_offset=0,
-            destination=self.geometry_heap_device_buffer,
-            destination_offset=(
-                allocation_offset * PodGeometryArray.array_size(shape=(1,))
-            ),
-            size=PodGeometryArray.array_size(shape=(1,)),
-        )
-        self.queue.submit([encoder.finish()])
-
-        # Return offset in geometry:
-        return allocation_offset
+    def _add_triangles(self, vertices: PodVertexArray) -> int:
+        assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
+        assert vertices.shape[0] % 3 == 0
+        return self.triangle_heap.insert(vertices) // 3
 
     def _add_texture(
         self,
@@ -445,18 +335,6 @@ class Draw3dRenderer(BaseDisposable):
         subpixel_span_begin: int,
         subpixel_span_count: int,
     ) -> int:
-        """
-        Create a single PodTextureArray entry and upload it to the texture heap.
-
-        Returns the allocated texture index (offset in texture array elements).
-        """
-
-        LOG.debug(
-            f"Uploading texture: {width}x{height}x{depth}, "
-            f"subpixels [{subpixel_span_begin}, {subpixel_span_begin + subpixel_span_count})"
-        )
-
-        # Prepare singleton PodTextureArray
         data = PodTextureArray.empty(shape=(1,))
         data["width"][0] = np.uint32(width)
         data["height"][0] = np.uint32(height)
@@ -465,40 +343,7 @@ class Draw3dRenderer(BaseDisposable):
         data["subpixel_span"][0]["end"] = np.uint32(
             subpixel_span_begin + subpixel_span_count
         )
-
-        # Allocate one texture slot
-        allocation_offset = self.allocated_image_count
-        self.allocated_image_count += 1
-        if self.allocated_image_count > self.image_capacity:
-            raise RuntimeError("Draw3dRenderer image heap capacity exceeded.")
-
-        # Upload via staging buffer:
-        staging_size = PodTextureArray.array_size(shape=(1,))
-        staging_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.TextureUploadStagingBuffer",
-            size=staging_size,
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        staging_buffer.write_mapped(data=data)
-        staging_buffer.unmap()
-
-        encoder = self.device.create_command_encoder(
-            label="Draw3dRenderer.TextureUploadEncoder"
-        )
-        encoder.copy_buffer_to_buffer(
-            source=staging_buffer,
-            source_offset=0,
-            destination=self.texture_heap_device_buffer,
-            destination_offset=(allocation_offset * staging_size),
-            size=staging_size,
-        )
-        self.queue.submit([encoder.finish()])
-
-        staging_buffer.destroy()
-
-        # Return offset in texture array elements:
-        return allocation_offset
+        return self.texture_heap.insert(data)
 
     def _add_material(
         self,
@@ -511,10 +356,6 @@ class Draw3dRenderer(BaseDisposable):
         roughness_map_id: int,
         roughness_factor: float,
     ) -> int:
-        """Create a single PodMaterialArray entry and upload it to the material heap.
-
-        Returns the allocated material index (offset in material array elements).
-        """
         data = PodMaterialArray.empty(shape=(1,))
         data["color_map_id"][0] = np.uint32(color_map_id)
         data["color_factor"][0] = np.array(color_factor, dtype=np.float32)
@@ -523,78 +364,11 @@ class Draw3dRenderer(BaseDisposable):
         data["metalness_factor"][0] = np.float32(metalness_factor)
         data["roughness_map_id"][0] = np.uint32(roughness_map_id)
         data["roughness_factor"][0] = np.float32(roughness_factor)
-
-        # Allocate one material slot
-        allocation_offset = self.allocated_material_count
-        self.allocated_material_count += 1
-        if self.allocated_material_count > self.material_capacity:
-            raise RuntimeError("Draw3dRenderer material heap capacity exceeded.")
-
-        # Upload via staging buffer
-        staging_size = PodMaterialArray.array_size(shape=(1,))
-        staging_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.MaterialUploadStagingBuffer",
-            size=staging_size,
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        staging_buffer.write_mapped(data=data)
-        staging_buffer.unmap()
-
-        encoder = self.device.create_command_encoder(
-            label="Draw3dRenderer.MaterialUploadEncoder"
-        )
-        encoder.copy_buffer_to_buffer(
-            source=staging_buffer,
-            source_offset=0,
-            destination=self.material_heap_device_buffer,
-            destination_offset=(allocation_offset * staging_size),
-            size=staging_size,
-        )
-        self.queue.submit([encoder.finish()])
-
-        staging_buffer.destroy()
-
-        return allocation_offset
+        return self.material_heap.insert(data)
 
     def _add_subpixels(self, subpixels: np.ndarray) -> int:
         assert subpixels.ndim == 1 and subpixels.dtype == np.float16
-
-        element_count = subpixels.size
-
-        # Allocate:
-        allocation_offset = self.allocated_subpixel_count
-        allocation_offset_in_bytes = allocation_offset * np.dtype(np.float16).itemsize
-        self.allocated_subpixel_count += element_count
-        if self.allocated_subpixel_count > self.subpixel_capacity:
-            raise RuntimeError("Draw3dRenderer subpixel heap capacity exceeded.")
-
-        # Upload via staging buffer:
-        staging_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.SubpixelUploadStagingBuffer",
-            size=subpixels.nbytes,
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        staging_buffer.write_mapped(data=subpixels)
-        staging_buffer.unmap()
-
-        encoder = self.device.create_command_encoder(
-            label="Draw3dRenderer.SubpixelUploadEncoder"
-        )
-        encoder.copy_buffer_to_buffer(
-            source=staging_buffer,
-            source_offset=0,
-            destination=self.subpixel_heap_device_buffer,
-            destination_offset=allocation_offset_in_bytes,
-            size=subpixels.nbytes,
-        )
-        self.queue.submit([encoder.finish()])
-
-        staging_buffer.destroy()
-
-        # Return offset in subpixel f16 elements:
-        return allocation_offset
+        return self.subpixel_heap.insert(subpixels.view(PodSubpixelArray))
 
     def record(
         self,
@@ -697,9 +471,16 @@ class Draw3dRenderer(BaseDisposable):
 class Draw3dFrame(BaseDisposable):
     renderer: Draw3dRenderer
 
+    debug_flags: int
+
+    output_image: wgpu.GPUTexture
+    frame_info_buffer: "PerFrameBuffer[PodFrameInfoArray]"
+    camera_buffer: "PerFrameBuffer[PodCameraArray]"
+    instance_buffer: "PerFrameBuffer[PodInstanceArray]"
+
     def __init__(self, renderer: Draw3dRenderer) -> None:
         self.renderer = renderer
-        self._debug_flags = 0
+        self.debug_flags = 0
 
         self.output_image = self._device.create_texture(
             label="Draw3dFrame.OutputImage",
@@ -709,35 +490,26 @@ class Draw3dFrame(BaseDisposable):
             | wgpu.TextureUsage.COPY_SRC
             | wgpu.TextureUsage.TEXTURE_BINDING,
         )
-        self.frame_info_device_buffer = self._device.create_buffer(
-            label="Draw3dFrame.FrameInfoDeviceBuffer",
-            size=PodFrameInfoArray.array_size(shape=(1,)),
-            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
+        self.frame_info_buffer = PerFrameBuffer[PodFrameInfoArray](
+            device=self._device,
+            label="Draw3dFrame.FrameInfoHeap",
+            structured_array_cls=PodFrameInfoArray,
+            element_capacity=1,
+            device_buffer_usages=wgpu.BufferUsage.UNIFORM,
         )
-        self.frame_info_staging_buffer = self._device.create_buffer(
-            label="Draw3dFrame.FrameInfoStagingBuffer",
-            size=PodFrameInfoArray.array_size(shape=(1,)),
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        self.camera_buffer = PerFrameBuffer[PodCameraArray](
+            device=self._device,
+            label="Draw3dFrame.CameraHeap",
+            structured_array_cls=PodCameraArray,
+            element_capacity=1,
+            device_buffer_usages=wgpu.BufferUsage.UNIFORM,
         )
-        self.camera_device_buffer = self._device.create_buffer(
-            label="Draw3dFrame.CameraDeviceBuffer",
-            size=PodCameraArray.array_size(shape=(1,)),
-            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
-        )
-        self.camera_staging_buffer = self._device.create_buffer(
-            label="Draw3dFrame.CameraStagingBuffer",
-            size=PodCameraArray.array_size(shape=(1,)),
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
-        self.instances_list_device_buffer = self._device.create_buffer(
-            label="Draw3dFrame.InstanceHeapDeviceBuffer",
-            size=PodInstanceArray.array_size(shape=(self.renderer.instance_capacity,)),
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
-        self.instances_list_staging_buffer = self._device.create_buffer(
-            label="Draw3dFrame.InstanceHeapStagingBuffer",
-            size=PodInstanceArray.array_size(shape=(self.renderer.instance_capacity,)),
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        self.instance_buffer = PerFrameBuffer[PodInstanceArray](
+            device=self._device,
+            label="Draw3dFrame.InstanceHeap",
+            structured_array_cls=PodInstanceArray,
+            element_capacity=renderer.instance_capacity,
+            device_buffer_usages=wgpu.BufferUsage.STORAGE,
         )
 
         self.bind_group = self._device.create_bind_group(
@@ -751,25 +523,25 @@ class Draw3dFrame(BaseDisposable):
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
-                        buffer=self.frame_info_device_buffer,
+                        buffer=self.frame_info_buffer.device_buffer,
                         offset=0,
-                        size=self.frame_info_device_buffer.size,
+                        size=self.frame_info_buffer.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
-                        buffer=self.camera_device_buffer,
+                        buffer=self.camera_buffer.device_buffer,
                         offset=0,
-                        size=self.camera_device_buffer.size,
+                        size=self.camera_buffer.device_buffer.size,
                     ),
                 ),
                 wgpu.BindGroupEntry(
                     binding=3,
                     resource=wgpu.BufferBinding(
-                        buffer=self.instances_list_device_buffer,
+                        buffer=self.instance_buffer.device_buffer,
                         offset=0,
-                        size=self.instances_list_device_buffer.size,
+                        size=self.instance_buffer.device_buffer.size,
                     ),
                 ),
             ],
@@ -793,32 +565,32 @@ class Draw3dFrame(BaseDisposable):
         emit_hit_normal: bool = False,
         emit_orm: bool = False,
     ) -> None:
-        """Set debug visualization flags.
-
-        Args:
-            emit_primary_ray_direction: If True, output normalized ray direction as RGB.
-            emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
-            emit_hit_world_position: If True, output world-space hit position as RGB.
-            emit_closest_hit_bvh_depth_in_r: If True, output normalized hit depth to BVH leaf in red channel.
-            emit_primary_ray_color: If True, output sampled texture color at hit point.
-            emit_hit_normal: If True, output world-space hit normal as RGB.
-            emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
         """
-        self._debug_flags = 0
+        Set debug visualization modes.
+
+        :param emit_primary_ray_direction: If True, output normalized ray direction as RGB.
+        :param emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
+        :param emit_hit_world_position: If True, output world-space hit position as RGB.
+        :param emit_closest_hit_bvh_depth_in_r: If True, output normalized hit depth to BVH leaf in red channel.
+        :param emit_primary_ray_color: If True, output sampled texture color at hit point.
+        :param emit_hit_normal: If True, output world-space hit normal as RGB.
+        :param emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
+        """
+        self.debug_flags = 0
         if emit_primary_ray_direction:
-            self._debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
+            self.debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
         if emit_closest_hit_depth_in_r:
-            self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
+            self.debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
         if emit_hit_world_position:
-            self._debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
+            self.debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
         if emit_closest_hit_bvh_depth_in_r:
-            self._debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R
+            self.debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R
         if emit_color:
-            self._debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_COLOR
+            self.debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_COLOR
         if emit_hit_normal:
-            self._debug_flags |= _FRAME_FLAG_EMIT_HIT_NORMAL
+            self.debug_flags |= _FRAME_FLAG_EMIT_HIT_NORMAL
         if emit_orm:
-            self._debug_flags |= _FRAME_FLAG_EMIT_ORM
+            self.debug_flags |= _FRAME_FLAG_EMIT_ORM
 
     def record(
         self,
@@ -834,7 +606,7 @@ class Draw3dFrame(BaseDisposable):
             scene.environment_map.texture_id if scene.environment_map else -1
         )
         self._upload_frame_info(
-            instance_count, encoder, self._debug_flags, environment_map_texture_id
+            instance_count, encoder, self.debug_flags, environment_map_texture_id
         )
         self._upload_camera_info(scene.camera, encoder)
         self._upload_instances_info(scene.meshes, encoder)
@@ -864,17 +636,7 @@ class Draw3dFrame(BaseDisposable):
         frame_info_data["debug_flags"] = debug_flags
         frame_info_data["environment_map_texture_id"] = environment_map_texture_id
 
-        self.frame_info_staging_buffer.map_sync(wgpu.MapMode.WRITE)
-        self.frame_info_staging_buffer.write_mapped(data=frame_info_data)
-        self.frame_info_staging_buffer.unmap()
-
-        command_encoder.copy_buffer_to_buffer(
-            source=self.frame_info_staging_buffer,
-            source_offset=0,
-            destination=self.frame_info_device_buffer,
-            destination_offset=0,
-            size=frame_info_data.nbytes,
-        )
+        self.frame_info_buffer.write(frame_info_data, command_encoder)
 
     def _upload_camera_info(
         self,
@@ -887,17 +649,7 @@ class Draw3dFrame(BaseDisposable):
         camera_data["aspect_ratio"] = camera.aspect_ratio
         camera_data["max_distance"] = camera.max_distance
 
-        self.camera_staging_buffer.map_sync(wgpu.MapMode.WRITE)
-        self.camera_staging_buffer.write_mapped(data=camera_data)
-        self.camera_staging_buffer.unmap()
-
-        command_encoder.copy_buffer_to_buffer(
-            source=self.camera_staging_buffer,
-            source_offset=0,
-            destination=self.camera_device_buffer,
-            destination_offset=0,
-            size=camera_data.nbytes,
-        )
+        self.camera_buffer.write(camera_data, command_encoder)
 
     def _upload_instances_info(
         self,
@@ -910,10 +662,6 @@ class Draw3dFrame(BaseDisposable):
         total_instance_count = sum(len(t) for t in instances.values())
         if total_instance_count > self.renderer.instance_capacity:
             raise RuntimeError("Draw3dRenderer instance heap capacity exceeded.")
-
-        if total_instance_count == 0:
-            # No instances to upload
-            return
 
         data = PodInstanceArray.empty(shape=(total_instance_count,))
         offset = 0
@@ -931,17 +679,7 @@ class Draw3dFrame(BaseDisposable):
 
             offset += n
 
-        self.instances_list_staging_buffer.map_sync(wgpu.MapMode.WRITE)
-        self.instances_list_staging_buffer.write_mapped(data=data)
-        self.instances_list_staging_buffer.unmap()
-
-        command_encoder.copy_buffer_to_buffer(
-            source=self.instances_list_staging_buffer,
-            source_offset=0,
-            destination=self.instances_list_device_buffer,
-            destination_offset=0,
-            size=data.nbytes,
-        )
+        self.instance_buffer.write(data, command_encoder)
 
 
 class Draw3dGeometry(BaseDisposable):
@@ -1156,6 +894,225 @@ class Draw3dCamera:
 
 
 #
+# PerFrameBuffer: data written to GPU for each frame
+#
+
+
+class PerFrameBuffer[T: StructuredNDArray](BaseDisposable):
+    device: wgpu.GPUDevice
+    label: str
+    structured_array_cls: type[StructuredNDArray]
+    element_capacity: int
+
+    device_buffer: wgpu.GPUBuffer
+    staging_buffer: wgpu.GPUBuffer
+
+    def __init__(
+        self,
+        device: wgpu.GPUDevice,
+        label: str,
+        structured_array_cls: type[T],
+        element_capacity: int,
+        device_buffer_usages: int,
+    ) -> None:
+        self.device = device
+        self.label = label
+        self.structured_array_cls = structured_array_cls
+        self.element_capacity = element_capacity
+
+        self.device_buffer = device.create_buffer(
+            label=f"{label}.DeviceBuffer",
+            size=self.structured_array_cls.array_size(shape=(element_capacity,)),
+            usage=device_buffer_usages | wgpu.BufferUsage.COPY_DST,
+        )
+        self.staging_buffer = device.create_buffer(
+            label=f"{label}.StagingBuffer",
+            size=self.structured_array_cls.array_size(shape=(element_capacity,)),
+            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+        )
+
+    def _on_dispose(self) -> None:
+        self.device_buffer.destroy()
+        return super()._on_dispose()
+
+    def write(self, data: T, command_encoder: wgpu.GPUCommandEncoder) -> None:
+        assert data.__class__ is self.structured_array_cls
+        assert data.shape[0] <= self.element_capacity
+
+        self.staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+        self.staging_buffer.write_mapped(data=data)
+        self.staging_buffer.unmap()
+
+        command_encoder.copy_buffer_to_buffer(
+            source=self.staging_buffer,
+            source_offset=0,
+            destination=self.device_buffer,
+            destination_offset=0,
+            size=self.structured_array_cls.array_size(shape=data.shape),
+        )
+
+
+#
+# LinearHeap: helper for linear allocation in GPU storage buffers
+#
+
+
+class LinearHeap[T: StructuredNDArray](BaseDisposable):
+    device: wgpu.GPUDevice
+    label: str
+    structured_array_cls: type[StructuredNDArray]
+    element_capacity: int
+    persistent_staging_buffer_element_capacity: int
+
+    device_buffer: wgpu.GPUBuffer
+    persistent_staging_buffer: wgpu.GPUBuffer | None
+    allocated_element_count: int
+
+    def __init__(
+        self,
+        device: wgpu.GPUDevice,
+        label: str,
+        structured_array_cls: type[T],
+        element_capacity: int,
+        persistent_staging_buffer_element_capacity: int = 0,
+    ) -> None:
+        assert persistent_staging_buffer_element_capacity <= element_capacity
+
+        self.device = device
+        self.label = label
+        self.structured_array_cls = structured_array_cls
+        self.element_capacity = element_capacity
+        self.persistent_staging_buffer_element_capacity = (
+            persistent_staging_buffer_element_capacity
+        )
+
+        self.device_buffer = device.create_buffer(
+            label=f"{label}.DeviceBuffer",
+            size=self.structured_array_cls.array_size(shape=(element_capacity,)),
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
+        self.persistent_staging_buffer = (
+            device.create_buffer(
+                label=f"{label}.StagingBuffer",
+                size=self.structured_array_cls.array_size(
+                    shape=(persistent_staging_buffer_element_capacity,)
+                ),
+                usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+            )
+            if persistent_staging_buffer_element_capacity > 0
+            else None
+        )
+        self.allocated_element_count = 0
+
+        self._clear_device_buffer()
+
+    def _clear_device_buffer(self) -> None:
+        command_encoder = self.device.create_command_encoder(
+            label=f"{self.label}.InitializationEncoder"
+        )
+        command_encoder.clear_buffer(buffer=self.device_buffer)
+        self.device.queue.submit([command_encoder.finish()])
+
+    def _on_dispose(self) -> None:
+        self.device_buffer.destroy()
+        if self.persistent_staging_buffer:
+            self.persistent_staging_buffer.destroy()
+        return super()._on_dispose()
+
+    @contextmanager
+    def _acquire_staging_buffer(
+        self,
+        element_count: int,
+    ) -> Generator[wgpu.GPUBuffer, None, None]:
+        if self.persistent_staging_buffer:
+            assert self.persistent_staging_buffer_element_capacity >= element_count
+            yield self.persistent_staging_buffer
+        else:
+            # Create a temporary staging buffer
+            staging_buffer = self.device.create_buffer(
+                label=f"{self.label}.TempStagingBuffer",
+                size=self.structured_array_cls.array_size(shape=(element_count,)),
+                usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
+            )
+            yield staging_buffer
+            staging_buffer.destroy()
+
+    @contextmanager
+    def _acquire_command_encoder(
+        self,
+        label_suffix: str,
+        user_command_encoder: wgpu.GPUCommandEncoder | None,
+    ) -> Generator[wgpu.GPUCommandEncoder, None, None]:
+        if user_command_encoder:
+            assert self.persistent_staging_buffer, (
+                "No persistent staging buffer available when using user-provided "
+                "command encoder: the transient staging buffer created for this "
+                "allocator will be destroyed before the command encoder is submitted."
+            )
+            yield user_command_encoder
+        else:
+            encoder = self.device.create_command_encoder(
+                label=f"{self.label}.{label_suffix}"
+            )
+            yield encoder
+            self.device.queue.submit([encoder.finish()])
+
+    def insert(
+        self,
+        data: T,
+        *,
+        command_encoder: wgpu.GPUCommandEncoder | None = None,
+    ) -> int:
+        """
+        Uploads data to the heap, allocating space for it.
+
+        :param data: The structured array data to upload.
+        :param command_encoder: Optional command encoder to use for the copy operation.
+            If not provided, a temporary encoder will be created and the command will be
+            submitted immediately, introducing a GPU synchronization point.
+        :return: The offset (in elements) where the data was uploaded.
+        """
+
+        assert data.__class__ is self.structured_array_cls
+
+        n = data.shape[0]
+
+        # If n == 0, do nothing and return early.
+        if n == 0:
+            return self.allocated_element_count
+
+        # Allocate:
+        allocation_offset = self.allocated_element_count
+        if self.allocated_element_count + n > self.element_capacity:
+            raise RuntimeError(f"{self.label} heap capacity exceeded.")
+        self.allocated_element_count += n
+
+        # Upload via staging buffer:
+        with self._acquire_staging_buffer(n) as staging_buffer:
+            staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
+            staging_buffer.write_mapped(data=data)
+            staging_buffer.unmap()
+
+            with self._acquire_command_encoder(
+                label_suffix="UploadEncoder",
+                user_command_encoder=command_encoder,
+            ) as encoder:
+                encoder.copy_buffer_to_buffer(
+                    source=staging_buffer,
+                    source_offset=0,
+                    destination=self.device_buffer,
+                    destination_offset=(
+                        allocation_offset
+                        * self.structured_array_cls.array_size(shape=(1,))
+                    ),
+                    size=self.structured_array_cls.array_size(shape=(n,)),
+                )
+
+        # Return offset in elements:
+        return allocation_offset
+
+
+#
 # POD Types (NumPy structured dtypes)
 #
 
@@ -1246,6 +1203,14 @@ class PodTextureArray(StructuredNDArray):
             ("height", np.uint32),
             ("depth", np.uint32),
             ("subpixel_span", POD_SPAN_DTYPE),
+        ]
+    )
+
+
+class PodSubpixelArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("subpixel", np.float16),
         ]
     )
 
