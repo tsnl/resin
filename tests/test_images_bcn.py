@@ -322,7 +322,7 @@ def test_encode_bc4(
     assert rainbow_512x512_image_grayscale.data.shape == (512, 512, 1)
     input_h, input_w, _ = rainbow_512x512_image_grayscale.data.shape
 
-    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale.data, range_="unorm")
+    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale.data)
     assert bc4_data.dtype == np.uint8
     assert bc4_data.shape == (input_h // 4, input_w // 4, 8)
 
@@ -379,11 +379,11 @@ def test_encode_bc1(
     assert psnr > 45.0, f"BC1 PSNR too low: {psnr:.2f} dB"
 
 
-def test_encode_bc5_snorm(
+def test_encode_bc5(
     gpu: GpuFixture,
     rainbow_512x512_image: zfw.ImageResource,
 ):
-    """Test BC5 (RG snorm) encoding round-trip."""
+    """Test BC5 (RG unorm) encoding round-trip."""
     assert rainbow_512x512_image.data.dtype == np.float32
     assert rainbow_512x512_image.data.shape == (512, 512, 4)
     input_h, input_w, _ = rainbow_512x512_image.data.shape
@@ -392,7 +392,7 @@ def test_encode_bc5_snorm(
     rg = rainbow_512x512_image.data[:, :, :2]
     rg = rg.astype(np.float32)
 
-    bc5_data = zfw.encode_bc5(rg, range_="unorm")
+    bc5_data = zfw.encode_bc5(rg)
     assert bc5_data.dtype == np.uint8
     assert bc5_data.shape == (input_h // 4, input_w // 4, 16)
 

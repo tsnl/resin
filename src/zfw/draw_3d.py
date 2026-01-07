@@ -1360,7 +1360,7 @@ type Draw3dTextureUsage = Literal[
 def _texture_format_for_draw_3d_usage(usage: Draw3dTextureUsage) -> wgpu.TextureFormat:
     mapping: dict[Draw3dTextureUsage, str] = {
         "color": "bc1_rgba_unorm",
-        "normal": "bc5_rg_snorm",
+        "normal": "bc5_rg_unorm",
         "metalness": "bc4_r_unorm",
         "roughness": "bc4_r_unorm",
         "environment": "rgba16float",
@@ -1476,12 +1476,27 @@ class TextureHeap(BaseDisposable):
             raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 3:
             raise LogicError(f"Normal texture must have 3 channels: {data.shape[2]=}")
+
+        # Expect normal components in [0, 1] range
+        assert np.all((data >= 0.0) & (data <= 1.0))
+
+        # Convert from [0, 1] to [-1, 1]
+        data = data * 2.0 - 1.0
+
         # Normalize all vectors to ensure unit length
         norms = np.linalg.norm(data, axis=2, keepdims=True)
-        # Avoid division by zero for any zero-length vectors
-        norms = np.maximum(norms, 1e-8)
         normalized_data = data / norms
-        return encode_bc5(input_=normalized_data[:, :, 0:2], range_="snorm")
+
+        # Expect normal vectors to always have Z>=0
+        assert np.all(normalized_data[:, :, 2] >= 0.0), (
+            "Expected normal texture Z component to be non-negative: "
+            f"{normalized_data[:, :, 2].min()=}, {normalized_data[:, :, 2].max()=}"
+        )
+
+        # Rescale back to [0, 1] range after normalization, keeping only X and Y
+        # channels:
+        normalized_data = (normalized_data + 1.0) * 0.5
+        return encode_bc5(input_=normalized_data[:, :, 0:2])
 
     @staticmethod
     def _encode_metalness_texture(data: np.ndarray) -> np.ndarray:
@@ -1490,7 +1505,7 @@ class TextureHeap(BaseDisposable):
             raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 1:
             raise LogicError(f"Metalness texture must have 1 channel: {data.shape[2]=}")
-        return encode_bc4(input_=data, range_="unorm")
+        return encode_bc4(input_=data)
 
     @staticmethod
     def _encode_roughness_texture(data: np.ndarray) -> np.ndarray:
@@ -1499,7 +1514,7 @@ class TextureHeap(BaseDisposable):
             raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
         if data.shape[2] != 1:
             raise LogicError(f"Roughness texture must have 1 channel: {data.shape[2]=}")
-        return encode_bc4(input_=data, range_="unorm")
+        return encode_bc4(input_=data)
 
     @staticmethod
     def _encode_environment_texture(data: np.ndarray) -> np.ndarray:

@@ -211,6 +211,7 @@ fn sample_color_texture(
     return sample_color.rgb;
 }
 
+/// Samples a normal in [-1,+1]^3 from a normal map texture.
 fn sample_normal_texture(
     normal_texture_id: u32,
     uv: vec2<f32>,
@@ -222,11 +223,9 @@ fn sample_normal_texture(
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     let sample_rg = textureSampleLevel(normal_texture_heap, linear_sampler, sample_uv, page, 0.0);
-    // BC5 stores RG channels, compute B from unit length constraint
-    let r = sample_rg.r;
-    let g = sample_rg.g;
-    let b = sqrt(max(0.0, 1.0 - r * r - g * g));
-    return vec3<f32>(r, g, b);
+    let xy = 2.0 * sample_rg.rg - vec2<f32>(1.0);
+    let z = sqrt(1.0 - dot(xy, xy));
+    return vec3<f32>(xy.x, xy.y, z);
 }
 
 fn sample_metalness_texture(
@@ -811,7 +810,7 @@ fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
     let texture_normal = sample_normal_texture(material.normal_map_id, hit_details.texcoords);
-    let normal = hit_details.tbn * normalize(texture_normal * 2.0 - 1.0);
+    let normal = hit_details.tbn * texture_normal;
     return normalize(normal);   // for good measure
 }
 fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {

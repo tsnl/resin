@@ -32,7 +32,12 @@ import jaxtyping as jt
 
 from .excepts import LogicError
 from .basic import Font, FontSize, FontWeight, logger
-from .images import ImageFormat, convert_image_format, normalize_image_to_f32
+from .images import (
+    ImageFormat,
+    convert_image_format,
+    normalize_image_to_f32,
+    convert_linear_to_srgb,
+)
 
 
 LOG = logger(__name__)
@@ -496,17 +501,13 @@ def _load_material_resources(
         if cache_key in image_resource_cache:
             return image_resource_cache[cache_key]
 
-        # Determine input format based on typical glTF usage
-        # For base color: sRGB RGBA on disk
-        # For metallic/roughness/normal: linear RGBA on disk
-        if output_format in ("rgb32float", "rgb16float"):
-            # This is likely for base color - came from sRGB
-            input_format: ImageFormat = "rgba8unorm-srgb"
-        else:
-            # Linear formats
-            input_format = "rgba8unorm"
+        # FIXME: glTF image loading is not working properly...
+        # ...I don't even know, but unless we do this (linear->sRGB conversion), we get
+        # invalid normals from the glTF example resources. We very likely have a bug in
+        # our image loader
+        resource = image_sources[source_idx].load("rgba8unorm", "rgba32float")
+        resource.data = convert_linear_to_srgb(resource.data)
 
-        resource = image_sources[source_idx].load(input_format, output_format)
         image_resource_cache[cache_key] = resource
         return resource
 
@@ -599,12 +600,28 @@ def _load_material_resources(
                 if texture.source is not None and texture.source < len(image_sources):
                     # Normal map: linear RGBA on disk -> linear RGB output
                     normal_resource = get_or_load_image_resource(
-                        texture.source, output_format="rgb32float"
+                        texture.source,
+                        output_format="rgb32float",
                     )
                     # Ensure it's 3-channel
                     if normal_resource.depth != 3:
                         raise ValueError(
                             f"Normal texture should have 3 channels, got {normal_resource.depth}"
+                        )
+                    # Ensure B channel is >= 0 (no negative Z)
+                    # From GLTF spec:
+                    # > Normal textures SHOULD NOT contain blue values less than or equal to 0.5.
+                    # https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html?utm_source=chatgpt.com#additional-textures
+                    if np.any(normal_resource.data[:, :, 2] < 0.5):
+                        raise ValueError(
+                            "Normal texture B channel has negative values, but this is "
+                            "forbidden by the glTF spec:\n"
+                            f"{normal_resource.data[:, :, 0].min()=}, "
+                            f"{normal_resource.data[:, :, 0].max()=}, "
+                            f"{normal_resource.data[:, :, 1].min()=}, "
+                            f"{normal_resource.data[:, :, 1].max()=}, "
+                            f"{normal_resource.data[:, :, 2].min()=}, "
+                            f"{normal_resource.data[:, :, 2].max()=}"
                         )
                     normal_map = normal_resource
 
