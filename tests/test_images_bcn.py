@@ -414,4 +414,75 @@ def test_encode_bc5_snorm(
     assert psnr > 45.0, f"BC5 PSNR too low: {psnr:.2f} dB"
 
 
+def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
+    """Test BC1 encoding on the DamagedHelmet color map texture."""
+    # Load the glTF model to get the material resources
+    resource_meshes = zfw.load_gltf(
+        path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
+    )
+
+    # Extract the first material's color map
+    (_, mat_res), _ = next(iter(resource_meshes.items()))
+    assert mat_res.color_map is not None, "DamagedHelmet should have a color map"
+
+    color_map = mat_res.color_map
+    assert color_map.data.dtype == np.float32
+    assert color_map.data.shape[2] == 3  # RGB
+
+    input_h, input_w, _ = color_map.data.shape
+    LOG.info(
+        f"DamagedHelmet color map size: {input_w}x{input_h}, format: {color_map.image_format}"
+    )
+
+    # Save original uncompressed image for comparison
+    original_rgba = np.dstack([color_map.data, np.ones((input_h, input_w, 1))])
+    zfw.debug_save_rgba_image(
+        file_path=Path(
+            "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_original.png"
+        ),
+        data=original_rgba,
+    )
+
+    # Compress using BC1
+    bc1_data = zfw.encode_bc1(color_map.data)
+    assert bc1_data.dtype == np.uint8
+    assert bc1_data.shape == (input_h // 4, input_w // 4, 8)
+
+    # Render back to verify quality
+    image = help_render_texture_to_framebuffer(
+        device=gpu.device,
+        queue=gpu.queue,
+        attachment_texture_format="bc1-rgba-unorm",
+        compressed_texture_data=bc1_data,
+        input_w=input_w,
+        input_h=input_h,
+        bytes_per_row=(input_w // 4) * 8,
+        grayscale=False,
+        output_path=Path(
+            "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_compressed.png"
+        ),
+    )
+
+    # Compare RGB channels
+    psnr = zfw.compute_psnr(
+        img1=color_map.data,
+        img2=image[:input_h, :input_w, :3],
+    )
+    LOG.info(f"DamagedHelmet BC1 compression PSNR: {psnr:.2f} dB")
+    
+    # Compute and save difference visualization
+    diff = np.abs(color_map.data - image[:input_h, :input_w, :3])
+    diff_rgba = np.dstack([diff, np.ones((input_h, input_w, 1))])
+    # Amplify differences for visibility (multiply by 10, clamp to [0,1])
+    diff_rgba[:, :, :3] = np.clip(diff_rgba[:, :, :3] * 10.0, 0.0, 1.0)
+    zfw.debug_save_rgba_image(
+        file_path=Path(
+            "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_diff.png"
+        ),
+        data=diff_rgba,
+    )
+    
+    assert psnr > 25.0, f"BC1 PSNR too low for DamagedHelmet: {psnr:.2f} dB"
+
+
 LOG = zfw.logger(__name__)
