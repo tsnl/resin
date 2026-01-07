@@ -9,8 +9,15 @@ enable f16;
 @group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
 @group(0) @binding(2) var<storage, read> triangle_heap: array<PodTriangle>;
 @group(0) @binding(3) var<storage, read> material_heap: array<PodMaterial>;
-@group(0) @binding(4) var<storage, read> texture_heap: array<PodTextureArray>;
-@group(0) @binding(5) var<storage, read> subpixel_heap: array<f16>;
+@group(0) @binding(4) var color_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(5) var<storage, read> color_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(6) var normal_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(7) var<storage, read> normal_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(8) var metalness_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(9) var<storage, read> metalness_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(10) var roughness_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(11) var<storage, read> roughness_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(12) var linear_sampler: sampler;
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
@@ -106,11 +113,11 @@ struct PodCamera {
     _rsv: u32,
 }
 
-struct PodTextureArray {
-    width: u32,
-    height: u32,
-    depth: u32,
-    subpixel_span: PodSpan,
+struct PodTextureAllocation {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
 }
 
 struct PodSpan {
@@ -182,6 +189,40 @@ fn get_triangle_vertices_texcoords(triangle_id: u32) -> mat3x2<f32> {
         pod_triangle.vertices[2].uv[1],
     );
     return mat3x2<f32>(v0, v1, v2);
+}
+
+//
+// Texture sampling:
+//
+
+fn sample_color_texture(
+    color_texture_id: u32,
+    uv: vec2<f32>,
+) -> vec3<f32> {
+    // TODO
+}
+
+fn sample_normal_texture(
+    normal_texture_id: u32,
+    uv: vec2<f32>,
+) -> vec3<f32> {
+    // TODO
+    // NOTE: The normal texture heap contains only RG texture handles.
+    // We need to compute the B channel in the shader.
+}
+
+fn sample_metalness_texture(
+    metalness_texture_id: u32,
+    uv: vec2<f32>,
+) -> f32 {
+    // TODO
+}
+
+fn sample_roughness_texture(
+    roughness_texture_id: u32,
+    uv: vec2<f32>,
+) -> f32 {
+    // TODO
 }
 
 //
@@ -545,54 +586,6 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
     } else {
         // Intersection exists, return the distance to the nearest intersection point.
         return max(t_close, 0.0);
-    }
-}
-
-//
-// Texture sampling:
-//
-
-/// Sample a texture using nearest neighbor filtering.
-/// texture_id: Index into texture_heap
-/// uv: Texture coordinates in [0, 1]^2
-fn sample_texture(texture_id: u32, uv: vec2<f32>) -> vec4<f32> {
-    let texture_info = texture_heap[texture_id];
-    let width = texture_info.width;
-    let height = texture_info.height;
-    let depth = texture_info.depth;  // Number of channels (1, 3, or 4)
-    
-    // Clamp UV coordinates to [0, 1]
-    let uv_clamped = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    
-    // Convert to pixel coordinates (nearest neighbor)
-    let x = u32(uv_clamped.x * f32(width - 1u));
-    let y = u32(uv_clamped.y * f32(height - 1u));
-    
-    // Calculate pixel index in the texture array
-    let pixel_index = y * width + x;
-    
-    // Get subpixel data offset (channels are stored contiguously per pixel)
-    let subpixel_offset = texture_info.subpixel_span.begin + pixel_index * depth;
-    
-    // Sample channels based on depth (1=grayscale, 3=RGB, 4=RGBA)
-    // Note: subpixel_heap contains f16 values already in [0,1] range
-    if depth == 1u {
-        // Grayscale - replicate to RGB
-        let gray = f32(subpixel_heap[subpixel_offset]);
-        return vec4<f32>(gray, gray, gray, 1.0);
-    } else if depth == 3u {
-        // RGB
-        let r = f32(subpixel_heap[subpixel_offset + 0u]);
-        let g = f32(subpixel_heap[subpixel_offset + 1u]);
-        let b = f32(subpixel_heap[subpixel_offset + 2u]);
-        return vec4<f32>(r, g, b, 1.0);
-    } else {
-        // RGBA (depth == 4)
-        let r = f32(subpixel_heap[subpixel_offset + 0u]);
-        let g = f32(subpixel_heap[subpixel_offset + 1u]);
-        let b = f32(subpixel_heap[subpixel_offset + 2u]);
-        let a = f32(subpixel_heap[subpixel_offset + 3u]);
-        return vec4<f32>(r, g, b, a);
     }
 }
 

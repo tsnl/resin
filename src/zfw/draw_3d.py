@@ -60,8 +60,11 @@ class Draw3dRenderer(BaseDisposable):
     bvh_node_heap: "LinearHeap[PodBvhNodeArray]"
     triangle_heap: "LinearHeap[PodVertexArray]"
     material_heap: "LinearHeap[PodMaterialArray]"
-    texture_heap: "LinearHeap[PodTextureArray]"
-    subpixel_heap: "LinearHeap[PodSubpixelArray]"
+    color_texture_heap: "TextureHeap"
+    normal_texture_heap: "TextureHeap"
+    metalness_texture_heap: "TextureHeap"
+    roughness_texture_heap: "TextureHeap"
+    linear_sampler: wgpu.GPUSampler
 
     renderer_bind_group: wgpu.GPUBindGroup
 
@@ -74,7 +77,7 @@ class Draw3dRenderer(BaseDisposable):
 
     geometry_cache: dict["GeometryResource", "Draw3dGeometry"]
     material_cache: dict["MaterialResource", "Draw3dMaterial"]
-    texture_cache: dict["ImageResource", "Draw3dTexture"]
+    texture_cache: dict[tuple["ImageResource", "Draw3dTextureUsage"], "Draw3dTexture"]
 
     def __init__(
         self,
@@ -105,6 +108,7 @@ class Draw3dRenderer(BaseDisposable):
         self.renderer_bind_group_layout = device.create_bind_group_layout(
             label="Draw3dRenderer.RendererBindGroupLayout",
             entries=[
+                # Geometry heap:
                 wgpu.BindGroupLayoutEntry(
                     binding=0,
                     visibility=wgpu.ShaderStage.COMPUTE,
@@ -112,6 +116,7 @@ class Draw3dRenderer(BaseDisposable):
                         type=wgpu.BufferBindingType.read_only_storage
                     ),
                 ),
+                # BVH node heap:
                 wgpu.BindGroupLayoutEntry(
                     binding=1,
                     visibility=wgpu.ShaderStage.COMPUTE,
@@ -119,6 +124,7 @@ class Draw3dRenderer(BaseDisposable):
                         type=wgpu.BufferBindingType.read_only_storage
                     ),
                 ),
+                # Triangle heap:
                 wgpu.BindGroupLayoutEntry(
                     binding=2,
                     visibility=wgpu.ShaderStage.COMPUTE,
@@ -126,6 +132,7 @@ class Draw3dRenderer(BaseDisposable):
                         type=wgpu.BufferBindingType.read_only_storage
                     ),
                 ),
+                # Material heap:
                 wgpu.BindGroupLayoutEntry(
                     binding=3,
                     visibility=wgpu.ShaderStage.COMPUTE,
@@ -133,11 +140,14 @@ class Draw3dRenderer(BaseDisposable):
                         type=wgpu.BufferBindingType.read_only_storage
                     ),
                 ),
+                # Color texture heap:
                 wgpu.BindGroupLayoutEntry(
                     binding=4,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(
-                        type=wgpu.BufferBindingType.read_only_storage
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                        multisampled=False,
                     ),
                 ),
                 wgpu.BindGroupLayoutEntry(
@@ -145,6 +155,65 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(
                         type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                # Normal texture heap:
+                wgpu.BindGroupLayoutEntry(
+                    binding=6,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                        multisampled=False,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=7,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                # Metalness texture heap:
+                wgpu.BindGroupLayoutEntry(
+                    binding=8,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                        multisampled=False,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=9,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                # Roughness texture heap:
+                wgpu.BindGroupLayoutEntry(
+                    binding=10,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                        multisampled=False,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=11,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                # Linear sampler:
+                wgpu.BindGroupLayoutEntry(
+                    binding=12,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    sampler=wgpu.SamplerBindingLayout(
+                        type=wgpu.SamplerBindingType.filtering
                     ),
                 ),
             ],
@@ -227,24 +296,43 @@ class Draw3dRenderer(BaseDisposable):
             structured_array_cls=PodMaterialArray,
             persistent_staging_buffer_element_capacity=1,
         )
-        self.texture_heap = LinearHeap[PodTextureArray](
+
+        self.color_texture_heap = TextureHeap(
             device=device,
-            label="Draw3dRenderer.TextureHeap",
-            element_capacity=self.image_capacity,
-            structured_array_cls=PodTextureArray,
-            persistent_staging_buffer_element_capacity=1,
+            label="Draw3dRenderer.ColorTextureHeap",
+            usage="color",
         )
-        self.subpixel_heap = LinearHeap[PodSubpixelArray](
+        self.normal_texture_heap = TextureHeap(
             device=device,
-            label="Draw3dRenderer.SubpixelHeap",
-            structured_array_cls=PodSubpixelArray,
-            element_capacity=self.subpixel_capacity,
+            label="Draw3dRenderer.NormalTextureHeap",
+            usage="normal",
+        )
+        self.metalness_texture_heap = TextureHeap(
+            device=device,
+            label="Draw3dRenderer.MetalnessTextureHeap",
+            usage="metalness",
+        )
+        self.roughness_texture_heap = TextureHeap(
+            device=device,
+            label="Draw3dRenderer.RoughnessTextureHeap",
+            usage="roughness",
+        )
+
+        self.linear_sampler = device.create_sampler(
+            label="Draw3dRenderer.LinearSampler",
+            mag_filter=wgpu.FilterMode.linear,
+            min_filter=wgpu.FilterMode.linear,
+            mipmap_filter=wgpu.FilterMode.linear,
+            address_mode_u=wgpu.AddressMode.clamp_to_edge,
+            address_mode_v=wgpu.AddressMode.clamp_to_edge,
+            address_mode_w=wgpu.AddressMode.clamp_to_edge,
         )
 
         self.renderer_bind_group = device.create_bind_group(
             label="Draw3dRenderer.RendererBindGroup",
             layout=self.renderer_bind_group_layout,
             entries=[
+                # Geometry heap
                 wgpu.BindGroupEntry(
                     binding=0,
                     resource=wgpu.BufferBinding(
@@ -253,6 +341,7 @@ class Draw3dRenderer(BaseDisposable):
                         size=self.geometry_heap.device_buffer.size,
                     ),
                 ),
+                # BVH node heap
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=wgpu.BufferBinding(
@@ -261,6 +350,7 @@ class Draw3dRenderer(BaseDisposable):
                         size=self.bvh_node_heap.device_buffer.size,
                     ),
                 ),
+                # Triangle heap
                 wgpu.BindGroupEntry(
                     binding=2,
                     resource=wgpu.BufferBinding(
@@ -269,6 +359,7 @@ class Draw3dRenderer(BaseDisposable):
                         size=self.triangle_heap.device_buffer.size,
                     ),
                 ),
+                # Material heap
                 wgpu.BindGroupEntry(
                     binding=3,
                     resource=wgpu.BufferBinding(
@@ -277,21 +368,30 @@ class Draw3dRenderer(BaseDisposable):
                         size=self.material_heap.device_buffer.size,
                     ),
                 ),
+                # Color texture heap
                 wgpu.BindGroupEntry(
                     binding=4,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.texture_heap.device_buffer,
-                        offset=0,
-                        size=self.texture_heap.device_buffer.size,
-                    ),
+                    resource=self.color_texture_heap.texture,
                 ),
+                # Normal texture heap
                 wgpu.BindGroupEntry(
                     binding=5,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.subpixel_heap.device_buffer,
-                        offset=0,
-                        size=self.subpixel_heap.device_buffer.size,
-                    ),
+                    resource=self.normal_texture_heap.texture,
+                ),
+                # Metalness texture heap
+                wgpu.BindGroupEntry(
+                    binding=6,
+                    resource=self.metalness_texture_heap.texture,
+                ),
+                # Roughness texture heap
+                wgpu.BindGroupEntry(
+                    binding=7,
+                    resource=self.roughness_texture_heap.texture,
+                ),
+                # Linear sampler
+                wgpu.BindGroupEntry(
+                    binding=8,
+                    resource=self.linear_sampler,
                 ),
             ],
         )
@@ -314,8 +414,12 @@ class Draw3dRenderer(BaseDisposable):
         self.bvh_node_heap.dispose()
         self.triangle_heap.dispose()
         self.material_heap.dispose()
-        self.texture_heap.dispose()
-        self.subpixel_heap.dispose()
+
+        self.color_texture_heap.dispose()
+        self.normal_texture_heap.dispose()
+        self.metalness_texture_heap.dispose()
+        self.roughness_texture_heap.dispose()
+
         return super()._on_dispose()
 
     def _add_geometry(
@@ -345,21 +449,18 @@ class Draw3dRenderer(BaseDisposable):
     def _add_texture(
         self,
         *,
-        width: int,
-        height: int,
-        depth: int,
-        subpixel_span_begin: int,
-        subpixel_span_count: int,
-    ) -> int:
-        data = PodTextureArray.empty(shape=(1,))
-        data["width"][0] = np.uint32(width)
-        data["height"][0] = np.uint32(height)
-        data["depth"][0] = np.uint32(depth)
-        data["subpixel_span"][0]["begin"] = np.uint32(subpixel_span_begin)
-        data["subpixel_span"][0]["end"] = np.uint32(
-            subpixel_span_begin + subpixel_span_count
-        )
-        return self.texture_heap.insert(data)
+        data: np.ndarray,
+        usage: "Draw3dTextureUsage",
+    ) -> TextureHeapAllocation:
+        return self._get_texture_heap(usage).insert(data=data)
+
+    def _get_texture_heap(self, usage: "Draw3dTextureUsage") -> "TextureHeap":
+        return {
+            "color": self.color_texture_heap,
+            "normal": self.normal_texture_heap,
+            "metalness": self.metalness_texture_heap,
+            "roughness": self.roughness_texture_heap,
+        }[usage]
 
     def _add_material(
         self,
@@ -381,10 +482,6 @@ class Draw3dRenderer(BaseDisposable):
         data["roughness_map_id"][0] = np.uint32(roughness_map_id)
         data["roughness_factor"][0] = np.float32(roughness_factor)
         return self.material_heap.insert(data)
-
-    def _add_subpixels(self, subpixels: np.ndarray) -> int:
-        assert subpixels.ndim == 1 and subpixels.dtype == np.float16
-        return self.subpixel_heap.insert(subpixels.view(PodSubpixelArray))
 
     def record(
         self,
@@ -423,7 +520,11 @@ class Draw3dRenderer(BaseDisposable):
 
         return new_draw_3d_geometry
 
-    def get_texture(self, resource: "ImageResource") -> "Draw3dTexture":
+    def get_texture(
+        self,
+        resource: "ImageResource",
+        usage: "Draw3dTextureUsage",
+    ) -> "Draw3dTexture":
         """
         Convert an ImageResource to a Draw3dTexture, using a cache to avoid
         recreating the same texture multiple times.
@@ -432,14 +533,17 @@ class Draw3dRenderer(BaseDisposable):
         :return: A Draw3dTexture instance.
         """
 
-        if cached_entry := self._texture_cache.get(resource):
+        cache_key = (resource, usage)
+
+        if cached_entry := self._texture_cache.get(cache_key):
             return cached_entry
 
         new_draw_3d_texture = Draw3dTexture(
             renderer=self,
             resource=resource,
+            usage=usage,
         )
-        self._texture_cache[resource] = new_draw_3d_texture
+        self._texture_cache[cache_key] = new_draw_3d_texture
 
         return new_draw_3d_texture
 
@@ -457,16 +561,24 @@ class Draw3dRenderer(BaseDisposable):
 
         # Convert ImageResource objects to Draw3dTexture objects
         color_texture = (
-            self.get_texture(resource.color_map) if resource.color_map else None
+            self.get_texture(resource.color_map, usage="color")
+            if resource.color_map
+            else None
         )
         normal_texture = (
-            self.get_texture(resource.normal_map) if resource.normal_map else None
+            self.get_texture(resource.normal_map, usage="normal")
+            if resource.normal_map
+            else None
         )
         metalness_texture = (
-            self.get_texture(resource.metalness_map) if resource.metalness_map else None
+            self.get_texture(resource.metalness_map, usage="metalness")
+            if resource.metalness_map
+            else None
         )
         roughness_texture = (
-            self.get_texture(resource.roughness_map) if resource.roughness_map else None
+            self.get_texture(resource.roughness_map, usage="roughness")
+            if resource.roughness_map
+            else None
         )
 
         new_draw_3d_material = Draw3dMaterial(
@@ -502,9 +614,11 @@ class Draw3dFrame(BaseDisposable):
             label="Draw3dFrame.OutputImage",
             size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=wgpu.TextureUsage.STORAGE_BINDING
-            | wgpu.TextureUsage.COPY_SRC
-            | wgpu.TextureUsage.TEXTURE_BINDING,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
         )
         self.frame_info_buffer = PerFrameBuffer[PodFrameInfoArray](
             device=self._device,
@@ -618,11 +732,11 @@ class Draw3dFrame(BaseDisposable):
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
-        environment_map_texture_id = (
-            scene.environment_map.texture_id if scene.environment_map else -1
-        )
         self._upload_frame_info(
-            instance_count, encoder, self.debug_flags, environment_map_texture_id
+            instance_count,
+            encoder,
+            self.debug_flags,
+            environment_map_texture_id=-1,  # FIXME: add back support for environment maps
         )
         self._upload_camera_info(scene.camera, encoder)
         self._upload_instances_info(scene.meshes, encoder)
@@ -806,33 +920,19 @@ class Draw3dTexture(BaseDisposable):
     """
 
     renderer: Draw3dRenderer
-    texture_id: int
+    allocation: TextureHeapAllocation
 
     def __init__(
         self,
         renderer: Draw3dRenderer,
         *,
         resource: ImageResource,
+        usage: "Draw3dTextureUsage",
     ) -> None:
         super().__init__()
 
         self.renderer = renderer
-
-        # Convert image data to float16 for GPU storage
-        subpixel_data = resource.data.astype(np.float16).flatten()
-
-        # Upload subpixels to GPU heap
-        subpixel_span_begin = renderer._add_subpixels(subpixels=subpixel_data)
-        subpixel_span_count = subpixel_data.size
-
-        # Create texture metadata and upload to texture heap
-        self.texture_id = renderer._add_texture(
-            width=resource.width,
-            height=resource.height,
-            depth=resource.depth,
-            subpixel_span_begin=subpixel_span_begin,
-            subpixel_span_count=subpixel_span_count,
-        )
+        self.allocation = renderer._add_texture(data=resource.data, usage=usage)
 
 
 class Draw3dMaterial(BaseDisposable):
@@ -877,10 +977,14 @@ class Draw3dMaterial(BaseDisposable):
         self.roughness_factor = roughness_factor
 
         # Upload material data to GPU
-        color_map_id = color_texture.texture_id if color_texture else 0
-        normal_map_id = normal_texture.texture_id if normal_texture else 0
-        metalness_map_id = metalness_texture.texture_id if metalness_texture else 0
-        roughness_map_id = roughness_texture.texture_id if roughness_texture else 0
+        color_map_id = color_texture.allocation.texture_id if color_texture else 0
+        normal_map_id = normal_texture.allocation.texture_id if normal_texture else 0
+        metalness_map_id = (
+            metalness_texture.allocation.texture_id if metalness_texture else 0
+        )
+        roughness_map_id = (
+            roughness_texture.allocation.texture_id if roughness_texture else 0
+        )
 
         self.material_id = renderer._add_material(
             color_map_id=color_map_id,
@@ -906,7 +1010,8 @@ class Draw3dScene:
         jt.Float32[np.ndarray, "n 4 4"],
     ] = field(default_factory=dict)
 
-    environment_map: Draw3dTexture | None = None
+    # FIXME: add support for environment maps: dedicated texture heap
+    # environment_map: Draw3dTexture | None = None
 
 
 @dataclass(kw_only=True)
@@ -1145,7 +1250,7 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
 #
 
 
-type TextureHeapUsage = Literal[
+type Draw3dTextureUsage = Literal[
     "color",
     "normal",
     "metalness",
@@ -1153,8 +1258,8 @@ type TextureHeapUsage = Literal[
 ]
 
 
-def _texture_format_for_heap_usage(usage: TextureHeapUsage) -> wgpu.TextureFormat:
-    mapping: dict[TextureHeapUsage, str] = {
+def _texture_format_for_draw_3d_usage(usage: Draw3dTextureUsage) -> wgpu.TextureFormat:
+    mapping: dict[Draw3dTextureUsage, str] = {
         "color": "bc1-rgba-unorm",
         "normal": "bc5-rg-snorm",
         "metalness": "bc4-r-unorm",
@@ -1173,13 +1278,16 @@ class TextureHeap(BaseDisposable):
 
     device: wgpu.GPUDevice
     label: str
-    usage: TextureHeapUsage
+    usage: Draw3dTextureUsage
     page_size_px: int
     page_size_blk: int
     page_count: int
 
     texture_format: wgpu.TextureFormat
-    texture_array: wgpu.GPUTexture
+    texture: wgpu.GPUTexture
+
+    allocation_list: list[TextureHeapAllocation]
+    allocation_heap: LinearHeap[PodTextureAllocationArray]
 
     cursor_x_blk: int
     cursor_y_blk: int
@@ -1190,9 +1298,10 @@ class TextureHeap(BaseDisposable):
         self,
         device: wgpu.GPUDevice,
         label: str,
-        usage: TextureHeapUsage,
-        page_size_px: int,
-        page_count: int,
+        usage: Draw3dTextureUsage,
+        page_size_px: int = 8192,
+        page_count: int = 32,
+        allocation_capacity: int = 1024,
     ) -> None:
         if page_size_px % 4 != 0:
             raise ValueError("TextureHeap page_size_px must be a multiple of 4.")
@@ -1206,13 +1315,19 @@ class TextureHeap(BaseDisposable):
         self.page_size_blk = page_size_px // 4
         self.page_count = page_count
 
-        self.texture_format = _texture_format_for_heap_usage(self.usage)
-        self.texture_array = device.create_texture(
+        self.texture_format = _texture_format_for_draw_3d_usage(self.usage)
+        self.texture = device.create_texture(
             label=f"{label}.TextureArray",
             size=(page_size_px, page_size_px, page_count),
-            dimension=wgpu.TextureDimension.d2,
+            dimension="2d",
             format=str(self.texture_format),
             usage=(wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST),
+        )
+        self.allocation_heap = LinearHeap[PodTextureAllocationArray](
+            device=device,
+            label=f"{label}.TextureMetadataHeap",
+            structured_array_cls=PodTextureAllocationArray,
+            element_capacity=allocation_capacity,
         )
 
         self.cursor_x_blk = 0
@@ -1221,7 +1336,7 @@ class TextureHeap(BaseDisposable):
         self.cursor_page = 0
 
     def _on_dispose(self) -> None:
-        self.texture_array.destroy()
+        self.texture.destroy()
         super()._on_dispose()
 
     def _encode_texture(self, data: np.ndarray) -> np.ndarray:
@@ -1292,17 +1407,36 @@ class TextureHeap(BaseDisposable):
 
         # Finalize allocation
         allocation = TextureHeapAllocation(
-            texture_page=self.cursor_page,
+            usage=self.usage,
+            texture_id=len(self.allocation_list),
+            page=self.cursor_page,
             texture_x_blk=self.cursor_x_blk,
             texture_y_blk=self.cursor_y_blk,
+            texture_w_blk=blocks_w,
+            texture_h_blk=blocks_h,
         )
+        self.allocation_count += 1
         self.cursor_x_blk += blocks_w
         self.cursor_h_blk = max(self.cursor_h_blk, blocks_h)
+        self.allocation_list.append(allocation)
 
         # Done:
         return allocation
 
-    def _upload_to_allocation(
+    def _upload_record_to_gpu(
+        self,
+        allocation: TextureHeapAllocation,
+    ) -> None:
+        # Upload to the GPU buffer:
+        data = PodTextureAllocationArray.empty((1,))
+        data["x"][0] = allocation.texture_x_px / self.page_size_px
+        data["y"][0] = allocation.texture_y_px / self.page_size_px + allocation.page
+        data["w"][0] = allocation.texture_w_px / self.page_size_px
+        data["h"][0] = allocation.texture_h_px / self.page_size_px
+        heap_index = self.allocation_heap.insert(data)
+        assert heap_index == allocation.texture_id
+
+    def _upload_texels_to_gpu(
         self,
         encoded_data: np.ndarray,
         allocation: TextureHeapAllocation,
@@ -1312,12 +1446,12 @@ class TextureHeap(BaseDisposable):
 
         self.device.queue.write_texture(
             destination=wgpu.TexelCopyTextureInfo(
-                texture=self.texture_array,
+                texture=self.texture,
                 mip_level=0,
                 origin=(
                     allocation.texture_x_blk * 4,
                     allocation.texture_y_blk * 4,
-                    allocation.texture_page,
+                    allocation.page,
                 ),
             ),
             data=encoded_data.tobytes(),
@@ -1335,18 +1469,44 @@ class TextureHeap(BaseDisposable):
 
     def insert(self, data: np.ndarray) -> TextureHeapAllocation:
         encoded_data = self._encode_texture(data)
-        blocks_w = encoded_data.shape[1]
-        blocks_h = encoded_data.shape[0]
-        allocation = self._allocate(blocks_w=blocks_w, blocks_h=blocks_h)
-        self._upload_to_allocation(encoded_data, allocation)
+        allocation = self._allocate(
+            blocks_w=encoded_data.shape[1],
+            blocks_h=encoded_data.shape[0],
+        )
+        self._upload_record_to_gpu(allocation)
+        self._upload_texels_to_gpu(encoded_data, allocation)
         return allocation
 
 
 @dataclass
 class TextureHeapAllocation:
-    texture_page: int
+    usage: Draw3dTextureUsage
+    texture_id: int
+    page: int
     texture_x_blk: int
     texture_y_blk: int
+    texture_w_blk: int
+    texture_h_blk: int
+
+    def __post_init__(self):
+        assert 0 < self.texture_x_px <= 0xFFFF
+        assert 0 < self.texture_y_px <= 0xFFFF
+
+    @property
+    def texture_x_px(self) -> int:
+        return self.texture_x_blk * 4
+
+    @property
+    def texture_y_px(self) -> int:
+        return self.texture_y_blk * 4
+
+    @property
+    def texture_w_px(self) -> int:
+        return self.texture_w_blk * 4
+
+    @property
+    def texture_h_px(self) -> int:
+        return self.texture_h_blk * 4
 
 
 #
@@ -1433,17 +1593,6 @@ class PodVertexArray(StructuredNDArray):
     )
 
 
-class PodTextureArray(StructuredNDArray):
-    DTYPE = np.dtype(
-        [
-            ("width", np.uint32),
-            ("height", np.uint32),
-            ("depth", np.uint32),
-            ("subpixel_span", POD_SPAN_DTYPE),
-        ]
-    )
-
-
 class PodSubpixelArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
@@ -1475,6 +1624,17 @@ class PodCameraArray(StructuredNDArray):
             ("aspect_ratio", np.float32),
             ("max_distance", np.float32),
             ("_rsv", np.uint32),
+        ]
+    )
+
+
+class PodTextureAllocationArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("x", np.float32),
+            ("y", np.float32),  # upper 16 bits stores page index
+            ("w", np.float32),
+            ("h", np.float32),
         ]
     )
 
