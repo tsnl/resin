@@ -205,7 +205,8 @@ fn sample_color_texture(
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let sample_uv = alloc_uv + uv * alloc_size;
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     let sample_color = textureSampleLevel(color_texture_heap, linear_sampler, sample_uv, page, 0.0);
     return sample_color.rgb;
 }
@@ -218,7 +219,8 @@ fn sample_normal_texture(
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let sample_uv = alloc_uv + uv * alloc_size;
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     let sample_rg = textureSampleLevel(normal_texture_heap, linear_sampler, sample_uv, page, 0.0);
     // BC5 stores RG channels, compute B from unit length constraint
     let r = sample_rg.r;
@@ -235,7 +237,8 @@ fn sample_metalness_texture(
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let sample_uv = alloc_uv + uv * alloc_size;
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     return textureSampleLevel(metalness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
 }
 
@@ -247,7 +250,8 @@ fn sample_roughness_texture(
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let sample_uv = alloc_uv + uv * alloc_size;
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     return textureSampleLevel(roughness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
 }
 
@@ -259,7 +263,8 @@ fn sample_environment_texture(
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let sample_uv = alloc_uv + uv * alloc_size;
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     return textureSampleLevel(environment_texture_heap, linear_sampler, sample_uv, page, 0.0);
 }
 

@@ -134,7 +134,7 @@ def _encode_bc1_impl(input_: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
 @numba.njit(cache=NUMBA_CACHE_ENABLED)
 def _encode_bc1_block(
     block: npt.NDArray[np.float32],
-    refinement_iteration_count: int = 5,
+    refinement_iteration_count: int = 3,
 ) -> tuple[
     npt.NDArray[np.float32],
     npt.NDArray[np.uint8],

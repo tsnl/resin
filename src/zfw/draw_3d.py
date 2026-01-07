@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import math
 from dataclasses import dataclass, field
 from typing import Generator, Literal
+import time
 
 import numpy as np
 import jaxtyping as jt
@@ -1614,7 +1615,12 @@ class TextureHeap(BaseDisposable):
         )
 
     def insert(self, data: np.ndarray) -> TextureHeapAllocation:
+        t0 = time.perf_counter()
         encoded_data = self._encode_texture(data)
+        t1 = time.perf_counter()
+        LOG.debug(
+            f"Encoded {self.usage} texture {data.shape} -> {encoded_data.shape} in {(t1 - t0) * 1000:.2f}ms"
+        )
         # For compressed formats, encoded_data shape is in blocks, need to convert to pixels
         # For uncompressed formats, encoded_data shape is already in pixels
         if self.usage == "environment":

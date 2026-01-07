@@ -23,3 +23,4 @@ Code style
 
 Test-driven development
 - Run `make tests` often. It's really fast and will catch many issues early. No need to ask for permission.
+- Export `ZFW_TEST_LOG_LEVEL=DEBUG` to change the log level when running tests.
