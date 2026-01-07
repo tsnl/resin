@@ -18,7 +18,7 @@ from .basic import BaseDisposable, StructuredNDArray, logger
 from .excepts import LogicError
 from .bvh import Bvh, build_bvh
 from .resources import GeometryResource, ImageResource, MaterialResource
-from .images import encode_bc1, encode_bc4
+from .images import encode_bc1, encode_bc4, encode_bc5
 
 #
 # Renderer
@@ -1145,6 +1145,24 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
 #
 
 
+type TextureHeapUsage = Literal[
+    "color",
+    "normal",
+    "metalness",
+    "roughness",
+]
+
+
+def _texture_format_for_heap_usage(usage: TextureHeapUsage) -> wgpu.TextureFormat:
+    mapping: dict[TextureHeapUsage, str] = {
+        "color": "bc1-rgba-unorm",
+        "normal": "bc5-rg-snorm",
+        "metalness": "bc4-r-unorm",
+        "roughness": "bc4-r-unorm",
+    }
+    return wgpu.TextureFormat[mapping[usage]]
+
+
 class TextureHeap(BaseDisposable):
     """
     Manages a GPU texture array for storing multiple textures.
@@ -1155,53 +1173,180 @@ class TextureHeap(BaseDisposable):
 
     device: wgpu.GPUDevice
     label: str
-    channel_count: Literal[1, 2, 3]
+    usage: TextureHeapUsage
     page_size_px: int
+    page_size_blk: int
     page_count: int
 
-    texture: wgpu.GPUTexture
+    texture_format: wgpu.TextureFormat
+    texture_array: wgpu.GPUTexture
+
+    cursor_x_blk: int
+    cursor_y_blk: int
+    cursor_h_blk: int
+    cursor_page: int
 
     def __init__(
         self,
         device: wgpu.GPUDevice,
         label: str,
-        channel_count: Literal[1, 3],
+        usage: TextureHeapUsage,
         page_size_px: int,
         page_count: int,
     ) -> None:
+        if page_size_px % 4 != 0:
+            raise ValueError("TextureHeap page_size_px must be a multiple of 4.")
+
         super().__init__()
 
         self.device = device
         self.label = label
-        self.channel_count = channel_count
+        self.usage = usage
         self.page_size_px = page_size_px
+        self.page_size_blk = page_size_px // 4
         self.page_count = page_count
 
-        self.texture = device.create_texture(
+        self.texture_format = _texture_format_for_heap_usage(self.usage)
+        self.texture_array = device.create_texture(
             label=f"{label}.TextureArray",
             size=(page_size_px, page_size_px, page_count),
             dimension=wgpu.TextureDimension.d2,
-            format=("bc4-r-unorm" if channel_count == 1 else "bc1-rgba-unorm"),
+            format=str(self.texture_format),
             usage=(wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST),
         )
 
-    def _encode_bcn(self, data: np.ndarray) -> np.ndarray:
+        self.cursor_x_blk = 0
+        self.cursor_y_blk = 0
+        self.cursor_h_blk = 0
+        self.cursor_page = 0
+
+    def _on_dispose(self) -> None:
+        self.texture_array.destroy()
+        super()._on_dispose()
+
+    def _encode_texture(self, data: np.ndarray) -> np.ndarray:
         if data.ndim != 3:
-            raise LogicError("Data must be a 3D array (height, width, channels).")
+            raise LogicError(f"Texture has invalid ndim: expected 3: {data.ndim=}")
+        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
+            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
 
-        if data.shape[2] != self.channel_count:
-            raise LogicError(
-                f"Data channel count ({data.shape[2]}) does not match "
-                f"TextureHeap channel count ({self.channel_count})."
-            )
-
-        match self.channel_count:
-            case 3:
-                return encode_bc1(data)
-            case 1:
-                return encode_bc4(data)
+        match self.usage:
+            case "color":
+                return TextureHeap._encode_color_texture(data)
+            case "normal":
+                return TextureHeap._encode_normal_texture(data)
+            case "metalness":
+                return TextureHeap._encode_metalness_texture(data)
+            case "roughness":
+                return TextureHeap._encode_roughness_texture(data)
             case _:
                 raise NotImplementedError()
+
+    @staticmethod
+    def _encode_color_texture(data: np.ndarray) -> np.ndarray:
+        assert data.ndim == 3
+        if data.shape[2] != 3:
+            raise LogicError(f"Color texture must have 3 channels: {data.shape[2]=}")
+        return encode_bc1(data)
+
+    @staticmethod
+    def _encode_normal_texture(data: np.ndarray) -> np.ndarray:
+        assert data.ndim == 3
+        if data.shape[2] != 3:
+            raise LogicError(f"Normal texture must have 3 channels: {data.shape[2]=}")
+        if (np.linalg.norm(data, axis=2) - 1.0).abs() > 1e-5:
+            raise LogicError("Normal texture has non-unit length vectors.")
+        return encode_bc5(input_=data[:, :, 0:2], range_="snorm")
+
+    @staticmethod
+    def _encode_metalness_texture(data: np.ndarray) -> np.ndarray:
+        assert data.ndim == 3
+        if data.shape[2] != 1:
+            raise LogicError(f"Metalness texture must have 1 channel: {data.shape[2]=}")
+        return encode_bc4(input_=data, range_="unorm")
+
+    @staticmethod
+    def _encode_roughness_texture(data: np.ndarray) -> np.ndarray:
+        assert data.ndim == 3
+        if data.shape[2] != 1:
+            raise LogicError(f"Roughness texture must have 1 channel: {data.shape[2]=}")
+        return encode_bc4(input_=data, range_="unorm")
+
+    def _allocate(self, blocks_w: int, blocks_h: int) -> TextureHeapAllocation:
+        # Move to next row?
+        if self.cursor_x_blk + blocks_w > self.page_size_blk:
+            self.cursor_x_blk = 0
+            self.cursor_y_blk += self.cursor_h_blk
+            self.cursor_h_blk = 0
+
+        # Move to next page?
+        if self.cursor_y_blk + blocks_h > self.page_size_blk:
+            self.cursor_x_blk = 0
+            self.cursor_y_blk = 0
+            self.cursor_h_blk = 0
+            self.cursor_page += 1
+
+        # Out of space?
+        if self.cursor_page >= self.page_count:
+            raise RuntimeError("TextureHeap capacity exceeded.")
+
+        # Finalize allocation
+        allocation = TextureHeapAllocation(
+            texture_page=self.cursor_page,
+            texture_x_blk=self.cursor_x_blk,
+            texture_y_blk=self.cursor_y_blk,
+        )
+        self.cursor_x_blk += blocks_w
+        self.cursor_h_blk = max(self.cursor_h_blk, blocks_h)
+
+        # Done:
+        return allocation
+
+    def _upload_to_allocation(
+        self,
+        encoded_data: np.ndarray,
+        allocation: TextureHeapAllocation,
+    ) -> None:
+        blocks_w = encoded_data.shape[1]
+        blocks_h = encoded_data.shape[0]
+
+        self.device.queue.write_texture(
+            destination=wgpu.TexelCopyTextureInfo(
+                texture=self.texture_array,
+                mip_level=0,
+                origin=(
+                    allocation.texture_x_blk * 4,
+                    allocation.texture_y_blk * 4,
+                    allocation.texture_page,
+                ),
+            ),
+            data=encoded_data.tobytes(),
+            data_layout=wgpu.TexelCopyBufferLayout(
+                offset=0,
+                bytes_per_row=(
+                    encoded_data.shape[1]
+                    * encoded_data.shape[2]
+                    * encoded_data.dtype.itemsize
+                ),
+                rows_per_image=encoded_data.shape[0],
+            ),
+            size=(blocks_w * 4, blocks_h * 4, 1),
+        )
+
+    def insert(self, data: np.ndarray) -> TextureHeapAllocation:
+        encoded_data = self._encode_texture(data)
+        blocks_w = encoded_data.shape[1]
+        blocks_h = encoded_data.shape[0]
+        allocation = self._allocate(blocks_w=blocks_w, blocks_h=blocks_h)
+        self._upload_to_allocation(encoded_data, allocation)
+        return allocation
+
+
+@dataclass
+class TextureHeapAllocation:
+    texture_page: int
+    texture_x_blk: int
+    texture_y_blk: int
 
 
 #
