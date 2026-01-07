@@ -122,6 +122,7 @@ def _encode_bc1_block(
     # Helpful resource:
     # https://users.cs.utah.edu/~tch/CS4640F2019/resources/A%20geometric%20interpretation%20of%20the%20covariance%20matrix.pdf
     principal_component = _compute_principal_component_of_cov_mat3x3(cov)
+    principal_component = np.ascontiguousarray(principal_component)
 
     # Identify extreme points along the principal component axis:
     # Broadcast mean to subtract from each row of block_colors

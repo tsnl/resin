@@ -32,6 +32,7 @@ type ImageFormat = Literal[
     "rgba8unorm-srgb",
     "rgb32float",
     "rgb16float",
+    "bc1-rgba-unorm",
     "bc4-r-unorm",
 ]
 
