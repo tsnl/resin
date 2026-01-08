@@ -12,11 +12,13 @@ __all__ = [
     "ImageResource",
     "MaterialResource",
     "load_gltf",
+    "load_gltf_v2",
     "load_image",
     "load_image_from_bytes",
 ]
 
 import base64
+import hashlib
 import io
 from dataclasses import dataclass
 from fractions import Fraction
@@ -24,14 +26,16 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+import numpy.typing as npt
 import orjson
 import pydantic
 import imageio.v3 as iio
+import cv2 as cv
 import pygltflib
 import jaxtyping as jt
 
 from .excepts import LogicError
-from .basic import Font, FontSize, FontWeight, logger
+from .basic import BaseDisposable, Font, FontSize, FontWeight, logger
 from .images import (
     ImageFormat,
     convert_image_format,
@@ -222,14 +226,16 @@ def load_image_from_bytes(
 
     height, width = raw_data.shape[:2]
 
-    # Apply format conversion if needed
-    if expected_format is not None and expected_format != image_format:
-        converted_data = convert_image_format(raw_data, image_format, expected_format)
-        output_format = expected_format
-    else:
-        # Just normalize to float32
-        converted_data = normalize_image_to_f32(raw_data)
-        output_format = image_format
+    # # Apply format conversion if needed
+    # if expected_format is not None and expected_format != image_format:
+    #     converted_data = convert_image_format(raw_data, image_format, expected_format)
+    #     output_format = expected_format
+    # else:
+    #     # Just normalize to float32
+    #     converted_data = normalize_image_to_f32(raw_data)
+    #     output_format = image_format
+    converted_data = normalize_image_to_f32(raw_data)
+    output_format = image_format
 
     # Determine depth (number of channels)
     depth = converted_data.shape[2] if converted_data.ndim == 3 else 1
@@ -241,6 +247,183 @@ def load_image_from_bytes(
         depth=depth,
         image_format=output_format,
     )
+
+
+#
+# New Loader API
+#
+
+
+class BaseLoader(BaseDisposable):
+    def _on_dispose(self) -> None:
+        return super()._on_dispose()
+
+
+class FileLoader(BaseLoader):
+    def load_file_from_url(self, url: str) -> bytes:
+        if url.startswith("file://"):
+            path = Path(url[len("file://") :])
+            return self.load_file_from_path(path)
+
+        if url.startswith("data:"):
+            _, bs_base64 = url.split(",", maxsplit=1)
+            return base64.b64decode(bs_base64)
+
+        raise ValueError(f"Unsupported URL scheme in: {url}")
+
+    def load_file_from_path(self, path: Path) -> bytes:
+        return path.read_bytes()
+
+
+class ImageLoader(BaseLoader):
+    def __init__(self):
+        super().__init__()
+        self._rgb_image_file_cache: dict[str, ImageResource] = {}
+        self._rgb_image_bytes_cache: dict[str, ImageResource] = {}
+
+    def load_rgb_image(self, url: str, *, cache: bool = True) -> ImageResource:
+        if url.startswith("file://"):
+            path = Path(url[len("file://") :])
+            return self.load_rgb_image_from_file(path, cache=cache)
+        if url.startswith("data:"):
+            _, bs_base64 = url.split(",", maxsplit=1)
+            bs = base64.b64decode(bs_base64)
+            return self.load_rgb_image_from_bytes(bs, cache=cache)
+        raise ValueError(f"Unsupported URL scheme in: {url}")
+
+    def load_rgb_image_from_file(
+        self, path: Path, *, cache: bool = True
+    ) -> ImageResource:
+        cache_key = str(path.resolve().as_posix())
+        if cache and (cache_image := self._rgb_image_file_cache.get(cache_key)):
+            return cache_image
+
+        im = cv.imread(
+            str(path),
+            cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH,
+        )
+        im = ImageLoader._validate_rgb_image(im, str(path))
+
+        res = ImageResource(
+            data=ImageLoader._normalize_image(im),
+            width=im.shape[1],
+            height=im.shape[0],
+            depth=3,
+            image_format="rgb32float",
+        )
+
+        if cache:
+            self._rgb_image_file_cache[cache_key] = res
+
+        return res
+
+    def load_rgb_image_from_bytes(
+        self, bs: bytes, *, cache: bool = True
+    ) -> ImageResource:
+        cache_key = hashlib.sha1(bs).hexdigest()
+        if cache and (cache_image := self._rgb_image_bytes_cache.get(cache_key)):
+            return cache_image
+
+        im = cv.imdecode(
+            np.frombuffer(bs, np.uint8),
+            cv.IMREAD_COLOR | cv.IMREAD_ANYDEPTH,
+        )
+        im = ImageLoader._validate_rgb_image(im, "bytes")
+
+        res = ImageResource(
+            data=ImageLoader._normalize_image(im),
+            width=im.shape[1],
+            height=im.shape[0],
+            depth=3,
+            image_format="rgb32float",
+        )
+
+        self._rgb_image_bytes_cache[cache_key] = res
+
+        return res
+
+    @staticmethod
+    def _normalize_image(im: np.ndarray) -> np.ndarray:
+        match im.dtype.type:
+            case np.uint8:
+                return im.astype(np.float32) / 255.0
+            case np.uint16:
+                return im.astype(np.float32) / 65535.0
+            case np.float32:
+                return im
+            case _:
+                raise LogicError(f"Unsupported image dtype: {im.dtype}")
+
+    @staticmethod
+    def _validate_rgb_image(im: npt.ArrayLike | None, source: str) -> np.ndarray:
+        if im is None:
+            raise IOError(f"Could not load image from: {source}")
+        im = np.asarray(im)
+        if im.shape[2] != 3:
+            raise ValueError(f"Expected RGB image with 3 channels, got: {im.shape[2]}")
+        return im
+
+
+class GltfLoader(ImageLoader, FileLoader):
+    def __init__(self):
+        super().__init__()
+
+    def load_gltf(
+        self, path: Path
+    ) -> dict[
+        tuple[GeometryResource, MaterialResource],
+        npt.NDArray[np.float32],  # (N, 4, 4)
+    ]:
+        gltf = pygltflib.GLTF2()
+
+        if not gltf.load(str(path)):
+            raise IOError(f"Could not load glTF file: {path}")
+
+        buffers = [
+            self._load_gltf_buffer(buffer)  #
+            for buffer in (gltf.buffers or [])
+        ]
+        images = [
+            self._load_gltf_image(image, gltf=gltf, buffers=buffers)  #
+            for image in (gltf.images or [])
+        ]
+
+        # TODO: Continue from here.
+
+        raise NotImplementedError()
+
+    def _load_gltf_buffer(self, buffer: pygltflib.Buffer) -> bytes:
+        if (buffer_uri := buffer.uri) is not None:
+            return self.load_file_from_url(buffer_uri)
+        raise ValueError("glTF buffer has no URI")
+
+    def _load_gltf_image(
+        self,
+        image: pygltflib.Image,
+        *,
+        gltf: pygltflib.GLTF2,
+        buffers: list[bytes],
+    ) -> ImageResource:
+        if (image_uri := image.uri) is not None:
+            return self.load_rgb_image(image_uri)
+
+        if (image_bv := image.bufferView) is not None:
+            bv = gltf.bufferViews[image_bv]
+            bv_offset = bv.byteOffset or 0
+            bv_length = bv.byteLength
+            bs = buffers[bv.buffer][bv_offset : bv_offset + bv_length]
+            return self.load_rgb_image_from_bytes(bs)
+
+        if image.bufferView is not None:
+            raise NotImplementedError(
+                "Loading glTF images from bufferView not implemented"
+            )
+
+        raise ValueError("glTF image has no URI or bufferView")
+
+
+class Loader(GltfLoader, ImageLoader, FileLoader):
+    pass
 
 
 #
@@ -411,7 +594,7 @@ class _ImageSource:
         if self.raw_bytes is not None:
             return load_image_from_bytes(
                 self.raw_bytes,
-                image_format=input_format,
+                image_format=output_format,
                 expected_format=output_format,
             )
         elif self.file_path is not None:
@@ -460,7 +643,7 @@ def _load_image_sources(
 
         if source is not None:
             image_sources.append(source)
-            LOG.debug(f"Found image source {image_idx}")
+            LOG.debug(f"Found image source {image_idx}: {image.uri=}")
         else:
             LOG.warning(f"Could not find image source {image_idx}")
             # Create a placeholder that will return white
@@ -506,7 +689,7 @@ def _load_material_resources(
         # invalid normals from the glTF example resources. We very likely have a bug in
         # our image loader
         resource = image_sources[source_idx].load("rgba8unorm", "rgba32float")
-        resource.data = convert_linear_to_srgb(resource.data)
+        # resource.data = convert_linear_to_srgb(resource.data)
 
         image_resource_cache[cache_key] = resource
         return resource

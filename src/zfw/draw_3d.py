@@ -951,7 +951,8 @@ class Draw3dGeometry(BaseDisposable):
         triangle_span_begin = renderer._add_triangles(vertices=pod_vertices)
         triangle_span_count = self.triangle_count
 
-        # Offset the BVH triangle spans to point to the global triangle heap instead of the per-geometry triangles list.
+        # Offset the BVH triangle spans to point to the global triangle heap instead of
+        # the per-geometry triangles list.
         bvh.tri_span += triangle_span_begin
 
         # Upload BVH:
