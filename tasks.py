@@ -27,8 +27,8 @@ PTY = platform.system() != "Windows" and INTERACTIVE
 
 
 @task
-def clean(c: Context):
-    if INTERACTIVE:
+def clean(c: Context, force: bool = False):
+    if INTERACTIVE and not force:
         confirm = rich.prompt.Confirm.ask(
             "[bold yellow]WARNING[/bold yellow] Running `git clean -fxd .` will delete all untracked files.",
             default=False,
@@ -89,7 +89,7 @@ def build(_: Context): ...
 
 @task(pre=[build])
 def sandbox(c: Context):
-    _uv_run(c, "zfw-sandbox")
+    _uv_run(c, "zfw-sandbox --debug")
 
 
 @task(pre=[build])
