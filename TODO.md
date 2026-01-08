@@ -16,20 +16,25 @@
   - [x] Interpolate normals, get smooth lambertian shading.
   - [x] Texture mapping support
   - [x] Sample environment map on ray miss.
-- [ ] Texture heap overhaul
-  - [ ] Implement BC4, ~~BC6H~~ BC1 texture encoding.
-  - [ ] Use a large BC6H texture array (and a separate BC4 for mono) instead of a 
+- [x] Texture heap overhaul
+  - [x] Implement BC4, ~~BC6H~~ BC1 texture encoding.
+  - [x] Use a large BC1 texture array (and a separate BC4 for mono) instead of a 
         storage buffer for all textures, using a GPU linear sampler to read data.
-  - [ ] Move the big environment map into a singleton cube map.
+  - [x] Move the big environment map into a singleton cube map.
   - [ ] (Future) add a separate cube map heap for light probes.
   - [ ] (Future) add BC6H encoding: it's really complicated.
+- [ ] Resources cleanup
+  - [ ] Rewrite `resources.py` GLTF loader, resolve normal map range issue. See 
+        `class Loader` WIP.
+  - [ ] Rewrite `Draw3dRenderer` to eliminate `get_geometry()`, `get_material()`, etc.
+        Eliminate caching. Add `.dispose()` method.
 - [ ] Secondary rays, PBR shading:
     - [ ] IBL (environment map): prefiltered environment map.
     - [ ] Monte Carlo path tracing, offline rendering with ∞ samples.
 - [ ] Optimization
-  - [ ] Texture heaps: BC4 for mono, BC6H for color, paged atlas allocator, 
+  - [x] Texture heaps: BC4 for mono, BC6H for color, paged atlas allocator, 
         deallocation.
-  - [ ] Linear buffer deallocation, free lists for resource allocator heaps.
+  - [ ] Free lists
   - [ ] TLAS support, including per-frame TLAS rebuilds, ensure no regressions.
 - [ ] Bigger Changes
   - [ ] Rewrite ray tracer to use wavefront design.
