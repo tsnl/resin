@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import wgpu
 
-from tests.image_ref_tests import assert_image_matches_reference
+from image_ref_tests import assert_image_matches_reference
 from zfw import (
     setup_logging,
     Draw2dRenderer,

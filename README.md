@@ -15,18 +15,18 @@ git lfs pull
 
 ```bash
 # Create a virtual environment with the right Python version, install all dependencies.
-make -j sync
+./invoke sync
 
 # Run the example
-make -j sandbox
+./invoke sandbox
 ```
 
 ```bash
 # Run the tests
-make -j tests
+./invoke tests
 
 # Lint and Typecheck
-make -j check
+./invoke check
 ```
 
 ## Resources

@@ -1,5 +1,6 @@
 {
     "editor.rulers": [
         88
-    ]
+    ],
+    "python-envs.pythonProjects": []
 }

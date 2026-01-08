@@ -374,24 +374,18 @@ def main_impl() -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("output", type=Path)
-    ap.add_argument(
-        "--output-is-stamp-file",
-        action="store_true",
-        help="Remove last path component before validating extension",
-    )
     args = ap.parse_args()
 
     project_root = Path.cwd()
 
     output_path: Path = args.output
-    stamp_file_path: Path | None = None
-
-    if args.output_is_stamp_file:
-        stamp_file_path = output_path
-        output_path = output_path.parent
 
     if output_path.suffix != COOKED_ATLAS_PATH_SUFFIX:
         LOG.error(f"Output path must have suffix {COOKED_ATLAS_PATH_SUFFIX!r}")
+        return 1
+
+    if output_path.is_dir():
+        LOG.error(f"Bitmap font already exists: {str(output_path)!r}")
         return 1
 
     font = cast(Font, output_path.stem.removesuffix(COOKED_ATLAS_PATH_SUFFIX))
@@ -422,11 +416,6 @@ def main_impl() -> int:
         license_path=license_path,
     )
     cooker.cook()
-
-    # Create stamp file if requested
-    if stamp_file_path is not None:
-        stamp_file_path.parent.mkdir(parents=True, exist_ok=True)
-        stamp_file_path.touch()
 
     return 0
 

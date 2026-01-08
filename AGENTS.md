@@ -1,10 +1,10 @@
 Platform
-- Use `make` targets to do anything if possible
-  - `make sync` runs codgen via `make build` and then runs `uv sync`.
-  - `make tests` runs all tests and writes test outputs (e.g. image renders).
-    - You can supply `pytest` args with `PYTEST_ARGS`, e.g.: `make tests PYTEST_ARGS="-k filter"`
-  - `make sandbox` launches a windowed interactive application.
+- Use `./invoke <task>+` targets to do anything if possible. 
+  See `tasks.py`.
 - To run a Python shell, use `uv run python`.
+- To run specific tests, use `./invoke tests --filter "filter-args"`.
+- Run `./invoke tests` often. It's really fast and will catch many issues early. No need to ask for permission.
+- Export `ZFW_TEST_LOG_LEVEL=DEBUG` to change the log level when running tests.
 
 Python
 - Our code-base is statically typed and must type-check successfully.
@@ -20,7 +20,3 @@ Python
 
 Code style
 - Always re-export public symbols under `zfw` directly. E.g. instead of `from zfw.basic import logger`, use `from zfw import logger`.
-
-Test-driven development
-- Run `make tests` often. It's really fast and will catch many issues early. No need to ask for permission.
-- Export `ZFW_TEST_LOG_LEVEL=DEBUG` to change the log level when running tests.
