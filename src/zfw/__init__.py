@@ -45,7 +45,6 @@ __all__ = [
     "convert_linear_to_srgb",
     "convert_rgb_to_grayscale",
     "convert_srgb_to_linear",
-    "debug_save_rgba_image",
     "encode_bc1",
     "encode_bc4",
     "encode_bc5",
@@ -123,7 +122,6 @@ from .images import (
     normalize_image_to_f32,
     convert_rgb_to_grayscale,
     image_format_channel_count,
-    debug_save_rgba_image,
 )
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext

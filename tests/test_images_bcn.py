@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import wgpu
+import PIL.Image
 
 import zfw
 from zfw.images_bcn import _f32_to_rgb565, _pack_bc1_block, _quantize_rgb565_f32
@@ -282,7 +283,9 @@ def help_render_texture_to_framebuffer(
         res = np.dstack([res[:, :, 0:1]] * 4)
         res[:, :, 3] = 1.0  # set alpha to 1.0
 
-    zfw.debug_save_rgba_image(file_path=output_path, data=res)
+    PIL.Image.fromarray((np.clip(res, 0.0, 1.0) * 255.0).astype(np.uint8)).save(
+        output_path
+    )
 
     return res
 
@@ -431,12 +434,9 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
 
     # Save original uncompressed image for comparison
     original_rgba = np.dstack([color_map.data, np.ones((input_h, input_w, 1))])
-    zfw.debug_save_rgba_image(
-        file_path=Path(
-            "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_original.png"
-        ),
-        data=original_rgba,
-    )
+    PIL.Image.fromarray(
+        (np.clip(original_rgba, 0.0, 1.0) * 255.0).astype(np.uint8)
+    ).save("output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_original.png")
 
     # Compress using BC1
     bc1_data = zfw.encode_bc1(color_map)
@@ -470,11 +470,8 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     diff_rgba = np.dstack([diff, np.ones((input_h, input_w, 1))])
     # Amplify differences for visibility (multiply by 10, clamp to [0,1])
     diff_rgba[:, :, :3] = np.clip(diff_rgba[:, :, :3] * 10.0, 0.0, 1.0)
-    zfw.debug_save_rgba_image(
-        file_path=Path(
-            "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_diff.png"
-        ),
-        data=diff_rgba,
+    PIL.Image.fromarray((np.clip(diff_rgba, 0.0, 1.0) * 255.0).astype(np.uint8)).save(
+        "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_diff.png"
     )
 
     assert psnr > 25.0, f"BC1 PSNR too low for DamagedHelmet: {psnr:.2f} dB"

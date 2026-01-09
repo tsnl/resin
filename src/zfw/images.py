@@ -6,17 +6,14 @@ __all__ = [
     "convert_linear_to_srgb",
     "convert_rgb_to_grayscale",
     "convert_srgb_to_linear",
-    "debug_save_rgba_image",
     "encode_bc1",
     "encode_bc4",
     "encode_bc5",
     "normalize_image_to_f32",
 ]
 
-from pathlib import Path
 from typing import Literal
 
-import imageio.v3 as iio
 import numpy as np
 
 from .basic import ColorSpace, logger
@@ -91,27 +88,6 @@ def convert_rgb_to_grayscale(rgb: np.ndarray) -> np.ndarray:
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     grayscale = 0.2126 * r + 0.7152 * g + 0.0722 * b
     return grayscale[..., np.newaxis]
-
-
-def debug_save_rgba_image(*, file_path: Path | str, data: np.ndarray):
-    """
-    Saves an RGBA image from a normalized NumPy array in linear color space.
-
-    :param file_path: The path to save the image file to.
-    :param data: The image data as a NumPy array.
-    """
-    assert data.ndim == 3, "Data must be a 3D array: (height, width, channels)"
-    assert data.shape[-1] == 4, "Data must have 4 channels (RGBA)"
-
-    file_path = Path(file_path)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    linear = data[..., :3]
-    alpha = data[..., 3:4]
-    srgb_normalized = convert_linear_to_srgb(linear)
-    srgb_normalized = np.concatenate((srgb_normalized, alpha), axis=-1)
-    srgb = (srgb_normalized * 255.0).clip(0, 255).astype(np.uint8)
-    iio.imwrite(file_path, srgb)
 
 
 #

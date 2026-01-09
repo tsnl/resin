@@ -171,8 +171,139 @@ def _decode_any_image_with_pil(image_bytes: bytes) -> npt.NDArray[np.float32]:
             raise ValueError(f"Unsupported image bands: {bands}")
 
 
-def _decode_hdr_image(image_bs: bytes) -> npt.NDArray[np.float32]:
-    raise NotImplementedError()
+def _decode_hdr_image(image_bytes: bytes) -> npt.NDArray[np.float32]:
+    """
+    Decode RADIANCE HDR image bytes into an (H, W, 3) float32 RGB array.
+    """
+
+    assert image_bytes.startswith(b"#?RADIANCE")
+
+    def decode_header(
+        data: memoryview,
+    ) -> tuple[dict[str, str], memoryview]:
+        """Parse HDR header, returning (metadata_dict, remainder)."""
+        header_end = data.obj.find(b"\n\n")  # type: ignore[union-attr]
+        if header_end == -1:
+            raise ValueError("HDR: missing blank line after header")
+
+        header_bytes = bytes(data[:header_end])
+        metadata: dict[str, str] = {}
+        for line in header_bytes.decode("ascii").splitlines():
+            if line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", maxsplit=1)
+                metadata[key.strip()] = value.strip()
+
+        return metadata, data[header_end + 2 :]
+
+    def decode_resolution(
+        data: memoryview,
+    ) -> tuple[tuple[int, int], memoryview]:
+        """Parse HDR resolution line, returning ((height, width), remainder)."""
+        newline_pos = bytes(data).find(b"\n")
+        if newline_pos == -1:
+            raise ValueError("HDR: missing resolution line")
+
+        resolution_line = bytes(data[:newline_pos]).decode("ascii")
+        parts = resolution_line.split()
+        if len(parts) != 4 or parts[0] != "-Y" or parts[2] != "+X":
+            raise ValueError(f"HDR: unsupported resolution format: {resolution_line!r}")
+
+        height, width = int(parts[1]), int(parts[3])
+        return (height, width), data[newline_pos + 1 :]
+
+    def decode_scanlines(
+        data: memoryview, height: int, width: int
+    ) -> tuple[npt.NDArray[np.float32], memoryview]:
+        """Decode all HDR scanlines, returning (image_array, remainder)."""
+        result = np.zeros((height, width, 3), dtype=np.float32)
+
+        for y in range(height):
+            scanline, data = decode_one_scanline(data, width)
+            result[y] = scanline
+
+        return result, data
+
+    def decode_one_scanline(
+        data: memoryview, width: int
+    ) -> tuple[npt.NDArray[np.float32], memoryview]:
+        """Decode a single HDR scanline, returning (rgb_array, remainder)."""
+        # Check for new-style RLE marker: 0x02 0x02 <width_hi> <width_lo>
+        if (
+            len(data) >= 4
+            and data[0] == 0x02
+            and data[1] == 0x02
+            and ((data[2] << 8) | data[3]) == width
+        ):
+            rgbe, data = decode_one_rle_scanline(data[4:], width)
+        else:
+            rgbe, data = decode_one_uncompressed_scanline(data, width)
+
+        rgb = rgbe_to_float(rgbe)
+        return rgb, data
+
+    def decode_one_rle_scanline(
+        data: memoryview, width: int
+    ) -> tuple[npt.NDArray[np.uint8], memoryview]:
+        """Decode an RLE-encoded HDR scanline, returning (rgbe_array, remainder)."""
+        channels = np.zeros((4, width), dtype=np.uint8)
+        pos = 0
+        for ch in range(4):
+            col = 0
+            while col < width:
+                if pos >= len(data):
+                    raise ValueError("HDR: unexpected end of RLE data")
+                code = data[pos]
+                pos += 1
+                if code > 128:
+                    # Run of same value
+                    run_len = code - 128
+                    if pos >= len(data):
+                        raise ValueError("HDR: unexpected end of RLE run data")
+                    val = data[pos]
+                    pos += 1
+                    channels[ch, col : col + run_len] = val
+                    col += run_len
+                else:
+                    # Literal values
+                    count = code
+                    if pos + count > len(data):
+                        raise ValueError("HDR: unexpected end of RLE literal data")
+                    channels[ch, col : col + count] = np.frombuffer(
+                        data[pos : pos + count], dtype=np.uint8
+                    )
+                    pos += count
+                    col += count
+        return channels.T, data[pos:]  # (width, 4)
+
+    def decode_one_uncompressed_scanline(
+        data: memoryview, width: int
+    ) -> tuple[npt.NDArray[np.uint8], memoryview]:
+        """Decode an uncompressed HDR scanline, returning (rgbe_array, remainder)."""
+        byte_count = width * 4
+        if len(data) < byte_count:
+            raise ValueError("HDR: insufficient uncompressed pixel data")
+        rgbe = np.frombuffer(data[:byte_count], dtype=np.uint8).reshape((width, 4))
+        return rgbe, data[byte_count:]
+
+    def rgbe_to_float(rgbe: npt.NDArray[np.uint8]) -> npt.NDArray[np.float32]:
+        """Convert RGBE (N, 4) uint8 array to RGB (N, 3) float32."""
+        r, g, b, e = rgbe[:, 0], rgbe[:, 1], rgbe[:, 2], rgbe[:, 3]
+        result = np.zeros((rgbe.shape[0], 3), dtype=np.float32)
+        nonzero = e > 0
+        scale = np.ldexp(1.0, e[nonzero].astype(np.int32) - (128 + 8))
+        result[nonzero, 0] = r[nonzero] * scale
+        result[nonzero, 1] = g[nonzero] * scale
+        result[nonzero, 2] = b[nonzero] * scale
+        return result
+
+    data = memoryview(image_bytes)
+    _, data = decode_header(data)
+    (height, width), data = decode_resolution(data)
+    result, remainder = decode_scanlines(data, height, width)
+    assert len(remainder) == 0, "HDR: unexpected trailing data"
+    return result
 
 
 #
