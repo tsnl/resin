@@ -41,6 +41,7 @@ from .basic import BaseDisposable, Font, FontSize, FontWeight, expect, logger
 from .images import (
     ImageFormat,
     convert_image_format,
+    convert_srgb_to_linear,
     normalize_image_to_f32,
     convert_linear_to_srgb,
 )
@@ -392,6 +393,8 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
     #
 
     def load_image(image: pygltflib.Image) -> np.ndarray:
+        # No color space conversion should be performed.
+        # See: https://github.com/KhronosGroup/glTF-Sample-Models/issues/316
         bs = np.frombuffer(load_image_raw_bytes(image), dtype=np.uint8)
         im = cv.imdecode(bs, cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH)
         im = validate_rgb_image(im)

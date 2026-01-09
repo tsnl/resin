@@ -713,9 +713,6 @@ class GuiWindow(BaseDisposable):
             # Create 3D frame if needed (first frame or after resize)
             if self._draw_3d_frame is None:
                 self._draw_3d_frame = Draw3dFrame(renderer=self._draw_3d_renderer)
-                self._draw_3d_frame.set_debug_flags(
-                    emit_closest_hit_bvh_depth_in_r=False
-                )
 
             # Build 3D scene
             environment_map_texture = self._environment_map

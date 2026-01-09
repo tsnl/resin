@@ -920,10 +920,9 @@ fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
 fn debug_visualize_orm(hit_details: HitDetails) -> vec4<f32> {
     // Visualize ORM: Opacity, Roughness, Metalness in RGB channels
     // For now, using placeholder values - will be replaced with actual material sampling
-    // TODO: Sample from material maps based on hit_details
     let opacity = 1.0;  // Placeholder: sample from opacity/alpha texture
-    let roughness = 0.5;  // Placeholder: sample from roughness texture
-    let metalness = 0.5;  // Placeholder: sample from metalness texture
+    let roughness = hit_details.surface_roughness;
+    let metalness = hit_details.surface_metalness;
     return vec4<f32>(opacity, roughness, metalness, 1.0);
 }
 
