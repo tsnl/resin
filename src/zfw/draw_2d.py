@@ -136,8 +136,8 @@ class Draw2dRenderer:
 
     def record(
         self,
-        quads: list[Draw2dQuad],
-        frame: Draw2dFrame,
+        quads: list["Draw2dQuad"],
+        frame: "Draw2dFrame",
         command_encoder: wgpu.GPUCommandEncoder,
     ):
         frame.record(
@@ -159,7 +159,11 @@ class Draw2dFrame:
             size=(renderer.target_size_wh[0], renderer.target_size_wh[1], 1),
             dimension=wgpu.TextureDimension.d2,
             format=renderer.target_format,
-            usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC,
+            usage=(
+                wgpu.TextureUsage.RENDER_ATTACHMENT
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
         )
         self.quad_group_cache: dict[wgpu.GPUTexture, "QuadGroup"] = {}
 
@@ -176,7 +180,7 @@ class Draw2dFrame:
         pipeline: wgpu.GPURenderPipeline,
         target_size_wh: tuple[int, int],
         command_encoder: wgpu.GPUCommandEncoder,
-        quads: list[Draw2dQuad],
+        quads: list["Draw2dQuad"],
     ):
         quad_batch_list = QuadBatchList(quads, target_size_wh)
 

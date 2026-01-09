@@ -57,16 +57,16 @@ struct PodFrameInfo {
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
-const FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R: u32 = 2u;
+const FLAG_EMIT_SURFACE_DEPTH: u32 = 2u;
 const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
-const FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R: u32 = 8u;
-const FLAG_EMIT_PRIMARY_RAY_COLOR: u32 = 16u;
-const FLAG_EMIT_HIT_NORMAL: u32 = 32u;
-const FLAG_EMIT_ORM: u32 = 64u;
+const FLAG_EMIT_BVH_DEPTH: u32 = 8u;
+const FLAG_EMIT_SURFACE_COLOR: u32 = 16u;
+const FLAG_EMIT_SURFACE_NORMAL: u32 = 32u;
+const FLAG_EMIT_SURFACE_ORM: u32 = 64u;
 
 const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
-const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R;
-const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_COLOR | FLAG_EMIT_HIT_NORMAL | FLAG_EMIT_ORM;
+const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_DEPTH | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_BVH_DEPTH;
+const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_COLOR | FLAG_EMIT_SURFACE_NORMAL | FLAG_EMIT_SURFACE_ORM;
 
 struct PodInstance {
     geometry_id: u32,
@@ -298,7 +298,7 @@ fn h_mat4x4_inverse(m: mat4x4<f32>) -> mat4x4<f32> {
     let t = m[3].xyz;
 
     let r_inv = transpose(r);
-    let t_inv = -r_inv * t;
+    let t_inv = -(r_inv * t);
 
     let col0 = vec4<f32>(r_inv[0], 0.0);
     let col1 = vec4<f32>(r_inv[1], 0.0);
@@ -421,7 +421,7 @@ fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
 fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
     let geometry = geometry_heap[geometry_id];
     let bvh_node_span = geometry.bvh_node_span_in_heap;
-    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R) != 0u;
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_BVH_DEPTH) != 0u;
     
     // Stack-based BVH traversal
     // We use a fixed-size stack for iterative traversal instead of recursion
@@ -834,7 +834,7 @@ fn debug_visualize_primary_ray_direction(ray: Ray) -> vec4<f32> {
 
 
 fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
-    let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R) != 0u;
+    let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_SURFACE_DEPTH) != 0u;
     if debug_emit_depth_in_r {
         return debug_visualize_depth_in_r(hit);
     }
@@ -844,7 +844,7 @@ fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
         return debug_visualize_hit_world_position(hit);
     }
 
-    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R) != 0u;
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_BVH_DEPTH) != 0u;
     if debug_bvh_traversal {
         return debug_visualize_depth_in_r(hit);
     }
@@ -874,17 +874,17 @@ fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
 }
 
 fn post_primary_ray_hit_details_debug_output(hit_details: HitDetails) -> vec4<f32> {
-    let debug_emit_primary_ray_color = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_COLOR) != 0u;
+    let debug_emit_primary_ray_color = (frame_info.debug_flags & FLAG_EMIT_SURFACE_COLOR) != 0u;
     if debug_emit_primary_ray_color {
         return debug_visualize_primary_ray_color(hit_details);
     }
 
-    let debug_emit_hit_normal = (frame_info.debug_flags & FLAG_EMIT_HIT_NORMAL) != 0u;
+    let debug_emit_hit_normal = (frame_info.debug_flags & FLAG_EMIT_SURFACE_NORMAL) != 0u;
     if debug_emit_hit_normal {
         return debug_visualize_hit_normal(hit_details);
     }
 
-    let debug_emit_orm = (frame_info.debug_flags & FLAG_EMIT_ORM) != 0u;
+    let debug_emit_orm = (frame_info.debug_flags & FLAG_EMIT_SURFACE_ORM) != 0u;
     if debug_emit_orm {
         return debug_visualize_orm(hit_details);
     }

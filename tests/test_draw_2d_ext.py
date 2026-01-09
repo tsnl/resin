@@ -181,7 +181,7 @@ def test_draw_2d_ext_image(
     primitives: list[Draw2dExtBasePrimitive] = []
 
     # Load test image (returns float32 linear color space)
-    image_data = rainbow_512x512_image.data
+    image_data = rainbow_512x512_image
     assert image_data.shape == (512, 512, 4)
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture

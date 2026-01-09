@@ -9,7 +9,7 @@ import wgpu
 from zfw import (
     load_image,
     setup_logging,
-    request_wgpu_device,
+    help_request_wgpu_device,
     convert_rgb_to_grayscale,
 )
 from zfw.images import convert_srgb_to_linear
@@ -19,7 +19,7 @@ from zfw.images import convert_srgb_to_linear
 def gpu_device() -> wgpu.GPUDevice:
     """Fixture that provides a GPU device and queue."""
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    return request_wgpu_device(adapter, label="ZfwTestDevice")
+    return help_request_wgpu_device(adapter)
 
 
 @pytest.fixture(scope="session")

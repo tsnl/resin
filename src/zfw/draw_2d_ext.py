@@ -700,7 +700,7 @@ class TextShaper:
     """
     Text shaper for a specific font family.
 
-    Uses FreeType for simple left-to-right text layout. Metrics come from pre-cooked 
+    Uses FreeType for simple left-to-right text layout. Metrics come from pre-cooked
     glyph atlas.
     """
 
@@ -732,7 +732,7 @@ class TextShaper:
         """Shape text and return glyph infos and positions (simple LTR layout)."""
         self.set_font_size(font_size_px)
         self.set_font_weight(font_weight)
-        
+
         infos: list[GlyphInfo] = []
         positions: list[GlyphPosition] = []
 

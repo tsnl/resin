@@ -83,6 +83,7 @@ from .draw_3d import (
     Draw3dRenderer,
     Draw3dScene,
 )
+from .gpu import BlitRenderer
 from .window import Window
 from .events import EventHub
 
@@ -316,6 +317,7 @@ class GuiWindow(BaseDisposable):
     _draw_2d_renderer: Draw2dRenderer
     _draw_2d_canvas: Draw2dExtCanvas
     _draw_2d_frame: Draw2dFrame
+    _blit_renderer: BlitRenderer
 
     # 3D viewport
     _draw_3d_renderer: Draw3dRenderer
@@ -374,6 +376,7 @@ class GuiWindow(BaseDisposable):
         )
         self._draw_2d_canvas = Draw2dExtCanvas(device=device, queue=self._queue)
         self._draw_2d_frame = Draw2dFrame(renderer=self._draw_2d_renderer)
+        self._blit_renderer = BlitRenderer(device=device)
 
         # Create 3D renderer and frame (initially None, created on first render)
         self._draw_3d_renderer = Draw3dRenderer(
@@ -520,13 +523,15 @@ class GuiWindow(BaseDisposable):
         self._camera_transform = transform
         self._camera_intrinsics = intrinsics
 
-    def set_environment_map(self, environment_map: npt.NDArray[np.float32] | None) -> None:
+    def set_environment_map(
+        self, environment_map: npt.NDArray[np.float32] | None
+    ) -> None:
         """Set the environment map for IBL lighting."""
         self._environment_map = (
             Draw3dTexture(
-                self._draw_3d_renderer, data=environment_map.data, usage="environment"
+                self._draw_3d_renderer, data=environment_map, usage="environment"
             )
-            if environment_map
+            if environment_map is not None
             else None
         )
 
@@ -713,7 +718,7 @@ class GuiWindow(BaseDisposable):
             # Create 3D frame if needed (first frame or after resize)
             if self._draw_3d_frame is None:
                 self._draw_3d_frame = Draw3dFrame(renderer=self._draw_3d_renderer)
-                self._draw_3d_frame.set_debug_flags(emit_hit_normal=True)
+                self._draw_3d_frame.set_debug_flags(emit_surface_normal=True)
 
             # Build 3D scene
             environment_map_texture = self._environment_map
@@ -765,19 +770,11 @@ class GuiWindow(BaseDisposable):
             command_encoder=command_encoder,
         )
 
-        # Copy from 2D frame to canvas texture (now same format)
-        command_encoder.copy_texture_to_texture(
-            source=wgpu.TexelCopyTextureInfo(
-                texture=self._draw_2d_frame.get_output_image(),
-                mip_level=0,
-                origin=(0, 0, 0),
-            ),
-            destination=wgpu.TexelCopyTextureInfo(
-                texture=current_texture,
-                mip_level=0,
-                origin=(0, 0, 0),
-            ),
-            copy_size=self._draw_2d_frame.get_output_image().size,
+        # Blit from 2D frame to canvas texture
+        self._blit_renderer.record(
+            input_texture=self._draw_2d_frame.get_output_image(),
+            output_texture=current_texture,
+            command_encoder=command_encoder,
         )
 
         # Submit and present

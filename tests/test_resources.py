@@ -7,7 +7,6 @@ from zfw import (
     Draw3dGeometry,
     Draw3dMaterial,
     Draw3dRenderer,
-    Draw3dTexture,
     GeometryResource,
     MaterialResource,
     load_gltf,

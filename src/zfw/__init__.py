@@ -2,6 +2,7 @@ __all__ = [
     "BUNDLED_DATA_PATH",
     "COOKED_ATLAS_PATH_SUFFIX",
     "BaseDisposable",
+    "BlitRenderer",
     "ButtonAction",
     "Bvh",
     "ColorSpace",
@@ -49,6 +50,7 @@ __all__ = [
     "encode_bc4",
     "encode_bc5",
     "expect",
+    "help_request_wgpu_device",
     "image_format_channel_count",
     "load_gltf",
     "load_image",
@@ -56,7 +58,6 @@ __all__ = [
     "normalize_image_to_f32",
     "partition_points",
     "partition_triangles",
-    "request_wgpu_device",
     "round_up_to_po2",
     "setup_logging",
     "typed_freetype",
@@ -132,5 +133,5 @@ from .bvh import (
     partition_points,
     partition_triangles,
 )
-from .gpu import request_wgpu_device
+from .gpu import help_request_wgpu_device, BlitRenderer
 from . import typed_freetype

@@ -517,11 +517,11 @@ class Draw3dRenderer(BaseDisposable):
         data["bvh_node_span"][0]["end"] = bvh_node_span_begin + bvh_node_count
         return self.geometry_heap.insert(data)
 
-    def _add_bvh_nodes(self, bvh_nodes: PodBvhNodeArray) -> int:
+    def _add_bvh_nodes(self, bvh_nodes: "PodBvhNodeArray") -> int:
         assert bvh_nodes.ndim == 1 and bvh_nodes.dtype == PodBvhNodeArray.DTYPE
         return self.bvh_node_heap.insert(bvh_nodes)
 
-    def _add_triangles(self, vertices: PodVertexArray) -> int:
+    def _add_triangles(self, vertices: "PodVertexArray") -> int:
         assert vertices.ndim == 1 and vertices.dtype == PodVertexArray.DTYPE
         assert vertices.shape[0] % 3 == 0
         return self.triangle_heap.insert(vertices) // 3
@@ -531,7 +531,7 @@ class Draw3dRenderer(BaseDisposable):
         *,
         data: np.ndarray,
         usage: "Draw3dTextureUsage",
-    ) -> TextureHeapAllocation:
+    ) -> "TextureHeapAllocation":
         return self._get_texture_heap(usage).insert(data=data)
 
     def _get_texture_heap(self, usage: "Draw3dTextureUsage") -> "TextureHeap":
@@ -566,7 +566,7 @@ class Draw3dRenderer(BaseDisposable):
 
     def record(
         self,
-        scene: Draw3dScene,
+        scene: "Draw3dScene",
         frame: "Draw3dFrame",
         command_encoder: wgpu.GPUCommandEncoder,
     ) -> None:
@@ -674,8 +674,8 @@ class Draw3dFrame(BaseDisposable):
         emit_closest_hit_depth_in_r: bool = False,
         emit_hit_world_position: bool = False,
         emit_closest_hit_bvh_depth_in_r: bool = False,
-        emit_color: bool = False,
-        emit_hit_normal: bool = False,
+        emit_surface_color: bool = False,
+        emit_surface_normal: bool = False,
         emit_orm: bool = False,
     ) -> None:
         """
@@ -685,25 +685,25 @@ class Draw3dFrame(BaseDisposable):
         :param emit_closest_hit_depth_in_r: If True, output normalized hit depth in red channel.
         :param emit_hit_world_position: If True, output world-space hit position as RGB.
         :param emit_closest_hit_bvh_depth_in_r: If True, output normalized hit depth to BVH leaf in red channel.
-        :param emit_primary_ray_color: If True, output sampled texture color at hit point.
-        :param emit_hit_normal: If True, output world-space hit normal as RGB.
+        :param emit_surface_color: If True, output sampled texture color at hit point.
+        :param emit_surface_normal: If True, output world-space hit normal as RGB.
         :param emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
         """
         self.debug_flags = 0
         if emit_primary_ray_direction:
             self.debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
         if emit_closest_hit_depth_in_r:
-            self.debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R
+            self.debug_flags |= _FRAME_FLAG_EMIT_BVH_DEPTH
         if emit_hit_world_position:
             self.debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
         if emit_closest_hit_bvh_depth_in_r:
-            self.debug_flags |= _FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R
-        if emit_color:
-            self.debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_COLOR
-        if emit_hit_normal:
-            self.debug_flags |= _FRAME_FLAG_EMIT_HIT_NORMAL
+            self.debug_flags |= _FRAME_FLAG_EMIT_BVH_DEPTH
+        if emit_surface_color:
+            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_COLOR
+        if emit_surface_normal:
+            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_NORMAL
         if emit_orm:
-            self.debug_flags |= _FRAME_FLAG_EMIT_ORM
+            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_ORM
 
     def record(
         self,
@@ -711,7 +711,7 @@ class Draw3dFrame(BaseDisposable):
         renderer_bind_group: wgpu.GPUBindGroup,
         target_size_wh: tuple[int, int],
         encoder: wgpu.GPUCommandEncoder,
-        scene: Draw3dScene,
+        scene: "Draw3dScene",
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
@@ -856,7 +856,7 @@ class Draw3dGeometry(BaseDisposable):
         )
 
     @staticmethod
-    def _marshall_bvh(bvh: Bvh) -> PodBvhNodeArray:
+    def _marshall_bvh(bvh: Bvh) -> "PodBvhNodeArray":
         # TODO: Each node will either have children or a triangle span. We can save memory by
         # using a union-like structure here. Maybe negative values refer to triangle spans?
 
@@ -876,7 +876,7 @@ class Draw3dGeometry(BaseDisposable):
         v_n_array: npt.NDArray[np.float32],
         v_t_array: npt.NDArray[np.float32],
         t_indices: npt.NDArray[np.uint32],
-    ) -> PodVertexArray:
+    ) -> "PodVertexArray":
         # Interleave the vertex arrays:
         v = np.concatenate([v_p_array, v_n_array, v_t_array], axis=-1)
         v = v.view(dtype=PodVertexArray.DTYPE).squeeze()
@@ -909,7 +909,7 @@ class Draw3dGeometry(BaseDisposable):
 
 class Draw3dTexture(BaseDisposable):
     renderer: Draw3dRenderer
-    allocation: TextureHeapAllocation
+    allocation: "TextureHeapAllocation"
 
     def __init__(
         self,
@@ -1039,7 +1039,7 @@ class Draw3dScene:
     Represents a 3D scene to be rendered.
     """
 
-    camera: Draw3dCamera
+    camera: "Draw3dCamera"
 
     meshes: dict[
         tuple[Draw3dGeometry, Draw3dMaterial],
@@ -1326,8 +1326,8 @@ class TextureHeap(BaseDisposable):
     texture_format: wgpu.TextureFormat
     texture: wgpu.GPUTexture
 
-    allocation_list: list[TextureHeapAllocation]
-    allocation_heap: LinearHeap[PodTextureAllocationArray]
+    allocation_list: list["TextureHeapAllocation"]
+    allocation_heap: LinearHeap["PodTextureAllocationArray"]
 
     cursor_x_px: int
     cursor_y_px: int
@@ -1473,7 +1473,7 @@ class TextureHeap(BaseDisposable):
         # Convert to float16 and return as-is (no block compression)
         return data.astype(np.float16)
 
-    def _allocate(self, width_px: int, height_px: int) -> TextureHeapAllocation:
+    def _allocate(self, width_px: int, height_px: int) -> "TextureHeapAllocation":
         # Move to next row?
         if self.cursor_x_px + width_px > self.page_size_px:
             self.cursor_x_px = 0
@@ -1541,7 +1541,7 @@ class TextureHeap(BaseDisposable):
 
     def _upload_record_to_gpu(
         self,
-        allocation: TextureHeapAllocation,
+        allocation: "TextureHeapAllocation",
     ) -> None:
         # Upload to the GPU buffer:
         data = PodTextureAllocationArray.empty((1,))
@@ -1555,7 +1555,7 @@ class TextureHeap(BaseDisposable):
     def _upload_texels_to_gpu(
         self,
         encoded_data: np.ndarray,
-        allocation: TextureHeapAllocation,
+        allocation: "TextureHeapAllocation",
     ) -> None:
         self.device.queue.write_texture(
             destination=wgpu.TexelCopyTextureInfo(
@@ -1572,7 +1572,7 @@ class TextureHeap(BaseDisposable):
             size=(allocation.texture_w_px, allocation.texture_h_px, 1),
         )
 
-    def insert(self, data: np.ndarray) -> TextureHeapAllocation:
+    def insert(self, data: np.ndarray) -> "TextureHeapAllocation":
         t0 = time.perf_counter()
         encoded_data = self._encode_texture(data)
         t1 = time.perf_counter()
@@ -1615,12 +1615,12 @@ class TextureHeapAllocation:
 #
 
 _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
-_FRAME_FLAG_EMIT_CLOSEST_HIT_DEPTH_IN_R = 1 << 1
+_FRAME_FLAG_EMIT_BVH_DEPTH = 1 << 1
 _FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
-_FRAME_FLAG_EMIT_CLOSEST_BVH_HIT_DEPTH_IN_R = 1 << 3
-_FRAME_FLAG_EMIT_PRIMARY_RAY_COLOR = 1 << 4
-_FRAME_FLAG_EMIT_HIT_NORMAL = 1 << 5
-_FRAME_FLAG_EMIT_ORM = 1 << 6
+_FRAME_FLAG_EMIT_BVH_DEPTH = 1 << 3
+_FRAME_FLAG_EMIT_SURFACE_COLOR = 1 << 4
+_FRAME_FLAG_EMIT_SURFACE_NORMAL = 1 << 5
+_FRAME_FLAG_EMIT_SURFACE_ORM = 1 << 6
 
 
 POD_SPAN_DTYPE = np.dtype(

@@ -108,7 +108,7 @@ def main():
 
     # Create WebGPU device
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = zfw.request_wgpu_device(adapter)
+    device = zfw.help_request_wgpu_device(adapter)
 
     # Create window context (manages GLFW)
     window_context = zfw.WindowContext()
@@ -117,8 +117,8 @@ def main():
     window = zfw.Window(
         device=device,
         window_context=window_context,
-        width_dip=1920,
-        height_dip=1080,
+        width_dip=1280,
+        height_dip=720,
         title="ZFW Sandbox",
     )
 

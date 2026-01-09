@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -17,15 +16,17 @@ from zfw import (
 )
 
 
-def test_basic_draw_2d(gpu_device: wgpu.GPUDevice, rainbow_512x512_image: npt.NDArray[np.float32]):
+def test_basic_draw_2d(
+    gpu_device: wgpu.GPUDevice, rainbow_512x512_image: npt.NDArray[np.float32]
+):
     """Test basic 2D rendering with quads and textures."""
     device = gpu_device
     queue = gpu_device.queue
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture
-    rainbow_image_data_uint8 = (np.clip(rainbow_512x512_image, 0.0, 1.0) * 255.0).astype(
-        np.uint8
-    )
+    rainbow_image_data_uint8 = (
+        np.clip(rainbow_512x512_image, 0.0, 1.0) * 255.0
+    ).astype(np.uint8)
 
     rainbow_texture = device.create_texture(
         size=(512, 512, 1),

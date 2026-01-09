@@ -583,7 +583,7 @@ def _f32_to_rgb565(color: npt.NDArray[np.float32]) -> np.uint16:
     r = np.uint16(int(np.round(max(0.0, min(1.0, color[0])) * 31.0)))
     g = np.uint16(int(np.round(max(0.0, min(1.0, color[1])) * 63.0)))
     b = np.uint16(int(np.round(max(0.0, min(1.0, color[2])) * 31.0)))
-    return (r << 11) | (g << 5) | b
+    return np.uint16((r << 11) | (g << 5) | b)
 
 
 #
