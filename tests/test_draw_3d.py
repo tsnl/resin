@@ -118,7 +118,8 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
 
     # scene = _load_two_avocados_scene(renderer)
-    scene = _load_damaged_helmet_scene(renderer)
+    # scene = _load_damaged_helmet_scene(renderer)
+    scene = _load_flight_helmet_scene(renderer)
 
     data = _render_and_readback(
         gpu_device,
@@ -224,6 +225,38 @@ def _load_damaged_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
                     [0.0, 0.0, 0.0, 1.0],
                 ],
                 dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(45.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=5.0,
+        ),
+        meshes=meshes,
+    )
+
+    return scene
+
+
+def _load_flight_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
+    resource_meshes = load_gltf(
+        gltf_path="tests/data/glTF-Sample-Assets/Models/FlightHelmet/glTF/FlightHelmet.gltf",
+    )
+
+    # Convert resource types to Draw3d objects using renderer cache
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = Draw3dGeometry.from_resource(geom_res, renderer)
+        material = Draw3dMaterial.from_resource(mat_res, renderer)
+        meshes[(geometry, material)] = transforms
+
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -3.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
             ),
             fov_y_rad=np.radians(45.0),
             aspect_ratio=FRAME_W / FRAME_H,

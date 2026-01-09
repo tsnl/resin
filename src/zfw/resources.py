@@ -404,6 +404,10 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
         assert accessor.bufferView is not None
         bs = buffer_views[accessor.bufferView]
 
+        # Apply accessor's byteOffset (offset within the buffer view)
+        accessor_byte_offset = accessor.byteOffset or 0
+        bs = bs[accessor_byte_offset:]
+
         # Get the component type:
         component_dtype: np.dtype = {
             5120: np.dtype(np.int8),
@@ -455,7 +459,7 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
     def load_image(image: pygltflib.Image) -> np.ndarray:
         bs = load_image_raw_bytes(image)
         im = decode_image(bs)
-        im = validate_rgb_image(im)
+        im = into_rgb_image(im)
         return im
 
     def load_image_raw_bytes(image: pygltflib.Image) -> bytes:
@@ -465,9 +469,12 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
             else buffer_views[expect(image.bufferView)].tobytes()
         )
 
-    def validate_rgb_image(im: npt.ArrayLike) -> np.ndarray:
+    def into_rgb_image(im: npt.ArrayLike) -> np.ndarray:
         im = np.asarray(im)
-        if im.shape[2] != 3:
+        if im.shape[2] == 4:
+            # Drop alpha channel
+            im = im[:, :, :3]
+        elif im.shape[2] != 3:
             raise ValueError(f"Expected RGB image with 3 channels, got: {im.shape[2]}")
         return im
 
