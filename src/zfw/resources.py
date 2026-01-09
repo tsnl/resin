@@ -393,13 +393,47 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
     #
 
     def load_image(image: pygltflib.Image) -> np.ndarray:
-        # No color space conversion should be performed.
+        # No color space conversion should be performed. According to the glTF spec,
+        # the color profile in an image file should be ignored.
         # See: https://github.com/KhronosGroup/glTF-Sample-Models/issues/316
+        #
+        # Unfortunately, OpenCV does not support disabling color space conversion
+        # on imdecode.
+        #
+        # This means OpenCV will automatically perform gamma correction on sRGB images,
+        # trying to linearize an already linear image, resulting in incorrect colors.
+        # > When using OpenCV's cv2.imread(), the library generally handles gamma
+        # > correction automatically during the file reading process for common formats
+        # > like PNG and JPEG, converting them from their typical sRGB space to a
+        # > linear or near-linear space for processing. This is done by the image
+        # > codecs (libjpeg, libpng, etc.) that OpenCV uses under the hood.
+        #
+        # To work around this, we try to guess whether the image uses the sRGB color
+        # space in its metadata. If so, we reverse the gamma correction after loading.
+        # This is done by converting from linear to sRGB color space.
+
         bs = np.frombuffer(load_image_raw_bytes(image), dtype=np.uint8)
         im = cv.imdecode(bs, cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH)
         im = validate_rgb_image(im)
         im = normalize_image(im)
+        im = convert_linear_to_srgb(im) if image_is_srgb(image) else im
         return im
+
+    def image_is_srgb(image: pygltflib.Image) -> bool:
+        """
+        Guess whether an image will be loaded by OpenCV in sRGB color space.
+        """
+        if image.mimeType == "image/jpeg":
+            return True
+        if image.mimeType == "image/png":
+            return False
+        if image.uri and image.uri.endswith(".jpg"):
+            return True
+        if image.uri and image.uri.endswith(".jpeg"):
+            return True
+        if image.uri and image.uri.endswith(".png"):
+            return False
+        return False
 
     def load_image_raw_bytes(image: pygltflib.Image) -> bytes:
         return (

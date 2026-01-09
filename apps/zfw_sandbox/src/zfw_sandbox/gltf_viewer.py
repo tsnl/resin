@@ -16,7 +16,7 @@ LOG = zfw.logger(__name__)
 # Available models
 MODELS = [
     ("Avocado", "Avocado/glTF-Binary/Avocado.glb"),
-    ("Damaged Helmet", "DamagedHelmet/glTF-Binary/DamagedHelmet.glb"),
+    ("Damaged Helmet", "DamagedHelmet/glTF/DamagedHelmet.gltf"),
     ("Flight Helmet", "FlightHelmet/glTF/FlightHelmet.gltf"),
     ("Water Bottle", "WaterBottle/glTF-Binary/WaterBottle.glb"),
     ("Sci-Fi Helmet", "SciFiHelmet/glTF/SciFiHelmet.gltf"),
