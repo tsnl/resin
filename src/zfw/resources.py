@@ -116,11 +116,12 @@ class MaterialResource:
 # Image Loading
 #
 
+
 def load_image(
-        image_path: Path | str,
+    image_path: Path | str,
 ) -> npt.NDArray[np.float32]:
     """
-    Loads an image from a file path and returns it as an (H, W, C) float32 RGB array 
+    Loads an image from a file path and returns it as an (H, W, C) float32 RGB array
     with values in [0.0, 1.0].
     """
 
@@ -129,8 +130,7 @@ def load_image(
     return decode_image(image_bs)
 
 
-def decode_image(
-        image_bs: bytes ) -> npt.NDArray[np.float32]:
+def decode_image(image_bs: bytes) -> npt.NDArray[np.float32]:
     """
     Decode image bytes into an (H, W, C) float32 RGB array with values in [0.0, 1.0].
     Supports PNG, JPEG, BMP formats.
@@ -139,22 +139,26 @@ def decode_image(
     if image_bs.startswith(b"#?RADIANCE"):
         return _decode_hdr_image(image_bs)
 
-    if any((
-        image_bs.startswith(b"\x89PNG"),   # PNG
-        image_bs.startswith(b"BM"),         # BMP
-        image_bs.startswith(b"\xff\xd8\xff\xe0"),  # JPEG
-    )):
+    if any(
+        (
+            image_bs.startswith(b"\x89PNG"),  # PNG
+            image_bs.startswith(b"BM"),  # BMP
+            image_bs.startswith(b"\xff\xd8\xff\xe0"),  # JPEG
+        )
+    ):
         return _decode_any_image_with_pil(image_bs)
-    
+
     raise ValueError("Unsupported image byte format.")
 
-def _decode_any_image_with_pil(
-        image_bytes: bytes ) -> npt.NDArray[np.float32]:
-    assert any((
-        image_bytes.startswith(b"\x89PNG"),   # PNG
-        image_bytes.startswith(b"BM"),         # BMP
-        image_bytes.startswith(b"\xff\xd8\xff\xe0"),  # JPEG
-    ))
+
+def _decode_any_image_with_pil(image_bytes: bytes) -> npt.NDArray[np.float32]:
+    assert any(
+        (
+            image_bytes.startswith(b"\x89PNG"),  # PNG
+            image_bytes.startswith(b"BM"),  # BMP
+            image_bytes.startswith(b"\xff\xd8\xff\xe0"),  # JPEG
+        )
+    )
     with PIL.Image.open(io.BytesIO(image_bytes)) as pil_im:
         bands = pil_im.getbands()
         if bands == ("R", "G", "B"):
@@ -167,8 +171,7 @@ def _decode_any_image_with_pil(
             raise ValueError(f"Unsupported image bands: {bands}")
 
 
-def _decode_hdr_image(
-        image_bs: bytes ) -> npt.NDArray[np.float32]:
+def _decode_hdr_image(image_bs: bytes) -> npt.NDArray[np.float32]:
     raise NotImplementedError()
 
 
@@ -571,7 +574,9 @@ class CookedAtlas:
     image_format: ImageFormat = "rgba32float"
     readme_text: str | None = None
     license_text: str | None = None
-    as_glyph_cache: dict["CookedAtlasGlyphCacheKey", "CookedAtlasGlyphInfo"] | None = None
+    as_glyph_cache: dict["CookedAtlasGlyphCacheKey", "CookedAtlasGlyphInfo"] | None = (
+        None
+    )
 
     @staticmethod
     def load(
@@ -598,7 +603,7 @@ class CookedAtlas:
         # Load atlas.png with format conversion
         atlas_path = path / "atlas.png"
         atlas_data = load_image(atlas_path)
-        
+
         # (Optional) Load README.md
         if load_readme_text:
             with open(path / "README.md", "r", encoding="utf-8") as f:

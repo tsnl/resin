@@ -1,12 +1,12 @@
 import time
 from typing import Generator
 
-import imageio.v3 as iio
 import numpy as np
 import os
 import pytest
 import rich
 import wgpu
+import PIL.Image
 
 from zfw import (
     Draw3dRenderer,
@@ -18,6 +18,7 @@ from zfw import (
     Draw3dMaterial,
     load_gltf,
     logger,
+    load_image,
 )
 
 FRAME_W = 1024
@@ -105,7 +106,7 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
     img_data = (data * 255.0).astype(np.uint8)
     output_path = f"output/zfw/test_draw_3d/{filename}"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    iio.imwrite(output_path, img_data)
+    PIL.Image.fromarray(img_data).save(output_path)
 
 
 @pytest.fixture(scope="module")
@@ -393,7 +394,9 @@ def test_depth_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRendere
     )
 
 
-def test_world_position_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
+def test_world_position_visualization(
+    gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
+):
     """Test world position visualization to see what's actually being hit."""
     frame = Draw3dFrame(renderer)
 
@@ -433,7 +436,9 @@ def test_world_position_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw
     _save_debug_image(data, "test_world_position.png", format="RGBA")
 
 
-def test_coordinate_system_offset_px(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
+def test_coordinate_system_offset_px(
+    gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
+):
     """Test that positive X camera offset shifts the depth centroid left."""
     frame = Draw3dFrame(renderer)
 
@@ -493,7 +498,9 @@ def test_coordinate_system_offset_px(gpu_device: wgpu.GPUDevice, renderer: Draw3
     )
 
 
-def test_coordinate_system_offset_py(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
+def test_coordinate_system_offset_py(
+    gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
+):
     """Test that positive Y camera offset makes the cube appear larger."""
     frame = Draw3dFrame(renderer)
 
@@ -584,7 +591,9 @@ def test_coordinate_system_offset_py(gpu_device: wgpu.GPUDevice, renderer: Draw3
     )
 
 
-def test_coordinate_system_offset_pz(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
+def test_coordinate_system_offset_pz(
+    gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
+):
     """Test that positive Z camera offset shifts the depth centroid downward."""
     frame = Draw3dFrame(renderer)
 
@@ -649,7 +658,7 @@ def test_environment_map_basic(gpu_device: wgpu.GPUDevice, renderer: Draw3dRende
     frame = Draw3dFrame(renderer)
 
     # Load HDR environment map
-    hdr_data = iio.imread("tests/data/glTF-Sample-Environments/helipad.hdr")
+    hdr_data = load_image("tests/data/glTF-Sample-Environments/helipad.hdr")
     # HDR files are loaded as RGB float32 in linear color space
     assert hdr_data.ndim == 3
     assert hdr_data.shape[2] == 3

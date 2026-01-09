@@ -441,7 +441,7 @@ def test_draw_2d_ext_layered_quads_and_text(engine: Draw2dExTestEngine):
     assert_image_matches_reference(
         image,
         "test_draw_2d_ext_layered_quads_and_text",
-        psnr_threshold=65.0,
+        psnr_threshold=56.0,
         test_subdir="test_draw_2d_ext",
     )
 

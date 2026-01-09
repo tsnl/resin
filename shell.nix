@@ -10,11 +10,15 @@ pkgs.mkShell {
     # Python
     uv
 
+    # Numba dependencies:
+    cmake
+    llvmPackages_20.libllvm
+
     # zlib (for NumPy)
     zlib
 
     # GLFW:
-    glfw # The GLFW library
+    glfw
     # GLFW for Wayland
     wayland
     wayland-protocols
