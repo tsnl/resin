@@ -350,8 +350,8 @@ class GltfViewerWidget(zfw.GuiWidget):
         self._meshes = {}
         renderer = self._gui_window.draw_3d_renderer
         for (geom_res, mat_res), transforms in self._resource_meshes.items():
-            geometry = renderer.get_geometry(geom_res)
-            material = renderer.get_material(mat_res)
+            geometry = zfw.Draw3dGeometry.from_resource(geom_res, renderer)
+            material = zfw.Draw3dMaterial.from_resource(mat_res, renderer)
             self._meshes[(geometry, material)] = transforms
 
         # Update label

@@ -77,10 +77,6 @@ class Draw3dRenderer(BaseDisposable):
     allocated_image_count: int
     allocated_subpixel_count: int
 
-    geometry_cache: dict["GeometryResource", "Draw3dGeometry"]
-    material_cache: dict["MaterialResource", "Draw3dMaterial"]
-    texture_cache: dict[tuple["ImageResource", "Draw3dTextureUsage"], "Draw3dTexture"]
-
     def __init__(
         self,
         device: wgpu.GPUDevice,
@@ -492,12 +488,6 @@ class Draw3dRenderer(BaseDisposable):
         self.allocated_image_count = 0
         self.allocated_subpixel_count = 0
 
-        # Cache for converting GeometryResource/MaterialResource to Draw3d objects
-        # Maps resource objects to their Draw3d counterparts
-        self._geometry_cache = {}
-        self._material_cache = {}
-        self._texture_cache = {}
-
     def _on_dispose(self) -> None:
         self.geometry_heap.dispose()
         self.bvh_node_heap.dispose()
@@ -587,104 +577,6 @@ class Draw3dRenderer(BaseDisposable):
             command_encoder,
             scene,
         )
-
-    def get_geometry(self, resource: "GeometryResource") -> "Draw3dGeometry":
-        """
-        Convert a GeometryResource to a Draw3dGeometry, using a cache to avoid
-        recreating the same geometry multiple times.
-
-        :param resource: The GeometryResource to convert.
-        :return: A Draw3dGeometry instance.
-        """
-
-        if cached_entry := self._geometry_cache.get(resource):
-            return cached_entry
-
-        new_draw_3d_geometry = Draw3dGeometry(
-            renderer=self,
-            v_p_array=resource.v_p_array,
-            v_n_array=resource.v_n_array,
-            v_t_array=resource.v_t_array,
-            t_indices=resource.t_indices,
-        )
-        self._geometry_cache[resource] = new_draw_3d_geometry
-
-        return new_draw_3d_geometry
-
-    def get_texture(
-        self,
-        resource: "ImageResource",
-        usage: "Draw3dTextureUsage",
-    ) -> "Draw3dTexture":
-        """
-        Convert an ImageResource to a Draw3dTexture, using a cache to avoid
-        recreating the same texture multiple times.
-
-        :param resource: The ImageResource to convert.
-        :return: A Draw3dTexture instance.
-        """
-
-        cache_key = (resource, usage)
-
-        if cached_entry := self._texture_cache.get(cache_key):
-            return cached_entry
-
-        new_draw_3d_texture = Draw3dTexture(
-            renderer=self,
-            resource=resource,
-            usage=usage,
-        )
-        self._texture_cache[cache_key] = new_draw_3d_texture
-
-        return new_draw_3d_texture
-
-    def get_material(self, resource: "MaterialResource") -> "Draw3dMaterial":
-        """
-        Convert a MaterialResource to a Draw3dMaterial, using a cache to avoid
-        recreating the same material multiple times.
-
-        :param resource: The MaterialResource to convert.
-        :return: A Draw3dMaterial instance.
-        """
-
-        if cached_entry := self._material_cache.get(resource):
-            return cached_entry
-
-        # Convert ImageResource objects to Draw3dTexture objects
-        color_texture = (
-            self.get_texture(resource.color_map, usage="color")
-            if resource.color_map
-            else None
-        )
-        normal_texture = (
-            self.get_texture(resource.normal_map, usage="normal")
-            if resource.normal_map
-            else None
-        )
-        metalness_texture = (
-            self.get_texture(resource.metalness_map, usage="metalness")
-            if resource.metalness_map
-            else None
-        )
-        roughness_texture = (
-            self.get_texture(resource.roughness_map, usage="roughness")
-            if resource.roughness_map
-            else None
-        )
-
-        new_draw_3d_material = Draw3dMaterial(
-            renderer=self,
-            color_texture=color_texture,
-            color_factor=resource.color_factor,
-            normal_texture=normal_texture,
-            metalness_texture=metalness_texture,
-            metalness_factor=resource.metalness_factor,
-            roughness_texture=roughness_texture,
-            roughness_factor=resource.roughness_factor,
-        )
-        self._material_cache[resource] = new_draw_3d_material
-
-        return new_draw_3d_material
 
 
 class Draw3dFrame(BaseDisposable):
@@ -908,11 +800,6 @@ class Draw3dFrame(BaseDisposable):
 
 
 class Draw3dGeometry(BaseDisposable):
-    """
-    IMPORTANT: do not call this constructor directly: use
-    `Draw3dRenderer.get_geometry()` instead.
-    """
-
     renderer: Draw3dRenderer
 
     triangle_count: int
@@ -1006,15 +893,21 @@ class Draw3dGeometry(BaseDisposable):
         # Done:
         return v
 
+    @staticmethod
+    def from_resource(
+        geometry: "GeometryResource",
+        renderer: Draw3dRenderer,
+    ) -> "Draw3dGeometry":
+        return Draw3dGeometry(
+            renderer,
+            v_p_array=geometry.v_p_array,
+            v_n_array=geometry.v_n_array,
+            v_t_array=geometry.v_t_array,
+            t_indices=geometry.t_indices,
+        )
+
 
 class Draw3dTexture(BaseDisposable):
-    """
-    IMPORTANT: do not call this constructor directly: use `Draw3dRenderer.get_texture()`
-    instead.
-
-    Represents a GPU texture created from an ImageResource.
-    """
-
     renderer: Draw3dRenderer
     allocation: TextureHeapAllocation
 
@@ -1022,21 +915,16 @@ class Draw3dTexture(BaseDisposable):
         self,
         renderer: Draw3dRenderer,
         *,
-        resource: ImageResource,
+        data: np.ndarray,
         usage: "Draw3dTextureUsage",
     ) -> None:
         super().__init__()
 
         self.renderer = renderer
-        self.allocation = renderer._add_texture(data=resource.data, usage=usage)
+        self.allocation = renderer._add_texture(data=data, usage=usage)
 
 
 class Draw3dMaterial(BaseDisposable):
-    """
-    IMPORTANT: do not call this constructor directly: use
-    `Draw3dRenderer.get_material()` instead.
-    """
-
     renderer: Draw3dRenderer
     material_id: int
 
@@ -1090,6 +978,58 @@ class Draw3dMaterial(BaseDisposable):
             metalness_factor=metalness_factor,
             roughness_map_id=roughness_map_id,
             roughness_factor=roughness_factor,
+        )
+
+    @staticmethod
+    def from_resource(
+        material: "MaterialResource",
+        renderer: Draw3dRenderer,
+    ) -> "Draw3dMaterial":
+        color_texture = (
+            Draw3dTexture(
+                renderer,
+                data=material.color_map,
+                usage="color",
+            )
+            if material.color_map is not None
+            else None
+        )
+        normal_texture = (
+            Draw3dTexture(
+                renderer,
+                data=material.normal_map,
+                usage="normal",
+            )
+            if material.normal_map is not None
+            else None
+        )
+        metalness_texture = (
+            Draw3dTexture(
+                renderer,
+                data=material.metalness_map,
+                usage="metalness",
+            )
+            if material.metalness_map is not None
+            else None
+        )
+        roughness_texture = (
+            Draw3dTexture(
+                renderer,
+                data=material.roughness_map,
+                usage="roughness",
+            )
+            if material.roughness_map is not None
+            else None
+        )
+        return Draw3dMaterial(
+            renderer,
+            color_texture=color_texture,
+            color_factor=material.color_factor,
+            normal_texture=normal_texture,
+            metalness_texture=metalness_texture,
+            metalness_factor=material.metalness_factor,
+            roughness_texture=roughness_texture,
+            roughness_factor=material.roughness_factor,
         )
 
 

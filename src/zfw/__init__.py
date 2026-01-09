@@ -21,6 +21,7 @@ __all__ = [
     "Draw3dMaterial",
     "Draw3dRenderer",
     "Draw3dScene",
+    "Draw3dTexture",
     "Font",
     "FontSize",
     "FontWeight",
@@ -97,6 +98,7 @@ from .draw_3d import (
     Draw3dCamera,
     Draw3dGeometry,
     Draw3dMaterial,
+    Draw3dTexture,
 )
 from .resources import (
     CookedAtlas,

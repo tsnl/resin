@@ -76,6 +76,7 @@ from .draw_2d_ext import (
 from .draw_3d import (
     Draw3dCamera,
     Draw3dFrame,
+    Draw3dTexture,
     Draw3dGeometry,
     Draw3dMaterial,
     Draw3dRenderer,
@@ -321,7 +322,7 @@ class GuiWindow(BaseDisposable):
     _draw_3d_frame: Draw3dFrame | None
     _camera_transform: np.ndarray | None
     _camera_intrinsics: Draw3dCamera | None
-    _environment_map: ImageResource | None
+    _environment_map: Draw3dTexture | None
 
     # 3D mesh collection for current frame
     _meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]
@@ -521,7 +522,13 @@ class GuiWindow(BaseDisposable):
 
     def set_environment_map(self, environment_map: ImageResource | None) -> None:
         """Set the environment map for IBL lighting."""
-        self._environment_map = environment_map
+        self._environment_map = (
+            Draw3dTexture(
+                self._draw_3d_renderer, data=environment_map.data, usage="environment"
+            )
+            if environment_map
+            else None
+        )
 
     def add_3d_mesh(
         self,
@@ -711,14 +718,7 @@ class GuiWindow(BaseDisposable):
                 )
 
             # Build 3D scene
-            environment_map_texture = (
-                self._draw_3d_renderer.get_texture(
-                    self._environment_map,
-                    usage="environment",
-                )
-                if self._environment_map
-                else None
-            )
+            environment_map_texture = self._environment_map
             scene = Draw3dScene(
                 camera=self._camera_intrinsics,
                 meshes=self._meshes,

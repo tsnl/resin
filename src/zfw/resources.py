@@ -18,6 +18,7 @@ __all__ = [
 ]
 
 import base64
+from collections import defaultdict
 import hashlib
 import io
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
+import quaternion
 import orjson
 import pydantic
 import imageio.v3 as iio
@@ -35,7 +37,7 @@ import pygltflib
 import jaxtyping as jt
 
 from .excepts import LogicError
-from .basic import BaseDisposable, Font, FontSize, FontWeight, logger
+from .basic import BaseDisposable, Font, FontSize, FontWeight, expect, logger
 from .images import (
     ImageFormat,
     convert_image_format,
@@ -82,38 +84,27 @@ class GeometryResource:
 
 
 class MaterialResource:
-    """Contains image resources and factors needed to construct a Draw3dMaterial."""
+    """
+    Contains image resources and factors needed to construct a Draw3dMaterial.
+    """
 
-    color_map: "ImageResource | None"
-    """Base color texture (3-channel, linear space)."""
-
+    color_map: "npt.NDArray[np.float32] | None"
     color_factor: tuple[float, float, float]
-    """Base color factor."""
-
-    normal_map: "ImageResource | None"
-    """Normal map texture (3-channel, linear space)."""
-
-    metalness_map: "ImageResource | None"
-    """Metalness texture (1-channel, linear space)."""
-
+    normal_map: "npt.NDArray[np.float32] | None"
+    metalness_map: "npt.NDArray[np.float32] | None"
     metalness_factor: float
-    """Metalness factor."""
-
-    roughness_map: "ImageResource | None"
-    """Roughness texture (1-channel, linear space)."""
-
+    roughness_map: "npt.NDArray[np.float32] | None"
     roughness_factor: float
-    """Roughness factor."""
 
     def __init__(
         self,
         *,
-        color_map: "ImageResource | None" = None,
+        color_map: "npt.NDArray[np.float32] | None",
+        normal_map: "npt.NDArray[np.float32] | None",
+        metalness_map: "npt.NDArray[np.float32] | None",
+        roughness_map: "npt.NDArray[np.float32] | None",
         color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
-        normal_map: "ImageResource | None" = None,
-        metalness_map: "ImageResource | None" = None,
         metalness_factor: float = 1.0,
-        roughness_map: "ImageResource | None" = None,
         roughness_factor: float = 1.0,
     ) -> None:
         self.color_map = color_map
@@ -254,96 +245,161 @@ def load_image_from_bytes(
 #
 
 
-class BaseLoader(BaseDisposable):
-    def _on_dispose(self) -> None:
-        return super()._on_dispose()
+type GltfScene = dict[
+    tuple[GeometryResource, MaterialResource],
+    npt.NDArray[np.float32],  # (N, 4, 4)
+]
 
 
-class FileLoader(BaseLoader):
-    def load_file_from_url(self, url: str) -> bytes:
-        if url.startswith("file://"):
-            path = Path(url[len("file://") :])
-            return self.load_file_from_path(path)
+def load_gltf(gltf_path: Path | str) -> GltfScene:
+    """
+    Load a glTF file and return a meshes dict with resource types.
 
-        if url.startswith("data:"):
-            _, bs_base64 = url.split(",", maxsplit=1)
+    Returns a list of GltfScene objects. Each GltfScene is a dict mapping a pair of
+    (geometry_resource, material_resource) to instance transforms (Nx4x4 arrays).
+    Matrices are in row-major order, and should have [0, 0, 0, 1] in the last row to
+    represent affine transforms in homogeneous coordinates.
+
+    :param gltf_path: Path to the glTF or GLB file.
+    :return: GltfScene object.
+    """
+
+    gltf_path = Path(gltf_path)
+
+    # Load glTF file
+    gltf = pygltflib.GLTF2().load(str(gltf_path))
+    if gltf is None:
+        raise ValueError(f"Failed to load glTF file: {gltf_path}")
+
+    # Verify exactly one scene:
+    if not gltf.scenes or len(gltf.scenes) == 0:
+        raise ValueError("glTF file has no scenes")
+
+    #
+    # help_load_url()
+    #
+
+    def load_url(uri: str) -> bytes:
+        if uri.startswith("file://"):
+            file_path = Path(uri[len("file://") :])
+            return file_path.read_bytes()
+        elif uri.startswith("data:"):
+            _, bs_base64 = uri.split(",", maxsplit=1)
             return base64.b64decode(bs_base64)
+        else:
+            file_path = gltf_path.parent / uri
+            return file_path.read_bytes()
 
-        raise ValueError(f"Unsupported URL scheme in: {url}")
+    #
+    # load_buffer()
+    #
 
-    def load_file_from_path(self, path: Path) -> bytes:
-        return path.read_bytes()
+    def load_buffer(buffer: pygltflib.Buffer) -> np.ndarray:
+        """
+        Loads a file from a path or raw bytes.
 
+        If raw bytes as a numpy array are provided, they are returned as-is.
+        """
 
-class ImageLoader(BaseLoader):
-    def __init__(self):
-        super().__init__()
-        self._rgb_image_file_cache: dict[str, ImageResource] = {}
-        self._rgb_image_bytes_cache: dict[str, ImageResource] = {}
+        if (uri := buffer.uri) is not None:
+            return np.frombuffer(load_url(uri), dtype=np.uint8)
 
-    def load_rgb_image(self, url: str, *, cache: bool = True) -> ImageResource:
-        if url.startswith("file://"):
-            path = Path(url[len("file://") :])
-            return self.load_rgb_image_from_file(path, cache=cache)
-        if url.startswith("data:"):
-            _, bs_base64 = url.split(",", maxsplit=1)
-            bs = base64.b64decode(bs_base64)
-            return self.load_rgb_image_from_bytes(bs, cache=cache)
-        raise ValueError(f"Unsupported URL scheme in: {url}")
+        if (buffer_bytes := gltf.binary_blob()) is not None:
+            return np.frombuffer(buffer_bytes, dtype=np.uint8)
 
-    def load_rgb_image_from_file(
-        self, path: Path, *, cache: bool = True
-    ) -> ImageResource:
-        cache_key = str(path.resolve().as_posix())
-        if cache and (cache_image := self._rgb_image_file_cache.get(cache_key)):
-            return cache_image
+        raise ValueError("Buffer has no URI and GLTF has no binary blob")
 
-        im = cv.imread(
-            str(path),
-            cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH,
+    def source_desc(source: str | bytes) -> str:
+        match source:
+            case str():
+                return source
+            case bytes():
+                shasum = hashlib.sha1(source).hexdigest()
+                return f"bytes(len={len(source)}, sha1={shasum[:7]})"
+            case _:
+                return f"unknown(type={type(source)})"
+
+    buffers = [load_buffer(buffer) for buffer in (gltf.buffers or [])]
+
+    #
+    # load_buffer_view()
+    #
+
+    def load_buffer_view(buffer_view: pygltflib.BufferView) -> np.ndarray:
+        buffer_bytes = buffers[buffer_view.buffer]
+        byte_offset = buffer_view.byteOffset or 0
+        byte_length = buffer_view.byteLength
+        return buffer_bytes[byte_offset : byte_offset + byte_length]
+
+    buffer_views = [
+        load_buffer_view(buffer_view) for buffer_view in (gltf.bufferViews or [])
+    ]
+
+    #
+    # load_accessor()
+    #
+
+    def load_accessor(accessor: pygltflib.Accessor) -> np.ndarray:
+        assert accessor.bufferView is not None
+        bs = buffer_views[accessor.bufferView]
+
+        # If byteStride is set, handle strided data:
+        bv = gltf.bufferViews[accessor.bufferView]
+        if bv.byteStride is not None or bv.byteStride != 0:
+            bs = bs[0 : bv.byteLength : bv.byteStride]
+
+        # Get the component type:
+        component_dtype: np.dtype = {
+            5120: np.dtype(np.int8),
+            5121: np.dtype(np.uint8),
+            5122: np.dtype(np.int16),
+            5123: np.dtype(np.uint16),
+            5125: np.dtype(np.uint32),
+            5126: np.dtype(np.float32),
+        }[accessor.componentType]
+
+        # Get the component count:
+        component_count: int = {
+            "SCALAR": 1,
+            "VEC2": 2,
+            "VEC3": 3,
+            "VEC4": 4,
+            "MAT2": 4,
+            "MAT3": 9,
+            "MAT4": 16,
+        }[accessor.type]
+
+        # Get the element count:
+        element_count = accessor.count
+
+        # Create array
+        return np.frombuffer(
+            np.ascontiguousarray(bs),
+            dtype=(component_dtype, component_count),
+            count=element_count,
         )
-        im = ImageLoader._validate_rgb_image(im, str(path))
 
-        res = ImageResource(
-            data=ImageLoader._normalize_image(im),
-            width=im.shape[1],
-            height=im.shape[0],
-            depth=3,
-            image_format="rgb32float",
+    accessors = [load_accessor(accessor) for accessor in (gltf.accessors or [])]
+
+    #
+    # load_image:
+    #
+
+    def load_image(image: pygltflib.Image) -> np.ndarray:
+        bs = np.frombuffer(load_image_raw_bytes(image), dtype=np.uint8)
+        im = cv.imdecode(bs, cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH)
+        im = validate_rgb_image(im)
+        im = normalize_image(im)
+        return im
+
+    def load_image_raw_bytes(image: pygltflib.Image) -> bytes:
+        return (
+            load_url(image.uri)
+            if image.uri is not None
+            else buffer_views[expect(image.bufferView)].tobytes()
         )
 
-        if cache:
-            self._rgb_image_file_cache[cache_key] = res
-
-        return res
-
-    def load_rgb_image_from_bytes(
-        self, bs: bytes, *, cache: bool = True
-    ) -> ImageResource:
-        cache_key = hashlib.sha1(bs).hexdigest()
-        if cache and (cache_image := self._rgb_image_bytes_cache.get(cache_key)):
-            return cache_image
-
-        im = cv.imdecode(
-            np.frombuffer(bs, np.uint8),
-            cv.IMREAD_COLOR | cv.IMREAD_ANYDEPTH,
-        )
-        im = ImageLoader._validate_rgb_image(im, "bytes")
-
-        res = ImageResource(
-            data=ImageLoader._normalize_image(im),
-            width=im.shape[1],
-            height=im.shape[0],
-            depth=3,
-            image_format="rgb32float",
-        )
-
-        self._rgb_image_bytes_cache[cache_key] = res
-
-        return res
-
-    @staticmethod
-    def _normalize_image(im: np.ndarray) -> np.ndarray:
+    def normalize_image(im: np.ndarray) -> np.ndarray:
         match im.dtype.type:
             case np.uint8:
                 return im.astype(np.float32) / 255.0
@@ -354,696 +410,220 @@ class ImageLoader(BaseLoader):
             case _:
                 raise LogicError(f"Unsupported image dtype: {im.dtype}")
 
-    @staticmethod
-    def _validate_rgb_image(im: npt.ArrayLike | None, source: str) -> np.ndarray:
-        if im is None:
-            raise IOError(f"Could not load image from: {source}")
+    def validate_rgb_image(im: npt.ArrayLike) -> np.ndarray:
         im = np.asarray(im)
         if im.shape[2] != 3:
             raise ValueError(f"Expected RGB image with 3 channels, got: {im.shape[2]}")
         return im
 
+    images = [load_image(image) for image in (gltf.images or [])]
 
-class GltfLoader(ImageLoader, FileLoader):
-    def __init__(self):
-        super().__init__()
+    #
+    # load_texture:
+    #
 
-    def load_gltf(
-        self, path: Path
-    ) -> dict[
-        tuple[GeometryResource, MaterialResource],
-        npt.NDArray[np.float32],  # (N, 4, 4)
-    ]:
-        gltf = pygltflib.GLTF2()
+    def load_texture(texture: pygltflib.Texture) -> np.ndarray:
+        if texture.source is None:
+            raise ValueError("Texture has no source")
+        # We ignore sampler for now
+        return images[texture.source]
 
-        if not gltf.load(str(path)):
-            raise IOError(f"Could not load glTF file: {path}")
+    textures = [load_texture(texture) for texture in (gltf.textures or [])]
 
-        buffers = [
-            self._load_gltf_buffer(buffer)  #
-            for buffer in (gltf.buffers or [])
-        ]
-        images = [
-            self._load_gltf_image(image, gltf=gltf, buffers=buffers)  #
-            for image in (gltf.images or [])
-        ]
+    #
+    # load_material:
+    #
 
-        # TODO: Continue from here.
+    def load_material(material: pygltflib.Material) -> MaterialResource:
+        if material.pbrMetallicRoughness is None:
+            raise ValueError("Only PBR metallic-roughness materials are supported")
 
-        raise NotImplementedError()
-
-    def _load_gltf_buffer(self, buffer: pygltflib.Buffer) -> bytes:
-        if (buffer_uri := buffer.uri) is not None:
-            return self.load_file_from_url(buffer_uri)
-        raise ValueError("glTF buffer has no URI")
-
-    def _load_gltf_image(
-        self,
-        image: pygltflib.Image,
-        *,
-        gltf: pygltflib.GLTF2,
-        buffers: list[bytes],
-    ) -> ImageResource:
-        if (image_uri := image.uri) is not None:
-            return self.load_rgb_image(image_uri)
-
-        if (image_bv := image.bufferView) is not None:
-            bv = gltf.bufferViews[image_bv]
-            bv_offset = bv.byteOffset or 0
-            bv_length = bv.byteLength
-            bs = buffers[bv.buffer][bv_offset : bv_offset + bv_length]
-            return self.load_rgb_image_from_bytes(bs)
-
-        if image.bufferView is not None:
-            raise NotImplementedError(
-                "Loading glTF images from bufferView not implemented"
-            )
-
-        raise ValueError("glTF image has no URI or bufferView")
-
-
-class Loader(GltfLoader, ImageLoader, FileLoader):
-    pass
-
-
-#
-# GLTF loader
-#
-
-
-def load_gltf(
-    path: Path | str,
-    *,
-    transform_coordinate_system: bool = True,
-) -> dict[tuple[GeometryResource, MaterialResource], jt.Float32[np.ndarray, "N 4 4"]]:
-    """
-    Load a glTF file and return a meshes dict with resource types.
-
-    Returns a meshes dict mapping (geometry_resource, material_resource) pairs to instance
-    transforms (Nx4x4 arrays). Matrices are in row-major order, and should have [0, 0, 0, 1]
-    in the last row to represent affine transforms in homogeneous coordinates.
-
-    :param path: Path to the glTF or GLB file.
-    :param transform_coordinate_system: If True, transform from glTF's coordinate
-        system (Y-up, Z-forward, X-right) to Z-up, Y-forward, X-right. This applies
-        a -90° rotation around the X-axis to all geometry and instance transforms.
-    :return: Dict mapping (geometry_resource, material_resource) to instance transforms.
-    """
-    path = Path(path)
-    LOG.info(f"Loading glTF file: {path}")
-
-    gltf = pygltflib.GLTF2().load(str(path))
-
-    # Check if glTF loaded successfully
-    if gltf is None:
-        raise ValueError(f"Failed to load glTF file: {path}")
-
-    # Load all binary data
-    blob_data = _load_blob_data(gltf, path)
-
-    # Create shared resources: images, materials, geometries
-    image_sources = _load_image_sources(gltf, blob_data, path.parent)
-    materials = _load_material_resources(gltf, image_sources)
-    geometries = _load_geometry_resources(gltf, blob_data)
-
-    # Process the default scene (or first scene)
-    scene_idx = gltf.scene if gltf.scene is not None else 0
-    if not gltf.scenes or scene_idx >= len(gltf.scenes):
-        LOG.warning("No valid scene found in glTF file")
-        return {}
-
-    scene = gltf.scenes[scene_idx]
-    meshes = _process_scene_resources(
-        gltf, scene, geometries, materials, transform_coordinate_system
-    )
-
-    LOG.info(
-        f"Loaded scene with {len(geometries)} geometries, "
-        f"{len(materials)} materials, {sum(len(t) for t in meshes.values())} instances"
-    )
-
-    return meshes
-
-
-def _load_blob_data(gltf: pygltflib.GLTF2, path: Path) -> list[bytes]:
-    """Load all buffer data from the glTF file."""
-    blob_data: list[bytes] = []
-
-    for buffer_idx, buffer in enumerate(gltf.buffers or []):
-        if buffer.uri is None:
-            # Embedded GLB binary chunk
-            if (bb := gltf.binary_blob()) is not None:
-                assert isinstance(bb, bytes)
-                blob_data.append(bb)
-            else:
-                raise ValueError(f"Buffer {buffer_idx} has no URI and no binary blob")
-        elif buffer.uri.startswith("data:"):
-            # Base64 embedded data
-            header, data = buffer.uri.split(",", 1)
-            blob_data.append(base64.b64decode(data))
-        else:
-            # External file
-            buffer_path = path.parent / buffer.uri
-            blob_data.append(buffer_path.read_bytes())
-
-    return blob_data
-
-
-def _get_accessor_data(
-    gltf: pygltflib.GLTF2,
-    blob_data: list[bytes],
-    accessor_idx: int,
-) -> np.ndarray:
-    """Extract numpy array data from a glTF accessor."""
-    accessor = gltf.accessors[accessor_idx]
-    assert isinstance(accessor.bufferView, int)
-    buffer_view = gltf.bufferViews[accessor.bufferView]
-
-    # Component type mapping
-    component_types: dict[int, np.dtype] = {
-        5120: np.dtype(np.int8),
-        5121: np.dtype(np.uint8),
-        5122: np.dtype(np.int16),
-        5123: np.dtype(np.uint16),
-        5125: np.dtype(np.uint32),
-        5126: np.dtype(np.float32),
-    }
-    dtype = component_types[accessor.componentType]
-
-    # Type to component count mapping
-    type_counts: dict[str, int] = {
-        "SCALAR": 1,
-        "VEC2": 2,
-        "VEC3": 3,
-        "VEC4": 4,
-        "MAT2": 4,
-        "MAT3": 9,
-        "MAT4": 16,
-    }
-    component_count = type_counts[accessor.type]
-
-    # Get raw bytes
-    buffer_bytes = blob_data[buffer_view.buffer]
-    byte_offset = (buffer_view.byteOffset or 0) + (accessor.byteOffset or 0)
-    byte_stride = buffer_view.byteStride
-
-    if byte_stride is None or byte_stride == 0:
-        # Tightly packed data
-        byte_length = accessor.count * component_count * dtype.itemsize
-        raw_bytes = buffer_bytes[byte_offset : byte_offset + byte_length]
-        data = np.frombuffer(raw_bytes, dtype=dtype)
-        if component_count > 1:
-            data = data.reshape(accessor.count, component_count)
-    else:
-        # Strided data - need to extract element by element
-        element_size = component_count * dtype.itemsize
-        data = np.zeros((accessor.count, component_count), dtype=dtype)
-        for i in range(accessor.count):
-            offset = byte_offset + i * byte_stride
-            element_bytes = buffer_bytes[offset : offset + element_size]
-            element = np.frombuffer(element_bytes, dtype=dtype)
-            data[i] = element
-        if component_count == 1:
-            data = data.flatten()
-
-    return data
-
-
-class _ImageSource:
-    """Stores raw image bytes or file path for deferred loading with format conversion."""
-
-    def __init__(
-        self,
-        *,
-        raw_bytes: bytes | None = None,
-        file_path: Path | None = None,
-    ):
-        self.raw_bytes = raw_bytes
-        self.file_path = file_path
-
-    def load(
-        self, input_format: ImageFormat, output_format: ImageFormat
-    ) -> ImageResource:
-        """
-        Load the image with format conversion.
-
-        :param input_format: Format as stored (on disk/in bytes)
-        :param output_format: Desired output format
-        :return: ImageResource with converted data
-        """
-        if self.raw_bytes is not None:
-            return load_image_from_bytes(
-                self.raw_bytes,
-                image_format=output_format,
-                expected_format=output_format,
-            )
-        elif self.file_path is not None:
-            return load_image(
-                self.file_path,
-                image_format=input_format,
-                expected_format=output_format,
-            )
-        else:
-            raise ValueError("ImageSource has no raw_bytes or file_path")
-
-
-def _load_image_sources(
-    gltf: pygltflib.GLTF2,
-    blob_data: list[bytes],
-    base_path: Path,
-) -> list[_ImageSource]:
-    """Load all image sources from the glTF file.
-
-    Returns ImageSource objects that can be loaded later with the appropriate
-    color space for each texture usage.
-    """
-    image_sources: list[_ImageSource] = []
-
-    for image_idx, image in enumerate(gltf.images or []):
-        source: _ImageSource | None = None
-
-        if image.bufferView is not None:
-            # Image data embedded in buffer
-            buffer_view = gltf.bufferViews[image.bufferView]
-            buffer_bytes = blob_data[buffer_view.buffer]
-            byte_offset = buffer_view.byteOffset or 0
-            byte_length = buffer_view.byteLength
-            raw_bytes = buffer_bytes[byte_offset : byte_offset + byte_length]
-            source = _ImageSource(raw_bytes=raw_bytes)
-
-        elif (image_uri := image.uri) is not None:
-            if image_uri.startswith("data:"):
-                # Base64 embedded image
-                _, data = image_uri.split(",", 1)  # type: ignore[var-annotated]
-                raw_bytes = base64.b64decode(data)
-                source = _ImageSource(raw_bytes=raw_bytes)
-            else:
-                # External file
-                source = _ImageSource(file_path=base_path / image.uri)
-
-        if source is not None:
-            image_sources.append(source)
-            LOG.debug(f"Found image source {image_idx}: {image.uri=}")
-        else:
-            LOG.warning(f"Could not find image source {image_idx}")
-            # Create a placeholder that will return white
-            image_sources.append(_ImageSource(raw_bytes=_WHITE_1X1_PNG))
-
-    return image_sources
-
-
-# 1x1 white PNG for placeholder images
-_WHITE_1X1_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5/hPwAIAgL/4d1j8wAAAABJRU5ErkJggg=="
-)
-
-
-def _load_material_resources(
-    gltf: pygltflib.GLTF2,
-    image_sources: list[_ImageSource],
-) -> list[MaterialResource]:
-    """Load all materials from the glTF file as MaterialResource objects.
-
-    Format handling:
-    - Base color textures: RGBA sRGB on disk -> RGB linear (3 channels)
-    - Metallic-roughness textures: Linear on disk -> linear output (1 channel each)
-    - Normal maps: Linear on disk -> linear output (3 channels)
-    """
-    materials: list[MaterialResource] = []
-
-    # Cache for loaded ImageResource from sources
-    # Maps (source_index, output_format) to ImageResource
-    image_resource_cache: dict[tuple[int, ImageFormat], ImageResource] = {}
-
-    def get_or_load_image_resource(
-        source_idx: int,
-        output_format: ImageFormat,
-    ) -> ImageResource:
-        """Get or load image resource with format conversion, with caching."""
-        cache_key = (source_idx, output_format)
-        if cache_key in image_resource_cache:
-            return image_resource_cache[cache_key]
-
-        # FIXME: glTF image loading is not working properly...
-        # ...I don't even know, but unless we do this (linear->sRGB conversion), we get
-        # invalid normals from the glTF example resources. We very likely have a bug in
-        # our image loader
-        resource = image_sources[source_idx].load("rgba8unorm", "rgba32float")
-        # resource.data = convert_linear_to_srgb(resource.data)
-
-        image_resource_cache[cache_key] = resource
-        return resource
-
-    def extract_channel(resource: ImageResource, channel: int) -> ImageResource:
-        """Extract a single channel from an ImageResource."""
-        # Extract channel and create new ImageResource
-        channel_data = resource.data[:, :, channel : channel + 1]
-
-        # Determine output format (1-channel version)
-        if "32float" in resource.image_format:
-            out_fmt: ImageFormat = "r32float"
-        elif "16float" in resource.image_format:
-            out_fmt = "r16float"
-        else:
-            out_fmt = "r8unorm"
-
-        return ImageResource(
-            data=channel_data,
-            width=resource.width,
-            height=resource.height,
-            depth=1,
-            image_format=out_fmt,
-        )
-
-    for material_idx, material in enumerate(gltf.materials or []):
-        color_factor = (1.0, 1.0, 1.0)
-        color_map: "ImageResource | None" = None
-        normal_map: "ImageResource | None" = None
-        metalness_factor = 1.0
-        roughness_factor = 1.0
-        metalness_map: "ImageResource | None" = None
-        roughness_map: "ImageResource | None" = None
-
-        # PBR metallic-roughness workflow
         pbr = material.pbrMetallicRoughness
-        if pbr is not None:
-            # Base color
-            if pbr.baseColorFactor is not None:
-                color_factor = (
-                    pbr.baseColorFactor[0],
-                    pbr.baseColorFactor[1],
-                    pbr.baseColorFactor[2],
-                )
 
-            if pbr.baseColorTexture is not None:
-                tex_idx = pbr.baseColorTexture.index
-                if tex_idx is not None and gltf.textures:
-                    texture = gltf.textures[tex_idx]
-                    if texture.source is not None and texture.source < len(
-                        image_sources
-                    ):
-                        # Base color: sRGB RGBA on disk -> linear RGB output
-                        color_resource = get_or_load_image_resource(
-                            texture.source, output_format="rgb32float"
-                        )
-                        # Ensure it's 3-channel
-                        if color_resource.depth != 3:
-                            raise ValueError(
-                                f"Base color texture should have 3 channels, got {color_resource.depth}"
-                            )
-                        color_map = color_resource
-
-            # Metallic-roughness
-            if pbr.metallicFactor is not None:
-                metalness_factor = pbr.metallicFactor
-            if pbr.roughnessFactor is not None:
-                roughness_factor = pbr.roughnessFactor
-
-            if pbr.metallicRoughnessTexture is not None:
-                tex_idx = pbr.metallicRoughnessTexture.index
-                if tex_idx is not None and gltf.textures:
-                    texture = gltf.textures[tex_idx]
-                    if texture.source is not None and texture.source < len(
-                        image_sources
-                    ):
-                        # Load as linear RGBA
-                        mr_resource = get_or_load_image_resource(
-                            texture.source, output_format="rgba32float"
-                        )
-                        # glTF stores metallic in B channel (index 2),
-                        # roughness in G channel (index 1)
-                        metalness_map = extract_channel(mr_resource, 2)
-                        roughness_map = extract_channel(mr_resource, 1)
-
-        # Normal map (stored in linear space)
-        if material.normalTexture is not None:
-            tex_idx = material.normalTexture.index
-            if tex_idx is not None and gltf.textures:
-                texture = gltf.textures[tex_idx]
-                if texture.source is not None and texture.source < len(image_sources):
-                    # Normal map: linear RGBA on disk -> linear RGB output
-                    normal_resource = get_or_load_image_resource(
-                        texture.source,
-                        output_format="rgb32float",
-                    )
-                    # Ensure it's 3-channel
-                    if normal_resource.depth != 3:
-                        raise ValueError(
-                            f"Normal texture should have 3 channels, got {normal_resource.depth}"
-                        )
-                    # Ensure B channel is >= 0 (no negative Z)
-                    # From GLTF spec:
-                    # > Normal textures SHOULD NOT contain blue values less than or equal to 0.5.
-                    # https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html?utm_source=chatgpt.com#additional-textures
-                    if np.any(normal_resource.data[:, :, 2] < 0.5):
-                        raise ValueError(
-                            "Normal texture B channel has negative values, but this is "
-                            "forbidden by the glTF spec:\n"
-                            f"{normal_resource.data[:, :, 0].min()=}, "
-                            f"{normal_resource.data[:, :, 0].max()=}, "
-                            f"{normal_resource.data[:, :, 1].min()=}, "
-                            f"{normal_resource.data[:, :, 1].max()=}, "
-                            f"{normal_resource.data[:, :, 2].min()=}, "
-                            f"{normal_resource.data[:, :, 2].max()=}"
-                        )
-                    normal_map = normal_resource
-
-        material_resource = MaterialResource(
-            color_factor=color_factor,
-            color_map=color_map,
-            normal_map=normal_map,
-            metalness_factor=metalness_factor,
-            metalness_map=metalness_map,
-            roughness_factor=roughness_factor,
-            roughness_map=roughness_map,
+        base_color_factor = (
+            (
+                pbr.baseColorFactor[0],
+                pbr.baseColorFactor[1],
+                pbr.baseColorFactor[2],
+            )
+            if pbr.baseColorFactor is not None
+            else (1.0, 1.0, 1.0)
         )
-        materials.append(material_resource)
-        LOG.debug(f"Loaded material {material_idx}: {material.name}")
+        base_color_texture = (
+            textures[pbr.baseColorTexture.index] if pbr.baseColorTexture else None
+        )
 
-    # If no materials, create a default one
-    if not materials:
-        materials.append(MaterialResource())
+        metalness_roughness_texture = (
+            textures[pbr.metallicRoughnessTexture.index]
+            if pbr.metallicRoughnessTexture
+            else None
+        )
 
-    return materials
+        metalness_factor = pbr.metallicFactor if pbr.metallicFactor is not None else 1.0
+        metalness_texture = (
+            metalness_roughness_texture[:, :, 2:3]
+            if metalness_roughness_texture is not None
+            else None
+        )
 
+        roughness_factor = (
+            pbr.roughnessFactor if pbr.roughnessFactor is not None else 1.0
+        )
+        roughness_texture = (
+            metalness_roughness_texture[:, :, 1:2]
+            if metalness_roughness_texture is not None
+            else None
+        )
 
-def _load_geometry_resources(
-    gltf: pygltflib.GLTF2,
-    blob_data: list[bytes],
-) -> dict[tuple[int, int], GeometryResource]:
-    """
-    Load all unique geometries (mesh primitives) from the glTF file as GeometryResource objects.
+        normal_scale = np.float32(
+            (material.normalTexture.scale or 1.0) if material.normalTexture else 1.0
+        )
+        normal_texture = (
+            normal_scale * textures[expect(material.normalTexture.index)]
+            if material.normalTexture
+            else None
+        )
 
-    Returns a dict mapping (mesh_index, primitive_index) to GeometryResource.
-    Only TRIANGLES topology is supported.
-    """
-    geometries: dict[tuple[int, int], GeometryResource] = {}
+        return MaterialResource(
+            color_map=base_color_texture,
+            color_factor=base_color_factor,
+            normal_map=normal_texture,
+            metalness_map=metalness_texture,
+            metalness_factor=metalness_factor,
+            roughness_map=roughness_texture,
+            roughness_factor=roughness_factor,
+        )
 
-    for mesh_idx, mesh in enumerate(gltf.meshes or []):
-        for prim_idx, primitive in enumerate(mesh.primitives):
-            # Only support TRIANGULAR mode (4 = TRIANGLES)
-            mode = primitive.mode if primitive.mode is not None else 4
-            if mode != 4:
-                LOG.warning(
-                    f"Skipping primitive {mesh_idx}.{prim_idx}: "
-                    f"unsupported mode {mode} (only TRIANGLES=4 supported)"
-                )
-                continue
+    materials = [load_material(material) for material in (gltf.materials or [])]
 
-            # Get vertex attributes
-            attributes = primitive.attributes
+    #
+    # load_mesh():
+    #
 
-            # Position (required)
-            if attributes.POSITION is None:
-                LOG.warning(
-                    f"Skipping primitive {mesh_idx}.{prim_idx}: no POSITION attribute"
-                )
-                continue
+    def load_mesh(
+        mesh: pygltflib.Mesh,
+    ) -> list[tuple[GeometryResource, MaterialResource]]:
+        resources: list[tuple[GeometryResource, MaterialResource]] = []
 
-            positions = _get_accessor_data(gltf, blob_data, attributes.POSITION)
-            vertex_count = len(positions)
+        for primitive in mesh.primitives:
+            if primitive.material is None:
+                raise ValueError("Primitive has no material")
 
-            # Normal (optional, generate flat normals if missing)
-            if attributes.NORMAL is not None:
-                normals = _get_accessor_data(gltf, blob_data, attributes.NORMAL)
-            else:
-                normals = np.zeros((vertex_count, 3), dtype=np.float32)
-                normals[:, 2] = 1.0  # Default to +Z normal
+            geometry_resource = load_primitive(primitive)
+            material_resource = materials[primitive.material]
 
-            # Texture coordinates (optional)
-            if attributes.TEXCOORD_0 is not None:
-                texcoords = _get_accessor_data(gltf, blob_data, attributes.TEXCOORD_0)
-                # Wrap texture coordinates to [0, 1) range to simulate repeat wrapping
-                texcoords = np.mod(texcoords, 1.0)
-            else:
-                texcoords = np.zeros((vertex_count, 2), dtype=np.float32)
+            resources.append((geometry_resource, material_resource))
 
-            # Get or generate indices
-            if primitive.indices is not None:
-                indices = _get_accessor_data(gltf, blob_data, primitive.indices)
-            else:
-                # Generate sequential indices
-                indices = np.arange(vertex_count, dtype=np.uint32)
+        return resources
 
-            # Ensure indices are in the right format
-            indices = indices.astype(np.uint32)
+    def load_primitive(primitive: pygltflib.Primitive) -> GeometryResource:
+        # Only support TRIANGULAR mode (4 = TRIANGLES)
+        mode = primitive.mode if primitive.mode is not None else 4
+        if mode != 4:
+            raise ValueError(f"Only TRIANGLES mode is supported, got: {mode=}")
 
-            # Reshape indices to triangles (Nx3)
-            triangle_count = len(indices) // 3
-            t_indices = indices[: triangle_count * 3].reshape(-1, 3)
+        attributes = primitive.attributes
 
-            # Create geometry resource
-            geometry = GeometryResource(
-                v_p_array=positions.astype(np.float32),
-                v_n_array=normals.astype(np.float32),
-                v_t_array=texcoords.astype(np.float32),
-                t_indices=t_indices,
-            )
-            geometries[(mesh_idx, prim_idx)] = geometry
-            LOG.debug(
-                f"Loaded geometry {mesh_idx}.{prim_idx}: "
-                f"{vertex_count} vertices, {triangle_count} triangles"
-            )
+        positions = accessors[expect(attributes.POSITION)]
+        vertex_count = len(positions)
 
-    return geometries
+        normals = (
+            accessors[attributes.NORMAL].astype(np.float32)  #
+            if attributes.NORMAL is not None
+            else np.full((vertex_count, 3), (0.0, 0.0, 1.0), dtype=np.float32)
+        )
+        texcoords = (
+            np.mod(accessors[attributes.TEXCOORD_0], 1.0).astype(np.float32)
+            if attributes.TEXCOORD_0 is not None
+            else np.zeros((vertex_count, 2), dtype=np.float32)
+        )
+        indices = (
+            accessors[primitive.indices].astype(np.uint32)
+            if primitive.indices is not None
+            else np.arange(vertex_count, dtype=np.uint32)
+        )
 
+        return GeometryResource(
+            v_p_array=positions,
+            v_n_array=normals,
+            v_t_array=texcoords,
+            t_indices=indices.reshape((-1, 3)),
+        )
 
-def _process_scene_resources(
-    gltf: pygltflib.GLTF2,
-    scene: pygltflib.Scene,
-    geometries: dict[tuple[int, int], GeometryResource],
-    materials: list[MaterialResource],
-    transform_coordinate_system: bool,
-) -> dict[tuple[GeometryResource, MaterialResource], np.ndarray]:
-    """
-    Process a glTF scene and collect all mesh instances with world transforms.
+    #
+    # load_scene:
+    #
 
-    Returns a meshes dict with resource types.
-    """
-    # Collect all instances: (geometry, material) -> list of transforms
-    instances: dict[tuple[GeometryResource, MaterialResource], list[np.ndarray]] = {}
-
-    def traverse_node(node_idx: int, parent_transform: np.ndarray) -> None:
-        """Recursively traverse nodes, accumulating transforms."""
-        node = gltf.nodes[node_idx]
-
-        # Compute local transform
-        local_transform = _get_node_transform(node)
-
-        # Compute world transform
-        world_transform = parent_transform @ local_transform
-
-        # If this node has a mesh, add instances for each primitive
-        if node.mesh is not None:
-            mesh = gltf.meshes[node.mesh]
-            for prim_idx, primitive in enumerate(mesh.primitives):
-                key = (node.mesh, prim_idx)
-                if key not in geometries:
-                    continue  # Skipped primitive (e.g., non-triangle topology)
-
-                geometry = geometries[key]
-
-                # Get material (default to first material if none specified)
-                material_idx = (
-                    primitive.material if primitive.material is not None else 0
-                )
-                if material_idx >= len(materials):
-                    material_idx = 0
-                material = materials[material_idx]
-
-                instance_key = (geometry, material)
-                if instance_key not in instances:
-                    instances[instance_key] = []
-
-                instances[instance_key].append(world_transform)
-
-        # Traverse children
-        for child_idx in node.children or []:
-            traverse_node(child_idx, world_transform)
-
-    # Start traversal from scene root nodes
-    # If transforming coordinate system, start with the conversion matrix
-    if transform_coordinate_system:
-        root_transform = GLTF_TO_Z_UP_MATRIX.copy()
-    else:
-        root_transform = np.eye(4, dtype=np.float32)
-
-    for root_idx in scene.nodes or []:
-        traverse_node(root_idx, root_transform)
-
-    # Convert instance lists to numpy arrays with shape (N, 3, 4)
-    meshes: dict[tuple[GeometryResource, MaterialResource], np.ndarray] = {}
-    for key, transform_list in instances.items():
-        meshes[key] = np.array(transform_list, dtype=np.float32)
-
-    return meshes
-
-
-def _get_node_transform(node: pygltflib.Node) -> np.ndarray:
-    """Get the local transform matrix for a node."""
-    # Matrix is stored column-major in glTF, but we need row-major
-    if node.matrix is not None:
-        matrix = np.array(node.matrix, dtype=np.float32).reshape(4, 4).T
-        return matrix
-
-    # Build transform from TRS components
-    transform = np.eye(4, dtype=np.float32)
-
-    # Scale
-    if node.scale is not None:
-        scale = np.array(node.scale, dtype=np.float32)
-        transform = transform @ np.diag([scale[0], scale[1], scale[2], 1.0])
-
-    # Rotation (quaternion: x, y, z, w)
-    if node.rotation is not None:
-        qx, qy, qz, qw = node.rotation
-        rot_matrix = _quaternion_to_matrix(qx, qy, qz, qw)
-        transform = rot_matrix @ transform
-
-    # Translation
-    if node.translation is not None:
-        translation = np.array(node.translation, dtype=np.float32)
-        trans_matrix = np.eye(4, dtype=np.float32)
-        trans_matrix[:3, 3] = translation
-        transform = trans_matrix @ transform
-
-    return transform
-
-
-def _quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
-    """Convert a quaternion to a 4x4 rotation matrix (row-major)."""
-    # Normalize quaternion
-    n = np.sqrt(x * x + y * y + z * z + w * w)
-    if n > 0:
-        x, y, z, w = x / n, y / n, z / n, w / n
-
-    xx, yy, zz = x * x, y * y, z * z
-    xy, xz, yz = x * y, x * z, y * z
-    wx, wy, wz = w * x, w * y, w * z
-
-    return np.array(
+    # Coordinate system transformation matrix: glTF (Y-up, Z-forward) to Z-up, Y-forward.
+    # This is a -90° rotation around the X-axis.
+    # Maps: X -> X, Y -> Z, Z -> -Y
+    GLTF_TO_Z_UP_MATRIX = np.array(
         [
-            [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy), 0],
-            [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx), 0],
-            [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy), 0],
-            [0, 0, 0, 1],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
         ],
         dtype=np.float32,
     )
 
+    def load_node(
+        node: pygltflib.Node,
+        parent_transform: np.ndarray,
+        acc: defaultdict[
+            tuple[GeometryResource, MaterialResource],
+            list[npt.NDArray[np.float32]],
+        ],
+    ) -> None:
+        local_transform = compute_node_transform(node)
+        world_transform = parent_transform @ local_transform
 
-# Coordinate system transformation matrix: glTF (Y-up, Z-forward) to Z-up, Y-forward.
-# This is a -90° rotation around the X-axis.
-# Maps: X -> X, Y -> Z, Z -> -Y
-GLTF_TO_Z_UP_MATRIX = np.array(
-    [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, -1.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ],
-    dtype=np.float32,
-)
+        if node.mesh is not None:
+            mesh = gltf.meshes[expect(node.mesh)]
+            resources = load_mesh(mesh)
+            for geometry_resource, material_resource in resources:
+                acc[(geometry_resource, material_resource)].append(world_transform)
+
+        for child in node.children or []:
+            load_node(
+                node=gltf.nodes[child],
+                parent_transform=world_transform,
+                acc=acc,
+            )
+
+    def compute_node_transform(node: pygltflib.Node) -> np.ndarray:
+        if node.matrix is not None:
+            return np.array(node.matrix, dtype=np.float32).reshape((4, 4)).T
+
+        s = np.eye(3)
+        if node.scale is not None:
+            s *= np.array(node.scale, dtype=np.float32).reshape((1, 3))
+
+        r = np.eye(3)
+        if node.rotation is not None:
+            q = quaternion.as_quat_array(node.rotation)
+            r = quaternion.as_rotation_matrix(q).astype(np.float32)
+
+        t = np.zeros((3,), dtype=np.float32)
+        if node.translation is not None:
+            t = np.array(node.translation, dtype=np.float32)
+
+        res = np.eye(4, dtype=np.float32)
+        res[:3, :3] = r @ s
+        res[:3, 3] = t
+        return res
+
+    def load_scene(scene: pygltflib.Scene) -> GltfScene:
+        acc = defaultdict(list)
+        for root_node_idx in scene.nodes or []:
+            load_node(
+                node=gltf.nodes[root_node_idx],
+                parent_transform=GLTF_TO_Z_UP_MATRIX,
+                acc=acc,
+            )
+        return {k: np.stack(v, axis=0) for k, v in acc.items()}
+
+    return load_scene(gltf.scenes[0])
 
 
 #

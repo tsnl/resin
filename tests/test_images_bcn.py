@@ -418,7 +418,7 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
     """Test BC1 encoding on the DamagedHelmet color map texture."""
     # Load the glTF model to get the material resources
     resource_meshes = zfw.load_gltf(
-        path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
+        gltf_path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
     )
 
     # Extract the first material's color map
@@ -426,13 +426,11 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
     assert mat_res.color_map is not None, "DamagedHelmet should have a color map"
 
     color_map = mat_res.color_map
-    assert color_map.data.dtype == np.float32
-    assert color_map.data.shape[2] == 3  # RGB
+    assert color_map.dtype == np.float32
+    assert color_map.shape[2] == 3  # RGB
 
-    input_h, input_w, _ = color_map.data.shape
-    LOG.info(
-        f"DamagedHelmet color map size: {input_w}x{input_h}, format: {color_map.image_format}"
-    )
+    input_h, input_w, _ = color_map.shape
+    LOG.info(f"DamagedHelmet color map size: {input_w}x{input_h}")
 
     # Save original uncompressed image for comparison
     original_rgba = np.dstack([color_map.data, np.ones((input_h, input_w, 1))])
@@ -444,7 +442,7 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
     )
 
     # Compress using BC1
-    bc1_data = zfw.encode_bc1(color_map.data)
+    bc1_data = zfw.encode_bc1(color_map)
     assert bc1_data.dtype == np.uint8
     assert bc1_data.shape == (input_h // 4, input_w // 4, 8)
 
@@ -465,7 +463,7 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
 
     # Compare RGB channels
     psnr = zfw.compute_psnr(
-        img1=color_map.data,
+        img1=color_map,
         img2=image[:input_h, :input_w, :3],
     )
     LOG.info(f"DamagedHelmet BC1 compression PSNR: {psnr:.2f} dB")
