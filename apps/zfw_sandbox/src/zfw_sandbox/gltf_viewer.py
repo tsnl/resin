@@ -257,7 +257,7 @@ class GltfViewerWidget(zfw.GuiWidget):
         self._environments_path = environments_path
 
         # State
-        self._current_model_index = 0
+        self._current_model_index = 1
         self._current_env_index = 0
         self._camera = FreeCameraController(position=(0.0, -3.0, 0.0))
         self._mouse_captured = False

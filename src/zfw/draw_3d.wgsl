@@ -770,9 +770,9 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
     let m = r * mat2x2<f32>(delta_uv2.y, -delta_uv1.y, -delta_uv2.x, delta_uv1.x);
     let e = mat2x3<f32>(edge1, edge2);
     let tb = e * m;
-    let model_tangent = tb[0];
-    let model_bitangent = tb[1];
-    let model_tbn = mat3x3<f32>(model_tangent, model_bitangent, model_normal);
+    let model_tangent = normalize(tb[0]);
+    let model_bitangent = normalize(tb[1]);
+    let model_tbn = mat3x3<f32>(model_tangent, model_bitangent, cross(model_tangent, model_bitangent));
 
     // Transform to world space
     // TODO: support non-uniform scale
