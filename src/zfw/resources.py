@@ -607,7 +607,8 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
 
         r = np.eye(3)
         if node.rotation is not None:
-            q = quaternion.as_quat_array(node.rotation)
+            x = [node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]]
+            q = quaternion.as_quat_array(x)
             r = quaternion.as_rotation_matrix(q).astype(np.float32)
 
         t = np.zeros((3,), dtype=np.float32)

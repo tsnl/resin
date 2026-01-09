@@ -1429,10 +1429,12 @@ class TextureHeap(BaseDisposable):
         normalized_data = data / norms
 
         # Expect normal vectors to always have Z>=0
-        assert np.all(normalized_data[:, :, 2] >= 0.0), (
-            "Expected normal texture Z component to be non-negative: "
-            f"{normalized_data[:, :, 2].min()=}, {normalized_data[:, :, 2].max()=}"
-        )
+        corrupt_normal_map = np.any(normalized_data[:, :, 2] < 0.0)
+        if corrupt_normal_map:
+            LOG.error(
+                "Normal texture contains invalid normals with negative Z component. "
+                "This may cause visual artifacts."
+            )
 
         # Rescale back to [0, 1] range after normalization, keeping only X and Y
         # channels:
