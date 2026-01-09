@@ -410,13 +410,13 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
         #
         # To work around this, we try to guess whether the image uses the sRGB color
         # space in its metadata. If so, we reverse the gamma correction after loading.
-        # This is done by converting from linear to sRGB color space.
 
         bs = np.frombuffer(load_image_raw_bytes(image), dtype=np.uint8)
         im = cv.imdecode(bs, cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH)
         im = validate_rgb_image(im)
         im = normalize_image(im)
-        im = convert_linear_to_srgb(im) if image_is_srgb(image) else im
+        # im = convert_linear_to_srgb(im) if image_is_srgb(image) else im
+        im = convert_srgb_to_linear(im) if image_is_srgb(image) else im
         return im
 
     def image_is_srgb(image: pygltflib.Image) -> bool:
@@ -576,7 +576,7 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
             else np.full((vertex_count, 3), (0.0, 0.0, 1.0), dtype=np.float32)
         )
         texcoords = (
-            np.mod(accessors[attributes.TEXCOORD_0], 1.0).astype(np.float32)
+            accessors[attributes.TEXCOORD_0].astype(np.float32)
             if attributes.TEXCOORD_0 is not None
             else np.zeros((vertex_count, 2), dtype=np.float32)
         )

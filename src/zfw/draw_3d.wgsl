@@ -224,7 +224,7 @@ fn sample_normal_texture(
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     let sample_rg = textureSampleLevel(normal_texture_heap, linear_sampler, sample_uv, page, 0.0);
     let xy = 2.0 * sample_rg.rg - vec2<f32>(1.0);
-    let z = sqrt(1.0 - dot(xy, xy));
+    let z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
     return vec3<f32>(xy.x, xy.y, z);
 }
 
@@ -757,7 +757,7 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
 
     // Interpolate normal in model space using barycentric coordinates
     let bc = hit.barycentric_coordinates;
-    let model_normal = normalize(bc.x * normal[0] + bc.y * normal[1] + bc.z * normal[2]);
+    let model_normal = normalize(normal * bc);
     
     // Compute tangent and bitangent in model space using edge vectors and UV deltas
     let edge1 = pos[1] - pos[0];
@@ -765,39 +765,26 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
     let delta_uv1 = uv[1] - uv[0];
     let delta_uv2 = uv[2] - uv[0];
     
-    let uv_det = delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x;
-    let r = 1.0 / uv_det;
-    let model_tangent = (edge1 * delta_uv2.y - edge2 * delta_uv1.y) * r;
-    let model_bitangent = (edge2 * delta_uv1.x - edge1 * delta_uv2.x) * r;
-    
-    // Transform to world space, accounting for non-uniform scale
-    let transform = h_mat4x4_from_pod_transform(instance.transform);
-    let inv_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
-    
-    // For normals with non-uniform scale, use inverse transpose of the 3x3 rotation/scale part
-    let normal_transform = transpose(mat3x3<f32>(inv_transform[0].xyz, inv_transform[1].xyz, inv_transform[2].xyz));
-    
-    // For tangent/bitangent (surface directions), use the regular 3x3 transform
-    let tangent_transform = mat3x3<f32>(transform[0].xyz, transform[1].xyz, transform[2].xyz);
-    
-    // Apply transforms
-    var world_normal = normalize(normal_transform * model_normal);
-    var world_tangent = normalize(tangent_transform * model_tangent);
-    var world_bitangent = normalize(tangent_transform * model_bitangent);
-    
-    // Gram-Schmidt orthonormalization to ensure TBN is orthonormal after transformation
-    // Re-orthogonalize tangent against normal
-    world_tangent = normalize(world_tangent - dot(world_tangent, world_normal) * world_normal);
+    let uv_det = delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x ;
+    let r = 1.0 / (uv_det + 1e-6);
+    let m = r * mat2x2<f32>(delta_uv2.y, -delta_uv1.y, -delta_uv2.x, delta_uv1.x);
+    let e = mat2x3<f32>(edge1, edge2);
+    let tb = e * m;
+    let model_tangent = tb[0];
+    let model_bitangent = tb[1];
+    let model_tbn = mat3x3<f32>(model_tangent, model_bitangent, model_normal);
 
-    // Re-orthogonalize bitangent against both normal and tangent
-    world_bitangent = normalize(
-        world_bitangent 
-        - dot(world_bitangent, world_normal) * world_normal 
-        - dot(world_bitangent, world_tangent) * world_tangent
+    // Transform to world space
+    // TODO: support non-uniform scale
+    let transform_4x4 = h_mat4x4_from_pod_transform(instance.transform);
+    let transform = mat3x3<f32>(
+        transform_4x4[0].xyz,
+        transform_4x4[1].xyz,
+        transform_4x4[2].xyz,
     );
     
-    // Return TBN matrix with T, B, N as column vectors
-    return mat3x3<f32>(world_tangent, world_bitangent, world_normal);
+    return transform * model_tbn;
+    
 }
 fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
     let instance = instances[hit_details.instance_id];
@@ -810,8 +797,7 @@ fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
     let texture_normal = sample_normal_texture(material.normal_map_id, hit_details.texcoords);
-    let normal = hit_details.tbn * texture_normal;
-    return normalize(normal);   // for good measure
+    return hit_details.tbn * texture_normal;
 }
 fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
