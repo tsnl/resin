@@ -586,30 +586,22 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
 
         attributes = primitive.attributes
 
-        positions = accessors[expect(attributes.POSITION)]
-        vertex_count = len(positions)
+        positions = accessors[expect(attributes.POSITION)].astype(np.float32)
 
-        normals = (
-            accessors[attributes.NORMAL].astype(np.float32)  #
-            if attributes.NORMAL is not None
-            else np.full((vertex_count, 3), (0.0, 0.0, 1.0), dtype=np.float32)
-        )
-        texcoords = (
-            accessors[attributes.TEXCOORD_0].astype(np.float32)
-            if attributes.TEXCOORD_0 is not None
-            else np.zeros((vertex_count, 2), dtype=np.float32)
-        )
-        indices = (
-            accessors[primitive.indices].astype(np.uint32)
-            if primitive.indices is not None
-            else np.arange(vertex_count, dtype=np.uint32)
-        )
+        assert attributes.NORMAL is not None
+        normals = accessors[attributes.NORMAL].astype(np.float32)
+
+        assert attributes.TEXCOORD_0 is not None
+        texcoords = accessors[attributes.TEXCOORD_0].astype(np.float32)
+
+        assert primitive.indices is not None
+        indices = accessors[primitive.indices].astype(np.uint32).reshape((-1, 3))
 
         return GeometryResource(
             v_p_array=positions,
             v_n_array=normals,
             v_t_array=texcoords,
-            t_indices=indices.reshape((-1, 3)),
+            t_indices=indices,
         )
 
     #
