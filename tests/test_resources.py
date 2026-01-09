@@ -1,8 +1,7 @@
 from pathlib import Path
 
 import numpy as np
-
-from conftest import GpuFixture
+import wgpu
 
 from zfw import (
     Draw3dGeometry,
@@ -15,12 +14,12 @@ from zfw import (
 )
 
 
-def test_gltf_loader_basic(gpu: GpuFixture):
+def test_gltf_loader_basic(gpu_device: wgpu.GPUDevice):
     """Test loading a basic glTF file (Box model)."""
     # Create renderer
     renderer = Draw3dRenderer(
-        device=gpu.device,
-        queue=gpu.queue,
+        device=gpu_device,
+        queue=gpu_device.queue,
         target_size_wh_px=(512, 512),
     )
 
@@ -43,55 +42,8 @@ def test_gltf_loader_basic(gpu: GpuFixture):
         assert isinstance(material_resource, MaterialResource)
 
         # Convert to Draw3d objects
-        geometry = Draw3dGeometry(
-            renderer,
-            v_p_array=geometry_resource.v_p_array,
-            v_n_array=geometry_resource.v_n_array,
-            v_t_array=geometry_resource.v_t_array,
-            t_indices=geometry_resource.t_indices,
-        )
-        material = Draw3dMaterial(
-            renderer,
-            color_factor=material_resource.color_factor,
-            color_texture=(
-                Draw3dTexture(
-                    renderer,
-                    data=material_resource.color_map.data,
-                    usage="color",
-                )
-                if material_resource.color_map
-                else None
-            ),
-            normal_texture=(
-                Draw3dTexture(
-                    renderer,
-                    data=material_resource.normal_map.data,
-                    usage="normal",
-                )
-                if material_resource.normal_map
-                else None
-            ),
-            metalness_factor=material_resource.metalness_factor,
-            metalness_texture=(
-                Draw3dTexture(
-                    renderer,
-                    data=material_resource.metalness_map.data,
-                    usage="metalness",
-                )
-                if material_resource.metalness_map
-                else None
-            ),
-            roughness_factor=material_resource.roughness_factor,
-            roughness_texture=(
-                Draw3dTexture(
-                    renderer,
-                    data=material_resource.roughness_map.data,
-                    usage="roughness",
-                )
-                if material_resource.roughness_map
-                else None
-            ),
-        )
+        geometry = Draw3dGeometry.from_resource(geometry_resource, renderer)
+        material = Draw3dMaterial.from_resource(material_resource, renderer)
 
         # Verify converted types
         assert isinstance(geometry, Draw3dGeometry)

@@ -11,14 +11,14 @@ from typing import Generator, Literal
 import time
 
 import numpy as np
-import jaxtyping as jt
+import numpy.typing as npt
 import wgpu
 
 
 from .basic import BaseDisposable, StructuredNDArray, logger
 from .excepts import LogicError
 from .bvh import Bvh, build_bvh
-from .resources import GeometryResource, ImageResource, MaterialResource
+from .resources import GeometryResource, MaterialResource
 from .images import encode_bc1, encode_bc4, encode_bc5
 
 #
@@ -772,7 +772,7 @@ class Draw3dFrame(BaseDisposable):
         self,
         instances: dict[
             tuple["Draw3dGeometry", "Draw3dMaterial"],
-            jt.Float32[np.ndarray, "n 4 4"],
+            npt.NDArray[np.float32],
         ],
         command_encoder: wgpu.GPUCommandEncoder,
     ) -> None:
@@ -812,10 +812,10 @@ class Draw3dGeometry(BaseDisposable):
         self,
         renderer: Draw3dRenderer,
         *,
-        v_p_array: jt.Float32[jt.Array, "nv 3"],
-        v_n_array: jt.Float32[jt.Array, "nv 3"],
-        v_t_array: jt.Float32[jt.Array, "nv 2"],
-        t_indices: jt.UInt32[jt.Array, "nt 3"],
+        v_p_array: npt.NDArray[np.float32],
+        v_n_array: npt.NDArray[np.float32],
+        v_t_array: npt.NDArray[np.float32],
+        t_indices: npt.NDArray[np.uint32],
     ) -> None:
         super().__init__()
 
@@ -872,10 +872,10 @@ class Draw3dGeometry(BaseDisposable):
 
     @staticmethod
     def _marshall_triangles(
-        v_p_array: jt.Float32[jt.Array, "nv 3"],
-        v_n_array: jt.Float32[jt.Array, "nv 3"],
-        v_t_array: jt.Float32[jt.Array, "nv 2"],
-        t_indices: jt.UInt32[jt.Array, "nt 3"],
+        v_p_array: npt.NDArray[np.float32],
+        v_n_array: npt.NDArray[np.float32],
+        v_t_array: npt.NDArray[np.float32],
+        t_indices: npt.NDArray[np.uint32],
     ) -> PodVertexArray:
         # Interleave the vertex arrays:
         v = np.concatenate([v_p_array, v_n_array, v_t_array], axis=-1)
@@ -1043,7 +1043,7 @@ class Draw3dScene:
 
     meshes: dict[
         tuple[Draw3dGeometry, Draw3dMaterial],
-        jt.Float32[np.ndarray, "n 4 4"],
+        npt.NDArray[np.float32],
     ] = field(default_factory=dict)
 
     environment_map: Draw3dTexture | None = None
@@ -1055,7 +1055,7 @@ class Draw3dCamera:
     Represents a camera in the 3D scene.
     """
 
-    transform: jt.Float32[np.ndarray, "4 4"]
+    transform: npt.NDArray[np.float32]
     fov_y_rad: float
     aspect_ratio: float
     max_distance: float = 1e3

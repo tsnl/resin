@@ -2,38 +2,28 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 import wgpu
 
 from image_ref_tests import assert_image_matches_reference
+
 from zfw import (
     setup_logging,
     Draw2dRenderer,
     Draw2dFrame,
     Draw2dQuad,
     convert_color,
-    load_image,
 )
 
-from conftest import GpuFixture
 
-
-def test_basic_draw_2d(gpu: GpuFixture):
+def test_basic_draw_2d(gpu_device: wgpu.GPUDevice, rainbow_512x512_image: npt.NDArray[np.float32]):
     """Test basic 2D rendering with quads and textures."""
-    device = gpu.device
-    queue = gpu.queue
-
-    # Load rainbow test image as linear RGBA
-    rainbow_resource = load_image(
-        Path("tests/data/rainbow-512x512.png"),
-        image_format="rgba8unorm-srgb",
-        expected_format="rgba32float",
-    )
-    rainbow_image_data = rainbow_resource.data
-    assert rainbow_image_data.shape == (512, 512, 4)
+    device = gpu_device
+    queue = gpu_device.queue
 
     # Convert from linear to sRGB and to uint8 for rgba8unorm texture
-    rainbow_image_data_uint8 = (np.clip(rainbow_image_data, 0.0, 1.0) * 255.0).astype(
+    rainbow_image_data_uint8 = (np.clip(rainbow_512x512_image, 0.0, 1.0) * 255.0).astype(
         np.uint8
     )
 

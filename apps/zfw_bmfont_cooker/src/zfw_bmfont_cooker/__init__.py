@@ -24,10 +24,8 @@ from zfw import (
     CookedAtlasGlyphInfo,
     CookedAtlasGlyphCacheKey,
     COOKED_ATLAS_PATH_SUFFIX,
+    typed_freetype as ft,
 )
-import zfw.typed_uharfbuzz as hb
-
-from . import typed_freetype as ft
 
 
 LOG = logger(__name__)
@@ -65,7 +63,7 @@ FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
 }
 
 # Characters to pre-rasterize for the glyph atlas
-GLYPH_CHARSET = "".join(chr(c) for c in range(32, 127))  # ASCII printable
+GLYPH_CODE_POINTS = set(range(32, 127))  # Basic ASCII
 
 
 class GlyphEntry:
@@ -128,12 +126,7 @@ class GlyphAtlasCooker:
         self._cursor_y = 0
         self._row_height = 0
 
-        # Load font with FreeType and HarfBuzz
-        with open(font_path, "rb") as f:
-            hb_blob = f.read()
-        hb_face = hb.Face(hb_blob)
-        self._hb_font = hb.Font(hb_face)
-
+        # Load font with FreeType
         self._ft_face = ft.Face(str(font_path))
 
         # Find weight axis
@@ -176,17 +169,8 @@ class GlyphAtlasCooker:
         weight_value = FONT_WEIGHT_VALUE[font_weight]
         effective_size_px = int(font_size_px * float(scale))
 
-        # Shape the charset to get glyph indices
-        self._set_hb_scale(effective_size_px, weight_value)
-        hb_buffer = hb.Buffer()
-        hb_buffer.add_str(GLYPH_CHARSET)
-        hb_buffer.guess_segment_properties()
-        hb.shape(self._hb_font, hb_buffer)
-
-        infos = hb_buffer.glyph_infos
-
         # Get unique glyph indices
-        glyph_indices = set(info.codepoint for info in infos)
+        glyph_indices = {self._ft_face.get_char_index(c) for c in GLYPH_CODE_POINTS}
 
         # Compute and store metrics for this configuration
         self._ft_face.set_pixel_sizes(0, effective_size_px)
@@ -234,12 +218,6 @@ class GlyphAtlasCooker:
                     bitmap_left=entry.bitmap_left,
                     bitmap_top=entry.bitmap_top,
                 )
-
-    def _set_hb_scale(self, font_size_px: int, font_weight: int) -> None:
-        """Set HarfBuzz scale and weight."""
-        scale = font_size_px * 64  # HarfBuzz uses 26.6 fixed point
-        self._hb_font.scale = (scale, scale)
-        self._hb_font.set_variations({"wght": font_weight})
 
     def _set_freetype_weight(self, weight: int) -> None:
         """Set FreeType weight."""

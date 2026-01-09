@@ -2,6 +2,7 @@ import logging
 from typing import Generator
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 import wgpu
 
@@ -18,10 +19,8 @@ from zfw import (
     Draw2dExtTextPrimitive,
     Draw2dExtCanvas,
     convert_color,
-    ImageResource,
 )
 
-from conftest import GpuFixture
 from image_ref_tests import assert_image_matches_reference
 
 
@@ -38,7 +37,7 @@ class Draw2dExTestEngine(BaseDisposable):
     canvas: Draw2dExtCanvas
     readback_buffer: wgpu.GPUBuffer
 
-    def __init__(self, *, gpu: GpuFixture, scale: float = 1.0) -> None:
+    def __init__(self, *, gpu: wgpu.GPUDevice, scale: float = 1.0) -> None:
         super().__init__()
 
         setup_logging(level=logging.ERROR)
@@ -126,9 +125,9 @@ class Draw2dExTestEngine(BaseDisposable):
 
 
 @pytest.fixture(scope="module")
-def engine(gpu: GpuFixture) -> Generator[Draw2dExTestEngine, None, None]:
+def engine(gpu_device: wgpu.GPUDevice) -> Generator[Draw2dExTestEngine, None, None]:
     """Fixture that provides a Draw2dExTestEngine."""
-    eng = Draw2dExTestEngine(gpu=gpu)
+    eng = Draw2dExTestEngine(gpu=gpu_device)
     yield eng
     eng.dispose()
 
@@ -176,7 +175,7 @@ def test_draw_2d_ext_quads(engine: Draw2dExTestEngine):
 
 def test_draw_2d_ext_image(
     engine: Draw2dExTestEngine,
-    rainbow_512x512_image: ImageResource,
+    rainbow_512x512_image: npt.NDArray[np.float32],
 ):
     """Test rendering a textured quad with an image (parity with draw_2d)."""
     primitives: list[Draw2dExtBasePrimitive] = []

@@ -6,6 +6,7 @@ from pathlib import Path
 import math
 
 import numpy as np
+import numpy.typing as npt
 
 import zfw
 
@@ -279,7 +280,7 @@ class GltfViewerWidget(zfw.GuiWidget):
             ]
             | None
         ) = None
-        self._environment_resource: zfw.ImageResource | None = None
+        self._environment_resource: npt.NDArray[np.float32] | None = None
 
         # HUD widgets
         self._top_bar = zfw.GuiWidget(
@@ -371,10 +372,7 @@ class GltfViewerWidget(zfw.GuiWidget):
         LOG.info(f"Loading environment: {env_name}")
 
         # Load HDR environment map using zfw.load_image
-        self._environment_resource = zfw.load_image(
-            file_path=env_path,
-            image_format="rgb32float",
-        )
+        self._environment_resource = zfw.load_image(image_path=env_path)
 
         # Set environment map in GUI window
         self._gui_window.set_environment_map(self._environment_resource)

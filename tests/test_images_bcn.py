@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import wgpu
-from conftest import GpuFixture
 
 import zfw
 from zfw.images_bcn import _f32_to_rgb565, _pack_bc1_block, _quantize_rgb565_f32
@@ -288,18 +288,17 @@ def help_render_texture_to_framebuffer(
 
 
 def test_help_render_texture_to_framebuffer(
-    gpu: GpuFixture,
-    rainbow_512x512_image_grayscale: zfw.ImageResource,
+    gpu_device: wgpu.GPUDevice,
+    rainbow_512x512_image_grayscale: npt.NDArray[np.float32],
 ):
-    assert rainbow_512x512_image_grayscale.data.dtype == np.float32
-    assert rainbow_512x512_image_grayscale.data.shape == (512, 512, 1)
-    input_h, input_w, _ = rainbow_512x512_image_grayscale.data.shape
-
-    image_data = rainbow_512x512_image_grayscale.data.astype(np.float16)
+    assert rainbow_512x512_image_grayscale.dtype == np.float32
+    assert rainbow_512x512_image_grayscale.shape == (512, 512, 1)
+    input_h, input_w, _ = rainbow_512x512_image_grayscale.shape
+    image_data = rainbow_512x512_image_grayscale.astype(np.float16)
 
     image = help_render_texture_to_framebuffer(
-        device=gpu.device,
-        queue=gpu.queue,
+        device=gpu_device,
+        queue=gpu_device.queue,
         attachment_texture_format="r16float",
         compressed_texture_data=image_data.view(np.uint8),
         input_w=input_w,
@@ -315,20 +314,19 @@ def test_help_render_texture_to_framebuffer(
 
 
 def test_encode_bc4(
-    gpu: GpuFixture,
-    rainbow_512x512_image_grayscale: zfw.ImageResource,
+    gpu_device: wgpu.GPUDevice,
+    rainbow_512x512_image_grayscale: npt.NDArray[np.float32],
 ):
-    assert rainbow_512x512_image_grayscale.data.dtype == np.float32
-    assert rainbow_512x512_image_grayscale.data.shape == (512, 512, 1)
-    input_h, input_w, _ = rainbow_512x512_image_grayscale.data.shape
-
-    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale.data)
+    assert rainbow_512x512_image_grayscale.dtype == np.float32
+    assert rainbow_512x512_image_grayscale.shape == (512, 512, 1)
+    input_h, input_w, _ = rainbow_512x512_image_grayscale.shape
+    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale)
     assert bc4_data.dtype == np.uint8
     assert bc4_data.shape == (input_h // 4, input_w // 4, 8)
 
     image = help_render_texture_to_framebuffer(
-        device=gpu.device,
-        queue=gpu.queue,
+        device=gpu_device,
+        queue=gpu_device.queue,
         attachment_texture_format="bc4-r-unorm",
         compressed_texture_data=bc4_data,
         input_w=input_w,
@@ -339,30 +337,29 @@ def test_encode_bc4(
     )
 
     psnr = zfw.compute_psnr(
-        img1=rainbow_512x512_image_grayscale.data,
+        img1=rainbow_512x512_image_grayscale,
         img2=image[:input_h, :input_w, :1],
     )
     assert psnr > 55.0, f"BC4 PSNR too low: {psnr:.2f} dB"
 
 
 def test_encode_bc1(
-    gpu: GpuFixture,
-    rainbow_512x512_image: zfw.ImageResource,
+    gpu_device: wgpu.GPUDevice,
+    rainbow_512x512_image: npt.NDArray[np.float32],
 ):
-    assert rainbow_512x512_image.data.dtype == np.float32
-    assert rainbow_512x512_image.data.shape == (512, 512, 4)
-    input_h, input_w, _ = rainbow_512x512_image.data.shape
-
+    assert rainbow_512x512_image.dtype == np.float32
+    assert rainbow_512x512_image.shape == (512, 512, 4)
+    input_h, input_w, _ = rainbow_512x512_image.shape
     # Discard alpha channel to get RGB
-    rgb_data = rainbow_512x512_image.data[:, :, :3]
+    rgb_data = rainbow_512x512_image[:, :, :3]
 
     bc1_data = zfw.encode_bc1(rgb_data)
     assert bc1_data.dtype == np.uint8
     assert bc1_data.shape == (input_h // 4, input_w // 4, 8)
 
     image = help_render_texture_to_framebuffer(
-        device=gpu.device,
-        queue=gpu.queue,
+        device=gpu_device,
+        queue=gpu_device.queue,
         attachment_texture_format="bc1-rgba-unorm",
         compressed_texture_data=bc1_data,
         input_w=input_w,
@@ -380,16 +377,16 @@ def test_encode_bc1(
 
 
 def test_encode_bc5(
-    gpu: GpuFixture,
-    rainbow_512x512_image: zfw.ImageResource,
+    gpu_device: wgpu.GPUDevice,
+    rainbow_512x512_image: npt.NDArray[np.float32],
 ):
     """Test BC5 (RG unorm) encoding round-trip."""
-    assert rainbow_512x512_image.data.dtype == np.float32
-    assert rainbow_512x512_image.data.shape == (512, 512, 4)
-    input_h, input_w, _ = rainbow_512x512_image.data.shape
+    assert rainbow_512x512_image.dtype == np.float32
+    assert rainbow_512x512_image.shape == (512, 512, 4)
+    input_h, input_w, _ = rainbow_512x512_image.shape
 
     # Create a 2-channel image in [-1, +1] from the first two RGB channels.
-    rg = rainbow_512x512_image.data[:, :, :2]
+    rg = rainbow_512x512_image[:, :, :2]
     rg = rg.astype(np.float32)
 
     bc5_data = zfw.encode_bc5(rg)
@@ -397,8 +394,8 @@ def test_encode_bc5(
     assert bc5_data.shape == (input_h // 4, input_w // 4, 16)
 
     image = help_render_texture_to_framebuffer(
-        device=gpu.device,
-        queue=gpu.queue,
+        device=gpu_device,
+        queue=gpu_device.queue,
         attachment_texture_format="bc5-rg-unorm",
         compressed_texture_data=bc5_data,
         input_w=input_w,
@@ -414,7 +411,7 @@ def test_encode_bc5(
     assert psnr > 45.0, f"BC5 PSNR too low: {psnr:.2f} dB"
 
 
-def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
+def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     """Test BC1 encoding on the DamagedHelmet color map texture."""
     # Load the glTF model to get the material resources
     resource_meshes = zfw.load_gltf(
@@ -448,8 +445,8 @@ def test_encode_bc1_damaged_helmet(gpu: GpuFixture):
 
     # Render back to verify quality
     image = help_render_texture_to_framebuffer(
-        device=gpu.device,
-        queue=gpu.queue,
+        device=gpu_device,
+        queue=gpu_device.queue,
         attachment_texture_format="bc1-rgba-unorm",
         compressed_texture_data=bc1_data,
         input_w=input_w,

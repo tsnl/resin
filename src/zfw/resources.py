@@ -9,35 +9,30 @@ __all__ = [
     "CookedAtlasGlyphCacheKey",
     "CookedAtlasGlyphInfo",
     "GeometryResource",
-    "ImageResource",
     "MaterialResource",
     "load_gltf",
-    "load_gltf_v2",
     "load_image",
-    "load_image_from_bytes",
 ]
 
 import base64
 from collections import defaultdict
 import hashlib
-import io
 from dataclasses import dataclass
 from fractions import Fraction
+import io
 from pathlib import Path
 from typing import Literal
+import json
 
 import numpy as np
 import numpy.typing as npt
 import quaternion
-import orjson
 import pydantic
-import imageio.v3 as iio
-import cv2 as cv
+import PIL.Image
 import pygltflib
-import jaxtyping as jt
 
 from .excepts import LogicError
-from .basic import BaseDisposable, Font, FontSize, FontWeight, expect, logger
+from .basic import Font, FontSize, FontWeight, expect, logger
 from .images import (
     ImageFormat,
     convert_image_format,
@@ -58,25 +53,25 @@ LOG = logger(__name__)
 class GeometryResource:
     """Contains NumPy arrays needed to construct a Draw3dGeometry."""
 
-    v_p_array: jt.Float32[np.ndarray, "nv 3"]
+    v_p_array: npt.NDArray[np.float32]
     """Vertex positions array."""
 
-    v_n_array: jt.Float32[np.ndarray, "nv 3"]
+    v_n_array: npt.NDArray[np.float32]
     """Vertex normals array."""
 
-    v_t_array: jt.Float32[np.ndarray, "nv 2"]
+    v_t_array: npt.NDArray[np.float32]
     """Vertex texture coordinates array."""
 
-    t_indices: jt.UInt32[np.ndarray, "nt 3"]
+    t_indices: npt.NDArray[np.uint32]
     """Triangle indices array."""
 
     def __init__(
         self,
         *,
-        v_p_array: jt.Float32[np.ndarray, "nv 3"],
-        v_n_array: jt.Float32[np.ndarray, "nv 3"],
-        v_t_array: jt.Float32[np.ndarray, "nv 2"],
-        t_indices: jt.UInt32[np.ndarray, "nt 3"],
+        v_p_array: npt.NDArray[np.float32],
+        v_n_array: npt.NDArray[np.float32],
+        v_t_array: npt.NDArray[np.float32],
+        t_indices: npt.NDArray[np.uint32],
     ) -> None:
         self.v_p_array = v_p_array
         self.v_n_array = v_n_array
@@ -117,134 +112,69 @@ class MaterialResource:
         self.roughness_factor = roughness_factor
 
 
-class ImageResource:
-    """Stores image data along with metadata about format and dimensions."""
-
-    def __init__(
-        self,
-        *,
-        data: np.ndarray,
-        width: int,
-        height: int,
-        depth: int,
-        image_format: ImageFormat,
-    ) -> None:
-        self.data = data
-        self.width = width
-        self.height = height
-        self.depth = depth
-        self.image_format = image_format
-
-
 #
 # Image Loading
 #
 
-
 def load_image(
-    file_path: Path | str,
-    image_format: ImageFormat,
-    *,
-    expected_format: ImageFormat | None = None,
-) -> ImageResource:
+        image_path: Path | str,
+) -> npt.NDArray[np.float32]:
     """
-    Load an image from a file path.
-
-    If expected_format is not None, performs color/format conversion from
-    image_format (input) to expected_format (output).
-
-    :param file_path: Path to the image file.
-    :param image_format: The format of the image as stored.
-    :param expected_format: Optional output format. If provided, converts the image.
-    :return: ImageResource with loaded data and metadata.
+    Loads an image from a file path and returns it as an (H, W, C) float32 RGB array 
+    with values in [0.0, 1.0].
     """
-    file_path = Path(file_path)
 
-    # Load image using imageio (preserves bit-depth)
-    raw_data = iio.imread(file_path)
-
-    # Ensure 3D array (height, width, channels)
-    if raw_data.ndim == 2:
-        # Grayscale image - add channel dimension
-        raw_data = raw_data[:, :, np.newaxis]
-
-    height, width = raw_data.shape[:2]
-
-    # Apply format conversion if needed
-    if expected_format is not None and expected_format != image_format:
-        converted_data = convert_image_format(raw_data, image_format, expected_format)
-        output_format = expected_format
-    else:
-        # Just normalize to float32
-        converted_data = normalize_image_to_f32(raw_data)
-        output_format = image_format
-
-    # Determine depth (number of channels)
-    depth = converted_data.shape[2] if converted_data.ndim == 3 else 1
-
-    return ImageResource(
-        data=converted_data,
-        width=width,
-        height=height,
-        depth=depth,
-        image_format=output_format,
-    )
+    image_path = Path(image_path)
+    image_bs = image_path.read_bytes()
+    return decode_image(image_bs)
 
 
-def load_image_from_bytes(
-    raw_bytes: bytes,
-    image_format: ImageFormat,
-    *,
-    expected_format: ImageFormat | None = None,
-) -> ImageResource:
+def decode_image(
+        image_bs: bytes ) -> npt.NDArray[np.float32]:
     """
-    Load an image from raw bytes.
-
-    If expected_format is not None, performs color/format conversion from
-    image_format (input) to expected_format (output).
-
-    :param raw_bytes: Raw image bytes (e.g., PNG, JPEG data).
-    :param image_format: The format of the image as stored.
-    :param expected_format: Optional output format. If provided, converts the image.
-    :return: ImageResource with loaded data and metadata.
+    Decode image bytes into an (H, W, C) float32 RGB array with values in [0.0, 1.0].
+    Supports PNG, JPEG, BMP formats.
     """
-    # Load image using imageio from bytes
-    raw_data = iio.imread(io.BytesIO(raw_bytes))
 
-    # Ensure 3D array (height, width, channels)
-    if raw_data.ndim == 2:
-        # Grayscale image - add channel dimension
-        raw_data = raw_data[:, :, np.newaxis]
+    if image_bs.startswith(b"#?RADIANCE"):
+        return _decode_hdr_image(image_bs)
 
-    height, width = raw_data.shape[:2]
+    if any((
+        image_bs.startswith(b"\x89PNG"),   # PNG
+        image_bs.startswith(b"BM"),         # BMP
+        image_bs.startswith(b"\xff\xd8\xff\xe0"),  # JPEG
+    )):
+        return _decode_any_image_with_pil(image_bs)
+    
+    raise ValueError("Unsupported image byte format.")
 
-    # # Apply format conversion if needed
-    # if expected_format is not None and expected_format != image_format:
-    #     converted_data = convert_image_format(raw_data, image_format, expected_format)
-    #     output_format = expected_format
-    # else:
-    #     # Just normalize to float32
-    #     converted_data = normalize_image_to_f32(raw_data)
-    #     output_format = image_format
-    converted_data = normalize_image_to_f32(raw_data)
-    output_format = image_format
+def _decode_any_image_with_pil(
+        image_bytes: bytes ) -> npt.NDArray[np.float32]:
+    assert any((
+        image_bytes.startswith(b"\x89PNG"),   # PNG
+        image_bytes.startswith(b"BM"),         # BMP
+        image_bytes.startswith(b"\xff\xd8\xff\xe0"),  # JPEG
+    ))
+    with PIL.Image.open(io.BytesIO(image_bytes)) as pil_im:
+        bands = pil_im.getbands()
+        if bands == ("R", "G", "B"):
+            return np.asarray(pil_im.convert("RGB"), dtype=np.float32) / 255.0
+        elif bands == ("R", "G", "B", "A"):
+            return np.asarray(pil_im.convert("RGBA"), dtype=np.float32) / 255.0
+        elif bands == ("L",):
+            return np.asarray(pil_im.convert("L"), dtype=np.float32) / 255.0
+        else:
+            raise ValueError(f"Unsupported image bands: {bands}")
 
-    # Determine depth (number of channels)
-    depth = converted_data.shape[2] if converted_data.ndim == 3 else 1
 
-    return ImageResource(
-        data=converted_data,
-        width=width,
-        height=height,
-        depth=depth,
-        image_format=output_format,
-    )
+def _decode_hdr_image(
+        image_bs: bytes ) -> npt.NDArray[np.float32]:
+    raise NotImplementedError()
 
 
 #
-# New Loader API
+# GLTF loader:
 #
-
 
 type GltfScene = dict[
     tuple[GeometryResource, MaterialResource],
@@ -393,47 +323,10 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
     #
 
     def load_image(image: pygltflib.Image) -> np.ndarray:
-        # No color space conversion should be performed. According to the glTF spec,
-        # the color profile in an image file should be ignored.
-        # See: https://github.com/KhronosGroup/glTF-Sample-Models/issues/316
-        #
-        # Unfortunately, OpenCV does not support disabling color space conversion
-        # on imdecode.
-        #
-        # This means OpenCV will automatically perform gamma correction on sRGB images,
-        # trying to linearize an already linear image, resulting in incorrect colors.
-        # > When using OpenCV's cv2.imread(), the library generally handles gamma
-        # > correction automatically during the file reading process for common formats
-        # > like PNG and JPEG, converting them from their typical sRGB space to a
-        # > linear or near-linear space for processing. This is done by the image
-        # > codecs (libjpeg, libpng, etc.) that OpenCV uses under the hood.
-        #
-        # To work around this, we try to guess whether the image uses the sRGB color
-        # space in its metadata. If so, we reverse the gamma correction after loading.
-
-        bs = np.frombuffer(load_image_raw_bytes(image), dtype=np.uint8)
-        im = cv.imdecode(bs, cv.IMREAD_COLOR_RGB | cv.IMREAD_ANYDEPTH)
+        bs = load_image_raw_bytes(image)
+        im = decode_image(bs)
         im = validate_rgb_image(im)
-        im = normalize_image(im)
-        # im = convert_linear_to_srgb(im) if image_is_srgb(image) else im
-        im = convert_srgb_to_linear(im) if image_is_srgb(image) else im
         return im
-
-    def image_is_srgb(image: pygltflib.Image) -> bool:
-        """
-        Guess whether an image will be loaded by OpenCV in sRGB color space.
-        """
-        if image.mimeType == "image/jpeg":
-            return True
-        if image.mimeType == "image/png":
-            return False
-        if image.uri and image.uri.endswith(".jpg"):
-            return True
-        if image.uri and image.uri.endswith(".jpeg"):
-            return True
-        if image.uri and image.uri.endswith(".png"):
-            return False
-        return False
 
     def load_image_raw_bytes(image: pygltflib.Image) -> bytes:
         return (
@@ -441,17 +334,6 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
             if image.uri is not None
             else buffer_views[expect(image.bufferView)].tobytes()
         )
-
-    def normalize_image(im: np.ndarray) -> np.ndarray:
-        match im.dtype.type:
-            case np.uint8:
-                return im.astype(np.float32) / 255.0
-            case np.uint16:
-                return im.astype(np.float32) / 65535.0
-            case np.float32:
-                return im
-            case _:
-                raise LogicError(f"Unsupported image dtype: {im.dtype}")
 
     def validate_rgb_image(im: npt.ArrayLike) -> np.ndarray:
         im = np.asarray(im)
@@ -689,7 +571,7 @@ class CookedAtlas:
     image_format: ImageFormat = "rgba32float"
     readme_text: str | None = None
     license_text: str | None = None
-    as_glyph_cache: dict[CookedAtlasGlyphCacheKey, "CookedAtlasGlyphInfo"] | None = None
+    as_glyph_cache: dict["CookedAtlasGlyphCacheKey", "CookedAtlasGlyphInfo"] | None = None
 
     @staticmethod
     def load(
@@ -710,18 +592,13 @@ class CookedAtlas:
 
         # Load index.json
         with open(path / "index.json", "rb") as f:
-            index = CookedAtlasIndexFile(**orjson.loads(f.read()))
+            index = CookedAtlasIndexFile(**json.load(f))
         image_xywh_list = index.image_xywh_list
 
         # Load atlas.png with format conversion
         atlas_path = path / "atlas.png"
-        resource = load_image(
-            atlas_path,
-            image_format=index.image_format,
-            expected_format=image_format,
-        )
-        atlas_data = resource.data
-
+        atlas_data = load_image(atlas_path)
+        
         # (Optional) Load README.md
         if load_readme_text:
             with open(path / "README.md", "r", encoding="utf-8") as f:
@@ -741,9 +618,7 @@ class CookedAtlas:
             with open(path / "glyph_metrics.json", "rb") as f:
                 as_glyph_cache = {
                     key: val
-                    for key, val in CookedAtlasGlyphCacheExtFile(
-                        **orjson.loads(f.read())
-                    ).data
+                    for key, val in CookedAtlasGlyphCacheExtFile(**json.load(f)).data
                 }
         else:
             as_glyph_cache = None
@@ -768,18 +643,18 @@ class CookedAtlas:
         path.mkdir(parents=True, exist_ok=True)
 
         # Save index.json
-        with open(path / "index.json", "wb") as f:
+        with open(path / "index.json", "w", encoding="utf-8") as f:
             index = CookedAtlasIndexFile(
                 cooked_atlas_type=self.atlas_type,
                 image_xywh_list=self.image_xywh_list,
                 image_format=self.image_format,
             )
-            f.write(orjson.dumps(index.model_dump()))
+            json.dump(index.model_dump(), f)
 
         # Save atlas.png using imageio
         atlas_uint8 = (np.clip(self.atlas_data, 0.0, 1.0) * 255).astype(np.uint8)
         atlas_uint8 = atlas_uint8.squeeze()
-        iio.imwrite(path / "atlas.png", atlas_uint8)
+        PIL.Image.fromarray(atlas_uint8).save(path / "atlas.png")
 
         # (Optional) Save README.md
         if self.readme_text:
@@ -798,11 +673,11 @@ class CookedAtlas:
                     "Inconsistent CookedAtlas instance: if 'as_glyph_cache' is set, "
                     "'atlas_type' must be 'glyph_cache'."
                 )
-            with open(path / "glyph_metrics.json", "wb") as f:
+            with open(path / "glyph_metrics.json", "w", encoding="utf-8") as f:
                 glyph_metrics_file = CookedAtlasGlyphCacheExtFile(
                     data=list(self.as_glyph_cache.items())
                 )
-                f.write(orjson.dumps(glyph_metrics_file.model_dump()))
+                json.dump(glyph_metrics_file.model_dump(), f)
 
 
 class CookedAtlasIndexFile(pydantic.BaseModel):
@@ -817,7 +692,7 @@ class CookedAtlasIndexFile(pydantic.BaseModel):
 
 
 class CookedAtlasGlyphCacheExtFile(pydantic.BaseModel):
-    data: list[tuple[CookedAtlasGlyphCacheKey, "CookedAtlasGlyphInfo"]]
+    data: list[tuple["CookedAtlasGlyphCacheKey", "CookedAtlasGlyphInfo"]]
 
 
 @dataclass(frozen=True, kw_only=True)

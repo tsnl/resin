@@ -37,7 +37,7 @@ from .basic import (
 from .bundled_data import BUNDLED_DATA_PATH
 from .resources import COOKED_ATLAS_PATH_SUFFIX, CookedAtlas
 from .draw_2d import Draw2dQuad
-from . import typed_uharfbuzz as hb
+from . import typed_freetype as ft
 
 
 #
@@ -313,8 +313,8 @@ class Draw2dExtTextPrimitive(Draw2dExtBasePrimitive):  #
     def _layout_text_lines(
         self,
         *,
-        infos: list[hb.GlyphInfo],
-        positions: list[hb.GlyphPosition],
+        infos: list["GlyphInfo"],
+        positions: list["GlyphPosition"],
         text: str,
         wrap: bool,
         max_width_26_6: int,
@@ -378,8 +378,8 @@ class Draw2dExtTextPrimitive(Draw2dExtBasePrimitive):  #
         self,
         *,
         shaper: "TextShaper",
-        infos: list[hb.GlyphInfo],
-        positions: list[hb.GlyphPosition],
+        infos: list["GlyphInfo"],
+        positions: list["GlyphPosition"],
         start_idx: int,
         end_idx: int,
     ) -> tuple[int, int]:
@@ -668,26 +668,51 @@ class GlyphAtlas(BaseDisposable):
 #
 
 
+@dataclass(frozen=True)
+class GlyphInfo:
+    """Glyph info compatible with HarfBuzz interface."""
+
+    codepoint: int
+    cluster: int
+
+
+@dataclass(frozen=True)
+class GlyphPosition:
+    """Glyph position compatible with HarfBuzz interface."""
+
+    x_advance: int
+    y_advance: int
+    x_offset: int
+    y_offset: int
+
+
+@dataclass(frozen=True)
+class GlyphExtents:
+    """Glyph extents compatible with HarfBuzz interface."""
+
+    x_bearing: int
+    y_bearing: int
+    width: int
+    height: int
+
+
 class TextShaper:
     """
     Text shaper for a specific font family.
 
-    Wraps HarfBuzz for shaping. Metrics come from pre-cooked glyph atlas.
+    Uses FreeType for simple left-to-right text layout. Metrics come from pre-cooked 
+    glyph atlas.
     """
 
     _font: Font
-    _hb_font: hb.Font
+    _ft_face: ft.Face
 
     def __init__(self, *, font: Font):
         self._font = font
 
-        # Load font for HarfBuzz:
+        # Load font for FreeType:
         file_path = self._get_font_file_path(font)
-
-        with open(file_path, "rb") as f:
-            hb_blob = f.read()
-        hb_face = hb.Face(hb_blob)
-        self._hb_font = hb.Font(hb_face)
+        self._ft_face = ft.Face(str(file_path))
 
     @staticmethod
     def _get_font_file_path(font: Font) -> Path:
@@ -703,23 +728,61 @@ class TextShaper:
         text: str,
         font_size_px: int,
         font_weight: int,
-    ) -> tuple[list[hb.GlyphInfo], list[hb.GlyphPosition]]:
-        """Shape text and return glyph infos and positions."""
-        scale = font_size_px * 64  # HarfBuzz uses 26.6 fixed point
-        self._hb_font.scale = (scale, scale)
-        self._hb_font.set_variations({"wght": font_weight})
+    ) -> tuple[list[GlyphInfo], list[GlyphPosition]]:
+        """Shape text and return glyph infos and positions (simple LTR layout)."""
+        self.set_font_size(font_size_px)
+        self.set_font_weight(font_weight)
+        
+        infos: list[GlyphInfo] = []
+        positions: list[GlyphPosition] = []
 
-        hb_buffer = hb.Buffer()
-        hb_buffer.add_str(text)
-        hb_buffer.guess_segment_properties()
+        # Simple left-to-right layout
+        for cluster, char in enumerate(text):
+            glyph_index = self._ft_face.get_char_index(ord(char))
+            self._ft_face.load_glyph(glyph_index, ft.FT_LOAD_TARGET_NORMAL)
 
-        hb.shape(self._hb_font, hb_buffer)
+            # Get advance in 26.6 fixed point
+            x_advance = self._ft_face.glyph.advance.x
 
-        return hb_buffer.glyph_infos, hb_buffer.glyph_positions
+            infos.append(GlyphInfo(codepoint=glyph_index, cluster=cluster))
+            positions.append(
+                GlyphPosition(
+                    x_advance=x_advance,
+                    y_advance=0,
+                    x_offset=0,
+                    y_offset=0,
+                )
+            )
 
-    def get_glyph_extents(self, glyph: int) -> hb.GlyphExtents:
+        return infos, positions
+
+    def set_font_size(self, size_px: int) -> None:
+        """Set font size for shaping."""
+        self._ft_face.set_pixel_sizes(0, size_px)
+
+    def set_font_weight(self, weight: int) -> None:
+        """Set font weight for shaping (variable fonts only)."""
+        var_info = self._ft_face.get_variation_info()
+        if not var_info.axes:
+            return
+        coords = list(self._ft_face.get_var_design_coords())
+        for i, axis in enumerate(var_info.axes):
+            if axis.tag == "wght":
+                coords[i] = float(weight)
+        self._ft_face.set_var_design_coords(coords)
+
+    def get_glyph_extents(self, glyph: int) -> GlyphExtents:
         """Get glyph extents for optical bounds calculation."""
-        return self._hb_font.get_glyph_extents(glyph)
+        self._ft_face.load_glyph(glyph, ft.FT_LOAD_TARGET_NORMAL)
+
+        # Get glyph metrics in 26.6 fixed point
+        metrics = self._ft_face.glyph.metrics  # type: ignore
+        return GlyphExtents(
+            x_bearing=metrics.horiBearingX,
+            y_bearing=metrics.horiBearingY,
+            width=metrics.width,
+            height=metrics.height,
+        )
 
 
 #

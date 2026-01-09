@@ -43,6 +43,7 @@ from typing import Literal, Callable
 import time
 
 import numpy as np
+import numpy.typing as npt
 import wgpu
 from kiwisolver import (
     Solver as KiwiSolver,
@@ -82,7 +83,6 @@ from .draw_3d import (
     Draw3dRenderer,
     Draw3dScene,
 )
-from .resources import ImageResource
 from .window import Window
 from .events import EventHub
 
@@ -520,7 +520,7 @@ class GuiWindow(BaseDisposable):
         self._camera_transform = transform
         self._camera_intrinsics = intrinsics
 
-    def set_environment_map(self, environment_map: ImageResource | None) -> None:
+    def set_environment_map(self, environment_map: npt.NDArray[np.float32] | None) -> None:
         """Set the environment map for IBL lighting."""
         self._environment_map = (
             Draw3dTexture(

@@ -15,6 +15,8 @@ class GlyphSlot:
     bitmap: "Bitmap"
     bitmap_left: int
     bitmap_top: int
+    metrics: "GlyphMetrics"
+    advance: "Vector"
     def render(self, render_mode: int) -> None: ...
 
 class Bitmap:
@@ -47,6 +49,20 @@ class SizeMetrics:
     descender: int
     height: int
     max_advance: int
+
+class GlyphMetrics:
+    width: int
+    height: int
+    horiBearingX: int
+    horiBearingY: int
+    horiAdvance: int
+    vertBearingX: int
+    vertBearingY: int
+    vertAdvance: int
+
+class Vector:
+    x: int
+    y: int
 
 FT_LOAD_RENDER: int
 FT_LOAD_TARGET_NORMAL: int

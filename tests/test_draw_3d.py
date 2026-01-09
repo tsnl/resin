@@ -8,8 +8,6 @@ import pytest
 import rich
 import wgpu
 
-from conftest import GpuFixture
-
 from zfw import (
     Draw3dRenderer,
     Draw3dFrame,
@@ -18,7 +16,6 @@ from zfw import (
     Draw3dGeometry,
     Draw3dTexture,
     Draw3dMaterial,
-    ImageResource,
     load_gltf,
     logger,
 )
@@ -37,7 +34,7 @@ def _create_readback_buffer(device: wgpu.GPUDevice, w: int, h: int) -> wgpu.GPUB
 
 
 def _render_and_readback(
-    gpu: GpuFixture,
+    gpu_device: wgpu.GPUDevice,
     renderer: Draw3dRenderer,
     frame: Draw3dFrame,
     scene: Draw3dScene,
@@ -50,14 +47,14 @@ def _render_and_readback(
     Returns:
         Array of shape (H, W, 4) with float32 values.
     """
-    readback_buffer = _create_readback_buffer(gpu.device, w, h)
+    readback_buffer = _create_readback_buffer(gpu_device, w, h)
 
     repeat_count = 1 if not measure_runtime else 30
 
     start_time = time.monotonic_ns()
 
     for _ in range(repeat_count):
-        command_encoder = gpu.device.create_command_encoder(label="CommandEncoder")
+        command_encoder = gpu_device.create_command_encoder(label="CommandEncoder")
         renderer.record(scene, frame, command_encoder)
         command_encoder.copy_texture_to_buffer(
             source=wgpu.TexelCopyTextureInfo(
@@ -73,7 +70,7 @@ def _render_and_readback(
             ),
             copy_size=frame.get_output_image().size,
         )
-        gpu.queue.submit([command_encoder.finish()])
+        gpu_device.queue.submit([command_encoder.finish()])
 
     end_time = time.monotonic_ns()
 
@@ -112,18 +109,18 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
 
 
 @pytest.fixture(scope="module")
-def renderer(gpu: GpuFixture) -> Generator[Draw3dRenderer, None, None]:
-    yield Draw3dRenderer(gpu.device, gpu.queue, (FRAME_W, FRAME_H))
+def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None]:
+    yield Draw3dRenderer(gpu_device, gpu_device.queue, (FRAME_W, FRAME_H))
 
 
-def test_basic_draw_3d(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
 
     # scene = _load_two_avocados_scene(renderer)
     scene = _load_damaged_helmet_scene(renderer)
 
     data = _render_and_readback(
-        gpu,
+        gpu_device,
         renderer,
         frame,
         scene,
@@ -237,7 +234,7 @@ def _load_damaged_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
     return scene
 
 
-def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_primary_ray_generation(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test that primary rays are generated correctly with proper FOV coverage."""
     frame = Draw3dFrame(renderer)
 
@@ -253,7 +250,7 @@ def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Enable primary ray direction debug flag
     frame.set_debug_flags(emit_primary_ray_direction=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     # Extract RGB (ray direction mapped to [0,1])
     data = data[:, :, :3]
@@ -335,7 +332,7 @@ def test_primary_ray_generation(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
 
-def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_depth_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test depth visualization for debugging ray-triangle intersections."""
     frame = Draw3dFrame(renderer)
 
@@ -371,7 +368,7 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Enable depth debug flag
     frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     # Save output:
     _save_debug_image(data, "test_depth_visualization.png", format="RGBA")
@@ -396,7 +393,7 @@ def test_depth_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
 
-def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_world_position_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test world position visualization to see what's actually being hit."""
     frame = Draw3dFrame(renderer)
 
@@ -431,12 +428,12 @@ def test_world_position_visualization(gpu: GpuFixture, renderer: Draw3dRenderer)
 
     # Enable world position debug flag
     frame.set_debug_flags(emit_hit_world_position=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     _save_debug_image(data, "test_world_position.png", format="RGBA")
 
 
-def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_coordinate_system_offset_px(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test that positive X camera offset shifts the depth centroid left."""
     frame = Draw3dFrame(renderer)
 
@@ -472,7 +469,7 @@ def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Enable depth debug flag
     frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_px.png", format="RGBA")
@@ -496,7 +493,7 @@ def test_coordinate_system_offset_px(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
 
-def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_coordinate_system_offset_py(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test that positive Y camera offset makes the cube appear larger."""
     frame = Draw3dFrame(renderer)
 
@@ -532,7 +529,7 @@ def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Enable depth debug flag
     frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_py.png", format="RGBA")
@@ -570,7 +567,7 @@ def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
     data_baseline = _render_and_readback(
-        gpu, renderer, frame, scene_baseline, FRAME_W, FRAME_H
+        gpu_device, renderer, frame, scene_baseline, FRAME_W, FRAME_H
     )
     alpha_baseline = data_baseline[:, :, 3]
     hit_mask_baseline = alpha_baseline > 0
@@ -587,7 +584,7 @@ def test_coordinate_system_offset_py(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
 
-def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_coordinate_system_offset_pz(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test that positive Z camera offset shifts the depth centroid downward."""
     frame = Draw3dFrame(renderer)
 
@@ -623,7 +620,7 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
 
     # Enable depth debug flag
     frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_pz.png", format="RGBA")
@@ -647,7 +644,7 @@ def test_coordinate_system_offset_pz(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
 
-def test_environment_map_basic(gpu: GpuFixture, renderer: Draw3dRenderer):
+def test_environment_map_basic(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test environment map rendering with an empty scene."""
     frame = Draw3dFrame(renderer)
 
@@ -658,19 +655,10 @@ def test_environment_map_basic(gpu: GpuFixture, renderer: Draw3dRenderer):
     assert hdr_data.shape[2] == 3
     height, width = hdr_data.shape[:2]
 
-    # Create ImageResource from HDR data
-    env_map_resource = ImageResource(
-        data=hdr_data,
-        width=width,
-        height=height,
-        depth=3,
-        image_format="rgb32float",
-    )
-
     # Convert to Draw3dTexture
     env_map_texture = Draw3dTexture(
         renderer,
-        data=env_map_resource.data,
+        data=hdr_data,
         usage="environment",
     )
 
@@ -686,7 +674,7 @@ def test_environment_map_basic(gpu: GpuFixture, renderer: Draw3dRenderer):
     )
 
     # Render
-    data = _render_and_readback(gpu, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
 
     # Save debug output
     _save_debug_image(data, "test_environment_map_basic.png", format="RGBA")

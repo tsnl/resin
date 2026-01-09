@@ -30,7 +30,6 @@ __all__ = [
     "GuiWidget",
     "GuiWindow",
     "ImageFormat",
-    "ImageResource",
     "Key",
     "KeyModifier",
     "MaterialResource",
@@ -54,7 +53,6 @@ __all__ = [
     "image_format_channel_count",
     "load_gltf",
     "load_image",
-    "load_image_from_bytes",
     "logger",
     "normalize_image_to_f32",
     "partition_points",
@@ -62,6 +60,7 @@ __all__ = [
     "request_wgpu_device",
     "round_up_to_po2",
     "setup_logging",
+    "typed_freetype",
 ]
 
 from .basic import (
@@ -107,9 +106,7 @@ from .resources import (
     COOKED_ATLAS_PATH_SUFFIX,
     GeometryResource,
     MaterialResource,
-    ImageResource,
     load_image,
-    load_image_from_bytes,
     load_gltf,
 )
 from .bundled_data import BUNDLED_DATA_PATH
@@ -138,3 +135,4 @@ from .bvh import (
     partition_triangles,
 )
 from .gpu import request_wgpu_device
+from . import typed_freetype

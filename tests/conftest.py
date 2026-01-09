@@ -1,8 +1,8 @@
-from dataclasses import dataclass
 import logging
 import os
-from pathlib import Path
 
+import numpy as np
+import numpy.typing as npt
 import pytest
 import wgpu
 
@@ -10,54 +10,35 @@ from zfw import (
     load_image,
     setup_logging,
     request_wgpu_device,
-    ImageResource,
     convert_rgb_to_grayscale,
 )
-
-
-@dataclass
-class GpuFixture:
-    adapter: wgpu.GPUAdapter
-    device: wgpu.GPUDevice
-    queue: wgpu.GPUQueue
+from zfw.images import convert_srgb_to_linear
 
 
 @pytest.fixture(scope="session")
-def gpu() -> GpuFixture:
+def gpu_device() -> wgpu.GPUDevice:
     """Fixture that provides a GPU device and queue."""
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = request_wgpu_device(adapter, label="TestDevice")
-    queue = device.queue
-    return GpuFixture(adapter=adapter, device=device, queue=queue)
+    return request_wgpu_device(adapter, label="ZfwTestDevice")
 
 
 @pytest.fixture(scope="session")
-def rainbow_512x512_image() -> ImageResource:
+def rainbow_512x512_image() -> npt.NDArray[np.float32]:
     """Load the rainbow test image as a float32 linear RGBA array."""
-    image_resource = load_image(
-        Path("tests/data/rainbow-512x512.png"),
-        image_format="rgba8unorm-srgb",
-        expected_format="rgba32float",
-    )
-    image_data = image_resource.data
+    image_data = load_image("tests/data/rainbow-512x512.png")
+    image_data = convert_srgb_to_linear(image_data)
     assert image_data.shape == (512, 512, 4)
     image_data.setflags(write=False)
-    return image_resource
+    return image_data
 
 
 @pytest.fixture(scope="session")
 def rainbow_512x512_image_grayscale(
-    rainbow_512x512_image: ImageResource,
-) -> ImageResource:
-    image_data_rgb = rainbow_512x512_image.data[..., :3]
+    rainbow_512x512_image: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    image_data_rgb = rainbow_512x512_image[..., :3]
     image_data_gray = convert_rgb_to_grayscale(rgb=image_data_rgb)
-    return ImageResource(
-        data=image_data_gray,
-        width=rainbow_512x512_image.width,
-        height=rainbow_512x512_image.height,
-        depth=1,
-        image_format="r32float",
-    )
+    return image_data_gray
 
 
 @pytest.fixture(scope="session", autouse=True)
