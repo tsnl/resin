@@ -343,11 +343,6 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
         assert accessor.bufferView is not None
         bs = buffer_views[accessor.bufferView]
 
-        # If byteStride is set, handle strided data:
-        bv = gltf.bufferViews[accessor.bufferView]
-        if bv.byteStride is not None or bv.byteStride != 0:
-            bs = bs[0 : bv.byteLength : bv.byteStride]
-
         # Get the component type:
         component_dtype: np.dtype = {
             5120: np.dtype(np.int8),
@@ -371,6 +366,17 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
 
         # Get the element count:
         element_count = accessor.count
+
+        # Get the total byte count per-element:
+        element_bytes = component_dtype.itemsize * component_count
+
+        # If byteStride is set, handle strided data:
+        bv = gltf.bufferViews[accessor.bufferView]
+        if bv.byteStride is not None and bv.byteStride != 0:
+            bs = np.lib.stride_tricks.sliding_window_view(
+                bs,
+                window_shape=element_bytes,
+            )[:: bv.byteStride, :].ravel()
 
         # Create array
         return np.frombuffer(
