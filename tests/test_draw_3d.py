@@ -1,4 +1,3 @@
-import math
 import time
 from typing import Generator
 
@@ -41,7 +40,6 @@ def _render_and_readback(
     w: int,
     h: int,
     measure_runtime: bool = False,
-    samples_per_pixel: int = 32,
 ) -> np.ndarray:
     """Render a scene and read back the result as a numpy array.
 
@@ -55,15 +53,9 @@ def _render_and_readback(
     start_time = time.monotonic_ns()
 
     for _ in range(repeat_count):
-        command_encoder = gpu_device.create_command_encoder(label="CommandEncoder")
+        for _ in range(renderer.accumulator_frame_count):
+            command_encoder = gpu_device.create_command_encoder(label="CommandEncoder")
 
-        # GPUs crash if we set very high SPP on one frame.
-        # Instead, we can do multiple passes and accumulate.
-        iter_count = max(
-            1, int(math.ceil(renderer._samples_per_pixel / samples_per_pixel))
-        )
-        renderer._history_weight = 1.0 / iter_count
-        for _ in range(iter_count):
             renderer.record(scene, command_encoder)
             command_encoder.copy_texture_to_buffer(
                 source=wgpu.TexelCopyTextureInfo(
@@ -119,7 +111,13 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
 
 @pytest.fixture(scope="module")
 def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None]:
-    yield Draw3dRenderer(gpu_device, gpu_device.queue, (FRAME_W, FRAME_H))
+    yield Draw3dRenderer(
+        gpu_device,
+        gpu_device.queue,
+        (FRAME_W, FRAME_H),
+        samples_per_pixel=8,
+        accumulator_frame_count=32,
+    )
 
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
@@ -150,7 +148,6 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
             FRAME_W,
             FRAME_H,
             measure_runtime=True,
-            samples_per_pixel=4096,
         )
         _save_debug_image(data, f"test_basic_draw_3d-{scene_name}.png")
 

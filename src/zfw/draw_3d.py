@@ -38,10 +38,8 @@ class Draw3dRenderer(BaseDisposable):
         materials, textures) and reset the accumulator.
 
     The renderer supports temporal accumulation for path tracing convergence. The
-    `history_weight` parameter controls blending: 0.0 = only new frame (no history),
-    1.0 = only history (frozen). For interactive use, low values (~0.05) give
-    responsive results; for offline rendering, use higher values to accumulate
-    many samples.
+    `accumulator_frame_count` parameter controls how many frames are kept in the
+    history buffer and averaged together. Default is 4 frames.
     """
 
     device: wgpu.GPUDevice
@@ -89,7 +87,7 @@ class Draw3dRenderer(BaseDisposable):
         queue: wgpu.GPUQueue,
         target_size_wh_px: tuple[int, int],
         samples_per_pixel: int = 1,
-        history_weight: float = 0.50,
+        accumulator_frame_count: int = 4,
         render_scale: float = 1.0,
         instance_capacity: int = 1 << 10,
         geometry_capacity: int = 1 << 7,
@@ -564,7 +562,7 @@ class Draw3dRenderer(BaseDisposable):
         self._debug_flags = 0
         self._max_bounces = 3
         self._samples_per_pixel = samples_per_pixel
-        self._history_weight = history_weight
+        self.accumulator_frame_count = accumulator_frame_count
         self._render_scale = render_scale
 
         # Internal render target at reduced resolution
@@ -592,7 +590,10 @@ class Draw3dRenderer(BaseDisposable):
                 wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING
             ),
         )
-        accumulator_size = internal_w * internal_h * 4 * 4
+        # Multiple accumulator buffers for frame averaging
+        # Each buffer stores one frame's worth of rgba float data
+        single_frame_size = internal_w * internal_h * 4 * 4  # vec4<f32> per pixel
+        accumulator_size = single_frame_size * self.accumulator_frame_count
         self._accumulator_buffer = device.create_buffer(
             label="Draw3dRenderer.AccumulatorBuffer",
             size=accumulator_size,
@@ -981,7 +982,9 @@ class Draw3dRenderer(BaseDisposable):
         frame_info_data["frame_index"] = np.uint32(frame_index)
         frame_info_data["max_bounces"] = np.uint32(self._max_bounces)
         frame_info_data["samples_per_pixel"] = np.uint32(self._samples_per_pixel)
-        frame_info_data["history_weight"] = np.float32(self._history_weight)
+        frame_info_data["accumulator_frame_count"] = np.uint32(
+            self.accumulator_frame_count
+        )
 
         self._frame_info_buffer.write(frame_info_data, command_encoder)
 
@@ -1982,7 +1985,7 @@ class PodFrameInfoArray(StructuredNDArray):
             ("frame_index", np.uint32),
             ("max_bounces", np.uint32),
             ("samples_per_pixel", np.uint32),
-            ("history_weight", np.float32),
+            ("accumulator_frame_count", np.uint32),
         ]
     )
 
