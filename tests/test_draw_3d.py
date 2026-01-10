@@ -1,3 +1,4 @@
+import math
 import time
 from typing import Generator
 
@@ -42,6 +43,7 @@ def _render_and_readback(
     w: int,
     h: int,
     measure_runtime: bool = False,
+    samples_per_pixel: int = 32,
 ) -> np.ndarray:
     """Render a scene and read back the result as a numpy array.
 
@@ -60,22 +62,27 @@ def _render_and_readback(
         # Reset accumulators in case this frame is re-used on a different scene:
         frame.reset(command_encoder)
 
-        renderer.record(scene, frame, command_encoder)
-        command_encoder.copy_texture_to_buffer(
-            source=wgpu.TexelCopyTextureInfo(
-                texture=frame.get_output_image(),
-                mip_level=0,
-                origin=(0, 0, 0),
-                aspect=wgpu.TextureAspect.all,
-            ),
-            destination=wgpu.TexelCopyBufferInfo(
-                bytes_per_row=w * 4 * 2,  # rgba16float
-                rows_per_image=h,
-                buffer=readback_buffer,
-            ),
-            copy_size=frame.get_output_image().size,
-        )
-        gpu_device.queue.submit([command_encoder.finish()])
+        # GPUs crash if we set very high SPP on one frame.
+        # Instead, we can do multiple passes and accumulate.
+        iter_count = max(1, int(math.ceil(frame.samples_per_pixel / samples_per_pixel)))
+        frame.accumulator_persistence = 1.0 / iter_count
+        for _ in range(iter_count):
+            renderer.record(scene, frame, command_encoder)
+            command_encoder.copy_texture_to_buffer(
+                source=wgpu.TexelCopyTextureInfo(
+                    texture=frame.get_output_image(),
+                    mip_level=0,
+                    origin=(0, 0, 0),
+                    aspect=wgpu.TextureAspect.all,
+                ),
+                destination=wgpu.TexelCopyBufferInfo(
+                    bytes_per_row=w * 4 * 2,  # rgba16float
+                    rows_per_image=h,
+                    buffer=readback_buffer,
+                ),
+                copy_size=frame.get_output_image().size,
+            )
+            gpu_device.queue.submit([command_encoder.finish()])
 
     end_time = time.monotonic_ns()
 
@@ -120,7 +127,6 @@ def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
-    frame.samples_per_pixel = 4
 
     scenes = {
         "two_avocados": _load_two_avocados_scene(renderer),
@@ -147,6 +153,7 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
             FRAME_W,
             FRAME_H,
             measure_runtime=True,
+            samples_per_pixel=4096,
         )
         _save_debug_image(data, f"test_basic_draw_3d-{scene_name}.png")
 

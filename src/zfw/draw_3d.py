@@ -671,7 +671,7 @@ class Draw3dFrame(BaseDisposable):
         self.renderer = renderer
         self.debug_flags = 0
         self.max_bounces = 4
-        self.samples_per_pixel = 64
+        self.samples_per_pixel = 8
         self.accumulator_persistence = 0.25
         self.render_scale = render_scale
 
