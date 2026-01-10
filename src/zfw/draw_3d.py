@@ -779,6 +779,27 @@ class Draw3dRenderer(BaseDisposable):
         command_encoder: wgpu.GPUCommandEncoder,
         timestamp: float | None = None,
     ) -> None:
+        # Validate all scene resources are still valid
+        for geometry, material in scene.meshes:
+            if not geometry.is_valid:
+                raise LogicError(
+                    f"Draw3dGeometry {geometry.geometry_id} is no longer valid "
+                    "(geometry heap was cleared since it was created)"
+                )
+            if not material.is_valid:
+                raise LogicError(
+                    f"Draw3dMaterial {material.material_id} is no longer valid "
+                    "(material heap was cleared since it was created)"
+                )
+        if scene.environment_map is not None:
+            env_gen = scene.environment_map.allocation.heap_generation
+            heap_gen = self.environment_texture_heap.generation_count
+            if env_gen != heap_gen:
+                raise LogicError(
+                    "Draw3dTexture (environment map) is no longer valid "
+                    "(texture heap was cleared since it was created)"
+                )
+
         if timestamp is None:
             timestamp = time.monotonic() - self._construction_time
         self._record(
@@ -1744,6 +1765,7 @@ class TextureHeap(BaseDisposable):
             texture_y_px=self.cursor_y_px,
             texture_w_px=width_px,
             texture_h_px=height_px,
+            heap_generation=self.generation_count,
         )
         self.cursor_x_px += width_px
         self.cursor_h_px = max(self.cursor_h_px, height_px)
@@ -1848,6 +1870,7 @@ class TextureHeapAllocation:
     texture_y_px: int
     texture_w_px: int
     texture_h_px: int
+    heap_generation: int
 
     def __post_init__(self):
         assert 0 <= self.texture_x_px <= 0xFFFF
