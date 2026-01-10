@@ -664,7 +664,7 @@ class Draw3dFrame(BaseDisposable):
     camera_buffer: "PerFrameBuffer[PodCameraArray]"
     instance_buffer: "PerFrameBuffer[PodInstanceArray]"
 
-    def __init__(self, renderer: Draw3dRenderer, *, render_scale: float = 0.5) -> None:
+    def __init__(self, renderer: Draw3dRenderer, *, render_scale: float = 1.0) -> None:
         self.renderer = renderer
         self.debug_flags = 0
         self.max_bounces = 4

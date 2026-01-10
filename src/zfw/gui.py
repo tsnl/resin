@@ -717,7 +717,10 @@ class GuiWindow(BaseDisposable):
         if self._camera_transform is not None and self._camera_intrinsics is not None:
             # Create 3D frame if needed (first frame or after resize)
             if self._draw_3d_frame is None:
-                self._draw_3d_frame = Draw3dFrame(renderer=self._draw_3d_renderer)
+                self._draw_3d_frame = Draw3dFrame(
+                    renderer=self._draw_3d_renderer,
+                    render_scale=0.5,
+                )
                 # self._draw_3d_frame.set_debug_flags(emit_surface_normal=True)
 
             # Build 3D scene

@@ -539,13 +539,13 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
         } else {
             // Internal node: push children onto stack
             // Child indices are relative to this geometry's BVH, so offset them by the span begin
-            // Test both children's AABBs and push them in order of distance (closer first)
+            // Only fetch second child's AABB if first child intersects (lazy evaluation)
             let child0_idx = node.children[0];
             let child1_idx = node.children[1];
+            let closest_dist = closest_hit.triangle_raycast_result.w;
 
+            // Test first child
             var child0_dist = F32_INFINITY;
-            var child1_dist = F32_INFINITY;
-
             if child0_idx != 0u {
                 let child0_node = bvh_node_heap[bvh_node_span.begin + child0_idx];
                 let child0_aabb = Aabb(
@@ -555,6 +555,8 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
                 child0_dist = hit_aabb(ray, child0_aabb);
             }
 
+            // Test second child only if it might be closer than current best
+            var child1_dist = F32_INFINITY;
             if child1_idx != 0u {
                 let child1_node = bvh_node_heap[bvh_node_span.begin + child1_idx];
                 let child1_aabb = Aabb(
@@ -567,22 +569,22 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
             // Push children in reverse order of distance so closer child is popped first
             // Skip children that don't intersect or are further than current closest hit
             if child0_dist < child1_dist {
-                // Push child1 first (farther), then child0 (closer)
-                if child1_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                // child0 is closer: push child1 first (farther), then child0 (closer)
+                if child1_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
                     stack[stack_ptr] = bvh_node_span.begin + child1_idx;
                     stack_ptr += 1u;
                 }
-                if child0_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                if child0_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
                     stack[stack_ptr] = bvh_node_span.begin + child0_idx;
                     stack_ptr += 1u;
                 }
             } else {
-                // Push child0 first (farther), then child1 (closer)
-                if child0_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                // child1 is closer: push child0 first (farther), then child1 (closer)
+                if child0_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
                     stack[stack_ptr] = bvh_node_span.begin + child0_idx;
                     stack_ptr += 1u;
                 }
-                if child1_dist < closest_hit.triangle_raycast_result.w && stack_ptr < MAX_STACK_DEPTH {
+                if child1_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
                     stack[stack_ptr] = bvh_node_span.begin + child1_idx;
                     stack_ptr += 1u;
                 }
@@ -984,6 +986,9 @@ fn handle_path_hit(state: PathState, hit_details: HitDetails, seed: ptr<function
 
     if should_terminate_russian_roulette(next_state.throughput, seed) {
         next_state.terminated = true;
+    } else {
+        // Compensate throughput for Russian Roulette to maintain unbiased estimate
+        next_state.throughput = compensate_russian_roulette(next_state.throughput);
     }
 
     return next_state;
@@ -1063,7 +1068,8 @@ fn compute_primary_ray_jitter(sample_idx: u32) -> vec2<f32> {
 
 fn gen_primary_ray_jittered(pixel_coord_px: vec2<u32>, jitter: vec2<f32>) -> Ray {
     let target_size = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
-    let jittered_coord = vec2<f32>(pixel_coord_px) + jitter;
+    // Add 0.5 to get pixel center, then apply jitter (which is in [-0.5, +0.5])
+    let jittered_coord = vec2<f32>(pixel_coord_px) + vec2<f32>(0.5) + jitter;
     return gen_primary_ray_from_coord(jittered_coord, target_size);
 }
 
@@ -1222,7 +1228,8 @@ fn render_pixel(pixel_xy: vec2<u32>, seed: ptr<function, u32>) -> vec4<f32> {
 
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
     let target_size = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
-    return gen_primary_ray_from_coord(vec2<f32>(pixel_coord_px), target_size);
+    // Use pixel center (add 0.5) for non-jittered rays
+    return gen_primary_ray_from_coord(vec2<f32>(pixel_coord_px) + vec2<f32>(0.5), target_size);
 }
 
 fn compute_pixel_seed(pixel_xy: vec2<u32>) -> u32 {
