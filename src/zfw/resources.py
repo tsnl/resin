@@ -593,8 +593,11 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
         assert attributes.NORMAL is not None
         normals = accessors[attributes.NORMAL].astype(np.float32)
 
-        assert attributes.TEXCOORD_0 is not None
-        texcoords = accessors[attributes.TEXCOORD_0].astype(np.float32)
+        texcoords = (
+            accessors[attributes.TEXCOORD_0].astype(np.float32)
+            if attributes.TEXCOORD_0 is not None
+            else np.zeros((positions.shape[0], 2), dtype=np.float32)
+        )
 
         assert primitive.indices is not None
         indices = accessors[primitive.indices].astype(np.uint32).reshape((-1, 3))
