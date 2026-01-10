@@ -26,6 +26,7 @@ enable f16;
 @group(1) @binding(1) var<uniform> frame_info: PodFrameInfo;
 @group(1) @binding(2) var<uniform> camera: PodCamera;
 @group(1) @binding(3) var<storage, read> instances: array<PodInstance>;
+@group(1) @binding(4) var<storage, read_write> accumulator: array<vec4<f32>>;
 
 //
 // Constants and configuration:
@@ -40,6 +41,61 @@ const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-8;
 /// Max BVH traversal stack depth
 const MAX_STACK_DEPTH: u32 = 64u;
 
+/// Max path tracing stack depth
+const MAX_PATH_DEPTH: u32 = 8u;
+
+/// Pi constant
+const PI: f32 = 3.14159265359;
+
+//
+// Random number generation and low-discrepancy sequences:
+//
+
+fn halton_base2(index: u32) -> f32 {
+    var bits = index;
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return f32(bits) * 2.3283064365386963e-10;
+}
+
+fn halton_base3(index: u32) -> f32 {
+    var result: f32 = 0.0;
+    var f: f32 = 1.0 / 3.0;
+    var i = index;
+    while i > 0u {
+        result += f * f32(i % 3u);
+        i = i / 3u;
+        f = f / 3.0;
+    }
+    return result;
+}
+
+fn halton_2d(index: u32) -> vec2<f32> {
+    return vec2<f32>(halton_base2(index), halton_base3(index));
+}
+
+fn pcg_hash(input: u32) -> u32 {
+    var state = input * 747796405u + 2891336453u;
+    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+fn rand_from_seed(seed: ptr<function, u32>) -> f32 {
+    *seed = pcg_hash(*seed);
+    return f32(*seed) / f32(0xFFFFFFFFu);
+}
+
+fn rand2_from_seed(seed: ptr<function, u32>) -> vec2<f32> {
+    return vec2<f32>(rand_from_seed(seed), rand_from_seed(seed));
+}
+
+fn rand3_from_seed(seed: ptr<function, u32>) -> vec3<f32> {
+    return vec3<f32>(rand_from_seed(seed), rand_from_seed(seed), rand_from_seed(seed));
+}
+
 
 //
 // Pod types: used for CPU-GPU data exchange.
@@ -53,7 +109,11 @@ struct PodFrameInfo {
     environment_map_texture_id: i32,
     timestamp: u32,
     frame_index: u32,
+    max_bounces: u32,
+    samples_per_pixel: u32,
+    accumulator_persistence: f32,
     _pad0: u32,
+    _pad1: u32,
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
@@ -632,24 +692,14 @@ fn hit_aabb(ray: Ray, aabb: Aabb) -> f32 {
 }
 
 //
-// PBR shading (WIP):
+// PBR shading and path tracing:
 //
 
-fn compute_hit_color(hit_details: HitDetails) -> vec4<f32> {
-    let sun_direction = normalize(vec3<f32>(-1.0, -1.0, -0.5));
-    let color = hit_details.surface_color;
-    let normal = hit_details.surface_normal;
-    let intensity = clamp(dot(normal, sun_direction), 0.05, 1.0);
-    return vec4<f32>(color.xyz * intensity, 1.0);
-}
-
-fn compute_miss_color(ray: Ray) -> vec4<f32> {
-    // If environment map is available, sample it
+fn get_environment_radiance(ray: Ray) -> vec3<f32> {
     if frame_info.environment_map_texture_id >= 0 {
-        return sample_environment_map(ray);
-    } else {
-        return sample_procedural_environment_map(ray);
+        return sample_environment_map(ray).rgb;
     }
+    return sample_procedural_environment_map(ray).rgb;
 }
 
 fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
@@ -827,18 +877,237 @@ fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
 }
 
 //
+// BRDF sampling and evaluation:
+//
+
+fn cosine_weighted_hemisphere_sample(normal: vec3<f32>, rand: vec2<f32>) -> vec3<f32> {
+    let r = sqrt(rand.x);
+    let theta = 2.0 * PI * rand.y;
+    let local_dir = vec3<f32>(r * cos(theta), r * sin(theta), sqrt(1.0 - rand.x));
+    return orient_to_normal(local_dir, normal);
+}
+
+fn orient_to_normal(local_dir: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    let tangent = select_orthogonal(normal);
+    let bitangent = cross(normal, tangent);
+    return tangent * local_dir.x + bitangent * local_dir.y + normal * local_dir.z;
+}
+
+fn select_orthogonal(v: vec3<f32>) -> vec3<f32> {
+    let abs_v = abs(v);
+    let axis = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs_v.x > abs_v.y);
+    return normalize(cross(v, axis));
+}
+
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (1.0 - f0) * pow(1.0 - cos_theta, 5.0);
+}
+
+fn ggx_sample_hemisphere(roughness: f32, rand: vec2<f32>) -> vec3<f32> {
+    let a = roughness * roughness;
+    let phi = 2.0 * PI * rand.y;
+    let cos_theta = sqrt((1.0 - rand.x) / (1.0 + (a * a - 1.0) * rand.x));
+    let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+    return vec3<f32>(sin_theta * cos(phi), sin_theta * sin(phi), cos_theta);
+}
+
+fn ggx_sample_direction(normal: vec3<f32>, view_dir: vec3<f32>, roughness: f32, rand: vec2<f32>) -> vec3<f32> {
+    let local_h = ggx_sample_hemisphere(roughness, rand);
+    let h = orient_to_normal(local_h, normal);
+    return reflect(-view_dir, h);
+}
+
+fn luminance(color: vec3<f32>) -> f32 {
+    return dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+//
+// Path tracing core:
+//
+
+struct PathState {
+    ray: Ray,
+    throughput: vec3<f32>,
+    accumulated_radiance: vec3<f32>,
+    bounce: u32,
+    terminated: bool,
+}
+
+fn create_initial_path_state(ray: Ray) -> PathState {
+    var state: PathState;
+    state.ray = ray;
+    state.throughput = vec3<f32>(1.0);
+    state.accumulated_radiance = vec3<f32>(0.0);
+    state.bounce = 0u;
+    state.terminated = false;
+    return state;
+}
+
+fn trace_path(initial_ray: Ray, seed: ptr<function, u32>) -> vec3<f32> {
+    var state = create_initial_path_state(initial_ray);
+
+    for (var bounce = 0u; bounce < frame_info.max_bounces; bounce++) {
+        if state.terminated { break; }
+        state = process_path_bounce(state, seed);
+    }
+
+    return state.accumulated_radiance;
+}
+
+fn process_path_bounce(state: PathState, seed: ptr<function, u32>) -> PathState {
+    var next_state = state;
+    let hit_record = hit(state.ray);
+
+    if !is_hit_record_valid(hit_record) {
+        return handle_path_miss(next_state);
+    }
+
+    let hit_details = compute_hit_details(hit_record);
+    return handle_path_hit(next_state, hit_details, seed);
+}
+
+fn handle_path_miss(state: PathState) -> PathState {
+    var next_state = state;
+    let env_radiance = get_environment_radiance(state.ray);
+    next_state.accumulated_radiance += state.throughput * env_radiance;
+    next_state.terminated = true;
+    return next_state;
+}
+
+fn handle_path_hit(state: PathState, hit_details: HitDetails, seed: ptr<function, u32>) -> PathState {
+    var next_state = state;
+    let brdf_result = sample_brdf(hit_details, state.ray.direction, seed);
+
+    next_state.throughput *= brdf_result.weight;
+    next_state.ray = Ray(offset_ray_origin(hit_details, brdf_result.direction), brdf_result.direction);
+    next_state.bounce += 1u;
+
+    if should_terminate_russian_roulette(next_state.throughput, seed) {
+        next_state.terminated = true;
+    }
+
+    return next_state;
+}
+
+fn offset_ray_origin(hit_details: HitDetails, direction: vec3<f32>) -> vec3<f32> {
+    let offset_sign = sign(dot(direction, hit_details.surface_normal));
+    return hit_details.world_hit_position + offset_sign * hit_details.surface_normal * 0.001;
+}
+
+struct BrdfSample {
+    direction: vec3<f32>,
+    weight: vec3<f32>,
+}
+
+fn sample_brdf(hit_details: HitDetails, incoming_dir: vec3<f32>, seed: ptr<function, u32>) -> BrdfSample {
+    let view_dir = normalize(-incoming_dir);
+    let normal = hit_details.surface_normal;
+    let roughness = max(hit_details.surface_roughness, 0.04);
+    let metalness = hit_details.surface_metalness;
+
+    let rand = rand2_from_seed(seed);
+    let select_rand = rand_from_seed(seed);
+
+    let base_color = hit_details.surface_color.rgb;
+    let f0 = mix(vec3<f32>(0.04), base_color, metalness);
+
+    if select_rand < 0.5 {
+        return sample_diffuse_brdf(normal, base_color, metalness, rand);
+    }
+    return sample_specular_brdf(normal, view_dir, roughness, f0, rand);
+}
+
+fn sample_diffuse_brdf(normal: vec3<f32>, base_color: vec3<f32>, metalness: f32, rand: vec2<f32>) -> BrdfSample {
+    var result: BrdfSample;
+    result.direction = cosine_weighted_hemisphere_sample(normal, rand);
+    result.weight = base_color * (1.0 - metalness) * 2.0;
+    return result;
+}
+
+fn sample_specular_brdf(normal: vec3<f32>, view_dir: vec3<f32>, roughness: f32, f0: vec3<f32>, rand: vec2<f32>) -> BrdfSample {
+    var result: BrdfSample;
+    result.direction = ggx_sample_direction(normal, view_dir, roughness, rand);
+    let n_dot_l = max(dot(normal, result.direction), 0.0);
+    let fresnel = fresnel_schlick(n_dot_l, f0);
+    result.weight = fresnel * 2.0;
+    return result;
+}
+
+fn should_terminate_russian_roulette(throughput: vec3<f32>, seed: ptr<function, u32>) -> bool {
+    let survival_prob = clamp(luminance(throughput), 0.1, 0.95);
+    let rand = rand_from_seed(seed);
+    return rand > survival_prob;
+}
+
+fn compensate_russian_roulette(throughput: vec3<f32>) -> vec3<f32> {
+    let survival_prob = clamp(luminance(throughput), 0.1, 0.95);
+    return throughput / survival_prob;
+}
+
+fn render_pixel_path_traced(pixel_xy: vec2<u32>, seed: ptr<function, u32>) -> vec3<f32> {
+    var radiance = vec3<f32>(0.0);
+
+    for (var sample_idx = 0u; sample_idx < frame_info.samples_per_pixel; sample_idx++) {
+        let jitter = compute_primary_ray_jitter(sample_idx);
+        let ray = gen_primary_ray_jittered(pixel_xy, jitter);
+        radiance += trace_path(ray, seed);
+    }
+
+    return radiance / f32(frame_info.samples_per_pixel);
+}
+
+fn compute_primary_ray_jitter(sample_idx: u32) -> vec2<f32> {
+    let combined_idx = frame_info.frame_index * frame_info.samples_per_pixel + sample_idx;
+    return halton_2d(combined_idx + 1u) - 0.5;
+}
+
+fn gen_primary_ray_jittered(pixel_coord_px: vec2<u32>, jitter: vec2<f32>) -> Ray {
+    let target_size = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
+    let jittered_coord = vec2<f32>(pixel_coord_px) + jitter;
+    return gen_primary_ray_from_coord(jittered_coord, target_size);
+}
+
+fn gen_primary_ray_from_coord(pixel_coord: vec2<f32>, target_size: vec2<f32>) -> Ray {
+    let pixel_coord_ndc = compute_ndc_from_pixel_coord(pixel_coord, target_size);
+    let sensor_pixel = compute_sensor_pixel_camera_space(pixel_coord_ndc);
+    let camera_space_ray = Ray(vec3<f32>(0.0), sensor_pixel);
+    let camera_transform = h_mat4x4_from_pod_transform(camera.transform);
+    return h_mat4x4_transform_ray(camera_transform, camera_space_ray);
+}
+
+fn compute_ndc_from_pixel_coord(pixel_coord: vec2<f32>, target_size: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        (pixel_coord.x / target_size.x) * 2.0 - 1.0,
+        1.0 - (pixel_coord.y / target_size.y) * 2.0,
+    );
+}
+
+fn compute_sensor_pixel_camera_space(pixel_coord_ndc: vec2<f32>) -> vec3<f32> {
+    let hw = tan(camera.fov_y_rad / 2.0) * camera.aspect_ratio;
+    let hh = tan(camera.fov_y_rad / 2.0);
+    return vec3<f32>(pixel_coord_ndc.x * hw, 1.0, pixel_coord_ndc.y * hh);
+}
+
+fn accumulator_index(pixel_xy: vec2<u32>) -> u32 {
+    return pixel_xy.y * frame_info.target_size_w_px + pixel_xy.x;
+}
+
+fn accumulate_pixel_result(pixel_xy: vec2<u32>, new_color: vec4<f32>) -> vec4<f32> {
+    let idx = accumulator_index(pixel_xy);
+    let existing_color = accumulator[idx];
+    let persistence = frame_info.accumulator_persistence;
+    return mix(new_color, existing_color, persistence);
+}
+
+fn store_accumulated_result(pixel_xy: vec2<u32>, color: vec4<f32>) {
+    let idx = accumulator_index(pixel_xy);
+    accumulator[idx] = color;
+}
+
+//
 // Debug shading:
 //
 
-fn post_primary_ray_gen_debug_output(ray: Ray) -> vec4<f32> {
-    let debug_emit_primary_ray_direction = (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u;
-    if debug_emit_primary_ray_direction {
-        return debug_visualize_primary_ray_direction(ray);
-    }
-
-    // No debug flag matched, return magenta to indicate error.
-    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
-}
 fn debug_visualize_primary_ray_direction(ray: Ray) -> vec4<f32> {
     let dir_normalized = normalize(ray.direction);
     return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
@@ -928,10 +1197,10 @@ fn debug_visualize_orm(hit_details: HitDetails) -> vec4<f32> {
 // Entry point:
 //
 
-fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
+fn render_pixel(pixel_xy: vec2<u32>, seed: ptr<function, u32>) -> vec4<f32> {
     let ray = gen_primary_ray(pixel_xy);
-    if (frame_info.debug_flags & POST_PRIMARY_RAY_GEN_DEBUG_MASK) != 0u {
-        return post_primary_ray_gen_debug_output(ray);
+    if (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u {
+        return debug_visualize_primary_ray_direction(ray);
     }
 
     let closest_hit = hit(ray);
@@ -940,42 +1209,30 @@ fn main(pixel_xy: vec2<u32>) -> vec4<f32> {
     }
 
     if !is_hit_record_valid(closest_hit) {
-        return compute_miss_color(ray);
-    } else {
-        var closest_hit_details = compute_hit_details(closest_hit);
-        if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK) != 0u {
-            return post_primary_ray_hit_details_debug_output(closest_hit_details);
-        }
-        return compute_hit_color(closest_hit_details);
+        return vec4<f32>(get_environment_radiance(ray), 1.0);
     }
+
+    let hit_details = compute_hit_details(closest_hit);
+    if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK) != 0u {
+        return post_primary_ray_hit_details_debug_output(hit_details);
+    }
+
+    let radiance = render_pixel_path_traced(pixel_xy, seed);
+    return vec4<f32>(radiance, 1.0);
 }
 
 fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
-    // Compute 2D NDC coordinates of the pixel in the output image:
-    let target_size_wh_px_f = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
-    let pixel_coord_px_f = vec2<f32>(pixel_coord_px);
-    let pixel_coord_ndc = vec2<f32>(
-        (pixel_coord_px_f.x / target_size_wh_px_f.x) * 2.0 - 1.0,
-        1.0 - (pixel_coord_px_f.y / target_size_wh_px_f.y) * 2.0,
-    );
+    let target_size = vec2<f32>(f32(frame_info.target_size_w_px), f32(frame_info.target_size_h_px));
+    return gen_primary_ray_from_coord(vec2<f32>(pixel_coord_px), target_size);
+}
 
-    // Compute 3D camera-space coordinates of the pixel on the sensor plane at unit focal length.
-    // NOTE: Camera looks down +Y axis, with +X to the right and +Z up.
-    // NOTE: In a pinhole camera, the sensor plane is behind the pinhole and the image is inverted. To simplify, we
-    // place the sensor plane in front of the pinhole. The ray still originates from origin in camera space, this is
-    // just used to calculate the ray direction.
-    let sensor_hw_at_unit_focal_length = tan(camera.fov_y_rad / 2.0) * camera.aspect_ratio;
-    let sensor_hh_at_unit_focal_length = tan(camera.fov_y_rad / 2.0);
-    let sensor_pixel_camera_space = vec3<f32>(
-        pixel_coord_ndc.x * sensor_hw_at_unit_focal_length,     // sensor right
-        1.0,                                                    // sensor plane at unit focal length (forward)
-        pixel_coord_ndc.y * sensor_hh_at_unit_focal_length,     // sensor up
-    );
+fn compute_pixel_seed(pixel_xy: vec2<u32>) -> u32 {
+    let pixel_idx = pixel_xy.y * frame_info.target_size_w_px + pixel_xy.x;
+    return pcg_hash(pixel_idx ^ (frame_info.frame_index * 0x9E3779B9u));
+}
 
-    // Create ray in camera space, then transform to world space.
-    let camera_space_ray = Ray(vec3<f32>(0.0, 0.0, 0.0), sensor_pixel_camera_space);
-    let camera_transform = h_mat4x4_from_pod_transform(camera.transform);
-    return h_mat4x4_transform_ray(camera_transform, camera_space_ray);
+fn tonemap_pixel(hdr_color: vec4<f32>) -> vec4<f32> {
+    return hdr_color;
 }
 
 //
@@ -988,7 +1245,13 @@ fn main_wrapper(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let pixel_color = main(global_id.xy);
+    let pixel_xy = global_id.xy;
+    var seed = compute_pixel_seed(pixel_xy);
 
-    textureStore(output_image, vec2<i32>(global_id.xy), pixel_color);
+    var pixel_color = render_pixel(pixel_xy, &seed);
+    pixel_color = accumulate_pixel_result(pixel_xy, pixel_color);
+    store_accumulated_result(pixel_xy, pixel_color);
+    pixel_color = tonemap_pixel(pixel_color);
+
+    textureStore(output_image, vec2<i32>(pixel_xy), pixel_color);
 }

@@ -263,6 +263,11 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
                 ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=4,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(type="storage"),
+                ),
             ],
         )
 
@@ -593,8 +598,12 @@ class Draw3dFrame(BaseDisposable):
     renderer: Draw3dRenderer
 
     debug_flags: int
+    max_bounces: int
+    samples_per_pixel: int
+    accumulator_persistence: float
 
     output_image: wgpu.GPUTexture
+    accumulator_image: wgpu.GPUTexture
     frame_info_buffer: "PerFrameBuffer[PodFrameInfoArray]"
     camera_buffer: "PerFrameBuffer[PodCameraArray]"
     instance_buffer: "PerFrameBuffer[PodInstanceArray]"
@@ -602,6 +611,9 @@ class Draw3dFrame(BaseDisposable):
     def __init__(self, renderer: Draw3dRenderer) -> None:
         self.renderer = renderer
         self.debug_flags = 0
+        self.max_bounces = 4
+        self.samples_per_pixel = 1
+        self.accumulator_persistence = 0.5
 
         self.output_image = self._device.create_texture(
             label="Draw3dFrame.OutputImage",
@@ -612,6 +624,12 @@ class Draw3dFrame(BaseDisposable):
                 | wgpu.TextureUsage.COPY_SRC
                 | wgpu.TextureUsage.TEXTURE_BINDING
             ),
+        )
+        accumulator_size = renderer.target_size_wh_px[0] * renderer.target_size_wh_px[1] * 4 * 4
+        self.accumulator_buffer = self._device.create_buffer(
+            label="Draw3dFrame.AccumulatorBuffer",
+            size=accumulator_size,
+            usage=wgpu.BufferUsage.STORAGE,
         )
         self.frame_info_buffer = PerFrameBuffer[PodFrameInfoArray](
             device=self._device,
@@ -665,6 +683,14 @@ class Draw3dFrame(BaseDisposable):
                         buffer=self.instance_buffer.device_buffer,
                         offset=0,
                         size=self.instance_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=4,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.accumulator_buffer,
+                        offset=0,
+                        size=self.accumulator_buffer.size,
                     ),
                 ),
             ],
@@ -771,6 +797,11 @@ class Draw3dFrame(BaseDisposable):
         # Convert timestamp to 16.16 fixed-point format
         frame_info_data["timestamp"] = np.uint32(timestamp * 65536.0)
         frame_info_data["frame_index"] = np.uint32(frame_index)
+        frame_info_data["max_bounces"] = np.uint32(self.max_bounces)
+        frame_info_data["samples_per_pixel"] = np.uint32(self.samples_per_pixel)
+        frame_info_data["accumulator_persistence"] = np.float32(
+            self.accumulator_persistence
+        )
 
         self.frame_info_buffer.write(frame_info_data, command_encoder)
 
@@ -1731,7 +1762,11 @@ class PodFrameInfoArray(StructuredNDArray):
             ("environment_map_texture_id", np.int32),
             ("timestamp", np.uint32),
             ("frame_index", np.uint32),
+            ("max_bounces", np.uint32),
+            ("samples_per_pixel", np.uint32),
+            ("accumulator_persistence", np.float32),
             ("_pad0", np.uint32),
+            ("_pad1", np.uint32),
         ]
     )
 
