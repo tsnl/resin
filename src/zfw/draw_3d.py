@@ -1426,20 +1426,20 @@ class TextureHeap(BaseDisposable):
 
         # Normalize all vectors to ensure unit length
         norms = np.linalg.norm(data, axis=2, keepdims=True)
-        normalized_data = data / norms
+        data_unit_length = data / norms
 
         # Expect normal vectors to always have Z>=0
-        corrupt_normal_map = np.any(normalized_data[:, :, 2] < 0.0)
-        if corrupt_normal_map:
-            LOG.error(
+        if np.any(data_unit_length[:, :, 2] < 0.0):
+            LOG.warning(
                 "Normal texture contains invalid normals with negative Z component. "
                 "This may cause visual artifacts."
             )
+            data_unit_length[:, :, 2] = data_unit_length[:, :, 2].clip(0.0, 1.0)
 
         # Rescale back to [0, 1] range after normalization, keeping only X and Y
         # channels:
-        normalized_data = (normalized_data + 1.0) * 0.5
-        return encode_bc5(input_=normalized_data[:, :, 0:2])
+        data_unit_length = (data_unit_length + 1.0) * 0.5
+        return encode_bc5(input_=data_unit_length[:, :, 0:2])
 
     @staticmethod
     def _encode_metalness_texture(data: np.ndarray) -> np.ndarray:

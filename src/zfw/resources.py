@@ -35,6 +35,8 @@ from .excepts import LogicError
 from .basic import Font, FontSize, FontWeight, expect, logger
 from .images import (
     ImageFormat,
+    convert_linear_to_srgb,
+    convert_srgb_to_linear,
 )
 
 
