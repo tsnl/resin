@@ -95,6 +95,7 @@ class FreeCameraController:
         self.right_pressed = False
         self.up_pressed = False
         self.down_pressed = False
+        self.moved_this_frame = False
 
     def handle_key(
         self,
@@ -149,6 +150,9 @@ class FreeCameraController:
 
     def handle_mouse_move(self, dx: float, dy: float) -> None:
         """Handle mouse movement for looking around."""
+        if dx != 0 or dy != 0:
+            self.moved_this_frame = True
+
         # Yaw: rotate around world Z axis (left/right look)
         self.yaw += dx * self.look_speed
 
@@ -194,6 +198,7 @@ class FreeCameraController:
         if length > 0:
             move_dir /= length
             self.position += move_dir * self.move_speed * dt
+            self.moved_this_frame = True
 
     def get_transform(self) -> np.ndarray:
         """Get the camera's 4x4 world-to-camera transform matrix.
@@ -377,6 +382,14 @@ class GltfViewerWidget(zfw.GuiWidget):
         # Set environment map in GUI window
         self._gui_window.set_environment_map(self._environment_resource)
 
+        # Reset accumulators since lighting changed
+        self._gui_window.draw_3d_renderer.reset(
+            geometry_heap=False,
+            material_heap=False,
+            texture_heap=False,
+            per_frame_state=True,
+        )
+
         # Update label
         self._env_label._text = f"Env: {env_name}"
 
@@ -451,6 +464,16 @@ class GltfViewerWidget(zfw.GuiWidget):
         """Update camera and 3D rendering."""
         # Update camera
         self._camera.update(dt)
+
+        # Reset accumulators if camera moved
+        if self._camera.moved_this_frame:
+            self._gui_window.draw_3d_renderer.reset(
+                geometry_heap=False,
+                material_heap=False,
+                texture_heap=False,
+                per_frame_state=True,
+            )
+            self._camera.moved_this_frame = False
 
         # Clear and add meshes
         self._gui_window.clear_3d_meshes()

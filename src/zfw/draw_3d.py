@@ -834,35 +834,52 @@ class Draw3dRenderer(BaseDisposable):
         if disable_jitter:
             self._debug_flags |= _FRAME_FLAG_DISABLE_JITTER
 
-    def reset(self, encoder: wgpu.GPUCommandEncoder | None = None) -> None:
-        """Full reset: clear all allocators and frame state.
+    def reset(
+        self,
+        encoder: wgpu.GPUCommandEncoder | None = None,
+        *,
+        geometry_heap: bool = True,
+        material_heap: bool = True,
+        texture_heap: bool = True,
+        per_frame_state: bool = True,
+    ) -> None:
+        """Reset renderer state, with selective control over what gets cleared.
 
-        This deallocates all geometry, materials, textures, and resets the
-        accumulator, frame index, timestamp, and debug flags.
-
-        If encoder is provided, uses clear_buffer for proper GPU synchronization.
-        Otherwise, uses write_buffer which is asynchronous.
+        Args:
+            encoder: If provided, uses clear_buffer for proper GPU synchronization.
+                Otherwise, uses write_buffer which is asynchronous.
+            geometry_heap: Clear geometry, BVH nodes, and triangles.
+            material_heap: Clear materials.
+            texture_heap: Clear all texture heaps (color, normal, metalness,
+                roughness, environment).
+            per_frame_state: Reset accumulator buffer, frame index, timestamp,
+                and debug flags.
         """
-        self._frame_index = 0
-        self._construction_time = time.monotonic()
-        self._debug_flags = 0
+        if per_frame_state:
+            self._frame_index = 0
+            self._construction_time = time.monotonic()
+            self._debug_flags = 0
 
-        # Clear all heaps/allocators
-        self.geometry_heap.clear()
-        self.bvh_node_heap.clear()
-        self.triangle_heap.clear()
-        self.material_heap.clear()
-        self.color_texture_heap.clear()
-        self.normal_texture_heap.clear()
-        self.metalness_texture_heap.clear()
-        self.roughness_texture_heap.clear()
-        self.environment_texture_heap.clear()
+            if encoder is not None:
+                encoder.clear_buffer(self._accumulator_buffer)
+            else:
+                zeros = np.zeros(self._accumulator_buffer.size, dtype=np.uint8)
+                self.device.queue.write_buffer(self._accumulator_buffer, 0, zeros)
 
-        if encoder is not None:
-            encoder.clear_buffer(self._accumulator_buffer)
-        else:
-            zeros = np.zeros(self._accumulator_buffer.size, dtype=np.uint8)
-            self.device.queue.write_buffer(self._accumulator_buffer, 0, zeros)
+        if geometry_heap:
+            self.geometry_heap.clear()
+            self.bvh_node_heap.clear()
+            self.triangle_heap.clear()
+
+        if material_heap:
+            self.material_heap.clear()
+
+        if texture_heap:
+            self.color_texture_heap.clear()
+            self.normal_texture_heap.clear()
+            self.metalness_texture_heap.clear()
+            self.roughness_texture_heap.clear()
+            self.environment_texture_heap.clear()
 
     def _record(
         self,
@@ -999,6 +1016,7 @@ class Draw3dGeometry(BaseDisposable):
 
     geometry_id: int
     geometry_heap_offset_in_triangles: int
+    heap_generation: int
 
     def __init__(
         self,
@@ -1013,6 +1031,7 @@ class Draw3dGeometry(BaseDisposable):
 
         self.renderer = renderer
         self.triangle_count = t_indices.shape[0]
+        self.heap_generation = renderer.geometry_heap.generation_count
 
         # Construct the BVH first.
         # This produces an updated `t_indices` array with a different triangle order.
@@ -1085,6 +1104,11 @@ class Draw3dGeometry(BaseDisposable):
         # Done:
         return v
 
+    @property
+    def is_valid(self) -> bool:
+        """Check if this geometry is still valid (heap hasn't been cleared)."""
+        return self.heap_generation == self.renderer.geometry_heap.generation_count
+
     @staticmethod
     def from_resource(
         geometry: "GeometryResource",
@@ -1119,6 +1143,7 @@ class Draw3dTexture(BaseDisposable):
 class Draw3dMaterial(BaseDisposable):
     renderer: Draw3dRenderer
     material_id: int
+    heap_generation: int
 
     color_texture: "Draw3dTexture | None"
     color_factor: tuple[float, float, float]
@@ -1143,6 +1168,7 @@ class Draw3dMaterial(BaseDisposable):
         super().__init__()
 
         self.renderer = renderer
+        self.heap_generation = renderer.material_heap.generation_count
 
         self.color_texture = color_texture
         self.color_factor = color_factor
@@ -1171,6 +1197,11 @@ class Draw3dMaterial(BaseDisposable):
             roughness_map_id=roughness_map_id,
             roughness_factor=roughness_factor,
         )
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if this material is still valid (heap hasn't been cleared)."""
+        return self.heap_generation == self.renderer.material_heap.generation_count
 
     @staticmethod
     def from_resource(
@@ -1331,6 +1362,7 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
     device_buffer: wgpu.GPUBuffer
     persistent_staging_buffer: wgpu.GPUBuffer | None
     allocated_element_count: int
+    generation_count: int
 
     def __init__(
         self,
@@ -1367,6 +1399,7 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
             else None
         )
         self.allocated_element_count = 0
+        self.generation_count = 0
 
         self._clear_device_buffer()
 
@@ -1380,6 +1413,7 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
     def clear(self) -> None:
         """Reset the heap, deallocating all elements."""
         self.allocated_element_count = 0
+        self.generation_count += 1
         self._clear_device_buffer()
 
     def _on_dispose(self) -> None:
@@ -1530,6 +1564,7 @@ class TextureHeap(BaseDisposable):
     cursor_y_px: int
     cursor_h_px: int
     cursor_page: int
+    generation_count: int
 
     def __init__(
         self,
@@ -1575,6 +1610,7 @@ class TextureHeap(BaseDisposable):
         self.cursor_y_px = 0
         self.cursor_h_px = 0
         self.cursor_page = 0
+        self.generation_count = 0
 
     def _on_dispose(self) -> None:
         self.texture.destroy()
@@ -1588,6 +1624,7 @@ class TextureHeap(BaseDisposable):
         self.cursor_y_px = 0
         self.cursor_h_px = 0
         self.cursor_page = 0
+        self.generation_count += 1
 
     def _encode_texture(self, data: np.ndarray) -> np.ndarray:
         if data.ndim != 3:
