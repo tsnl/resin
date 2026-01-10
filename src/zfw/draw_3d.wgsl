@@ -126,6 +126,7 @@ const FLAG_DISABLE_JITTER: u32 = 128u;
 const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
 const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_DEPTH | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_BVH_DEPTH;
 const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_COLOR | FLAG_EMIT_SURFACE_NORMAL | FLAG_EMIT_SURFACE_ORM;
+const ALL_DEBUG_VISUALIZATION_MASK: u32 = POST_PRIMARY_RAY_GEN_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK;
 
 struct PodInstance {
     geometry_id: u32,
@@ -1258,8 +1259,13 @@ fn main_wrapper(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var seed = compute_pixel_seed(pixel_xy);
 
     var pixel_color = render_pixel(pixel_xy, &seed);
-    pixel_color = accumulate_pixel_result(pixel_xy, pixel_color);
-    store_accumulated_result(pixel_xy, pixel_color);
+
+    // Skip accumulation for debug visualization modes to preserve raw values
+    let is_debug_visualization = (frame_info.debug_flags & ALL_DEBUG_VISUALIZATION_MASK) != 0u;
+    if !is_debug_visualization {
+        pixel_color = accumulate_pixel_result(pixel_xy, pixel_color);
+        store_accumulated_result(pixel_xy, pixel_color);
+    }
     pixel_color = tonemap_pixel(pixel_color);
 
     textureStore(output_image, vec2<i32>(pixel_xy), pixel_color);
@@ -1269,8 +1275,16 @@ fn main_wrapper(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Postprocess shader:
 //
 
+struct PostprocessUniforms {
+    debug_flags: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
 @group(0) @binding(1) var input_sampler: sampler;
+@group(0) @binding(2) var<uniform> postprocess_uniforms: PostprocessUniforms;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -1300,6 +1314,12 @@ fn compute_fullscreen_uv(vertex_idx: u32) -> vec2<f32> {
 @fragment
 fn fs_postprocess(input: VertexOutput) -> @location(0) vec4<f32> {
     let hdr_color = textureSample(input_texture, input_sampler, input.uv);
+
+    // Skip tonemapping when debug flags are active (pass through raw values)
+    if postprocess_uniforms.debug_flags != 0u {
+        return hdr_color;
+    }
+
     let exposed = apply_exposure(hdr_color.rgb, 1.5);
     let tonemapped = naughty_dog_tonemap(exposed);
     let gamma_corrected = linear_to_srgb(tonemapped);

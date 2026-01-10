@@ -314,6 +314,13 @@ class Draw3dRenderer(BaseDisposable):
                         type=wgpu.SamplerBindingType.filtering
                     ),
                 ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=2,
+                    visibility=wgpu.ShaderStage.FRAGMENT,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.uniform,
+                    ),
+                ),
             ],
         )
         postprocess_pipeline_layout = device.create_pipeline_layout(
@@ -764,6 +771,13 @@ class Draw3dFrame(BaseDisposable):
             ],
         )
 
+        # Postprocess uniform buffer for debug flags
+        self.postprocess_uniform_buffer = self._device.create_buffer(
+            label="Draw3dFrame.PostprocessUniformBuffer",
+            size=16,  # vec4<u32> alignment
+            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
+        )
+
         # Postprocess bind group (reads internal_image, writes to output_image)
         self.postprocess_bind_group = self._device.create_bind_group(
             label="Draw3dFrame.PostprocessBindGroup",
@@ -776,6 +790,14 @@ class Draw3dFrame(BaseDisposable):
                 wgpu.BindGroupEntry(
                     binding=1,
                     resource=renderer.linear_sampler,
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.postprocess_uniform_buffer,
+                        offset=0,
+                        size=16,
+                    ),
                 ),
             ],
         )
@@ -879,6 +901,12 @@ class Draw3dFrame(BaseDisposable):
             workgroup_count_z=1,
         )
         compute_pass.end()
+
+        # Upload postprocess debug flags
+        postprocess_uniforms = np.array([self.debug_flags, 0, 0, 0], dtype=np.uint32)
+        self._device.queue.write_buffer(
+            self.postprocess_uniform_buffer, 0, postprocess_uniforms
+        )
 
         # Postprocess render pass (upscales and tonemaps to output_image)
         render_pass = encoder.begin_render_pass(
