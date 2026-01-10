@@ -293,12 +293,8 @@ class Draw3dRenderer(BaseDisposable):
         )
 
         # Postprocess pipeline for tonemapping and upscaling
-        with open(__file__.replace(".py", "_postprocess.wgsl"), "r") as f:
-            postprocess_shader_source = f.read()
-
-        self.postprocess_shader = device.create_shader_module(
-            code=postprocess_shader_source
-        )
+        # Postprocess shader is now in the same .wgsl file
+        self.postprocess_shader = device.create_shader_module(code=shader_source)
         self.postprocess_bind_group_layout = device.create_bind_group_layout(
             label="Draw3dRenderer.PostprocessBindGroupLayout",
             entries=[
@@ -653,6 +649,7 @@ class Draw3dFrame(BaseDisposable):
     debug_flags: int
     max_bounces: int
     samples_per_pixel: int
+    max_secondary_ray_count: int
     accumulator_persistence: float
     render_scale: float
 
@@ -669,6 +666,7 @@ class Draw3dFrame(BaseDisposable):
         self.debug_flags = 0
         self.max_bounces = 4
         self.samples_per_pixel = 64
+        self.max_secondary_ray_count = 1
         self.accumulator_persistence = 0.25
         self.render_scale = render_scale
 
@@ -701,7 +699,7 @@ class Draw3dFrame(BaseDisposable):
         self.accumulator_buffer = self._device.create_buffer(
             label="Draw3dFrame.AccumulatorBuffer",
             size=accumulator_size,
-            usage=wgpu.BufferUsage.STORAGE,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
         self.frame_info_buffer = PerFrameBuffer[PodFrameInfoArray](
             device=self._device,
@@ -801,6 +799,7 @@ class Draw3dFrame(BaseDisposable):
         emit_surface_color: bool = False,
         emit_surface_normal: bool = False,
         emit_orm: bool = False,
+        disable_jitter: bool = False,
     ) -> None:
         """
         Set debug visualization modes.
@@ -812,12 +811,13 @@ class Draw3dFrame(BaseDisposable):
         :param emit_surface_color: If True, output sampled texture color at hit point.
         :param emit_surface_normal: If True, output world-space hit normal as RGB.
         :param emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
+        :param disable_jitter: If True, disable jitter for primary ray generation.
         """
         self.debug_flags = 0
         if emit_primary_ray_direction:
             self.debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
         if emit_closest_hit_depth_in_r:
-            self.debug_flags |= _FRAME_FLAG_EMIT_BVH_DEPTH
+            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_DEPTH
         if emit_hit_world_position:
             self.debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
         if emit_closest_hit_bvh_depth_in_r:
@@ -828,6 +828,20 @@ class Draw3dFrame(BaseDisposable):
             self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_NORMAL
         if emit_orm:
             self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_ORM
+        if disable_jitter:
+            self.debug_flags |= _FRAME_FLAG_DISABLE_JITTER
+
+    def reset(self, encoder: wgpu.GPUCommandEncoder | None = None) -> None:
+        """Clear the accumulator buffer to reset frame state.
+
+        If encoder is provided, uses clear_buffer for proper GPU synchronization.
+        Otherwise, uses write_buffer which is asynchronous.
+        """
+        if encoder is not None:
+            encoder.clear_buffer(self.accumulator_buffer)
+        else:
+            zeros = np.zeros(self.accumulator_buffer.size, dtype=np.uint8)
+            self._device.queue.write_buffer(self.accumulator_buffer, 0, zeros)
 
     def record(
         self,
@@ -905,6 +919,9 @@ class Draw3dFrame(BaseDisposable):
         frame_info_data["frame_index"] = np.uint32(frame_index)
         frame_info_data["max_bounces"] = np.uint32(self.max_bounces)
         frame_info_data["samples_per_pixel"] = np.uint32(self.samples_per_pixel)
+        frame_info_data["max_secondary_ray_count"] = np.uint32(
+            self.max_secondary_ray_count
+        )
         frame_info_data["accumulator_persistence"] = np.float32(
             self.accumulator_persistence
         )
@@ -1586,8 +1603,9 @@ class TextureHeap(BaseDisposable):
 
         # Expect normal vectors to always have Z>=0
         if np.any(data_unit_length[:, :, 2] < 0.0):
-            LOG.warning(
+            LOG.debug(
                 "Normal texture contains invalid normals with negative Z component. "
+                "This is usually really subtle and is caused by compression artifacts. "
                 "This may cause visual artifacts."
             )
             data_unit_length[:, :, 2] = data_unit_length[:, :, 2].clip(0.0, 1.0)
@@ -1771,12 +1789,13 @@ class TextureHeapAllocation:
 #
 
 _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION = 1 << 0
-_FRAME_FLAG_EMIT_BVH_DEPTH = 1 << 1
+_FRAME_FLAG_EMIT_SURFACE_DEPTH = 1 << 1
 _FRAME_FLAG_EMIT_HIT_WORLD_POSITION = 1 << 2
 _FRAME_FLAG_EMIT_BVH_DEPTH = 1 << 3
 _FRAME_FLAG_EMIT_SURFACE_COLOR = 1 << 4
 _FRAME_FLAG_EMIT_SURFACE_NORMAL = 1 << 5
 _FRAME_FLAG_EMIT_SURFACE_ORM = 1 << 6
+_FRAME_FLAG_DISABLE_JITTER = 1 << 7
 
 
 POD_SPAN_DTYPE = np.dtype(
@@ -1871,7 +1890,7 @@ class PodFrameInfoArray(StructuredNDArray):
             ("max_bounces", np.uint32),
             ("samples_per_pixel", np.uint32),
             ("accumulator_persistence", np.float32),
-            ("_pad0", np.uint32),
+            ("max_secondary_ray_count", np.uint32),
             ("_pad1", np.uint32),
         ]
     )

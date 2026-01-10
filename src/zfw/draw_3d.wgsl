@@ -112,7 +112,7 @@ struct PodFrameInfo {
     max_bounces: u32,
     samples_per_pixel: u32,
     accumulator_persistence: f32,
-    _pad0: u32,
+    max_secondary_ray_count: u32,
     _pad1: u32,
 }
 
@@ -123,6 +123,7 @@ const FLAG_EMIT_BVH_DEPTH: u32 = 8u;
 const FLAG_EMIT_SURFACE_COLOR: u32 = 16u;
 const FLAG_EMIT_SURFACE_NORMAL: u32 = 32u;
 const FLAG_EMIT_SURFACE_ORM: u32 = 64u;
+const FLAG_DISABLE_JITTER: u32 = 128u;
 
 const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
 const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_DEPTH | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_BVH_DEPTH;
@@ -978,10 +979,25 @@ fn handle_path_miss(state: PathState) -> PathState {
 
 fn handle_path_hit(state: PathState, hit_details: HitDetails, seed: ptr<function, u32>) -> PathState {
     var next_state = state;
-    let brdf_result = sample_brdf(hit_details, state.ray.direction, seed);
 
-    next_state.throughput *= brdf_result.weight;
-    next_state.ray = Ray(offset_ray_origin(hit_details, brdf_result.direction), brdf_result.direction);
+    // Perform up to max_secondary_ray_count secondary rays and average their contributions
+    let secondary_ray_count = max(1u, frame_info.max_secondary_ray_count);
+    var accumulated_weight = vec3<f32>(0.0);
+    var accumulated_direction = vec3<f32>(0.0);
+
+    for (var secondary_idx = 0u; secondary_idx < secondary_ray_count; secondary_idx++) {
+        let brdf_result = sample_brdf(hit_details, state.ray.direction, seed);
+        accumulated_weight += brdf_result.weight;
+        accumulated_direction += brdf_result.direction;
+    }
+
+    // Average the accumulated weights and directions
+    let inv_count = 1.0 / f32(secondary_ray_count);
+    let avg_weight = accumulated_weight * inv_count;
+    let avg_direction = normalize(accumulated_direction);
+
+    next_state.throughput *= avg_weight;
+    next_state.ray = Ray(offset_ray_origin(hit_details, avg_direction), avg_direction);
     next_state.bounce += 1u;
 
     if should_terminate_russian_roulette(next_state.throughput, seed) {
@@ -1053,7 +1069,10 @@ fn render_pixel_path_traced(pixel_xy: vec2<u32>, seed: ptr<function, u32>) -> ve
     var radiance = vec3<f32>(0.0);
 
     for (var sample_idx = 0u; sample_idx < frame_info.samples_per_pixel; sample_idx++) {
-        let jitter = compute_primary_ray_jitter(sample_idx);
+        var jitter = vec2<f32>(0.0);
+        if (frame_info.debug_flags & FLAG_DISABLE_JITTER) == 0u {
+            jitter = compute_primary_ray_jitter(sample_idx);
+        }
         let ray = gen_primary_ray_jittered(pixel_xy, jitter);
         radiance += trace_path(ray, seed);
     }
@@ -1260,4 +1279,73 @@ fn main_wrapper(@builtin(global_invocation_id) global_id: vec3<u32>) {
     pixel_color = tonemap_pixel(pixel_color);
 
     textureStore(output_image, vec2<i32>(pixel_xy), pixel_color);
+}
+
+//
+// Postprocess shader:
+//
+
+@group(0) @binding(0) var input_texture: texture_2d<f32>;
+@group(0) @binding(1) var input_sampler: sampler;
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_postprocess(@builtin(vertex_index) vertex_idx: u32) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = compute_fullscreen_position(vertex_idx);
+    output.uv = compute_fullscreen_uv(vertex_idx);
+    return output;
+}
+
+fn compute_fullscreen_position(vertex_idx: u32) -> vec4<f32> {
+    let x = f32(i32(vertex_idx & 1u) * 4 - 1);
+    let y = f32(i32(vertex_idx & 2u) * 2 - 1);
+    return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+fn compute_fullscreen_uv(vertex_idx: u32) -> vec2<f32> {
+    let x = f32(i32(vertex_idx & 1u) * 4 - 1);
+    let y = f32(i32(vertex_idx & 2u) * 2 - 1);
+    return vec2<f32>((x + 1.0) * 0.5, (1.0 - y) * 0.5);
+}
+
+@fragment
+fn fs_postprocess(input: VertexOutput) -> @location(0) vec4<f32> {
+    let hdr_color = textureSample(input_texture, input_sampler, input.uv);
+    let exposed = apply_exposure(hdr_color.rgb, 1.5);
+    let tonemapped = naughty_dog_tonemap(exposed);
+    let gamma_corrected = linear_to_srgb(tonemapped);
+    return vec4<f32>(gamma_corrected, 1.0);
+}
+
+fn apply_exposure(color: vec3<f32>, exposure: f32) -> vec3<f32> {
+    return color * exposure;
+}
+
+fn naughty_dog_tonemap(color: vec3<f32>) -> vec3<f32> {
+    // Attempt to better capture Uncharted 2 / Naughty Dog filmic curve
+    let A = 0.22;  // Shoulder strength
+    let B = 0.30;  // Linear strength
+    let C = 0.10;  // Linear angle
+    let D = 0.20;  // Toe strength
+    let E = 0.01;  // Toe numerator
+    let F = 0.30;  // Toe denominator
+    let white = 11.2;
+    let num = naughty_dog_curve(color, A, B, C, D, E, F);
+    let denom = naughty_dog_curve(vec3<f32>(white), A, B, C, D, E, F);
+    return num / denom;
+}
+
+fn naughty_dog_curve(x: vec3<f32>, A: f32, B: f32, C: f32, D: f32, E: f32, F: f32) -> vec3<f32> {
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
+    let low = color * 12.92;
+    let high = 1.055 * pow(color, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(high, low, color <= vec3<f32>(0.0031308));
 }

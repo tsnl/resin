@@ -56,6 +56,10 @@ def _render_and_readback(
 
     for _ in range(repeat_count):
         command_encoder = gpu_device.create_command_encoder(label="CommandEncoder")
+
+        # Reset accumulators in case this frame is re-used on a different scene:
+        frame.reset(command_encoder)
+
         renderer.record(scene, frame, command_encoder)
         command_encoder.copy_texture_to_buffer(
             source=wgpu.TexelCopyTextureInfo(
@@ -116,11 +120,13 @@ def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
-    frame.samples_per_pixel = 4096
+    frame.samples_per_pixel = 2048
 
-    # scene = _load_two_avocados_scene(renderer)
-    # scene = _load_damaged_helmet_scene(renderer)
-    scene = _load_flight_helmet_scene(renderer)
+    scenes = {
+        "two_avocados": _load_two_avocados_scene(renderer),
+        "damaged_helmet": _load_damaged_helmet_scene(renderer),
+        "flight_helmet": _load_flight_helmet_scene(renderer),
+    }
 
     # Load Field environment map
     hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
@@ -129,18 +135,20 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
         data=hdr_data,
         usage="environment",
     )
-    scene.environment_map = env_map_texture
 
-    data = _render_and_readback(
-        gpu_device,
-        renderer,
-        frame,
-        scene,
-        FRAME_W,
-        FRAME_H,
-    )
-    data *= 1.0
-    _save_debug_image(data, "test_basic_draw_3d.png")
+    for scene_name, scene in scenes.items():
+        scene.environment_map = env_map_texture
+
+        data = _render_and_readback(
+            gpu_device,
+            renderer,
+            frame,
+            scene,
+            FRAME_W,
+            FRAME_H,
+            measure_runtime=True,
+        )
+        _save_debug_image(data, f"test_basic_draw_3d-{scene_name}.png")
 
 
 def _load_two_avocados_scene(renderer: Draw3dRenderer) -> Draw3dScene:
