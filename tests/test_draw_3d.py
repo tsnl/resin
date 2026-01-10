@@ -120,7 +120,7 @@ def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
-    frame.samples_per_pixel = 2048
+    frame.samples_per_pixel = 4
 
     scenes = {
         "two_avocados": _load_two_avocados_scene(renderer),

@@ -721,6 +721,7 @@ class GuiWindow(BaseDisposable):
                     renderer=self._draw_3d_renderer,
                     render_scale=0.5,
                 )
+                self._draw_3d_frame.samples_per_pixel = 8
                 # self._draw_3d_frame.set_debug_flags(emit_surface_normal=True)
 
             # Build 3D scene
