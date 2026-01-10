@@ -233,7 +233,7 @@ class Window(BaseDisposable):
 
         canvas_context.configure(
             device=self._device,
-            format="rgba16float",
+            format="bgra8unorm-srgb",
             usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_DST,
         )
 

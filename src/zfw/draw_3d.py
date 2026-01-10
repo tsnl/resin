@@ -76,6 +76,8 @@ class Draw3dRenderer(BaseDisposable):
     allocated_material_count: int
     allocated_image_count: int
     allocated_subpixel_count: int
+    _frame_index: int
+    _construction_time: float
 
     def __init__(
         self,
@@ -487,6 +489,8 @@ class Draw3dRenderer(BaseDisposable):
         self.allocated_material_count = 0
         self.allocated_image_count = 0
         self.allocated_subpixel_count = 0
+        self._frame_index = 0
+        self._construction_time = time.monotonic()
 
     def _on_dispose(self) -> None:
         self.geometry_heap.dispose()
@@ -569,14 +573,20 @@ class Draw3dRenderer(BaseDisposable):
         scene: "Draw3dScene",
         frame: "Draw3dFrame",
         command_encoder: wgpu.GPUCommandEncoder,
+        timestamp: float | None = None,
     ) -> None:
+        if timestamp is None:
+            timestamp = time.monotonic() - self._construction_time
         frame.record(
             self.draw_pipeline,
             self.renderer_bind_group,
             self.target_size_wh_px,
             command_encoder,
             scene,
+            timestamp,
+            self._frame_index,
         )
+        self._frame_index += 1
 
 
 class Draw3dFrame(BaseDisposable):
@@ -712,6 +722,8 @@ class Draw3dFrame(BaseDisposable):
         target_size_wh: tuple[int, int],
         encoder: wgpu.GPUCommandEncoder,
         scene: "Draw3dScene",
+        timestamp: float,
+        frame_index: int,
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
@@ -719,6 +731,8 @@ class Draw3dFrame(BaseDisposable):
             instance_count,
             encoder,
             self.debug_flags,
+            timestamp,
+            frame_index,
             environment_map_texture_id=(
                 scene.environment_map.allocation.texture_id
                 if scene.environment_map
@@ -743,7 +757,9 @@ class Draw3dFrame(BaseDisposable):
         self,
         instance_count: int,
         command_encoder: wgpu.GPUCommandEncoder,
-        debug_flags: int = 0,
+        debug_flags: int,
+        timestamp: float,
+        frame_index: int,
         environment_map_texture_id: int = -1,
     ) -> None:
         frame_info_data = PodFrameInfoArray.empty(shape=(1,))
@@ -752,6 +768,9 @@ class Draw3dFrame(BaseDisposable):
         frame_info_data["target_size_h_px"] = self.renderer.target_size_wh_px[1]
         frame_info_data["debug_flags"] = debug_flags
         frame_info_data["environment_map_texture_id"] = environment_map_texture_id
+        # Convert timestamp to 16.16 fixed-point format
+        frame_info_data["timestamp"] = np.uint32(timestamp * 65536.0)
+        frame_info_data["frame_index"] = np.uint32(frame_index)
 
         self.frame_info_buffer.write(frame_info_data, command_encoder)
 
@@ -1710,9 +1729,9 @@ class PodFrameInfoArray(StructuredNDArray):
             ("target_size_h_px", np.uint32),
             ("debug_flags", np.uint32),
             ("environment_map_texture_id", np.int32),
+            ("timestamp", np.uint32),
+            ("frame_index", np.uint32),
             ("_pad0", np.uint32),
-            ("_pad1", np.uint32),
-            ("_pad2", np.uint32),
         ]
     )
 

@@ -51,9 +51,9 @@ struct PodFrameInfo {
     target_size_h_px: u32,
     debug_flags: u32,
     environment_map_texture_id: i32,
+    timestamp: u32,
+    frame_index: u32,
     _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
