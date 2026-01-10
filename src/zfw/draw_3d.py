@@ -292,6 +292,59 @@ class Draw3dRenderer(BaseDisposable):
             ),
         )
 
+        # Postprocess pipeline for tonemapping and upscaling
+        with open(__file__.replace(".py", "_postprocess.wgsl"), "r") as f:
+            postprocess_shader_source = f.read()
+
+        self.postprocess_shader = device.create_shader_module(
+            code=postprocess_shader_source
+        )
+        self.postprocess_bind_group_layout = device.create_bind_group_layout(
+            label="Draw3dRenderer.PostprocessBindGroupLayout",
+            entries=[
+                wgpu.BindGroupLayoutEntry(
+                    binding=0,
+                    visibility=wgpu.ShaderStage.FRAGMENT,
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                        multisampled=False,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=1,
+                    visibility=wgpu.ShaderStage.FRAGMENT,
+                    sampler=wgpu.SamplerBindingLayout(
+                        type=wgpu.SamplerBindingType.filtering
+                    ),
+                ),
+            ],
+        )
+        postprocess_pipeline_layout = device.create_pipeline_layout(
+            label="Draw3dRenderer.PostprocessPipelineLayout",
+            bind_group_layouts=[self.postprocess_bind_group_layout],
+        )
+        self.postprocess_pipeline = device.create_render_pipeline(
+            label="Draw3dRenderer.PostprocessPipeline",
+            layout=postprocess_pipeline_layout,
+            vertex=wgpu.VertexState(
+                module=self.postprocess_shader,
+                entry_point="vs_postprocess",
+            ),
+            fragment=wgpu.FragmentState(
+                module=self.postprocess_shader,
+                entry_point="fs_postprocess",
+                targets=[
+                    wgpu.ColorTargetState(
+                        format=wgpu.TextureFormat.rgba16float,
+                    )
+                ],
+            ),
+            primitive=wgpu.PrimitiveState(
+                topology=wgpu.PrimitiveTopology.triangle_list,
+            ),
+        )
+
         self.geometry_heap = LinearHeap[PodGeometryArray](
             device=device,
             label="Draw3dRenderer.GeometryHeap",
@@ -584,8 +637,8 @@ class Draw3dRenderer(BaseDisposable):
             timestamp = time.monotonic() - self._construction_time
         frame.record(
             self.draw_pipeline,
+            self.postprocess_pipeline,
             self.renderer_bind_group,
-            self.target_size_wh_px,
             command_encoder,
             scene,
             timestamp,
@@ -601,31 +654,50 @@ class Draw3dFrame(BaseDisposable):
     max_bounces: int
     samples_per_pixel: int
     accumulator_persistence: float
+    render_scale: float
 
+    internal_size_wh_px: tuple[int, int]
     output_image: wgpu.GPUTexture
-    accumulator_image: wgpu.GPUTexture
+    internal_image: wgpu.GPUTexture
+    accumulator_buffer: wgpu.GPUBuffer
     frame_info_buffer: "PerFrameBuffer[PodFrameInfoArray]"
     camera_buffer: "PerFrameBuffer[PodCameraArray]"
     instance_buffer: "PerFrameBuffer[PodInstanceArray]"
 
-    def __init__(self, renderer: Draw3dRenderer) -> None:
+    def __init__(self, renderer: Draw3dRenderer, *, render_scale: float = 0.5) -> None:
         self.renderer = renderer
         self.debug_flags = 0
         self.max_bounces = 4
-        self.samples_per_pixel = 1
+        self.samples_per_pixel = 8
         self.accumulator_persistence = 0.5
+        self.render_scale = render_scale
 
+        # Internal render target at reduced resolution
+        internal_w = max(1, int(renderer.target_size_wh_px[0] * render_scale))
+        internal_h = max(1, int(renderer.target_size_wh_px[1] * render_scale))
+        self.internal_size_wh_px = (internal_w, internal_h)
+
+        # Full-resolution output (postprocessed)
         self.output_image = self._device.create_texture(
             label="Draw3dFrame.OutputImage",
             size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
             format=wgpu.TextureFormat.rgba16float,
             usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
+                wgpu.TextureUsage.RENDER_ATTACHMENT
                 | wgpu.TextureUsage.COPY_SRC
                 | wgpu.TextureUsage.TEXTURE_BINDING
             ),
         )
-        accumulator_size = renderer.target_size_wh_px[0] * renderer.target_size_wh_px[1] * 4 * 4
+        # Reduced-resolution internal image (path tracer writes here)
+        self.internal_image = self._device.create_texture(
+            label="Draw3dFrame.InternalImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        accumulator_size = internal_w * internal_h * 4 * 4
         self.accumulator_buffer = self._device.create_buffer(
             label="Draw3dFrame.AccumulatorBuffer",
             size=accumulator_size,
@@ -659,7 +731,7 @@ class Draw3dFrame(BaseDisposable):
             entries=[
                 wgpu.BindGroupEntry(
                     binding=0,
-                    resource=self.output_image.create_view(),
+                    resource=self.internal_image.create_view(),
                 ),
                 wgpu.BindGroupEntry(
                     binding=1,
@@ -692,6 +764,22 @@ class Draw3dFrame(BaseDisposable):
                         offset=0,
                         size=self.accumulator_buffer.size,
                     ),
+                ),
+            ],
+        )
+
+        # Postprocess bind group (reads internal_image, writes to output_image)
+        self.postprocess_bind_group = self._device.create_bind_group(
+            label="Draw3dFrame.PostprocessBindGroup",
+            layout=renderer.postprocess_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=self.internal_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=renderer.linear_sampler,
                 ),
             ],
         )
@@ -743,9 +831,9 @@ class Draw3dFrame(BaseDisposable):
 
     def record(
         self,
-        pipeline: wgpu.GPUComputePipeline,
+        draw_pipeline: wgpu.GPUComputePipeline,
+        postprocess_pipeline: wgpu.GPURenderPipeline,
         renderer_bind_group: wgpu.GPUBindGroup,
-        target_size_wh: tuple[int, int],
         encoder: wgpu.GPUCommandEncoder,
         scene: "Draw3dScene",
         timestamp: float,
@@ -768,16 +856,34 @@ class Draw3dFrame(BaseDisposable):
         self._upload_camera_info(scene.camera, encoder)
         self._upload_instances_info(scene.meshes, encoder)
 
+        # Path tracing compute pass (renders to internal_image at reduced resolution)
         compute_pass = encoder.begin_compute_pass(label="Draw3dFrame.ComputePass")
-        compute_pass.set_pipeline(pipeline)
+        compute_pass.set_pipeline(draw_pipeline)
         compute_pass.set_bind_group(0, renderer_bind_group, [], 0, 0)
         compute_pass.set_bind_group(1, self.bind_group, [], 0, 0)
         compute_pass.dispatch_workgroups(
-            workgroup_count_x=math.ceil(target_size_wh[0] / 8),
-            workgroup_count_y=math.ceil(target_size_wh[1] / 8),
+            workgroup_count_x=math.ceil(self.internal_size_wh_px[0] / 8),
+            workgroup_count_y=math.ceil(self.internal_size_wh_px[1] / 8),
             workgroup_count_z=1,
         )
         compute_pass.end()
+
+        # Postprocess render pass (upscales and tonemaps to output_image)
+        render_pass = encoder.begin_render_pass(
+            label="Draw3dFrame.PostprocessPass",
+            color_attachments=[
+                wgpu.RenderPassColorAttachment(
+                    view=self.output_image.create_view(),
+                    load_op=wgpu.LoadOp.clear,
+                    store_op=wgpu.StoreOp.store,
+                    clear_value=(0.0, 0.0, 0.0, 1.0),
+                )
+            ],
+        )
+        render_pass.set_pipeline(postprocess_pipeline)
+        render_pass.set_bind_group(0, self.postprocess_bind_group, [], 0, 0)
+        render_pass.draw(3, 1, 0, 0)
+        render_pass.end()
 
     def _upload_frame_info(
         self,
@@ -790,8 +896,8 @@ class Draw3dFrame(BaseDisposable):
     ) -> None:
         frame_info_data = PodFrameInfoArray.empty(shape=(1,))
         frame_info_data["instance_count"] = instance_count
-        frame_info_data["target_size_w_px"] = self.renderer.target_size_wh_px[0]
-        frame_info_data["target_size_h_px"] = self.renderer.target_size_wh_px[1]
+        frame_info_data["target_size_w_px"] = self.internal_size_wh_px[0]
+        frame_info_data["target_size_h_px"] = self.internal_size_wh_px[1]
         frame_info_data["debug_flags"] = debug_flags
         frame_info_data["environment_map_texture_id"] = environment_map_texture_id
         # Convert timestamp to 16.16 fixed-point format
