@@ -67,7 +67,7 @@ from .basic import (
     JsonObject,
     LogicError,
 )
-from .draw_2d import Draw2dRenderer, Draw2dFrame
+from .draw_2d import Draw2dRenderer
 from .draw_2d_ext import (
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
@@ -76,7 +76,6 @@ from .draw_2d_ext import (
 )
 from .draw_3d import (
     Draw3dCamera,
-    Draw3dFrame,
     Draw3dTexture,
     Draw3dGeometry,
     Draw3dMaterial,
@@ -316,12 +315,10 @@ class GuiWindow(BaseDisposable):
     # Renderers
     _draw_2d_renderer: Draw2dRenderer
     _draw_2d_canvas: Draw2dExtCanvas
-    _draw_2d_frame: Draw2dFrame
     _blit_renderer: BlitRenderer
 
     # 3D viewport
     _draw_3d_renderer: Draw3dRenderer
-    _draw_3d_frame: Draw3dFrame | None
     _camera_transform: np.ndarray | None
     _camera_intrinsics: Draw3dCamera | None
     _environment_map: Draw3dTexture | None
@@ -375,10 +372,9 @@ class GuiWindow(BaseDisposable):
             target_format="rgba8unorm-srgb",
         )
         self._draw_2d_canvas = Draw2dExtCanvas(device=device, queue=self._queue)
-        self._draw_2d_frame = Draw2dFrame(renderer=self._draw_2d_renderer)
         self._blit_renderer = BlitRenderer(device=device)
 
-        # Create 3D renderer and frame (initially None, created on first render)
+        # Create 3D renderer
         self._draw_3d_renderer = Draw3dRenderer(
             device=device,
             queue=self._queue,
@@ -386,8 +382,9 @@ class GuiWindow(BaseDisposable):
                 int(window.width_dip * scale_x),
                 int(window.height_dip * scale_x),
             ),
+            render_scale=0.5,
+            history_weight=0.95,
         )
-        self._draw_3d_frame = None
 
         # 3D camera state
         self._camera_transform = None
@@ -665,10 +662,8 @@ class GuiWindow(BaseDisposable):
         height_px: int,
     ) -> None:
         """Handle window resize events."""
-        # Recreate frames if needed
-        if width_px > 0 and height_px > 0:
-            self._draw_2d_frame = Draw2dFrame(renderer=self._draw_2d_renderer)
-            self._draw_3d_frame = None  # Will be recreated on next render
+        # Note: Renderers contain their own frame resources now, no recreation needed
+        pass
 
     #
     # Update and Render:
@@ -715,14 +710,6 @@ class GuiWindow(BaseDisposable):
 
         # Render 3D if camera is set
         if self._camera_transform is not None and self._camera_intrinsics is not None:
-            # Create 3D frame if needed (first frame or after resize)
-            if self._draw_3d_frame is None:
-                self._draw_3d_frame = Draw3dFrame(
-                    renderer=self._draw_3d_renderer,
-                    render_scale=0.5,
-                )
-                # self._draw_3d_frame.set_debug_flags(emit_surface_normal=True)
-
             # Build 3D scene
             environment_map_texture = self._environment_map
             scene = Draw3dScene(
@@ -733,7 +720,6 @@ class GuiWindow(BaseDisposable):
             # Record 3D rendering
             self._draw_3d_renderer.record(
                 scene=scene,
-                frame=self._draw_3d_frame,
                 command_encoder=command_encoder,
             )
 
@@ -746,7 +732,7 @@ class GuiWindow(BaseDisposable):
             self._central_widget._render(primitives)
 
         # If we have 3D rendering, composite it as a background quad
-        if self._draw_3d_frame is not None:
+        if self._camera_transform is not None and self._camera_intrinsics is not None:
             # Insert 3D viewport as a background quad at the beginning
             primitives.insert(
                 0,
@@ -758,7 +744,7 @@ class GuiWindow(BaseDisposable):
                         self._window.height_dip,
                     ),
                     src_xy_px=(0, 0),
-                    fill_texture=self._draw_3d_frame.get_output_image(),
+                    fill_texture=self._draw_3d_renderer.get_output_image(),
                     fill_color=(1.0, 1.0, 1.0, 1.0),
                 ),
             )
@@ -766,16 +752,15 @@ class GuiWindow(BaseDisposable):
         # Convert primitives to quads
         quads = self._draw_2d_canvas.quads(primitives=primitives, scale=scale_x)
 
-        # Record 2D drawing commands targeting the Draw2dFrame
+        # Record 2D drawing commands
         self._draw_2d_renderer.record(
             quads=quads,
-            frame=self._draw_2d_frame,
             command_encoder=command_encoder,
         )
 
-        # Blit from 2D frame to canvas texture
+        # Blit from 2D renderer output to canvas texture
         self._blit_renderer.record(
-            input_texture=self._draw_2d_frame.get_output_image(),
+            input_texture=self._draw_2d_renderer.get_output_image(),
             output_texture=current_texture,
             command_encoder=command_encoder,
         )

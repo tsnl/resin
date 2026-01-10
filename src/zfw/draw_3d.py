@@ -1,5 +1,4 @@
 __all__ = [
-    "Draw3dFrame",
     "Draw3dRenderer",
     "Draw3dScene",
 ]
@@ -32,12 +31,17 @@ class Draw3dRenderer(BaseDisposable):
 
     Usage:
     -   Create an instance of Draw3dRenderer.
-    -   Create Draw3dFrame instances for each frame to be rendered concurrently. You can
-        and should reuse Draw3dFrame instances across multiple frames.
-    -   Create Draw3dScene instances representing the scenes to be rendered. These
-        should be created anew for each frame.
-    -   For each frame, call `Draw3dRenderer.record()` with the scene, frame, and a GPU
-        command encoder (to record commands into).
+    -   Create Draw3dScene instances representing the scenes to be rendered.
+    -   For each frame, call `Draw3dRenderer.record()` with the scene and a GPU
+        command encoder.
+    -   Call `reset()` when changing scenes to clear all loaded resources (geometry,
+        materials, textures) and reset the accumulator.
+
+    The renderer supports temporal accumulation for path tracing convergence. The
+    `history_weight` parameter controls blending: 0.0 = only new frame (no history),
+    1.0 = only history (frozen). For interactive use, low values (~0.05) give
+    responsive results; for offline rendering, use higher values to accumulate
+    many samples.
     """
 
     device: wgpu.GPUDevice
@@ -84,6 +88,9 @@ class Draw3dRenderer(BaseDisposable):
         device: wgpu.GPUDevice,
         queue: wgpu.GPUQueue,
         target_size_wh_px: tuple[int, int],
+        samples_per_pixel: int = 1,
+        history_weight: float = 0.50,
+        render_scale: float = 1.0,
         instance_capacity: int = 1 << 10,
         geometry_capacity: int = 1 << 7,
         material_capacity: int = 1 << 7,
@@ -553,6 +560,143 @@ class Draw3dRenderer(BaseDisposable):
         self._frame_index = 0
         self._construction_time = time.monotonic()
 
+        # Per-frame resources
+        self._debug_flags = 0
+        self._max_bounces = 3
+        self._samples_per_pixel = samples_per_pixel
+        self._history_weight = history_weight
+        self._render_scale = render_scale
+
+        # Internal render target at reduced resolution
+        internal_w = max(1, int(target_size_wh_px[0] * self._render_scale))
+        internal_h = max(1, int(target_size_wh_px[1] * self._render_scale))
+        self._internal_size_wh_px = (internal_w, internal_h)
+
+        # Full-resolution output (postprocessed)
+        self.output_image = device.create_texture(
+            label="Draw3dRenderer.OutputImage",
+            size=(target_size_wh_px[0], target_size_wh_px[1], 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.RENDER_ATTACHMENT
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        # Reduced-resolution internal image (path tracer writes here)
+        self._internal_image = device.create_texture(
+            label="Draw3dRenderer.InternalImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        accumulator_size = internal_w * internal_h * 4 * 4
+        self._accumulator_buffer = device.create_buffer(
+            label="Draw3dRenderer.AccumulatorBuffer",
+            size=accumulator_size,
+            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
+        )
+        self._frame_info_buffer = PerFrameBuffer[PodFrameInfoArray](
+            device=device,
+            label="Draw3dRenderer.FrameInfoHeap",
+            structured_array_cls=PodFrameInfoArray,
+            element_capacity=1,
+            device_buffer_usages=wgpu.BufferUsage.UNIFORM,
+        )
+        self._camera_buffer = PerFrameBuffer[PodCameraArray](
+            device=device,
+            label="Draw3dRenderer.CameraHeap",
+            structured_array_cls=PodCameraArray,
+            element_capacity=1,
+            device_buffer_usages=wgpu.BufferUsage.UNIFORM,
+        )
+        self._instance_buffer = PerFrameBuffer[PodInstanceArray](
+            device=device,
+            label="Draw3dRenderer.InstanceHeap",
+            structured_array_cls=PodInstanceArray,
+            element_capacity=instance_capacity,
+            device_buffer_usages=wgpu.BufferUsage.STORAGE,
+        )
+
+        self._per_frame_bind_group = device.create_bind_group(
+            label="Draw3dRenderer.PerFrameBindGroup",
+            layout=self.per_frame_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=self._internal_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._frame_info_buffer.device_buffer,
+                        offset=0,
+                        size=self._frame_info_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._camera_buffer.device_buffer,
+                        offset=0,
+                        size=self._camera_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=3,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._instance_buffer.device_buffer,
+                        offset=0,
+                        size=self._instance_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=4,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._accumulator_buffer,
+                        offset=0,
+                        size=self._accumulator_buffer.size,
+                    ),
+                ),
+            ],
+        )
+
+        # Postprocess uniform buffer for debug flags
+        self._postprocess_uniform_buffer = device.create_buffer(
+            label="Draw3dRenderer.PostprocessUniformBuffer",
+            size=16,  # vec4<u32> alignment
+            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
+        )
+
+        # Postprocess bind group (reads internal_image, writes to output_image)
+        self._postprocess_bind_group = device.create_bind_group(
+            label="Draw3dRenderer.PostprocessBindGroup",
+            layout=self.postprocess_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=self._internal_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=self.linear_sampler,
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._postprocess_uniform_buffer,
+                        offset=0,
+                        size=16,
+                    ),
+                ),
+            ],
+        )
+
+        # Initialize frame state
+        self.reset()
+
     def _on_dispose(self) -> None:
         self.geometry_heap.dispose()
         self.bvh_node_heap.dispose()
@@ -632,179 +776,18 @@ class Draw3dRenderer(BaseDisposable):
     def record(
         self,
         scene: "Draw3dScene",
-        frame: "Draw3dFrame",
         command_encoder: wgpu.GPUCommandEncoder,
         timestamp: float | None = None,
     ) -> None:
         if timestamp is None:
             timestamp = time.monotonic() - self._construction_time
-        frame.record(
-            self.draw_pipeline,
-            self.postprocess_pipeline,
-            self.renderer_bind_group,
+        self._record(
             command_encoder,
             scene,
             timestamp,
             self._frame_index,
         )
         self._frame_index += 1
-
-
-class Draw3dFrame(BaseDisposable):
-    renderer: Draw3dRenderer
-
-    debug_flags: int
-    max_bounces: int
-    samples_per_pixel: int
-    accumulator_persistence: float
-    render_scale: float
-
-    internal_size_wh_px: tuple[int, int]
-    output_image: wgpu.GPUTexture
-    internal_image: wgpu.GPUTexture
-    accumulator_buffer: wgpu.GPUBuffer
-    frame_info_buffer: "PerFrameBuffer[PodFrameInfoArray]"
-    camera_buffer: "PerFrameBuffer[PodCameraArray]"
-    instance_buffer: "PerFrameBuffer[PodInstanceArray]"
-
-    def __init__(self, renderer: Draw3dRenderer, *, render_scale: float = 1.0) -> None:
-        self.renderer = renderer
-        self.debug_flags = 0
-        self.max_bounces = 4
-        self.samples_per_pixel = 8
-        self.accumulator_persistence = 0.25
-        self.render_scale = render_scale
-
-        # Internal render target at reduced resolution
-        internal_w = max(1, int(renderer.target_size_wh_px[0] * render_scale))
-        internal_h = max(1, int(renderer.target_size_wh_px[1] * render_scale))
-        self.internal_size_wh_px = (internal_w, internal_h)
-
-        # Full-resolution output (postprocessed)
-        self.output_image = self._device.create_texture(
-            label="Draw3dFrame.OutputImage",
-            size=(renderer.target_size_wh_px[0], renderer.target_size_wh_px[1], 1),
-            format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.RENDER_ATTACHMENT
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
-        )
-        # Reduced-resolution internal image (path tracer writes here)
-        self.internal_image = self._device.create_texture(
-            label="Draw3dFrame.InternalImage",
-            size=(internal_w, internal_h, 1),
-            format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
-        )
-        accumulator_size = internal_w * internal_h * 4 * 4
-        self.accumulator_buffer = self._device.create_buffer(
-            label="Draw3dFrame.AccumulatorBuffer",
-            size=accumulator_size,
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
-        self.frame_info_buffer = PerFrameBuffer[PodFrameInfoArray](
-            device=self._device,
-            label="Draw3dFrame.FrameInfoHeap",
-            structured_array_cls=PodFrameInfoArray,
-            element_capacity=1,
-            device_buffer_usages=wgpu.BufferUsage.UNIFORM,
-        )
-        self.camera_buffer = PerFrameBuffer[PodCameraArray](
-            device=self._device,
-            label="Draw3dFrame.CameraHeap",
-            structured_array_cls=PodCameraArray,
-            element_capacity=1,
-            device_buffer_usages=wgpu.BufferUsage.UNIFORM,
-        )
-        self.instance_buffer = PerFrameBuffer[PodInstanceArray](
-            device=self._device,
-            label="Draw3dFrame.InstanceHeap",
-            structured_array_cls=PodInstanceArray,
-            element_capacity=renderer.instance_capacity,
-            device_buffer_usages=wgpu.BufferUsage.STORAGE,
-        )
-
-        self.bind_group = self._device.create_bind_group(
-            label="Draw3dFrame.BindGroup",
-            layout=renderer.per_frame_bind_group_layout,
-            entries=[
-                wgpu.BindGroupEntry(
-                    binding=0,
-                    resource=self.internal_image.create_view(),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=1,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.frame_info_buffer.device_buffer,
-                        offset=0,
-                        size=self.frame_info_buffer.device_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=2,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.camera_buffer.device_buffer,
-                        offset=0,
-                        size=self.camera_buffer.device_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=3,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.instance_buffer.device_buffer,
-                        offset=0,
-                        size=self.instance_buffer.device_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=4,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.accumulator_buffer,
-                        offset=0,
-                        size=self.accumulator_buffer.size,
-                    ),
-                ),
-            ],
-        )
-
-        # Postprocess uniform buffer for debug flags
-        self.postprocess_uniform_buffer = self._device.create_buffer(
-            label="Draw3dFrame.PostprocessUniformBuffer",
-            size=16,  # vec4<u32> alignment
-            usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
-        )
-
-        # Postprocess bind group (reads internal_image, writes to output_image)
-        self.postprocess_bind_group = self._device.create_bind_group(
-            label="Draw3dFrame.PostprocessBindGroup",
-            layout=renderer.postprocess_bind_group_layout,
-            entries=[
-                wgpu.BindGroupEntry(
-                    binding=0,
-                    resource=self.internal_image.create_view(),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=1,
-                    resource=renderer.linear_sampler,
-                ),
-                wgpu.BindGroupEntry(
-                    binding=2,
-                    resource=wgpu.BufferBinding(
-                        buffer=self.postprocess_uniform_buffer,
-                        offset=0,
-                        size=16,
-                    ),
-                ),
-            ],
-        )
-
-    @property
-    def _device(self) -> wgpu.GPUDevice:
-        return self.renderer.device
 
     def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
@@ -833,41 +816,56 @@ class Draw3dFrame(BaseDisposable):
         :param emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
         :param disable_jitter: If True, disable jitter for primary ray generation.
         """
-        self.debug_flags = 0
+        self._debug_flags = 0
         if emit_primary_ray_direction:
-            self.debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
+            self._debug_flags |= _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION
         if emit_closest_hit_depth_in_r:
-            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_DEPTH
+            self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_DEPTH
         if emit_hit_world_position:
-            self.debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
+            self._debug_flags |= _FRAME_FLAG_EMIT_HIT_WORLD_POSITION
         if emit_closest_hit_bvh_depth_in_r:
-            self.debug_flags |= _FRAME_FLAG_EMIT_BVH_DEPTH
+            self._debug_flags |= _FRAME_FLAG_EMIT_BVH_DEPTH
         if emit_surface_color:
-            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_COLOR
+            self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_COLOR
         if emit_surface_normal:
-            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_NORMAL
+            self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_NORMAL
         if emit_orm:
-            self.debug_flags |= _FRAME_FLAG_EMIT_SURFACE_ORM
+            self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_ORM
         if disable_jitter:
-            self.debug_flags |= _FRAME_FLAG_DISABLE_JITTER
+            self._debug_flags |= _FRAME_FLAG_DISABLE_JITTER
 
     def reset(self, encoder: wgpu.GPUCommandEncoder | None = None) -> None:
-        """Clear the accumulator buffer to reset frame state.
+        """Full reset: clear all allocators and frame state.
+
+        This deallocates all geometry, materials, textures, and resets the
+        accumulator, frame index, timestamp, and debug flags.
 
         If encoder is provided, uses clear_buffer for proper GPU synchronization.
         Otherwise, uses write_buffer which is asynchronous.
         """
-        if encoder is not None:
-            encoder.clear_buffer(self.accumulator_buffer)
-        else:
-            zeros = np.zeros(self.accumulator_buffer.size, dtype=np.uint8)
-            self._device.queue.write_buffer(self.accumulator_buffer, 0, zeros)
+        self._frame_index = 0
+        self._construction_time = time.monotonic()
+        self._debug_flags = 0
 
-    def record(
+        # Clear all heaps/allocators
+        self.geometry_heap.clear()
+        self.bvh_node_heap.clear()
+        self.triangle_heap.clear()
+        self.material_heap.clear()
+        self.color_texture_heap.clear()
+        self.normal_texture_heap.clear()
+        self.metalness_texture_heap.clear()
+        self.roughness_texture_heap.clear()
+        self.environment_texture_heap.clear()
+
+        if encoder is not None:
+            encoder.clear_buffer(self._accumulator_buffer)
+        else:
+            zeros = np.zeros(self._accumulator_buffer.size, dtype=np.uint8)
+            self.device.queue.write_buffer(self._accumulator_buffer, 0, zeros)
+
+    def _record(
         self,
-        draw_pipeline: wgpu.GPUComputePipeline,
-        postprocess_pipeline: wgpu.GPURenderPipeline,
-        renderer_bind_group: wgpu.GPUBindGroup,
         encoder: wgpu.GPUCommandEncoder,
         scene: "Draw3dScene",
         timestamp: float,
@@ -878,7 +876,7 @@ class Draw3dFrame(BaseDisposable):
         self._upload_frame_info(
             instance_count,
             encoder,
-            self.debug_flags,
+            self._debug_flags,
             timestamp,
             frame_index,
             environment_map_texture_id=(
@@ -891,26 +889,26 @@ class Draw3dFrame(BaseDisposable):
         self._upload_instances_info(scene.meshes, encoder)
 
         # Path tracing compute pass (renders to internal_image at reduced resolution)
-        compute_pass = encoder.begin_compute_pass(label="Draw3dFrame.ComputePass")
-        compute_pass.set_pipeline(draw_pipeline)
-        compute_pass.set_bind_group(0, renderer_bind_group, [], 0, 0)
-        compute_pass.set_bind_group(1, self.bind_group, [], 0, 0)
+        compute_pass = encoder.begin_compute_pass(label="Draw3dRenderer.ComputePass")
+        compute_pass.set_pipeline(self.draw_pipeline)
+        compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
+        compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
         compute_pass.dispatch_workgroups(
-            workgroup_count_x=math.ceil(self.internal_size_wh_px[0] / 8),
-            workgroup_count_y=math.ceil(self.internal_size_wh_px[1] / 8),
+            workgroup_count_x=math.ceil(self._internal_size_wh_px[0] / 8),
+            workgroup_count_y=math.ceil(self._internal_size_wh_px[1] / 8),
             workgroup_count_z=1,
         )
         compute_pass.end()
 
         # Upload postprocess debug flags
-        postprocess_uniforms = np.array([self.debug_flags, 0, 0, 0], dtype=np.uint32)
-        self._device.queue.write_buffer(
-            self.postprocess_uniform_buffer, 0, postprocess_uniforms
+        postprocess_uniforms = np.array([self._debug_flags, 0, 0, 0], dtype=np.uint32)
+        self.device.queue.write_buffer(
+            self._postprocess_uniform_buffer, 0, postprocess_uniforms
         )
 
         # Postprocess render pass (upscales and tonemaps to output_image)
         render_pass = encoder.begin_render_pass(
-            label="Draw3dFrame.PostprocessPass",
+            label="Draw3dRenderer.PostprocessPass",
             color_attachments=[
                 wgpu.RenderPassColorAttachment(
                     view=self.output_image.create_view(),
@@ -920,8 +918,8 @@ class Draw3dFrame(BaseDisposable):
                 )
             ],
         )
-        render_pass.set_pipeline(postprocess_pipeline)
-        render_pass.set_bind_group(0, self.postprocess_bind_group, [], 0, 0)
+        render_pass.set_pipeline(self.postprocess_pipeline)
+        render_pass.set_bind_group(0, self._postprocess_bind_group, [], 0, 0)
         render_pass.draw(3, 1, 0, 0)
         render_pass.end()
 
@@ -936,20 +934,18 @@ class Draw3dFrame(BaseDisposable):
     ) -> None:
         frame_info_data = PodFrameInfoArray.empty(shape=(1,))
         frame_info_data["instance_count"] = instance_count
-        frame_info_data["target_size_w_px"] = self.internal_size_wh_px[0]
-        frame_info_data["target_size_h_px"] = self.internal_size_wh_px[1]
+        frame_info_data["target_size_w_px"] = self._internal_size_wh_px[0]
+        frame_info_data["target_size_h_px"] = self._internal_size_wh_px[1]
         frame_info_data["debug_flags"] = debug_flags
         frame_info_data["environment_map_texture_id"] = environment_map_texture_id
         # Convert timestamp to 16.16 fixed-point format
         frame_info_data["timestamp"] = np.uint32(timestamp * 65536.0)
         frame_info_data["frame_index"] = np.uint32(frame_index)
-        frame_info_data["max_bounces"] = np.uint32(self.max_bounces)
-        frame_info_data["samples_per_pixel"] = np.uint32(self.samples_per_pixel)
-        frame_info_data["accumulator_persistence"] = np.float32(
-            self.accumulator_persistence
-        )
+        frame_info_data["max_bounces"] = np.uint32(self._max_bounces)
+        frame_info_data["samples_per_pixel"] = np.uint32(self._samples_per_pixel)
+        frame_info_data["history_weight"] = np.float32(self._history_weight)
 
-        self.frame_info_buffer.write(frame_info_data, command_encoder)
+        self._frame_info_buffer.write(frame_info_data, command_encoder)
 
     def _upload_camera_info(
         self,
@@ -962,7 +958,7 @@ class Draw3dFrame(BaseDisposable):
         camera_data["aspect_ratio"] = camera.aspect_ratio
         camera_data["max_distance"] = camera.max_distance
 
-        self.camera_buffer.write(camera_data, command_encoder)
+        self._camera_buffer.write(camera_data, command_encoder)
 
     def _upload_instances_info(
         self,
@@ -973,7 +969,7 @@ class Draw3dFrame(BaseDisposable):
         command_encoder: wgpu.GPUCommandEncoder,
     ) -> None:
         total_instance_count = sum(len(t) for t in instances.values())
-        if total_instance_count > self.renderer.instance_capacity:
+        if total_instance_count > self.instance_capacity:
             raise RuntimeError("Draw3dRenderer instance heap capacity exceeded.")
 
         data = PodInstanceArray.empty(shape=(total_instance_count,))
@@ -992,7 +988,7 @@ class Draw3dFrame(BaseDisposable):
 
             offset += n
 
-        self.instance_buffer.write(data, command_encoder)
+        self._instance_buffer.write(data, command_encoder)
 
 
 class Draw3dGeometry(BaseDisposable):
@@ -1381,6 +1377,11 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
         command_encoder.clear_buffer(buffer=self.device_buffer)
         self.device.queue.submit([command_encoder.finish()])
 
+    def clear(self) -> None:
+        """Reset the heap, deallocating all elements."""
+        self.allocated_element_count = 0
+        self._clear_device_buffer()
+
     def _on_dispose(self) -> None:
         self.device_buffer.destroy()
         if self.persistent_staging_buffer:
@@ -1578,6 +1579,15 @@ class TextureHeap(BaseDisposable):
     def _on_dispose(self) -> None:
         self.texture.destroy()
         super()._on_dispose()
+
+    def clear(self) -> None:
+        """Reset the texture heap, deallocating all textures."""
+        self.allocation_list = []
+        self.allocation_heap.clear()
+        self.cursor_x_px = 0
+        self.cursor_y_px = 0
+        self.cursor_h_px = 0
+        self.cursor_page = 0
 
     def _encode_texture(self, data: np.ndarray) -> np.ndarray:
         if data.ndim != 3:
@@ -1912,7 +1922,7 @@ class PodFrameInfoArray(StructuredNDArray):
             ("frame_index", np.uint32),
             ("max_bounces", np.uint32),
             ("samples_per_pixel", np.uint32),
-            ("accumulator_persistence", np.float32),
+            ("history_weight", np.float32),
         ]
     )
 

@@ -1,5 +1,4 @@
 __all__ = [
-    "Draw2dFrame",
     "Draw2dQuad",
     "Draw2dRenderer",
 ]
@@ -134,72 +133,56 @@ class Draw2dRenderer:
             mipmap_filter=wgpu.MipmapFilterMode.nearest,
         )
 
-    def record(
-        self,
-        quads: list["Draw2dQuad"],
-        frame: "Draw2dFrame",
-        command_encoder: wgpu.GPUCommandEncoder,
-    ):
-        frame.record(
-            device=self.device,
-            bind_group_layout=self.bind_group_layout,
-            sampler=self.sampler,
-            default_white_texture=self.default_white_texture,
-            pipeline=self.pipeline,
-            target_size_wh=self.target_size_wh,
-            command_encoder=command_encoder,
-            quads=quads,
-        )
-
-
-class Draw2dFrame:
-    def __init__(self, *, renderer: Draw2dRenderer):
-        self.output_image = renderer.device.create_texture(
-            label="Draw2dFrame.OutputImage",
-            size=(renderer.target_size_wh[0], renderer.target_size_wh[1], 1),
+        # Frame resources (single frame in flight)
+        self.output_image = device.create_texture(
+            label="Draw2dRenderer.OutputImage",
+            size=(target_size_wh[0], target_size_wh[1], 1),
             dimension=wgpu.TextureDimension.d2,
-            format=renderer.target_format,
+            format=target_format,
             usage=(
                 wgpu.TextureUsage.RENDER_ATTACHMENT
                 | wgpu.TextureUsage.COPY_SRC
                 | wgpu.TextureUsage.TEXTURE_BINDING
             ),
         )
-        self.quad_group_cache: dict[wgpu.GPUTexture, "QuadGroup"] = {}
+        self._quad_group_cache: dict[wgpu.GPUTexture, "QuadGroup"] = {}
 
     def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
 
     def record(
         self,
+        quads: list["Draw2dQuad"],
+        command_encoder: wgpu.GPUCommandEncoder,
+    ) -> None:
+        self._record(
+            command_encoder=command_encoder,
+            quads=quads,
+        )
+
+    def _record(
+        self,
         *,
-        device: wgpu.GPUDevice,
-        bind_group_layout: wgpu.GPUBindGroupLayout,
-        sampler: wgpu.GPUSampler,
-        default_white_texture: wgpu.GPUTexture,
-        pipeline: wgpu.GPURenderPipeline,
-        target_size_wh: tuple[int, int],
         command_encoder: wgpu.GPUCommandEncoder,
         quads: list["Draw2dQuad"],
-    ):
-        quad_batch_list = QuadBatchList(quads, target_size_wh)
+    ) -> None:
+        quad_batch_list = QuadBatchList(quads, self.target_size_wh)
 
         group_bind_groups: dict[wgpu.GPUTexture, wgpu.GPUBindGroup] = {}
 
         for texture, group_quads in quad_batch_list.bind_groups.items():
-            actual_texture = texture if texture is not None else default_white_texture
-            bind_group = self.acquire_quad_group(
-                device,
+            actual_texture = (
+                texture if texture is not None else self.default_white_texture
+            )
+            bind_group = self._acquire_quad_group(
                 command_encoder,
                 actual_texture,
                 group_quads,
-                bind_group_layout,
-                sampler,
             )
             group_bind_groups[actual_texture] = bind_group
 
         render_pass = command_encoder.begin_render_pass(
-            label="Draw2dFrame.RenderPass",
+            label="Draw2dRenderer.RenderPass",
             color_attachments=[
                 wgpu.RenderPassColorAttachment(
                     view=self.output_image.create_view(),
@@ -211,10 +194,10 @@ class Draw2dFrame:
             ],
         )
 
-        render_pass.set_pipeline(pipeline)
+        render_pass.set_pipeline(self.pipeline)
 
         for texture, draw_range in quad_batch_list.draw_ranges:
-            actual_texture = texture or default_white_texture
+            actual_texture = texture or self.default_white_texture
             bind_group = group_bind_groups[actual_texture]
 
             render_pass.set_bind_group(0, bind_group, [], 0, 0)
@@ -222,25 +205,22 @@ class Draw2dFrame:
 
         render_pass.end()
 
-    def acquire_quad_group(
+    def _acquire_quad_group(
         self,
-        device: wgpu.GPUDevice,
         command_encoder: wgpu.GPUCommandEncoder,
         key: wgpu.GPUTexture,
         quads: npt.NDArray,
-        bind_group_layout: wgpu.GPUBindGroupLayout,
-        sampler: wgpu.GPUSampler,
     ) -> wgpu.GPUBindGroup:
-        if key not in self.quad_group_cache:
-            self.quad_group_cache[key] = QuadGroup(
-                device, key, len(quads), bind_group_layout, sampler
+        if key not in self._quad_group_cache:
+            self._quad_group_cache[key] = QuadGroup(
+                self.device, key, len(quads), self.bind_group_layout, self.sampler
             )
 
-        return self.quad_group_cache[key].update(
-            device=device,
+        return self._quad_group_cache[key].update(
+            device=self.device,
             encoder=command_encoder,
-            quad_batch_bind_group_layout=bind_group_layout,
-            quad_batch_sampler=sampler,
+            quad_batch_bind_group_layout=self.bind_group_layout,
+            quad_batch_sampler=self.sampler,
             data=quads,
         )
 

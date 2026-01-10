@@ -13,11 +13,9 @@ __all__ = [
     "Draw2dExtCanvas",
     "Draw2dExtQuadPrimitive",
     "Draw2dExtTextPrimitive",
-    "Draw2dFrame",
     "Draw2dQuad",
     "Draw2dRenderer",
     "Draw3dCamera",
-    "Draw3dFrame",
     "Draw3dGeometry",
     "Draw3dMaterial",
     "Draw3dRenderer",
@@ -80,7 +78,6 @@ from .basic import (
     setup_logging,
 )
 from .draw_2d import (
-    Draw2dFrame,
     Draw2dQuad,
     Draw2dRenderer,
 )
@@ -91,7 +88,6 @@ from .draw_2d_ext import (
     Draw2dExtCanvas,
 )
 from .draw_3d import (
-    Draw3dFrame,
     Draw3dRenderer,
     Draw3dScene,
     Draw3dCamera,

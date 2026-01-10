@@ -13,7 +13,6 @@ from zfw import (
     FontSize,
     FontWeight,
     Draw2dRenderer,
-    Draw2dFrame,
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
     Draw2dExtTextPrimitive,
@@ -33,7 +32,6 @@ class Draw2dExTestEngine(BaseDisposable):
     device: wgpu.GPUDevice
     queue: wgpu.GPUQueue
     renderer: Draw2dRenderer
-    target: Draw2dFrame
     canvas: Draw2dExtCanvas
     readback_buffer: wgpu.GPUBuffer
 
@@ -49,13 +47,12 @@ class Draw2dExTestEngine(BaseDisposable):
         self.device = adapter.request_device_sync(label="Draw2dExTestEngine")
         self.queue = self.device.queue
 
-        # Create renderer and frame
+        # Create renderer
         self.renderer = Draw2dRenderer(
             self.device,
             self.queue,
             (int(TEST_IMAGE_W * self._scale), int(TEST_IMAGE_H * self._scale)),
         )
-        self.target = Draw2dFrame(renderer=self.renderer)
         self.canvas = Draw2dExtCanvas(device=self.device, queue=self.queue)
 
         # Readback buffer for image data
@@ -70,7 +67,7 @@ class Draw2dExTestEngine(BaseDisposable):
 
     def readback(self) -> np.ndarray:
         """Read back the rendered image as a uint8 RGBA array in sRGB color space."""
-        color_image = self.target.get_output_image()
+        color_image = self.renderer.get_output_image()
 
         # Create command encoder for readback
         command_encoder = self.device.create_command_encoder(label="Readback")
@@ -118,7 +115,6 @@ class Draw2dExTestEngine(BaseDisposable):
         )
         self.renderer.record(
             quads=self.canvas.quads(primitives=primitives, scale=self._scale),
-            frame=self.target,
             command_encoder=command_encoder,
         )
         self.queue.submit([command_encoder.finish()])

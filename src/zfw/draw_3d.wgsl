@@ -111,7 +111,7 @@ struct PodFrameInfo {
     frame_index: u32,
     max_bounces: u32,
     samples_per_pixel: u32,
-    accumulator_persistence: f32,
+    history_weight: f32,
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
@@ -1103,10 +1103,14 @@ fn accumulator_index(pixel_xy: vec2<u32>) -> u32 {
 }
 
 fn accumulate_pixel_result(pixel_xy: vec2<u32>, new_color: vec4<f32>) -> vec4<f32> {
+    // On first frame, directly store without blending
+    if frame_info.frame_index == 0u {
+        return new_color;
+    }
     let idx = accumulator_index(pixel_xy);
     let existing_color = accumulator[idx];
-    let persistence = frame_info.accumulator_persistence;
-    return mix(new_color, existing_color, persistence);
+    let history_weight = frame_info.history_weight;
+    return mix(new_color, existing_color, history_weight);
 }
 
 fn store_accumulated_result(pixel_xy: vec2<u32>, color: vec4<f32>) {

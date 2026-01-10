@@ -10,7 +10,6 @@ from image_ref_tests import assert_image_matches_reference
 from zfw import (
     setup_logging,
     Draw2dRenderer,
-    Draw2dFrame,
     Draw2dQuad,
     convert_color,
 )
@@ -52,7 +51,6 @@ def test_basic_draw_2d(
     )
 
     renderer = Draw2dRenderer(device, queue, (1024, 1024))
-    frame = Draw2dFrame(renderer=renderer)
     readback_buffer = device.create_buffer(
         size=1024 * 1024 * 4,
         usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
@@ -84,10 +82,10 @@ def test_basic_draw_2d(
         ),
     ]
 
-    renderer.record(quads, frame, command_encoder)
+    renderer.record(quads, command_encoder)
     command_encoder.copy_texture_to_buffer(
         source=wgpu.TexelCopyTextureInfo(
-            texture=frame.get_output_image(),
+            texture=renderer.get_output_image(),
             mip_level=0,
             origin=(0, 0, 0),
             aspect=wgpu.TextureAspect.all,
@@ -97,7 +95,7 @@ def test_basic_draw_2d(
             rows_per_image=1024,
             buffer=readback_buffer,
         ),
-        copy_size=frame.get_output_image().size,
+        copy_size=renderer.get_output_image().size,
     )
 
     queue.submit([command_encoder.finish()])

@@ -11,7 +11,6 @@ import PIL.Image
 
 from zfw import (
     Draw3dRenderer,
-    Draw3dFrame,
     Draw3dScene,
     Draw3dCamera,
     Draw3dGeometry,
@@ -38,7 +37,6 @@ def _create_readback_buffer(device: wgpu.GPUDevice, w: int, h: int) -> wgpu.GPUB
 def _render_and_readback(
     gpu_device: wgpu.GPUDevice,
     renderer: Draw3dRenderer,
-    frame: Draw3dFrame,
     scene: Draw3dScene,
     w: int,
     h: int,
@@ -59,18 +57,17 @@ def _render_and_readback(
     for _ in range(repeat_count):
         command_encoder = gpu_device.create_command_encoder(label="CommandEncoder")
 
-        # Reset accumulators in case this frame is re-used on a different scene:
-        frame.reset(command_encoder)
-
         # GPUs crash if we set very high SPP on one frame.
         # Instead, we can do multiple passes and accumulate.
-        iter_count = max(1, int(math.ceil(frame.samples_per_pixel / samples_per_pixel)))
-        frame.accumulator_persistence = 1.0 / iter_count
+        iter_count = max(
+            1, int(math.ceil(renderer._samples_per_pixel / samples_per_pixel))
+        )
+        renderer._history_weight = 1.0 / iter_count
         for _ in range(iter_count):
-            renderer.record(scene, frame, command_encoder)
+            renderer.record(scene, command_encoder)
             command_encoder.copy_texture_to_buffer(
                 source=wgpu.TexelCopyTextureInfo(
-                    texture=frame.get_output_image(),
+                    texture=renderer.get_output_image(),
                     mip_level=0,
                     origin=(0, 0, 0),
                     aspect=wgpu.TextureAspect.all,
@@ -80,7 +77,7 @@ def _render_and_readback(
                     rows_per_image=h,
                     buffer=readback_buffer,
                 ),
-                copy_size=frame.get_output_image().size,
+                copy_size=renderer.get_output_image().size,
             )
             gpu_device.queue.submit([command_encoder.finish()])
 
@@ -126,29 +123,29 @@ def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None
 
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
-    frame = Draw3dFrame(renderer)
-
-    scenes = {
-        "two_avocados": _load_two_avocados_scene(renderer),
-        "damaged_helmet": _load_damaged_helmet_scene(renderer),
-        "flight_helmet": _load_flight_helmet_scene(renderer),
+    scene_loaders = {
+        "two_avocados": _load_two_avocados_scene,
+        "damaged_helmet": _load_damaged_helmet_scene,
+        "flight_helmet": _load_flight_helmet_scene,
     }
 
-    # Load Field environment map
-    hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
-    env_map_texture = Draw3dTexture(
-        renderer,
-        data=hdr_data,
-        usage="environment",
-    )
+    for scene_name, load_scene in scene_loaders.items():
+        renderer.reset()
 
-    for scene_name, scene in scenes.items():
+        scene = load_scene(renderer)
+
+        # Load Field environment map
+        hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
+        env_map_texture = Draw3dTexture(
+            renderer,
+            data=hdr_data,
+            usage="environment",
+        )
         scene.environment_map = env_map_texture
 
         data = _render_and_readback(
             gpu_device,
             renderer,
-            frame,
             scene,
             FRAME_W,
             FRAME_H,
@@ -294,7 +291,7 @@ def _load_flight_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
 
 def test_primary_ray_generation(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test that primary rays are generated correctly with proper FOV coverage."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     # Simple camera: identity transform (at origin, looking down +Y)
     scene = Draw3dScene(
@@ -307,8 +304,8 @@ def test_primary_ray_generation(gpu_device: wgpu.GPUDevice, renderer: Draw3dRend
     )
 
     # Enable primary ray direction debug flag
-    frame.set_debug_flags(emit_primary_ray_direction=True)
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    renderer.set_debug_flags(emit_primary_ray_direction=True)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     # Extract RGB (ray direction mapped to [0,1])
     data = data[:, :, :3]
@@ -392,7 +389,7 @@ def test_primary_ray_generation(gpu_device: wgpu.GPUDevice, renderer: Draw3dRend
 
 def test_depth_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test depth visualization for debugging ray-triangle intersections."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     resource_meshes = load_gltf(
         gltf_path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
@@ -425,8 +422,8 @@ def test_depth_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRendere
     )
 
     # Enable depth debug flag
-    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     # Save output:
     _save_debug_image(data, "test_depth_visualization.png", format="RGBA")
@@ -455,7 +452,7 @@ def test_world_position_visualization(
     gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
 ):
     """Test world position visualization to see what's actually being hit."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     resource_meshes = load_gltf(
         gltf_path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
@@ -487,8 +484,8 @@ def test_world_position_visualization(
     )
 
     # Enable world position debug flag
-    frame.set_debug_flags(emit_hit_world_position=True)
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    renderer.set_debug_flags(emit_hit_world_position=True)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     _save_debug_image(data, "test_world_position.png", format="RGBA")
 
@@ -497,7 +494,7 @@ def test_coordinate_system_offset_px(
     gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
 ):
     """Test that positive X camera offset shifts the depth centroid left."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     resource_meshes = load_gltf(
         gltf_path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
@@ -530,8 +527,8 @@ def test_coordinate_system_offset_px(
     )
 
     # Enable depth debug flag
-    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_px.png", format="RGBA")
@@ -559,7 +556,7 @@ def test_coordinate_system_offset_py(
     gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
 ):
     """Test that positive Y camera offset makes the cube appear larger."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     resource_meshes = load_gltf(
         gltf_path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
@@ -592,8 +589,8 @@ def test_coordinate_system_offset_py(
     )
 
     # Enable depth debug flag
-    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_py.png", format="RGBA")
@@ -631,7 +628,7 @@ def test_coordinate_system_offset_py(
     )
 
     data_baseline = _render_and_readback(
-        gpu_device, renderer, frame, scene_baseline, FRAME_W, FRAME_H
+        gpu_device, renderer, scene_baseline, FRAME_W, FRAME_H
     )
     alpha_baseline = data_baseline[:, :, 3]
     hit_mask_baseline = alpha_baseline > 0
@@ -652,7 +649,7 @@ def test_coordinate_system_offset_pz(
     gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
 ):
     """Test that positive Z camera offset shifts the depth centroid downward."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     resource_meshes = load_gltf(
         gltf_path="tests/data/glTF-Sample-Assets/Models/Cube/glTF/Cube.gltf",
@@ -685,8 +682,8 @@ def test_coordinate_system_offset_pz(
     )
 
     # Enable depth debug flag
-    frame.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_pz.png", format="RGBA")
@@ -712,7 +709,7 @@ def test_coordinate_system_offset_pz(
 
 def test_environment_map_basic(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     """Test environment map rendering with an empty scene."""
-    frame = Draw3dFrame(renderer)
+    renderer.reset()
 
     # Load HDR environment map
     hdr_data = load_image("tests/data/glTF-Sample-Environments/helipad.hdr")
@@ -740,7 +737,7 @@ def test_environment_map_basic(gpu_device: wgpu.GPUDevice, renderer: Draw3dRende
     )
 
     # Render
-    data = _render_and_readback(gpu_device, renderer, frame, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
 
     # Save debug output
     _save_debug_image(data, "test_environment_map_basic.png", format="RGBA")
