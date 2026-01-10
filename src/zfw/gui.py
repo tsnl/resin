@@ -383,7 +383,8 @@ class GuiWindow(BaseDisposable):
                 int(window.height_dip * scale_x),
             ),
             render_scale=0.5,
-            accumulator_frame_count=32,
+            accumulator_frame_count=64,
+            samples_per_pixel=8,
         )
 
         # 3D camera state
