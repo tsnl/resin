@@ -1113,7 +1113,6 @@ fn debug_visualize_primary_ray_direction(ray: Ray) -> vec4<f32> {
     return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
 }
 
-
 fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
     let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_SURFACE_DEPTH) != 0u;
     if debug_emit_depth_in_r {

@@ -50,7 +50,7 @@ def _render_and_readback(
     """
     readback_buffer = _create_readback_buffer(gpu_device, w, h)
 
-    repeat_count = 1 if not measure_runtime else 30
+    repeat_count = 1 if not measure_runtime else 1
 
     start_time = time.monotonic_ns()
 
@@ -106,7 +106,7 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
     img_data = (data * 255.0).astype(np.uint8)
     output_path = f"output/zfw/test_draw_3d/{filename}"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    PIL.Image.fromarray(img_data).save(output_path)
+    PIL.Image.fromarray(img_data).convert(format).save(output_path)
 
 
 @pytest.fixture(scope="module")
@@ -116,10 +116,20 @@ def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     frame = Draw3dFrame(renderer)
+    frame.samples_per_pixel = 512
 
     # scene = _load_two_avocados_scene(renderer)
     # scene = _load_damaged_helmet_scene(renderer)
     scene = _load_flight_helmet_scene(renderer)
+
+    # Load Field environment map
+    hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
+    env_map_texture = Draw3dTexture(
+        renderer,
+        data=hdr_data,
+        usage="environment",
+    )
+    scene.environment_map = env_map_texture
 
     data = _render_and_readback(
         gpu_device,
@@ -128,7 +138,6 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
         scene,
         FRAME_W,
         FRAME_H,
-        measure_runtime=True,
     )
     data *= 1.0
     _save_debug_image(data, "test_basic_draw_3d.png")
@@ -253,8 +262,8 @@ def _load_flight_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
             transform=np.array(
                 [
                     [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, -3.0],
-                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 1.0, 0.0, -1.5],
+                    [0.0, 0.0, 1.0, 0.30],
                     [0.0, 0.0, 0.0, 1.0],
                 ]
             ),
