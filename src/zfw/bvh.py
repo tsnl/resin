@@ -542,8 +542,8 @@ def partition_triangles(
     aabb_rt = compute_points_aabb(v_rt)
     aabb_surface_area_rt = single_aabb_surface_area(aabb_rt)
 
-    sah_cost_lt = nt_lt * aabb_surface_area_lt if nt_lt > 0 else np.inf
-    sah_cost_rt = nt_rt * aabb_surface_area_rt if nt_rt > 0 else np.inf
+    sah_cost_lt = float(nt_lt * aabb_surface_area_lt if nt_lt > 0 else float("inf"))
+    sah_cost_rt = float(nt_rt * aabb_surface_area_rt if nt_rt > 0 else float("inf"))
 
     return i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt
 

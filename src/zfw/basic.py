@@ -105,7 +105,7 @@ class StructuredNDArray(np.ndarray, ABC):
         cls,
         data: npt.ArrayLike,
         *,
-        copy: bool | np._CopyMode | None = True,
+        copy: bool | None = True,
     ) -> Self:
         """
         Replacement for np.array() that returns an instance of this subclass.

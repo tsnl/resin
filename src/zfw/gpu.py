@@ -121,7 +121,7 @@ class BlitRenderer:
                     entry_point="fs_blit",
                     targets=[
                         wgpu.ColorTargetState(
-                            format=output_format,
+                            format=str(output_format),
                             write_mask=wgpu.ColorWrite.ALL,
                         )
                     ],
@@ -161,7 +161,9 @@ class BlitRenderer:
             ],
         )
 
-        pipeline = self._get_pipeline(output_texture.format)
+        pipeline = self._get_pipeline(
+            wgpu.TextureFormat[output_texture.format.replace("-", "_")]
+        )
 
         render_pass = command_encoder.begin_render_pass(
             label="BlitRenderer.RenderPass",
