@@ -112,8 +112,6 @@ struct PodFrameInfo {
     max_bounces: u32,
     samples_per_pixel: u32,
     accumulator_persistence: f32,
-    max_secondary_ray_count: u32,
-    _pad1: u32,
 }
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
@@ -980,24 +978,10 @@ fn handle_path_miss(state: PathState) -> PathState {
 fn handle_path_hit(state: PathState, hit_details: HitDetails, seed: ptr<function, u32>) -> PathState {
     var next_state = state;
 
-    // Perform up to max_secondary_ray_count secondary rays and average their contributions
-    let secondary_ray_count = max(1u, frame_info.max_secondary_ray_count);
-    var accumulated_weight = vec3<f32>(0.0);
-    var accumulated_direction = vec3<f32>(0.0);
+    let brdf_result = sample_brdf(hit_details, state.ray.direction, seed);
 
-    for (var secondary_idx = 0u; secondary_idx < secondary_ray_count; secondary_idx++) {
-        let brdf_result = sample_brdf(hit_details, state.ray.direction, seed);
-        accumulated_weight += brdf_result.weight;
-        accumulated_direction += brdf_result.direction;
-    }
-
-    // Average the accumulated weights and directions
-    let inv_count = 1.0 / f32(secondary_ray_count);
-    let avg_weight = accumulated_weight * inv_count;
-    let avg_direction = normalize(accumulated_direction);
-
-    next_state.throughput *= avg_weight;
-    next_state.ray = Ray(offset_ray_origin(hit_details, avg_direction), avg_direction);
+    next_state.throughput *= brdf_result.weight;
+    next_state.ray = Ray(offset_ray_origin(hit_details, brdf_result.direction), brdf_result.direction);
     next_state.bounce += 1u;
 
     if should_terminate_russian_roulette(next_state.throughput, seed) {

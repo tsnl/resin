@@ -649,7 +649,6 @@ class Draw3dFrame(BaseDisposable):
     debug_flags: int
     max_bounces: int
     samples_per_pixel: int
-    max_secondary_ray_count: int
     accumulator_persistence: float
     render_scale: float
 
@@ -666,7 +665,6 @@ class Draw3dFrame(BaseDisposable):
         self.debug_flags = 0
         self.max_bounces = 4
         self.samples_per_pixel = 64
-        self.max_secondary_ray_count = 1
         self.accumulator_persistence = 0.25
         self.render_scale = render_scale
 
@@ -919,9 +917,6 @@ class Draw3dFrame(BaseDisposable):
         frame_info_data["frame_index"] = np.uint32(frame_index)
         frame_info_data["max_bounces"] = np.uint32(self.max_bounces)
         frame_info_data["samples_per_pixel"] = np.uint32(self.samples_per_pixel)
-        frame_info_data["max_secondary_ray_count"] = np.uint32(
-            self.max_secondary_ray_count
-        )
         frame_info_data["accumulator_persistence"] = np.float32(
             self.accumulator_persistence
         )
@@ -1890,8 +1885,6 @@ class PodFrameInfoArray(StructuredNDArray):
             ("max_bounces", np.uint32),
             ("samples_per_pixel", np.uint32),
             ("accumulator_persistence", np.float32),
-            ("max_secondary_ray_count", np.uint32),
-            ("_pad1", np.uint32),
         ]
     )
 
