@@ -39,7 +39,7 @@ const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-8;
 
 /// Max BVH traversal stack depth
 const MAX_STACK_DEPTH: u32 = 64u;
-    
+
 
 //
 // Pod types: used for CPU-GPU data exchange.
@@ -361,9 +361,9 @@ fn hit_instance(ray: Ray, instance_id: u32) -> HitRecord {
     let instance = instances[instance_id];
     let instance_transform = h_mat4x4_from_pod_transform(instance.transform);
     let inv_instance_transform = h_mat4x4_from_pod_transform(instance.inv_transform);
-    
+
     let geometry_id = instance.geometry_id;
-    
+
     // Transform ray into model space by applying the inverse of the instance's transform.
     // This lets us raycast against the geometry without transforming all the vertices per-instance.
     let local_ray = h_mat4x4_transform_ray(inv_instance_transform, ray);
@@ -422,43 +422,43 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
     let geometry = geometry_heap[geometry_id];
     let bvh_node_span = geometry.bvh_node_span_in_heap;
     let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_BVH_DEPTH) != 0u;
-    
+
     // Stack-based BVH traversal
     // We use a fixed-size stack for iterative traversal instead of recursion
     var stack: array<u32, 64u>;
     var stack_ptr: u32 = 0u;
-    
+
     // Start with root node (first node in the BVH span)
     if bvh_node_span.begin >= bvh_node_span.end {
         return new_invalid_geometry_hit_record();
     }
     stack[stack_ptr] = bvh_node_span.begin;
     stack_ptr += 1u;
-    
+
     var closest_hit = new_invalid_geometry_hit_record();
-    
+
     while stack_ptr > 0u {
         // Pop node from stack
         stack_ptr -= 1u;
         let node_id = stack[stack_ptr];
         let node = bvh_node_heap[node_id];
-        
+
         // Convert PodAabb to Aabb
         let aabb = Aabb(
             vec3<f32>(node.aabb.min[0], node.aabb.min[1], node.aabb.min[2]),
             vec3<f32>(node.aabb.max[0], node.aabb.max[1], node.aabb.max[2]),
         );
-        
+
         // Test ray against AABB
         let aabb_hit_dist = hit_aabb(ray, aabb);
         if aabb_hit_dist >= closest_hit.triangle_raycast_result.w {
             // AABB is further than current closest hit, skip this branch
             continue;
         }
-        
+
         // Check if this is a leaf node (both children are 0)
         let is_leaf = node.children[0] == 0u && node.children[1] == 0u;
-        
+
         if is_leaf {
             if debug_bvh_traversal {
                 // Debug mode: return AABB hit instead of triangle hit
@@ -482,10 +482,10 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
             // Test both children's AABBs and push them in order of distance (closer first)
             let child0_idx = node.children[0];
             let child1_idx = node.children[1];
-            
+
             var child0_dist = F32_INFINITY;
             var child1_dist = F32_INFINITY;
-            
+
             if child0_idx != 0u {
                 let child0_node = bvh_node_heap[bvh_node_span.begin + child0_idx];
                 let child0_aabb = Aabb(
@@ -494,7 +494,7 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
                 );
                 child0_dist = hit_aabb(ray, child0_aabb);
             }
-            
+
             if child1_idx != 0u {
                 let child1_node = bvh_node_heap[bvh_node_span.begin + child1_idx];
                 let child1_aabb = Aabb(
@@ -503,7 +503,7 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
                 );
                 child1_dist = hit_aabb(ray, child1_aabb);
             }
-            
+
             // Push children in reverse order of distance so closer child is popped first
             // Skip children that don't intersect or are further than current closest hit
             if child0_dist < child1_dist {
@@ -529,7 +529,7 @@ fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
             }
         }
     }
-    
+
     return closest_hit;
 }
 
@@ -656,34 +656,34 @@ fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
     // Otherwise, use procedural sky gradient
     // Create a sky gradient with brightest spot at azimuth 45°, altitude 45°
     let dir = normalize(ray.direction);
-    
+
     // Compute altitude (elevation angle from horizontal plane)
     let altitude = asin(dir.y);  // -π/2 to π/2
-    
+
     // Compute azimuth (horizontal angle)
     let azimuth = atan2(dir.x, dir.z);  // -π to π
-    
+
     // Target: azimuth 45° = π/4, altitude 45° = π/4
     let target_azimuth = 0.785398;  // π/4
     let target_altitude = 0.785398;  // π/4
-    
+
     // Angular distance from brightest spot
     let azimuth_diff = azimuth - target_azimuth;
     let altitude_diff = altitude - target_altitude;
     let angular_distance = sqrt(azimuth_diff * azimuth_diff + altitude_diff * altitude_diff);
-    
+
     // Brightness falloff from the sun spot
     let sun_brightness = exp(-angular_distance * 2.0);
-    
+
     // Base sky color gradient (horizon to zenith)
     let horizon_color = vec3<f32>(0.6, 0.7, 0.9);  // Light blue
     let zenith_color = vec3<f32>(0.2, 0.4, 0.8);   // Deeper blue
     let t = clamp((dir.y + 1.0) * 0.5, 0.0, 1.0);
     let sky_color = mix(horizon_color, zenith_color, t);
-    
+
     // Sun color (warm yellow-white)
     let sun_color = vec3<f32>(1.0, 0.95, 0.8);
-    
+
     // Blend sun and sky
     let final_color = mix(sky_color, sun_color, sun_brightness * 0.8);
 
@@ -696,19 +696,19 @@ fn sample_procedural_environment_map(ray: Ray) -> vec4<f32> {
 /// Coordinate system: Z-up, Y-forward, X-right (right-handed)
 fn sample_environment_map(ray: Ray) -> vec4<f32> {
     let dir = normalize(ray.direction);
-    
+
     // Convert 3D direction to spherical coordinates for Z-up, Y-forward system
     // Longitude (θ): horizontal angle in XY plane from +Y axis, range [-π, π]
     // Latitude (φ): elevation angle from XY plane towards +Z, range [-π/2, π/2]
     let theta = atan2(dir.x, dir.y);  // Horizontal angle from +Y (forward)
     let phi = asin(dir.z);  // Elevation angle (+Z is up)
-    
+
     // Convert to UV coordinates [0, 1]
     // U maps longitude: [-π, π] -> [0, 1]
     // V maps latitude: [-π/2, π/2] -> [0, 1] (flip so +Z up is at top of image)
     let u = (theta + 3.14159265359) / (2.0 * 3.14159265359);
     let v = 1.0 - ((phi + 1.5707963268) / 3.14159265359);  // Flip V so +Z is at top
-    
+
     let uv = vec2<f32>(u, v);
     return sample_environment_texture(u32(frame_info.environment_map_texture_id), uv);
 }
@@ -749,7 +749,7 @@ fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
 }
 fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
     let instance = instances[hit.instance_id];
-    
+
     // Load vertex data:
     let pos = get_triangle_vertices_positions(hit.triangle_id);
     let normal = get_triangle_vertices_normals(hit.triangle_id);
@@ -758,36 +758,45 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
     // Interpolate normal in model space using barycentric coordinates
     let bc = hit.barycentric_coordinates;
     let model_normal = normalize(normal * bc);
-    
+
     // Compute tangent and bitangent in model space using edge vectors and UV deltas
     let edge1 = pos[1] - pos[0];
     let edge2 = pos[2] - pos[0];
     let delta_uv1 = uv[1] - uv[0];
     let delta_uv2 = uv[2] - uv[0];
-    
+
     let uv_det = delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x;
     let r = 1.0 / (uv_det + 1e-6);
     let m = r * mat2x2<f32>(delta_uv2.y, -delta_uv1.y, -delta_uv2.x, delta_uv1.x);
     let e = mat2x3<f32>(edge1, edge2);
     let tb = e * m;
-    
-    // Gram-Schmidt orthonormalize: ensure T is perpendicular to N, then B perpendicular to both
-    let raw_tangent = tb[0];
-    let model_tangent = normalize(raw_tangent - model_normal * dot(model_normal, raw_tangent));
-    let model_bitangent = cross(model_normal, model_tangent);
-    let model_tbn = mat3x3<f32>(model_tangent, model_bitangent, model_normal);
 
-    // Transform to world space
-    // TODO: support non-uniform scale
+    // Transform to world space:
+    // - Tangent uses regular transform (it's a direction in the surface plane)
+    // - Normal uses inverse-transpose to handle non-uniform scale correctly
     let transform_4x4 = h_mat4x4_from_pod_transform(instance.transform);
     let transform = mat3x3<f32>(
         transform_4x4[0].xyz,
         transform_4x4[1].xyz,
         transform_4x4[2].xyz,
     );
-    
-    return transform * model_tbn;
-    
+    let inv_transform_4x4 = h_mat4x4_from_pod_transform(instance.inv_transform);
+    let normal_transform = transpose(mat3x3<f32>(
+        inv_transform_4x4[0].xyz,
+        inv_transform_4x4[1].xyz,
+        inv_transform_4x4[2].xyz,
+    ));
+
+    // Transform tangent and normal to world space, then orthonormalize
+    let world_tangent_raw = transform * tb[0];
+    let world_normal = normalize(normal_transform * model_normal);
+
+    // Gram-Schmidt orthonormalize in world space: ensure T is perpendicular to N, then B perpendicular to both
+    let world_tangent = normalize(world_tangent_raw - world_normal * dot(world_normal, world_tangent_raw));
+    let world_bitangent = cross(world_normal, world_tangent);
+
+    return mat3x3<f32>(world_tangent, world_bitangent, world_normal);
+
 }
 fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
     let instance = instances[hit_details.instance_id];
@@ -952,8 +961,8 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 
     // Compute 3D camera-space coordinates of the pixel on the sensor plane at unit focal length.
     // NOTE: Camera looks down +Y axis, with +X to the right and +Z up.
-    // NOTE: In a pinhole camera, the sensor plane is behind the pinhole and the image is inverted. To simplify, we 
-    // place the sensor plane in front of the pinhole. The ray still originates from origin in camera space, this is 
+    // NOTE: In a pinhole camera, the sensor plane is behind the pinhole and the image is inverted. To simplify, we
+    // place the sensor plane in front of the pinhole. The ray still originates from origin in camera space, this is
     // just used to calculate the ray direction.
     let sensor_hw_at_unit_focal_length = tan(camera.fov_y_rad / 2.0) * camera.aspect_ratio;
     let sensor_hh_at_unit_focal_length = tan(camera.fov_y_rad / 2.0);
