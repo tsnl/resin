@@ -4,6 +4,89 @@ enable f16;
 // Bindings:
 //
 
+const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
+const FLAG_EMIT_SURFACE_DEPTH: u32 = 2u;
+const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
+const FLAG_EMIT_BVH_DEPTH: u32 = 8u;
+const FLAG_EMIT_SURFACE_COLOR: u32 = 16u;
+const FLAG_EMIT_SURFACE_NORMAL: u32 = 32u;
+const FLAG_EMIT_SURFACE_ORM: u32 = 64u;
+const FLAG_DISABLE_JITTER: u32 = 128u;
+
+struct PodFrameInfo {
+    instance_count: u32,
+    target_size_w_px: u32,
+    target_size_h_px: u32,
+    debug_flags: u32,
+    environment_map_texture_id: i32,
+    timestamp: u32,
+    frame_index: u32,
+    max_bounces: u32,
+    samples_per_pixel: u32,
+    accumulator_frame_count: u32,
+}
+struct PodInstance {
+    geometry_id: u32,
+    material_id: u32,
+    _pad0: u32,
+    _pad1: u32,
+    transform: PodTransform,
+    inv_transform: PodTransform,
+}
+struct PodGeometry {
+    bvh_node_span_in_heap: PodSpan,
+    triangle_span_in_heap: PodSpan,
+}
+struct PodBvhNode {
+    tri_span: PodSpan,
+    children: array<u32, 2>,
+    aabb: PodAabb,
+}
+struct PodTriangle {
+    vertices: array<PodVertex, 3>,
+}
+struct PodVertex {
+    position: array<f32, 3>,
+    normal: array<f32, 3>,
+    uv: array<f32, 2>,
+}
+struct PodMaterial {
+    color_map_id: u32,
+    color_factor: array<f32, 3>,
+    normal_map_id: u32,
+    metalness_map_id: u32,
+    metalness_factor: f32,
+    roughness_map_id: u32,
+    roughness_factor: f32,
+}
+struct PodCamera {
+    transform: PodTransform,
+    fov_y_rad: f32,
+    aspect_ratio: f32,
+    clip_aabb_max: f32,
+    _rsv: u32,
+}
+struct PodTextureAllocation {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+struct PodSpan {
+    begin: u32,
+    end: u32,
+}
+struct PodAabb {
+    min: array<f32, 3>,
+    max: array<f32, 3>,
+}
+struct PodTransform {
+    row0: vec4<f32>,
+    row1: vec4<f32>,
+    row2: vec4<f32>,
+    row3: vec4<f32>,
+}
+
 // Renderer bind group:
 @group(0) @binding(0) var<storage, read> geometry_heap: array<PodGeometry>;
 @group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
@@ -32,171 +115,20 @@ enable f16;
 // Constants and configuration:
 //
 
-/// A large finite value to represent "infinity" in ray intersection tests.
 const F32_INFINITY: f32 = 1e8;  // WGSL does not have f32::INFINITY?
-
-/// Epsilon value for triangle-ray intersection tests, used when ray is nearly parallel to triangle plane.
 const TRIANGLE_RAY_INTERSECTION_EPSILON: f32 = 1e-8;
-
-/// Max BVH traversal stack depth
 const MAX_STACK_DEPTH: u32 = 64u;
-
-/// Max path tracing stack depth
 const MAX_PATH_DEPTH: u32 = 8u;
-
-/// Pi constant
 const PI: f32 = 3.14159265359;
-
-//
-// Random number generation and low-discrepancy sequences:
-//
-
-fn halton_base2(index: u32) -> f32 {
-    var bits = index;
-    bits = (bits << 16u) | (bits >> 16u);
-    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return f32(bits) * 2.3283064365386963e-10;
-}
-
-fn halton_base3(index: u32) -> f32 {
-    var result: f32 = 0.0;
-    var f: f32 = 1.0 / 3.0;
-    var i = index;
-    while i > 0u {
-        result += f * f32(i % 3u);
-        i = i / 3u;
-        f = f / 3.0;
-    }
-    return result;
-}
-
-fn halton_2d(index: u32) -> vec2<f32> {
-    return vec2<f32>(halton_base2(index), halton_base3(index));
-}
-
-fn pcg_hash(input: u32) -> u32 {
-    var state = input * 747796405u + 2891336453u;
-    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-fn rand_from_seed(seed: ptr<function, u32>) -> f32 {
-    *seed = pcg_hash(*seed);
-    return f32(*seed) / f32(0xFFFFFFFFu);
-}
-
-fn rand2_from_seed(seed: ptr<function, u32>) -> vec2<f32> {
-    return vec2<f32>(rand_from_seed(seed), rand_from_seed(seed));
-}
-
-fn rand3_from_seed(seed: ptr<function, u32>) -> vec3<f32> {
-    return vec3<f32>(rand_from_seed(seed), rand_from_seed(seed), rand_from_seed(seed));
-}
-
-
-//
-// Pod types: used for CPU-GPU data exchange.
-//
-
-struct PodFrameInfo {
-    instance_count: u32,
-    target_size_w_px: u32,
-    target_size_h_px: u32,
-    debug_flags: u32,
-    environment_map_texture_id: i32,
-    timestamp: u32,
-    frame_index: u32,
-    max_bounces: u32,
-    samples_per_pixel: u32,
-    accumulator_frame_count: u32,
-}
-
-const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
-const FLAG_EMIT_SURFACE_DEPTH: u32 = 2u;
-const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
-const FLAG_EMIT_BVH_DEPTH: u32 = 8u;
-const FLAG_EMIT_SURFACE_COLOR: u32 = 16u;
-const FLAG_EMIT_SURFACE_NORMAL: u32 = 32u;
-const FLAG_EMIT_SURFACE_ORM: u32 = 64u;
-const FLAG_DISABLE_JITTER: u32 = 128u;
 
 const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
 const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_DEPTH | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_BVH_DEPTH;
 const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_COLOR | FLAG_EMIT_SURFACE_NORMAL | FLAG_EMIT_SURFACE_ORM;
 const ALL_DEBUG_VISUALIZATION_MASK: u32 = POST_PRIMARY_RAY_GEN_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK;
 
-struct PodInstance {
-    geometry_id: u32,
-    material_id: u32,
-    _pad0: u32,
-    _pad1: u32,
-    transform: PodTransform,
-    inv_transform: PodTransform,
-}
-
-struct PodGeometry {
-    bvh_node_span_in_heap: PodSpan,
-    triangle_span_in_heap: PodSpan,
-}
-
-struct PodMaterial {
-    color_map_id: u32,
-    color_factor: array<f32, 3>,
-    normal_map_id: u32,
-    metalness_map_id: u32,
-    metalness_factor: f32,
-    roughness_map_id: u32,
-    roughness_factor: f32,
-}
-
-struct PodBvhNode {
-    tri_span: PodSpan,
-    children: array<u32, 2>,
-    aabb: PodAabb,
-}
-
-struct PodTriangle {
-    vertices: array<PodVertex, 3>,
-}
-struct PodVertex {
-    position: array<f32, 3>,
-    normal: array<f32, 3>,
-    uv: array<f32, 2>,
-}
-
-struct PodCamera {
-    transform: PodTransform,
-    fov_y_rad: f32,
-    aspect_ratio: f32,
-    clip_aabb_max: f32,
-    _rsv: u32,
-}
-
-struct PodTextureAllocation {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-}
-
-struct PodSpan {
-    begin: u32,
-    end: u32,
-}
-struct PodAabb {
-    min: array<f32, 3>,
-    max: array<f32, 3>,
-}
-
-struct PodTransform {
-    row0: vec4<f32>,
-    row1: vec4<f32>,
-    row2: vec4<f32>,
-    row3: vec4<f32>,
-}
+//
+// Accessors
+//
 
 fn get_triangle_vertices_positions(triangle_id: u32) -> mat3x3<f32> {
     let pod_triangle = triangle_heap[triangle_id];
@@ -251,6 +183,55 @@ fn get_triangle_vertices_texcoords(triangle_id: u32) -> mat3x2<f32> {
         pod_triangle.vertices[2].uv[1],
     );
     return mat3x2<f32>(v0, v1, v2);
+}
+
+//
+// Random number generation and low-discrepancy sequences:
+//
+
+fn halton_base2(index: u32) -> f32 {
+    var bits = index;
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return f32(bits) * 2.3283064365386963e-10;
+}
+
+fn halton_base3(index: u32) -> f32 {
+    var result: f32 = 0.0;
+    var f: f32 = 1.0 / 3.0;
+    var i = index;
+    while i > 0u {
+        result += f * f32(i % 3u);
+        i = i / 3u;
+        f = f / 3.0;
+    }
+    return result;
+}
+
+fn halton_2d(index: u32) -> vec2<f32> {
+    return vec2<f32>(halton_base2(index), halton_base3(index));
+}
+
+fn pcg_hash(input: u32) -> u32 {
+    var state = input * 747796405u + 2891336453u;
+    var word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+fn rand_from_seed(seed: ptr<function, u32>) -> f32 {
+    *seed = pcg_hash(*seed);
+    return f32(*seed) / f32(0xFFFFFFFFu);
+}
+
+fn rand2_from_seed(seed: ptr<function, u32>) -> vec2<f32> {
+    return vec2<f32>(rand_from_seed(seed), rand_from_seed(seed));
+}
+
+fn rand3_from_seed(seed: ptr<function, u32>) -> vec3<f32> {
+    return vec3<f32>(rand_from_seed(seed), rand_from_seed(seed), rand_from_seed(seed));
 }
 
 //
