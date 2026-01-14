@@ -40,12 +40,19 @@ def _render_and_readback(
     w: int,
     h: int,
     measure_runtime: bool = False,
+    texture: wgpu.GPUTexture | None = None,
 ) -> np.ndarray:
     """Render a scene and read back the result as a numpy array.
+
+    Args:
+        texture: Optional texture to read from. If None, uses get_output_image().
 
     Returns:
         Array of shape (H, W, 4) with float32 values.
     """
+    if texture is None:
+        texture = renderer.get_output_image()
+
     readback_buffer = _create_readback_buffer(gpu_device, w, h)
 
     repeat_count = 1 if not measure_runtime else 1
@@ -59,7 +66,7 @@ def _render_and_readback(
             renderer.record(scene, command_encoder)
             command_encoder.copy_texture_to_buffer(
                 source=wgpu.TexelCopyTextureInfo(
-                    texture=renderer.get_output_image(),
+                    texture=texture,
                     mip_level=0,
                     origin=(0, 0, 0),
                     aspect=wgpu.TextureAspect.all,
@@ -69,7 +76,7 @@ def _render_and_readback(
                     rows_per_image=h,
                     buffer=readback_buffer,
                 ),
-                copy_size=renderer.get_output_image().size,
+                copy_size=texture.size,
             )
             gpu_device.queue.submit([command_encoder.finish()])
 
@@ -302,7 +309,14 @@ def test_primary_ray_generation(gpu_device: wgpu.GPUDevice, renderer: Draw3dRend
 
     # Enable primary ray direction debug flag
     renderer.set_debug_flags(emit_primary_ray_direction=True)
-    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(
+        gpu_device,
+        renderer,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_primary_ray_direction_image(),
+    )
 
     # Extract RGB (ray direction mapped to [0,1])
     data = data[:, :, :3]
@@ -420,7 +434,14 @@ def test_depth_visualization(gpu_device: wgpu.GPUDevice, renderer: Draw3dRendere
 
     # Enable depth debug flag
     renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(
+        gpu_device,
+        renderer,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_surface_depth_image(),
+    )
 
     # Save output:
     _save_debug_image(data, "test_depth_visualization.png", format="RGBA")
@@ -482,7 +503,14 @@ def test_world_position_visualization(
 
     # Enable world position debug flag
     renderer.set_debug_flags(emit_hit_world_position=True)
-    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(
+        gpu_device,
+        renderer,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_surface_position_image(),
+    )
 
     _save_debug_image(data, "test_world_position.png", format="RGBA")
 
@@ -525,7 +553,14 @@ def test_coordinate_system_offset_px(
 
     # Enable depth debug flag
     renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(
+        gpu_device,
+        renderer,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_surface_depth_image(),
+    )
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_px.png", format="RGBA")
@@ -587,7 +622,14 @@ def test_coordinate_system_offset_py(
 
     # Enable depth debug flag
     renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(
+        gpu_device,
+        renderer,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_surface_depth_image(),
+    )
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_py.png", format="RGBA")
@@ -625,7 +667,12 @@ def test_coordinate_system_offset_py(
     )
 
     data_baseline = _render_and_readback(
-        gpu_device, renderer, scene_baseline, FRAME_W, FRAME_H
+        gpu_device,
+        renderer,
+        scene_baseline,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_surface_depth_image(),
     )
     alpha_baseline = data_baseline[:, :, 3]
     hit_mask_baseline = alpha_baseline > 0
@@ -680,7 +727,14 @@ def test_coordinate_system_offset_pz(
 
     # Enable depth debug flag
     renderer.set_debug_flags(emit_closest_hit_depth_in_r=True)
-    data = _render_and_readback(gpu_device, renderer, scene, FRAME_W, FRAME_H)
+    data = _render_and_readback(
+        gpu_device,
+        renderer,
+        scene,
+        FRAME_W,
+        FRAME_H,
+        texture=renderer.get_frame_surface_depth_image(),
+    )
 
     # Save output
     _save_debug_image(data, "test_coordinate_system_offset_pz.png", format="RGBA")

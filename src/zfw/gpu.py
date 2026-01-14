@@ -11,6 +11,8 @@ def get_required_wgpu_features() -> list[str]:
     return [
         "shader-f16",
         "texture-compression-bc",
+        # "rw-storage-texture-tier-2",  # for rgba16float rw
+        "texture-adapter-specific-format-features",
     ]
 
 

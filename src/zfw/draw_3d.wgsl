@@ -5,13 +5,14 @@ enable f16;
 //
 
 const FLAG_EMIT_PRIMARY_RAY_DIRECTION: u32 = 1u;
-const FLAG_EMIT_SURFACE_DEPTH: u32 = 2u;
-const FLAG_EMIT_HIT_WORLD_POSITION: u32 = 4u;
-const FLAG_EMIT_BVH_DEPTH: u32 = 8u;
-const FLAG_EMIT_SURFACE_COLOR: u32 = 16u;
-const FLAG_EMIT_SURFACE_NORMAL: u32 = 32u;
-const FLAG_EMIT_SURFACE_ORM: u32 = 64u;
+const FLAG_EMIT_FRAME_SURFACE_DEPTH: u32 = 2u;
+const FLAG_EMIT_FRAME_SURFACE_POSITION: u32 = 4u;
+const FLAG_BVH_AABB_VIEW: u32 = 8u;
+const FLAG_EMIT_FRAME_SURFACE_COLOR: u32 = 16u;
+const FLAG_EMIT_FRAME_SURFACE_NORMAL: u32 = 32u;
+const FLAG_EMIT_FRAME_SURFACE_ORM: u32 = 64u;
 const FLAG_DISABLE_JITTER: u32 = 128u;
+const FRAME_PER_PIXEL_RADIANCE: u32 = 256u;
 
 struct PodFrameInfo {
     instance_count: u32,
@@ -23,7 +24,7 @@ struct PodFrameInfo {
     frame_index: u32,
     max_bounces: u32,
     samples_per_pixel: u32,
-    accumulator_frame_count: u32,
+    accumulated_frame_index: u32,
 }
 struct PodInstance {
     geometry_id: u32,
@@ -106,10 +107,17 @@ struct PodTransform {
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
-@group(1) @binding(1) var<uniform> frame_info: PodFrameInfo;
-@group(1) @binding(2) var<uniform> camera: PodCamera;
-@group(1) @binding(3) var<storage, read> instances: array<PodInstance>;
-@group(1) @binding(4) var<storage, read_write> accumulator: array<vec4<f32>>;
+@group(1) @binding(1) var accum_image: texture_storage_2d<rgba16float, read_write>;
+@group(1) @binding(2) var frame_per_pixel_radiance: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(3) var frame_primary_ray_direction_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(4) var frame_surface_depth_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(5) var frame_surface_position_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(6) var frame_surface_color_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(7) var frame_surface_normal_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(8) var frame_surface_orm_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(9) var<uniform> frame_info: PodFrameInfo;
+@group(1) @binding(10) var<uniform> camera: PodCamera;
+@group(1) @binding(11) var<storage, read> instances: array<PodInstance>;
 
 //
 // Constants and configuration:
@@ -122,8 +130,8 @@ const MAX_PATH_DEPTH: u32 = 8u;
 const PI: f32 = 3.14159265359;
 
 const POST_PRIMARY_RAY_GEN_DEBUG_MASK: u32 = FLAG_EMIT_PRIMARY_RAY_DIRECTION;
-const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_DEPTH | FLAG_EMIT_HIT_WORLD_POSITION | FLAG_EMIT_BVH_DEPTH;
-const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_SURFACE_COLOR | FLAG_EMIT_SURFACE_NORMAL | FLAG_EMIT_SURFACE_ORM;
+const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_FRAME_SURFACE_DEPTH | FLAG_EMIT_FRAME_SURFACE_POSITION | FLAG_BVH_AABB_VIEW;
+const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_FRAME_SURFACE_COLOR | FLAG_EMIT_FRAME_SURFACE_NORMAL | FLAG_EMIT_FRAME_SURFACE_ORM;
 const ALL_DEBUG_VISUALIZATION_MASK: u32 = POST_PRIMARY_RAY_GEN_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK;
 
 //
@@ -363,6 +371,13 @@ fn h_mat4x4_transform_ray(m: mat4x4<f32>, ray: Ray) -> Ray {
     return Ray(transformed_origin, transformed_direction);
 }
 
+fn convert_direction_to_rgb(dir: vec3<f32>) -> vec3<f32> {
+    return 0.5 * (normalize(dir) + vec3<f32>(1.0, 1.0, 1.0));
+}
+fn convert_rgb_to_direction(rgb: vec3<f32>) -> vec3<f32> {
+    return normalize(2.0 * rgb - vec3<f32>(1.0, 1.0, 1.0));
+}
+
 //
 // Raycast: Ray -> HitRecord
 //
@@ -462,7 +477,7 @@ fn hit_geometry(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
 fn hit_geometry_with_bvh(ray: Ray, geometry_id: u32) -> GeometryHitRecord {
     let geometry = geometry_heap[geometry_id];
     let bvh_node_span = geometry.bvh_node_span_in_heap;
-    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_BVH_DEPTH) != 0u;
+    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_BVH_AABB_VIEW) != 0u;
 
     // Stack-based BVH traversal
     // We use a fixed-size stack for iterative traversal instead of recursion
@@ -1088,145 +1103,99 @@ fn accumulator_index_for_frame(pixel_xy: vec2<u32>, frame_slot: u32) -> u32 {
     return frame_slot * pixels_per_frame + accumulator_index(pixel_xy);
 }
 
-fn accumulate_pixel_result(pixel_xy: vec2<u32>, new_color: vec4<f32>) -> vec4<f32> {
-    // Calculate which slot to write to (ring buffer)
-    let frame_count = frame_info.accumulator_frame_count;
-    let current_slot = frame_info.frame_index % frame_count;
-    
-    // Store the new color in the current slot
-    let write_idx = accumulator_index_for_frame(pixel_xy, current_slot);
-    accumulator[write_idx] = new_color;
-    
-    // Average all slots that have valid data
-    let frames_available = min(frame_info.frame_index + 1u, frame_count);
-    var sum = vec4<f32>(0.0);
-    for (var i = 0u; i < frames_available; i = i + 1u) {
-        let read_idx = accumulator_index_for_frame(pixel_xy, i);
-        sum = sum + accumulator[read_idx];
-    }
-    return sum / f32(frames_available);
-}
-
-fn store_accumulated_result(pixel_xy: vec2<u32>, color: vec4<f32>) {
-    // This is now a no-op since we write directly in accumulate_pixel_result
-    // Kept for API compatibility
-    _ = pixel_xy;
-    _ = color;
-}
-
 //
 // Debug shading:
 //
 
-fn debug_visualize_primary_ray_direction(ray: Ray) -> vec4<f32> {
-    let dir_normalized = normalize(ray.direction);
-    return vec4<f32>(dir_normalized * 0.5 + 0.5, 1.0);
-}
-
-fn post_primary_ray_hit_debug_output(hit: HitRecord) -> vec4<f32> {
-    let debug_emit_depth_in_r = (frame_info.debug_flags & FLAG_EMIT_SURFACE_DEPTH) != 0u;
-    if debug_emit_depth_in_r {
-        return debug_visualize_depth_in_r(hit);
-    }
-
-    let debug_emit_hit_world_pos = (frame_info.debug_flags & FLAG_EMIT_HIT_WORLD_POSITION) != 0u;
-    if debug_emit_hit_world_pos {
-        return debug_visualize_hit_world_position(hit);
-    }
-
-    let debug_bvh_traversal = (frame_info.debug_flags & FLAG_EMIT_BVH_DEPTH) != 0u;
-    if debug_bvh_traversal {
-        return debug_visualize_depth_in_r(hit);
-    }
-
-    // No debug flag matched, return magenta to indicate error.
-    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
-}
-fn debug_visualize_primary_ray_color(hit_details: HitDetails) -> vec4<f32> {
-    // Get material from instance and sample its color map
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
-    let color_map_id = material.color_map_id;
-    let color = sample_color_texture(color_map_id, hit_details.texcoords);
-    return vec4<f32>(color, 1.0);
-}
-
-fn debug_visualize_hit_normal(hit_details: HitDetails) -> vec4<f32> {
-    return vec4<f32>((hit_details.surface_normal + 1.0) * 0.5, 1.0);
-}
-fn debug_visualize_depth_in_r(hit: HitRecord) -> vec4<f32> {
-    if is_hit_record_valid(hit) {
-        let depth_normalized = clamp(hit.world_hit_distance / camera.clip_aabb_max, 0.0, 1.0);
-        return vec4<f32>(depth_normalized, 0.0, 0.0, 1.0);
-    } else {
-        return vec4<f32>(0.0);
+fn debug_hook_post_primary_ray_gen(ray: Ray, pixel_coords: vec2<i32>) {
+    if (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u {
+        emit_primary_ray_direction(ray, pixel_coords);
     }
 }
-
-fn post_primary_ray_hit_details_debug_output(hit_details: HitDetails) -> vec4<f32> {
-    let debug_emit_primary_ray_color = (frame_info.debug_flags & FLAG_EMIT_SURFACE_COLOR) != 0u;
-    if debug_emit_primary_ray_color {
-        return debug_visualize_primary_ray_color(hit_details);
-    }
-
-    let debug_emit_hit_normal = (frame_info.debug_flags & FLAG_EMIT_SURFACE_NORMAL) != 0u;
-    if debug_emit_hit_normal {
-        return debug_visualize_hit_normal(hit_details);
-    }
-
-    let debug_emit_orm = (frame_info.debug_flags & FLAG_EMIT_SURFACE_ORM) != 0u;
-    if debug_emit_orm {
-        return debug_visualize_orm(hit_details);
-    }
-
-    // No debug flag matched, return magenta to indicate error.
-    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+fn emit_primary_ray_direction(ray: Ray, pixel_coords: vec2<i32>) {
+    let rgb = vec4<f32>(convert_direction_to_rgb(ray.direction.xyz), 1.0);
+    textureStore(frame_primary_ray_direction_image, pixel_coords, rgb);
 }
 
-fn debug_visualize_hit_world_position(hit: HitRecord) -> vec4<f32> {
+fn debug_hook_post_primary_ray_hit(hit: HitRecord, pixel_coords: vec2<i32>) {
+    if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_DEPTH) != 0u {
+        emit_frame_surface_depth(hit, pixel_coords);
+    }
+    if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_POSITION) != 0u {
+        emit_frame_surface_position(hit, pixel_coords);
+    }
+}
+fn emit_frame_surface_depth(hit: HitRecord, pixel_coords: vec2<i32>) {
+    let depth = clamp(hit.world_hit_distance / camera.clip_aabb_max, 0.0, 1.0);
+    let alpha = f32(is_hit_record_valid(hit));
+    let rgba = vec4<f32>(vec3<f32>(depth), alpha);
+    textureStore(frame_surface_depth_image, pixel_coords, rgba);
+}
+fn emit_frame_surface_position(hit: HitRecord, pixel_coords: vec2<i32>) {
     let clip_aabb_min = vec3<f32>(-10.0);
     let clip_aabb_max = vec3<f32>(10.0);
-    if is_hit_record_valid(hit) {
-        let pos_normalized = (hit.world_hit_position - clip_aabb_min) / (clip_aabb_max - clip_aabb_min);
-        return vec4<f32>(pos_normalized, 1.0);
-    } else {
-        return vec4<f32>(0.0);
+    let rgb = (hit.world_hit_position - clip_aabb_min) / (clip_aabb_max - clip_aabb_min);
+    let alpha = f32(is_hit_record_valid(hit));
+    let color = vec4<f32>(rgb, alpha);
+    textureStore(frame_surface_position_image, pixel_coords, color);
+}
+
+fn debug_hook_post_primary_ray_hit_details(hit_details: HitDetails, pixel_coords: vec2<i32>) {
+    if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_COLOR) != 0u {
+        emit_frame_surface_color(hit_details, pixel_coords);
+    }
+    if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_NORMAL) != 0u {
+        emit_frame_surface_normal(hit_details, pixel_coords);
+    }
+    if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_ORM) != 0u {
+        emit_frame_surface_orm(hit_details, pixel_coords);
     }
 }
-fn debug_visualize_orm(hit_details: HitDetails) -> vec4<f32> {
-    // Visualize ORM: Opacity, Roughness, Metalness in RGB channels
-    // For now, using placeholder values - will be replaced with actual material sampling
-    let opacity = 1.0;  // Placeholder: sample from opacity/alpha texture
-    let roughness = hit_details.surface_roughness;
-    let metalness = hit_details.surface_metalness;
-    return vec4<f32>(opacity, roughness, metalness, 1.0);
+fn emit_frame_surface_color(hit_details: HitDetails, pixel_coords: vec2<i32>) {
+    textureStore(frame_surface_color_image, pixel_coords, hit_details.surface_color);
+}
+fn emit_frame_surface_normal(hit_details: HitDetails, pixel_coords: vec2<i32>) {
+    let normal_rgb = convert_direction_to_rgb(hit_details.surface_normal);
+    textureStore(frame_surface_normal_image, pixel_coords, vec4<f32>(normal_rgb, 1.0));
+}
+fn emit_frame_surface_orm(hit_details: HitDetails, pixel_coords: vec2<i32>) {
+    let o = 1.0;  // Opacity placeholder
+    let r = hit_details.surface_roughness;
+    let m = hit_details.surface_metalness;
+    let orm = vec4<f32>(o, r, m, 1.0);
+    textureStore(frame_surface_orm_image, pixel_coords, orm);
+}
+
+fn debug_hook_post_path_trace_complete(radiance: vec3<f32>, pixel_coords: vec2<i32>) {
+    if (frame_info.debug_flags & FRAME_PER_PIXEL_RADIANCE) != 0u {
+        emit_frame_pixel_radiance(radiance, pixel_coords);
+    }
+}
+fn emit_frame_pixel_radiance(radiance: vec3<f32>, pixel_coords: vec2<i32>) {
+    textureStore(frame_per_pixel_radiance, pixel_coords, vec4<f32>(radiance, 1.0));
 }
 
 //
-// Entry point:
+// render_pixel():
 //
 
 fn render_pixel(pixel_xy: vec2<u32>, seed: ptr<function, u32>) -> vec4<f32> {
     let ray = gen_primary_ray(pixel_xy);
-    if (frame_info.debug_flags & FLAG_EMIT_PRIMARY_RAY_DIRECTION) != 0u {
-        return debug_visualize_primary_ray_direction(ray);
-    }
+    debug_hook_post_primary_ray_gen(ray, vec2<i32>(pixel_xy));
 
     let closest_hit = hit(ray);
-    if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DEBUG_MASK) != 0u {
-        return post_primary_ray_hit_debug_output(closest_hit);
-    }
+    debug_hook_post_primary_ray_hit(closest_hit, vec2<i32>(pixel_xy));
 
     if !is_hit_record_valid(closest_hit) {
         return vec4<f32>(get_environment_radiance(ray), 1.0);
     }
 
     let hit_details = compute_hit_details(closest_hit);
-    if (frame_info.debug_flags & POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK) != 0u {
-        return post_primary_ray_hit_details_debug_output(hit_details);
-    }
+    debug_hook_post_primary_ray_hit_details(hit_details, vec2<i32>(pixel_xy));
 
     let radiance = render_pixel_path_traced(pixel_xy, seed);
+    debug_hook_post_path_trace_complete(radiance, vec2<i32>(pixel_xy));
+
     return vec4<f32>(radiance, 1.0);
 }
 
@@ -1239,10 +1208,6 @@ fn gen_primary_ray(pixel_coord_px: vec2<u32>) -> Ray {
 fn compute_pixel_seed(pixel_xy: vec2<u32>) -> u32 {
     let pixel_idx = pixel_xy.y * frame_info.target_size_w_px + pixel_xy.x;
     return pcg_hash(pixel_idx ^ (frame_info.frame_index * 0x9E3779B9u));
-}
-
-fn tonemap_pixel(hdr_color: vec4<f32>) -> vec4<f32> {
-    return hdr_color;
 }
 
 //
@@ -1260,15 +1225,19 @@ fn main_wrapper(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var pixel_color = render_pixel(pixel_xy, &seed);
 
-    // Skip accumulation for debug visualization modes to preserve raw values
-    let is_debug_visualization = (frame_info.debug_flags & ALL_DEBUG_VISUALIZATION_MASK) != 0u;
-    if !is_debug_visualization {
-        pixel_color = accumulate_pixel_result(pixel_xy, pixel_color);
-        store_accumulated_result(pixel_xy, pixel_color);
-    }
-    pixel_color = tonemap_pixel(pixel_color);
+    finish_frame(pixel_xy, pixel_color);
+}
 
-    textureStore(output_image, vec2<i32>(pixel_xy), pixel_color);
+fn finish_frame(pixel_xy: vec2<u32>, pixel_color: vec4<f32>) {
+    // Accumulate into the accumulator image:
+    let prev = textureLoad(accum_image, vec2<i32>(pixel_xy)).xyz;
+    let curr = prev + pixel_color.xyz;
+    textureStore(accum_image, vec2<i32>(pixel_xy), vec4<f32>(curr, 1.0));
+
+    // Average and store into the output image:
+    let accumulated_frame_count = 1u + frame_info.accumulated_frame_index;
+    let average_pixel_color = curr / f32(accumulated_frame_count);
+    textureStore(output_image, vec2<i32>(pixel_xy), vec4<f32>(average_pixel_color, 1.0));
 }
 
 //

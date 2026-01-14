@@ -1,4 +1,5 @@
 from pathlib import Path
+import os.path
 
 import numpy as np
 import numpy.typing as npt
@@ -283,6 +284,7 @@ def help_render_texture_to_framebuffer(
         res = np.dstack([res[:, :, 0:1]] * 4)
         res[:, :, 3] = 1.0  # set alpha to 1.0
 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     PIL.Image.fromarray((np.clip(res, 0.0, 1.0) * 255.0).astype(np.uint8)).save(
         output_path
     )
@@ -434,9 +436,13 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
 
     # Save original uncompressed image for comparison
     original_rgba = np.dstack([color_map.data, np.ones((input_h, input_w, 1))])
+    output_path = (
+        "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_original.png"
+    )
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     PIL.Image.fromarray(
         (np.clip(original_rgba, 0.0, 1.0) * 255.0).astype(np.uint8)
-    ).save("output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_original.png")
+    ).save(output_path)
 
     # Compress using BC1
     bc1_data = zfw.encode_bc1(color_map)
