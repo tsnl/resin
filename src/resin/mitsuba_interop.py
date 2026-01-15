@@ -355,7 +355,9 @@ def gltf_to_mitsuba_xml(
 
         # camera_transform is camera-to-world in Z-up coordinates
         # Convert to Y-up coordinates
-        camera_transform_y_up = z_up_to_y_up @ camera_transform @ np.linalg.inv(z_up_to_y_up)
+        camera_transform_y_up = (
+            z_up_to_y_up @ camera_transform @ np.linalg.inv(z_up_to_y_up)
+        )
 
         # Mitsuba's to_world expects camera-to-world matrix (not inverted)
         transform = ET.SubElement(sensor, "transform", name="to_world")
