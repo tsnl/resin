@@ -1,0 +1,19 @@
+[project]
+name = "resin_replay"
+version = "0.1.0"
+description = "CLI tool for rendering glTF scenes with camera trajectories using resin or mitsuba."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = ["resin", "click>=8.1.0"]
+[project.optional-dependencies]
+mitsuba = ["mitsuba>=3.0.0"]
+
+[build-system]
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
+
+[project.scripts]
+resin-replay = "resin_replay:main"
+
+[tool.uv.sources]
+resin = { workspace = true }

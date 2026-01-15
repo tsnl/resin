@@ -78,7 +78,7 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
 
             # Build BVH with timing
             start_time = time.monotonic_ns()
-            bvh = resin.build_bvh(t=t, v=v, metrics_log_level=logging.INFO)
+            bvh = resin.build_blas_bvh(t=t, v=v, metrics_log_level=logging.INFO)
             end_time = time.monotonic_ns()
             elapsed_ms = (end_time - start_time) * 1e-6
 
@@ -96,7 +96,7 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
 
 
 def _verify_leaf_nodes_contain_triangles(
-    bvh: resin.Bvh,
+    bvh: resin.Blas,
     v: np.ndarray,
     t_original: np.ndarray,
     mesh_name: str,
@@ -138,7 +138,7 @@ def _verify_leaf_nodes_contain_triangles(
 
 
 def _verify_all_triangles_represented(
-    bvh: resin.Bvh,
+    bvh: resin.Blas,
     t_original: np.ndarray,
     mesh_name: str,
 ) -> None:
@@ -171,7 +171,7 @@ def _verify_all_triangles_represented(
 
 
 def _verify_intermediate_node_aabbs(
-    bvh: resin.Bvh,
+    bvh: resin.Blas,
     mesh_name: str,
 ) -> None:
     """
@@ -203,7 +203,7 @@ def _verify_intermediate_node_aabbs(
 
 
 def _verify_children_have_fewer_triangles(
-    bvh: resin.Bvh,
+    bvh: resin.Blas,
     mesh_name: str,
 ) -> None:
     """

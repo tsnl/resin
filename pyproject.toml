@@ -61,3 +61,11 @@ ignore = [
     # Syntax error in forward annotation (for JaxTyping)
     "F722",
 ]
+per-file-ignores = { "apps/resin_replay/src/resin_replay/__init__.py" = [
+    # mitsuba is an optional dependency that only works on Python <= 3.13
+    "PLC0415",
+] }
+
+[tool.pyright]
+# mitsuba is an optional dependency that only works on Python <= 3.13
+reportMissingImports = "warning"

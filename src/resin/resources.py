@@ -313,7 +313,7 @@ type GltfScene = dict[
 ]
 
 
-def load_gltf(gltf_path: Path | str) -> GltfScene:
+def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> GltfScene:
     """
     Load a glTF file and return a meshes dict with resource types.
 
@@ -323,6 +323,9 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
     represent affine transforms in homogeneous coordinates.
 
     :param gltf_path: Path to the glTF or GLB file.
+    :param apply_z_up_conversion: Whether to apply the Z-up coordinate system conversion
+                                  (default True for resin rendering). Set to False when
+                                  exporting to other renderers that use Y-up coordinates.
     :return: GltfScene object.
     """
 
@@ -674,10 +677,16 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
 
     def load_scene(scene: pygltflib.Scene) -> GltfScene:
         acc = defaultdict(list)
+        # Use identity matrix if not applying Z-up conversion (for Y-up renderers like Mitsuba)
+        parent_transform = (
+            GLTF_TO_Z_UP_MATRIX
+            if apply_z_up_conversion
+            else np.eye(4, dtype=np.float32)
+        )
         for root_node_idx in scene.nodes or []:
             load_node(
                 node=gltf.nodes[root_node_idx],
-                parent_transform=GLTF_TO_Z_UP_MATRIX,
+                parent_transform=parent_transform,
                 acc=acc,
             )
         return {k: np.stack(v, axis=0) for k, v in acc.items()}

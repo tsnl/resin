@@ -111,6 +111,12 @@ def tests(
         _uv_run(c, "flameprof --width 4096 prof/combined.prof > prof/combined.svg")
 
 
+@task(pre=[build])
+def test_mitsuba_ref(c: Context):
+    """Run the Mitsuba reference comparison test."""
+    _uv_run(c, "python scripts/test-mitsuba-ref.py")
+
+
 #
 # Develop:
 #
@@ -150,7 +156,7 @@ def wheel(c: Context):
 
 
 def _uv_run(c: Context, command: str):
-    _run(c, f"uv run --all-packages --all-extras {command}")
+    _run(c, f"uv run --all-packages {command}")
 
 
 def _run(c: Context, command: str):

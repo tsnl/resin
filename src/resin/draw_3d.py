@@ -17,7 +17,7 @@ import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
 from .excepts import LogicError
-from .bvh import Bvh, build_bvh
+from .bvh import Blas, build_blas_bvh
 from .resources import GeometryResource, MaterialResource
 from .images import encode_bc1, encode_bc4, encode_bc5
 
@@ -1275,7 +1275,7 @@ class Draw3dGeometry(BaseDisposable):
         # Construct the BVH first.
         # This produces an updated `t_indices` array with a different triangle order.
         # We need to use this reordered index array for all subsequent uploads.
-        bvh = build_bvh(t=t_indices, v=v_p_array)
+        bvh = build_blas_bvh(t=t_indices, v=v_p_array)
         t_indices = bvh.t
 
         # Upload triangles, using the reordered t array:
@@ -1306,7 +1306,7 @@ class Draw3dGeometry(BaseDisposable):
         )
 
     @staticmethod
-    def _marshall_bvh(bvh: Bvh) -> "PodBvhNodeArray":
+    def _marshall_bvh(bvh: Blas) -> "PodBvhNodeArray":
         # TODO: Each node will either have children or a triangle span. We can save memory by
         # using a union-like structure here. Maybe negative values refer to triangle spans?
 

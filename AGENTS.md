@@ -10,6 +10,7 @@ Worktree workflow
 - To list all worktrees: `git worktree list`
 - To remove a worktree after merging: `git worktree remove <folder-name>`
 - Each worktree should have its own virtual environment. Run `uv sync` in each worktree folder to create a separate `.venv` for that branch.
+- Never commit yourself. Let the user commit changes.
 
 Platform
 - Use `./invoke <task>+` targets to do anything if possible.

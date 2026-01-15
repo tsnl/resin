@@ -2,9 +2,9 @@ __all__ = [
     "BUNDLED_DATA_PATH",
     "COOKED_ATLAS_PATH_SUFFIX",
     "BaseDisposable",
+    "Blas",
     "BlitRenderer",
     "ButtonAction",
-    "Bvh",
     "ColorSpace",
     "CookedAtlas",
     "CookedAtlasGlyphCacheKey",
@@ -25,6 +25,7 @@ __all__ = [
     "FontSize",
     "FontWeight",
     "GeometryResource",
+    "GltfScene",
     "GuiTheme",
     "GuiWidget",
     "GuiWindow",
@@ -32,11 +33,14 @@ __all__ = [
     "Key",
     "KeyModifier",
     "MaterialResource",
+    "MitsubaSceneConfig",
     "MouseButton",
     "SupportsWrite",
+    "Tlas",
     "Window",
     "WindowContext",
-    "build_bvh",
+    "build_blas_bvh",
+    "build_tlas_bvh",
     "compute_points_aabb",
     "compute_psnr",
     "convert_color",
@@ -48,16 +52,20 @@ __all__ = [
     "encode_bc4",
     "encode_bc5",
     "expect",
+    "gltf_to_mitsuba_xml",
     "help_request_wgpu_device",
     "image_format_channel_count",
     "load_gltf",
     "load_image",
     "normalize_image_to_f32",
+    "partition_instances",
     "partition_points",
     "partition_triangles",
     "round_up_to_po2",
     "setup_logging",
+    "transform_aabb",
     "typed_freetype",
+    "write_mitsuba_scene",
 ]
 
 from .basic import (
@@ -99,9 +107,15 @@ from .resources import (
     CookedAtlasGlyphCacheKey,
     COOKED_ATLAS_PATH_SUFFIX,
     GeometryResource,
+    GltfScene,
     MaterialResource,
     load_image,
     load_gltf,
+)
+from .mitsuba_interop import (
+    MitsubaSceneConfig,
+    gltf_to_mitsuba_xml,
+    write_mitsuba_scene,
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .images import (
@@ -121,11 +135,15 @@ from .images import (
 from .gui import GuiWidget, GuiWindow, GuiTheme
 from .window import Window, WindowContext
 from .bvh import (
-    Bvh,
-    build_bvh,
+    Blas,
+    Tlas,
+    build_blas_bvh,
+    build_tlas_bvh,
     compute_points_aabb,
+    partition_instances,
     partition_points,
     partition_triangles,
+    transform_aabb,
 )
 from .gpu import help_request_wgpu_device, BlitRenderer
 from . import typed_freetype
