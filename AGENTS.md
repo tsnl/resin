@@ -1,5 +1,18 @@
+Worktree workflow
+- This repository uses a bare git repository with worktrees. Each branch lives in its own folder.
+- The repository root (containing `.git`) is bare—do not create files directly there.
+- Each worktree folder (e.g. `main/`, `feature-branch/`) is a complete checkout of that branch.
+- When working on a new feature or task:
+  1. Create a new worktree/branch: `git worktree add <branch-name> -b <branch-name> main`
+  2. Work exclusively within that worktree folder.
+  3. Do not modify files in other worktree folders.
+- Always respect worktree boundaries: changes for one branch should only be made in its corresponding folder.
+- To list all worktrees: `git worktree list`
+- To remove a worktree after merging: `git worktree remove <folder-name>`
+- Each worktree should have its own virtual environment. Run `uv sync` in each worktree folder to create a separate `.venv` for that branch.
+
 Platform
-- Use `./invoke <task>+` targets to do anything if possible. 
+- Use `./invoke <task>+` targets to do anything if possible.
   See `tasks.py`.
 - To run a Python shell, use `uv run python`.
 - To run specific tests, use `./invoke tests --filter "filter-args"`.
