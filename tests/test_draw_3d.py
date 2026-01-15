@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Generator
 
@@ -147,6 +148,10 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
         )
         scene.environment_map = env_map_texture
 
+        # For damaged_helmet, also output emissive debug image
+        if scene_name == "damaged_helmet":
+            renderer.set_debug_flags(emit_emissive=True)
+
         data = _render_and_readback(
             gpu_device,
             renderer,
@@ -156,6 +161,22 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
             measure_runtime=True,
         )
         _save_debug_image(data, f"test_basic_draw_3d-{scene_name}.png")
+
+        # For damaged_helmet, save emissive debug output
+        if scene_name == "damaged_helmet":
+            emissive_data = _render_and_readback(
+                gpu_device,
+                renderer,
+                scene,
+                FRAME_W,
+                FRAME_H,
+                texture=renderer.get_frame_surface_emissive_image(),
+            )
+            _save_debug_image(
+                emissive_data, f"test_basic_draw_3d-{scene_name}-emissive.png"
+            )
+            # Reset debug flags for next scene
+            renderer.set_debug_flags()
 
 
 def _load_two_avocados_scene(renderer: Draw3dRenderer) -> Draw3dScene:
@@ -806,4 +827,78 @@ def test_environment_map_basic(gpu_device: wgpu.GPUDevice, renderer: Draw3dRende
     )
 
 
-LOG = __name__
+def test_damaged_helmet_surface_outputs(
+    gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer
+):
+    """Test that outputs all debug surface textures for the damaged helmet."""
+    renderer.reset()
+
+    # Load GLTF and print emissive info
+    resource_meshes = load_gltf(
+        gltf_path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
+    )
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        LOG.info(f"emissive_factor: {mat_res.emissive_factor}")
+        LOG.info(f"emissive_map is None: {mat_res.emissive_map is None}")
+        if mat_res.emissive_map is not None:
+            LOG.info(f"  emissive_map shape: {mat_res.emissive_map.shape}")
+            LOG.info(f"  emissive_map dtype: {mat_res.emissive_map.dtype}")
+            LOG.info(
+                f"  emissive_map min/max: {mat_res.emissive_map.min():.4f} / {mat_res.emissive_map.max():.4f}"
+            )
+            LOG.info(f"  emissive_map mean: {mat_res.emissive_map.mean():.4f}")
+
+    scene = _load_damaged_helmet_scene(renderer)
+
+    # Load environment map
+    hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
+    env_map_texture = Draw3dTexture(
+        renderer,
+        data=hdr_data,
+        usage="environment",
+    )
+    scene.environment_map = env_map_texture
+
+    # Enable all surface debug flags
+    renderer.set_debug_flags(
+        emit_surface_color=True,
+        emit_surface_normal=True,
+        emit_orm=True,
+        emit_emissive=True,
+        disable_jitter=True,
+    )
+
+    # Single render pass with 1 frame
+    command_encoder = gpu_device.create_command_encoder(label="CommandEncoder")
+    renderer.record(scene, command_encoder)
+    gpu_device.queue.submit([command_encoder.finish()])
+
+    # Read back and save each debug texture
+    debug_textures = {
+        "color": renderer.get_frame_surface_color_image(),
+        "normal": renderer.get_frame_surface_normal_image(),
+        "orm": renderer.get_frame_surface_orm_image(),
+        "emissive": renderer.get_frame_surface_emissive_image(),
+    }
+
+    for name, texture in debug_textures.items():
+        LOG.info(f"{name} texture size: {texture.size}")
+        # Use the actual texture size for readback
+        tex_w, tex_h = texture.size[0], texture.size[1]
+        data = _render_and_readback(
+            gpu_device,
+            renderer,
+            scene,
+            tex_w,
+            tex_h,
+            texture=texture,
+        )
+        # Print raw value statistics before clipping
+        LOG.info(
+            f"{name}: min={data.min():.4f}, max={data.max():.4f}, "
+            f"mean={data.mean():.4f}, nonzero={np.count_nonzero(data[:, :, :3])}"
+        )
+        _save_debug_image(data, f"test_damaged_helmet_surface-{name}.png")
+
+
+LOG = logging.getLogger(__name__)

@@ -13,6 +13,7 @@ const FLAG_EMIT_FRAME_SURFACE_NORMAL: u32 = 32u;
 const FLAG_EMIT_FRAME_SURFACE_ORM: u32 = 64u;
 const FLAG_DISABLE_JITTER: u32 = 128u;
 const FRAME_PER_PIXEL_RADIANCE: u32 = 256u;
+const FLAG_EMIT_FRAME_SURFACE_EMISSIVE: u32 = 512u;
 
 struct PodFrameInfo {
     instance_count: u32,
@@ -59,6 +60,8 @@ struct PodMaterial {
     metalness_factor: f32,
     roughness_map_id: u32,
     roughness_factor: f32,
+    emissive_map_id: u32,
+    emissive_factor: array<f32, 3>,
 }
 struct PodCamera {
     transform: PodTransform,
@@ -103,7 +106,9 @@ struct PodTransform {
 @group(0) @binding(11) var<storage, read> roughness_texture_allocations: array<PodTextureAllocation>;
 @group(0) @binding(12) var environment_texture_heap: texture_2d_array<f32>;
 @group(0) @binding(13) var<storage, read> environment_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(14) var linear_sampler: sampler;
+@group(0) @binding(14) var emissive_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(15) var<storage, read> emissive_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(16) var linear_sampler: sampler;
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
@@ -115,9 +120,10 @@ struct PodTransform {
 @group(1) @binding(6) var frame_surface_color_image: texture_storage_2d<rgba16float, write>;
 @group(1) @binding(7) var frame_surface_normal_image: texture_storage_2d<rgba16float, write>;
 @group(1) @binding(8) var frame_surface_orm_image: texture_storage_2d<rgba16float, write>;
-@group(1) @binding(9) var<uniform> frame_info: PodFrameInfo;
-@group(1) @binding(10) var<uniform> camera: PodCamera;
-@group(1) @binding(11) var<storage, read> instances: array<PodInstance>;
+@group(1) @binding(9) var frame_surface_emissive_image: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(10) var<uniform> frame_info: PodFrameInfo;
+@group(1) @binding(11) var<uniform> camera: PodCamera;
+@group(1) @binding(12) var<storage, read> instances: array<PodInstance>;
 
 //
 // Constants and configuration:
@@ -314,6 +320,20 @@ fn sample_environment_texture(
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     return textureSampleLevel(environment_texture_heap, linear_sampler, sample_uv, page, 0.0);
+}
+
+fn sample_emissive_texture(
+    emissive_texture_id: u32,
+    uv: vec2<f32>,
+) -> vec3<f32> {
+    let alloc = emissive_texture_allocations[emissive_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
+    let sample_color = textureSampleLevel(emissive_texture_heap, linear_sampler, sample_uv, page, 0.0);
+    return sample_color.rgb;
 }
 
 //
@@ -773,6 +793,7 @@ struct HitDetails {
     surface_normal: vec3<f32>,
     surface_metalness: f32,
     surface_roughness: f32,
+    surface_emissive: vec3<f32>,
     instance_id: u32,
 }
 fn compute_hit_details(hit: HitRecord) -> HitDetails {
@@ -787,6 +808,7 @@ fn compute_hit_details(hit: HitRecord) -> HitDetails {
     hit_details.surface_normal = compute_hit_details_surface_normal(hit_details);
     hit_details.surface_metalness = compute_hit_details_surface_metalness(hit_details);
     hit_details.surface_roughness = compute_hit_details_surface_roughness(hit_details);
+    hit_details.surface_emissive = compute_hit_details_surface_emissive(hit_details);
     return hit_details;
 }
 fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
@@ -872,6 +894,21 @@ fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
     let roughness_texture = sample_roughness_texture(material.roughness_map_id, hit_details.texcoords);
     let roughness_factor = material.roughness_factor;
     return roughness_factor * roughness_texture;
+}
+fn compute_hit_details_surface_emissive(hit_details: HitDetails) -> vec3<f32> {
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let emissive_factor = vec3<f32>(
+        material.emissive_factor[0],
+        material.emissive_factor[1],
+        material.emissive_factor[2],
+    );
+    // If emissive_map_id is 0xFFFFFFFF, there's no emissive texture, just use the factor
+    if material.emissive_map_id == 0xFFFFFFFFu {
+        return emissive_factor;
+    }
+    let emissive_texture = sample_emissive_texture(material.emissive_map_id, hit_details.texcoords);
+    return emissive_factor * emissive_texture;
 }
 
 //
@@ -974,6 +1011,9 @@ fn handle_path_miss(state: PathState) -> PathState {
 
 fn handle_path_hit(state: PathState, hit_details: HitDetails, seed: ptr<function, u32>) -> PathState {
     var next_state = state;
+
+    // Add emissive contribution from the hit surface
+    next_state.accumulated_radiance += state.throughput * hit_details.surface_emissive;
 
     let brdf_result = sample_brdf(hit_details, state.ray.direction, seed);
 
@@ -1150,6 +1190,9 @@ fn debug_hook_post_primary_ray_hit_details(hit_details: HitDetails, pixel_coords
     if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_ORM) != 0u {
         emit_frame_surface_orm(hit_details, pixel_coords);
     }
+    if (frame_info.debug_flags & FLAG_EMIT_FRAME_SURFACE_EMISSIVE) != 0u {
+        emit_frame_surface_emissive(hit_details, pixel_coords);
+    }
 }
 fn emit_frame_surface_color(hit_details: HitDetails, pixel_coords: vec2<i32>) {
     textureStore(frame_surface_color_image, pixel_coords, hit_details.surface_color);
@@ -1164,6 +1207,9 @@ fn emit_frame_surface_orm(hit_details: HitDetails, pixel_coords: vec2<i32>) {
     let m = hit_details.surface_metalness;
     let orm = vec4<f32>(o, r, m, 1.0);
     textureStore(frame_surface_orm_image, pixel_coords, orm);
+}
+fn emit_frame_surface_emissive(hit_details: HitDetails, pixel_coords: vec2<i32>) {
+    textureStore(frame_surface_emissive_image, pixel_coords, vec4<f32>(hit_details.surface_emissive, 1.0));
 }
 
 fn debug_hook_post_path_trace_complete(radiance: vec3<f32>, pixel_coords: vec2<i32>) {
