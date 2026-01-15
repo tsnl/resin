@@ -7,7 +7,7 @@ import wgpu
 
 from image_ref_tests import assert_image_matches_reference
 
-from zfw import (
+from resin import (
     setup_logging,
     Draw2dRenderer,
     Draw2dQuad,

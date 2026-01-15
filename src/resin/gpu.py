@@ -7,7 +7,7 @@ import wgpu
 
 
 def get_required_wgpu_features() -> list[str]:
-    """Get the list of required wgpu features for zfw."""
+    """Get the list of required wgpu features for resin."""
     return [
         "shader-f16",
         "texture-compression-bc",
@@ -18,7 +18,7 @@ def get_required_wgpu_features() -> list[str]:
 
 def get_required_wgpu_limits() -> dict[str, int | None]:
     """
-    Get the dict of required wgpu limits for zfw.
+    Get the dict of required wgpu limits for resin.
     """
     return {
         "maxBufferSize": 1 << 30,  # 1 GiB
@@ -28,12 +28,12 @@ def get_required_wgpu_limits() -> dict[str, int | None]:
 
 def help_request_wgpu_device(adapter: wgpu.GPUAdapter) -> wgpu.GPUDevice:
     """
-    Convenience function to request a wgpu device with zfw-required features and
+    Convenience function to request a wgpu device with resin-required features and
     limits.
     """
 
     return adapter.request_device_sync(
-        label="ZfwDevice",
+        label="ResinDevice",
         required_features=get_required_wgpu_features(),
         required_limits=get_required_wgpu_limits(),
     )

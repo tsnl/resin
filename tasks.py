@@ -16,7 +16,7 @@ from invoke import task, Context  # type: ignore
 # Configuration
 #
 
-BUNDLED_DATA = "src/zfw/bundled_data"
+BUNDLED_DATA = "src/resin/bundled_data"
 INTERACTIVE = True
 PTY = platform.system() != "Windows" and INTERACTIVE
 
@@ -61,11 +61,11 @@ def _ensure_fonts_output_dir():
 
 def _emit_bitmap_fonts(c: Context):
     for name in ["monospaced", "sans-serif", "serif"]:
-        output_path = Path(f"{BUNDLED_DATA}/fonts/{name}.zfw_atlas")
+        output_path = Path(f"{BUNDLED_DATA}/fonts/{name}.resin_atlas")
         if output_path.is_dir():
             continue
 
-        _uv_run(c, f"zfw-bmfont-cooker {output_path}")
+        _uv_run(c, f"resin-bmfont-cooker {output_path}")
 
 
 def _copy_ttf_font_files():
@@ -89,7 +89,7 @@ def build(_: Context): ...
 
 @task(pre=[build])
 def sandbox(c: Context):
-    _uv_run(c, "zfw-sandbox --debug")
+    _uv_run(c, "resin-sandbox --debug")
 
 
 @task(pre=[build])

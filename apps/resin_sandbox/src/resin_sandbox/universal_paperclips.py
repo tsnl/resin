@@ -1,7 +1,7 @@
-import zfw
+import resin
 
 
-LOG = zfw.logger(__name__)
+LOG = resin.logger(__name__)
 
 
 #
@@ -9,8 +9,8 @@ LOG = zfw.logger(__name__)
 #
 
 
-class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
-    def __init__(self, gui_window: zfw.GuiWindow):
+class UniversalPaperclipsMainMenuWidget(resin.GuiWidget):
+    def __init__(self, gui_window: resin.GuiWindow):
         super().__init__(
             gui_window=gui_window,
             grid_rows=(-4, -1, -1, -1, -1, -1, -1),
@@ -20,7 +20,7 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
         )
         self._gui_window = gui_window
 
-        self._title_widget = zfw.GuiWidget(
+        self._title_widget = resin.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,
@@ -28,28 +28,28 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
             style_classes=["h1", "title"],
             text="Universal Paperclips",
         )
-        self._new_game_button_widget = zfw.GuiWidget(
+        self._new_game_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=2,
             col=1,
             style_classes=["button"],
             text="New Game",
         )
-        self._load_game_button_widget = zfw.GuiWidget(
+        self._load_game_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=3,
             col=1,
             style_classes=["button"],
             text="Load Game",
         )
-        self._settings_button_widget = zfw.GuiWidget(
+        self._settings_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=4,
             col=1,
             style_classes=["button"],
             text="Settings",
         )
-        self._quit_button_widget = zfw.GuiWidget(
+        self._quit_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=5,
             col=1,
@@ -58,26 +58,26 @@ class UniversalPaperclipsMainMenuWidget(zfw.GuiWidget):
         )
 
         @self._new_game_button_widget.click_event.subscribe()
-        def new_game_button_click(button: zfw.MouseButton):
+        def new_game_button_click(button: resin.MouseButton):
             self._gui_window.push_central_widget(
                 UniversalPaperclipsWidget(gui_window=self._gui_window),
             )
 
         @self._load_game_button_widget.click_event.subscribe()
-        def load_game_button_click(button: zfw.MouseButton):
+        def load_game_button_click(button: resin.MouseButton):
             raise NotImplementedError()
 
         @self._settings_button_widget.click_event.subscribe()
-        def settings_button_click(button: zfw.MouseButton):
+        def settings_button_click(button: resin.MouseButton):
             raise NotImplementedError()
 
         @self._quit_button_widget.click_event.subscribe()
-        def quit_button_click(button: zfw.MouseButton):
+        def quit_button_click(button: resin.MouseButton):
             gui_window.pop_central_widget()
 
 
-class UniversalPaperclipsWidget(zfw.GuiWidget):
-    def __init__(self, gui_window: zfw.GuiWindow):
+class UniversalPaperclipsWidget(resin.GuiWidget):
+    def __init__(self, gui_window: resin.GuiWindow):
         super().__init__(
             gui_window=gui_window,
             grid_rows=(200, 40, 40, -1, -1, -1),
@@ -86,7 +86,7 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
             theme=_THEME,
         )
 
-        self._console_widget = zfw.GuiWidget(
+        self._console_widget = resin.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,
@@ -94,7 +94,7 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
             style_classes=["label", "console"],
             text="(Game console would go here)\nLine 2\nLine 3\n...",
         )
-        self._paperclip_count_widget = zfw.GuiWidget(
+        self._paperclip_count_widget = resin.GuiWidget(
             parent_widget=self,
             row=1,
             col=0,
@@ -102,7 +102,7 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
             style_classes=["label", "h1", "paperclip-counter"],
             text="Paperclips: 0",
         )
-        self._make_paperclip_button_widget = zfw.GuiWidget(
+        self._make_paperclip_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=2,
             col=0,
@@ -129,14 +129,14 @@ class UniversalPaperclipsWidget(zfw.GuiWidget):
         # TODO: projects module at (4, 1)
 
         @self._make_paperclip_button_widget.click_event.subscribe()
-        def make_paperclip_button_click(button: zfw.MouseButton):
+        def make_paperclip_button_click(button: resin.MouseButton):
             LOG.info("Make Paperclip button clicked")
 
 
-class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
+class UniversalPaperclipsBusinessModuleWidget(resin.GuiWidget):
     def __init__(
         self,
-        parent: zfw.GuiWidget,
+        parent: resin.GuiWidget,
         row: int,
         col: int,
     ):
@@ -159,7 +159,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             style_classes=["module"],
         )
 
-        self._title_widget = zfw.GuiWidget(
+        self._title_widget = resin.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,
@@ -167,7 +167,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             style_classes=["label", "h2"],
             text="Business",
         )
-        self._available_funds_widget = zfw.GuiWidget(
+        self._available_funds_widget = resin.GuiWidget(
             parent_widget=self,
             row=1,
             col=0,
@@ -175,7 +175,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             style_classes=["label"],
             text="Available Funds: $ 0.00",
         )
-        self._unsold_inventory_widget = zfw.GuiWidget(
+        self._unsold_inventory_widget = resin.GuiWidget(
             parent_widget=self,
             row=2,
             col=0,
@@ -183,28 +183,28 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             style_classes=["label"],
             text="Unsold Inventory: 0 Paperclips",
         )
-        self._price_per_paperclip_lower_button_widget = zfw.GuiWidget(
+        self._price_per_paperclip_lower_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=3,
             col=0,
             style_classes=["button", "button-pair-left"],
             text="lower",
         )
-        self._price_per_paperclip_higher_button_widget = zfw.GuiWidget(
+        self._price_per_paperclip_higher_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=3,
             col=1,
             style_classes=["button", "button-pair-right"],
             text="raise",
         )
-        self._price_per_paperclip_label_widget = zfw.GuiWidget(
+        self._price_per_paperclip_label_widget = resin.GuiWidget(
             parent_widget=self,
             row=3,
             col=2,
             style_classes=["label"],
             text="Price per Paperclip: $0.00",
         )
-        self._public_demand_widget = zfw.GuiWidget(
+        self._public_demand_widget = resin.GuiWidget(
             parent_widget=self,
             row=4,
             col=0,
@@ -212,7 +212,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             style_classes=["label"],
             text="Public Demand: 0%",
         )
-        self._marketing_button_widget = zfw.GuiWidget(
+        self._marketing_button_widget = resin.GuiWidget(
             parent_widget=self,
             row=6,
             col=0,
@@ -221,14 +221,14 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             text="Marketing",
             clickable=False,
         )
-        self._marketing_level_widget = zfw.GuiWidget(
+        self._marketing_level_widget = resin.GuiWidget(
             parent_widget=self,
             row=6,
             col=2,
             style_classes=["label"],
             text="Level: 1",
         )
-        self._marketing_cost_label_widget = zfw.GuiWidget(
+        self._marketing_cost_label_widget = resin.GuiWidget(
             parent_widget=self,
             row=7,
             col=0,
@@ -236,7 +236,7 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
             style_classes=["label"],
             text="Cost:        $ ",
         )
-        self._marketing_cost_display_widget = zfw.GuiWidget(
+        self._marketing_cost_display_widget = resin.GuiWidget(
             parent_widget=self,
             row=7,
             col=2,
@@ -245,10 +245,10 @@ class UniversalPaperclipsBusinessModuleWidget(zfw.GuiWidget):
         )
 
 
-class UniversalPaperclipsManufacturingModuleWidget(zfw.GuiWidget):
+class UniversalPaperclipsManufacturingModuleWidget(resin.GuiWidget):
     def __init__(
         self,
-        parent: zfw.GuiWidget,
+        parent: resin.GuiWidget,
         row: int,
         col: int,
     ):
@@ -261,7 +261,7 @@ class UniversalPaperclipsManufacturingModuleWidget(zfw.GuiWidget):
             style_classes=["module"],
         )
 
-        self._title_widget = zfw.GuiWidget(
+        self._title_widget = resin.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,

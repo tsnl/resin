@@ -1,5 +1,5 @@
 """
-Resources = file-based data assets used by ZFW, such as images, 3D models, 3D materials,
+Resources = file-based data assets used by Resin, such as images, 3D models, 3D materials,
 etc.
 """
 
@@ -692,7 +692,7 @@ def load_gltf(gltf_path: Path | str) -> GltfScene:
 CookedAtlasType = Literal["glyph-cache"]
 
 
-COOKED_ATLAS_PATH_SUFFIX: str = ".zfw_atlas"
+COOKED_ATLAS_PATH_SUFFIX: str = ".resin_atlas"
 
 
 @dataclass(kw_only=True, frozen=True)

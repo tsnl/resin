@@ -6,13 +6,13 @@ import numpy.typing as npt
 import pytest
 import wgpu
 
-from zfw import (
+from resin import (
     load_image,
     setup_logging,
     help_request_wgpu_device,
     convert_rgb_to_grayscale,
 )
-from zfw.images import convert_srgb_to_linear
+from resin.images import convert_srgb_to_linear
 
 
 @pytest.fixture(scope="session")
@@ -43,5 +43,5 @@ def rainbow_512x512_image_grayscale(
 
 @pytest.fixture(scope="session", autouse=True)
 def _setup_logging():
-    log_level = os.environ.get("ZFW_TEST_LOG_LEVEL", "WARNING")
+    log_level = os.environ.get("RESIN_TEST_LOG_LEVEL", "WARNING")
     setup_logging(level=logging.getLevelNamesMapping()[log_level])

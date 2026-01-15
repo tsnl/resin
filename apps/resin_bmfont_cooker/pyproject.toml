@@ -1,0 +1,17 @@
+[project]
+name = "resin_bmfont_cooker"
+version = "0.1.0"
+description = "Bitmap font cooker for Resin SDK - pre-generates glyph atlases."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["resin", "freetype-py>=2.5.1"]
+
+[build-system]
+requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
+build-backend = "uv_build"
+
+[project.scripts]
+resin-bmfont-cooker = "resin_bmfont_cooker:main"
+
+[tool.uv.sources]
+resin = { workspace = true }

@@ -8,7 +8,7 @@ import rich
 import wgpu
 import PIL.Image
 
-from zfw import (
+from resin import (
     Draw3dRenderer,
     Draw3dScene,
     Draw3dCamera,
@@ -107,11 +107,11 @@ def _save_debug_image(data: np.ndarray, filename: str, format: str = "RGBA") -> 
 
     Args:
         data: Array of shape (H, W, C) with float32 values in [0, 1].
-        filename: Output path relative to output/zfw/draw_3d/.
+        filename: Output path relative to output/resin/draw_3d/.
         format: Image format ("RGB", "RGBA", or "L" for grayscale).
     """
     img_data = (data * 255.0).astype(np.uint8)
-    output_path = f"output/zfw/test_draw_3d/{filename}"
+    output_path = f"output/resin/test_draw_3d/{filename}"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     PIL.Image.fromarray(img_data).convert(format).save(output_path)
 

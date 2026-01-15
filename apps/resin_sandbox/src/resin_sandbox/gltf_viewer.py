@@ -8,10 +8,10 @@ import math
 import numpy as np
 import numpy.typing as npt
 
-import zfw
+import resin
 
 
-LOG = zfw.logger(__name__)
+LOG = resin.logger(__name__)
 
 
 # Available models
@@ -43,7 +43,7 @@ ENVIRONMENTS = [
 ]
 
 # Theme for the viewer HUD
-_VIEWER_THEME: zfw.GuiTheme = {
+_VIEWER_THEME: resin.GuiTheme = {
     ".central": {
         "default": {
             "background": (0, 0, 0, 0),  # Transparent to show 3D behind
@@ -99,8 +99,8 @@ class FreeCameraController:
 
     def handle_key(
         self,
-        key: zfw.Key | None,
-        action: zfw.ButtonAction,
+        key: resin.Key | None,
+        action: resin.ButtonAction,
     ) -> bool:
         """Handle key press/release. Returns True if key was consumed."""
         if key is None:
@@ -239,13 +239,13 @@ class FreeCameraController:
         return transform
 
 
-class GltfViewerWidget(zfw.GuiWidget):
+class GltfViewerWidget(resin.GuiWidget):
     """Main GLTF viewer widget with HUD overlay."""
 
     def __init__(
         self,
         *,
-        gui_window: zfw.GuiWindow,
+        gui_window: resin.GuiWindow,
         models_path: Path,
         environments_path: Path,
     ):
@@ -273,14 +273,14 @@ class GltfViewerWidget(zfw.GuiWidget):
         # 3D resources
         self._resource_meshes: (
             dict[
-                tuple[zfw.GeometryResource, zfw.MaterialResource],
+                tuple[resin.GeometryResource, resin.MaterialResource],
                 np.ndarray,
             ]
             | None
         ) = None
         self._meshes: (
             dict[
-                tuple[zfw.Draw3dGeometry, zfw.Draw3dMaterial],
+                tuple[resin.Draw3dGeometry, resin.Draw3dMaterial],
                 np.ndarray,
             ]
             | None
@@ -288,7 +288,7 @@ class GltfViewerWidget(zfw.GuiWidget):
         self._environment_resource: npt.NDArray[np.float32] | None = None
 
         # HUD widgets
-        self._top_bar = zfw.GuiWidget(
+        self._top_bar = resin.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,
@@ -297,7 +297,7 @@ class GltfViewerWidget(zfw.GuiWidget):
             style_classes=["hud-bar"],
         )
 
-        self._model_label = zfw.GuiWidget(
+        self._model_label = resin.GuiWidget(
             parent_widget=self._top_bar,
             row=0,
             col=0,
@@ -305,7 +305,7 @@ class GltfViewerWidget(zfw.GuiWidget):
             text=f"Model: {MODELS[self._current_model_index][0]}",
         )
 
-        self._env_label = zfw.GuiWidget(
+        self._env_label = resin.GuiWidget(
             parent_widget=self._top_bar,
             row=0,
             col=2,
@@ -313,14 +313,14 @@ class GltfViewerWidget(zfw.GuiWidget):
             text=f"Env: {ENVIRONMENTS[self._current_env_index][0]}",
         )
 
-        self._bottom_bar = zfw.GuiWidget(
+        self._bottom_bar = resin.GuiWidget(
             parent_widget=self,
             row=2,
             col=0,
             style_classes=["hud-bar"],
         )
 
-        self._help_label = zfw.GuiWidget(
+        self._help_label = resin.GuiWidget(
             parent_widget=self._bottom_bar,
             row=0,
             col=0,
@@ -350,14 +350,14 @@ class GltfViewerWidget(zfw.GuiWidget):
             return
 
         LOG.info(f"Loading model: {model_name}")
-        self._resource_meshes = zfw.load_gltf(model_path)
+        self._resource_meshes = resin.load_gltf(model_path)
 
         # Convert resource types to Draw3d objects using renderer cache
         self._meshes = {}
         renderer = self._gui_window.draw_3d_renderer
         for (geom_res, mat_res), transforms in self._resource_meshes.items():
-            geometry = zfw.Draw3dGeometry.from_resource(geom_res, renderer)
-            material = zfw.Draw3dMaterial.from_resource(mat_res, renderer)
+            geometry = resin.Draw3dGeometry.from_resource(geom_res, renderer)
+            material = resin.Draw3dMaterial.from_resource(mat_res, renderer)
             self._meshes[(geometry, material)] = transforms
 
         # Update label
@@ -376,8 +376,8 @@ class GltfViewerWidget(zfw.GuiWidget):
 
         LOG.info(f"Loading environment: {env_name}")
 
-        # Load HDR environment map using zfw.load_image
-        self._environment_resource = zfw.load_image(image_path=env_path)
+        # Load HDR environment map using resin.load_image
+        self._environment_resource = resin.load_image(image_path=env_path)
 
         # Set environment map in GUI window
         self._gui_window.set_environment_map(self._environment_resource)
@@ -395,10 +395,10 @@ class GltfViewerWidget(zfw.GuiWidget):
 
     def _on_key_event(
         self,
-        key: zfw.Key | None,
+        key: resin.Key | None,
         scancode: int,
-        action: zfw.ButtonAction,
-        mods: list[zfw.KeyModifier],
+        action: resin.ButtonAction,
+        mods: list[resin.KeyModifier],
     ) -> None:
         # Handle camera movement
         if self._camera.handle_key(key, action):
@@ -434,8 +434,8 @@ class GltfViewerWidget(zfw.GuiWidget):
 
     def _receive_mouse_button_action(
         self,
-        button: zfw.MouseButton,
-        action: zfw.ButtonAction,
+        button: resin.MouseButton,
+        action: resin.ButtonAction,
         click_handled: bool,
     ) -> bool:
         # Capture mouse on click
@@ -485,7 +485,7 @@ class GltfViewerWidget(zfw.GuiWidget):
         aspect_ratio = self._gui_window.width_dip / self._gui_window.height_dip
         self._gui_window.set_3d_camera(
             transform=self._camera.get_transform(),
-            intrinsics=zfw.Draw3dCamera(
+            intrinsics=resin.Draw3dCamera(
                 transform=self._camera.get_transform(),
                 fov_y_rad=math.radians(60),
                 aspect_ratio=aspect_ratio,
@@ -494,7 +494,7 @@ class GltfViewerWidget(zfw.GuiWidget):
         )
 
 
-_VIEWER_THEME: zfw.GuiTheme = {
+_VIEWER_THEME: resin.GuiTheme = {
     "central": {
         "default": {
             "bg_color": (0.0, 0.0, 0.0, 0.0),  # Transparent

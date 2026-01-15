@@ -1,5 +1,5 @@
 [project]
-name = "zfw"
+name = "resin"
 version = "0.1.0"
 description = "A game engine for fun and profit, written in Python."
 readme = "README.md"
@@ -37,7 +37,7 @@ requires = ["uv_build>=0.9.10,<0.10.0", "uv"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-package-data = { "zfw" = ["bundled_data/**/*", "*.wgsl"] }
+package-data = { "resin" = ["bundled_data/**/*", "*.wgsl"] }
 
 [tool.uv.workspace]
 members = ["apps/*"]
