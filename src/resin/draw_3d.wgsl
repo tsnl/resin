@@ -1069,8 +1069,9 @@ fn sample_diffuse_brdf(normal: vec3<f32>, base_color: vec3<f32>, metalness: f32,
 fn sample_specular_brdf(normal: vec3<f32>, view_dir: vec3<f32>, roughness: f32, f0: vec3<f32>, rand: vec2<f32>) -> BrdfSample {
     var result: BrdfSample;
     result.direction = ggx_sample_direction(normal, view_dir, roughness, rand);
-    let n_dot_l = max(dot(normal, result.direction), 0.0);
-    let fresnel = fresnel_schlick(n_dot_l, f0);
+    let h = normalize(view_dir + result.direction);
+    let v_dot_h = max(dot(view_dir, h), 0.0);
+    let fresnel = fresnel_schlick(v_dot_h, f0);
     result.weight = fresnel * 2.0;
     return result;
 }
