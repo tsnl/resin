@@ -105,37 +105,19 @@ def _save_texture(
 def _save_mesh_ply(
     geometry: GeometryResource,
     output_path: Path,
-    transform_to_y_up: bool = True,
 ) -> None:
     """Save geometry as a PLY file for Mitsuba.
 
     Args:
         geometry: The geometry resource to save.
         output_path: Path to save the PLY file.
-        transform_to_y_up: If True, transform vertices from Z-up to Y-up coordinates.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    v_p = geometry.v_p_array.copy()
-    v_n = geometry.v_n_array.copy()
+    v_p = geometry.v_p_array
+    v_n = geometry.v_n_array
     v_t = geometry.v_t_array
     t_indices = geometry.t_indices
-
-    # Transform vertices to Y-up if needed
-    if transform_to_y_up:
-        # Z-up to Y-up: (X, Y, Z) -> (X, -Z, Y)
-        v_p_transformed = np.zeros_like(v_p)
-        v_p_transformed[:, 0] = v_p[:, 0]  # X stays
-        v_p_transformed[:, 1] = -v_p[:, 2]  # Y <- -Z
-        v_p_transformed[:, 2] = v_p[:, 1]  # Z <- Y
-        v_p = v_p_transformed
-
-        # Transform normals the same way
-        v_n_transformed = np.zeros_like(v_n)
-        v_n_transformed[:, 0] = v_n[:, 0]  # X stays
-        v_n_transformed[:, 1] = -v_n[:, 2]  # Y <- -Z
-        v_n_transformed[:, 2] = v_n[:, 1]  # Z <- Y
-        v_n = v_n_transformed
 
     num_vertices = v_p.shape[0]
     num_faces = t_indices.shape[0]
@@ -354,15 +336,12 @@ def gltf_to_mitsuba_xml(
     # Camera transform
     if camera_transform is not None:
         # Camera transform is given in Resin's Z-up, Y-forward coordinate system.
-        # We need to convert it to Mitsuba's Y-up system with correct view direction.
+        # We need to convert it to match the glTF geometry (Y-up, Z-forward).
         #
-        # Resin camera convention: looks in +Y direction (local frame)
-        # Mitsuba camera convention: looks in +Z direction (local frame)
-        #
-        # Steps:
-        # 1. Convert coordinate system from Z-up to Y-up
-        # 2. Rotate camera 180° around Y to flip view direction (camera was looking +Z,
-        #    but we need it to look -Z towards the origin)
+        # The coordinate system conversion is:
+        # Z-up (X, Y, Z) -> Y-up (X, -Z, Y)
+        # So a camera at (0, -3, 0) in Z-up becomes (0, 0, 3) in Y-up.
+        # A camera looking forward (+Y in Z-up) becomes looking forward (+Z in Y-up).
 
         z_up_to_y_up = np.array(
             [
@@ -376,31 +355,12 @@ def gltf_to_mitsuba_xml(
 
         # camera_transform is camera-to-world in Z-up coordinates
         # Convert to Y-up coordinates
-        camera_transform_y_up = (
-            z_up_to_y_up @ camera_transform @ np.linalg.inv(z_up_to_y_up)
-        )
-
-        # Rotate camera 180° around Y-axis to flip view direction
-        # This makes the camera look towards -Z instead of +Z
-        flip_view = np.array(
-            [
-                [-1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, -1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-            dtype=np.float32,
-        )
-        camera_transform_mitsuba = (camera_transform_y_up @ flip_view).astype(
-            np.float32
-        )
+        camera_transform_y_up = z_up_to_y_up @ camera_transform @ np.linalg.inv(z_up_to_y_up)
 
         # Mitsuba's to_world expects camera-to-world matrix (not inverted)
         transform = ET.SubElement(sensor, "transform", name="to_world")
         ET.SubElement(
-            transform,
-            "matrix",
-            value=_matrix_to_mitsuba_string(camera_transform_mitsuba),
+            transform, "matrix", value=_matrix_to_mitsuba_string(camera_transform_y_up)
         )
 
     # Film
@@ -432,43 +392,6 @@ def gltf_to_mitsuba_xml(
         # Scale for HDR environments
         ET.SubElement(emitter, "float", name="scale", value="1.0")
 
-        # Apply coordinate system transform to environment map
-        # Resin uses Z-up, Y-forward; Mitsuba uses Y-up with different longitude origin.
-        #
-        # Resin's envmap sampling (draw_3d.wgsl):
-        #   theta = atan2(dir.x, dir.y)  // longitude from +Y axis
-        #   u = (theta + pi) / (2*pi)
-        #   So u=0.5 corresponds to +Y direction
-        #
-        # Mitsuba's default equirectangular sampling (Y-up):
-        #   theta = atan2(x, z)  // longitude from +Z axis
-        #   u = (theta + pi) / (2*pi)
-        #   So u=0.5 corresponds to +Z direction
-        #
-        # When we convert Resin's +Y (forward) to Mitsuba's Y-up coords:
-        #   (0, 1, 0)_resin -> (0, 0, -1)_mitsuba (Z-up to Y-up: x,y,z -> x,z,-y)
-        #
-        # This direction samples at u=1.0 in Mitsuba but should sample at u=0.5.
-        # We need to rotate the environment 180° around Y-axis to align the longitude.
-        #
-        # to_world rotates the environment, so sampling direction d becomes
-        # T^(-1) @ d in emitter local coords. R_y(180)^(-1) = R_y(180).
-        env_transform = np.array(
-            [
-                [-1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, -1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-            dtype=np.float32,
-        )
-        env_transform_elem = ET.SubElement(emitter, "transform", name="to_world")
-        ET.SubElement(
-            env_transform_elem,
-            "matrix",
-            value=_matrix_to_mitsuba_string(env_transform),
-        )
-
     # Process meshes and materials
     mesh_dir = output_dir / "meshes"
     mesh_dir.mkdir(parents=True, exist_ok=True)
@@ -477,11 +400,10 @@ def gltf_to_mitsuba_xml(
     mesh_id = 0
 
     for (geometry, material), transforms in gltf_scene.items():
-        # Save mesh geometry as-is (vertices are already in Y-up coordinates
-        # since we loaded with apply_z_up_conversion=False)
+        # Save mesh geometry
         mesh_filename = f"mesh_{mesh_id}.ply"
         mesh_path = mesh_dir / mesh_filename
-        _save_mesh_ply(geometry, mesh_path, transform_to_y_up=False)
+        _save_mesh_ply(geometry, mesh_path)
 
         # Create shape for each instance
         for instance_idx in range(transforms.shape[0]):
@@ -492,17 +414,24 @@ def gltf_to_mitsuba_xml(
                 shape, "string", name="filename", value=f"meshes/{mesh_filename}"
             )
 
-            # Apply the glTF node transform
-            # The vertices are in Y-up coordinates (after transformation from Z-up in PLY export)
-            # The instance_transform from load_gltf(apply_z_up_conversion=False) is the node's
-            # local transform in Y-up space, so we apply it directly.
-            if not np.allclose(instance_transform, np.eye(4)):
-                transform_elem = ET.SubElement(shape, "transform", name="to_world")
-                ET.SubElement(
-                    transform_elem,
-                    "matrix",
-                    value=_matrix_to_mitsuba_string(instance_transform),
-                )
+            # Add coordinate system transformation
+            # The geometry vertices are in Resin's Z-up coordinate system.
+            # Mitsuba uses Y-up, so we need to apply the coordinate transformation.
+            z_up_to_y_up = np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, -1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            )
+            transform_elem = ET.SubElement(shape, "transform", name="to_world")
+            ET.SubElement(
+                transform_elem,
+                "matrix",
+                value=_matrix_to_mitsuba_string(z_up_to_y_up),
+            )
 
             # Add material (BSDF)
             _create_principled_bsdf(
@@ -554,7 +483,7 @@ def write_mitsuba_scene(
     gltf_path = Path(gltf_path)
     output_dir = Path(output_dir)
 
-    # Load glTF WITHOUT Z-up conversion (Mitsuba uses standard Y-up coordinates)
+    # Load glTF without Z-up conversion (Mitsuba uses standard Y-up coordinates)
     gltf_scene = load_gltf(gltf_path, apply_z_up_conversion=False)
 
     # Create config
