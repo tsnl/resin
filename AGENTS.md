@@ -17,7 +17,7 @@ Platform
 - To run a Python shell, use `uv run python`.
 - To run specific tests, use `./invoke tests --filter "filter-args"`.
 - Run `./invoke tests` often. It's really fast and will catch many issues early. No need to ask for permission.
-- Export `ZFW_TEST_LOG_LEVEL=DEBUG` to change the log level when running tests.
+- Export `RESIN_TEST_LOG_LEVEL=DEBUG` to change the log level when running tests.
 
 Python
 - Our code-base is statically typed and must type-check successfully.
@@ -32,4 +32,4 @@ Python
   - Never `from __future__ import annotations`.
 
 Code style
-- Always re-export public symbols under `zfw` directly. E.g. instead of `from zfw.basic import logger`, use `from zfw import logger`.
+- Always re-export public symbols under `resin` directly. E.g. instead of `from resin.basic import logger`, use `from resin import logger`.

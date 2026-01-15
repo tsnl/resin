@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import wgpu
 
-from zfw import (
+from resin import (
     Draw3dGeometry,
     Draw3dMaterial,
     Draw3dRenderer,

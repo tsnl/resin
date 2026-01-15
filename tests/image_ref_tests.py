@@ -5,7 +5,7 @@ from pathlib import Path
 import imageio.v3 as iio
 import numpy as np
 
-from zfw import compute_psnr, logger
+from resin import compute_psnr, logger
 
 LOG = logger(__name__)
 
@@ -27,17 +27,17 @@ def assert_image_matches_reference(
         actual_image: The rendered image as a numpy array (H, W, C).
         test_name: Name of the test (used for filename).
         psnr_threshold: Minimum PSNR value required to pass.
-        test_subdir: Subdirectory under tests/expect/zfw/ and output/zfw/ for organizing test images.
+        test_subdir: Subdirectory under tests/expect/resin/ and output/resin/ for organizing test images.
     """
 
-    expect_dir = Path("tests/expect/zfw") / test_subdir
+    expect_dir = Path("tests/expect/resin") / test_subdir
     expect_dir.mkdir(parents=True, exist_ok=True)
 
     expect_path = expect_dir / f"{test_name}.png"
     actual_path = expect_dir / f"{test_name}.actual.png"
 
     # Also save to output directory for convenience
-    output_path = Path("output/zfw") / test_subdir / f"{test_name}.png"
+    output_path = Path("output/resin") / test_subdir / f"{test_name}.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     iio.imwrite(output_path, actual_image)
 

@@ -31,7 +31,7 @@ from .excepts import GlfwError
 LOG = logger(__name__)
 
 
-def zfw_get_glfw_present_info(window: glfw._GLFWwindow, vsync: bool = True) -> dict:
+def resin_get_glfw_present_info(window: glfw._GLFWwindow, vsync: bool = True) -> dict:
     """
     Get the ``present_info`` dict required to instantiate a ``GPUCanvasContext``.
 
@@ -226,7 +226,7 @@ class Window(BaseDisposable):
 
     def _new_canvas_context(self) -> wgpu.GPUCanvasContext:
         """Create a WebGPU canvas context for rendering to the GLFW window."""
-        present_info = zfw_get_glfw_present_info(self._glfw_window_handle)
+        present_info = resin_get_glfw_present_info(self._glfw_window_handle)
         canvas_context = wgpu.gpu.get_canvas_context(present_info)
         width, height = glfw.get_framebuffer_size(self._glfw_window_handle)
         canvas_context.set_physical_size(width, height)

@@ -6,8 +6,8 @@ import numpy.typing as npt
 import wgpu
 import PIL.Image
 
-import zfw
-from zfw.images_bcn import _f32_to_rgb565, _pack_bc1_block, _quantize_rgb565_f32
+import resin
+from resin.images_bcn import _f32_to_rgb565, _pack_bc1_block, _quantize_rgb565_f32
 
 
 def test_f32_to_rgb565():
@@ -144,7 +144,7 @@ def test_pack_bc1_block():
 def help_render_texture_to_framebuffer(
     device: wgpu.GPUDevice,
     queue: wgpu.GPUQueue,
-    attachment_texture_format: zfw.ImageFormat,
+    attachment_texture_format: resin.ImageFormat,
     compressed_texture_data: np.ndarray,
     input_w: int,
     input_h: int,
@@ -311,7 +311,7 @@ def test_help_render_texture_to_framebuffer(
         bytes_per_row=input_w * 2,
         grayscale=True,
         output_path=Path(
-            "output/zfw/test_images_bcn/test_help_render_texture_to_framebuffer.png"
+            "output/resin/test_images_bcn/test_help_render_texture_to_framebuffer.png"
         ),
     )
 
@@ -325,7 +325,7 @@ def test_encode_bc4(
     assert rainbow_512x512_image_grayscale.dtype == np.float32
     assert rainbow_512x512_image_grayscale.shape == (512, 512, 1)
     input_h, input_w, _ = rainbow_512x512_image_grayscale.shape
-    bc4_data = zfw.encode_bc4(rainbow_512x512_image_grayscale)
+    bc4_data = resin.encode_bc4(rainbow_512x512_image_grayscale)
     assert bc4_data.dtype == np.uint8
     assert bc4_data.shape == (input_h // 4, input_w // 4, 8)
 
@@ -338,10 +338,10 @@ def test_encode_bc4(
         input_h=input_h,
         bytes_per_row=(input_w // 4) * 8,
         grayscale=True,
-        output_path=Path("output/zfw/test_images_bcn/test_image_bc4.png"),
+        output_path=Path("output/resin/test_images_bcn/test_image_bc4.png"),
     )
 
-    psnr = zfw.compute_psnr(
+    psnr = resin.compute_psnr(
         img1=rainbow_512x512_image_grayscale,
         img2=image[:input_h, :input_w, :1],
     )
@@ -358,7 +358,7 @@ def test_encode_bc1(
     # Discard alpha channel to get RGB
     rgb_data = rainbow_512x512_image[:, :, :3]
 
-    bc1_data = zfw.encode_bc1(rgb_data)
+    bc1_data = resin.encode_bc1(rgb_data)
     assert bc1_data.dtype == np.uint8
     assert bc1_data.shape == (input_h // 4, input_w // 4, 8)
 
@@ -371,10 +371,10 @@ def test_encode_bc1(
         input_h=input_h,
         bytes_per_row=(input_w // 4) * 8,
         grayscale=False,
-        output_path=Path("output/zfw/test_images_bcn/test_image_bc1.png"),
+        output_path=Path("output/resin/test_images_bcn/test_image_bc1.png"),
     )
 
-    psnr = zfw.compute_psnr(
+    psnr = resin.compute_psnr(
         img1=rgb_data,
         img2=image[:input_h, :input_w, :3],
     )
@@ -394,7 +394,7 @@ def test_encode_bc5(
     rg = rainbow_512x512_image[:, :, :2]
     rg = rg.astype(np.float32)
 
-    bc5_data = zfw.encode_bc5(rg)
+    bc5_data = resin.encode_bc5(rg)
     assert bc5_data.dtype == np.uint8
     assert bc5_data.shape == (input_h // 4, input_w // 4, 16)
 
@@ -407,19 +407,19 @@ def test_encode_bc5(
         input_h=input_h,
         bytes_per_row=(input_w // 4) * 16,
         grayscale=False,
-        output_path=Path("output/zfw/test_images_bcn/test_image_bc5.png"),
+        output_path=Path("output/resin/test_images_bcn/test_image_bc5.png"),
     )
 
     # Compare the two channels (R,G). The encoder input was in [-1,1], sampling
     # yields the same range; compute PSNR on float values.
-    psnr = zfw.compute_psnr(img1=rg, img2=image[:input_h, :input_w, :2])
+    psnr = resin.compute_psnr(img1=rg, img2=image[:input_h, :input_w, :2])
     assert psnr > 45.0, f"BC5 PSNR too low: {psnr:.2f} dB"
 
 
 def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     """Test BC1 encoding on the DamagedHelmet color map texture."""
     # Load the glTF model to get the material resources
-    resource_meshes = zfw.load_gltf(
+    resource_meshes = resin.load_gltf(
         gltf_path="tests/data/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf",
     )
 
@@ -437,7 +437,7 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     # Save original uncompressed image for comparison
     original_rgba = np.dstack([color_map.data, np.ones((input_h, input_w, 1))])
     output_path = (
-        "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_original.png"
+        "output/resin/test_images_bcn/test_encode_bc1_damaged_helmet_original.png"
     )
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     PIL.Image.fromarray(
@@ -445,7 +445,7 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     ).save(output_path)
 
     # Compress using BC1
-    bc1_data = zfw.encode_bc1(color_map)
+    bc1_data = resin.encode_bc1(color_map)
     assert bc1_data.dtype == np.uint8
     assert bc1_data.shape == (input_h // 4, input_w // 4, 8)
 
@@ -460,12 +460,12 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
         bytes_per_row=(input_w // 4) * 8,
         grayscale=False,
         output_path=Path(
-            "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_compressed.png"
+            "output/resin/test_images_bcn/test_encode_bc1_damaged_helmet_compressed.png"
         ),
     )
 
     # Compare RGB channels
-    psnr = zfw.compute_psnr(
+    psnr = resin.compute_psnr(
         img1=color_map,
         img2=image[:input_h, :input_w, :3],
     )
@@ -477,10 +477,10 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     # Amplify differences for visibility (multiply by 10, clamp to [0,1])
     diff_rgba[:, :, :3] = np.clip(diff_rgba[:, :, :3] * 10.0, 0.0, 1.0)
     PIL.Image.fromarray((np.clip(diff_rgba, 0.0, 1.0) * 255.0).astype(np.uint8)).save(
-        "output/zfw/test_images_bcn/test_encode_bc1_damaged_helmet_diff.png"
+        "output/resin/test_images_bcn/test_encode_bc1_damaged_helmet_diff.png"
     )
 
     assert psnr > 25.0, f"BC1 PSNR too low for DamagedHelmet: {psnr:.2f} dB"
 
 
-LOG = zfw.logger(__name__)
+LOG = resin.logger(__name__)

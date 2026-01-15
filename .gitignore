@@ -17,8 +17,8 @@ __pycache__
 /prof
 
 # `bundled_data` is always excluded from Git and is generated during the build process.
-src/zfw/bundled_data/*
-!src/zfw/bundled_data/__init__.py
+src/resin/bundled_data/*
+!src/resin/bundled_data/__init__.py
 
 # Ignore '*.actual.png' files from expect tests.
 *.actual.png

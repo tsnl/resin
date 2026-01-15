@@ -1,5 +1,5 @@
 import logging
-import zfw
+import resin
 
 import time
 import numpy as np
@@ -15,7 +15,7 @@ def test_compute_triangles_aabb_performance():
     # Load Suzanne mesh
     base_path = Path(__file__).parent / "data" / "glTF-Sample-Assets" / "Models"
     mesh_path = base_path / "Suzanne" / "glTF" / "Suzanne.gltf"
-    meshes_dict = zfw.load_gltf(mesh_path)
+    meshes_dict = resin.load_gltf(mesh_path)
 
     for (geometry, _), _ in meshes_dict.items():
         v = geometry.v_p_array
@@ -25,18 +25,18 @@ def test_compute_triangles_aabb_performance():
         v_triangles = v[t.flatten()]
 
         # Time the AABB computation (cold - first run with JIT)
-        aabb1 = zfw.compute_points_aabb(v_triangles)
+        aabb1 = resin.compute_points_aabb(v_triangles)
 
         # Time the AABB computation (warm - second run without JIT)
         start_time = time.monotonic_ns()
-        aabb2 = zfw.compute_points_aabb(v_triangles)
+        aabb2 = resin.compute_points_aabb(v_triangles)
         end_time = time.monotonic_ns()
         elapsed_ms_warm = (end_time - start_time) * 1e-6
 
         # Run it multiple times to get average
         num_iterations = 100
         for _ in range(num_iterations):
-            _ = zfw.compute_points_aabb(v_triangles)
+            _ = resin.compute_points_aabb(v_triangles)
 
         # Verify AABBs are the same
         assert np.allclose(aabb1, aabb2), "AABBs should be identical"
@@ -68,7 +68,7 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
             continue
 
         # Load mesh using resources
-        meshes_dict = zfw.load_gltf(mesh_path)
+        meshes_dict = resin.load_gltf(mesh_path)
         assert len(meshes_dict) > 0, f"Failed to load mesh {mesh_name}"
 
         # Extract geometry from the first mesh (we only care about geometry, not materials)
@@ -78,7 +78,7 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
 
             # Build BVH with timing
             start_time = time.monotonic_ns()
-            bvh = zfw.build_bvh(t=t, v=v, metrics_log_level=logging.INFO)
+            bvh = resin.build_bvh(t=t, v=v, metrics_log_level=logging.INFO)
             end_time = time.monotonic_ns()
             elapsed_ms = (end_time - start_time) * 1e-6
 
@@ -96,7 +96,7 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
 
 
 def _verify_leaf_nodes_contain_triangles(
-    bvh: zfw.Bvh,
+    bvh: resin.Bvh,
     v: np.ndarray,
     t_original: np.ndarray,
     mesh_name: str,
@@ -128,7 +128,7 @@ def _verify_leaf_nodes_contain_triangles(
             )
 
             # Verify AABB is the tightest (exact bounding box)
-            aabb_exact = zfw.bvh.compute_points_aabb(v_leaf)
+            aabb_exact = resin.bvh.compute_points_aabb(v_leaf)
             assert np.allclose(aabb_min, aabb_exact[0], atol=1e-6), (
                 f"{mesh_name}: Leaf node {i_node} AABB min is not tight"
             )
@@ -138,7 +138,7 @@ def _verify_leaf_nodes_contain_triangles(
 
 
 def _verify_all_triangles_represented(
-    bvh: zfw.Bvh,
+    bvh: resin.Bvh,
     t_original: np.ndarray,
     mesh_name: str,
 ) -> None:
@@ -171,7 +171,7 @@ def _verify_all_triangles_represented(
 
 
 def _verify_intermediate_node_aabbs(
-    bvh: zfw.Bvh,
+    bvh: resin.Bvh,
     mesh_name: str,
 ) -> None:
     """
@@ -203,7 +203,7 @@ def _verify_intermediate_node_aabbs(
 
 
 def _verify_children_have_fewer_triangles(
-    bvh: zfw.Bvh,
+    bvh: resin.Bvh,
     mesh_name: str,
 ) -> None:
     """
@@ -273,7 +273,7 @@ def test_partition_triangles():
     c = v[t].mean(axis=-2)
 
     # Partition triangles at pivot index 2 along x-axis:
-    i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt = zfw.partition_triangles(
+    i_lt, i_rt, aabb_lt, aabb_rt, sah_cost_lt, sah_cost_rt = resin.partition_triangles(
         t=t,
         v=v,
         c=c,
@@ -304,7 +304,7 @@ def test_partition_points():
     # Test all pivots and axes:
     for i in range(n):
         for x in range(3):
-            i_lt, i_rt = zfw.partition_points(p=p, z=p[i, x], x=x)
+            i_lt, i_rt = resin.partition_points(p=p, z=p[i, x], x=x)
             assert i_lt.shape[0] + i_rt.shape[0] == n
             assert np.all(i_lt < i)
             assert np.all(i_rt >= i)
@@ -320,7 +320,7 @@ def test_compute_triangles_abbb():
         dtype=np.float32,
     )
 
-    v_min, v_max = zfw.bvh.compute_points_aabb(v)
+    v_min, v_max = resin.bvh.compute_points_aabb(v)
 
     assert np.allclose(np.asarray(v_min), [-1.0, 0.0, -2.0])
     assert np.allclose(np.asarray(v_max), [1.0, 2.0, 4.0])

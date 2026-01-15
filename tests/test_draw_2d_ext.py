@@ -6,7 +6,7 @@ import numpy.typing as npt
 import pytest
 import wgpu
 
-from zfw import (
+from resin import (
     setup_logging,
     BaseDisposable,
     Font,

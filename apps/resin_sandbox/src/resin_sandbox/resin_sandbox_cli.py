@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 import wgpu
-import zfw
+import resin
 
 
 from .gltf_viewer import GltfViewerWidget
@@ -12,8 +12,8 @@ from .universal_paperclips import (
 )
 
 
-class MainMenuWidget(zfw.GuiWidget):
-    def __init__(self, gui_window: zfw.GuiWindow):
+class MainMenuWidget(resin.GuiWidget):
+    def __init__(self, gui_window: resin.GuiWindow):
         super().__init__(
             gui_window=gui_window,
             grid_rows=(100, -1, -1),
@@ -22,7 +22,7 @@ class MainMenuWidget(zfw.GuiWidget):
         )
         self._gui_window = gui_window
 
-        self._title_widget = zfw.GuiWidget(
+        self._title_widget = resin.GuiWidget(
             parent_widget=self,
             row=0,
             col=0,
@@ -31,7 +31,7 @@ class MainMenuWidget(zfw.GuiWidget):
             text="Main Menu",
         )
 
-        self._universal_paperclips_button = zfw.GuiWidget(
+        self._universal_paperclips_button = resin.GuiWidget(
             parent_widget=self,
             row=1,
             col=0,
@@ -39,7 +39,7 @@ class MainMenuWidget(zfw.GuiWidget):
             text="Universal Paperclips",
         )
 
-        self._gltf_viewer_button = zfw.GuiWidget(
+        self._gltf_viewer_button = resin.GuiWidget(
             parent_widget=self,
             row=1,
             col=1,
@@ -51,7 +51,7 @@ class MainMenuWidget(zfw.GuiWidget):
         self._gltf_viewer_widget = None
 
         @self._universal_paperclips_button.click_event.subscribe()
-        def universal_paperclips_button_click(button: zfw.MouseButton):
+        def universal_paperclips_button_click(button: resin.MouseButton):
             if self._universal_paperclips_widget is None:
                 self._universal_paperclips_widget = UniversalPaperclipsMainMenuWidget(
                     gui_window=gui_window,
@@ -59,7 +59,7 @@ class MainMenuWidget(zfw.GuiWidget):
             gui_window.push_central_widget(self._universal_paperclips_widget)
 
         @self._gltf_viewer_button.click_event.subscribe()
-        def gltf_viewer_button_click(button: zfw.MouseButton):
+        def gltf_viewer_button_click(button: resin.MouseButton):
             if self._gltf_viewer_widget is None:
                 # Get paths for models and environments
                 workspace_root = Path(__file__).parent.parent.parent.parent.parent
@@ -88,7 +88,7 @@ class MainMenuWidget(zfw.GuiWidget):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="ZFW Sandbox CLI")
+    ap = argparse.ArgumentParser(description="Resin Sandbox CLI")
     ap.add_argument(
         "--debug",
         action="store_true",
@@ -97,33 +97,33 @@ def main():
     args = ap.parse_args()
 
     # Setup logging
-    zfw.setup_logging(
+    resin.setup_logging(
         level=logging.DEBUG if args.debug else logging.INFO,
         console=True,
-        file=Path("zfw.log"),
+        file=Path("resin.log"),
     )
 
-    LOG = zfw.logger(__name__)
-    LOG.info(f"Starting ZFW Sandbox: debug={args.debug}")
+    LOG = resin.logger(__name__)
+    LOG.info(f"Starting Resin Sandbox: debug={args.debug}")
 
     # Create WebGPU device
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = zfw.help_request_wgpu_device(adapter)
+    device = resin.help_request_wgpu_device(adapter)
 
     # Create window context (manages GLFW)
-    window_context = zfw.WindowContext()
+    window_context = resin.WindowContext()
 
     # Create window with device
-    window = zfw.Window(
+    window = resin.Window(
         device=device,
         window_context=window_context,
         width_dip=1280,
         height_dip=720,
-        title="ZFW Sandbox",
+        title="Resin Sandbox",
     )
 
     # Create GUI window
-    gui_window = zfw.GuiWindow(
+    gui_window = resin.GuiWindow(
         window=window,
         device=device,
     )
@@ -137,7 +137,7 @@ def main():
     while not window.should_close():
         gui_window.update()
         gui_window.render()
-        zfw.Window.poll_events()
+        resin.Window.poll_events()
 
     # Cleanup
     start_widget.dispose()
