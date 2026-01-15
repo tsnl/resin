@@ -62,6 +62,8 @@ struct PodMaterial {
     roughness_factor: f32,
     emissive_map_id: u32,
     emissive_factor: array<f32, 3>,
+    diffuse_f0_map_id: u32,
+    diffuse_f0_factor: array<f32, 3>,
 }
 struct PodCamera {
     transform: PodTransform,
@@ -108,7 +110,9 @@ struct PodTransform {
 @group(0) @binding(13) var<storage, read> environment_texture_allocations: array<PodTextureAllocation>;
 @group(0) @binding(14) var emissive_texture_heap: texture_2d_array<f32>;
 @group(0) @binding(15) var<storage, read> emissive_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(16) var linear_sampler: sampler;
+@group(0) @binding(16) var diffuse_f0_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(17) var<storage, read> diffuse_f0_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(18) var linear_sampler: sampler;
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
@@ -235,17 +239,17 @@ fn pcg_hash(input: u32) -> u32 {
     return (word >> 22u) ^ word;
 }
 
-fn rand_from_seed(seed: ptr<function, u32>) -> f32 {
+fn rand1f(seed: ptr<function, u32>) -> f32 {
     *seed = pcg_hash(*seed);
     return f32(*seed) / f32(0xFFFFFFFFu);
 }
 
-fn rand2_from_seed(seed: ptr<function, u32>) -> vec2<f32> {
-    return vec2<f32>(rand_from_seed(seed), rand_from_seed(seed));
+fn rand2f(seed: ptr<function, u32>) -> vec2<f32> {
+    return vec2<f32>(rand1f(seed), rand1f(seed));
 }
 
 fn rand3_from_seed(seed: ptr<function, u32>) -> vec3<f32> {
-    return vec3<f32>(rand_from_seed(seed), rand_from_seed(seed), rand_from_seed(seed));
+    return vec3<f32>(rand1f(seed), rand1f(seed), rand1f(seed));
 }
 
 //
@@ -326,6 +330,10 @@ fn sample_emissive_texture(
     emissive_texture_id: u32,
     uv: vec2<f32>,
 ) -> vec3<f32> {
+    // If emissive_texture_id is 0xFFFFFFFF, there's no emissive texture, return black
+    if emissive_texture_id == 0xFFFFFFFFu {
+        return vec3<f32>(0.0);
+    }
     let alloc = emissive_texture_allocations[emissive_texture_id];
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
@@ -333,6 +341,24 @@ fn sample_emissive_texture(
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
     let sample_color = textureSampleLevel(emissive_texture_heap, linear_sampler, sample_uv, page, 0.0);
+    return sample_color.rgb;
+}
+
+fn sample_diffuse_f0_texture(
+    diffuse_f0_texture_id: u32,
+    uv: vec2<f32>,
+) -> vec3<f32> {
+    // If diffuse_f0_texture_id is 0xFFFFFFFF, there's no diffuse_f0 texture, return white (1.0)
+    if diffuse_f0_texture_id == 0xFFFFFFFFu {
+        return vec3<f32>(1.0);
+    }
+    let alloc = diffuse_f0_texture_allocations[diffuse_f0_texture_id];
+    let page = u32(alloc.y);
+    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
+    let alloc_size = vec2<f32>(alloc.w, alloc.h);
+    let wrapped_uv = fract(uv);
+    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
+    let sample_color = textureSampleLevel(diffuse_f0_texture_heap, linear_sampler, sample_uv, page, 0.0);
     return sample_color.rgb;
 }
 
@@ -794,6 +820,7 @@ struct HitDetails {
     surface_metalness: f32,
     surface_roughness: f32,
     surface_emissive: vec3<f32>,
+    surface_diffuse_f0: vec3<f32>,
     instance_id: u32,
 }
 fn compute_hit_details(hit: HitRecord) -> HitDetails {
@@ -809,6 +836,7 @@ fn compute_hit_details(hit: HitRecord) -> HitDetails {
     hit_details.surface_metalness = compute_hit_details_surface_metalness(hit_details);
     hit_details.surface_roughness = compute_hit_details_surface_roughness(hit_details);
     hit_details.surface_emissive = compute_hit_details_surface_emissive(hit_details);
+    hit_details.surface_diffuse_f0 = compute_hit_details_surface_diffuse_f0(hit_details);
     return hit_details;
 }
 fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
@@ -903,12 +931,19 @@ fn compute_hit_details_surface_emissive(hit_details: HitDetails) -> vec3<f32> {
         material.emissive_factor[1],
         material.emissive_factor[2],
     );
-    // If emissive_map_id is 0xFFFFFFFF, there's no emissive texture, just use the factor
-    if material.emissive_map_id == 0xFFFFFFFFu {
-        return emissive_factor;
-    }
     let emissive_texture = sample_emissive_texture(material.emissive_map_id, hit_details.texcoords);
     return emissive_factor * emissive_texture;
+}
+fn compute_hit_details_surface_diffuse_f0(hit_details: HitDetails) -> vec3<f32> {
+    let instance = instances[hit_details.instance_id];
+    let material = material_heap[instance.material_id];
+    let diffuse_f0_factor = vec3<f32>(
+        material.diffuse_f0_factor[0],
+        material.diffuse_f0_factor[1],
+        material.diffuse_f0_factor[2],
+    );
+    let diffuse_f0_texture = sample_diffuse_f0_texture(material.diffuse_f0_map_id, hit_details.texcoords);
+    return diffuse_f0_factor * diffuse_f0_texture;
 }
 
 //
@@ -1047,16 +1082,15 @@ fn sample_brdf(hit_details: HitDetails, incoming_dir: vec3<f32>, seed: ptr<funct
     let roughness = max(hit_details.surface_roughness, 0.04);
     let metalness = hit_details.surface_metalness;
 
-    let rand = rand2_from_seed(seed);
-    let select_rand = rand_from_seed(seed);
-
     let base_color = hit_details.surface_color.rgb;
-    let f0 = mix(vec3<f32>(0.04), base_color, metalness);
+    // For metals, f0 is the base color; for dielectrics, it's diffuse_f0 (typically 0.04)
+    let f0 = mix(hit_details.surface_diffuse_f0, base_color, metalness);
 
-    if select_rand < 0.5 {
-        return sample_diffuse_brdf(normal, base_color, metalness, rand);
+    if rand1f(seed) < 0.5 {
+        return sample_diffuse_brdf(normal, base_color, metalness, rand2f(seed));
+    } else {
+        return sample_specular_brdf(normal, view_dir, roughness, f0, rand2f(seed));
     }
-    return sample_specular_brdf(normal, view_dir, roughness, f0, rand);
 }
 
 fn sample_diffuse_brdf(normal: vec3<f32>, base_color: vec3<f32>, metalness: f32, rand: vec2<f32>) -> BrdfSample {
@@ -1078,7 +1112,7 @@ fn sample_specular_brdf(normal: vec3<f32>, view_dir: vec3<f32>, roughness: f32, 
 
 fn should_terminate_russian_roulette(throughput: vec3<f32>, seed: ptr<function, u32>) -> bool {
     let survival_prob = clamp(luminance(throughput), 0.1, 0.95);
-    let rand = rand_from_seed(seed);
+    let rand = rand1f(seed);
     return rand > survival_prob;
 }
 
@@ -1339,7 +1373,7 @@ fn fs_postprocess(input: VertexOutput) -> @location(0) vec4<f32> {
     let exposed = apply_exposure(hdr_color.rgb, 1.5);
     let tonemapped = naughty_dog_tonemap(exposed);
     let gamma_corrected = linear_to_srgb(tonemapped);
-    return vec4<f32>(gamma_corrected, 1.0);
+    return vec4<f32>(clamp(gamma_corrected, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
 
 fn apply_exposure(color: vec3<f32>, exposure: f32) -> vec3<f32> {

@@ -90,6 +90,8 @@ class MaterialResource:
     roughness_factor: float
     emissive_map: "npt.NDArray[np.float32] | None"
     emissive_factor: tuple[float, float, float]
+    diffuse_f0_map: "npt.NDArray[np.float32] | None"
+    diffuse_f0_factor: tuple[float, float, float]
 
     def __init__(
         self,
@@ -99,10 +101,12 @@ class MaterialResource:
         metalness_map: "npt.NDArray[np.float32] | None",
         roughness_map: "npt.NDArray[np.float32] | None",
         emissive_map: "npt.NDArray[np.float32] | None" = None,
+        diffuse_f0_map: "npt.NDArray[np.float32] | None" = None,
         color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
         metalness_factor: float = 1.0,
         roughness_factor: float = 1.0,
         emissive_factor: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        diffuse_f0_factor: tuple[float, float, float] = (0.04, 0.04, 0.04),
     ) -> None:
         self.color_map = color_map
         self.color_factor = color_factor
@@ -113,6 +117,8 @@ class MaterialResource:
         self.roughness_factor = roughness_factor
         self.emissive_map = emissive_map
         self.emissive_factor = emissive_factor
+        self.diffuse_f0_map = diffuse_f0_map
+        self.diffuse_f0_factor = diffuse_f0_factor
 
 
 #
@@ -571,6 +577,27 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             else None
         )
 
+        # Load KHR_materials_specular extension if present
+        diffuse_f0_factor: tuple[float, float, float] = (0.04, 0.04, 0.04)
+        diffuse_f0_texture = None
+        if material.extensions and "KHR_materials_specular" in material.extensions:
+            spec_ext = material.extensions["KHR_materials_specular"]
+            if isinstance(spec_ext, dict):
+                # Extract specularColorFactor (default [1.0, 1.0, 1.0])
+                spec_color = spec_ext.get("specularColorFactor", [1.0, 1.0, 1.0])
+                diffuse_f0_factor = (
+                    float(spec_color[0]),
+                    float(spec_color[1]),
+                    float(spec_color[2]),
+                )
+                # Extract specularColorTexture if present
+                if "specularColorTexture" in spec_ext:
+                    spec_color_tex_info = spec_ext["specularColorTexture"]
+                    if isinstance(spec_color_tex_info, dict):
+                        tex_index = spec_color_tex_info.get("index")
+                        if tex_index is not None:
+                            diffuse_f0_texture = textures[tex_index]
+
         return MaterialResource(
             color_map=base_color_texture,
             color_factor=base_color_factor,
@@ -581,6 +608,8 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             roughness_factor=roughness_factor,
             emissive_map=emissive_texture,
             emissive_factor=emissive_factor,
+            diffuse_f0_map=diffuse_f0_texture,
+            diffuse_f0_factor=diffuse_f0_factor,
         )
 
     materials = [load_material(material) for material in (gltf.materials or [])]
