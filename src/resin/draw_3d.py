@@ -3,6 +3,7 @@ __all__ = [
     "Draw3dScene",
 ]
 
+import logging
 from contextlib import contextmanager
 import math
 from dataclasses import dataclass, field
@@ -14,7 +15,7 @@ import numpy.typing as npt
 import wgpu
 
 
-from .basic import BaseDisposable, StructuredNDArray, logger
+from .basic import BaseDisposable, StructuredNDArray
 from .excepts import LogicError
 from .bvh import Bvh, build_bvh
 from .resources import GeometryResource, MaterialResource
@@ -2227,4 +2228,4 @@ class PodTextureAllocationArray(StructuredNDArray):
     )
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)

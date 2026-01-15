@@ -5,9 +5,9 @@ from pathlib import Path
 import imageio.v3 as iio
 import numpy as np
 
-from resin import compute_psnr, logger
+from resin import compute_psnr
 
-LOG = logger(__name__)
+LOG = __name__
 
 
 def assert_image_matches_reference(

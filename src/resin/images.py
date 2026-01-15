@@ -12,11 +12,12 @@ __all__ = [
     "normalize_image_to_f32",
 ]
 
+import logging
 from typing import Literal
 
 import numpy as np
 
-from .basic import ColorSpace, logger
+from .basic import ColorSpace
 from .images_bcn import encode_bc1, encode_bc4, encode_bc5
 
 # ImageFormat: subset of WebGPU texture formats for images
@@ -36,7 +37,7 @@ type ImageFormat = Literal[
 ]
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 #

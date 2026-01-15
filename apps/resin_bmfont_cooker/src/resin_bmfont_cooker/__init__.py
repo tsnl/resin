@@ -8,6 +8,7 @@ __all__ = ["main"]
 
 import argparse
 from fractions import Fraction
+import logging
 from pathlib import Path
 import sys
 from typing import cast
@@ -16,7 +17,6 @@ import numpy as np
 
 from resin import (
     setup_logging,
-    logger,
     Font,
     FontSize,
     FontWeight,
@@ -28,7 +28,7 @@ from resin import (
 )
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 #

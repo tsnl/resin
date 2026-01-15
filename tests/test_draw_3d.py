@@ -16,7 +16,6 @@ from resin import (
     Draw3dTexture,
     Draw3dMaterial,
     load_gltf,
-    logger,
     load_image,
 )
 
@@ -807,4 +806,4 @@ def test_environment_map_basic(gpu_device: wgpu.GPUDevice, renderer: Draw3dRende
     )
 
 
-LOG = logger(__name__)
+LOG = __name__

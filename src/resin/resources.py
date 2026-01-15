@@ -14,6 +14,7 @@ __all__ = [
     "load_image",
 ]
 
+import logging
 import base64
 from collections import defaultdict
 import hashlib
@@ -32,13 +33,13 @@ import PIL.Image
 import pygltflib
 
 from .excepts import LogicError
-from .basic import Font, FontSize, FontWeight, expect, logger
+from .basic import Font, FontSize, FontWeight, expect
 from .images import (
     ImageFormat,
 )
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 #

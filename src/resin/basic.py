@@ -11,7 +11,6 @@ __all__ = [
     "MouseButton",
     "SupportsWrite",
     "expect",
-    "logger",
     "round_up_to_po2",
     "setup_logging",
 ]
@@ -317,19 +316,6 @@ type Json = JsonObject | JsonArray | str | int | float | bool | None
 #
 
 
-def logger(name: str) -> logging.Logger:
-    """
-    Get a logger instance for the given module name.
-
-    Args:
-        name: The logger name, typically __name__.
-
-    Returns:
-        A configured logger instance.
-    """
-    return logging.getLogger(name)
-
-
 def setup_logging(
     level: int = logging.INFO,
     file: Path | None = None,
@@ -393,4 +379,4 @@ def setup_logging(
 # Log for this module:
 #
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)

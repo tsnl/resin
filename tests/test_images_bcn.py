@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 import os.path
 
 import numpy as np
@@ -483,4 +484,4 @@ def test_encode_bc1_damaged_helmet(gpu_device: wgpu.GPUDevice):
     assert psnr > 25.0, f"BC1 PSNR too low for DamagedHelmet: {psnr:.2f} dB"
 
 
-LOG = resin.logger(__name__)
+LOG = logging.getLogger(__name__)
