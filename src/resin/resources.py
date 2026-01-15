@@ -88,6 +88,8 @@ class MaterialResource:
     metalness_factor: float
     roughness_map: "npt.NDArray[np.float32] | None"
     roughness_factor: float
+    emissive_map: "npt.NDArray[np.float32] | None"
+    emissive_factor: tuple[float, float, float]
 
     def __init__(
         self,
@@ -96,9 +98,11 @@ class MaterialResource:
         normal_map: "npt.NDArray[np.float32] | None",
         metalness_map: "npt.NDArray[np.float32] | None",
         roughness_map: "npt.NDArray[np.float32] | None",
+        emissive_map: "npt.NDArray[np.float32] | None" = None,
         color_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
         metalness_factor: float = 1.0,
         roughness_factor: float = 1.0,
+        emissive_factor: tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> None:
         self.color_map = color_map
         self.color_factor = color_factor
@@ -107,6 +111,8 @@ class MaterialResource:
         self.metalness_factor = metalness_factor
         self.roughness_map = roughness_map
         self.roughness_factor = roughness_factor
+        self.emissive_map = emissive_map
+        self.emissive_factor = emissive_factor
 
 
 #
@@ -550,6 +556,21 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             else None
         )
 
+        emissive_factor = (
+            (
+                material.emissiveFactor[0],
+                material.emissiveFactor[1],
+                material.emissiveFactor[2],
+            )
+            if material.emissiveFactor is not None
+            else (0.0, 0.0, 0.0)
+        )
+        emissive_texture = (
+            textures[material.emissiveTexture.index]
+            if material.emissiveTexture
+            else None
+        )
+
         return MaterialResource(
             color_map=base_color_texture,
             color_factor=base_color_factor,
@@ -558,6 +579,8 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             metalness_factor=metalness_factor,
             roughness_map=roughness_texture,
             roughness_factor=roughness_factor,
+            emissive_map=emissive_texture,
+            emissive_factor=emissive_factor,
         )
 
     materials = [load_material(material) for material in (gltf.materials or [])]

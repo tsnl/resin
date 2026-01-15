@@ -69,6 +69,7 @@ class Draw3dRenderer(BaseDisposable):
     metalness_texture_heap: "TextureHeap"
     roughness_texture_heap: "TextureHeap"
     environment_texture_heap: "TextureHeap"
+    emissive_texture_heap: "TextureHeap"
     linear_sampler: wgpu.GPUSampler
 
     renderer_bind_group: wgpu.GPUBindGroup
@@ -231,9 +232,26 @@ class Draw3dRenderer(BaseDisposable):
                         type=wgpu.BufferBindingType.read_only_storage
                     ),
                 ),
-                # Linear sampler:
+                # Emissive texture heap:
                 wgpu.BindGroupLayoutEntry(
                     binding=14,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    texture=wgpu.TextureBindingLayout(
+                        sample_type=wgpu.TextureSampleType.float,
+                        view_dimension=wgpu.TextureViewDimension.d2_array,
+                        multisampled=False,
+                    ),
+                ),
+                wgpu.BindGroupLayoutEntry(
+                    binding=15,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(
+                        type=wgpu.BufferBindingType.read_only_storage
+                    ),
+                ),
+                # Linear sampler:
+                wgpu.BindGroupLayoutEntry(
+                    binding=16,
                     visibility=wgpu.ShaderStage.COMPUTE,
                     sampler=wgpu.SamplerBindingLayout(
                         type=wgpu.SamplerBindingType.filtering
@@ -335,21 +353,31 @@ class Draw3dRenderer(BaseDisposable):
                         view_dimension=wgpu.TextureViewDimension.d2,
                     ),
                 ),
-                # @group(1) @binding(9) var<uniform> frame_info: PodFrameInfo;
+                # @group(1) @binding(9) var frame_surface_emissive_image: texture_storage_2d<rgba16float, write>;
                 wgpu.BindGroupLayoutEntry(
                     binding=9,
                     visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(type="uniform"),
+                    storage_texture=wgpu.StorageTextureBindingLayout(
+                        access=wgpu.StorageTextureAccess.write_only,
+                        format=wgpu.TextureFormat.rgba16float,
+                        view_dimension=wgpu.TextureViewDimension.d2,
+                    ),
                 ),
-                # @group(1) @binding(10) var<uniform> camera: PodCamera;
+                # @group(1) @binding(10) var<uniform> frame_info: PodFrameInfo;
                 wgpu.BindGroupLayoutEntry(
                     binding=10,
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(type="uniform"),
                 ),
-                # @group(1) @binding(11) var<storage, read> instances: array<PodInstance>;
+                # @group(1) @binding(11) var<uniform> camera: PodCamera;
                 wgpu.BindGroupLayoutEntry(
                     binding=11,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(type="uniform"),
+                ),
+                # @group(1) @binding(12) var<storage, read> instances: array<PodInstance>;
+                wgpu.BindGroupLayoutEntry(
+                    binding=12,
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
                 ),
@@ -490,6 +518,12 @@ class Draw3dRenderer(BaseDisposable):
             usage="environment",
             page_count=2,
         )
+        self.emissive_texture_heap = TextureHeap(
+            device=device,
+            label="Draw3dRenderer.EmissiveTextureHeap",
+            usage="emissive",
+            page_count=4,
+        )
 
         self.linear_sampler = device.create_sampler(
             label="Draw3dRenderer.LinearSampler",
@@ -621,9 +655,25 @@ class Draw3dRenderer(BaseDisposable):
                         size=self.environment_texture_heap.allocation_heap.device_buffer.size,
                     ),
                 ),
-                # Linear sampler
+                # Emissive texture heap
                 wgpu.BindGroupEntry(
                     binding=14,
+                    resource=self.emissive_texture_heap.texture.create_view(
+                        dimension=wgpu.TextureViewDimension.d2_array,
+                    ),
+                ),
+                # Emissive texture allocations
+                wgpu.BindGroupEntry(
+                    binding=15,
+                    resource=wgpu.BufferBinding(
+                        buffer=self.emissive_texture_heap.allocation_heap.device_buffer,
+                        offset=0,
+                        size=self.emissive_texture_heap.allocation_heap.device_buffer.size,
+                    ),
+                ),
+                # Linear sampler
+                wgpu.BindGroupEntry(
+                    binding=16,
                     resource=self.linear_sampler,
                 ),
             ],
@@ -740,6 +790,16 @@ class Draw3dRenderer(BaseDisposable):
                 | wgpu.TextureUsage.TEXTURE_BINDING
             ),
         )
+        self._frame_surface_emissive_image = device.create_texture(
+            label="Draw3dRenderer.FrameSurfaceEmissiveImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
         # Full-resolution final output (postprocessed from _output_image)
         self.output_image = device.create_texture(
             label="Draw3dRenderer.FinalOutputImage",
@@ -815,6 +875,10 @@ class Draw3dRenderer(BaseDisposable):
                 ),
                 wgpu.BindGroupEntry(
                     binding=9,
+                    resource=self._frame_surface_emissive_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=10,
                     resource=wgpu.BufferBinding(
                         buffer=self._frame_info_buffer.device_buffer,
                         offset=0,
@@ -822,7 +886,7 @@ class Draw3dRenderer(BaseDisposable):
                     ),
                 ),
                 wgpu.BindGroupEntry(
-                    binding=10,
+                    binding=11,
                     resource=wgpu.BufferBinding(
                         buffer=self._camera_buffer.device_buffer,
                         offset=0,
@@ -830,7 +894,7 @@ class Draw3dRenderer(BaseDisposable):
                     ),
                 ),
                 wgpu.BindGroupEntry(
-                    binding=11,
+                    binding=12,
                     resource=wgpu.BufferBinding(
                         buffer=self._instance_buffer.device_buffer,
                         offset=0,
@@ -885,6 +949,7 @@ class Draw3dRenderer(BaseDisposable):
         self.metalness_texture_heap.dispose()
         self.roughness_texture_heap.dispose()
         self.environment_texture_heap.dispose()
+        self.emissive_texture_heap.dispose()
 
         return super()._on_dispose()
 
@@ -927,6 +992,7 @@ class Draw3dRenderer(BaseDisposable):
             "metalness": self.metalness_texture_heap,
             "roughness": self.roughness_texture_heap,
             "environment": self.environment_texture_heap,
+            "emissive": self.emissive_texture_heap,
         }[usage]
 
     def _add_material(
@@ -939,6 +1005,8 @@ class Draw3dRenderer(BaseDisposable):
         metalness_factor: float,
         roughness_map_id: int,
         roughness_factor: float,
+        emissive_map_id: int,
+        emissive_factor: tuple[float, float, float],
     ) -> int:
         data = PodMaterialArray.empty(shape=(1,))
         data["color_map_id"][0] = np.uint32(color_map_id)
@@ -948,6 +1016,8 @@ class Draw3dRenderer(BaseDisposable):
         data["metalness_factor"][0] = np.float32(metalness_factor)
         data["roughness_map_id"][0] = np.uint32(roughness_map_id)
         data["roughness_factor"][0] = np.float32(roughness_factor)
+        data["emissive_map_id"][0] = np.uint32(emissive_map_id)
+        data["emissive_factor"][0] = np.array(emissive_factor, dtype=np.float32)
         return self.material_heap.insert(data)
 
     def record(
@@ -1019,6 +1089,10 @@ class Draw3dRenderer(BaseDisposable):
         """Get the surface ORM (occlusion/roughness/metalness) debug output (internal resolution)."""
         return self._frame_surface_orm_image
 
+    def get_frame_surface_emissive_image(self) -> wgpu.GPUTexture:
+        """Get the surface emissive debug output (internal resolution)."""
+        return self._frame_surface_emissive_image
+
     def set_debug_flags(
         self,
         *,
@@ -1029,6 +1103,7 @@ class Draw3dRenderer(BaseDisposable):
         emit_surface_color: bool = False,
         emit_surface_normal: bool = False,
         emit_orm: bool = False,
+        emit_emissive: bool = False,
         disable_jitter: bool = False,
     ) -> None:
         """
@@ -1041,6 +1116,7 @@ class Draw3dRenderer(BaseDisposable):
         :param emit_surface_color: If True, output sampled texture color at hit point.
         :param emit_surface_normal: If True, output world-space hit normal as RGB.
         :param emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
+        :param emit_emissive: If True, output sampled emissive color at hit point.
         :param disable_jitter: If True, disable jitter for primary ray generation.
         """
         self._debug_flags = 0
@@ -1058,6 +1134,8 @@ class Draw3dRenderer(BaseDisposable):
             self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_NORMAL
         if emit_orm:
             self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_ORM
+        if emit_emissive:
+            self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_EMISSIVE
         if disable_jitter:
             self._debug_flags |= _FRAME_FLAG_DISABLE_JITTER
 
@@ -1102,6 +1180,7 @@ class Draw3dRenderer(BaseDisposable):
             self.metalness_texture_heap.clear()
             self.roughness_texture_heap.clear()
             self.environment_texture_heap.clear()
+            self.emissive_texture_heap.clear()
 
     def _reset_accumulator_texture(self) -> None:
         w, h = self._internal_size_wh_px
@@ -1391,6 +1470,8 @@ class Draw3dMaterial(BaseDisposable):
     metalness_factor: float
     roughness_texture: "Draw3dTexture | None"
     roughness_factor: float
+    emissive_texture: "Draw3dTexture | None"
+    emissive_factor: tuple[float, float, float]
 
     def __init__(
         self,
@@ -1403,6 +1484,8 @@ class Draw3dMaterial(BaseDisposable):
         metalness_factor: float = 1.0,
         roughness_texture: "Draw3dTexture | None" = None,
         roughness_factor: float = 1.0,
+        emissive_texture: "Draw3dTexture | None" = None,
+        emissive_factor: tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> None:
         super().__init__()
 
@@ -1416,6 +1499,8 @@ class Draw3dMaterial(BaseDisposable):
         self.metalness_factor = metalness_factor
         self.roughness_texture = roughness_texture
         self.roughness_factor = roughness_factor
+        self.emissive_texture = emissive_texture
+        self.emissive_factor = emissive_factor
 
         # Upload material data to GPU
         color_map_id = color_texture.allocation.texture_id if color_texture else 0
@@ -1426,6 +1511,9 @@ class Draw3dMaterial(BaseDisposable):
         roughness_map_id = (
             roughness_texture.allocation.texture_id if roughness_texture else 0
         )
+        emissive_map_id = (
+            emissive_texture.allocation.texture_id if emissive_texture else 0xFFFFFFFF
+        )
 
         self.material_id = renderer._add_material(
             color_map_id=color_map_id,
@@ -1435,6 +1523,8 @@ class Draw3dMaterial(BaseDisposable):
             metalness_factor=metalness_factor,
             roughness_map_id=roughness_map_id,
             roughness_factor=roughness_factor,
+            emissive_map_id=emissive_map_id,
+            emissive_factor=emissive_factor,
         )
 
     @property
@@ -1483,6 +1573,15 @@ class Draw3dMaterial(BaseDisposable):
             if material.roughness_map is not None
             else None
         )
+        emissive_texture = (
+            Draw3dTexture(
+                renderer,
+                data=material.emissive_map,
+                usage="emissive",
+            )
+            if material.emissive_map is not None
+            else None
+        )
         return Draw3dMaterial(
             renderer,
             color_texture=color_texture,
@@ -1492,6 +1591,8 @@ class Draw3dMaterial(BaseDisposable):
             metalness_factor=material.metalness_factor,
             roughness_texture=roughness_texture,
             roughness_factor=material.roughness_factor,
+            emissive_texture=emissive_texture,
+            emissive_factor=material.emissive_factor,
         )
 
 
@@ -1765,6 +1866,7 @@ type Draw3dTextureUsage = Literal[
     "metalness",
     "roughness",
     "environment",
+    "emissive",
 ]
 
 
@@ -1775,6 +1877,7 @@ def _texture_format_for_draw_3d_usage(usage: Draw3dTextureUsage) -> wgpu.Texture
         "metalness": "bc4_r_unorm",
         "roughness": "bc4_r_unorm",
         "environment": "rgba16float",
+        "emissive": "bc1_rgba_unorm",
     }
     return wgpu.TextureFormat[mapping[usage]]
 
@@ -1880,6 +1983,8 @@ class TextureHeap(BaseDisposable):
                 return TextureHeap._encode_roughness_texture(data)
             case "environment":
                 return TextureHeap._encode_environment_texture(data)
+            case "emissive":
+                return TextureHeap._encode_emissive_texture(data)
             case _:
                 raise NotImplementedError()
 
@@ -1956,6 +2061,15 @@ class TextureHeap(BaseDisposable):
         # Convert to float16 and return as-is (no block compression)
         return data.astype(np.float16)
 
+    @staticmethod
+    def _encode_emissive_texture(data: np.ndarray) -> np.ndarray:
+        assert data.ndim == 3
+        if data.shape[0] % 4 != 0 or data.shape[1] % 4 != 0:
+            raise LogicError(f"Texture size must be multiple of 4: {data.shape=}")
+        if data.shape[2] != 3:
+            raise LogicError(f"Emissive texture must have 3 channels: {data.shape[2]=}")
+        return encode_bc1(data)
+
     def _allocate(self, width_px: int, height_px: int) -> "TextureHeapAllocation":
         # Move to next row?
         if self.cursor_x_px + width_px > self.page_size_px:
@@ -1997,7 +2111,7 @@ class TextureHeap(BaseDisposable):
     ) -> wgpu.TexelCopyBufferLayout:
         """Get the texture data layout based on the texture format."""
         match self.usage:
-            case "color" | "normal" | "metalness" | "roughness":
+            case "color" | "normal" | "metalness" | "roughness" | "emissive":
                 # Compressed formats: data is organized in blocks
                 # Each "pixel" in encoded_data is actually a compressed block
                 return wgpu.TexelCopyBufferLayout(
@@ -2107,6 +2221,8 @@ _FRAME_FLAG_EMIT_SURFACE_COLOR = 1 << 4
 _FRAME_FLAG_EMIT_SURFACE_NORMAL = 1 << 5
 _FRAME_FLAG_EMIT_SURFACE_ORM = 1 << 6
 _FRAME_FLAG_DISABLE_JITTER = 1 << 7
+_FRAME_FLAG_EMIT_PER_PIXEL_RADIANCE = 1 << 8
+_FRAME_FLAG_EMIT_SURFACE_EMISSIVE = 1 << 9
 
 
 POD_SPAN_DTYPE = np.dtype(
@@ -2156,6 +2272,8 @@ class PodMaterialArray(StructuredNDArray):
             ("metalness_factor", np.float32),
             ("roughness_map_id", np.uint32),
             ("roughness_factor", np.float32),
+            ("emissive_map_id", np.uint32),
+            ("emissive_factor", np.float32, (3,)),
         ]
     )
 
