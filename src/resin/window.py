@@ -10,6 +10,7 @@ __all__ = [
     "WindowContext",
 ]
 
+import logging
 import os
 import sys
 from typing import Callable
@@ -19,7 +20,6 @@ import wgpu
 
 from .basic import (
     BaseDisposable,
-    logger,
     Key,
     KeyModifier,
     MouseButton,
@@ -28,7 +28,7 @@ from .basic import (
 from .excepts import GlfwError
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 def resin_get_glfw_present_info(window: glfw._GLFWwindow, vsync: bool = True) -> dict:

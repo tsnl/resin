@@ -17,7 +17,7 @@ import numpy.typing as npt
 import numpy as np
 import time
 
-from .basic import logger, NUMBA_CACHE_ENABLED
+from .basic import NUMBA_CACHE_ENABLED
 
 
 @dataclass
@@ -695,4 +695,4 @@ def aabb_union(
     return aabb_union
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)

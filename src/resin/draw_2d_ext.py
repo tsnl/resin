@@ -17,6 +17,7 @@ __all__ = [
     "Draw2dExtTextPrimitive",
 ]
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from fractions import Fraction
@@ -32,7 +33,6 @@ from .basic import (
     FontWeight,
     HorizontalAlignment,
     VerticalAlignment,
-    logger,
 )
 from .bundled_data import BUNDLED_DATA_PATH
 from .resources import COOKED_ATLAS_PATH_SUFFIX, CookedAtlas
@@ -789,4 +789,4 @@ class TextShaper:
 # Logging
 #
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)

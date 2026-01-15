@@ -38,6 +38,7 @@ __all__ = [
     "GuiWindow",
 ]
 
+import logging
 from dataclasses import dataclass
 from typing import Literal, Callable
 import time
@@ -54,7 +55,6 @@ from kiwisolver import (
 
 from .basic import (
     BaseDisposable,
-    logger,
     MouseButton,
     ButtonAction,
     Font,
@@ -87,7 +87,7 @@ from .window import Window
 from .events import EventHub
 
 
-LOG = logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 type GuiImageLayout = Literal["fit", "crop", "stretch"]
