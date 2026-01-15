@@ -103,7 +103,6 @@ def main():
         file=Path("resin.log"),
     )
 
-    LOG = resin.logger(__name__)
     LOG.info(f"Starting Resin Sandbox: debug={args.debug}")
 
     # Create WebGPU device
@@ -144,6 +143,9 @@ def main():
     gui_window.dispose()
     window.dispose()
     window_context.dispose()
+
+
+LOG = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":

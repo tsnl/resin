@@ -1,7 +1,8 @@
+import logging
 import resin
 
 
-LOG = resin.logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 #

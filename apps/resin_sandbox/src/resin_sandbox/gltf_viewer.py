@@ -2,6 +2,7 @@
 Interactive GLTF model viewer with free camera and model/environment selection.
 """
 
+import logging
 from pathlib import Path
 import math
 
@@ -11,7 +12,7 @@ import numpy.typing as npt
 import resin
 
 
-LOG = resin.logger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 # Available models
