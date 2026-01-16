@@ -1061,6 +1061,253 @@ class Draw3dRenderer(BaseDisposable):
         """Get the final output image (full resolution, postprocessed)."""
         return self.output_image
 
+    def resize(self, target_size_wh_px: tuple[int, int]) -> None:
+        """
+        Resize the renderer's output textures.
+
+        Call this when the window size changes to avoid recreating the entire renderer.
+        All loaded geometry, materials, and textures are preserved.
+        """
+        if target_size_wh_px == self.target_size_wh_px:
+            return
+
+        self.target_size_wh_px = target_size_wh_px
+
+        # Calculate internal resolution
+        internal_w = max(1, int(target_size_wh_px[0] * self._render_scale))
+        internal_h = max(1, int(target_size_wh_px[1] * self._render_scale))
+        self._internal_size_wh_px = (internal_w, internal_h)
+
+        # Recreate all size-dependent textures
+        self._output_image = self.device.create_texture(
+            label="Draw3dRenderer.OutputImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._accum_image = self.device.create_texture(
+            label="Draw3dRenderer.AccumImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_DST),
+        )
+        self._frame_per_pixel_radiance_image = self.device.create_texture(
+            label="Draw3dRenderer.FramePerPixelRadianceImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_primary_ray_direction_image = self.device.create_texture(
+            label="Draw3dRenderer.FramePrimaryRayDirectionImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_surface_depth_image = self.device.create_texture(
+            label="Draw3dRenderer.FrameSurfaceDepthImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_surface_position_image = self.device.create_texture(
+            label="Draw3dRenderer.FrameSurfacePositionImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_surface_color_image = self.device.create_texture(
+            label="Draw3dRenderer.FrameSurfaceColorImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_surface_normal_image = self.device.create_texture(
+            label="Draw3dRenderer.FrameSurfaceNormalImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_surface_orm_image = self.device.create_texture(
+            label="Draw3dRenderer.FrameSurfaceOrmImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        self._frame_surface_emissive_image = self.device.create_texture(
+            label="Draw3dRenderer.FrameSurfaceEmissiveImage",
+            size=(internal_w, internal_h, 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.STORAGE_BINDING
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+        # Full-resolution final output
+        self.output_image = self.device.create_texture(
+            label="Draw3dRenderer.FinalOutputImage",
+            size=(target_size_wh_px[0], target_size_wh_px[1], 1),
+            format=wgpu.TextureFormat.rgba16float,
+            usage=(
+                wgpu.TextureUsage.RENDER_ATTACHMENT
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+
+        # Recreate per-frame bind group with new texture views
+        self._per_frame_bind_group = self.device.create_bind_group(
+            label="Draw3dRenderer.PerFrameBindGroup",
+            layout=self.per_frame_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=self._output_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=self._accum_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=self._frame_per_pixel_radiance_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=3,
+                    resource=self._frame_primary_ray_direction_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=4,
+                    resource=self._frame_surface_depth_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=5,
+                    resource=self._frame_surface_position_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=6,
+                    resource=self._frame_surface_color_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=7,
+                    resource=self._frame_surface_normal_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=8,
+                    resource=self._frame_surface_orm_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=9,
+                    resource=self._frame_surface_emissive_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=10,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._frame_info_buffer.device_buffer,
+                        offset=0,
+                        size=self._frame_info_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=11,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._camera_buffer.device_buffer,
+                        offset=0,
+                        size=self._camera_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=12,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._instance_buffer.device_buffer,
+                        offset=0,
+                        size=self._instance_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=13,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._tlas_node_buffer.device_buffer,
+                        offset=0,
+                        size=self._tlas_node_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=14,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._tlas_instance_index_buffer.device_buffer,
+                        offset=0,
+                        size=self._tlas_instance_index_buffer.device_buffer.size,
+                    ),
+                ),
+            ],
+        )
+
+        # Recreate postprocess bind group
+        self._postprocess_bind_group = self.device.create_bind_group(
+            label="Draw3dRenderer.PostprocessBindGroup",
+            layout=self.postprocess_bind_group_layout,
+            entries=[
+                wgpu.BindGroupEntry(
+                    binding=0,
+                    resource=self._output_image.create_view(),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=1,
+                    resource=self.linear_sampler,
+                ),
+                wgpu.BindGroupEntry(
+                    binding=2,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._postprocess_uniform_buffer,
+                        offset=0,
+                        size=16,
+                    ),
+                ),
+            ],
+        )
+
+        # Reset per-frame state (accumulator needs to restart)
+        # Explicitly preserve geometry, materials, and textures
+        self.reset(
+            geometry_heap=False,
+            material_heap=False,
+            texture_heap=False,
+            per_frame_state=True,
+        )
+
     def get_frame_per_pixel_radiance_image(self) -> wgpu.GPUTexture:
         """Get the per-pixel radiance debug output (internal resolution)."""
         return self._frame_per_pixel_radiance_image

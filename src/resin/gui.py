@@ -1152,6 +1152,13 @@ class Gui:
         else:
             h = height
 
+        # Resize renderer to match viewport size in pixels
+        # (resize() early-outs if size unchanged)
+        if self._gui_window is not None:
+            scale = self._gui_window._window.content_scale[0]
+            target_size_px = (int(w * scale), int(h * scale))
+            renderer.resize(target_size_px)
+
         # Draw viewport quad with renderer's output texture
         prim = Draw2dExtQuadPrimitive(
             dst_xywh_dip=(x, y, w, h),
@@ -1375,13 +1382,8 @@ class GuiWindow:
         LOG.info(f"GuiWindow resizing to {width}x{height}")
         self._framebuffer_size = new_size
 
-        # Recreate 2D renderer at new size
-        self._draw_2d_renderer = Draw2dRenderer(
-            self._device,
-            self._queue,
-            self._framebuffer_size,
-            target_format="rgba8unorm-srgb",
-        )
+        # Resize 2D renderer
+        self._draw_2d_renderer.resize(new_size)
 
     def _register_viewport(self, id: str, x: int, y: int, w: int, h: int) -> None:
         """Register viewport bounds for input tracking."""

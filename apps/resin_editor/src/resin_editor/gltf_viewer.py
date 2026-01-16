@@ -206,10 +206,7 @@ class GltfViewer:
         self._window.set_framebuffer_size_callback(self._on_framebuffer_resize)
 
     def _create_3d_renderer(self) -> None:
-        """Create or recreate 3D renderer at current framebuffer size."""
-        if self._draw_3d_renderer is not None:
-            self._draw_3d_renderer.dispose()
-
+        """Create 3D renderer at current framebuffer size."""
         self._draw_3d_renderer = resin.Draw3dRenderer(
             device=self._device,
             queue=self._queue,
@@ -228,12 +225,9 @@ class GltfViewer:
         LOG.info(f"Resizing to {width}x{height}")
         self._framebuffer_size = new_size
 
-        # Recreate 3D renderer at new size
-        self._create_3d_renderer()
-
-        # Reload resources (they're tied to the renderer)
-        self._load_model()
-        self._load_environment()
+        # Resize 3D renderer (preserves geometry, materials, textures)
+        if self._draw_3d_renderer is not None:
+            self._draw_3d_renderer.resize(new_size)
 
     def _load_model(self) -> None:
         """Load the currently selected model."""
@@ -300,6 +294,7 @@ class GltfViewer:
         assert self._draw_3d_renderer is not None
 
         # GUI frame with horizontal layout
+        # Note: viewport() automatically resizes the 3D renderer to match
         with self._gui_window.frame() as g:
             # Left panel: settings (vertical layout with fixed width)
             if self._show_settings:
@@ -398,38 +393,38 @@ class GltfViewer:
             )
             self._camera.moved_this_frame = False
 
+    @trace.decorator("GltfViewer/render_3d", "viewer")
     def _render_3d(self) -> None:
         """Render the 3D scene."""
-        with trace.span("GltfViewer/render_3d", "viewer"):
-            assert self._draw_3d_renderer is not None
+        assert self._draw_3d_renderer is not None
 
-            command_encoder = self._device.create_command_encoder()
+        command_encoder = self._device.create_command_encoder()
 
-            aspect_ratio = self._window.width_dip / self._window.height_dip
-            camera = resin.Draw3dCamera(
-                transform=self._camera.get_transform(),
-                fov_y_rad=math.radians(60),
-                aspect_ratio=aspect_ratio,
-                max_distance=100.0,
-            )
+        aspect_ratio = self._window.width_dip / self._window.height_dip
+        camera = resin.Draw3dCamera(
+            transform=self._camera.get_transform(),
+            fov_y_rad=math.radians(60),
+            aspect_ratio=aspect_ratio,
+            max_distance=100.0,
+        )
 
-            scene = resin.Draw3dScene(
-                camera=camera,
-                meshes=self._meshes or {},
-                environment_map=self._environment_texture,
-            )
+        scene = resin.Draw3dScene(
+            camera=camera,
+            meshes=self._meshes or {},
+            environment_map=self._environment_texture,
+        )
 
-            self._draw_3d_renderer.record(
-                scene=scene,
-                command_encoder=command_encoder,
-            )
+        self._draw_3d_renderer.record(
+            scene=scene,
+            command_encoder=command_encoder,
+        )
 
-            self._queue.submit([command_encoder.finish()])
+        self._queue.submit([command_encoder.finish()])
 
+    @trace.decorator("GltfViewer/present", "viewer")
     def _present(self) -> None:
         """Present the final image to screen."""
-        with trace.span("GltfViewer/present", "viewer"):
-            self._gui_window.present()
+        self._gui_window.present()
 
     def dispose(self) -> None:
         """Clean up resources."""
