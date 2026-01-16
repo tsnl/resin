@@ -65,6 +65,14 @@ FONT_WEIGHT_VALUE: dict[FontWeight, int] = {
 # Characters to pre-rasterize for the glyph atlas
 GLYPH_CODE_POINTS = set(range(32, 127))  # Basic ASCII
 
+# Unicode UI symbols (triangles for dropdown arrows, etc.)
+GLYPH_CODE_POINTS |= {
+    0x25B2,  # ▲ Black Up-Pointing Triangle
+    0x25B6,  # ▶ Black Right-Pointing Triangle
+    0x25BC,  # ▼ Black Down-Pointing Triangle
+    0x25C0,  # ◀ Black Left-Pointing Triangle
+}
+
 
 class GlyphEntry:
     """Entry for a single glyph in the atlas."""

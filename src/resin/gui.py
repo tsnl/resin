@@ -1052,9 +1052,9 @@ class Gui:
             self._style.fg_color,
         )
 
-        # Draw dropdown arrow (simple triangle representation)
+        # Draw dropdown arrow
         arrow_x = box_x + combo_w - arrow_w - pad
-        self._draw_text("v", arrow_x, box_y, arrow_w, h, self._style.fg_color)
+        self._draw_text("\u25bc", arrow_x, box_y, arrow_w, h, self._style.fg_color)
 
         # Draw dropdown list if open (deferred to render on top)
         new_index = current_index
