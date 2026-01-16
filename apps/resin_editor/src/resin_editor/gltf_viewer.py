@@ -400,7 +400,9 @@ class GltfViewer:
 
         command_encoder = self._device.create_command_encoder()
 
-        aspect_ratio = self._window.width_dip / self._window.height_dip
+        # Use render target aspect ratio (not window) since viewport may be smaller
+        target_w, target_h = self._draw_3d_renderer.target_size_wh_px
+        aspect_ratio = target_w / target_h
         camera = resin.Draw3dCamera(
             transform=self._camera.get_transform(),
             fov_y_rad=math.radians(60),
