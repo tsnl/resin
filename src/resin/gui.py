@@ -25,9 +25,12 @@ __all__ = [
 ]
 
 import logging
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal, Generator
+
+from . import trace
 
 from .basic import (
     ButtonAction,
@@ -149,6 +152,7 @@ class GuiStyle:
     """Style configuration for GUI widgets."""
 
     # Colors
+    window_bg_color: Color | None = (0.1, 0.1, 0.1, 0.85)  # None to disable
     bg_color: Color = (0.15, 0.15, 0.15, 0.95)
     bg_color_hover: Color = (0.25, 0.25, 0.25, 1.0)
     bg_color_active: Color = (0.12, 0.12, 0.12, 1.0)
@@ -303,7 +307,24 @@ class Gui:
         ]
 
     def _end_frame(self) -> None:
-        """Finalize frame - append deferred primitives (dropdowns, etc)."""
+        """Finalize frame - draw window background and append deferred primitives."""
+        # Draw window background if configured
+        if self._style.window_bg_color is not None:
+            layout = self._current_layout()
+            padding = self._style.window_padding
+
+            # Calculate content bounds
+            content_width = layout.width + padding
+            content_height = layout.cursor_y  # cursor_y is at the bottom of content
+
+            # Insert background at the beginning of primitives
+            bg_prim = Draw2dExtQuadPrimitive(
+                dst_xywh_dip=(0, 0, content_width, content_height),
+                fill_color=self._style.window_bg_color,
+            )
+            self.primitives.insert(0, bg_prim)
+
+        # Append deferred primitives (dropdowns, etc) on top
         self.primitives.extend(self._deferred_primitives)
 
     def _current_layout(self) -> _LayoutContext:
@@ -395,8 +416,17 @@ class Gui:
     # Layout Methods
     #
 
-    def begin_horizontal(self, spacing: int | None = None) -> None:
-        """Begin a horizontal layout group."""
+    @contextmanager
+    def horizontal(self, spacing: int | None = None) -> Generator[None, None, None]:
+        """
+        Context manager for horizontal layout group.
+
+        Example:
+            with g.horizontal():
+                g.button("A")
+                g.button("B")
+                g.button("C")
+        """
         layout = self._current_layout()
         self._layout_stack.append(
             _LayoutContext(
@@ -409,19 +439,18 @@ class Gui:
                 spacing=spacing if spacing is not None else self._style.item_spacing,
             )
         )
-
-    def end_horizontal(self) -> None:
-        """End a horizontal layout group."""
-        if len(self._layout_stack) <= 1:
-            return
-        finished = self._layout_stack.pop()
-        # Calculate total width and height of the horizontal group
-        total_width = finished.cursor_x - finished.origin_x - finished.spacing
-        total_height = finished.max_height
-        if total_width < 0:
-            total_width = 0
-        # Advance parent layout
-        self._advance_cursor(total_width, total_height)
+        try:
+            yield
+        finally:
+            if len(self._layout_stack) > 1:
+                finished = self._layout_stack.pop()
+                # Calculate total width and height of the horizontal group
+                total_width = finished.cursor_x - finished.origin_x - finished.spacing
+                total_height = finished.max_height
+                if total_width < 0:
+                    total_width = 0
+                # Advance parent layout
+                self._advance_cursor(total_width, total_height)
 
     def same_line(self, spacing: int | None = None) -> None:
         """Place next widget on same line as previous."""
@@ -1086,6 +1115,7 @@ def window(
 
         quads = canvas.quads(primitives=g.primitives, scale=scale)
     """
+    start = time.perf_counter()
     g = Gui(
         width=width,
         height=height,
@@ -1093,5 +1123,9 @@ def window(
         style=style or GuiStyle(),
     )
     g._begin_frame()
-    yield g
-    g._end_frame()
+    try:
+        yield g
+    finally:
+        g._end_frame()
+        end = time.perf_counter()
+        trace.add_time_span("gui/window", start, end)

@@ -13,7 +13,7 @@ import numpy.typing as npt
 import wgpu
 
 import resin
-from resin import gui
+from resin import gui, trace
 
 
 LOG = logging.getLogger(__name__)
@@ -137,9 +137,10 @@ class FreeCameraController:
 
 # Semi-transparent style for HUD overlay
 _OVERLAY_STYLE = gui.GuiStyle(
-    bg_color=(0.1, 0.1, 0.1, 0.85),
-    bg_color_hover=(0.2, 0.2, 0.2, 0.9),
-    bg_color_active=(0.08, 0.08, 0.08, 0.9),
+    window_bg_color=(0.08, 0.08, 0.08, 0.8),
+    bg_color=(0.15, 0.15, 0.15, 0.9),
+    bg_color_hover=(0.25, 0.25, 0.25, 0.95),
+    bg_color_active=(0.1, 0.1, 0.1, 0.95),
     input_bg_color=(0.05, 0.05, 0.05, 0.9),
     combo_dropdown_bg=(0.12, 0.12, 0.12, 0.95),
     window_padding=12,
@@ -269,6 +270,11 @@ class GltfViewer:
 
     def _load_model(self) -> None:
         """Load the currently selected model."""
+        with trace.span("GltfViewer/load_model", "viewer"):
+            self._load_model_impl()
+
+    def _load_model_impl(self) -> None:
+        """Load the currently selected model implementation."""
         assert self._draw_3d_renderer is not None
         self._meshes = None
 
@@ -294,6 +300,11 @@ class GltfViewer:
 
     def _load_environment(self) -> None:
         """Load the currently selected environment."""
+        with trace.span("GltfViewer/load_environment", "viewer"):
+            self._load_environment_impl()
+
+    def _load_environment_impl(self) -> None:
+        """Load the currently selected environment implementation."""
         assert self._draw_3d_renderer is not None
         env_name, env_file = ENVIRONMENTS[self._current_env]
         env_path = self._environments_path / env_file
@@ -333,6 +344,11 @@ class GltfViewer:
 
     def _update(self, dt: float) -> None:
         """Update viewer state and GUI."""
+        with trace.span("GltfViewer/update", "viewer"):
+            self._update_impl(dt)
+
+    def _update_impl(self, dt: float) -> None:
+        """Update viewer state and GUI implementation."""
         assert self._draw_3d_renderer is not None
 
         # Update camera
@@ -398,6 +414,11 @@ class GltfViewer:
 
     def _render(self) -> None:
         """Render 3D scene and GUI overlay."""
+        with trace.span("GltfViewer/render", "viewer"):
+            self._render_impl()
+
+    def _render_impl(self) -> None:
+        """Render 3D scene and GUI overlay implementation."""
         assert self._draw_2d_renderer is not None
         assert self._draw_3d_renderer is not None
 

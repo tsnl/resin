@@ -4,9 +4,9 @@ __all__ = [
     "add_time_span",
     "clear",
     "compute_execution_time",
+    "decorator",
     "enable_chromium_trace",
     "log",
-    "decorator",
     "save_chromium_trace",
     "span",
 ]
