@@ -945,29 +945,14 @@ class Draw3dRenderer(BaseDisposable):
         command_encoder: wgpu.GPUCommandEncoder,
         timestamp: float | None = None,
     ) -> None:
-        # Validate all scene resources are still valid
-        for geometry, material in scene.meshes:
-            if not geometry.is_valid:
-                raise LogicError(
-                    f"Draw3dGeometry {geometry.geometry_id} is no longer valid "
-                    "(geometry heap was cleared since it was created)"
-                )
-            if not material.is_valid:
-                raise LogicError(
-                    f"Draw3dMaterial {material.material_id} is no longer valid "
-                    "(material heap was cleared since it was created)"
-                )
-        if scene.environment_map is not None:
-            env_gen = scene.environment_map.allocation.heap_generation
-            heap_gen = self.hdr_texture_heap.generation_count
-            if env_gen != heap_gen:
-                raise LogicError(
-                    "Draw3dTexture (environment map) is no longer valid "
-                    "(texture heap was cleared since it was created)"
-                )
+        self._validate_scene(scene)
 
-        if timestamp is None:
-            timestamp = time.monotonic() - self._construction_time
+        timestamp = (
+            timestamp
+            if timestamp is not None
+            else time.monotonic() - self._construction_time
+        )
+
         self._record(
             command_encoder,
             scene,
@@ -1116,6 +1101,28 @@ class Draw3dRenderer(BaseDisposable):
             size=(w, h, 1),
         )
 
+    def _validate_scene(self, scene: "Draw3dScene") -> None:
+        for geometry, material in scene.meshes:
+            if not geometry.is_valid:
+                raise LogicError(
+                    f"Draw3dGeometry {geometry.geometry_id} is no longer valid "
+                    "(geometry heap was cleared since it was created)"
+                )
+            if not material.is_valid:
+                raise LogicError(
+                    f"Draw3dMaterial {material.material_id} is no longer valid "
+                    "(material heap was cleared since it was created)"
+                )
+
+        if scene.environment_map is not None:
+            env_gen = scene.environment_map.allocation.heap_generation
+            heap_gen = self.hdr_texture_heap.generation_count
+            if env_gen != heap_gen:
+                raise LogicError(
+                    "Draw3dTexture (environment map) is no longer valid "
+                    "(texture heap was cleared since it was created)"
+                )
+
     def _record(
         self,
         encoder: wgpu.GPUCommandEncoder,
@@ -1184,8 +1191,7 @@ class Draw3dRenderer(BaseDisposable):
         frame_info_data["target_size_h_px"] = self._internal_size_wh_px[1]
         frame_info_data["debug_flags"] = debug_flags
         frame_info_data["environment_map_texture_id"] = environment_map_texture_id
-        # Convert timestamp to 16.16 fixed-point format
-        frame_info_data["timestamp"] = np.uint32(timestamp * 65536.0)
+        frame_info_data["timestamp"] = np.uint32(timestamp * 65536.0)  # 16.16 fixed pt
         frame_info_data["frame_index"] = np.uint32(frame_index)
         frame_info_data["max_bounces"] = np.uint32(self._max_bounces)
         frame_info_data["samples_per_pixel"] = np.uint32(self._samples_per_pixel)
