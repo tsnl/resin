@@ -79,7 +79,12 @@ def _copy_ttf_font_files():
         shutil.copy(input_path, output_path)
 
 
-@task(pre=[build_fonts])
+@task
+def build_cornell_box(c: Context):
+    _uv_run(c, "python scripts/create_cornell_box.py")
+
+
+@task(pre=[build_fonts, build_cornell_box])
 def build(_: Context): ...
 
 

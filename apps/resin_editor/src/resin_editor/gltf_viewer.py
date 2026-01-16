@@ -21,17 +21,54 @@ LOG = logging.getLogger(__name__)
 
 # Available models
 MODELS = [
-    ("Sponza", "Sponza/glTF/Sponza.gltf"),
-    ("Avocado", "Avocado/glTF-Binary/Avocado.glb"),
-    ("Damaged Helmet", "DamagedHelmet/glTF/DamagedHelmet.gltf"),
-    ("Flight Helmet", "FlightHelmet/glTF/FlightHelmet.gltf"),
-    ("Water Bottle", "WaterBottle/glTF-Binary/WaterBottle.glb"),
-    ("Sci-Fi Helmet", "SciFiHelmet/glTF/SciFiHelmet.gltf"),
-    ("Lantern", "Lantern/glTF-Binary/Lantern.glb"),
-    ("Antique Camera", "AntiqueCamera/glTF-Binary/AntiqueCamera.glb"),
-    ("Boom Box", "BoomBox/glTF-Binary/BoomBox.glb"),
-    ("Corset", "Corset/glTF-Binary/Corset.glb"),
-    ("Duck", "Duck/glTF-Binary/Duck.glb"),
+    # (
+    #     "Sponza",
+    #     "tests/data/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf",
+    # ),
+    (
+        "Cornell Box",
+        "CornellBox/glTF/CornellBox.gltf",
+    ),
+    (
+        "Avocado",
+        "Avocado/glTF-Binary/Avocado.glb",
+    ),
+    (
+        "Damaged Helmet",
+        "DamagedHelmet/glTF/DamagedHelmet.gltf",
+    ),
+    (
+        "Flight Helmet",
+        "FlightHelmet/glTF/FlightHelmet.gltf",
+    ),
+    (
+        "Water Bottle",
+        "WaterBottle/glTF-Binary/WaterBottle.glb",
+    ),
+    (
+        "Sci-Fi Helmet",
+        "SciFiHelmet/glTF/SciFiHelmet.gltf",
+    ),
+    (
+        "Lantern",
+        "Lantern/glTF-Binary/Lantern.glb",
+    ),
+    (
+        "Antique Camera",
+        "AntiqueCamera/glTF-Binary/AntiqueCamera.glb",
+    ),
+    (
+        "Boom Box",
+        "BoomBox/glTF-Binary/BoomBox.glb",
+    ),
+    (
+        "Corset",
+        "Corset/glTF-Binary/Corset.glb",
+    ),
+    (
+        "Duck",
+        "Duck/glTF-Binary/Duck.glb",
+    ),
 ]
 
 # Available environments
@@ -158,18 +195,25 @@ class GltfViewer:
         *,
         window: resin.Window,
         device: wgpu.GPUDevice,
-        models_path: Path,
-        environments_path: Path,
+        workspace_root: Path,
     ):
         self._window = window
         self._device = device
         self._queue = device.queue
-        self._models_path = models_path
-        self._environments_path = environments_path
+        self._workspace_root = workspace_root
+        self._models_path = (
+            self._workspace_root / "tests" / "data" / "glTF-Sample-Assets" / "Models"
+        )
+        self._environments_path = (
+            self._workspace_root / "tests" / "data" / "glTF-Sample-Environments"
+        )
 
         # GUI window (handles 2D rendering and input)
         self._gui_window = gui.GuiWindow(
-            window, device, self._queue, style=_PANEL_STYLE
+            window,
+            device,
+            self._queue,
+            style=_PANEL_STYLE,
         )
 
         # 3D renderer (created in _create_3d_renderer)
@@ -234,13 +278,9 @@ class GltfViewer:
         if self._draw_3d_renderer is not None:
             self._draw_3d_renderer.resize(new_size)
 
+    @trace.decorator("GltfViewer/load_model", "viewer")
     def _load_model(self) -> None:
         """Load the currently selected model."""
-        with trace.span("GltfViewer/load_model", "viewer"):
-            self._load_model_impl()
-
-    def _load_model_impl(self) -> None:
-        """Load the currently selected model implementation."""
         assert self._draw_3d_renderer is not None
         self._meshes = None
 
@@ -264,14 +304,11 @@ class GltfViewer:
             )
             self._meshes[(geometry, material)] = transforms
 
+    @trace.decorator("GltfViewer/load_environment", "viewer")
     def _load_environment(self) -> None:
         """Load the currently selected environment."""
-        with trace.span("GltfViewer/load_environment", "viewer"):
-            self._load_environment_impl()
-
-    def _load_environment_impl(self) -> None:
-        """Load the currently selected environment implementation."""
         assert self._draw_3d_renderer is not None
+
         env_name, env_file = ENVIRONMENTS[self._current_env]
         env_path = self._environments_path / env_file
 

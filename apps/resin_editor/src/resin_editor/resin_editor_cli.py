@@ -52,15 +52,12 @@ def main() -> None:
 
     # Get paths for models and environments
     workspace_root = Path(__file__).parent.parent.parent.parent.parent
-    models_path = workspace_root / "tests" / "data" / "glTF-Sample-Assets" / "Models"
-    environments_path = workspace_root / "tests" / "data" / "glTF-Sample-Environments"
 
     # Create viewer
     viewer = GltfViewer(
         window=window,
         device=device,
-        models_path=models_path,
-        environments_path=environments_path,
+        workspace_root=workspace_root,
     )
 
     window.show()
