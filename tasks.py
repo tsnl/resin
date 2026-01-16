@@ -89,8 +89,8 @@ def build(_: Context): ...
 
 
 @task(pre=[build])
-def sandbox(c: Context):
-    _uv_run(c, "resin-sandbox --debug")
+def editor(c: Context):
+    _uv_run(c, "resin-editor --debug")
 
 
 @task(pre=[build])

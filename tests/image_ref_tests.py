@@ -1,5 +1,6 @@
 """Helper utilities for image reference testing."""
 
+import logging
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -7,7 +8,7 @@ import numpy as np
 
 from resin import compute_psnr
 
-LOG = __name__
+LOG = logging.getLogger(__name__)
 
 
 def assert_image_matches_reference(

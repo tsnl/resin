@@ -150,6 +150,33 @@ class Draw2dRenderer:
     def get_output_image(self) -> wgpu.GPUTexture:
         return self.output_image
 
+    def resize(self, target_size_wh: tuple[int, int]) -> None:
+        """
+        Resize the renderer's output texture.
+
+        Call this when the window size changes to avoid recreating the entire renderer.
+        """
+        if target_size_wh == self.target_size_wh:
+            return
+
+        self.target_size_wh = target_size_wh
+
+        # Recreate output texture at new size
+        self.output_image = self.device.create_texture(
+            label="Draw2dRenderer.OutputImage",
+            size=(target_size_wh[0], target_size_wh[1], 1),
+            dimension=wgpu.TextureDimension.d2,
+            format=self.target_format,
+            usage=(
+                wgpu.TextureUsage.RENDER_ATTACHMENT
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING
+            ),
+        )
+
+        # Clear quad group cache as texture references may be stale
+        self._quad_group_cache.clear()
+
     def record(
         self,
         quads: list["Draw2dQuad"],

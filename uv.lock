@@ -6,8 +6,8 @@ requires-python = ">=3.13"
 members = [
     "resin",
     "resin-bmfont-cooker",
+    "resin-editor",
     "resin-replay",
-    "resin-sandbox",
 ]
 
 [[package]]
@@ -1106,6 +1106,7 @@ source = { editable = "." }
 dependencies = [
     { name = "glfw" },
     { name = "kiwisolver" },
+    { name = "mitsuba" },
     { name = "numba" },
     { name = "numpy-quaternion" },
     { name = "pillow" },
@@ -1138,6 +1139,7 @@ requires-dist = [
     { name = "invoke", marker = "extra == 'dev'", specifier = ">=2.2.1" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "kiwisolver", specifier = ">=1.4.9" },
+    { name = "mitsuba", specifier = ">=3.7.1" },
     { name = "numba", specifier = ">=0.63.1" },
     { name = "numpy-quaternion", specifier = ">=2024.0.13" },
     { name = "pillow", specifier = ">=12.1.0" },
@@ -1171,6 +1173,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "resin-editor"
+version = "0.1.0"
+source = { editable = "apps/resin_editor" }
+dependencies = [
+    { name = "resin" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "resin", editable = "." }]
+
+[[package]]
 name = "resin-replay"
 version = "0.1.0"
 source = { editable = "apps/resin_replay" }
@@ -1191,17 +1204,6 @@ requires-dist = [
     { name = "resin", editable = "." },
 ]
 provides-extras = ["mitsuba"]
-
-[[package]]
-name = "resin-sandbox"
-version = "0.1.0"
-source = { editable = "apps/resin_sandbox" }
-dependencies = [
-    { name = "resin" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "resin", editable = "." }]
 
 [[package]]
 name = "rich"

@@ -79,6 +79,8 @@ type MouseButtonCallback = Callable[
 ]
 type CursorPosCallback = Callable[[float, float], None]
 type FramebufferSizeCallback = Callable[[int, int], None]
+type CharCallback = Callable[[str], None]
+type ScrollCallback = Callable[[float, float], None]
 
 
 class WindowContext(BaseDisposable):
@@ -122,6 +124,8 @@ class Window(BaseDisposable):
     _mouse_button_callback: MouseButtonCallback | None
     _cursor_pos_callback: CursorPosCallback | None
     _framebuffer_size_callback: FramebufferSizeCallback | None
+    _char_callback: CharCallback | None
+    _scroll_callback: ScrollCallback | None
 
     def __init__(
         self,
@@ -157,6 +161,8 @@ class Window(BaseDisposable):
         self._mouse_button_callback = None
         self._cursor_pos_callback = None
         self._framebuffer_size_callback = None
+        self._char_callback = None
+        self._scroll_callback = None
 
         # Create GLFW window and WebGPU canvas context
         self._glfw_window_handle = self._new_glfw_window()
@@ -215,6 +221,14 @@ class Window(BaseDisposable):
         glfw.set_framebuffer_size_callback(
             window=glfw_window,
             cbfun=self._on_framebuffer_resize_event,
+        )
+        glfw.set_char_callback(
+            window=glfw_window,
+            cbfun=self._on_glfw_char_event,
+        )
+        glfw.set_scroll_callback(
+            window=glfw_window,
+            cbfun=self._on_glfw_scroll_event,
         )
 
         # Update window sizes:
@@ -353,6 +367,12 @@ class Window(BaseDisposable):
     ) -> None:
         self._framebuffer_size_callback = callback
 
+    def set_char_callback(self, callback: CharCallback | None) -> None:
+        self._char_callback = callback
+
+    def set_scroll_callback(self, callback: ScrollCallback | None) -> None:
+        self._scroll_callback = callback
+
     #
     # GLFW event handlers:
     #
@@ -417,6 +437,23 @@ class Window(BaseDisposable):
 
         if self._framebuffer_size_callback is not None:
             self._framebuffer_size_callback(width_px, height_px)
+
+    def _on_glfw_char_event(
+        self,
+        _glfw_window_handle: glfw._GLFWwindow,
+        codepoint: int,
+    ) -> None:
+        if self._char_callback is not None:
+            self._char_callback(chr(codepoint))
+
+    def _on_glfw_scroll_event(
+        self,
+        _glfw_window_handle: glfw._GLFWwindow,
+        xoffset: float,
+        yoffset: float,
+    ) -> None:
+        if self._scroll_callback is not None:
+            self._scroll_callback(xoffset, yoffset)
 
 
 #
