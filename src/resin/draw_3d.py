@@ -81,6 +81,16 @@ class Draw3dRenderer(BaseDisposable):
     _frame_index: int
     _construction_time: float
 
+    # Frame profiling
+    num_frame_profiling_samples: int
+    _profiling_enabled: bool
+    _profiling_query_set: wgpu.GPUQuerySet | None
+    _profiling_resolve_buffer: wgpu.GPUBuffer | None
+    _profiling_staging_buffer: wgpu.GPUBuffer | None
+    _profiling_write_index: int
+    _profiling_sample_count: int
+    _profiling_last_log_time: float
+
     def __init__(
         self,
         device: wgpu.GPUDevice,
@@ -96,6 +106,7 @@ class Draw3dRenderer(BaseDisposable):
         triangle_capacity: int = 1 << 22,
         image_capacity: int = 1 << 8,
         subpixel_capacity: int = 1 << 29,
+        num_frame_profiling_samples: int = 5 * 3600,
     ):
         self.device = device
         self.queue = queue
@@ -851,6 +862,40 @@ class Draw3dRenderer(BaseDisposable):
             ],
         )
 
+        # Frame profiling resources
+        self.num_frame_profiling_samples = num_frame_profiling_samples
+        self._profiling_write_index = 0
+        self._profiling_sample_count = 0
+        self._profiling_last_log_time = 0.0
+
+        # Check if timestamp-query feature is available
+        self._profiling_enabled = "timestamp-query" in device.features
+        if self._profiling_enabled:
+            # Query set stores 2 timestamps per frame (begin and end of compute pass)
+            self._profiling_query_set = device.create_query_set(
+                label="Draw3dRenderer.ProfilingQuerySet",
+                type=wgpu.QueryType.timestamp,
+                count=2,
+            )
+            # Resolve buffer receives raw timestamp values from query set
+            self._profiling_resolve_buffer = device.create_buffer(
+                label="Draw3dRenderer.ProfilingResolveBuffer",
+                size=16,  # 2 * uint64
+                usage=wgpu.BufferUsage.QUERY_RESOLVE | wgpu.BufferUsage.COPY_SRC,
+            )
+            # Staging buffer stores all profiling samples for CPU readback
+            self._profiling_staging_buffer = device.create_buffer(
+                label="Draw3dRenderer.ProfilingStagingBuffer",
+                size=PodFrameTimingArray.array_size(
+                    shape=(num_frame_profiling_samples,)
+                ),
+                usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
+            )
+        else:
+            self._profiling_query_set = None
+            self._profiling_resolve_buffer = None
+            self._profiling_staging_buffer = None
+
         # Initialize frame state
         self.reset()
 
@@ -864,6 +909,11 @@ class Draw3dRenderer(BaseDisposable):
         self.rg_texture_heap.dispose()
         self.mono_texture_heap.dispose()
         self.hdr_texture_heap.dispose()
+
+        if self._profiling_resolve_buffer is not None:
+            self._profiling_resolve_buffer.destroy()
+        if self._profiling_staging_buffer is not None:
+            self._profiling_staging_buffer.destroy()
 
         return super()._on_dispose()
 
@@ -960,6 +1010,7 @@ class Draw3dRenderer(BaseDisposable):
             self._frame_index,
         )
         self._frame_index += 1
+        self._log_frame_timing_stats_if_due()
 
     def get_output_image(self) -> wgpu.GPUTexture:
         """Get the final output image (full resolution, postprocessed)."""
@@ -996,6 +1047,87 @@ class Draw3dRenderer(BaseDisposable):
     def get_frame_surface_emissive_image(self) -> wgpu.GPUTexture:
         """Get the surface emissive debug output (internal resolution)."""
         return self._frame_surface_emissive_image
+
+    @property
+    def is_profiling_enabled(self) -> bool:
+        """
+        Check if GPU frame profiling is enabled.
+
+        Profiling requires the 'timestamp-query' feature to be available on the
+        GPU device. If not available, `get_frame_timing_stats()` will return an
+        empty array.
+        """
+        return self._profiling_enabled
+
+    def get_frame_timing_stats(self) -> npt.NDArray[np.float32]:
+        """
+        Get GPU frame timing statistics for recent frames.
+
+        Returns an array of frame times in seconds, one entry per frame. The array
+        contains up to `num_frame_profiling_samples` entries (configured in constructor),
+        ordered from oldest to newest.
+
+        Note: This method blocks while mapping the staging buffer for CPU read access.
+        Call this infrequently (e.g., once per second) to avoid stalling the GPU pipeline.
+
+        Returns an empty array if profiling is not enabled (timestamp-query feature
+        not available on the GPU device).
+
+        :return: Array of frame times in seconds (float32).
+        """
+        if not self._profiling_enabled or self._profiling_staging_buffer is None:
+            return np.array([], dtype=np.float32)
+
+        if self._profiling_sample_count == 0:
+            return np.array([], dtype=np.float32)
+
+        self._profiling_staging_buffer.map_sync(mode=wgpu.MapMode.READ)
+        raw_memoryview = self._profiling_staging_buffer.read_mapped()
+        assert isinstance(raw_memoryview, memoryview)
+        raw_data = bytes(raw_memoryview)
+        self._profiling_staging_buffer.unmap()
+
+        timing_data = np.frombuffer(raw_data, dtype=PodFrameTimingArray.DTYPE)
+
+        # Extract valid samples in chronological order
+        if self._profiling_sample_count < self.num_frame_profiling_samples:
+            # Buffer not yet full - samples are at indices 0..sample_count-1
+            valid_data = timing_data[: self._profiling_sample_count]
+        else:
+            # Buffer is full and wrapping - reorder from oldest to newest
+            valid_data = np.concatenate(
+                [
+                    timing_data[self._profiling_write_index :],
+                    timing_data[: self._profiling_write_index],
+                ]
+            )
+
+        # Compute frame times in seconds from nanosecond timestamps
+        begin_ns = valid_data["begin_ns"].astype(np.float64)
+        end_ns = valid_data["end_ns"].astype(np.float64)
+        frame_times_s = ((end_ns - begin_ns) / 1e9).astype(np.float32)
+
+        return frame_times_s
+
+    def _log_frame_timing_stats_if_due(self) -> None:
+        """Log average frame timing stats every 1 second (debug level)."""
+        if not self._profiling_enabled:
+            return
+
+        current_time = time.monotonic()
+        if current_time - self._profiling_last_log_time < 1.0:
+            return
+
+        self._profiling_last_log_time = current_time
+
+        frame_times = self.get_frame_timing_stats()
+        if len(frame_times) == 0:
+            return
+
+        avg_ms = float(frame_times.mean()) * 1000.0
+        LOG.debug(
+            f"Average GPU frame time: {avg_ms:.2f}ms ({len(frame_times)} samples)"
+        )
 
     def set_debug_flags(
         self,
@@ -1148,7 +1280,17 @@ class Draw3dRenderer(BaseDisposable):
         self._upload_instances_info(scene.meshes, encoder)
 
         # Path tracing compute pass (renders to internal_image at reduced resolution)
-        compute_pass = encoder.begin_compute_pass(label="Draw3dRenderer.ComputePass")
+        timestamp_writes: wgpu.ComputePassTimestampWrites | None = None
+        if self._profiling_enabled and self._profiling_query_set is not None:
+            timestamp_writes = wgpu.ComputePassTimestampWrites(
+                query_set=self._profiling_query_set,
+                beginning_of_pass_write_index=0,
+                end_of_pass_write_index=1,
+            )
+        compute_pass = encoder.begin_compute_pass(
+            label="Draw3dRenderer.ComputePass",
+            timestamp_writes=timestamp_writes,
+        )
         compute_pass.set_pipeline(self.draw_pipeline)
         compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
         compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
@@ -1158,6 +1300,37 @@ class Draw3dRenderer(BaseDisposable):
             workgroup_count_z=1,
         )
         compute_pass.end()
+
+        # Resolve timestamp queries and copy to staging buffer (if profiling enabled)
+        if (
+            self._profiling_enabled
+            and self._profiling_query_set is not None
+            and self._profiling_resolve_buffer is not None
+            and self._profiling_staging_buffer is not None
+        ):
+            encoder.resolve_query_set(
+                query_set=self._profiling_query_set,
+                first_query=0,
+                query_count=2,
+                destination=self._profiling_resolve_buffer,
+                destination_offset=0,
+            )
+            staging_offset = (
+                self._profiling_write_index * PodFrameTimingArray.DTYPE.itemsize
+            )
+            encoder.copy_buffer_to_buffer(
+                source=self._profiling_resolve_buffer,
+                source_offset=0,
+                destination=self._profiling_staging_buffer,
+                destination_offset=staging_offset,
+                size=PodFrameTimingArray.DTYPE.itemsize,
+            )
+            self._profiling_write_index = (
+                self._profiling_write_index + 1
+            ) % self.num_frame_profiling_samples
+            self._profiling_sample_count = min(
+                self._profiling_sample_count + 1, self.num_frame_profiling_samples
+            )
 
         # Postprocess render pass (upscales and tonemaps to output_image)
         render_pass = encoder.begin_render_pass(
@@ -2278,6 +2451,17 @@ class PodTextureAllocationArray(StructuredNDArray):
             ("y", np.float32),  # upper 16 bits stores page index
             ("w", np.float32),
             ("h", np.float32),
+        ]
+    )
+
+
+class PodFrameTimingArray(StructuredNDArray):
+    """Stores GPU timestamp pairs (begin, end) for frame profiling."""
+
+    DTYPE = np.dtype(
+        [
+            ("begin_ns", np.uint64),
+            ("end_ns", np.uint64),
         ]
     )
 
