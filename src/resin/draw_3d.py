@@ -1978,6 +1978,8 @@ class LinearHeap[T: StructuredNDArray](BaseDisposable):
         element_capacity: int,
         persistent_staging_buffer_element_capacity: int = 0,
     ) -> None:
+        super().__init__()
+
         assert persistent_staging_buffer_element_capacity <= element_capacity
 
         self.device = device

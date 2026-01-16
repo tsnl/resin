@@ -20,6 +20,7 @@ Usage:
 __all__ = [
     "Gui",
     "GuiStyle",
+    "GuiWindow",
     "InputState",
     "window",
 ]
@@ -28,10 +29,11 @@ import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Literal, Generator
+from typing import TYPE_CHECKING, Literal, Generator
+
+import wgpu
 
 from . import trace
-
 from .basic import (
     ButtonAction,
     Font,
@@ -43,11 +45,18 @@ from .basic import (
     MouseButton,
     VerticalAlignment,
 )
+from .draw_2d import Draw2dRenderer
 from .draw_2d_ext import (
     Draw2dExtBasePrimitive,
+    Draw2dExtCanvas,
     Draw2dExtQuadPrimitive,
     Draw2dExtTextPrimitive,
 )
+from .gpu import BlitRenderer
+
+if TYPE_CHECKING:
+    from .draw_3d import Draw3dRenderer
+    from .window import Window
 
 
 LOG = logging.getLogger(__name__)
@@ -272,6 +281,8 @@ class Gui:
     _input: InputState
     _style: GuiStyle
     _layout_stack: list[_LayoutContext]
+    _gui_window: "GuiWindow | None"
+    _default_direction: LayoutDirection
 
     def __init__(
         self,
@@ -280,11 +291,15 @@ class Gui:
         height: int,
         input_state: InputState,
         style: GuiStyle,
+        gui_window: "GuiWindow | None" = None,
+        default_direction: LayoutDirection = "vertical",
     ) -> None:
         self._width = width
         self._height = height
         self._input = input_state
         self._style = style
+        self._gui_window = gui_window
+        self._default_direction = default_direction
         self.primitives = []
         self._deferred_primitives = []
         self._layout_stack = []
@@ -296,7 +311,7 @@ class Gui:
         padding = self._style.window_padding
         self._layout_stack = [
             _LayoutContext(
-                direction="vertical",
+                direction=self._default_direction,
                 origin_x=padding,
                 origin_y=padding,
                 width=self._width - 2 * padding,
@@ -417,9 +432,17 @@ class Gui:
     #
 
     @contextmanager
-    def horizontal(self, spacing: int | None = None) -> Generator[None, None, None]:
+    def horizontal(
+        self,
+        width: int | None = None,
+        spacing: int | None = None,
+    ) -> Generator[None, None, None]:
         """
         Context manager for horizontal layout group.
+
+        Args:
+            width: Fixed width for the group. None = fill available space.
+            spacing: Spacing between items. None = use style default.
 
         Example:
             with g.horizontal():
@@ -428,12 +451,16 @@ class Gui:
                 g.button("C")
         """
         layout = self._current_layout()
+        if width is None:
+            w = layout.width - (layout.cursor_x - layout.origin_x)
+        else:
+            w = width
         self._layout_stack.append(
             _LayoutContext(
                 direction="horizontal",
                 origin_x=layout.cursor_x,
                 origin_y=layout.cursor_y,
-                width=layout.width - (layout.cursor_x - layout.origin_x),
+                width=w,
                 cursor_x=layout.cursor_x,
                 cursor_y=layout.cursor_y,
                 spacing=spacing if spacing is not None else self._style.item_spacing,
@@ -1087,6 +1114,138 @@ class Gui:
         self._advance_cursor(total_w, h)
         return new_index
 
+    def viewport(
+        self,
+        id: str,
+        renderer: "Draw3dRenderer",
+        *,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> InputState:
+        """
+        Draw a 3D viewport and return input state filtered for this viewport.
+
+        The returned InputState only contains events if this viewport is active
+        (has keyboard focus) or hovered (for mouse events).
+
+        Args:
+            id: Unique identifier for this viewport.
+            renderer: The Draw3dRenderer whose output will be displayed.
+            width: Width in DIP. None = fill available horizontal space.
+            height: Height in DIP. None = fill available vertical space.
+
+        Returns:
+            InputState containing events filtered for this viewport.
+        """
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
+
+        # Calculate size - fill available space if not specified
+        if width is None:
+            w = layout.width - (x - layout.origin_x)
+        else:
+            w = width
+
+        if height is None:
+            h = self._height - y - self._style.window_padding
+        else:
+            h = height
+
+        # Draw viewport quad with renderer's output texture
+        prim = Draw2dExtQuadPrimitive(
+            dst_xywh_dip=(x, y, w, h),
+            fill_texture=renderer.get_output_image(),
+        )
+        self.primitives.append(prim)
+
+        self._advance_cursor(w, h)
+
+        # Create filtered input state for this viewport
+        hovered = self._is_hovered(x, y, w, h)
+        clicked = self._is_clicked(x, y, w, h)
+
+        # Track viewport in GuiWindow if available
+        if self._gui_window is not None:
+            self._gui_window._register_viewport(id, x, y, w, h)
+            if hovered:
+                self._gui_window._hovered_viewport_id = id
+            if clicked:
+                self._gui_window._active_viewport_id = id
+
+            return self._gui_window._get_viewport_input(id)
+
+        # Fallback: return filtered input based on hover/focus
+        return self._create_filtered_input(hovered)
+
+    def _create_filtered_input(self, active: bool) -> InputState:
+        """Create a filtered InputState based on whether viewport is active."""
+        if not active:
+            # Return empty input state
+            return InputState()
+
+        # Return copy of current input
+        return InputState(
+            mouse_x=self._input.mouse_x,
+            mouse_y=self._input.mouse_y,
+            mouse_down=dict(self._input.mouse_down),
+            mouse_clicked=dict(self._input.mouse_clicked),
+            mouse_released=dict(self._input.mouse_released),
+            keys_down=set(self._input.keys_down),
+            keys_pressed=set(self._input.keys_pressed),
+            keys_released=set(self._input.keys_released),
+            text_input=self._input.text_input,
+            scroll_x=self._input.scroll_x,
+            scroll_y=self._input.scroll_y,
+        )
+
+    @contextmanager
+    def vertical(
+        self,
+        width: int | None = None,
+        spacing: int | None = None,
+    ) -> Generator[None, None, None]:
+        """
+        Context manager for vertical layout group.
+
+        Args:
+            width: Fixed width for the group. None = fill available space.
+            spacing: Spacing between items. None = use style default.
+
+        Example:
+            with g.vertical(width=200):
+                g.label("Line 1")
+                g.label("Line 2")
+        """
+        layout = self._current_layout()
+        if width is None:
+            w = layout.width - (layout.cursor_x - layout.origin_x)
+        else:
+            w = width
+        self._layout_stack.append(
+            _LayoutContext(
+                direction="vertical",
+                origin_x=layout.cursor_x,
+                origin_y=layout.cursor_y,
+                width=w,
+                cursor_x=layout.cursor_x,
+                cursor_y=layout.cursor_y,
+                spacing=spacing if spacing is not None else self._style.item_spacing,
+            )
+        )
+        try:
+            yield
+        finally:
+            if len(self._layout_stack) > 1:
+                finished = self._layout_stack.pop()
+                # Calculate total height of the vertical group
+                total_height = finished.cursor_y - finished.origin_y - finished.spacing
+                total_width = finished.width
+                if total_height < 0:
+                    total_height = 0
+                # Advance parent layout
+                self._advance_cursor(total_width, total_height)
+
 
 #
 # Context Manager
@@ -1129,3 +1288,242 @@ def window(
         g._end_frame()
         end = time.perf_counter()
         trace.add_time_span("gui/window", start, end)
+
+
+#
+# GuiWindow Class
+#
+
+
+class GuiWindow:
+    """
+    High-level GUI window that encapsulates rendering and input handling.
+
+    Manages Draw2dRenderer, handles window callbacks, and tracks viewport focus.
+    Provides a frame() context manager that yields a Gui with horizontal default layout.
+
+    Example:
+        gui_window = GuiWindow(window, device, queue)
+
+        while running:
+            with gui_window.frame() as g:
+                # Horizontal layout by default - widgets stack left-to-right
+                with g.vertical():
+                    g.label("Settings")
+                    g.slider_float("Value", value, 0, 1)
+
+                viewport_input = g.viewport("main", renderer_3d)
+                camera.update(viewport_input, dt)
+
+            gui_window.present()
+    """
+
+    def __init__(
+        self,
+        window: "Window",
+        device: wgpu.GPUDevice,
+        queue: wgpu.GPUQueue,
+        *,
+        style: GuiStyle | None = None,
+    ) -> None:
+        self._window = window
+        self._device = device
+        self._queue = queue
+        self._style = style or GuiStyle()
+
+        # Create renderers
+        self._framebuffer_size = (window.width_px, window.height_px)
+        self._draw_2d_renderer = Draw2dRenderer(
+            device,
+            queue,
+            self._framebuffer_size,
+            target_format="rgba8unorm-srgb",
+        )
+        self._draw_2d_canvas = Draw2dExtCanvas(device=device, queue=queue)
+        self._blit_renderer = BlitRenderer(device=device)
+
+        # Input state
+        self._input = InputState()
+        self._active_viewport_id: str | None = None
+        self._hovered_viewport_id: str | None = None
+        self._viewport_bounds: dict[str, tuple[int, int, int, int]] = {}
+
+        # Current frame state
+        self._current_primitives: list[Draw2dExtBasePrimitive] = []
+
+        # Register window callbacks
+        self._setup_callbacks()
+
+    def _setup_callbacks(self) -> None:
+        """Register window input callbacks."""
+        self._window.set_mouse_button_callback(self._input.on_mouse_button)
+        self._window.set_cursor_pos_callback(self._input.on_cursor_pos)
+        self._window.set_key_callback(self._input.on_key)
+        self._window.set_char_callback(self._input.on_char)
+        self._window.set_scroll_callback(self._input.on_scroll)
+        self._window.set_framebuffer_size_callback(self._on_framebuffer_resize)
+
+    def _on_framebuffer_resize(self, width: int, height: int) -> None:
+        """Handle framebuffer resize."""
+        if width == 0 or height == 0:
+            return
+
+        new_size = (width, height)
+        if new_size == self._framebuffer_size:
+            return
+
+        LOG.info(f"GuiWindow resizing to {width}x{height}")
+        self._framebuffer_size = new_size
+
+        # Recreate 2D renderer at new size
+        self._draw_2d_renderer = Draw2dRenderer(
+            self._device,
+            self._queue,
+            self._framebuffer_size,
+            target_format="rgba8unorm-srgb",
+        )
+
+    def _register_viewport(self, id: str, x: int, y: int, w: int, h: int) -> None:
+        """Register viewport bounds for input tracking."""
+        self._viewport_bounds[id] = (x, y, w, h)
+
+    def _get_viewport_input(self, viewport_id: str) -> InputState:
+        """Get filtered input state for a viewport."""
+        is_hovered = self._hovered_viewport_id == viewport_id
+        is_active = self._active_viewport_id == viewport_id
+
+        # Mouse events go to hovered viewport
+        # Keyboard events go to active viewport
+        filtered = InputState()
+
+        if is_hovered:
+            # Provide mouse state
+            filtered.mouse_x = self._input.mouse_x
+            filtered.mouse_y = self._input.mouse_y
+            filtered.mouse_down = dict(self._input.mouse_down)
+            filtered.mouse_clicked = dict(self._input.mouse_clicked)
+            filtered.mouse_released = dict(self._input.mouse_released)
+            filtered.scroll_x = self._input.scroll_x
+            filtered.scroll_y = self._input.scroll_y
+
+        if is_active:
+            # Provide keyboard state
+            filtered.keys_down = set(self._input.keys_down)
+            filtered.keys_pressed = set(self._input.keys_pressed)
+            filtered.keys_released = set(self._input.keys_released)
+            filtered.text_input = self._input.text_input
+
+        return filtered
+
+    @property
+    def input(self) -> InputState:
+        """Get the raw input state (for non-viewport widgets)."""
+        return self._input
+
+    @property
+    def active_viewport_id(self) -> str | None:
+        """Get the ID of the currently active (focused) viewport."""
+        return self._active_viewport_id
+
+    @property
+    def hovered_viewport_id(self) -> str | None:
+        """Get the ID of the currently hovered viewport."""
+        return self._hovered_viewport_id
+
+    @contextmanager
+    def frame(self) -> Generator[Gui, None, None]:
+        """
+        Context manager for a GUI frame.
+
+        Default layout is horizontal - widgets stack left-to-right.
+        Use g.vertical() for vertical sections.
+
+        Example:
+            with gui_window.frame() as g:
+                with g.vertical():
+                    g.label("Panel")
+                viewport_input = g.viewport("main", renderer)
+        """
+        start = time.perf_counter()
+
+        # Begin frame
+        self._input.begin_frame()
+        self._window.poll_events()
+        self._hovered_viewport_id = None
+        self._viewport_bounds.clear()
+
+        g = Gui(
+            width=self._window.width_dip,
+            height=self._window.height_dip,
+            input_state=self._input,
+            style=self._style,
+            gui_window=self,
+            default_direction="horizontal",
+        )
+        g._begin_frame()
+
+        try:
+            yield g
+        finally:
+            g._end_frame()
+            self._current_primitives = g.primitives
+            end = time.perf_counter()
+            trace.add_time_span("GuiWindow/frame", start, end)
+
+    def render(self, command_encoder: wgpu.GPUCommandEncoder) -> None:
+        """
+        Render the GUI primitives to the internal texture.
+
+        Call this after frame() context exits to render the GUI.
+        """
+        with trace.span("GuiWindow/render", "gui"):
+            scale = self._window.content_scale[0]
+
+            quads = self._draw_2d_canvas.quads(
+                primitives=self._current_primitives,
+                scale=scale,
+            )
+
+            self._draw_2d_renderer.record(
+                quads=quads,
+                command_encoder=command_encoder,
+            )
+
+    def present(self, command_encoder: wgpu.GPUCommandEncoder | None = None) -> None:
+        """
+        Render GUI and present to screen.
+
+        If command_encoder is None, creates one and submits immediately.
+        """
+        with trace.span("GuiWindow/present", "gui"):
+            current_texture = self._window.canvas_context.get_current_texture()
+            if current_texture is None:
+                return
+
+            owns_encoder = command_encoder is None
+            if owns_encoder:
+                command_encoder = self._device.create_command_encoder()
+
+            assert command_encoder is not None
+
+            # Render GUI
+            self.render(command_encoder)
+
+            # Blit to screen
+            self._blit_renderer.record(
+                input_texture=self._draw_2d_renderer.get_output_image(),
+                output_texture=current_texture,
+                command_encoder=command_encoder,
+            )
+
+            if owns_encoder:
+                self._queue.submit([command_encoder.finish()])
+                self._window.canvas_context.present()
+
+    def get_output_image(self) -> wgpu.GPUTexture:
+        """Get the rendered GUI texture (for compositing)."""
+        return self._draw_2d_renderer.get_output_image()
+
+    def dispose(self) -> None:
+        """Clean up resources."""
+        self._draw_2d_canvas.dispose()

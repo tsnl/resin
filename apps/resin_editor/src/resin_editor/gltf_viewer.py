@@ -1,7 +1,7 @@
 """
 Interactive GLTF model viewer with free camera and model/environment selection.
 
-Uses immediate-mode GUI for the settings panel overlay.
+Uses immediate-mode GUI with GuiWindow for the settings panel and 3D viewport.
 """
 
 import logging
@@ -135,22 +135,22 @@ class FreeCameraController:
         return transform
 
 
-# Semi-transparent style for HUD overlay
-_OVERLAY_STYLE = gui.GuiStyle(
-    window_bg_color=(0.08, 0.08, 0.08, 0.8),
-    bg_color=(0.15, 0.15, 0.15, 0.9),
+# Style for settings panel
+_PANEL_STYLE = gui.GuiStyle(
+    window_bg_color=None,  # No background for horizontal root
+    bg_color=(0.15, 0.15, 0.15, 0.95),
     bg_color_hover=(0.25, 0.25, 0.25, 0.95),
     bg_color_active=(0.1, 0.1, 0.1, 0.95),
     input_bg_color=(0.05, 0.05, 0.05, 0.9),
     combo_dropdown_bg=(0.12, 0.12, 0.12, 0.95),
-    window_padding=12,
-    item_spacing=6,
+    window_padding=0,
+    item_spacing=0,
     label_width=80,
 )
 
 
 class GltfViewer:
-    """GLTF model viewer with immediate-mode GUI overlay."""
+    """GLTF model viewer with immediate-mode GUI and 3D viewport."""
 
     def __init__(
         self,
@@ -166,17 +166,15 @@ class GltfViewer:
         self._models_path = models_path
         self._environments_path = environments_path
 
-        # Renderers (created in _create_renderers)
-        self._framebuffer_size = (window.width_px, window.height_px)
-        self._draw_2d_renderer: resin.Draw2dRenderer | None = None
-        self._draw_2d_canvas = resin.Draw2dExtCanvas(device=device, queue=self._queue)
-        self._draw_3d_renderer: resin.Draw3dRenderer | None = None
-        self._blit_renderer = resin.BlitRenderer(device=device)
-        self._create_renderers()
+        # GUI window (handles 2D rendering and input)
+        self._gui_window = gui.GuiWindow(
+            window, device, self._queue, style=_PANEL_STYLE
+        )
 
-        # GUI input state
-        self._input = gui.InputState()
-        self._setup_input_callbacks()
+        # 3D renderer (created in _create_3d_renderer)
+        self._framebuffer_size = (window.width_px, window.height_px)
+        self._draw_3d_renderer: resin.Draw3dRenderer | None = None
+        self._create_3d_renderer()
 
         # Camera
         self._camera = FreeCameraController(position=(0.0, -5.0, 1.0))
@@ -188,6 +186,7 @@ class GltfViewer:
         self._current_env = 0
         self._exposure = 1.0
         self._show_settings = True
+        self._panel_width = 220
 
         # 3D resources
         self._meshes: (
@@ -203,54 +202,22 @@ class GltfViewer:
         self._load_model()
         self._load_environment()
 
-    def _create_renderers(self) -> None:
-        """Create or recreate renderers at current framebuffer size."""
-        size = self._framebuffer_size
+        # Set up resize callback
+        self._window.set_framebuffer_size_callback(self._on_framebuffer_resize)
 
-        # Dispose old renderers if they exist
+    def _create_3d_renderer(self) -> None:
+        """Create or recreate 3D renderer at current framebuffer size."""
         if self._draw_3d_renderer is not None:
             self._draw_3d_renderer.dispose()
 
-        self._draw_2d_renderer = resin.Draw2dRenderer(
-            self._device, self._queue, size, target_format="rgba8unorm-srgb"
-        )
         self._draw_3d_renderer = resin.Draw3dRenderer(
-            device=self._device, queue=self._queue, target_size_wh_px=size
+            device=self._device,
+            queue=self._queue,
+            target_size_wh_px=self._framebuffer_size,
         )
-
-    def _setup_input_callbacks(self) -> None:
-        """Wire up window callbacks to input state."""
-        self._window.set_mouse_button_callback(self._on_mouse_button)
-        self._window.set_cursor_pos_callback(self._on_cursor_pos)
-        self._window.set_key_callback(self._input.on_key)
-        self._window.set_char_callback(self._input.on_char)
-        self._window.set_scroll_callback(self._input.on_scroll)
-        self._window.set_framebuffer_size_callback(self._on_framebuffer_resize)
-
-    def _on_mouse_button(
-        self,
-        button: resin.MouseButton,
-        action: resin.ButtonAction,
-        mods: list[resin.KeyModifier],
-    ) -> None:
-        """Handle mouse button events."""
-        self._input.on_mouse_button(button, action, mods)
-
-    def _on_cursor_pos(self, x: float, y: float) -> None:
-        """Handle cursor position with click-and-drag camera look."""
-        dx = x - self._last_mouse_x
-        dy = y - self._last_mouse_y
-        self._last_mouse_x = x
-        self._last_mouse_y = y
-
-        self._input.on_cursor_pos(x, y)
-
-        # Camera look when left mouse button is held
-        if self._input.mouse_down.get("left", False):
-            self._camera.handle_mouse_look(dx, dy)
 
     def _on_framebuffer_resize(self, width: int, height: int) -> None:
-        """Handle framebuffer resize by recreating renderers."""
+        """Handle framebuffer resize."""
         if width == 0 or height == 0:
             return
 
@@ -261,8 +228,8 @@ class GltfViewer:
         LOG.info(f"Resizing to {width}x{height}")
         self._framebuffer_size = new_size
 
-        # Recreate renderers at new size
-        self._create_renderers()
+        # Recreate 3D renderer at new size
+        self._create_3d_renderer()
 
         # Reload resources (they're tied to the renderer)
         self._load_model()
@@ -330,30 +297,98 @@ class GltfViewer:
 
     def run(self, dt: float = 1 / 60) -> None:
         """Run one frame of the viewer."""
-        self._input.begin_frame()
-        self._window.poll_events()
-        self._handle_input()
-        self._update(dt)
-        self._render()
-
-    def _handle_input(self) -> None:
-        """Handle input events."""
-        # Tab toggles settings panel
-        if "tab" in self._input.keys_pressed:
-            self._show_settings = not self._show_settings
-
-    def _update(self, dt: float) -> None:
-        """Update viewer state and GUI."""
-        with trace.span("GltfViewer/update", "viewer"):
-            self._update_impl(dt)
-
-    def _update_impl(self, dt: float) -> None:
-        """Update viewer state and GUI implementation."""
         assert self._draw_3d_renderer is not None
 
-        # Update camera
-        self._camera.update(self._input, dt)
+        # GUI frame with horizontal layout
+        with self._gui_window.frame() as g:
+            # Left panel: settings (vertical layout with fixed width)
+            if self._show_settings:
+                with g.vertical(width=self._panel_width):
+                    self._draw_settings_panel(g)
 
+            # Main viewport: 3D scene (fills remaining space)
+            viewport_input = g.viewport("main", self._draw_3d_renderer)
+
+            # Handle viewport input
+            self._handle_viewport_input(viewport_input, dt)
+
+        # Handle global input (tab to toggle panel)
+        if "tab" in self._gui_window.input.keys_pressed:
+            self._show_settings = not self._show_settings
+
+        # Render 3D scene
+        self._render_3d()
+
+        # Present everything
+        self._present()
+
+    def _draw_settings_panel(self, g: gui.Gui) -> None:
+        """Draw the settings panel widgets."""
+        # Panel background
+        g._draw_rect(
+            0,
+            0,
+            self._panel_width,
+            self._window.height_dip,
+            (0.08, 0.08, 0.08, 0.9),
+        )
+
+        # Add padding
+        g.space(8)
+        g.indent(8)
+
+        g.label("GLTF Viewer")
+        g.separator()
+
+        # Model selection
+        new_model = g.combo("Model", self._current_model, [m[0] for m in MODELS])
+        if new_model != self._current_model:
+            self._current_model = new_model
+            self._load_model()
+
+        # Environment selection
+        new_env = g.combo("Env", self._current_env, [e[0] for e in ENVIRONMENTS])
+        if new_env != self._current_env:
+            self._current_env = new_env
+            self._load_environment()
+
+        g.space(8)
+
+        # Camera controls
+        self._exposure = g.slider_float("Exposure", self._exposure, 0.1, 5.0)
+        self._camera.move_speed = g.slider_float(
+            "Move Speed", self._camera.move_speed, 0.5, 10.0
+        )
+
+        g.space(16)
+        g.separator()
+        g.space(4)
+
+        # Help text
+        g.label("Controls:")
+        g.label("  WASD + Space/Shift - Move")
+        g.label("  LMB + Drag - Look around")
+        g.label("  TAB - Toggle this panel")
+
+        g.unindent(8)
+
+    def _handle_viewport_input(self, input_state: gui.InputState, dt: float) -> None:
+        """Handle input for the 3D viewport."""
+        assert self._draw_3d_renderer is not None
+
+        # Camera movement (keyboard)
+        self._camera.update(input_state, dt)
+
+        # Camera look (mouse drag)
+        if input_state.mouse_down.get("left", False):
+            dx = input_state.mouse_x - self._last_mouse_x
+            dy = input_state.mouse_y - self._last_mouse_y
+            self._camera.handle_mouse_look(dx, dy)
+
+        self._last_mouse_x = input_state.mouse_x
+        self._last_mouse_y = input_state.mouse_y
+
+        # Reset accumulator if camera moved
         if self._camera.moved_this_frame:
             self._draw_3d_renderer.reset(
                 geometry_heap=False,
@@ -363,125 +398,41 @@ class GltfViewer:
             )
             self._camera.moved_this_frame = False
 
-        # Build GUI
-        self._gui_primitives: list[resin.Draw2dExtBasePrimitive] = []
+    def _render_3d(self) -> None:
+        """Render the 3D scene."""
+        with trace.span("GltfViewer/render_3d", "viewer"):
+            assert self._draw_3d_renderer is not None
 
-        if self._show_settings:
-            with gui.window(
-                width=self._window.width_dip,
-                height=self._window.height_dip,
-                input_state=self._input,
-                style=_OVERLAY_STYLE,
-            ) as g:
-                g.label("GLTF Viewer")
-                g.separator()
+            command_encoder = self._device.create_command_encoder()
 
-                # Model selection
-                new_model = g.combo(
-                    "Model", self._current_model, [m[0] for m in MODELS]
-                )
-                if new_model != self._current_model:
-                    self._current_model = new_model
-                    self._load_model()
+            aspect_ratio = self._window.width_dip / self._window.height_dip
+            camera = resin.Draw3dCamera(
+                transform=self._camera.get_transform(),
+                fov_y_rad=math.radians(60),
+                aspect_ratio=aspect_ratio,
+                max_distance=100.0,
+            )
 
-                # Environment selection
-                new_env = g.combo(
-                    "Env", self._current_env, [e[0] for e in ENVIRONMENTS]
-                )
-                if new_env != self._current_env:
-                    self._current_env = new_env
-                    self._load_environment()
+            scene = resin.Draw3dScene(
+                camera=camera,
+                meshes=self._meshes or {},
+                environment_map=self._environment_texture,
+            )
 
-                g.space(8)
+            self._draw_3d_renderer.record(
+                scene=scene,
+                command_encoder=command_encoder,
+            )
 
-                # Camera controls
-                self._exposure = g.slider_float("Exposure", self._exposure, 0.1, 5.0)
-                self._camera.move_speed = g.slider_float(
-                    "Move Speed", self._camera.move_speed, 0.5, 10.0
-                )
+            self._queue.submit([command_encoder.finish()])
 
-                g.space(16)
-                g.separator()
-                g.space(4)
-
-                # Help text
-                g.label("Controls:")
-                g.label("  WASD + Space/Shift - Move")
-                g.label("  LMB + Drag - Look around")
-                g.label("  TAB - Toggle this panel")
-
-            self._gui_primitives = g.primitives
-
-    def _render(self) -> None:
-        """Render 3D scene and GUI overlay."""
-        with trace.span("GltfViewer/render", "viewer"):
-            self._render_impl()
-
-    def _render_impl(self) -> None:
-        """Render 3D scene and GUI overlay implementation."""
-        assert self._draw_2d_renderer is not None
-        assert self._draw_3d_renderer is not None
-
-        current_texture = self._window.canvas_context.get_current_texture()
-        if current_texture is None:
-            return
-
-        command_encoder = self._device.create_command_encoder()
-
-        # 3D rendering
-        aspect_ratio = self._window.width_dip / self._window.height_dip
-        camera = resin.Draw3dCamera(
-            transform=self._camera.get_transform(),
-            fov_y_rad=math.radians(60),
-            aspect_ratio=aspect_ratio,
-            max_distance=100.0,
-        )
-
-        scene = resin.Draw3dScene(
-            camera=camera,
-            meshes=self._meshes or {},
-            environment_map=self._environment_texture,
-        )
-
-        self._draw_3d_renderer.record(
-            scene=scene,
-            command_encoder=command_encoder,
-        )
-
-        # Composite: 3D background + 2D GUI overlay using Draw2dRenderer's alpha blending
-        scale = self._window.content_scale[0]
-        size = (self._window.width_px, self._window.height_px)
-
-        # Full-screen quad with 3D output as texture (background layer)
-        background_quad = resin.Draw2dQuad(
-            dst_xy_px=(0, 0),
-            dst_wh_px=size,
-            fill_texture=self._draw_3d_renderer.get_output_image(),
-        )
-
-        # GUI overlay quads
-        gui_quads = self._draw_2d_canvas.quads(
-            primitives=self._gui_primitives, scale=scale
-        )
-
-        # Render 3D background first, then GUI on top (alpha blended)
-        self._draw_2d_renderer.record(
-            quads=[background_quad] + gui_quads,
-            command_encoder=command_encoder,
-        )
-
-        # Present final composited image to screen
-        self._blit_renderer.record(
-            input_texture=self._draw_2d_renderer.get_output_image(),
-            output_texture=current_texture,
-            command_encoder=command_encoder,
-        )
-
-        self._queue.submit([command_encoder.finish()])
-        self._window.canvas_context.present()
+    def _present(self) -> None:
+        """Present the final image to screen."""
+        with trace.span("GltfViewer/present", "viewer"):
+            self._gui_window.present()
 
     def dispose(self) -> None:
         """Clean up resources."""
-        self._draw_2d_canvas.dispose()
+        self._gui_window.dispose()
         if self._draw_3d_renderer is not None:
             self._draw_3d_renderer.dispose()
