@@ -183,7 +183,7 @@ class GltfViewer:
         self._last_mouse_y = 0.0
 
         # Viewer state
-        self._current_model = 2
+        self._current_model = 0  # Default to Sponza for benchmarking
         self._current_env = 0
         self._exposure = 1.0
         self._show_settings = True

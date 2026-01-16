@@ -4,13 +4,8 @@ Sponza benchmark script for measuring path tracer performance.
 
 Renders the Sponza scene from multiple canonical viewpoints, measures timing
 statistics, and saves reference images for comparison.
-
-Usage:
-    python scripts/sponza-benchmark.py              # Run with megakernel (default)
-    python scripts/sponza-benchmark.py --wavefront  # Run with wavefront path tracing
 """
 
-import argparse
 import json
 import logging
 import shutil
@@ -164,27 +159,15 @@ def save_image(data: npt.NDArray[np.float32], output_path: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Sponza benchmark for measuring path tracer performance."
-    )
-    parser.add_argument(
-        "--wavefront",
-        action="store_true",
-        help="Use wavefront path tracing instead of megakernel",
-    )
-    args = parser.parse_args()
-
     setup_logging(level=logging.INFO)
 
-    mode = "wavefront" if args.wavefront else "megakernel"
     LOG.info("Sponza Benchmark")
     LOG.info("================")
-    LOG.info(f"Mode: {mode}")
     LOG.info(f"Resolution: {FRAME_WIDTH}x{FRAME_HEIGHT}")
     LOG.info(f"Samples per pixel: {SAMPLES_PER_PIXEL}")
     LOG.info(f"Accumulator frames: {ACCUMULATOR_FRAMES}")
 
-    output_dir = Path(f"output/sponza-benchmark-{mode}")
+    output_dir = Path("output/sponza-benchmark")
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -203,11 +186,6 @@ def main() -> int:
         samples_per_pixel=SAMPLES_PER_PIXEL,
         accumulator_frame_count=ACCUMULATOR_FRAMES,
     )
-
-    # Enable wavefront mode if requested
-    if args.wavefront:
-        LOG.info("Enabling wavefront path tracing mode")
-        renderer.set_wavefront_enabled(True)
 
     # Enable debug AOVs for validation
     renderer.set_debug_flags(
@@ -316,9 +294,7 @@ def main() -> int:
         ]
         for aov_name, aov_texture in aov_textures:
             aov_path = output_dir / name / f"{aov_name}-00000-resin.png"
-            aov_data = readback_texture(
-                gpu_device, aov_texture, FRAME_WIDTH, FRAME_HEIGHT
-            )
+            aov_data = readback_texture(gpu_device, aov_texture, FRAME_WIDTH, FRAME_HEIGHT)
             save_image(aov_data, aov_path)
             LOG.info(f"  AOV saved: {aov_path}")
 
@@ -358,7 +334,6 @@ def main() -> int:
     # Save timing report
     report = {
         "benchmark": "sponza",
-        "mode": mode,
         "resolution": [FRAME_WIDTH, FRAME_HEIGHT],
         "samples_per_pixel": SAMPLES_PER_PIXEL,
         "accumulator_frames": ACCUMULATOR_FRAMES,

@@ -389,30 +389,6 @@ class Draw3dRenderer(BaseDisposable):
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
                 ),
-                # @group(1) @binding(15) var<storage, read_write> wf_rays: array<PodRay>;
-                wgpu.BindGroupLayoutEntry(
-                    binding=15,
-                    visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(type="storage"),
-                ),
-                # @group(1) @binding(16) var<storage, read_write> wf_path_states: array<PodPathState>;
-                wgpu.BindGroupLayoutEntry(
-                    binding=16,
-                    visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(type="storage"),
-                ),
-                # @group(1) @binding(17) var<storage, read_write> wf_hits: array<PodHit>;
-                wgpu.BindGroupLayoutEntry(
-                    binding=17,
-                    visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(type="storage"),
-                ),
-                # @group(1) @binding(18) var<storage, read_write> wf_compact_state
-                wgpu.BindGroupLayoutEntry(
-                    binding=18,
-                    visibility=wgpu.ShaderStage.COMPUTE,
-                    buffer=wgpu.BufferBindingLayout(type="storage"),
-                ),
             ],
         )
 
@@ -434,48 +410,6 @@ class Draw3dRenderer(BaseDisposable):
             compute=wgpu.ProgrammableStage(
                 module=self.draw_shader,
                 entry_point="main_wrapper",
-            ),
-        )
-
-        # Wavefront path tracing pipelines
-        self._wf_gen_primary_rays_pipeline = device.create_compute_pipeline(
-            label="Draw3dRenderer.WfGenPrimaryRaysPipeline",
-            layout=pipeline_layout,
-            compute=wgpu.ProgrammableStage(
-                module=self.draw_shader,
-                entry_point="wf_gen_primary_rays",
-            ),
-        )
-        self._wf_trace_rays_pipeline = device.create_compute_pipeline(
-            label="Draw3dRenderer.WfTraceRaysPipeline",
-            layout=pipeline_layout,
-            compute=wgpu.ProgrammableStage(
-                module=self.draw_shader,
-                entry_point="wf_trace_rays",
-            ),
-        )
-        self._wf_shade_and_extend_pipeline = device.create_compute_pipeline(
-            label="Draw3dRenderer.WfShadeAndExtendPipeline",
-            layout=pipeline_layout,
-            compute=wgpu.ProgrammableStage(
-                module=self.draw_shader,
-                entry_point="wf_shade_and_extend",
-            ),
-        )
-        self._wf_finalize_pipeline = device.create_compute_pipeline(
-            label="Draw3dRenderer.WfFinalizePipeline",
-            layout=pipeline_layout,
-            compute=wgpu.ProgrammableStage(
-                module=self.draw_shader,
-                entry_point="wf_finalize",
-            ),
-        )
-        self._wf_swap_buffers_pipeline = device.create_compute_pipeline(
-            label="Draw3dRenderer.WfSwapBuffersPipeline",
-            layout=pipeline_layout,
-            compute=wgpu.ProgrammableStage(
-                module=self.draw_shader,
-                entry_point="wf_swap_buffers",
             ),
         )
 
@@ -873,35 +807,6 @@ class Draw3dRenderer(BaseDisposable):
             device_buffer_usages=wgpu.BufferUsage.STORAGE,
         )
 
-        # Wavefront path tracing buffers
-        wf_ray_count = internal_w * internal_h
-        self._wf_ray_count = wf_ray_count
-
-        # Ray buffer is double-sized for ping-pong compaction
-        self._wf_ray_buffer = device.create_buffer(
-            label="Draw3dRenderer.RayBuffer",
-            size=PodRayArray.array_size(shape=(wf_ray_count * 2,)),
-            usage=wgpu.BufferUsage.STORAGE,
-        )
-        # Path state is indexed by pixel (not compacted)
-        self._wf_path_state_buffer = device.create_buffer(
-            label="Draw3dRenderer.PathStateBuffer",
-            size=PodPathStateArray.array_size(shape=(wf_ray_count,)),
-            usage=wgpu.BufferUsage.STORAGE,
-        )
-        # Hit buffer is single-buffered (used within each bounce)
-        self._wf_hit_buffer = device.create_buffer(
-            label="Draw3dRenderer.HitBuffer",
-            size=PodHitArray.array_size(shape=(wf_ray_count,)),
-            usage=wgpu.BufferUsage.STORAGE,
-        )
-        # Compact state: [active_count, current_buf, next_count] - 3 atomic u32s
-        self._wf_compact_state_buffer = device.create_buffer(
-            label="Draw3dRenderer.CompactStateBuffer",
-            size=3 * 4,  # 3 x u32
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
-
         self._per_frame_bind_group = device.create_bind_group(
             label="Draw3dRenderer.PerFrameBindGroup",
             layout=self.per_frame_bind_group_layout,
@@ -984,38 +889,6 @@ class Draw3dRenderer(BaseDisposable):
                         buffer=self._tlas_instance_index_buffer.device_buffer,
                         offset=0,
                         size=self._tlas_instance_index_buffer.device_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=15,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_ray_buffer,
-                        offset=0,
-                        size=self._wf_ray_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=16,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_path_state_buffer,
-                        offset=0,
-                        size=self._wf_path_state_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=17,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_hit_buffer,
-                        offset=0,
-                        size=self._wf_hit_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=18,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_compact_state_buffer,
-                        offset=0,
-                        size=self._wf_compact_state_buffer.size,
                     ),
                 ),
             ],
@@ -1397,31 +1270,6 @@ class Draw3dRenderer(BaseDisposable):
             ),
         )
 
-        # Recreate wavefront buffers for new resolution
-        wf_ray_count = internal_w * internal_h
-        self._wf_ray_count = wf_ray_count
-
-        self._wf_ray_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.RayBuffer",
-            size=PodRayArray.array_size(shape=(wf_ray_count * 2,)),
-            usage=wgpu.BufferUsage.STORAGE,
-        )
-        self._wf_path_state_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.PathStateBuffer",
-            size=PodPathStateArray.array_size(shape=(wf_ray_count,)),
-            usage=wgpu.BufferUsage.STORAGE,
-        )
-        self._wf_hit_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.HitBuffer",
-            size=PodHitArray.array_size(shape=(wf_ray_count,)),
-            usage=wgpu.BufferUsage.STORAGE,
-        )
-        self._wf_compact_state_buffer = self.device.create_buffer(
-            label="Draw3dRenderer.CompactStateBuffer",
-            size=3 * 4,
-            usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
-
         # Recreate per-frame bind group with new texture views
         self._per_frame_bind_group = self.device.create_bind_group(
             label="Draw3dRenderer.PerFrameBindGroup",
@@ -1505,38 +1353,6 @@ class Draw3dRenderer(BaseDisposable):
                         buffer=self._tlas_instance_index_buffer.device_buffer,
                         offset=0,
                         size=self._tlas_instance_index_buffer.device_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=15,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_ray_buffer,
-                        offset=0,
-                        size=self._wf_ray_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=16,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_path_state_buffer,
-                        offset=0,
-                        size=self._wf_path_state_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=17,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_hit_buffer,
-                        offset=0,
-                        size=self._wf_hit_buffer.size,
-                    ),
-                ),
-                wgpu.BindGroupEntry(
-                    binding=18,
-                    resource=wgpu.BufferBinding(
-                        buffer=self._wf_compact_state_buffer,
-                        offset=0,
-                        size=self._wf_compact_state_buffer.size,
                     ),
                 ),
             ],
@@ -1918,7 +1734,7 @@ class Draw3dRenderer(BaseDisposable):
             )
             self._upload_camera_info(scene.camera, encoder)
 
-        # Path tracing compute passes (wavefront architecture)
+        # Path tracing compute pass (renders to internal_image at reduced resolution)
         t_compute_start = time.perf_counter()
         timestamp_writes: wgpu.ComputePassTimestampWrites | None = None
         if self._profiling_enabled and self._profiling_query_set is not None:
@@ -1927,9 +1743,19 @@ class Draw3dRenderer(BaseDisposable):
                 beginning_of_pass_write_index=0,
                 end_of_pass_write_index=1,
             )
-
-        self._record_wavefront_passes(encoder, timestamp_writes)
-
+        compute_pass = encoder.begin_compute_pass(
+            label="Draw3dRenderer.ComputePass",
+            timestamp_writes=timestamp_writes,
+        )
+        compute_pass.set_pipeline(self.draw_pipeline)
+        compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
+        compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
+        compute_pass.dispatch_workgroups(
+            workgroup_count_x=math.ceil(self._internal_size_wh_px[0] / 8),
+            workgroup_count_y=math.ceil(self._internal_size_wh_px[1] / 8),
+            workgroup_count_z=1,
+        )
+        compute_pass.end()
         t_compute_end = time.perf_counter()
         trace.add_time_span(
             "Draw3dRenderer/record/compute_pass_encode",
@@ -1987,96 +1813,6 @@ class Draw3dRenderer(BaseDisposable):
             render_pass.set_bind_group(0, bind_group, [], 0, 0)
             render_pass.draw(3, 1, 0, 0)
             render_pass.end()
-
-    def _record_wavefront_passes(
-        self,
-        encoder: wgpu.GPUCommandEncoder,
-        timestamp_writes: "wgpu.ComputePassTimestampWrites | None",
-    ) -> None:
-        """Record wavefront path tracing passes.
-
-        This dispatches separate compute passes for:
-        1. Primary ray generation
-        2. Ray tracing (BVH traversal) - repeated for each bounce
-        3. Shading and path extension - repeated for each bounce
-        4. Buffer swap (for compaction) - repeated for each bounce
-        5. Finalization (write to output)
-        """
-        w, h = self._internal_size_wh_px
-        total_rays = w * h
-
-        # Workgroup sizes for different kernels
-        wg_2d_x = math.ceil(w / 8)
-        wg_2d_y = math.ceil(h / 8)
-        wg_1d = math.ceil(total_rays / 64)
-
-        # Initialize compact state: [active_count=total_rays, current_buf=0, next_count=0]
-        compact_init = np.array([total_rays, 0, 0], dtype=np.uint32)
-        self.queue.write_buffer(
-            self._wf_compact_state_buffer, 0, compact_init.tobytes()
-        )
-
-        # Pass 1: Generate primary rays
-        with trace.span("Draw3dRenderer/wavefront/gen_primary_rays", "render"):
-            compute_pass = encoder.begin_compute_pass(
-                label="Draw3dRenderer.WfGenPrimaryRays",
-                timestamp_writes=timestamp_writes,
-            )
-            compute_pass.set_pipeline(self._wf_gen_primary_rays_pipeline)
-            compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
-            compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
-            compute_pass.dispatch_workgroups(wg_2d_x, wg_2d_y, 1)
-            compute_pass.end()
-
-        # Bounce loop: trace and shade for each bounce
-        for bounce in range(self._max_bounces):
-            # Pass 2: Trace rays (BVH traversal)
-            with trace.span(f"Draw3dRenderer/wavefront/trace_rays/{bounce}", "render"):
-                compute_pass = encoder.begin_compute_pass(
-                    label=f"Draw3dRenderer.WfTraceRays.{bounce}",
-                )
-                compute_pass.set_pipeline(self._wf_trace_rays_pipeline)
-                compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
-                compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
-                compute_pass.dispatch_workgroups(wg_1d, 1, 1)
-                compute_pass.end()
-
-            # Pass 3: Shade hits and extend paths
-            with trace.span(
-                f"Draw3dRenderer/wavefront/shade_and_extend/{bounce}", "render"
-            ):
-                compute_pass = encoder.begin_compute_pass(
-                    label=f"Draw3dRenderer.WfShadeAndExtend.{bounce}",
-                )
-                compute_pass.set_pipeline(self._wf_shade_and_extend_pipeline)
-                compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
-                compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
-                compute_pass.dispatch_workgroups(wg_1d, 1, 1)
-                compute_pass.end()
-
-            # Pass 4: Swap buffers (prepare for next bounce)
-            with trace.span(
-                f"Draw3dRenderer/wavefront/swap_buffers/{bounce}", "render"
-            ):
-                compute_pass = encoder.begin_compute_pass(
-                    label=f"Draw3dRenderer.WfSwapBuffers.{bounce}",
-                )
-                compute_pass.set_pipeline(self._wf_swap_buffers_pipeline)
-                compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
-                compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
-                compute_pass.dispatch_workgroups(1, 1, 1)
-                compute_pass.end()
-
-        # Pass 5: Finalize and write to output
-        with trace.span("Draw3dRenderer/wavefront/finalize", "render"):
-            compute_pass = encoder.begin_compute_pass(
-                label="Draw3dRenderer.WfFinalize",
-            )
-            compute_pass.set_pipeline(self._wf_finalize_pipeline)
-            compute_pass.set_bind_group(0, self.renderer_bind_group, [], 0, 0)
-            compute_pass.set_bind_group(1, self._per_frame_bind_group, [], 0, 0)
-            compute_pass.dispatch_workgroups(wg_2d_x, wg_2d_y, 1)
-            compute_pass.end()
 
     def _upload_frame_info(
         self,
@@ -3285,57 +3021,6 @@ class PodFrameTimingArray(StructuredNDArray):
         [
             ("begin_ns", np.uint64),
             ("end_ns", np.uint64),
-        ]
-    )
-
-
-class PodRayArray(StructuredNDArray):
-    """Per-ray state for wavefront path tracing."""
-
-    DTYPE = np.dtype(
-        [
-            ("origin_x", np.float32),
-            ("origin_y", np.float32),
-            ("origin_z", np.float32),
-            ("pixel_id", np.uint32),  # x | (y << 16)
-            ("direction_x", np.float32),
-            ("direction_y", np.float32),
-            ("direction_z", np.float32),
-            ("bounce", np.uint32),
-        ]
-    )
-
-
-class PodPathStateArray(StructuredNDArray):
-    """Per-path state for wavefront path tracing."""
-
-    DTYPE = np.dtype(
-        [
-            ("throughput_r", np.float32),
-            ("throughput_g", np.float32),
-            ("throughput_b", np.float32),
-            ("rng_seed", np.uint32),
-            ("accumulated_r", np.float32),
-            ("accumulated_g", np.float32),
-            ("accumulated_b", np.float32),
-            ("flags", np.uint32),  # bit 0: terminated
-        ]
-    )
-
-
-class PodHitArray(StructuredNDArray):
-    """Per-ray hit record for wavefront path tracing."""
-
-    DTYPE = np.dtype(
-        [
-            ("barycentric_u", np.float32),
-            ("barycentric_v", np.float32),
-            ("distance", np.float32),
-            ("triangle_id", np.uint32),
-            ("instance_id", np.uint32),
-            ("geometry_id", np.uint32),
-            ("_pad0", np.uint32),
-            ("_pad1", np.uint32),
         ]
     )
 

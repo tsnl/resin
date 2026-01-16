@@ -89,11 +89,6 @@ def build(_: Context): ...
 
 
 @task(pre=[build])
-def sponza(c: Context):
-    _uv_run(c, "scripts/sponza-benchmark.py")
-
-
-@task(pre=[build])
 def editor(c: Context):
     _uv_run(c, "resin-editor --debug")
 
