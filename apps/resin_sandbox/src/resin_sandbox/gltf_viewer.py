@@ -266,7 +266,7 @@ class GltfViewerWidget(resin.GuiWidget):
         # State
         self._current_model_index = 1
         self._current_env_index = 0
-        self._camera = FreeCameraController(position=(0.0, -3.0, 0.0))
+        self._camera = FreeCameraController(position=(0.0, -5.0, 1.0))
         self._mouse_captured = False
         self._last_mouse_x = 0.0
         self._last_mouse_y = 0.0
@@ -326,7 +326,7 @@ class GltfViewerWidget(resin.GuiWidget):
             row=0,
             col=0,
             style_classes=["hud-label"],
-            text="Click to look | WASD+Space/Shift to move | 1-9 change model | Q/E change environment | ESC to release mouse",
+            text="Click to look | WASD+Space/Shift to move | 1-9 model, 0=ALL | Q/E environment | ESC release mouse",
         )
 
         # Setup key event handler
@@ -363,6 +363,52 @@ class GltfViewerWidget(resin.GuiWidget):
 
         # Update label
         self._model_label._text = f"Model: {model_name}"
+
+    def _load_all_models(self) -> None:
+        """Load ALL models and arrange them in a horizontal row for TLAS testing."""
+        # Clear old meshes
+        self._resource_meshes = None
+        self._meshes = {}
+
+        renderer = self._gui_window.draw_3d_renderer
+        spacing = 3.0  # Distance between models along X axis
+        x_offset = -spacing * (len(MODELS) - 1) / 2  # Center the row
+
+        for i, (model_name, model_file) in enumerate(MODELS):
+            model_path = self._models_path / model_file
+
+            if not model_path.exists():
+                LOG.warning(f"Model not found: {model_path}")
+                continue
+
+            LOG.info(f"Loading model {i + 1}/{len(MODELS)}: {model_name}")
+            resource_meshes = resin.load_gltf(model_path)
+
+            # Create translation matrix to position this model in the row
+            translation = np.eye(4, dtype=np.float32)
+            translation[0, 3] = x_offset + i * spacing
+
+            for (geom_res, mat_res), transforms in resource_meshes.items():
+                geometry = resin.Draw3dGeometry.from_resource(geom_res, renderer)
+                material = resin.Draw3dMaterial.from_resource(mat_res, renderer)
+
+                # Apply translation to all transforms
+                translated_transforms = np.array(
+                    [translation @ t for t in transforms], dtype=np.float32
+                )
+
+                # Merge with existing meshes for this geometry/material pair
+                key = (geometry, material)
+                if key in self._meshes:
+                    self._meshes[key] = np.concatenate(
+                        [self._meshes[key], translated_transforms]
+                    )
+                else:
+                    self._meshes[key] = translated_transforms
+
+        total_instances = sum(len(t) for t in self._meshes.values())
+        LOG.info(f"Loaded {len(MODELS)} models with {total_instances} total instances")
+        self._model_label._text = f"Model: ALL ({total_instances} instances)"
 
     def _load_environment(self) -> None:
         """Load the currently selected environment map."""
@@ -408,7 +454,10 @@ class GltfViewerWidget(resin.GuiWidget):
         if action != "press":
             return
 
-        # Handle model switching (1-9)
+        # Handle model switching (1-9, 0 for all)
+        if key == "0":
+            self._load_all_models()
+            return
         if key in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
             idx = int(key) - 1
             if idx < len(MODELS):

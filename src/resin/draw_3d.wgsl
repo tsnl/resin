@@ -26,6 +26,7 @@ struct PodFrameInfo {
     max_bounces: u32,
     samples_per_pixel: u32,
     accumulated_frame_index: u32,
+    tlas_node_count: u32,
 }
 struct PodInstance {
     geometry_id: u32,
@@ -41,6 +42,11 @@ struct PodGeometry {
 }
 struct PodBvhNode {
     tri_span: PodSpan,
+    children: array<u32, 2>,
+    aabb: PodAabb,
+}
+struct PodTlasNode {
+    instance_span: PodSpan,
     children: array<u32, 2>,
     aabb: PodAabb,
 }
@@ -122,6 +128,8 @@ struct PodTransform {
 @group(1) @binding(10) var<uniform> frame_info: PodFrameInfo;
 @group(1) @binding(11) var<uniform> camera: PodCamera;
 @group(1) @binding(12) var<storage, read> instances: array<PodInstance>;
+@group(1) @binding(13) var<storage, read> tlas_nodes: array<PodTlasNode>;
+@group(1) @binding(14) var<storage, read> tlas_instance_indices: array<u32>;
 
 //
 // Constants and configuration:
@@ -372,15 +380,106 @@ fn is_hit_record_valid(hit: HitRecord) -> bool {
     return hit.world_hit_distance < F32_INFINITY;
 }
 fn hit(ray: Ray) -> HitRecord {
-    // Raycast against all instances, find closest hit.
-    // TODO: Use TLAS to accelerate this.
+    // Raycast against all instances using TLAS acceleration.
     var closest_hit = new_invalid_hit_record(ray);
-    for (var instance_id = 0u; instance_id < frame_info.instance_count; instance_id++) {
-        let hit_record = hit_instance(ray, instance_id);
-        if hit_record.world_hit_distance < closest_hit.world_hit_distance {
-            closest_hit = hit_record;
+
+    // Early out if no TLAS nodes
+    if frame_info.tlas_node_count == 0u {
+        return closest_hit;
+    }
+
+    // Stack-based TLAS traversal (similar to BLAS BVH traversal)
+    var stack: array<u32, 64u>;
+    var stack_ptr: u32 = 0u;
+
+    // Start with root node (always index 0)
+    stack[stack_ptr] = 0u;
+    stack_ptr += 1u;
+
+    while stack_ptr > 0u {
+        // Pop node from stack
+        stack_ptr -= 1u;
+        let node_id = stack[stack_ptr];
+        let node = tlas_nodes[node_id];
+
+        // Convert PodAabb to Aabb
+        let aabb = Aabb(
+            vec3<f32>(node.aabb.min[0], node.aabb.min[1], node.aabb.min[2]),
+            vec3<f32>(node.aabb.max[0], node.aabb.max[1], node.aabb.max[2]),
+        );
+
+        // Test ray against AABB
+        let aabb_hit_dist = hit_aabb(ray, aabb);
+        if aabb_hit_dist >= closest_hit.world_hit_distance {
+            // AABB is further than current closest hit, skip this branch
+            continue;
+        }
+
+        // Check if this is a leaf node (both children are 0)
+        let is_leaf = node.children[0] == 0u && node.children[1] == 0u;
+
+        if is_leaf {
+            // Test all instances in this leaf
+            for (var i = node.instance_span.begin; i < node.instance_span.end; i++) {
+                let instance_id = tlas_instance_indices[i];
+                let hit_record = hit_instance(ray, instance_id);
+                if hit_record.world_hit_distance < closest_hit.world_hit_distance {
+                    closest_hit = hit_record;
+                }
+            }
+        } else {
+            // Internal node: push children onto stack
+            let child0_idx = node.children[0];
+            let child1_idx = node.children[1];
+            let closest_dist = closest_hit.world_hit_distance;
+
+            // Test first child
+            var child0_dist = F32_INFINITY;
+            if child0_idx != 0u {
+                let child0_node = tlas_nodes[child0_idx];
+                let child0_aabb = Aabb(
+                    vec3<f32>(child0_node.aabb.min[0], child0_node.aabb.min[1], child0_node.aabb.min[2]),
+                    vec3<f32>(child0_node.aabb.max[0], child0_node.aabb.max[1], child0_node.aabb.max[2]),
+                );
+                child0_dist = hit_aabb(ray, child0_aabb);
+            }
+
+            // Test second child
+            var child1_dist = F32_INFINITY;
+            if child1_idx != 0u {
+                let child1_node = tlas_nodes[child1_idx];
+                let child1_aabb = Aabb(
+                    vec3<f32>(child1_node.aabb.min[0], child1_node.aabb.min[1], child1_node.aabb.min[2]),
+                    vec3<f32>(child1_node.aabb.max[0], child1_node.aabb.max[1], child1_node.aabb.max[2]),
+                );
+                child1_dist = hit_aabb(ray, child1_aabb);
+            }
+
+            // Push children in reverse order of distance so closer child is popped first
+            if child0_dist < child1_dist {
+                // child0 is closer: push child1 first (farther), then child0 (closer)
+                if child1_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = child1_idx;
+                    stack_ptr += 1u;
+                }
+                if child0_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = child0_idx;
+                    stack_ptr += 1u;
+                }
+            } else {
+                // child1 is closer: push child0 first (farther), then child1 (closer)
+                if child0_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = child0_idx;
+                    stack_ptr += 1u;
+                }
+                if child1_dist < closest_dist && stack_ptr < MAX_STACK_DEPTH {
+                    stack[stack_ptr] = child1_idx;
+                    stack_ptr += 1u;
+                }
+            }
         }
     }
+
     return closest_hit;
 }
 fn hit_instance(ray: Ray, instance_id: u32) -> HitRecord {

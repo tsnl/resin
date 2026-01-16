@@ -179,12 +179,19 @@ def _decode_any_image_with_pil(image_bytes: bytes) -> npt.NDArray[np.float32]:
     )
     with PIL.Image.open(io.BytesIO(image_bytes)) as pil_im:
         bands = pil_im.getbands()
+        transparency = pil_im.info.get("transparency", None)
         if bands == ("R", "G", "B"):
             return np.asarray(pil_im.convert("RGB"), dtype=np.float32) / 255.0
         elif bands == ("R", "G", "B", "A"):
             return np.asarray(pil_im.convert("RGBA"), dtype=np.float32) / 255.0
         elif bands == ("L",):
             return np.asarray(pil_im.convert("L"), dtype=np.float32) / 255.0
+        elif bands == ("P",) and transparency is not None:
+            pil_im = pil_im.convert("RGBA")
+            return np.asarray(pil_im, dtype=np.float32) / 255.0
+        elif bands == ("P",):
+            pil_im = pil_im.convert("RGB")
+            return np.asarray(pil_im, dtype=np.float32) / 255.0
         else:
             raise ValueError(f"Unsupported image bands: {bands}")
 

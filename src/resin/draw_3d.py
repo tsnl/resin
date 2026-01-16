@@ -17,7 +17,7 @@ import wgpu
 
 from .basic import BaseDisposable, StructuredNDArray
 from .excepts import LogicError
-from .bvh import Blas, build_blas_bvh
+from .bvh import Blas, build_blas_bvh, build_tlas_bvh, transform_aabb
 from .resources import GeometryResource, MaterialResource
 from .images import encode_bc1, encode_bc4, encode_bc5
 
@@ -342,6 +342,18 @@ class Draw3dRenderer(BaseDisposable):
                 # @group(1) @binding(12) var<storage, read> instances: array<PodInstance>;
                 wgpu.BindGroupLayoutEntry(
                     binding=12,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
+                ),
+                # @group(1) @binding(13) var<storage, read> tlas_nodes: array<PodTlasNode>;
+                wgpu.BindGroupLayoutEntry(
+                    binding=13,
+                    visibility=wgpu.ShaderStage.COMPUTE,
+                    buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
+                ),
+                # @group(1) @binding(14) var<storage, read> tlas_instance_indices: array<u32>;
+                wgpu.BindGroupLayoutEntry(
+                    binding=14,
                     visibility=wgpu.ShaderStage.COMPUTE,
                     buffer=wgpu.BufferBindingLayout(type="read-only-storage"),
                 ),
@@ -748,6 +760,20 @@ class Draw3dRenderer(BaseDisposable):
             element_capacity=instance_capacity,
             device_buffer_usages=wgpu.BufferUsage.STORAGE,
         )
+        self._tlas_node_buffer = PerFrameBuffer[PodTlasNodeArray](
+            device=device,
+            label="Draw3dRenderer.TlasNodeBuffer",
+            structured_array_cls=PodTlasNodeArray,
+            element_capacity=instance_capacity * 2,
+            device_buffer_usages=wgpu.BufferUsage.STORAGE,
+        )
+        self._tlas_instance_index_buffer = PerFrameBuffer[PodTlasInstanceIndexArray](
+            device=device,
+            label="Draw3dRenderer.TlasInstanceIndexBuffer",
+            structured_array_cls=PodTlasInstanceIndexArray,
+            element_capacity=instance_capacity,
+            device_buffer_usages=wgpu.BufferUsage.STORAGE,
+        )
 
         self._per_frame_bind_group = device.create_bind_group(
             label="Draw3dRenderer.PerFrameBindGroup",
@@ -815,6 +841,22 @@ class Draw3dRenderer(BaseDisposable):
                         buffer=self._instance_buffer.device_buffer,
                         offset=0,
                         size=self._instance_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=13,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._tlas_node_buffer.device_buffer,
+                        offset=0,
+                        size=self._tlas_node_buffer.device_buffer.size,
+                    ),
+                ),
+                wgpu.BindGroupEntry(
+                    binding=14,
+                    resource=wgpu.BufferBinding(
+                        buffer=self._tlas_instance_index_buffer.device_buffer,
+                        offset=0,
+                        size=self._tlas_instance_index_buffer.device_buffer.size,
                     ),
                 ),
             ],
@@ -1132,8 +1174,12 @@ class Draw3dRenderer(BaseDisposable):
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
+        # Upload instances and build TLAS first to get tlas_node_count
+        tlas_node_count = self._upload_instances_info(scene.meshes, encoder)
+
         self._upload_frame_info(
             instance_count,
+            tlas_node_count,
             encoder,
             self._debug_flags,
             timestamp,
@@ -1145,7 +1191,6 @@ class Draw3dRenderer(BaseDisposable):
             ),
         )
         self._upload_camera_info(scene.camera, encoder)
-        self._upload_instances_info(scene.meshes, encoder)
 
         # Path tracing compute pass (renders to internal_image at reduced resolution)
         compute_pass = encoder.begin_compute_pass(label="Draw3dRenderer.ComputePass")
@@ -1179,6 +1224,7 @@ class Draw3dRenderer(BaseDisposable):
     def _upload_frame_info(
         self,
         instance_count: int,
+        tlas_node_count: int,
         command_encoder: wgpu.GPUCommandEncoder,
         debug_flags: int,
         timestamp: float,
@@ -1196,6 +1242,7 @@ class Draw3dRenderer(BaseDisposable):
         frame_info_data["max_bounces"] = np.uint32(self._max_bounces)
         frame_info_data["samples_per_pixel"] = np.uint32(self._samples_per_pixel)
         frame_info_data["accumulated_frame_index"] = np.uint32(frame_index)
+        frame_info_data["tlas_node_count"] = np.uint32(tlas_node_count)
 
         self._frame_info_buffer.write(frame_info_data, command_encoder)
 
@@ -1219,12 +1266,14 @@ class Draw3dRenderer(BaseDisposable):
             npt.NDArray[np.float32],
         ],
         command_encoder: wgpu.GPUCommandEncoder,
-    ) -> None:
+    ) -> int:
         total_instance_count = sum(len(t) for t in instances.values())
         if total_instance_count > self.instance_capacity:
             raise RuntimeError("Draw3dRenderer instance heap capacity exceeded.")
 
+        # Build instance data and compute world-space AABBs for TLAS
         data = PodInstanceArray.empty(shape=(total_instance_count,))
+        instance_aabbs = np.empty((total_instance_count, 2, 3), dtype=np.float32)
         offset = 0
         for (geometry, material), transforms in instances.items():
             n = transforms.shape[0]
@@ -1232,15 +1281,47 @@ class Draw3dRenderer(BaseDisposable):
             data["material_id"][offset : offset + n] = material.material_id
             data["transform"][offset : offset + n] = transforms
 
-            # Compute inverse transforms
+            # Compute inverse transforms and world-space AABBs
             for i in range(n):
                 transform_4x4 = transforms[i]  # Shape (4, 4)
                 inv_transform_4x4 = np.linalg.inv(transform_4x4)
                 data["inv_transform"][offset + i] = inv_transform_4x4
+                # Transform BLAS AABB to world space for TLAS construction
+                instance_aabbs[offset + i] = transform_aabb(
+                    geometry.blas_aabb, transform_4x4
+                )
 
             offset += n
 
         self._instance_buffer.write(data, command_encoder)
+
+        # Build TLAS from world-space instance AABBs
+        if total_instance_count > 0:
+            tlas = build_tlas_bvh(instance_aabbs)
+
+            # Marshall and upload TLAS nodes
+            tlas_node_data = PodTlasNodeArray.empty(shape=(tlas.node_count,))
+            for i in range(tlas.node_count):
+                tlas_node_data["instance_span"]["begin"][i] = tlas.instance_span[i, 0]
+                tlas_node_data["instance_span"]["end"][i] = tlas.instance_span[i, 1]
+                tlas_node_data["children"][i][0] = tlas.children[i, 0]
+                tlas_node_data["children"][i][1] = tlas.children[i, 1]
+                tlas_node_data["aabb"]["min"][i] = tlas.aabb[i, 0]
+                tlas_node_data["aabb"]["max"][i] = tlas.aabb[i, 1]
+            self._tlas_node_buffer.write(tlas_node_data, command_encoder)
+
+            # Upload reordered instance indices
+            tlas_instance_index_data = PodTlasInstanceIndexArray.empty(
+                shape=(total_instance_count,)
+            )
+            tlas_instance_index_data["index"] = tlas.instance_indices
+            self._tlas_instance_index_buffer.write(
+                tlas_instance_index_data, command_encoder
+            )
+
+            return tlas.node_count
+        else:
+            return 0
 
 
 class Draw3dGeometry(BaseDisposable):
@@ -1252,6 +1333,8 @@ class Draw3dGeometry(BaseDisposable):
     geometry_id: int
     geometry_heap_offset_in_triangles: int
     heap_generation: int
+
+    blas_aabb: npt.NDArray[np.float32]  # (2, 3) root BLAS AABB for TLAS construction
 
     def __init__(
         self,
@@ -1273,6 +1356,9 @@ class Draw3dGeometry(BaseDisposable):
         # We need to use this reordered index array for all subsequent uploads.
         bvh = build_blas_bvh(t=t_indices, v=v_p_array)
         t_indices = bvh.t
+
+        # Store root BLAS AABB for TLAS construction
+        self.blas_aabb = bvh.aabb[0].copy()
 
         # Upload triangles, using the reordered t array:
         pod_vertices = Draw3dGeometry._marshall_triangles(
@@ -2224,6 +2310,20 @@ class PodBvhNodeArray(StructuredNDArray):
     )
 
 
+class PodTlasNodeArray(StructuredNDArray):
+    DTYPE = np.dtype(
+        [
+            ("instance_span", POD_SPAN_DTYPE),
+            ("children", np.uint32, (2,)),
+            ("aabb", POD_AABB_DTYPE),
+        ]
+    )
+
+
+class PodTlasInstanceIndexArray(StructuredNDArray):
+    DTYPE = np.dtype([("index", np.uint32)])
+
+
 class PodVertexArray(StructuredNDArray):
     DTYPE = np.dtype(
         [
@@ -2255,6 +2355,7 @@ class PodFrameInfoArray(StructuredNDArray):
             ("max_bounces", np.uint32),
             ("samples_per_pixel", np.uint32),
             ("accumulated_frame_index", np.uint32),
+            ("tlas_node_count", np.uint32),
         ]
     )
 

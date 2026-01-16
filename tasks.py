@@ -4,6 +4,7 @@ See: https://www.pyinvoke.org/
 """
 
 from pathlib import Path
+import shutil
 import sys
 import platform
 
@@ -75,7 +76,7 @@ def _copy_ttf_font_files():
             continue
 
         input_path = Path(f"res/fonts/{font_name}/{font_name}.ttf")
-        input_path.copy(output_path)
+        shutil.copy(input_path, output_path)
 
 
 @task(pre=[build_fonts])
