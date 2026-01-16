@@ -21,6 +21,7 @@ LOG = logging.getLogger(__name__)
 
 # Available models
 MODELS = [
+    ("Sponza", "Sponza/glTF/Sponza.gltf"),
     ("Avocado", "Avocado/glTF-Binary/Avocado.glb"),
     ("Damaged Helmet", "DamagedHelmet/glTF/DamagedHelmet.gltf"),
     ("Flight Helmet", "FlightHelmet/glTF/FlightHelmet.gltf"),
@@ -182,7 +183,7 @@ class GltfViewer:
         self._last_mouse_y = 0.0
 
         # Viewer state
-        self._current_model = 1
+        self._current_model = 0  # Default to Sponza for benchmarking
         self._current_env = 0
         self._exposure = 1.0
         self._show_settings = True
