@@ -1230,7 +1230,8 @@ fn debug_hook_post_primary_ray_hit_details(hit_details: HitDetails, pixel_coords
     }
 }
 fn emit_frame_surface_color(hit_details: HitDetails, pixel_coords: vec2<i32>) {
-    textureStore(frame_surface_color_image, pixel_coords, hit_details.surface_color);
+    let clamped = clamp(hit_details.surface_color, vec4<f32>(0.0), vec4<f32>(1.0));
+    textureStore(frame_surface_color_image, pixel_coords, clamped);
 }
 fn emit_frame_surface_normal(hit_details: HitDetails, pixel_coords: vec2<i32>) {
     let normal_rgb = convert_direction_to_rgb(hit_details.surface_normal);
@@ -1244,7 +1245,8 @@ fn emit_frame_surface_orm(hit_details: HitDetails, pixel_coords: vec2<i32>) {
     textureStore(frame_surface_orm_image, pixel_coords, orm);
 }
 fn emit_frame_surface_emissive(hit_details: HitDetails, pixel_coords: vec2<i32>) {
-    textureStore(frame_surface_emissive_image, pixel_coords, vec4<f32>(hit_details.surface_emissive, 1.0));
+    let clamped = clamp(hit_details.surface_emissive, vec3<f32>(0.0), vec3<f32>(1.0));
+    textureStore(frame_surface_emissive_image, pixel_coords, vec4<f32>(clamped, 1.0));
 }
 
 fn debug_hook_post_path_trace_complete(radiance: vec3<f32>, pixel_coords: vec2<i32>) {
@@ -1253,7 +1255,8 @@ fn debug_hook_post_path_trace_complete(radiance: vec3<f32>, pixel_coords: vec2<i
     }
 }
 fn emit_frame_pixel_radiance(radiance: vec3<f32>, pixel_coords: vec2<i32>) {
-    textureStore(frame_per_pixel_radiance, pixel_coords, vec4<f32>(radiance, 1.0));
+    let clamped = clamp(radiance, vec3<f32>(0.0), vec3<f32>(1.0));
+    textureStore(frame_per_pixel_radiance, pixel_coords, vec4<f32>(clamped, 1.0));
 }
 
 //
@@ -1364,11 +1367,6 @@ fn compute_fullscreen_uv(vertex_idx: u32) -> vec2<f32> {
 @fragment
 fn fs_postprocess(input: VertexOutput) -> @location(0) vec4<f32> {
     let hdr_color = textureSample(input_texture, input_sampler, input.uv);
-
-    // Skip tonemapping when debug flags are active (pass through raw values)
-    if postprocess_uniforms.debug_flags != 0u {
-        return hdr_color;
-    }
 
     let exposed = apply_exposure(hdr_color.rgb, 1.5);
     let tonemapped = naughty_dog_tonemap(exposed);

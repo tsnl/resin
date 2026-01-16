@@ -1283,12 +1283,6 @@ class Draw3dRenderer(BaseDisposable):
         )
         compute_pass.end()
 
-        # Upload postprocess debug flags
-        postprocess_uniforms = np.array([self._debug_flags, 0, 0, 0], dtype=np.uint32)
-        self.device.queue.write_buffer(
-            self._postprocess_uniform_buffer, 0, postprocess_uniforms
-        )
-
         # Postprocess render pass (upscales and tonemaps to output_image)
         render_pass = encoder.begin_render_pass(
             label="Draw3dRenderer.PostprocessPass",
@@ -1569,7 +1563,9 @@ class Draw3dMaterial(BaseDisposable):
             emissive_texture.allocation.texture_id if emissive_texture else 0xFFFFFFFF
         )
         diffuse_f0_map_id = (
-            diffuse_f0_texture.allocation.texture_id if diffuse_f0_texture else 0xFFFFFFFF
+            diffuse_f0_texture.allocation.texture_id
+            if diffuse_f0_texture
+            else 0xFFFFFFFF
         )
 
         self.material_id = renderer._add_material(
