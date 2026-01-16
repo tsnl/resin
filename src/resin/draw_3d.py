@@ -1804,7 +1804,6 @@ class Draw3dRenderer(BaseDisposable):
 
     def reset(
         self,
-        encoder: wgpu.GPUCommandEncoder | None = None,
         *,
         geometry_heap: bool = True,
         material_heap: bool = True,
@@ -1814,8 +1813,6 @@ class Draw3dRenderer(BaseDisposable):
         """Reset renderer state, with selective control over what gets cleared.
 
         Args:
-            encoder: If provided, uses clear_buffer for proper GPU synchronization.
-                Otherwise, uses write_buffer which is asynchronous.
             geometry_heap: Clear geometry, BVH nodes, and triangles.
             material_heap: Clear materials.
             texture_heap: Clear all texture heaps (color, normal, metalness,
