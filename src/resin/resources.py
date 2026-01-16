@@ -36,6 +36,7 @@ from .excepts import LogicError
 from .basic import Font, FontSize, FontWeight, expect
 from .images import (
     ImageFormat,
+    convert_srgb_to_linear,
 )
 
 
@@ -130,8 +131,9 @@ def load_image(
     image_path: Path | str,
 ) -> npt.NDArray[np.float32]:
     """
-    Loads an image from a file path and returns it as an (H, W, C) float32 RGB array
-    with values in [0.0, 1.0].
+    Loads an image from a file path and returns it as an (H, W, C) float32 array
+    with values in [0.0, 1.0]. PNG/JPEG/BMP images are returned as sRGB-encoded;
+    HDR images are returned in linear color space.
     """
 
     image_path = Path(image_path)
@@ -141,8 +143,9 @@ def load_image(
 
 def decode_image(image_bs: bytes) -> npt.NDArray[np.float32]:
     """
-    Decode image bytes into an (H, W, C) float32 RGB array with values in [0.0, 1.0].
-    Supports PNG, JPEG, BMP formats.
+    Decode image bytes into an (H, W, C) float32 array with values in [0.0, 1.0].
+    PNG/JPEG/BMP images are returned as sRGB-encoded; HDR images are returned in
+    linear color space. Supports PNG, JPEG, BMP, and HDR formats.
     """
 
     if image_bs.startswith(b"#?RADIANCE"):
@@ -161,6 +164,12 @@ def decode_image(image_bs: bytes) -> npt.NDArray[np.float32]:
 
 
 def _decode_any_image_with_pil(image_bytes: bytes) -> npt.NDArray[np.float32]:
+    """
+    Decode PNG, BMP, or JPEG image bytes into an (H, W, C) float32 array with values
+    in [0.0, 1.0]. Note: PIL decodes these formats as sRGB-encoded. For color textures,
+    callers should apply sRGB-to-linear conversion; for data textures (normal maps,
+    metalness/roughness), use as-is.
+    """
     assert any(
         (
             image_bytes.startswith(b"\x89PNG"),  # PNG
@@ -527,8 +536,11 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             if pbr.baseColorFactor is not None
             else (1.0, 1.0, 1.0)
         )
+        # Base color textures are sRGB-encoded, convert to linear for PBR shading
         base_color_texture = (
-            textures[pbr.baseColorTexture.index] if pbr.baseColorTexture else None
+            convert_srgb_to_linear(textures[pbr.baseColorTexture.index])
+            if pbr.baseColorTexture
+            else None
         )
 
         metalness_roughness_texture = (
@@ -571,8 +583,9 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             if material.emissiveFactor is not None
             else (0.0, 0.0, 0.0)
         )
+        # Emissive textures are sRGB-encoded, convert to linear
         emissive_texture = (
-            textures[material.emissiveTexture.index]
+            convert_srgb_to_linear(textures[material.emissiveTexture.index])
             if material.emissiveTexture
             else None
         )

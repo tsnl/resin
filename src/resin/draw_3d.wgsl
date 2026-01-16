@@ -1086,28 +1086,79 @@ fn sample_brdf(hit_details: HitDetails, incoming_dir: vec3<f32>, seed: ptr<funct
     // For metals, f0 is the base color; for dielectrics, it's diffuse_f0 (typically 0.04)
     let f0 = mix(hit_details.surface_diffuse_f0, base_color, metalness);
 
-    if rand1f(seed) < 0.5 {
-        return sample_diffuse_brdf(normal, base_color, metalness, rand2f(seed));
+    var result: BrdfSample;
+
+    // Sample direction from one of the lobes (50/50 split)
+    let use_diffuse = rand1f(seed) < 0.5;
+    if use_diffuse {
+        result.direction = cosine_weighted_hemisphere_sample(normal, rand2f(seed));
     } else {
-        return sample_specular_brdf(normal, view_dir, roughness, f0, rand2f(seed));
+        result.direction = ggx_sample_direction(normal, view_dir, roughness, rand2f(seed));
     }
-}
 
-fn sample_diffuse_brdf(normal: vec3<f32>, base_color: vec3<f32>, metalness: f32, rand: vec2<f32>) -> BrdfSample {
-    var result: BrdfSample;
-    result.direction = cosine_weighted_hemisphere_sample(normal, rand);
-    result.weight = base_color * (1.0 - metalness) * 2.0;
-    return result;
-}
+    // Check for below-horizon samples
+    let n_dot_l_raw = dot(normal, result.direction);
+    if n_dot_l_raw <= 0.0 {
+        result.weight = vec3<f32>(0.0);
+        return result;
+    }
+    // Clamp to minimum for numerical stability
+    let n_dot_l = max(n_dot_l_raw, 0.001);
 
-fn sample_specular_brdf(normal: vec3<f32>, view_dir: vec3<f32>, roughness: f32, f0: vec3<f32>, rand: vec2<f32>) -> BrdfSample {
-    var result: BrdfSample;
-    result.direction = ggx_sample_direction(normal, view_dir, roughness, rand);
+    // Compute shared terms
     let h = normalize(view_dir + result.direction);
-    let v_dot_h = max(dot(view_dir, h), 0.0);
+    let n_dot_v = max(dot(normal, view_dir), 0.001);
+    let n_dot_h = max(dot(normal, h), 0.001);
+    let v_dot_h = max(dot(view_dir, h), 0.001);
     let fresnel = fresnel_schlick(v_dot_h, f0);
-    result.weight = fresnel * 2.0;
+
+    // Evaluate both BRDFs for this direction
+    // Diffuse BRDF: base_color * (1 - metalness) * (1 - F) / π
+    let f_diffuse = base_color * (1.0 - metalness) * (vec3<f32>(1.0) - fresnel) / PI;
+
+    // Specular BRDF: F * D * G / (4 * n·v * n·l)
+    let d = ggx_distribution(n_dot_h, roughness);
+    let g2 = ggx_smith_g2(n_dot_v, n_dot_l, roughness);
+    let f_specular = fresnel * d * g2 / (4.0 * n_dot_v * n_dot_l);
+
+    // Combined BRDF
+    let f_total = f_diffuse + f_specular;
+
+    // Compute PDFs for both sampling strategies
+    // Diffuse PDF: cos(θ) / π
+    let pdf_diffuse = n_dot_l / PI;
+
+    // Specular PDF: D * n·h / (4 * v·h)
+    let pdf_specular = d * n_dot_h / (4.0 * v_dot_h);
+
+    // MIS weight using balance heuristic: weight = f * cos / (0.5 * pdf_d + 0.5 * pdf_s)
+    let combined_pdf = max(0.5 * pdf_diffuse + 0.5 * pdf_specular, 0.0001);
+    result.weight = f_total * n_dot_l / combined_pdf;
+
+    // Guard against NaN/Inf - return zero weight if invalid
+    if any(result.weight != result.weight) || any(result.weight > vec3<f32>(1e6)) {
+        result.weight = vec3<f32>(0.0);
+    }
+
     return result;
+}
+
+// GGX normal distribution function
+fn ggx_distribution(n_dot_h: f32, roughness: f32) -> f32 {
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let n_dot_h2 = n_dot_h * n_dot_h;
+    let denom = n_dot_h2 * (a2 - 1.0) + 1.0;
+    return a2 / (PI * denom * denom);
+}
+
+// Height-correlated Smith G2 for GGX
+// More accurate than separable G1*G1 - doesn't overcount blocked rays
+fn ggx_smith_g2(n_dot_v: f32, n_dot_l: f32, roughness: f32) -> f32 {
+    let a2 = roughness * roughness * roughness * roughness; // α² where α = roughness²
+    let lambda_v = sqrt(a2 + (1.0 - a2) * n_dot_v * n_dot_v);
+    let lambda_l = sqrt(a2 + (1.0 - a2) * n_dot_l * n_dot_l);
+    return 2.0 * n_dot_v * n_dot_l / (n_dot_v * lambda_l + n_dot_l * lambda_v);
 }
 
 fn should_terminate_russian_roulette(throughput: vec3<f32>, seed: ptr<function, u32>) -> bool {
