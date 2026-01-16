@@ -98,21 +98,15 @@ struct PodTransform {
 @group(0) @binding(1) var<storage, read> bvh_node_heap: array<PodBvhNode>;
 @group(0) @binding(2) var<storage, read> triangle_heap: array<PodTriangle>;
 @group(0) @binding(3) var<storage, read> material_heap: array<PodMaterial>;
-@group(0) @binding(4) var color_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(5) var<storage, read> color_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(6) var normal_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(7) var<storage, read> normal_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(8) var metalness_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(9) var<storage, read> metalness_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(10) var roughness_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(11) var<storage, read> roughness_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(12) var environment_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(13) var<storage, read> environment_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(14) var emissive_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(15) var<storage, read> emissive_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(16) var diffuse_f0_texture_heap: texture_2d_array<f32>;
-@group(0) @binding(17) var<storage, read> diffuse_f0_texture_allocations: array<PodTextureAllocation>;
-@group(0) @binding(18) var linear_sampler: sampler;
+@group(0) @binding(4) var rgb_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(5) var<storage, read> rgb_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(6) var rg_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(7) var<storage, read> rg_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(8) var mono_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(9) var<storage, read> mono_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(10) var hdr_texture_heap: texture_2d_array<f32>;
+@group(0) @binding(11) var<storage, read> hdr_texture_allocations: array<PodTextureAllocation>;
+@group(0) @binding(12) var linear_sampler: sampler;
 
 // Per-frame bind group:
 @group(1) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
@@ -216,7 +210,6 @@ fn halton_base2(index: u32) -> f32 {
     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
     return f32(bits) * 2.3283064365386963e-10;
 }
-
 fn halton_base3(index: u32) -> f32 {
     var result: f32 = 0.0;
     var f: f32 = 1.0 / 3.0;
@@ -228,7 +221,6 @@ fn halton_base3(index: u32) -> f32 {
     }
     return result;
 }
-
 fn halton_2d(index: u32) -> vec2<f32> {
     return vec2<f32>(halton_base2(index), halton_base3(index));
 }
@@ -243,12 +235,10 @@ fn rand1f(seed: ptr<function, u32>) -> f32 {
     *seed = pcg_hash(*seed);
     return f32(*seed) / f32(0xFFFFFFFFu);
 }
-
 fn rand2f(seed: ptr<function, u32>) -> vec2<f32> {
     return vec2<f32>(rand1f(seed), rand1f(seed));
 }
-
-fn rand3_from_seed(seed: ptr<function, u32>) -> vec3<f32> {
+fn rand3f(seed: ptr<function, u32>) -> vec3<f32> {
     return vec3<f32>(rand1f(seed), rand1f(seed), rand1f(seed));
 }
 
@@ -256,110 +246,44 @@ fn rand3_from_seed(seed: ptr<function, u32>) -> vec3<f32> {
 // Texture sampling:
 //
 
-fn sample_color_texture(
-    color_texture_id: u32,
-    uv: vec2<f32>,
-) -> vec3<f32> {
-    let alloc = color_texture_allocations[color_texture_id];
+fn sample_rgb_texture(texture_id: u32, uv: vec2<f32>) -> vec3<f32> {
+    let alloc = rgb_texture_allocations[texture_id];
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    let sample_color = textureSampleLevel(color_texture_heap, linear_sampler, sample_uv, page, 0.0);
-    return sample_color.rgb;
+    return textureSampleLevel(rgb_texture_heap, linear_sampler, sample_uv, page, 0.0).rgb;
 }
 
-/// Samples a normal in [-1,+1]^3 from a normal map texture.
-fn sample_normal_texture(
-    normal_texture_id: u32,
-    uv: vec2<f32>,
-) -> vec3<f32> {
-    let alloc = normal_texture_allocations[normal_texture_id];
+fn sample_rg_texture(texture_id: u32, uv: vec2<f32>) -> vec2<f32> {
+    let alloc = rg_texture_allocations[texture_id];
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    let sample_rg = textureSampleLevel(normal_texture_heap, linear_sampler, sample_uv, page, 0.0);
-    let xy = 2.0 * sample_rg.rg - vec2<f32>(1.0);
-    let z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
-    return vec3<f32>(xy.x, xy.y, z);
+    return textureSampleLevel(rg_texture_heap, linear_sampler, sample_uv, page, 0.0).rg;
 }
 
-fn sample_metalness_texture(
-    metalness_texture_id: u32,
-    uv: vec2<f32>,
-) -> f32 {
-    let alloc = metalness_texture_allocations[metalness_texture_id];
+fn sample_mono_texture(texture_id: u32, uv: vec2<f32>) -> f32 {
+    let alloc = mono_texture_allocations[texture_id];
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    return textureSampleLevel(metalness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
+    return textureSampleLevel(mono_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
 }
 
-fn sample_roughness_texture(
-    roughness_texture_id: u32,
-    uv: vec2<f32>,
-) -> f32 {
-    let alloc = roughness_texture_allocations[roughness_texture_id];
+fn sample_hdr_texture(texture_id: u32, uv: vec2<f32>) -> vec4<f32> {
+    let alloc = hdr_texture_allocations[texture_id];
     let page = u32(alloc.y);
     let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
     let alloc_size = vec2<f32>(alloc.w, alloc.h);
     let wrapped_uv = fract(uv);
     let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    return textureSampleLevel(roughness_texture_heap, linear_sampler, sample_uv, page, 0.0).r;
-}
-
-fn sample_environment_texture(
-    environment_texture_id: u32,
-    uv: vec2<f32>,
-) -> vec4<f32> {
-    let alloc = environment_texture_allocations[environment_texture_id];
-    let page = u32(alloc.y);
-    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
-    let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let wrapped_uv = fract(uv);
-    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    return textureSampleLevel(environment_texture_heap, linear_sampler, sample_uv, page, 0.0);
-}
-
-fn sample_emissive_texture(
-    emissive_texture_id: u32,
-    uv: vec2<f32>,
-) -> vec3<f32> {
-    // If emissive_texture_id is 0xFFFFFFFF, there's no emissive texture, return black
-    if emissive_texture_id == 0xFFFFFFFFu {
-        return vec3<f32>(0.0);
-    }
-    let alloc = emissive_texture_allocations[emissive_texture_id];
-    let page = u32(alloc.y);
-    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
-    let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let wrapped_uv = fract(uv);
-    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    let sample_color = textureSampleLevel(emissive_texture_heap, linear_sampler, sample_uv, page, 0.0);
-    return sample_color.rgb;
-}
-
-fn sample_diffuse_f0_texture(
-    diffuse_f0_texture_id: u32,
-    uv: vec2<f32>,
-) -> vec3<f32> {
-    // If diffuse_f0_texture_id is 0xFFFFFFFF, there's no diffuse_f0 texture, return white (1.0)
-    if diffuse_f0_texture_id == 0xFFFFFFFFu {
-        return vec3<f32>(1.0);
-    }
-    let alloc = diffuse_f0_texture_allocations[diffuse_f0_texture_id];
-    let page = u32(alloc.y);
-    let alloc_uv = vec2<f32>(alloc.x, fract(alloc.y));
-    let alloc_size = vec2<f32>(alloc.w, alloc.h);
-    let wrapped_uv = fract(uv);
-    let sample_uv = alloc_uv + wrapped_uv * alloc_size;
-    let sample_color = textureSampleLevel(diffuse_f0_texture_heap, linear_sampler, sample_uv, page, 0.0);
-    return sample_color.rgb;
+    return textureSampleLevel(hdr_texture_heap, linear_sampler, sample_uv, page, 0.0);
 }
 
 //
@@ -804,7 +728,7 @@ fn sample_environment_map(ray: Ray) -> vec4<f32> {
     let v = 1.0 - ((phi + 1.5707963268) / 3.14159265359);  // Flip V so +Z is at top
 
     let uv = vec2<f32>(u, v);
-    return sample_environment_texture(u32(frame_info.environment_map_texture_id), uv);
+    return sample_hdr_texture(u32(frame_info.environment_map_texture_id), uv);
 }
 
 
@@ -899,27 +823,29 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
 fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let color = sample_color_texture(material.color_map_id, hit_details.texcoords);
+    let color = sample_rgb_texture(material.color_map_id, hit_details.texcoords);
     let color_factor = vec3<f32>(material.color_factor[0], material.color_factor[1], material.color_factor[2]);
     return vec4<f32>(color * color_factor, 1.0);
 }
 fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let texture_normal = sample_normal_texture(material.normal_map_id, hit_details.texcoords);
+    let xy = 2.0 * sample_rg_texture(material.normal_map_id, hit_details.texcoords) - vec2<f32>(1.0);
+    let z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
+    let texture_normal = vec3<f32>(xy.x, xy.y, z);
     return hit_details.tbn * texture_normal;
 }
 fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let metalness_texture = sample_metalness_texture(material.metalness_map_id, hit_details.texcoords);
+    let metalness_texture = sample_mono_texture(material.metalness_map_id, hit_details.texcoords);
     let metalness_factor = material.metalness_factor;
     return metalness_factor * metalness_texture;
 }
 fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let roughness_texture = sample_roughness_texture(material.roughness_map_id, hit_details.texcoords);
+    let roughness_texture = sample_mono_texture(material.roughness_map_id, hit_details.texcoords);
     let roughness_factor = material.roughness_factor;
     return roughness_factor * roughness_texture;
 }
@@ -931,7 +857,10 @@ fn compute_hit_details_surface_emissive(hit_details: HitDetails) -> vec3<f32> {
         material.emissive_factor[1],
         material.emissive_factor[2],
     );
-    let emissive_texture = sample_emissive_texture(material.emissive_map_id, hit_details.texcoords);
+    if material.emissive_map_id == 0xFFFFFFFFu {
+        return vec3<f32>(0.0);
+    }
+    let emissive_texture = sample_rgb_texture(material.emissive_map_id, hit_details.texcoords);
     return emissive_factor * emissive_texture;
 }
 fn compute_hit_details_surface_diffuse_f0(hit_details: HitDetails) -> vec3<f32> {
@@ -942,7 +871,10 @@ fn compute_hit_details_surface_diffuse_f0(hit_details: HitDetails) -> vec3<f32> 
         material.diffuse_f0_factor[1],
         material.diffuse_f0_factor[2],
     );
-    let diffuse_f0_texture = sample_diffuse_f0_texture(material.diffuse_f0_map_id, hit_details.texcoords);
+    if material.diffuse_f0_map_id == 0xFFFFFFFFu {
+        return diffuse_f0_factor;
+    }
+    let diffuse_f0_texture = sample_rgb_texture(material.diffuse_f0_map_id, hit_details.texcoords);
     return diffuse_f0_factor * diffuse_f0_texture;
 }
 
