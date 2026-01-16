@@ -15,6 +15,7 @@ __all__ = [
     "Draw2dExtTextPrimitive",
     "Draw2dQuad",
     "Draw2dRenderer",
+    "Draw3dAov",
     "Draw3dCamera",
     "Draw3dGeometry",
     "Draw3dMaterial",
@@ -95,11 +96,12 @@ from .draw_2d_ext import (
     Draw2dExtCanvas,
 )
 from .draw_3d import (
-    Draw3dRenderer,
-    Draw3dScene,
+    Draw3dAov,
     Draw3dCamera,
     Draw3dGeometry,
     Draw3dMaterial,
+    Draw3dRenderer,
+    Draw3dScene,
     Draw3dTexture,
 )
 from .resources import (

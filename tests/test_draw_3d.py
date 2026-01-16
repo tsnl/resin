@@ -150,7 +150,7 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
 
         # For damaged_helmet, also output emissive debug image
         if scene_name == "damaged_helmet":
-            renderer.set_debug_flags(emit_emissive=True)
+            renderer.set_debug_flags(emit_surface_emissive=True)
 
         data = _render_and_readback(
             gpu_device,
@@ -863,8 +863,8 @@ def test_damaged_helmet_surface_outputs(
     renderer.set_debug_flags(
         emit_surface_color=True,
         emit_surface_normal=True,
-        emit_orm=True,
-        emit_emissive=True,
+        emit_surface_orm=True,
+        emit_surface_emissive=True,
         disable_jitter=True,
     )
 

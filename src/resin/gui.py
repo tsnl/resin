@@ -55,7 +55,7 @@ from .draw_2d_ext import (
 from .gpu import BlitRenderer
 
 if TYPE_CHECKING:
-    from .draw_3d import Draw3dRenderer
+    from .draw_3d import Draw3dAov, Draw3dRenderer
     from .window import Window
 
 
@@ -1121,6 +1121,7 @@ class Gui:
         *,
         width: int | None = None,
         height: int | None = None,
+        aov: "Draw3dAov | None" = None,
     ) -> InputState:
         """
         Draw a 3D viewport and return input state filtered for this viewport.
@@ -1133,6 +1134,9 @@ class Gui:
             renderer: The Draw3dRenderer whose output will be displayed.
             width: Width in DIP. None = fill available horizontal space.
             height: Height in DIP. None = fill available vertical space.
+            aov: Which AOV to display. If None, uses the renderer's current display_aov.
+                 The AOV must be enabled via renderer.set_render_settings(enabled_aov_list=...)
+                 for meaningful output.
 
         Returns:
             InputState containing events filtered for this viewport.
@@ -1151,6 +1155,10 @@ class Gui:
             h = self._height - y - self._style.window_padding
         else:
             h = height
+
+        # Set display AOV if specified
+        if aov is not None:
+            renderer.set_display_aov(aov)
 
         # Resize renderer to match viewport size in pixels
         # (resize() early-outs if size unchanged)

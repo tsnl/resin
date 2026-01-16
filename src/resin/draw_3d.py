@@ -1,4 +1,5 @@
 __all__ = [
+    "Draw3dAov",
     "Draw3dRenderer",
     "Draw3dScene",
 ]
@@ -21,6 +22,23 @@ from .excepts import LogicError
 from .bvh import Blas, build_blas_bvh, build_tlas_bvh, transform_aabb
 from .resources import GeometryResource, MaterialResource
 from .images import encode_bc1, encode_bc4, encode_bc5
+
+#
+# AOV type alias
+#
+
+type Draw3dAov = Literal[
+    "default",
+    "per-pixel-radiance",
+    "primary-ray-direction",
+    "surface-depth",
+    "surface-position",
+    "surface-color",
+    "surface-normal",
+    "surface-orm",
+    "surface-emissive",
+    "bvh-depth",
+]
 
 #
 # Renderer
@@ -1034,6 +1052,10 @@ class Draw3dRenderer(BaseDisposable):
             ],
         )
 
+        # Per-AOV postprocess bind groups for viewport display selection
+        self._display_aov: Draw3dAov = "default"
+        self._aov_postprocess_bind_groups = self._create_aov_postprocess_bind_groups()
+
         # Frame profiling resources
         self.num_frame_profiling_samples = num_frame_profiling_samples
         self._profiling_write_index = 0
@@ -1184,9 +1206,70 @@ class Draw3dRenderer(BaseDisposable):
         self._frame_index += 1
         self._log_frame_timing_stats_if_due()
 
-    def get_output_image(self) -> wgpu.GPUTexture:
-        """Get the final output image (full resolution, postprocessed)."""
+    def get_output_image(self, aov: Draw3dAov | None = None) -> wgpu.GPUTexture:
+        """Get the final output image (full resolution, postprocessed).
+
+        Args:
+            aov: Which AOV to get output for. If None, uses the current display_aov.
+                 Note: This returns the same postprocessed output texture, but the
+                 content depends on which AOV was selected via set_display_aov()
+                 before calling record().
+        """
         return self.output_image
+
+    def get_display_aov(self) -> Draw3dAov:
+        """Get the currently selected AOV for viewport display."""
+        return self._display_aov
+
+    def set_display_aov(self, aov: Draw3dAov) -> None:
+        """Set which AOV to display in the viewport.
+
+        This determines which AOV texture is used as the source for postprocessing.
+        The AOV must be enabled via set_render_settings(enabled_aov_list=...) for
+        meaningful output.
+        """
+        self._display_aov = aov
+
+    def _create_aov_postprocess_bind_groups(self) -> dict[Draw3dAov, wgpu.GPUBindGroup]:
+        """Create postprocess bind groups for each AOV texture."""
+        aov_textures: dict[Draw3dAov, wgpu.GPUTexture] = {
+            "default": self._output_image,
+            "per-pixel-radiance": self._frame_per_pixel_radiance_image,
+            "primary-ray-direction": self._frame_primary_ray_direction_image,
+            "surface-depth": self._frame_surface_depth_image,
+            "surface-position": self._frame_surface_position_image,
+            "surface-color": self._frame_surface_color_image,
+            "surface-normal": self._frame_surface_normal_image,
+            "surface-orm": self._frame_surface_orm_image,
+            "surface-emissive": self._frame_surface_emissive_image,
+            "bvh-depth": self._frame_surface_depth_image,  # Reuses depth texture
+        }
+
+        bind_groups: dict[Draw3dAov, wgpu.GPUBindGroup] = {}
+        for aov, texture in aov_textures.items():
+            bind_groups[aov] = self.device.create_bind_group(
+                label=f"Draw3dRenderer.PostprocessBindGroup.{aov}",
+                layout=self.postprocess_bind_group_layout,
+                entries=[
+                    wgpu.BindGroupEntry(
+                        binding=0,
+                        resource=texture.create_view(),
+                    ),
+                    wgpu.BindGroupEntry(
+                        binding=1,
+                        resource=self.linear_sampler,
+                    ),
+                    wgpu.BindGroupEntry(
+                        binding=2,
+                        resource=wgpu.BufferBinding(
+                            buffer=self._postprocess_uniform_buffer,
+                            offset=0,
+                            size=16,
+                        ),
+                    ),
+                ],
+            )
+        return bind_groups
 
     def resize(self, target_size_wh_px: tuple[int, int]) -> None:
         """
@@ -1483,6 +1566,9 @@ class Draw3dRenderer(BaseDisposable):
             ],
         )
 
+        # Recreate per-AOV postprocess bind groups
+        self._aov_postprocess_bind_groups = self._create_aov_postprocess_bind_groups()
+
         # Reset per-frame state (accumulator needs to restart)
         # Explicitly preserve geometry, materials, and textures
         self.reset(
@@ -1634,8 +1720,8 @@ class Draw3dRenderer(BaseDisposable):
         emit_closest_hit_bvh_depth_in_r: bool = False,
         emit_surface_color: bool = False,
         emit_surface_normal: bool = False,
-        emit_orm: bool = False,
-        emit_emissive: bool = False,
+        emit_surface_orm: bool = False,
+        emit_surface_emissive: bool = False,
         disable_jitter: bool = False,
     ) -> None:
         """
@@ -1647,8 +1733,8 @@ class Draw3dRenderer(BaseDisposable):
         :param emit_closest_hit_bvh_depth_in_r: If True, output normalized hit depth to BVH leaf in red channel.
         :param emit_surface_color: If True, output sampled texture color at hit point.
         :param emit_surface_normal: If True, output world-space hit normal as RGB.
-        :param emit_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
-        :param emit_emissive: If True, output sampled emissive color at hit point.
+        :param emit_surface_orm: If True, output ORM (Opacity, Roughness, Metalness) as RGB.
+        :param emit_surface_emissive: If True, output sampled emissive color at hit point.
         :param disable_jitter: If True, disable jitter for primary ray generation.
         """
         self._debug_flags = 0
@@ -1664,9 +1750,9 @@ class Draw3dRenderer(BaseDisposable):
             self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_COLOR
         if emit_surface_normal:
             self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_NORMAL
-        if emit_orm:
+        if emit_surface_orm:
             self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_ORM
-        if emit_emissive:
+        if emit_surface_emissive:
             self._debug_flags |= _FRAME_FLAG_EMIT_SURFACE_EMISSIVE
         if disable_jitter:
             self._debug_flags |= _FRAME_FLAG_DISABLE_JITTER
@@ -1678,6 +1764,8 @@ class Draw3dRenderer(BaseDisposable):
         max_bounces: int | None = None,
         render_scale: float | None = None,
         accumulator_frame_count: int | None = None,
+        enabled_aov_list: list[Draw3dAov] | None = None,
+        disable_jitter: bool | None = None,
     ) -> None:
         """Update render settings dynamically.
 
@@ -1686,6 +1774,10 @@ class Draw3dRenderer(BaseDisposable):
             max_bounces: Maximum ray bounces for path tracing. If None, unchanged.
             render_scale: Internal render resolution scale (0.0-1.0). If None, unchanged.
             accumulator_frame_count: Number of frames to accumulate. If None, unchanged.
+            enabled_aov_list: List of AOVs to enable for rendering. When set, replaces
+                the current AOV flags. Use ["default"] for standard path tracing output.
+            disable_jitter: If True, disable jitter for primary ray generation.
+                If False, enable jitter. If None, unchanged.
         """
         if samples_per_pixel is not None:
             self._samples_per_pixel = samples_per_pixel
@@ -1699,6 +1791,16 @@ class Draw3dRenderer(BaseDisposable):
             current_size = self.target_size_wh_px
             self.target_size_wh_px = (0, 0)  # Bypass early-return check
             self.resize(current_size)
+        if enabled_aov_list is not None:
+            # Clear AOV flags and set new ones based on the list
+            self._debug_flags &= _FRAME_FLAG_DISABLE_JITTER  # Preserve jitter flag
+            for aov in enabled_aov_list:
+                self._debug_flags |= _AOV_TO_FLAG[aov]
+        if disable_jitter is not None:
+            if disable_jitter:
+                self._debug_flags |= _FRAME_FLAG_DISABLE_JITTER
+            else:
+                self._debug_flags &= ~_FRAME_FLAG_DISABLE_JITTER
 
     def reset(
         self,
@@ -1883,7 +1985,9 @@ class Draw3dRenderer(BaseDisposable):
                 ],
             )
             render_pass.set_pipeline(self.postprocess_pipeline)
-            render_pass.set_bind_group(0, self._postprocess_bind_group, [], 0, 0)
+            # Select bind group based on display AOV
+            bind_group = self._aov_postprocess_bind_groups[self._display_aov]
+            render_pass.set_bind_group(0, bind_group, [], 0, 0)
             render_pass.draw(3, 1, 0, 0)
             render_pass.end()
 
@@ -1911,7 +2015,9 @@ class Draw3dRenderer(BaseDisposable):
 
         # Initialize compact state: [active_count=total_rays, current_buf=0, next_count=0]
         compact_init = np.array([total_rays, 0, 0], dtype=np.uint32)
-        self.queue.write_buffer(self._wf_compact_state_buffer, 0, compact_init.tobytes())
+        self.queue.write_buffer(
+            self._wf_compact_state_buffer, 0, compact_init.tobytes()
+        )
 
         # Pass 1: Generate primary rays
         with trace.span("Draw3dRenderer/wavefront/gen_primary_rays", "render"):
@@ -3022,6 +3128,19 @@ _FRAME_FLAG_EMIT_SURFACE_ORM = 1 << 6
 _FRAME_FLAG_DISABLE_JITTER = 1 << 7
 _FRAME_FLAG_EMIT_PER_PIXEL_RADIANCE = 1 << 8
 _FRAME_FLAG_EMIT_SURFACE_EMISSIVE = 1 << 9
+
+_AOV_TO_FLAG: dict[Draw3dAov, int] = {
+    "default": 0,
+    "per-pixel-radiance": _FRAME_FLAG_EMIT_PER_PIXEL_RADIANCE,
+    "primary-ray-direction": _FRAME_FLAG_EMIT_PRIMARY_RAY_DIRECTION,
+    "surface-depth": _FRAME_FLAG_EMIT_SURFACE_DEPTH,
+    "surface-position": _FRAME_FLAG_EMIT_HIT_WORLD_POSITION,
+    "surface-color": _FRAME_FLAG_EMIT_SURFACE_COLOR,
+    "surface-normal": _FRAME_FLAG_EMIT_SURFACE_NORMAL,
+    "surface-orm": _FRAME_FLAG_EMIT_SURFACE_ORM,
+    "surface-emissive": _FRAME_FLAG_EMIT_SURFACE_EMISSIVE,
+    "bvh-depth": _FRAME_FLAG_EMIT_BVH_DEPTH,
+}
 
 
 POD_SPAN_DTYPE = np.dtype(
