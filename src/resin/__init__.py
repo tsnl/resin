@@ -26,9 +26,6 @@ __all__ = [
     "FontWeight",
     "GeometryResource",
     "GltfScene",
-    "GuiTheme",
-    "GuiWidget",
-    "GuiWindow",
     "ImageFormat",
     "Key",
     "KeyModifier",
@@ -54,6 +51,7 @@ __all__ = [
     "encode_bc5",
     "expect",
     "gltf_to_mitsuba_xml",
+    "gui",
     "help_request_wgpu_device",
     "image_format_channel_count",
     "load_gltf",
@@ -135,7 +133,7 @@ from .images import (
     convert_rgb_to_grayscale,
     image_format_channel_count,
 )
-from .gui import GuiWidget, GuiWindow, GuiTheme
+from . import gui
 from .window import Window, WindowContext
 from .bvh import (
     Blas,

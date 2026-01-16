@@ -6,8 +6,8 @@ requires-python = ">=3.13"
 members = [
     "resin",
     "resin-bmfont-cooker",
+    "resin-editor",
     "resin-replay",
-    "resin-sandbox",
 ]
 
 [[package]]
@@ -1171,6 +1171,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "resin-editor"
+version = "0.1.0"
+source = { editable = "apps/resin_editor" }
+dependencies = [
+    { name = "resin" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "resin", editable = "." }]
+
+[[package]]
 name = "resin-replay"
 version = "0.1.0"
 source = { editable = "apps/resin_replay" }
@@ -1191,17 +1202,6 @@ requires-dist = [
     { name = "resin", editable = "." },
 ]
 provides-extras = ["mitsuba"]
-
-[[package]]
-name = "resin-sandbox"
-version = "0.1.0"
-source = { editable = "apps/resin_sandbox" }
-dependencies = [
-    { name = "resin" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "resin", editable = "." }]
 
 [[package]]
 name = "rich"

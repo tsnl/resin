@@ -1,1306 +1,1097 @@
 """
-GUI widgets and window management.
+Immediate-mode GUI built on draw_2d.
 
-Philosophy: each widget is a multipurpose element that can be styled to behave as a
-label, button, container, etc. The key difference between these roles is the style,
-which may depend on the widget's "state" (default, hover, unclickable, etc), and which
-callbacks the user decides to connect to its events.
+This module provides an imgui-style API where widgets are "called" each frame
+and state is stored externally or via unique IDs. No persistent widget objects.
 
-Each widget has a grid layout for its children, with constraints solved via kiwisolver.
+Usage:
+    input_state = gui.InputState()
+    # ... wire up window callbacks to input_state methods ...
 
-Styles are CSS-like, with style classes and state-dependent overrides.
+    with gui.window(width=800, height=600, input_state=input_state) as g:
+        g.label("Hello World")
+        if g.button("Click Me"):
+            print("Clicked!")
+        value = g.slider_float("Value", value, 0.0, 1.0)
 
-Order of operations per frame:
-1.  Update style based on previous state (hover, clicked, etc).
-    The margin, border, and padding may affect the state (hover, clicked, etc) by
-    affecting the bounding box of the widget or its layout children.
-2.  Update layout constraints based on style (margin, border, padding, etc). Solve.
-    This ensures the widget and its children have up-to-date positions and sizes
-    given the current layout.
-3.  Update state (hover, clicked, etc) using input events and style: mouse move,
-    mouse button, key press, etc.
-4.  Render self and children.
-
-Widget stacking order:
-- parent always below children.
-- among siblings, later added always above earlier added.
-
-FIXME: Currently, 3D viewport rendering is broken. We rewrote the 2D renderer such that
-we can render-to-texture and then display as a quad. This is the right way to handle
-viewports. Need to rewrite this module after rewriting the 3D renderer.
+    # Render g.primitives via Draw2dExtCanvas
 """
 
 __all__ = [
-    "GuiCursorMode",
-    "GuiTheme",
-    "GuiWidget",
-    "GuiWidgetStyle",
-    "GuiWindow",
+    "Gui",
+    "GuiStyle",
+    "InputState",
+    "window",
 ]
 
 import logging
-from dataclasses import dataclass
-from typing import Literal, Callable
-import time
-
-import numpy as np
-import numpy.typing as npt
-import wgpu
-from kiwisolver import (
-    Solver as KiwiSolver,
-    Variable as KiwiVariable,
-    Expression as KiwiExpression,
-    Term as KiwiTerm,
-)
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Literal, Generator
 
 from .basic import (
-    BaseDisposable,
-    MouseButton,
     ButtonAction,
     Font,
     FontSize,
     FontWeight,
+    HorizontalAlignment,
     Key,
     KeyModifier,
-    HorizontalAlignment,
+    MouseButton,
     VerticalAlignment,
-    JsonObject,
-    LogicError,
 )
-from .draw_2d import Draw2dRenderer
 from .draw_2d_ext import (
     Draw2dExtBasePrimitive,
     Draw2dExtQuadPrimitive,
     Draw2dExtTextPrimitive,
-    Draw2dExtCanvas,
 )
-from .draw_3d import (
-    Draw3dCamera,
-    Draw3dTexture,
-    Draw3dGeometry,
-    Draw3dMaterial,
-    Draw3dRenderer,
-    Draw3dScene,
-)
-from .gpu import BlitRenderer
-from .window import Window
-from .events import EventHub
 
 
 LOG = logging.getLogger(__name__)
 
 
-type GuiImageLayout = Literal["fit", "crop", "stretch"]
-type GuiCursorMode = Literal["cursor", "joystick"]
-type GuiImage = wgpu.GPUTexture
+#
+# Type aliases
+#
+
+type Color = tuple[float, float, float, float]
+type LayoutDirection = Literal["vertical", "horizontal"]
 
 
-def _compute_image_src_xy_wh(
-    dst_wh: tuple[int, int],
-    image: GuiImage | None,
-    layout: GuiImageLayout,
-    user_src_xy: tuple[int, int] = (0, 0),
-    user_src_wh: tuple[int, int] | None = None,
-) -> tuple[tuple[int, int], tuple[int, int] | None]:
-    """
-    Compute the src_xy and src_wh to pass to Draw2dRenderer.add_quad() based on the layout mode.
-
-    Args:
-        dst_wh: The destination widget size in pixels
-        image: The image to layout, or None
-        layout: The layout mode ("fit", "crop", or "stretch")
-        user_src_xy: User-specified source rectangle origin (default: top-left)
-        user_src_wh: User-specified source rectangle size, or None to use full image
-
-    Returns:
-        A tuple of (src_xy, src_wh) to pass to Draw2dRenderer.add_quad()
-    """
-    if image is None:
-        # No image: return defaults
-        return user_src_xy, user_src_wh
-
-    # Determine the source rectangle
-    src_w = user_src_wh[0] if user_src_wh is not None else image.size[0]
-    src_h = user_src_wh[1] if user_src_wh is not None else image.size[1]
-    src_xy = user_src_xy
-    src_wh = (src_w, src_h)
-
-    dst_w, dst_h = dst_wh
-
-    if layout == "stretch":
-        # Stretch: use the source rectangle as-is
-        return src_xy, src_wh
-    elif layout == "fit":
-        # Fit: scale the source rectangle so the entire image fits within the destination
-        # We adjust src_wh to match the aspect ratio of dst_wh
-        src_aspect = src_w / src_h
-        dst_aspect = dst_w / dst_h
-
-        if src_aspect > dst_aspect:
-            # Source is wider: limit by destination width
-            new_src_w = int(src_h * dst_aspect)
-            offset = (src_w - new_src_w) // 2
-            return (src_xy[0] + offset, src_xy[1]), (new_src_w, src_h)
-        else:
-            # Source is taller: limit by destination height
-            new_src_h = int(src_w / dst_aspect)
-            offset = (src_h - new_src_h) // 2
-            return (src_xy[0], src_xy[1] + offset), (src_w, new_src_h)
-    elif layout == "crop":
-        # Crop: trim the minimum to fit the center
-        src_aspect = src_w / src_h
-        dst_aspect = dst_w / dst_h
-
-        if src_aspect > dst_aspect:
-            # Source is wider: crop left and right
-            new_src_w = int(src_h * dst_aspect)
-            offset = (src_w - new_src_w) // 2
-            return (src_xy[0] + offset, src_xy[1]), (new_src_w, src_h)
-        else:
-            # Source is taller: crop top and bottom
-            new_src_h = int(src_w / dst_aspect)
-            offset = (src_h - new_src_h) // 2
-            return (src_xy[0], src_xy[1] + offset), (src_w, new_src_h)
-    else:
-        raise ValueError(f"Invalid image layout: {layout}")
+#
+# Input State
+#
 
 
 @dataclass
-class GuiWidgetStyle:
-    font: Font = "sans-serif"
-    font_size: FontSize = "regular"
-    font_weight: FontWeight = "regular"
-    bg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
-    fg_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
-    border_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
-    border_thickness: tuple[int, int, int, int] = (0, 0, 0, 0)
-    padding: tuple[int, int, int, int] = (0, 0, 0, 0)
-    margin: tuple[int, int, int, int] = (0, 0, 0, 0)
-    text_horizontal_alignment: HorizontalAlignment = "center"
-    text_vertical_alignment: VerticalAlignment = "middle"
-    wrap: bool = False
-    image_layout: GuiImageLayout = "fit"
-
-
-type GuiWidgetState = Literal["default", "hover", "unclickable", "pressed", "cancelled"]
-type GuiTheme = dict[str, dict[GuiWidgetState, JsonObject]]
-
-
-_DEFAULT_THEME: GuiTheme = {
-    "central": {
-        "default": {
-            "bg_color": (
-                0.925,
-                0.925,
-                0.925,
-                1.0,
-            ),  # Light gray background (Windows XP)
-            "border_color": (0.0, 0.0, 0.0, 0.0),
-            "border_thickness": (0, 0, 0, 0),
-            "padding": (0, 0, 0, 0),
-        }
-    },
-    "label": {
-        "default": {
-            "bg_color": (
-                0.925,
-                0.925,
-                0.925,
-                1.0,
-            ),
-            "fg_color": (0.0, 0.0, 0.0, 1.0),
-        },
-    },
-    "button": {
-        "default": {
-            "bg_color": (0.85, 0.87, 0.92, 1.0),  # Light blue-gray (Windows XP button)
-            "fg_color": (0.0, 0.0, 0.0, 1.0),  # Black text
-            "border_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP blue border
-            "border_thickness": (1, 1, 1, 1),
-            "padding": (5, 5, 5, 5),
-            "margin": (10, 10, 10, 10),
-        },
-        "hover": {
-            "bg_color": (0.78, 0.84, 0.95, 1.0),  # Lighter blue on hover
-            "border_color": (0.0, 0.45, 0.85, 1.0),  # Brighter blue on hover
-        },
-        "pressed": {
-            "bg_color": (0.4, 0.6, 0.85, 1.0),  # Dark blue when pressed
-            "border_color": (0.0, 0.2, 0.5, 1.0),  # Darker blue border when pressed
-        },
-        "cancelled": {
-            "bg_color": (0.75, 0.75, 0.75, 1.0),  # Gray when cancelled
-            "border_color": (0.5, 0.5, 0.5, 1.0),  # Darker gray border when cancelled
-        },
-        "unclickable": {
-            "fg_color": (0.35, 0.35, 0.35, 1.0),
-            "bg_color": (0.82, 0.82, 0.82, 1.0),
-            "border_color": (0.65, 0.65, 0.65, 1.0),
-            "border_thickness": (1, 1, 1, 1),
-        },
-    },
-    "h1": {
-        "default": {
-            "font_size": "extra-large",
-            "font_weight": "bold",
-            "fg_color": (1.0, 1.0, 1.0, 1.0),  # White text
-            "bg_color": (0.0, 0.33, 0.65, 1.0),  # Windows XP title bar blue
-        },
-    },
-    "h2": {
-        "default": {
-            "font_size": "large",
-            "font_weight": "bold",
-            "fg_color": (0.0, 0.0, 0.0, 1.0),
-        },
-    },
-}
-
-
-def _eval_theme(theme: GuiTheme, override: GuiTheme) -> GuiTheme:
-    res = {}
-
-    for class_name in set(theme.keys()) | set(override.keys()):
-        res[class_name] = {}
-
-        theme_dicts = theme.get(class_name, {})
-        override_dicts = override.get(class_name, {})
-
-        res[class_name] = {
-            state_name: {
-                **theme_dicts.get(state_name, {}),
-                **override_dicts.get(state_name, {}),
-            }
-            for state_name in set(theme_dicts.keys()) | set(override_dicts.keys())
-        }
-
-    return res
-
-
-def _eval_style(
-    theme: GuiTheme,
-    class_names: list[str],
-    state: GuiWidgetState,
-) -> GuiWidgetStyle:
-    for class_name in class_names:
-        if class_name not in theme:
-            raise LogicError(f"Style class name not found in theme: {class_name!r}")
-
-    d = {}
-    for class_name in class_names:
-        per_state_style_dicts = theme[class_name]
-        d |= per_state_style_dicts.get("default", {})
-        d |= per_state_style_dicts.get(state, {})
-
-    return GuiWidgetStyle(**d)
-
-
-class GuiWindow(BaseDisposable):
+class InputState:
     """
-    A GUI window that wraps a Window and provides 2D rendering plus widget management.
+    Mutable input state collected from window callbacks.
 
-    Takes a Window, device, and queue as arguments.
+    Wire up window callbacks to the helper methods, then call begin_frame()
+    at the start of each frame to reset per-frame state.
     """
 
-    _window: Window
-    _device: wgpu.GPUDevice
-    _queue: wgpu.GPUQueue
-    _theme: GuiTheme
-    _last_mouse_x: float
-    _last_mouse_y: float
-    _central_widget: "GuiWidget | None"
-    _central_widget_stack: list["GuiWidget"]
-    _kiwi_solver: KiwiSolver
+    mouse_x: float = 0.0
+    mouse_y: float = 0.0
+    mouse_down: dict[MouseButton, bool] = field(default_factory=dict)
+    mouse_clicked: dict[MouseButton, bool] = field(default_factory=dict)
+    mouse_released: dict[MouseButton, bool] = field(default_factory=dict)
+    keys_down: set[Key] = field(default_factory=set)
+    keys_pressed: set[Key] = field(default_factory=set)
+    keys_released: set[Key] = field(default_factory=set)
+    text_input: str = ""
+    scroll_x: float = 0.0
+    scroll_y: float = 0.0
 
-    # Renderers
-    _draw_2d_renderer: Draw2dRenderer
-    _draw_2d_canvas: Draw2dExtCanvas
-    _blit_renderer: BlitRenderer
+    def begin_frame(self) -> None:
+        """Call at start of frame to clear per-frame state."""
+        self.mouse_clicked.clear()
+        self.mouse_released.clear()
+        self.keys_pressed.clear()
+        self.keys_released.clear()
+        self.text_input = ""
+        self.scroll_x = 0.0
+        self.scroll_y = 0.0
 
-    # 3D viewport
-    _draw_3d_renderer: Draw3dRenderer
-    _camera_transform: np.ndarray | None
-    _camera_intrinsics: Draw3dCamera | None
-    _environment_map: Draw3dTexture | None
-
-    # 3D mesh collection for current frame
-    _meshes: dict[tuple[Draw3dGeometry, Draw3dMaterial], np.ndarray]
-
-    # Key event callback
-    _key_event_callback: (
-        Callable[[Key | None, int, ButtonAction, list[KeyModifier]], None] | None
-    )
-
-    # Frame timing
-    _last_frame_time: float
-
-    def __init__(
-        self,
-        *,
-        window: Window,
-        device: wgpu.GPUDevice,
-        theme: GuiTheme | None = None,
+    def on_mouse_button(
+        self, button: MouseButton, action: ButtonAction, mods: list[KeyModifier]
     ) -> None:
-        super().__init__()
+        """Handle mouse button callback from Window."""
+        _ = mods
+        if action == "press":
+            self.mouse_down[button] = True
+            self.mouse_clicked[button] = True
+        elif action == "release":
+            self.mouse_down[button] = False
+            self.mouse_released[button] = True
 
-        self._window = window
-        self._device = device
-        self._queue = device.queue
-        self._theme = theme or _DEFAULT_THEME
+    def on_cursor_pos(self, x: float, y: float) -> None:
+        """Handle cursor position callback from Window."""
+        self.mouse_x = x
+        self.mouse_y = y
 
-        self._last_mouse_x = 0.0
-        self._last_mouse_y = 0.0
-
-        # Create central widget stack
-        self._central_widget = None
-        self._central_widget_stack = []
-
-        # For Kiwi solver: window size variables
-        self._kiwi_solver = KiwiSolver()
-        self._w_var = KiwiVariable("window_width")
-        self._h_var = KiwiVariable("window_height")
-
-        # Create 2D renderer and frame
-        scale_x, _ = window.content_scale
-        self._draw_2d_renderer = Draw2dRenderer(
-            device=device,
-            queue=self._queue,
-            target_size_wh=(
-                int(window.width_dip * scale_x),
-                int(window.height_dip * scale_x),
-            ),
-            target_format="rgba8unorm-srgb",
-        )
-        self._draw_2d_canvas = Draw2dExtCanvas(device=device, queue=self._queue)
-        self._blit_renderer = BlitRenderer(device=device)
-
-        # Create 3D renderer
-        self._draw_3d_renderer = Draw3dRenderer(
-            device=device,
-            queue=self._queue,
-            target_size_wh_px=(
-                int(window.width_dip * scale_x),
-                int(window.height_dip * scale_x),
-            ),
-            render_scale=0.5,
-            accumulator_frame_count=64,
-            samples_per_pixel=8,
-        )
-
-        # 3D camera state
-        self._camera_transform = None
-        self._camera_intrinsics = None
-        self._environment_map = None
-        self._meshes = {}
-
-        # Key event callback
-        self._key_event_callback = None
-
-        # Frame timing
-        self._last_frame_time = 0.0
-
-        # Set up window callbacks
-        self._window.set_key_callback(self._on_key_event)
-        self._window.set_mouse_button_callback(self._on_mouse_button_event)
-        self._window.set_cursor_pos_callback(self._on_cursor_pos_event)
-        self._window.set_framebuffer_size_callback(self._on_framebuffer_resize_event)
-
-    #
-    # Resource disposal:
-    #
-
-    def _on_dispose(self) -> None:
-        self._draw_2d_canvas.dispose()
-        super()._on_dispose()
-
-    #
-    # Properties:
-    #
-
-    @property
-    def window(self) -> Window:
-        return self._window
-
-    @property
-    def device(self) -> wgpu.GPUDevice:
-        return self._device
-
-    @property
-    def queue(self) -> wgpu.GPUQueue:
-        return self._queue
-
-    @property
-    def draw_2d_renderer(self) -> Draw2dExtCanvas:
-        return self._draw_2d_canvas
-
-    @property
-    def draw_3d_renderer(self) -> Draw3dRenderer:
-        return self._draw_3d_renderer
-
-    @property
-    def width_dip(self) -> int:
-        return self._window.width_dip
-
-    @property
-    def height_dip(self) -> int:
-        return self._window.height_dip
-
-    @property
-    def content_scale(self) -> tuple[float, float]:
-        return self._window.content_scale
-
-    @property
-    def theme(self) -> GuiTheme:
-        return self._theme
-
-    #
-    # Central widget management:
-    #
-
-    @property
-    def central_widget(self) -> "GuiWidget":
-        """Get the central widget that occupies the full window area."""
-        assert self._central_widget is not None
-        return self._central_widget
-
-    def set_central_widget(self, widget: "GuiWidget") -> None:
-        """Set the central widget that occupies the full window area."""
-        self._central_widget = widget
-        self.update_layout()
-
-    def push_central_widget(self, widget: "GuiWidget") -> None:
-        """Push a new central widget onto the stack."""
-        if self._central_widget is not None:
-            self._central_widget_stack.append(self._central_widget)
-        self._central_widget = widget
-        self.update_layout()
-
-    def pop_central_widget(self) -> None:
-        """Pop the current central widget and restore the previous one."""
-        if self._central_widget_stack:
-            self._central_widget = self._central_widget_stack.pop()
-            self.update_layout()
-        else:
-            self._central_widget = None
-
-    #
-    # Window management (delegated to Window):
-    #
-
-    def should_close(self) -> bool:
-        return self._window.should_close()
-
-    def show(self) -> None:
-        self._window.show()
-
-    def hide(self) -> None:
-        self._window.hide()
-
-    def set_cursor_mode(self, cursor_mode: GuiCursorMode) -> None:
-        """
-        Sets the mouse input mode for the window.
-        - "cursor": cursor input, mouse movement handled by the OS.
-        - "joystick": cursor hidden, mouse movement captured by the window.
-        """
-        self._window.set_cursor_mode(cursor_mode)
-
-    @staticmethod
-    def poll_events() -> None:
-        Window.poll_events()
-
-    #
-    # 3D viewport camera and rendering:
-    #
-
-    def set_3d_camera(
-        self,
-        transform: np.ndarray,
-        intrinsics: Draw3dCamera,
-    ) -> None:
-        """Set the camera for 3D viewport rendering."""
-        self._camera_transform = transform
-        self._camera_intrinsics = intrinsics
-
-    def set_environment_map(
-        self, environment_map: npt.NDArray[np.float32] | None
-    ) -> None:
-        """Set the environment map for IBL lighting."""
-        self._environment_map = (
-            Draw3dTexture(
-                self._draw_3d_renderer, data=environment_map, usage="environment"
-            )
-            if environment_map is not None
-            else None
-        )
-
-    def add_3d_mesh(
-        self,
-        geometry: Draw3dGeometry,
-        material: Draw3dMaterial,
-        model_matrices: np.ndarray,
-    ) -> None:
-        """
-        Add mesh instances to render in the 3D viewport.
-
-        :param geometry: The geometry to render.
-        :param material: The material to apply.
-        :param model_matrices: A (N, 4, 4) array of model transforms in row-major layout.
-        """
-        key = (geometry, material)
-        if key in self._meshes:
-            # Concatenate with existing matrices
-            self._meshes[key] = np.concatenate(
-                [self._meshes[key], model_matrices], axis=0
-            )
-        else:
-            self._meshes[key] = model_matrices
-
-    def clear_3d_meshes(self) -> None:
-        """Clear all 3D meshes for the next frame."""
-        self._meshes = {}
-
-    def set_key_event_callback(
-        self,
-        callback: "Callable[[Key | None, int, ButtonAction, list[KeyModifier]], None] | None",
-    ) -> None:
-        """Set a callback for key events."""
-        self._key_event_callback = callback
-
-    #
-    # Update phase 1: update style:
-    #
-
-    def update_style(self) -> None:
-        if self._central_widget is None:
-            return
-        self._central_widget._update_style()
-
-    #
-    # Update phase 2: update layout:
-    #
-
-    def update_layout(self) -> None:
-        # TODO: Can we get rid of Kiwi here?
-
-        if self._central_widget is None:
-            return
-
-        solver = self._kiwi_solver
-
-        # Reset solver:
-        solver.reset()
-
-        # Setup window size constraints:
-        solver.addEditVariable(self._w_var, "strong")
-        solver.addEditVariable(self._h_var, "strong")
-        solver.suggestValue(self._w_var, self._window.width_dip)
-        solver.suggestValue(self._h_var, self._window.height_dip)
-
-        # Setup widget layout constraints:
-        self._central_widget._update_layout_constraints(
-            solver,
-            0.0,
-            0.0,
-            self._w_var,
-            self._h_var,
-        )
-
-        # Solve:
-        solver.updateVariables()
-
-    #
-    # Update phase 3: process input events:
-    #
-
-    def _on_key_event(
+    def on_key(
         self,
         key: Key | None,
         scancode: int,
         action: ButtonAction,
         mods: list[KeyModifier],
     ) -> None:
-        if self._key_event_callback is not None:
-            self._key_event_callback(key, scancode, action, mods)
-
-        # TODO: Handle key events in GuiWidget if needed
-
-    def _on_mouse_button_event(
-        self,
-        button: MouseButton,
-        action: ButtonAction,
-        mods: list[KeyModifier],
-    ) -> None:
-        if not self._central_widget:
+        """Handle key callback from Window."""
+        _ = scancode, mods
+        if key is None:
             return
+        if action == "press":
+            self.keys_down.add(key)
+            self.keys_pressed.add(key)
+        elif action == "release":
+            self.keys_down.discard(key)
+            self.keys_released.add(key)
 
-        self._central_widget._receive_mouse_button_action(
-            button=button,
-            action=action,
-            click_handled=False,
-        )
+    def on_char(self, char: str) -> None:
+        """Handle character input callback from Window."""
+        self.text_input += char
 
-    def _on_cursor_pos_event(
-        self,
-        x: float,
-        y: float,
-    ) -> None:
-        if not self._central_widget:
-            return
-
-        dx, self._last_mouse_x = x - self._last_mouse_x, x
-        dy, self._last_mouse_y = y - self._last_mouse_y, y
-
-        _ = dx, dy  # Currently unused
-
-        self._central_widget._receive_mouse_position_change(
-            mouse_x_dip=int(round(x)),
-            mouse_y_dip=int(round(y)),
-        )
-
-    def _on_framebuffer_resize_event(
-        self,
-        width_px: int,
-        height_px: int,
-    ) -> None:
-        """Handle window resize events."""
-        # Note: Renderers contain their own frame resources now, no recreation needed
-        pass
-
-    #
-    # Update and Render:
-    #
-
-    def update(self) -> None:
-        """Update style, layout, poll input events, and call widget update hooks."""
-
-        # Compute delta time
-        current_time = time.perf_counter()
-        if self._last_frame_time == 0.0:
-            dt = 0.0
-        else:
-            dt = current_time - self._last_frame_time
-        self._last_frame_time = current_time
-
-        # This specific update order is important, and is documented in the docstring
-        # for `GuiWidget`.
-
-        # Update style:
-        self.update_style()
-
-        # Update layout:
-        self.update_layout()
-
-        # Receive input events:
-        self.poll_events()
-
-        # Call widget update hooks:
-        if self._central_widget is not None:
-            self._central_widget._update(dt)
-
-        # Ready to 'render()'.
-
-    def render(self) -> None:
-        """Render the GUI window with 2D widgets to the screen."""
-        # Get current canvas texture
-        current_texture = self._window.canvas_context.get_current_texture()
-        if current_texture is None:
-            return
-
-        # Create command encoder
-        command_encoder = self._device.create_command_encoder(label="GuiWindow.Render")
-
-        # Render 3D if camera is set
-        if self._camera_transform is not None and self._camera_intrinsics is not None:
-            # Build 3D scene
-            environment_map_texture = self._environment_map
-            scene = Draw3dScene(
-                camera=self._camera_intrinsics,
-                meshes=self._meshes,
-                environment_map=environment_map_texture,
-            )
-            # Record 3D rendering
-            self._draw_3d_renderer.record(
-                scene=scene,
-                command_encoder=command_encoder,
-            )
-
-        # Create primitives list for this frame
-        primitives: list[Draw2dExtBasePrimitive] = []
-        scale_x, _ = self._window.content_scale
-
-        # Draw to primitives:
-        if self._central_widget is not None:
-            self._central_widget._render(primitives)
-
-        # If we have 3D rendering, composite it as a background quad
-        if self._camera_transform is not None and self._camera_intrinsics is not None:
-            # Insert 3D viewport as a background quad at the beginning
-            primitives.insert(
-                0,
-                Draw2dExtQuadPrimitive(
-                    dst_xywh_dip=(
-                        0,
-                        0,
-                        self._window.width_dip,
-                        self._window.height_dip,
-                    ),
-                    src_xy_px=(0, 0),
-                    fill_texture=self._draw_3d_renderer.get_output_image(),
-                    fill_color=(1.0, 1.0, 1.0, 1.0),
-                ),
-            )
-
-        # Convert primitives to quads
-        quads = self._draw_2d_canvas.quads(primitives=primitives, scale=scale_x)
-
-        # Record 2D drawing commands
-        self._draw_2d_renderer.record(
-            quads=quads,
-            command_encoder=command_encoder,
-        )
-
-        # Blit from 2D renderer output to canvas texture
-        self._blit_renderer.record(
-            input_texture=self._draw_2d_renderer.get_output_image(),
-            output_texture=current_texture,
-            command_encoder=command_encoder,
-        )
-
-        # Submit and present
-        self._queue.submit([command_encoder.finish()])
-        self._window.canvas_context.present()
+    def on_scroll(self, xoffset: float, yoffset: float) -> None:
+        """Handle scroll callback from Window."""
+        self.scroll_x += xoffset
+        self.scroll_y += yoffset
 
 
-class GuiWidget(BaseDisposable):
-    _parent_widget: "GuiWidget | None"
-    _gui_window: "GuiWindow"
-    _child_widget_list: list["GuiWidget"]
-    _mouse_over: bool
-    _latest_local_mouse_pos: tuple[int, int]
-    _latest_global_mouse_pos: tuple[int, int]
-    _mouse_button_pressed_locally: bool
+#
+# Style
+#
 
-    # Layout params (position in parent)
-    _row: int
-    _col: int
-    _row_span: int
-    _col_span: int
 
-    # Grid params (for children)
-    _grid_row_size_hints: tuple[int, ...]
-    _grid_col_size_hints: tuple[int, ...]
+@dataclass
+class GuiStyle:
+    """Style configuration for GUI widgets."""
 
-    # Content:
-    _text: str | None
-    _image: GuiImage | None
-    _image_src_xy: tuple[int, int]
-    _image_src_wh: tuple[int, int] | None
-    _image_layout: GuiImageLayout
-    _image_hover: GuiImage | None
-    _image_hover_src_xy: tuple[int, int]
-    _image_hover_src_wh: tuple[int, int] | None
-    _image_hover_layout: GuiImageLayout
-    _style_classes: list[str]
-    _clickable: bool
-    _theme: GuiTheme
+    # Colors
+    bg_color: Color = (0.15, 0.15, 0.15, 0.95)
+    bg_color_hover: Color = (0.25, 0.25, 0.25, 1.0)
+    bg_color_active: Color = (0.12, 0.12, 0.12, 1.0)
+    fg_color: Color = (1.0, 1.0, 1.0, 1.0)
+    fg_color_disabled: Color = (0.5, 0.5, 0.5, 1.0)
+    border_color: Color = (0.4, 0.4, 0.4, 1.0)
+    accent_color: Color = (0.26, 0.59, 0.98, 1.0)
+    slider_grab_color: Color = (0.4, 0.4, 0.4, 1.0)
+    slider_grab_color_active: Color = (0.5, 0.5, 0.5, 1.0)
+    input_bg_color: Color = (0.1, 0.1, 0.1, 1.0)
+    combo_dropdown_bg: Color = (0.18, 0.18, 0.18, 0.98)
+    separator_color: Color = (0.4, 0.4, 0.4, 1.0)
+    scrollbar_bg_color: Color = (0.1, 0.1, 0.1, 0.5)
+    scrollbar_grab_color: Color = (0.3, 0.3, 0.3, 1.0)
 
-    # Events
-    _click_event_hub: EventHub["MouseButton"]
-    _mouse_over_changed_event_hub: EventHub[bool]
-    _mouse_move_event_hub: EventHub[tuple[int, int]]
+    # Typography
+    font: Font = "sans-serif"
+    font_size: FontSize = "regular"
+    font_weight: FontWeight = "regular"
 
-    # Bounding box in DIP (computed during layout)
-    _x: KiwiVariable
-    _y: KiwiVariable
-    _w: KiwiVariable
-    _h: KiwiVariable
+    # Spacing
+    item_spacing: int = 4
+    window_padding: int = 8
+
+    # Sizing
+    button_padding_x: int = 12
+    button_padding_y: int = 6
+    input_height: int = 24
+    slider_height: int = 20
+    slider_grab_width: int = 12
+    combo_arrow_size: int = 16
+    scrollbar_width: int = 12
+    separator_height: int = 1
+
+    # Borders
+    border_thickness: int = 1
+
+    # Label width for labeled widgets (slider, combo, input)
+    label_width: int = 100
+
+
+#
+# Internal State Storage
+#
+
+
+@dataclass
+class _TextInputState:
+    """Persistent state for a text input widget."""
+
+    cursor_pos: int = 0
+    text_buffer: str = ""
+
+
+@dataclass
+class _ComboState:
+    """Persistent state for a combo box widget."""
+
+    is_open: bool = False
+
+
+@dataclass
+class _ScrollState:
+    """Persistent state for a scrollable region."""
+
+    offset_y: float = 0.0
+
+
+type _WidgetState = _TextInputState | _ComboState | _ScrollState
+
+# Module-level state storage
+_widget_states: dict[str, _WidgetState] = {}
+_active_id: str | None = None  # Widget with keyboard focus (text input)
+
+
+def _get_widget_state[T: _WidgetState](widget_id: str, factory: type[T]) -> T:
+    """Get or create widget state."""
+    state = _widget_states.get(widget_id)
+    if state is None or not isinstance(state, factory):
+        state = factory()
+        _widget_states[widget_id] = state
+    return state
+
+
+#
+# Layout Context
+#
+
+
+@dataclass
+class _LayoutContext:
+    """Layout context for a group of widgets."""
+
+    direction: LayoutDirection
+    origin_x: int
+    origin_y: int
+    width: int
+    cursor_x: int
+    cursor_y: int
+    spacing: int
+    max_height: int = 0  # Track max height in horizontal layout
+
+
+#
+# Gui Class
+#
+
+
+class Gui:
+    """Immediate-mode GUI context for a single frame."""
+
+    primitives: list[Draw2dExtBasePrimitive]
+    _deferred_primitives: list[Draw2dExtBasePrimitive]
+
+    _width: int
+    _height: int
+    _input: InputState
+    _style: GuiStyle
+    _layout_stack: list[_LayoutContext]
 
     def __init__(
         self,
         *,
-        parent_widget: "GuiWidget | None" = None,
-        gui_window: "GuiWindow | None" = None,
-        theme: GuiTheme | None = None,
-        row: int = 0,
-        col: int = 0,
-        row_span: int = 1,
-        col_span: int = 1,
-        grid_rows: tuple[int, ...] | None = None,
-        grid_cols: tuple[int, ...] | None = None,
-        text: str | None = None,
-        image: GuiImage | None = None,
-        image_src_xy: tuple[int, int] = (0, 0),
-        image_src_wh: tuple[int, int] | None = None,
-        image_layout: GuiImageLayout = "fit",
-        image_hover: GuiImage | None = None,
-        image_hover_src_xy: tuple[int, int] = (0, 0),
-        image_hover_src_wh: tuple[int, int] | None = None,
-        image_hover_layout: GuiImageLayout | None = None,
-        style_classes: list[str] | None = None,
-        clickable: bool = True,
+        width: int,
+        height: int,
+        input_state: InputState,
+        style: GuiStyle,
     ) -> None:
-        if not gui_window and not parent_widget:
-            raise ValueError("Either gui_window or parent_widget must be provided")
-        if gui_window and parent_widget:
-            raise ValueError("Either gui_window or parent_widget should be provided")
+        self._width = width
+        self._height = height
+        self._input = input_state
+        self._style = style
+        self.primitives = []
+        self._deferred_primitives = []
+        self._layout_stack = []
 
-        super().__init__()
-
-        self._parent_widget, self._gui_window = (
-            GuiWidget._resolve_parent_widget_and_window(
-                parent_widget=parent_widget,
-                gui_window=gui_window,
+    def _begin_frame(self) -> None:
+        """Initialize frame state."""
+        self.primitives = []
+        self._deferred_primitives = []
+        padding = self._style.window_padding
+        self._layout_stack = [
+            _LayoutContext(
+                direction="vertical",
+                origin_x=padding,
+                origin_y=padding,
+                width=self._width - 2 * padding,
+                cursor_x=padding,
+                cursor_y=padding,
+                spacing=self._style.item_spacing,
             )
-        )
-        self._theme = GuiWidget._resolve_theme(
-            theme=theme, parent_widget=parent_widget, gui_window=gui_window
-        )
-
-        self._child_widget_list = []
-        self._mouse_over = False
-        self._latest_local_mouse_pos = (0, 0)
-        self._latest_global_mouse_pos = (0, 0)
-        self._mouse_button_pressed_locally = False
-
-        self._row = row
-        self._col = col
-        self._row_span = row_span
-        self._col_span = col_span
-
-        self._grid_row_size_hints = grid_rows or (-1,)
-        self._grid_col_size_hints = grid_cols or (-1,)
-
-        self._text = text
-        self._image = image
-        self._image_src_xy = image_src_xy
-        self._image_src_wh = image_src_wh
-        self._image_layout = image_layout
-        self._image_hover = image_hover
-        self._image_hover_src_xy = image_hover_src_xy
-        self._image_hover_src_wh = image_hover_src_wh
-        self._image_hover_layout = image_hover_layout or image_layout
-        self._style_classes = style_classes or ["label"]
-        self._style = _eval_style(self._theme, self._style_classes, "default")
-        self._clickable = clickable
-
-        if self._parent_widget is not None:
-            self._parent_widget._add_child_widget(self)
-
-        self._click_event_hub = EventHub["MouseButton"]()
-        self._mouse_over_changed_event_hub = EventHub[bool]()
-        self._mouse_move_event_hub = EventHub[tuple[int, int]]()
-
-        # Layout variables:
-        self._x = KiwiVariable(f"{repr(self)}::x")
-        self._y = KiwiVariable(f"{repr(self)}::y")
-        self._w = KiwiVariable(f"{repr(self)}::w")
-        self._h = KiwiVariable(f"{repr(self)}::h")
-        self._grid_row_unit_var = KiwiVariable(f"{repr(self)}::grid_row_unit")
-        self._grid_col_unit_var = KiwiVariable(f"{repr(self)}::grid_col_unit")
-        self._grid_row_size_vars: list[KiwiVariable] = [
-            KiwiVariable(f"{repr(self)}::grid_row_{i}")
-            for i in range(len(self._grid_row_size_hints))
-        ]
-        self._grid_col_size_vars: list[KiwiVariable] = [
-            KiwiVariable(f"{repr(self)}::grid_col_{i}")
-            for i in range(len(self._grid_col_size_hints))
         ]
 
-    @staticmethod
-    def _resolve_parent_widget_and_window(
-        parent_widget: "GuiWidget | None",
-        gui_window: "GuiWindow | None",
-    ) -> tuple["GuiWidget | None", "GuiWindow"]:
-        if not gui_window and not parent_widget:
-            raise ValueError("Either gui_window or parent_widget must be provided")
-        if gui_window and parent_widget:
-            raise ValueError("Either gui_window or parent_widget should be provided")
-        if parent_widget:
-            return parent_widget, parent_widget._gui_window
+    def _end_frame(self) -> None:
+        """Finalize frame - append deferred primitives (dropdowns, etc)."""
+        self.primitives.extend(self._deferred_primitives)
+
+    def _current_layout(self) -> _LayoutContext:
+        """Get current layout context."""
+        return self._layout_stack[-1]
+
+    def _advance_cursor(self, width: int, height: int) -> None:
+        """Advance cursor after drawing a widget."""
+        layout = self._current_layout()
+        if layout.direction == "vertical":
+            layout.cursor_y += height + layout.spacing
         else:
-            assert gui_window is not None
-            return None, gui_window
+            layout.cursor_x += width + layout.spacing
+            layout.max_height = max(layout.max_height, height)
 
-    @staticmethod
-    def _resolve_theme(
-        theme: GuiTheme | None,
-        parent_widget: "GuiWidget | None",
-        gui_window: "GuiWindow | None",
-    ) -> GuiTheme:
-        if parent_widget is not None:
-            base_theme = parent_widget._theme
-        elif gui_window is not None:
-            base_theme = gui_window.theme
-        else:
-            base_theme = _DEFAULT_THEME
-        return _eval_theme(base_theme, theme or {})
+    def _is_hovered(self, x: int, y: int, w: int, h: int) -> bool:
+        """Check if mouse is hovering over a rectangle."""
+        mx, my = self._input.mouse_x, self._input.mouse_y
+        return x <= mx < x + w and y <= my < y + h
 
-    def _add_child_widget(self, child_widget: "GuiWidget") -> None:
-        self._child_widget_list.append(child_widget)
-
-    #
-    # Dispose resources:
-    #
-
-    def _on_dispose(self) -> None:
-        for child in self._child_widget_list:
-            child.dispose()
-
-    #
-    # Event hubs:
-    #
-
-    @property
-    def click_event(self) -> EventHub["MouseButton"]:
-        return self._click_event_hub
-
-    @property
-    def mouse_over_changed_event(self) -> EventHub[bool]:
-        return self._mouse_over_changed_event_hub
-
-    #
-    # Layout accessors:
-    #
-
-    @property
-    def _xywh(self) -> tuple[int, int, int, int]:
-        return (
-            int(round(self._x.value())),
-            int(round(self._y.value())),
-            int(round(self._w.value())),
-            int(round(self._h.value())),
+    def _is_clicked(self, x: int, y: int, w: int, h: int) -> bool:
+        """Check if a rectangle was clicked this frame."""
+        return self._is_hovered(x, y, w, h) and self._input.mouse_clicked.get(
+            "left", False
         )
 
-    #
-    # Phase 1: update style based on previous state:
-    #
-
-    def _update_style(self) -> None:
-        self._style = _eval_style(
-            theme=self._theme,
-            class_names=self._style_classes,
-            state=self._compute_style_state(),
-        )
-
-        # Recursively update children
-        for child in self._child_widget_list:
-            child._update_style()
-
-    def _compute_style_state(self) -> GuiWidgetState:
-        if not self._clickable:
-            return "unclickable"
-        elif self._mouse_button_pressed_locally:
-            if self._mouse_over:
-                return "pressed"
-            else:
-                return "cancelled"
-        elif self._mouse_over:
-            return "hover"
-        else:
-            return "default"
-
-    #
-    # Phase 2: update layout constraints:
-    #
-
-    def _update_layout_constraints(
+    def _draw_rect(
         self,
-        solver: KiwiSolver,
-        x: KiwiExpression | KiwiTerm | KiwiVariable | float,
-        y: KiwiExpression | KiwiTerm | KiwiVariable | float,
-        w: KiwiExpression | KiwiTerm | KiwiVariable | float,
-        h: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        color: Color,
+        *,
+        border_color: Color | None = None,
+        border_thickness: int = 0,
+        deferred: bool = False,
     ) -> None:
-        # Setup own position constraints:
-        self._update_layout_constraints_for_xywh(solver=solver, x=x, y=y, w=w, h=h)
-
-        # Setup grid layout constraints for children:
-        self._update_layout_constraints_for_grid_dim(
-            grid_hints=self._grid_row_size_hints,
-            grid_vars=self._grid_row_size_vars,
-            unit_var=self._grid_row_unit_var,
-            total_var=self._h,
-            solver=solver,
+        """Draw a filled rectangle."""
+        prim = Draw2dExtQuadPrimitive(
+            dst_xywh_dip=(x, y, w, h),
+            fill_color=color,
+            border_color=border_color or (0, 0, 0, 0),
+            border_thickness_dip=(
+                border_thickness,
+                border_thickness,
+                border_thickness,
+                border_thickness,
+            ),
         )
-        self._update_layout_constraints_for_grid_dim(
-            grid_hints=self._grid_col_size_hints,
-            grid_vars=self._grid_col_size_vars,
-            unit_var=self._grid_col_unit_var,
-            total_var=self._w,
-            solver=solver,
-        )
+        if deferred:
+            self._deferred_primitives.append(prim)
+        else:
+            self.primitives.append(prim)
 
-        # Setup children's constraints:
-        self._update_layout_constraints_for_children(solver=solver)
-
-    def _update_layout_constraints_for_xywh(
+    def _draw_text(
         self,
-        solver: KiwiSolver,
-        x: KiwiExpression | KiwiTerm | KiwiVariable | float,
-        y: KiwiExpression | KiwiTerm | KiwiVariable | float,
-        w: KiwiExpression | KiwiTerm | KiwiVariable | float,
-        h: KiwiExpression | KiwiTerm | KiwiVariable | float,
+        text: str,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        color: Color,
+        *,
+        h_align: HorizontalAlignment = "left",
+        v_align: VerticalAlignment = "middle",
+        wrap: bool = False,
+        deferred: bool = False,
     ) -> None:
-        # Position constraints:
-        solver.addConstraint(self._x == x)
-        solver.addConstraint(self._y == y)
-
-        # Size constraints:
-        solver.addConstraint(self._w == w)
-        solver.addConstraint(self._h == h)
-
-    @staticmethod
-    def _update_layout_constraints_for_grid_dim(
-        grid_hints: tuple[int, ...],
-        grid_vars: list[KiwiVariable],
-        unit_var: KiwiVariable,
-        total_var: KiwiVariable,
-        solver: KiwiSolver,
-    ) -> None:
-        solver.addConstraint(unit_var >= 0)
-        for grid_var, size_hint in zip(grid_vars, grid_hints):
-            solver.addConstraint(grid_var >= 0)
-            if size_hint < 0:
-                solver.addConstraint(grid_var == -size_hint * unit_var)
-            else:
-                solver.addConstraint(grid_var == size_hint)
-
-        solver.addConstraint(total_var == sum(grid_vars, 0.0))
-
-    def _update_layout_constraints_for_children(self, solver: KiwiSolver) -> None:
-        for child in self._child_widget_list:
-            # Compute child's x, y, w, h based on grid layout:
-            child_x = self._x + sum(
-                self._grid_col_size_vars[i] for i in range(child._col)
-            )
-            child_y = self._y + sum(
-                self._grid_row_size_vars[i] for i in range(child._row)
-            )
-            child_w = sum(
-                (
-                    self._grid_col_size_vars[i]
-                    for i in range(child._col, child._col + child._col_span)
-                ),
-                0.0,
-            )
-            child_h = sum(
-                (
-                    self._grid_row_size_vars[i]
-                    for i in range(child._row, child._row + child._row_span)
-                ),
-                0.0,
-            )
-
-            # Setup child's constraints recursively:
-            child._update_layout_constraints(
-                solver=solver,
-                x=child_x,
-                y=child_y,
-                w=child_w,
-                h=child_h,
-            )
+        """Draw text within a bounding box."""
+        prim = Draw2dExtTextPrimitive(
+            text=text,
+            font=self._style.font,
+            font_size=self._style.font_size,
+            font_weight=self._style.font_weight,
+            dst_xy_dip=(x, y),
+            dst_wh_dip=(w, h),
+            color=color,
+            wrap=wrap,
+            horizontal_alignment=h_align,
+            vertical_alignment=v_align,
+        )
+        if deferred:
+            self._deferred_primitives.append(prim)
+        else:
+            self.primitives.append(prim)
 
     #
-    # Phase 3: process input events:
+    # Layout Methods
     #
 
-    def _receive_mouse_position_change(self, mouse_x_dip: int, mouse_y_dip: int):
-        # OPTIMIZATION: early out if mouse position hasn't changed.
-        if (mouse_x_dip, mouse_y_dip) == self._latest_global_mouse_pos:
+    def begin_horizontal(self, spacing: int | None = None) -> None:
+        """Begin a horizontal layout group."""
+        layout = self._current_layout()
+        self._layout_stack.append(
+            _LayoutContext(
+                direction="horizontal",
+                origin_x=layout.cursor_x,
+                origin_y=layout.cursor_y,
+                width=layout.width - (layout.cursor_x - layout.origin_x),
+                cursor_x=layout.cursor_x,
+                cursor_y=layout.cursor_y,
+                spacing=spacing if spacing is not None else self._style.item_spacing,
+            )
+        )
+
+    def end_horizontal(self) -> None:
+        """End a horizontal layout group."""
+        if len(self._layout_stack) <= 1:
             return
+        finished = self._layout_stack.pop()
+        # Calculate total width and height of the horizontal group
+        total_width = finished.cursor_x - finished.origin_x - finished.spacing
+        total_height = finished.max_height
+        if total_width < 0:
+            total_width = 0
+        # Advance parent layout
+        self._advance_cursor(total_width, total_height)
 
-        # Update `self._mouse_over`
-        is_over = self._intersect_point(mouse_x_dip, mouse_y_dip)
-        if is_over != self._mouse_over:
-            self._mouse_over = is_over
-            self._on_mouse_over_changed()
+    def same_line(self, spacing: int | None = None) -> None:
+        """Place next widget on same line as previous."""
+        layout = self._current_layout()
+        if layout.direction == "vertical":
+            # Switch to temporary horizontal mode
+            # Undo the last vertical advance
+            layout.cursor_y -= layout.spacing
+            layout.direction = "horizontal"
+            if spacing is not None:
+                layout.spacing = spacing
 
-        # If mouse is over, call `_on_mouse_move`.
-        if self._mouse_over:
-            self._on_mouse_move(mouse_x_dip, mouse_y_dip)
+    def separator(self) -> None:
+        """Draw a horizontal separator line."""
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
+        w = layout.width - (x - layout.origin_x)
+        h = self._style.separator_height
 
-        # If mouse is over, update `self._local_mouse_pos`.
-        if self._mouse_over:
-            x, y, _, _ = self._xywh
-            self._latest_global_mouse_pos = (mouse_x_dip, mouse_y_dip)
-            self._latest_local_mouse_pos = (mouse_x_dip - x, mouse_y_dip - y)
+        self._draw_rect(x, y, w, h, self._style.separator_color)
+        self._advance_cursor(w, h)
 
-        # Regardless of whether mouse is over, propagate to children.
-        # Children may be outside parent's bounds.
-        for child in self._child_widget_list:
-            child._receive_mouse_position_change(mouse_x_dip, mouse_y_dip)
+    def space(self, size: int) -> None:
+        """Add vertical or horizontal space."""
+        layout = self._current_layout()
+        if layout.direction == "vertical":
+            layout.cursor_y += size
+        else:
+            layout.cursor_x += size
 
-    def _receive_mouse_button_action(
+    def indent(self, width: int = 16) -> None:
+        """Indent subsequent widgets."""
+        layout = self._current_layout()
+        layout.cursor_x += width
+        layout.origin_x += width
+        layout.width -= width
+
+    def unindent(self, width: int = 16) -> None:
+        """Remove indentation."""
+        layout = self._current_layout()
+        layout.cursor_x -= width
+        layout.origin_x -= width
+        layout.width += width
+
+    #
+    # Widget Methods
+    #
+
+    def label(
         self,
-        button: MouseButton,
-        action: ButtonAction,
-        click_handled: bool,
+        text: str,
+        *,
+        wrap: bool = False,
+        id: str | None = None,
+    ) -> None:
+        """Display a text label."""
+        _ = id  # Labels don't need ID for now
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
+        w = layout.width - (x - layout.origin_x)
+        h = self._style.input_height
+
+        self._draw_text(text, x, y, w, h, self._style.fg_color, wrap=wrap)
+        self._advance_cursor(w, h)
+
+    def label_multiline(
+        self,
+        text: str,
+        *,
+        width: int,
+        height: int,
+        scroll: bool = True,
+        id: str | None = None,
+    ) -> None:
+        """Display a multiline text label with optional scrollbar."""
+        widget_id = id if id is not None else f"label_ml_{text[:20]}"
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
+
+        # Background
+        self._draw_rect(
+            x,
+            y,
+            width,
+            height,
+            self._style.input_bg_color,
+            border_color=self._style.border_color,
+            border_thickness=self._style.border_thickness,
+        )
+
+        # Handle scroll if enabled
+        scroll_offset = 0.0
+        if scroll:
+            state = _get_widget_state(widget_id, _ScrollState)
+            if self._is_hovered(x, y, width, height):
+                state.offset_y -= self._input.scroll_y * 20
+                state.offset_y = max(0.0, state.offset_y)
+            scroll_offset = state.offset_y
+
+        # Text content area (with padding)
+        pad = 4
+        text_x = x + pad
+        text_y = y + pad - int(scroll_offset)
+        text_w = width - 2 * pad
+        if scroll:
+            text_w -= self._style.scrollbar_width
+        text_h = height - 2 * pad
+
+        # Draw text (would need clipping for proper implementation)
+        self._draw_text(
+            text,
+            text_x,
+            text_y,
+            text_w,
+            text_h + int(scroll_offset),
+            self._style.fg_color,
+            wrap=True,
+            v_align="top",
+        )
+
+        self._advance_cursor(width, height)
+
+    def button(
+        self,
+        label: str,
+        *,
+        width: int | None = None,
+        enabled: bool = True,
+        id: str | None = None,
     ) -> bool:
-        if action == "press":
-            assert not click_handled, "click_handled must be False for press action"
+        """
+        Display a button.
 
-            # Set pressed state if mouse is over this widget
-            self._mouse_button_pressed_locally = self._mouse_over
+        Returns True if clicked this frame.
+        """
+        _ = id  # Buttons use label as implicit ID
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
 
-            # Propagate press events to children first (topmost first)
-            for child in reversed(self._child_widget_list):
-                child._receive_mouse_button_action(
-                    button=button,
-                    action=action,
-                    click_handled=False,
-                )
+        # Calculate button size
+        pad_x = self._style.button_padding_x
+        h = self._style.input_height
+        w = width if width is not None else len(label) * 8 + 2 * pad_x
 
-            # Press action does not handle clicks, so always return False
-            return False
-        elif action == "release":
-            # Clear pressed state
-            was_pressed_locally = self._mouse_button_pressed_locally
-            self._mouse_button_pressed_locally = False
+        # Determine state
+        hovered = self._is_hovered(x, y, w, h) and enabled
+        pressed = hovered and self._input.mouse_down.get("left", False)
+        clicked = self._is_clicked(x, y, w, h) and enabled
 
-            # Propagate to children first (topmost first) if not click_handled:
-            for child in reversed(self._child_widget_list):
-                click_handled = child._receive_mouse_button_action(
-                    button=button,
-                    action=action,
-                    click_handled=click_handled,
-                )
-
-            # Invoke the click handler if...
-            # - click not yet handled
-            # - mouse is over this widget
-            # - this widget was pressed locally (otherwise, it's not a valid click)
-            if not click_handled and self._mouse_over and was_pressed_locally:
-                click_handled = self._on_click(button=button)
-
-            # Return whether click was handled
-            return click_handled
+        # Choose color
+        if not enabled:
+            bg_color = self._style.bg_color
+            fg_color = self._style.fg_color_disabled
+        elif pressed:
+            bg_color = self._style.bg_color_active
+            fg_color = self._style.fg_color
+        elif hovered:
+            bg_color = self._style.bg_color_hover
+            fg_color = self._style.fg_color
         else:
-            raise NotImplementedError(f"Unknown button action: {action!r}")
+            bg_color = self._style.bg_color
+            fg_color = self._style.fg_color
 
-    def _intersect_point(self, x: int, y: int) -> bool:
-        rx, ry, rw, rh = self._xywh
-        mt, mr, mb, ml = self._style.margin
-        return rx + ml <= x < rx + rw - mr and ry + mt <= y < ry + rh - mb
+        # Draw button
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            bg_color,
+            border_color=self._style.border_color,
+            border_thickness=self._style.border_thickness,
+        )
+        self._draw_text(label, x + pad_x, y, w - 2 * pad_x, h, fg_color, h_align="left")
 
-    def _on_mouse_over_changed(self) -> None:
-        self._mouse_over_changed_event_hub.publish(self._mouse_over)
+        self._advance_cursor(w, h)
+        return clicked
 
-    def _on_mouse_move(self, x_dip: int, y_dip: int) -> None:
-        self._mouse_move_event_hub.publish((x_dip, y_dip))
+    def slider_int(
+        self,
+        label: str,
+        value: int,
+        min_val: int,
+        max_val: int,
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> int:
+        """
+        Display an integer slider.
 
-    def _on_click(self, button: MouseButton) -> bool:
-        if not self._clickable:
-            return False
-        self._click_event_hub.publish(button)
-        return True
+        Returns the (potentially modified) value.
+        """
+        float_val = self._slider_impl(
+            label, float(value), float(min_val), float(max_val), width, id, is_int=True
+        )
+        return int(round(float_val))
 
-    #
-    # Update:
-    #
+    def slider_float(
+        self,
+        label: str,
+        value: float,
+        min_val: float,
+        max_val: float,
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> float:
+        """
+        Display a float slider.
 
-    def _update(self, dt: float) -> None:
-        """Update this widget and its children. Called once per frame."""
-        # Update self first.
-        self._update_self(dt)
+        Returns the (potentially modified) value.
+        """
+        return self._slider_impl(
+            label, value, min_val, max_val, width, id, is_int=False
+        )
 
-        # Update children, in order, after self.
-        for child in self._child_widget_list:
-            child._update(dt)
+    def _slider_impl(
+        self,
+        label: str,
+        value: float,
+        min_val: float,
+        max_val: float,
+        width: int | None,
+        id: str | None,
+        is_int: bool,
+    ) -> float:
+        """Internal slider implementation."""
+        global _active_id
+        widget_id = id if id is not None else f"slider_{label}"
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
 
-    def _update_self(self, dt: float) -> None:
-        """Override this method to add custom per-frame update logic."""
-        pass
+        label_w = self._style.label_width
+        slider_w = (
+            width
+            if width is not None
+            else layout.width - (x - layout.origin_x) - label_w
+        )
+        h = self._style.slider_height
+        grab_w = self._style.slider_grab_width
 
-    #
-    # Render:
-    #
+        # Draw label
+        self._draw_text(label, x, y, label_w, h, self._style.fg_color)
 
-    def _render(self, primitives: list[Draw2dExtBasePrimitive]) -> None:
-        # Render self.
-        self._render_self(primitives)
+        # Slider track position
+        track_x = x + label_w
+        track_y = y
+        track_w = slider_w
+        track_h = h
 
-        # Render children, in order, after self.
-        for child in self._child_widget_list:
-            child._render(primitives)
+        # Draw track background
+        self._draw_rect(
+            track_x,
+            track_y,
+            track_w,
+            track_h,
+            self._style.input_bg_color,
+            border_color=self._style.border_color,
+            border_thickness=self._style.border_thickness,
+        )
 
-    def _render_self(self, primitives: list[Draw2dExtBasePrimitive]) -> None:
-        # Get the latest style:
-        style = self._style
+        # Calculate grab position
+        range_val = max_val - min_val
+        if range_val <= 0:
+            range_val = 1.0
+        t = (value - min_val) / range_val
+        t = max(0.0, min(1.0, t))
+        grab_x = track_x + int(t * (track_w - grab_w))
+        grab_y = track_y
 
-        # Get position and size:
-        x, y, w, h = self._xywh
-        pt, pr, pb, pl = style.padding
-        bt, br, bb, bl = style.border_thickness
-        mt, mr, mb, ml = style.margin
+        # Handle interaction
+        hovered = self._is_hovered(track_x, track_y, track_w, track_h)
+        if hovered and self._input.mouse_clicked.get("left", False):
+            _active_id = widget_id
+        if _active_id == widget_id:
+            if self._input.mouse_down.get("left", False):
+                # Calculate new value from mouse position
+                rel_x = self._input.mouse_x - track_x - grab_w / 2
+                new_t = rel_x / (track_w - grab_w)
+                new_t = max(0.0, min(1.0, new_t))
+                value = min_val + new_t * range_val
+                if is_int:
+                    value = round(value)
+            else:
+                _active_id = None
 
-        # Determine image and image layout
-        # TODO: move this image into style, so it's resolved during style eval.
-        if self._mouse_over and self._image_hover is not None:
-            bg_image = self._image_hover
-            image_src_xy = self._image_hover_src_xy
-            image_src_wh = self._image_hover_src_wh
-            image_layout = self._image_hover_layout
+        # Determine grab color
+        is_active = _active_id == widget_id
+        grab_color = (
+            self._style.slider_grab_color_active
+            if is_active or hovered
+            else self._style.slider_grab_color
+        )
+
+        # Draw grab
+        self._draw_rect(grab_x, grab_y, grab_w, track_h, grab_color)
+
+        # Draw value text
+        if is_int:
+            value_text = str(int(round(value)))
         else:
-            bg_image = self._image
-            image_src_xy = self._image_src_xy
-            image_src_wh = self._image_src_wh
-            image_layout = self._image_layout
-
-        # Compute src_xy and src_wh based on layout mode
-        dst_wh = (w - ml - mr - bl - br, h - mt - mb - bt - bb)
-        src_xy, src_wh = _compute_image_src_xy_wh(
-            dst_wh=dst_wh,
-            image=bg_image,
-            layout=image_layout,
-            user_src_xy=image_src_xy,
-            user_src_wh=image_src_wh,
+            value_text = f"{value:.2f}"
+        self._draw_text(
+            value_text,
+            track_x,
+            track_y,
+            track_w,
+            track_h,
+            self._style.fg_color,
+            h_align="center",
         )
 
-        # Compute src_xy_px for quad
-        src_xy, src_wh = _compute_image_src_xy_wh(
-            dst_wh=dst_wh,
-            image=bg_image,
-            layout=style.image_layout,
-            user_src_xy=self._image_src_xy,
-            user_src_wh=self._image_src_wh,
-        )
+        total_w = label_w + slider_w
+        self._advance_cursor(total_w, h)
+        return value
 
-        # Draw background quad:
-        primitives.append(
-            Draw2dExtQuadPrimitive(
-                dst_xywh_dip=(
-                    x + ml + bl,
-                    y + mt + bt,
-                    dst_wh[0],
-                    dst_wh[1],
-                ),
-                src_xy_px=src_xy,
-                fill_color=style.bg_color,
-                fill_texture=bg_image,
-                border_color=style.border_color,
-                border_thickness_dip=style.border_thickness,
-            )
-        )
+    def text_input(
+        self,
+        label: str,
+        value: str,
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> str:
+        """
+        Display a text input field.
 
-        # Draw text:
-        if self._text is not None:
-            primitives.append(
-                Draw2dExtTextPrimitive(
-                    text=self._text,
-                    font=style.font,
-                    font_size=style.font_size,
-                    font_weight=style.font_weight,
-                    dst_xy_dip=(
-                        x + ml + bl + pl,
-                        y + mt + bt + pt,
-                    ),
-                    dst_wh_dip=(
-                        w - ml - mr - bl - br - pl - pr,
-                        h - mt - mb - bt - bb - pt - pb,
-                    ),
-                    color=style.fg_color,
-                    wrap=style.wrap,
-                    horizontal_alignment=style.text_horizontal_alignment,
-                    vertical_alignment=style.text_vertical_alignment,
+        Returns the (potentially modified) string value.
+        """
+        global _active_id
+        widget_id = id if id is not None else f"text_{label}"
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
+
+        label_w = self._style.label_width
+        input_w = (
+            width
+            if width is not None
+            else layout.width - (x - layout.origin_x) - label_w
+        )
+        h = self._style.input_height
+
+        # Draw label
+        self._draw_text(label, x, y, label_w, h, self._style.fg_color)
+
+        # Input field position
+        field_x = x + label_w
+        field_y = y
+
+        # Get or create state
+        state = _get_widget_state(widget_id, _TextInputState)
+
+        # Handle activation
+        is_active = _active_id == widget_id
+        if self._is_clicked(field_x, field_y, input_w, h):
+            _active_id = widget_id
+            state.text_buffer = value
+            state.cursor_pos = len(value)
+            is_active = True
+
+        # Handle deactivation when clicking elsewhere
+        if is_active and self._input.mouse_clicked.get("left", False):
+            if not self._is_hovered(field_x, field_y, input_w, h):
+                _active_id = None
+                is_active = False
+                value = state.text_buffer
+
+        # Handle keyboard input when active
+        if is_active:
+            # Text input
+            for char in self._input.text_input:
+                state.text_buffer = (
+                    state.text_buffer[: state.cursor_pos]
+                    + char
+                    + state.text_buffer[state.cursor_pos :]
                 )
+                state.cursor_pos += 1
+
+            # Backspace
+            if "backspace" in self._input.keys_pressed and state.cursor_pos > 0:
+                state.text_buffer = (
+                    state.text_buffer[: state.cursor_pos - 1]
+                    + state.text_buffer[state.cursor_pos :]
+                )
+                state.cursor_pos -= 1
+
+            # Delete
+            if "delete" in self._input.keys_pressed:
+                state.text_buffer = (
+                    state.text_buffer[: state.cursor_pos]
+                    + state.text_buffer[state.cursor_pos + 1 :]
+                )
+
+            # Arrow keys
+            if "left" in self._input.keys_pressed:
+                state.cursor_pos = max(0, state.cursor_pos - 1)
+            if "right" in self._input.keys_pressed:
+                state.cursor_pos = min(len(state.text_buffer), state.cursor_pos + 1)
+
+            # Home/End
+            if "home" in self._input.keys_pressed:
+                state.cursor_pos = 0
+            if "end" in self._input.keys_pressed:
+                state.cursor_pos = len(state.text_buffer)
+
+            # Enter to confirm
+            if "enter" in self._input.keys_pressed:
+                _active_id = None
+                is_active = False
+                value = state.text_buffer
+
+            # Escape to cancel
+            if "escape" in self._input.keys_pressed:
+                _active_id = None
+                is_active = False
+                state.text_buffer = value
+
+        # Determine colors
+        bg_color = self._style.input_bg_color
+        border_color = (
+            self._style.accent_color if is_active else self._style.border_color
+        )
+
+        # Draw input background
+        self._draw_rect(
+            field_x,
+            field_y,
+            input_w,
+            h,
+            bg_color,
+            border_color=border_color,
+            border_thickness=self._style.border_thickness,
+        )
+
+        # Draw text
+        display_text = state.text_buffer if is_active else value
+        pad = 4
+        self._draw_text(
+            display_text,
+            field_x + pad,
+            field_y,
+            input_w - 2 * pad,
+            h,
+            self._style.fg_color,
+        )
+
+        # Draw cursor when active (simple blinking could be added)
+        if is_active:
+            # Simple cursor representation - would need font metrics for accuracy
+            cursor_x_offset = state.cursor_pos * 7  # Approximate character width
+            cursor_x = field_x + pad + cursor_x_offset
+            self._draw_rect(cursor_x, field_y + 4, 1, h - 8, self._style.fg_color)
+
+        total_w = label_w + input_w
+        self._advance_cursor(total_w, h)
+        return state.text_buffer if is_active else value
+
+    def input_int(
+        self,
+        label: str,
+        value: int,
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> int:
+        """
+        Display an integer input field.
+
+        Returns the (potentially modified) value.
+        """
+        result = self.text_input(label, str(value), width=width, id=id)
+        try:
+            return int(result)
+        except ValueError:
+            return value
+
+    def input_float(
+        self,
+        label: str,
+        value: float,
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> float:
+        """
+        Display a float input field.
+
+        Returns the (potentially modified) value.
+        """
+        result = self.text_input(label, f"{value:.3f}", width=width, id=id)
+        try:
+            return float(result)
+        except ValueError:
+            return value
+
+    def combo(
+        self,
+        label: str,
+        current_index: int,
+        items: list[str],
+        *,
+        width: int | None = None,
+        id: str | None = None,
+    ) -> int:
+        """
+        Display a combo box (dropdown).
+
+        Returns the (potentially modified) selected index.
+        """
+        widget_id = id if id is not None else f"combo_{label}"
+        layout = self._current_layout()
+        x = layout.cursor_x
+        y = layout.cursor_y
+
+        label_w = self._style.label_width
+        combo_w = (
+            width
+            if width is not None
+            else layout.width - (x - layout.origin_x) - label_w
+        )
+        h = self._style.input_height
+
+        # Draw label
+        self._draw_text(label, x, y, label_w, h, self._style.fg_color)
+
+        # Combo box position
+        box_x = x + label_w
+        box_y = y
+
+        # Get state
+        state = _get_widget_state(widget_id, _ComboState)
+
+        # Handle click on combo box
+        if self._is_clicked(box_x, box_y, combo_w, h):
+            state.is_open = not state.is_open
+
+        # Determine colors
+        hovered = self._is_hovered(box_x, box_y, combo_w, h)
+        bg_color = self._style.bg_color_hover if hovered else self._style.bg_color
+        border_color = (
+            self._style.accent_color if state.is_open else self._style.border_color
+        )
+
+        # Draw combo box
+        self._draw_rect(
+            box_x,
+            box_y,
+            combo_w,
+            h,
+            bg_color,
+            border_color=border_color,
+            border_thickness=self._style.border_thickness,
+        )
+
+        # Draw current selection
+        current_text = items[current_index] if 0 <= current_index < len(items) else ""
+        pad = 4
+        arrow_w = self._style.combo_arrow_size
+        self._draw_text(
+            current_text,
+            box_x + pad,
+            box_y,
+            combo_w - 2 * pad - arrow_w,
+            h,
+            self._style.fg_color,
+        )
+
+        # Draw dropdown arrow (simple triangle representation)
+        arrow_x = box_x + combo_w - arrow_w - pad
+        self._draw_text("v", arrow_x, box_y, arrow_w, h, self._style.fg_color)
+
+        # Draw dropdown list if open (deferred to render on top)
+        new_index = current_index
+        if state.is_open:
+            dropdown_y = box_y + h
+            item_h = h
+            dropdown_h = len(items) * item_h
+
+            # Background
+            self._draw_rect(
+                box_x,
+                dropdown_y,
+                combo_w,
+                dropdown_h,
+                self._style.combo_dropdown_bg,
+                border_color=self._style.border_color,
+                border_thickness=self._style.border_thickness,
+                deferred=True,
             )
+
+            # Items
+            for i, item in enumerate(items):
+                item_y = dropdown_y + i * item_h
+                item_hovered = self._is_hovered(box_x, item_y, combo_w, item_h)
+
+                if item_hovered:
+                    self._draw_rect(
+                        box_x,
+                        item_y,
+                        combo_w,
+                        item_h,
+                        self._style.accent_color,
+                        deferred=True,
+                    )
+
+                self._draw_text(
+                    item,
+                    box_x + pad,
+                    item_y,
+                    combo_w - 2 * pad,
+                    item_h,
+                    self._style.fg_color,
+                    deferred=True,
+                )
+
+                if item_hovered and self._input.mouse_clicked.get("left", False):
+                    new_index = i
+                    state.is_open = False
+
+            # Close if clicked outside
+            total_h = h + dropdown_h
+            if self._input.mouse_clicked.get("left", False):
+                if not self._is_hovered(box_x, box_y, combo_w, total_h):
+                    state.is_open = False
+
+        total_w = label_w + combo_w
+        self._advance_cursor(total_w, h)
+        return new_index
+
+
+#
+# Context Manager
+#
+
+
+@contextmanager
+def window(
+    *,
+    width: int,
+    height: int,
+    input_state: InputState,
+    style: GuiStyle | None = None,
+) -> Generator[Gui, None, None]:
+    """
+    Context manager for immediate-mode GUI frame.
+
+    Yields a Gui object for drawing widgets.
+    After the context exits, access gui.primitives for rendering.
+
+    Example:
+        with gui.window(width=800, height=600, input_state=input_state) as g:
+            g.label("Hello")
+            if g.button("Click"):
+                do_something()
+
+        quads = canvas.quads(primitives=g.primitives, scale=scale)
+    """
+    g = Gui(
+        width=width,
+        height=height,
+        input_state=input_state,
+        style=style or GuiStyle(),
+    )
+    g._begin_frame()
+    yield g
+    g._end_frame()
