@@ -109,6 +109,8 @@ class Draw3dRenderer(BaseDisposable):
         subpixel_capacity: int = 1 << 29,
         num_frame_profiling_samples: int = 5 * 3600,
     ):
+        super().__init__()
+
         self.device = device
         self.queue = queue
 
