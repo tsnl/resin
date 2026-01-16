@@ -925,10 +925,6 @@ class Draw3dRenderer(BaseDisposable):
             ],
         )
 
-        # Per-AOV postprocess bind groups for viewport display selection
-        self._display_aov: Draw3dAov = "default"
-        self._aov_postprocess_bind_groups = self._create_aov_postprocess_bind_groups()
-
         # Frame profiling resources
         self.num_frame_profiling_samples = num_frame_profiling_samples
         self._profiling_write_index = 0
@@ -1061,6 +1057,7 @@ class Draw3dRenderer(BaseDisposable):
         scene: "Draw3dScene",
         command_encoder: wgpu.GPUCommandEncoder,
         timestamp: float | None = None,
+        display_aov: Draw3dAov = "default",
     ) -> None:
         self._validate_scene(scene)
 
@@ -1075,36 +1072,20 @@ class Draw3dRenderer(BaseDisposable):
             scene,
             timestamp,
             self._frame_index,
+            display_aov,
         )
         self._frame_index += 1
         self._log_frame_timing_stats_if_due()
 
-    def get_output_image(self, aov: Draw3dAov | None = None) -> wgpu.GPUTexture:
+    def get_output_image(self) -> wgpu.GPUTexture:
         """Get the final output image (full resolution, postprocessed).
 
-        Args:
-            aov: Which AOV to get output for. If None, uses the current display_aov.
-                 Note: This returns the same postprocessed output texture, but the
-                 content depends on which AOV was selected via set_display_aov()
-                 before calling record().
+        The content depends on which AOV was passed to record().
         """
         return self.output_image
 
-    def get_display_aov(self) -> Draw3dAov:
-        """Get the currently selected AOV for viewport display."""
-        return self._display_aov
-
-    def set_display_aov(self, aov: Draw3dAov) -> None:
-        """Set which AOV to display in the viewport.
-
-        This determines which AOV texture is used as the source for postprocessing.
-        The AOV must be enabled via set_render_settings(enabled_aov_list=...) for
-        meaningful output.
-        """
-        self._display_aov = aov
-
-    def _create_aov_postprocess_bind_groups(self) -> dict[Draw3dAov, wgpu.GPUBindGroup]:
-        """Create postprocess bind groups for each AOV texture."""
+    def _get_aov_texture(self, aov: Draw3dAov) -> wgpu.GPUTexture:
+        """Get the texture for a given AOV."""
         aov_textures: dict[Draw3dAov, wgpu.GPUTexture] = {
             "default": self._output_image,
             "per-pixel-radiance": self._frame_per_pixel_radiance_image,
@@ -1117,32 +1098,7 @@ class Draw3dRenderer(BaseDisposable):
             "surface-emissive": self._frame_surface_emissive_image,
             "bvh-depth": self._frame_surface_depth_image,  # Reuses depth texture
         }
-
-        bind_groups: dict[Draw3dAov, wgpu.GPUBindGroup] = {}
-        for aov, texture in aov_textures.items():
-            bind_groups[aov] = self.device.create_bind_group(
-                label=f"Draw3dRenderer.PostprocessBindGroup.{aov}",
-                layout=self.postprocess_bind_group_layout,
-                entries=[
-                    wgpu.BindGroupEntry(
-                        binding=0,
-                        resource=texture.create_view(),
-                    ),
-                    wgpu.BindGroupEntry(
-                        binding=1,
-                        resource=self.linear_sampler,
-                    ),
-                    wgpu.BindGroupEntry(
-                        binding=2,
-                        resource=wgpu.BufferBinding(
-                            buffer=self._postprocess_uniform_buffer,
-                            offset=0,
-                            size=16,
-                        ),
-                    ),
-                ],
-            )
-        return bind_groups
+        return aov_textures[aov]
 
     def resize(self, target_size_wh_px: tuple[int, int]) -> None:
         """
@@ -1381,9 +1337,6 @@ class Draw3dRenderer(BaseDisposable):
                 ),
             ],
         )
-
-        # Recreate per-AOV postprocess bind groups
-        self._aov_postprocess_bind_groups = self._create_aov_postprocess_bind_groups()
 
         # Reset per-frame state (accumulator needs to restart)
         # Explicitly preserve geometry, materials, and textures
@@ -1701,9 +1654,10 @@ class Draw3dRenderer(BaseDisposable):
         scene: "Draw3dScene",
         timestamp: float,
         frame_index: int,
+        display_aov: Draw3dAov,
     ) -> None:
         with trace.span("Draw3dRenderer/record", "render", args={"frame": frame_index}):
-            self._record_impl(encoder, scene, timestamp, frame_index)
+            self._record_impl(encoder, scene, timestamp, frame_index, display_aov)
 
     def _record_impl(
         self,
@@ -1711,6 +1665,7 @@ class Draw3dRenderer(BaseDisposable):
         scene: "Draw3dScene",
         timestamp: float,
         frame_index: int,
+        display_aov: Draw3dAov,
     ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
@@ -1719,11 +1674,13 @@ class Draw3dRenderer(BaseDisposable):
             tlas_node_count = self._upload_instances_info(scene.meshes, encoder)
 
         with trace.span("Draw3dRenderer/record/upload_frame_info", "render"):
+            # Enable debug flag for the selected AOV
+            debug_flags = self._debug_flags | _AOV_TO_FLAG[display_aov]
             self._upload_frame_info(
                 instance_count,
                 tlas_node_count,
                 encoder,
-                self._debug_flags,
+                debug_flags,
                 timestamp,
                 frame_index,
                 environment_map_texture_id=(
@@ -1808,8 +1765,30 @@ class Draw3dRenderer(BaseDisposable):
                 ],
             )
             render_pass.set_pipeline(self.postprocess_pipeline)
-            # Select bind group based on display AOV
-            bind_group = self._aov_postprocess_bind_groups[self._display_aov]
+            # Create bind group for the selected AOV
+            aov_texture = self._get_aov_texture(display_aov)
+            bind_group = self.device.create_bind_group(
+                label=f"Draw3dRenderer.PostprocessBindGroup.{display_aov}",
+                layout=self.postprocess_bind_group_layout,
+                entries=[
+                    wgpu.BindGroupEntry(
+                        binding=0,
+                        resource=aov_texture.create_view(),
+                    ),
+                    wgpu.BindGroupEntry(
+                        binding=1,
+                        resource=self.linear_sampler,
+                    ),
+                    wgpu.BindGroupEntry(
+                        binding=2,
+                        resource=wgpu.BufferBinding(
+                            buffer=self._postprocess_uniform_buffer,
+                            offset=0,
+                            size=16,
+                        ),
+                    ),
+                ],
+            )
             render_pass.set_bind_group(0, bind_group, [], 0, 0)
             render_pass.draw(3, 1, 0, 0)
             render_pass.end()

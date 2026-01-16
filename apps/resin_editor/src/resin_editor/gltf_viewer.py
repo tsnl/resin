@@ -85,6 +85,20 @@ ENVIRONMENTS = [
     ("Ennis", "ennis.hdr"),
 ]
 
+# Available AOVs (display name, value)
+AOVS: list[tuple[str, resin.Draw3dAov]] = [
+    ("Default", "default"),
+    ("Per-Pixel Radiance", "per-pixel-radiance"),
+    ("Primary Ray Direction", "primary-ray-direction"),
+    ("Surface Depth", "surface-depth"),
+    ("Surface Position", "surface-position"),
+    ("Surface Color", "surface-color"),
+    ("Surface Normal", "surface-normal"),
+    ("Surface ORM", "surface-orm"),
+    ("Surface Emissive", "surface-emissive"),
+    ("BVH Depth", "bvh-depth"),
+]
+
 
 class FreeCameraController:
     """Free-look camera controller with WASD + mouse.
@@ -229,6 +243,7 @@ class GltfViewer:
         # Viewer state
         self._current_model = 0  # Default to Sponza for benchmarking
         self._current_env = 0
+        self._current_aov = 0
         self._exposure = 1.0
         self._show_settings = True
         self._panel_width = 220
@@ -389,6 +404,9 @@ class GltfViewer:
             self._current_env = new_env
             self._load_environment()
 
+        # AOV selection
+        self._current_aov = g.combo("AOV", self._current_aov, [a[0] for a in AOVS])
+
         g.space(8)
 
         # Camera controls
@@ -480,6 +498,7 @@ class GltfViewer:
         self._draw_3d_renderer.record(
             scene=scene,
             command_encoder=command_encoder,
+            display_aov=AOVS[self._current_aov][1],
         )
 
         self._queue.submit([command_encoder.finish()])
