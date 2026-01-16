@@ -512,36 +512,38 @@ class GltfViewerWidget(resin.GuiWidget):
 
     def _update_self(self, dt: float) -> None:
         """Update camera and 3D rendering."""
-        # Update camera
-        self._camera.update(dt)
+        with resin.trace.span("GltfViewerWidget/update", "viewer"):
+            # Update camera
+            self._camera.update(dt)
 
-        # Reset accumulators if camera moved
-        if self._camera.moved_this_frame:
-            self._gui_window.draw_3d_renderer.reset(
-                geometry_heap=False,
-                material_heap=False,
-                texture_heap=False,
-                per_frame_state=True,
-            )
-            self._camera.moved_this_frame = False
+            # Reset accumulators if camera moved
+            if self._camera.moved_this_frame:
+                self._gui_window.draw_3d_renderer.reset(
+                    geometry_heap=False,
+                    material_heap=False,
+                    texture_heap=False,
+                    per_frame_state=True,
+                )
+                self._camera.moved_this_frame = False
 
-        # Clear and add meshes
-        self._gui_window.clear_3d_meshes()
-        if self._meshes is not None:
-            for (geometry, material), transforms in self._meshes.items():
-                self._gui_window.add_3d_mesh(geometry, material, transforms)
+            # Clear and add meshes
+            with resin.trace.span("GltfViewerWidget/update/add_meshes", "viewer"):
+                self._gui_window.clear_3d_meshes()
+                if self._meshes is not None:
+                    for (geometry, material), transforms in self._meshes.items():
+                        self._gui_window.add_3d_mesh(geometry, material, transforms)
 
-        # Set camera
-        aspect_ratio = self._gui_window.width_dip / self._gui_window.height_dip
-        self._gui_window.set_3d_camera(
-            transform=self._camera.get_transform(),
-            intrinsics=resin.Draw3dCamera(
+            # Set camera
+            aspect_ratio = self._gui_window.width_dip / self._gui_window.height_dip
+            self._gui_window.set_3d_camera(
                 transform=self._camera.get_transform(),
-                fov_y_rad=math.radians(60),
-                aspect_ratio=aspect_ratio,
-                max_distance=10.0,
-            ),
-        )
+                intrinsics=resin.Draw3dCamera(
+                    transform=self._camera.get_transform(),
+                    fov_y_rad=math.radians(60),
+                    aspect_ratio=aspect_ratio,
+                    max_distance=10.0,
+                ),
+            )
 
 
 _VIEWER_THEME: resin.GuiTheme = {

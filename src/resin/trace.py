@@ -4,12 +4,24 @@ __all__ = [
     "add_time_span",
     "clear",
     "compute_execution_time",
+    "enable_chromium_trace",
     "log",
+    "decorator",
+    "save_chromium_trace",
+    "span",
 ]
 
+import atexit
+import functools
+import json
 import logging
+import os
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Generator, ParamSpec, TypeVar
 
 import numpy as np
 
@@ -169,8 +181,10 @@ _global_hub = TraceHub()
 
 
 def add_time_span(stream: str, beg_sec: float, end_sec: float) -> None:
-    """Add a time span sample to the global trace hub."""
+    """Add a time span sample to the global trace hub and Chromium tracer."""
     _global_hub.add_time_span(stream, beg_sec, end_sec)
+    # Also add to Chromium tracer if enabled (uses forward reference)
+    _add_to_chromium_tracer(stream, beg_sec, end_sec)
 
 
 def compute_execution_time(
@@ -198,3 +212,377 @@ def log(
     _global_hub.log(
         filter_prefixes=filter_prefixes, truncate_window_sec=truncate_window_sec
     )
+
+
+# =============================================================================
+# Chromium Trace Format Support
+# =============================================================================
+
+
+@dataclass
+class _ChromiumTraceEvent:
+    """
+    A single event in Chromium trace format.
+
+    See: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU
+    """
+
+    name: str
+    cat: str  # Category
+    ph: str  # Phase: 'B' = begin, 'E' = end, 'X' = complete, 'i' = instant
+    ts: float  # Timestamp in microseconds
+    dur: float | None = None  # Duration in microseconds (for 'X' phase)
+    pid: int = 0  # Process ID
+    tid: int = 0  # Thread ID
+    args: dict[str, str | int | float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, str | int | float | dict[str, str | int | float]]:
+        """Convert to JSON-serializable dictionary."""
+        result: dict[str, str | int | float | dict[str, str | int | float]] = {
+            "name": self.name,
+            "cat": self.cat,
+            "ph": self.ph,
+            "ts": self.ts,
+            "pid": self.pid,
+            "tid": self.tid,
+        }
+        if self.dur is not None:
+            result["dur"] = self.dur
+        if self.args:
+            result["args"] = self.args
+        return result
+
+
+class ChromiumTracer:
+    """
+    Collects trace events and exports them in Chromium trace format.
+
+    The Chromium trace format is a JSON array of trace events that can be
+    loaded in Chrome's chrome://tracing or Perfetto UI (https://ui.perfetto.dev).
+
+    Usage:
+        tracer = ChromiumTracer()
+        tracer.add_complete_event("my_function", "category", start_us, duration_us)
+        tracer.save("trace.json")
+
+    Or use the context manager:
+        with tracer.span("my_operation", "category"):
+            do_work()
+    """
+
+    _events: list[_ChromiumTraceEvent]
+    _enabled: bool
+    _output_path: Path | None
+    _start_time_sec: float
+    _atexit_registered: bool
+
+    def __init__(self) -> None:
+        self._events = []
+        self._enabled = False
+        self._output_path = None
+        self._start_time_sec = time.perf_counter()
+        self._atexit_registered = False
+
+    def enable(
+        self,
+        output_path: Path | str | None = None,
+        register_atexit: bool = True,
+    ) -> None:
+        """
+        Enable trace collection.
+
+        :param output_path: Path to save trace file. If None, uses 'trace.json'
+            in the current directory.
+        :param register_atexit: If True, automatically save trace on program exit.
+        """
+        self._enabled = True
+        self._start_time_sec = time.perf_counter()
+        self._events.clear()
+
+        if output_path is None:
+            output_path = Path("trace.json")
+        self._output_path = Path(output_path)
+
+        if register_atexit and not self._atexit_registered:
+            atexit.register(self._atexit_save)
+            self._atexit_registered = True
+
+        LOG.info("Chromium tracing enabled, output: %s", self._output_path)
+
+    def disable(self) -> None:
+        """Disable trace collection."""
+        self._enabled = False
+
+    @property
+    def is_enabled(self) -> bool:
+        """Check if tracing is enabled."""
+        return self._enabled
+
+    def add_complete_event(
+        self,
+        name: str,
+        category: str,
+        start_sec: float,
+        duration_sec: float,
+        *,
+        tid: int = 0,
+        args: dict[str, str | int | float] | None = None,
+    ) -> None:
+        """
+        Add a complete duration event (phase 'X').
+
+        :param name: Event name (displayed in trace viewer).
+        :param category: Category for filtering.
+        :param start_sec: Start time in seconds (relative to tracer start).
+        :param duration_sec: Duration in seconds.
+        :param tid: Thread ID for grouping events.
+        :param args: Optional dictionary of additional event data.
+        """
+        if not self._enabled:
+            return
+
+        # Convert seconds to microseconds
+        ts_us = (start_sec - self._start_time_sec) * 1_000_000
+        dur_us = duration_sec * 1_000_000
+
+        self._events.append(
+            _ChromiumTraceEvent(
+                name=name,
+                cat=category,
+                ph="X",  # Complete event
+                ts=ts_us,
+                dur=dur_us,
+                pid=os.getpid(),
+                tid=tid,
+                args=args or {},
+            )
+        )
+
+    def add_instant_event(
+        self,
+        name: str,
+        category: str,
+        timestamp_sec: float,
+        *,
+        scope: str = "t",  # 't' = thread, 'p' = process, 'g' = global
+        tid: int = 0,
+        args: dict[str, str | int | float] | None = None,
+    ) -> None:
+        """
+        Add an instant event (phase 'i').
+
+        :param name: Event name.
+        :param category: Category for filtering.
+        :param timestamp_sec: Timestamp in seconds.
+        :param scope: Event scope: 't' (thread), 'p' (process), 'g' (global).
+        :param tid: Thread ID.
+        :param args: Optional additional data.
+        """
+        if not self._enabled:
+            return
+
+        ts_us = (timestamp_sec - self._start_time_sec) * 1_000_000
+
+        event_args = dict(args) if args else {}
+        event_args["s"] = scope
+
+        self._events.append(
+            _ChromiumTraceEvent(
+                name=name,
+                cat=category,
+                ph="i",
+                ts=ts_us,
+                pid=os.getpid(),
+                tid=tid,
+                args=event_args,
+            )
+        )
+
+    @contextmanager
+    def span(
+        self,
+        name: str,
+        category: str = "default",
+        *,
+        tid: int = 0,
+        args: dict[str, str | int | float] | None = None,
+    ) -> Generator[None, None, None]:
+        """
+        Context manager for timing a code block.
+
+        Usage:
+            with tracer.span("my_operation", "render"):
+                do_work()
+
+        :param name: Event name.
+        :param category: Category for filtering.
+        :param tid: Thread ID.
+        :param args: Optional additional data.
+        """
+        if not self._enabled:
+            yield
+            return
+
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            end = time.perf_counter()
+            self.add_complete_event(
+                name=name,
+                category=category,
+                start_sec=start,
+                duration_sec=end - start,
+                tid=tid,
+                args=args,
+            )
+
+    def save(self, output_path: Path | str | None = None) -> None:
+        """
+        Save collected trace events to a JSON file.
+
+        :param output_path: Path to save. If None, uses the path from enable().
+        """
+        path = Path(output_path) if output_path else self._output_path
+        if path is None:
+            path = Path("trace.json")
+
+        if not self._events:
+            LOG.warning("No trace events to save")
+            return
+
+        # Build Chromium trace format
+        trace_data = {
+            "traceEvents": [e.to_dict() for e in self._events],
+            "displayTimeUnit": "ms",
+            "metadata": {
+                "process_name": "resin",
+            },
+        }
+
+        with open(path, "w") as f:
+            json.dump(trace_data, f, indent=None)
+
+        LOG.info("Saved %d trace events to %s", len(self._events), path)
+
+    def _atexit_save(self) -> None:
+        """Called at program exit to save trace."""
+        if self._enabled and self._events:
+            self.save()
+
+    def clear(self) -> None:
+        """Clear all collected events."""
+        self._events.clear()
+
+
+# Global singleton instance
+_global_tracer = ChromiumTracer()
+
+
+def _add_to_chromium_tracer(stream: str, beg_sec: float, end_sec: float) -> None:
+    """Helper to add time span to Chromium tracer (called from add_time_span)."""
+    # Parse category from stream name (use first component before '/')
+    parts = stream.split("/", 1)
+    category = parts[0] if parts else "default"
+    _global_tracer.add_complete_event(
+        name=stream,
+        category=category,
+        start_sec=beg_sec,
+        duration_sec=end_sec - beg_sec,
+    )
+
+
+def enable_chromium_trace(
+    output_path: Path | str | None = None,
+    register_atexit: bool = True,
+) -> None:
+    """
+    Enable global Chromium trace collection.
+
+    :param output_path: Path to save trace file on exit.
+    :param register_atexit: If True, automatically save on program exit.
+    """
+    _global_tracer.enable(output_path=output_path, register_atexit=register_atexit)
+
+
+def save_chromium_trace(output_path: Path | str | None = None) -> None:
+    """Save the global Chromium trace to a file."""
+    _global_tracer.save(output_path)
+
+
+@contextmanager
+def span(
+    name: str,
+    category: str = "default",
+    *,
+    tid: int = 0,
+    args: dict[str, str | int | float] | None = None,
+) -> Generator[None, None, None]:
+    """
+    Context manager for timing a code block in the global tracer.
+
+    Also adds the time span to the global TraceHub for statistics.
+
+    Usage:
+        with trace.span("my_operation", "render"):
+            do_work()
+    """
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        end = time.perf_counter()
+        # Add to Chromium tracer
+        _global_tracer.add_complete_event(
+            name=name,
+            category=category,
+            start_sec=start,
+            duration_sec=end - start,
+            tid=tid,
+            args=args,
+        )
+        # Also add to TraceHub for statistics
+        _global_hub.add_time_span(name, start, end)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def decorator(
+    name: str,
+    category: str = "default",
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """
+    Decorator to automatically trace function execution.
+
+    Usage:
+        @trace.decorator("MyClass/my_method")
+        def my_method(self, x: int) -> int:
+            return x * 2
+
+    :param name: Event name (displayed in trace viewer).
+    :param category: Category for filtering (default: first component of name).
+    """
+
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        @functools.wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            start = time.perf_counter()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                end = time.perf_counter()
+                # Add to Chromium tracer
+                _global_tracer.add_complete_event(
+                    name=name,
+                    category=category,
+                    start_sec=start,
+                    duration_sec=end - start,
+                )
+                # Also add to TraceHub for statistics
+                _global_hub.add_time_span(name, start, end)
+
+        return wrapper
+
+    return decorator

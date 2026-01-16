@@ -1325,27 +1325,40 @@ class Draw3dRenderer(BaseDisposable):
         timestamp: float,
         frame_index: int,
     ) -> None:
+        with trace.span("Draw3dRenderer/record", "render", args={"frame": frame_index}):
+            self._record_impl(encoder, scene, timestamp, frame_index)
+
+    def _record_impl(
+        self,
+        encoder: wgpu.GPUCommandEncoder,
+        scene: "Draw3dScene",
+        timestamp: float,
+        frame_index: int,
+    ) -> None:
         instance_count = sum(len(transforms) for transforms in scene.meshes.values())
 
         # Upload instances and build TLAS first to get tlas_node_count
-        tlas_node_count = self._upload_instances_info(scene.meshes, encoder)
+        with trace.span("Draw3dRenderer/record/upload_instances", "render"):
+            tlas_node_count = self._upload_instances_info(scene.meshes, encoder)
 
-        self._upload_frame_info(
-            instance_count,
-            tlas_node_count,
-            encoder,
-            self._debug_flags,
-            timestamp,
-            frame_index,
-            environment_map_texture_id=(
-                scene.environment_map.allocation.texture_id
-                if scene.environment_map
-                else -1
-            ),
-        )
-        self._upload_camera_info(scene.camera, encoder)
+        with trace.span("Draw3dRenderer/record/upload_frame_info", "render"):
+            self._upload_frame_info(
+                instance_count,
+                tlas_node_count,
+                encoder,
+                self._debug_flags,
+                timestamp,
+                frame_index,
+                environment_map_texture_id=(
+                    scene.environment_map.allocation.texture_id
+                    if scene.environment_map
+                    else -1
+                ),
+            )
+            self._upload_camera_info(scene.camera, encoder)
 
         # Path tracing compute pass (renders to internal_image at reduced resolution)
+        t_compute_start = time.perf_counter()
         timestamp_writes: wgpu.ComputePassTimestampWrites | None = None
         if self._profiling_enabled and self._profiling_query_set is not None:
             timestamp_writes = wgpu.ComputePassTimestampWrites(
@@ -1366,6 +1379,12 @@ class Draw3dRenderer(BaseDisposable):
             workgroup_count_z=1,
         )
         compute_pass.end()
+        t_compute_end = time.perf_counter()
+        trace.add_time_span(
+            "Draw3dRenderer/record/compute_pass_encode",
+            t_compute_start,
+            t_compute_end,
+        )
 
         # Resolve timestamp queries and copy to staging buffer (if profiling enabled)
         if (
@@ -1399,21 +1418,22 @@ class Draw3dRenderer(BaseDisposable):
             )
 
         # Postprocess render pass (upscales and tonemaps to output_image)
-        render_pass = encoder.begin_render_pass(
-            label="Draw3dRenderer.PostprocessPass",
-            color_attachments=[
-                wgpu.RenderPassColorAttachment(
-                    view=self.output_image.create_view(),
-                    load_op=wgpu.LoadOp.clear,
-                    store_op=wgpu.StoreOp.store,
-                    clear_value=(0.0, 0.0, 0.0, 1.0),
-                )
-            ],
-        )
-        render_pass.set_pipeline(self.postprocess_pipeline)
-        render_pass.set_bind_group(0, self._postprocess_bind_group, [], 0, 0)
-        render_pass.draw(3, 1, 0, 0)
-        render_pass.end()
+        with trace.span("Draw3dRenderer/record/postprocess_encode", "render"):
+            render_pass = encoder.begin_render_pass(
+                label="Draw3dRenderer.PostprocessPass",
+                color_attachments=[
+                    wgpu.RenderPassColorAttachment(
+                        view=self.output_image.create_view(),
+                        load_op=wgpu.LoadOp.clear,
+                        store_op=wgpu.StoreOp.store,
+                        clear_value=(0.0, 0.0, 0.0, 1.0),
+                    )
+                ],
+            )
+            render_pass.set_pipeline(self.postprocess_pipeline)
+            render_pass.set_bind_group(0, self._postprocess_bind_group, [], 0, 0)
+            render_pass.draw(3, 1, 0, 0)
+            render_pass.end()
 
     def _upload_frame_info(
         self,
@@ -1466,6 +1486,7 @@ class Draw3dRenderer(BaseDisposable):
             raise RuntimeError("Draw3dRenderer instance heap capacity exceeded.")
 
         # Build instance data and compute world-space AABBs for TLAS
+        t_instance_prep_start = time.perf_counter()
         data = PodInstanceArray.empty(shape=(total_instance_count,))
         instance_aabbs = np.empty((total_instance_count, 2, 3), dtype=np.float32)
         offset = 0
@@ -1486,8 +1507,21 @@ class Draw3dRenderer(BaseDisposable):
                 )
 
             offset += n
+        t_instance_prep_end = time.perf_counter()
+        trace.add_time_span(
+            "Draw3dRenderer/record/instance_prep",
+            t_instance_prep_start,
+            t_instance_prep_end,
+        )
 
+        t_instance_upload_start = time.perf_counter()
         self._instance_buffer.write(data, command_encoder)
+        t_instance_upload_end = time.perf_counter()
+        trace.add_time_span(
+            "Draw3dRenderer/record/instance_upload",
+            t_instance_upload_start,
+            t_instance_upload_end,
+        )
 
         # Build TLAS from world-space instance AABBs
         if total_instance_count > 0:
@@ -1497,6 +1531,7 @@ class Draw3dRenderer(BaseDisposable):
             trace.add_time_span("Draw3dRenderer/record/tlas_build", tlas_t0, tlas_t1)
 
             # Marshall and upload TLAS nodes
+            t_tlas_marshal_start = time.perf_counter()
             tlas_node_data = PodTlasNodeArray.empty(shape=(tlas.node_count,))
             for i in range(tlas.node_count):
                 tlas_node_data["instance_span"]["begin"][i] = tlas.instance_span[i, 0]
@@ -1505,6 +1540,14 @@ class Draw3dRenderer(BaseDisposable):
                 tlas_node_data["children"][i][1] = tlas.children[i, 1]
                 tlas_node_data["aabb"]["min"][i] = tlas.aabb[i, 0]
                 tlas_node_data["aabb"]["max"][i] = tlas.aabb[i, 1]
+            t_tlas_marshal_end = time.perf_counter()
+            trace.add_time_span(
+                "Draw3dRenderer/record/tlas_marshal",
+                t_tlas_marshal_start,
+                t_tlas_marshal_end,
+            )
+
+            t_tlas_upload_start = time.perf_counter()
             self._tlas_node_buffer.write(tlas_node_data, command_encoder)
 
             # Upload reordered instance indices
@@ -1514,6 +1557,12 @@ class Draw3dRenderer(BaseDisposable):
             tlas_instance_index_data["index"] = tlas.instance_indices
             self._tlas_instance_index_buffer.write(
                 tlas_instance_index_data, command_encoder
+            )
+            t_tlas_upload_end = time.perf_counter()
+            trace.add_time_span(
+                "Draw3dRenderer/record/tlas_upload",
+                t_tlas_upload_start,
+                t_tlas_upload_end,
             )
 
             return tlas.node_count
@@ -1860,7 +1909,6 @@ class PerFrameBuffer[T: StructuredNDArray](BaseDisposable):
     element_capacity: int
 
     device_buffer: wgpu.GPUBuffer
-    staging_buffer: wgpu.GPUBuffer
 
     def __init__(
         self,
@@ -1880,11 +1928,6 @@ class PerFrameBuffer[T: StructuredNDArray](BaseDisposable):
             size=self.structured_array_cls.array_size(shape=(element_capacity,)),
             usage=device_buffer_usages | wgpu.BufferUsage.COPY_DST,
         )
-        self.staging_buffer = device.create_buffer(
-            label=f"{label}.StagingBuffer",
-            size=self.structured_array_cls.array_size(shape=(element_capacity,)),
-            usage=wgpu.BufferUsage.MAP_WRITE | wgpu.BufferUsage.COPY_SRC,
-        )
 
     def _on_dispose(self) -> None:
         self.device_buffer.destroy()
@@ -1898,16 +1941,13 @@ class PerFrameBuffer[T: StructuredNDArray](BaseDisposable):
         if data.shape[0] == 0:
             return
 
-        self.staging_buffer.map_sync(mode=wgpu.MapMode.WRITE)
-        self.staging_buffer.write_mapped(data=data)
-        self.staging_buffer.unmap()
-
-        command_encoder.copy_buffer_to_buffer(
-            source=self.staging_buffer,
-            source_offset=0,
-            destination=self.device_buffer,
-            destination_offset=0,
-            size=self.structured_array_cls.array_size(shape=data.shape),
+        # Use write_buffer for async upload (no GPU sync required)
+        # The command_encoder parameter is kept for API compatibility but unused
+        _ = command_encoder
+        self.device.queue.write_buffer(
+            buffer=self.device_buffer,
+            buffer_offset=0,
+            data=data,
         )
 
 

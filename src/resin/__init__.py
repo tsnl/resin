@@ -48,6 +48,7 @@ __all__ = [
     "convert_linear_to_srgb",
     "convert_rgb_to_grayscale",
     "convert_srgb_to_linear",
+    "enable_chromium_trace",
     "encode_bc1",
     "encode_bc4",
     "encode_bc5",
@@ -62,6 +63,7 @@ __all__ = [
     "partition_points",
     "partition_triangles",
     "round_up_to_po2",
+    "save_chromium_trace",
     "setup_logging",
     "trace",
     "transform_aabb",
@@ -149,3 +151,4 @@ from .bvh import (
 from .gpu import help_request_wgpu_device, BlitRenderer
 from . import trace
 from . import typed_freetype
+from .trace import enable_chromium_trace, save_chromium_trace

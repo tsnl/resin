@@ -25,3 +25,4 @@ src/resin/bundled_data/*
 
 # Ignore log files
 *.log
+trace*.json
