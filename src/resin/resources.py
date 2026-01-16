@@ -590,6 +590,19 @@ def load_gltf(gltf_path: Path | str, apply_z_up_conversion: bool = True) -> Gltf
             if material.emissiveFactor is not None
             else (0.0, 0.0, 0.0)
         )
+        # Apply KHR_materials_emissive_strength extension if present
+        if (
+            material.extensions
+            and "KHR_materials_emissive_strength" in material.extensions
+        ):
+            strength_ext = material.extensions["KHR_materials_emissive_strength"]
+            if isinstance(strength_ext, dict):
+                emissive_strength = float(strength_ext.get("emissiveStrength", 1.0))
+                emissive_factor = (
+                    emissive_factor[0] * emissive_strength,
+                    emissive_factor[1] * emissive_strength,
+                    emissive_factor[2] * emissive_strength,
+                )
         # Emissive textures are sRGB-encoded, convert to linear
         emissive_texture = (
             convert_srgb_to_linear(textures[material.emissiveTexture.index])

@@ -294,7 +294,9 @@ def main() -> int:
         ]
         for aov_name, aov_texture in aov_textures:
             aov_path = output_dir / name / f"{aov_name}-00000-resin.png"
-            aov_data = readback_texture(gpu_device, aov_texture, FRAME_WIDTH, FRAME_HEIGHT)
+            aov_data = readback_texture(
+                gpu_device, aov_texture, FRAME_WIDTH, FRAME_HEIGHT
+            )
             save_image(aov_data, aov_path)
             LOG.info(f"  AOV saved: {aov_path}")
 

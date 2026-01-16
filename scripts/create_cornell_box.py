@@ -58,7 +58,8 @@ def create_cornell_box(
     )
     mat_light = Material(
         pbrMetallicRoughness=PbrMetallicRoughness(baseColorFactor=[0.0, 0.0, 0.0, 1.0]),
-        emissiveFactor=[1.0] * 3,
+        emissiveFactor=[1.0, 1.0, 1.0],
+        extensions={"KHR_materials_emissive_strength": {"emissiveStrength": 15.0}},
         name="Light",
     )
 

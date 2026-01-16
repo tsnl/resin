@@ -957,7 +957,7 @@ fn compute_hit_details_surface_emissive(hit_details: HitDetails) -> vec3<f32> {
         material.emissive_factor[2],
     );
     if material.emissive_map_id == 0xFFFFFFFFu {
-        return vec3<f32>(0.0);
+        return emissive_factor;
     }
     let emissive_texture = sample_rgb_texture(material.emissive_map_id, hit_details.texcoords);
     return emissive_factor * emissive_texture;
