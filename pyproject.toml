@@ -15,7 +15,6 @@ dependencies = [
     "numba>=0.63.1",
     "numpy-quaternion>=2024.0.13",
     "pillow>=12.1.0",
-    "mitsuba>=3.7.1",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +30,7 @@ dev = [
     "ipykernel>=7.1.0",
     "flameprof>=0.4",
     "click>=8.3.1",
+    "mitsuba==3.7.1",
 ]
 
 [build-system]
@@ -58,15 +58,3 @@ extend-select = [
     # import-outside-top-level
     "PLC0415",
 ]
-ignore = [
-    # Syntax error in forward annotation (for JaxTyping)
-    "F722",
-]
-per-file-ignores = { "apps/resin_replay/src/resin_replay/__init__.py" = [
-    # mitsuba is an optional dependency that only works on Python <= 3.13
-    "PLC0415",
-] }
-
-[tool.pyright]
-# mitsuba is an optional dependency that only works on Python <= 3.13
-reportMissingImports = "warning"
