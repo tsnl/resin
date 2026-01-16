@@ -1487,6 +1487,35 @@ class Draw3dRenderer(BaseDisposable):
         if disable_jitter:
             self._debug_flags |= _FRAME_FLAG_DISABLE_JITTER
 
+    def set_render_settings(
+        self,
+        *,
+        samples_per_pixel: int | None = None,
+        max_bounces: int | None = None,
+        render_scale: float | None = None,
+        accumulator_frame_count: int | None = None,
+    ) -> None:
+        """Update render settings dynamically.
+
+        Args:
+            samples_per_pixel: Number of samples per pixel per frame. If None, unchanged.
+            max_bounces: Maximum ray bounces for path tracing. If None, unchanged.
+            render_scale: Internal render resolution scale (0.0-1.0). If None, unchanged.
+            accumulator_frame_count: Number of frames to accumulate. If None, unchanged.
+        """
+        if samples_per_pixel is not None:
+            self._samples_per_pixel = samples_per_pixel
+        if max_bounces is not None:
+            self._max_bounces = max_bounces
+        if accumulator_frame_count is not None:
+            self.accumulator_frame_count = accumulator_frame_count
+        if render_scale is not None and render_scale != self._render_scale:
+            self._render_scale = render_scale
+            # Force resize to recreate render targets at new internal resolution
+            current_size = self.target_size_wh_px
+            self.target_size_wh_px = (0, 0)  # Bypass early-return check
+            self.resize(current_size)
+
     def reset(
         self,
         encoder: wgpu.GPUCommandEncoder | None = None,

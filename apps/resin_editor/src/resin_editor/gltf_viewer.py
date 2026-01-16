@@ -189,6 +189,10 @@ class GltfViewer:
         self._show_settings = True
         self._panel_width = 220
 
+        # Render settings
+        self._samples_per_pixel = 1
+        self._max_bounces = 3
+
         # 3D resources
         self._meshes: (
             dict[
@@ -355,6 +359,25 @@ class GltfViewer:
         self._camera.move_speed = g.slider_float(
             "Move Speed", self._camera.move_speed, 0.5, 10.0
         )
+
+        g.space(8)
+        g.separator()
+        g.space(4)
+        g.label("Render Settings:")
+
+        # Samples per pixel
+        new_spp = g.slider_int("SPP", self._samples_per_pixel, 1, 16)
+        if new_spp != self._samples_per_pixel:
+            self._samples_per_pixel = new_spp
+            assert self._draw_3d_renderer is not None
+            self._draw_3d_renderer.set_render_settings(samples_per_pixel=new_spp)
+
+        # Max bounces
+        new_bounces = g.slider_int("Bounces", self._max_bounces, 1, 8)
+        if new_bounces != self._max_bounces:
+            self._max_bounces = new_bounces
+            assert self._draw_3d_renderer is not None
+            self._draw_3d_renderer.set_render_settings(max_bounces=new_bounces)
 
         g.space(16)
         g.separator()
