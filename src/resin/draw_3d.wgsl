@@ -922,13 +922,19 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
 fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let color = sample_rgb_texture(material.color_map_id, hit_details.texcoords);
     let color_factor = vec3<f32>(material.color_factor[0], material.color_factor[1], material.color_factor[2]);
+    if material.color_map_id == 0xFFFFFFFFu {
+        return vec4<f32>(color_factor, 1.0);
+    }
+    let color = sample_rgb_texture(material.color_map_id, hit_details.texcoords);
     return vec4<f32>(color * color_factor, 1.0);
 }
 fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
+    if material.normal_map_id == 0xFFFFFFFFu {
+        return hit_details.tbn[2];  // Return geometric normal (Z column of TBN)
+    }
     let xy = 2.0 * sample_rg_texture(material.normal_map_id, hit_details.texcoords) - vec2<f32>(1.0);
     let z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
     let texture_normal = vec3<f32>(xy.x, xy.y, z);
@@ -937,15 +943,21 @@ fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
 fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let metalness_texture = sample_mono_texture(material.metalness_map_id, hit_details.texcoords);
     let metalness_factor = material.metalness_factor;
+    if material.metalness_map_id == 0xFFFFFFFFu {
+        return metalness_factor;
+    }
+    let metalness_texture = sample_mono_texture(material.metalness_map_id, hit_details.texcoords);
     return metalness_factor * metalness_texture;
 }
 fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
     let instance = instances[hit_details.instance_id];
     let material = material_heap[instance.material_id];
-    let roughness_texture = sample_mono_texture(material.roughness_map_id, hit_details.texcoords);
     let roughness_factor = material.roughness_factor;
+    if material.roughness_map_id == 0xFFFFFFFFu {
+        return roughness_factor;
+    }
+    let roughness_texture = sample_mono_texture(material.roughness_map_id, hit_details.texcoords);
     return roughness_factor * roughness_texture;
 }
 fn compute_hit_details_surface_emissive(hit_details: HitDetails) -> vec3<f32> {
