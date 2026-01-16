@@ -63,6 +63,7 @@ __all__ = [
     "partition_triangles",
     "round_up_to_po2",
     "setup_logging",
+    "trace",
     "transform_aabb",
     "typed_freetype",
     "write_mitsuba_scene",
@@ -146,4 +147,5 @@ from .bvh import (
     transform_aabb,
 )
 from .gpu import help_request_wgpu_device, BlitRenderer
+from . import trace
 from . import typed_freetype

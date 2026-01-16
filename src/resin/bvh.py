@@ -24,6 +24,7 @@ import numpy as np
 import time
 
 from .basic import NUMBA_CACHE_ENABLED
+from . import trace
 
 
 @dataclass
@@ -81,7 +82,6 @@ def build_blas_bvh(
     t: npt.NDArray[np.uint32],  # (nt, 3)
     v: npt.NDArray[np.float32],  # (nv, 3)
     copy_t: bool = True,
-    metrics_log_level: int = logging.DEBUG,
 ) -> Blas:
     """
     Constructs a BLAS (bottom-level acceleration structure) BVH for the given triangles and vertices.
@@ -96,7 +96,6 @@ def build_blas_bvh(
     :param t: Triangle index array of shape (nt, 3). Each element indexes into `v`.
     :param v: Vertex position array of shape (nv, 3).
     :param copy_t: If True, copies the triangle array before reordering.
-    :param metrics_log_level: Log level for construction metrics.
     :return: The constructed BLAS, including re-ordered triangle indices.
     """
 
@@ -106,21 +105,11 @@ def build_blas_bvh(
     if copy_t:
         t = t.copy()
 
-    nt = t.shape[0]
-    nv = v.shape[0]
-    LOG.log(
-        msg=f"Starting BLAS construction: {nv=}, {nt=}",
-        level=metrics_log_level,
-    )
-
     # Compute triangle centroids:
+    nt = t.shape[0]
     c = v[t].mean(axis=-2)
-    assert c.shape == (nt, 3)
     t1 = time.perf_counter()
-    LOG.log(
-        msg=f"BLAS construction: centroids: {(t1 - t0) * 1000:.2f}ms",
-        level=metrics_log_level,
-    )
+    trace.add_time_span("bvh/blas/centroids", t0, t1)
 
     # Guess number of BVH nodes needed for initial capacity:
     # For a binary tree, worst case is 2L - 1 nodes (for L leaves).
@@ -146,10 +135,7 @@ def build_blas_bvh(
     bvh_r[0, :] = 0, nt
     bvh_s[0] = nt * single_aabb_surface_area(bvh_b[0])
     t3 = time.perf_counter()
-    LOG.log(
-        msg=f"BLAS construction: root AABB: {(t3 - t2) * 1000:.2f}ms",
-        level=metrics_log_level,
-    )
+    trace.add_time_span("bvh/blas/root_aabb", t2, t3)
 
     # Recursively build BVH subtree starting from root node:
     t4 = time.perf_counter()
@@ -166,10 +152,7 @@ def build_blas_bvh(
         _debug_depth=0,
     )
     t5 = time.perf_counter()
-    LOG.log(
-        msg=f"BLAS construction: recursive build: {(t5 - t4) * 1000:.2f}ms",
-        level=metrics_log_level,
-    )
+    trace.add_time_span("bvh/blas/recursive_build", t4, t5)
 
     # Ensure we did not exceed allocated BVH node buffer:
     assert bvh_count[0] <= nb, "BLAS node buffer overflow"
@@ -740,7 +723,6 @@ def aabb_union(
 def build_tlas_bvh(
     instance_aabbs: npt.NDArray[np.float32],  # (ni, 2, 3)
     copy_instances: bool = True,
-    metrics_log_level: int = logging.DEBUG,
 ) -> Tlas:
     """
     Constructs a TLAS (top-level acceleration structure) BVH over instance AABBs.
@@ -753,17 +735,12 @@ def build_tlas_bvh(
 
     :param instance_aabbs: Per-instance world-space AABBs of shape (ni, 2, 3).
     :param copy_instances: If True, copies the instance indices before reordering.
-    :param metrics_log_level: Log level for construction metrics.
     :return: The constructed TLAS, including re-ordered instance indices.
     """
 
     t0 = time.perf_counter()
 
     ni = instance_aabbs.shape[0]
-    LOG.log(
-        msg=f"Starting TLAS construction: {ni=}",
-        level=metrics_log_level,
-    )
 
     # Create instance indices array that will be reordered:
     instance_indices = np.arange(ni, dtype=np.uint32)
@@ -772,12 +749,8 @@ def build_tlas_bvh(
 
     # Compute instance centroids from AABBs:
     c = (instance_aabbs[:, 0, :] + instance_aabbs[:, 1, :]) * 0.5
-    assert c.shape == (ni, 3)
     t1 = time.perf_counter()
-    LOG.log(
-        msg=f"TLAS construction: centroids: {(t1 - t0) * 1000:.2f}ms",
-        level=metrics_log_level,
-    )
+    trace.add_time_span("bvh/tlas/centroids", t0, t1)
 
     # Guess number of BVH nodes needed for initial capacity:
     ESTIMATED_INSTANCES_PER_LEAF = 1
@@ -800,10 +773,7 @@ def build_tlas_bvh(
     bvh_r[0, :] = 0, ni
     bvh_s[0] = ni * single_aabb_surface_area(bvh_b[0])
     t3 = time.perf_counter()
-    LOG.log(
-        msg=f"TLAS construction: root AABB: {(t3 - t2) * 1000:.2f}ms",
-        level=metrics_log_level,
-    )
+    trace.add_time_span("bvh/tlas/root_aabb", t2, t3)
 
     # Recursively build BVH subtree starting from root node:
     t4 = time.perf_counter()
@@ -820,10 +790,7 @@ def build_tlas_bvh(
         _debug_depth=0,
     )
     t5 = time.perf_counter()
-    LOG.log(
-        msg=f"TLAS construction: recursive build: {(t5 - t4) * 1000:.2f}ms",
-        level=metrics_log_level,
-    )
+    trace.add_time_span("bvh/tlas/recursive_build", t4, t5)
 
     # Ensure we did not exceed allocated BVH node buffer:
     assert bvh_count[0] <= nb, "TLAS node buffer overflow"

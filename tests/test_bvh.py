@@ -1,4 +1,3 @@
-import logging
 import resin
 
 import time
@@ -78,7 +77,7 @@ def test_build_bvh(mesh_name: str = "Suzanne.gltf"):
 
             # Build BVH with timing
             start_time = time.monotonic_ns()
-            bvh = resin.build_blas_bvh(t=t, v=v, metrics_log_level=logging.INFO)
+            bvh = resin.build_blas_bvh(t=t, v=v)
             end_time = time.monotonic_ns()
             elapsed_ms = (end_time - start_time) * 1e-6
 

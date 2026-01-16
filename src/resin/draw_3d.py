@@ -16,6 +16,7 @@ import wgpu
 
 
 from .basic import BaseDisposable, StructuredNDArray
+from . import trace
 from .excepts import LogicError
 from .bvh import Blas, build_blas_bvh, build_tlas_bvh, transform_aabb
 from .resources import GeometryResource, MaterialResource
@@ -1152,24 +1153,44 @@ class Draw3dRenderer(BaseDisposable):
         return frame_times_s
 
     def _log_frame_timing_stats_if_due(self) -> None:
-        """Log average frame timing stats every 1 second (debug level)."""
-        if not self._profiling_enabled:
-            return
-
+        """Log frame timing stats every 1 second (debug level)."""
         current_time = time.monotonic()
         if current_time - self._profiling_last_log_time < 1.0:
             return
 
         self._profiling_last_log_time = current_time
 
-        frame_times = self.get_frame_timing_stats()
-        if len(frame_times) == 0:
-            return
+        parts: list[str] = []
 
-        avg_ms = float(frame_times.mean()) * 1000.0
-        LOG.debug(
-            f"Average GPU frame time: {avg_ms:.2f}ms ({len(frame_times)} samples)"
+        # GPU kernel timing (from timestamp queries)
+        if self._profiling_enabled:
+            frame_times = self.get_frame_timing_stats()
+            if len(frame_times) > 0:
+                gpu_mean = float(frame_times.mean()) * 1000.0
+                gpu_p5 = float(np.percentile(frame_times, 5)) * 1000.0
+                gpu_p50 = float(np.percentile(frame_times, 50)) * 1000.0
+                gpu_p95 = float(np.percentile(frame_times, 95)) * 1000.0
+                parts.append(
+                    f"GPU p5/p50/p95/mean={gpu_p5:.2f}/{gpu_p50:.2f}/"
+                    f"{gpu_p95:.2f}/{gpu_mean:.2f}ms"
+                )
+
+        # TLAS build timing (from global trace hub)
+        tlas_stats = trace.compute_execution_time(
+            "Draw3dRenderer/record/tlas_build", truncate_window_sec=1.0
         )
+        if tlas_stats is not None:
+            tlas_mean = tlas_stats.mean_sec * 1000.0
+            tlas_p5 = tlas_stats.p5_sec * 1000.0
+            tlas_p50 = tlas_stats.p50_sec * 1000.0
+            tlas_p95 = tlas_stats.p95_sec * 1000.0
+            parts.append(
+                f"TLAS p5/p50/p95/mean={tlas_p5:.2f}/{tlas_p50:.2f}/"
+                f"{tlas_p95:.2f}/{tlas_mean:.2f}ms"
+            )
+
+        if parts:
+            LOG.debug(" | ".join(parts))
 
     def set_debug_flags(
         self,
@@ -1470,7 +1491,10 @@ class Draw3dRenderer(BaseDisposable):
 
         # Build TLAS from world-space instance AABBs
         if total_instance_count > 0:
+            tlas_t0 = time.perf_counter()
             tlas = build_tlas_bvh(instance_aabbs)
+            tlas_t1 = time.perf_counter()
+            trace.add_time_span("Draw3dRenderer/record/tlas_build", tlas_t0, tlas_t1)
 
             # Marshall and upload TLAS nodes
             tlas_node_data = PodTlasNodeArray.empty(shape=(tlas.node_count,))
