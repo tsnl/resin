@@ -10,11 +10,11 @@ Components:
 Tasks:
 - [ ] Renderer 
   - [ ] Clean up existing `draw_3d` renderer implementation.
-    - [ ] Switch to single buffer accumulator, always increment.
+    - [x] Switch to single buffer accumulator, always increment.
     - [ ] Separate postprocessing pipeline into separate compute shader entry point.
-    - [ ] Continue factoring megakernel into smaller kernels.
+    - [ ] Continue factoring megakernel into smaller kernels, e.g. wavefront.
   - [ ] Refactor: break into small, composable functors.
-  - [ ] Add TLAS to ray-trace operator to support larger scenes.
+  - [x] Add TLAS to ray-trace operator to support larger scenes.
   - [ ] Train de-noiser to improve render quality.
 - [ ] Physics
   - [ ] Constrained rigid-body dynamics solver.
