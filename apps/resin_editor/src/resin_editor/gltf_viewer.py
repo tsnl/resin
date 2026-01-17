@@ -21,13 +21,13 @@ LOG = logging.getLogger(__name__)
 
 # Available models
 MODELS = [
-    # (
-    #     "Sponza",
-    #     "tests/data/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf",
-    # ),
     (
         "Cornell Box",
         "CornellBox/glTF/CornellBox.gltf",
+    ),
+    (
+        "Sponza",
+        "tests/data/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf",
     ),
     (
         "Avocado",
