@@ -129,6 +129,7 @@ def renderer(gpu_device: wgpu.GPUDevice) -> Generator[Draw3dRenderer, None, None
 
 def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
     scene_loaders = {
+        "cornell_box": _load_cornell_box_scene,
         "two_avocados": _load_two_avocados_scene,
         "damaged_helmet": _load_damaged_helmet_scene,
         "flight_helmet": _load_flight_helmet_scene,
@@ -139,18 +140,25 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
 
         scene = load_scene(renderer)
 
-        # Load Field environment map
-        hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
-        env_map_texture = Draw3dTexture(
-            renderer,
-            data=hdr_data,
-            usage="environment",
-        )
-        scene.environment_map = env_map_texture
+        # Load Field environment map (skip for Cornell Box - it's enclosed)
+        if scene_name != "cornell_box":
+            hdr_data = load_image("tests/data/glTF-Sample-Environments/field.hdr")
+            env_map_texture = Draw3dTexture(
+                renderer,
+                data=hdr_data,
+                usage="environment",
+            )
+            scene.environment_map = env_map_texture
 
-        # For damaged_helmet, also output emissive debug image
-        if scene_name == "damaged_helmet":
-            renderer.set_debug_flags(emit_surface_emissive=True)
+        # For cornell_box or damaged_helmet, output debug AOVs
+        if scene_name in ("cornell_box", "damaged_helmet"):
+            renderer.set_debug_flags(
+                emit_surface_color=True,
+                emit_surface_normal=True,
+                emit_surface_emissive=True,
+                emit_closest_hit_depth_in_r=True,
+                emit_hit_world_position=True,
+            )
 
         data = _render_and_readback(
             gpu_device,
@@ -162,8 +170,35 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
         )
         _save_debug_image(data, f"test_basic_draw_3d-{scene_name}.png")
 
-        # For damaged_helmet, save emissive debug output
-        if scene_name == "damaged_helmet":
+        # For cornell_box or damaged_helmet, save debug AOV outputs
+        if scene_name in ("cornell_box", "damaged_helmet"):
+            # Surface color
+            color_data = _render_and_readback(
+                gpu_device,
+                renderer,
+                scene,
+                FRAME_W,
+                FRAME_H,
+                texture=renderer.get_frame_surface_color_image(),
+            )
+            _save_debug_image(
+                color_data, f"test_basic_draw_3d-{scene_name}-color.png"
+            )
+
+            # Surface normal
+            normal_data = _render_and_readback(
+                gpu_device,
+                renderer,
+                scene,
+                FRAME_W,
+                FRAME_H,
+                texture=renderer.get_frame_surface_normal_image(),
+            )
+            _save_debug_image(
+                normal_data, f"test_basic_draw_3d-{scene_name}-normal.png"
+            )
+
+            # Surface emissive
             emissive_data = _render_and_readback(
                 gpu_device,
                 renderer,
@@ -175,6 +210,33 @@ def test_basic_draw_3d(gpu_device: wgpu.GPUDevice, renderer: Draw3dRenderer):
             _save_debug_image(
                 emissive_data, f"test_basic_draw_3d-{scene_name}-emissive.png"
             )
+
+            # Surface depth
+            depth_data = _render_and_readback(
+                gpu_device,
+                renderer,
+                scene,
+                FRAME_W,
+                FRAME_H,
+                texture=renderer.get_frame_surface_depth_image(),
+            )
+            _save_debug_image(
+                depth_data, f"test_basic_draw_3d-{scene_name}-depth.png"
+            )
+
+            # Surface position
+            position_data = _render_and_readback(
+                gpu_device,
+                renderer,
+                scene,
+                FRAME_W,
+                FRAME_H,
+                texture=renderer.get_frame_surface_position_image(),
+            )
+            _save_debug_image(
+                position_data, f"test_basic_draw_3d-{scene_name}-position.png"
+            )
+
             # Reset debug flags for next scene
             renderer.set_debug_flags()
 
@@ -306,6 +368,57 @@ def _load_flight_helmet_scene(renderer: Draw3dRenderer) -> Draw3dScene:
             fov_y_rad=np.radians(45.0),
             aspect_ratio=FRAME_W / FRAME_H,
             max_distance=5.0,
+        ),
+        meshes=meshes,
+    )
+
+    return scene
+
+
+def _load_cornell_box_scene(renderer: Draw3dRenderer) -> Draw3dScene:
+    """Helper to load the Cornell Box scene.
+
+    The Cornell Box spans from [-1, 0, -1] to [1, 2, 1] with:
+    - White walls (floor, ceiling, back)
+    - Red wall (left)
+    - Green wall (right)
+    - Light panel at the top with emissive factor [15, 15, 15]
+    """
+    resource_meshes = load_gltf(
+        gltf_path="tests/data/glTF-Sample-Assets/Models/CornellBox/glTF/cornell_box.gltf",
+    )
+
+    # Log material info for debugging
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        LOG.info(
+            f"Cornell Box material: color={mat_res.color_factor}, "
+            f"emissive={mat_res.emissive_factor}"
+        )
+
+    # Convert resource types to Draw3d objects
+    meshes: dict = {}
+    for (geom_res, mat_res), transforms in resource_meshes.items():
+        geometry = Draw3dGeometry.from_resource(geom_res, renderer)
+        material = Draw3dMaterial.from_resource(mat_res, renderer)
+        meshes[(geometry, material)] = transforms
+
+    # Camera inside the box, looking at the back wall
+    # Box is at Y=[0, 2], so place camera at Y=-0.5 (in front of box opening)
+    # looking toward +Y (into the box)
+    scene = Draw3dScene(
+        camera=Draw3dCamera(
+            transform=np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, -0.5],
+                    [0.0, 0.0, 1.0, 1.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            fov_y_rad=np.radians(90.0),
+            aspect_ratio=FRAME_W / FRAME_H,
+            max_distance=10.0,
         ),
         meshes=meshes,
     )
