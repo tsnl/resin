@@ -680,85 +680,60 @@ class Draw3dRenderer(BaseDisposable):
             usage=(wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_DST),
         )
         # Debug output textures (created unconditionally)
+        # Include COPY_DST to allow clearing via write_texture
+        debug_texture_usage = (
+            wgpu.TextureUsage.STORAGE_BINDING
+            | wgpu.TextureUsage.COPY_SRC
+            | wgpu.TextureUsage.COPY_DST
+            | wgpu.TextureUsage.TEXTURE_BINDING
+        )
         self._frame_per_pixel_radiance_image = device.create_texture(
             label="Draw3dRenderer.FramePerPixelRadianceImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_primary_ray_direction_image = device.create_texture(
             label="Draw3dRenderer.FramePrimaryRayDirectionImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_depth_image = device.create_texture(
             label="Draw3dRenderer.FrameSurfaceDepthImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_position_image = device.create_texture(
             label="Draw3dRenderer.FrameSurfacePositionImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_color_image = device.create_texture(
             label="Draw3dRenderer.FrameSurfaceColorImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_normal_image = device.create_texture(
             label="Draw3dRenderer.FrameSurfaceNormalImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_orm_image = device.create_texture(
             label="Draw3dRenderer.FrameSurfaceOrmImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_emissive_image = device.create_texture(
             label="Draw3dRenderer.FrameSurfaceEmissiveImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         # Full-resolution final output (postprocessed from _output_image)
         self.output_image = device.create_texture(
@@ -1134,85 +1109,60 @@ class Draw3dRenderer(BaseDisposable):
             format=wgpu.TextureFormat.rgba16float,
             usage=(wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_DST),
         )
+        # Debug textures (include COPY_DST to allow clearing via write_texture)
+        debug_texture_usage = (
+            wgpu.TextureUsage.STORAGE_BINDING
+            | wgpu.TextureUsage.COPY_SRC
+            | wgpu.TextureUsage.COPY_DST
+            | wgpu.TextureUsage.TEXTURE_BINDING
+        )
         self._frame_per_pixel_radiance_image = self.device.create_texture(
             label="Draw3dRenderer.FramePerPixelRadianceImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_primary_ray_direction_image = self.device.create_texture(
             label="Draw3dRenderer.FramePrimaryRayDirectionImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_depth_image = self.device.create_texture(
             label="Draw3dRenderer.FrameSurfaceDepthImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_position_image = self.device.create_texture(
             label="Draw3dRenderer.FrameSurfacePositionImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_color_image = self.device.create_texture(
             label="Draw3dRenderer.FrameSurfaceColorImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_normal_image = self.device.create_texture(
             label="Draw3dRenderer.FrameSurfaceNormalImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_orm_image = self.device.create_texture(
             label="Draw3dRenderer.FrameSurfaceOrmImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         self._frame_surface_emissive_image = self.device.create_texture(
             label="Draw3dRenderer.FrameSurfaceEmissiveImage",
             size=(internal_w, internal_h, 1),
             format=wgpu.TextureFormat.rgba16float,
-            usage=(
-                wgpu.TextureUsage.STORAGE_BINDING
-                | wgpu.TextureUsage.COPY_SRC
-                | wgpu.TextureUsage.TEXTURE_BINDING
-            ),
+            usage=debug_texture_usage,
         )
         # Full-resolution final output
         self.output_image = self.device.create_texture(
@@ -1594,6 +1544,7 @@ class Draw3dRenderer(BaseDisposable):
             self._construction_time = time.monotonic()
             self._debug_flags = 0
             self._reset_accumulator_texture()
+            self._reset_debug_textures()
 
         if geometry_heap:
             self.geometry_heap.clear()
@@ -1625,6 +1576,35 @@ class Draw3dRenderer(BaseDisposable):
             ),
             size=(w, h, 1),
         )
+
+    def _reset_debug_textures(self) -> None:
+        """Clear all debug/AOV textures to black."""
+        w, h = self._internal_size_wh_px
+        zeros = np.zeros((h * w * 4 * 2,), dtype=np.uint8)  # rgba16float
+        debug_textures = [
+            self._frame_per_pixel_radiance_image,
+            self._frame_primary_ray_direction_image,
+            self._frame_surface_depth_image,
+            self._frame_surface_position_image,
+            self._frame_surface_color_image,
+            self._frame_surface_normal_image,
+            self._frame_surface_orm_image,
+            self._frame_surface_emissive_image,
+        ]
+        for texture in debug_textures:
+            self.device.queue.write_texture(
+                destination=wgpu.TexelCopyTextureInfo(
+                    texture=texture,
+                    mip_level=0,
+                    origin=(0, 0, 0),
+                ),
+                data=zeros,
+                data_layout=wgpu.TexelCopyBufferLayout(
+                    bytes_per_row=w * 4 * 2,
+                    rows_per_image=h,
+                ),
+                size=(w, h, 1),
+            )
 
     def _validate_scene(self, scene: "Draw3dScene") -> None:
         for geometry, material in scene.meshes:
@@ -2116,13 +2096,18 @@ class Draw3dMaterial(BaseDisposable):
         self.diffuse_f0_factor = diffuse_f0_factor
 
         # Upload material data to GPU
-        color_map_id = color_texture.allocation.texture_id if color_texture else 0
-        normal_map_id = normal_texture.allocation.texture_id if normal_texture else 0
+        # Use 0xFFFFFFFF as sentinel for "no texture" - the shader checks for this value
+        color_map_id = (
+            color_texture.allocation.texture_id if color_texture else 0xFFFFFFFF
+        )
+        normal_map_id = (
+            normal_texture.allocation.texture_id if normal_texture else 0xFFFFFFFF
+        )
         metalness_map_id = (
-            metalness_texture.allocation.texture_id if metalness_texture else 0
+            metalness_texture.allocation.texture_id if metalness_texture else 0xFFFFFFFF
         )
         roughness_map_id = (
-            roughness_texture.allocation.texture_id if roughness_texture else 0
+            roughness_texture.allocation.texture_id if roughness_texture else 0xFFFFFFFF
         )
         emissive_map_id = (
             emissive_texture.allocation.texture_id if emissive_texture else 0xFFFFFFFF
