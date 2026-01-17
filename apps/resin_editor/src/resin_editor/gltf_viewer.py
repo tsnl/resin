@@ -27,7 +27,7 @@ MODELS = [
     ),
     (
         "Sponza",
-        "tests/data/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf",
+        "Sponza/glTF/Sponza.gltf",
     ),
     (
         "Avocado",
