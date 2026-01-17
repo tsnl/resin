@@ -23,7 +23,7 @@ LOG = logging.getLogger(__name__)
 MODELS = [
     (
         "Cornell Box",
-        "CornellBox/glTF/CornellBox.gltf",
+        "CornellBox/glTF-Binary/CornellBox.glb",
     ),
     (
         "Sponza",
