@@ -146,6 +146,8 @@ const POST_PRIMARY_RAY_HIT_DEBUG_MASK: u32 = FLAG_EMIT_FRAME_SURFACE_DEPTH | FLA
 const POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK: u32 = FLAG_EMIT_FRAME_SURFACE_COLOR | FLAG_EMIT_FRAME_SURFACE_NORMAL | FLAG_EMIT_FRAME_SURFACE_ORM;
 const ALL_DEBUG_VISUALIZATION_MASK: u32 = POST_PRIMARY_RAY_GEN_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DEBUG_MASK | POST_PRIMARY_RAY_HIT_DETAILS_DEBUG_MASK;
 
+const NULL_TEXTURE_ID: u32 = 0xFFFFFFFFu;
+
 //
 // Accessors
 //
@@ -847,19 +849,29 @@ struct HitDetails {
     instance_id: u32,
 }
 fn compute_hit_details(hit: HitRecord) -> HitDetails {
+    let instance = instances[hit.instance_id];
+    let material = material_heap[instance.material_id];
+    let texcoords = compute_hit_details_texcoords(hit);
+    let tbn = compute_hit_details_tbn_matrix(hit);
+    let surface_color = compute_hit_details_surface_color(material, texcoords);
+    let surface_normal = compute_hit_details_surface_normal(material, texcoords, tbn);
+    let surface_metalness = compute_hit_details_surface_metalness(material, texcoords);
+    let surface_roughness = compute_hit_details_surface_roughness(material, texcoords);
+    let surface_emissive = compute_hit_details_surface_emissive(material, texcoords);
+    let surface_diffuse_f0 = compute_hit_details_surface_diffuse_f0(material, texcoords);
     var hit_details: HitDetails;
     hit_details.world_hit_position = hit.world_hit_position;
     hit_details.world_hit_distance = hit.world_hit_distance;
     hit_details.barycentric_coordinates = hit.barycentric_coordinates.xyz;
-    hit_details.texcoords = compute_hit_details_texcoords(hit);
-    hit_details.tbn = compute_hit_details_tbn_matrix(hit);
+    hit_details.texcoords = texcoords;
+    hit_details.tbn = tbn;
     hit_details.instance_id = hit.instance_id;
-    hit_details.surface_color = compute_hit_details_surface_color(hit_details);
-    hit_details.surface_normal = compute_hit_details_surface_normal(hit_details);
-    hit_details.surface_metalness = compute_hit_details_surface_metalness(hit_details);
-    hit_details.surface_roughness = compute_hit_details_surface_roughness(hit_details);
-    hit_details.surface_emissive = compute_hit_details_surface_emissive(hit_details);
-    hit_details.surface_diffuse_f0 = compute_hit_details_surface_diffuse_f0(hit_details);
+    hit_details.surface_color = surface_color;
+    hit_details.surface_normal = surface_normal;
+    hit_details.surface_metalness = surface_metalness;
+    hit_details.surface_roughness = surface_roughness;
+    hit_details.surface_emissive = surface_emissive;
+    hit_details.surface_diffuse_f0 = surface_diffuse_f0;
     return hit_details;
 }
 fn compute_hit_details_texcoords(hit: HitRecord) -> vec2<f32> {
@@ -919,73 +931,61 @@ fn compute_hit_details_tbn_matrix(hit: HitRecord) -> mat3x3<f32> {
     return mat3x3<f32>(world_tangent, world_bitangent, world_normal);
 
 }
-fn compute_hit_details_surface_color(hit_details: HitDetails) -> vec4<f32> {
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
+fn compute_hit_details_surface_color(material: PodMaterial, texcoords: vec2<f32>) -> vec4<f32> {
     let color_factor = vec3<f32>(material.color_factor[0], material.color_factor[1], material.color_factor[2]);
-    if material.color_map_id == 0xFFFFFFFFu {
+    if material.color_map_id == NULL_TEXTURE_ID {
         return vec4<f32>(color_factor, 1.0);
     }
-    let color = sample_rgb_texture(material.color_map_id, hit_details.texcoords);
+    let color = sample_rgb_texture(material.color_map_id, texcoords);
     return vec4<f32>(color * color_factor, 1.0);
 }
-fn compute_hit_details_surface_normal(hit_details: HitDetails) -> vec3<f32> {
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
-    if material.normal_map_id == 0xFFFFFFFFu {
-        return hit_details.tbn[2];  // Return geometric normal (Z column of TBN)
+fn compute_hit_details_surface_normal(material: PodMaterial, texcoords: vec2<f32>, tbn: mat3x3<f32>) -> vec3<f32> {
+    if material.normal_map_id == NULL_TEXTURE_ID {
+        return tbn[2];  // Return geometric normal (Z column of TBN)
     }
-    let xy = 2.0 * sample_rg_texture(material.normal_map_id, hit_details.texcoords) - vec2<f32>(1.0);
+    let xy = 2.0 * sample_rg_texture(material.normal_map_id, texcoords) - vec2<f32>(1.0);
     let z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
     let texture_normal = vec3<f32>(xy.x, xy.y, z);
-    return hit_details.tbn * texture_normal;
+    return tbn * texture_normal;
 }
-fn compute_hit_details_surface_metalness(hit_details: HitDetails) -> f32 {
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
+fn compute_hit_details_surface_metalness(material: PodMaterial, texcoords: vec2<f32>) -> f32 {
     let metalness_factor = material.metalness_factor;
-    if material.metalness_map_id == 0xFFFFFFFFu {
+    if material.metalness_map_id == NULL_TEXTURE_ID {
         return metalness_factor;
     }
-    let metalness_texture = sample_mono_texture(material.metalness_map_id, hit_details.texcoords);
+    let metalness_texture = sample_mono_texture(material.metalness_map_id, texcoords);
     return metalness_factor * metalness_texture;
 }
-fn compute_hit_details_surface_roughness(hit_details: HitDetails) -> f32 {
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
+fn compute_hit_details_surface_roughness(material: PodMaterial, texcoords: vec2<f32>) -> f32 {
     let roughness_factor = material.roughness_factor;
-    if material.roughness_map_id == 0xFFFFFFFFu {
+    if material.roughness_map_id == NULL_TEXTURE_ID {
         return roughness_factor;
     }
-    let roughness_texture = sample_mono_texture(material.roughness_map_id, hit_details.texcoords);
+    let roughness_texture = sample_mono_texture(material.roughness_map_id,      texcoords);
     return roughness_factor * roughness_texture;
 }
-fn compute_hit_details_surface_emissive(hit_details: HitDetails) -> vec3<f32> {
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
+fn compute_hit_details_surface_emissive(material: PodMaterial, texcoords: vec2<f32>) -> vec3<f32> {
     let emissive_factor = vec3<f32>(
         material.emissive_factor[0],
         material.emissive_factor[1],
         material.emissive_factor[2],
     );
-    if material.emissive_map_id == 0xFFFFFFFFu {
+    if material.emissive_map_id == NULL_TEXTURE_ID {
         return emissive_factor;
     }
-    let emissive_texture = sample_rgb_texture(material.emissive_map_id, hit_details.texcoords);
+    let emissive_texture = sample_rgb_texture(material.emissive_map_id, texcoords);
     return emissive_factor * emissive_texture;
 }
-fn compute_hit_details_surface_diffuse_f0(hit_details: HitDetails) -> vec3<f32> {
-    let instance = instances[hit_details.instance_id];
-    let material = material_heap[instance.material_id];
+fn compute_hit_details_surface_diffuse_f0(material: PodMaterial, texcoords: vec2<f32>) -> vec3<f32> {
     let diffuse_f0_factor = vec3<f32>(
         material.diffuse_f0_factor[0],
         material.diffuse_f0_factor[1],
         material.diffuse_f0_factor[2],
     );
-    if material.diffuse_f0_map_id == 0xFFFFFFFFu {
+    if material.diffuse_f0_map_id == NULL_TEXTURE_ID {
         return diffuse_f0_factor;
     }
-    let diffuse_f0_texture = sample_rgb_texture(material.diffuse_f0_map_id, hit_details.texcoords);
+    let diffuse_f0_texture = sample_rgb_texture(material.diffuse_f0_map_id, texcoords);
     return diffuse_f0_factor * diffuse_f0_texture;
 }
 
