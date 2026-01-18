@@ -595,13 +595,12 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 name = "resin"
 version = "0.1.0"
 dependencies = [
- "resin-pbrt",
+ "bytemuck",
+ "parking_lot",
+ "simd_math",
+ "thiserror",
  "wgpu",
 ]
-
-[[package]]
-name = "resin-pbrt"
-version = "0.1.0"
 
 [[package]]
 name = "rustc-hash"
@@ -649,6 +648,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "simd_math"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c102bec6c3e5e359d21662b4e4e17c5cdc4e89c0579e483654b1ddafc18838ea"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

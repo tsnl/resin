@@ -6,9 +6,9 @@ edition = "2024"
 [lib]
 name = "resin"
 
-[workspace]
-members = ["crates/resin-pbrt"]
-
 [dependencies]
+bytemuck = "1.24.0"
+parking_lot = "0.12.5"
+simd_math = "1.0.2"
+thiserror = "2.0.17"
 wgpu = "28.0.0"
-resin-pbrt = { path = "crates/resin-pbrt" }
