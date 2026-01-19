@@ -145,7 +145,7 @@ mod details {
             // Allocate and write index data:
             let index_range = self.index_allocator.allocate(index_data.len())?;
             self.index_buffer
-                .write(index_range.start, &index_data, queue);
+                .write(index_range.start, index_data, queue);
 
             // Write the allocated ranges to a GPU-accessible allocation table.
             // This can be used by a compute shader to set up DrawIndexedIndirectArgs for

@@ -38,7 +38,7 @@ impl<T: bytemuck::Pod> StructuredBuffer<T> {
     pub fn buffer(&self) -> &wgpu::Buffer {
         &self.buffer
     }
-    pub fn buffer_slice(&self, range: Range<usize>) -> wgpu::BufferSlice {
+    pub fn buffer_slice(&self, range: Range<usize>) -> wgpu::BufferSlice<'_> {
         let offset = Layout::array::<T>(range.start).unwrap().size() as wgpu::BufferAddress;
         let size = Layout::array::<T>(range.len()).unwrap().size() as wgpu::BufferAddress;
         self.buffer.slice(offset..offset + size)

@@ -27,7 +27,7 @@ impl<B: GenericBackend> GenericManager<B> {
     }
     fn del(self: &Arc<Self>, resource: &B::ResourceInfo) {
         let mut backend = self.backend.write();
-        backend.del_impl(&resource);
+        backend.del_impl(resource);
     }
 }
 
