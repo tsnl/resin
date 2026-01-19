@@ -1,2 +1,5 @@
-pub mod geom;
+mod geometry;
+mod texture;
+
+mod core;
 mod heap;
