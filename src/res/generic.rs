@@ -10,15 +10,19 @@ pub struct GenericManager<B: GenericBackend> {
     backend: RwLock<B>,
 }
 impl<B: GenericBackend> GenericManager<B> {
-    pub fn create<'a>(create_info: B::CreateInfo<'a>) -> Arc<Self> {
-        let backend = B::new(create_info);
+    pub fn create<'a>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        create_info: B::ManagerCreateArgs<'a>,
+    ) -> Arc<Self> {
+        let backend = B::new(device, queue, create_info);
         Arc::new(Self {
             backend: RwLock::new(backend),
         })
     }
     pub fn add<'a>(
         self: &Arc<Self>,
-        create_info: B::ResourceCreateInfo<'a>,
+        create_info: B::ResourceCreateArgs<'a>,
     ) -> Result<GenericResource<B>, B::ResourceCreateError> {
         let mut backend = self.backend.write();
         let resource_info = backend.add_impl(create_info)?;
@@ -52,16 +56,20 @@ impl<B: GenericBackend> Drop for GenericResource<B> {
 }
 
 pub trait GenericBackend: Sized {
-    type CreateInfo<'a>;
-    type ResourceCreateInfo<'a>;
+    type ManagerCreateArgs<'a>: Default;
+    type ResourceCreateArgs<'a>;
     type ResourceCreateError: Error;
     type ResourceInfo;
 
-    fn new<'a>(create_info: Self::CreateInfo<'a>) -> Self;
+    fn new<'a>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        create_info: Self::ManagerCreateArgs<'a>,
+    ) -> Self;
 
     fn add_impl<'a>(
         &mut self,
-        create_info: Self::ResourceCreateInfo<'a>,
+        create_info: Self::ResourceCreateArgs<'a>,
     ) -> Result<Self::ResourceInfo, Self::ResourceCreateError>;
 
     fn del_impl(&mut self, resource: &Self::ResourceInfo);

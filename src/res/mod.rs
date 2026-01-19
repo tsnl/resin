@@ -1,5 +1,8 @@
+mod generic;
 mod geometry;
+mod heap;
 mod texture;
 
-mod core;
-mod heap;
+pub use geometry::{
+    Geometry, GeometryArgs, GeometryDrawArgs, GeometryInfo, GeometryManager, GeometryManagerArgs,
+};

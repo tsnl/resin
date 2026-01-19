@@ -1,7 +1,7 @@
 //! Geometry resources model 3D triangle meshes without any specific material applied.
 
-use crate::res::core::{GenericManager, GenericResource};
-use std::ops::Range;
+use crate::res::generic::{GenericManager, GenericResource};
+use std::{marker::PhantomData, ops::Range};
 
 //
 // Interface:
@@ -10,14 +10,24 @@ use std::ops::Range;
 pub type GeometryManager = GenericManager<details::GeometryBackend>;
 pub type Geometry = GenericResource<details::GeometryBackend>;
 
-pub struct GeometryBackendCreateArgs<'a> {
-    device: &'a wgpu::Device,
+pub struct GeometryManagerArgs<'a> {
     resource_capacity: usize,
     vertex_capacity: usize,
     index_capacity: usize,
+    _marker: PhantomData<&'a ()>,
+}
+impl<'a> Default for GeometryManagerArgs<'a> {
+    fn default() -> Self {
+        Self {
+            resource_capacity: 512,
+            vertex_capacity: 1 << 20,
+            index_capacity: 1 << 20,
+            _marker: PhantomData,
+        }
+    }
 }
 
-pub struct GeometryCreateArgs<'a> {
+pub struct GeometryArgs<'a> {
     vertex_position_data: &'a [[f32; 3]],
     vertex_normal_data: &'a [[f32; 3]],
     vertex_texcoord0_data: &'a [[f32; 2]],
@@ -33,7 +43,7 @@ pub struct GeometryInfo {
 
 #[derive(Default, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
-pub struct Allocation {
+pub struct GeometryDrawArgs {
     pub first_index: u32,
     pub index_count: u32,
     pub base_vertex: u32,
@@ -45,7 +55,7 @@ pub struct Allocation {
 
 mod details {
     use super::*;
-    use crate::res::{core::GenericBackend, heap::StructuredBuffer};
+    use crate::res::{generic::GenericBackend, heap::StructuredBuffer};
     use crate::util::{RangeAllocationError, RangeAllocator};
 
     pub(super) struct GeometryBackend {
@@ -56,21 +66,26 @@ mod details {
         vertex_normal_buffer: StructuredBuffer<[f32; 3]>,
         vertex_texcoord0_buffer: StructuredBuffer<[f32; 2]>,
         index_buffer: StructuredBuffer<u32>,
-        allocation_buffer: StructuredBuffer<Allocation>,
+        allocation_buffer: StructuredBuffer<GeometryDrawArgs>,
     }
     impl GenericBackend for GeometryBackend {
-        type CreateInfo<'a> = GeometryBackendCreateArgs<'a>;
-        type ResourceCreateInfo<'a> = GeometryCreateArgs<'a>;
+        type ManagerCreateArgs<'a> = GeometryManagerArgs<'a>;
+        type ResourceCreateArgs<'a> = GeometryArgs<'a>;
         type ResourceCreateError = RangeAllocationError;
         type ResourceInfo = GeometryInfo;
 
-        fn new<'a>(create_info: Self::CreateInfo<'a>) -> Self {
-            let GeometryBackendCreateArgs {
-                device,
+        fn new<'a>(
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            create_info: Self::ManagerCreateArgs<'a>,
+        ) -> Self {
+            let GeometryManagerArgs {
                 resource_capacity,
                 vertex_capacity,
                 index_capacity,
+                _marker,
             } = create_info;
+            _ = queue;
 
             Self {
                 id_allocator: RangeAllocator::new(
@@ -120,9 +135,9 @@ mod details {
 
         fn add_impl<'a>(
             &mut self,
-            create_info: GeometryCreateArgs<'a>,
+            create_info: GeometryArgs<'a>,
         ) -> Result<GeometryInfo, Self::ResourceCreateError> {
-            let GeometryCreateArgs {
+            let GeometryArgs {
                 vertex_position_data,
                 vertex_normal_data,
                 vertex_texcoord0_data,
@@ -154,7 +169,7 @@ mod details {
             let id = self.id_allocator.allocate(1)?.start;
             self.allocation_buffer.write(
                 id,
-                &[Allocation::new(&vertex_range, &index_range)],
+                &[GeometryDrawArgs::new(&vertex_range, &index_range)],
                 queue,
             );
 
@@ -175,7 +190,7 @@ mod details {
         }
     }
 
-    impl Allocation {
+    impl GeometryDrawArgs {
         fn new(vertex_range: &Range<usize>, index_range: &Range<usize>) -> Self {
             Self {
                 first_index: index_range.start as u32,
