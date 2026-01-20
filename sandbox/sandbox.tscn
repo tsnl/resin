@@ -1,0 +1,28 @@
+[gd_scene load_steps=5 format=3 uid="uid://ww4nfgxbsav0"]
+
+[ext_resource type="Script" path="res://src/sandbox.gd" id="1_vos54"]
+[ext_resource type="PackedScene" uid="uid://d1vqs7uikff7u" path="res://player/player.tscn" id="2_6gs2s"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_6gs2s"]
+size = Vector3(20, 1, 20)
+
+[sub_resource type="BoxMesh" id="BoxMesh_6gs2s"]
+
+[node name="sandbox" type="Node3D"]
+script = ExtResource("1_vos54")
+
+[node name="Map" type="RigidBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Map"]
+shape = SubResource("BoxShape3D_6gs2s")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Map"]
+transform = Transform3D(20, 0, 0, 0, 1, 0, 0, 0, 20, 0, 0, 0)
+mesh = SubResource("BoxMesh_6gs2s")
+
+[node name="Sun" type="DirectionalLight3D" parent="Map"]
+transform = Transform3D(0.44335282, 0.71920186, -0.5349644, -0.6026508, 0.68097, 0.41604263, 0.6635134, 0.13794309, 0.7353377, -3.4944355, 7.2924776, -1.9292965)
+shadow_enabled = true
+
+[node name="Player" parent="." instance=ExtResource("2_6gs2s")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4255247, 0)

@@ -1,0 +1,27 @@
+[gd_scene load_steps=5 format=3 uid="uid://d1vqs7uikff7u"]
+
+[ext_resource type="Script" uid="uid://cdsyce3gsecer" path="res://player/camera.gd" id="1_oul6g"]
+[ext_resource type="Script" uid="uid://bftntcn8qw662" path="res://player/player.gd" id="1_rkbax"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_oul6g"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_rkbax"]
+
+[node name="Player" type="Node3D" node_paths=PackedStringArray("avatar_node", "camera_node")]
+script = ExtResource("1_rkbax")
+avatar_node = NodePath("Avatar")
+camera_node = NodePath("Camera")
+
+[node name="Avatar" type="RigidBody3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Avatar"]
+mesh = SubResource("CapsuleMesh_oul6g")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Avatar"]
+shape = SubResource("CapsuleShape3D_rkbax")
+
+[node name="Camera" type="Camera3D" parent="." node_paths=PackedStringArray("follow_target")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4373764, 5.228209)
+current = true
+script = ExtResource("1_oul6g")
+follow_target = NodePath("../Avatar")
