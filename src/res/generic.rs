@@ -13,7 +13,7 @@ impl<B: GenericBackend> GenericManager<B> {
     pub fn create<'a>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        create_info: B::ManagerCreateArgs<'a>,
+        create_info: B::ManagerCreateArgs,
     ) -> Arc<Self> {
         let backend = B::new(device, queue, create_info);
         Arc::new(Self {
@@ -56,7 +56,7 @@ impl<B: GenericBackend> Drop for GenericResource<B> {
 }
 
 pub trait GenericBackend: Sized {
-    type ManagerCreateArgs<'a>: Default;
+    type ManagerCreateArgs;
     type ResourceCreateArgs<'a>;
     type ResourceCreateError: Error;
     type ResourceInfo;
@@ -64,7 +64,7 @@ pub trait GenericBackend: Sized {
     fn new<'a>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        create_info: Self::ManagerCreateArgs<'a>,
+        create_info: Self::ManagerCreateArgs,
     ) -> Self;
 
     fn add_impl<'a>(

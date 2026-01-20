@@ -4,7 +4,7 @@ use crate::{
     res::generic::{GenericBackend, GenericManager, GenericResource},
     util::{RangeAllocationError, RangeAllocator, StructuredBuffer},
 };
-use std::{marker::PhantomData, ops::Range};
+use std::ops::Range;
 
 //
 // API:
@@ -13,19 +13,18 @@ use std::{marker::PhantomData, ops::Range};
 pub type GeometryManager = GenericManager<GeometryBackend>;
 pub type Geometry = GenericResource<GeometryBackend>;
 
-pub struct GeometryManagerArgs<'a> {
-    resource_capacity: usize,
-    vertex_capacity: usize,
-    index_capacity: usize,
-    _marker: PhantomData<&'a ()>,
+pub struct GeometryManagerArgs {
+    pub resource_capacity: usize,
+    pub vertex_capacity: usize,
+    pub index_capacity: usize,
 }
 
 pub struct GeometryArgs<'a> {
-    vertex_position_data: &'a [[f32; 3]],
-    vertex_normal_data: &'a [[f32; 3]],
-    vertex_texcoord0_data: &'a [[f32; 2]],
-    index_data: &'a [u32],
-    queue: &'a wgpu::Queue,
+    pub vertex_position_data: &'a [[f32; 3]],
+    pub vertex_normal_data: &'a [[f32; 3]],
+    pub vertex_texcoord0_data: &'a [[f32; 2]],
+    pub index_data: &'a [u32],
+    pub queue: &'a wgpu::Queue,
 }
 
 pub struct GeometryInfo {
@@ -57,7 +56,7 @@ struct GeometryBackend {
     allocation_buffer: StructuredBuffer<GeometryDrawArgs>,
 }
 impl GenericBackend for GeometryBackend {
-    type ManagerCreateArgs<'a> = GeometryManagerArgs<'a>;
+    type ManagerCreateArgs = GeometryManagerArgs;
     type ResourceCreateArgs<'a> = GeometryArgs<'a>;
     type ResourceCreateError = RangeAllocationError;
     type ResourceInfo = GeometryInfo;
@@ -65,13 +64,12 @@ impl GenericBackend for GeometryBackend {
     fn new<'a>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        create_info: Self::ManagerCreateArgs<'a>,
+        create_info: Self::ManagerCreateArgs,
     ) -> Self {
         let GeometryManagerArgs {
             resource_capacity,
             vertex_capacity,
             index_capacity,
-            _marker,
         } = create_info;
         _ = queue;
 
@@ -178,13 +176,12 @@ impl GenericBackend for GeometryBackend {
     }
 }
 
-impl<'a> Default for GeometryManagerArgs<'a> {
+impl<'a> Default for GeometryManagerArgs {
     fn default() -> Self {
         Self {
             resource_capacity: 512,
             vertex_capacity: 1 << 20,
             index_capacity: 1 << 20,
-            _marker: PhantomData,
         }
     }
 }

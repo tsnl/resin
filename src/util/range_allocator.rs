@@ -114,7 +114,7 @@ impl RangeAllocator {
 /// AllocationError indicates a failure to allocate a range.
 #[derive(thiserror::Error, Debug)]
 pub enum RangeAllocationError {
-    #[error("Heap {0} too full or fragmented to satisfy {1}-element allocation.")]
+    #[error("Heap {0} too full or fragmented to satisfy allocation: {1} elements")]
     NoFreeRange(&'static str, usize),
 }
 
