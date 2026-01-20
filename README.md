@@ -2,6 +2,8 @@
 
 A small Souls-like game.
 
+Run `./setup.sh` to inflate the project after cloning.
+
 ## Story
 
 Dark Souls meets Prey (2017).
