@@ -1,0 +1,10 @@
+- [ ] 3D renderer
+  - [ ] Asset heaps
+    - [x] Geometry heap
+    - [ ] Texture heap
+    - [ ] Material heap
+    - [ ] BVH BLAS heap
+  - [ ] G-buffer rasterizer
+  - [ ] Compute-shader ray-tracing for light and shadow
+- [ ] Scene editor
+  - Think 2D tile editor, but with 3D brushes: overall blocky/voxelized.
