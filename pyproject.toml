@@ -1,0 +1,7 @@
+[project]
+name = "resin"
+version = "0.1.0"
+description = "Souls-like game"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
