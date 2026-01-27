@@ -4,16 +4,15 @@ use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Rem, Shl, Shr, Su
 pub struct Tensor {
     pub dtype: DType,
     pub shape: Vec<u64>,
+    pub strides: Vec<u64>,
     pub detail: TensorDetail,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum DType {
     Int32,
-    Int64,
     Float16,
     Float32,
-    Float64,
 }
 
 pub enum TensorDetail {
@@ -59,7 +58,6 @@ pub enum Operator {
 
     // Shape manipulation
     Reshape(Tensor),
-    Broadcast(Tensor),
 
     // Cast
     Into(Tensor, DType),
@@ -74,27 +72,41 @@ impl Scalar for i32 {
         DType::Int32
     }
 }
-impl Scalar for i64 {
-    fn dtype() -> DType {
-        DType::Int64
-    }
-}
 impl Scalar for f32 {
     fn dtype() -> DType {
         DType::Float32
     }
 }
-impl Scalar for f64 {
-    fn dtype() -> DType {
-        DType::Float64
+
+pub fn dtype_size(dtype: DType) -> usize {
+    match dtype {
+        DType::Int32 => 4,
+        DType::Float16 => 2,
+        DType::Float32 => 4,
     }
+}
+
+pub fn contiguous_strides(shape: &[u64], dtype: DType) -> Vec<u64> {
+    let elem_size = dtype_size(dtype) as u64;
+    let mut strides = vec![0u64; shape.len()];
+    if !shape.is_empty() {
+        strides[shape.len() - 1] = elem_size;
+        for i in (0..shape.len() - 1).rev() {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+    }
+    strides
 }
 
 impl<T: Scalar> From<&[T]> for Tensor {
     fn from(value: &[T]) -> Self {
+        let dtype = T::dtype();
+        let shape = vec![value.len() as u64];
+        let strides = contiguous_strides(&shape, dtype);
         Tensor {
-            dtype: T::dtype(),
-            shape: vec![value.len() as u64],
+            dtype,
+            shape,
+            strides,
             detail: TensorDetail::Constant(bytemuck::cast_slice(value).into()),
         }
     }
@@ -103,9 +115,11 @@ impl<T: Scalar> From<&[T]> for Tensor {
 impl Neg for Tensor {
     type Output = Tensor;
     fn neg(self) -> Self::Output {
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::Neg(self))),
         }
     }
@@ -113,32 +127,40 @@ impl Neg for Tensor {
 impl Not for Tensor {
     type Output = Tensor;
     fn not(self) -> Self::Output {
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::BitNot(self))),
         }
     }
 }
 impl Tensor {
     pub fn abs(self) -> Self {
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::Abs(self))),
         }
     }
     pub fn exp(self) -> Self {
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::Exp(self))),
         }
     }
     pub fn log(self) -> Self {
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::Log(self))),
         }
     }
@@ -151,9 +173,12 @@ impl Tensor {
         assert_eq!(other.shape.len(), 3);
         assert_eq!(self.shape[0], other.shape[0]);
         assert_eq!(self.shape[2], other.shape[1]);
+        let shape = vec![self.shape[0], self.shape[1], other.shape[2]];
+        let strides = contiguous_strides(&shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
-            shape: vec![self.shape[0], self.shape[1], other.shape[2]],
+            dtype: self.dtype,
+            shape,
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::BatchMatmul(self, other))),
         }
     }
@@ -176,9 +201,11 @@ impl Tensor {
     {
         assert_eq!(self.dtype, other.dtype);
         assert_eq!(self.shape, other.shape);
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(op(self, other))),
         }
     }
@@ -273,34 +300,51 @@ impl Tensor {
         let old_size: u64 = self.shape.iter().product();
         let new_size: u64 = shape.iter().product();
         assert_eq!(old_size, new_size, "Reshape size mismatch");
+        let new_shape = shape.to_vec();
+        let strides = contiguous_strides(&new_shape, self.dtype);
         Tensor {
-            dtype: self.dtype.clone(),
-            shape: shape.to_vec(),
+            dtype: self.dtype,
+            shape: new_shape,
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::Reshape(self))),
         }
     }
+    /// Broadcast tensor to new shape. This is a metadata-only operation.
+    /// Sets stride to 0 for dimensions that are broadcast (size 1 -> size N).
     pub fn broadcast(self, shape: &[u64]) -> Self {
         assert_eq!(self.shape.len(), shape.len());
-        for (i, &dim) in self.shape.iter().enumerate() {
-            assert!(dim == 1 || dim == shape[i]);
+        let mut new_strides = Vec::with_capacity(shape.len());
+        for (i, (&old_dim, &new_dim)) in self.shape.iter().zip(shape.iter()).enumerate() {
+            assert!(old_dim == 1 || old_dim == new_dim, "Broadcast shape mismatch");
+            if old_dim == 1 && new_dim > 1 {
+                // Broadcast dimension: stride = 0
+                new_strides.push(0);
+            } else {
+                new_strides.push(self.strides[i]);
+            }
         }
         Tensor {
-            dtype: self.dtype.clone(),
+            dtype: self.dtype,
             shape: shape.to_vec(),
-            detail: TensorDetail::Operator(Box::new(Operator::Broadcast(self))),
+            strides: new_strides,
+            detail: self.detail,
         }
     }
     pub fn into(self, dtype: DType) -> Self {
+        let strides = contiguous_strides(&self.shape, dtype);
         Tensor {
             dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::Into(self, dtype))),
         }
     }
     pub fn view(self, dtype: DType) -> Self {
+        let strides = contiguous_strides(&self.shape, dtype);
         Tensor {
             dtype,
             shape: self.shape.clone(),
+            strides,
             detail: TensorDetail::Operator(Box::new(Operator::View(self, dtype))),
         }
     }
@@ -312,6 +356,9 @@ impl Tensor {
         let mut new_shape = self.shape.clone();
         new_shape.insert(dim, 1);
         self.reshape(&new_shape)
+    }
+    pub fn is_contiguous(&self) -> bool {
+        self.strides == contiguous_strides(&self.shape, self.dtype)
     }
 }
 
@@ -392,7 +439,6 @@ impl Operator {
             Operator::Eq(a, b) => write!(f, "Eq({:?}, {:?})", a, b),
             Operator::NotEq(a, b) => write!(f, "NotEq({:?}, {:?})", a, b),
             Operator::Reshape(a) => write!(f, "Reshape({:?})", a),
-            Operator::Broadcast(a) => write!(f, "Broadcast({:?})", a),
             Operator::Into(a, dt) => write!(f, "Into({:?}, {:?})", a, dt),
             Operator::View(a, dt) => write!(f, "View({:?}, {:?})", a, dt),
         }
@@ -424,31 +470,17 @@ impl Operator {
             Operator::Eq(a, b) => write!(f, "Eq(\n    {:#?},\n    {:#?}\n)", a, b),
             Operator::NotEq(a, b) => write!(f, "NotEq(\n    {:#?},\n    {:#?}\n)", a, b),
             Operator::Reshape(a) => write!(f, "Reshape(\n    {:#?}\n)", a),
-            Operator::Broadcast(a) => write!(f, "Broadcast(\n    {:#?}\n)", a),
             Operator::Into(a, dt) => write!(f, "Into(\n    {:#?},\n    {:?}\n)", a, dt),
             Operator::View(a, dt) => write!(f, "View(\n    {:#?},\n    {:?}\n)", a, dt),
         }
     }
 }
 
-fn dtype_size(dtype: DType) -> usize {
-    match dtype {
-        DType::Int32 => 4,
-        DType::Int64 => 8,
-        DType::Float16 => 2,
-        DType::Float32 => 4,
-        DType::Float64 => 8,
-    }
-}
 
 fn format_scalar(f: &mut fmt::Formatter<'_>, data: &[u8], dtype: DType) -> fmt::Result {
     match dtype {
         DType::Int32 => {
             let v = i32::from_ne_bytes(data.try_into().unwrap());
-            write!(f, "{}", v)
-        }
-        DType::Int64 => {
-            let v = i64::from_ne_bytes(data.try_into().unwrap());
             write!(f, "{}", v)
         }
         DType::Float16 => {
@@ -462,14 +494,6 @@ fn format_scalar(f: &mut fmt::Formatter<'_>, data: &[u8], dtype: DType) -> fmt::
         }
         DType::Float32 => {
             let v = f32::from_ne_bytes(data.try_into().unwrap());
-            if v.fract() == 0.0 && v.abs() < 1e10 {
-                write!(f, "{}.", v)
-            } else {
-                write!(f, "{}", v)
-            }
-        }
-        DType::Float64 => {
-            let v = f64::from_ne_bytes(data.try_into().unwrap());
             if v.fract() == 0.0 && v.abs() < 1e10 {
                 write!(f, "{}.", v)
             } else {

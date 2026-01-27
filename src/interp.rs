@@ -1,613 +1,802 @@
-use crate::tensor::{DType, Operator, Tensor, TensorDetail};
+use std::collections::HashMap;
+use wgpu::util::DeviceExt;
 
-pub struct Buffer {
+use crate::tensor::{DType, Operator, Tensor, TensorDetail, contiguous_strides, dtype_size};
+
+/// GPU buffer with metadata
+struct GpuBuffer {
+    buffer: wgpu::Buffer,
+    dtype: DType,
+    shape: Vec<u64>,
+    strides: Vec<u64>,
+}
+
+pub struct CpuBuffer {
     pub dtype: DType,
     pub shape: Vec<u64>,
     pub data: Box<[u8]>,
 }
 
-impl Buffer {
+impl CpuBuffer {
     pub fn to_tensor(self) -> Tensor {
+        let strides = contiguous_strides(&self.shape, self.dtype);
         Tensor {
             dtype: self.dtype,
             shape: self.shape,
+            strides,
             detail: TensorDetail::Constant(self.data),
         }
     }
-    fn numel(&self) -> usize {
-        self.shape.iter().product::<u64>() as usize
-    }
 }
 
-pub fn eval(tensor: &Tensor) -> Tensor {
-    eval_to_buffer(tensor).to_tensor()
-}
-
-fn eval_to_buffer(tensor: &Tensor) -> Buffer {
-    match &tensor.detail {
-        TensorDetail::Constant(data) => Buffer {
-            dtype: tensor.dtype,
-            shape: tensor.shape.clone(),
-            data: data.clone(),
-        },
-        TensorDetail::Operator(op) => eval_op(op, tensor.dtype, &tensor.shape),
-    }
-}
-
-fn eval_op(op: &Operator, dtype: DType, shape: &[u64]) -> Buffer {
-    match op {
-        // Unary operations
-        Operator::Neg(a) => {
-            let a = eval_to_buffer(a);
-            unary_op(&a, dtype, shape, |dtype, a| match dtype {
-                DType::Int32 => box_scalar(-i32::from_ne_bytes(a.try_into().unwrap())),
-                DType::Int64 => box_scalar(-i64::from_ne_bytes(a.try_into().unwrap())),
-                DType::Float16 => {
-                    let v = half::f16::from_ne_bytes(a.try_into().unwrap());
-                    box_scalar((-v).to_ne_bytes())
-                }
-                DType::Float32 => box_scalar(-f32::from_ne_bytes(a.try_into().unwrap())),
-                DType::Float64 => box_scalar(-f64::from_ne_bytes(a.try_into().unwrap())),
-            })
-        }
-        Operator::Abs(a) => {
-            let a = eval_to_buffer(a);
-            unary_op(&a, dtype, shape, |dtype, a| match dtype {
-                DType::Int32 => box_scalar(i32::from_ne_bytes(a.try_into().unwrap()).abs()),
-                DType::Int64 => box_scalar(i64::from_ne_bytes(a.try_into().unwrap()).abs()),
-                DType::Float16 => {
-                    let v = half::f16::from_ne_bytes(a.try_into().unwrap());
-                    box_scalar(half::f16::from_f32(v.to_f32().abs()).to_ne_bytes())
-                }
-                DType::Float32 => box_scalar(f32::from_ne_bytes(a.try_into().unwrap()).abs()),
-                DType::Float64 => box_scalar(f64::from_ne_bytes(a.try_into().unwrap()).abs()),
-            })
-        }
-        Operator::Exp(a) => {
-            let a = eval_to_buffer(a);
-            unary_op(&a, dtype, shape, |dtype, a| match dtype {
-                DType::Float16 => {
-                    let v = half::f16::from_ne_bytes(a.try_into().unwrap());
-                    box_scalar(half::f16::from_f32(v.to_f32().exp()).to_ne_bytes())
-                }
-                DType::Float32 => box_scalar(f32::from_ne_bytes(a.try_into().unwrap()).exp()),
-                DType::Float64 => box_scalar(f64::from_ne_bytes(a.try_into().unwrap()).exp()),
-                _ => panic!("exp not supported for {:?}", dtype),
-            })
-        }
-        Operator::Log(a) => {
-            let a = eval_to_buffer(a);
-            unary_op(&a, dtype, shape, |dtype, a| match dtype {
-                DType::Float16 => {
-                    let v = half::f16::from_ne_bytes(a.try_into().unwrap());
-                    box_scalar(half::f16::from_f32(v.to_f32().ln()).to_ne_bytes())
-                }
-                DType::Float32 => box_scalar(f32::from_ne_bytes(a.try_into().unwrap()).ln()),
-                DType::Float64 => box_scalar(f64::from_ne_bytes(a.try_into().unwrap()).ln()),
-                _ => panic!("log not supported for {:?}", dtype),
-            })
-        }
-        Operator::BitNot(a) => {
-            let a = eval_to_buffer(a);
-            unary_op(&a, dtype, shape, |dtype, a| match dtype {
-                DType::Int32 => box_scalar(!i32::from_ne_bytes(a.try_into().unwrap())),
-                DType::Int64 => box_scalar(!i64::from_ne_bytes(a.try_into().unwrap())),
-                _ => panic!("bitnot not supported for {:?}", dtype),
-            })
-        }
-
-        // Binary arithmetic
-        Operator::Add(a, b) => binary_arith(a, b, dtype, shape, |l, r| l + r, |l, r| l + r),
-        Operator::Sub(a, b) => binary_arith(a, b, dtype, shape, |l, r| l - r, |l, r| l - r),
-        Operator::Mul(a, b) => binary_arith(a, b, dtype, shape, |l, r| l * r, |l, r| l * r),
-        Operator::Div(a, b) => binary_arith(a, b, dtype, shape, |l, r| l / r, |l, r| l / r),
-        Operator::Rem(a, b) => binary_arith(a, b, dtype, shape, |l, r| l % r, |l, r| l % r),
-        Operator::Pow(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-                DType::Int32 => {
-                    let base = i32::from_ne_bytes(av.try_into().unwrap());
-                    let exp = i32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(base.pow(exp as u32))
-                }
-                DType::Int64 => {
-                    let base = i64::from_ne_bytes(av.try_into().unwrap());
-                    let exp = i64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(base.pow(exp as u32))
-                }
-                DType::Float16 => {
-                    let base = half::f16::from_ne_bytes(av.try_into().unwrap()).to_f32();
-                    let exp = half::f16::from_ne_bytes(bv.try_into().unwrap()).to_f32();
-                    box_scalar(half::f16::from_f32(base.powf(exp)).to_ne_bytes())
-                }
-                DType::Float32 => {
-                    let base = f32::from_ne_bytes(av.try_into().unwrap());
-                    let exp = f32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(base.powf(exp))
-                }
-                DType::Float64 => {
-                    let base = f64::from_ne_bytes(av.try_into().unwrap());
-                    let exp = f64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(base.powf(exp))
-                }
-            })
-        }
-
-        // Shift operations
-        Operator::Shl(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-                DType::Int32 => {
-                    let l = i32::from_ne_bytes(av.try_into().unwrap());
-                    let r = i32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l << r)
-                }
-                DType::Int64 => {
-                    let l = i64::from_ne_bytes(av.try_into().unwrap());
-                    let r = i64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l << r)
-                }
-                _ => panic!("shl not supported for {:?}", dtype),
-            })
-        }
-        Operator::Shr(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-                DType::Int32 => {
-                    let l = i32::from_ne_bytes(av.try_into().unwrap());
-                    let r = i32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l >> r)
-                }
-                DType::Int64 => {
-                    let l = i64::from_ne_bytes(av.try_into().unwrap());
-                    let r = i64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l >> r)
-                }
-                _ => panic!("shr not supported for {:?}", dtype),
-            })
-        }
-
-        // Bitwise operations
-        Operator::BitAnd(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-                DType::Int32 => {
-                    let l = i32::from_ne_bytes(av.try_into().unwrap());
-                    let r = i32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l & r)
-                }
-                DType::Int64 => {
-                    let l = i64::from_ne_bytes(av.try_into().unwrap());
-                    let r = i64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l & r)
-                }
-                _ => panic!("bitand not supported for {:?}", dtype),
-            })
-        }
-        Operator::BitOr(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-                DType::Int32 => {
-                    let l = i32::from_ne_bytes(av.try_into().unwrap());
-                    let r = i32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l | r)
-                }
-                DType::Int64 => {
-                    let l = i64::from_ne_bytes(av.try_into().unwrap());
-                    let r = i64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l | r)
-                }
-                _ => panic!("bitor not supported for {:?}", dtype),
-            })
-        }
-        Operator::BitXor(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-                DType::Int32 => {
-                    let l = i32::from_ne_bytes(av.try_into().unwrap());
-                    let r = i32::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l ^ r)
-                }
-                DType::Int64 => {
-                    let l = i64::from_ne_bytes(av.try_into().unwrap());
-                    let r = i64::from_ne_bytes(bv.try_into().unwrap());
-                    box_scalar(l ^ r)
-                }
-                _ => panic!("bitxor not supported for {:?}", dtype),
-            })
-        }
-
-        // Comparison operations (return same dtype, 1 for true, 0 for false)
-        Operator::LessThan(a, b) => binary_cmp(a, b, dtype, shape, |o| o.is_lt()),
-        Operator::LessOrEq(a, b) => binary_cmp(a, b, dtype, shape, |o| o.is_le()),
-        Operator::GreaterThan(a, b) => binary_cmp(a, b, dtype, shape, |o| o.is_gt()),
-        Operator::GreaterOrEq(a, b) => binary_cmp(a, b, dtype, shape, |o| o.is_ge()),
-        Operator::Eq(a, b) => binary_cmp(a, b, dtype, shape, |o| o.is_eq()),
-        Operator::NotEq(a, b) => binary_cmp(a, b, dtype, shape, |o| o.is_ne()),
-
-        // Shape manipulation
-        Operator::Reshape(a) => {
-            let a = eval_to_buffer(a);
-            Buffer {
-                dtype,
-                shape: shape.to_vec(),
-                data: a.data,
-            }
-        }
-        Operator::Broadcast(a) => {
-            let a = eval_to_buffer(a);
-            broadcast_impl(&a, shape)
-        }
-
-        // Matmul
-        Operator::BatchMatmul(a, b) => {
-            let a = eval_to_buffer(a);
-            let b = eval_to_buffer(b);
-            batch_matmul(&a, &b, dtype, shape)
-        }
-
-        // Cast operations
-        Operator::Into(a, target_dtype) => {
-            let a = eval_to_buffer(a);
-            cast_into(&a, *target_dtype, shape)
-        }
-        Operator::View(a, _target_dtype) => {
-            let a = eval_to_buffer(a);
-            Buffer {
-                dtype,
-                shape: shape.to_vec(),
-                data: a.data,
-            }
-        }
-    }
-}
-
-fn dtype_size(dtype: DType) -> usize {
-    match dtype {
-        DType::Int32 => 4,
-        DType::Int64 => 8,
-        DType::Float16 => 2,
-        DType::Float32 => 4,
-        DType::Float64 => 8,
-    }
-}
-
-fn box_scalar<T: bytemuck::Pod>(v: T) -> Box<[u8]> {
-    bytemuck::bytes_of(&v).into()
-}
-
-fn unary_op<F>(a: &Buffer, dtype: DType, shape: &[u64], op: F) -> Buffer
-where
-    F: Fn(DType, &[u8]) -> Box<[u8]>,
-{
-    let elem_size = dtype_size(a.dtype);
-    let numel = a.numel();
-    let mut result = Vec::with_capacity(numel * elem_size);
-
-    for i in 0..numel {
-        let start = i * elem_size;
-        let end = start + elem_size;
-        let val = &a.data[start..end];
-        let out = op(dtype, val);
-        result.extend_from_slice(&out);
-    }
-
-    Buffer {
-        dtype,
-        shape: shape.to_vec(),
-        data: result.into_boxed_slice(),
-    }
-}
-
-fn binary_op<F>(a: &Buffer, b: &Buffer, dtype: DType, shape: &[u64], op: F) -> Buffer
-where
-    F: Fn(DType, &[u8], &[u8]) -> Box<[u8]>,
-{
-    let elem_size = dtype_size(a.dtype);
-    let numel: usize = shape.iter().product::<u64>() as usize;
-    let mut result = Vec::with_capacity(numel * elem_size);
-
-    for i in 0..numel {
-        let start = i * elem_size;
-        let end = start + elem_size;
-        let av = &a.data[start..end];
-        let bv = &b.data[start..end];
-        let out = op(dtype, av, bv);
-        result.extend_from_slice(&out);
-    }
-
-    Buffer {
-        dtype,
-        shape: shape.to_vec(),
-        data: result.into_boxed_slice(),
-    }
-}
-
-fn binary_arith<IF, FF>(
-    a: &Tensor,
-    b: &Tensor,
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+struct PipelineKey {
+    op: &'static str,
     dtype: DType,
-    shape: &[u64],
-    int_op: IF,
-    float_op: FF,
-) -> Buffer
-where
-    IF: Fn(i64, i64) -> i64,
-    FF: Fn(f64, f64) -> f64,
-{
-    let a = eval_to_buffer(a);
-    let b = eval_to_buffer(b);
-    binary_op(&a, &b, dtype, shape, |dtype, av, bv| match dtype {
-        DType::Int32 => {
-            let l = i32::from_ne_bytes(av.try_into().unwrap()) as i64;
-            let r = i32::from_ne_bytes(bv.try_into().unwrap()) as i64;
-            box_scalar(int_op(l, r) as i32)
-        }
-        DType::Int64 => {
-            let l = i64::from_ne_bytes(av.try_into().unwrap());
-            let r = i64::from_ne_bytes(bv.try_into().unwrap());
-            box_scalar(int_op(l, r))
-        }
-        DType::Float16 => {
-            let l = half::f16::from_ne_bytes(av.try_into().unwrap()).to_f64();
-            let r = half::f16::from_ne_bytes(bv.try_into().unwrap()).to_f64();
-            box_scalar(half::f16::from_f64(float_op(l, r)).to_ne_bytes())
-        }
-        DType::Float32 => {
-            let l = f32::from_ne_bytes(av.try_into().unwrap()) as f64;
-            let r = f32::from_ne_bytes(bv.try_into().unwrap()) as f64;
-            box_scalar(float_op(l, r) as f32)
-        }
-        DType::Float64 => {
-            let l = f64::from_ne_bytes(av.try_into().unwrap());
-            let r = f64::from_ne_bytes(bv.try_into().unwrap());
-            box_scalar(float_op(l, r))
-        }
-    })
 }
 
-fn binary_cmp<F>(a: &Tensor, b: &Tensor, dtype: DType, shape: &[u64], cmp: F) -> Buffer
-where
-    F: Fn(std::cmp::Ordering) -> bool,
-{
-    let a = eval_to_buffer(a);
-    let b = eval_to_buffer(b);
-    binary_op(&a, &b, dtype, shape, |dt, av, bv| {
-        let ord = match dt {
-            DType::Int32 => {
-                let l = i32::from_ne_bytes(av.try_into().unwrap());
-                let r = i32::from_ne_bytes(bv.try_into().unwrap());
-                l.cmp(&r)
-            }
-            DType::Int64 => {
-                let l = i64::from_ne_bytes(av.try_into().unwrap());
-                let r = i64::from_ne_bytes(bv.try_into().unwrap());
-                l.cmp(&r)
-            }
-            DType::Float16 => {
-                let l = half::f16::from_ne_bytes(av.try_into().unwrap());
-                let r = half::f16::from_ne_bytes(bv.try_into().unwrap());
-                l.total_cmp(&r)
-            }
-            DType::Float32 => {
-                let l = f32::from_ne_bytes(av.try_into().unwrap());
-                let r = f32::from_ne_bytes(bv.try_into().unwrap());
-                l.total_cmp(&r)
-            }
-            DType::Float64 => {
-                let l = f64::from_ne_bytes(av.try_into().unwrap());
-                let r = f64::from_ne_bytes(bv.try_into().unwrap());
-                l.total_cmp(&r)
-            }
-        };
-        let result = if cmp(ord) { 1 } else { 0 };
-        match dt {
-            DType::Int32 => box_scalar(result as i32),
-            DType::Int64 => box_scalar(result as i64),
-            DType::Float16 => box_scalar(half::f16::from_f32(result as f32).to_ne_bytes()),
-            DType::Float32 => box_scalar(result as f32),
-            DType::Float64 => box_scalar(result as f64),
-        }
-    })
+pub struct Interpreter {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    pipeline_cache: HashMap<PipelineKey, wgpu::ComputePipeline>,
 }
 
-fn broadcast_impl(a: &Buffer, target_shape: &[u64]) -> Buffer {
-    let elem_size = dtype_size(a.dtype);
-    let target_numel: usize = target_shape.iter().product::<u64>() as usize;
-    let mut result = Vec::with_capacity(target_numel * elem_size);
-
-    let ndim = target_shape.len();
-    let src_shape = &a.shape;
-
-    // Compute strides for source (0 stride for broadcast dimensions)
-    let mut src_strides = vec![0usize; ndim];
-    let mut stride = 1usize;
-    for i in (0..ndim).rev() {
-        if src_shape[i] == 1 {
-            src_strides[i] = 0;
-        } else {
-            src_strides[i] = stride;
+impl Interpreter {
+    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        Self {
+            device,
+            queue,
+            pipeline_cache: HashMap::new(),
         }
-        stride *= src_shape[i] as usize;
     }
 
-    // Iterate over target shape
-    for flat_idx in 0..target_numel {
-        let mut src_idx = 0;
-        let mut remaining = flat_idx;
+    pub fn eval(&mut self, tensor: &Tensor) -> Tensor {
+        let gpu_buf = self.eval_to_gpu(tensor);
+        self.read_buffer(&gpu_buf).to_tensor()
+    }
 
-        // Compute multi-dimensional index and map to source
-        let mut divisor = target_numel;
-        for i in 0..ndim {
-            divisor /= target_shape[i] as usize;
-            let coord = remaining / divisor;
-            remaining %= divisor;
-            src_idx += coord * src_strides[i];
+    fn eval_to_gpu(&mut self, tensor: &Tensor) -> GpuBuffer {
+        match &tensor.detail {
+            TensorDetail::Constant(data) => {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("constant"),
+                        contents: data,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    });
+                GpuBuffer {
+                    buffer,
+                    dtype: tensor.dtype,
+                    shape: tensor.shape.clone(),
+                    strides: tensor.strides.clone(),
+                }
+            }
+            TensorDetail::Operator(op) => {
+                self.eval_op(op, tensor.dtype, &tensor.shape, &tensor.strides)
+            }
         }
-
-        let start = src_idx * elem_size;
-        let end = start + elem_size;
-        result.extend_from_slice(&a.data[start..end]);
     }
 
-    Buffer {
-        dtype: a.dtype,
-        shape: target_shape.to_vec(),
-        data: result.into_boxed_slice(),
-    }
-}
+    fn eval_op(
+        &mut self,
+        op: &Operator,
+        dtype: DType,
+        shape: &[u64],
+        strides: &[u64],
+    ) -> GpuBuffer {
+        match op {
+            // Unary operations
+            Operator::Neg(a) => self.dispatch_unary(a, dtype, shape, "neg"),
+            Operator::Abs(a) => self.dispatch_unary(a, dtype, shape, "abs"),
+            Operator::Exp(a) => self.dispatch_unary(a, dtype, shape, "exp"),
+            Operator::Log(a) => self.dispatch_unary(a, dtype, shape, "log"),
+            Operator::BitNot(a) => self.dispatch_unary(a, dtype, shape, "bitnot"),
 
-fn batch_matmul(a: &Buffer, b: &Buffer, dtype: DType, shape: &[u64]) -> Buffer {
-    let batch = shape[0] as usize;
-    let m = shape[1] as usize;
-    let n = shape[2] as usize;
-    let k = a.shape[2] as usize;
+            // Binary arithmetic
+            Operator::Add(a, b) => self.dispatch_binary(a, b, dtype, shape, "add"),
+            Operator::Sub(a, b) => self.dispatch_binary(a, b, dtype, shape, "sub"),
+            Operator::Mul(a, b) => self.dispatch_binary(a, b, dtype, shape, "mul"),
+            Operator::Div(a, b) => self.dispatch_binary(a, b, dtype, shape, "div"),
+            Operator::Rem(a, b) => self.dispatch_binary(a, b, dtype, shape, "rem"),
+            Operator::Pow(a, b) => self.dispatch_binary(a, b, dtype, shape, "pow"),
 
-    let elem_size = dtype_size(dtype);
-    let a_batch_size = m * k;
-    let b_batch_size = k * n;
-    let c_batch_size = m * n;
+            // Shift operations
+            Operator::Shl(a, b) => self.dispatch_binary(a, b, dtype, shape, "shl"),
+            Operator::Shr(a, b) => self.dispatch_binary(a, b, dtype, shape, "shr"),
 
-    let mut result = vec![0u8; batch * c_batch_size * elem_size];
+            // Bitwise operations
+            Operator::BitAnd(a, b) => self.dispatch_binary(a, b, dtype, shape, "bitand"),
+            Operator::BitOr(a, b) => self.dispatch_binary(a, b, dtype, shape, "bitor"),
+            Operator::BitXor(a, b) => self.dispatch_binary(a, b, dtype, shape, "bitxor"),
 
-    for batch_idx in 0..batch {
-        let a_offset = batch_idx * a_batch_size * elem_size;
-        let b_offset = batch_idx * b_batch_size * elem_size;
-        let c_offset = batch_idx * c_batch_size * elem_size;
+            // Comparison operations
+            Operator::LessThan(a, b) => self.dispatch_binary(a, b, dtype, shape, "lt"),
+            Operator::LessOrEq(a, b) => self.dispatch_binary(a, b, dtype, shape, "le"),
+            Operator::GreaterThan(a, b) => self.dispatch_binary(a, b, dtype, shape, "gt"),
+            Operator::GreaterOrEq(a, b) => self.dispatch_binary(a, b, dtype, shape, "ge"),
+            Operator::Eq(a, b) => self.dispatch_binary(a, b, dtype, shape, "eq"),
+            Operator::NotEq(a, b) => self.dispatch_binary(a, b, dtype, shape, "ne"),
 
-        for i in 0..m {
-            for j in 0..n {
-                let c_idx = c_offset + (i * n + j) * elem_size;
+            // Reshape - just pass through with new shape
+            Operator::Reshape(a) => {
+                let input = self.eval_to_gpu(a);
+                GpuBuffer {
+                    buffer: input.buffer,
+                    dtype,
+                    shape: shape.to_vec(),
+                    strides: strides.to_vec(),
+                }
+            }
 
-                match dtype {
-                    DType::Int32 => {
-                        let mut sum: i32 = 0;
-                        for kk in 0..k {
-                            let a_idx = a_offset + (i * k + kk) * elem_size;
-                            let b_idx = b_offset + (kk * n + j) * elem_size;
-                            let av =
-                                i32::from_ne_bytes(a.data[a_idx..a_idx + 4].try_into().unwrap());
-                            let bv =
-                                i32::from_ne_bytes(b.data[b_idx..b_idx + 4].try_into().unwrap());
-                            sum += av * bv;
-                        }
-                        result[c_idx..c_idx + 4].copy_from_slice(&sum.to_ne_bytes());
-                    }
-                    DType::Int64 => {
-                        let mut sum: i64 = 0;
-                        for kk in 0..k {
-                            let a_idx = a_offset + (i * k + kk) * elem_size;
-                            let b_idx = b_offset + (kk * n + j) * elem_size;
-                            let av =
-                                i64::from_ne_bytes(a.data[a_idx..a_idx + 8].try_into().unwrap());
-                            let bv =
-                                i64::from_ne_bytes(b.data[b_idx..b_idx + 8].try_into().unwrap());
-                            sum += av * bv;
-                        }
-                        result[c_idx..c_idx + 8].copy_from_slice(&sum.to_ne_bytes());
-                    }
-                    DType::Float16 => {
-                        let mut sum: f32 = 0.0;
-                        for kk in 0..k {
-                            let a_idx = a_offset + (i * k + kk) * elem_size;
-                            let b_idx = b_offset + (kk * n + j) * elem_size;
-                            let av = half::f16::from_ne_bytes(
-                                a.data[a_idx..a_idx + 2].try_into().unwrap(),
-                            );
-                            let bv = half::f16::from_ne_bytes(
-                                b.data[b_idx..b_idx + 2].try_into().unwrap(),
-                            );
-                            sum += av.to_f32() * bv.to_f32();
-                        }
-                        result[c_idx..c_idx + 2]
-                            .copy_from_slice(&half::f16::from_f32(sum).to_ne_bytes());
-                    }
-                    DType::Float32 => {
-                        let mut sum: f32 = 0.0;
-                        for kk in 0..k {
-                            let a_idx = a_offset + (i * k + kk) * elem_size;
-                            let b_idx = b_offset + (kk * n + j) * elem_size;
-                            let av =
-                                f32::from_ne_bytes(a.data[a_idx..a_idx + 4].try_into().unwrap());
-                            let bv =
-                                f32::from_ne_bytes(b.data[b_idx..b_idx + 4].try_into().unwrap());
-                            sum += av * bv;
-                        }
-                        result[c_idx..c_idx + 4].copy_from_slice(&sum.to_ne_bytes());
-                    }
-                    DType::Float64 => {
-                        let mut sum: f64 = 0.0;
-                        for kk in 0..k {
-                            let a_idx = a_offset + (i * k + kk) * elem_size;
-                            let b_idx = b_offset + (kk * n + j) * elem_size;
-                            let av =
-                                f64::from_ne_bytes(a.data[a_idx..a_idx + 8].try_into().unwrap());
-                            let bv =
-                                f64::from_ne_bytes(b.data[b_idx..b_idx + 8].try_into().unwrap());
-                            sum += av * bv;
-                        }
-                        result[c_idx..c_idx + 8].copy_from_slice(&sum.to_ne_bytes());
-                    }
+            // Matmul
+            Operator::BatchMatmul(a, b) => self.dispatch_matmul(a, b, dtype, shape),
+
+            // Cast operations
+            Operator::Into(a, target_dtype) => self.dispatch_cast(a, *target_dtype, shape),
+            Operator::View(a, _target_dtype) => {
+                let input = self.eval_to_gpu(a);
+                GpuBuffer {
+                    buffer: input.buffer,
+                    dtype,
+                    shape: shape.to_vec(),
+                    strides: strides.to_vec(),
                 }
             }
         }
     }
 
-    Buffer {
-        dtype,
-        shape: shape.to_vec(),
-        data: result.into_boxed_slice(),
+    fn dispatch_unary(
+        &mut self,
+        input: &Tensor,
+        dtype: DType,
+        shape: &[u64],
+        op_name: &'static str,
+    ) -> GpuBuffer {
+        let input_buf = self.eval_to_gpu(input);
+        let numel: u64 = shape.iter().product();
+        let elem_size = dtype_size(dtype);
+        let output_size = numel as usize * elem_size;
+
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("unary_output"),
+            size: output_size as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let params = [numel as u32, 0, 0, 0]; // numel + padding
+        let params_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let key = PipelineKey { op: op_name, dtype };
+        self.ensure_pipeline(&key, generate_unary_shader);
+        let pipeline = self.pipeline_cache.get(&key).unwrap();
+
+        let bind_group_layout = pipeline.get_bind_group_layout(0);
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("unary_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input_buf.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("unary_encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("unary_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((numel as u32 + 255) / 256, 1, 1);
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+
+        GpuBuffer {
+            buffer: output_buffer,
+            dtype,
+            shape: shape.to_vec(),
+            strides: contiguous_strides(shape, dtype),
+        }
+    }
+
+    fn dispatch_binary(
+        &mut self,
+        a: &Tensor,
+        b: &Tensor,
+        dtype: DType,
+        shape: &[u64],
+        op_name: &'static str,
+    ) -> GpuBuffer {
+        let a_buf = self.eval_to_gpu(a);
+        let b_buf = self.eval_to_gpu(b);
+        let numel: u64 = shape.iter().product();
+        let elem_size = dtype_size(dtype);
+        let output_size = numel as usize * elem_size;
+
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("binary_output"),
+            size: output_size as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let params = [numel as u32, 0, 0, 0];
+        let params_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let key = PipelineKey { op: op_name, dtype };
+        self.ensure_pipeline(&key, generate_binary_shader);
+        let pipeline = self.pipeline_cache.get(&key).unwrap();
+
+        let bind_group_layout = pipeline.get_bind_group_layout(0);
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("binary_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a_buf.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_buf.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("binary_encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("binary_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((numel as u32 + 255) / 256, 1, 1);
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+
+        GpuBuffer {
+            buffer: output_buffer,
+            dtype,
+            shape: shape.to_vec(),
+            strides: contiguous_strides(shape, dtype),
+        }
+    }
+
+    fn dispatch_matmul(
+        &mut self,
+        a: &Tensor,
+        b: &Tensor,
+        dtype: DType,
+        shape: &[u64],
+    ) -> GpuBuffer {
+        let a_buf = self.eval_to_gpu(a);
+        let b_buf = self.eval_to_gpu(b);
+
+        let batch = shape[0] as u32;
+        let m = shape[1] as u32;
+        let n = shape[2] as u32;
+        let k = a.shape[2] as u32;
+
+        let elem_size = dtype_size(dtype);
+        let output_size = (batch as usize * m as usize * n as usize) * elem_size;
+
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("matmul_output"),
+            size: output_size as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let params = [batch, m, n, k];
+        let params_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("matmul_params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let key = PipelineKey {
+            op: "matmul",
+            dtype,
+        };
+        self.ensure_matmul_pipeline(&key);
+        let pipeline = self.pipeline_cache.get(&key).unwrap();
+
+        let bind_group_layout = pipeline.get_bind_group_layout(0);
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("matmul_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a_buf.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_buf.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("matmul_encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("matmul_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            // Dispatch one workgroup per output element
+            pass.dispatch_workgroups(n, m, batch);
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+
+        GpuBuffer {
+            buffer: output_buffer,
+            dtype,
+            shape: shape.to_vec(),
+            strides: contiguous_strides(shape, dtype),
+        }
+    }
+
+    fn dispatch_cast(&mut self, input: &Tensor, target_dtype: DType, shape: &[u64]) -> GpuBuffer {
+        let input_buf = self.eval_to_gpu(input);
+        let numel: u64 = shape.iter().product();
+        let output_elem_size = dtype_size(target_dtype);
+        let output_size = numel as usize * output_elem_size;
+
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cast_output"),
+            size: output_size as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let params = [numel as u32, 0, 0, 0];
+        let params_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("cast_params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let pipeline = self.create_cast_pipeline(input.dtype, target_dtype);
+
+        let bind_group_layout = pipeline.get_bind_group_layout(0);
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cast_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input_buf.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("cast_encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cast_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((numel as u32 + 255) / 256, 1, 1);
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+
+        GpuBuffer {
+            buffer: output_buffer,
+            dtype: target_dtype,
+            shape: shape.to_vec(),
+            strides: contiguous_strides(shape, target_dtype),
+        }
+    }
+
+    fn read_buffer(&self, gpu_buf: &GpuBuffer) -> CpuBuffer {
+        let numel: u64 = gpu_buf.shape.iter().product();
+        let elem_size = dtype_size(gpu_buf.dtype);
+        let size = numel as usize * elem_size;
+
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("staging"),
+            size: size as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback_encoder"),
+            });
+        encoder.copy_buffer_to_buffer(&gpu_buf.buffer, 0, &staging_buffer, 0, size as u64);
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = staging_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        self.device.poll(wgpu::Maintain::Wait);
+
+        let data = slice.get_mapped_range().to_vec().into_boxed_slice();
+        staging_buffer.unmap();
+
+        CpuBuffer {
+            dtype: gpu_buf.dtype,
+            shape: gpu_buf.shape.clone(),
+            data,
+        }
+    }
+
+    fn ensure_pipeline(&mut self, key: &PipelineKey, generator: fn(&str, DType) -> String) {
+        if !self.pipeline_cache.contains_key(key) {
+            let shader_source = generator(key.op, key.dtype);
+            let shader_module = self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some(key.op),
+                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                });
+            let pipeline = self
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(key.op),
+                    layout: None,
+                    module: &shader_module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+            self.pipeline_cache.insert(key.clone(), pipeline);
+        }
+    }
+
+    fn ensure_matmul_pipeline(&mut self, key: &PipelineKey) {
+        if !self.pipeline_cache.contains_key(key) {
+            let shader_source = generate_matmul_shader(key.dtype);
+            let shader_module = self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("matmul"),
+                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                });
+            let pipeline = self
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("matmul"),
+                    layout: None,
+                    module: &shader_module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+            self.pipeline_cache.insert(key.clone(), pipeline);
+        }
+    }
+
+    fn create_cast_pipeline(&self, from_dtype: DType, to_dtype: DType) -> wgpu::ComputePipeline {
+        let shader_source = generate_cast_shader(from_dtype, to_dtype);
+        let shader_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("cast"),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        self.device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("cast"),
+                layout: None,
+                module: &shader_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
     }
 }
 
-fn cast_into(a: &Buffer, target_dtype: DType, shape: &[u64]) -> Buffer {
-    let src_elem_size = dtype_size(a.dtype);
-    let dst_elem_size = dtype_size(target_dtype);
-    let numel = a.numel();
-    let mut result = Vec::with_capacity(numel * dst_elem_size);
-
-    for i in 0..numel {
-        let start = i * src_elem_size;
-        let end = start + src_elem_size;
-        let src = &a.data[start..end];
-
-        // Convert source to f64 as intermediate
-        let val: f64 = match a.dtype {
-            DType::Int32 => i32::from_ne_bytes(src.try_into().unwrap()) as f64,
-            DType::Int64 => i64::from_ne_bytes(src.try_into().unwrap()) as f64,
-            DType::Float16 => half::f16::from_ne_bytes(src.try_into().unwrap()).to_f64(),
-            DType::Float32 => f32::from_ne_bytes(src.try_into().unwrap()) as f64,
-            DType::Float64 => f64::from_ne_bytes(src.try_into().unwrap()),
-        };
-
-        // Convert f64 to target dtype
-        let bytes: Box<[u8]> = match target_dtype {
-            DType::Int32 => box_scalar(val as i32),
-            DType::Int64 => box_scalar(val as i64),
-            DType::Float16 => box_scalar(half::f16::from_f64(val).to_ne_bytes()),
-            DType::Float32 => box_scalar(val as f32),
-            DType::Float64 => box_scalar(val),
-        };
-        result.extend_from_slice(&bytes);
+fn wgsl_type(dtype: DType) -> &'static str {
+    match dtype {
+        DType::Int32 => "i32",
+        DType::Float16 => "f32", // Use f32 internally for f16
+        DType::Float32 => "f32",
     }
+}
 
-    Buffer {
-        dtype: target_dtype,
-        shape: shape.to_vec(),
-        data: result.into_boxed_slice(),
+fn generate_unary_shader(op: &str, dtype: DType) -> String {
+    let wgsl_t = wgsl_type(dtype);
+    let op_expr = match op {
+        "neg" => "-input[idx]".to_string(),
+        "abs" => format!("abs(input[idx])"),
+        "exp" => format!("exp(input[idx])"),
+        "log" => format!("log(input[idx])"),
+        "bitnot" => "~input[idx]".to_string(),
+        _ => panic!("Unknown unary op: {}", op),
+    };
+
+    format!(
+        r#"
+@group(0) @binding(0) var<storage, read> input: array<{dtype}>;
+@group(0) @binding(1) var<storage, read_write> output: array<{dtype}>;
+
+struct Params {{
+    numel: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}}
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let idx = gid.x;
+    if (idx >= params.numel) {{ return; }}
+    output[idx] = {op_expr};
+}}
+"#,
+        dtype = wgsl_t,
+        op_expr = op_expr
+    )
+}
+
+fn generate_binary_shader(op: &str, dtype: DType) -> String {
+    let wgsl_t = wgsl_type(dtype);
+    let op_expr = match op {
+        "add" => "a[idx] + b[idx]".to_string(),
+        "sub" => "a[idx] - b[idx]".to_string(),
+        "mul" => "a[idx] * b[idx]".to_string(),
+        "div" => "a[idx] / b[idx]".to_string(),
+        "rem" => "a[idx] % b[idx]".to_string(),
+        "pow" => "pow(a[idx], b[idx])".to_string(),
+        "shl" => "a[idx] << u32(b[idx])".to_string(),
+        "shr" => "a[idx] >> u32(b[idx])".to_string(),
+        "bitand" => "a[idx] & b[idx]".to_string(),
+        "bitor" => "a[idx] | b[idx]".to_string(),
+        "bitxor" => "a[idx] ^ b[idx]".to_string(),
+        "lt" => format!(
+            "select({zero}, {one}, a[idx] < b[idx])",
+            zero = zero_val(dtype),
+            one = one_val(dtype)
+        ),
+        "le" => format!(
+            "select({zero}, {one}, a[idx] <= b[idx])",
+            zero = zero_val(dtype),
+            one = one_val(dtype)
+        ),
+        "gt" => format!(
+            "select({zero}, {one}, a[idx] > b[idx])",
+            zero = zero_val(dtype),
+            one = one_val(dtype)
+        ),
+        "ge" => format!(
+            "select({zero}, {one}, a[idx] >= b[idx])",
+            zero = zero_val(dtype),
+            one = one_val(dtype)
+        ),
+        "eq" => format!(
+            "select({zero}, {one}, a[idx] == b[idx])",
+            zero = zero_val(dtype),
+            one = one_val(dtype)
+        ),
+        "ne" => format!(
+            "select({zero}, {one}, a[idx] != b[idx])",
+            zero = zero_val(dtype),
+            one = one_val(dtype)
+        ),
+        _ => panic!("Unknown binary op: {}", op),
+    };
+
+    format!(
+        r#"
+@group(0) @binding(0) var<storage, read> a: array<{dtype}>;
+@group(0) @binding(1) var<storage, read> b: array<{dtype}>;
+@group(0) @binding(2) var<storage, read_write> output: array<{dtype}>;
+
+struct Params {{
+    numel: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}}
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let idx = gid.x;
+    if (idx >= params.numel) {{ return; }}
+    output[idx] = {op_expr};
+}}
+"#,
+        dtype = wgsl_t,
+        op_expr = op_expr
+    )
+}
+
+fn zero_val(dtype: DType) -> &'static str {
+    match dtype {
+        DType::Int32 => "0i",
+        DType::Float16 | DType::Float32 => "0.0",
     }
+}
+
+fn one_val(dtype: DType) -> &'static str {
+    match dtype {
+        DType::Int32 => "1i",
+        DType::Float16 | DType::Float32 => "1.0",
+    }
+}
+
+fn generate_matmul_shader(dtype: DType) -> String {
+    let wgsl_t = wgsl_type(dtype);
+    let zero = zero_val(dtype);
+
+    format!(
+        r#"
+@group(0) @binding(0) var<storage, read> a: array<{dtype}>;
+@group(0) @binding(1) var<storage, read> b: array<{dtype}>;
+@group(0) @binding(2) var<storage, read_write> output: array<{dtype}>;
+
+struct Params {{
+    batch: u32,
+    m: u32,
+    n: u32,
+    k: u32,
+}}
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let j = gid.x;  // column
+    let i = gid.y;  // row
+    let batch_idx = gid.z;
+
+    if (i >= params.m || j >= params.n || batch_idx >= params.batch) {{ return; }}
+
+    let a_batch_offset = batch_idx * params.m * params.k;
+    let b_batch_offset = batch_idx * params.k * params.n;
+    let c_batch_offset = batch_idx * params.m * params.n;
+
+    var sum: {dtype} = {zero};
+    for (var kk: u32 = 0u; kk < params.k; kk++) {{
+        let a_val = a[a_batch_offset + i * params.k + kk];
+        let b_val = b[b_batch_offset + kk * params.n + j];
+        sum = sum + a_val * b_val;
+    }}
+
+    output[c_batch_offset + i * params.n + j] = sum;
+}}
+"#,
+        dtype = wgsl_t,
+        zero = zero
+    )
+}
+
+fn generate_cast_shader(from_dtype: DType, to_dtype: DType) -> String {
+    let from_t = wgsl_type(from_dtype);
+    let to_t = wgsl_type(to_dtype);
+
+    let convert_expr = if from_t == to_t {
+        "input[idx]".to_string()
+    } else {
+        format!("{}(input[idx])", to_t)
+    };
+
+    format!(
+        r#"
+@group(0) @binding(0) var<storage, read> input: array<{from_t}>;
+@group(0) @binding(1) var<storage, read_write> output: array<{to_t}>;
+
+struct Params {{
+    numel: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}}
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let idx = gid.x;
+    if (idx >= params.numel) {{ return; }}
+    output[idx] = {convert_expr};
+}}
+"#,
+        from_t = from_t,
+        to_t = to_t,
+        convert_expr = convert_expr
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
+
+    fn create_interpreter() -> Interpreter {
+        let instance = wgpu::Instance::default();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+                .unwrap();
+        Interpreter::new(device, queue)
+    }
 
     fn get_data(tensor: &Tensor) -> &[u8] {
         match &tensor.detail {
@@ -618,45 +807,47 @@ mod tests {
 
     #[test]
     fn test_add() {
+        let mut interp = create_interpreter();
         let a: Tensor = (&[1.0f32, 2.0, 3.0][..]).into();
         let b: Tensor = (&[4.0f32, 5.0, 6.0][..]).into();
         let c = a + b;
-        let result = eval(&c);
+        let result = interp.eval(&c);
         let data: &[f32] = bytemuck::cast_slice(get_data(&result));
         assert_eq!(data, &[5.0, 7.0, 9.0]);
     }
 
     #[test]
     fn test_mul() {
+        let mut interp = create_interpreter();
         let a: Tensor = (&[2.0f32, 3.0, 4.0][..]).into();
         let b: Tensor = (&[5.0f32, 6.0, 7.0][..]).into();
         let c = a * b;
-        let result = eval(&c);
+        let result = interp.eval(&c);
         let data: &[f32] = bytemuck::cast_slice(get_data(&result));
         assert_eq!(data, &[10.0, 18.0, 28.0]);
     }
 
     #[test]
     fn test_neg() {
+        let mut interp = create_interpreter();
         let a: Tensor = (&[1.0f32, -2.0, 3.0][..]).into();
         let b = -a;
-        let result = eval(&b);
+        let result = interp.eval(&b);
         let data: &[f32] = bytemuck::cast_slice(get_data(&result));
         assert_eq!(data, &[-1.0, 2.0, -3.0]);
     }
 
     #[test]
     fn test_matmul() {
+        let mut interp = create_interpreter();
         // 2x3 @ 3x2 = 2x2
         let a: Tensor = (&[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0][..]).into();
         let a = a.reshape(&[2, 3]);
         let b: Tensor = (&[7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0][..]).into();
         let b = b.reshape(&[3, 2]);
         let c = a.matmul(b);
-        let result = eval(&c);
+        let result = interp.eval(&c);
         let data: &[f32] = bytemuck::cast_slice(get_data(&result));
-        // [1,2,3] @ [7,9,11; 8,10,12]^T = [1*7+2*9+3*11, 1*8+2*10+3*12] = [58, 64]
-        // [4,5,6] @ same = [4*7+5*9+6*11, 4*8+5*10+6*12] = [139, 154]
         assert_eq!(data, &[58.0, 64.0, 139.0, 154.0]);
     }
 }
