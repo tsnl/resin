@@ -1,10 +1,12 @@
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, RangeBounds, Rem, Shl, Shr, Sub};
+use std::fmt;
+use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Rem, Shl, Shr, Sub};
 
 pub struct Tensor {
     pub dtype: DType,
     pub shape: Vec<u64>,
     pub detail: TensorDetail,
 }
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum DType {
     Int32,
@@ -13,10 +15,12 @@ pub enum DType {
     Float32,
     Float64,
 }
+
 pub enum TensorDetail {
     Constant(Box<[u8]>),
     Operator(Box<Operator>),
 }
+
 pub enum Operator {
     // Unary
     Neg(Tensor),
@@ -308,5 +312,278 @@ impl Tensor {
         let mut new_shape = self.shape.clone();
         new_shape.insert(dim, 1);
         self.reshape(&new_shape)
+    }
+}
+
+// Custom Debug implementations for NumPy-style output
+
+impl fmt::Debug for Tensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.detail {
+            TensorDetail::Constant(data) => {
+                write!(f, "array(")?;
+                format_array(f, data, &self.shape, self.dtype, 0)?;
+                write!(f, ", dtype={:?})", self.dtype)
+            }
+            TensorDetail::Operator(op) => {
+                if f.alternate() {
+                    f.debug_struct("Tensor")
+                        .field("dtype", &self.dtype)
+                        .field("shape", &self.shape)
+                        .field("op", op.as_ref())
+                        .finish()
+                } else {
+                    write!(f, "Tensor {{ {:?}, {:?}, {:?} }}", self.dtype, self.shape, op.as_ref())
+                }
+            }
+        }
+    }
+}
+
+impl fmt::Debug for TensorDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TensorDetail::Constant(_) => write!(f, "Constant(...)"),
+            TensorDetail::Operator(op) => {
+                if f.alternate() {
+                    write!(f, "Operator({:#?})", op)
+                } else {
+                    write!(f, "Operator({:?})", op)
+                }
+            }
+        }
+    }
+}
+
+impl fmt::Debug for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            self.fmt_pretty(f)
+        } else {
+            self.fmt_compact(f)
+        }
+    }
+}
+
+impl Operator {
+    fn fmt_compact(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Operator::Neg(a) => write!(f, "Neg({:?})", a),
+            Operator::Abs(a) => write!(f, "Abs({:?})", a),
+            Operator::Exp(a) => write!(f, "Exp({:?})", a),
+            Operator::Log(a) => write!(f, "Log({:?})", a),
+            Operator::BitNot(a) => write!(f, "BitNot({:?})", a),
+            Operator::BatchMatmul(a, b) => write!(f, "BatchMatmul({:?}, {:?})", a, b),
+            Operator::Pow(a, b) => write!(f, "Pow({:?}, {:?})", a, b),
+            Operator::Mul(a, b) => write!(f, "Mul({:?}, {:?})", a, b),
+            Operator::Div(a, b) => write!(f, "Div({:?}, {:?})", a, b),
+            Operator::Rem(a, b) => write!(f, "Rem({:?}, {:?})", a, b),
+            Operator::Add(a, b) => write!(f, "Add({:?}, {:?})", a, b),
+            Operator::Sub(a, b) => write!(f, "Sub({:?}, {:?})", a, b),
+            Operator::Shl(a, b) => write!(f, "Shl({:?}, {:?})", a, b),
+            Operator::Shr(a, b) => write!(f, "Shr({:?}, {:?})", a, b),
+            Operator::BitAnd(a, b) => write!(f, "BitAnd({:?}, {:?})", a, b),
+            Operator::BitOr(a, b) => write!(f, "BitOr({:?}, {:?})", a, b),
+            Operator::BitXor(a, b) => write!(f, "BitXor({:?}, {:?})", a, b),
+            Operator::LessThan(a, b) => write!(f, "LessThan({:?}, {:?})", a, b),
+            Operator::LessOrEq(a, b) => write!(f, "LessOrEq({:?}, {:?})", a, b),
+            Operator::GreaterThan(a, b) => write!(f, "GreaterThan({:?}, {:?})", a, b),
+            Operator::GreaterOrEq(a, b) => write!(f, "GreaterOrEq({:?}, {:?})", a, b),
+            Operator::Eq(a, b) => write!(f, "Eq({:?}, {:?})", a, b),
+            Operator::NotEq(a, b) => write!(f, "NotEq({:?}, {:?})", a, b),
+            Operator::Reshape(a) => write!(f, "Reshape({:?})", a),
+            Operator::Broadcast(a) => write!(f, "Broadcast({:?})", a),
+            Operator::Into(a, dt) => write!(f, "Into({:?}, {:?})", a, dt),
+            Operator::View(a, dt) => write!(f, "View({:?}, {:?})", a, dt),
+        }
+    }
+
+    fn fmt_pretty(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Operator::Neg(a) => write!(f, "Neg(\n    {:#?}\n)", a),
+            Operator::Abs(a) => write!(f, "Abs(\n    {:#?}\n)", a),
+            Operator::Exp(a) => write!(f, "Exp(\n    {:#?}\n)", a),
+            Operator::Log(a) => write!(f, "Log(\n    {:#?}\n)", a),
+            Operator::BitNot(a) => write!(f, "BitNot(\n    {:#?}\n)", a),
+            Operator::BatchMatmul(a, b) => write!(f, "BatchMatmul(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Pow(a, b) => write!(f, "Pow(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Mul(a, b) => write!(f, "Mul(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Div(a, b) => write!(f, "Div(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Rem(a, b) => write!(f, "Rem(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Add(a, b) => write!(f, "Add(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Sub(a, b) => write!(f, "Sub(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Shl(a, b) => write!(f, "Shl(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Shr(a, b) => write!(f, "Shr(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::BitAnd(a, b) => write!(f, "BitAnd(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::BitOr(a, b) => write!(f, "BitOr(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::BitXor(a, b) => write!(f, "BitXor(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::LessThan(a, b) => write!(f, "LessThan(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::LessOrEq(a, b) => write!(f, "LessOrEq(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::GreaterThan(a, b) => write!(f, "GreaterThan(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::GreaterOrEq(a, b) => write!(f, "GreaterOrEq(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Eq(a, b) => write!(f, "Eq(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::NotEq(a, b) => write!(f, "NotEq(\n    {:#?},\n    {:#?}\n)", a, b),
+            Operator::Reshape(a) => write!(f, "Reshape(\n    {:#?}\n)", a),
+            Operator::Broadcast(a) => write!(f, "Broadcast(\n    {:#?}\n)", a),
+            Operator::Into(a, dt) => write!(f, "Into(\n    {:#?},\n    {:?}\n)", a, dt),
+            Operator::View(a, dt) => write!(f, "View(\n    {:#?},\n    {:?}\n)", a, dt),
+        }
+    }
+}
+
+fn dtype_size(dtype: DType) -> usize {
+    match dtype {
+        DType::Int32 => 4,
+        DType::Int64 => 8,
+        DType::Float16 => 2,
+        DType::Float32 => 4,
+        DType::Float64 => 8,
+    }
+}
+
+fn format_scalar(f: &mut fmt::Formatter<'_>, data: &[u8], dtype: DType) -> fmt::Result {
+    match dtype {
+        DType::Int32 => {
+            let v = i32::from_ne_bytes(data.try_into().unwrap());
+            write!(f, "{}", v)
+        }
+        DType::Int64 => {
+            let v = i64::from_ne_bytes(data.try_into().unwrap());
+            write!(f, "{}", v)
+        }
+        DType::Float16 => {
+            let v = half::f16::from_ne_bytes(data.try_into().unwrap());
+            let fv = v.to_f32();
+            if fv.fract() == 0.0 && fv.abs() < 1e10 {
+                write!(f, "{}.", fv)
+            } else {
+                write!(f, "{}", fv)
+            }
+        }
+        DType::Float32 => {
+            let v = f32::from_ne_bytes(data.try_into().unwrap());
+            if v.fract() == 0.0 && v.abs() < 1e10 {
+                write!(f, "{}.", v)
+            } else {
+                write!(f, "{}", v)
+            }
+        }
+        DType::Float64 => {
+            let v = f64::from_ne_bytes(data.try_into().unwrap());
+            if v.fract() == 0.0 && v.abs() < 1e10 {
+                write!(f, "{}.", v)
+            } else {
+                write!(f, "{}", v)
+            }
+        }
+    }
+}
+
+fn format_array(
+    f: &mut fmt::Formatter<'_>,
+    data: &[u8],
+    shape: &[u64],
+    dtype: DType,
+    depth: usize,
+) -> fmt::Result {
+    let elem_size = dtype_size(dtype);
+    let pretty = f.alternate();
+
+    if shape.is_empty() {
+        // Scalar
+        return format_scalar(f, data, dtype);
+    }
+
+    if shape.len() == 1 {
+        // 1D array
+        let n = shape[0] as usize;
+        write!(f, "[")?;
+        for i in 0..n {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            let start = i * elem_size;
+            let end = start + elem_size;
+            format_scalar(f, &data[start..end], dtype)?;
+        }
+        write!(f, "]")
+    } else {
+        // Multi-dimensional array
+        let outer_dim = shape[0] as usize;
+        let inner_shape = &shape[1..];
+        let inner_size: usize = inner_shape.iter().product::<u64>() as usize * elem_size;
+
+        write!(f, "[")?;
+        for i in 0..outer_dim {
+            if i > 0 {
+                if pretty {
+                    // Pretty print: newlines and indentation
+                    write!(f, ",")?;
+                    writeln!(f)?;
+                    for _ in 0..=depth {
+                        write!(f, " ")?;
+                    }
+                } else {
+                    // Compact: just comma and space
+                    write!(f, ", ")?;
+                }
+            }
+            let start = i * inner_size;
+            let end = start + inner_size;
+            format_array_inner(f, &data[start..end], inner_shape, dtype, depth + 1, pretty)?;
+        }
+        write!(f, "]")
+    }
+}
+
+fn format_array_inner(
+    f: &mut fmt::Formatter<'_>,
+    data: &[u8],
+    shape: &[u64],
+    dtype: DType,
+    depth: usize,
+    pretty: bool,
+) -> fmt::Result {
+    let elem_size = dtype_size(dtype);
+
+    if shape.is_empty() {
+        return format_scalar(f, data, dtype);
+    }
+
+    if shape.len() == 1 {
+        let n = shape[0] as usize;
+        write!(f, "[")?;
+        for i in 0..n {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            let start = i * elem_size;
+            let end = start + elem_size;
+            format_scalar(f, &data[start..end], dtype)?;
+        }
+        write!(f, "]")
+    } else {
+        let outer_dim = shape[0] as usize;
+        let inner_shape = &shape[1..];
+        let inner_size: usize = inner_shape.iter().product::<u64>() as usize * elem_size;
+
+        write!(f, "[")?;
+        for i in 0..outer_dim {
+            if i > 0 {
+                if pretty {
+                    write!(f, ",")?;
+                    writeln!(f)?;
+                    for _ in 0..=depth {
+                        write!(f, " ")?;
+                    }
+                } else {
+                    write!(f, ", ")?;
+                }
+            }
+            let start = i * inner_size;
+            let end = start + inner_size;
+            format_array_inner(f, &data[start..end], inner_shape, dtype, depth + 1, pretty)?;
+        }
+        write!(f, "]")
     }
 }

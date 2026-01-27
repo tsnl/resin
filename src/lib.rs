@@ -1,1 +1,2 @@
-mod tensor;
+pub mod interp;
+pub mod tensor;
