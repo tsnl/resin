@@ -8,9 +8,6 @@ __all__ = [
 import textwrap
 from typing import Literal
 
-DEFAULT_WRAP_LEN = 80
-DEFAULT_INDENT_SIZE = 2
-
 
 def new(value: list, dtype: "DType" = "float32") -> Tensor:
     return ConstantTensor(value=value, dtype=dtype)
@@ -25,6 +22,7 @@ class Tensor:
         self.shape = shape
 
     def to_sexp(self, indent: int = 0) -> str:
+        _ = indent
         raise NotImplementedError()
 
     def __pos__(self) -> "OperatorTensor":
@@ -396,3 +394,6 @@ Operator = Literal[
     "or",
     "matmul",
 ]
+
+DEFAULT_WRAP_LEN = 80
+DEFAULT_INDENT_SIZE = 2
