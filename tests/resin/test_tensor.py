@@ -1,7 +1,7 @@
 import pytest
 import sys
 
-import resin.comp.tensor as tensor
+import resin.tensor as tensor
 
 
 def test_basic():
@@ -14,7 +14,7 @@ def test_basic():
         ],
         dtype="float32",
     )
-    print(f"{str(t)}")
+    print(t.to_sexp())
 
 
 if __name__ == "__main__":

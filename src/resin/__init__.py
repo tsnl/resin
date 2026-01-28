@@ -1,1 +1,1 @@
-from . import comp
+from . import tensor

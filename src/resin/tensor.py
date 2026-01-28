@@ -5,7 +5,11 @@ __all__ = [
     "OperatorTensor",
 ]
 
+import textwrap
 from typing import Literal
+
+DEFAULT_WRAP_LEN = 80
+DEFAULT_INDENT_SIZE = 2
 
 
 def new(value: list, dtype: "DType" = "float32") -> Tensor:
@@ -19,6 +23,9 @@ class Tensor:
     def __init__(self, *, dtype: "DType", shape: list[int]):
         self.dtype = dtype
         self.shape = shape
+
+    def to_sexp(self, indent: int = 0) -> str:
+        raise NotImplementedError()
 
     def __pos__(self) -> "OperatorTensor":
         return OperatorTensor(
@@ -193,7 +200,13 @@ class ConstantTensor(Tensor):
         self.value = value
 
     def __str__(self) -> str:
-        return f"ConstantTensor(dtype={self.dtype}, shape={self.shape}, value={self.value})"
+        return self.to_sexp()
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    def to_sexp(self, indent: int = 0) -> str:
+        return _format_array(self.value, indent)
 
 
 class OperatorTensor(Tensor):
@@ -211,7 +224,61 @@ class OperatorTensor(Tensor):
         self.args = args
 
     def __str__(self) -> str:
-        return f"OperatorTensor(operator={self.operator}, dtype={self.dtype}, shape={self.shape}, args={self.args})"
+        return self.to_sexp()
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    def to_sexp(self, indent: int = 0) -> str:
+        # Check if everything fits on one line
+        one_line = (
+            f"({self.operator} " + " ".join(arg.to_sexp(0) for arg in self.args) + ")"
+        )
+        if "\n" not in one_line and len(one_line) <= DEFAULT_WRAP_LEN:
+            return one_line
+
+        # Multi-line format
+        child_indent = indent + DEFAULT_INDENT_SIZE
+        lines = [f"({self.operator}"]
+        for arg in self.args:
+            arg_str = arg.to_sexp(0)
+            indented = textwrap.indent(arg_str, " " * child_indent)
+            lines.append(indented)
+        return "\n".join(lines) + ")"
+
+
+def _format_array(value: list | int | float, base_indent: int = 0) -> str:
+    """
+    Format a nested list in NumPy-style array notation.
+
+    The base_indent controls alignment of continuation lines relative to the
+    opening bracket. The first line has no leading spaces.
+    """
+
+    if isinstance(value, (int, float)):
+        return str(value)
+
+    if not value:
+        return "[]"
+
+    # Check if this is the innermost list (contains scalars)
+    if not isinstance(value[0], list):
+        return "[" + " ".join(str(v) for v in value) + "]"
+
+    # Multi-dimensional: format each sub-array on its own line
+    # Continuation lines align with the first element (1 char after '[')
+    continuation_indent = base_indent + 1
+    formatted = [_format_array(v, continuation_indent) for v in value]
+
+    # First element on same line as opening bracket
+    lines = ["[" + formatted[0]]
+
+    # Subsequent elements aligned with first element
+    for f in formatted[1:]:
+        lines.append(" " * continuation_indent + f)
+    lines[-1] = lines[-1] + "]"
+
+    return "\n".join(lines)
 
 
 def infer_shape(value: list | int | float) -> list[int]:
