@@ -30,14 +30,14 @@ git-repo-setup () {
     quiet-popd
 }
 
-build-wgpu-native () {
+copy-wgpu-native () {
     local OUTPUT_DIR
     
     quiet-pushd "${ROOT}/deps/wgpu-native"
         quiet-run make lib-native-release
     quiet-popd
 
-    OUTPUT_DIR="${ROOT}/src/resin_gen/bundled_data/wgpu/"
+    OUTPUT_DIR="${ROOT}/resin_gen/bundled_data/wgpu"
     mkdir -p "${OUTPUT_DIR}/lib"
     mkdir -p "${OUTPUT_DIR}/include"
     
@@ -45,9 +45,14 @@ build-wgpu-native () {
     cp "${ROOT}/deps/wgpu-native/ffi/webgpu-headers/webgpu.h" "${OUTPUT_DIR}/include/webgpu.h"
 }
 
+copy-resin-runtime () {
+    cp -r "${ROOT}/resin_runtime/"* "${ROOT}/resin_gen/bundled_data/resin_runtime"
+}
+
 main () {
     git-repo-setup
-    build-wgpu-native
+    copy-wgpu-native
+    copy-resin-runtime
     echo "Done" >&2
 }
 
