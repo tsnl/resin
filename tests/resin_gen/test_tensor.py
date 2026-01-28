@@ -1,7 +1,7 @@
 import pytest
 import sys
 
-import resin.tensor as tensor
+import resin_gen.tensor as tensor
 
 
 def test_basic():

@@ -397,9 +397,9 @@ wheels = [
 ]
 
 [[package]]
-name = "resin-py"
+name = "resin-gen"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "egglog" },
     { name = "ninja" },
