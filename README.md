@@ -1,6 +1,6 @@
 # `resin`
 
 ```bash
-$ ./scripts/setup.sh
+$ ./build.py
 $ uv run pytest tests
 ```
