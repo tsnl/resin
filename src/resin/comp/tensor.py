@@ -1,7 +1,18 @@
+__all__ = [
+    "new",
+    "Tensor",
+    "ConstantTensor",
+    "OperatorTensor",
+]
+
 from typing import Literal
 
 
-class Expr:
+def new(value: list, dtype: "DType" = "float32") -> Tensor:
+    return ConstantTensor(value=value, dtype=dtype)
+
+
+class Tensor:
     dtype: "DType"
     shape: list[int]
 
@@ -9,166 +20,166 @@ class Expr:
         self.dtype = dtype
         self.shape = shape
 
-    def __pos__(self) -> "OperatorExpr":
-        return OperatorExpr(
+    def __pos__(self) -> "OperatorTensor":
+        return OperatorTensor(
             operator="pos",
             args=[self],
             dtype=self.dtype,
             shape=self.shape,
         )
 
-    def __neg__(self) -> "OperatorExpr":
-        return OperatorExpr(
+    def __neg__(self) -> "OperatorTensor":
+        return OperatorTensor(
             operator="neg",
             args=[self],
             dtype=self.dtype,
             shape=self.shape,
         )
 
-    def __invert__(self) -> "OperatorExpr":
-        return OperatorExpr(
+    def __invert__(self) -> "OperatorTensor":
+        return OperatorTensor(
             operator="not",
             args=[self],
             dtype=self.dtype,
             shape=self.shape,
         )
 
-    def __mul__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __mul__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="mul",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __truediv__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __truediv__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="div",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __floordiv__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __floordiv__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="div",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __mod__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __mod__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="mod",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __add__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __add__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="add",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __sub__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __sub__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="sub",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __lsh__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __lsh__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="lsh",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __rsh__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __rsh__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="rsh",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __eq__(self, other: object) -> "OperatorExpr":  # pyright: ignore[reportIncompatibleMethodOverride]
-        assert isinstance(other, Expr)
-        return OperatorExpr(
+    def __eq__(self, other: object) -> "OperatorTensor":  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert isinstance(other, Tensor)
+        return OperatorTensor(
             operator="eq",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __ne__(self, other: object) -> "OperatorExpr":  # pyright: ignore[reportIncompatibleMethodOverride]
-        assert isinstance(other, Expr)
-        return OperatorExpr(
+    def __ne__(self, other: object) -> "OperatorTensor":  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert isinstance(other, Tensor)
+        return OperatorTensor(
             operator="neq",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __lt__(self, other: object) -> "OperatorExpr":  # pyright: ignore[reportIncompatibleMethodOverride]
-        assert isinstance(other, Expr)
-        return OperatorExpr(
+    def __lt__(self, other: object) -> "OperatorTensor":  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert isinstance(other, Tensor)
+        return OperatorTensor(
             operator="lt",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __le__(self, other: object) -> "OperatorExpr":  # pyright: ignore[reportIncompatibleMethodOverride]
-        assert isinstance(other, Expr)
-        return OperatorExpr(
+    def __le__(self, other: object) -> "OperatorTensor":  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert isinstance(other, Tensor)
+        return OperatorTensor(
             operator="le",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __gt__(self, other: object) -> "OperatorExpr":  # pyright: ignore[reportIncompatibleMethodOverride]
-        assert isinstance(other, Expr)
-        return OperatorExpr(
+    def __gt__(self, other: object) -> "OperatorTensor":  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert isinstance(other, Tensor)
+        return OperatorTensor(
             operator="gt",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __ge__(self, other: object) -> "OperatorExpr":  # pyright: ignore[reportIncompatibleMethodOverride]
-        assert isinstance(other, Expr)
-        return OperatorExpr(
+    def __ge__(self, other: object) -> "OperatorTensor":  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert isinstance(other, Tensor)
+        return OperatorTensor(
             operator="ge",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __and__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __and__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="and",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __or__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __or__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="or",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
             shape=infer_elementwise_binop_shape(self.shape, other.shape),
         )
 
-    def __matmul__(self, other: "Expr") -> "OperatorExpr":
-        return OperatorExpr(
+    def __matmul__(self, other: "Tensor") -> "OperatorTensor":
+        return OperatorTensor(
             operator="matmul",
             args=[self, other],
             dtype=infer_binop_dtype(self.dtype, other.dtype),
@@ -176,18 +187,21 @@ class Expr:
         )
 
 
-class ConstantExpr(Expr):
+class ConstantTensor(Tensor):
     def __init__(self, *, value: list, dtype: "DType"):
         super().__init__(dtype=dtype, shape=infer_shape(value))
         self.value = value
 
+    def __str__(self) -> str:
+        return f"ConstantTensor(dtype={self.dtype}, shape={self.shape}, value={self.value})"
 
-class OperatorExpr(Expr):
+
+class OperatorTensor(Tensor):
     def __init__(
         self,
         *,
         operator: Operator,
-        args: list[Expr],
+        args: list[Tensor],
         dtype: "DType",
         shape: list[int],
     ):
@@ -195,6 +209,9 @@ class OperatorExpr(Expr):
 
         self.operator = operator
         self.args = args
+
+    def __str__(self) -> str:
+        return f"OperatorTensor(operator={self.operator}, dtype={self.dtype}, shape={self.shape}, args={self.args})"
 
 
 def infer_shape(value: list | int | float) -> list[int]:
