@@ -12,4 +12,3 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 data = { data = "src/resin_gen/bundled_data" }
-module-root = ""

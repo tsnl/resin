@@ -7,13 +7,14 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+DATA = ROOT / "mods" / "resin_gen" / "src" / "resin_gen" / "bundled_data"
 
 COMPILE_FLAGS = [
     "-std=c11",
     "-Wall",
     "-Wextra",
-    "-Iresin_gen/bundled_data/wgpu/include",
-    "-Iresin_runtime/include",
+    f"-I{DATA}/wgpu/include",
+    f"-I{DATA}/resin_runtime/include",
 ]
 
 
@@ -47,7 +48,7 @@ def copy_wgpu_native() -> None:
     wgpu_dir = ROOT / "deps" / "wgpu-native"
     quiet_run(["make", "lib-native-release"], cwd=wgpu_dir)
 
-    output_dir = ROOT / "resin_gen" / "bundled_data" / "wgpu"
+    output_dir = DATA / "wgpu"
     lib_dir = output_dir / "lib"
     include_dir = output_dir / "include"
 
@@ -67,8 +68,8 @@ def copy_wgpu_native() -> None:
 def build_resin_runtime() -> None:
     """Build resin_runtime as a static library."""
 
-    runtime_dir = ROOT / "resin_runtime"
-    dst = ROOT / "resin_gen" / "bundled_data" / "resin_runtime"
+    runtime_dir = ROOT / "mods" / "resin_runtime"
+    dst = DATA / "resin_runtime"
 
     inc_dir = dst / "include"
     shutil.rmtree(inc_dir, ignore_errors=True)
