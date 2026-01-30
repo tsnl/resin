@@ -1,5 +1,6 @@
 use resin::expr::Expr;
 use resin::interp::Interp;
+use std::collections::HashMap;
 
 async fn main_impl() {
     // Create wgpu device
@@ -17,12 +18,12 @@ async fn main_impl() {
     let interp = Interp::new(&device, &queue);
 
     // Build and evaluate a matmul expression: identity * [[2,1],[0,2]]
-    let lt = Expr::new_matrix(&device, &[[1.0, 0.0], [0.0, 1.0]]);
-    let rt = Expr::new_matrix(&device, &[[2.0, 1.0], [0.0, 2.0]]);
+    let lt = Expr::new_matrix(&[[1.0, 0.0], [0.0, 1.0]]);
+    let rt = Expr::new_matrix(&[[2.0, 1.0], [0.0, 2.0]]);
     let expr = lt.matmul(rt);
 
     // Evaluate and readback
-    let result_buf = interp.eval(&expr);
+    let result_buf = interp.eval(&expr, &HashMap::new());
     let result = interp.readback(&result_buf, expr.numel());
 
     println!("Shape: {:?}", expr.shape);

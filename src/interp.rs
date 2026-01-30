@@ -1,6 +1,6 @@
-use std::alloc::Layout;
-
 use crate::expr::{Detail, Expr, Operator};
+use std::alloc::Layout;
+use std::collections::HashMap;
 use wgpu::include_wgsl;
 
 pub struct Interp {
@@ -264,15 +264,16 @@ impl Interp {
 }
 
 impl Interp {
-    pub fn eval(&self, expr: &Expr) -> wgpu::Buffer {
+    pub fn eval(&self, expr: &Expr, params: &HashMap<String, wgpu::Buffer>) -> wgpu::Buffer {
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         let result_buf = match &expr.detail {
-            Detail::Constant(constant) => self.eval_constant_impl(constant),
-            Detail::Reshape(inner) => self.eval_impl(inner, &mut enc),
-            Detail::Operator(operator) => self.eval_operator_impl(operator, &mut enc),
+            Detail::Constant(data) => self.eval_constant_impl(data),
+            Detail::Parameter(name) => self.eval_parameter_impl(name, params),
+            Detail::Reshape(inner) => self.eval_impl(inner, params, &mut enc),
+            Detail::Operator(operator) => self.eval_operator_impl(operator, params, &mut enc),
         };
 
         self.queue.submit(Some(enc.finish()));
@@ -296,10 +297,7 @@ impl Interp {
         let slice = readback_buf.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         self.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: None,
-            })
+            .poll(wgpu::PollType::wait_indefinitely())
             .unwrap();
 
         let data: Vec<f32> = {
@@ -311,15 +309,37 @@ impl Interp {
         data
     }
 
-    fn eval_impl(&self, expr: &Expr, enc: &mut wgpu::CommandEncoder) -> wgpu::Buffer {
+    fn eval_impl(
+        &self,
+        expr: &Expr,
+        params: &HashMap<String, wgpu::Buffer>,
+        enc: &mut wgpu::CommandEncoder,
+    ) -> wgpu::Buffer {
         match &expr.detail {
-            Detail::Constant(constant) => self.eval_constant_impl(constant),
-            Detail::Reshape(inner) => self.eval_impl(inner, enc),
-            Detail::Operator(operator) => self.eval_operator_impl(operator, enc),
+            Detail::Constant(data) => self.eval_constant_impl(data),
+            Detail::Parameter(name) => self.eval_parameter_impl(name, params),
+            Detail::Reshape(inner) => self.eval_impl(inner, params, enc),
+            Detail::Operator(operator) => self.eval_operator_impl(operator, params, enc),
         }
     }
 
-    fn eval_constant_impl(&self, buffer: &wgpu::Buffer) -> wgpu::Buffer {
+    fn eval_constant_impl(&self, data: &[f32]) -> wgpu::Buffer {
+        self.emplace_wgpu_buffer(
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            data,
+        )
+    }
+
+    fn eval_parameter_impl(
+        &self,
+        name: &str,
+        params: &HashMap<String, wgpu::Buffer>,
+    ) -> wgpu::Buffer {
+        let buffer = params
+            .get(name)
+            .unwrap_or_else(|| panic!("Parameter '{}' not found", name));
         // Copy the buffer to avoid lifetime issues
         let size = buffer.size();
         let new_buf = self.create_wgpu_buffer(
@@ -339,11 +359,12 @@ impl Interp {
     fn eval_operator_impl(
         &self,
         operator: &Operator,
+        params: &HashMap<String, wgpu::Buffer>,
         enc: &mut wgpu::CommandEncoder,
     ) -> wgpu::Buffer {
         let pipeline = self.get_operator_pipeline(operator);
         let uniform_buffer = self.get_operator_uniform_buffer(operator);
-        let (n, res, bg) = self.get_operator_dispatch_args(operator, &uniform_buffer, enc);
+        let (n, res, bg) = self.get_operator_dispatch_args(operator, params, &uniform_buffer, enc);
 
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
@@ -416,6 +437,7 @@ impl Interp {
     fn get_operator_dispatch_args(
         &self,
         operator: &Operator,
+        params: &HashMap<String, wgpu::Buffer>,
         uniform_buffer: &wgpu::Buffer,
         enc: &mut wgpu::CommandEncoder,
     ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
@@ -424,7 +446,7 @@ impl Interp {
             | Operator::Abs(expr)
             | Operator::Exp(expr)
             | Operator::Log(expr) => {
-                self.get_unary_operator_dispatch_args(expr, uniform_buffer, enc)
+                self.get_unary_operator_dispatch_args(expr, params, uniform_buffer, enc)
             }
             Operator::Pow(lt, rt)
             | Operator::Mul(lt, rt)
@@ -432,21 +454,22 @@ impl Interp {
             | Operator::Rem(lt, rt)
             | Operator::Add(lt, rt)
             | Operator::Sub(lt, rt) => {
-                self.get_binary_operator_dispatch_args(lt, rt, uniform_buffer, enc)
+                self.get_binary_operator_dispatch_args(lt, rt, params, uniform_buffer, enc)
             }
             Operator::Bmm(lt, rt) => {
-                self.get_gemm_operator_dispatch_args(lt, rt, uniform_buffer, enc)
+                self.get_gemm_operator_dispatch_args(lt, rt, params, uniform_buffer, enc)
             }
         }
     }
     fn get_unary_operator_dispatch_args(
         &self,
         expr: &Expr,
+        params: &HashMap<String, wgpu::Buffer>,
         uniform_buffer: &wgpu::Buffer,
         enc: &mut wgpu::CommandEncoder,
     ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
         const WORKGROUP_SIZE: u32 = 32;
-        let buf = self.eval_impl(expr, enc);
+        let buf = self.eval_impl(expr, params, enc);
         let numel = expr.numel() as u32;
         let workgroups = (numel + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -469,12 +492,13 @@ impl Interp {
         &self,
         lt: &Expr,
         rt: &Expr,
+        params: &HashMap<String, wgpu::Buffer>,
         uniform_buffer: &wgpu::Buffer,
         enc: &mut wgpu::CommandEncoder,
     ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
         const WORKGROUP_SIZE: u32 = 32;
-        let lt_buf = self.eval_impl(lt, enc);
-        let rt_buf = self.eval_impl(rt, enc);
+        let lt_buf = self.eval_impl(lt, params, enc);
+        let rt_buf = self.eval_impl(rt, params, enc);
         let numel = lt.numel() as u32;
         let workgroups = (numel + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -501,12 +525,13 @@ impl Interp {
         &self,
         lt: &Expr,
         rt: &Expr,
+        params: &HashMap<String, wgpu::Buffer>,
         uniform_buffer: &wgpu::Buffer,
         enc: &mut wgpu::CommandEncoder,
     ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
         const WORKGROUP_SIZE: u32 = 32;
-        let lt_buf = self.eval_impl(lt, enc);
-        let rt_buf = self.eval_impl(rt, enc);
+        let lt_buf = self.eval_impl(lt, params, enc);
+        let rt_buf = self.eval_impl(rt, params, enc);
         let c_numel = lt.shape[0] * lt.shape[1] * rt.shape[2];
         let c_buf = self.create_wgpu_buffer(
             wgpu::BufferUsages::STORAGE
@@ -621,77 +646,75 @@ mod tests {
 
     fn setup() -> (wgpu::Device, wgpu::Queue, Interp) {
         let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(
-            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
-        )
-        .expect("Failed to find an adapter");
-        let (device, queue) = pollster::block_on(
-            adapter.request_device(&wgpu::DeviceDescriptor::default()),
-        )
-        .expect("Failed to create device");
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .expect("Failed to find an adapter");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .expect("Failed to create device");
         let interp = Interp::new(&device, &queue);
         (device, queue, interp)
     }
 
     #[test]
     fn test_constant_readback() {
-        let (device, _, interp) = setup();
-        let constant = Expr::new_matrix(&device, &[[1.0, 2.0], [3.0, 4.0]]);
-        let buf = interp.eval(&constant);
+        let (_, _, interp) = setup();
+        let constant = Expr::new_matrix(&[[1.0, 2.0], [3.0, 4.0]]);
+        let buf = interp.eval(&constant, &HashMap::new());
         let result = interp.readback(&buf, constant.numel());
         assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
     fn test_binary_add() {
-        let (device, _, interp) = setup();
-        let a = Expr::new_vector(&device, &[1.0, 2.0, 3.0, 4.0]);
-        let b = Expr::new_vector(&device, &[10.0, 20.0, 30.0, 40.0]);
+        let (_, _, interp) = setup();
+        let a = Expr::new_vector(&[1.0, 2.0, 3.0, 4.0]);
+        let b = Expr::new_vector(&[10.0, 20.0, 30.0, 40.0]);
         let expr = a + b;
-        let buf = interp.eval(&expr);
+        let buf = interp.eval(&expr, &HashMap::new());
         let result = interp.readback(&buf, expr.numel());
         assert_eq!(result, vec![11.0, 22.0, 33.0, 44.0]);
     }
 
     #[test]
     fn test_binary_mul() {
-        let (device, _, interp) = setup();
-        let a = Expr::new_vector(&device, &[1.0, 2.0, 3.0, 4.0]);
-        let b = Expr::new_vector(&device, &[2.0, 3.0, 4.0, 5.0]);
+        let (_, _, interp) = setup();
+        let a = Expr::new_vector(&[1.0, 2.0, 3.0, 4.0]);
+        let b = Expr::new_vector(&[2.0, 3.0, 4.0, 5.0]);
         let expr = a * b;
-        let buf = interp.eval(&expr);
+        let buf = interp.eval(&expr, &HashMap::new());
         let result = interp.readback(&buf, expr.numel());
         assert_eq!(result, vec![2.0, 6.0, 12.0, 20.0]);
     }
 
     #[test]
     fn test_unary_neg() {
-        let (device, _, interp) = setup();
-        let a = Expr::new_vector(&device, &[1.0, -2.0, 3.0, -4.0]);
+        let (_, _, interp) = setup();
+        let a = Expr::new_vector(&[1.0, -2.0, 3.0, -4.0]);
         let expr = -a;
-        let buf = interp.eval(&expr);
+        let buf = interp.eval(&expr, &HashMap::new());
         let result = interp.readback(&buf, expr.numel());
         assert_eq!(result, vec![-1.0, 2.0, -3.0, 4.0]);
     }
 
     #[test]
     fn test_bmm() {
-        let (device, _, interp) = setup();
-        let lt = Expr::new_tensor(&device, &[[[1.0, 0.0], [0.0, 1.0]]]);
-        let rt = Expr::new_tensor(&device, &[[[2.0, 1.0], [0.0, 2.0]]]);
+        let (_, _, interp) = setup();
+        let lt = Expr::new_tensor(&[[[1.0, 0.0], [0.0, 1.0]]]);
+        let rt = Expr::new_tensor(&[[[2.0, 1.0], [0.0, 2.0]]]);
         let expr = lt.bmm(rt);
-        let buf = interp.eval(&expr);
+        let buf = interp.eval(&expr, &HashMap::new());
         let result = interp.readback(&buf, expr.numel());
         assert_eq!(result, vec![2.0, 1.0, 0.0, 2.0]);
     }
 
     #[test]
     fn test_matmul() {
-        let (device, _, interp) = setup();
-        let lt = Expr::new_matrix(&device, &[[1.0, 0.0], [0.0, 1.0]]);
-        let rt = Expr::new_matrix(&device, &[[2.0, 1.0], [0.0, 2.0]]);
+        let (_, _, interp) = setup();
+        let lt = Expr::new_matrix(&[[1.0, 0.0], [0.0, 1.0]]);
+        let rt = Expr::new_matrix(&[[2.0, 1.0], [0.0, 2.0]]);
         let expr = lt.matmul(rt);
-        let buf = interp.eval(&expr);
+        let buf = interp.eval(&expr, &HashMap::new());
         let result = interp.readback(&buf, expr.numel());
         assert_eq!(result, vec![2.0, 1.0, 0.0, 2.0]);
     }
