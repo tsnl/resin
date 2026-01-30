@@ -566,6 +566,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -642,7 +648,7 @@ name = "resin"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "simd_math",
+ "pollster",
  "wgpu",
 ]
 
@@ -692,15 +698,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "simd_math"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c102bec6c3e5e359d21662b4e4e17c5cdc4e89c0579e483654b1ddafc18838ea"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]

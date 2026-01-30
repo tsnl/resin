@@ -1,4 +1,5 @@
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use wgpu::util::DeviceExt;
 
 #[derive(Debug)]
 pub struct Expr {
@@ -6,10 +7,67 @@ pub struct Expr {
     pub detail: Detail,
 }
 
-#[derive(Debug)]
+impl Expr {
+    /// Create a 1D vector expression from a slice of f32 values.
+    pub fn new_vector(device: &wgpu::Device, data: &[f32]) -> Self {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vector_constant"),
+            contents: bytemuck::cast_slice(data),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        Expr {
+            shape: vec![data.len()],
+            detail: Detail::Constant(buffer),
+        }
+    }
+
+    /// Create a 2D matrix expression from a 2D array of f32 values.
+    pub fn new_matrix<const R: usize, const C: usize>(
+        device: &wgpu::Device,
+        data: &[[f32; C]; R],
+    ) -> Self {
+        let flat: Vec<f32> = data.iter().flatten().copied().collect();
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("matrix_constant"),
+            contents: bytemuck::cast_slice(&flat),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        Expr {
+            shape: vec![R, C],
+            detail: Detail::Constant(buffer),
+        }
+    }
+
+    /// Create a 3D tensor expression from a 3D array of f32 values.
+    pub fn new_tensor<const B: usize, const R: usize, const C: usize>(
+        device: &wgpu::Device,
+        data: &[[[f32; C]; R]; B],
+    ) -> Self {
+        let flat: Vec<f32> = data.iter().flatten().flatten().copied().collect();
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tensor_constant"),
+            contents: bytemuck::cast_slice(&flat),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        Expr {
+            shape: vec![B, R, C],
+            detail: Detail::Constant(buffer),
+        }
+    }
+}
+
 pub enum Detail {
-    Constant(Box<[f32]>),
+    Constant(wgpu::Buffer),
     Operator(Box<Operator>),
+}
+
+impl std::fmt::Debug for Detail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Detail::Constant(_) => f.debug_tuple("Constant").finish(),
+            Detail::Operator(op) => f.debug_tuple("Operator").field(op).finish(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -33,44 +91,6 @@ pub enum Operator {
 
     // Shape manipulation
     Reshape(Expr),
-}
-
-impl<const N: usize> From<[f32; N]> for Expr {
-    fn from(value: [f32; N]) -> Self {
-        let shape = vec![N];
-        Expr {
-            shape,
-            detail: Detail::Constant(Box::from(value)),
-        }
-    }
-}
-impl<const M: usize, const N: usize> From<[[f32; N]; M]> for Expr {
-    fn from(value: [[f32; N]; M]) -> Self {
-        let shape = vec![M, N];
-        Expr {
-            shape,
-            detail: Detail::Constant(Box::from(value.as_flattened())),
-        }
-    }
-}
-impl<const L: usize, const M: usize, const N: usize> From<[[[f32; N]; M]; L]> for Expr {
-    fn from(value: [[[f32; N]; M]; L]) -> Self {
-        let shape = vec![L, M, N];
-        Expr {
-            shape,
-            detail: Detail::Constant(Box::from({
-                let mut res = Vec::with_capacity(L * M * N);
-                for i in 0..L {
-                    for j in 0..M {
-                        for k in 0..N {
-                            res.push(value[i][j][k]);
-                        }
-                    }
-                }
-                res
-            })),
-        }
-    }
 }
 
 impl Neg for Expr {

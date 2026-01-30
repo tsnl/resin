@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 bytemuck = "1.24.0"
-simd_math = "1.0.2"
 wgpu = "27.0.1"
+
+[dev-dependencies]
+pollster = "0.4"
