@@ -1,11 +1,206 @@
+use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
+
+#[derive(Debug)]
 pub struct Expr {
-    dtype: DType,
-    shape: Vec<usize>,
+    pub shape: Vec<usize>,
+    pub detail: Detail,
 }
 
-pub enum Detail {}
+#[derive(Debug)]
+pub enum Detail {
+    Constant(Box<[f32]>),
+    Operator(Box<Operator>),
+}
 
-pub enum DType {
-    Fp16,
-    Fp32,
+#[derive(Debug)]
+pub enum Operator {
+    // Unary
+    Neg(Expr),
+    Abs(Expr),
+    Exp(Expr),
+    Log(Expr),
+
+    // Matmul
+    Bmm(Expr, Expr),
+
+    // Binary arithmetic
+    Pow(Expr, Expr),
+    Mul(Expr, Expr),
+    Div(Expr, Expr),
+    Rem(Expr, Expr),
+    Add(Expr, Expr),
+    Sub(Expr, Expr),
+
+    // Shape manipulation
+    Reshape(Expr),
+}
+
+impl<const N: usize> From<[f32; N]> for Expr {
+    fn from(value: [f32; N]) -> Self {
+        let shape = vec![N];
+        Expr {
+            shape,
+            detail: Detail::Constant(Box::from(value)),
+        }
+    }
+}
+impl<const M: usize, const N: usize> From<[[f32; N]; M]> for Expr {
+    fn from(value: [[f32; N]; M]) -> Self {
+        let shape = vec![M, N];
+        Expr {
+            shape,
+            detail: Detail::Constant(Box::from(value.as_flattened())),
+        }
+    }
+}
+impl<const L: usize, const M: usize, const N: usize> From<[[[f32; N]; M]; L]> for Expr {
+    fn from(value: [[[f32; N]; M]; L]) -> Self {
+        let shape = vec![L, M, N];
+        Expr {
+            shape,
+            detail: Detail::Constant(Box::from({
+                let mut res = Vec::with_capacity(L * M * N);
+                for i in 0..L {
+                    for j in 0..M {
+                        for k in 0..N {
+                            res.push(value[i][j][k]);
+                        }
+                    }
+                }
+                res
+            })),
+        }
+    }
+}
+
+impl Neg for Expr {
+    type Output = Expr;
+    fn neg(self) -> Self::Output {
+        Expr {
+            shape: self.shape.clone(),
+            detail: Detail::Operator(Box::new(Operator::Neg(self))),
+        }
+    }
+}
+impl Expr {
+    pub fn abs(self) -> Self {
+        Expr {
+            shape: self.shape.clone(),
+            detail: Detail::Operator(Box::new(Operator::Abs(self))),
+        }
+    }
+    pub fn exp(self) -> Self {
+        Expr {
+            shape: self.shape.clone(),
+            detail: Detail::Operator(Box::new(Operator::Exp(self))),
+        }
+    }
+    pub fn log(self) -> Self {
+        Expr {
+            shape: self.shape.clone(),
+            detail: Detail::Operator(Box::new(Operator::Log(self))),
+        }
+    }
+}
+
+impl Expr {
+    pub fn bmm(self, other: Expr) -> Self {
+        assert_eq!(self.shape.len(), 3);
+        assert_eq!(other.shape.len(), 3);
+        assert_eq!(self.shape[0], other.shape[0]);
+        assert_eq!(self.shape[2], other.shape[1]);
+        let shape = vec![self.shape[0], self.shape[1], other.shape[2]];
+        Expr {
+            shape,
+            detail: Detail::Operator(Box::new(Operator::Bmm(self, other))),
+        }
+    }
+    pub fn matmul(self, other: Expr) -> Self {
+        let a_shape = self.shape.clone();
+        let b_shape = other.shape.clone();
+        assert_eq!(a_shape.len(), 2);
+        assert_eq!(b_shape.len(), 2);
+        let a = self.unsqueeze(0);
+        let b = other.unsqueeze(0);
+        let c = a.bmm(b);
+        c.squeeze()
+    }
+}
+
+impl Expr {
+    fn binary_op<F>(self, other: Expr, op: F) -> Expr
+    where
+        F: Fn(Expr, Expr) -> Operator,
+    {
+        assert_eq!(self.shape, other.shape);
+        Expr {
+            shape: self.shape.clone(),
+            detail: Detail::Operator(Box::new(op(self, other))),
+        }
+    }
+}
+impl Mul for Expr {
+    type Output = Expr;
+    fn mul(self, rhs: Expr) -> Self::Output {
+        self.binary_op(rhs, Operator::Mul)
+    }
+}
+impl Div for Expr {
+    type Output = Expr;
+    fn div(self, rhs: Expr) -> Self::Output {
+        self.binary_op(rhs, Operator::Div)
+    }
+}
+impl Rem for Expr {
+    type Output = Expr;
+    fn rem(self, rhs: Expr) -> Self::Output {
+        self.binary_op(rhs, Operator::Rem)
+    }
+}
+impl Add for Expr {
+    type Output = Expr;
+    fn add(self, rhs: Expr) -> Self::Output {
+        self.binary_op(rhs, Operator::Add)
+    }
+}
+impl Sub for Expr {
+    type Output = Expr;
+    fn sub(self, rhs: Expr) -> Self::Output {
+        self.binary_op(rhs, Operator::Sub)
+    }
+}
+impl Expr {
+    pub fn pow(self, other: Expr) -> Self {
+        self.binary_op(other, Operator::Pow)
+    }
+}
+
+impl Expr {
+    pub fn reshape(self, shape: impl Into<Vec<usize>>) -> Self {
+        let new_shape: Vec<_> = shape.into();
+
+        let old_size: usize = self.numel();
+        let new_size: usize = new_shape.iter().product();
+        assert_eq!(old_size, new_size, "Reshape size mismatch");
+
+        Expr {
+            shape: new_shape,
+            detail: Detail::Operator(Box::new(Operator::Reshape(self))),
+        }
+    }
+    pub fn squeeze(self) -> Self {
+        let new_shape: Vec<_> = self.shape.iter().cloned().filter(|&d| d != 1).collect();
+        self.reshape(new_shape)
+    }
+    pub fn unsqueeze(self, dim: usize) -> Self {
+        let mut new_shape = self.shape.clone();
+        new_shape.insert(dim, 1);
+        self.reshape(new_shape)
+    }
+}
+
+impl Expr {
+    pub fn numel(&self) -> usize {
+        self.shape.iter().product()
+    }
 }
