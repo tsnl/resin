@@ -58,6 +58,7 @@ impl Expr {
 
 pub enum Detail {
     Constant(wgpu::Buffer),
+    Reshape(Box<Expr>),
     Operator(Box<Operator>),
 }
 
@@ -65,6 +66,7 @@ impl std::fmt::Debug for Detail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Detail::Constant(_) => f.debug_tuple("Constant").finish(),
+            Detail::Reshape(inner) => f.debug_tuple("Reshape").field(inner).finish(),
             Detail::Operator(op) => f.debug_tuple("Operator").field(op).finish(),
         }
     }
@@ -88,9 +90,6 @@ pub enum Operator {
     Rem(Expr, Expr),
     Add(Expr, Expr),
     Sub(Expr, Expr),
-
-    // Shape manipulation
-    Reshape(Expr),
 }
 
 impl Neg for Expr {
@@ -205,7 +204,7 @@ impl Expr {
 
         Expr {
             shape: new_shape,
-            detail: Detail::Operator(Box::new(Operator::Reshape(self))),
+            detail: Detail::Reshape(Box::new(self)),
         }
     }
     pub fn squeeze(self) -> Self {

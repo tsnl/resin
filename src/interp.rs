@@ -271,6 +271,7 @@ impl Interp {
 
         let result_buf = match &expr.detail {
             Detail::Constant(constant) => self.eval_constant_impl(constant),
+            Detail::Reshape(inner) => self.eval_impl(inner, &mut enc),
             Detail::Operator(operator) => self.eval_operator_impl(operator, &mut enc),
         };
 
@@ -281,7 +282,10 @@ impl Interp {
 
     pub fn readback(&self, src: &wgpu::Buffer, numel: usize) -> Vec<f32> {
         let size = Layout::array::<f32>(numel).unwrap().size();
-        let readback_buf = self.create_wgpu_buffer(wgpu::BufferUsages::MAP_READ, false, size);
+        let readback_buf = self.create_wgpu_buffer(
+            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            size,
+        );
 
         let mut enc = self
             .device
@@ -310,6 +314,7 @@ impl Interp {
     fn eval_impl(&self, expr: &Expr, enc: &mut wgpu::CommandEncoder) -> wgpu::Buffer {
         match &expr.detail {
             Detail::Constant(constant) => self.eval_constant_impl(constant),
+            Detail::Reshape(inner) => self.eval_impl(inner, enc),
             Detail::Operator(operator) => self.eval_operator_impl(operator, enc),
         }
     }
@@ -317,7 +322,12 @@ impl Interp {
     fn eval_constant_impl(&self, buffer: &wgpu::Buffer) -> wgpu::Buffer {
         // Copy the buffer to avoid lifetime issues
         let size = buffer.size();
-        let new_buf = self.create_wgpu_buffer(wgpu::BufferUsages::STORAGE, false, size as usize);
+        let new_buf = self.create_wgpu_buffer(
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            size as usize,
+        );
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -356,7 +366,6 @@ impl Interp {
             Operator::Add(_, _) => &self.binary_op_add_pipeline,
             Operator::Sub(_, _) => &self.binary_op_sub_pipeline,
             Operator::Bmm(_, _) => &self.gemm_pipeline,
-            Operator::Reshape(_) => panic!("Reshape has no pipeline"),
         }
     }
     fn get_operator_uniform_buffer(&self, operator: &Operator) -> wgpu::Buffer {
@@ -402,8 +411,6 @@ impl Interp {
                     }],
                 )
             }
-
-            Operator::Reshape(_) => panic!("Reshape has no uniform buffer"),
         }
     }
     fn get_operator_dispatch_args(
@@ -412,129 +419,149 @@ impl Interp {
         uniform_buffer: &wgpu::Buffer,
         enc: &mut wgpu::CommandEncoder,
     ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
-        const WORKGROUP_SIZE: u32 = 32;
-
         match operator {
-            // Unary operators: uniform, storage read_write (in-place)
             Operator::Neg(expr)
             | Operator::Abs(expr)
             | Operator::Exp(expr)
             | Operator::Log(expr) => {
-                let buf = self.eval_impl(expr, enc);
-                let numel = expr.numel() as u32;
-                let workgroups = (numel + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.unary_op_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: uniform_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: buf.as_entire_binding(),
-                        },
-                    ],
-                });
-                (workgroups, buf, bind_group)
+                self.get_unary_operator_dispatch_args(expr, uniform_buffer, enc)
             }
-
-            // Binary operators: uniform, storage read_write (a), storage read (b)
             Operator::Pow(lt, rt)
             | Operator::Mul(lt, rt)
             | Operator::Div(lt, rt)
             | Operator::Rem(lt, rt)
             | Operator::Add(lt, rt)
             | Operator::Sub(lt, rt) => {
-                let lt_buf = self.eval_impl(lt, enc);
-                let rt_buf = self.eval_impl(rt, enc);
-                let numel = lt.numel() as u32;
-                let workgroups = (numel + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.binary_op_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: uniform_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: lt_buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: rt_buf.as_entire_binding(),
-                        },
-                    ],
-                });
-                (workgroups, lt_buf, bind_group)
+                self.get_binary_operator_dispatch_args(lt, rt, uniform_buffer, enc)
             }
-
-            // GEMM: uniform, storage read (a), storage read (b), storage read_write (c)
             Operator::Bmm(lt, rt) => {
-                let lt_buf = self.eval_impl(lt, enc);
-                let rt_buf = self.eval_impl(rt, enc);
-                let c_numel = lt.shape[0] * lt.shape[1] * rt.shape[2];
-                let c_buf = self.create_wgpu_buffer(
-                    wgpu::BufferUsages::STORAGE,
-                    false,
-                    Layout::array::<f32>(c_numel).unwrap().size(),
-                );
-                let workgroups = ((c_numel as u32) + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.gemm_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: uniform_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: lt_buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: rt_buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: c_buf.as_entire_binding(),
-                        },
-                    ],
-                });
-                (workgroups, c_buf, bind_group)
+                self.get_gemm_operator_dispatch_args(lt, rt, uniform_buffer, enc)
             }
-
-            Operator::Reshape(_) => panic!("Reshape has no dispatch args"),
         }
+    }
+    fn get_unary_operator_dispatch_args(
+        &self,
+        expr: &Expr,
+        uniform_buffer: &wgpu::Buffer,
+        enc: &mut wgpu::CommandEncoder,
+    ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
+        const WORKGROUP_SIZE: u32 = 32;
+        let buf = self.eval_impl(expr, enc);
+        let numel = expr.numel() as u32;
+        let workgroups = (numel + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.unary_op_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: buf.as_entire_binding(),
+                },
+            ],
+        });
+        (workgroups, buf, bind_group)
+    }
+    fn get_binary_operator_dispatch_args(
+        &self,
+        lt: &Expr,
+        rt: &Expr,
+        uniform_buffer: &wgpu::Buffer,
+        enc: &mut wgpu::CommandEncoder,
+    ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
+        const WORKGROUP_SIZE: u32 = 32;
+        let lt_buf = self.eval_impl(lt, enc);
+        let rt_buf = self.eval_impl(rt, enc);
+        let numel = lt.numel() as u32;
+        let workgroups = (numel + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.binary_op_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: lt_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: rt_buf.as_entire_binding(),
+                },
+            ],
+        });
+        (workgroups, lt_buf, bind_group)
+    }
+    fn get_gemm_operator_dispatch_args(
+        &self,
+        lt: &Expr,
+        rt: &Expr,
+        uniform_buffer: &wgpu::Buffer,
+        enc: &mut wgpu::CommandEncoder,
+    ) -> (u32, wgpu::Buffer, wgpu::BindGroup) {
+        const WORKGROUP_SIZE: u32 = 32;
+        let lt_buf = self.eval_impl(lt, enc);
+        let rt_buf = self.eval_impl(rt, enc);
+        let c_numel = lt.shape[0] * lt.shape[1] * rt.shape[2];
+        let c_buf = self.create_wgpu_buffer(
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            Layout::array::<f32>(c_numel).unwrap().size(),
+        );
+        let workgroups = ((c_numel as u32) + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.gemm_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: lt_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: rt_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: c_buf.as_entire_binding(),
+                },
+            ],
+        });
+        (workgroups, c_buf, bind_group)
     }
     fn emplace_wgpu_buffer<T: bytemuck::Pod>(
         &self,
         usages: wgpu::BufferUsages,
         data: &[T],
     ) -> wgpu::Buffer {
-        let buffer =
-            self.create_wgpu_buffer(usages, true, Layout::array::<T>(data.len()).unwrap().size());
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            mapped_at_creation: true,
+            size: Layout::array::<T>(data.len()).unwrap().size() as u64,
+            usage: usages,
+        });
         buffer
             .get_mapped_range_mut(..)
             .copy_from_slice(bytemuck::cast_slice(data));
         buffer.unmap();
         buffer
     }
-    fn create_wgpu_buffer(
-        &self,
-        usages: wgpu::BufferUsages,
-        mapped_at_creation: bool,
-        nbytes: usize,
-    ) -> wgpu::Buffer {
+    fn create_wgpu_buffer(&self, usages: wgpu::BufferUsages, nbytes: usize) -> wgpu::Buffer {
         self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            mapped_at_creation,
+            mapped_at_creation: false,
             size: nbytes as u64,
-            usage: usages | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: usages,
         })
     }
 }
@@ -584,5 +611,88 @@ impl UVec3 {
             3 => UVec3::new(shape[0] as u32, shape[1] as u32, shape[2] as u32),
             _ => panic!("Unsupported shape dimension: {}", shape.len()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::Expr;
+
+    fn setup() -> (wgpu::Device, wgpu::Queue, Interp) {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(
+            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+        )
+        .expect("Failed to find an adapter");
+        let (device, queue) = pollster::block_on(
+            adapter.request_device(&wgpu::DeviceDescriptor::default()),
+        )
+        .expect("Failed to create device");
+        let interp = Interp::new(&device, &queue);
+        (device, queue, interp)
+    }
+
+    #[test]
+    fn test_constant_readback() {
+        let (device, _, interp) = setup();
+        let constant = Expr::new_matrix(&device, &[[1.0, 2.0], [3.0, 4.0]]);
+        let buf = interp.eval(&constant);
+        let result = interp.readback(&buf, constant.numel());
+        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_binary_add() {
+        let (device, _, interp) = setup();
+        let a = Expr::new_vector(&device, &[1.0, 2.0, 3.0, 4.0]);
+        let b = Expr::new_vector(&device, &[10.0, 20.0, 30.0, 40.0]);
+        let expr = a + b;
+        let buf = interp.eval(&expr);
+        let result = interp.readback(&buf, expr.numel());
+        assert_eq!(result, vec![11.0, 22.0, 33.0, 44.0]);
+    }
+
+    #[test]
+    fn test_binary_mul() {
+        let (device, _, interp) = setup();
+        let a = Expr::new_vector(&device, &[1.0, 2.0, 3.0, 4.0]);
+        let b = Expr::new_vector(&device, &[2.0, 3.0, 4.0, 5.0]);
+        let expr = a * b;
+        let buf = interp.eval(&expr);
+        let result = interp.readback(&buf, expr.numel());
+        assert_eq!(result, vec![2.0, 6.0, 12.0, 20.0]);
+    }
+
+    #[test]
+    fn test_unary_neg() {
+        let (device, _, interp) = setup();
+        let a = Expr::new_vector(&device, &[1.0, -2.0, 3.0, -4.0]);
+        let expr = -a;
+        let buf = interp.eval(&expr);
+        let result = interp.readback(&buf, expr.numel());
+        assert_eq!(result, vec![-1.0, 2.0, -3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_bmm() {
+        let (device, _, interp) = setup();
+        let lt = Expr::new_tensor(&device, &[[[1.0, 0.0], [0.0, 1.0]]]);
+        let rt = Expr::new_tensor(&device, &[[[2.0, 1.0], [0.0, 2.0]]]);
+        let expr = lt.bmm(rt);
+        let buf = interp.eval(&expr);
+        let result = interp.readback(&buf, expr.numel());
+        assert_eq!(result, vec![2.0, 1.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn test_matmul() {
+        let (device, _, interp) = setup();
+        let lt = Expr::new_matrix(&device, &[[1.0, 0.0], [0.0, 1.0]]);
+        let rt = Expr::new_matrix(&device, &[[2.0, 1.0], [0.0, 2.0]]);
+        let expr = lt.matmul(rt);
+        let buf = interp.eval(&expr);
+        let result = interp.readback(&buf, expr.numel());
+        assert_eq!(result, vec![2.0, 1.0, 0.0, 2.0]);
     }
 }

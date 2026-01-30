@@ -5,6 +5,7 @@ struct GemmParams {
     a_dim: vec3<u32>,   // b, r, c
     b_dim: vec3<u32>,   // b, r, c
     c_dim: vec3<u32>,   // b, r, c
+    _pad: u32,          // align coefficients to 16-byte boundary
     a_coeff: f32,
     b_coeff: f32,
     c_coeff: f32,
@@ -41,7 +42,7 @@ fn gemm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if global_id.x >= u.c_dim.x * u.c_dim.y * u.c_dim.z {
         return;
     }
-    
+
     let c_index = global_id.x;
     let c_coords = unpack_mat_index(u.c_dim, c_index);
     let bi = c_coords.x;
@@ -50,8 +51,8 @@ fn gemm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var sum: f32 = 0.0;
     for (var k = 0u; k < u.a_dim.z; k++) {
-        let a_index: u32 = mat_index(u.a_dim, bi, global_id.y, k);
-        let b_index: u32 = mat_index(u.b_dim, bi, k, global_id.x);
+        let a_index: u32 = mat_index(u.a_dim, bi, ri, k);
+        let b_index: u32 = mat_index(u.b_dim, bi, k, ci);
         sum += (a[a_index] * u.a_coeff) * (b[b_index] * u.b_coeff);
     }
 
