@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        ".clang-tidy": "yaml",
+        ".clang-format": "yaml"
+    },
+    "editor.formatOnSave": true,
+    "editor.detectIndentation": false,
+    "editor.tabSize": 4,
+    "editor.rulers": [
+        88
+    ]
+}

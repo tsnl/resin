@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "llvm-vs-code-extensions.vscode-clangd"
+    ]
+}
