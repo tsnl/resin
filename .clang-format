@@ -1,0 +1,80 @@
+# This file is a part of [tsnl/cpp_base](https://github.com/tsnl/cpp_base).
+# If you make any changes here, please consider upstreaming them so that other projects can consistently follow the same 
+# style.
+
+BasedOnStyle: LLVM
+IndentWidth: 4
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+ColumnLimit: 120
+
+# Common:
+ContinuationIndentWidth: 4
+BreakBeforeBraces: Attach
+SeparateDefinitionBlocks: Always
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakBeforeMultilineStrings: true
+QualifierAlignment: Right
+
+# Templates:
+BreakBeforeConceptDeclarations: Always
+AlwaysBreakTemplateDeclarations: true
+
+# Requires:
+AllowShortCompoundRequirementOnASingleLine: true
+IndentRequiresClause: false
+RequiresClausePosition: SingleLine
+
+# Type definitions:
+AllowShortEnumsOnASingleLine: false
+
+# Arguments and Parameters:
+AlignAfterOpenBracket: BlockIndent
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackArguments: false
+BinPackParameters: false
+
+# Constructors:
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
+SpaceBeforeCtorInitializerColon: false
+ConstructorInitializerIndentWidth: 0
+
+# Namespaces:
+FixNamespaceComments: true
+ShortNamespaceLines: 0
+NamespaceIndentation: Inner
+
+# Misc:
+BitFieldColonSpacing: After
+AccessModifierOffset: -4
+EmptyLineBeforeAccessModifier: Always
+
+# Attributes:
+BreakAfterAttributes: Never
+
+# Includes:
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '^["<]gtest\/gtest.h[">]$'
+    Priority:        1000
+  - Regex:           '^"[^\/"]*"$'
+    Priority:        200
+  - Regex:           '^"[^"]*"$'
+    Priority:        300
+  - Regex:           '^<(cstdlib|cstddef|cstdio|cstdint|cctype|cassert)>$'
+    Priority:        600
+    # Everything that didn't match
+  - Regex:           '^<[^>\.\/]+>$'
+    Priority:        500
+  - Regex:           '^<[^>]+>$'
+    Priority:        400
+    # Everything that didn't match
+  - Regex:           '.*'
+    Priority:        1000
