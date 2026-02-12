@@ -2,37 +2,33 @@
 resin.gradient: computes the gradient of a tensor function with respect to its inputs.
 """
 
-__all__ = [
-    "create_parameter_tensor_list",
-    "differentiate_graph",
-    "grad",
-]
-
-from collections import deque
-import inspect
+from dataclasses import dataclass
 
 from .tensor import (
     BroadcastTensor,
     ConstantTensor,
-    DType,
     ElementwiseOperationTensor,
     ExpandTensor,
-    ParameterTensor,
-    Shape,
+    TensorDict,
+    TensorDictType,
+    VarTensor,
     Tensor,
     TensorFunction,
     Substitution,
     BatchedMatrixMultiplicationTensor,
+    tensordict_flatten,
+    tensordict_type,
+    tensordict_type_instantiate,
 )
 
 
 def grad(
-    f: TensorFunction[Tensor],
-) -> TensorFunction[tuple[Tensor, tuple[Tensor, ...]]]:
+    f: TensorFunction[TensorFunction[Tensor]],
+) -> TensorFunction[TensorFunction[tuple[TensorDict, Tensor]]]:
     """
-    Transforms a scalar valued function 'f: (*Tensor) -> Tensor' into a function
-    'g: (*Tensor) -> (Tensor, (Tensor, ...))' that computes both the value of 'f' and
-    the gradients of 'f' with respect to its inputs.
+    Transforms a scalar valued function 'f: TensorDict -> TensorDict -> Tensor' into a
+    function 'g: TensorDict -> TensorDict -> (TensorDict, Tensor)' that computes both
+    the value of 'f' and the gradients of 'f' with respect to its inputs.
 
     Useful for backpropagation in neural networks, where we need to compute the
     gradients of a loss function with respect to the model parameters.
@@ -42,86 +38,91 @@ def grad(
     pass.
     """
 
-    grad_graph_cache = {}
+    grad_graph_cache: dict[tuple[TensorDictType, TensorDictType], GradCacheValue] = {}
 
     def new_grad_graph(
-        a: tuple[tuple[DType, Shape], ...],
-    ) -> tuple[
-        tuple[Tensor, tuple[Tensor, ...]],
-        list[ParameterTensor],
-    ]:
-        params = create_parameter_tensor_list(f, a)
-        f_graph = f(*params)
-        g_graph_dict = differentiate_graph(f_graph)
-        return (
-            (f_graph, tuple(g_graph_dict[param] for param in params)),
-            params,
+        params_types: TensorDictType,
+        inputs_types: TensorDictType,
+    ) -> GradCacheValue:
+        params_vars_td = tensordict_type_instantiate(
+            params_types,
+            name=f.__qualname__,
+        )
+        f_prime = f(params_vars_td)
+
+        inputs_vars_td = tensordict_type_instantiate(
+            inputs_types,
+            name=f_prime.__qualname__,
+        )
+        f_graph = f_prime(inputs_vars_td)
+
+        grad_dict = differentiate_graph(f_graph)
+
+        sub = Substitution(
+            subs={
+                param_var.name: grad_dict[param_var]
+                for param_var in tensordict_flatten(params_vars_td)
+                if isinstance(param_var, VarTensor) and param_var in grad_dict
+            }
+        )
+        backward_graph_dict = sub.rewrite_tensordict(params_vars_td)
+
+        return GradCacheValue(
+            forward_graph=f_graph,
+            backward_graph_dict=backward_graph_dict,
+            params_vars_td=params_vars_td,
+            inputs_vars_td=inputs_vars_td,
         )
 
     def get_grad_graph(
-        a: tuple[tuple[DType, Shape], ...],
-    ) -> tuple[
-        tuple[Tensor, tuple[Tensor, ...]],
-        list[ParameterTensor],
-    ]:
-        if grad_graph := grad_graph_cache.get(a):
-            return grad_graph
+        params_types: TensorDictType,
+        inputs_types: TensorDictType,
+    ) -> GradCacheValue:
+        if grad_cache_value := grad_graph_cache.get((params_types, inputs_types)):
+            return grad_cache_value
         else:
-            grad_graph = new_grad_graph(a)
-            grad_graph_cache[a] = grad_graph
-            return grad_graph
+            grad_cache_value = new_grad_graph(params_types, inputs_types)
+            grad_graph_cache[params_types, inputs_types] = grad_cache_value
+            return grad_cache_value
 
-    def gradient(*inputs: Tensor) -> tuple[Tensor, tuple[Tensor, ...]]:
-        a: tuple[tuple[DType, Shape], ...] = tuple((x.dtype, x.shape) for x in inputs)
+    def gradient(params: TensorDict) -> TensorFunction[tuple[TensorDict, Tensor]]:
+        params_types = tensordict_type(params)
 
-        (value_graph, gradient_graph_tuple), grad_params = get_grad_graph(a=a)
+        def inner(inputs: TensorDict) -> tuple[TensorDict, Tensor]:
+            inputs_types = tensordict_type(inputs)
 
-        rewriter = Substitution.zip(grad_params, inputs)
-        concrete_value_graph = rewriter.rewrite(value_graph)
-        concrete_gradient_graph_tuple = rewriter.rewrite_tuple(gradient_graph_tuple)
-        return concrete_value_graph, concrete_gradient_graph_tuple
+            grad_cache_value = get_grad_graph(
+                params_types=params_types,
+                inputs_types=inputs_types,
+            )
+
+            rewriter = Substitution.zip_tensordict(
+                {
+                    "params": grad_cache_value.params_vars_td,
+                    "inputs": grad_cache_value.inputs_vars_td,
+                },
+                {
+                    "params": params,
+                    "inputs": inputs,
+                },
+            )
+            concrete_forward_graph = rewriter.rewrite(grad_cache_value.forward_graph)
+            concrete_backward_graph_dict = rewriter.rewrite_tensordict(
+                grad_cache_value.backward_graph_dict
+            )
+            return concrete_backward_graph_dict, concrete_forward_graph
+
+        return inner
 
     return gradient
 
 
-def create_parameter_tensor_list[T](
-    f: TensorFunction[T],
-    a: tuple[tuple[DType, Shape], ...],
-) -> list[ParameterTensor]:
-    signature = inspect.signature(f)
-    f_name = f.__qualname__
-
-    queue = deque(a)
-    out = []
-
-    for param_name, param_spec in signature.parameters.items():
-        name = f"{f_name}.{param_name}"
-
-        if param_spec.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
-            # Pop one arg type and shape for this parameter
-            dtype, shape = queue.popleft()
-            param = ParameterTensor.new(name=name, dtype=dtype, shape=shape)
-            out.append(param)
-
-        elif param_spec.kind == inspect.Parameter.VAR_POSITIONAL:
-            # Pop all remaining arg types and shapes for *args
-            i = 0
-            while queue:
-                (dtype, shape) = queue.popleft()
-                elt_name = f"{name}[{i}]"
-                param = ParameterTensor.new(name=elt_name, dtype=dtype, shape=shape)
-                out.append(param)
-                i += 1
-            break
-
-        else:
-            # ignore: this argument type is not traced
-            pass
-
-    return out
+@dataclass
+class GradCacheValue:
+    forward_graph: Tensor
+    backward_graph_dict: TensorDict
+    params_vars_td: TensorDict
+    inputs_vars_td: TensorDict
 
 
 def differentiate_graph(f_graph: Tensor) -> dict[Tensor, Tensor]:
@@ -158,15 +159,22 @@ def differentiate_graph(f_graph: Tensor) -> dict[Tensor, Tensor]:
 
         match node:
             case ConstantTensor():
-                pass
+                visit_constant(node)
 
-            case ParameterTensor():
-                # Parameters' gradients are computed by backpropagation and are written
-                # by nodes that depend on them.
-                assert node in grad
+            case VarTensor():
+                visit_parameter(node)
 
             case ElementwiseOperationTensor():
                 visit_elementwise_operation(node)
+
+            case BatchedMatrixMultiplicationTensor():
+                visit_batched_matmul_operation(node)
+
+            case BroadcastTensor():
+                visit_broadcast_operation(node)
+
+            case ExpandTensor():
+                visit_expand_operation(node)
 
             case _:
                 raise NotImplementedError()
@@ -181,7 +189,7 @@ def differentiate_graph(f_graph: Tensor) -> dict[Tensor, Tensor]:
         # Constants do not contribute to gradients.
         _ = node
 
-    def visit_parameter(node: ParameterTensor) -> None:
+    def visit_parameter(node: VarTensor) -> None:
         # Parameters' gradients are computed by backpropagation and are written
         # by nodes that depend on them.
         assert node in grad
@@ -294,26 +302,6 @@ def differentiate_graph(f_graph: Tensor) -> dict[Tensor, Tensor]:
         )
 
     for node in f_graph.topological_sort():
-        match node:
-            case ConstantTensor():
-                visit_constant(node)
-
-            case ParameterTensor():
-                visit_parameter(node)
-
-            case ElementwiseOperationTensor():
-                visit_elementwise_operation(node)
-
-            case BatchedMatrixMultiplicationTensor():
-                visit_batched_matmul_operation(node)
-
-            case BroadcastTensor():
-                visit_broadcast_operation(node)
-
-            case ExpandTensor():
-                visit_expand_operation(node)
-
-            case _:
-                raise NotImplementedError()
+        visit_node(node)
 
     return grad

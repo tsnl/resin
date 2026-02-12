@@ -14,20 +14,47 @@ def scalar(x: float) -> rc.Tensor:
 
 
 def eval_grad(
-    f: rc.TensorFunction[rc.Tensor],
+    f_body,
     *inputs: rc.Tensor,
 ) -> tuple[float, tuple[float, ...]]:
-    """Evaluate f and its gradients at inputs, returning Python floats."""
-    g = rc.grad(f)
-    value_tensor, grad_tensors = g(*inputs)
-    interp = rc.Interpreter()
-    value = interp.evaluate(value_tensor).item()
-    grads = tuple(interp.evaluate(gt).item() for gt in grad_tensors)
+    """Evaluate f_body and its gradients at inputs, returning Python floats.
+
+    f_body is a function taking individual Tensor args and returning a scalar
+    Tensor.  It is wrapped into the curried form expected by rc.grad, where all
+    arguments are treated as parameters to differentiate with respect to.
+    """
+    n = len(inputs)
+
+    if n == 1:
+        def f(params):
+            def inner(inputs_td):
+                return f_body(params)
+            return inner
+
+        g = rc.grad(f)
+        grad_td, value_tensor = g(inputs[0])({})
+        assert isinstance(grad_td, rc.Tensor)
+        interp = rc.Interpreter()
+        value = interp.evaluate(value_tensor).item()
+        grads = (interp.evaluate(grad_td).item(),)
+    else:
+        def f(params):
+            def inner(inputs_td):
+                return f_body(*params)
+            return inner
+
+        g = rc.grad(f)
+        grad_td, value_tensor = g(list(inputs))({})
+        assert isinstance(grad_td, list)
+        interp = rc.Interpreter()
+        value = interp.evaluate(value_tensor).item()
+        grads = tuple(interp.evaluate(gt).item() for gt in grad_td)  # type: ignore[arg-type]
+
     return value, grads
 
 
 def numerical_gradient(
-    f: rc.TensorFunction[rc.Tensor],
+    f_body,
     *inputs: rc.Tensor,
     eps: float = 1e-4,
 ) -> tuple[float, ...]:
@@ -38,25 +65,25 @@ def numerical_gradient(
 
         args_plus = list(inputs)
         args_plus[i] = scalar(xi + eps)
-        f_plus = rc.Interpreter().evaluate(f(*args_plus)).item()
+        f_plus = rc.Interpreter().evaluate(f_body(*args_plus)).item()
 
         args_minus = list(inputs)
         args_minus[i] = scalar(xi - eps)
-        f_minus = rc.Interpreter().evaluate(f(*args_minus)).item()
+        f_minus = rc.Interpreter().evaluate(f_body(*args_minus)).item()
 
         grads.append((f_plus - f_minus) / (2 * eps))
     return tuple(grads)
 
 
 def check_grad(
-    f: rc.TensorFunction[rc.Tensor],
+    f_body,
     *inputs: rc.Tensor,
     rtol: float = 1e-2,
     atol: float = 1e-2,
 ) -> None:
     """Assert analytical gradients match numerical gradients (fp32 tolerance)."""
-    _, analytical = eval_grad(f, *inputs)
-    numerical = numerical_gradient(f, *inputs)
+    _, analytical = eval_grad(f_body, *inputs)
+    numerical = numerical_gradient(f_body, *inputs)
     for i, (a, n) in enumerate(zip(analytical, numerical)):
         np.testing.assert_allclose(
             a,
@@ -444,15 +471,18 @@ class TestCaching:
     def test_same_shape_different_values(self) -> None:
         """Calling the same grad function at different points must give correct results."""
 
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x * x
+        def f(params):
+            def inner(inputs):
+                return params * params
+            return inner
 
         g = rc.grad(f)
         for x_val in [0.0, 1.0, -2.0, 5.5, 0.1]:
-            value_t, (grad_t,) = g(scalar(x_val))
+            grad_td, value_t = g(scalar(x_val))({})
             interp = rc.Interpreter()
             val = interp.evaluate(value_t).item()
-            dx = interp.evaluate(grad_t).item()
+            assert isinstance(grad_td, rc.Tensor)
+            dx = interp.evaluate(grad_td).item()
             assert val == pytest.approx(x_val**2, abs=1e-5)
             assert dx == pytest.approx(2 * x_val, abs=1e-5)
 
@@ -506,7 +536,7 @@ class TestMaxMinGradients:
         """f(x) = max(x, 0) where x > 0, df/dx = 1."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=0.0))
+            return x.max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(f, scalar(3.0))
         assert val == pytest.approx(3.0)
@@ -516,7 +546,7 @@ class TestMaxMinGradients:
         """f(x) = max(x, 0) where x < 0, df/dx = 0."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=0.0))
+            return x.max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(f, scalar(-3.0))
         assert val == pytest.approx(0.0)
@@ -526,7 +556,7 @@ class TestMaxMinGradients:
         """f(x) = max(x, 5) where x > 5, df/dx = 1."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=5.0))
+            return x.max(rc.Tensor.const(value=5.0))
 
         val, (dx,) = eval_grad(f, scalar(7.0))
         assert val == pytest.approx(7.0)
@@ -536,7 +566,7 @@ class TestMaxMinGradients:
         """f(x) = max(x, 5) where x < 5, df/dx = 0."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=5.0))
+            return x.max(rc.Tensor.const(value=5.0))
 
         val, (dx,) = eval_grad(f, scalar(2.0))
         assert val == pytest.approx(5.0)
@@ -546,7 +576,7 @@ class TestMaxMinGradients:
         """f(x) = min(x, 5) where x < 5, df/dx = 1."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__min__(rc.Tensor.const(value=5.0))
+            return x.min(rc.Tensor.const(value=5.0))
 
         val, (dx,) = eval_grad(f, scalar(2.0))
         assert val == pytest.approx(2.0)
@@ -556,7 +586,7 @@ class TestMaxMinGradients:
         """f(x) = min(x, 5) where x > 5, df/dx = 0."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__min__(rc.Tensor.const(value=5.0))
+            return x.min(rc.Tensor.const(value=5.0))
 
         val, (dx,) = eval_grad(f, scalar(8.0))
         assert val == pytest.approx(5.0)
@@ -566,7 +596,7 @@ class TestMaxMinGradients:
         """f(x) = min(x, 10) where x < 10, passes through."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__min__(rc.Tensor.const(value=10.0))
+            return x.min(rc.Tensor.const(value=10.0))
 
         val, (dx,) = eval_grad(f, scalar(3.0))
         assert val == pytest.approx(3.0)
@@ -576,7 +606,7 @@ class TestMaxMinGradients:
         """f(x) = min(x, 10) where x > 10, clamped."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            return x.__min__(rc.Tensor.const(value=10.0))
+            return x.min(rc.Tensor.const(value=10.0))
 
         val, (dx,) = eval_grad(f, scalar(15.0))
         assert val == pytest.approx(10.0)
@@ -590,7 +620,7 @@ class TestReLUPatterns:
         """ReLU(x) = max(x, 0), x > 0 -> f = x, f' = 1."""
 
         def relu(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=0.0))
+            return x.max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(relu, scalar(5.0))
         assert val == pytest.approx(5.0)
@@ -600,7 +630,7 @@ class TestReLUPatterns:
         """ReLU(x) = max(x, 0), x < 0 -> f = 0, f' = 0."""
 
         def relu(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=0.0))
+            return x.max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(relu, scalar(-5.0))
         assert val == pytest.approx(0.0)
@@ -610,7 +640,7 @@ class TestReLUPatterns:
         """ReLU(x) = max(x, 0), x = 0 -> f = 0, f' = 0 (subgradient)."""
 
         def relu(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=0.0))
+            return x.max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(relu, scalar(0.0))
         assert val == pytest.approx(0.0)
@@ -621,7 +651,7 @@ class TestReLUPatterns:
 
         def f(x: rc.Tensor) -> rc.Tensor:
             linear = rc.Tensor.const(value=2.0) * x - rc.Tensor.const(value=3.0)
-            return linear.__max__(rc.Tensor.const(value=0.0))
+            return linear.max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(f, scalar(2.0))
         assert val == pytest.approx(1.0)
@@ -635,7 +665,7 @@ class TestReLUPatterns:
         """f(x) = ReLU(x)^2. At x=3: f=9, f'=6. At x=-3: f=0, f'=0."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            r = x.__max__(rc.Tensor.const(value=0.0))
+            r = x.max(rc.Tensor.const(value=0.0))
             return r * r
 
         val, (dx,) = eval_grad(f, scalar(3.0))
@@ -650,8 +680,8 @@ class TestReLUPatterns:
         """f(x) = ReLU(x) + ReLU(-x) = |x|. At x=3: f=3, f'=1. At x=-3: f=3, f'=-1."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            pos = x.__max__(rc.Tensor.const(value=0.0))
-            neg = (-x).__max__(rc.Tensor.const(value=0.0))
+            pos = x.max(rc.Tensor.const(value=0.0))
+            neg = (-x).max(rc.Tensor.const(value=0.0))
             return pos + neg
 
         val, (dx,) = eval_grad(f, scalar(3.0))
@@ -668,7 +698,7 @@ class TestReLUPatterns:
         def clamp(x: rc.Tensor) -> rc.Tensor:
             lo = rc.Tensor.const(value=-1.0)
             hi = rc.Tensor.const(value=1.0)
-            return x.__max__(lo).__min__(hi)
+            return x.max(lo).min(hi)
 
         # In range: gradient passes through
         val, (dx,) = eval_grad(clamp, scalar(0.5))
@@ -690,7 +720,7 @@ class TestReLUPatterns:
 
         def leaky_relu(x: rc.Tensor) -> rc.Tensor:
             alpha = rc.Tensor.const(value=0.01)
-            return x.__max__(alpha * x)
+            return x.max(alpha * x)
 
         val, (dx,) = eval_grad(leaky_relu, scalar(3.0))
         assert val == pytest.approx(3.0)
@@ -704,8 +734,8 @@ class TestReLUPatterns:
         """f(x) = ReLU(ReLU(x) - 2). At x=5: inner=5, f=3, f'=1. At x=1: inner=1, f=0, f'=0."""
 
         def f(x: rc.Tensor) -> rc.Tensor:
-            r1 = x.__max__(rc.Tensor.const(value=0.0))
-            return (r1 - rc.Tensor.const(value=2.0)).__max__(rc.Tensor.const(value=0.0))
+            r1 = x.max(rc.Tensor.const(value=0.0))
+            return (r1 - rc.Tensor.const(value=2.0)).max(rc.Tensor.const(value=0.0))
 
         val, (dx,) = eval_grad(f, scalar(5.0))
         assert val == pytest.approx(3.0)
@@ -726,7 +756,7 @@ class TestReLUPatterns:
             return (rc.Tensor.const(value=1.0) + x.exp()).log()
 
         def relu(x: rc.Tensor) -> rc.Tensor:
-            return x.__max__(rc.Tensor.const(value=0.0))
+            return x.max(rc.Tensor.const(value=0.0))
 
         # For large positive x, both gradients should be ~1
         _, (sp_dx,) = eval_grad(softplus, scalar(10.0))
@@ -745,43 +775,55 @@ class TestComparisonGradientErrors:
     """Comparison operators should raise ValueError when gradient is attempted."""
 
     def test_eq_raises(self) -> None:
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x.eq(rc.Tensor.const(value=1.0))
+        def f(params):
+            def inner(inputs):
+                return params.eq(rc.Tensor.const(value=1.0))
+            return inner
 
         with pytest.raises(ValueError, match="Cannot compute gradients for comparison"):
-            rc.grad(f)(scalar(1.0))
+            rc.grad(f)(scalar(1.0))({})
 
     def test_ne_raises(self) -> None:
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x.ne(rc.Tensor.const(value=1.0))
+        def f(params):
+            def inner(inputs):
+                return params.ne(rc.Tensor.const(value=1.0))
+            return inner
 
         with pytest.raises(ValueError, match="Cannot compute gradients for comparison"):
-            rc.grad(f)(scalar(1.0))
+            rc.grad(f)(scalar(1.0))({})
 
     def test_lt_raises(self) -> None:
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x < rc.Tensor.const(value=1.0)
+        def f(params):
+            def inner(inputs):
+                return params < rc.Tensor.const(value=1.0)
+            return inner
 
         with pytest.raises(ValueError, match="Cannot compute gradients for comparison"):
-            rc.grad(f)(scalar(0.0))
+            rc.grad(f)(scalar(0.0))({})
 
     def test_gt_raises(self) -> None:
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x > rc.Tensor.const(value=1.0)
+        def f(params):
+            def inner(inputs):
+                return params > rc.Tensor.const(value=1.0)
+            return inner
 
         with pytest.raises(ValueError, match="Cannot compute gradients for comparison"):
-            rc.grad(f)(scalar(2.0))
+            rc.grad(f)(scalar(2.0))({})
 
     def test_le_raises(self) -> None:
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x <= rc.Tensor.const(value=1.0)
+        def f(params):
+            def inner(inputs):
+                return params <= rc.Tensor.const(value=1.0)
+            return inner
 
         with pytest.raises(ValueError, match="Cannot compute gradients for comparison"):
-            rc.grad(f)(scalar(0.0))
+            rc.grad(f)(scalar(0.0))({})
 
     def test_ge_raises(self) -> None:
-        def f(x: rc.Tensor) -> rc.Tensor:
-            return x >= rc.Tensor.const(value=1.0)
+        def f(params):
+            def inner(inputs):
+                return params >= rc.Tensor.const(value=1.0)
+            return inner
 
         with pytest.raises(ValueError, match="Cannot compute gradients for comparison"):
-            rc.grad(f)(scalar(2.0))
+            rc.grad(f)(scalar(2.0))({})

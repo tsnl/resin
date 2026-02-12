@@ -12,7 +12,6 @@ __all__ = [
     "ElementwiseOperationTensor",
     "IndexTensor",
     "Operator",
-    "ParameterTensor",
     "Pitch",
     "ReductionTensor",
     "ReshapeTensor",
@@ -22,16 +21,86 @@ __all__ = [
     "Tensor",
     "TensorFunction",
     "UnaryOperator",
+    "VarTensor",
     "dtype_bytes",
 ]
 
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace, field
-from typing import Callable, Literal
+from typing import Callable, Generator, Literal
 
 from ..common import SupportsWrite
 
+
+#
+# TensorDict: JSON-style objects, but with Tensor leaves.
+# NOTE: a Tensor is a trivial TensorDict.
+#
+
+
+type TensorDict = "Tensor | list[TensorDict] | dict[str, TensorDict]"
+
+
+type TensorDictType = (
+    "TensorType | tuple[TensorDictType, ...] | frozenset[tuple[str, TensorDictType]]"
+)
+
+
+@dataclass(frozen=True)
+class TensorType:
+    dtype: DType
+    shape: Shape
+
+
+def tensordict_flatten(td: TensorDict) -> Generator[Tensor, None, None]:
+    match td:
+        case Tensor() as t:
+            yield t
+        case list() as l:
+            for v in l:
+                yield from tensordict_flatten(v)
+        case dict() as d:
+            for v in d.values():
+                yield from tensordict_flatten(v)
+
+
+def tensordict_type(td: TensorDict) -> TensorDictType:
+    match td:
+        case Tensor() as t:
+            return TensorType(dtype=t.dtype, shape=t.shape)
+        case list() as l:
+            return tuple(tensordict_type(v) for v in l)
+        case dict() as d:
+            return frozenset((k, tensordict_type(v)) for k, v in d.items())
+        case _:
+            raise TypeError("TensorDict must be a Tensor, dict, or list")
+
+
+def tensordict_type_instantiate(dt: TensorDictType, name: str) -> TensorDict:
+    match dt:
+        case frozenset() as dt:
+            return {
+                k: tensordict_type_instantiate(v, name=f"{name}.{k}")  #
+                for k, v in dt
+            }
+        case tuple() as lt:
+            return [
+                tensordict_type_instantiate(v, name=f"{name}[{i}]")
+                for i, v in enumerate(lt)
+            ]
+        case TensorType() as tt:
+            return VarTensor.new(name=name, dtype=tt.dtype, shape=tt.shape)
+        case _:
+            raise TypeError("Invalid TensorDictType")
+
+
+#
+# TensorFunction: functions on TensorDict
+#
+#
+
+type TensorFunction[T] = Callable[[TensorDict], T]
 
 #
 # Tensor:
@@ -158,10 +227,10 @@ class Tensor(ABC):
     def __sub__(self, other: "Tensor | Scalar") -> "ElementwiseOperationTensor":
         return self.elementwise_binary_operation(op="sub", other=other)
 
-    def __max__(self, other: "Tensor | Scalar") -> "ElementwiseOperationTensor":
+    def max(self, other: "Tensor | Scalar") -> "ElementwiseOperationTensor":
         return self.elementwise_binary_operation(op="max", other=other)
 
-    def __min__(self, other: "Tensor | Scalar") -> "ElementwiseOperationTensor":
+    def min(self, other: "Tensor | Scalar") -> "ElementwiseOperationTensor":
         return self.elementwise_binary_operation(op="min", other=other)
 
     def eq(self, other: "Tensor | Scalar") -> "ElementwiseOperationTensor":
@@ -205,8 +274,7 @@ class Tensor(ABC):
         return ElementwiseOperationTensor.new(operator="not", operands=(self,))
 
     def __matmul__(self, other: "Tensor") -> "Tensor":
-        assert len(self.shape) in (2, 3)
-        assert len(other.shape) in (2, 3)
+        assert len(self.shape) in (2, 3) and len(other.shape) in (2, 3)
 
         must_squeeze_result = False
         if len(other.shape) < 3:
@@ -435,7 +503,7 @@ class ConstantTensor(Tensor):
 
 
 @dataclass(eq=False)
-class ParameterTensor(Tensor):
+class VarTensor(Tensor):
     """
     WARNING: should never be constructed by the end-user, purely used to trace/record
     inputs to functions for automatic differentiation, etc.
@@ -444,9 +512,9 @@ class ParameterTensor(Tensor):
     name: str
 
     @staticmethod
-    def new(*, name: str, dtype: DType, shape: Shape) -> "ParameterTensor":
+    def new(*, name: str, dtype: DType, shape: Shape) -> "VarTensor":
         pitch = _c_contiguous_pitch(shape)
-        return ParameterTensor(
+        return VarTensor(
             dtype=dtype,
             offset=0,
             shape=shape,
@@ -873,23 +941,6 @@ def _c_contiguous_pitch(shape: Shape) -> Pitch:
 
 
 #
-# TensorFunction:
-#
-
-
-type TensorFunction[T] = (
-    Callable[[Tensor], T]
-    | Callable[[Tensor, Tensor], T]
-    | Callable[[Tensor, Tensor, Tensor], T]
-    | Callable[[Tensor, Tensor, Tensor, Tensor], T]
-    | Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], T]
-    | Callable[[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor], T]
-    | Callable[[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor], T]
-    | Callable[[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor], T]
-)
-
-
-#
 # Substitution:
 #
 
@@ -911,7 +962,7 @@ class Substitution:
 
     @staticmethod
     def zip(
-        params: list[ParameterTensor],
+        params: list[VarTensor],
         args: tuple[Tensor, ...],
     ) -> "Substitution":
         """
@@ -921,12 +972,27 @@ class Substitution:
         subs = {param.name: arg for param, arg in zip(params, args)}
         return Substitution(subs=subs)
 
+    @staticmethod
+    def zip_tensordict(
+        params: TensorDict,
+        values: TensorDict,
+    ) -> "Substitution":
+        assert tensordict_type(params) == tensordict_type(values)
+        params_iterator = tensordict_flatten(params)
+        values_iterator = tensordict_flatten(values)
+        subs = {
+            param.name: value
+            for param, value in zip(params_iterator, values_iterator)
+            if isinstance(param, VarTensor)
+        }
+        return Substitution(subs=subs)
+
     def rewrite(self, tensor: Tensor) -> Tensor:
         if cached := self.memo.get(tensor):
             return cached
 
         match tensor:
-            case ParameterTensor(name=name) if replacement := self.subs.get(name):
+            case VarTensor(name=name) if replacement := self.subs.get(name):
                 res = replacement
             case leaf if not tensor.operands:
                 res = leaf
@@ -941,11 +1007,13 @@ class Substitution:
         self.memo[tensor] = res
         return res
 
-    def rewrite_dict[K](self, td: dict[K, Tensor]) -> dict[K, Tensor]:
-        return {k: self.rewrite(v) for k, v in td.items()}
-
-    def rewrite_list(self, tl: list[Tensor]) -> list[Tensor]:
-        return [self.rewrite(t) for t in tl]
-
-    def rewrite_tuple(self, tt: tuple[Tensor, ...]) -> tuple[Tensor, ...]:
-        return tuple(self.rewrite(t) for t in tt)
+    def rewrite_tensordict(self, td: TensorDict) -> TensorDict:
+        match td:
+            case Tensor() as t:
+                return self.rewrite(t)
+            case list() as tl:
+                return [self.rewrite_tensordict(t) for t in tl]
+            case dict() as td:
+                return {k: self.rewrite_tensordict(v) for k, v in td.items()}
+            case _:
+                raise TypeError("TensorDict must be a Tensor, dict, or list")

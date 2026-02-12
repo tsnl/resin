@@ -309,7 +309,7 @@ class TestMemoization:
 
 class TestParameterTensor:
     def test_raises_on_unsubstituted(self) -> None:
-        p = rc.ParameterTensor.new(name="x", dtype="fp32", shape=(3,))
+        p = rc.VarTensor.new(name="x", dtype="fp32", shape=(3,))
         with pytest.raises(ValueError, match="Cannot evaluate unsubstituted parameter"):
             evaluate(p)
 

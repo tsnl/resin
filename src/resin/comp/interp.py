@@ -19,7 +19,7 @@ from .tensor import (
     ElementwiseOperationTensor,
     ExpandTensor,
     IndexTensor,
-    ParameterTensor,
+    VarTensor,
     PermuteTensor,
     ReductionTensor,
     ReshapeTensor,
@@ -65,7 +65,7 @@ class Interpreter:
         match tensor:
             case ConstantTensor():
                 return self._evaluate_constant(tensor)
-            case ParameterTensor():
+            case VarTensor():
                 raise ValueError(
                     f"Cannot evaluate unsubstituted parameter: {tensor.name}"
                 )

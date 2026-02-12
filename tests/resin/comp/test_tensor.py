@@ -321,8 +321,8 @@ class TestComplexGraphs:
 class TestRewriteSimple:
     def test_substitute_single_parameter(self) -> None:
         """A parameter is replaced by a constant."""
-        x = rc.ParameterTensor.new(name="x", dtype="fp32", shape=(4,))
-        y = rc.ParameterTensor.new(name="y", dtype="fp32", shape=(4,))
+        x = rc.VarTensor.new(name="x", dtype="fp32", shape=(4,))
+        y = rc.VarTensor.new(name="y", dtype="fp32", shape=(4,))
         graph = x + y
 
         replacement = rc.Tensor.const(value=[1, 2, 3, 4], dtype="fp32")
@@ -343,8 +343,8 @@ class TestRewriteSimple:
 class TestRewriteComplexGraph:
     def test_softmax_like_pattern(self) -> None:
         """Rewrite through a multi-layer softmax-like graph."""
-        x = rc.ParameterTensor.new(name="x", dtype="fp32", shape=(8,))
-        w = rc.ParameterTensor.new(name="w", dtype="fp32", shape=(8,))
+        x = rc.VarTensor.new(name="x", dtype="fp32", shape=(8,))
+        w = rc.VarTensor.new(name="w", dtype="fp32", shape=(8,))
 
         z = x * w
         exp_z = z.exp()
@@ -358,7 +358,7 @@ class TestRewriteComplexGraph:
 
         # No ParameterTensor should remain in the rewritten graph
         for tensor in rewritten.topological_sort():
-            assert not isinstance(tensor, rc.ParameterTensor)
+            assert not isinstance(tensor, rc.VarTensor)
 
         assert rewritten.shape == (8,)
 
@@ -371,7 +371,7 @@ class TestRewriteComplexGraph:
 class TestRewriteSharedSubexpressions:
     def test_shared_subexpr_stays_shared(self) -> None:
         """Shared sub-expressions remain shared (same identity) after rewrite."""
-        x = rc.ParameterTensor.new(name="x", dtype="fp32", shape=(4,))
+        x = rc.VarTensor.new(name="x", dtype="fp32", shape=(4,))
         shared = x.exp()
         graph = shared + shared
 
@@ -389,7 +389,7 @@ class TestRewriteSharedSubexpressions:
 
     def test_shared_parameter_substituted_once(self) -> None:
         """A parameter used in multiple places maps to the same replacement."""
-        x = rc.ParameterTensor.new(name="x", dtype="fp32", shape=(2,))
+        x = rc.VarTensor.new(name="x", dtype="fp32", shape=(2,))
         graph = (x + x) * x
 
         replacement = rc.Tensor.const(value=[5, 6], dtype="fp32")
@@ -409,7 +409,7 @@ class TestMaxMinOperations:
     def test_max_debug_print(self) -> None:
         t1 = rc.Tensor.const(value=[1, 2], dtype="fp32")
         t2 = rc.Tensor.const(value=[3, 4], dtype="fp32")
-        result = t1.__max__(t2)
+        result = t1.max(t2)
         expected = textwrap.dedent(
             """
             (elementwise "max") :: (fp32 (2))
@@ -422,7 +422,7 @@ class TestMaxMinOperations:
     def test_min_debug_print(self) -> None:
         t1 = rc.Tensor.const(value=[1, 2], dtype="fp32")
         t2 = rc.Tensor.const(value=[3, 4], dtype="fp32")
-        result = t1.__min__(t2)
+        result = t1.min(t2)
         expected = textwrap.dedent(
             """
             (elementwise "min") :: (fp32 (2))
@@ -434,7 +434,7 @@ class TestMaxMinOperations:
 
     def test_max_with_scalar(self) -> None:
         t = rc.Tensor.const(value=[1, 2, 3], dtype="fp32")
-        result = t.__max__(0)
+        result = t.max(0)
         expected = textwrap.dedent(
             """
             (elementwise "max") :: (fp32 (3))
@@ -447,7 +447,7 @@ class TestMaxMinOperations:
 
     def test_min_with_scalar(self) -> None:
         t = rc.Tensor.const(value=[1, 2, 3], dtype="fp32")
-        result = t.__min__(10)
+        result = t.min(10)
         expected = textwrap.dedent(
             """
             (elementwise "min") :: (fp32 (3))
