@@ -26,7 +26,7 @@ BreakBeforeConceptDeclarations: Always
 AlwaysBreakTemplateDeclarations: true
 
 # Requires:
-AllowShortCompoundRequirementOnASingleLine: true
+# AllowShortCompoundRequirementOnASingleLine: true
 IndentRequiresClause: false
 RequiresClausePosition: SingleLine
 

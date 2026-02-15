@@ -1,1 +1,1 @@
--I deps/wgpu-native/ffi/
+-Ideps/wgpu-native/ffi/webgpu-headers
