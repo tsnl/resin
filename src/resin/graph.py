@@ -8,6 +8,7 @@ resin.graph models the computational graph of tensor operations.
 __all__ = [
     "ConstNode",
     "ElementwiseNode",
+    "GradOfUndifferentiableNodeException",
     "IndexNode",
     "MatmulNode",
     "Node",
@@ -24,6 +25,10 @@ from typing import Literal
 import numpy.typing as npt
 
 from .common import SupportsWrite, pascal_to_snake_case
+
+
+class GradOfUndifferentiableNodeException(Exception):
+    pass
 
 
 #
@@ -164,7 +169,11 @@ class Node(ABC):
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> Node:
         return IndexNode.new(container=self, key=key)
 
-    def reduce(self, axes: tuple[int, ...], operator: ScalarOperator) -> Node:
+    def reduce(
+        self,
+        axes: tuple[int, ...],
+        operator: BinaryAssocScalarOperator,
+    ) -> Node:
         return ReductionNode.new(input=self, axes=axes, operator=operator)
 
     def permute(self, permutation: tuple[int, ...]) -> Node:
@@ -210,15 +219,15 @@ class Node(ABC):
         """
         return grad(self)
 
-    def df_do(self, df_dn: "Node") -> "tuple[Node, ...] | None":
+    def df_do(self, df_dn: "Node") -> "tuple[Node, ...]":
         """
-        Given ∂f/∂n (df_dn), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand oᵢ,
-        or None if this node is not differentiable.
+        Given ∂f/∂n (df_dn), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand oᵢ.
 
         Override this method in each Node subclass to implement differentiation for that
-        node type.
+        node type. Raises GradOfUndifferentiableNodeException if the node is not
+        differentiable.
         """
-        return None
+        raise GradOfUndifferentiableNodeException(self)
 
     #
     # Private:
@@ -352,7 +361,7 @@ class ParamNode(Node):
 class ElementwiseNode(Node):
     operator: ScalarOperator
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...] | None:
+    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         match self.operator:
             case "neg":
                 return (-df_dn,)
@@ -402,23 +411,33 @@ class ElementwiseNode(Node):
                     df_dn * self.input[1].lt(self.input[0]),
                 )
             case "eq" | "ne" | "lt" | "gt" | "le" | "ge":
-                # Comparison operators are not differentiable.
-                return None
+                raise GradOfUndifferentiableNodeException(self)
             case _:
                 raise NotImplementedError(f"{self.operator=}")
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ReductionNode(Node):
-    operator: ScalarOperator
+    """
+    Performs a reduction (e.g. sum, max) along one or more axes of the input tensor,
+    using a specified associative binary operator (e.g. mul, add, max, min).
+
+    The output tensor has the same shape as the input tensor, except that the reduced
+    axes have been replaced with size 1.
+    """
+
+    operator: BinaryAssocScalarOperator
     axes: tuple[int, ...]
 
     @staticmethod
     def new(
         input: Node,
         axes: tuple[int, ...],
-        operator: ScalarOperator,
-    ) -> "ReductionNode":
+        operator: BinaryAssocScalarOperator,
+    ) -> "Node":
+        if not axes:
+            return input
+
         out_shape = list(input.shape)
         for axis in axes:
             if axis < 0 or axis >= len(input.shape):
@@ -434,9 +453,23 @@ class ReductionNode(Node):
             axes=axes,
         )
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...] | None:
-        _ = df_dn
-        raise NotImplementedError()
+    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+        match self.operator:
+            case "mul":
+                # ∂n/∂o₁ = n / o₁
+                return (df_dn * (self / self.input[0]),)
+            case "add":
+                # ∂n/∂o₁ = 1
+                # Broadcast df_dn to input's shape
+                return (df_dn.view(shape=self.input[0].shape, pitch=self.pitch),)
+            case "max" | "min":
+                # ∂n/∂o₁ = 1 if o₁ is the max/min along the reduction axes, else 0
+                # Broadcast df_dn to input's shape and mask with the condition above.
+                # Note that the condition is identical for both "max" and "min".
+                cond = self.input[0].eq(self)
+                return (df_dn.view(shape=self.input[0].shape, pitch=self.pitch) * cond,)
+            case _:
+                raise NotImplementedError(f"{self.operator=}")
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -460,6 +493,13 @@ class MatmulNode(Node):
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ViewNode(Node):
+    """
+    Reinterpret cast for tensors.
+
+    More formally, maps each input element to zero, one, or multiple (i.e. broadcasted)
+    output elements by only changing the shape and pitch.
+    """
+
     @staticmethod
     def new(
         input: Node,
@@ -468,7 +508,7 @@ class ViewNode(Node):
     ) -> "Node":
         if isinstance(input, ViewNode):
             return input.input[0].view(shape=shape, pitch=pitch)
-        check_view_compatibility(input.shape, input.pitch, shape, pitch)
+        ViewNode._check_view_compatibility(input.shape, input.pitch, shape, pitch)
         return ViewNode(shape=shape, pitch=pitch, dtype=input.dtype, input=(input,))
 
     @staticmethod
@@ -491,11 +531,108 @@ class ViewNode(Node):
             input=(input,),
         )
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...] | None:
-        # TODO: implement this: for each view dim...
-        # - if broadcast, need to reduce sum over that dim in the gradient
-        # - if not broadcast, need to index with the right key
-        raise NotImplementedError()
+    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+        """
+        NOTE:
+        - A view simply maps each input index `x` to zero, one, or multiple output indices `y_o`. Each index is a "flat" index, i.e. an integer that references an element in some flat storage array that is viewed.
+        - Consider each case:
+          - x -> {}: the gradient flow is zero for that element.
+          - x -> {y}: the gradient flow is identity for that element.
+          - x -> {y₁, y₂, ...}: the gradient flow is a sum over elements (broadcast).
+        """
+
+        # Sum-reduce over all broadcast dimensions (i.e. pitch 0).
+        # Then, view in the input shape and pitch.
+        df_do = df_dn.reduce(
+            axes=tuple(i_dim for i_dim, p in enumerate(self.pitch) if p == 0),
+            operator="add",
+        ).view(
+            shape=self.input[0].shape,
+            pitch=self.input[0].pitch,
+        )
+        return (df_do,)
+
+    @staticmethod
+    def _check_view_compatibility(
+        old_shape: tuple[int, ...],
+        old_pitch: tuple[int, ...],
+        new_shape: tuple[int, ...],
+        new_pitch: tuple[int, ...],
+    ):
+        """
+        Checks whether a tensor with (old_shape, old_pitch) can be viewed as a tensor
+        with (new_shape, new_pitch).
+        """
+
+        def c_contiguous_permutation(
+            shape: tuple[int, ...],
+            pitch: tuple[int, ...],
+        ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
+            """
+            Given a contiguous (but not C-contiguous) tensor, attempt to find a
+            permutation of its dimensions that makes it C-contiguous. If such a
+            permutation exists, return the permuted shape and pitch. Otherwise, return
+            None.
+            """
+
+            # argsort the dimensions by decreasing pitch, breaking ties by decreasing shape.
+            perm = sorted(
+                range(len(pitch)), key=lambda i: (pitch[i], shape[i]), reverse=True
+            )
+
+            # permute the shape and pitch according to the permutation above:
+            new_shape = tuple(shape[i] for i in perm)
+            new_pitch = tuple(pitch[i] for i in perm)
+
+            # Check if the new pitch is C-contiguous for the new shape:
+            if is_c_contiguous(new_shape, new_pitch):
+                return new_shape, new_pitch
+
+            # If not, then the tensor cannot be made C-contiguous by permuting dimensions.
+            return None
+
+        def del_size_one_pitch_zero_dims(
+            shape: tuple[int, ...],
+            pitch: tuple[int, ...],
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            """
+            Returns the shape and pitch after deleting all dimensions of size 1 or
+            dimensions of pitch 0.
+            """
+
+            new_shape = []
+            new_pitch = []
+            for s, p in zip(shape, pitch):
+                if s != 1 and p != 0:
+                    new_shape.append(s)
+                    new_pitch.append(p)
+            return tuple(new_shape), tuple(new_pitch)
+
+        # If both old and new shapes are contiguous (not even C-contiguous), then the
+        # view is compatible if and only if the element count is the same.
+        old_cc_shape_pitch = c_contiguous_permutation(old_shape, old_pitch)
+        new_cc_shape_pitch = c_contiguous_permutation(new_shape, new_pitch)
+        if (
+            old_cc_shape_pitch == new_cc_shape_pitch
+            and old_cc_shape_pitch is not None
+            and math.prod(old_shape) == math.prod(new_shape)
+        ):
+            return
+
+        # If both old and new shapes are identical after deleting all dimensions of size
+        # 1 or dimensions of pitch 0, then the view is compatible, even if not
+        # contiguous.
+        old_squeezed_shape_pitch = del_size_one_pitch_zero_dims(old_shape, old_pitch)
+        new_squeezed_shape_pitch = del_size_one_pitch_zero_dims(new_shape, new_pitch)
+        if old_squeezed_shape_pitch == new_squeezed_shape_pitch:
+            return
+
+        # Otherwise, the view is not compatible.
+        return ValueError(
+            f"Cannot view "
+            f"old tensor (shape={old_shape}, pitch={old_pitch}) as "
+            f"new tensor (shape={new_shape}, pitch={new_pitch})"
+        )
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -542,7 +679,7 @@ class IndexNode(Node):
             input=(container,),
         )
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...] | None:
+    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         raise NotImplementedError()
 
 
@@ -557,7 +694,7 @@ class CopyNode(Node):
         pitch = compute_c_contiguous_pitch_for_shape(shape)
         return CopyNode(shape=shape, pitch=pitch, dtype=dtype, input=(input,))
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...] | None:
+    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         return (df_dn.copy(dtype=self.input[0].dtype),)
 
 
@@ -697,90 +834,8 @@ def is_c_contiguous(shape: tuple[int, ...], pitch: tuple[int, ...]) -> bool:
     return pitch == compute_c_contiguous_pitch_for_shape(shape)
 
 
-def check_view_compatibility(
-    old_shape: tuple[int, ...],
-    old_pitch: tuple[int, ...],
-    new_shape: tuple[int, ...],
-    new_pitch: tuple[int, ...],
-):
-    """
-    Checks whether a tensor with (old_shape, old_pitch) can be viewed as a tensor with
-    (new_shape, new_pitch). Returns a string describing the reason for compatibility or
-    incompatibility.
-    """
-
-    def c_contiguous_permutation(
-        shape: tuple[int, ...],
-        pitch: tuple[int, ...],
-    ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
-        """
-        Given a contiguous (but not C-contiguous) tensor, attempt to find a permutation
-        of its dimensions that makes it C-contiguous. If such a permutation exists,
-        return the new shape and pitch. Otherwise, return None.
-        """
-
-        # argsort the dimensions by decreasing pitch, breaking ties by decreasing shape.
-        perm = sorted(
-            range(len(pitch)), key=lambda i: (pitch[i], shape[i]), reverse=True
-        )
-
-        # permute the shape and pitch according to the permutation above:
-        new_shape = tuple(shape[i] for i in perm)
-        new_pitch = tuple(pitch[i] for i in perm)
-
-        # Check if the new pitch is C-contiguous for the new shape:
-        if is_c_contiguous(new_shape, new_pitch):
-            return new_shape, new_pitch
-
-        # If not, then the tensor cannot be made C-contiguous by permuting dimensions.
-        return None
-
-    def del_size_one_pitch_zero_dims(
-        shape: tuple[int, ...],
-        pitch: tuple[int, ...],
-    ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-        """
-        Returns the shape and pitch after deleting all dimensions of size 1 or dimensions of
-        pitch 0.
-        """
-
-        new_shape = []
-        new_pitch = []
-        for s, p in zip(shape, pitch):
-            if s != 1 and p != 0:
-                new_shape.append(s)
-                new_pitch.append(p)
-        return tuple(new_shape), tuple(new_pitch)
-
-    # If both old and new shapes are contiguous (not even C-contiguous), then the view
-    # is compatible if and only if the element count is the same.
-    old_cc_shape_pitch = c_contiguous_permutation(old_shape, old_pitch)
-    new_cc_shape_pitch = c_contiguous_permutation(new_shape, new_pitch)
-    if (
-        old_cc_shape_pitch == new_cc_shape_pitch
-        and old_cc_shape_pitch is not None
-        and math.prod(old_shape) == math.prod(new_shape)
-    ):
-        return
-
-    # If both old and new shapes are identical after deleting all dimensions of size 1
-    # or dimensions of pitch 0, then the view is compatible, even if not contiguous.
-    # This is commonly called "squeezing".
-    old_squeezed_shape_pitch = del_size_one_pitch_zero_dims(old_shape, old_pitch)
-    new_squeezed_shape_pitch = del_size_one_pitch_zero_dims(new_shape, new_pitch)
-    if old_squeezed_shape_pitch == new_squeezed_shape_pitch:
-        return
-
-    # Otherwise, the view is not compatible.
-    return ValueError(
-        f"Cannot view "
-        f"old tensor (shape={old_shape}, pitch={old_pitch}) as "
-        f"new tensor (shape={new_shape}, pitch={new_pitch})"
-    )
-
-
 #
-# Scalar:
+# Scalar, ScalarOperator:
 #
 
 
@@ -789,7 +844,8 @@ _SCALAR_TYPES: tuple[type, ...] = (float, int)
 
 type ScalarOperator = UnaryScalarOperator | BinaryScalarOperator | BinaryCompareOperator
 type UnaryScalarOperator = Literal["neg", "exp", "log", "not"]
-type BinaryScalarOperator = Literal["pow", "mul", "div", "add", "sub", "max", "min"]
+type BinaryAssocScalarOperator = Literal["mul", "add", "max", "min"]
+type BinaryScalarOperator = Literal["pow", "div", "sub"] | BinaryAssocScalarOperator
 type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
 
 
@@ -943,8 +999,9 @@ def grad(f_graph: Node) -> dict[Node, Node]:
         if not df_dn:
             continue
 
-        df_do = node.df_do(df_dn)
-        if df_do is None:
+        try:
+            df_do = node.df_do(df_dn)
+        except GradOfUndifferentiableNodeException:
             continue
 
         for operand, df_do_i in zip(node.input, df_do):

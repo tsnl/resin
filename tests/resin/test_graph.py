@@ -3,7 +3,7 @@
 import textwrap
 from io import StringIO
 
-from resin.graph import Node
+from resin.graph import ElementwiseNode, Node, ViewNode
 
 
 def debug_str(node: Node) -> str:
@@ -321,3 +321,147 @@ class TestParam:
         t = Node.param((4,), "fp32", label="weights")
         expected = "param(label='weights') :: (fp32 (4,) (1,))"
         assert debug_str(t) == expected.strip()
+
+
+class TestViewDfDo:
+    """Verify ViewNode.df_do() produces correct gradient graphs."""
+
+    def test_broadcast_reduces(self) -> None:
+        """Broadcast dims (pitch=0) should be sum-reduced in the backward pass."""
+        x = Node.param((3,), "fp32", label="x")
+        y = x.broadcast((4,))  # shape (4, 3), pitch (0, 1)
+        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        (grad_x,) = y.df_do(df_dn)
+
+        assert grad_x.shape == x.shape
+        assert grad_x.pitch == x.pitch
+
+    def test_permutation_views_back(self) -> None:
+        """Permutation has no broadcast dims — backward is just a view."""
+        x = Node.param((2, 3), "fp32", label="x")
+        y = x.permute((1, 0))  # shape (3, 2), pitch (1, 2)
+        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        (grad_x,) = y.df_do(df_dn)
+
+        assert isinstance(grad_x, ViewNode)
+        assert grad_x.shape == x.shape
+        assert grad_x.pitch == x.pitch
+
+    def test_identity_view(self) -> None:
+        """Viewing with same shape/pitch is a no-op on the gradient."""
+        x = Node.param((2, 3), "fp32", label="x")
+        y = x.view(shape=x.shape, pitch=x.pitch)
+        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        (grad_x,) = y.df_do(df_dn)
+
+        assert grad_x.shape == x.shape
+
+    def test_reshape_1d_to_2d(self) -> None:
+        """Reshaping 1D to 2D is one-to-one — backward is just a view back."""
+        x = Node.param((6,), "fp32", label="x")
+        y = x.view(shape=(2, 3), pitch=(3, 1))
+        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        (grad_x,) = y.df_do(df_dn)
+
+        assert isinstance(grad_x, ViewNode)
+        assert grad_x.shape == x.shape
+        assert grad_x.pitch == x.pitch
+
+    def test_reshape_1d_to_3d(self) -> None:
+        """Reshaping 1D to 3D is one-to-one — backward is just a view back."""
+        x = Node.param((24,), "fp32", label="x")
+        y = x.view(shape=(2, 3, 4), pitch=(12, 4, 1))
+        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        (grad_x,) = y.df_do(df_dn)
+
+        assert isinstance(grad_x, ViewNode)
+        assert grad_x.shape == x.shape
+        assert grad_x.pitch == x.pitch
+
+    def test_scalar_broadcast(self) -> None:
+        """Broadcasting a scalar to a matrix should reduce all dims."""
+        x = Node.param((), "fp32", label="x")
+        y = x.broadcast((2, 3))  # shape (2, 3), pitch (0, 0)
+        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        (grad_x,) = y.df_do(df_dn)
+
+        assert grad_x.shape == x.shape
+
+
+class TestReductionDfDo:
+    """Verify ReductionNode.df_do() produces correct gradient graphs.
+
+    Each test builds a small forward graph (param -> reduce), then calls
+    df_do() with a mock upstream gradient and checks the resulting graph
+    structure: node type, operator, and shape.
+    """
+
+    def _make(self, axes, operator):
+        """Helper: build input, reduction node, and upstream gradient."""
+        x = Node.param((2, 3), "fp32", label="x")
+        n = x.reduce(axes=axes, operator=operator)
+        df_dn = Node.param(n.shape, "fp32", label="df_dn")
+        return x, n, df_dn
+
+    # -- add ------------------------------------------------------------------
+
+    def test_add_returns_view_broadcast(self) -> None:
+        """∂(Σxᵢ)/∂xⱼ = 1 — gradient is just df_dn broadcast to input shape."""
+        x, n, df_dn = self._make(axes=(1,), operator="add")
+        (grad_x,) = n.df_do(df_dn)
+
+        # Broadcasting df_dn from (2,1) back to (2,3) is a pure view.
+        assert isinstance(grad_x, ViewNode)
+        assert grad_x.shape == x.shape
+
+    # -- mul ------------------------------------------------------------------
+
+    def test_mul_uses_quotient(self) -> None:
+        """∂(∏xᵢ)/∂xⱼ = (∏xᵢ)/xⱼ — top-level node is df_dn * (n / x)."""
+        x, n, df_dn = self._make(axes=(1,), operator="mul")
+        (grad_x,) = n.df_do(df_dn)
+
+        assert isinstance(grad_x, ElementwiseNode)
+        assert grad_x.operator == "mul"
+        assert grad_x.shape == x.shape
+
+    # -- max / min ------------------------------------------------------------
+
+    def test_max_masks_by_equality(self) -> None:
+        """∂(max xᵢ)/∂xⱼ = 1{xⱼ == max} — top node is mul (broadcast * mask)."""
+        x, n, df_dn = self._make(axes=(1,), operator="max")
+        (grad_x,) = n.df_do(df_dn)
+
+        assert isinstance(grad_x, ElementwiseNode)
+        assert grad_x.operator == "mul"
+        assert grad_x.shape == x.shape
+
+    def test_min_masks_by_equality(self) -> None:
+        """∂(min xᵢ)/∂xⱼ = 1{xⱼ == min} — same structure as max."""
+        x, n, df_dn = self._make(axes=(1,), operator="min")
+        (grad_x,) = n.df_do(df_dn)
+
+        assert isinstance(grad_x, ElementwiseNode)
+        assert grad_x.operator == "mul"
+        assert grad_x.shape == x.shape
+
+    # -- multi-axis -----------------------------------------------------------
+
+    def test_add_multi_axis(self) -> None:
+        """Reducing over all axes: gradient broadcasts scalar back to full shape."""
+        x = Node.param((2, 3), "fp32", label="x")
+        n = x.reduce(axes=(0, 1), operator="add")  # shape (1, 1)
+        df_dn = Node.param(n.shape, "fp32", label="df_dn")
+        (grad_x,) = n.df_do(df_dn)
+
+        assert grad_x.shape == x.shape
+
+    # -- single operand -------------------------------------------------------
+
+    def test_always_returns_single_element_tuple(self) -> None:
+        """ReductionNode has one input, so df_do always returns a 1-tuple."""
+        for op in ("add", "mul", "max", "min"):
+            _, n, df_dn = self._make(axes=(0,), operator=op)
+            result = n.df_do(df_dn)
+            assert result is not None
+            assert len(result) == 1
