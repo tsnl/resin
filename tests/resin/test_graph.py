@@ -147,7 +147,7 @@ class TestIndexing:
         t = t[0]
         expected = textwrap.dedent(
             """
-            index(key=(0,)) :: (fp32 (3,) (1,))
+            view() :: (fp32 (3,) (1,))
             └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
             """
         )
@@ -158,7 +158,7 @@ class TestIndexing:
         t = t[::2]
         expected = textwrap.dedent(
             """
-            index(key=(slice(None, None, 2),)) :: (fp32 (3,) (2,))
+            view() :: (fp32 (3,) (2,))
             └ const(value=[1, 2, 3, 4, 5, 6]) :: (fp32 (6,) (1,))
             """
         )
@@ -169,7 +169,7 @@ class TestIndexing:
         t = t[1, 1:3]
         expected = textwrap.dedent(
             """
-            index(key=(1, slice(1, 3, None))) :: (fp32 (2,) (1,))
+            view() :: (fp32 (2,) (1,))
             └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
             """
         )
@@ -197,7 +197,7 @@ class TestCompact:
         expected = textwrap.dedent(
             """
             copy() :: (fp32 (1, 3) (3, 1))
-            └ index(key=(slice(None, None, 2), slice(None, None, None))) :: (fp32 (1, 3) (6, 1))
+            └ view() :: (fp32 (1, 3) (6, 1))
               └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
             """
         )

@@ -174,7 +174,8 @@ class Node(ABC):
         return Node._from_node_or_scalar(other, dtype=self.dtype) @ self
 
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> Node:
-        return IndexNode.new(container=self, key=key)
+        key = (key,) if isinstance(key, (int, slice)) else key
+        return ViewNode.new_index(input=self, key=key)
 
     def reduce(
         self,
@@ -525,10 +526,8 @@ class MatmulNode(Node):
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ViewNode(Node):
     """
-    Reinterpret cast for tensors.
-
-    More formally, maps each input element to zero, one, or multiple (i.e. broadcasted)
-    output elements by only changing the shape and pitch.
+    Maps each input element to zero, one, or multiple (i.e. broadcasted) output elements
+    by only changing the shape and pitch.
     """
 
     @staticmethod
@@ -568,6 +567,58 @@ class ViewNode(Node):
             pitch=new_pitch,
         )
 
+    @staticmethod
+    def new_index(input: Node, key: tuple[int | slice, ...]) -> "ViewNode":
+        def bounded_index(k: int) -> int:
+            d = input.shape[dim]
+            if not (-d <= k < d):
+                raise IndexError(
+                    f"Index {k} out of bounds for dimension {dim} of size {d}"
+                )
+            return k % d
+
+        def bounded_end(k: int) -> int:
+            d = input.shape[dim]
+            if not (0 <= k <= d):
+                raise IndexError(
+                    f"Slice end {k} out of bounds for dimension {dim} of size {d}"
+                )
+            return k
+
+        assert len(key) <= len(input.shape)
+
+        offset = input.offset
+        pitch = []
+        shape = []
+
+        for dim, k in enumerate(key):
+            match k:
+                case int():
+                    offset += bounded_index(k) * input.pitch[dim]
+                case slice():
+                    b = bounded_index(k.start) if k.start is not None else 0
+                    e = bounded_end(k.stop) if k.stop is not None else input.shape[dim]
+                    s = k.step if k.step is not None else 1
+                    a = abs(s)
+
+                    offset += b * input.pitch[dim]
+                    pitch.append(input.pitch[dim] * s)
+                    shape.append(max(0, (e - b + (a - 1)) // a))
+                case _:
+                    raise TypeError(f"Invalid index {k} for dimension {dim}")
+
+        for dim in range(len(key), len(input.shape)):
+            pitch.append(input.pitch[dim])
+            shape.append(input.shape[dim])
+
+        return ViewNode(
+            offset=offset,
+            pitch=tuple(pitch),
+            shape=tuple(shape),
+            dtype=input.dtype,
+            input=(input,),
+        )
+
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         """
         - A view simply maps each input index `x` to zero, one, or multiple output
@@ -578,6 +629,8 @@ class ViewNode(Node):
           - x -> {y}: the gradient flow is identity for that element.
           - x -> {y₁, y₂, ...}: the gradient flow is a sum over elements (broadcast).
         """
+
+        assert self.offset == 0, "Non-zero offset not supported in ViewNode.df_do yet"
 
         # Sum-reduce over all broadcast dimensions (i.e. pitch 0).
         # Then, view in the input shape and pitch.
@@ -674,55 +727,6 @@ class ViewNode(Node):
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
-class IndexNode(Node):
-    key: tuple[int | slice, ...]
-
-    @staticmethod
-    def new(container: Node, key: int | slice | tuple[int | slice, ...]) -> "IndexNode":
-        key = (key,) if isinstance(key, (int, slice)) else key
-
-        shape_list = []
-        pitch_list = []
-
-        # Compute the new shape and pitch for indexed dimensions:
-        for i, (k, s, p) in enumerate(zip(key, container.shape, container.pitch)):
-            if isinstance(k, int):
-                if not (-s <= k < s):
-                    raise IndexError(f"Index {i} out of bounds: {key=}")
-                # This dimension is removed, so we don't add to the lists.
-            elif isinstance(k, slice):
-                start = k.start if k.start is not None else 0
-                stop = k.stop if k.stop is not None else s
-                step = k.step if k.step is not None else 1
-                abs_step = abs(step)
-                dim_size = max(0, (stop - start + (abs_step - 1)) // abs_step)
-                shape_list.append(dim_size)
-                pitch_list.append(p * step)
-            else:
-                raise TypeError(f"Index {i} must be int or slice: {key=}")
-
-        # Add remaining dimensions that are not indexed:
-        for i in range(len(key), len(container.shape)):
-            shape_list.append(container.shape[i])
-            pitch_list.append(container.pitch[i])
-
-        shape = tuple(shape_list)
-        pitch = tuple(pitch_list)
-        dtype = container.dtype
-        return IndexNode(
-            offset=0,  # TODO: replace with ViewNode
-            key=key,
-            shape=shape,
-            pitch=pitch,
-            dtype=dtype,
-            input=(container,),
-        )
-
-    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
-        raise NotImplementedError()
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
 class CopyNode(Node):
     @staticmethod
     def new(input: Node, dtype: DType | None = None) -> "Node":
@@ -781,62 +785,8 @@ def dtype_join_kind(dtype1: DTypeKind, dtype2: DTypeKind) -> DTypeKind:
 
 
 #
-# Memory, Shape, Pitch:
+# Shape, Pitch:
 #
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
-class Memory:
-    bytes: int
-    dtype: DType
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
-class MemoryView:
-    memory: Memory
-    offset: int
-    pitch: tuple[int, ...]
-    shape: tuple[int, ...]
-
-    def gather(self, key: tuple[int | slice, ...]) -> "MemoryView":
-        """
-        Computes the MemoryView corresponding to indexing this MemoryView with the given
-        key.
-        """
-
-        def bounded_index(k: int) -> int:
-            if not (-dim <= k < dim):
-                raise IndexError(f"Index {k} out of bounds for dimension of size {dim}")
-            return k % dim
-
-        assert len(key) <= len(self.shape)
-
-        offset = self.offset
-        pitch = []
-        shape = []
-
-        for dim, k in enumerate(key):
-            match k:
-                case int():
-                    offset += bounded_index(k) * self.pitch[dim]
-                case slice():
-                    b = bounded_index(k.start) if k.start is not None else 0
-                    e = bounded_index(k.stop) if k.stop is not None else self.shape[dim]
-                    s = k.step if k.step is not None else 1
-                    a = abs(s)
-
-                    offset += b * self.pitch[dim]
-                    pitch.append(self.pitch[dim] * s)
-                    shape.append(max(0, (e - b + (a - 1)) // a))
-                case _:
-                    raise TypeError(f"Invalid index {k} for dimension {dim}")
-
-        return MemoryView(
-            memory=self.memory,
-            offset=offset,
-            pitch=tuple(pitch),
-            shape=tuple(shape),
-        )
 
 
 @dataclass
