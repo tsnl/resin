@@ -38,6 +38,7 @@ class GradOfUndifferentiableNodeException(Exception):
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class Node(ABC):
+    offset: int
     shape: tuple[int, ...]
     pitch: tuple[int, ...]
     dtype: DType
@@ -85,8 +86,14 @@ class Node(ABC):
     def broadcast(self, ns: tuple[int, ...]) -> Node:
         return ViewNode.new_broadcast(input=self, ns=ns)
 
-    def view(self, *, shape: tuple[int, ...], pitch: tuple[int, ...]) -> Node:
-        return ViewNode.new(input=self, shape=shape, pitch=pitch)
+    def view(
+        self,
+        *,
+        offset: int = 0,
+        shape: tuple[int, ...],
+        pitch: tuple[int, ...],
+    ) -> Node:
+        return ViewNode.new(input=self, offset=offset, shape=shape, pitch=pitch)
 
     def copy(self, dtype: DType | None = None) -> Node:
         return CopyNode.new(input=self, dtype=dtype)
@@ -235,6 +242,7 @@ class Node(ABC):
 
     def _elementwise_uop(self, operator: UnaryScalarOperator) -> Node:
         return ElementwiseNode(
+            offset=self.offset,
             shape=self.shape,
             pitch=self.pitch,
             dtype=self.dtype,
@@ -251,6 +259,7 @@ class Node(ABC):
         self, other = self._join_dtypes_for_bop(other)
         self, other = self._join_shapes_for_elementwise_bop(other)
         return ElementwiseNode(
+            offset=self.offset,
             shape=self.shape,
             pitch=self.pitch,
             dtype=self.dtype,
@@ -326,7 +335,14 @@ class ConstNode(Node):
     def new(value: "npt.ArrayLike", *, dtype: DType):
         shape = ConstNode._infer_value_shape(value)
         pitch = compute_c_contiguous_pitch_for_shape(shape)
-        return ConstNode(shape=shape, pitch=pitch, dtype=dtype, value=value, input=())
+        return ConstNode(
+            offset=0,
+            shape=shape,
+            pitch=pitch,
+            dtype=dtype,
+            value=value,
+            input=(),
+        )
 
     @staticmethod
     def _infer_value_shape(value: "npt.ArrayLike") -> tuple[int, ...]:
@@ -354,7 +370,14 @@ class ParamNode(Node):
         label: str | None = None,
     ) -> "ParamNode":
         pitch = compute_c_contiguous_pitch_for_shape(shape)
-        return ParamNode(shape=shape, pitch=pitch, dtype=dtype, input=(), label=label)
+        return ParamNode(
+            offset=0,
+            shape=shape,
+            pitch=pitch,
+            dtype=dtype,
+            input=(),
+            label=label,
+        )
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -445,6 +468,7 @@ class ReductionNode(Node):
             out_shape[axis] = 1
 
         return ReductionNode(
+            offset=input.offset,
             shape=tuple(out_shape),
             pitch=input.pitch,
             dtype=input.dtype,
@@ -478,9 +502,16 @@ class MatmulNode(Node):
     def new(a: Node, b: Node) -> "MatmulNode":
         a, b = a._join_dtypes_for_bop(b)
         a, b = a._join_shapes_for_matmul_bop(b)
+        out_offset = 0
         out_shape = a.shape[:-1] + (b.shape[-1],)
         out_pitch = compute_c_contiguous_pitch_for_shape(out_shape)
-        return MatmulNode(shape=out_shape, pitch=out_pitch, dtype=a.dtype, input=(a, b))
+        return MatmulNode(
+            offset=out_offset,
+            shape=out_shape,
+            pitch=out_pitch,
+            dtype=a.dtype,
+            input=(a, b),
+        )
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         # ∂n/∂o₁ = df/dn @ o₂.T
@@ -503,38 +534,45 @@ class ViewNode(Node):
     @staticmethod
     def new(
         input: Node,
+        offset: int,
         shape: tuple[int, ...],
         pitch: tuple[int, ...],
-    ) -> "Node":
-        if isinstance(input, ViewNode):
-            return input.input[0].view(shape=shape, pitch=pitch)
+    ) -> "ViewNode":
         ViewNode._check_view_compatibility(input.shape, input.pitch, shape, pitch)
-        return ViewNode(shape=shape, pitch=pitch, dtype=input.dtype, input=(input,))
+        return ViewNode(
+            offset=offset,
+            shape=shape,
+            pitch=pitch,
+            dtype=input.dtype,
+            input=(input,),
+        )
 
     @staticmethod
     def new_broadcast(input: Node, ns: tuple[int, ...]) -> "Node":
         zs = (0,) * len(ns)
         shape = ns + input.shape
         pitch = zs + input.pitch
-        return input.view(shape=shape, pitch=pitch)
+        return input.view(offset=input.offset, shape=shape, pitch=pitch)
 
     @staticmethod
     def new_permutation(input: Node, permutation: tuple[int, ...]) -> "ViewNode":
         if sorted(permutation) != list(range(len(input.shape))):
             raise ValueError(f"Bad permutation {permutation} for shape {input.shape}")
+        new_offset = input.offset
         new_shape = tuple(input.shape[i] for i in permutation)
         new_pitch = tuple(input.pitch[i] for i in permutation)
-        return ViewNode(
+        return ViewNode.new(
+            input=input,
+            offset=new_offset,
             shape=new_shape,
             pitch=new_pitch,
-            dtype=input.dtype,
-            input=(input,),
         )
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         """
-        NOTE:
-        - A view simply maps each input index `x` to zero, one, or multiple output indices `y_o`. Each index is a "flat" index, i.e. an integer that references an element in some flat storage array that is viewed.
+        - A view simply maps each input index `x` to zero, one, or multiple output
+          indices `y_o`. Each index is a "flat" index, i.e. an integer that references
+          an element in some flat storage array that is viewed.
         - Consider each case:
           - x -> {}: the gradient flow is zero for that element.
           - x -> {y}: the gradient flow is identity for that element.
@@ -672,6 +710,7 @@ class IndexNode(Node):
         pitch = tuple(pitch_list)
         dtype = container.dtype
         return IndexNode(
+            offset=0,  # TODO: replace with ViewNode
             key=key,
             shape=shape,
             pitch=pitch,
@@ -692,7 +731,7 @@ class CopyNode(Node):
             return input
         shape = input.shape
         pitch = compute_c_contiguous_pitch_for_shape(shape)
-        return CopyNode(shape=shape, pitch=pitch, dtype=dtype, input=(input,))
+        return CopyNode(offset=0, shape=shape, pitch=pitch, dtype=dtype, input=(input,))
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         return (df_dn.copy(dtype=self.input[0].dtype),)
@@ -742,8 +781,62 @@ def dtype_join_kind(dtype1: DTypeKind, dtype2: DTypeKind) -> DTypeKind:
 
 
 #
-# Shape, Pitch:
+# Memory, Shape, Pitch:
 #
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class Memory:
+    bytes: int
+    dtype: DType
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class MemoryView:
+    memory: Memory
+    offset: int
+    pitch: tuple[int, ...]
+    shape: tuple[int, ...]
+
+    def gather(self, key: tuple[int | slice, ...]) -> "MemoryView":
+        """
+        Computes the MemoryView corresponding to indexing this MemoryView with the given
+        key.
+        """
+
+        def bounded_index(k: int) -> int:
+            if not (-dim <= k < dim):
+                raise IndexError(f"Index {k} out of bounds for dimension of size {dim}")
+            return k % dim
+
+        assert len(key) <= len(self.shape)
+
+        offset = self.offset
+        pitch = []
+        shape = []
+
+        for dim, k in enumerate(key):
+            match k:
+                case int():
+                    offset += bounded_index(k) * self.pitch[dim]
+                case slice():
+                    b = bounded_index(k.start) if k.start is not None else 0
+                    e = bounded_index(k.stop) if k.stop is not None else self.shape[dim]
+                    s = k.step if k.step is not None else 1
+                    a = abs(s)
+
+                    offset += b * self.pitch[dim]
+                    pitch.append(self.pitch[dim] * s)
+                    shape.append(max(0, (e - b + (a - 1)) // a))
+                case _:
+                    raise TypeError(f"Invalid index {k} for dimension {dim}")
+
+        return MemoryView(
+            memory=self.memory,
+            offset=offset,
+            pitch=tuple(pitch),
+            shape=tuple(shape),
+        )
 
 
 @dataclass
