@@ -1,24 +1,19 @@
-import resin.comp as rc
+from dataclasses import dataclass
+
+import resin.graph as rg
+import resin.optim as ro
 
 
-def mlp(
-    linear_1: rc.Tensor,
-    linear_2: rc.Tensor,
-    linear_3: rc.Tensor,
-) -> rc.TensorFunction[rc.Tensor]:
-    def forward(x: rc.Tensor) -> rc.Tensor:
-        x = linear_1 @ x
-        x = relu(x)
-        x = linear_2 @ x
-        x = relu(x)
-        x = linear_3 @ x
-        return x
+@dataclass
+class BabyMlp:
+    l1: ro.Linear
+    l2: ro.Linear
+    l3: ro.Linear
 
-    return forward
-
-
-def relu(x: rc.Tensor) -> rc.Tensor:
-    return x.max(rc.Tensor.const(value=0, dtype=x.dtype))
+    def __call__(self, x: rg.Node) -> rg.Node:
+        w1 = ro.Parameter((784, 128), dtype="fp32")
+        w2 = ro.Parameter((128, 10), dtype="fp32")
+        return (x @ w1).relu() @ w2
 
 
 def main():
