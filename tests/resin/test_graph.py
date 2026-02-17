@@ -134,7 +134,7 @@ class TestReduction:
         t = t.reduce(axes=(1,), operator="add")
         expected = textwrap.dedent(
             """
-            reduction(operator='add', axes=(1,)) :: fp32(0,(2, 1),(3, 1))
+            reduction(operator='add', axes=(1,)) :: fp32(0,(2, 1),(1, 1))
             └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )

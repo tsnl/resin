@@ -229,18 +229,6 @@ class Node(ABC):
         raise NotDifferentiableException(self)
 
     #
-    # Backend:
-    #
-
-    def can_reuse_operand_memory(self) -> bool:
-        """
-        Returns whether this node can reuse any of its operands' memory for its output.
-        This is a hint for the backend to enable memory reuse, and thus, kernel fusion.
-        Conservatively disabled by default.
-        """
-        return False
-
-    #
     # Private:
     #
 
@@ -442,15 +430,6 @@ class ElementwiseNode(Node):
             case _:
                 raise NotImplementedError(f"{self.operator=}")
 
-    def can_reuse_operand_memory(self) -> bool:
-        """
-        ElementwiseNode can always reuse its operands' memory because each thread reads
-        from and writes to a single element.
-        """
-
-        assert self.input
-        return True
-
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ReductionNode(Node):
@@ -480,10 +459,13 @@ class ReductionNode(Node):
                 raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
             out_shape[axis] = 1
 
+        out_shape = tuple(out_shape)
+        out_pitch = compute_c_contiguous_pitch_for_shape(out_shape)
+
         return ReductionNode(
             offset=input.offset,
-            shape=tuple(out_shape),
-            pitch=input.pitch,
+            shape=out_shape,
+            pitch=out_pitch,
             dtype=input.dtype,
             input=(input,),
             operator=operator,
@@ -624,14 +606,6 @@ class ViewNode(Node):
 
         # Done:
         return (x,)
-
-    def can_reuse_operand_memory(self) -> bool:
-        """
-        ViewNode can always reuse its operand's memory because it is just a different
-        view of the same data. This is thoroughly validated in `ViewNode.new()` using
-        `Accessor.raise_if_not_compatible()`.
-        """
-        return True
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
