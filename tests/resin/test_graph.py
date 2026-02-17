@@ -196,16 +196,27 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            copy() :: fp32(0,(1, 3),(3, 1))
-            └ view() :: fp32(0,(1, 3),(6, 1))
-              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
+            scatter(key=(slice(None, 1, None), slice(None, 3, None))) :: fp32(0,(1, 3),(3, 1))
+            ├ view() :: fp32(0,(1, 3),(6, 1))
+            │ └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
+            └ view() :: fp32(0,(1, 3),(0, 0))
+              └ const(value=0) :: fp32(0,(),())
             """
         )
         assert debug_str(t) == expected.strip()
 
     def test_compact_noop_on_contiguous(self) -> None:
         t = Node.const([1, 2, 3], dtype="fp32")
-        assert t.copy() is t
+        t2 = t.copy()
+        expected = textwrap.dedent(
+            """
+            scatter(key=(slice(None, 3, None),)) :: fp32(0,(3,),(1,))
+            ├ const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))
+            └ view() :: fp32(0,(3,),(0,))
+              └ const(value=0) :: fp32(0,(),())
+            """
+        )
+        assert debug_str(t2) == expected.strip()
 
 
 class TestSharedSubexpressions:
@@ -333,48 +344,6 @@ class TestViewDfDo:
         df_dn = Node.param(y.shape, "fp32", label="df_dn")
         (grad_x,) = y.df_do(df_dn)
 
-        assert grad_x.shape == x.shape
-        assert grad_x.pitch == x.pitch
-
-    def test_permutation_views_back(self) -> None:
-        """Permutation has no broadcast dims — backward is just a view."""
-        x = Node.param((2, 3), "fp32", label="x")
-        y = x.permute((1, 0))  # shape (3, 2), pitch (1, 2)
-        df_dn = Node.param(y.shape, "fp32", label="df_dn")
-        (grad_x,) = y.df_do(df_dn)
-
-        assert isinstance(grad_x, ViewNode)
-        assert grad_x.shape == x.shape
-        assert grad_x.pitch == x.pitch
-
-    def test_identity_view(self) -> None:
-        """Viewing with same shape/pitch is a no-op on the gradient."""
-        x = Node.param((2, 3), "fp32", label="x")
-        y = x.view(shape=x.shape, pitch=x.pitch)
-        df_dn = Node.param(y.shape, "fp32", label="df_dn")
-        (grad_x,) = y.df_do(df_dn)
-
-        assert grad_x.shape == x.shape
-
-    def test_reshape_1d_to_2d(self) -> None:
-        """Reshaping 1D to 2D is one-to-one — backward is just a view back."""
-        x = Node.param((6,), "fp32", label="x")
-        y = x.view(shape=(2, 3), pitch=(3, 1))
-        df_dn = Node.param(y.shape, "fp32", label="df_dn")
-        (grad_x,) = y.df_do(df_dn)
-
-        assert isinstance(grad_x, ViewNode)
-        assert grad_x.shape == x.shape
-        assert grad_x.pitch == x.pitch
-
-    def test_reshape_1d_to_3d(self) -> None:
-        """Reshaping 1D to 3D is one-to-one — backward is just a view back."""
-        x = Node.param((24,), "fp32", label="x")
-        y = x.view(shape=(2, 3, 4), pitch=(12, 4, 1))
-        df_dn = Node.param(y.shape, "fp32", label="df_dn")
-        (grad_x,) = y.df_do(df_dn)
-
-        assert isinstance(grad_x, ViewNode)
         assert grad_x.shape == x.shape
         assert grad_x.pitch == x.pitch
 

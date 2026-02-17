@@ -8,9 +8,9 @@ resin.graph models the computational graph of tensor operations.
 __all__ = [
     "ConstNode",
     "ElementwiseNode",
-    "GradOfUndifferentiableNodeException",
     "MatmulNode",
     "Node",
+    "NotDifferentiableException",
     "ParamNode",
     "ReductionNode",
     "ViewNode",
@@ -26,7 +26,7 @@ import numpy.typing as npt
 from .common import SupportsWrite, pascal_to_snake_case
 
 
-class GradOfUndifferentiableNodeException(Exception):
+class NotDifferentiableException(Exception):
     pass
 
 
@@ -94,8 +94,8 @@ class Node(ABC):
     ) -> Node:
         return ViewNode.new(input=self, offset=offset, shape=shape, pitch=pitch)
 
-    def copy(self, dtype: DType | None = None) -> Node:
-        return CopyNode.new(input=self, dtype=dtype)
+    def copy(self, *, dtype: DType | None = None) -> Node:
+        return ScatterNode.new_copy(input=self, dtype=dtype)
 
     def __pow__(self, other: Node | Scalar) -> Node:
         return self._elementwise_bop(other, operator="pow")
@@ -234,7 +234,7 @@ class Node(ABC):
         node type. Raises GradOfUndifferentiableNodeException if the node is not
         differentiable.
         """
-        raise GradOfUndifferentiableNodeException(self)
+        raise NotDifferentiableException(self)
 
     #
     # Private:
@@ -434,7 +434,7 @@ class ElementwiseNode(Node):
                     df_dn * self.input[1].lt(self.input[0]),
                 )
             case "eq" | "ne" | "lt" | "gt" | "le" | "ge":
-                raise GradOfUndifferentiableNodeException(self)
+                raise NotDifferentiableException(self)
             case _:
                 raise NotImplementedError(f"{self.operator=}")
 
@@ -629,18 +629,22 @@ class ViewNode(Node):
           - x -> {y₁, y₂, ...}: the gradient flow is a sum over elements (broadcast).
         """
 
-        assert self.offset == 0, "Non-zero offset not supported in ViewNode.df_do yet"
-
         # Sum-reduce over all broadcast dimensions (i.e. pitch 0).
-        # Then, view in the input shape and pitch.
-        df_do = df_dn.reduce(
+        x = df_dn.reduce(
             axes=tuple(i_dim for i_dim, p in enumerate(self.pitch) if p == 0),
             operator="add",
-        ).view(
-            shape=self.input[0].shape,
-            pitch=self.input[0].pitch,
         )
-        return (df_do,)
+
+        # Scatter the reduced tensor back to the input shape, using the same view logic
+        # as the forward pass.
+        x = ScatterNode.new(
+            pick=x,
+            default=Node.zeros(shape=self.input[0].shape, dtype=self.dtype),
+            key=tuple(slice(s) for s in self.input[0].shape),
+        )
+
+        # Done:
+        return (x,)
 
     @staticmethod
     def _check_view_compatibility(
@@ -726,18 +730,53 @@ class ViewNode(Node):
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
-class CopyNode(Node):
+class ScatterNode(Node):
+    """
+    Scatter selects values from a `pick` node according to the `key` and writes them to
+    the output. Output values not addressed by `key` are filled with values from a
+    `default` node.
+
+    ```python
+    def scatter(pick, default, key) =
+        res = default.copy()
+        res[key] = pick
+        return res
+    ```
+
+    Note that `scatter` is the inverse of `index`, a special case of `view`:
+
+    ```python
+    assert scatter(pick, default, key)[key] == pick
+    ```
+
+    Note that the `default` node does not receive gradient flow! It is typically a const
+    node or a broadcasted const node.
+    """
+
+    key: tuple[int | slice, ...]
+
     @staticmethod
-    def new(input: Node, dtype: DType | None = None) -> "Node":
+    def new(pick: Node, default: Node, key: tuple[int | slice, ...]) -> "ScatterNode":
+        return ScatterNode(
+            offset=0,
+            shape=default.shape,
+            pitch=compute_c_contiguous_pitch_for_shape(default.shape),
+            dtype=default.dtype,
+            input=(pick, default),
+            key=key,
+        )
+
+    @staticmethod
+    def new_copy(input: Node, dtype: DType | None = None) -> "Node":
         dtype = dtype or input.dtype
-        if is_c_contiguous(input.shape, input.pitch) and input.dtype == dtype:
-            return input
-        shape = input.shape
-        pitch = compute_c_contiguous_pitch_for_shape(shape)
-        return CopyNode(offset=0, shape=shape, pitch=pitch, dtype=dtype, input=(input,))
+        default = Node.zeros(shape=input.shape, dtype=dtype)
+        key = tuple(slice(s) for s in input.shape)
+        return ScatterNode.new(pick=input, default=default, key=key)
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
-        return (df_dn.copy(dtype=self.input[0].dtype),)
+        pick_grad = df_dn[self.key]
+        default_grad = Node.zeros(shape=self.shape, dtype=self.dtype)
+        return (pick_grad, default_grad)
 
 
 #
@@ -1045,7 +1084,7 @@ def grad(f_graph: Node) -> dict[Node, Node]:
 
         try:
             df_do = node.df_do(df_dn)
-        except GradOfUndifferentiableNodeException:
+        except NotDifferentiableException:
             continue
 
         for operand, df_do_i in zip(node.input, df_do):
