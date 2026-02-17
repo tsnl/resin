@@ -42,9 +42,9 @@ class TestElementwiseOps:
         expected = textwrap.dedent(
             """
             elementwise(operator='add') :: fp32(0,(2,),(1,))
-            ├ view() :: fp32(0,(2,),(1,))
+            ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
-            └ view() :: fp32(0,(2,),(1,))
+            └ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
               └ const(value=[3, 4]) :: fp32(0,(2,),(1,))
             """
         )
@@ -58,13 +58,13 @@ class TestElementwiseOps:
         expected = textwrap.dedent(
             """
             elementwise(operator='mul') :: fp32(0,(2,),(1,))
-            ├ view() :: fp32(0,(2,),(1,))
+            ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │ └ elementwise(operator='add') :: fp32(0,(2,),(1,))
-            │   ├ view() :: fp32(0,(2,),(1,))
+            │   ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │   │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
-            │   └ view() :: fp32(0,(2,),(1,))
+            │   └ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │     └ const(value=[3, 4]) :: fp32(0,(2,),(1,))
-            └ view() :: fp32(0,(2,),(1,))
+            └ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
               └ const(value=[5, 6]) :: fp32(0,(2,),(1,))
             """
         )
@@ -90,9 +90,9 @@ class TestElementwiseOps:
         expected = textwrap.dedent(
             """
             elementwise(operator='add') :: fp32(0,(2, 2),(2, 1))
-            ├ view() :: fp32(0,(2, 2),(2, 1))
+            ├ view(accessor=Accessor(offset=0, pitch=(2, 1), shape=(2, 2))) :: fp32(0,(2, 2),(2, 1))
             │ └ const(value=[[1, 2], [3, 4]]) :: fp32(0,(2, 2),(2, 1))
-            └ view() :: fp32(0,(2, 2),(0, 0))
+            └ view(accessor=Accessor(offset=0, pitch=(0, 0), shape=(2, 2))) :: fp32(0,(2, 2),(0, 0))
               └ const(value=10) :: fp32(0,(),())
             """
         )
@@ -104,9 +104,9 @@ class TestElementwiseOps:
         expected = textwrap.dedent(
             """
             elementwise(operator='max') :: fp32(0,(3,),(1,))
-            ├ view() :: fp32(0,(3,),(1,))
+            ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(3,))) :: fp32(0,(3,),(1,))
             │ └ const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))
-            └ view() :: fp32(0,(3,),(0,))
+            └ view(accessor=Accessor(offset=0, pitch=(0,), shape=(3,))) :: fp32(0,(3,),(0,))
               └ const(value=0) :: fp32(0,(),())
             """
         )
@@ -119,9 +119,9 @@ class TestElementwiseOps:
         expected = textwrap.dedent(
             """
             elementwise(operator='gt') :: fp32(0,(2,),(1,))
-            ├ view() :: fp32(0,(2,),(1,))
+            ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
-            └ view() :: fp32(0,(2,),(1,))
+            └ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
               └ const(value=[2, 1]) :: fp32(0,(2,),(1,))
             """
         )
@@ -147,7 +147,7 @@ class TestIndexing:
         t = t[0]
         expected = textwrap.dedent(
             """
-            view() :: fp32(0,(3,),(1,))
+            view(accessor=Accessor(offset=0, pitch=(1,), shape=(3,))) :: fp32(0,(3,),(1,))
             └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
@@ -158,7 +158,7 @@ class TestIndexing:
         t = t[::2]
         expected = textwrap.dedent(
             """
-            view() :: fp32(0,(3,),(2,))
+            view(accessor=Accessor(offset=0, pitch=(2,), shape=(3,))) :: fp32(0,(3,),(2,))
             └ const(value=[1, 2, 3, 4, 5, 6]) :: fp32(0,(6,),(1,))
             """
         )
@@ -169,7 +169,7 @@ class TestIndexing:
         t = t[1, 1:3]
         expected = textwrap.dedent(
             """
-            view() :: fp32(4,(2,),(1,))
+            view(accessor=Accessor(offset=4, pitch=(1,), shape=(2,))) :: fp32(4,(2,),(1,))
             └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
@@ -182,7 +182,7 @@ class TestPermute:
         t = t.permute((1, 0))
         expected = textwrap.dedent(
             """
-            view() :: fp32(0,(3, 2),(1, 3))
+            view(accessor=Accessor(offset=0, pitch=(1, 3), shape=(3, 2))) :: fp32(0,(3, 2),(1, 3))
             └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
@@ -196,10 +196,10 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(key=(slice(None, 1, None), slice(None, 3, None))) :: fp32(0,(1, 3),(3, 1))
-            ├ view() :: fp32(0,(1, 3),(6, 1))
+            scatter(accessor=Accessor(offset=0, pitch=(0, 0), shape=(1, 3))) :: fp32(0,(1, 3),(3, 1))
+            ├ view(accessor=Accessor(offset=0, pitch=(6, 1), shape=(1, 3))) :: fp32(0,(1, 3),(6, 1))
             │ └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
-            └ view() :: fp32(0,(1, 3),(0, 0))
+            └ view(accessor=Accessor(offset=0, pitch=(0, 0), shape=(1, 3))) :: fp32(0,(1, 3),(0, 0))
               └ const(value=0) :: fp32(0,(),())
             """
         )
@@ -210,9 +210,9 @@ class TestCompact:
         t2 = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(key=(slice(None, 3, None),)) :: fp32(0,(3,),(1,))
+            scatter(accessor=Accessor(offset=0, pitch=(0,), shape=(3,))) :: fp32(0,(3,),(1,))
             ├ const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))
-            └ view() :: fp32(0,(3,),(0,))
+            └ view(accessor=Accessor(offset=0, pitch=(0,), shape=(3,))) :: fp32(0,(3,),(0,))
               └ const(value=0) :: fp32(0,(),())
             """
         )
@@ -228,14 +228,14 @@ class TestSharedSubexpressions:
         expected = textwrap.dedent(
             """
             elementwise(operator='mul') :: fp32(0,(2,),(1,))
-            ├ view() :: fp32(0,(2,),(1,))
+            ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │ └ %0
-            └ view() :: fp32(0,(2,),(1,))
+            └ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
               └ %0
             %0 := elementwise(operator='add') :: fp32(0,(2,),(1,))
-            ├ view() :: fp32(0,(2,),(1,))
+            ├ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
             │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
-            └ view() :: fp32(0,(2,),(1,))
+            └ view(accessor=Accessor(offset=0, pitch=(1,), shape=(2,))) :: fp32(0,(2,),(1,))
               └ const(value=[3, 4]) :: fp32(0,(2,),(1,))
             """
         )
@@ -250,9 +250,9 @@ class TestMatmul:
         expected = textwrap.dedent(
             """
             matmul() :: fp32(0,(3, 3),(3, 1))
-            ├ view() :: fp32(0,(3, 2),(2, 1))
+            ├ view(accessor=Accessor(offset=0, pitch=(2, 1), shape=(3, 2))) :: fp32(0,(3, 2),(2, 1))
             │ └ const(value=[[1, 2], [3, 4], [5, 6]]) :: fp32(0,(3, 2),(2, 1))
-            └ view() :: fp32(0,(2, 3),(3, 1))
+            └ view(accessor=Accessor(offset=0, pitch=(3, 1), shape=(2, 3))) :: fp32(0,(2, 3),(3, 1))
               └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
@@ -278,9 +278,9 @@ class TestMatmul:
         expected = textwrap.dedent(
             """
             matmul() :: fp32(0,(2, 3, 3),(9, 3, 1))
-            ├ view() :: fp32(0,(2, 3, 2),(0, 2, 1))
+            ├ view(accessor=Accessor(offset=0, pitch=(0, 2, 1), shape=(2, 3, 2))) :: fp32(0,(2, 3, 2),(0, 2, 1))
             │ └ const(value=[[1, 2], [3, 4], [5, 6]]) :: fp32(0,(3, 2),(2, 1))
-            └ view() :: fp32(0,(2, 2, 3),(6, 3, 1))
+            └ view(accessor=Accessor(offset=0, pitch=(6, 3, 1), shape=(2, 2, 3))) :: fp32(0,(2, 2, 3),(6, 3, 1))
               └ const(value=[[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]]) :: fp32(0,(2, 2, 3),(6, 3, 1))
             """
         )
@@ -296,9 +296,9 @@ class TestMatmul:
         expected = textwrap.dedent(
             """
             matmul() :: fp32(0,(2, 3, 3),(9, 3, 1))
-            ├ view() :: fp32(0,(2, 3, 2),(6, 2, 1))
+            ├ view(accessor=Accessor(offset=0, pitch=(6, 2, 1), shape=(2, 3, 2))) :: fp32(0,(2, 3, 2),(6, 2, 1))
             │ └ const(value=[[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]]) :: fp32(0,(2, 3, 2),(6, 2, 1))
-            └ view() :: fp32(0,(2, 2, 3),(0, 3, 1))
+            └ view(accessor=Accessor(offset=0, pitch=(0, 3, 1), shape=(2, 2, 3))) :: fp32(0,(2, 2, 3),(0, 3, 1))
               └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
@@ -310,7 +310,7 @@ class TestBroadcast:
         t = Node.full((2, 3), v=1, dtype="fp32")
         expected = textwrap.dedent(
             """
-            view() :: fp32(0,(2, 3),(0, 0))
+            view(accessor=Accessor(offset=0, pitch=(0, 0), shape=(2, 3))) :: fp32(0,(2, 3),(0, 0))
             └ const(value=1) :: fp32(0,(),())
             """
         )
@@ -320,7 +320,7 @@ class TestBroadcast:
         t = Node.zeros((4,), dtype="fp32")
         expected = textwrap.dedent(
             """
-            view() :: fp32(0,(4,),(0,))
+            view(accessor=Accessor(offset=0, pitch=(0,), shape=(4,))) :: fp32(0,(4,),(0,))
             └ const(value=0) :: fp32(0,(),())
             """
         )

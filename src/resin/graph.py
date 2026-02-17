@@ -3,6 +3,9 @@ resin.graph models the computational graph of tensor operations.
 -   Node is both a tensor memory and an instruction in the graph.
 -   The graph is static and acyclic, but not necessarily a tree (e.g. shared subgraphs).
 -   Parameter nodes map to buffers that must be written when executing the graph.
+
+Nodes will frequently reuse their first operand's shape, pitch, etc. This makes it
+easier for the backend to reuse memory and fuse kernels.
 """
 
 __all__ = [
@@ -92,10 +95,11 @@ class Node(ABC):
         shape: tuple[int, ...],
         pitch: tuple[int, ...],
     ) -> Node:
-        return ViewNode.new(input=self, offset=offset, shape=shape, pitch=pitch)
+        accessor = Accessor(offset=offset, shape=shape, pitch=pitch)
+        return ViewNode.new(input=self, accessor=accessor)
 
     def copy(self, *, dtype: DType | None = None) -> Node:
-        return ScatterNode.new_copy(input=self, dtype=dtype)
+        return ScatterNode.new_copy(source=self, dtype=dtype)
 
     def __pow__(self, other: Node | Scalar) -> Node:
         return self._elementwise_bop(other, operator="pow")
@@ -234,6 +238,7 @@ class Node(ABC):
         node type. Raises GradOfUndifferentiableNodeException if the node is not
         differentiable.
         """
+        _ = df_dn
         raise NotDifferentiableException(self)
 
     #
@@ -478,20 +483,28 @@ class ReductionNode(Node):
         )
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+        # broadcast df_dn to the input shape
+        df_dn = df_dn.view(
+            shape=self.input[0].shape,
+            pitch=tuple(
+                (0 if i in self.axes else df_dn.pitch[i])
+                for i in range(len(self.input[0].shape))
+            ),
+        )
+
         match self.operator:
             case "mul":
                 # ∂n/∂o₁ = n / o₁
                 return (df_dn * (self / self.input[0]),)
             case "add":
                 # ∂n/∂o₁ = 1
-                # Broadcast df_dn to input's shape
-                return (df_dn.view(shape=self.input[0].shape, pitch=self.pitch),)
+                return (df_dn,)
             case "max" | "min":
                 # ∂n/∂o₁ = 1 if o₁ is the max/min along the reduction axes, else 0
-                # Broadcast df_dn to input's shape and mask with the condition above.
+                # Mask broadcast df_dn with the condition above.
                 # Note that the condition is identical for both "max" and "min".
                 cond = self.input[0].eq(self)
-                return (df_dn.view(shape=self.input[0].shape, pitch=self.pitch) * cond,)
+                return (df_dn * cond,)
             case _:
                 raise NotImplementedError(f"{self.operator=}")
 
@@ -526,23 +539,21 @@ class MatmulNode(Node):
 class ViewNode(Node):
     """
     Maps each input element to zero, one, or multiple (i.e. broadcasted) output elements
-    by only changing the shape and pitch.
+    by only changing the offset, shape, pitch.
     """
 
+    accessor: Accessor
+
     @staticmethod
-    def new(
-        input: Node,
-        offset: int,
-        shape: tuple[int, ...],
-        pitch: tuple[int, ...],
-    ) -> "ViewNode":
-        ViewNode._check_view_compatibility(input.shape, input.pitch, shape, pitch)
+    def new(input: Node, accessor: Accessor) -> "ViewNode":
+        accessor.raise_if_not_compatible(input)
         return ViewNode(
-            offset=offset,
-            shape=shape,
-            pitch=pitch,
+            offset=accessor.offset,
+            shape=accessor.shape,
+            pitch=accessor.pitch,
             dtype=input.dtype,
             input=(input,),
+            accessor=accessor,
         )
 
     @staticmethod
@@ -561,61 +572,19 @@ class ViewNode(Node):
         new_pitch = tuple(input.pitch[i] for i in permutation)
         return ViewNode.new(
             input=input,
-            offset=new_offset,
-            shape=new_shape,
-            pitch=new_pitch,
+            accessor=Accessor(offset=new_offset, shape=new_shape, pitch=new_pitch),
         )
 
     @staticmethod
     def new_index(input: Node, key: tuple[int | slice, ...]) -> "ViewNode":
-        def bounded_index(k: int) -> int:
-            d = input.shape[dim]
-            if not (-d <= k < d):
-                raise IndexError(
-                    f"Index {k} out of bounds for dimension {dim} of size {d}"
-                )
-            return k % d
-
-        def bounded_end(k: int) -> int:
-            d = input.shape[dim]
-            if not (0 <= k <= d):
-                raise IndexError(
-                    f"Slice end {k} out of bounds for dimension {dim} of size {d}"
-                )
-            return k
-
-        assert len(key) <= len(input.shape)
-
-        offset = input.offset
-        pitch = []
-        shape = []
-
-        for dim, k in enumerate(key):
-            match k:
-                case int():
-                    offset += bounded_index(k) * input.pitch[dim]
-                case slice():
-                    b = bounded_index(k.start) if k.start is not None else 0
-                    e = bounded_end(k.stop) if k.stop is not None else input.shape[dim]
-                    s = k.step if k.step is not None else 1
-                    a = abs(s)
-
-                    offset += b * input.pitch[dim]
-                    pitch.append(input.pitch[dim] * s)
-                    shape.append(max(0, (e - b + (a - 1)) // a))
-                case _:
-                    raise TypeError(f"Invalid index {k} for dimension {dim}")
-
-        for dim in range(len(key), len(input.shape)):
-            pitch.append(input.pitch[dim])
-            shape.append(input.shape[dim])
-
+        accessor = Accessor.from_key(input.offset, input.shape, input.pitch, key)
         return ViewNode(
-            offset=offset,
-            pitch=tuple(pitch),
-            shape=tuple(shape),
+            offset=accessor.offset,
+            pitch=accessor.pitch,
+            shape=accessor.shape,
             dtype=input.dtype,
             input=(input,),
+            accessor=accessor,
         )
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
@@ -637,146 +606,61 @@ class ViewNode(Node):
 
         # Scatter the reduced tensor back to the input shape, using the same view logic
         # as the forward pass.
+        # TODO: Check if this is right!
         x = ScatterNode.new(
-            pick=x,
-            default=Node.zeros(shape=self.input[0].shape, dtype=self.dtype),
-            key=tuple(slice(s) for s in self.input[0].shape),
+            source=x,
+            shape=self.input[0].shape,
+            accessor=self.accessor,
         )
 
         # Done:
         return (x,)
 
-    @staticmethod
-    def _check_view_compatibility(
-        old_shape: tuple[int, ...],
-        old_pitch: tuple[int, ...],
-        new_shape: tuple[int, ...],
-        new_pitch: tuple[int, ...],
-    ):
-        """
-        Checks whether a tensor with (old_shape, old_pitch) can be viewed as a tensor
-        with (new_shape, new_pitch).
-        """
-
-        def c_contiguous_permutation(
-            shape: tuple[int, ...],
-            pitch: tuple[int, ...],
-        ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
-            """
-            Given a contiguous (but not C-contiguous) tensor, attempt to find a
-            permutation of its dimensions that makes it C-contiguous. If such a
-            permutation exists, return the permuted shape and pitch. Otherwise, return
-            None.
-            """
-
-            # argsort the dimensions by decreasing pitch, breaking ties by decreasing shape.
-            perm = sorted(
-                range(len(pitch)), key=lambda i: (pitch[i], shape[i]), reverse=True
-            )
-
-            # permute the shape and pitch according to the permutation above:
-            new_shape = tuple(shape[i] for i in perm)
-            new_pitch = tuple(pitch[i] for i in perm)
-
-            # Check if the new pitch is C-contiguous for the new shape:
-            if is_c_contiguous(new_shape, new_pitch):
-                return new_shape, new_pitch
-
-            # If not, then the tensor cannot be made C-contiguous by permuting dimensions.
-            return None
-
-        def del_size_one_pitch_zero_dims(
-            shape: tuple[int, ...],
-            pitch: tuple[int, ...],
-        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-            """
-            Returns the shape and pitch after deleting all dimensions of size 1 or
-            dimensions of pitch 0.
-            """
-
-            new_shape = []
-            new_pitch = []
-            for s, p in zip(shape, pitch):
-                if s != 1 and p != 0:
-                    new_shape.append(s)
-                    new_pitch.append(p)
-            return tuple(new_shape), tuple(new_pitch)
-
-        # If both old and new shapes are contiguous (not even C-contiguous), then the
-        # view is compatible if and only if the element count is the same.
-        old_cc_shape_pitch = c_contiguous_permutation(old_shape, old_pitch)
-        new_cc_shape_pitch = c_contiguous_permutation(new_shape, new_pitch)
-        if (
-            old_cc_shape_pitch == new_cc_shape_pitch
-            and old_cc_shape_pitch is not None
-            and math.prod(old_shape) == math.prod(new_shape)
-        ):
-            return
-
-        # If both old and new shapes are identical after deleting all dimensions of size
-        # 1 or dimensions of pitch 0, then the view is compatible, even if not
-        # contiguous.
-        old_squeezed_shape_pitch = del_size_one_pitch_zero_dims(old_shape, old_pitch)
-        new_squeezed_shape_pitch = del_size_one_pitch_zero_dims(new_shape, new_pitch)
-        if old_squeezed_shape_pitch == new_squeezed_shape_pitch:
-            return
-
-        # Otherwise, the view is not compatible.
-        return ValueError(
-            f"Cannot view "
-            f"old tensor (shape={old_shape}, pitch={old_pitch}) as "
-            f"new tensor (shape={new_shape}, pitch={new_pitch})"
-        )
-
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ScatterNode(Node):
     """
-    Scatter selects values from a `pick` node according to the `key` and writes them to
-    the output. Output values not addressed by `key` are filled with values from a
-    `default` node.
+    Scatter maps a dense "source" to sparse destinations using view parameters. Unlike a
+    ViewNode, the view parameters specify write locations, not read locations. The
+    "shape" operand gives the shape of the output, all unwritten values are filled with
+    zeros.
+
+    Example NumPy code:
 
     ```python
-    def scatter(pick, default, key) =
-        res = default.copy()
-        res[key] = pick
+    def scatter(source, shape, accessor) =
+        res = np.zeros(shape=shape, dtype=source.dtype)
+        res[key] = source
         return res
+
+    # Note that `scatter` is the inverse of `view` aka `__getitem__`:
+    assert scatter(source, shape, key)[key] == source
     ```
-
-    Note that `scatter` is the inverse of `index`, a special case of `view`:
-
-    ```python
-    assert scatter(pick, default, key)[key] == pick
-    ```
-
-    Note that the `default` node does not receive gradient flow! It is typically a const
-    node or a broadcasted const node.
     """
 
-    key: tuple[int | slice, ...]
+    accessor: Accessor
 
     @staticmethod
-    def new(pick: Node, default: Node, key: tuple[int | slice, ...]) -> "ScatterNode":
+    def new(source: Node, shape: tuple[int, ...], accessor: Accessor) -> "ScatterNode":
         return ScatterNode(
             offset=0,
-            shape=default.shape,
-            pitch=compute_c_contiguous_pitch_for_shape(default.shape),
-            dtype=default.dtype,
-            input=(pick, default),
-            key=key,
+            shape=shape,
+            pitch=compute_c_contiguous_pitch_for_shape(shape),
+            dtype=source.dtype,
+            input=(source,),
+            accessor=accessor,
         )
 
     @staticmethod
-    def new_copy(input: Node, dtype: DType | None = None) -> "Node":
-        dtype = dtype or input.dtype
-        default = Node.zeros(shape=input.shape, dtype=dtype)
-        key = tuple(slice(s) for s in input.shape)
-        return ScatterNode.new(pick=input, default=default, key=key)
+    def new_copy(source: Node, dtype: DType | None = None) -> "Node":
+        dtype = dtype or source.dtype
+        key = tuple(slice(s) for s in source.shape)
+        accessor = Accessor.from_key(source.offset, source.shape, source.pitch, key)
+        return ScatterNode.new(source=source, shape=source.shape, accessor=accessor)
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
-        pick_grad = df_dn[self.key]
-        default_grad = Node.zeros(shape=self.shape, dtype=self.dtype)
-        return (pick_grad, default_grad)
+        source_grad = ViewNode.new(df_dn, self.accessor)
+        return (source_grad,)
 
 
 #
@@ -825,6 +709,160 @@ def dtype_join_kind(dtype1: DTypeKind, dtype2: DTypeKind) -> DTypeKind:
 #
 # Shape, Pitch:
 #
+
+
+@dataclass(frozen=True, kw_only=True)
+class Accessor:
+    offset: int
+    pitch: tuple[int, ...]
+    shape: tuple[int, ...]
+
+    @staticmethod
+    def from_key(
+        old_offset: int,
+        old_shape: tuple[int, ...],
+        old_pitch: tuple[int, ...],
+        key: tuple[int | slice, ...],
+    ) -> Accessor:
+        """
+        Computes an accessor's offset, pitch, and shape for a given input tensor and
+        key.
+
+        Accessor = ViewNode (aka read accessor) or ScatterNode (aka write accessor).
+        """
+
+        def bounded_index(k: int) -> int:
+            d = old_shape[dim]
+            if not (-d <= k < d):
+                raise IndexError(
+                    f"Index {k} out of bounds for dimension {dim} of size {d}"
+                )
+            return k % d
+
+        def bounded_end(k: int) -> int:
+            d = old_shape[dim]
+            if not (0 <= k <= d):
+                raise IndexError(
+                    f"Slice end {k} out of bounds for dimension {dim} of size {d}"
+                )
+            return k
+
+        assert len(key) <= len(old_shape)
+
+        new_offset = old_offset
+        new_pitch = []
+        new_shape = []
+
+        for dim, k in enumerate(key):
+            match k:
+                case int():
+                    new_offset += bounded_index(k) * old_pitch[dim]
+                case slice():
+                    b = bounded_index(k.start) if k.start is not None else 0
+                    e = bounded_end(k.stop) if k.stop is not None else old_shape[dim]
+                    s = k.step if k.step is not None else 1
+                    a = abs(s)
+
+                    new_offset += b * old_pitch[dim]
+                    new_pitch.append(old_pitch[dim] * s)
+                    new_shape.append(max(0, (e - b + (a - 1)) // a))
+                case _:
+                    raise TypeError(f"Invalid index {k} for dimension {dim}")
+
+        for dim in range(len(key), len(old_shape)):
+            new_pitch.append(old_pitch[dim])
+            new_shape.append(old_shape[dim])
+
+        return Accessor(
+            offset=new_offset,
+            pitch=tuple(new_pitch),
+            shape=tuple(new_shape),
+        )
+
+    def raise_if_not_compatible(self, node: Node):
+        """
+        Raises a ValueError if the view defined by this accessor is not compatible with
+        the given node's memory layout (shape and pitch).
+
+        An accessor is incompatible with a node if it cannot be implemented as a view
+        (i.e. without copying).
+        """
+
+        old_shape = node.shape
+        old_pitch = node.pitch
+        new_shape = self.shape
+        new_pitch = self.pitch
+
+        def c_permutation(
+            shape: tuple[int, ...],
+            pitch: tuple[int, ...],
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            """
+            Permute the dimensions by decreasing pitch, breaking ties by decreasing
+            shape, and return the new shape and pitch.
+
+            Note that this makes contiguous shapes C-contiguous.
+
+            This normalization is useful even for comparing non-contiguous shapes.
+            """
+
+            # argsort the dimensions by decreasing pitch, breaking ties by decreasing
+            # shape.
+            perm = sorted(
+                range(len(pitch)),
+                key=lambda i: (pitch[i], shape[i]),
+                reverse=True,
+            )
+
+            # permute the shape and pitch according to the permutation above:
+            new_shape = tuple(shape[i] for i in perm)
+            new_pitch = tuple(pitch[i] for i in perm)
+
+            # Done:
+            return new_shape, new_pitch
+
+        def squeezed_c_permutation(
+            shape: tuple[int, ...],
+            pitch: tuple[int, ...],
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            """
+            Returns the shape and pitch after deleting all dimensions of size 1 or
+            dimensions of pitch 0.
+            """
+
+            new_shape = []
+            new_pitch = []
+            for s, p in zip(shape, pitch):
+                if s != 1 and p != 0:
+                    new_shape.append(s)
+                    new_pitch.append(p)
+            return c_permutation(tuple(new_shape), tuple(new_pitch))
+
+        # If both old and new shapes are contiguous (not even C-contiguous), then the
+        # accessor is compatible if it addresses fewer elements than in the original.
+        old_cc_shape_pitch = c_permutation(old_shape, old_pitch)
+        new_cc_shape_pitch = c_permutation(new_shape, new_pitch)
+        if (
+            old_cc_shape_pitch == new_cc_shape_pitch
+            and is_c_contiguous(old_cc_shape_pitch[0], old_cc_shape_pitch[1])
+            and math.prod(old_shape) >= math.prod(new_shape)
+        ):
+            return
+
+        # If both old and new shapes are identical after deleting all dimensions of size
+        # 1 or dimensions of pitch 0, then the view is compatible, even if not
+        # contiguous.
+        old_squeezed_shape_pitch = squeezed_c_permutation(old_shape, old_pitch)
+        new_squeezed_shape_pitch = squeezed_c_permutation(new_shape, new_pitch)
+        if old_squeezed_shape_pitch == new_squeezed_shape_pitch:
+            return
+
+        # Otherwise, the view is not compatible.
+        raise ValueError(
+            f"Cannot view "
+            f"old tensor (shape={old_shape}, pitch={old_pitch}) as "
+            f"new tensor (shape={new_shape}, pitch={new_pitch})"
+        )
 
 
 @dataclass
