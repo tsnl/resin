@@ -198,23 +198,6 @@ class Node(ABC):
         return self.permute(tuple(permutation))
 
     #
-    # Graph ops:
-    #
-
-    def refcount(self) -> dict["Node", int]:
-        """
-        Compute reference counts for all tensors in the subgraph rooted at this tensor.
-        """
-        return refcount(self)
-
-    def toposort(self) -> list["Node"]:
-        """
-        Returns a list of all tensors in the subgraph rooted at this tensor, sorted in
-        topological order (i.e. each tensor appears after all its inputs).
-        """
-        return toposort(self)
-
-    #
     # Debug printing:
     #
 
@@ -242,6 +225,18 @@ class Node(ABC):
         """
         _ = df_dn
         raise NotDifferentiableException(self)
+
+    #
+    # Backend:
+    #
+
+    def can_reuse_operand_memory(self) -> bool:
+        """
+        Returns whether this node can reuse any of its operands' memory for its output.
+        This is a hint for the backend to enable memory reuse, and thus, kernel fusion.
+        Conservatively disabled by default.
+        """
+        return False
 
     #
     # Private:
@@ -445,6 +440,15 @@ class ElementwiseNode(Node):
             case _:
                 raise NotImplementedError(f"{self.operator=}")
 
+    def can_reuse_operand_memory(self) -> bool:
+        """
+        ElementwiseNode can always reuse its operands' memory because each thread reads
+        from and writes to a single element.
+        """
+
+        assert self.input
+        return True
+
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ReductionNode(Node):
@@ -618,6 +622,14 @@ class ViewNode(Node):
 
         # Done:
         return (x,)
+
+    def can_reuse_operand_memory(self) -> bool:
+        """
+        ViewNode can always reuse its operand's memory because it is just a different
+        view of the same data. This is thoroughly validated in `ViewNode.new()` using
+        `Accessor.raise_if_not_compatible()`.
+        """
+        return True
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -985,7 +997,7 @@ def is_scalar_instance(value: object) -> bool:
 
 def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
     def build_tid_map() -> dict["Node", int]:
-        reference_count_map = root.refcount()
+        reference_count_map = refcount([root])
         assert reference_count_map[root] == 1, "Root tensor must have reference count 1"
 
         tid_map: dict["Node", int] = {}
@@ -1055,7 +1067,7 @@ def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
 #
 
 
-def toposort(root: Node) -> list["Node"]:
+def toposort(roots: list[Node]) -> list["Node"]:
     """
     Returns a list of all tensors in the subgraph rooted at this tensor, sorted in
     topological order (i.e. each tensor appears after all its inputs).
@@ -1070,11 +1082,13 @@ def toposort(root: Node) -> list["Node"]:
                 visit(operand)
             topo_order.append(node)
 
-    visit(root)
+    for root in roots:
+        visit(root)
+
     return topo_order
 
 
-def refcount(root: Node) -> dict["Node", int]:
+def refcount(roots: list[Node]) -> dict["Node", int]:
     """
     Compute reference counts for all tensors in the subgraph rooted at this tensor.
     """
@@ -1088,13 +1102,10 @@ def refcount(root: Node) -> dict["Node", int]:
             for operand in tensor.input:
                 visit(operand)
 
-    visit(root)
+    for root in roots:
+        visit(root)
+
     return ref_counts
-
-
-#
-# Differentiation
-#
 
 
 def grad(f_graph: Node) -> dict[Node, Node]:
@@ -1120,7 +1131,7 @@ def grad(f_graph: Node) -> dict[Node, Node]:
 
     # Traverse the graph in reverse topological order, accumulating gradients for each
     # node.
-    for node in reversed(f_graph.toposort()):
+    for node in reversed(toposort([f_graph])):
         df_dn = grad.get(node)
         if not df_dn:
             continue
