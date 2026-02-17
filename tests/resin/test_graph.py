@@ -15,22 +15,22 @@ def debug_str(node: Node) -> str:
 class TestConstants:
     def test_scalar(self) -> None:
         t = Node.const(42, dtype="fp32")
-        expected = "const(value=42) :: (fp32 () ())"
+        expected = "const(value=42) :: fp32(0,(),())"
         assert debug_str(t) == expected.strip()
 
     def test_1d(self) -> None:
         t = Node.const([1, 2, 3], dtype="fp32")
-        expected = "const(value=[1, 2, 3]) :: (fp32 (3,) (1,))"
+        expected = "const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))"
         assert debug_str(t) == expected.strip()
 
     def test_2d(self) -> None:
         t = Node.const([[1, 2], [3, 4]], dtype="fp32")
-        expected = "const(value=[[1, 2], [3, 4]]) :: (fp32 (2, 2) (2, 1))"
+        expected = "const(value=[[1, 2], [3, 4]]) :: fp32(0,(2, 2),(2, 1))"
         assert debug_str(t) == expected.strip()
 
     def test_fp16(self) -> None:
         t = Node.const([1, 2], dtype="fp16")
-        expected = "const(value=[1, 2]) :: (fp16 (2,) (1,))"
+        expected = "const(value=[1, 2]) :: fp16(0,(2,),(1,))"
         assert debug_str(t) == expected.strip()
 
 
@@ -41,11 +41,11 @@ class TestElementwiseOps:
         t = t1 + t2
         expected = textwrap.dedent(
             """
-            elementwise(operator='add') :: (fp32 (2,) (1,))
-            ├ view() :: (fp32 (2,) (1,))
-            │ └ const(value=[1, 2]) :: (fp32 (2,) (1,))
-            └ view() :: (fp32 (2,) (1,))
-              └ const(value=[3, 4]) :: (fp32 (2,) (1,))
+            elementwise(operator='add') :: fp32(0,(2,),(1,))
+            ├ view() :: fp32(0,(2,),(1,))
+            │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
+            └ view() :: fp32(0,(2,),(1,))
+              └ const(value=[3, 4]) :: fp32(0,(2,),(1,))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -57,15 +57,15 @@ class TestElementwiseOps:
         t = (t1 + t2) * t3
         expected = textwrap.dedent(
             """
-            elementwise(operator='mul') :: (fp32 (2,) (1,))
-            ├ view() :: (fp32 (2,) (1,))
-            │ └ elementwise(operator='add') :: (fp32 (2,) (1,))
-            │   ├ view() :: (fp32 (2,) (1,))
-            │   │ └ const(value=[1, 2]) :: (fp32 (2,) (1,))
-            │   └ view() :: (fp32 (2,) (1,))
-            │     └ const(value=[3, 4]) :: (fp32 (2,) (1,))
-            └ view() :: (fp32 (2,) (1,))
-              └ const(value=[5, 6]) :: (fp32 (2,) (1,))
+            elementwise(operator='mul') :: fp32(0,(2,),(1,))
+            ├ view() :: fp32(0,(2,),(1,))
+            │ └ elementwise(operator='add') :: fp32(0,(2,),(1,))
+            │   ├ view() :: fp32(0,(2,),(1,))
+            │   │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
+            │   └ view() :: fp32(0,(2,),(1,))
+            │     └ const(value=[3, 4]) :: fp32(0,(2,),(1,))
+            └ view() :: fp32(0,(2,),(1,))
+              └ const(value=[5, 6]) :: fp32(0,(2,),(1,))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -75,11 +75,11 @@ class TestElementwiseOps:
         t = t.exp().log().exp().log()
         expected = textwrap.dedent(
             """
-            elementwise(operator='log') :: (fp32 (4,) (1,))
-            └ elementwise(operator='exp') :: (fp32 (4,) (1,))
-              └ elementwise(operator='log') :: (fp32 (4,) (1,))
-                └ elementwise(operator='exp') :: (fp32 (4,) (1,))
-                  └ const(value=[1, 2, 3, 4]) :: (fp32 (4,) (1,))
+            elementwise(operator='log') :: fp32(0,(4,),(1,))
+            └ elementwise(operator='exp') :: fp32(0,(4,),(1,))
+              └ elementwise(operator='log') :: fp32(0,(4,),(1,))
+                └ elementwise(operator='exp') :: fp32(0,(4,),(1,))
+                  └ const(value=[1, 2, 3, 4]) :: fp32(0,(4,),(1,))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -89,11 +89,11 @@ class TestElementwiseOps:
         t = t + 10
         expected = textwrap.dedent(
             """
-            elementwise(operator='add') :: (fp32 (2, 2) (2, 1))
-            ├ view() :: (fp32 (2, 2) (2, 1))
-            │ └ const(value=[[1, 2], [3, 4]]) :: (fp32 (2, 2) (2, 1))
-            └ view() :: (fp32 (2, 2) (0, 0))
-              └ const(value=10) :: (fp32 () ())
+            elementwise(operator='add') :: fp32(0,(2, 2),(2, 1))
+            ├ view() :: fp32(0,(2, 2),(2, 1))
+            │ └ const(value=[[1, 2], [3, 4]]) :: fp32(0,(2, 2),(2, 1))
+            └ view() :: fp32(0,(2, 2),(0, 0))
+              └ const(value=10) :: fp32(0,(),())
             """
         )
         assert debug_str(t) == expected.strip()
@@ -103,11 +103,11 @@ class TestElementwiseOps:
         t = t.max(0)
         expected = textwrap.dedent(
             """
-            elementwise(operator='max') :: (fp32 (3,) (1,))
-            ├ view() :: (fp32 (3,) (1,))
-            │ └ const(value=[1, 2, 3]) :: (fp32 (3,) (1,))
-            └ view() :: (fp32 (3,) (0,))
-              └ const(value=0) :: (fp32 () ())
+            elementwise(operator='max') :: fp32(0,(3,),(1,))
+            ├ view() :: fp32(0,(3,),(1,))
+            │ └ const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))
+            └ view() :: fp32(0,(3,),(0,))
+              └ const(value=0) :: fp32(0,(),())
             """
         )
         assert debug_str(t) == expected.strip()
@@ -118,11 +118,11 @@ class TestElementwiseOps:
         t = t1.gt(t2)
         expected = textwrap.dedent(
             """
-            elementwise(operator='gt') :: (fp32 (2,) (1,))
-            ├ view() :: (fp32 (2,) (1,))
-            │ └ const(value=[1, 2]) :: (fp32 (2,) (1,))
-            └ view() :: (fp32 (2,) (1,))
-              └ const(value=[2, 1]) :: (fp32 (2,) (1,))
+            elementwise(operator='gt') :: fp32(0,(2,),(1,))
+            ├ view() :: fp32(0,(2,),(1,))
+            │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
+            └ view() :: fp32(0,(2,),(1,))
+              └ const(value=[2, 1]) :: fp32(0,(2,),(1,))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -134,8 +134,8 @@ class TestReduction:
         t = t.reduce(axes=(1,), operator="add")
         expected = textwrap.dedent(
             """
-            reduction(operator='add', axes=(1,)) :: (fp32 (2, 1) (3, 1))
-            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            reduction(operator='add', axes=(1,)) :: fp32(0,(2, 1),(3, 1))
+            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -147,8 +147,8 @@ class TestIndexing:
         t = t[0]
         expected = textwrap.dedent(
             """
-            view() :: (fp32 (3,) (1,))
-            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            view() :: fp32(0,(3,),(1,))
+            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -158,8 +158,8 @@ class TestIndexing:
         t = t[::2]
         expected = textwrap.dedent(
             """
-            view() :: (fp32 (3,) (2,))
-            └ const(value=[1, 2, 3, 4, 5, 6]) :: (fp32 (6,) (1,))
+            view() :: fp32(0,(3,),(2,))
+            └ const(value=[1, 2, 3, 4, 5, 6]) :: fp32(0,(6,),(1,))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -169,8 +169,8 @@ class TestIndexing:
         t = t[1, 1:3]
         expected = textwrap.dedent(
             """
-            view() :: (fp32 (2,) (1,))
-            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            view() :: fp32(4,(2,),(1,))
+            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -182,8 +182,8 @@ class TestPermute:
         t = t.permute((1, 0))
         expected = textwrap.dedent(
             """
-            view() :: (fp32 (3, 2) (1, 3))
-            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            view() :: fp32(0,(3, 2),(1, 3))
+            └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -196,9 +196,9 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            copy() :: (fp32 (1, 3) (3, 1))
-            └ view() :: (fp32 (1, 3) (6, 1))
-              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            copy() :: fp32(0,(1, 3),(3, 1))
+            └ view() :: fp32(0,(1, 3),(6, 1))
+              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -216,16 +216,16 @@ class TestSharedSubexpressions:
         t = t * t
         expected = textwrap.dedent(
             """
-            elementwise(operator='mul') :: (fp32 (2,) (1,))
-            ├ view() :: (fp32 (2,) (1,))
+            elementwise(operator='mul') :: fp32(0,(2,),(1,))
+            ├ view() :: fp32(0,(2,),(1,))
             │ └ %0
-            └ view() :: (fp32 (2,) (1,))
+            └ view() :: fp32(0,(2,),(1,))
               └ %0
-            %0 := elementwise(operator='add') :: (fp32 (2,) (1,))
-            ├ view() :: (fp32 (2,) (1,))
-            │ └ const(value=[1, 2]) :: (fp32 (2,) (1,))
-            └ view() :: (fp32 (2,) (1,))
-              └ const(value=[3, 4]) :: (fp32 (2,) (1,))
+            %0 := elementwise(operator='add') :: fp32(0,(2,),(1,))
+            ├ view() :: fp32(0,(2,),(1,))
+            │ └ const(value=[1, 2]) :: fp32(0,(2,),(1,))
+            └ view() :: fp32(0,(2,),(1,))
+              └ const(value=[3, 4]) :: fp32(0,(2,),(1,))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -238,11 +238,11 @@ class TestMatmul:
         t = t1 @ t2
         expected = textwrap.dedent(
             """
-            matmul() :: (fp32 (3, 3) (3, 1))
-            ├ view() :: (fp32 (3, 2) (2, 1))
-            │ └ const(value=[[1, 2], [3, 4], [5, 6]]) :: (fp32 (3, 2) (2, 1))
-            └ view() :: (fp32 (2, 3) (3, 1))
-              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            matmul() :: fp32(0,(3, 3),(3, 1))
+            ├ view() :: fp32(0,(3, 2),(2, 1))
+            │ └ const(value=[[1, 2], [3, 4], [5, 6]]) :: fp32(0,(3, 2),(2, 1))
+            └ view() :: fp32(0,(2, 3),(3, 1))
+              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -266,11 +266,11 @@ class TestMatmul:
         t = t1 @ t2
         expected = textwrap.dedent(
             """
-            matmul() :: (fp32 (2, 3, 3) (9, 3, 1))
-            ├ view() :: (fp32 (2, 3, 2) (0, 2, 1))
-            │ └ const(value=[[1, 2], [3, 4], [5, 6]]) :: (fp32 (3, 2) (2, 1))
-            └ view() :: (fp32 (2, 2, 3) (6, 3, 1))
-              └ const(value=[[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]]) :: (fp32 (2, 2, 3) (6, 3, 1))
+            matmul() :: fp32(0,(2, 3, 3),(9, 3, 1))
+            ├ view() :: fp32(0,(2, 3, 2),(0, 2, 1))
+            │ └ const(value=[[1, 2], [3, 4], [5, 6]]) :: fp32(0,(3, 2),(2, 1))
+            └ view() :: fp32(0,(2, 2, 3),(6, 3, 1))
+              └ const(value=[[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]]) :: fp32(0,(2, 2, 3),(6, 3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -284,11 +284,11 @@ class TestMatmul:
         t = t1 @ t2
         expected = textwrap.dedent(
             """
-            matmul() :: (fp32 (2, 3, 3) (9, 3, 1))
-            ├ view() :: (fp32 (2, 3, 2) (6, 2, 1))
-            │ └ const(value=[[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]]) :: (fp32 (2, 3, 2) (6, 2, 1))
-            └ view() :: (fp32 (2, 2, 3) (0, 3, 1))
-              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: (fp32 (2, 3) (3, 1))
+            matmul() :: fp32(0,(2, 3, 3),(9, 3, 1))
+            ├ view() :: fp32(0,(2, 3, 2),(6, 2, 1))
+            │ └ const(value=[[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]]) :: fp32(0,(2, 3, 2),(6, 2, 1))
+            └ view() :: fp32(0,(2, 2, 3),(0, 3, 1))
+              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -299,8 +299,8 @@ class TestBroadcast:
         t = Node.full((2, 3), v=1, dtype="fp32")
         expected = textwrap.dedent(
             """
-            view() :: (fp32 (2, 3) (0, 0))
-            └ const(value=1) :: (fp32 () ())
+            view() :: fp32(0,(2, 3),(0, 0))
+            └ const(value=1) :: fp32(0,(),())
             """
         )
         assert debug_str(t) == expected.strip()
@@ -309,8 +309,8 @@ class TestBroadcast:
         t = Node.zeros((4,), dtype="fp32")
         expected = textwrap.dedent(
             """
-            view() :: (fp32 (4,) (0,))
-            └ const(value=0) :: (fp32 () ())
+            view() :: fp32(0,(4,),(0,))
+            └ const(value=0) :: fp32(0,(),())
             """
         )
         assert debug_str(t) == expected.strip()
@@ -319,7 +319,7 @@ class TestBroadcast:
 class TestParam:
     def test_param_node(self) -> None:
         t = Node.param((4,), "fp32", label="weights")
-        expected = "param(label='weights') :: (fp32 (4,) (1,))"
+        expected = "param(label='weights') :: fp32(0,(4,),(1,))"
         assert debug_str(t) == expected.strip()
 
 

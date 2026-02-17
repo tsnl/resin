@@ -9,7 +9,6 @@ __all__ = [
     "ConstNode",
     "ElementwiseNode",
     "GradOfUndifferentiableNodeException",
-    "IndexNode",
     "MatmulNode",
     "Node",
     "ParamNode",
@@ -921,7 +920,9 @@ def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
         extra_fields = [f.name for f in fields(node) if f.name not in base_fields]
         args = ", ".join(f"{f}={getattr(node, f)!r}" for f in extra_fields)
         name = pascal_to_snake_case(node.__class__.__name__[: -len("Node")])
-        return f"{name}({args}) :: ({node.dtype} {node.shape} {node.pitch})"
+        return (
+            f"{name}({args}) :: {node.dtype}({node.offset},{node.shape},{node.pitch})"
+        )
 
     def visit(
         node: "Node",
