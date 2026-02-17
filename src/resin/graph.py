@@ -19,6 +19,8 @@ __all__ = [
     "ReductionNode",
     "ScatterNode",
     "ViewNode",
+    "is_c_contiguous",
+    "is_contiguous",
 ]
 
 from abc import ABC
@@ -810,34 +812,6 @@ class Accessor:
         new_shape = self.shape
         new_pitch = self.pitch
 
-        def c_permutation(
-            shape: tuple[int, ...],
-            pitch: tuple[int, ...],
-        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-            """
-            Permute the dimensions by decreasing pitch, breaking ties by decreasing
-            shape, and return the new shape and pitch.
-
-            Note that this makes contiguous shapes C-contiguous.
-
-            This normalization is useful even for comparing non-contiguous shapes.
-            """
-
-            # argsort the dimensions by decreasing pitch, breaking ties by decreasing
-            # shape.
-            perm = sorted(
-                range(len(pitch)),
-                key=lambda i: (pitch[i], shape[i]),
-                reverse=True,
-            )
-
-            # permute the shape and pitch according to the permutation above:
-            new_shape = tuple(shape[i] for i in perm)
-            new_pitch = tuple(pitch[i] for i in perm)
-
-            # Done:
-            return new_shape, new_pitch
-
         def squeezed_c_permutation(
             shape: tuple[int, ...],
             pitch: tuple[int, ...],
@@ -970,6 +944,40 @@ def is_c_contiguous(shape: tuple[int, ...], pitch: tuple[int, ...]) -> bool:
     return pitch == compute_c_contiguous_pitch_for_shape(shape)
 
 
+def is_contiguous(shape: tuple[int, ...], pitch: tuple[int, ...]) -> bool:
+    new_shape, new_pitch = c_permutation(shape, pitch)
+    return is_c_contiguous(new_shape, new_pitch)
+
+
+def c_permutation(
+    shape: tuple[int, ...],
+    pitch: tuple[int, ...],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """
+    Permute the dimensions by decreasing pitch, breaking ties by decreasing
+    shape, and return the new shape and pitch.
+
+    Note that this makes contiguous shapes C-contiguous.
+
+    This normalization is useful even for comparing non-contiguous shapes.
+    """
+
+    # argsort the dimensions by decreasing pitch, breaking ties by decreasing
+    # shape.
+    perm = sorted(
+        range(len(pitch)),
+        key=lambda i: (pitch[i], shape[i]),
+        reverse=True,
+    )
+
+    # permute the shape and pitch according to the permutation above:
+    new_shape = tuple(shape[i] for i in perm)
+    new_pitch = tuple(pitch[i] for i in perm)
+
+    # Done:
+    return new_shape, new_pitch
+
+
 #
 # Scalar, ScalarOperator:
 #
@@ -1076,11 +1084,14 @@ def toposort(roots: list[Node]) -> list["Node"]:
     topo_order: list["Node"] = []
 
     def visit(node: "Node") -> None:
-        if node not in visited:
-            visited.add(node)
-            for operand in node.input:
-                visit(operand)
-            topo_order.append(node)
+        if node in visited:
+            return
+        visited.add(node)
+
+        for operand in node.input:
+            visit(operand)
+
+        topo_order.append(node)
 
     for root in roots:
         visit(root)
