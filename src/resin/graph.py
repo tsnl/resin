@@ -9,6 +9,7 @@ easier for the backend to reuse memory and fuse kernels.
 """
 
 __all__ = [
+    "Accessor",
     "ConstNode",
     "ElementwiseNode",
     "MatmulNode",
@@ -16,11 +17,12 @@ __all__ = [
     "NotDifferentiableException",
     "ParamNode",
     "ReductionNode",
+    "ScatterNode",
     "ViewNode",
 ]
 
 from abc import ABC
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import math
 from typing import Literal
 
@@ -604,13 +606,14 @@ class ViewNode(Node):
             operator="add",
         )
 
-        # Scatter the reduced tensor back to the input shape, using the same view logic
-        # as the forward pass.
-        # TODO: Check if this is right!
+        # Scatter the reduced tensor back to the input shape.
+        # We can't use the original accessor because it does not account for the
+        # collapsed broadcast dimensions. Instead, we replace the accessor's shape with
+        # the reduced shape, keeping offset and pitch intact.
         x = ScatterNode.new(
             source=x,
             shape=self.input[0].shape,
-            accessor=self.accessor,
+            accessor=replace(self.accessor, shape=x.shape),
         )
 
         # Done:
@@ -636,6 +639,8 @@ class ScatterNode(Node):
     # Note that `scatter` is the inverse of `view` aka `__getitem__`:
     assert scatter(source, shape, key)[key] == source
     ```
+
+    Scatter always writes to freshly allocated C-contiguous memory.
     """
 
     accessor: Accessor
@@ -654,8 +659,8 @@ class ScatterNode(Node):
     @staticmethod
     def new_copy(source: Node, dtype: DType | None = None) -> "Node":
         dtype = dtype or source.dtype
-        key = tuple(slice(s) for s in source.shape)
-        accessor = Accessor.from_key(source.offset, source.shape, source.pitch, key)
+        pitch = compute_c_contiguous_pitch_for_shape(source.shape)
+        accessor = Accessor(offset=0, pitch=pitch, shape=source.shape)
         return ScatterNode.new(source=source, shape=source.shape, accessor=accessor)
 
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:

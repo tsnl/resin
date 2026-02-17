@@ -196,11 +196,9 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(accessor=Accessor(offset=0, pitch=(0, 0), shape=(1, 3))) :: fp32(0,(1, 3),(3, 1))
-            ├ view(accessor=Accessor(offset=0, pitch=(6, 1), shape=(1, 3))) :: fp32(0,(1, 3),(6, 1))
-            │ └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
-            └ view(accessor=Accessor(offset=0, pitch=(0, 0), shape=(1, 3))) :: fp32(0,(1, 3),(0, 0))
-              └ const(value=0) :: fp32(0,(),())
+            scatter(accessor=Accessor(offset=0, pitch=(3, 1), shape=(1, 3))) :: fp32(0,(1, 3),(3, 1))
+            └ view(accessor=Accessor(offset=0, pitch=(6, 1), shape=(1, 3))) :: fp32(0,(1, 3),(6, 1))
+              └ const(value=[[1, 2, 3], [4, 5, 6]]) :: fp32(0,(2, 3),(3, 1))
             """
         )
         assert debug_str(t) == expected.strip()
@@ -210,10 +208,8 @@ class TestCompact:
         t2 = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(accessor=Accessor(offset=0, pitch=(0,), shape=(3,))) :: fp32(0,(3,),(1,))
-            ├ const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))
-            └ view(accessor=Accessor(offset=0, pitch=(0,), shape=(3,))) :: fp32(0,(3,),(0,))
-              └ const(value=0) :: fp32(0,(),())
+            scatter(accessor=Accessor(offset=0, pitch=(1,), shape=(3,))) :: fp32(0,(3,),(1,))
+            └ const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))
             """
         )
         assert debug_str(t2) == expected.strip()
