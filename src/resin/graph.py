@@ -62,30 +62,6 @@ class Node(ABC):
         return math.prod(self.shape) * dtype_nbytes(self.dtype)
 
     #
-    # Factory methods:
-    #
-
-    @staticmethod
-    def const(value: "npt.ArrayLike", *, dtype: DType = "fp32") -> ConstNode:
-        return ConstNode.new(value=value, dtype=dtype)
-
-    @staticmethod
-    def ones(shape: tuple[int, ...], *, dtype: DType = "fp32") -> Node:
-        return Node.full(shape, v=1, dtype=dtype)
-
-    @staticmethod
-    def zeros(shape: tuple[int, ...], *, dtype: DType = "fp32") -> Node:
-        return Node.full(shape, v=0, dtype=dtype)
-
-    @staticmethod
-    def full(shape: tuple[int, ...], v: Scalar, *, dtype: DType = "fp32") -> Node:
-        return Node.const(v, dtype=dtype).broadcast(shape)
-
-    @staticmethod
-    def param(shape: tuple[int, ...], dtype: DType, label: str = "") -> ParamNode:
-        return ParamNode.new(shape=shape, dtype=dtype, label=label)
-
-    #
     # Operations:
     #
 
@@ -186,10 +162,18 @@ class Node(ABC):
 
     def reduce(
         self,
-        axes: tuple[int, ...],
+        *,
         operator: BinaryAssocScalarOperator,
+        axes: tuple[int, ...] | None,
     ) -> Node:
+        axes = tuple(range(len(self.shape))) if axes is None else axes
         return ReductionNode.new(input=self, axes=axes, operator=operator)
+
+    def sum(self, axes: tuple[int, ...] | None = None) -> Node:
+        return self.reduce(axes=axes, operator="add")
+
+    def prod(self, axes: tuple[int, ...] | None = None) -> Node:
+        return self.reduce(axes=axes, operator="mul")
 
     def permute(self, permutation: tuple[int, ...]) -> Node:
         return ViewNode.new_permutation(input=self, permutation=permutation)
@@ -261,7 +245,7 @@ class Node(ABC):
 
     @staticmethod
     def _from_node_or_scalar(value: "npt.ArrayLike | Node", dtype: DType) -> Node:
-        return value if isinstance(value, Node) else Node.const(value, dtype=dtype)
+        return value if isinstance(value, Node) else ConstNode.new(value, dtype=dtype)
 
     def _join_dtypes_for_bop(self, other: Node) -> tuple[Node, Node]:
         res_dtype = dtype_join(self.dtype, other.dtype)
@@ -324,7 +308,7 @@ class ConstNode(Node):
     value: npt.ArrayLike
 
     @staticmethod
-    def new(value: "npt.ArrayLike", *, dtype: DType):
+    def new(value: "npt.ArrayLike", *, dtype: DType = "fp32") -> "ConstNode":
         shape = ConstNode._infer_value_shape(value)
         pitch = compute_c_contiguous_pitch_for_shape(shape)
         return ConstNode(
@@ -335,6 +319,18 @@ class ConstNode(Node):
             value=value,
             input=(),
         )
+
+    @staticmethod
+    def ones(shape: tuple[int, ...], *, dtype: DType = "fp32") -> Node:
+        return ConstNode.full(shape, v=1, dtype=dtype)
+
+    @staticmethod
+    def zeros(shape: tuple[int, ...], *, dtype: DType = "fp32") -> Node:
+        return ConstNode.full(shape, v=0, dtype=dtype)
+
+    @staticmethod
+    def full(shape: tuple[int, ...], v: Scalar, *, dtype: DType = "fp32") -> Node:
+        return ConstNode.new(v, dtype=dtype).broadcast(shape)
 
     @staticmethod
     def _infer_value_shape(value: "npt.ArrayLike") -> tuple[int, ...]:
@@ -1102,6 +1098,9 @@ def grad(f_graph: Node) -> dict[Node, Node]:
     for efficient reuse of forward pass expressions in the backward pass.
     """
 
+    if f_graph.shape != ():
+        raise ValueError("Output graph must be a scalar (i.e. have shape=())")
+
     def accumulate_gradient(t: Node, increment: Node) -> None:
         if base := grad.get(t):
             grad[t] = base + increment
@@ -1112,7 +1111,7 @@ def grad(f_graph: Node) -> dict[Node, Node]:
     grad: dict[Node, Node] = {}
 
     # Initialize: ∂f / ∂f = 1
-    grad[f_graph] = Node.ones(f_graph.shape, dtype=f_graph.dtype)
+    grad[f_graph] = ConstNode.ones(f_graph.shape, dtype=f_graph.dtype)
 
     # Traverse the graph in reverse topological order, accumulating gradients for each
     # node.

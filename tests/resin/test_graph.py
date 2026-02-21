@@ -3,7 +3,7 @@
 import textwrap
 from io import StringIO
 
-from resin.graph import ElementwiseNode, Node, ViewNode
+from resin.graph import ConstNode, ElementwiseNode, Node, ParamNode, ViewNode
 
 
 def debug_str(node: Node) -> str:
@@ -14,30 +14,30 @@ def debug_str(node: Node) -> str:
 
 class TestConstants:
     def test_scalar(self) -> None:
-        t = Node.const(42, dtype="fp32")
+        t = ConstNode.new(42, dtype="fp32")
         expected = "const(value=42) :: fp32(0,(),())"
         assert debug_str(t) == expected.strip()
 
     def test_1d(self) -> None:
-        t = Node.const([1, 2, 3], dtype="fp32")
+        t = ConstNode.new([1, 2, 3], dtype="fp32")
         expected = "const(value=[1, 2, 3]) :: fp32(0,(3,),(1,))"
         assert debug_str(t) == expected.strip()
 
     def test_2d(self) -> None:
-        t = Node.const([[1, 2], [3, 4]], dtype="fp32")
+        t = ConstNode.new([[1, 2], [3, 4]], dtype="fp32")
         expected = "const(value=[[1, 2], [3, 4]]) :: fp32(0,(2, 2),(2, 1))"
         assert debug_str(t) == expected.strip()
 
     def test_fp16(self) -> None:
-        t = Node.const([1, 2], dtype="fp16")
+        t = ConstNode.new([1, 2], dtype="fp16")
         expected = "const(value=[1, 2]) :: fp16(0,(2,),(1,))"
         assert debug_str(t) == expected.strip()
 
 
 class TestElementwiseOps:
     def test_add(self) -> None:
-        t1 = Node.const([1, 2], dtype="fp32")
-        t2 = Node.const([3, 4], dtype="fp32")
+        t1 = ConstNode.new([1, 2], dtype="fp32")
+        t2 = ConstNode.new([3, 4], dtype="fp32")
         t = t1 + t2
         expected = textwrap.dedent(
             """
@@ -51,9 +51,9 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_chained(self) -> None:
-        t1 = Node.const([1, 2], dtype="fp32")
-        t2 = Node.const([3, 4], dtype="fp32")
-        t3 = Node.const([5, 6], dtype="fp32")
+        t1 = ConstNode.new([1, 2], dtype="fp32")
+        t2 = ConstNode.new([3, 4], dtype="fp32")
+        t3 = ConstNode.new([5, 6], dtype="fp32")
         t = (t1 + t2) * t3
         expected = textwrap.dedent(
             """
@@ -71,7 +71,7 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_unary_chain(self) -> None:
-        t = Node.const([1, 2, 3, 4], dtype="fp32")
+        t = ConstNode.new([1, 2, 3, 4], dtype="fp32")
         t = t.exp().log().exp().log()
         expected = textwrap.dedent(
             """
@@ -85,7 +85,7 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_scalar_broadcast(self) -> None:
-        t = Node.const([[1, 2], [3, 4]], dtype="fp32")
+        t = ConstNode.new([[1, 2], [3, 4]], dtype="fp32")
         t = t + 10
         expected = textwrap.dedent(
             """
@@ -99,7 +99,7 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_max_with_scalar(self) -> None:
-        t = Node.const([1, 2, 3], dtype="fp32")
+        t = ConstNode.new([1, 2, 3], dtype="fp32")
         t = t.max(0)
         expected = textwrap.dedent(
             """
@@ -113,8 +113,8 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_comparison(self) -> None:
-        t1 = Node.const([1, 2], dtype="fp32")
-        t2 = Node.const([2, 1], dtype="fp32")
+        t1 = ConstNode.new([1, 2], dtype="fp32")
+        t2 = ConstNode.new([2, 1], dtype="fp32")
         t = t1.gt(t2)
         expected = textwrap.dedent(
             """
@@ -130,7 +130,7 @@ class TestElementwiseOps:
 
 class TestReduction:
     def test_sum(self) -> None:
-        t = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t.reduce(axes=(1,), operator="add")
         expected = textwrap.dedent(
             """
@@ -143,7 +143,7 @@ class TestReduction:
 
 class TestIndexing:
     def test_integer_index(self) -> None:
-        t = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t[0]
         expected = textwrap.dedent(
             """
@@ -154,7 +154,7 @@ class TestIndexing:
         assert debug_str(t) == expected.strip()
 
     def test_slice_with_step(self) -> None:
-        t = Node.const([1, 2, 3, 4, 5, 6], dtype="fp32")
+        t = ConstNode.new([1, 2, 3, 4, 5, 6], dtype="fp32")
         t = t[::2]
         expected = textwrap.dedent(
             """
@@ -165,7 +165,7 @@ class TestIndexing:
         assert debug_str(t) == expected.strip()
 
     def test_multi_dim(self) -> None:
-        t = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t[1, 1:3]
         expected = textwrap.dedent(
             """
@@ -178,7 +178,7 @@ class TestIndexing:
 
 class TestPermute:
     def test_transpose(self) -> None:
-        t = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t.permute((1, 0))
         expected = textwrap.dedent(
             """
@@ -191,7 +191,7 @@ class TestPermute:
 
 class TestCompact:
     def test_compact_after_slice(self) -> None:
-        t = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t[(slice(None, None, 2), slice(None))]
         t = t.copy()
         expected = textwrap.dedent(
@@ -204,7 +204,7 @@ class TestCompact:
         assert debug_str(t) == expected.strip()
 
     def test_compact_noop_on_contiguous(self) -> None:
-        t = Node.const([1, 2, 3], dtype="fp32")
+        t = ConstNode.new([1, 2, 3], dtype="fp32")
         t2 = t.copy()
         expected = textwrap.dedent(
             """
@@ -217,8 +217,8 @@ class TestCompact:
 
 class TestSharedSubexpressions:
     def test_shared_subgraph(self) -> None:
-        t1 = Node.const([1, 2], dtype="fp32")
-        t2 = Node.const([3, 4], dtype="fp32")
+        t1 = ConstNode.new([1, 2], dtype="fp32")
+        t2 = ConstNode.new([3, 4], dtype="fp32")
         t = t1 + t2
         t = t * t
         expected = textwrap.dedent(
@@ -240,8 +240,8 @@ class TestSharedSubexpressions:
 
 class TestMatmul:
     def test_matmul_2d(self) -> None:
-        t1 = Node.const([[1, 2], [3, 4], [5, 6]], dtype="fp32")
-        t2 = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t1 = ConstNode.new([[1, 2], [3, 4], [5, 6]], dtype="fp32")
+        t2 = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t1 @ t2
         expected = textwrap.dedent(
             """
@@ -255,10 +255,10 @@ class TestMatmul:
         assert debug_str(t) == expected.strip()
 
     def test_matmul_batched(self) -> None:
-        t1 = Node.const(
+        t1 = ConstNode.new(
             [[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]], dtype="fp32"
         )
-        t2 = Node.const(
+        t2 = ConstNode.new(
             [[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], dtype="fp32"
         )
         r = t1 @ t2
@@ -266,8 +266,8 @@ class TestMatmul:
 
     def test_matmul_2d_broadcast_left(self) -> None:
         """2D @ 3D: left operand is broadcast along the batch dim."""
-        t1 = Node.const([[1, 2], [3, 4], [5, 6]], dtype="fp32")
-        t2 = Node.const(
+        t1 = ConstNode.new([[1, 2], [3, 4], [5, 6]], dtype="fp32")
+        t2 = ConstNode.new(
             [[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], dtype="fp32"
         )
         t = t1 @ t2
@@ -284,10 +284,10 @@ class TestMatmul:
 
     def test_matmul_2d_broadcast_right(self) -> None:
         """3D @ 2D: right operand is broadcast along the batch dim."""
-        t1 = Node.const(
+        t1 = ConstNode.new(
             [[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]], dtype="fp32"
         )
-        t2 = Node.const([[1, 2, 3], [4, 5, 6]], dtype="fp32")
+        t2 = ConstNode.new([[1, 2, 3], [4, 5, 6]], dtype="fp32")
         t = t1 @ t2
         expected = textwrap.dedent(
             """
@@ -303,7 +303,7 @@ class TestMatmul:
 
 class TestBroadcast:
     def test_full(self) -> None:
-        t = Node.full((2, 3), v=1, dtype="fp32")
+        t = ConstNode.full((2, 3), v=1, dtype="fp32")
         expected = textwrap.dedent(
             """
             view(accessor=Accessor(offset=0, pitch=(0, 0), shape=(2, 3))) :: fp32(0,(2, 3),(0, 0))
@@ -313,7 +313,7 @@ class TestBroadcast:
         assert debug_str(t) == expected.strip()
 
     def test_zeros(self) -> None:
-        t = Node.zeros((4,), dtype="fp32")
+        t = ConstNode.zeros((4,), dtype="fp32")
         expected = textwrap.dedent(
             """
             view(accessor=Accessor(offset=0, pitch=(0,), shape=(4,))) :: fp32(0,(4,),(0,))
@@ -325,7 +325,7 @@ class TestBroadcast:
 
 class TestParam:
     def test_param_node(self) -> None:
-        t = Node.param((4,), "fp32", label="weights")
+        t = ParamNode.new(shape=(4,), dtype="fp32", label="weights")
         expected = "param(label='weights') :: fp32(0,(4,),(1,))"
         assert debug_str(t) == expected.strip()
 
@@ -335,9 +335,9 @@ class TestViewDfDo:
 
     def test_broadcast_reduces(self) -> None:
         """Broadcast dims (pitch=0) should be sum-reduced in the backward pass."""
-        x = Node.param((3,), "fp32", label="x")
+        x = ParamNode.new(shape=(3,), dtype="fp32", label="x")
         y = x.broadcast((4,))  # shape (4, 3), pitch (0, 1)
-        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        df_dn = ParamNode.new(shape=y.shape, dtype="fp32", label="df_dn")
         (grad_x,) = y.df_do(df_dn)
 
         assert grad_x.shape == x.shape
@@ -345,9 +345,9 @@ class TestViewDfDo:
 
     def test_scalar_broadcast(self) -> None:
         """Broadcasting a scalar to a matrix should reduce all dims."""
-        x = Node.param((), "fp32", label="x")
+        x = ParamNode.new(shape=(), dtype="fp32", label="x")
         y = x.broadcast((2, 3))  # shape (2, 3), pitch (0, 0)
-        df_dn = Node.param(y.shape, "fp32", label="df_dn")
+        df_dn = ParamNode.new(shape=y.shape, dtype="fp32", label="df_dn")
         (grad_x,) = y.df_do(df_dn)
 
         assert grad_x.shape == x.shape
@@ -363,9 +363,9 @@ class TestReductionDfDo:
 
     def _make(self, axes, operator):
         """Helper: build input, reduction node, and upstream gradient."""
-        x = Node.param((2, 3), "fp32", label="x")
+        x = ParamNode.new(shape=(2, 3), dtype="fp32", label="x")
         n = x.reduce(axes=axes, operator=operator)
-        df_dn = Node.param(n.shape, "fp32", label="df_dn")
+        df_dn = ParamNode.new(shape=n.shape, dtype="fp32", label="df_dn")
         return x, n, df_dn
 
     # -- add ------------------------------------------------------------------
@@ -414,9 +414,9 @@ class TestReductionDfDo:
 
     def test_add_multi_axis(self) -> None:
         """Reducing over all axes: gradient broadcasts scalar back to full shape."""
-        x = Node.param((2, 3), "fp32", label="x")
+        x = ParamNode.new(shape=(2, 3), dtype="fp32", label="x")
         n = x.reduce(axes=(0, 1), operator="add")  # shape (1, 1)
-        df_dn = Node.param(n.shape, "fp32", label="df_dn")
+        df_dn = ParamNode.new(shape=n.shape, dtype="fp32", label="df_dn")
         (grad_x,) = n.df_do(df_dn)
 
         assert grad_x.shape == x.shape

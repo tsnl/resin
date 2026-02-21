@@ -34,14 +34,23 @@ class MnistMlp:
 
 
 def main():
-    config = MnistMlpConfig(input_size=784, hidden_size=128, output_size=10)
-
     batch_size = 64
     img_size = 48
+    num_classes = 10
 
-    input = rg.Node.param(shape=(batch_size, img_size * img_size), dtype="fp32")
+    config = MnistMlpConfig(
+        input_size=img_size**2,
+        hidden_size=128,
+        output_size=num_classes,
+    )
+
+    image = rg.ParamNode.new(shape=(batch_size, img_size * img_size), dtype="fp32")
+    label = rg.ParamNode.new(shape=(batch_size, num_classes), dtype="fp32")
     model = MnistMlp.new(config)
-    probs = model(input)
+    probs = model(image)
+    error = nn.cross_entropy(probs, label)
+    grads = rg.grad(error)
+    # TODO: update model parameters with gradients, e.g. using SGD or Adam
 
     interp = ri.NumpyInterp({"probs": probs})
 
