@@ -1,6 +1,6 @@
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import math
 from typing import Mapping
 
 import numpy as np
@@ -250,4 +250,3 @@ def to_numpy_dtype(dtype: rg.DType) -> np.dtype:
         return np.dtype(np.float16)
     else:
         raise NotImplementedError(f"Unsupported dtype: {dtype}")
-

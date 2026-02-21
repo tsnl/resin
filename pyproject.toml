@@ -6,12 +6,12 @@ readme = "README.md"
 requires-python = ">=3.14"
 authors = [{ name = "Nikhil Idiculla", email = "nikhil.idiculla@gmail.com" }]
 dependencies = [
+    "clang>=21.1.7",
     "msgpack>=1.1.2",
     "numpy>=2.4.2",
     "pytest>=9.0.2",
     "rich>=14.3.2",
     "ruff>=0.14.14",
-    "wgpu>=0.29.0",
 ]
 
 [build-system]

@@ -23,9 +23,10 @@ __all__ = [
     "is_contiguous",
 ]
 
+from contextlib import contextmanager
+import math
 from abc import ABC
 from dataclasses import dataclass, fields, replace
-import math
 from typing import Literal
 
 import numpy.typing as npt
@@ -182,6 +183,16 @@ class Node(ABC):
         identity = tuple(range(len(self.shape)))
         permutation = identity[:-2] + (identity[-1], identity[-2])
         return self.permute(tuple(permutation))
+
+    def squeeze(self, axes: tuple[int, ...]) -> Node:
+        for axis in axes:
+            if axis < 0 or axis >= len(self.shape):
+                raise IndexError(f"Axis {axis} out of bounds for shape {self.shape}")
+            if self.shape[axis] != 1:
+                raise ValueError(f"Cannot squeeze axis {axis} with {self.shape[axis]=}")
+        new_shape = tuple(s for i, s in enumerate(self.shape) if i not in axes)
+        new_pitch = tuple(p for i, p in enumerate(self.pitch) if i not in axes)
+        return self.view(shape=new_shape, pitch=new_pitch)
 
     #
     # Debug printing:
@@ -650,6 +661,51 @@ class ScatterNode(Node):
     def df_do(self, df_dn: Node) -> tuple[Node, ...]:
         source_grad = ViewNode.new(df_dn, self.accessor)
         return (source_grad,)
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class RecurNode(Node):
+    params: tuple[ParamNode, ...]
+    init: dict[ParamNode, Node]
+    cond: Node
+    body: dict[ParamNode, Node]
+
+    @staticmethod
+    def while_(cond: Node) -> "RecurNodeBuilder":
+        return RecurNodeBuilder(cond=cond)
+
+
+@dataclass
+class RecurNodeBuilder:
+    cond: Node
+    init: dict[ParamNode, Node] | None = None
+    body: dict[ParamNode, Node] | None = None
+
+    def continue_(self, next: dict[ParamNode, Node]):
+        if self.body is not None:
+            raise RuntimeError("RecurNodeBuilder can only be continued once")
+        self.body = next
+
+    def finish(self) -> RecurNode:
+        if self.body is None:
+            raise RuntimeError("RecurNodeBuilder must be continued before finishing")
+        params = tuple(self.body.keys())
+        init = (
+            self.init
+            if self.init is not None
+            else {p: ConstNode.zeros(p.shape, dtype=p.dtype) for p in params}
+        )
+        return RecurNode(
+            offset=0,
+            shape=(),
+            pitch=(),
+            dtype="fp32",
+            input=(),
+            params=params,
+            init=init,
+            cond=self.cond,
+            body=self.body,
+        )
 
 
 #

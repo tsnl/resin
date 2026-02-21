@@ -1,10 +1,8 @@
-from dataclasses import dataclass, fields, is_dataclass
 import math
+from dataclasses import dataclass, fields, is_dataclass
 
 from . import graph as rg
-
-
-type Tree[T] = "dict[str, Tree[T]] | list[Tree[T]] | T"
+from . import tree as rt
 
 
 @dataclass
@@ -12,11 +10,11 @@ class Module:
     def __post_init__(self):
         assert is_dataclass(self), "Module must be a dataclass"
 
-    def params(self) -> Tree[rg.ParamNode]:
+    def params(self) -> rt.Tree[rg.ParamNode]:
         return Module._parse_param_tree(self)
 
     @staticmethod
-    def _parse_param_tree(it: Module | Tree[rg.ParamNode]) -> Tree[rg.ParamNode]:
+    def _parse_param_tree(it: Module | rt.Tree[rg.ParamNode]) -> rt.Tree[rg.ParamNode]:
         if isinstance(it, rg.ParamNode):
             return it
         elif isinstance(it, dict):
@@ -66,17 +64,11 @@ def softmax(x: rg.Node, axes: tuple[int, ...] = (0,)) -> rg.Node:
 def cross_entropy(y_hat: rg.Node, y: rg.Node) -> rg.Node:
     """
     Computes the cross-entropy loss between predicted probabilities `y_hat` and true
-    labels `y`. Both `y_hat` and `y` should have the same shape, which can be either
-    a 1D vector (for single samples) or a 2D matrix (for batches of samples).
-
-    The function returns a scalar loss value, which is the average cross-entropy loss
-    across the batch if `y_hat` is a 2D matrix.
+    labels `y`.
     """
     assert y_hat.shape == y.shape
-    assert len(y_hat.shape) in {1, 2}, "(batch_size, num_classes) expected"
     axis = len(y_hat.shape) - 1
-    loss = -(y * y_hat.log()).sum(axes=(axis,)) / y.shape[axis]
-    return mean(loss)
+    return -(y * y_hat.log()).sum(axes=(axis,)).squeeze(axes=(axis,)) / y.shape[axis]
 
 
 def mean(n: rg.Node) -> rg.Node:

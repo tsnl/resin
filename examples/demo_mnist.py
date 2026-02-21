@@ -48,7 +48,7 @@ def main():
     label = rg.ParamNode.new(shape=(batch_size, num_classes), dtype="fp32")
     model = MnistMlp.new(config)
     probs = model(image)
-    error = nn.cross_entropy(probs, label)
+    error = nn.mean(nn.cross_entropy(probs, label))
     grads = rg.grad(error)
     # TODO: update model parameters with gradients, e.g. using SGD or Adam
 
