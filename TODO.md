@@ -1,11 +1,12 @@
-function -> network
--   [x] Rename Tensor to Node, rename `tensor.py` to `graph.py`.
--   [ ] Simplify autodiff to work on graphs directly.
-    -   [x] Port bulk of old autodiff solution.
-    -   [ ] Can we use a single ViewNode without IndexNode?
-    -   [ ] Implement df_do for ReductionNode
-    -   [ ] Implement df_do for IndexNode
-    -   [ ] Implement df_do for ViewNode
--   [ ] Support "graph fusion": connect output node to input (var/parameter) node
--   [ ] Implement compiler: leave var/parameter nodes as buffers that can be written 
-    before graph execution.
+# TODO
+
+## Phase 1: Make It Work (Current)
+
+-   Model a graph-based language for static graphs, feed-forward, no loops/mutation/tail-recursion.
+-   Create an `Interpreter` that allows execution of this graph.
+
+## Phase 2: Make It Good
+
+-   Extend existing graph with a `RecurNode` for tail calls, enabling loops, tail recursion, mutation, etc.
+-   Extend existing type-system to support richer constructs, e.g. tuples, structs, etc. Broadcasting and other semantics should also generalize over these accessors, not just array indexing.
+-   Implement custom syntactic frontend: pure functional programming language. See `examples/` for more.

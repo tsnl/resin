@@ -663,51 +663,6 @@ class ScatterNode(Node):
         return (source_grad,)
 
 
-@dataclass(kw_only=True, frozen=True, eq=False)
-class RecurNode(Node):
-    params: tuple[ParamNode, ...]
-    init: dict[ParamNode, Node]
-    cond: Node
-    body: dict[ParamNode, Node]
-
-    @staticmethod
-    def while_(cond: Node) -> "RecurNodeBuilder":
-        return RecurNodeBuilder(cond=cond)
-
-
-@dataclass
-class RecurNodeBuilder:
-    cond: Node
-    init: dict[ParamNode, Node] | None = None
-    body: dict[ParamNode, Node] | None = None
-
-    def continue_(self, next: dict[ParamNode, Node]):
-        if self.body is not None:
-            raise RuntimeError("RecurNodeBuilder can only be continued once")
-        self.body = next
-
-    def finish(self) -> RecurNode:
-        if self.body is None:
-            raise RuntimeError("RecurNodeBuilder must be continued before finishing")
-        params = tuple(self.body.keys())
-        init = (
-            self.init
-            if self.init is not None
-            else {p: ConstNode.zeros(p.shape, dtype=p.dtype) for p in params}
-        )
-        return RecurNode(
-            offset=0,
-            shape=(),
-            pitch=(),
-            dtype="fp32",
-            input=(),
-            params=params,
-            init=init,
-            cond=self.cond,
-            body=self.body,
-        )
-
-
 #
 # DType
 #
