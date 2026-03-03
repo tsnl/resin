@@ -23,11 +23,10 @@ __all__ = [
     "is_contiguous",
 ]
 
-from contextlib import contextmanager
 import math
 from abc import ABC
-from dataclasses import dataclass, fields, replace
-from typing import Literal
+from dataclasses import dataclass, fields, is_dataclass, replace
+from typing import Callable, Generator, Iterable, Literal, Protocol
 
 import numpy.typing as npt
 
@@ -1056,7 +1055,7 @@ def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
 #
 
 
-def toposort(roots: list[Node]) -> list["Node"]:
+def toposort(roots: Iterable[Node]) -> list["Node"]:
     """
     Returns a list of all tensors in the subgraph rooted at this tensor, sorted in
     topological order (i.e. each tensor appears after all its inputs).
@@ -1141,3 +1140,32 @@ def grad(f_graph: Node) -> dict[Node, Node]:
 
     # Done:
     return grad
+
+
+#
+# PyTree
+#
+
+
+type PyTree[T] = "dict[str, PyTree[T]] | list[PyTree[T]] | T"
+"""Similar to PyTree in JAX."""
+
+
+def pytree_leaves[T](pytree: PyTree[T]) -> Generator[T, None, None]:
+    if isinstance(pytree, dict):
+        for v in pytree.values():
+            yield from pytree_leaves(v)
+    elif isinstance(pytree, list):
+        for v in pytree:
+            yield from pytree_leaves(v)
+    else:
+        yield pytree
+
+
+def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
+    if isinstance(pytree, dict):
+        return {k: map_pytree(v, f) for k, v in pytree.items()}
+    elif isinstance(pytree, list):
+        return [map_pytree(v, f) for v in pytree]
+    else:
+        return f(pytree)

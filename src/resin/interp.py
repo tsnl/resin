@@ -1,13 +1,52 @@
-import math
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Mapping
-
-import numpy as np
-import numpy.lib.stride_tricks as nps
+import wgpu
 
 from . import graph as rg
 
 
-class Interp(ABC):
-    pass
+class Processor:
+    def __init__(
+        self,
+        device: wgpu.GPUDevice,
+        output_tree: rg.PyTree[rg.Node],
+    ) -> None:
+        super().__init__()
+
+        self.device = device
+        self.output_tree = optimize_graph(output_tree)
+        self.param_nodes = Processor.compute_param_nodes(self.output_tree)
+
+    @staticmethod
+    def compute_param_nodes(pytree: rg.PyTree[rg.Node]) -> list[rg.ParamNode]:
+        return [
+            node  #
+            for node in rg.pytree_leaves(pytree)
+            if isinstance(node, rg.ParamNode)
+        ]
+
+    def run(
+        self,
+        params: dict[rg.ParamNode, wgpu.GPUBuffer],
+    ) -> rg.PyTree[wgpu.GPUBuffer]:
+        self._bind_params_buffers(params)
+        self._flood_buffers()
+        return self._gather_output()
+
+    def _bind_params_buffers(self, params: dict[rg.ParamNode, wgpu.GPUBuffer]) -> None:
+        for param_node in self.param_nodes:
+            if param_node not in params:
+                raise ValueError(f"Missing buffer for parameter node {param_node}")
+
+        raise NotImplementedError("Binding parameter buffers is not implemented yet")
+
+    def _flood_buffers(self) -> None:
+        raise NotImplementedError(
+            "Flooding buffers through the graph is not implemented yet"
+        )
+
+    def _gather_output(self) -> rg.PyTree[wgpu.GPUBuffer]:
+        raise NotImplementedError("Gathering output buffers is not implemented yet")
+
+
+def optimize_graph(graph: rg.PyTree[rg.Node]) -> rg.PyTree[rg.Node]:
+    # TODO: implement graph optimizations
+    return graph

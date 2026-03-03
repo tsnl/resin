@@ -2,7 +2,6 @@ import math
 from dataclasses import dataclass, fields, is_dataclass
 
 from . import graph as rg
-from . import tree as rt
 
 
 @dataclass
@@ -10,11 +9,13 @@ class Module:
     def __post_init__(self):
         assert is_dataclass(self), "Module must be a dataclass"
 
-    def params(self) -> rt.Tree[rg.ParamNode]:
+    def params(self) -> rg.PyTree[rg.ParamNode]:
         return Module._parse_param_tree(self)
 
     @staticmethod
-    def _parse_param_tree(it: Module | rt.Tree[rg.ParamNode]) -> rt.Tree[rg.ParamNode]:
+    def _parse_param_tree(
+        it: Module | rg.PyTree[rg.ParamNode],
+    ) -> rg.PyTree[rg.ParamNode]:
         if isinstance(it, rg.ParamNode):
             return it
         elif isinstance(it, dict):
