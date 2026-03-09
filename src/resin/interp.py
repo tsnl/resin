@@ -11,12 +11,12 @@ class Processor:
     ) -> None:
         super().__init__()
 
-        self.device = device
-        self.output_tree = optimize_graph(output_tree)
-        self.param_nodes = Processor.compute_param_nodes(self.output_tree)
+        self._device = device
+        self._output_tree = Processor._optimize_graph(output_tree)
+        self._param_nodes = Processor._compute_param_nodes(self._output_tree)
 
     @staticmethod
-    def compute_param_nodes(pytree: rg.PyTree[rg.Node]) -> list[rg.ParamNode]:
+    def _compute_param_nodes(pytree: rg.PyTree[rg.Node]) -> list[rg.ParamNode]:
         return [
             node  #
             for node in rg.pytree_leaves(pytree)
@@ -32,7 +32,7 @@ class Processor:
         return self._gather_output()
 
     def _bind_params_buffers(self, params: dict[rg.ParamNode, wgpu.GPUBuffer]) -> None:
-        for param_node in self.param_nodes:
+        for param_node in self._param_nodes:
             if param_node not in params:
                 raise ValueError(f"Missing buffer for parameter node {param_node}")
 
@@ -46,7 +46,25 @@ class Processor:
     def _gather_output(self) -> rg.PyTree[wgpu.GPUBuffer]:
         raise NotImplementedError("Gathering output buffers is not implemented yet")
 
+    #
+    # Compilation pipeline:
+    #
 
-def optimize_graph(graph: rg.PyTree[rg.Node]) -> rg.PyTree[rg.Node]:
-    # TODO: implement graph optimizations
-    return graph
+    @staticmethod
+    def _optimize_graph(graph: rg.PyTree[rg.Node]) -> rg.PyTree[rg.Node]:
+        # TODO: implement graph optimizations
+        return graph
+
+
+class ExecutionPlan:
+    def __init__(self, device: wgpu.GPUDevice, output_tree: rg.PyTree[rg.Node]) -> None:
+        super().__init__()
+
+
+class ExecutionNode:
+    pass
+
+
+class FusedElementwiseOperation:
+    def __init__(self, device: wgpu.GPUDevice, output_tree: rg.PyTree[rg.Node]) -> None:
+        super().__init__()
