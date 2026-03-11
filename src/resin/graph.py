@@ -25,12 +25,22 @@ __all__ = [
 
 import math
 from abc import ABC
-from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Callable, Generator, Iterable, Literal, Protocol
+from dataclasses import dataclass, fields, replace
+from typing import Callable, Generator, Iterable, Literal
 
 import numpy.typing as npt
 
 from .common import SupportsWrite, pascal_to_snake_case
+from .scalar import (
+    BinaryAssocScalarOperator,
+    Scalar,
+    ScalarOperator,
+    ScalarType,
+    UnaryScalarOperator,
+    is_scalar,
+    stype_join,
+    stype_nbytes,
+)
 
 
 class NotDifferentiableException(Exception):
@@ -47,8 +57,8 @@ class Node(ABC):
     offset: int
     shape: tuple[int, ...]
     pitch: tuple[int, ...]
-    dtype: DType
-    input: tuple[Node, ...]
+    stype: ScalarType
+    input: tuple["Node", ...]
 
     def __post_init__(self):
         assert len(self.shape) == len(self.pitch)
@@ -59,13 +69,13 @@ class Node(ABC):
 
     @property
     def nbytes(self) -> int:
-        return math.prod(self.shape) * dtype_nbytes(self.dtype)
+        return math.prod(self.shape) * stype_nbytes(self.stype)
 
     #
     # Operations:
     #
 
-    def broadcast(self, ns: tuple[int, ...]) -> Node:
+    def broadcast(self, ns: tuple[int, ...]) -> "Node":
         return ViewNode.new_broadcast(input=self, ns=ns)
 
     def view(
@@ -74,89 +84,89 @@ class Node(ABC):
         offset: int = 0,
         shape: tuple[int, ...],
         pitch: tuple[int, ...],
-    ) -> Node:
+    ) -> "Node":
         accessor = Accessor(offset=offset, shape=shape, pitch=pitch)
         return ViewNode.new(input=self, accessor=accessor)
 
-    def copy(self, *, dtype: DType | None = None) -> Node:
-        return ScatterNode.new_copy(source=self, dtype=dtype)
+    def copy(self, *, stype: ScalarType | None = None) -> "Node":
+        return ScatterNode.new_copy(source=self, stype=stype)
 
-    def __pow__(self, other: Node | Scalar) -> Node:
+    def __pow__(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="pow")
 
-    def __rpow__(self, other: Node | Scalar) -> Node:
-        return Node._from_node_or_scalar(other, dtype=self.dtype) ** self
+    def __rpow__(self, other: "Node | Scalar") -> "Node":
+        return Node._from_node_or_scalar(other, stype=self.stype) ** self
 
-    def __mul__(self, other: Node | Scalar) -> Node:
+    def __mul__(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="mul")
 
-    def __rmul__(self, other: Node | Scalar) -> Node:
-        return Node._from_node_or_scalar(other, dtype=self.dtype) * self
+    def __rmul__(self, other: "Node | Scalar") -> "Node":
+        return Node._from_node_or_scalar(other, stype=self.stype) * self
 
-    def __truediv__(self, other: Node | Scalar) -> Node:
+    def __truediv__(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="div")
 
-    def __rtruediv__(self, other: Node | Scalar) -> Node:
-        return Node._from_node_or_scalar(other, dtype=self.dtype) / self
+    def __rtruediv__(self, other: "Node | Scalar") -> "Node":
+        return Node._from_node_or_scalar(other, stype=self.stype) / self
 
-    def __add__(self, other: Node | Scalar) -> Node:
+    def __add__(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="add")
 
-    def __radd__(self, other: Node | Scalar) -> Node:
-        return Node._from_node_or_scalar(other, dtype=self.dtype) + self
+    def __radd__(self, other: "Node | Scalar") -> "Node":
+        return Node._from_node_or_scalar(other, stype=self.stype) + self
 
-    def __sub__(self, other: Node | Scalar) -> Node:
+    def __sub__(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="sub")
 
-    def __rsub__(self, other: Node | Scalar) -> Node:
-        return Node._from_node_or_scalar(other, dtype=self.dtype) - self
+    def __rsub__(self, other: "Node | Scalar") -> "Node":
+        return Node._from_node_or_scalar(other, stype=self.stype) - self
 
-    def max(self, other: Node | Scalar) -> Node:
+    def max(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="max")
 
-    def min(self, other: Node | Scalar) -> Node:
+    def min(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="min")
 
-    def eq(self, other: Node | Scalar) -> Node:
+    def eq(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="eq")
 
-    def ne(self, other: Node | Scalar) -> Node:
+    def ne(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="ne")
 
-    def lt(self, other: Node | Scalar) -> Node:
+    def lt(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="lt")
 
-    def gt(self, other: Node | Scalar) -> Node:
+    def gt(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="gt")
 
-    def le(self, other: Node | Scalar) -> Node:
+    def le(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="le")
 
-    def ge(self, other: Node | Scalar) -> Node:
+    def ge(self, other: "Node | Scalar") -> "Node":
         return self._elementwise_bop(other, operator="ge")
 
-    def __neg__(self) -> Node:
+    def __neg__(self) -> "Node":
         return self._elementwise_uop(operator="neg")
 
-    def __pos__(self) -> Node:
+    def __pos__(self) -> "Node":
         return self
 
-    def exp(self) -> Node:
+    def exp(self) -> "Node":
         return self._elementwise_uop(operator="exp")
 
-    def log(self) -> Node:
+    def log(self) -> "Node":
         return self._elementwise_uop(operator="log")
 
-    def __invert__(self) -> Node:
+    def __invert__(self) -> "Node":
         return self._elementwise_uop(operator="not")
 
-    def __matmul__(self, other: Node) -> Node:
+    def __matmul__(self, other: "Node") -> "Node":
         return MatmulNode.new(a=self, b=other)
 
-    def __rmatmul__(self, other: Node) -> Node:
-        return Node._from_node_or_scalar(other, dtype=self.dtype) @ self
+    def __rmatmul__(self, other: "Node") -> "Node":
+        return Node._from_node_or_scalar(other, stype=self.stype) @ self
 
-    def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> Node:
+    def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> "Node":
         key = (key,) if isinstance(key, (int, slice)) else key
         return ViewNode.new_index(input=self, key=key)
 
@@ -165,25 +175,25 @@ class Node(ABC):
         *,
         operator: BinaryAssocScalarOperator,
         axes: tuple[int, ...] | None,
-    ) -> Node:
+    ) -> "Node":
         axes = tuple(range(len(self.shape))) if axes is None else axes
         return ReductionNode.new(input=self, axes=axes, operator=operator)
 
-    def sum(self, axes: tuple[int, ...] | None = None) -> Node:
+    def sum(self, axes: tuple[int, ...] | None = None) -> "Node":
         return self.reduce(axes=axes, operator="add")
 
-    def prod(self, axes: tuple[int, ...] | None = None) -> Node:
+    def prod(self, axes: tuple[int, ...] | None = None) -> "Node":
         return self.reduce(axes=axes, operator="mul")
 
-    def permute(self, permutation: tuple[int, ...]) -> Node:
+    def permute(self, permutation: tuple[int, ...]) -> "Node":
         return ViewNode.new_permutation(input=self, permutation=permutation)
 
-    def transpose(self) -> Node:
+    def transpose(self) -> "Node":
         identity = tuple(range(len(self.shape)))
         permutation = identity[:-2] + (identity[-1], identity[-2])
         return self.permute(tuple(permutation))
 
-    def squeeze(self, axes: tuple[int, ...]) -> Node:
+    def squeeze(self, axes: tuple[int, ...]) -> "Node":
         for axis in axes:
             if axis < 0 or axis >= len(self.shape):
                 raise IndexError(f"Axis {axis} out of bounds for shape {self.shape}")
@@ -226,51 +236,53 @@ class Node(ABC):
     # Private:
     #
 
-    def _elementwise_uop(self, operator: UnaryScalarOperator) -> Node:
+    def _elementwise_uop(self, operator: UnaryScalarOperator) -> "Node":
         return ElementwiseNode(
             offset=self.offset,
             shape=self.shape,
             pitch=self.pitch,
-            dtype=self.dtype,
+            stype=self.stype,
             input=(self,),
             operator=operator,
         )
 
     def _elementwise_bop(
         self,
-        other: Node | Scalar,
+        other: "Node | Scalar",
         operator: ScalarOperator,
-    ) -> Node:
-        other = Node._from_node_or_scalar(other, dtype=self.dtype)
+    ) -> "Node":
+        other = Node._from_node_or_scalar(other, stype=self.stype)
         self, other = self._join_dtypes_for_bop(other)
         self, other = self._join_shapes_for_elementwise_bop(other)
         return ElementwiseNode(
             offset=self.offset,
             shape=self.shape,
             pitch=self.pitch,
-            dtype=self.dtype,
+            stype=self.stype,
             input=(self, other),
             operator=operator,
         )
 
     @staticmethod
-    def _from_node_or_scalar(value: "npt.ArrayLike | Node", dtype: DType) -> Node:
-        return value if isinstance(value, Node) else ConstNode.new(value, dtype=dtype)
+    def _from_node_or_scalar(
+        value: "npt.ArrayLike | Node", stype: ScalarType
+    ) -> "Node":
+        return value if isinstance(value, Node) else ConstNode.new(value, stype=stype)
 
-    def _join_dtypes_for_bop(self, other: Node) -> tuple[Node, Node]:
-        res_dtype = dtype_join(self.dtype, other.dtype)
-        s = self.copy(dtype=res_dtype) if self.dtype != res_dtype else self
-        o = other.copy(dtype=res_dtype) if other.dtype != res_dtype else other
+    def _join_dtypes_for_bop(self, other: "Node") -> tuple["Node", "Node"]:
+        res_dtype = stype_join(self.stype, other.stype)
+        s = self.copy(stype=res_dtype) if self.stype != res_dtype else self
+        o = other.copy(stype=res_dtype) if other.stype != res_dtype else other
         return s, o
 
-    def _join_shapes_for_elementwise_bop(self, other: Node) -> tuple[Node, Node]:
+    def _join_shapes_for_elementwise_bop(self, other: "Node") -> tuple[Node, Node]:
         join = shape_join(self.shape, self.pitch, other.shape, other.pitch)
         return (
             self.view(shape=join.shape, pitch=join.pitch1),
             other.view(shape=join.shape, pitch=join.pitch2),
         )
 
-    def _join_shapes_for_matmul_bop(self, other: Node) -> tuple[Node, Node]:
+    def _join_shapes_for_matmul_bop(self, other: "Node") -> tuple[Node, Node]:
         s = self
         o = other
 
@@ -318,33 +330,35 @@ class ConstNode(Node):
     value: npt.ArrayLike
 
     @staticmethod
-    def new(value: "npt.ArrayLike", *, dtype: DType = "fp32") -> "ConstNode":
+    def new(value: "npt.ArrayLike", *, stype: ScalarType = "fp32") -> "ConstNode":
         shape = ConstNode._infer_value_shape(value)
         pitch = compute_c_contiguous_pitch_for_shape(shape)
         return ConstNode(
             offset=0,
             shape=shape,
             pitch=pitch,
-            dtype=dtype,
+            stype=stype,
             value=value,
             input=(),
         )
 
     @staticmethod
-    def ones(shape: tuple[int, ...], *, dtype: DType = "fp32") -> Node:
-        return ConstNode.full(shape, v=1, dtype=dtype)
+    def ones(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> "Node":
+        return ConstNode.full(shape, v=1, stype=stype)
 
     @staticmethod
-    def zeros(shape: tuple[int, ...], *, dtype: DType = "fp32") -> Node:
-        return ConstNode.full(shape, v=0, dtype=dtype)
+    def zeros(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> "Node":
+        return ConstNode.full(shape, v=0, stype=stype)
 
     @staticmethod
-    def full(shape: tuple[int, ...], v: Scalar, *, dtype: DType = "fp32") -> Node:
-        return ConstNode.new(v, dtype=dtype).broadcast(shape)
+    def full(
+        shape: tuple[int, ...], v: Scalar, *, stype: ScalarType = "fp32"
+    ) -> "Node":
+        return ConstNode.new(v, stype=stype).broadcast(shape)
 
     @staticmethod
     def _infer_value_shape(value: "npt.ArrayLike") -> tuple[int, ...]:
-        if is_scalar_instance(value):
+        if is_scalar(value):
             return ()
         assert isinstance(value, list)
         if not value:
@@ -364,7 +378,7 @@ class ParamNode(Node):
     def new(
         *,
         shape: tuple[int, ...],
-        dtype: DType,
+        stype: ScalarType,
         label: str | None = None,
     ) -> "ParamNode":
         pitch = compute_c_contiguous_pitch_for_shape(shape)
@@ -372,7 +386,7 @@ class ParamNode(Node):
             offset=0,
             shape=shape,
             pitch=pitch,
-            dtype=dtype,
+            stype=stype,
             input=(),
             label=label,
         )
@@ -382,7 +396,7 @@ class ParamNode(Node):
 class ElementwiseNode(Node):
     operator: ScalarOperator
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
         match self.operator:
             case "neg":
                 return (-df_dn,)
@@ -452,7 +466,7 @@ class ReductionNode(Node):
 
     @staticmethod
     def new(
-        input: Node,
+        input: "Node",
         axes: tuple[int, ...],
         operator: BinaryAssocScalarOperator,
     ) -> "Node":
@@ -472,13 +486,13 @@ class ReductionNode(Node):
             offset=input.offset,
             shape=out_shape,
             pitch=out_pitch,
-            dtype=input.dtype,
+            stype=input.stype,
             input=(input,),
             operator=operator,
             axes=axes,
         )
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
         # broadcast df_dn to the input shape
         df_dn = df_dn.view(
             shape=self.input[0].shape,
@@ -508,7 +522,7 @@ class ReductionNode(Node):
 @dataclass(kw_only=True, frozen=True, eq=False)
 class MatmulNode(Node):
     @staticmethod
-    def new(a: Node, b: Node) -> "MatmulNode":
+    def new(a: "Node", b: "Node") -> "MatmulNode":
         a, b = a._join_dtypes_for_bop(b)
         a, b = a._join_shapes_for_matmul_bop(b)
         out_offset = 0
@@ -518,11 +532,11 @@ class MatmulNode(Node):
             offset=out_offset,
             shape=out_shape,
             pitch=out_pitch,
-            dtype=a.dtype,
+            stype=a.stype,
             input=(a, b),
         )
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
         # ∂n/∂o₁ = df/dn @ o₂.T
         # ∂n/∂o₂ = o₁.T @ df/dn
         return (
@@ -538,29 +552,29 @@ class ViewNode(Node):
     by only changing the offset, shape, pitch.
     """
 
-    accessor: Accessor
+    accessor: "Accessor"
 
     @staticmethod
-    def new(input: Node, accessor: Accessor) -> "ViewNode":
+    def new(input: "Node", accessor: "Accessor") -> "ViewNode":
         accessor.raise_if_not_compatible(input)
         return ViewNode(
             offset=accessor.offset,
             shape=accessor.shape,
             pitch=accessor.pitch,
-            dtype=input.dtype,
+            stype=input.stype,
             input=(input,),
             accessor=accessor,
         )
 
     @staticmethod
-    def new_broadcast(input: Node, ns: tuple[int, ...]) -> "Node":
+    def new_broadcast(input: "Node", ns: tuple[int, ...]) -> "Node":
         zs = (0,) * len(ns)
         shape = ns + input.shape
         pitch = zs + input.pitch
         return input.view(offset=input.offset, shape=shape, pitch=pitch)
 
     @staticmethod
-    def new_permutation(input: Node, permutation: tuple[int, ...]) -> "ViewNode":
+    def new_permutation(input: "Node", permutation: tuple[int, ...]) -> "ViewNode":
         if sorted(permutation) != list(range(len(input.shape))):
             raise ValueError(f"Bad permutation {permutation} for shape {input.shape}")
         new_offset = input.offset
@@ -572,18 +586,18 @@ class ViewNode(Node):
         )
 
     @staticmethod
-    def new_index(input: Node, key: tuple[int | slice, ...]) -> "ViewNode":
+    def new_index(input: "Node", key: tuple[int | slice, ...]) -> "ViewNode":
         accessor = Accessor.from_key(input.offset, input.shape, input.pitch, key)
         return ViewNode(
             offset=accessor.offset,
             pitch=accessor.pitch,
             shape=accessor.shape,
-            dtype=input.dtype,
+            stype=input.stype,
             input=(input,),
             accessor=accessor,
         )
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
         """
         - A view simply maps each input index `x` to zero, one, or multiple output
           indices `y_o`. Each index is a "flat" index, i.e. an integer that references
@@ -626,7 +640,7 @@ class ScatterNode(Node):
 
     ```python
     def scatter(source, shape, accessor) =
-        res = np.zeros(shape=shape, dtype=source.dtype)
+        res = np.zeros(shape=shape, stype=source.stype)
         res[key] = source
         return res
 
@@ -637,72 +651,33 @@ class ScatterNode(Node):
     Scatter always writes to freshly allocated C-contiguous memory.
     """
 
-    accessor: Accessor
+    accessor: "Accessor"
 
     @staticmethod
-    def new(source: Node, shape: tuple[int, ...], accessor: Accessor) -> "ScatterNode":
+    def new(
+        source: "Node",
+        shape: tuple[int, ...],
+        accessor: "Accessor",
+    ) -> "ScatterNode":
         return ScatterNode(
             offset=0,
             shape=shape,
             pitch=compute_c_contiguous_pitch_for_shape(shape),
-            dtype=source.dtype,
+            stype=source.stype,
             input=(source,),
             accessor=accessor,
         )
 
     @staticmethod
-    def new_copy(source: Node, dtype: DType | None = None) -> "Node":
-        dtype = dtype or source.dtype
+    def new_copy(source: "Node", stype: ScalarType | None = None) -> "Node":
+        stype = stype or source.stype
         pitch = compute_c_contiguous_pitch_for_shape(source.shape)
         accessor = Accessor(offset=0, pitch=pitch, shape=source.shape)
         return ScatterNode.new(source=source, shape=source.shape, accessor=accessor)
 
-    def df_do(self, df_dn: Node) -> tuple[Node, ...]:
+    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
         source_grad = ViewNode.new(df_dn, self.accessor)
         return (source_grad,)
-
-
-#
-# DType
-#
-
-
-type DType = Literal["fp32", "fp16"]
-type DTypeKind = Literal["float"]
-
-
-def dtype_join(dtype1: DType, dtype2: DType) -> DType:
-    kind = dtype_join_kind(dtype_kind(dtype1), dtype_kind(dtype2))
-    nbytes = max(dtype_nbytes(dtype1), dtype_nbytes(dtype2))
-    return dtype(kind, nbytes)
-
-
-def dtype(kind: DTypeKind, nbytes: int) -> DType:
-    match (kind, nbytes):
-        case ("float", 4):
-            return "fp32"
-        case ("float", 2):
-            return "fp16"
-        case _:
-            raise ValueError(f"Unsupported dtype with kind={kind} and nbytes={nbytes}")
-
-
-def dtype_nbytes(dtype: DType) -> int:
-    return {"fp32": 4, "fp16": 2}[dtype]
-
-
-def dtype_kind(dtype: DType) -> DTypeKind:
-    match dtype:
-        case "fp32" | "fp16":
-            return "float"
-        case _:
-            raise ValueError(f"Unsupported dtype {dtype}")
-
-
-def dtype_join_kind(dtype1: DTypeKind, dtype2: DTypeKind) -> DTypeKind:
-    if dtype1 != dtype2:
-        raise ValueError(f"Cannot join different kinds' dtypes: {dtype1} and {dtype2}")
-    return dtype1
 
 
 #
@@ -722,7 +697,7 @@ class Accessor:
         old_shape: tuple[int, ...],
         old_pitch: tuple[int, ...],
         key: tuple[int | slice, ...],
-    ) -> Accessor:
+    ) -> "Accessor":
         """
         Computes an accessor's offset, pitch, and shape for a given input tensor and
         key.
@@ -778,7 +753,7 @@ class Accessor:
             shape=tuple(new_shape),
         )
 
-    def raise_if_not_compatible(self, node: Node):
+    def raise_if_not_compatible(self, node: "Node"):
         """
         Raises a ValueError if the view defined by this accessor is not compatible with
         the given node's memory layout (shape and pitch).
@@ -959,26 +934,6 @@ def c_permutation(
 
 
 #
-# Scalar, ScalarOperator:
-#
-
-
-type Scalar = float | int
-_SCALAR_TYPES: tuple[type, ...] = (float, int)
-
-type ScalarOperator = UnaryScalarOperator | BinaryScalarOperator | BinaryCompareOperator
-type UnaryScalarOperator = Literal["neg", "exp", "log", "not"]
-type BinaryAssocScalarOperator = Literal["mul", "add", "max", "min"]
-type BinaryScalarOperator = Literal["pow", "div", "sub"] | BinaryAssocScalarOperator
-type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
-
-
-def is_scalar_instance(value: object) -> bool:
-    """Check if a value is a scalar (float or int)."""
-    return isinstance(value, _SCALAR_TYPES)
-
-
-#
 # Debug print:
 #
 
@@ -1003,7 +958,7 @@ def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
         args = ", ".join(f"{f}={getattr(node, f)!r}" for f in extra_fields)
         name = pascal_to_snake_case(node.__class__.__name__[: -len("Node")])
         return (
-            f"{name}({args}) :: {node.dtype}({node.offset},{node.shape},{node.pitch})"
+            f"{name}({args}) :: {node.stype}({node.offset},{node.shape},{node.pitch})"
         )
 
     def visit(
@@ -1099,7 +1054,7 @@ def refcount(roots: list[Node]) -> dict["Node", int]:
     return ref_counts
 
 
-def grad(f_graph: Node) -> dict[Node, Node]:
+def grad(f_graph: "Node") -> dict[Node, Node]:
     """
     Given a forward graph 'f_graph' that computes a scalar output, returns a mapping
     from each input tensor in 'f_graph' to its gradient with respect to the output.
@@ -1111,7 +1066,7 @@ def grad(f_graph: Node) -> dict[Node, Node]:
     if f_graph.shape != ():
         raise ValueError("Output graph must be a scalar (i.e. have shape=())")
 
-    def accumulate_gradient(t: Node, increment: Node) -> None:
+    def accumulate_gradient(t: "Node", increment: "Node") -> None:
         if base := grad.get(t):
             grad[t] = base + increment
         else:
@@ -1121,7 +1076,7 @@ def grad(f_graph: Node) -> dict[Node, Node]:
     grad: dict[Node, Node] = {}
 
     # Initialize: ∂f / ∂f = 1
-    grad[f_graph] = ConstNode.ones(f_graph.shape, dtype=f_graph.dtype)
+    grad[f_graph] = ConstNode.ones(f_graph.shape, stype=f_graph.stype)
 
     # Traverse the graph in reverse topological order, accumulating gradients for each
     # node.
@@ -1151,13 +1106,13 @@ type PyTree[T] = "dict[str, PyTree[T]] | list[PyTree[T]] | T"
 """Similar to PyTree in JAX."""
 
 
-def pytree_leaves[T](pytree: PyTree[T]) -> Generator[T, None, None]:
+def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
     if isinstance(pytree, dict):
         for v in pytree.values():
-            yield from pytree_leaves(v)
+            yield from flatten_pytree(v)
     elif isinstance(pytree, list):
         for v in pytree:
-            yield from pytree_leaves(v)
+            yield from flatten_pytree(v)
     else:
         yield pytree
 

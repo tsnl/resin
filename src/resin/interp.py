@@ -19,7 +19,7 @@ class Processor:
     def _compute_param_nodes(pytree: rg.PyTree[rg.Node]) -> list[rg.ParamNode]:
         return [
             node  #
-            for node in rg.pytree_leaves(pytree)
+            for node in rg.flatten_pytree(pytree)
             if isinstance(node, rg.ParamNode)
         ]
 
@@ -54,17 +54,3 @@ class Processor:
     def _optimize_graph(graph: rg.PyTree[rg.Node]) -> rg.PyTree[rg.Node]:
         # TODO: implement graph optimizations
         return graph
-
-
-class ExecutionPlan:
-    def __init__(self, device: wgpu.GPUDevice, output_tree: rg.PyTree[rg.Node]) -> None:
-        super().__init__()
-
-
-class ExecutionNode:
-    pass
-
-
-class FusedElementwiseOperation:
-    def __init__(self, device: wgpu.GPUDevice, output_tree: rg.PyTree[rg.Node]) -> None:
-        super().__init__()

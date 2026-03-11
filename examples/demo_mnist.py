@@ -44,8 +44,8 @@ def main():
         output_size=num_classes,
     )
 
-    image = rg.ParamNode.new(shape=(batch_size, img_size * img_size), dtype="fp32")
-    label = rg.ParamNode.new(shape=(batch_size, num_classes), dtype="fp32")
+    image = rg.ParamNode.new(shape=(batch_size, img_size * img_size), stype="fp32")
+    label = rg.ParamNode.new(shape=(batch_size, num_classes), stype="fp32")
     model = MnistMlp.new(config)
     probs = model(image)
     error = nn.mean(nn.cross_entropy(probs, label))

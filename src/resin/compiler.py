@@ -1,74 +1,75 @@
-"""
-TODO: Compiler should emit C code that then depends on the `wgpu-native` library in `deps/`.
-"""
-
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from . import graph as rg
-from . import tree as rt
-
-#
-# Compiler
-#
+from .scalar import ScalarOperator, ScalarType
 
 
-class Compiler:
-    pass
+def build_trivial_execution_plan(outs: rg.PyTree[rg.Node]) -> list["Kernel"]:
+    node_to_kernel_map = {}
+
+    def map_node(node: rg.Node) -> Kernel:
+        nonlocal node_to_kernel_map
+
+        if k := node_to_kernel_map.get(node):
+            return k
+
+        k = build_kernel_for_node(node)
+        node_to_kernel_map[node] = k
+        return k
+
+    def build_kernel_for_node(node: rg.Node) -> Kernel:
+        match node:
+            case rg.ConstNode():
+                return ConstKernel(
+                    shape=node.shape,
+                    pitch=node.shape,
+                    stype=node.stype,
+                    input=(),
+                    init=node,
+                )
+            case rg.ElementwiseNode():
+                input = tuple(map_node(input_node) for input_node in node.input)
+                return FusedElementwiseKernel(
+                    shape=node.shape,
+                    pitch=node.shape,
+                    stype=node.stype,
+                    input=input,
+                    ops=((node.operator, tuple(range(len(input)))),),
+                )
+            case _:
+                raise NotImplementedError()
+
+    nodes = rg.toposort(rg.flatten_pytree(outs))
+    kernels = [map_node(node) for node in nodes]
+
+    return kernels
 
 
-#
-# Program
-#
+def fuse_elementwise_kernels(kernels: list["Kernel"]) -> list["Kernel"]:
+    raise NotImplementedError()
 
 
-@dataclass(frozen=True)
-class Program:
-    routines: dict[str, Routine]
-    buffers: dict[str, Buffer]
+type Mode = Literal["r", "rw"]
 
 
-@dataclass(frozen=True)
-class Routine:
-    sinks: rt.Tree[rg.Node]
-    binds: dict[rg.ParamNode, str]
-
-
-@dataclass(frozen=True)
-class Buffer:
-    name: str
+@dataclass
+class Kernel:
     shape: tuple[int, ...]
-    dtype: rg.DType
+    pitch: tuple[int, ...]
+    stype: ScalarType
+    input: tuple["Kernel", ...]
 
 
-#
-# ProgramBuilder
-#
+@dataclass
+class ConstKernel(Kernel):
+    init: rg.ConstNode
 
 
-class ProgramBuilder:
-    def __init__(self) -> None:
-        self._routines: dict[str, Routine] = {}
-        self._buffers: dict[str, Buffer] = {}
+@dataclass
+class FusedElementwiseKernel(Kernel):
+    type Op = tuple[ScalarOperator, tuple[int, ...]]
+    # ^- int >= 0: load input param
+    # ^- int <  0: load intermediate result **relative to current slot**
 
-    def add_buffer(
-        self,
-        name: str,
-        shape: tuple[int, ...],
-        dtype: rg.DType,
-    ) -> Buffer:
-        buffer = Buffer(name=name, shape=shape, dtype=dtype)
-        self._buffers[name] = buffer
-        return buffer
-
-    def add_routine(
-        self,
-        name: str,
-        sinks: rt.Tree[rg.Node],
-        binds: dict[rg.ParamNode, str],
-    ) -> Routine:
-        routine = Routine(sinks=sinks, binds=binds)
-        self._routines[name] = routine
-        return routine
-
-    def build(self) -> Program:
-        return Program(routines=dict(self._routines), buffers=dict(self._buffers))
+    ops: tuple[Op, ...]

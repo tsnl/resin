@@ -39,9 +39,9 @@ class Linear:
 
     @staticmethod
     def new(in_features: int, out_features: int, bias: bool = True) -> "Linear":
-        weight = rg.ParamNode.new(shape=(out_features, in_features), dtype="fp32")
+        weight = rg.ParamNode.new(shape=(out_features, in_features), stype="fp32")
         bias_node = (
-            rg.ParamNode.new(shape=(out_features,), dtype="fp32") if bias else None
+            rg.ParamNode.new(shape=(out_features,), stype="fp32") if bias else None
         )
         return Linear(weight=weight, bias=bias_node)
 
@@ -53,7 +53,7 @@ class Linear:
 
 
 def relu(x: rg.Node) -> rg.Node:
-    return x.max(rg.ConstNode.new(value=0, dtype=x.dtype))
+    return x.max(rg.ConstNode.new(value=0, stype=x.stype))
 
 
 def softmax(x: rg.Node, axes: tuple[int, ...] = (0,)) -> rg.Node:
