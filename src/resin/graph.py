@@ -6,6 +6,9 @@ resin.graph models the computational graph of tensor operations.
 
 Nodes will frequently reuse their first operand's shape, pitch, etc. This makes it
 easier for the backend to reuse memory and fuse kernels.
+
+TODO: Refactor: make "views" a property of each node referencing another node instead of
+a node of its own.
 """
 
 __all__ = [
