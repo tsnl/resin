@@ -3,47 +3,71 @@
 ```
 # Resin is a statically-typed functional array programming language for data-parallel
 # GPU programming. It is designed to be a high-level language for writing GPU kernels.
-#
-# Similar to Elm, but with more robust let-polymorphism support and basic dependent
-# types. Explicit support for array types.
+# It aims to make GPU programming fun. Cf Futhark + Elm.
 #
 # Users:
 # - Jax or PyTorch users who want static typing, better performance, easier distribution.
 # - Rendering researchers who want to write GPGPU but also leverage hardware acceleration.
 # - Innovators who want to integrate ML models, e.g. GPU-accelerated audio processing,
 #   physics simulation, etc.
+#
+# Under the hood:
+# - Every program is a static, finite graph representing "value flow".
+#   - Few primitive nodes comprise a minimal calculus:
+#     - Const, Map, Reduce, Gather, Scatter, Recur.
+#     - Maybe more nodes in the future for raster pipeline, ray query pipeline.
+#   - View projects each node as input or output to an operation.
+#   - Only tail recursion supported. Non-tail calls are always inlined. If graph does not converge
+#     within a certain number of iterations, this is a compiler error.
+# - Every value is an immutable "tree" of static size:
+#   - Scalars: degenerate single-node trees with () path.
+#   - Tensors: trees whose keys are indices, defined by a fixed size.
+#   - Records: trees whose keys are field names. Unions are similar.
+#   - Broadcast operations map the same tree paths (keys) with usual tensor dim broadcast rules.
+#     Very similar to NumPy conventions, just a richer type system.
+# - Perfect memory management using ahead-of-time information, memory lifetimes are exactly known.
+# - Differentiable by symbolic graph -> graph manipulation. Metaprogramming out of scope.
+# - Cross-platform: emit WebGPU and Vulkan code.
+#
+# Compromises
+# - Tensor in, tensor out DSL: not for general-purpose programming, must integrate with Python, Go, 
+#   Rust, JS, etc.
+# - High-level:
+#   - Fine-grained scheduling left to the compiler.
+#   - Multi-GPU scheduling and sharding left to the compiler, though we may offer some primitives 
+#     for this in the future.
 
-Linear o i =
-  { w: [o][i]Fp32,
-    b: [o]Fp32 }
+Linear T o i =
+{ w: [o][i]T,
+  b: [o]T }
 
 linear model input =
-    model.w @ input + model.b
+  model.w @ input + model.b
 
 relu x =
-    max 0 x
+  max 0 x
 
-Mlp h i o =
-  { l1: Linear h i,
-    l2: Linear h h,
-    l3: Linear o h }
+Mlp T h i o =
+{ l1: Linear T h i,
+  l2: Linear T h h,
+  l3: Linear T o h }
 
 mlp model input =
-    h1 = relu (linear model.l1 input)
-    h2 = relu (linear model.l2 h1)
-    linear model.l3 h2
+  h1 = relu (linear model.l1 input)
+  h2 = relu (linear model.l2 h1)
+  linear model.l3 h2
 
 mlp_train_loss model input target =
-    pred = mlp model input
-    loss = cross_entropy pred target
-    loss
+  pred = mlp model input
+  loss = cross_entropy pred target
+  loss
 
 mlp_train model inputs targets lr epochs =
-    if epochs <= 0 then
-        model
-    else
-        loss = mlp_train_loss model inputs targets
-        grad = grad mlp_train_loss model inputs targets   # NOTE: (grad mlp_train_loss)
-        model = model - lr * grad
-        mlp_train model inputs targets lr (epochs - 1)
+  if epochs <= 0 then
+    model
+  else
+    loss = mlp_train_loss model inputs targets
+    grads = grad mlp_train_loss model inputs targets   # NOTE: (grad mlp_train_loss)
+    model = model - lr * grads
+    mlp_train model inputs targets lr (epochs - 1)
 ```

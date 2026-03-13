@@ -1,0 +1,14 @@
+{
+  "editor.rulers": [
+    100
+  ],
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
+  "editor.insertSpaces": true,
+  "[rust]": {
+    "editor.tabSize": 4
+  },
+  "[python]": {
+    "editor.tabSize": 4
+  }
+}
