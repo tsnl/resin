@@ -3,9 +3,14 @@ name = "resin"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+lalrpop = "0.23.1"
+
 [dependencies]
 fxhash = "0.2.1"
 hashbrown = "0.16.1"
+lalrpop-util = { version = "0.23.1", features = ["lexer", "unicode"] }
 num = "0.4.3"
 num-traits = "0.2.19"
+paste = "1.0.15"
 rand = "0.10.0"

@@ -27,16 +27,16 @@
 # - Cross-platform: emit WebGPU and Vulkan code.
 #
 # Compromises
-# - Tensor in, tensor out DSL: not for general-purpose programming, must integrate with Python, Go, 
+# - Tensor in, tensor out DSL: not for general-purpose programming, must integrate with Python, Go,
 #   Rust, JS, etc.
 # - High-level:
 #   - Fine-grained scheduling left to the compiler.
-#   - Multi-GPU scheduling and sharding left to the compiler, though we may offer some primitives 
+#   - Multi-GPU scheduling and sharding left to the compiler, though we may offer some primitives
 #     for this in the future.
 
 Linear T o i =
-{ w: [o][i]T,
-  b: [o]T }
+{ w: [o][i]T
+, b: [o]T }
 
 linear model input =
   model.w @ input + model.b
@@ -45,9 +45,9 @@ relu x =
   max 0 x
 
 Mlp T h i o =
-{ l1: Linear T h i,
-  l2: Linear T h h,
-  l3: Linear T o h }
+{ l1: Linear T h i
+, l2: Linear T h h
+, l3: Linear T o h }
 
 mlp model input =
   h1 = relu (linear model.l1 input)

@@ -1,0 +1,437 @@
+use super::*;
+
+grammar(builtin_op_names: &BuiltinOperatorNames, src: &Source);
+
+//
+// Parser rules:
+//
+
+pub File: ast::File = {
+    Eol* <stmts:(<TopLevelStmt>)*> => {
+        ast::File { stmts }
+    }
+}
+pub TopLevelStmt: ast::Stmt = {
+    <DefFunStmt>,
+    <DefEnumTypeStmt>,
+    <DefNewTypeStmt>,
+};
+pub Stmt: ast::Stmt = {
+    <LetStmt>,
+    <DiscardStmt>,
+};
+DefFunStmt: ast::Stmt = {
+    <ll:@L> 
+        "def" 
+        <name:Lid> 
+        <template_args:TemplateFormalArgPack>
+        <args:FormalArgPack> 
+        <ret_ty:(":" <TySpec>)?> 
+        "=" 
+        <body:MultilineTerm>
+    <rl:@R> => {
+        ast::Stmt::new_def_fun(name, template_args, args, ret_ty, body, loc(src, ll, rl))
+    }
+}
+DefEnumTypeStmt: ast::Stmt = {
+    <ll:@L> 
+        "def" <name:Uid> <template_args:TemplateFormalArgPack> 
+        Eol Indent <variants:(EnumArm)+> Dedent 
+    <rl:@R> => {
+        ast::Stmt::new_def_enum_type(name, template_args, variants, loc(src, ll, rl))
+    }
+};
+DefNewTypeStmt: ast::Stmt = {
+    <ll:@L> 
+        "def" 
+        <name:Uid>
+        <template_args:TemplateFormalArgPack> "(" <ty:TySpec> ")" 
+    <rl:@R>
+    Eol => {
+        ast::Stmt::new_def_new_type(name, template_args, ty, loc(src, ll, rl))
+    }
+};
+LetStmt: ast::Stmt = {
+    <ll:@L> "let" <pattern:Pattern> "=" <value:MultilineTerm> <rl:@R> =>
+        ast::Stmt::new_let(pattern, value, loc(src, ll, rl)),
+};
+DiscardStmt: ast::Stmt = {
+    <ll:@L> <term:MultilineTerm> <rl:@R> =>
+        ast::Stmt::new_discard(term, loc(src, ll, rl)),
+};
+#[inline]
+EnumArm: (Symbol, Option<ast::TySpec>) = {
+    "|" <variant_name:Uid> <variant_ty_spec:("(" <TySpec> ")")?> Eol =>
+        (variant_name, variant_ty_spec),
+};
+
+// Inline terms fit on a single line, and do not include Eol, Indent, or Dedent tokens.
+InlineTerm: ast::Term = {
+    <BinaryTerm>,
+}
+PrimaryTerm: ast::Term = {
+    <ll:@L> Hole <rl:@R> => {
+        ast::Term::new_hole(loc(src, ll, rl))
+    },
+    <ll:@L> <lit:Literal> <rl:@R> => {
+        ast::Term::new_literal(*lit, loc(src, ll, rl))
+    },
+    <ll:@L> <name:Lid> <rl:@R> => {
+        ast::Term::new_name(name, loc(src, ll, rl))
+    },
+    <ll:@L> <ctor:Uid> <rl:@R> => {
+        ast::Term::new_constructor(ctor, loc(src, ll, rl))
+    },
+    <ll:@L> "(" <elements:TupleCommaList1<InlineTerm>> ")" <rl:@R> => {
+        ast::Term::new_tuple(elements, loc(src, ll, rl))
+    },
+    <ll:@L> "{" <init:CommaList1<(<Lid> ":" <InlineTerm>)>> "}" <rl:@R> => {
+        ast::Term::new_named_tuple(init, loc(src, ll, rl))
+    },
+    "(" <InlineTerm> ")",
+};
+PostfixTerm: ast::Term = {
+    <PrimaryTerm>,
+    <ll:@L> <base:PostfixTerm> "." <field:Lid> <rl:@R> => {
+        ast::Term::new_dot(base, vocab::Literal::new_symbol(field), loc(src, ll, rl))
+    },
+    <ll:@L> <base:PostfixTerm> "." <field:Literal> <rl:@R> => {
+        ast::Term::new_dot(base, *field, loc(src, ll, rl))
+    },
+    <ll:@L> <callee:PostfixTerm> "(" <args:CommaList0<InlineTerm>> ")" <rl:@R> => {
+        ast::Term::new_apply(callee, args, loc(src, ll, rl))
+    },
+}
+UnaryTerm: ast::Term = {
+    <PostfixTerm>,
+    <ll:@L> <op:UnaryOperator> <arg:UnaryTerm> <rl:@R> => {
+        let op_name = builtin_op_names.for_unary_operator(op);
+        let name_term = ast::Term::new_name(op_name, loc(src, ll, rl));
+        ast::Term::new_apply(name_term, vec![arg], loc(src, ll, rl))
+    },
+}
+UnaryOperator: vocab::UnaryOperator = {
+    "-" => vocab::UnaryOperator::Neg,
+    "!" => vocab::UnaryOperator::Not,
+    "&" => vocab::UnaryOperator::Ref,
+    "*" => vocab::UnaryOperator::Deref,
+}
+BinaryTerm: ast::Term = BitwiseOrBinaryTerm;
+MulBinaryTerm: ast::Term = HelpBinaryTerm<MulBinaryOperator, UnaryTerm>;
+MulBinaryOperator: vocab::BinaryOperator = {
+    "*" => vocab::BinaryOperator::Mul,
+    "/" => vocab::BinaryOperator::Div,
+    "%" => vocab::BinaryOperator::Rem,
+}
+AddBinaryTerm: ast::Term = HelpBinaryTerm<AddBinaryOperator, MulBinaryTerm>;
+AddBinaryOperator: vocab::BinaryOperator = {
+    "+" => vocab::BinaryOperator::Add,
+    "-" => vocab::BinaryOperator::Sub,
+}
+ShiftBinaryTerm: ast::Term = HelpBinaryTerm<ShiftBinaryOperator, AddBinaryTerm>;
+ShiftBinaryOperator: vocab::BinaryOperator = {
+    "<<" => vocab::BinaryOperator::Shl,
+    ">>" => vocab::BinaryOperator::Shr,
+}
+CompareBinaryTerm: ast::Term = HelpBinaryTerm<CompareBinaryOperator, ShiftBinaryTerm>;
+CompareBinaryOperator: vocab::BinaryOperator = {
+    "==" => vocab::BinaryOperator::Eq,
+    "!=" => vocab::BinaryOperator::Ne,
+    "<" => vocab::BinaryOperator::Lt,
+    ">" => vocab::BinaryOperator::Gt,
+    "<=" => vocab::BinaryOperator::Le,
+    ">=" => vocab::BinaryOperator::Ge,
+}
+BitwiseAndBinaryTerm: ast::Term = HelpBinaryTerm<BitwiseAndBinaryOperator, CompareBinaryTerm>;
+BitwiseAndBinaryOperator: vocab::BinaryOperator = {
+    "&" => vocab::BinaryOperator::BitAnd,
+}
+BitwiseXorBinaryTerm: ast::Term = HelpBinaryTerm<BitwiseXorBinaryOperator, BitwiseAndBinaryTerm>;
+BitwiseXorBinaryOperator: vocab::BinaryOperator = {
+    "^" => vocab::BinaryOperator::BitXor,
+}
+BitwiseOrBinaryTerm: ast::Term = HelpBinaryTerm<BitwiseOrBinaryOperator, BitwiseXorBinaryTerm>;
+BitwiseOrBinaryOperator: vocab::BinaryOperator = {
+    "|" => vocab::BinaryOperator::BitOr,
+}
+HelpBinaryTerm<O, R>: ast::Term = {
+    <R>,
+    <ll:@L> <lt:HelpBinaryTerm<O, R>> <op:O> <rt:R> <rl:@R> => {
+        let op_name = builtin_op_names.for_binary_operator(op);
+        let name_term = ast::Term::new_name(op_name, loc(src, ll, rl));
+        ast::Term::new_apply(name_term, vec![lt, rt], loc(src, ll, rl))
+    },
+}
+
+// MultilineTerm can include Eol, Indent, and Dedent tokens.
+pub MultilineTerm: ast::Term = {
+    <InlineTerm> Eol,
+    <ChainTerm>,
+    <IfTerm>,
+    <MatchTerm>,
+}
+ChainTerm: ast::Term = {
+    <ll:@L> Eol Indent <stmt_vec:(Stmt)*> Dedent <rl:@R> => {
+        ast::Term::new_chain(stmt_vec, loc(src, ll, rl))
+    }
+}
+IfTerm: ast::Term = {
+    <ll:@L> 
+        "if" <ct0:CondThenBranch> 
+        <cts:("elif" <CondThenBranch>)*>
+        <else_branch:("else" <ChainTerm>)?>
+    <rl:@R> => {
+        let mut cond_branch_vec = vec![ct0];
+        for (cond, branch) in cts {
+            cond_branch_vec.push((cond, branch));
+        }
+        ast::Term::new_if(cond_branch_vec, else_branch, loc(src, ll, rl))
+    },
+};
+#[inline]
+CondThenBranch: (ast::Term, ast::Term) = {
+    <cond:InlineTerm> "then" <then_branch:ChainTerm> => {
+        (cond, then_branch)
+    }
+}
+MatchTerm: ast::Term = {
+    <ll:@L> "match" <scrutinee:InlineTerm> Eol <arms:(MatchArm)+> <rl:@R> => {
+        ast::Term::new_match(scrutinee, arms, loc(src, ll, rl))
+    }
+};
+#[inline]
+MatchArm: (ast::Pattern, ast::Term) = {
+    "|" <Pattern> "=>" <ChainTerm>,
+    "|" <Pattern> "=>" <InlineTerm> Eol,
+};
+
+pub Pattern: ast::Pattern = {
+    <UnaryPattern>
+};
+PrimaryPattern: ast::Pattern = {
+    <ll:@L> Hole <rl:@R> => {
+        ast::Pattern::new_hole(loc(src, ll, rl))
+    },
+    <ll:@L> <lit:Literal> <rl:@R> => {
+        ast::Pattern::new_literal(*lit, loc(src, ll, rl))
+    },
+    <ll:@L> <name:Lid> <ann:(":" <TySpec>)?> <rl:@R> => {
+        ast::Pattern::new_name(name, ann, loc(src, ll, rl))
+    },
+    <ll:@L> <ctor:Uid> <arg:(Pattern)?> <rl:@R> => {
+        ast::Pattern::new_constructor(ctor, arg, loc(src, ll, rl))
+    },
+    <ll:@L> "(" <elements:TupleCommaList1<Pattern>> ")" <rl:@R> => {
+        ast::Pattern::new_tuple(elements, loc(src, ll, rl))
+    },
+    <ll:@L> "{" <fields:CommaList1<(<Lid> <(":" <Pattern>)?>)>> "}" <rl:@R> => {
+        ast::Pattern::new_named_tuple(fields, loc(src, ll, rl))
+    },
+    "(" <Pattern> ")",
+};
+UnaryPattern: ast::Pattern = {
+    <PrimaryPattern>,
+    <ll:@L> "&" <inner:UnaryPattern> <rl:@R> => {
+        ast::Pattern::new_pointer(inner, loc(src, ll, rl))
+    },
+};
+
+pub TySpec: ast::TySpec = {
+    <UnaryTySpec>
+};
+PrimaryTySpec: ast::TySpec = {
+    <BuiltinTySpec>,
+    <TupleTySpec>,
+    <NamedTupleTySpec>,
+    <NameTySpec>,
+    <TemplateInstanceTySpec>,
+    <FunctionTySpec>,
+}
+BuiltinTySpec: ast::TySpec = {
+    <ll:@L> "u8" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::U8, loc(src, ll, rl)),
+    <ll:@L> "u16" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::U16, loc(src, ll, rl)),
+    <ll:@L> "u32" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::U32, loc(src, ll, rl)),
+    <ll:@L> "u64" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::U64, loc(src, ll, rl)),
+    <ll:@L> "i8" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::I8, loc(src, ll, rl)),
+    <ll:@L> "i16" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::I16, loc(src, ll, rl)),
+    <ll:@L> "i32" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::I32, loc(src, ll, rl)),
+    <ll:@L> "i64" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::I64, loc(src, ll, rl)),
+    <ll:@L> "f32" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::F32, loc(src, ll, rl)),
+    <ll:@L> "f64" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::F64, loc(src, ll, rl)),
+    <ll:@L> "bool" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::Bool, loc(src, ll, rl)),
+    <ll:@L> "string" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::String, loc(src, ll, rl)),
+    <ll:@L> "symbol" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::Symbol, loc(src, ll, rl)),
+    <ll:@L> "unit" <rl:@R> => ast::TySpec::new_builtin(BuiltinType::Unit, loc(src, ll, rl)),
+}
+TupleTySpec: ast::TySpec = {
+    <ll:@L> "(" <elems:TupleCommaList1<TySpec>> ")" <rl:@R> => {
+        ast::TySpec::new_template_instance(
+            builtin_op_names.ty_tuple.clone(), 
+            elems, 
+            loc(src, ll, rl),
+        )
+    }
+}
+NamedTupleTySpec: ast::TySpec = {
+    <ll:@L> "{" <fields:CommaList0<AnnId>> "}" <rl:@R> => {
+        ast::TySpec::new_named_tuple(fields, loc(src, ll, rl))
+    }
+}
+NameTySpec: ast::TySpec = {
+    <ll:@L> <name:Uid> <rl:@R> => {
+        ast::TySpec::new_name(name, loc(src, ll, rl))
+    },
+}
+TemplateInstanceTySpec: ast::TySpec = {
+    <ll:@L> <base:Uid> "[" <template_args:CommaList1<TySpec>> "]" <rl:@R> => {
+        ast::TySpec::new_template_instance(base, template_args, loc(src, ll, rl))
+    },
+};
+FunctionTySpec: ast::TySpec = {
+    <ll:@L> "Fn" "(" <args:CommaList0<TySpec>> ")" "->" <ret:TySpec> <rl:@R> => {
+        let mut all_args = args;
+        all_args.push(ret);
+        ast::TySpec::new_template_instance(builtin_op_names.ty_function.clone(), all_args, loc(src, ll, rl))
+    },
+};
+
+UnaryTySpec: ast::TySpec = {
+    <PrimaryTySpec>,
+    <ll:@L> "&" <inner:UnaryTySpec> <rl:@R> => {
+        ast::TySpec::new_template_instance(builtin_op_names.ty_pointer.clone(), vec![inner], loc(src, ll, rl))
+    },
+};
+
+AnnId: ast::AnnId = {
+    <ll:@L> <name:Lid> <ty:(":" <TySpec>)> <rl:@R> =>
+        ast::AnnId::new_lid(name, ty, loc(src, ll, rl)),
+    <ll:@L> <name:Uid> <ty:(":" <TySpec>)?> <rl:@R> =>
+        ast::AnnId::new_uid(name, ty, loc(src, ll, rl)),
+};
+FormalArgPack: Vec<ast::AnnId> = {
+    "(" <CommaList0<AnnId>> ")",
+};
+TemplateFormalArgPack: Vec<ast::AnnId> = {
+    "[" <CommaList0<AnnId>> "]",
+    /* empty */ => vec![],
+};
+
+#[inline]
+TupleCommaList1<T>: Vec<T> = {
+    <x0:T> "," => {
+        vec![x0]
+    },
+    <mut xs:(<T> ",")+> <e:T> (","?) => {
+        xs.push(e);
+        xs
+    },
+}
+#[inline]
+CommaList1<T>: Vec<T> = {
+    <mut xs:(<T> ",")*> <e:T> (","?) => {
+        xs.push(e);
+        xs
+    }
+}
+#[inline]
+CommaList0<T>: Vec<T> = {
+    <xs:CommaList1<T>> => xs,
+    /* empty */ => vec![]
+}
+
+//
+// Lexer:
+//
+
+Lid: Symbol = { "(Lid token)" }
+Uid: Symbol = { "(Uid token)" }
+Hole: Symbol = { "(Hole token)" }
+Literal: Box<vocab::Literal> = {
+    <s:"(Literal string token)"> => Box::new(vocab::Literal::String(*s)),
+    <n:"(Literal number token)"> => Box::new(vocab::Literal::Number(*n)),
+    "'" <name:Lid> => Box::new(vocab::Literal::Symbol(vocab::LiteralSymbol { content: name })),
+    "true" => Box::new(vocab::Literal::Bool(vocab::LiteralBool { value: true })),
+    "false" => Box::new(vocab::Literal::Bool(vocab::LiteralBool { value: false })),
+}
+
+Indent: () = { "(Indent token)" }
+Dedent: () = { "(Dedent token)" }
+Eol: () = { "(Eol token)" }
+
+extern {
+    type Location = usize;
+    type Error = fb::Error;
+
+    enum Token {
+        "(Lid token)" => Token::Lid(<Symbol>),
+        "(Uid token)" => Token::Uid(<Symbol>),
+        "(Hole token)" => Token::Hole(<Symbol>),
+        "(Literal number token)" => Token::LiteralNumber(<Box<vocab::LiteralNumber>>),
+        "(Literal string token)" => Token::LiteralString(<Box<vocab::LiteralString>>),
+
+        "(Indent token)" => Token::Indent,
+        "(Dedent token)" => Token::Dedent,
+        "(Eol token)" => Token::Eol,
+
+        "def" => Token::KwDef,
+        "let" => Token::KwLet,
+        "if" => Token::KwIf,
+        "then" => Token::KwThen,
+        "elif" => Token::KwElif,
+        "else" => Token::KwElse,
+        "match" => Token::KwMatch,
+        "u8" => Token::KwU8,
+        "u16" => Token::KwU16,
+        "u32" => Token::KwU32,
+        "u64" => Token::KwU64,
+        "i8" => Token::KwI8,
+        "i16" => Token::KwI16,
+        "i32" => Token::KwI32,
+        "i64" => Token::KwI64,
+        "f32" => Token::KwF32,
+        "f64" => Token::KwF64,
+        "bool" => Token::KwBool,
+        "string" => Token::KwString,
+        "symbol" => Token::KwSymbol,
+        "unit" => Token::KwUnit,
+        "Fn" => Token::KwFnUid,
+        "true" => Token::KwTrue,
+        "false" => Token::KwFalse,
+
+        "(" => Token::LParen,
+        ")" => Token::RParen,
+        "[" => Token::LSqBrk,
+        "]" => Token::RSqBrk,
+        "{" => Token::LCurly,
+        "}" => Token::RCurly,
+        "." => Token::Dot,
+        "," => Token::Comma,
+        "'" => Token::Quote,
+        ":" => Token::Colon,
+        ";" => Token::Semicolon,
+        "*" => Token::Asterisk,
+        "%" => Token::Percent,
+        "/" => Token::FSlash,
+        "//" => Token::DblFSlash,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "<<" => Token::LShift,
+        ">>" => Token::RShift,
+        "<" => Token::LessThan,
+        ">" => Token::GreaterThan,
+        "<=" => Token::LessThanEq,
+        ">=" => Token::GreaterThanEq,
+        "!" => Token::Bang,
+        "!=" => Token::NotEq,
+        "=" => Token::Eq,
+        "==" => Token::DblEq,
+        "->" => Token::ThinRtArrow,
+        "<-" => Token::ThinLtArrow,
+        "=>" => Token::ThickRtArrow,
+        "|" => Token::Pipe,
+        "&" => Token::Ampersand,
+        "||" => Token::DblPipe,
+        "&&" => Token::DblAmpersand,
+        "^" => Token::Caret,
+    }
+}

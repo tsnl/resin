@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct Config {
     pub tab_spaces: u16,
 }
