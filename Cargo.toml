@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+fxhash = "0.2.1"
+hashbrown = "0.16.1"
+num = "0.4.3"
+num-traits = "0.2.19"
+rand = "0.10.0"
