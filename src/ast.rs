@@ -1,270 +1,146 @@
-use crate::{
-    Symbol,
-    fb::Loc,
-    vocab::{self, BuiltinType},
-};
+use crate::{Span, Symbol, vocab};
 
 #[derive(Debug)]
 pub struct File {
     pub stmts: Vec<Stmt>,
 }
 
+#[derive(Debug)]
+pub enum Type {
+    Name {
+        name: Symbol,
+    },
+    Apply {
+        name: Symbol,
+        args: Vec<Expr>,
+    },
+    Record {
+        fields: Vec<(Symbol, Expr)>,
+    },
+    Enum {
+        variants: Vec<(Symbol, Option<Expr>)>,
+    },
+}
+
 crate::define_tree! {
   pub enum Stmt {
-    DefFun {
+    Def {
       name: Symbol,
-      template_args: Vec<AnnId>,
-      args: Vec<AnnId>,
-      ret_ty: Option<TySpec>,
-      body: Term,
-      loc: Loc,
-    },
-    DefNewType {
-      name: Symbol,
-      template_args: Vec<AnnId>,
-      old_ty: TySpec,
-      loc: Loc,
-    },
-    DefEnumType {
-      name: Symbol,
-      template_args: Vec<AnnId>,
-      variants: Vec<(Symbol, Option<TySpec>)>,
-      loc: Loc,
+      args: Vec<(Symbol, Span)>,
+      body: Expr,
+      span: Span,
     },
     Let {
       pattern: Pattern,
-      init: Term,
-      loc: Loc,
+      init: Expr,
+      span: Span,
     },
     Discard {
-      val: Term,
-      loc: Loc,
+      val: Expr,
+      span: Span,
+    },
+    TypeSig {
+      name: Symbol,
+      sig: Expr,
+      span: Span,
     },
   }
-  pub enum Term {
-    Hole {
-      loc: Loc,
-    },
+  pub enum Expr {
     Literal {
       val: vocab::Literal,
-      loc: Loc,
+      span: Span,
     },
     Name {
       name: Symbol,
-      loc: Loc,
+      span: Span,
     },
     Dot {
-      base: Term,
-      field: vocab::Literal,
-      loc: Loc,
+      base: Expr,
+      field: Symbol,
+      span: Span,
     },
     Apply {
-      callee: Term,
-      args: Vec<Term>,
-      loc: Loc,
+      callee: Expr,
+      args: Vec<Expr>,
+      span: Span,
     },
     If {
-      cond_branch_vec: Vec<(Term, Term)>,
-      else_branch: Option<Term>,
-      loc: Loc,
+      cond_branch_vec: Vec<(Expr, Expr)>,
+      else_branch: Option<Expr>,
+      span: Span,
     },
     Chain {
       stmt_vec: Vec<Stmt>,
-      loc: Loc,
+      span: Span,
     },
     Tuple {
-      elements: Vec<Term>,
-      loc: Loc,
-    },
-    NamedTuple {
-      fields: Vec<(Symbol, Term)>,
-      loc: Loc,
-    },
-    Constructor {
-      name: Symbol,
-      loc: Loc,
+      elements: Vec<Expr>,
+      span: Span,
     },
     Match {
-      scrutinee: Term,
-      arms: Vec<(Pattern, Term)>,
-      loc: Loc,
+      scrutinee: Expr,
+      arms: Vec<(Pattern, Expr)>,
+      span: Span,
+    },
+    Ctor {
+      ty: Type,
+      span: Span,
     }
   }
   pub enum Pattern {
     Hole {
-      loc: Loc,
+      span: Span,
     },
     Literal {
       val: vocab::Literal,
-      loc: Loc,
+      span: Span,
     },
     Name {
       name: Symbol,
-      ann: Option<TySpec>,
-      loc: Loc,
+      span: Span,
     },
     Constructor {
       name: Symbol,
       arg: Option<Pattern>,
-      loc: Loc,
-    },
-    Tuple {
-      elements: Vec<Pattern>,
-      loc: Loc,
-    },
-    NamedTuple {
-      fields: Vec<(Symbol, Option<Pattern>)>,
-      loc: Loc,
-    },
-    Pointer {
-      pointee: Pattern,
-      loc: Loc,
-    }
-  }
-  pub enum TySpec {
-    Hole {
-      loc: Loc,
-    },
-    Builtin {
-      kind: BuiltinType,
-      loc: Loc,
-    },
-    Name {
-      name: Symbol,
-      loc: Loc,
-    },
-    TemplateInstance {
-      name: Symbol,
-      template_args: Vec<TySpec>,
-      loc: Loc,
-    },
-    NamedTuple {
-      fields: Vec<AnnId>,
-      loc: Loc,
-    }
-  }
-  pub enum AnnId {
-    Lid {
-      name: Symbol,
-      ty: TySpec,
-      loc: Loc,
-    },
-    Uid {
-      name: Symbol,
-      ty: Option<TySpec>,
-      loc: Loc,
+      span: Span,
     }
   }
 }
 
 impl Stmt {
-    pub fn loc(&self) -> &Loc {
+    pub fn span(&self) -> &Span {
         match self {
-            Stmt::DefFun(inner) => {
-                let stmt::DefFun { loc, .. } = &**inner;
-                loc
-            }
-            Stmt::Let(inner) => {
-                let stmt::Let { loc, .. } = &**inner;
-                loc
-            }
-            Stmt::Discard(inner) => {
-                let stmt::Discard { loc, .. } = &**inner;
-                loc
-            }
-            Stmt::DefNewType(def_new_type) => {
-                let stmt::DefNewType { loc, .. } = &**def_new_type;
-                loc
-            }
-            Stmt::DefEnumType(def_enum_type) => {
-                let stmt::DefEnumType { loc, .. } = &**def_enum_type;
-                loc
-            }
+            Stmt::Def(inner) => &inner.span,
+            Stmt::Let(inner) => &inner.span,
+            Stmt::Discard(inner) => &inner.span,
+            Stmt::TypeSig(inner) => &inner.span,
         }
     }
 }
-impl Term {
-    pub fn loc(&self) -> &Loc {
+
+impl Expr {
+    pub fn span(&self) -> &Span {
         match self {
-            Term::Hole(inner) => {
-                let term::Hole { loc, .. } = &**inner;
-                loc
-            }
-            Term::Literal(inner) => {
-                let term::Literal { loc, .. } = &**inner;
-                loc
-            }
-            Term::Name(inner) => {
-                let term::Name { loc, .. } = &**inner;
-                loc
-            }
-            Term::Apply(inner) => {
-                let term::Apply { loc, .. } = &**inner;
-                loc
-            }
-            Term::Dot(dot) => {
-                let term::Dot { loc, .. } = &**dot;
-                loc
-            }
-            Term::If(inner) => {
-                let term::If { loc, .. } = &**inner;
-                loc
-            }
-            Term::Chain(inner) => {
-                let term::Chain { loc, .. } = &**inner;
-                loc
-            }
-            Term::Tuple(inner) => {
-                let term::Tuple { loc, .. } = &**inner;
-                loc
-            }
-            Term::NamedTuple(inner) => {
-                let term::NamedTuple { loc, .. } = &**inner;
-                loc
-            }
-            Term::Constructor(inner) => {
-                let term::Constructor { loc, .. } = &**inner;
-                loc
-            }
-            Term::Match(inner) => {
-                let term::Match { loc, .. } = &**inner;
-                loc
-            }
+            Expr::Literal(inner) => &inner.span,
+            Expr::Name(inner) => &inner.span,
+            Expr::Dot(inner) => &inner.span,
+            Expr::Apply(inner) => &inner.span,
+            Expr::If(inner) => &inner.span,
+            Expr::Chain(inner) => &inner.span,
+            Expr::Tuple(inner) => &inner.span,
+            Expr::Match(inner) => &inner.span,
+            Expr::Ctor(inner) => &inner.span,
         }
     }
 }
 
 impl Pattern {
-    pub fn loc(&self) -> &Loc {
+    pub fn span(&self) -> &Span {
         match self {
-            Pattern::Hole(inner) => {
-                let pattern::Hole { loc, .. } = &**inner;
-                loc
-            }
-            Pattern::Literal(inner) => {
-                let pattern::Literal { loc, .. } = &**inner;
-                loc
-            }
-            Pattern::Name(inner) => {
-                let pattern::Name { loc, .. } = &**inner;
-                loc
-            }
-            Pattern::Constructor(inner) => {
-                let pattern::Constructor { loc, .. } = &**inner;
-                loc
-            }
-            Pattern::Tuple(inner) => {
-                let pattern::Tuple { loc, .. } = &**inner;
-                loc
-            }
-            Pattern::NamedTuple(anonymous_struct) => {
-                let pattern::NamedTuple { loc, .. } = &**anonymous_struct;
-                loc
-            }
-            Pattern::Pointer(pointer) => {
-                let pattern::Pointer { loc, .. } = &**pointer;
-                loc
-            }
+            Pattern::Hole(inner) => &inner.span,
+            Pattern::Literal(inner) => &inner.span,
+            Pattern::Name(inner) => &inner.span,
+            Pattern::Constructor(inner) => &inner.span,
         }
     }
 }

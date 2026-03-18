@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::token::{Token, TokenKind};
 use crate::vocab::{LiteralNumber, LiteralString};
 use crate::{Config, Source, Span, Symbol, fb};
 
@@ -12,57 +13,66 @@ use crate::{Config, Source, Span, Symbol, fb};
 
 pub struct Lexer {
     config: Config,
-    keyword_map: HashMap<Symbol, Token>,
+    keyword_map: HashMap<Symbol, TokenKind>,
 }
 impl Lexer {
     pub fn new(config: Config) -> Arc<Self> {
         let keyword_map = HashMap::from([
-            (Symbol::from("def"), Token::KwDef),
-            (Symbol::from("let"), Token::KwLet),
-            (Symbol::from("if"), Token::KwIf),
-            (Symbol::from("then"), Token::KwThen),
-            (Symbol::from("elif"), Token::KwElif),
-            (Symbol::from("else"), Token::KwElse),
-            (Symbol::from("match"), Token::KwMatch),
-            (Symbol::from("u8"), Token::KwU8),
-            (Symbol::from("u16"), Token::KwU16),
-            (Symbol::from("u32"), Token::KwU32),
-            (Symbol::from("u64"), Token::KwU64),
-            (Symbol::from("i8"), Token::KwI8),
-            (Symbol::from("i16"), Token::KwI16),
-            (Symbol::from("i32"), Token::KwI32),
-            (Symbol::from("i64"), Token::KwI64),
-            (Symbol::from("f32"), Token::KwF32),
-            (Symbol::from("f64"), Token::KwF64),
-            (Symbol::from("bool"), Token::KwBool),
-            (Symbol::from("string"), Token::KwString),
-            (Symbol::from("symbol"), Token::KwSymbol),
-            (Symbol::from("unit"), Token::KwUnit),
-            (Symbol::from("Fn"), Token::KwFnUid),
-            (Symbol::from("true"), Token::KwTrue),
-            (Symbol::from("false"), Token::KwFalse),
+            (Symbol::from("def"), TokenKind::KwDef),
+            (Symbol::from("let"), TokenKind::KwLet),
+            (Symbol::from("if"), TokenKind::KwIf),
+            (Symbol::from("then"), TokenKind::KwThen),
+            (Symbol::from("elif"), TokenKind::KwElif),
+            (Symbol::from("else"), TokenKind::KwElse),
+            (Symbol::from("match"), TokenKind::KwMatch),
+            (Symbol::from("u8"), TokenKind::KwU8),
+            (Symbol::from("u16"), TokenKind::KwU16),
+            (Symbol::from("u32"), TokenKind::KwU32),
+            (Symbol::from("u64"), TokenKind::KwU64),
+            (Symbol::from("i8"), TokenKind::KwI8),
+            (Symbol::from("i16"), TokenKind::KwI16),
+            (Symbol::from("i32"), TokenKind::KwI32),
+            (Symbol::from("i64"), TokenKind::KwI64),
+            (Symbol::from("f32"), TokenKind::KwF32),
+            (Symbol::from("f64"), TokenKind::KwF64),
+            (Symbol::from("bool"), TokenKind::KwBool),
+            (Symbol::from("string"), TokenKind::KwString),
+            (Symbol::from("symbol"), TokenKind::KwSymbol),
+            (Symbol::from("unit"), TokenKind::KwUnit),
+            (Symbol::from("Fn"), TokenKind::KwFnUid),
+            (Symbol::from("true"), TokenKind::KwTrue),
+            (Symbol::from("false"), TokenKind::KwFalse),
         ]);
         Arc::new(Self {
             config,
             keyword_map,
         })
     }
-    pub fn lex(self: &Arc<Self>, source: Source) -> TokenStream {
-        TokenStream::new(source, self.clone())
+    pub fn lex(self: &Arc<Self>, source: Source) -> fb::Result<Vec<Token>> {
+        let mut state = LexState::new(source, self.clone());
+        let mut tokens = vec![];
+        while let Some(tok) = state.next()? {
+            tokens.push(tok);
+        }
+        Ok(tokens)
     }
     pub fn config(&self) -> &Config {
         &self.config
     }
-    fn keyword_map(&self) -> &HashMap<Symbol, Token> {
+    fn keyword_map(&self) -> &HashMap<Symbol, TokenKind> {
         &self.keyword_map
     }
 }
 
-pub struct TokenStream {
+//
+// LexState (internal lexer state machine)
+//
+
+struct LexState {
     input_stream: ByteStream,
     indent_stack: Vec<usize>,
     bookend_stack: Vec<Bookend>, // (), [], {}
-    lookahead_buffer: VecDeque<(Token, Span)>,
+    lookahead_buffer: VecDeque<Token>,
     parent_lexer: Arc<Lexer>,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -71,11 +81,11 @@ enum Bookend {
     SqBrk,
     Curly,
 }
-impl TokenStream {
+impl LexState {
     const INDENT_CAPACITY: usize = 16;
     const BOOKEND_CAPACITY: usize = 32;
 
-    pub fn new(source: Source, manager: Arc<Lexer>) -> Self {
+    fn new(source: Source, manager: Arc<Lexer>) -> Self {
         Self {
             input_stream: ByteStream::new(source),
             indent_stack: {
@@ -88,38 +98,9 @@ impl TokenStream {
             parent_lexer: manager,
         }
     }
-    pub fn into_token_vec(mut self) -> fb::Result<Vec<(Token, Span)>> {
-        let mut tokens = vec![];
-        while let Some(token) = self.next_token()? {
-            tokens.push(token);
-        }
-        Ok(tokens)
-    }
-    pub fn next_token(&mut self) -> fb::Result<Option<(Token, Span)>> {
+    fn next(&mut self) -> fb::Result<Option<Token>> {
         self.try_growing_lookahead_buffer_to_n(1)?;
         Ok(self.lookahead_buffer.pop_front())
-    }
-    pub fn peek_loc(&mut self) -> fb::Result<fb::Loc> {
-        self.peek_loc_at(0)
-    }
-    pub fn peek_loc_at(&mut self, i: usize) -> fb::Result<fb::Loc> {
-        Ok(self
-            .peek_at(i)?
-            .map(|(_, span)| fb::Loc::File(span.clone()))
-            .unwrap_or_else(|| {
-                let offset = self.cursor();
-                fb::Loc::File(Span::new(self.input_stream.source(), offset, offset))
-            }))
-    }
-    pub fn peek(&mut self) -> fb::Result<Option<(&Token, &Span)>> {
-        self.peek_at(0)
-    }
-    pub fn peek_at(&mut self, i: usize) -> fb::Result<Option<(&Token, &Span)>> {
-        self.try_growing_lookahead_buffer_to_n(i + 1)?;
-        Ok(self
-            .lookahead_buffer
-            .get(i)
-            .map(|(token, span)| (token, span)))
     }
     fn try_growing_lookahead_buffer_to_n(&mut self, n: usize) -> fb::Result<()> {
         while self.lookahead_buffer.len() < n {
@@ -160,13 +141,13 @@ impl TokenStream {
         }
 
         // If all replenishment attempts failed, error:
-        syntax_err(
+        lexer_err(
             format!(
                 "Unexpected byte in source file: {:#?} (0x{:02x})",
                 str::from_utf8(&[self.input_stream.peek()]).unwrap_or("(?)"),
                 self.input_stream.peek()
             ),
-            self.loc(self.cursor()),
+            self.span(self.cursor()),
         )
     }
     fn skip(&mut self) {
@@ -200,7 +181,7 @@ impl TokenStream {
         }
     }
     fn try_lex_identifier(&mut self) -> fb::Result<bool> {
-        self.wrap_single_token_lexer(|this| -> fb::Result<Option<(Token, Span)>> {
+        self.wrap_single_token_lexer(|this| -> fb::Result<Option<Token>> {
             let lt_cursor = this.cursor();
 
             // Scan the identifier's characters:
@@ -226,7 +207,10 @@ impl TokenStream {
 
             // Check if the identifier is a keyword.
             if let Some(keyword) = this.parent_lexer().keyword_map().get(&name_symbol) {
-                return Ok(Some((keyword.clone(), this.span(lt_cursor))));
+                return Ok(Some(Token {
+                    kind: keyword.clone(),
+                    span: this.span(lt_cursor),
+                }));
             }
 
             // For identifier: see if the first character is lowercase or uppercase.
@@ -242,24 +226,26 @@ impl TokenStream {
                 }
             }
 
-            match opt_is_lid_not_uid {
-                Some(is_lid_not_uid) => {
-                    if is_lid_not_uid {
-                        Ok(Some((Token::Lid(name_symbol), this.span(lt_cursor))))
-                    } else {
-                        Ok(Some((Token::Uid(name_symbol), this.span(lt_cursor))))
-                    }
-                }
-                None => Ok(Some((Token::Hole(name_symbol), this.span(lt_cursor)))),
-            }
+            let kind = match opt_is_lid_not_uid {
+                Some(true) => TokenKind::Lid(name_symbol),
+                Some(false) => TokenKind::Uid(name_symbol),
+                None => TokenKind::Hole(name_symbol),
+            };
+            Ok(Some(Token {
+                kind,
+                span: this.span(lt_cursor),
+            }))
         })
     }
     fn try_lex_punct(&mut self) -> fb::Result<bool> {
-        self.wrap_single_token_lexer(|this| -> fb::Result<Option<(Token, Span)>> {
+        self.wrap_single_token_lexer(|this| -> fb::Result<Option<Token>> {
             let lt_cursor = this.cursor();
             macro_rules! ok_spanned_token {
-                ($token:expr) => {
-                    Ok(Some(($token, this.span(lt_cursor))))
+                ($kind:expr) => {
+                    Ok(Some(Token {
+                        kind: $kind,
+                        span: this.span(lt_cursor),
+                    }))
                 };
             }
             macro_rules! push_bookend {
@@ -271,21 +257,21 @@ impl TokenStream {
                 ($bookend:expr) => {
                     match this.bookend_stack.pop() {
                         None => {
-                            return syntax_err(
+                            return lexer_err(
                                 format!("Unmatched closing bookend: see {:?}.", $bookend),
-                                this.loc(lt_cursor),
+                                this.span(lt_cursor),
                             );
                         }
                         Some(b) if b == $bookend => {
                             // OK
                         }
                         Some(b) => {
-                            return syntax_err(
+                            return lexer_err(
                                 format!(
                                     "Unmatched closing bookend: expected {:?}, but matched {:?}.",
                                     $bookend, b,
                                 ),
-                                this.loc(lt_cursor),
+                                this.span(lt_cursor),
                             );
                         }
                     }
@@ -293,120 +279,123 @@ impl TokenStream {
             }
             if this.input_stream.match_byte(b'(') {
                 push_bookend!(Bookend::Paren);
-                return ok_spanned_token!(Token::LParen);
+                return ok_spanned_token!(TokenKind::LParen);
             }
             if this.input_stream.match_byte(b')') {
                 pop_bookend_else_return_error!(Bookend::Paren);
-                return ok_spanned_token!(Token::RParen);
+                return ok_spanned_token!(TokenKind::RParen);
             }
             if this.input_stream.match_byte(b'[') {
                 push_bookend!(Bookend::SqBrk);
-                return ok_spanned_token!(Token::LSqBrk);
+                return ok_spanned_token!(TokenKind::LSqBrk);
             }
             if this.input_stream.match_byte(b']') {
                 pop_bookend_else_return_error!(Bookend::SqBrk);
-                return ok_spanned_token!(Token::RSqBrk);
+                return ok_spanned_token!(TokenKind::RSqBrk);
             }
             if this.input_stream.match_byte(b'{') {
                 push_bookend!(Bookend::Curly);
-                return ok_spanned_token!(Token::LCurly);
+                return ok_spanned_token!(TokenKind::LCurly);
             }
             if this.input_stream.match_byte(b'}') {
                 pop_bookend_else_return_error!(Bookend::Curly);
-                return ok_spanned_token!(Token::RCurly);
+                return ok_spanned_token!(TokenKind::RCurly);
             }
             if this.input_stream.match_byte(b'.') {
-                return ok_spanned_token!(Token::Dot);
+                return ok_spanned_token!(TokenKind::Dot);
             }
             if this.input_stream.match_byte(b',') {
-                return ok_spanned_token!(Token::Comma);
+                return ok_spanned_token!(TokenKind::Comma);
             }
             if this.input_stream.match_byte(b'\'') {
-                return ok_spanned_token!(Token::Quote);
+                return ok_spanned_token!(TokenKind::Quote);
             }
             if this.input_stream.match_byte(b':') {
-                return ok_spanned_token!(Token::Colon);
+                if this.input_stream.match_byte(b':') {
+                    return ok_spanned_token!(TokenKind::DblColon);
+                }
+                return ok_spanned_token!(TokenKind::Colon);
             }
             if this.input_stream.match_byte(b';') {
-                return ok_spanned_token!(Token::Semicolon);
+                return ok_spanned_token!(TokenKind::Semicolon);
             }
             if this.input_stream.match_byte(b'*') {
-                return ok_spanned_token!(Token::Asterisk);
+                return ok_spanned_token!(TokenKind::Asterisk);
             }
             if this.input_stream.match_byte(b'/') {
                 if this.input_stream.match_byte(b'/') {
-                    return ok_spanned_token!(Token::DblFSlash);
+                    return ok_spanned_token!(TokenKind::DblFSlash);
                 }
-                return ok_spanned_token!(Token::FSlash);
+                return ok_spanned_token!(TokenKind::FSlash);
             }
             if this.input_stream.match_byte(b'%') {
-                return ok_spanned_token!(Token::Percent);
+                return ok_spanned_token!(TokenKind::Percent);
             }
             if this.input_stream.match_byte(b'+') {
-                return ok_spanned_token!(Token::Plus);
+                return ok_spanned_token!(TokenKind::Plus);
             }
             if this.input_stream.match_byte(b'-') {
                 if this.input_stream.match_byte(b'>') {
-                    return ok_spanned_token!(Token::ThinRtArrow);
+                    return ok_spanned_token!(TokenKind::ThinRtArrow);
                 }
-                return ok_spanned_token!(Token::Minus);
+                return ok_spanned_token!(TokenKind::Minus);
             }
             if this.input_stream.match_byte(b'<') {
                 if this.input_stream.match_byte(b'<') {
-                    return ok_spanned_token!(Token::LShift);
+                    return ok_spanned_token!(TokenKind::LShift);
                 }
                 if this.input_stream.match_byte(b'=') {
-                    return ok_spanned_token!(Token::LessThanEq);
+                    return ok_spanned_token!(TokenKind::LessThanEq);
                 }
                 if this.input_stream.match_byte(b'-') {
-                    return ok_spanned_token!(Token::ThinLtArrow);
+                    return ok_spanned_token!(TokenKind::ThinLtArrow);
                 }
-                return ok_spanned_token!(Token::LessThan);
+                return ok_spanned_token!(TokenKind::LessThan);
             }
             if this.input_stream.match_byte(b'>') {
                 if this.input_stream.match_byte(b'>') {
-                    return ok_spanned_token!(Token::RShift);
+                    return ok_spanned_token!(TokenKind::RShift);
                 }
                 if this.input_stream.match_byte(b'=') {
-                    return ok_spanned_token!(Token::GreaterThanEq);
+                    return ok_spanned_token!(TokenKind::GreaterThanEq);
                 }
-                return ok_spanned_token!(Token::GreaterThan);
+                return ok_spanned_token!(TokenKind::GreaterThan);
             }
             if this.input_stream.match_byte(b'=') {
                 if this.input_stream.match_byte(b'=') {
-                    return ok_spanned_token!(Token::DblEq);
+                    return ok_spanned_token!(TokenKind::DblEq);
                 }
                 if this.input_stream.match_byte(b'>') {
-                    return ok_spanned_token!(Token::ThickRtArrow);
+                    return ok_spanned_token!(TokenKind::ThickRtArrow);
                 }
-                return ok_spanned_token!(Token::Eq);
+                return ok_spanned_token!(TokenKind::Eq);
             }
             if this.input_stream.match_byte(b'!') {
                 if this.input_stream.match_byte(b'=') {
-                    return ok_spanned_token!(Token::NotEq);
+                    return ok_spanned_token!(TokenKind::NotEq);
                 }
-                return ok_spanned_token!(Token::Bang);
+                return ok_spanned_token!(TokenKind::Bang);
             }
             if this.input_stream.match_byte(b'|') {
                 if this.input_stream.match_byte(b'|') {
-                    return ok_spanned_token!(Token::DblPipe);
+                    return ok_spanned_token!(TokenKind::DblPipe);
                 }
-                return ok_spanned_token!(Token::Pipe);
+                return ok_spanned_token!(TokenKind::Pipe);
             }
             if this.input_stream.match_byte(b'&') {
                 if this.input_stream.match_byte(b'&') {
-                    return ok_spanned_token!(Token::DblAmpersand);
+                    return ok_spanned_token!(TokenKind::DblAmpersand);
                 }
-                return ok_spanned_token!(Token::Ampersand);
+                return ok_spanned_token!(TokenKind::Ampersand);
             }
             if this.input_stream.match_byte(b'^') {
-                return ok_spanned_token!(Token::Caret);
+                return ok_spanned_token!(TokenKind::Caret);
             }
             Ok(None)
         })
     }
     fn try_lex_number(&mut self) -> fb::Result<bool> {
-        self.wrap_single_token_lexer(|this| -> fb::Result<Option<(Token, Span)>> {
+        self.wrap_single_token_lexer(|this| -> fb::Result<Option<Token>> {
             let lt_cursor = this.cursor();
 
             // Scan the number's characters:
@@ -438,9 +427,9 @@ impl TokenStream {
                 }
                 if b1 == b'.' {
                     if force_float {
-                        return syntax_err(
+                        return lexer_err(
                             r"Unexpected '.' in number literal.",
-                            this.loc(lt_cursor),
+                            this.span(lt_cursor),
                         );
                     }
                     force_float = true;
@@ -452,9 +441,9 @@ impl TokenStream {
 
             // Ensure at least one digit was seen so far.
             if !has_digits_before_exponent {
-                return syntax_err(
+                return lexer_err(
                     r"Expected at least one digit in number literal.",
-                    this.loc(lt_cursor),
+                    this.span(lt_cursor),
                 );
             }
 
@@ -477,9 +466,9 @@ impl TokenStream {
                     bs.push(b3);
                 }
                 if !exponent_has_digits {
-                    return syntax_err(
+                    return lexer_err(
                         r"Expected at least one digit in exponent of number literal.",
-                        this.loc(lt_cursor),
+                        this.span(lt_cursor),
                     );
                 }
 
@@ -490,17 +479,17 @@ impl TokenStream {
 
             let content = String::from_utf8(bs).unwrap();
             let value = num::BigRational::from_str(&content).unwrap();
-            Ok(Some((
-                Token::LiteralNumber(Box::new(LiteralNumber { value, force_float })),
-                this.span(lt_cursor),
-            )))
+            Ok(Some(Token {
+                kind: TokenKind::LiteralNumber(Box::new(LiteralNumber { value, force_float })),
+                span: this.span(lt_cursor),
+            }))
         })
     }
 
     fn try_lex_string_literal(&mut self) -> fb::Result<bool> {
         const QUOTE_CHAR: u8 = b'"';
 
-        self.wrap_single_token_lexer(|this| -> fb::Result<Option<(Token, Span)>> {
+        self.wrap_single_token_lexer(|this| -> fb::Result<Option<Token>> {
             let lt_cursor = this.cursor();
 
             // Check for opening quote
@@ -515,7 +504,7 @@ impl TokenStream {
 
                 // Check for EOF
                 if b == 0 {
-                    return syntax_err("Unterminated string literal", this.loc(lt_cursor));
+                    return lexer_err("Unterminated string literal", this.span(lt_cursor));
                 }
 
                 // Check for closing quote
@@ -535,23 +524,28 @@ impl TokenStream {
                 }
             }
 
-            let token = Token::LiteralString(Box::new(LiteralString { content }));
-            Ok(Some((token, this.span(lt_cursor))))
+            Ok(Some(Token {
+                kind: TokenKind::LiteralString(Box::new(LiteralString { content })),
+                span: this.span(lt_cursor),
+            }))
         })
     }
 
     fn try_lex_escape_sequence(&mut self, quote_char: u8) -> fb::Result<char> {
         // Consume the backslash
         if !self.input_stream.match_byte(b'\\') {
-            return syntax_err(
+            return lexer_err(
                 "Internal error: expected backslash",
-                self.loc(self.cursor()),
+                self.span(self.cursor()),
             );
         }
 
         let b = self.input_stream.peek();
         if b == 0 {
-            return syntax_err("Unexpected EOF in escape sequence", self.loc(self.cursor()));
+            return lexer_err(
+                "Unexpected EOF in escape sequence",
+                self.span(self.cursor()),
+            );
         }
 
         self.input_stream.match_byte(b);
@@ -563,9 +557,9 @@ impl TokenStream {
             b'r' => Ok('\r'),
             b'0' => Ok('\0'),
             c if c == quote_char => Ok(c as char),
-            _ => syntax_err(
+            _ => lexer_err(
                 format!("Unknown escape sequence: \\{}", b as char),
-                self.loc(self.cursor()),
+                self.span(self.cursor()),
             ),
         }
     }
@@ -587,15 +581,15 @@ impl TokenStream {
                     continue;
                 }
                 if self.input_stream.match_byte(b'\t') {
-                    return syntax_err(
+                    return lexer_err(
                         r"Tab character '\t' not allowed in indentation. Use spaces instead.",
-                        self.loc(lt_cursor),
+                        self.span(lt_cursor),
                     );
                 }
                 if self.input_stream.match_byte_if(|b| b.is_ascii_whitespace()) != 0 {
-                    return syntax_err(
+                    return lexer_err(
                         r"Expected only space characters in indentation.",
-                        self.loc(lt_cursor),
+                        self.span(lt_cursor),
                     );
                 }
                 break;
@@ -605,30 +599,36 @@ impl TokenStream {
             let indent_span = self.span(lt_cursor);
 
             // Always enqueue an Eol token.
-            self.lookahead_buffer
-                .push_back((Token::Eol, indent_span.clone()));
+            self.lookahead_buffer.push_back(Token {
+                kind: TokenKind::Eol,
+                span: indent_span.clone(),
+            });
 
             // If the indent count changed, push one Indent, or several Dedent tokens. Update the indent stack.
             if indent_count > *self.indent_stack.last().unwrap() {
                 // Indent => push an indent to the stack, enqueue an indent token.
                 self.indent_stack.push(indent_count);
-                self.lookahead_buffer
-                    .push_back((Token::Indent, indent_span));
+                self.lookahead_buffer.push_back(Token {
+                    kind: TokenKind::Indent,
+                    span: indent_span,
+                });
             } else if indent_count < *self.indent_stack.last().unwrap() {
                 // Dedent => pop the stack until the indent count matches, enqueue dedent tokens.
                 while indent_count < *self.indent_stack.last().unwrap() {
-                    self.lookahead_buffer
-                        .push_back((Token::Dedent, indent_span.clone()));
+                    self.lookahead_buffer.push_back(Token {
+                        kind: TokenKind::Dedent,
+                        span: indent_span.clone(),
+                    });
                     self.indent_stack.pop();
                 }
                 if indent_count != *self.indent_stack.last().unwrap() {
-                    return syntax_err(
+                    return lexer_err(
                         format!(
                             r"Unexpected indentation level. Expected {}, found {}.",
                             self.indent_stack.last().unwrap(),
                             indent_count
                         ),
-                        self.loc(lt_cursor),
+                        self.span(lt_cursor),
                     );
                 }
             }
@@ -641,18 +641,15 @@ impl TokenStream {
     }
     fn wrap_single_token_lexer(
         &mut self,
-        lex_one: impl FnOnce(&mut Self) -> fb::Result<Option<(Token, Span)>>,
+        lex_one: impl FnOnce(&mut Self) -> fb::Result<Option<Token>>,
     ) -> fb::Result<bool> {
         match lex_one(self)? {
-            Some((token, span)) => {
-                self.lookahead_buffer.push_back((token, span));
+            Some(token) => {
+                self.lookahead_buffer.push_back(token);
                 Ok(true)
             }
             None => Ok(false),
         }
-    }
-    fn loc(&self, lt_cursor: usize) -> fb::Loc {
-        fb::Loc::File(self.span(lt_cursor))
     }
     fn span(&self, lt_cursor: usize) -> Span {
         Span::new(
@@ -667,84 +664,6 @@ impl TokenStream {
     fn parent_lexer(&self) -> &Lexer {
         &self.parent_lexer
     }
-    pub fn source(&self) -> &Source {
-        self.input_stream.source()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Token {
-    Lid(Symbol),
-    Uid(Symbol),
-    Hole(Symbol),
-
-    LiteralNumber(Box<LiteralNumber>),
-    LiteralString(Box<LiteralString>),
-
-    Indent,
-    Dedent,
-    Eol,
-
-    KwDef,
-    KwLet,
-    KwIf,
-    KwThen,
-    KwElif,
-    KwElse,
-    KwMatch,
-    KwU8,
-    KwU16,
-    KwU32,
-    KwU64,
-    KwI8,
-    KwI16,
-    KwI32,
-    KwI64,
-    KwF32,
-    KwF64,
-    KwBool,
-    KwString,
-    KwSymbol,
-    KwUnit,
-    KwFnUid,
-    KwTrue,
-    KwFalse,
-
-    LParen,
-    RParen,
-    LSqBrk,
-    RSqBrk,
-    LCurly,
-    RCurly,
-    Dot,
-    Comma,
-    Quote,
-    Colon,
-    Semicolon,
-    Asterisk,
-    Percent,
-    FSlash,
-    DblFSlash,
-    Plus,
-    Minus,
-    LShift,
-    RShift,
-    LessThan,
-    GreaterThan,
-    LessThanEq,
-    GreaterThanEq,
-    Bang,
-    NotEq,
-    Eq,
-    DblEq,
-    ThinRtArrow,
-    ThinLtArrow,
-    ThickRtArrow,
-    Pipe,
-    Ampersand,
-    DblPipe,
-    DblAmpersand,
-    Caret,
 }
 
 //
@@ -798,15 +717,16 @@ impl ByteStream {
 }
 
 //
-// Helpers
+// Errors
 //
 
-fn syntax_err<T>(title: impl Into<String>, loc: fb::Loc) -> fb::Result<T> {
-    Err(fb::Error::SyntaxError(fb::SyntaxError {
-        title: title.into(),
-        expected: None,
-        loc,
-    }))
+fn lexer_err<T>(title: impl Into<String>, span: Span) -> fb::Result<T> {
+    let title = format!("[LexerError] {}", title.into());
+    let span = Some(span);
+    let notes = Default::default();
+    let messages = vec![fb::Message { title, span, notes }];
+    let outbox = fb::Outbox { messages };
+    Err(outbox)
 }
 
 //
@@ -816,27 +736,29 @@ fn syntax_err<T>(title: impl Into<String>, loc: fb::Loc) -> fb::Result<T> {
 #[cfg(test)]
 struct TestFixture {
     pub source: Source,
-    pub lexer_manager: Arc<Lexer>,
+    pub lexer: Arc<Lexer>,
 }
 #[cfg(test)]
 impl TestFixture {
     pub fn new<S: Into<String>, C: AsRef<[u8]>>(name: S, content: C) -> Self {
-        let lexer_manager = Lexer::new(Config::default());
+        let lexer = Lexer::new(Config::default());
         let text = std::str::from_utf8(content.as_ref()).unwrap();
-        let source = Source::new(name, text, lexer_manager.config());
-        Self {
-            source,
-            lexer_manager,
-        }
+        let source = Source::new(name, text, lexer.config());
+        Self { source, lexer }
+    }
+    pub fn lex(&self) -> Vec<Token> {
+        self.lexer
+            .lex(self.source.clone())
+            .unwrap_or_else(|e| panic!("Lex failed: {e:?}"))
+    }
+    pub fn try_lex(&self) -> fb::Result<Vec<Token>> {
+        self.lexer.lex(self.source.clone())
     }
     pub fn content(&self) -> &[u8] {
         self.source.text().as_bytes()
     }
     pub fn new_byte_stream(&self) -> ByteStream {
         ByteStream::new(self.source.clone())
-    }
-    pub fn new_lexer(&self) -> TokenStream {
-        self.lexer_manager.lex(self.source.clone())
     }
     pub fn intern(&self, s: &str) -> Symbol {
         Symbol::from(s)
@@ -863,62 +785,60 @@ mod lexer_tests {
             .join("\n")
     }
 
+    fn assert_kinds(tokens: &[Token], expected: &[TokenKind]) {
+        let kinds: Vec<&TokenKind> = tokens.iter().map(|t| &t.kind).collect();
+        let expected_refs: Vec<&TokenKind> = expected.iter().collect();
+        assert_eq!(kinds, expected_refs);
+    }
+
     #[test]
     fn test_punct() {
         let test_set = vec![
-            ("(", Token::LParen),
-            (")", Token::RParen),
-            ("[", Token::LSqBrk),
-            ("]", Token::RSqBrk),
-            ("{", Token::LCurly),
-            ("}", Token::RCurly),
-            (".", Token::Dot),
-            (",", Token::Comma),
-            ("'", Token::Quote),
-            (":", Token::Colon),
-            (";", Token::Semicolon),
-            ("*", Token::Asterisk),
-            ("%", Token::Percent),
-            ("/", Token::FSlash),
-            ("//", Token::DblFSlash),
-            ("+", Token::Plus),
-            ("-", Token::Minus),
-            ("<<", Token::LShift),
-            (">>", Token::RShift),
-            ("<", Token::LessThan),
-            (">", Token::GreaterThan),
-            ("<=", Token::LessThanEq),
-            (">=", Token::GreaterThanEq),
-            ("!", Token::Bang),
-            ("!=", Token::NotEq),
-            ("==", Token::DblEq),
-            ("->", Token::ThinRtArrow),
-            ("<-", Token::ThinLtArrow),
-            ("=>", Token::ThickRtArrow),
-            ("|", Token::Pipe),
-            ("&", Token::Ampersand),
-            ("||", Token::DblPipe),
-            ("&&", Token::DblAmpersand),
-            ("^", Token::Caret),
+            ("(", TokenKind::LParen),
+            (")", TokenKind::RParen),
+            ("[", TokenKind::LSqBrk),
+            ("]", TokenKind::RSqBrk),
+            ("{", TokenKind::LCurly),
+            ("}", TokenKind::RCurly),
+            (".", TokenKind::Dot),
+            (",", TokenKind::Comma),
+            ("'", TokenKind::Quote),
+            (":", TokenKind::Colon),
+            (";", TokenKind::Semicolon),
+            ("*", TokenKind::Asterisk),
+            ("%", TokenKind::Percent),
+            ("/", TokenKind::FSlash),
+            ("//", TokenKind::DblFSlash),
+            ("+", TokenKind::Plus),
+            ("-", TokenKind::Minus),
+            ("<<", TokenKind::LShift),
+            (">>", TokenKind::RShift),
+            ("<", TokenKind::LessThan),
+            (">", TokenKind::GreaterThan),
+            ("<=", TokenKind::LessThanEq),
+            (">=", TokenKind::GreaterThanEq),
+            ("!", TokenKind::Bang),
+            ("!=", TokenKind::NotEq),
+            ("==", TokenKind::DblEq),
+            ("->", TokenKind::ThinRtArrow),
+            ("<-", TokenKind::ThinLtArrow),
+            ("=>", TokenKind::ThickRtArrow),
+            ("|", TokenKind::Pipe),
+            ("&", TokenKind::Ampersand),
+            ("||", TokenKind::DblPipe),
+            ("&&", TokenKind::DblAmpersand),
+            ("^", TokenKind::Caret),
         ];
 
         let s: Vec<_> = test_set.iter().map(|(s, _)| *s).collect();
-        let t: Vec<_> = test_set.iter().map(|(_, t)| (*t).clone()).collect();
+        let expected: Vec<_> = test_set.into_iter().map(|(_, t)| t).collect();
 
         let fixture = TestFixture::new("test_punct", s.join(" "));
-        let mut lexer = fixture.new_lexer();
+        let tokens = fixture.lex();
 
-        let text = std::str::from_utf8(fixture.content()).unwrap();
-        eprintln!("{text}");
+        eprintln!("{}", std::str::from_utf8(fixture.content()).unwrap());
 
-        for expected_token in t {
-            let x = lexer.next_token();
-            match x {
-                Ok(Some((lexed_token, _))) => assert_eq!(lexed_token, expected_token),
-                Ok(other) => panic!("Unexpected token: {other:#?}"),
-                Err(e) => panic!("Expected successful parse, got Err:\n\n{e}"),
-            }
-        }
+        assert_kinds(&tokens, &expected);
     }
 
     #[test]
@@ -927,27 +847,17 @@ mod lexer_tests {
             "test_ident",
             vec!["hello", "World", "_1", "a1B2", "indent_0"].join(" "),
         );
-        let mut lexer = fixture.new_lexer();
 
-        let t = vec![
-            Token::Lid(fixture.intern("hello")),
-            Token::Uid(fixture.intern("World")),
-            Token::Hole(fixture.intern("_1")),
-            Token::Lid(fixture.intern("a1B2")),
-            Token::Lid(fixture.intern("indent_0")),
+        let expected = vec![
+            TokenKind::Lid(fixture.intern("hello")),
+            TokenKind::Uid(fixture.intern("World")),
+            TokenKind::Hole(fixture.intern("_1")),
+            TokenKind::Lid(fixture.intern("a1B2")),
+            TokenKind::Lid(fixture.intern("indent_0")),
         ];
 
-        let text = std::str::from_utf8(fixture.content()).unwrap();
-        eprintln!("{text}");
-
-        for expected_token in t {
-            let x = lexer.next_token();
-            match x {
-                Ok(Some((lexed_token, _))) => assert_eq!(lexed_token, expected_token),
-                Ok(other) => panic!("Unexpected token: {other:#?}"),
-                Err(e) => panic!("Expected successful parse, got Err:\n\n{e}"),
-            }
-        }
+        let tokens = fixture.lex();
+        assert_kinds(&tokens, &expected);
     }
 
     #[test]
@@ -966,48 +876,37 @@ mod lexer_tests {
         ",
             ),
         );
-        let mut lexer = fixture.new_lexer();
 
         eprintln!(
             "Source:\n{}\n",
             std::str::from_utf8(fixture.content()).unwrap()
         );
 
-        let t = vec![
-            Token::Eol,
-            Token::Lid(fixture.intern("indent_0")),
-            Token::Eol,
-            Token::Indent,
-            Token::Lid(fixture.intern("indent_1")),
-            Token::Eol,
-            Token::Lid(fixture.intern("indent_1")),
-            Token::Eol,
-            Token::Indent,
-            Token::Lid(fixture.intern("indent_2")),
-            Token::Eol,
-            Token::Indent,
-            Token::Lid(fixture.intern("indent_3")),
-            Token::Eol,
-            Token::Dedent,
-            Token::Lid(fixture.intern("indent_2")),
-            Token::Eol,
-            Token::Dedent,
-            Token::Dedent,
-            Token::Lid(fixture.intern("indent_0")),
-            Token::Eol,
+        let expected = vec![
+            TokenKind::Eol,
+            TokenKind::Lid(fixture.intern("indent_0")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("indent_1")),
+            TokenKind::Eol,
+            TokenKind::Lid(fixture.intern("indent_1")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("indent_2")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("indent_3")),
+            TokenKind::Eol,
+            TokenKind::Dedent,
+            TokenKind::Lid(fixture.intern("indent_2")),
+            TokenKind::Eol,
+            TokenKind::Dedent,
+            TokenKind::Dedent,
+            TokenKind::Lid(fixture.intern("indent_0")),
+            TokenKind::Eol,
         ];
 
-        for expected_token in t {
-            let x = lexer.next_token();
-            match x {
-                Ok(Some((lexed_token, _))) => {
-                    eprintln!("{lexed_token:#?}");
-                    assert_eq!(lexed_token, expected_token);
-                }
-                Ok(other) => panic!("Unexpected token: {other:#?}"),
-                Err(e) => panic!("Expected successful parse, got Err:\n\n{e}"),
-            }
-        }
+        assert_kinds(&fixture.lex(), &expected);
     }
 
     #[test]
@@ -1026,34 +925,25 @@ mod lexer_tests {
         ",
             ),
         );
-        let lexer = fixture.new_lexer();
 
         eprintln!(
             "Source:\n{}\n",
             std::str::from_utf8(fixture.content()).unwrap()
         );
 
-        let t = vec![
-            Token::Eol,
-            Token::LParen,
-            Token::Lid(fixture.intern("there")),
-            Token::Lid(fixture.intern("should")),
-            Token::Lid(fixture.intern("be")),
-            Token::Lid(fixture.intern("no")),
-            Token::Lid(fixture.intern("indentation")),
-            Token::RParen,
-            Token::Eol,
+        let expected = vec![
+            TokenKind::Eol,
+            TokenKind::LParen,
+            TokenKind::Lid(fixture.intern("there")),
+            TokenKind::Lid(fixture.intern("should")),
+            TokenKind::Lid(fixture.intern("be")),
+            TokenKind::Lid(fixture.intern("no")),
+            TokenKind::Lid(fixture.intern("indentation")),
+            TokenKind::RParen,
+            TokenKind::Eol,
         ];
 
-        assert_eq!(
-            lexer
-                .into_token_vec()
-                .unwrap_or_else(|e| panic!("Lex failed: {e}"))
-                .into_iter()
-                .map(|(tok, _)| tok)
-                .collect::<Vec<_>>(),
-            t
-        );
+        assert_kinds(&fixture.lex(), &expected);
     }
 
     #[test]
@@ -1062,39 +952,28 @@ mod lexer_tests {
             "test_string_literals",
             b"\"hello\" \"world\\n\" \"with \\\"quotes\\\"\" \"escape\\\\test\" \"\"",
         );
-        let lexer = fixture.new_lexer();
-
-        let tokens = lexer
-            .into_token_vec()
-            .unwrap_or_else(|e| panic!("Lex failed: {e}"))
-            .into_iter()
-            .map(|(tok, _)| tok)
-            .collect::<Vec<_>>();
+        let tokens = fixture.lex();
 
         assert_eq!(tokens.len(), 5);
 
-        match &tokens[0] {
-            Token::LiteralString(s) => assert_eq!(s.content, "hello"),
+        match &tokens[0].kind {
+            TokenKind::LiteralString(s) => assert_eq!(s.content, "hello"),
             _ => panic!("Expected literal token"),
         }
-
-        match &tokens[1] {
-            Token::LiteralString(s) => assert_eq!(s.content, "world\n"),
+        match &tokens[1].kind {
+            TokenKind::LiteralString(s) => assert_eq!(s.content, "world\n"),
             _ => panic!("Expected literal token"),
         }
-
-        match &tokens[2] {
-            Token::LiteralString(s) => assert_eq!(s.content, "with \"quotes\""),
+        match &tokens[2].kind {
+            TokenKind::LiteralString(s) => assert_eq!(s.content, "with \"quotes\""),
             _ => panic!("Expected literal token"),
         }
-
-        match &tokens[3] {
-            Token::LiteralString(s) => assert_eq!(s.content, "escape\\test"),
+        match &tokens[3].kind {
+            TokenKind::LiteralString(s) => assert_eq!(s.content, "escape\\test"),
             _ => panic!("Expected literal token"),
         }
-
-        match &tokens[4] {
-            Token::LiteralString(s) => assert_eq!(s.content, ""),
+        match &tokens[4].kind {
+            TokenKind::LiteralString(s) => assert_eq!(s.content, ""),
             _ => panic!("Expected literal token"),
         }
     }
@@ -1102,11 +981,8 @@ mod lexer_tests {
     #[test]
     fn test_unterminated_string_literal() {
         let fixture = TestFixture::new("test_unterminated_string", b"\"hello");
-        let lexer = fixture.new_lexer();
-
-        let result = lexer.into_token_vec();
         assert!(
-            result.is_err(),
+            fixture.try_lex().is_err(),
             "Expected error for unterminated string literal"
         );
     }
@@ -1114,11 +990,8 @@ mod lexer_tests {
     #[test]
     fn test_invalid_escape_sequence() {
         let fixture = TestFixture::new("test_invalid_escape", b"\"hello\\x\"");
-        let lexer = fixture.new_lexer();
-
-        let result = lexer.into_token_vec();
         assert!(
-            result.is_err(),
+            fixture.try_lex().is_err(),
             "Expected error for invalid escape sequence"
         );
     }
@@ -1126,15 +999,12 @@ mod lexer_tests {
     #[test]
     fn test_simple_string() {
         let fixture = TestFixture::new("test_simple_string", b"\"hello\"");
-        let mut lexer = fixture.new_lexer();
+        let tokens = fixture.lex();
 
-        match lexer.next_token() {
-            Ok(Some((token, _))) => match token {
-                Token::LiteralString(s) => assert_eq!(s.content, "hello"),
-                _ => panic!("Expected literal token, got: {:?}", token),
-            },
-            Ok(other) => panic!("Unexpected result: {:?}", other),
-            Err(e) => panic!("Lex error: {e}"),
+        assert_eq!(tokens.len(), 1);
+        match &tokens[0].kind {
+            TokenKind::LiteralString(s) => assert_eq!(s.content, "hello"),
+            other => panic!("Expected literal token, got: {:?}", other),
         }
     }
 
@@ -1154,73 +1024,53 @@ mod lexer_tests {
           ",
             ),
         );
-        let mut lexer = fixture.new_lexer();
 
         eprintln!(
             "Source:\n{}\n",
             std::str::from_utf8(fixture.content()).unwrap()
         );
 
-        let t = vec![
-            Token::Eol,
-            Token::Lid(fixture.intern("level_0")),
-            Token::Eol,
-            Token::Indent,
-            Token::Lid(fixture.intern("level_2")),
-            Token::Eol,
-            Token::Indent,
-            Token::Lid(fixture.intern("level_4")),
-            Token::Eol,
-            Token::Indent,
-            Token::Lid(fixture.intern("level_7")),
-            Token::Eol,
-            Token::Dedent,
-            Token::Lid(fixture.intern("level_4")),
-            Token::Eol,
-            Token::Dedent,
-            Token::Lid(fixture.intern("level_2")),
-            Token::Eol,
-            Token::Dedent,
-            Token::Lid(fixture.intern("level_0")),
-            Token::Eol,
+        let expected = vec![
+            TokenKind::Eol,
+            TokenKind::Lid(fixture.intern("level_0")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("level_2")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("level_4")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("level_7")),
+            TokenKind::Eol,
+            TokenKind::Dedent,
+            TokenKind::Lid(fixture.intern("level_4")),
+            TokenKind::Eol,
+            TokenKind::Dedent,
+            TokenKind::Lid(fixture.intern("level_2")),
+            TokenKind::Eol,
+            TokenKind::Dedent,
+            TokenKind::Lid(fixture.intern("level_0")),
+            TokenKind::Eol,
         ];
 
-        for expected_token in t {
-            let x = lexer.next_token();
-            match x {
-                Ok(Some((lexed_token, _))) => {
-                    eprintln!("{lexed_token:#?}");
-                    assert_eq!(lexed_token, expected_token);
-                }
-                Ok(other) => panic!("Unexpected token: {other:#?}"),
-                Err(e) => panic!("Expected successful parse, got Err:\n\n{e}"),
-            }
-        }
+        assert_kinds(&fixture.lex(), &expected);
     }
 
     #[test]
     fn test_tab_rejection_in_indentation() {
         let fixture = TestFixture::new("test_tab_rejection", "level_0\n\tlevel_with_tab\n");
-        let mut lexer = fixture.new_lexer();
-
-        // First token should be level_0
-        match lexer.next_token() {
-            Ok(Some((Token::Lid(_), _))) => {}
-            Ok(other) => panic!("Expected Lid, got: {other:#?}"),
-            Err(e) => panic!("Expected Lid, got Err: {e}"),
-        }
-
-        // Second token should fail due to tab character in indentation
-        match lexer.next_token() {
+        let result = fixture.try_lex();
+        match result {
             Err(e) => {
-                let error_msg = format!("{e}");
+                let error_msg = format!("{e:?}");
                 assert!(
                     error_msg.contains("Tab character")
                         && error_msg.contains("not allowed in indentation")
                 );
             }
-            Ok(other) => {
-                panic!("Expected error due to tab character in indentation, got: {other:#?}",)
+            Ok(_) => {
+                panic!("Expected error due to tab character in indentation");
             }
         }
     }
