@@ -68,7 +68,3 @@ mlp_train model inputs targets lr epochs =
     grads = grad mlp_train_loss model inputs targets   # NOTE: (grad mlp_train_loss)
     model = model - lr * grads
     mlp_train model inputs targets lr (epochs - 1)
-
-Option T =
-| Some { value: T }
-| None

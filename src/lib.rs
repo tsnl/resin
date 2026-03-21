@@ -9,6 +9,7 @@ mod vocab;
 pub mod token;
 pub mod lexer;
 pub mod parser;
+pub mod ir;
 
 pub use config::Config;
 pub use feedback as fb;
