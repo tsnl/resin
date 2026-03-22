@@ -50,21 +50,24 @@ Mlp T h i o =
 , l2: Linear T h h
 , l3: Linear T o h }
 
+mlp :: Mlp T h i o -> [i]T -> [o]T
 mlp model input =
   h1 = relu (linear model.l1 input)
   h2 = relu (linear model.l2 h1)
   linear model.l3 h2
 
+mlp_train_loss :: Mlp T h i o -> [i]T -> [o]T -> T
 mlp_train_loss model input target =
   pred = mlp model input
   loss = cross_entropy pred target
   loss
 
+mlp_train :: Mlp T h i o -> [i]T -> [o]T -> T -> T -> Mlp T h i o
 mlp_train model inputs targets lr epochs =
   if epochs <= 0 then
     model
   else
     loss = mlp_train_loss model inputs targets
-    grads = grad mlp_train_loss model inputs targets   # NOTE: (grad mlp_train_loss)
+    grads = (grad mlp_train_loss) model inputs targets
     model = model - lr * grads
     mlp_train model inputs targets lr (epochs - 1)

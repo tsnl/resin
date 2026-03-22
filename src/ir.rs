@@ -359,3 +359,196 @@
 //! loops use conditional graph nodes with a device-memory flag.
 //! For targets without conditional graphs, the compiler falls
 //! back to host-side dispatch.
+
+use crate::Symbol;
+
+// ---------------------------------------------------------------------------
+// Identifiers
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FuncId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OutputIndex(pub u32);
+
+// ---------------------------------------------------------------------------
+// View — affine index map
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct View {
+    pub shape: Vec<i64>,
+    pub strides: Vec<i64>,
+    pub offset: i64,
+}
+
+impl View {
+    /// Identity view — shape not yet resolved.
+    pub fn identity() -> Self {
+        View {
+            shape: vec![],
+            strides: vec![],
+            offset: 0,
+        }
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.shape.is_empty() && self.strides.is_empty() && self.offset == 0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ref — edge in the dataflow graph
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ref {
+    pub node: NodeId,
+    pub output: OutputIndex,
+    pub view: View,
+}
+
+impl Ref {
+    /// Shorthand: reference output 0 with identity view.
+    pub fn simple(node: NodeId) -> Self {
+        Ref {
+            node,
+            output: OutputIndex(0),
+            view: View::identity(),
+        }
+    }
+
+    /// Reference a specific output index with identity view.
+    pub fn output(node: NodeId, idx: u32) -> Self {
+        Ref {
+            node,
+            output: OutputIndex(idx),
+            view: View::identity(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Operations
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElemOp {
+    // Unary
+    Neg,
+    Recip,
+    Exp,
+    Log,
+    Sqrt,
+    Abs,
+    Not,
+    // Binary
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Pow,
+    Max,
+    Min,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
+    // Ternary
+    Where,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReduceOp {
+    Sum,
+    Prod,
+    Max,
+    Min,
+}
+
+// ---------------------------------------------------------------------------
+// Const values
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstVal {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+}
+
+// ---------------------------------------------------------------------------
+// Nodes
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum Node {
+    Param {
+        idx: u32,
+    },
+    Const {
+        val: ConstVal,
+    },
+    Elem {
+        op: ElemOp,
+        args: Vec<Ref>,
+    },
+    Reduce {
+        op: ReduceOp,
+        input: Ref,
+        dim: u32,
+    },
+    Gather {
+        data: Ref,
+        indices: Ref,
+        dim: u32,
+    },
+    Scatter {
+        op: ReduceOp,
+        data: Ref,
+        indices: Ref,
+        dim: u32,
+        dim_size: u32,
+    },
+    Cond {
+        pred: Ref,
+        then_refs: Vec<Ref>,
+        else_refs: Vec<Ref>,
+    },
+    Call {
+        func: FuncId,
+        args: Vec<Ref>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Function
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub id: FuncId,
+    pub name: Symbol,
+    pub params: Vec<Symbol>,
+    pub nodes: Vec<Node>,
+    pub outputs: Vec<Ref>,
+}
+
+// ---------------------------------------------------------------------------
+// Program
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct Program {
+    pub functions: Vec<Function>,
+    pub entry: FuncId,
+}

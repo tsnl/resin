@@ -3,6 +3,10 @@ name = "resin"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "resin"
+path = "src/bin/resin.rs"
+
 [dependencies]
 fxhash = "0.2.1"
 hashbrown = "0.16.1"
