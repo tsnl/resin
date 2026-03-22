@@ -2,12 +2,16 @@
 pub struct Config {
     pub tab_spaces: u16,
     pub debug_ast: bool,
+    pub debug_ir: bool,
+    pub output_dir: String,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
             tab_spaces: 4,
-            debug_ast: false,
+            debug_ast: true,
+            debug_ir: true,
+            output_dir: "resin-out".to_string(),
         }
     }
 }

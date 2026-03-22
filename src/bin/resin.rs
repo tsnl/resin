@@ -1,15 +1,28 @@
+use std::path::PathBuf;
+
+use clap::Parser;
 use resin::*;
 
+#[derive(Parser)]
+#[command(name = "resin", about = "The Resin compiler")]
+struct Cli {
+    /// Entry point file for compilation
+    entry_point: String,
+
+    /// Output directory for generated artifacts
+    #[arg(short, long, default_value = "resin-build")]
+    output: PathBuf,
+}
+
 fn main() {
+    let cli = Cli::parse();
+
     let mut config = Config::default();
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--compiler-debug") {
-        config.debug_ast = true;
-    }
+    config.output_dir = cli.output.display().to_string();
 
     let lexer = Lexer::new(config.clone());
-    let src = std::fs::read_to_string("examples/eg001.resin").unwrap();
-    let source = Source::new("eg001.resin", src, lexer.config());
+    let src = std::fs::read_to_string(&cli.entry_point).unwrap();
+    let source = Source::new(&cli.entry_point, src, lexer.config());
     let tokens = lexer
         .lex(source)
         .unwrap_or_else(|e| panic!("Lex error: {e:?}"));
@@ -19,10 +32,11 @@ fn main() {
     let ts = TokenStream::new(tokens);
     let file = match parse(ts) {
         Ok(file) => {
-            let sexpr = ast_sexpr::print(&file);
             if config.debug_ast {
-                std::fs::create_dir_all("resin-debug").unwrap();
-                std::fs::write("resin-debug/ast.sexp", &sexpr).unwrap();
+                let sexpr = ast_sexpr::print(&file);
+                let debug_dir = cli.output.join("debug");
+                std::fs::create_dir_all(&debug_dir).unwrap();
+                std::fs::write(debug_dir.join("ast.sexp"), &sexpr).unwrap();
             }
             file
         }
@@ -54,10 +68,10 @@ fn main() {
         }
     };
 
-    let ir_sexp = ir_sexpr::print(&program);
-    if config.debug_ast {
-        std::fs::create_dir_all("resin-debug").unwrap();
-        std::fs::write("resin-debug/ir.sexp", &ir_sexp).unwrap();
+    if config.debug_ir {
+        let ir_sexp = ir_sexpr::print(&program);
+        let debug_dir = cli.output.join("debug");
+        std::fs::create_dir_all(&debug_dir).unwrap();
+        std::fs::write(debug_dir.join("ir.sexp"), &ir_sexp).unwrap();
     }
-    println!("{ir_sexp}");
 }
