@@ -1,20 +1,21 @@
 pub mod ast;
+pub mod ast_sexpr;
 mod config;
 pub mod feedback;
+pub mod ir;
+pub mod lexer;
+pub mod parser;
 mod source;
 mod span;
 mod symbol;
+pub mod token;
 mod tree;
 mod vocab;
-pub mod token;
-pub mod lexer;
-pub mod parser;
-pub mod ir;
 
 pub use config::Config;
 pub use feedback as fb;
 pub use lexer::Lexer;
-pub use parser::{parse, TokenStream};
+pub use parser::{TokenStream, parse};
 pub use source::Source;
 pub use span::Span;
 pub use symbol::Symbol;
