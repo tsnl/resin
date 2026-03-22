@@ -295,6 +295,34 @@ fn skip_eols(mut ts: TokenStream) -> TokenStream {
     ts
 }
 
+macro_rules! alt {
+    ($ts:expr, [$($parser:expr),+ $(,)?]) => {{
+        let ts = $ts;
+        let mut _err = ParseError::default();
+        $(
+            match $parser(ts.clone()) {
+                ok @ Ok(_) => return ok,
+                Err(e) => _err = _err.merge(e),
+            }
+        )+
+        Err(_err)
+    }};
+    (local $ts:expr, [$($parser:expr),+ $(,)?]) => {{
+        let ts = $ts;
+        let mut _err = ParseError::default();
+        let mut _result: Option<_> = None;
+        $(
+            if _result.is_none() {
+                match $parser(ts.clone()) {
+                    Ok(v) => _result = Some(Ok(v)),
+                    Err(e) => _err = _err.merge(e),
+                }
+            }
+        )+
+        _result.unwrap_or(Err(_err))
+    }};
+}
+
 fn indented_block<T>(
     ts: TokenStream,
     rule: &'static str,
@@ -331,13 +359,7 @@ fn parse_file(ts: TokenStream) -> PResult<ast::File> {
 }
 
 fn parse_top_def(ts: TokenStream) -> PResult<Stmt> {
-    if let ok @ Ok(_) = parse_type_sig(ts.clone()) {
-        return ok;
-    }
-    if let ok @ Ok(_) = parse_uid_def(ts.clone()) {
-        return ok;
-    }
-    parse_lid_def(ts)
+    alt!(ts, [parse_type_sig, parse_uid_def, parse_lid_def])
 }
 
 fn parse_type_sig(ts: TokenStream) -> PResult<Stmt> {
@@ -360,21 +382,35 @@ fn parse_lid_def(ts: TokenStream) -> PResult<Stmt> {
 }
 
 fn parse_uid_def(ts: TokenStream) -> PResult<Stmt> {
+    enum Body {
+        Enum(Vec<Variant>, Span),
+        Struct(Expr, Span),
+        Expr(Expr),
+    }
+
     let start = ts.span();
     let ((name, _), ts) = expect_uid("def")(ts)?;
     let (args, ts) = many0(ts, expect_name("param"));
     let (_, ts) = tok(TokenKind::Eq, "def")(ts)?;
-    if let Ok(((variants, end_span), ts2)) = parse_enum_body(ts.clone()) {
-        let span = span_from(&start, &end_span);
-        let body = Expr::new_ctor(Type::Enum { variants }, span.clone());
-        return Ok((Stmt::new_def(name, args, body, span), ts2));
-    }
-    if let Ok(((body, end_span), ts2)) = parse_struct_body(ts.clone()) {
-        let span = span_from(&start, &end_span);
-        return Ok((Stmt::new_def(name, args, body, span), ts2));
-    }
-    let (body, ts) = parse_expr(ts)?;
-    let span = span_from(&start, body.span());
+
+    let (body, ts) = alt!(local ts, [
+        |ts| parse_enum_body(ts).map(|((v, s), ts)| (Body::Enum(v, s), ts)),
+        |ts| parse_struct_body(ts).map(|((e, s), ts)| (Body::Struct(e, s), ts)),
+        |ts| parse_expr(ts).map(|(e, ts)| (Body::Expr(e), ts)),
+    ])?;
+
+    let (body, end_span) = match body {
+        Body::Enum(variants, end) => {
+            let span = span_from(&start, &end);
+            (Expr::new_ctor(Type::Enum { variants }, span.clone()), end)
+        }
+        Body::Struct(expr, end) => (expr, end),
+        Body::Expr(expr) => {
+            let s = expr.span().clone();
+            (expr, s)
+        }
+    };
+    let span = span_from(&start, &end_span);
     Ok((Stmt::new_def(name, args, body, span), ts))
 }
 
@@ -445,13 +481,11 @@ fn parse_type(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_type_base(ts: TokenStream) -> PResult<Expr> {
-    if let Ok(((e, _), ts)) = parse_struct_body(ts.clone()) {
-        return Ok((e, ts));
-    }
-    if let ok @ Ok(_) = parse_array_type(ts.clone()) {
-        return ok;
-    }
-    parse_named_type(ts)
+    alt!(ts, [
+        |ts| parse_struct_body(ts).map(|((e, _), ts)| (e, ts)),
+        parse_array_type,
+        parse_named_type,
+    ])
 }
 
 fn parse_named_type(ts: TokenStream) -> PResult<Expr> {
@@ -469,10 +503,7 @@ fn parse_named_type(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_type_arg(ts: TokenStream) -> PResult<Expr> {
-    if let ok @ Ok(_) = parse_array_type(ts.clone()) {
-        return ok;
-    }
-    parse_atom(ts)
+    alt!(ts, [parse_array_type, parse_atom])
 }
 
 fn parse_array_type(ts: TokenStream) -> PResult<Expr> {
@@ -494,16 +525,7 @@ fn parse_array_type(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_expr(ts: TokenStream) -> PResult<Expr> {
-    if let ok @ Ok(_) = parse_if(ts.clone()) {
-        return ok;
-    }
-    if let ok @ Ok(_) = parse_match(ts.clone()) {
-        return ok;
-    }
-    if let ok @ Ok(_) = parse_chain(ts.clone()) {
-        return ok;
-    }
-    parse_binop_expr(ts)
+    alt!(ts, [parse_if, parse_match, parse_chain, parse_binop_expr])
 }
 
 fn parse_chain(ts: TokenStream) -> PResult<Expr> {
@@ -514,10 +536,7 @@ fn parse_chain(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_stmt(ts: TokenStream) -> PResult<Stmt> {
-    if let ok @ Ok(_) = parse_let_stmt(ts.clone()) {
-        return ok;
-    }
-    parse_discard_stmt(ts)
+    alt!(ts, [parse_let_stmt, parse_discard_stmt])
 }
 
 fn parse_let_stmt(ts: TokenStream) -> PResult<Stmt> {
@@ -586,17 +605,21 @@ fn parse_match(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_pattern(ts: TokenStream) -> PResult<Pattern> {
-    if let ok @ Ok(_) = parse_pattern_constructor(ts.clone()) {
-        return ok;
-    }
-    if let Ok(((s, sp), ts)) = expect_lid("pattern")(ts.clone()) {
-        return Ok((Pattern::new_name(s, sp), ts));
-    }
-    if let Ok(((_, sp), ts)) = expect_hole("pattern")(ts.clone()) {
-        return Ok((Pattern::new_hole(sp), ts));
-    }
-    let ((v, sp), ts) = expect_literal("pattern")(ts)?;
-    Ok((Pattern::new_literal(v, sp), ts))
+    alt!(ts, [
+        parse_pattern_constructor,
+        |ts| {
+            let ((s, sp), ts) = expect_lid("pattern")(ts)?;
+            Ok((Pattern::new_name(s, sp), ts))
+        },
+        |ts| {
+            let ((_, sp), ts) = expect_hole("pattern")(ts)?;
+            Ok((Pattern::new_hole(sp), ts))
+        },
+        |ts| {
+            let ((v, sp), ts) = expect_literal("pattern")(ts)?;
+            Ok((Pattern::new_literal(v, sp), ts))
+        },
+    ])
 }
 
 fn parse_pattern_constructor(ts: TokenStream) -> PResult<Pattern> {
@@ -730,16 +753,18 @@ fn parse_postfix_expr(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_atom(ts: TokenStream) -> PResult<Expr> {
-    if let Ok(((v, s), ts)) = expect_literal("expr")(ts.clone()) {
-        return Ok((Expr::new_literal(v, s), ts));
-    }
-    if let Ok(((s, sp), ts)) = expect_name_or_builtin("expr")(ts.clone()) {
-        return Ok((Expr::new_name(s, sp), ts));
-    }
-    if let ok @ Ok(_) = parse_paren(ts.clone()) {
-        return ok;
-    }
-    parse_array_type(ts)
+    alt!(ts, [
+        |ts| {
+            let ((v, s), ts) = expect_literal("expr")(ts)?;
+            Ok((Expr::new_literal(v, s), ts))
+        },
+        |ts| {
+            let ((s, sp), ts) = expect_name_or_builtin("expr")(ts)?;
+            Ok((Expr::new_name(s, sp), ts))
+        },
+        parse_paren,
+        parse_array_type,
+    ])
 }
 
 fn parse_paren(ts: TokenStream) -> PResult<Expr> {
