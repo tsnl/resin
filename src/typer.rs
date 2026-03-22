@@ -272,7 +272,12 @@ fn collect_call_deps(expr: &ast::Expr, names: &HashMap<&Symbol, usize>, out: &mu
             }
         }
         ast::Expr::Dot(inner) => collect_call_deps(&inner.base, names, out),
-        ast::Expr::Grad(inner) => collect_call_deps(&inner.func, names, out),
+        ast::Expr::Grad(inner) => {
+            collect_call_deps(&inner.func, names, out);
+            for a in &inner.args {
+                collect_call_deps(a, names, out);
+            }
+        }
         ast::Expr::As(inner) => collect_call_deps(&inner.expr, names, out),
         ast::Expr::Name(inner) => {
             if let Some(&idx) = names.get(&inner.name) {
@@ -446,14 +451,21 @@ fn infer_expr<'a>(
         }
 
         ast::Expr::Grad(inner) => {
+            // `grad f x y z` is a modified call: it calls f(x, y, z) but
+            // returns the gradient w.r.t. the first argument instead of the
+            // normal return value. The result type is the type of the first arg.
             let f_ty = infer_expr(ctx, scope, &inner.func, top)?;
-            let resolved = ctx.resolve(&f_ty);
-            match resolved {
-                Ty::Fn { params, .. } if !params.is_empty() => {
-                    let grad_ret = params[0].clone();
-                    Ok(Ty::Fn { params, ret: Box::new(grad_ret) })
-                }
-                _ => Ok(ctx.fresh_var()),
+            let mut arg_tys = vec![];
+            for arg in &inner.args {
+                arg_tys.push(infer_expr(ctx, scope, arg, top)?);
+            }
+            let ret = ctx.fresh_var();
+            let fn_ty = Ty::Fn { params: arg_tys.clone(), ret: Box::new(ret) };
+            ctx.unify(&f_ty, &fn_ty)?;
+            if arg_tys.is_empty() {
+                Ok(ctx.fresh_var())
+            } else {
+                Ok(ctx.resolve(&arg_tys[0]))
             }
         }
 

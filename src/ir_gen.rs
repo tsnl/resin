@@ -366,14 +366,7 @@ fn lower_expr<'a>(
         }
 
         ast::Expr::Grad(inner) => {
-            // grad without application — error (must be applied: grad f x y)
-            Err(fb::Outbox {
-                messages: vec![fb::Message {
-                    title: "grad must be applied to arguments: use `grad f x y z`".into(),
-                    span: Some(inner.span.clone()),
-                    notes: vec![],
-                }],
-            })
+            lower_grad(builder, &inner.func, &inner.args, &inner.span, scope)
         }
 
         ast::Expr::Match(inner) => {
@@ -483,53 +476,6 @@ fn lower_apply<'a>(
         });
     }
 
-    // Handle `grad f` as callee: grad f x y z
-    if let ast::Expr::Grad(grad_inner) = callee {
-        if let ast::Expr::Name(f_name) = &grad_inner.func {
-            let target_func_id = match builder.top.lookup(&f_name.name) {
-                Some(DeclBinding::Func { id, .. } | DeclBinding::Builtin { id, .. }) => *id,
-                _ => {
-                    return Err(fb::Outbox {
-                        messages: vec![fb::Message {
-                            title: format!("'{}' is not a function", f_name.name),
-                            span: Some(f_name.span.clone()),
-                            notes: vec![],
-                        }],
-                    });
-                }
-            };
-            let mut flat_args = vec![];
-            let mut first_arg_val: Option<Value> = None;
-            for (i, arg) in args.iter().enumerate() {
-                let val = lower_expr(builder, arg, scope)?;
-                if i == 0 {
-                    first_arg_val = Some(val.clone());
-                }
-                flat_args.extend(val.flatten());
-            }
-            let nid = builder.emit(Node::Grad {
-                func: target_func_id,
-                args: flat_args,
-            });
-            // grad returns the same shape as the first argument
-            let ret_shape = match &first_arg_val {
-                Some(v) => value_to_slot_shape(v),
-                None => SlotShape::Tensor,
-            };
-            let total = ret_shape.total_slots();
-            let refs: Vec<Ref> = (0..total).map(|i| Ref::output(nid, i)).collect();
-            let mut ref_iter = refs.into_iter();
-            return Ok(Value::from_shape_and_refs(&ret_shape, &mut ref_iter));
-        }
-        return Err(fb::Outbox {
-            messages: vec![fb::Message {
-                title: "grad argument must be a function name".into(),
-                span: Some(grad_inner.span.clone()),
-                notes: vec![],
-            }],
-        });
-    }
-
     Err(fb::Outbox {
         messages: vec![fb::Message {
             title: "complex callee expressions not yet supported".into(),
@@ -537,6 +483,62 @@ fn lower_apply<'a>(
             notes: vec![],
         }],
     })
+}
+
+/// Lower `grad f x y z` — a modified call that differentiates `f`.
+fn lower_grad<'a>(
+    builder: &mut FuncBuilder,
+    func_expr: &ast::Expr,
+    args: &[ast::Expr],
+    span: &crate::Span,
+    scope: &Scope<'a, Value>,
+) -> fb::Result<Value> {
+    let func_name = match func_expr {
+        ast::Expr::Name(n) => &n.name,
+        _ => {
+            return Err(fb::Outbox {
+                messages: vec![fb::Message {
+                    title: "grad argument must be a function name".into(),
+                    span: Some(span.clone()),
+                    notes: vec![],
+                }],
+            });
+        }
+    };
+    let target_func_id = match builder.top.lookup(func_name) {
+        Some(DeclBinding::Func { id, .. } | DeclBinding::Builtin { id, .. }) => *id,
+        _ => {
+            return Err(fb::Outbox {
+                messages: vec![fb::Message {
+                    title: format!("'{}' is not a function", func_name),
+                    span: Some(span.clone()),
+                    notes: vec![],
+                }],
+            });
+        }
+    };
+    let mut flat_args = vec![];
+    let mut first_arg_val: Option<Value> = None;
+    for (i, arg) in args.iter().enumerate() {
+        let val = lower_expr(builder, arg, scope)?;
+        if i == 0 {
+            first_arg_val = Some(val.clone());
+        }
+        flat_args.extend(val.flatten());
+    }
+    let nid = builder.emit(Node::Grad {
+        func: target_func_id,
+        args: flat_args,
+    });
+    // grad returns the same shape as the first argument
+    let ret_shape = match &first_arg_val {
+        Some(v) => value_to_slot_shape(v),
+        None => SlotShape::Tensor,
+    };
+    let total = ret_shape.total_slots();
+    let refs: Vec<Ref> = (0..total).map(|i| Ref::output(nid, i)).collect();
+    let mut ref_iter = refs.into_iter();
+    Ok(Value::from_shape_and_refs(&ret_shape, &mut ref_iter))
 }
 
 /// Lower a binary operator application.

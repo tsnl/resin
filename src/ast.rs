@@ -88,6 +88,7 @@ crate::define_tree! {
     },
     Grad {
       func: Expr,
+      args: Vec<Expr>,
       span: Span,
     },
     As {

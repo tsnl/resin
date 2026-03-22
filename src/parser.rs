@@ -724,17 +724,14 @@ fn binop_info(tk: &TokenKind) -> Option<(u8, BinOpKind)> {
 }
 
 fn parse_apply_expr(ts: TokenStream) -> PResult<Expr> {
-    // grad <atom> — parse as special form, then continue with application
+    // `grad f arg1 arg2 ...` — a modified call that differentiates f.
+    // Parsed as a single Grad node (not Apply(Grad(f), args)).
     if let Ok((start, ts2)) = tok(TokenKind::KwGrad, "grad")(ts.clone()) {
         let (func_expr, ts2) = parse_atom(ts2)?;
-        let span = span_from(&start, func_expr.span());
-        let head = Expr::new_grad(func_expr, span);
         let (args, ts2) = many0(ts2, parse_as_expr);
-        if args.is_empty() {
-            return Ok((head, ts2));
-        }
-        let full_span = span_from(head.span(), args.last().unwrap().span());
-        return Ok((Expr::new_apply(head, args, full_span), ts2));
+        let end = args.last().map(|a| a.span()).unwrap_or(func_expr.span());
+        let span = span_from(&start, end);
+        return Ok((Expr::new_grad(func_expr, args, span), ts2));
     }
 
     let (head, ts) = parse_as_expr(ts)?;

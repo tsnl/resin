@@ -107,6 +107,10 @@ fn write_expr(f: &mut String, expr: &ast::Expr) -> fmt::Result {
         ast::Expr::Grad(inner) => {
             f.write_str("(grad ")?;
             write_expr(f, &inner.func)?;
+            for arg in &inner.args {
+                f.write_char(' ')?;
+                write_expr(f, arg)?;
+            }
             f.write_char(')')
         }
         ast::Expr::As(inner) => {
