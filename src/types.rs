@@ -100,10 +100,7 @@ pub struct Scheme {
 impl Scheme {
     /// A monomorphic scheme (no quantified variables).
     pub fn mono(ty: Ty) -> Self {
-        Scheme {
-            bound: vec![],
-            ty,
-        }
+        Scheme { bound: vec![], ty }
     }
 
     /// Collect free type variables (those in ty but not in bound).
@@ -162,7 +159,10 @@ impl Substitution {
             },
             Ty::Tensor { elem, dims } => Ty::Tensor {
                 elem: Box::new(self.apply_inner(elem, expanding)),
-                dims: dims.iter().map(|d| self.apply_inner(d, expanding)).collect(),
+                dims: dims
+                    .iter()
+                    .map(|d| self.apply_inner(d, expanding))
+                    .collect(),
             },
             Ty::Record { fields } => Ty::Record {
                 fields: fields
@@ -171,12 +171,18 @@ impl Substitution {
                     .collect(),
             },
             Ty::Fn { params, ret } => Ty::Fn {
-                params: params.iter().map(|p| self.apply_inner(p, expanding)).collect(),
+                params: params
+                    .iter()
+                    .map(|p| self.apply_inner(p, expanding))
+                    .collect(),
                 ret: Box::new(self.apply_inner(ret, expanding)),
             },
             Ty::App { name, args } => Ty::App {
                 name: name.clone(),
-                args: args.iter().map(|a| self.apply_inner(a, expanding)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| self.apply_inner(a, expanding))
+                    .collect(),
             },
             Ty::Dim(_) | Ty::Scalar(_) => ty.clone(),
         }
@@ -197,11 +203,8 @@ impl Substitution {
     /// Compose: `self ∘ other`.
     /// `(self ∘ other)(t) = self(other(t))`
     pub fn compose(&self, other: &Substitution) -> Substitution {
-        let mut result: HashMap<TyVar, Ty> = other
-            .map
-            .iter()
-            .map(|(v, t)| (*v, self.apply(t)))
-            .collect();
+        let mut result: HashMap<TyVar, Ty> =
+            other.map.iter().map(|(v, t)| (*v, self.apply(t))).collect();
         for (v, t) in &self.map {
             result.entry(*v).or_insert_with(|| t.clone());
         }
@@ -295,9 +298,7 @@ fn unify_inner(a: &Ty, b: &Ty) -> Result<Substitution, TypeError> {
             }
             // Occurs check
             if t.free_vars().contains(v) {
-                return Err(TypeError::new(format!(
-                    "occurs check: {v:?} in {t:?}"
-                )));
+                return Err(TypeError::new(format!("occurs check: {v:?} in {t:?}")));
             }
             Ok(Substitution::singleton(*v, t.clone()))
         }
@@ -316,22 +317,11 @@ fn unify_inner(a: &Ty, b: &Ty) -> Result<Substitution, TypeError> {
             if a == b {
                 Ok(Substitution::empty())
             } else {
-                Err(TypeError::new(format!(
-                    "dimension mismatch: {a} vs {b}"
-                )))
+                Err(TypeError::new(format!("dimension mismatch: {a} vs {b}")))
             }
         }
 
-        (
-            Ty::Tensor {
-                elem: e1,
-                dims: d1,
-            },
-            Ty::Tensor {
-                elem: e2,
-                dims: d2,
-            },
-        ) => {
+        (Ty::Tensor { elem: e1, dims: d1 }, Ty::Tensor { elem: e2, dims: d2 }) => {
             if d1.len() != d2.len() {
                 return Err(TypeError::new(format!(
                     "rank mismatch: {} vs {}",
@@ -398,16 +388,7 @@ fn unify_inner(a: &Ty, b: &Ty) -> Result<Substitution, TypeError> {
             Ok(s2.compose(&s))
         }
 
-        (
-            Ty::App {
-                name: n1,
-                args: a1,
-            },
-            Ty::App {
-                name: n2,
-                args: a2,
-            },
-        ) => {
+        (Ty::App { name: n1, args: a1 }, Ty::App { name: n2, args: a2 }) => {
             if n1 != n2 {
                 return Err(TypeError::new(format!(
                     "type constructor mismatch: {n1} vs {n2}"
@@ -428,9 +409,7 @@ fn unify_inner(a: &Ty, b: &Ty) -> Result<Substitution, TypeError> {
             Ok(s)
         }
 
-        _ => Err(TypeError::new(format!(
-            "cannot unify {a:?} with {b:?}"
-        ))),
+        _ => Err(TypeError::new(format!("cannot unify {a:?} with {b:?}"))),
     }
 }
 
@@ -615,10 +594,7 @@ mod tests {
         assert_eq!(root.lookup(&Symbol::from("x")), Some(&1));
         assert_eq!(root.lookup(&Symbol::from("y")), None);
 
-        let child = Scope::child(
-            &root,
-            HashMap::from_iter([(Symbol::from("y"), 2)]),
-        );
+        let child = Scope::child(&root, HashMap::from_iter([(Symbol::from("y"), 2)]));
         assert_eq!(child.lookup(&Symbol::from("x")), Some(&1));
         assert_eq!(child.lookup(&Symbol::from("y")), Some(&2));
     }
@@ -626,10 +602,7 @@ mod tests {
     #[test]
     fn test_scope_shadowing() {
         let root = Scope::root(HashMap::from_iter([(Symbol::from("x"), 1)]));
-        let child = Scope::child(
-            &root,
-            HashMap::from_iter([(Symbol::from("x"), 2)]),
-        );
+        let child = Scope::child(&root, HashMap::from_iter([(Symbol::from("x"), 2)]));
         assert_eq!(child.lookup(&Symbol::from("x")), Some(&2));
         // Parent unchanged
         assert_eq!(root.lookup(&Symbol::from("x")), Some(&1));

@@ -25,8 +25,15 @@ pub enum DeclBinding {
         body_ty: Ty,
         fields: Vec<(Symbol, SlotShape)>,
     },
-    Func { id: FuncId, scheme: Scheme },
-    Builtin { id: FuncId, builtin: Builtin, scheme: Scheme },
+    Func {
+        id: FuncId,
+        scheme: Scheme,
+    },
+    Builtin {
+        id: FuncId,
+        builtin: Builtin,
+        scheme: Scheme,
+    },
 }
 
 pub struct TopLevel {
@@ -112,7 +119,9 @@ pub fn check(file: &ast::File) -> fb::Result<TopLevel> {
                 pending_sigs.insert(name.clone(), sig);
             }
             ast::Stmt::Def(inner) => {
-                let stmt::Def { name, args, body, .. } = inner.as_ref();
+                let stmt::Def {
+                    name, args, body, ..
+                } = inner.as_ref();
                 if name.is_upper_id() {
                     collect_type_def(&mut top, name, args, body);
                 } else {
@@ -127,11 +136,24 @@ pub fn check(file: &ast::File) -> fb::Result<TopLevel> {
                             let ps: Vec<Ty> = args.iter().map(|_| ctx.fresh_var()).collect();
                             let r = ctx.fresh_var();
                             let bound: Vec<TyVar> = (0..ctx.next_var).map(TyVar).collect();
-                            Scheme { bound, ty: Ty::Fn { params: ps, ret: Box::new(r) } }
+                            Scheme {
+                                bound,
+                                ty: Ty::Fn {
+                                    params: ps,
+                                    ret: Box::new(r),
+                                },
+                            }
                         }
                     };
-                    top.bindings.insert(name.clone(), DeclBinding::Func { id, scheme: stub });
-                    func_defs.push(FuncDef { name: name.clone(), args, body, sig, id });
+                    top.bindings
+                        .insert(name.clone(), DeclBinding::Func { id, scheme: stub });
+                    func_defs.push(FuncDef {
+                        name: name.clone(),
+                        args,
+                        body,
+                        sig,
+                        id,
+                    });
                 }
             }
             _ => {}
@@ -167,8 +189,7 @@ pub fn check(file: &ast::File) -> fb::Result<TopLevel> {
         let func = &func_defs[idx];
         match infer_function(&top, func) {
             Ok(scheme) => {
-                if let Some(DeclBinding::Func { scheme: s, .. }) =
-                    top.bindings.get_mut(&func.name)
+                if let Some(DeclBinding::Func { scheme: s, .. }) = top.bindings.get_mut(&func.name)
                 {
                     *s = scheme;
                 }
@@ -197,8 +218,11 @@ pub fn check(file: &ast::File) -> fb::Result<TopLevel> {
 /// sorted order so that inference still runs, but callers can check whether
 /// explicit type signatures are present.
 fn topo_sort(funcs: &[FuncDef]) -> (Vec<usize>, Vec<usize>) {
-    let name_to_idx: HashMap<&Symbol, usize> =
-        funcs.iter().enumerate().map(|(i, f)| (&f.name, i)).collect();
+    let name_to_idx: HashMap<&Symbol, usize> = funcs
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (&f.name, i))
+        .collect();
 
     let mut deps: Vec<HashSet<usize>> = vec![HashSet::new(); funcs.len()];
     for (i, func) in funcs.iter().enumerate() {
@@ -317,7 +341,11 @@ fn infer_function(top: &TopLevel, func: &FuncDef) -> Result<Scheme, TypeError> {
     // If explicit sig provided, unify param types BEFORE body inference
     // so that record field accesses can resolve during inference.
     let sig_inst = func.sig.as_ref().map(|s| ctx.instantiate(s));
-    if let Some(Ty::Fn { params: ref sig_params, .. }) = sig_inst {
+    if let Some(Ty::Fn {
+        params: ref sig_params,
+        ..
+    }) = sig_inst
+    {
         for (pt, sp) in param_tys.iter().zip(sig_params.iter()) {
             ctx.unify(pt, sp)?;
         }
@@ -329,7 +357,10 @@ fn infer_function(top: &TopLevel, func: &FuncDef) -> Result<Scheme, TypeError> {
     let body_ty = infer_expr(&mut ctx, &scope, func.body, top)?;
 
     // Build inferred function type
-    let fn_ty = Ty::Fn { params: param_tys, ret: Box::new(body_ty) };
+    let fn_ty = Ty::Fn {
+        params: param_tys,
+        ret: Box::new(body_ty),
+    };
 
     // Full reconciliation with sig (checks return type too)
     if let Some(sig_ty) = &sig_inst {
@@ -387,12 +418,11 @@ fn infer_expr<'a>(
                     let rhs = infer_expr(ctx, scope, &args[1], top)?;
                     let result_ty = unify_broadcast(ctx, &lhs, &rhs)?;
                     return match text.as_str() {
-                        "==(_,_)" | "!=(_,_)" | "<(_,_)" | ">(_,_)" | "<=(_,_)"
-                        | ">=(_,_)" | "||(_,_)" | "&&(_,_)" => Ok(Ty::scalar(ScalarType::Bool)),
+                        "==(_,_)" | "!=(_,_)" | "<(_,_)" | ">(_,_)" | "<=(_,_)" | ">=(_,_)"
+                        | "||(_,_)" | "&&(_,_)" => Ok(Ty::scalar(ScalarType::Bool)),
                         _ => Ok(result_ty),
                     };
                 }
-
             }
 
             // General application
@@ -402,7 +432,10 @@ fn infer_expr<'a>(
                 arg_tys.push(infer_expr(ctx, scope, arg, top)?);
             }
             let ret = ctx.fresh_var();
-            let fn_ty = Ty::Fn { params: arg_tys, ret: Box::new(ret.clone()) };
+            let fn_ty = Ty::Fn {
+                params: arg_tys,
+                ret: Box::new(ret.clone()),
+            };
             ctx.unify(&callee_ty, &fn_ty)?;
             Ok(ctx.resolve(&ret))
         }
@@ -417,7 +450,10 @@ fn infer_expr<'a>(
                             return Ok(fty.clone());
                         }
                     }
-                    Err(TypeError::new(format!("no field '{}' on record", inner.field)))
+                    Err(TypeError::new(format!(
+                        "no field '{}' on record",
+                        inner.field
+                    )))
                 }
                 _ => Err(TypeError::new(format!(
                     "field access '.{}' requires a known record type — add a type signature",
@@ -460,7 +496,10 @@ fn infer_expr<'a>(
                 arg_tys.push(infer_expr(ctx, scope, arg, top)?);
             }
             let ret = ctx.fresh_var();
-            let fn_ty = Ty::Fn { params: arg_tys.clone(), ret: Box::new(ret) };
+            let fn_ty = Ty::Fn {
+                params: arg_tys.clone(),
+                ret: Box::new(ret),
+            };
             ctx.unify(&f_ty, &fn_ty)?;
             if arg_tys.is_empty() {
                 Ok(ctx.fresh_var())
@@ -544,7 +583,9 @@ fn unify_broadcast(ctx: &mut TyCtx, a: &Ty, b: &Ty) -> Result<Ty, TypeError> {
                 let ft = unify_broadcast(ctx, ta, tb)?;
                 result_fields.push((na.clone(), ft));
             }
-            Ok(Ty::Record { fields: result_fields })
+            Ok(Ty::Record {
+                fields: result_fields,
+            })
         }
         (_, Ty::Record { fields }) => {
             let mut result_fields = vec![];
@@ -552,7 +593,9 @@ fn unify_broadcast(ctx: &mut TyCtx, a: &Ty, b: &Ty) -> Result<Ty, TypeError> {
                 let rt = unify_broadcast(ctx, &ra, ft)?;
                 result_fields.push((n.clone(), rt));
             }
-            Ok(Ty::Record { fields: result_fields })
+            Ok(Ty::Record {
+                fields: result_fields,
+            })
         }
         (Ty::Record { fields }, _) => {
             let mut result_fields = vec![];
@@ -560,7 +603,9 @@ fn unify_broadcast(ctx: &mut TyCtx, a: &Ty, b: &Ty) -> Result<Ty, TypeError> {
                 let rt = unify_broadcast(ctx, ft, &rb)?;
                 result_fields.push((n.clone(), rt));
             }
-            Ok(Ty::Record { fields: result_fields })
+            Ok(Ty::Record {
+                fields: result_fields,
+            })
         }
         // Tensor broadcasting: scalar (0-dim) broadcasts to any rank
         (Ty::Tensor { elem: ea, dims: da }, Ty::Tensor { elem: eb, dims: db }) => {
@@ -587,11 +632,24 @@ fn bind_pattern_ty(pat: &ast::Pattern, ty: &Ty, bindings: &mut HashMap<Symbol, S
     }
 }
 
-
 fn is_binop(s: &str) -> bool {
-    matches!(s, "+(_,_)" | "-(_,_)" | "*(_,_)" | "/(_,_)" | "//(_,_)" | "%(_,_)"
-        | "==(_,_)" | "!=(_,_)" | "<(_,_)" | ">(_,_)" | "<=(_,_)" | ">=(_,_)"
-        | "||(_,_)" | "&&(_,_)")
+    matches!(
+        s,
+        "+(_,_)"
+            | "-(_,_)"
+            | "*(_,_)"
+            | "/(_,_)"
+            | "//(_,_)"
+            | "%(_,_)"
+            | "==(_,_)"
+            | "!=(_,_)"
+            | "<(_,_)"
+            | ">(_,_)"
+            | "<=(_,_)"
+            | ">=(_,_)"
+            | "||(_,_)"
+            | "&&(_,_)"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -611,7 +669,9 @@ fn collect_type_def(
 
     // Create TyVars for each type parameter
     for param_name in &params {
-        let Ty::Var(v) = ctx.fresh_var() else { unreachable!() };
+        let Ty::Var(v) = ctx.fresh_var() else {
+            unreachable!()
+        };
         vars.insert(param_name.clone(), v);
         param_vars.push(v);
     }
@@ -630,10 +690,14 @@ fn collect_type_def(
 
     top.bindings.insert(
         name.clone(),
-        DeclBinding::TypeDef { params, param_vars, body_ty, fields },
+        DeclBinding::TypeDef {
+            params,
+            param_vars,
+            body_ty,
+            fields,
+        },
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // Type signature parsing
@@ -643,7 +707,10 @@ fn parse_type_sig(sig_expr: &ast::Expr, top: &TopLevel) -> Scheme {
     let mut ctx = TyCtx::new();
     let mut vars: HashMap<Symbol, TyVar> = HashMap::new();
     let ty = parse_type_expr(sig_expr, top, &mut ctx, &mut vars);
-    Scheme { bound: vars.values().copied().collect(), ty }
+    Scheme {
+        bound: vars.values().copied().collect(),
+        ty,
+    }
 }
 
 fn parse_type_expr(
@@ -655,15 +722,24 @@ fn parse_type_expr(
     match expr {
         ast::Expr::Name(inner) => {
             let text = inner.name.text();
-            if let Some(ty) = scalar_from_name(text.as_str()) { return ty; }
-            if let Some(DeclBinding::TypeDef { param_vars, body_ty, .. }) = top.bindings.get(&inner.name) {
+            if let Some(ty) = scalar_from_name(text.as_str()) {
+                return ty;
+            }
+            if let Some(DeclBinding::TypeDef {
+                param_vars,
+                body_ty,
+                ..
+            }) = top.bindings.get(&inner.name)
+            {
                 let (param_vars, body_ty) = (param_vars.clone(), body_ty.clone());
                 return instantiate_typedef(&param_vars, &body_ty, &[], ctx);
             }
             if let Some(v) = vars.get(&inner.name) {
                 Ty::Var(*v)
             } else {
-                let Ty::Var(v) = ctx.fresh_var() else { unreachable!() };
+                let Ty::Var(v) = ctx.fresh_var() else {
+                    unreachable!()
+                };
                 vars.insert(inner.name.clone(), v);
                 Ty::Var(v)
             }
@@ -675,9 +751,15 @@ fn parse_type_expr(
                 if n.name.text() == "->" && args.len() == 2 {
                     return parse_arrow_chain(expr, top, ctx, vars);
                 }
-                if let Some(DeclBinding::TypeDef { param_vars, body_ty, .. }) = top.bindings.get(&n.name) {
+                if let Some(DeclBinding::TypeDef {
+                    param_vars,
+                    body_ty,
+                    ..
+                }) = top.bindings.get(&n.name)
+                {
                     let (param_vars, body_ty) = (param_vars.clone(), body_ty.clone());
-                    let arg_tys: Vec<Ty> = args.iter()
+                    let arg_tys: Vec<Ty> = args
+                        .iter()
                         .map(|a| parse_type_expr(a, top, ctx, vars))
                         .collect();
                     return instantiate_typedef(&param_vars, &body_ty, &arg_tys, ctx);
@@ -685,9 +767,17 @@ fn parse_type_expr(
             }
             // Array type or other
             Ty::Tensor {
-                elem: Box::new(parse_type_expr(args.last().unwrap_or(callee), top, ctx, vars)),
+                elem: Box::new(parse_type_expr(
+                    args.last().unwrap_or(callee),
+                    top,
+                    ctx,
+                    vars,
+                )),
                 dims: if args.len() > 1 {
-                    args[..args.len() - 1].iter().map(|a| parse_type_expr(a, top, ctx, vars)).collect()
+                    args[..args.len() - 1]
+                        .iter()
+                        .map(|a| parse_type_expr(a, top, ctx, vars))
+                        .collect()
                 } else {
                     vec![ctx.fresh_var()]
                 },
@@ -733,7 +823,10 @@ fn parse_arrow_chain(
         }
     }
     let ret = as_value_type(parse_type_expr(current, top, ctx, vars));
-    Ty::Fn { params, ret: Box::new(ret) }
+    Ty::Fn {
+        params,
+        ret: Box::new(ret),
+    }
 }
 
 fn parse_ast_type(
@@ -744,15 +837,24 @@ fn parse_ast_type(
 ) -> Ty {
     match ty {
         ast::Type::Name { name } => {
-            if let Some(t) = scalar_from_name(name.text().as_str()) { return t; }
-            if let Some(DeclBinding::TypeDef { param_vars, body_ty, .. }) = top.bindings.get(name) {
+            if let Some(t) = scalar_from_name(name.text().as_str()) {
+                return t;
+            }
+            if let Some(DeclBinding::TypeDef {
+                param_vars,
+                body_ty,
+                ..
+            }) = top.bindings.get(name)
+            {
                 let (param_vars, body_ty) = (param_vars.clone(), body_ty.clone());
                 return instantiate_typedef(&param_vars, &body_ty, &[], ctx);
             }
             if let Some(v) = vars.get(name) {
                 Ty::Var(*v)
             } else {
-                let Ty::Var(v) = ctx.fresh_var() else { unreachable!() };
+                let Ty::Var(v) = ctx.fresh_var() else {
+                    unreachable!()
+                };
                 vars.insert(name.clone(), v);
                 Ty::Var(v)
             }
@@ -776,7 +878,10 @@ fn parse_ast_type(
                     break;
                 }
                 let ret = as_value_type(parse_type_expr(current, top, ctx, vars));
-                return Ty::Fn { params, ret: Box::new(ret) };
+                return Ty::Fn {
+                    params,
+                    ret: Box::new(ret),
+                };
             }
             if text == "[]" {
                 if args.len() >= 2 {
@@ -787,29 +892,48 @@ fn parse_ast_type(
                             dims.insert(0, dim);
                             Ty::Tensor { elem: ie, dims }
                         }
-                        other => Ty::Tensor { elem: Box::new(other), dims: vec![dim] },
+                        other => Ty::Tensor {
+                            elem: Box::new(other),
+                            dims: vec![dim],
+                        },
                     };
                 }
                 return Ty::Tensor {
-                    elem: Box::new(args.first().map(|a| parse_type_expr(a, top, ctx, vars)).unwrap_or_else(|| ctx.fresh_var())),
+                    elem: Box::new(
+                        args.first()
+                            .map(|a| parse_type_expr(a, top, ctx, vars))
+                            .unwrap_or_else(|| ctx.fresh_var()),
+                    ),
                     dims: vec![ctx.fresh_var()],
                 };
             }
-            if let Some(DeclBinding::TypeDef { param_vars, body_ty, .. }) = top.bindings.get(name) {
+            if let Some(DeclBinding::TypeDef {
+                param_vars,
+                body_ty,
+                ..
+            }) = top.bindings.get(name)
+            {
                 let (param_vars, body_ty) = (param_vars.clone(), body_ty.clone());
-                let arg_tys: Vec<Ty> = args.iter()
+                let arg_tys: Vec<Ty> = args
+                    .iter()
                     .map(|a| parse_type_expr(a, top, ctx, vars))
                     .collect();
                 instantiate_typedef(&param_vars, &body_ty, &arg_tys, ctx)
             } else {
                 Ty::App {
                     name: name.clone(),
-                    args: args.iter().map(|a| parse_type_expr(a, top, ctx, vars)).collect(),
+                    args: args
+                        .iter()
+                        .map(|a| parse_type_expr(a, top, ctx, vars))
+                        .collect(),
                 }
             }
         }
         ast::Type::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, e)| (n.clone(), as_value_type(parse_type_expr(e, top, ctx, vars)))).collect(),
+            fields: fields
+                .iter()
+                .map(|(n, e)| (n.clone(), as_value_type(parse_type_expr(e, top, ctx, vars))))
+                .collect(),
         },
         ast::Type::Enum { .. } => ctx.fresh_var(),
     }
@@ -820,19 +944,17 @@ fn parse_ast_type(
 /// Already-wrapped types (Tensor, Record, Fn) pass through.
 fn as_value_type(ty: Ty) -> Ty {
     match &ty {
-        Ty::Var(_) | Ty::Scalar(_) => Ty::Tensor { elem: Box::new(ty), dims: vec![] },
+        Ty::Var(_) | Ty::Scalar(_) => Ty::Tensor {
+            elem: Box::new(ty),
+            dims: vec![],
+        },
         _ => ty,
     }
 }
 
 /// Instantiate a TypeDef's body_ty by substituting type args for param_vars.
 /// If fewer args than params, remaining params get fresh vars.
-fn instantiate_typedef(
-    param_vars: &[TyVar],
-    body_ty: &Ty,
-    arg_tys: &[Ty],
-    ctx: &mut TyCtx,
-) -> Ty {
+fn instantiate_typedef(param_vars: &[TyVar], body_ty: &Ty, arg_tys: &[Ty], ctx: &mut TyCtx) -> Ty {
     use crate::types::Substitution;
     let mut map = HashMap::new();
     for (i, &pv) in param_vars.iter().enumerate() {
@@ -867,45 +989,90 @@ fn register_builtins(top: &mut TopLevel) {
     let mut ctx = TyCtx::new();
 
     macro_rules! fresh {
-        () => {{ let Ty::Var(v) = ctx.fresh_var() else { unreachable!() }; v }};
+        () => {{
+            let Ty::Var(v) = ctx.fresh_var() else {
+                unreachable!()
+            };
+            v
+        }};
     }
 
     // max :: a -> a -> a
     let v = fresh!();
     let id = top.alloc_func_id();
-    top.bindings.insert(Symbol::from("max"), DeclBinding::Func {
-        id, scheme: Scheme { bound: vec![v], ty: Ty::Fn {
-            params: vec![Ty::Var(v), Ty::Var(v)], ret: Box::new(Ty::Var(v)),
-        }},
-    });
+    top.bindings.insert(
+        Symbol::from("max"),
+        DeclBinding::Func {
+            id,
+            scheme: Scheme {
+                bound: vec![v],
+                ty: Ty::Fn {
+                    params: vec![Ty::Var(v), Ty::Var(v)],
+                    ret: Box::new(Ty::Var(v)),
+                },
+            },
+        },
+    );
 
     // matmul :: [m][k]T -> [k][n]T -> [m][n]T
     let (t, m, k, n) = (fresh!(), fresh!(), fresh!(), fresh!());
     let id = top.alloc_func_id();
-    top.bindings.insert(Symbol::from("matmul"), DeclBinding::Builtin {
-        id, builtin: Builtin::Matmul,
-        scheme: Scheme { bound: vec![t, m, k, n], ty: Ty::Fn {
-            params: vec![
-                Ty::Tensor { elem: Box::new(Ty::Var(t)), dims: vec![Ty::Var(m), Ty::Var(k)] },
-                Ty::Tensor { elem: Box::new(Ty::Var(t)), dims: vec![Ty::Var(k), Ty::Var(n)] },
-            ],
-            ret: Box::new(Ty::Tensor { elem: Box::new(Ty::Var(t)), dims: vec![Ty::Var(m), Ty::Var(n)] }),
-        }},
-    });
+    top.bindings.insert(
+        Symbol::from("matmul"),
+        DeclBinding::Builtin {
+            id,
+            builtin: Builtin::Matmul,
+            scheme: Scheme {
+                bound: vec![t, m, k, n],
+                ty: Ty::Fn {
+                    params: vec![
+                        Ty::Tensor {
+                            elem: Box::new(Ty::Var(t)),
+                            dims: vec![Ty::Var(m), Ty::Var(k)],
+                        },
+                        Ty::Tensor {
+                            elem: Box::new(Ty::Var(t)),
+                            dims: vec![Ty::Var(k), Ty::Var(n)],
+                        },
+                    ],
+                    ret: Box::new(Ty::Tensor {
+                        elem: Box::new(Ty::Var(t)),
+                        dims: vec![Ty::Var(m), Ty::Var(n)],
+                    }),
+                },
+            },
+        },
+    );
 
     // cross_entropy :: [n]T -> [n]T -> T
     let (t, nv) = (fresh!(), fresh!());
     let id = top.alloc_func_id();
-    top.bindings.insert(Symbol::from("cross_entropy"), DeclBinding::Builtin {
-        id, builtin: Builtin::CrossEntropy,
-        scheme: Scheme { bound: vec![t, nv], ty: Ty::Fn {
-            params: vec![
-                Ty::Tensor { elem: Box::new(Ty::Var(t)), dims: vec![Ty::Var(nv)] },
-                Ty::Tensor { elem: Box::new(Ty::Var(t)), dims: vec![Ty::Var(nv)] },
-            ],
-            ret: Box::new(Ty::Tensor { elem: Box::new(Ty::Var(t)), dims: vec![] }),
-        }},
-    });
+    top.bindings.insert(
+        Symbol::from("cross_entropy"),
+        DeclBinding::Builtin {
+            id,
+            builtin: Builtin::CrossEntropy,
+            scheme: Scheme {
+                bound: vec![t, nv],
+                ty: Ty::Fn {
+                    params: vec![
+                        Ty::Tensor {
+                            elem: Box::new(Ty::Var(t)),
+                            dims: vec![Ty::Var(nv)],
+                        },
+                        Ty::Tensor {
+                            elem: Box::new(Ty::Var(t)),
+                            dims: vec![Ty::Var(nv)],
+                        },
+                    ],
+                    ret: Box::new(Ty::Tensor {
+                        elem: Box::new(Ty::Var(t)),
+                        dims: vec![],
+                    }),
+                },
+            },
+        },
+    );
 
     // grad is now a keyword/special form, not a builtin function
 }

@@ -1,10 +1,10 @@
 pub mod ast;
 pub mod ast_sexpr;
 mod config;
-pub mod typer;
 pub mod feedback;
 pub mod ir;
 pub mod ir_gen;
+pub mod ir_rw;
 pub mod ir_sexpr;
 pub mod lexer;
 pub mod parser;
@@ -13,6 +13,7 @@ mod span;
 mod symbol;
 pub mod token;
 mod tree;
+pub mod typer;
 pub mod types;
 mod vocab;
 

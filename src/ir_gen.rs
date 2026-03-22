@@ -2,8 +2,8 @@ use hashbrown::HashMap;
 use num::ToPrimitive;
 
 use crate::ast::{self, expr, stmt};
-use crate::typer::{DeclBinding, TopLevel};
 use crate::ir::{self, ConstVal, ElemOp, FuncId, Node, NodeId, Ref};
+use crate::typer::{DeclBinding, TopLevel};
 use crate::types::{Scope, SlotShape, TyCtx};
 use crate::{Symbol, fb};
 
@@ -24,9 +24,7 @@ impl Value {
     fn flatten(&self) -> Vec<Ref> {
         match self {
             Value::Slot(r) => vec![r.clone()],
-            Value::Record(fields) => {
-                fields.iter().flat_map(|(_, v)| v.flatten()).collect()
-            }
+            Value::Record(fields) => fields.iter().flat_map(|(_, v)| v.flatten()).collect(),
         }
     }
 
@@ -54,9 +52,7 @@ impl Value {
     /// Project a field from a Record value.
     fn project(&self, field: &Symbol) -> Option<&Value> {
         match self {
-            Value::Record(fields) => {
-                fields.iter().find(|(n, _)| n == field).map(|(_, v)| v)
-            }
+            Value::Record(fields) => fields.iter().find(|(n, _)| n == field).map(|(_, v)| v),
             _ => None,
         }
     }
@@ -104,11 +100,7 @@ impl<'a> FuncBuilder<'a> {
     }
 
     /// Build params from a SlotShape, returning the Value.
-    fn build_params_from_shape(
-        &mut self,
-        name: &Symbol,
-        shape: &SlotShape,
-    ) -> Value {
+    fn build_params_from_shape(&mut self, name: &Symbol, shape: &SlotShape) -> Value {
         match shape {
             SlotShape::Tensor => {
                 let r = self.emit_param(name.clone());
@@ -119,8 +111,7 @@ impl<'a> FuncBuilder<'a> {
                     .iter()
                     .map(|(fname, sub_shape)| {
                         // Param names include field info for diagnostics
-                        let param_name =
-                            Symbol::from(format!("{}.{}", name.text(), fname.text()));
+                        let param_name = Symbol::from(format!("{}.{}", name.text(), fname.text()));
                         let val = self.build_params_from_shape(&param_name, sub_shape);
                         (fname.clone(), val)
                     })
@@ -203,7 +194,10 @@ pub fn lower(file: &ast::File, top: &TopLevel) -> fb::Result<ir::Program> {
         }
     }
 
-    Ok(ir::Program { functions, builtins })
+    Ok(ir::Program {
+        functions,
+        builtins,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -225,10 +219,7 @@ fn lower_function(
     // Build param bindings
     let mut bindings: HashMap<Symbol, Value> = HashMap::new();
     for (i, (arg_name, _)) in args.iter().enumerate() {
-        let shape = param_shapes
-            .get(i)
-            .cloned()
-            .unwrap_or(SlotShape::Tensor);
+        let shape = param_shapes.get(i).cloned().unwrap_or(SlotShape::Tensor);
         let val = builder.build_params_from_shape(arg_name, &shape);
         bindings.insert(arg_name.clone(), val);
     }
@@ -365,9 +356,7 @@ fn lower_expr<'a>(
             lower_expr(builder, &inner.expr, scope)
         }
 
-        ast::Expr::Grad(inner) => {
-            lower_grad(builder, &inner.func, &inner.args, &inner.span, scope)
-        }
+        ast::Expr::Grad(inner) => lower_grad(builder, &inner.func, &inner.args, &inner.span, scope),
 
         ast::Expr::Match(inner) => {
             // Match is not yet supported in IR gen
@@ -386,10 +375,7 @@ fn lower_expr<'a>(
 // Literals
 // ---------------------------------------------------------------------------
 
-fn lower_literal(
-    builder: &mut FuncBuilder,
-    lit: &crate::vocab::Literal,
-) -> fb::Result<Value> {
+fn lower_literal(builder: &mut FuncBuilder, lit: &crate::vocab::Literal) -> fb::Result<Value> {
     let val = match lit {
         crate::vocab::Literal::Number(n) => {
             if n.is_integer() {
@@ -751,7 +737,7 @@ fn lower_if<'a>(
                         span: Some(cond_expr.span().clone()),
                         notes: vec![],
                     }],
-                })
+                });
             }
         };
 
@@ -781,9 +767,7 @@ fn lower_if<'a>(
 
         // Reconstruct value from Cond outputs
         let slot_count = then_val.slot_count();
-        let cond_refs: Vec<Ref> = (0..slot_count)
-            .map(|i| Ref::output(cond_nid, i))
-            .collect();
+        let cond_refs: Vec<Ref> = (0..slot_count).map(|i| Ref::output(cond_nid, i)).collect();
         let mut ref_iter = cond_refs.into_iter();
 
         // Reconstruct using then_val's shape (both branches have same shape)

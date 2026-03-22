@@ -2,9 +2,9 @@ use std::fmt::{self, Write};
 
 use num::ToPrimitive;
 
+use crate::Symbol;
 use crate::ast;
 use crate::vocab;
-use crate::Symbol;
 pub fn print(file: &ast::File) -> String {
     let mut buf = String::new();
     write_file(&mut buf, file).unwrap();
@@ -55,7 +55,9 @@ fn write_stmt(f: &mut String, stmt: &ast::Stmt) -> fmt::Result {
 }
 
 fn write_stmt_def(f: &mut String, inner: &ast::stmt::Def) -> fmt::Result {
-    let ast::stmt::Def { name, args, body, .. } = inner;
+    let ast::stmt::Def {
+        name, args, body, ..
+    } = inner;
     f.write_str("(def ")?;
     write!(f, "{name}")?;
     if !args.is_empty() {
@@ -261,16 +263,18 @@ fn write_type_record(f: &mut String, fields: &[(Symbol, ast::Expr)]) -> fmt::Res
 
 fn write_type_enum(f: &mut String, variants: &[(Symbol, Option<ast::Expr>)]) -> fmt::Result {
     f.write_str("(enum ")?;
-    write_each(f, variants, |f: &mut String, (name, payload)| {
-        match payload {
+    write_each(
+        f,
+        variants,
+        |f: &mut String, (name, payload)| match payload {
             Some(expr) => {
                 write!(f, "({name} ")?;
                 write_expr(f, expr)?;
                 f.write_char(')')
             }
             None => write!(f, "{name}"),
-        }
-    })?;
+        },
+    )?;
     f.write_char(')')
 }
 

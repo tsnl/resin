@@ -481,11 +481,14 @@ fn parse_type(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_type_base(ts: TokenStream) -> PResult<Expr> {
-    alt!(ts, [
-        |ts| parse_struct_body(ts).map(|((e, _), ts)| (e, ts)),
-        parse_array_type,
-        parse_named_type,
-    ])
+    alt!(
+        ts,
+        [
+            |ts| parse_struct_body(ts).map(|((e, _), ts)| (e, ts)),
+            parse_array_type,
+            parse_named_type,
+        ]
+    )
 }
 
 fn parse_named_type(ts: TokenStream) -> PResult<Expr> {
@@ -600,21 +603,24 @@ fn parse_match(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_pattern(ts: TokenStream) -> PResult<Pattern> {
-    alt!(ts, [
-        parse_pattern_constructor,
-        |ts| {
-            let ((s, sp), ts) = expect_lid("pattern")(ts)?;
-            Ok((Pattern::new_name(s, sp), ts))
-        },
-        |ts| {
-            let ((_, sp), ts) = expect_hole("pattern")(ts)?;
-            Ok((Pattern::new_hole(sp), ts))
-        },
-        |ts| {
-            let ((v, sp), ts) = expect_literal("pattern")(ts)?;
-            Ok((Pattern::new_literal(v, sp), ts))
-        },
-    ])
+    alt!(
+        ts,
+        [
+            parse_pattern_constructor,
+            |ts| {
+                let ((s, sp), ts) = expect_lid("pattern")(ts)?;
+                Ok((Pattern::new_name(s, sp), ts))
+            },
+            |ts| {
+                let ((_, sp), ts) = expect_hole("pattern")(ts)?;
+                Ok((Pattern::new_hole(sp), ts))
+            },
+            |ts| {
+                let ((v, sp), ts) = expect_literal("pattern")(ts)?;
+                Ok((Pattern::new_literal(v, sp), ts))
+            },
+        ]
+    )
 }
 
 fn parse_pattern_constructor(ts: TokenStream) -> PResult<Pattern> {
@@ -768,28 +774,34 @@ fn parse_postfix_expr(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_atom(ts: TokenStream) -> PResult<Expr> {
-    alt!(ts, [
-        |ts| {
-            let (start, ts) = tok(TokenKind::Tilde, "unary_neg")(ts)?;
-            let (operand, ts) = parse_atom(ts)?;
-            let span = span_from(&start, operand.span());
-            Ok((Expr::new_apply(
-                Expr::new_name(Symbol::from("~(_)"), start),
-                vec![operand],
-                span,
-            ), ts))
-        },
-        |ts| {
-            let ((v, s), ts) = expect_literal("expr")(ts)?;
-            Ok((Expr::new_literal(v, s), ts))
-        },
-        |ts| {
-            let ((s, sp), ts) = expect_name_or_builtin("expr")(ts)?;
-            Ok((Expr::new_name(s, sp), ts))
-        },
-        parse_paren,
-        parse_array_type,
-    ])
+    alt!(
+        ts,
+        [
+            |ts| {
+                let (start, ts) = tok(TokenKind::Tilde, "unary_neg")(ts)?;
+                let (operand, ts) = parse_atom(ts)?;
+                let span = span_from(&start, operand.span());
+                Ok((
+                    Expr::new_apply(
+                        Expr::new_name(Symbol::from("~(_)"), start),
+                        vec![operand],
+                        span,
+                    ),
+                    ts,
+                ))
+            },
+            |ts| {
+                let ((v, s), ts) = expect_literal("expr")(ts)?;
+                Ok((Expr::new_literal(v, s), ts))
+            },
+            |ts| {
+                let ((s, sp), ts) = expect_name_or_builtin("expr")(ts)?;
+                Ok((Expr::new_name(s, sp), ts))
+            },
+            parse_paren,
+            parse_array_type,
+        ]
+    )
 }
 
 fn parse_paren(ts: TokenStream) -> PResult<Expr> {
@@ -828,8 +840,8 @@ mod tests {
         let tokens = lexer
             .lex(source)
             .unwrap_or_else(|e| panic!("Lex error: {e:?}"));
-        let (file, _) = parse_file(TokenStream::new(tokens))
-            .unwrap_or_else(|e| panic!("Parse error: {e:?}"));
+        let (file, _) =
+            parse_file(TokenStream::new(tokens)).unwrap_or_else(|e| panic!("Parse error: {e:?}"));
         file
     }
 
@@ -911,10 +923,7 @@ mod tests {
     }
     #[test]
     fn test_multiple_defs() {
-        assert_eq!(
-            parse_source("f x =\n  x\n\ng y =\n  y\n").stmts.len(),
-            2
-        );
+        assert_eq!(parse_source("f x =\n  x\n\ng y =\n  y\n").stmts.len(), 2);
     }
     #[test]
     fn test_array_type() {
