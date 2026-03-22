@@ -38,6 +38,8 @@ pub enum TokenKind {
     KwFnUid,
     KwTrue,
     KwFalse,
+    KwGrad,
+    KwAs,
 
     LParen,
     RParen,
@@ -75,6 +77,7 @@ pub enum TokenKind {
     DblPipe,
     DblAmpersand,
     Caret,
+    Tilde,
 }
 
 impl TokenKind {
@@ -112,6 +115,8 @@ impl TokenKind {
             Self::KwFnUid => "`Fn`",
             Self::KwTrue => "`true`",
             Self::KwFalse => "`false`",
+            Self::KwGrad => "`grad`",
+            Self::KwAs => "`as`",
             Self::LParen => "`(`",
             Self::RParen => "`)`",
             Self::LSqBrk => "`[`",
@@ -148,6 +153,7 @@ impl TokenKind {
             Self::DblPipe => "`||`",
             Self::DblAmpersand => "`&&`",
             Self::Caret => "`^`",
+            Self::Tilde => "`~`",
         }
     }
     pub fn builtin_name(&self) -> Option<&'static str> {

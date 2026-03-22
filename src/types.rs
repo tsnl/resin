@@ -1,6 +1,7 @@
 use hashbrown::{HashMap, HashSet};
 
 use crate::Symbol;
+use crate::vocab::ScalarType;
 
 // ---------------------------------------------------------------------------
 // Type variables
@@ -12,17 +13,6 @@ pub struct TyVar(pub u32);
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ElemTy {
-    F32,
-    F64,
-    I32,
-    I64,
-    U32,
-    U64,
-    Bool,
-}
 
 /// Core type representation.
 ///
@@ -43,14 +33,14 @@ pub enum Ty {
     App { name: Symbol, args: Vec<Ty> },
     /// Dimension literal (for shape positions).
     Dim(u64),
-    /// Element type keyword.
-    Elem(ElemTy),
+    /// Scalar element type (e.g. f32, i64, bool).
+    Scalar(ScalarType),
 }
 
 impl Ty {
-    pub fn scalar(elem: ElemTy) -> Self {
+    pub fn scalar(st: ScalarType) -> Self {
         Ty::Tensor {
-            elem: Box::new(Ty::Elem(elem)),
+            elem: Box::new(Ty::Scalar(st)),
             dims: vec![],
         }
     }
@@ -89,7 +79,7 @@ impl Ty {
                     a.collect_free_vars(out);
                 }
             }
-            Ty::Dim(_) | Ty::Elem(_) => {}
+            Ty::Dim(_) | Ty::Scalar(_) => {}
         }
     }
 }
@@ -147,32 +137,48 @@ impl Substitution {
         Substitution { map }
     }
 
+    pub fn from_map(map: HashMap<TyVar, Ty>) -> Self {
+        Substitution { map }
+    }
+
     /// Apply this substitution to a type.
     pub fn apply(&self, ty: &Ty) -> Ty {
+        self.apply_inner(ty, &mut HashSet::new())
+    }
+
+    fn apply_inner(&self, ty: &Ty, expanding: &mut HashSet<TyVar>) -> Ty {
         match ty {
             Ty::Var(v) => match self.map.get(v) {
-                Some(t) => self.apply(t),
+                Some(t) => {
+                    // Guard against infinite recursion from cyclic substitutions
+                    if !expanding.insert(*v) {
+                        return ty.clone();
+                    }
+                    let result = self.apply_inner(t, expanding);
+                    expanding.remove(v);
+                    result
+                }
                 None => ty.clone(),
             },
             Ty::Tensor { elem, dims } => Ty::Tensor {
-                elem: Box::new(self.apply(elem)),
-                dims: dims.iter().map(|d| self.apply(d)).collect(),
+                elem: Box::new(self.apply_inner(elem, expanding)),
+                dims: dims.iter().map(|d| self.apply_inner(d, expanding)).collect(),
             },
             Ty::Record { fields } => Ty::Record {
                 fields: fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), self.apply(ty)))
+                    .map(|(name, ty)| (name.clone(), self.apply_inner(ty, expanding)))
                     .collect(),
             },
             Ty::Fn { params, ret } => Ty::Fn {
-                params: params.iter().map(|p| self.apply(p)).collect(),
-                ret: Box::new(self.apply(ret)),
+                params: params.iter().map(|p| self.apply_inner(p, expanding)).collect(),
+                ret: Box::new(self.apply_inner(ret, expanding)),
             },
             Ty::App { name, args } => Ty::App {
                 name: name.clone(),
-                args: args.iter().map(|a| self.apply(a)).collect(),
+                args: args.iter().map(|a| self.apply_inner(a, expanding)).collect(),
             },
-            Ty::Dim(_) | Ty::Elem(_) => ty.clone(),
+            Ty::Dim(_) | Ty::Scalar(_) => ty.clone(),
         }
     }
 
@@ -296,12 +302,12 @@ fn unify_inner(a: &Ty, b: &Ty) -> Result<Substitution, TypeError> {
             Ok(Substitution::singleton(*v, t.clone()))
         }
 
-        (Ty::Elem(a), Ty::Elem(b)) => {
+        (Ty::Scalar(a), Ty::Scalar(b)) => {
             if a == b {
                 Ok(Substitution::empty())
             } else {
                 Err(TypeError::new(format!(
-                    "element type mismatch: {a:?} vs {b:?}"
+                    "scalar type mismatch: {a:?} vs {b:?}"
                 )))
             }
         }
@@ -501,6 +507,17 @@ impl<'a, V> Scope<'a, V> {
     }
 }
 
+impl<'a> Scope<'a, Scheme> {
+    /// Collect free type variables from all bindings in scope (walks parent chain).
+    pub fn free_vars(&self) -> HashSet<TyVar> {
+        let mut fv: HashSet<TyVar> = self.bindings.values().flat_map(|s| s.free_vars()).collect();
+        if let Some(parent) = self.parent {
+            fv.extend(parent.free_vars());
+        }
+        fv
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -512,9 +529,9 @@ mod tests {
     #[test]
     fn test_substitution_apply() {
         let v0 = TyVar(0);
-        let s = Substitution::singleton(v0, Ty::Elem(ElemTy::F32));
+        let s = Substitution::singleton(v0, Ty::Scalar(ScalarType::F32));
         let ty = Ty::Var(v0);
-        assert_eq!(s.apply(&ty), Ty::Elem(ElemTy::F32));
+        assert_eq!(s.apply(&ty), Ty::Scalar(ScalarType::F32));
     }
 
     #[test]
@@ -522,21 +539,21 @@ mod tests {
         let v0 = TyVar(0);
         let v1 = TyVar(1);
         let s1 = Substitution::singleton(v0, Ty::Var(v1));
-        let s2 = Substitution::singleton(v1, Ty::Elem(ElemTy::I32));
+        let s2 = Substitution::singleton(v1, Ty::Scalar(ScalarType::I32));
         let composed = s2.compose(&s1);
         // composed(v0) = s2(s1(v0)) = s2(v1) = I32
-        assert_eq!(composed.apply(&Ty::Var(v0)), Ty::Elem(ElemTy::I32));
+        assert_eq!(composed.apply(&Ty::Var(v0)), Ty::Scalar(ScalarType::I32));
         // composed(v1) = I32
-        assert_eq!(composed.apply(&Ty::Var(v1)), Ty::Elem(ElemTy::I32));
+        assert_eq!(composed.apply(&Ty::Var(v1)), Ty::Scalar(ScalarType::I32));
     }
 
     #[test]
     fn test_unify_vars() {
         let mut ctx = TyCtx::new();
         let a = ctx.fresh_var();
-        let b = Ty::Elem(ElemTy::F32);
+        let b = Ty::Scalar(ScalarType::F32);
         ctx.unify(&a, &b).unwrap();
-        assert_eq!(ctx.resolve(&a), Ty::Elem(ElemTy::F32));
+        assert_eq!(ctx.resolve(&a), Ty::Scalar(ScalarType::F32));
     }
 
     #[test]
@@ -548,11 +565,11 @@ mod tests {
             dims: vec![Ty::Dim(10)],
         };
         let t2 = Ty::Tensor {
-            elem: Box::new(Ty::Elem(ElemTy::F64)),
+            elem: Box::new(Ty::Scalar(ScalarType::F64)),
             dims: vec![Ty::Dim(10)],
         };
         ctx.unify(&t1, &t2).unwrap();
-        assert_eq!(ctx.resolve(&a), Ty::Elem(ElemTy::F64));
+        assert_eq!(ctx.resolve(&a), Ty::Scalar(ScalarType::F64));
     }
 
     #[test]
@@ -622,15 +639,15 @@ mod tests {
     fn test_slot_shape() {
         let ctx = TyCtx::new();
         // Tensor → 1 slot
-        let tensor_ty = Ty::scalar(ElemTy::F32);
+        let tensor_ty = Ty::scalar(ScalarType::F32);
         assert_eq!(SlotShape::from_ty(&tensor_ty, &ctx), SlotShape::Tensor);
         assert_eq!(SlotShape::Tensor.total_slots(), 1);
 
         // Record with 2 tensor fields → 2 slots
         let record_ty = Ty::Record {
             fields: vec![
-                (Symbol::from("w"), Ty::scalar(ElemTy::F32)),
-                (Symbol::from("b"), Ty::scalar(ElemTy::F32)),
+                (Symbol::from("w"), Ty::scalar(ScalarType::F32)),
+                (Symbol::from("b"), Ty::scalar(ScalarType::F32)),
             ],
         };
         let shape = SlotShape::from_ty(&record_ty, &ctx);

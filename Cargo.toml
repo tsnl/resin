@@ -8,7 +8,6 @@ name = "resin"
 path = "src/bin/resin.rs"
 
 [dependencies]
-fxhash = "0.2.1"
 hashbrown = "0.16.1"
 num = "0.4.3"
 num-traits = "0.2.19"

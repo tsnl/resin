@@ -115,6 +115,14 @@ fn write_node(f: &mut String, _id: u32, node: &ir::Node) -> fmt::Result {
             }
             f.write_char(')')
         }
+        ir::Node::Grad { func, args } => {
+            write!(f, "(grad {}", func.0)?;
+            for a in args {
+                f.write_char(' ')?;
+                write_ref(f, a)?;
+            }
+            f.write_char(')')
+        }
     }
 }
 
@@ -143,6 +151,7 @@ fn elem_op_name(op: ir::ElemOp) -> &'static str {
         ir::ElemOp::Sub => "sub",
         ir::ElemOp::Mul => "mul",
         ir::ElemOp::Div => "div",
+        ir::ElemOp::IntDiv => "idiv",
         ir::ElemOp::Rem => "rem",
         ir::ElemOp::Pow => "pow",
         ir::ElemOp::Max => "max",

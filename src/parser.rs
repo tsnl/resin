@@ -280,7 +280,6 @@ fn sep_by<T, S>(
                 ts = new_ts;
             }
             Err(_) => {
-                ts = after_sep;
                 break;
             }
         }
@@ -446,6 +445,7 @@ fn parse_struct_body(ts: TokenStream) -> PResult<(Expr, Span)> {
     let (start, ts) = tok(TokenKind::LCurly, "struct")(ts)?;
     let (_, ts) = opt(ts, tok(TokenKind::Comma, ""));
     let (fields, ts) = sep_by(ts, parse_field, tok(TokenKind::Comma, "struct"));
+    let (_, ts) = opt(ts, tok(TokenKind::Comma, ""));
     let (end, ts) = tok(TokenKind::RCurly, "struct")(ts)?;
     let span = span_from(&start, &end);
     Ok((
@@ -571,17 +571,12 @@ fn parse_if(ts: TokenStream) -> PResult<Expr> {
         let (body, ts) = parse_expr(ts)?;
         Ok(((cond, body), ts))
     });
-    let (else_branch, ts) = opt(ts, |ts| {
-        let ts = skip_eols(ts);
-        let (_, ts) = tok(TokenKind::KwElse, "if")(ts)?;
-        parse_expr(ts)
-    });
+    let ts = skip_eols(ts);
+    let (_, ts) = tok(TokenKind::KwElse, "if")(ts)?;
+    let (else_branch, ts) = parse_expr(ts)?;
     let mut cond_branches = vec![(cond, then_branch)];
     cond_branches.extend(elifs);
-    let last_span = match &else_branch {
-        Some(e) => e.span().clone(),
-        None => cond_branches.last().unwrap().1.span().clone(),
-    };
+    let last_span = else_branch.span().clone();
     Ok((
         Expr::new_if(cond_branches, else_branch, span_from(&start, &last_span)),
         ts,
@@ -729,14 +724,37 @@ fn binop_info(tk: &TokenKind) -> Option<(u8, BinOpKind)> {
 }
 
 fn parse_apply_expr(ts: TokenStream) -> PResult<Expr> {
-    let (head, ts) = parse_postfix_expr(ts)?;
-    let (args, ts) = many0(ts, parse_postfix_expr);
+    // grad <atom> — parse as special form, then continue with application
+    if let Ok((start, ts2)) = tok(TokenKind::KwGrad, "grad")(ts.clone()) {
+        let (func_expr, ts2) = parse_atom(ts2)?;
+        let span = span_from(&start, func_expr.span());
+        let head = Expr::new_grad(func_expr, span);
+        let (args, ts2) = many0(ts2, parse_as_expr);
+        if args.is_empty() {
+            return Ok((head, ts2));
+        }
+        let full_span = span_from(head.span(), args.last().unwrap().span());
+        return Ok((Expr::new_apply(head, args, full_span), ts2));
+    }
+
+    let (head, ts) = parse_as_expr(ts)?;
+    let (args, ts) = many0(ts, parse_as_expr);
     if args.is_empty() {
         Ok((head, ts))
     } else {
         let span = span_from(head.span(), args.last().unwrap().span());
         Ok((Expr::new_apply(head, args, span), ts))
     }
+}
+
+fn parse_as_expr(ts: TokenStream) -> PResult<Expr> {
+    let (expr, ts) = parse_postfix_expr(ts)?;
+    if let Ok((_, ts)) = tok(TokenKind::KwAs, "as")(ts.clone()) {
+        let (target, ts) = parse_type_base(ts)?;
+        let span = span_from(expr.span(), target.span());
+        return Ok((Expr::new_as(expr, target, span), ts));
+    }
+    Ok((expr, ts))
 }
 
 fn parse_postfix_expr(ts: TokenStream) -> PResult<Expr> {
@@ -754,6 +772,16 @@ fn parse_postfix_expr(ts: TokenStream) -> PResult<Expr> {
 
 fn parse_atom(ts: TokenStream) -> PResult<Expr> {
     alt!(ts, [
+        |ts| {
+            let (start, ts) = tok(TokenKind::Tilde, "unary_neg")(ts)?;
+            let (operand, ts) = parse_atom(ts)?;
+            let span = span_from(&start, operand.span());
+            Ok((Expr::new_apply(
+                Expr::new_name(Symbol::from("~(_)"), start),
+                vec![operand],
+                span,
+            ), ts))
+        },
         |ts| {
             let ((v, s), ts) = expect_literal("expr")(ts)?;
             Ok((Expr::new_literal(v, s), ts))

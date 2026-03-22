@@ -72,7 +72,6 @@ struct FuncBuilder<'a> {
     param_names: Vec<Symbol>,
     nodes: Vec<Node>,
     next_param_idx: u32,
-    ty_ctx: TyCtx,
     top: &'a TopLevel,
 }
 
@@ -84,7 +83,6 @@ impl<'a> FuncBuilder<'a> {
             param_names: vec![],
             nodes: vec![],
             next_param_idx: 0,
-            ty_ctx: TyCtx::new(),
             top,
         }
     }
@@ -143,7 +141,7 @@ fn op_from_symbol(sym: &str) -> Option<ElemOp> {
         "-(_,_)" => ElemOp::Sub,
         "*(_,_)" => ElemOp::Mul,
         "/(_,_)" => ElemOp::Div,
-        "//(_,_)" => ElemOp::Div, // integer div → Div for now
+        "//(_,_)" => ElemOp::IntDiv,
         "%(_,_)" => ElemOp::Rem,
         "==(_,_)" => ElemOp::Eq,
         "!=(_,_)" => ElemOp::Ne,
@@ -192,9 +190,20 @@ pub fn lower(file: &ast::File, top: &TopLevel) -> fb::Result<ir::Program> {
         return Err(fb::Outbox { messages: errors });
     }
 
-    let entry = functions.first().map(|f| f.id).unwrap_or(FuncId(0));
+    // Collect builtin function IDs
+    let mut builtins = hashbrown::HashMap::new();
+    for (_, binding) in &top.bindings {
+        if let DeclBinding::Builtin { id, builtin, .. } = binding {
+            let kind = match builtin {
+                crate::typer::Builtin::Matmul => ir::BuiltinKind::Matmul,
+                crate::typer::Builtin::CrossEntropy => ir::BuiltinKind::CrossEntropy,
+                crate::typer::Builtin::Grad => continue,
+            };
+            builtins.insert(*id, kind);
+        }
+    }
 
-    Ok(ir::Program { functions, entry })
+    Ok(ir::Program { functions, builtins })
 }
 
 // ---------------------------------------------------------------------------
@@ -271,14 +280,20 @@ fn lower_expr<'a>(
             if let Some(val) = scope.lookup(name) {
                 return Ok(val.clone());
             }
-            // Check if it's a known function — emit a const placeholder
-            // (used when functions are passed as arguments, e.g. to grad)
+            // Function names cannot be used as values (first-class functions
+            // are not supported). They can only appear as callees in Apply
+            // or as arguments to `grad`.
             if builder.top.func_id(name).is_some() {
-                let func_id = builder.top.func_id(name).unwrap();
-                let nid = builder.emit(Node::Const {
-                    val: ConstVal::Int(func_id.0 as i64),
+                return Err(fb::Outbox {
+                    messages: vec![fb::Message {
+                        title: format!(
+                            "function '{name}' cannot be used as a value; \
+                             call it directly or use `grad {name} args...`"
+                        ),
+                        span: Some(inner.span.clone()),
+                        notes: vec![],
+                    }],
                 });
-                return Ok(Value::Slot(Ref::simple(nid)));
             }
             Err(fb::Outbox {
                 messages: vec![fb::Message {
@@ -300,7 +315,7 @@ fn lower_expr<'a>(
                 else_branch,
                 ..
             } = inner.as_ref();
-            lower_if(builder, cond_branch_vec, else_branch.as_ref(), scope)
+            lower_if(builder, cond_branch_vec, else_branch, scope)
         }
 
         ast::Expr::Chain(inner) => {
@@ -343,6 +358,22 @@ fn lower_expr<'a>(
         ast::Expr::Ctor(_) => {
             // Type constructors shouldn't appear in expression position during IR gen
             Ok(Value::Record(vec![]))
+        }
+
+        ast::Expr::As(inner) => {
+            // View cast — pass through for now (actual view computation deferred)
+            lower_expr(builder, &inner.expr, scope)
+        }
+
+        ast::Expr::Grad(inner) => {
+            // grad without application — error (must be applied: grad f x y)
+            Err(fb::Outbox {
+                messages: vec![fb::Message {
+                    title: "grad must be applied to arguments: use `grad f x y z`".into(),
+                    span: Some(inner.span.clone()),
+                    notes: vec![],
+                }],
+            })
         }
 
         ast::Expr::Match(inner) => {
@@ -399,6 +430,12 @@ fn lower_apply<'a>(
         let name = &name_inner.name;
         let text = name.text();
 
+        // Check for unary negation
+        if text.as_str() == "~(_)" && args.len() == 1 {
+            let operand = lower_expr(builder, &args[0], scope)?;
+            return lower_unary_neg(builder, operand);
+        }
+
         // Check for binary operator symbols
         if let Some(op) = op_from_symbol(text.as_str()) {
             return lower_binop(builder, op, args, scope);
@@ -446,56 +483,51 @@ fn lower_apply<'a>(
         });
     }
 
-    // Handle (grad f) as callee: (grad f) x y z → Call(grad_builtin, [f_id, x, y, z])
-    if let ast::Expr::Apply(app_inner) = callee {
-        if let ast::Expr::Name(grad_name) = &app_inner.callee {
-            if grad_name.name.text().as_str() == "grad" && app_inner.args.len() == 1 {
-                if let ast::Expr::Name(f_name) = &app_inner.args[0] {
-                    if let Some(binding) = builder.top.lookup(&f_name.name) {
-                        let (grad_func_id, target_func_id) = match binding {
-                            DeclBinding::Func { id, .. } | DeclBinding::Builtin { id, .. } => {
-                                let target_id = *id;
-                                let grad_id = builder.top.func_id(&grad_name.name).unwrap();
-                                (grad_id, target_id)
-                            }
-                            _ => {
-                                return Err(fb::Outbox {
-                                    messages: vec![fb::Message {
-                                        title: format!("'{}' is not a function", f_name.name),
-                                        span: Some(f_name.span.clone()),
-                                        notes: vec![],
-                                    }],
-                                });
-                            }
-                        };
-                        // Emit the function ref as a const, then call grad with all args
-                        let func_ref_nid = builder.emit(Node::Const {
-                            val: ConstVal::Int(target_func_id.0 as i64),
-                        });
-                        let mut flat_args = vec![Ref::simple(func_ref_nid)];
-                        for arg in args {
-                            let val = lower_expr(builder, arg, scope)?;
-                            flat_args.extend(val.flatten());
-                        }
-                        let nid = builder.emit(Node::Call {
-                            func: grad_func_id,
-                            args: flat_args,
-                        });
-                        // grad returns the same shape as the first argument
-                        let ret_shape = if !args.is_empty() {
-                            let first_arg = lower_expr(builder, &args[0], scope)?;
-                            value_to_slot_shape(&first_arg)
-                        } else {
-                            SlotShape::Tensor
-                        };
-                        let total = ret_shape.total_slots();
-                        let refs: Vec<Ref> = (0..total).map(|i| Ref::output(nid, i)).collect();
-                        let mut ref_iter = refs.into_iter();
-                        return Ok(Value::from_shape_and_refs(&ret_shape, &mut ref_iter));
-                    }
+    // Handle `grad f` as callee: grad f x y z
+    if let ast::Expr::Grad(grad_inner) = callee {
+        if let ast::Expr::Name(f_name) = &grad_inner.func {
+            let target_func_id = match builder.top.lookup(&f_name.name) {
+                Some(DeclBinding::Func { id, .. } | DeclBinding::Builtin { id, .. }) => *id,
+                _ => {
+                    return Err(fb::Outbox {
+                        messages: vec![fb::Message {
+                            title: format!("'{}' is not a function", f_name.name),
+                            span: Some(f_name.span.clone()),
+                            notes: vec![],
+                        }],
+                    });
                 }
+            };
+            let mut flat_args = vec![];
+            let mut first_arg_val: Option<Value> = None;
+            for (i, arg) in args.iter().enumerate() {
+                let val = lower_expr(builder, arg, scope)?;
+                if i == 0 {
+                    first_arg_val = Some(val.clone());
+                }
+                flat_args.extend(val.flatten());
             }
+            let nid = builder.emit(Node::Grad {
+                func: target_func_id,
+                args: flat_args,
+            });
+            // grad returns the same shape as the first argument
+            let ret_shape = match &first_arg_val {
+                Some(v) => value_to_slot_shape(v),
+                None => SlotShape::Tensor,
+            };
+            let total = ret_shape.total_slots();
+            let refs: Vec<Ref> = (0..total).map(|i| Ref::output(nid, i)).collect();
+            let mut ref_iter = refs.into_iter();
+            return Ok(Value::from_shape_and_refs(&ret_shape, &mut ref_iter));
         }
+        return Err(fb::Outbox {
+            messages: vec![fb::Message {
+                title: "grad argument must be a function name".into(),
+                span: Some(grad_inner.span.clone()),
+                notes: vec![],
+            }],
+        });
     }
 
     Err(fb::Outbox {
@@ -514,7 +546,19 @@ fn lower_binop<'a>(
     args: &[ast::Expr],
     scope: &Scope<'a, Value>,
 ) -> fb::Result<Value> {
-    assert_eq!(args.len(), 2);
+    if args.len() != 2 {
+        return Err(fb::Outbox {
+            messages: vec![fb::Message {
+                title: format!(
+                    "binary operator {:?} requires exactly 2 arguments, got {}",
+                    op,
+                    args.len()
+                ),
+                span: args.first().map(|a| a.span().clone()),
+                notes: vec![],
+            }],
+        });
+    }
     let lhs = lower_expr(builder, &args[0], scope)?;
     let rhs = lower_expr(builder, &args[1], scope)?;
 
@@ -629,6 +673,29 @@ fn apply_binop_to_values(
     }
 }
 
+/// Lower unary negation, recursing into records.
+fn lower_unary_neg(builder: &mut FuncBuilder, val: Value) -> fb::Result<Value> {
+    match val {
+        Value::Slot(r) => {
+            let nid = builder.emit(Node::Elem {
+                op: ElemOp::Neg,
+                args: vec![r],
+            });
+            Ok(Value::Slot(Ref::simple(nid)))
+        }
+        Value::Record(fields) => {
+            let new_fields: fb::Result<Vec<(Symbol, Value)>> = fields
+                .into_iter()
+                .map(|(name, v)| {
+                    let negated = lower_unary_neg(builder, v)?;
+                    Ok((name, negated))
+                })
+                .collect();
+            Ok(Value::Record(new_fields?))
+        }
+    }
+}
+
 /// Lower a function call.
 fn lower_call<'a>(
     builder: &mut FuncBuilder,
@@ -664,19 +731,11 @@ fn lower_call<'a>(
 fn lower_if<'a>(
     builder: &mut FuncBuilder,
     cond_branches: &[(ast::Expr, ast::Expr)],
-    else_branch: Option<&ast::Expr>,
+    else_branch: &ast::Expr,
     scope: &Scope<'a, Value>,
 ) -> fb::Result<Value> {
     // Start with else branch
-    let mut current_else = if let Some(else_expr) = else_branch {
-        lower_expr(builder, else_expr, scope)?
-    } else {
-        // No else branch — default to Const(0)
-        let nid = builder.emit(Node::Const {
-            val: ConstVal::Int(0),
-        });
-        Value::Slot(Ref::simple(nid))
-    };
+    let mut current_else = lower_expr(builder, else_branch, scope)?;
 
     // Process branches from last to first (inside-out)
     for (cond_expr, then_expr) in cond_branches.iter().rev() {
@@ -755,12 +814,7 @@ fn lower_chain<'a>(
     stmts: &[ast::Stmt],
     scope: &Scope<'a, Value>,
 ) -> fb::Result<Value> {
-    if stmts.is_empty() {
-        let nid = builder.emit(Node::Const {
-            val: ConstVal::Int(0),
-        });
-        return Ok(Value::Slot(Ref::simple(nid)));
-    }
+    debug_assert!(!stmts.is_empty(), "parser should prevent empty chains");
 
     // Process statements one by one, creating child scopes
     lower_chain_inner(builder, stmts, 0, scope)
@@ -773,10 +827,13 @@ fn lower_chain_inner<'a>(
     scope: &Scope<'a, Value>,
 ) -> fb::Result<Value> {
     if idx >= stmts.len() {
-        let nid = builder.emit(Node::Const {
-            val: ConstVal::Int(0),
+        return Err(fb::Outbox {
+            messages: vec![fb::Message {
+                title: "chain must end with a value expression, not a let binding".into(),
+                span: Some(stmts.last().unwrap().span().clone()),
+                notes: vec![],
+            }],
         });
-        return Ok(Value::Slot(Ref::simple(nid)));
     }
 
     let stmt = &stmts[idx];

@@ -104,6 +104,18 @@ fn write_expr(f: &mut String, expr: &ast::Expr) -> fmt::Result {
         ast::Expr::Tuple(inner) => write_expr_tuple(f, inner),
         ast::Expr::Match(inner) => write_expr_match(f, inner),
         ast::Expr::Ctor(inner) => write_expr_ctor(f, inner),
+        ast::Expr::Grad(inner) => {
+            f.write_str("(grad ")?;
+            write_expr(f, &inner.func)?;
+            f.write_char(')')
+        }
+        ast::Expr::As(inner) => {
+            f.write_str("(as ")?;
+            write_expr(f, &inner.expr)?;
+            f.write_char(' ')?;
+            write_expr(f, &inner.target)?;
+            f.write_char(')')
+        }
     }
 }
 
@@ -138,12 +150,9 @@ fn write_expr_if(f: &mut String, inner: &ast::expr::If) -> fmt::Result {
         write_expr(f, body)?;
         f.write_char(')')
     })?;
-    if let Some(else_body) = &inner.else_branch {
-        f.write_str(" (else ")?;
-        write_expr(f, else_body)?;
-        f.write_char(')')?;
-    }
-    f.write_char(')')
+    f.write_str(" (else ")?;
+    write_expr(f, &inner.else_branch)?;
+    f.write_str("))")
 }
 
 fn write_expr_chain(f: &mut String, inner: &ast::expr::Chain) -> fmt::Result {

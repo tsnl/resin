@@ -66,7 +66,7 @@ crate::define_tree! {
     },
     If {
       cond_branch_vec: Vec<(Expr, Expr)>,
-      else_branch: Option<Expr>,
+      else_branch: Expr,
       span: Span,
     },
     Chain {
@@ -84,6 +84,15 @@ crate::define_tree! {
     },
     Ctor {
       ty: Type,
+      span: Span,
+    },
+    Grad {
+      func: Expr,
+      span: Span,
+    },
+    As {
+      expr: Expr,
+      target: Expr,
       span: Span,
     }
   }
@@ -130,6 +139,8 @@ impl Expr {
             Expr::Tuple(inner) => &inner.span,
             Expr::Match(inner) => &inner.span,
             Expr::Ctor(inner) => &inner.span,
+            Expr::Grad(inner) => &inner.span,
+            Expr::As(inner) => &inner.span,
         }
     }
 }

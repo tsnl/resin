@@ -38,9 +38,13 @@ Linear T o i =
 { w: [o][i]T
 , b: [o]T }
 
+# `as` is a view cast: reinterprets a tensor's shape without copying.
+# Holes (_) are inferred by the type checker.
+# Here input is [i]T, and `input as [_][1]_` views it as [i][1]T for matmul.
+# The matmul result [o][1]T is then viewed back as [o]T.
 linear :: Linear T o i -> [i]T -> [o]T
 linear model input =
-  matmul model.w input + model.b
+  (matmul model.w (input as [_][1]_)) as [_]_ + model.b
 
 relu x =
   max 0 x
@@ -62,6 +66,11 @@ mlp_train_loss model input target =
   loss = cross_entropy pred target
   loss
 
+# Arithmetic on records broadcasts automatically:
+# - record op record: field-by-field, recursively to leaf tensors
+# - scalar op record: scalar broadcasts to every leaf field
+# This means `lr * grads` multiplies every weight/bias in the gradient
+# record by the learning rate, and `model - scaled` subtracts field-by-field.
 mlp_train :: Mlp T h i o -> [i]T -> [o]T -> T -> T -> Mlp T h i o
 mlp_train model inputs targets lr epochs =
   if epochs <= 0 then

@@ -42,6 +42,8 @@ impl Lexer {
             (Symbol::from("Fn"), TokenKind::KwFnUid),
             (Symbol::from("true"), TokenKind::KwTrue),
             (Symbol::from("false"), TokenKind::KwFalse),
+            (Symbol::from("grad"), TokenKind::KwGrad),
+            (Symbol::from("as"), TokenKind::KwAs),
         ]);
         Arc::new(Self {
             config,
@@ -118,8 +120,16 @@ impl LexState {
         // Try skipping whitespace and comments:
         self.skip();
 
-        // If at EOF, early out:
+        // If at EOF, emit trailing Dedents and early out:
         if self.input_stream.peek() == 0 {
+            let eof_span = self.span(self.cursor());
+            while self.indent_stack.len() > 1 {
+                self.indent_stack.pop();
+                self.lookahead_buffer.push_back(Token {
+                    kind: TokenKind::Dedent,
+                    span: eof_span.clone(),
+                });
+            }
             return Ok(());
         }
 
@@ -391,6 +401,9 @@ impl LexState {
             if this.input_stream.match_byte(b'^') {
                 return ok_spanned_token!(TokenKind::Caret);
             }
+            if this.input_stream.match_byte(b'~') {
+                return ok_spanned_token!(TokenKind::Tilde);
+            }
             Ok(None)
         })
     }
@@ -403,29 +416,38 @@ impl LexState {
             let mut force_float = false;
             let mut has_digits_before_exponent = false;
 
-            // First character must be a digit or a dot.
-            let b0 = this
-                .input_stream
-                .match_byte_if(|b| b.is_ascii_digit() || b == b'.');
+            // First character must be a digit (or a dot followed by a digit,
+            // for literals like `.5`, though in practice the dot is consumed
+            // as punctuation before we get here).
+            let b0 = this.input_stream.match_byte_if(|b| b.is_ascii_digit());
             if b0 == 0 {
-                return Ok(None);
-            }
-            bs.push(b0);
-            if b0 == b'.' {
-                force_float = true;
+                // Check for leading-dot float (e.g. `.5`)
+                if this.input_stream.peek() == b'.'
+                    && this.input_stream.peek_ahead(1).is_ascii_digit()
+                {
+                    this.input_stream.match_byte(b'.');
+                    bs.push(b'.');
+                    force_float = true;
+                } else {
+                    return Ok(None);
+                }
             } else {
+                bs.push(b0);
                 has_digits_before_exponent = true;
             }
 
-            // Continue scanning digits or dots.
+            // Continue scanning digits. Only consume a '.' if followed by a
+            // digit — otherwise it's a dot-access (e.g. `3.field`).
             loop {
-                let b1 = this
-                    .input_stream
-                    .match_byte_if(|b| b.is_ascii_digit() || b == b'.');
-                if b1 == 0 {
-                    break;
+                let b1 = this.input_stream.match_byte_if(|b| b.is_ascii_digit());
+                if b1 != 0 {
+                    has_digits_before_exponent = true;
+                    bs.push(b1);
+                    continue;
                 }
-                if b1 == b'.' {
+                if this.input_stream.peek() == b'.'
+                    && this.input_stream.peek_ahead(1).is_ascii_digit()
+                {
                     if force_float {
                         return lexer_err(
                             r"Unexpected '.' in number literal.",
@@ -433,10 +455,11 @@ impl LexState {
                         );
                     }
                     force_float = true;
-                } else {
-                    has_digits_before_exponent = true;
+                    this.input_stream.match_byte(b'.');
+                    bs.push(b'.');
+                    continue;
                 }
-                bs.push(b1);
+                break;
             }
 
             // Ensure at least one digit was seen so far.
@@ -690,6 +713,12 @@ impl ByteStream {
     fn peek(&self) -> u8 {
         self.source_bytes().get(self.offset).cloned().unwrap_or(0)
     }
+    fn peek_ahead(&self, n: usize) -> u8 {
+        self.source_bytes()
+            .get(self.offset + n)
+            .cloned()
+            .unwrap_or(0)
+    }
     fn match_byte(&mut self, byte: u8) -> bool {
         self.match_byte_if(|b| b == byte) != 0
     }
@@ -828,6 +857,7 @@ mod lexer_tests {
             ("||", TokenKind::DblPipe),
             ("&&", TokenKind::DblAmpersand),
             ("^", TokenKind::Caret),
+            ("~", TokenKind::Tilde),
         ];
 
         let s: Vec<_> = test_set.iter().map(|(s, _)| *s).collect();
@@ -1052,6 +1082,26 @@ mod lexer_tests {
             TokenKind::Dedent,
             TokenKind::Lid(fixture.intern("level_0")),
             TokenKind::Eol,
+        ];
+
+        assert_kinds(&fixture.lex(), &expected);
+    }
+
+    #[test]
+    fn test_eof_emits_trailing_dedents() {
+        // Source ends mid-indent without trailing newline
+        let fixture = TestFixture::new("test_eof_dedents", "level_0\n  level_1\n    level_2");
+
+        let expected = vec![
+            TokenKind::Lid(fixture.intern("level_0")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("level_1")),
+            TokenKind::Eol,
+            TokenKind::Indent,
+            TokenKind::Lid(fixture.intern("level_2")),
+            TokenKind::Dedent,
+            TokenKind::Dedent,
         ];
 
         assert_kinds(&fixture.lex(), &expected);

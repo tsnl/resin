@@ -360,6 +360,8 @@
 //! For targets without conditional graphs, the compiler falls
 //! back to host-side dispatch.
 
+use hashbrown::HashMap;
+
 use crate::Symbol;
 
 // ---------------------------------------------------------------------------
@@ -451,6 +453,7 @@ pub enum ElemOp {
     Sub,
     Mul,
     Div,
+    IntDiv,
     Rem,
     Pow,
     Max,
@@ -528,6 +531,13 @@ pub enum Node {
         func: FuncId,
         args: Vec<Ref>,
     },
+    /// Differentiate `func` with respect to its arguments, evaluated at `args`.
+    /// Produces M outputs matching the slot shape of the first argument.
+    /// Eliminated by the grad-resolution pass before codegen.
+    Grad {
+        func: FuncId,
+        args: Vec<Ref>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -547,8 +557,14 @@ pub struct Function {
 // Program
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinKind {
+    Matmul,
+    CrossEntropy,
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub functions: Vec<Function>,
-    pub entry: FuncId,
+    pub builtins: HashMap<FuncId, BuiltinKind>,
 }
