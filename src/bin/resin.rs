@@ -30,7 +30,7 @@ fn main() {
     eprintln!("Lexed {} tokens", tokens.len());
 
     let ts = TokenStream::new(tokens);
-    let file = match parse(ts) {
+    match parse(ts) {
         Ok(file) => {
             if config.debug_ast {
                 let sexpr = ast_sexpr::print(&file);
@@ -38,40 +38,10 @@ fn main() {
                 std::fs::create_dir_all(&debug_dir).unwrap();
                 std::fs::write(debug_dir.join("ast.sexp"), &sexpr).unwrap();
             }
-            file
+            eprintln!("Parsed {} top-level statements", file.stmts.len());
         }
         Err(e) => {
             eprintln!("Parse error:\n{e}");
-            return;
         }
     };
-
-    let top = match typer::check(&file) {
-        Ok(top) => {
-            eprintln!("Collected {} top-level bindings", top.bindings.len());
-            top
-        }
-        Err(e) => {
-            eprintln!("Declaration error:\n{e}");
-            return;
-        }
-    };
-
-    let program = match ir_gen::lower(&file, &top) {
-        Ok(program) => {
-            eprintln!("Lowered to {} functions", program.functions.len());
-            program
-        }
-        Err(e) => {
-            eprintln!("IR generation error:\n{e}");
-            return;
-        }
-    };
-
-    if config.debug_ir {
-        let ir_sexp = ir_sexpr::print(&program);
-        let debug_dir = cli.output.join("debug");
-        std::fs::create_dir_all(&debug_dir).unwrap();
-        std::fs::write(debug_dir.join("ir.sexp"), &ir_sexp).unwrap();
-    }
 }
