@@ -725,19 +725,23 @@ fn binop_info(tk: &TokenKind) -> Option<(u8, BinOpKind)> {
         TokenKind::FSlash => (4, BinOpKind::Div),
         TokenKind::DblFSlash => (4, BinOpKind::IntDiv),
         TokenKind::Percent => (4, BinOpKind::Rem),
+        TokenKind::At => (4, BinOpKind::MatMul),
         _ => return None,
     })
 }
 
+fn parse_grad(ts: TokenStream) -> PResult<Expr> {
+    let (start, ts) = tok(TokenKind::KwGrad, "grad")(ts)?;
+    let (func_expr, ts) = parse_atom(ts)?;
+    let (args, ts) = many0(ts, parse_as_expr);
+    let end = args.last().map(|a| a.span()).unwrap_or(func_expr.span());
+    let span = span_from(&start, end);
+    Ok((Expr::new_grad(func_expr, args, span), ts))
+}
+
 fn parse_apply_expr(ts: TokenStream) -> PResult<Expr> {
-    // `grad f arg1 arg2 ...` — a modified call that differentiates f.
-    // Parsed as a single Grad node (not Apply(Grad(f), args)).
-    if let Ok((start, ts2)) = tok(TokenKind::KwGrad, "grad")(ts.clone()) {
-        let (func_expr, ts2) = parse_atom(ts2)?;
-        let (args, ts2) = many0(ts2, parse_as_expr);
-        let end = args.last().map(|a| a.span()).unwrap_or(func_expr.span());
-        let span = span_from(&start, end);
-        return Ok((Expr::new_grad(func_expr, args, span), ts2));
+    if let ok @ Ok(_) = parse_grad(ts.clone()) {
+        return ok;
     }
 
     let (head, ts) = parse_as_expr(ts)?;
