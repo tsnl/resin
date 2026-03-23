@@ -78,6 +78,7 @@ pub enum TokenKind {
     DblAmpersand,
     Caret,
     Tilde,
+    At,
 }
 
 impl TokenKind {
@@ -154,6 +155,7 @@ impl TokenKind {
             Self::DblAmpersand => "`&&`",
             Self::Caret => "`^`",
             Self::Tilde => "`~`",
+            Self::At => "`@`",
         }
     }
     pub fn builtin_name(&self) -> Option<&'static str> {

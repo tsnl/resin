@@ -404,6 +404,9 @@ impl LexState {
             if this.input_stream.match_byte(b'~') {
                 return ok_spanned_token!(TokenKind::Tilde);
             }
+            if this.input_stream.match_byte(b'@') {
+                return ok_spanned_token!(TokenKind::At);
+            }
             Ok(None)
         })
     }
@@ -858,6 +861,7 @@ mod lexer_tests {
             ("&&", TokenKind::DblAmpersand),
             ("^", TokenKind::Caret),
             ("~", TokenKind::Tilde),
+            ("@", TokenKind::At),
         ];
 
         let s: Vec<_> = test_set.iter().map(|(s, _)| *s).collect();

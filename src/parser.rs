@@ -370,16 +370,6 @@ fn parse_type_sig(ts: TokenStream) -> PResult<Stmt> {
     Ok((Stmt::new_type_sig(name, sig, span), ts))
 }
 
-fn parse_lid_def(ts: TokenStream) -> PResult<Stmt> {
-    let start = ts.span();
-    let ((name, _), ts) = expect_lid("def")(ts)?;
-    let (args, ts) = many0(ts, expect_name("param"));
-    let (_, ts) = tok(TokenKind::Eq, "def")(ts)?;
-    let (body, ts) = parse_expr(ts)?;
-    let span = span_from(&start, body.span());
-    Ok((Stmt::new_def(name, args, body, span), ts))
-}
-
 fn parse_uid_def(ts: TokenStream) -> PResult<Stmt> {
     enum Body {
         Enum(Vec<Variant>, Span),
@@ -413,6 +403,16 @@ fn parse_uid_def(ts: TokenStream) -> PResult<Stmt> {
     Ok((Stmt::new_def(name, args, body, span), ts))
 }
 
+fn parse_lid_def(ts: TokenStream) -> PResult<Stmt> {
+    let start = ts.span();
+    let ((name, _), ts) = expect_lid("def")(ts)?;
+    let (args, ts) = many0(ts, expect_name("param"));
+    let (_, ts) = tok(TokenKind::Eq, "def")(ts)?;
+    let (body, ts) = parse_expr(ts)?;
+    let span = span_from(&start, body.span());
+    Ok((Stmt::new_def(name, args, body, span), ts))
+}
+
 fn parse_enum_body(ts: TokenStream) -> PResult<(Vec<Variant>, Span)> {
     let ts = skip_eols(ts);
     let (_, ts) = tok(TokenKind::Pipe, "enum")(ts)?;
@@ -443,9 +443,9 @@ fn parse_variant(ts: TokenStream) -> PResult<(Variant, Span)> {
 fn parse_struct_body(ts: TokenStream) -> PResult<(Expr, Span)> {
     let ts = skip_eols(ts);
     let (start, ts) = tok(TokenKind::LCurly, "struct")(ts)?;
-    let (_, ts) = opt(ts, tok(TokenKind::Comma, ""));
+    let (_, ts) = opt(ts, tok(TokenKind::Comma, "struct"));
     let (fields, ts) = sep_by(ts, parse_field, tok(TokenKind::Comma, "struct"));
-    let (_, ts) = opt(ts, tok(TokenKind::Comma, ""));
+    let (_, ts) = opt(ts, tok(TokenKind::Comma, "struct"));
     let (end, ts) = tok(TokenKind::RCurly, "struct")(ts)?;
     let span = span_from(&start, &end);
     Ok((
@@ -686,6 +686,7 @@ enum BinOpKind {
     Div,
     IntDiv,
     Rem,
+    MatMul,
 }
 
 impl BinOpKind {
@@ -705,6 +706,7 @@ impl BinOpKind {
             Self::Div => "/(_,_)",
             Self::IntDiv => "//(_,_)",
             Self::Rem => "%(_,_)",
+            Self::MatMul => "@(_,_)",
         })
     }
 }

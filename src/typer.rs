@@ -1044,6 +1044,36 @@ fn register_builtins(top: &mut TopLevel) {
         },
     );
 
+    // @(_,_) :: [m][k]T -> [k]T -> [m]T  (matvec, rank-polymorphic matmul operator)
+    let (t, m, k) = (fresh!(), fresh!(), fresh!());
+    let id = top.alloc_func_id();
+    top.bindings.insert(
+        Symbol::from("@(_,_)"),
+        DeclBinding::Builtin {
+            id,
+            builtin: Builtin::Matmul,
+            scheme: Scheme {
+                bound: vec![t, m, k],
+                ty: Ty::Fn {
+                    params: vec![
+                        Ty::Tensor {
+                            elem: Box::new(Ty::Var(t)),
+                            dims: vec![Ty::Var(m), Ty::Var(k)],
+                        },
+                        Ty::Tensor {
+                            elem: Box::new(Ty::Var(t)),
+                            dims: vec![Ty::Var(k)],
+                        },
+                    ],
+                    ret: Box::new(Ty::Tensor {
+                        elem: Box::new(Ty::Var(t)),
+                        dims: vec![Ty::Var(m)],
+                    }),
+                },
+            },
+        },
+    );
+
     // cross_entropy :: [n]T -> [n]T -> T
     let (t, nv) = (fresh!(), fresh!());
     let id = top.alloc_func_id();

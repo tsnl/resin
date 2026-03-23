@@ -38,13 +38,12 @@ Linear T o i =
 { w: [o][i]T
 , b: [o]T }
 
-# `as` is a view cast: reinterprets a tensor's shape without copying.
-# Holes (_) are inferred by the type checker.
-# Here input is [i]T, and `input as [_][1]_` views it as [i][1]T for matmul.
-# The matmul result [o][1]T is then viewed back as [o]T.
+# `@` is a rank-polymorphic matrix multiply operator.
+# [m][k]T @ [k]T -> [m]T  (matrix-vector)
+# [m][k]T @ [k][n]T -> [m][n]T  (matrix-matrix)
 linear :: Linear T o i -> [i]T -> [o]T
 linear model input =
-  (matmul model.w (input as [_][1]_)) as [_]_ + model.b
+  model.w @ input + model.b
 
 relu x =
   max 0 x
