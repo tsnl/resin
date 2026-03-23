@@ -122,6 +122,11 @@ fn write_expr(f: &mut String, expr: &ast::Expr) -> fmt::Result {
             write_expr(f, &inner.target)?;
             f.write_char(')')
         }
+        ast::Expr::ArrayLit(inner) => {
+            f.write_str("(array ")?;
+            write_each(f, &inner.elements, write_expr)?;
+            f.write_char(')')
+        }
     }
 }
 

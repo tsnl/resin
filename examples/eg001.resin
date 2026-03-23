@@ -27,7 +27,7 @@
 # - Cross-platform: emit WebGPU and Vulkan code.
 #
 # Compromises
-# - Ten in, tensor out DSL: not for general-purpose programming, must integrate with Python, Go,
+# - Tensor in, tensor out DSL: not for general-purpose programming, must integrate with Python, Go,
 #   Rust, JS, etc.
 # - High-level:
 #   - Fine-grained scheduling left to the compiler.

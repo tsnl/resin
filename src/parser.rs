@@ -485,7 +485,6 @@ fn parse_type_base(ts: TokenStream) -> PResult<Expr> {
         ts,
         [
             |ts| parse_struct_body(ts).map(|((e, _), ts)| (e, ts)),
-            parse_array_type,
             parse_named_type,
         ]
     )
@@ -506,25 +505,7 @@ fn parse_named_type(ts: TokenStream) -> PResult<Expr> {
 }
 
 fn parse_type_arg(ts: TokenStream) -> PResult<Expr> {
-    alt!(ts, [parse_array_type, parse_atom])
-}
-
-fn parse_array_type(ts: TokenStream) -> PResult<Expr> {
-    let (start, ts) = tok(TokenKind::LSqBrk, "array_type")(ts)?;
-    let (dim, ts) = parse_expr(ts)?;
-    let (_, ts) = tok(TokenKind::RSqBrk, "array_type")(ts)?;
-    let (elem, ts) = parse_type_arg(ts)?;
-    let span = span_from(&start, elem.span());
-    Ok((
-        Expr::new_ctor(
-            Type::Apply {
-                name: Symbol::from("[]"),
-                args: vec![dim, elem],
-            },
-            span,
-        ),
-        ts,
-    ))
+    parse_atom(ts)
 }
 
 fn parse_expr(ts: TokenStream) -> PResult<Expr> {
@@ -805,7 +786,7 @@ fn parse_atom(ts: TokenStream) -> PResult<Expr> {
                 Ok((Expr::new_name(s, sp), ts))
             },
             parse_paren,
-            parse_array_type,
+            parse_array_lit,
         ]
     )
 }
@@ -825,6 +806,14 @@ fn parse_paren(ts: TokenStream) -> PResult<Expr> {
         elements.extend(rest);
         Ok((Expr::new_tuple(elements, span_from(&start, &end)), ts))
     }
+}
+
+fn parse_array_lit(ts: TokenStream) -> PResult<Expr> {
+    let (start, ts) = tok(TokenKind::LSqBrk, "array")(ts)?;
+    let (elements, ts) = sep_by(ts, parse_expr, tok(TokenKind::Comma, "array"));
+    let (_, ts) = opt(ts, tok(TokenKind::Comma, "array"));
+    let (end, ts) = tok(TokenKind::RSqBrk, "array")(ts)?;
+    Ok((Expr::new_array_lit(elements, span_from(&start, &end)), ts))
 }
 
 fn span_from(start: &Span, end: &Span) -> Span {
@@ -932,11 +921,29 @@ mod tests {
         assert_eq!(parse_source("f x =\n  x\n\ng y =\n  y\n").stmts.len(), 2);
     }
     #[test]
-    fn test_array_type() {
-        let f = parse_source("Foo T n =\n{ x: [n]T }\n");
+    fn test_tensor_type() {
+        let f = parse_source("Foo T n =\n{ x: Ten T [n] }\n");
         assert!(
             matches!(&f.stmts[0], Stmt::Def(d) if matches!(&d.body, Expr::Ctor(c) if matches!(&c.ty, Type::Record { .. })))
         );
+    }
+    #[test]
+    fn test_array_lit() {
+        let f = parse_source("f x =\n  [1, 2, 3]\n");
+        match &f.stmts[0] {
+            Stmt::Def(d) => match &d.body {
+                Expr::Chain(c) => match &c.stmt_vec[0] {
+                    Stmt::Discard(d) => assert!(matches!(&d.val, Expr::ArrayLit(a) if a.elements.len() == 3)),
+                    other => panic!("Expected Discard, got {other:?}"),
+                },
+                other => panic!("Expected Chain, got {other:?}"),
+            },
+            other => panic!("Expected Def, got {other:?}"),
+        }
+    }
+    #[test]
+    fn test_empty_array_lit() {
+        parse_source("f x =\n  []\n");
     }
     #[test]
     fn test_builtin_type() {

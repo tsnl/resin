@@ -95,6 +95,10 @@ crate::define_tree! {
       expr: Expr,
       target: Expr,
       span: Span,
+    },
+    ArrayLit {
+      elements: Vec<Expr>,
+      span: Span,
     }
   }
   pub enum Pattern {
@@ -142,6 +146,7 @@ impl Expr {
             Expr::Ctor(inner) => &inner.span,
             Expr::Grad(inner) => &inner.span,
             Expr::As(inner) => &inner.span,
+            Expr::ArrayLit(inner) => &inner.span,
         }
     }
 }
