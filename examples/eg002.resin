@@ -1,0 +1,39 @@
+# Demonstrating shape polymorphism with a user-defined matmul.
+#
+# `matmul_shape` is a comptime function that computes the output shape
+# from two input shapes. It panics on invalid combinations, which the
+# type checker surfaces as a type error.
+#
+# matmul_shape [m, k] [k, n]    => [m, n]      (matmat)
+# matmul_shape [m, k] [k]       => [m]          (matvec)
+# matmul_shape [b, m, k] [k, n] => [b, m, n]   (batch matmat)
+# matmul_shape [b, m, k] [k]    => [b, m]       (batch matvec)
+# matmul_shape [3, 4, 5] [6]    => panic!       (inner dims don't match)
+
+matmul_shape s1 s2 =
+  k1 = last s1
+  k2 = head s2
+  if k1 != k2 then
+    panic "matmul: inner dimensions don't match"
+  else
+    concat (init s1) (tail s2)
+
+# matmul is just a regular function whose return type is computed by
+# matmul_shape. No special builtin needed.
+matmul :: Ten T s1 -> Ten T s2 -> Ten T (matmul_shape s1 s2)
+matmul a b =
+  matmul_builtin a b
+
+# --- Usage examples showing rank polymorphism ---
+
+# Matrix-vector: Ten f32 [4, 3] -> Ten f32 [3] -> Ten f32 [4]
+matvec_example w v =
+  matmul w v
+
+# Matrix-matrix: Ten f32 [4, 3] -> Ten f32 [3, 2] -> Ten f32 [4, 2]
+matmat_example a b =
+  matmul a b
+
+# Batch matrix-vector: Ten f32 [8, 4, 3] -> Ten f32 [3] -> Ten f32 [8, 4]
+batch_matvec_example bw v =
+  matmul bw v

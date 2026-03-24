@@ -235,12 +235,12 @@ fn write_pattern_constructor(f: &mut String, inner: &ast::pattern::Constructor) 
 
 // --- Type ---
 
-fn write_type(f: &mut String, ty: &ast::Type) -> fmt::Result {
+fn write_type(f: &mut String, ty: &ast::TypeSpec) -> fmt::Result {
     match ty {
-        ast::Type::Name { name } => write_type_name(f, name),
-        ast::Type::Apply { name, args } => write_type_apply(f, name, args),
-        ast::Type::Record { fields } => write_type_record(f, fields),
-        ast::Type::Enum { variants } => write_type_enum(f, variants),
+        ast::TypeSpec::Name(n) => write_type_name(f, &n.name),
+        ast::TypeSpec::Apply(a) => write_type_apply(f, &a.name, &a.args),
+        ast::TypeSpec::Record(r) => write_type_record(f, &r.fields),
+        ast::TypeSpec::Enum(e) => write_type_enum(f, &e.variants),
     }
 }
 

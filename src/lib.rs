@@ -9,7 +9,10 @@ mod span;
 mod symbol;
 pub mod token;
 mod tree;
-mod vocab;
+pub mod types;
+pub mod interp;
+pub mod typer;
+pub mod vocab;
 
 pub use config::Config;
 pub use feedback as fb;

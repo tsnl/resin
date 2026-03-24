@@ -12,7 +12,7 @@ macro_rules! define_tree {
 	) => {
 		$(
 			::paste::paste! {
-				#[derive(Debug)]
+				#[derive(Debug, Clone)]
 				$visibility enum $name {
 					$(
 						$variant ( Box< [< $name:snake:lower >]::$variant > )
@@ -21,7 +21,7 @@ macro_rules! define_tree {
 				pub mod [< $name:snake:lower >] {
 					use super::*;
 					$(
-						#[derive(Debug)]
+						#[derive(Debug, Clone)]
 						$visibility struct $variant {
 							$( pub $fname: $ftype ),*
 						}

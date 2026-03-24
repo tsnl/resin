@@ -9,6 +9,15 @@ pub struct Span {
     pub end_offset: u32,
 }
 impl Span {
+    pub fn dummy() -> Self {
+        let source = Source::new("dummy", "", &crate::Config::default());
+        Self {
+            source,
+            beg_offset: 0,
+            end_offset: 0,
+        }
+    }
+
     pub fn new(source: &Source, beg_offset: usize, end_offset: usize) -> Self {
         let source = source.clone();
         let beg_offset = beg_offset.try_into().unwrap();

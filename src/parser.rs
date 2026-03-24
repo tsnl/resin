@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use hashbrown::HashMap;
 
-use crate::ast::{self, Expr, Pattern, Stmt, Type};
+use crate::ast::{self, Expr, Pattern, Stmt, TypeSpec};
 use crate::token::{Token, TokenKind};
 use crate::vocab::{self, LiteralBool};
 use crate::{Span, Symbol, fb};
@@ -391,7 +391,7 @@ fn parse_uid_def(ts: TokenStream) -> PResult<Stmt> {
     let (body, end_span) = match body {
         Body::Enum(variants, end) => {
             let span = span_from(&start, &end);
-            (Expr::new_ctor(Type::Enum { variants }, span.clone()), end)
+            (Expr::new_ctor(TypeSpec::new_enum(variants), span.clone()), end)
         }
         Body::Struct(expr, end) => (expr, end),
         Body::Expr(expr) => {
@@ -449,7 +449,7 @@ fn parse_struct_body(ts: TokenStream) -> PResult<(Expr, Span)> {
     let (end, ts) = tok(TokenKind::RCurly, "struct")(ts)?;
     let span = span_from(&start, &end);
     Ok((
-        (Expr::new_ctor(Type::Record { fields }, span.clone()), span),
+        (Expr::new_ctor(TypeSpec::new_record(fields), span.clone()), span),
         ts,
     ))
 }
@@ -468,10 +468,7 @@ fn parse_type(ts: TokenStream) -> PResult<Expr> {
         let span = span_from(base.span(), ret.span());
         return Ok((
             Expr::new_ctor(
-                Type::Apply {
-                    name: Symbol::from("->"),
-                    args: vec![base, ret],
-                },
+                TypeSpec::new_apply(Symbol::from("->"), vec![base, ret]),
                 span,
             ),
             ts,
@@ -497,9 +494,9 @@ fn parse_named_type(ts: TokenStream) -> PResult<Expr> {
     let end = args.last().map(|a| a.span()).unwrap_or(&start);
     let span = span_from(&start, end);
     let ty = if args.is_empty() {
-        Type::Name { name }
+        TypeSpec::new_name(name)
     } else {
-        Type::Apply { name, args }
+        TypeSpec::new_apply(name, args)
     };
     Ok((Expr::new_ctor(ty, span), ts))
 }
@@ -862,7 +859,7 @@ mod tests {
                 assert_eq!(d.name.text(), "Linear");
                 assert_eq!(d.args.len(), 3);
                 assert!(
-                    matches!(&d.body, Expr::Ctor(c) if matches!(&c.ty, Type::Record { fields } if fields.len() == 2))
+                    matches!(&d.body, Expr::Ctor(c) if matches!(&c.ty, TypeSpec::Record(r) if r.fields.len() == 2))
                 );
             }
             other => panic!("Expected Def, got {other:?}"),
@@ -882,10 +879,10 @@ mod tests {
                 assert_eq!(d.args.len(), 1);
                 match &d.body {
                     Expr::Ctor(c) => match &c.ty {
-                        Type::Enum { variants } => {
-                            assert_eq!(variants.len(), 2);
-                            assert_eq!(variants[0].0.text(), "Some");
-                            assert_eq!(variants[1].0.text(), "None");
+                        TypeSpec::Enum(e) => {
+                            assert_eq!(e.variants.len(), 2);
+                            assert_eq!(e.variants[0].0.text(), "Some");
+                            assert_eq!(e.variants[1].0.text(), "None");
                         }
                         other => panic!("Expected Enum type, got {other:?}"),
                     },
@@ -924,7 +921,7 @@ mod tests {
     fn test_tensor_type() {
         let f = parse_source("Foo T n =\n{ x: Ten T [n] }\n");
         assert!(
-            matches!(&f.stmts[0], Stmt::Def(d) if matches!(&d.body, Expr::Ctor(c) if matches!(&c.ty, Type::Record { .. })))
+            matches!(&f.stmts[0], Stmt::Def(d) if matches!(&d.body, Expr::Ctor(c) if matches!(&c.ty, TypeSpec::Record(_))))
         );
     }
     #[test]
@@ -951,9 +948,9 @@ mod tests {
         match &f.stmts[0] {
             Stmt::Def(d) => match &d.body {
                 Expr::Ctor(c) => match &c.ty {
-                    Type::Record { fields } => match &fields[0].1 {
+                    TypeSpec::Record(r) => match &r.fields[0].1 {
                         Expr::Ctor(ft) => {
-                            assert!(matches!(&ft.ty, Type::Name { name } if name.text() == "u32"))
+                            assert!(matches!(&ft.ty, TypeSpec::Name(n) if n.name.text() == "u32"))
                         }
                         other => panic!("Expected Ctor, got {other:?}"),
                     },

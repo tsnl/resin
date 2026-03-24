@@ -5,24 +5,22 @@ pub struct File {
     pub stmts: Vec<Stmt>,
 }
 
-#[derive(Debug)]
-pub enum Type {
+crate::define_tree! {
+  pub enum TypeSpec {
     Name {
-        name: Symbol,
+      name: Symbol,
     },
     Apply {
-        name: Symbol,
-        args: Vec<Expr>,
+      name: Symbol,
+      args: Vec<Expr>,
     },
     Record {
-        fields: Vec<(Symbol, Expr)>,
+      fields: Vec<(Symbol, Expr)>,
     },
     Enum {
-        variants: Vec<(Symbol, Option<Expr>)>,
+      variants: Vec<(Symbol, Option<Expr>)>,
     },
-}
-
-crate::define_tree! {
+  }
   pub enum Stmt {
     Def {
       name: Symbol,
@@ -83,7 +81,7 @@ crate::define_tree! {
       span: Span,
     },
     Ctor {
-      ty: Type,
+      ty: TypeSpec,
       span: Span,
     },
     Grad {
