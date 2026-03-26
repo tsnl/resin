@@ -10,6 +10,8 @@ use crate::vocab::ScalarType;
 // Type variables
 // ---------------------------------------------------------------------------
 
+/// A unification metavariable, identified by a unique integer.
+/// Fresh TyVars are allocated by `TyCtx::fresh_var`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TyVar(pub u32);
 
@@ -17,14 +19,26 @@ pub struct TyVar(pub u32);
 // Types (normal forms only — no unevaluated terms)
 // ---------------------------------------------------------------------------
 
+/// The core type representation. Only contains normal forms — no unevaluated
+/// function calls or pending computations. To construct a `Type`, any comptime
+/// calls must be evaluated first (see `elaborate_type` in typer.rs).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+    /// Unification metavariable, resolved by `TyCtx::resolve`.
     Var(TyVar),
+    /// A concrete comptime value embedded in a type (e.g., a shape like `[10, 5]`).
     Val(Value),
+    /// Scalar element type tag: `f32`, `i64`, `bool`, etc.
     Scalar(ScalarType),
+    /// Tensor type: `Ten f32 [10, 5]` → `Tensor { elem: Scalar(F32), shape: Val([10,5]) }`.
     Tensor { elem: Box<Type>, shape: Box<Type> },
+    /// Record type: `{ w: Ten f32 [10], b: Ten f32 [5] }`.
     Record { fields: Vec<(Symbol, Type)> },
+    /// Function type: `(params) -> ret`.
     Fn { params: Vec<Type>, ret: Box<Type> },
+    /// Opaque type constructor application: `Linear f32 10 5`.
+    /// Unified structurally (same name + pairwise args). Expanded via
+    /// `Scope::lookup_tycon` during dot access.
     TyCon { name: Symbol, args: Vec<Type> },
 }
 
@@ -76,18 +90,25 @@ impl Type {
 // Values (comptime tensor/record data)
 // ---------------------------------------------------------------------------
 
+/// A compile-time value. All comptime data is either a tensor, a record of
+/// values, or a string (for panic messages). Tensor values follow NumPy
+/// conventions: scalars are 0-dim (`shape: []`), shapes are 1-dim int tensors.
 #[derive(Debug, Clone)]
 pub enum Value {
     Tensor(TensorVal),
     Record(Vec<(Symbol, Value)>),
+    String(String),
 }
 
+/// A dense tensor value with typed element data and a shape.
 #[derive(Debug, Clone)]
 pub struct TensorVal {
     pub data: TensorData,
+    /// Tensor dimensions. `[]` = scalar, `[n]` = vector, `[m,n]` = matrix.
     pub shape: Vec<usize>,
 }
 
+/// Element storage for a tensor value.
 #[derive(Debug, Clone)]
 pub enum TensorData {
     Int(Vec<i64>),
@@ -173,6 +194,7 @@ impl PartialEq for Value {
                         .zip(b.iter())
                         .all(|((na, va), (nb, vb))| na == nb && va == vb)
             }
+            (Value::String(a), Value::String(b)) => a == b,
             _ => false,
         }
     }
@@ -204,15 +226,26 @@ impl PartialEq for TensorData {
 // Type schemes
 // ---------------------------------------------------------------------------
 
-/// What the return type of a function looks like.
-/// For simple cases (no comptime calls), it's a concrete Type.
-/// For complex cases (comptime calls in the return type), it's a deferred AST expression.
+/// How a function's return type is represented in its scheme.
+///
+/// `Concrete`: the return type is fully elaborated (no comptime calls).
+/// Most signatures use this — e.g., `relu :: Ten T s -> Ten T s`.
+///
+/// `Deferred`: the return type contains comptime function calls with
+/// unresolved arguments, stored as an unevaluated AST expression.
+/// Evaluated at each call site after unification resolves the variables.
+/// E.g., `matmul :: ... -> Ten T (matmul_shape s1 s2)`.
 #[derive(Debug, Clone)]
 pub enum ReturnType {
     Concrete(Type),
     Deferred(Arc<crate::ast::Expr>),
 }
 
+/// A polymorphic type scheme: `forall bound. params -> ret`.
+///
+/// `bound` lists the quantified type variable names and their TyVars.
+/// At each use site, `TyCtx::instantiate` replaces bound vars with fresh ones.
+/// Monomorphic bindings (local variables) have `bound: [], params: []`.
 #[derive(Debug, Clone)]
 pub struct Scheme {
     pub bound: Vec<(Symbol, TyVar)>,
@@ -234,6 +267,11 @@ impl Scheme {
 // Substitution (immutable cons list)
 // ---------------------------------------------------------------------------
 
+/// Immutable substitution mapping TyVars to Types, implemented as a cons list.
+///
+/// `bind` prepends a new binding (O(1)), `lookup` walks the chain (O(n)).
+/// Newer bindings shadow older ones — no `compose` needed. The chain IS
+/// the composition.
 #[derive(Clone)]
 pub enum Substitution {
     Empty,
@@ -356,6 +394,12 @@ impl fmt::Display for TypeError {
     }
 }
 
+/// Type-checking context, threaded immutably through inference.
+///
+/// Contains a fresh variable counter and the current substitution.
+/// Every inference function takes `TyCtx` by value and returns a new one —
+/// no mutation. `fresh_var` allocates a new TyVar, `unify` extends the
+/// substitution, `resolve` applies the substitution to chase variable bindings.
 #[derive(Clone)]
 pub struct TyCtx {
     pub next_var: u32,
@@ -395,7 +439,7 @@ impl TyCtx {
         })
     }
 
-    pub fn instantiate(&mut self, scheme: &Scheme) -> (Vec<Type>, Vec<(Symbol, TyVar)>) {
+    pub fn instantiate(&mut self, scheme: &Scheme) -> (Vec<Type>, Option<Type>, Vec<(Symbol, TyVar)>) {
         let mut fresh_map = Vec::new();
         let mut subst_pairs = Vec::new();
         for (name, old_var) in &scheme.bound {
@@ -408,7 +452,11 @@ impl TyCtx {
             .iter()
             .fold(Substitution::empty(), |s, (v, t)| s.bind(*v, t.clone()));
         let params = scheme.params.iter().map(|p| rename.apply(p)).collect();
-        (params, subst_pairs)
+        let ret = match &scheme.ret {
+            ReturnType::Concrete(ty) => Some(rename.apply(ty)),
+            ReturnType::Deferred(_) => None,
+        };
+        (params, ret, subst_pairs)
     }
 }
 
@@ -535,16 +583,48 @@ fn unify_inner(a: &Type, b: &Type, subst: &Substitution) -> Result<Substitution,
 }
 
 // ---------------------------------------------------------------------------
-// Scope (type checker: Symbol → Scheme)
+// Scope (type checker: Symbol → Binding)
 // ---------------------------------------------------------------------------
 
+/// What a name is bound to in the type-checker scope.
+///
+/// `Value(Scheme)`: a function or variable with a type scheme.
+/// `TyCon(TyConDef, Scheme)`: a type constructor definition (e.g., `Linear`)
+/// paired with its type scheme. The TyConDef is used for dot-access expansion;
+/// the Scheme is used for value-level type inference.
+#[derive(Debug, Clone)]
+pub enum Binding {
+    Value(Scheme),
+    TyCon(TyConDef, Scheme),
+}
+
+/// A type constructor definition: named parameters + body AST.
+/// E.g., `Linear T o i = { w: Ten T [o, i], b: Ten T [o] }` produces
+/// `TyConDef { params: [T, o, i], body: <the record Ctor AST> }`.
+/// Used during dot access to expand `model.w` when `model` has type
+/// `TyCon("Linear", [f32, 10, 5])`.
+#[derive(Debug, Clone)]
+pub struct TyConDef {
+    pub params: Vec<Symbol>,
+    pub body: crate::ast::Expr,
+}
+
+/// Persistent lexical scope mapping names to `Binding`s (type schemes or TyCon defs).
+///
+/// Implemented as a parent-chain: each node holds a small set of bindings plus
+/// an `Arc` to its parent. `extend` creates a new child scope (O(1)), `lookup`
+/// walks the chain (O(depth)).
+///
+/// Use `lookup_value` to get a name's type scheme (works for both `Value` and
+/// `TyCon` bindings). Use `lookup_tycon` to get the TyCon definition for dot
+/// access expansion.
 pub struct Scope {
-    bindings: HashMap<Symbol, Scheme>,
+    bindings: HashMap<Symbol, Binding>,
     parent: Option<Arc<Scope>>,
 }
 
 impl Scope {
-    pub fn root(bindings: HashMap<Symbol, Scheme>) -> Arc<Self> {
+    pub fn root(bindings: HashMap<Symbol, Binding>) -> Arc<Self> {
         Arc::new(Scope {
             bindings,
             parent: None,
@@ -555,59 +635,39 @@ impl Scope {
         Self::root(HashMap::new())
     }
 
-    pub fn extend(parent: &Arc<Self>, name: Symbol, val: Scheme) -> Arc<Self> {
+    pub fn extend(parent: &Arc<Self>, name: Symbol, val: Binding) -> Arc<Self> {
         Arc::new(Scope {
             bindings: HashMap::from_iter([(name, val)]),
             parent: Some(Arc::clone(parent)),
         })
     }
 
-    pub fn extend_many(parent: &Arc<Self>, bindings: HashMap<Symbol, Scheme>) -> Arc<Self> {
+    pub fn extend_many(parent: &Arc<Self>, bindings: HashMap<Symbol, Binding>) -> Arc<Self> {
         Arc::new(Scope {
             bindings,
             parent: Some(Arc::clone(parent)),
         })
     }
 
-    pub fn lookup(&self, name: &Symbol) -> Option<&Scheme> {
+    pub fn lookup(&self, name: &Symbol) -> Option<&Binding> {
         self.bindings
             .get(name)
             .or_else(|| self.parent.as_ref().and_then(|p| p.lookup(name)))
     }
-}
 
-// ---------------------------------------------------------------------------
-// Env (interpreter: Symbol → Value)
-// ---------------------------------------------------------------------------
-
-pub struct Env {
-    bindings: HashMap<Symbol, Value>,
-    parent: Option<Arc<Env>>,
-}
-
-impl Env {
-    pub fn root(bindings: HashMap<Symbol, Value>) -> Arc<Self> {
-        Arc::new(Env {
-            bindings,
-            parent: None,
-        })
+    pub fn lookup_value(&self, name: &Symbol) -> Option<&Scheme> {
+        match self.lookup(name) {
+            Some(Binding::Value(s)) => Some(s),
+            Some(Binding::TyCon(_, s)) => Some(s),
+            None => None,
+        }
     }
 
-    pub fn empty() -> Arc<Self> {
-        Self::root(HashMap::new())
-    }
-
-    pub fn extend(parent: &Arc<Self>, name: Symbol, val: Value) -> Arc<Self> {
-        Arc::new(Env {
-            bindings: HashMap::from_iter([(name, val)]),
-            parent: Some(Arc::clone(parent)),
-        })
-    }
-
-    pub fn lookup(&self, name: &Symbol) -> Option<&Value> {
-        self.bindings
-            .get(name)
-            .or_else(|| self.parent.as_ref().and_then(|p| p.lookup(name)))
+    pub fn lookup_tycon(&self, name: &Symbol) -> Option<&TyConDef> {
+        match self.lookup(name) {
+            Some(Binding::TyCon(d, _)) => Some(d),
+            _ => None,
+        }
     }
 }
 
@@ -690,29 +750,16 @@ mod tests {
 
     #[test]
     fn test_scope_lookup() {
-        let dummy_scheme = || Scheme::mono_fn(vec![], Type::Scalar(ScalarType::Bool));
+        let dummy_binding =
+            || Binding::Value(Scheme::mono_fn(vec![], Type::Scalar(ScalarType::Bool)));
 
-        let root = Scope::root(HashMap::from_iter([(Symbol::from("x"), dummy_scheme())]));
+        let root = Scope::root(HashMap::from_iter([(Symbol::from("x"), dummy_binding())]));
         assert!(root.lookup(&Symbol::from("x")).is_some());
         assert!(root.lookup(&Symbol::from("y")).is_none());
 
-        let child = Scope::extend(&root, Symbol::from("y"), dummy_scheme());
+        let child = Scope::extend(&root, Symbol::from("y"), dummy_binding());
         assert!(child.lookup(&Symbol::from("x")).is_some());
         assert!(child.lookup(&Symbol::from("y")).is_some());
-    }
-
-    #[test]
-    fn test_env_lookup() {
-        let root = Env::root(HashMap::from_iter([(
-            Symbol::from("x"),
-            Value::scalar_int(42),
-        )]));
-        assert_eq!(root.lookup(&Symbol::from("x")).unwrap().as_int(), Some(42));
-        assert!(root.lookup(&Symbol::from("y")).is_none());
-
-        let child = Env::extend(&root, Symbol::from("y"), Value::scalar_int(7));
-        assert_eq!(child.lookup(&Symbol::from("x")).unwrap().as_int(), Some(42));
-        assert_eq!(child.lookup(&Symbol::from("y")).unwrap().as_int(), Some(7));
     }
 
     #[test]

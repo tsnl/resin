@@ -30,7 +30,7 @@ fn main() {
     eprintln!("Lexed {} tokens", tokens.len());
 
     let ts = TokenStream::new(tokens);
-    match parse(ts) {
+    let file = match parse(ts) {
         Ok(file) => {
             if config.debug_ast {
                 let sexpr = ast_sexpr::print(&file);
@@ -39,9 +39,23 @@ fn main() {
                 std::fs::write(debug_dir.join("ast.sexp"), &sexpr).unwrap();
             }
             eprintln!("Parsed {} top-level statements", file.stmts.len());
+            file
         }
         Err(e) => {
             eprintln!("Parse error:\n{e}");
+            std::process::exit(1);
         }
     };
+
+    let scope = typer::builtin_scope();
+    let fn_env = interp::builtin_fn_registry();
+    match typer::typecheck_file(&file, &scope, &fn_env) {
+        Ok((_scope, _fn_env)) => {
+            eprintln!("Type-checked successfully");
+        }
+        Err(e) => {
+            eprintln!("Type error: {}", e.message);
+            std::process::exit(1);
+        }
+    }
 }
