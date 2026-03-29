@@ -19,9 +19,11 @@
 # - Simplified syntax, no whitespace sensitivity, more ML style.
 
 def factorial(n: int): int =
-  if (n < 0) then (panic("bad input"))
-  elif (n <= 1) then 1
-  else (n * factorial(n - 1))
+  factorial_inner(n, 1)
+def factorial_inner(n: int, a: int): int =
+  if n < 0 then panic("bad input")
+  elif n <= 1 then a
+  else factorial_inner(n - 1, a * n)
 
 def Linear(T: type, i: usize, o: usize): type = struct
 { w: Ten(T, [o, i])
