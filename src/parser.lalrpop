@@ -1,0 +1,226 @@
+use crate::{Source, Symbol, Span, Literal, Operator};
+use crate::ast;
+use crate::literal::*;
+
+grammar(source: &Source);
+
+pub File: Vec<ast::Def> = {
+  <(<Def> ";")+>,
+}
+
+pub Def: ast::Def = {
+  <ll:@L>
+    <template_args:("for" <Comma1<Val>>)?>
+    "def" <name:Name> "(" <args:Comma0<Val>> ")" <ret_ty:(":" <Expr>)?> "="
+    <body:Expr>
+  <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    let template_args = template_args.unwrap_or_default();
+    ast::Def::new(name, template_args, args, ret_ty, body, span)
+  },
+}
+pub Let: ast::Bind = {
+  <ll:@L> "let" <name:Name> "=" <expr:Expr> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Bind::new(name, expr, span)
+  },
+}
+pub Val: ast::Bind = {
+  <ll:@L> <name:Name> ":" <expr:Expr> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Bind::new(name, expr, span)
+  },
+};
+
+//
+// Expr:
+//
+
+pub Expr: ast::Expr = CompareExpr;
+
+PrimaryExpr: ast::Expr = {
+  LiteralExpr,
+  ParenExpr,
+  NameExpr,
+  ChainExpr,
+  RecordExpr,
+  ArrayExpr,
+  IfExpr,
+};
+LiteralExpr: ast::Expr = {
+  <ll:@L> "(" ")" <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_literal(Literal::Unit, span)
+  },
+  <ll:@L> <v:Bool> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_literal(Literal::Bool(v), span)
+  },
+  <ll:@L> <v:Number> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_literal(Literal::Number(v), span)
+  },
+  <ll:@L> <v:String> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_literal(Literal::String(v), span)
+  },
+};
+ParenExpr: ast::Expr = {
+  "(" <Expr> ")"
+};
+NameExpr: ast::Expr = {
+  <ll:@L> <name:Name> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_name(name, span)
+  },
+};
+ChainExpr: ast::Expr = {
+  <ll:@L> "{" <prefix:(<Let> ";")*> <tail:Expr?> "}" <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_chain(prefix, tail, span)
+  },
+};
+RecordExpr: ast::Expr = {
+  <ll:@L> "." "{" <fields: Comma0<Val>> "}" <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_record(fields, span)
+  },
+};
+ArrayExpr: ast::Expr = {
+  <ll:@L> "[" <elements:Comma0<Expr>> "]" <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_array(elements, span)
+  },
+};
+IfExpr: ast::Expr = {
+  <ll:@L> "if" <cond:Expr> <then_branch:ChainExpr> "else" <else_branch:ElseBranch> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_if(cond, then_branch, else_branch, span)
+  },
+};
+ElseBranch: ast::Expr = {
+  ChainExpr,
+  IfExpr,
+};
+
+PostfixExpr: ast::Expr = {
+  PrimaryExpr,
+  <ll:@L> <prefix:PostfixExpr> "." <field:Name> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_dot(prefix, field, span)
+  },
+  <ll:@L> <prefix:PostfixExpr> "(" <args:Comma0<Expr>> ")" <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_call(prefix, args, span)
+  },
+  <ll:@L> <prefix:PostfixExpr> <arg0:RecordExpr> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_call(prefix, vec![arg0], span)
+  },
+};
+
+UnaryExpr: ast::Expr = {
+  PostfixExpr,
+  <ll:@L> <op:UnaryOperator> <arg:UnaryExpr> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_op(op, vec![arg], span)
+  },
+};
+UnaryOperator: Operator = {
+  "+" => Operator::Pos,
+  "-" => Operator::Neg,
+  "!" => Operator::Not,
+}
+
+GenBinaryExpr<L, O>: ast::Expr = {
+  L,
+  <ll:@L> <left:GenBinaryExpr<L, O>> <op:O> <right:L> <rl:@R> => {
+    let span = Span::new(source, ll, rl);
+    ast::Expr::new_op(op, vec![left, right], span)
+  },
+};
+MulOperator: Operator = {
+  "@" => Operator::Matmul,
+  "*" => Operator::Mul,
+  "/" => Operator::Div,
+  "%" => Operator::Mod,
+}
+AddOperator: Operator = {
+  "+" => Operator::Add,
+  "-" => Operator::Sub,
+}
+ShiftOperator: Operator = {
+  "<<" => Operator::Shl,
+  ">>" => Operator::Shr,
+}
+CompareOperator: Operator = {
+  "<"  => Operator::Lt,
+  "<=" => Operator::Le,
+  ">"  => Operator::Gt,
+  ">=" => Operator::Ge,
+  "==" => Operator::Eq,
+  "!=" => Operator::Ne,
+  "<>" => Operator::Ne,
+}
+MulExpr: ast::Expr = GenBinaryExpr<UnaryExpr, MulOperator>;
+AddExpr: ast::Expr = GenBinaryExpr<MulExpr, AddOperator>;
+ShiftExpr: ast::Expr = GenBinaryExpr<AddExpr, ShiftOperator>;
+CompareExpr: ast::Expr = GenBinaryExpr<ShiftExpr, CompareOperator>;
+
+//
+// Macros:
+//
+
+Comma1<T>: Vec<T> = {
+  <mut v:(<T> ",")+> <s:T?> => {
+    if let Some(s) = s {
+      v.push(s);
+    };
+    v
+  },
+};
+Comma0<T>: Vec<T> = {
+  <mut v:(<T> ",")*> <s:T?> => {
+    if let Some(s) = s {
+      v.push(s);
+    };
+    v
+  },
+};
+
+//
+// Terminals:
+//
+
+Name: Symbol = {
+  r"[a-zA-Z_][a-zA-Z0-9_]*" => Symbol::from(<>),
+};
+Bool: Box<LiteralBool> = {
+  "true" => Box::new(LiteralBool { value: true }),
+  "false" => Box::new(LiteralBool { value: false }),
+};
+Number: Box<LiteralNumber> = {
+  r"[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?" => {
+    let s = String::from(<>).to_lowercase();
+    let (value, force_float) = super::parse_number_literal(&s, 10);
+    Box::new(LiteralNumber { value, force_float })
+  },
+};
+String: Box<LiteralString> = {
+  r#""([^"\\]|\\.)*""# => {
+    let s = String::from(<>);
+    let unescaped = unescape::unescape(&s[1..s.len()-1]).unwrap();
+    Box::new(LiteralString { value: unescaped })
+  },
+};
+
+//
+// Comments
+//
+
+match {
+  r"\s*" => {}, // The default whitespace skipping is disabled if an `ignore pattern` is specified
+  r"#[^\n\r]*[\n\r]*" => {}, // Skip `# comments`
+} else {
+  _
+}

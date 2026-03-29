@@ -1,8 +1,9 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal {
-    Number(LiteralNumber),
-    String(LiteralString),
-    Bool(LiteralBool),
+    Unit,
+    Number(Box<LiteralNumber>),
+    String(Box<LiteralString>),
+    Bool(Box<LiteralBool>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiteralNumber {
@@ -16,7 +17,7 @@ impl LiteralNumber {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiteralString {
-    pub content: String,
+    pub value: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiteralBool {

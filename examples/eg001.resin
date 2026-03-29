@@ -18,19 +18,23 @@
 # - Simplified type checking, type inference.
 # - Simplified syntax, no whitespace sensitivity, more ML style.
 
-def factorial(n: int): int =
+def factorial(n: int): int = {
   factorial_inner(n, 1)
-def factorial_inner(n: int, a: int): int =
-  if n < 0 then panic("bad input")
-  elif n <= 1 then a
-  else factorial_inner(n - 1, a * n)
+};
+def factorial_inner(n: int, a: int): int = {
+  if n < 0 { panic("bad input") }
+  else if n <= 1 { a }
+  else { factorial_inner(n - 1, a * n) }
+};
 
-def Linear(T: type, i: usize, o: usize): type = struct
-{ w: Ten(T, [o, i])
-, b: Ten(T, [o]) }
+def Linear(T: type, i: usize, o: usize) = struct .{
+  w: Ten(T, [o, i]),
+  b: Ten(T, [o])
+};
 
 for T: type, i: usize, o: usize
-def linear(model: Linear(T, i, o), input: Ten(T, [i])): Ten(T, [o]) =
+def linear(model: Linear(T, i, o), input: Ten(T, [i])): Ten(T, [o]) = {
   let output = model.w @ input;
   let output = model.b + output;
   output
+};

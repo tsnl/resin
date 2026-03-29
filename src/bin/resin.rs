@@ -28,5 +28,7 @@ impl CliConfig {
 
 fn main() {
     let config = CliConfig::parse().into_config();
-    eprintln!("resin\n{config:#?}");
+    let source = Source::new_file(&config.entry_point, &config);
+    let ast = parser::parse_file(&source).unwrap();
+    eprintln!("{ast:#?}");
 }

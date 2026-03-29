@@ -1,4 +1,6 @@
 use std::fmt::Debug;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::Config;
@@ -30,6 +32,12 @@ impl Source {
             offset_to_line_col_map,
         };
         Self(Arc::new(inner))
+    }
+    pub fn new_file<P: AsRef<Path>>(path: P, config: &Config) -> Self {
+        let path: &Path = path.as_ref();
+        let name: String = path.as_os_str().to_string_lossy().into();
+        let text = fs::read_to_string(path).unwrap();
+        Self::new(name, text, config)
     }
     pub fn name(&self) -> &str {
         &self.0.name
