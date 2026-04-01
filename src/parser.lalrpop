@@ -4,6 +4,10 @@ use crate::literal::*;
 
 grammar(source: &Source);
 
+extern {
+  type Error = crate::feedback::Error;
+}
+
 pub File: Vec<ast::Def> = {
   <(<Def> ";")+>,
 }
@@ -207,10 +211,10 @@ Number: Box<LiteralNumber> = {
   },
 };
 String: Box<LiteralString> = {
-  r#""([^"\\]|\\.)*""# => {
-    let s = String::from(<>);
-    let unescaped = unescape::unescape(&s[1..s.len()-1]).unwrap();
-    Box::new(LiteralString { value: unescaped })
+  <ll:@L> <s:r#""([^"\\]|\\.)*""#> <rl:@R> =>? {
+    let value = super::parse_string_literal(source, s, ll, rl)
+      .map_err(|error| lalrpop_util::ParseError::User { error })?;
+    Ok(Box::new(LiteralString { value }))
   },
 };
 

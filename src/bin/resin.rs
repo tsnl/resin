@@ -29,6 +29,11 @@ impl CliConfig {
 fn main() {
     let config = CliConfig::parse().into_config();
     let source = Source::new_file(&config.entry_point, &config);
-    let ast = parser::parse_file(&source).unwrap();
-    eprintln!("{ast:#?}");
+    match parser::parse_file(&source) {
+        Ok(ast) => eprintln!("{ast:#?}"),
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
 }
