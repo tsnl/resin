@@ -26,11 +26,17 @@ impl CliConfig {
     }
 }
 
-fn main() {
+fn main_inner() -> Result<(), fb::Error> {
     let config = CliConfig::parse().into_config();
-    let source = Source::new_file(&config.entry_point, &config);
-    match parser::parse_file(&source) {
-        Ok(ast) => eprintln!("{ast:#?}"),
+    let source = Source::new_file(&config.entry_point, &config)?;
+    let ast = parser::parse_file(&source)?;
+    eprintln!("{ast:#?}");
+    Ok(())
+}
+
+fn main() {
+    match main_inner() {
+        Ok(()) => {}
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(1);

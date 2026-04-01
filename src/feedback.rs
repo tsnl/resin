@@ -98,11 +98,15 @@ impl std::error::Error for Error {}
 mod tests {
     use super::*;
     use crate::{Config, Source};
+    use indoc::indoc;
 
     #[test]
     fn test_display_without_span() {
         let error = Error::new(ErrorKind::Syntax, "something went wrong");
-        assert_eq!(error.to_string(), "syntax error: something went wrong");
+        assert_eq!(
+            error.to_string(),
+            indoc! {"syntax error: something went wrong"}
+        );
     }
 
     #[test]
@@ -116,7 +120,9 @@ mod tests {
         .with_note("symbol was introduced here", Span::new(&source, 1, 1));
         assert_eq!(
             error.to_string(),
-            "scope error: symbol is undefined at test:1:1\n  note: symbol was introduced here at test:1:2"
+            indoc! {"
+                scope error: symbol is undefined at test:1:1
+                  note: symbol was introduced here at test:1:2"}
         );
     }
 }

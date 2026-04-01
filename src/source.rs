@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::Config;
+use crate::{Config, fb};
 
 #[derive(Clone)]
 pub struct Source(Arc<SourceInner>);
@@ -33,11 +33,16 @@ impl Source {
         };
         Self(Arc::new(inner))
     }
-    pub fn new_file<P: AsRef<Path>>(path: P, config: &Config) -> Self {
+    pub fn new_file<P: AsRef<Path>>(path: P, config: &Config) -> fb::Result<Self> {
         let path: &Path = path.as_ref();
         let name: String = path.as_os_str().to_string_lossy().into();
-        let text = fs::read_to_string(path).unwrap();
-        Self::new(name, text, config)
+        let text = fs::read_to_string(path).map_err(|error| {
+            fb::Error::new(
+                fb::ErrorKind::Io,
+                format!("failed to read source file `{name}`: {error}"),
+            )
+        })?;
+        Ok(Self::new(name, text, config))
     }
     pub fn name(&self) -> &str {
         &self.0.name
@@ -45,7 +50,7 @@ impl Source {
     pub fn text(&self) -> &str {
         &self.0.text
     }
-    pub fn line_column(&self, offset: u32) -> (u16, u16) {
+    pub fn line_column(&self, offset: u32) -> (u32, u32) {
         self.0.offset_to_line_col_map.lookup(offset)
     }
 }
@@ -59,31 +64,31 @@ struct SourceInner {
 
 #[derive(Debug)]
 pub struct OffsetToLineColMap {
-    marker_vec: Vec<(u32, (u16, u16))>,
+    marker_vec: Vec<(u32, (u32, u32))>,
 }
 impl OffsetToLineColMap {
     fn new(s: &str, tab_spaces: u16) -> Self {
         let mut marker_vec = vec![(0, (1, 1))];
-        let mut line: u16 = 1;
-        let mut column: u16 = 1;
+        let mut line: u32 = 1;
+        let mut column: u32 = 1;
+        let tab_spaces = u32::from(tab_spaces.max(1));
 
-        for (offset, byte) in s.as_bytes().iter().cloned().enumerate() {
-            if byte == b'\n' {
+        for (offset, ch) in s.char_indices() {
+            if ch == '\n' {
                 line += 1;
                 column = 1;
-                marker_vec.push(((offset + 1) as u32, (line, column)));
-            } else if byte == b'\t' {
+            } else if ch == '\t' {
                 column = column.next_multiple_of(tab_spaces) + 1;
-                marker_vec.push(((offset + 1) as u32, (line, column)));
             } else {
                 column += 1;
-                // No need to push a marker for every byte
             }
+
+            marker_vec.push(((offset + ch.len_utf8()) as u32, (line, column)));
         }
 
         Self { marker_vec }
     }
-    fn lookup(&self, offset: u32) -> (u16, u16) {
+    fn lookup(&self, offset: u32) -> (u32, u32) {
         match self
             .marker_vec
             .binary_search_by_key(&offset, |(offset, _)| *offset)
@@ -94,9 +99,8 @@ impl OffsetToLineColMap {
             }
             Err(0) => (1, 1),
             Err(index) => {
-                let (marker_offset, (marker_line, marker_col)) = self.marker_vec[index - 1];
-                let delta = offset - marker_offset;
-                (marker_line, marker_col + delta as u16)
+                let (_, (marker_line, marker_col)) = self.marker_vec[index - 1];
+                (marker_line, marker_col)
             }
         }
     }
@@ -105,6 +109,7 @@ impl OffsetToLineColMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::feedback::ErrorKind;
 
     #[test]
     fn test_offset_to_line_col_map() {
@@ -122,5 +127,34 @@ mod tests {
         let map = OffsetToLineColMap::new(text, 4);
         assert_eq!(map.lookup(1), (2, 1));
         assert_eq!(map.lookup(2), (2, 5));
+    }
+
+    #[test]
+    fn test_offset_to_line_col_map_counts_unicode_scalar_columns() {
+        let text = "éx\n\tβ";
+        let map = OffsetToLineColMap::new(text, 4);
+        assert_eq!(map.lookup(text.find('é').unwrap() as u32), (1, 1));
+        assert_eq!(map.lookup(text.find('x').unwrap() as u32), (1, 2));
+        assert_eq!(map.lookup(text.find('β').unwrap() as u32), (2, 5));
+    }
+
+    #[test]
+    fn test_offset_to_line_col_map_handles_long_lines() {
+        let text = "a".repeat(70_000);
+        let map = OffsetToLineColMap::new(&text, 4);
+        assert_eq!(map.lookup(69_999), (1, 70_000));
+    }
+
+    #[test]
+    fn test_new_file_reports_io_error() {
+        let path = Path::new("/tmp/resin-source-missing-file.resin");
+        let error =
+            Source::new_file(path, &Config::default()).expect_err("Expected file read to fail");
+        assert_eq!(error.kind, ErrorKind::Io);
+        assert!(
+            error
+                .message
+                .contains("failed to read source file `/tmp/resin-source-missing-file.resin`")
+        );
     }
 }

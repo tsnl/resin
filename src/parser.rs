@@ -220,6 +220,7 @@ lalrpop_mod!(
 mod tests {
     use super::*;
     use crate::{Literal, Source, Span, Symbol, ast, feedback::ErrorKind};
+    use indoc::indoc;
 
     #[test]
     fn test_parse_val() {
@@ -245,7 +246,9 @@ mod tests {
         assert_eq!(error.kind, ErrorKind::Syntax);
         assert_eq!(
             error.to_string(),
-            "syntax error: unexpected token `;`; expected `!`, `(`, `)`, `+`, `-`, `.`, `[`, `false`, `if`, `true`, `{`, identifier, number or string literal at test_parse_file_reports_syntax_error:1:12-13"
+            indoc!(
+                "syntax error: unexpected token `;`; expected `!`, `(`, `)`, `+`, `-`, `.`, `[`, `false`, `if`, `true`, `{`, identifier, number or string literal at test_parse_file_reports_syntax_error:1:12-13"
+            )
         );
     }
 
@@ -260,7 +263,26 @@ mod tests {
         assert_eq!(error.kind, ErrorKind::Syntax);
         assert_eq!(
             error.to_string(),
-            "syntax error: invalid escape sequence `\\q` in string literal at test_parse_file_reports_invalid_string_escape:1:12-14\n  note: in this string literal at test_parse_file_reports_invalid_string_escape:1:11-15"
+            indoc!("
+                syntax error: invalid escape sequence `\\q` in string literal at test_parse_file_reports_invalid_string_escape:1:12-14
+                  note: in this string literal at test_parse_file_reports_invalid_string_escape:1:11-15")
+        );
+    }
+
+    #[test]
+    fn test_parse_file_reports_invalid_string_escape_after_unicode() {
+        let source = Source::new(
+            "test_parse_file_reports_invalid_string_escape_after_unicode",
+            "def a() = \"é\\q\";",
+            &Default::default(),
+        );
+        let error = parse_file(&source).expect_err("Expected parsing to fail");
+        assert_eq!(error.kind, ErrorKind::Syntax);
+        assert_eq!(
+            error.to_string(),
+            indoc!("
+                syntax error: invalid escape sequence `\\q` in string literal at test_parse_file_reports_invalid_string_escape_after_unicode:1:13-15
+                  note: in this string literal at test_parse_file_reports_invalid_string_escape_after_unicode:1:11-16")
         );
     }
 }

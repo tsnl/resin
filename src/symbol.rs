@@ -41,12 +41,14 @@ impl PartialEq for Symbol {
         // Equality is determined solely by comparing 64-bit SipHash digests.
         //
         // Rationale: SipHash-2-4 (std::collections::hash_map::DefaultHasher) is a
-        // cryptographic-strength PRF. The probability of an accidental collision
-        // between two distinct strings is ~2^-64 per pair, which is negligible for
-        // any realistic symbol table (even 10^9 symbols yield ~10^-1 expected
-        // collisions). We rigorously verify this with a dedicated fuzz test
-        // (see `fuzz_intstr_hash_equality` in this module's tests) that checks
+        // cryptographic-strength PRF. The probability of an accidental collision between two
+        // distinct strings is ~2^-64 per pair, which is negligible for any realistic symbol table
+        // (even 10^9 symbols yield ~10^-1 expected collisions). We rigorously verify this with a
+        // dedicated fuzz test (see `fuzz_intstr_hash_equality` in this module's tests) that checks
         // tens of thousands of random identifier strings for collisions.
+        //
+        // This practically gives us O(1) equality checks without requiring synchronization when
+        // interning new strings.
         //
         // The debug_assert below provides an additional safety net during
         // development: any collision in a debug build will immediately surface
