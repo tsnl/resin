@@ -67,7 +67,7 @@ impl OffsetToLineColMap {
         let mut line: u16 = 1;
         let mut column: u16 = 1;
 
-        for (offset, byte) in s.as_bytes().iter().cloned().enumerate().skip(1) {
+        for (offset, byte) in s.as_bytes().iter().cloned().enumerate() {
             if byte == b'\n' {
                 line += 1;
                 column = 1;
@@ -114,5 +114,13 @@ mod tests {
         assert_eq!(map.lookup(text.find('b').unwrap() as u32), (2, 1));
         assert_eq!(map.lookup(text.find('v').unwrap() as u32), (3, 2));
         assert_eq!(map.lookup(text.find('d').unwrap() as u32), (3, 17));
+    }
+
+    #[test]
+    fn test_offset_to_line_col_map_handles_leading_newline_and_tab() {
+        let text = "\n\tabc";
+        let map = OffsetToLineColMap::new(text, 4);
+        assert_eq!(map.lookup(1), (2, 1));
+        assert_eq!(map.lookup(2), (2, 5));
     }
 }
