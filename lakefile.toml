@@ -1,0 +1,10 @@
+name = "resin"
+version = "0.1.0"
+defaultTargets = ["resin"]
+
+[[lean_lib]]
+name = "Resin"
+
+[[lean_exe]]
+name = "resin"
+root = "Main"
