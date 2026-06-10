@@ -1,4 +1,4 @@
-import Resin.Graph
+import Resin
 
 def main : IO Unit := do
-  hello
+  IO.println "Hello, world"
