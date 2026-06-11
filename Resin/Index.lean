@@ -1,4 +1,5 @@
-import Resin.Basic
+import Resin.PNat
+import Resin.ListVector
 
 /-! Index contains math to translate integer tuples into address offsets (and vice-versa) when
     dealing with multi-dimensional arrays. -/
@@ -13,37 +14,37 @@ def Offset := Int
 /-- Shape is a tuple of integers representing the number of elements per-dimension of a
     multi-dimensional array.
     -/
-def Shape (n : Nat) := Vector Nat n
+def Shape (n : Nat) := ListVector Nat n
 
 /-- Pitch is a tuple of integers representing the strides needed to move between elements in a
     multi-dimensional array. May be negative to allow for reverse traversal.
     - E.g. in a dense 1D array, pitch is (1,)
     - E.g. in a dense 2D array with row-major order, pitch is (num_cols, 1)
     Note that pitch, like shape, always counts in elements, not bytes. -/
-def Pitch (n : Nat) := Vector Int n
+def Pitch (n : Nat) := ListVector Int n
 
 /-- Index is a tuple of integers identifying a single element in a multi-dimensional array. -/
-def Index (n : Nat) := Vector Nat n
+def Index (n : Nat) := ListVector Nat n
 
 def indexBoundsCheck {n : Nat} (index : Index n) (shape : Shape n) : Bool :=
-  Vector.all (Vector.zip index shape) (fun (i, s) => i < s)
+  ListVector.all (ListVector.zip index shape) (fun (i, s) => i < s)
 
 /-- Extent is the minimum and maximum offset of all elements in a [View]. -/
 
 def computeMinOrMaxOffsetOfView
     {n : Nat}
     (baseOffset : Int)
-    (zippedShapePitch : Vector (PNat × Int) n)
+    (zippedShapePitch : ListVector (PNat × Int) n)
     (pickDimIndex : PNat × Int → Int)
     : Int :=
-  Vector.foldl
+  ListVector.foldl
     (fun acc sp => let (_, p) := sp; acc + (pickDimIndex sp * p))
     baseOffset
     zippedShapePitch
 
 def minOffsetOfView
     (baseOffset : Int)
-    (zippedShapePitch : Vector (PNat × Int) n)
+    (zippedShapePitch : ListVector (PNat × Int) n)
     : Int :=
   let pickDimIndex sp : Int :=
     let (s, p) := sp
@@ -54,7 +55,7 @@ def minOffsetOfView
 
 def maxOffsetOfView
     (baseOffset : Int)
-    (zippedShapePitch : Vector (PNat × Int) n)
+    (zippedShapePitch : ListVector (PNat × Int) n)
     : Int :=
   let pickDimIndex sp : Int :=
     let (s, p) := sp
@@ -106,28 +107,28 @@ def offsetOfIndexInView
     {n: Nat}
     (v : View n)
     (i : Index n)
-    (_ : (indexBoundsCheck i v.shape) := by native_decide)
+    (_ : (indexBoundsCheck i v.shape) := by decide)
     : Int :=
-  let ip := Vector.zip i v.pitch
-  Vector.foldl
+  let ip := ListVector.zip i v.pitch
+  ListVector.foldl
     (fun acc (i, p) => acc + i * p)
     v.baseOffset
     ip
 
 example : 12 = (
-    let view : View _ := { baseOffset := 10, shape := makeVector [3], pitch := makeVector [2] }
-    let index : Index _ := makeVector [1]
+    let view : View _ := { baseOffset := 10, shape := ListVector.mk [3], pitch := ListVector.mk [2] }
+    let index : Index _ := ListVector.mk [1]
     offsetOfIndexInView view index
-  ) := by native_decide
+  ) := by decide
 
 example : 8 = (
-    let view : View _ := { baseOffset := 10, shape := makeVector [3], pitch := makeVector [-2] }
-    let index : Index _ := makeVector [1]
+    let view : View _ := { baseOffset := 10, shape := ListVector.mk [3], pitch := ListVector.mk [-2] }
+    let index : Index _ := ListVector.mk [1]
     offsetOfIndexInView view index
-  ) := by native_decide
+  ) := by decide
 
 example : 114 = (
-  let view : View _ := { baseOffset := 100, shape := makeVector [3, 4], pitch := makeVector [10, 2] }
-  let index : Index _ := (makeVector [1, 2])
+  let view : View _ := { baseOffset := 100, shape := ListVector.mk [3, 4], pitch := ListVector.mk [10, 2] }
+  let index : Index _ := (ListVector.mk [1, 2])
   offsetOfIndexInView view index
-) := by native_decide
+) := by decide
