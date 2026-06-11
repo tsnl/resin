@@ -43,6 +43,7 @@ def computeMinOrMaxOffsetOfView
     zippedShapePitch
 
 def minOffsetOfView
+    {n : Nat}
     (baseOffset : Int)
     (zippedShapePitch : ListVector (PNat × Int) n)
     : Int :=
@@ -54,6 +55,7 @@ def minOffsetOfView
   computeMinOrMaxOffsetOfView baseOffset zippedShapePitch pickDimIndex
 
 def maxOffsetOfView
+    {n : Nat}
     (baseOffset : Int)
     (zippedShapePitch : ListVector (PNat × Int) n)
     : Int :=
@@ -95,18 +97,25 @@ def maxOffsetOfView
     can map offsets into nonnegative address spaces post-hoc.
     -/
 
-structure View {n : Nat} (shape : Shape n) where
+structure View
+  {rank : Nat}
+  (shape : Shape rank)
+where
   baseOffset : Nat
-  pitch : Pitch n
+  pitch : Pitch rank
 
-def rankOfView {n : Nat} {shape : Shape n} (_ : View shape) : Nat :=
-  n
+def rankOfView
+    {rank : Nat}
+    {shape : Shape rank}
+    (_ : View shape)
+    : Nat :=
+  rank
 
 def offsetOfIndexInView
-    {n: Nat}
-    {shape : Shape n}
+    {rank: Nat}
+    {shape : Shape rank}
     (v : View shape)
-    (i : Index n)
+    (i : Index rank)
     (_ : (indexBoundsCheck i shape) := by decide)
     : Int :=
   let ip := ListVector.zip i v.pitch

@@ -15,9 +15,10 @@ inductive Node : {rank : Nat} → Shape rank → Type where
   | view
       {rank : Nat}
       {shape : Shape rank}
-      {rank' : Nat}
-      {shape' : Shape rank'}
-      (src : Node shape')
+      {srcRank : Nat}
+      {srcShape : Shape srcRank}
+      (src : Node srcShape)
+      (view : View shape)
       : Node shape
   | mul
       {rank : Nat}

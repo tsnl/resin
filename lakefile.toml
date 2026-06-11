@@ -4,6 +4,7 @@ defaultTargets = ["resin"]
 
 [[lean_lib]]
 name = "Resin"
+leanOptions = { autoImplicit = false }
 
 [[lean_exe]]
 name = "resin"
