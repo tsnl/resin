@@ -95,19 +95,19 @@ def maxOffsetOfView
     can map offsets into nonnegative address spaces post-hoc.
     -/
 
-structure View (n : Nat) where
+structure View {n : Nat} (shape : Shape n) where
   baseOffset : Nat
-  shape : Shape n
   pitch : Pitch n
 
-def rankOfView {n : Nat} (_ : View n) : Nat :=
+def rankOfView {n : Nat} {shape : Shape n} (_ : View shape) : Nat :=
   n
 
 def offsetOfIndexInView
     {n: Nat}
-    (v : View n)
+    {shape : Shape n}
+    (v : View shape)
     (i : Index n)
-    (_ : (indexBoundsCheck i v.shape) := by decide)
+    (_ : (indexBoundsCheck i shape) := by decide)
     : Int :=
   let ip := ListVector.zip i v.pitch
   ListVector.foldl
@@ -116,19 +116,19 @@ def offsetOfIndexInView
     ip
 
 example : 12 = (
-    let view : View _ := { baseOffset := 10, shape := ListVector.mk [3], pitch := ListVector.mk [2] }
+    let view : View (ListVector.mk [3]) := { baseOffset := 10, pitch := ListVector.mk [2] }
     let index : Index _ := ListVector.mk [1]
     offsetOfIndexInView view index
   ) := by decide
 
 example : 8 = (
-    let view : View _ := { baseOffset := 10, shape := ListVector.mk [3], pitch := ListVector.mk [-2] }
+    let view : View (ListVector.mk [3]) := { baseOffset := 10, pitch := ListVector.mk [-2] }
     let index : Index _ := ListVector.mk [1]
     offsetOfIndexInView view index
   ) := by decide
 
 example : 114 = (
-  let view : View _ := { baseOffset := 100, shape := ListVector.mk [3, 4], pitch := ListVector.mk [10, 2] }
+  let view : View (ListVector.mk [3, 4]) := { baseOffset := 100, pitch := ListVector.mk [10, 2] }
   let index : Index _ := (ListVector.mk [1, 2])
   offsetOfIndexInView view index
 ) := by decide
