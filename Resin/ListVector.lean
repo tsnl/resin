@@ -42,3 +42,42 @@ def ListVector.foldl
     (v : ListVector T n)
     : U :=
   List.foldl f init v.val
+
+def ListVector.scanl
+    {T U : Type}
+    {n : Nat}
+    (f : U → T → U)
+    (init : U)
+    (v : ListVector T n)
+    : ListVector U (n + 1) :=
+  ListVector.mk (List.scanl f init v.val) (by simp [v.property])
+
+def ListVector.reverse
+    {T : Type}
+    {n : Nat}
+    (v : ListVector T n)
+    : ListVector T n :=
+  ListVector.mk (List.reverse v.val) (by simp [v.property])
+
+def ListVector.tail
+    {T : Type}
+    {n : Nat}
+    (v : ListVector T (n + 1))
+    : ListVector T n :=
+  ListVector.mk (List.tail v.val) (by simp [v.property])
+
+def ListVector.equal?
+    {T : Type}
+    {n : Nat}
+    [BEq T]
+    (v1 v2 : ListVector T n)
+    : Bool :=
+  v1.val == v2.val
+
+def ListVector.permute
+    {T : Type}
+    {n : Nat}
+    (v : ListVector T n)
+    (permutation : ListVector (Fin n) n)
+    : ListVector T n :=
+  ListVector.mk (List.permute v.val perm.val) (by simp [v.property, permutation.property])

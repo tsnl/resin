@@ -111,6 +111,13 @@ def rankOfView
     : Nat :=
   rank
 
+def shapeOfView
+    {rank : Nat}
+    {shape : Shape rank}
+    (_ : View shape)
+    : Shape rank :=
+  shape
+
 def offsetOfIndexInView
     {rank: Nat}
     {shape : Shape rank}
@@ -141,3 +148,31 @@ example : 114 = (
   let index : Index _ := (ListVector.mk [1, 2])
   offsetOfIndexInView view index
 ) := by decide
+
+---
+--- C-contiguity
+---
+
+def cContiguousPitch
+    {n : Nat}
+    (shape : Shape n)
+    : Pitch n :=
+  let pitchWithExtraHead : ListVector Int (n + 1) :=
+      ListVector.reverse (ListVector.scanl (fun acc s => acc * Int.ofNat s) 1 shape)
+  ListVector.tail pitchWithExtraHead
+
+def isCContiguous
+    {n : Nat}
+    (shape : Shape n)
+    (pitch : Pitch n)
+    : Bool :=
+  ListVector.equal? pitch (cContiguousPitch shape)
+
+def permuteView
+    {rank : Nat}
+    {shape : Shape rank}
+    (view : View shape)
+    (perm : ListVector Nat rank)
+    : View shape :=
+  let newPitch := ListVector.permute view.pitch perm
+  { view with pitch := newPitch }
