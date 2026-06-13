@@ -6,9 +6,6 @@ resin.graph models the computational graph of tensor operations.
 
 Nodes will frequently reuse their first operand's shape, pitch, etc. This makes it
 easier for the backend to reuse memory and fuse kernels.
-
-TODO: Refactor: make "views" a property of each node referencing another node instead of
-a node of its own.
 """
 
 __all__ = [
@@ -32,7 +29,6 @@ from dataclasses import dataclass, fields, replace
 from typing import Callable, Generator, Iterable, Literal
 
 import numpy.typing as npt
-from wgpu.structs import Sequence
 
 from .common import SupportsWrite, pascal_to_snake_case
 from .scalar import (
@@ -871,31 +867,82 @@ class Accessor:
         Returns a single accessor whose view is equivalent to viewing through `first`, then `self`.
         """
 
-        assert self.rank == first.rank
+        if self.rank != first.rank:
+            raise ValueError(
+                f"Cannot compose accessors with different ranks: {self.rank} and {first.rank}"
+            )
 
-        # Compute `new_offset`:
-        # If we skip the first `self.offset` elements in sparse `first`, how many elements do we
-        # skip in the dense backing array?
-        # Convert self.offset into an index in a C-contiguous view with the same shape as `first`.
-        # Then, get the address of that index in `first`.
-        new_offset = first.address(
-            Accessor(
-                shape=first.shape,
-                pitch=c_contiguous_pitch_for_shape(first.shape),
-                offset=0,
-            ).index(self.offset)
+        # First, convert `self` into a sequence of `slice()` args.
+        # Then, `first.slice()` will produce the composed view.
+
+        # Convert self.offset into a multi-dimensional index using an auxiliary "phony" dense view.
+        per_dim_offsets = Accessor(
+            shape=first.shape,
+            pitch=c_contiguous_pitch_for_shape(first.shape),
+            offset=0,
+        ).index(self.offset)
+
+        # Build slice args per-dimension:
+        per_dim_slices = tuple(
+            (o, s, p) for o, s, p in zip(per_dim_offsets, self.shape, self.pitch)
         )
 
-        # Compute `new_pitch` and `new_shape`:
-        new_pitch = tuple(p1 * p2 for p1, p2 in zip(self.pitch, first.pitch))
-        new_shape = tuple(
-            s1 if p1 != 0 else s2
-            for s1, s2, p1 in zip(self.shape, first.shape, self.pitch)
+        # Now simply slice `first` using the per-dimension slice args we just built.
+        return first.slice(per_dim_slices)
+
+    def slice(
+        self,
+        raw_slices: tuple[tuple[int | None, int | None, int | None], ...],
+    ) -> Accessor:
+        """
+        Returns a new accessor that represents a sliced subview of self's view.
+
+        Args:
+        -   slices: a tuple of slice objects, one for each dimension of self. Each slice specifies
+            how to slice that dimension:
+                (skip = 0, count = self.shape[dim], step = 1).
+        -   truncate: a value indicating whether to allow truncating slices that go out of bounds.
+        """
+
+        if self.rank != len(raw_slices):
+            raise ValueError(
+                f"Number of slices {len(raw_slices)} does not match accessor rank {self.rank}"
+            )
+
+        # Fill in default values in each slice:
+        slices: tuple[tuple[int, int, int], ...] = tuple(
+            (
+                skip if skip is not None else 0,
+                count if count is not None else self.shape[dim],
+                step if step is not None else 1,
+            )
+            for dim, (skip, count, step) in enumerate(raw_slices)
         )
 
-        raise NotImplementedError("Need to test, think")
+        # Compute the updated accessor offset:
+        new_offset = self.offset + self.address(tuple(s[0] for s in slices))
 
-        return Accessor(offset=new_offset, pitch=new_pitch, shape=new_shape)
+        # Compute the updated accessor shape and pitch:
+        new_shape = []
+        new_pitch = []
+        for dim, (skip, count, step) in enumerate(slices):
+            assert self.shape[dim] != 0
+
+            if not (
+                (0 <= skip < self.shape[dim])
+                and (0 <= skip + step * count <= self.shape[dim])
+            ):
+                raise IndexError(f"{dim=}: {skip=}, {step=}, {count=} out of bounds")
+
+            new_shape.append(count)
+            new_pitch.append(self.pitch[dim] * step)
+
+        # Done:
+        return Accessor(
+            offset=new_offset,
+            pitch=tuple(new_pitch),
+            shape=tuple(new_shape),
+        )
 
 
 @dataclass

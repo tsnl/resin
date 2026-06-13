@@ -2,6 +2,7 @@
 
 import textwrap
 from io import StringIO
+from posix import access
 
 from resin.graph import (
     Accessor,
@@ -442,8 +443,8 @@ class TestReductionDfDo:
             assert len(result) == 1
 
 
-class TestAccessorMath:
-    def test_address_index_inverse(self) -> None:
+class TestAccessor:
+    def test_address_index_inverse_for_dense_view(self) -> None:
         """
         Applying an accessor and then its inverse should yield the original index for a C-contiguous
         accessor (i.e. 1:1 relationship between index and address).
@@ -452,11 +453,7 @@ class TestAccessorMath:
         offset = 5
         shape = (4, 5)
 
-        accessor = Accessor(
-            offset=offset,
-            pitch=permute(c_contiguous_pitch_for_shape(shape), (1, 0)),
-            shape=shape,
-        )
+        accessor = TestAccessor.make_c_contiguous_accessor(shape=shape, offset=offset)
 
         for i in range(accessor.shape[0]):
             for j in range(accessor.shape[1]):
@@ -464,6 +461,28 @@ class TestAccessorMath:
                 address = accessor.address(index)
                 index_ref = accessor.index(address)
                 assert index == index_ref
+
+    def test_slice(self) -> None:
+        """
+        View composition works as expected
+        """
+
+        accessor0 = TestAccessor.make_c_contiguous_accessor(shape=(8, 8))
+        accessor1 = accessor0.slice(((0, 2, 2), (0, 2, 2)))
+
+        assert accessor1 == Accessor(
+            offset=0,
+            shape=(2, 2),
+            pitch=(2 * accessor0.pitch[0], 2 * accessor0.pitch[1]),
+        )
+
+    @staticmethod
+    def make_c_contiguous_accessor(shape: tuple[int, ...], offset: int = 0) -> Accessor:
+        return Accessor(
+            offset=offset,
+            shape=shape,
+            pitch=c_contiguous_pitch_for_shape(shape),
+        )
 
 
 class TestPermutationMath:
