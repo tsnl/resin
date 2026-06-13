@@ -32,6 +32,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Callable, Generator, Iterable, Literal
 
 import numpy.typing as npt
+from wgpu.structs import Sequence
 
 from .common import SupportsWrite, pascal_to_snake_case
 from .scalar import (
@@ -229,8 +230,7 @@ class Node(ABC):
         Given ∂f/∂n (df_dn), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand oᵢ.
 
         Override this method in each Node subclass to implement differentiation for that
-        node type. Raises GradOfUndifferentiableNodeException if the node is not
-        differentiable.
+        node type. Raises NotDifferentiableException if the node is not differentiable.
         """
         _ = df_dn
         raise NotDifferentiableException(self)
@@ -335,7 +335,7 @@ class ConstNode(Node):
     @staticmethod
     def new(value: "npt.ArrayLike", *, stype: ScalarType = "fp32") -> "ConstNode":
         shape = ConstNode._infer_value_shape(value)
-        pitch = compute_c_contiguous_pitch_for_shape(shape)
+        pitch = c_contiguous_pitch_for_shape(shape)
         return ConstNode(
             offset=0,
             shape=shape,
@@ -384,7 +384,7 @@ class ParamNode(Node):
         stype: ScalarType,
         label: str | None = None,
     ) -> "ParamNode":
-        pitch = compute_c_contiguous_pitch_for_shape(shape)
+        pitch = c_contiguous_pitch_for_shape(shape)
         return ParamNode(
             offset=0,
             shape=shape,
@@ -483,7 +483,7 @@ class ReductionNode(Node):
             out_shape[axis] = 1
 
         out_shape = tuple(out_shape)
-        out_pitch = compute_c_contiguous_pitch_for_shape(out_shape)
+        out_pitch = c_contiguous_pitch_for_shape(out_shape)
 
         return ReductionNode(
             offset=input.offset,
@@ -530,7 +530,7 @@ class MatmulNode(Node):
         a, b = a._join_shapes_for_matmul_bop(b)
         out_offset = 0
         out_shape = a.shape[:-1] + (b.shape[-1],)
-        out_pitch = compute_c_contiguous_pitch_for_shape(out_shape)
+        out_pitch = c_contiguous_pitch_for_shape(out_shape)
         return MatmulNode(
             offset=out_offset,
             shape=out_shape,
@@ -560,14 +560,27 @@ class ViewNode(Node):
     @staticmethod
     def new(input: "Node", accessor: "Accessor") -> "ViewNode":
         accessor.raise_if_not_compatible(input)
-        return ViewNode(
-            offset=accessor.offset,
-            shape=accessor.shape,
-            pitch=accessor.pitch,
-            stype=input.stype,
-            input=(input,),
-            accessor=accessor,
-        )
+
+        if isinstance(input, ViewNode):
+            assert len(input.input) == 1
+            accessor = accessor.compose(input.accessor)
+            return ViewNode(
+                offset=accessor.offset,
+                shape=accessor.shape,
+                pitch=accessor.pitch,
+                stype=input.stype,
+                input=input.input,
+                accessor=accessor,
+            )
+        else:
+            return ViewNode(
+                offset=accessor.offset,
+                shape=accessor.shape,
+                pitch=accessor.pitch,
+                stype=input.stype,
+                input=(input,),
+                accessor=accessor,
+            )
 
     @staticmethod
     def new_broadcast(input: "Node", ns: tuple[int, ...]) -> "Node":
@@ -665,7 +678,7 @@ class ScatterNode(Node):
         return ScatterNode(
             offset=0,
             shape=shape,
-            pitch=compute_c_contiguous_pitch_for_shape(shape),
+            pitch=c_contiguous_pitch_for_shape(shape),
             stype=source.stype,
             input=(source,),
             accessor=accessor,
@@ -674,7 +687,7 @@ class ScatterNode(Node):
     @staticmethod
     def new_copy(source: "Node", stype: ScalarType | None = None) -> "Node":
         stype = stype or source.stype
-        pitch = compute_c_contiguous_pitch_for_shape(source.shape)
+        pitch = c_contiguous_pitch_for_shape(source.shape)
         accessor = Accessor(offset=0, pitch=pitch, shape=source.shape)
         return ScatterNode.new(source=source, shape=source.shape, accessor=accessor)
 
@@ -693,6 +706,10 @@ class Accessor:
     offset: int
     pitch: tuple[int, ...]
     shape: tuple[int, ...]
+
+    @property
+    def rank(self) -> int:
+        return len(self.shape)
 
     @staticmethod
     def from_key(
@@ -785,12 +802,12 @@ class Accessor:
                 if s != 1 and p != 0:
                     new_shape.append(s)
                     new_pitch.append(p)
-            return c_permutation(tuple(new_shape), tuple(new_pitch))
+            return c_permuted(tuple(new_shape), tuple(new_pitch))
 
         # If both old and new shapes are contiguous (not even C-contiguous), then the
         # accessor is compatible if it addresses fewer elements than in the original.
-        old_cc_shape_pitch = c_permutation(old_shape, old_pitch)
-        new_cc_shape_pitch = c_permutation(new_shape, new_pitch)
+        old_cc_shape_pitch = c_permuted(old_shape, old_pitch)
+        new_cc_shape_pitch = c_permuted(new_shape, new_pitch)
         if (
             old_cc_shape_pitch == new_cc_shape_pitch
             and is_c_contiguous(old_cc_shape_pitch[0], old_cc_shape_pitch[1])
@@ -812,6 +829,73 @@ class Accessor:
             f"old tensor (shape={old_shape}, pitch={old_pitch}) as "
             f"new tensor (shape={new_shape}, pitch={new_pitch})"
         )
+
+    def address(self, index: tuple[int, ...]) -> int:
+        """
+        Returns the flat index in the original storage array that corresponds to the given
+        multi-dimensional index in the view defined by this accessor.
+        """
+        return self.offset + sum(i * p for i, p in zip(index, self.pitch))
+
+    def index(self, address: int) -> tuple[int, ...]:
+        """
+        Returns a multi-dimensional index in the view defined by this accessor that corresponds to
+        the given flat index in the original storage array.
+
+        Note that because stride tricks can map multiple indices to the same address, this function
+        is NOT the inverse of address UNLESS self is C-contiguous.
+        """
+
+        assert address >= self.offset
+        address -= self.offset
+
+        accessor_c_permutation = c_permutation(self.shape, self.pitch)
+        accessor_c_permutation_inverse = invert_permutation(accessor_c_permutation)
+
+        c_shape = permute(self.shape, accessor_c_permutation)
+        c_pitch = permute(self.pitch, accessor_c_permutation)
+
+        c_index = []
+        for s, p in zip(c_shape, c_pitch):
+            if p == 0:
+                c_index.append(0)
+            else:
+                i = min(s - 1, address // p)
+                address -= i * p
+                c_index.append(i)
+
+        return permute(tuple(c_index), accessor_c_permutation_inverse)
+
+    def compose(self, first: Accessor) -> Accessor:
+        """
+        Returns a single accessor whose view is equivalent to viewing through `first`, then `self`.
+        """
+
+        assert self.rank == first.rank
+
+        # Compute `new_offset`:
+        # If we skip the first `self.offset` elements in sparse `first`, how many elements do we
+        # skip in the dense backing array?
+        # Convert self.offset into an index in a C-contiguous view with the same shape as `first`.
+        # Then, get the address of that index in `first`.
+        new_offset = first.address(
+            Accessor(
+                shape=first.shape,
+                pitch=c_contiguous_pitch_for_shape(first.shape),
+                offset=0,
+            ).index(self.offset)
+        )
+
+        # Compute `new_pitch` and `new_shape`:
+        new_pitch = tuple(p1 * p2 for p1, p2 in zip(self.pitch, first.pitch))
+        new_shape = tuple(
+            s1 if p1 != 0 else s2
+            for s1, s2, p1 in zip(self.shape, first.shape, self.pitch)
+        )
+
+        raise NotImplementedError("Need to test, think")
+
+        return Accessor(offset=new_offset, pitch=new_pitch, shape=new_shape)
 
 
 @dataclass
@@ -881,7 +965,7 @@ def shape_join(
 #   dimensions.
 
 
-def compute_c_contiguous_pitch_for_shape(shape: tuple[int, ...]) -> tuple[int, ...]:
+def c_contiguous_pitch_for_shape(shape: tuple[int, ...]) -> tuple[int, ...]:
     """
     Returns the C-contiguous strides for a given shape.
 
@@ -899,18 +983,33 @@ def is_c_contiguous(shape: tuple[int, ...], pitch: tuple[int, ...]) -> bool:
     """
     Check if a tensor with the given shape and pitch is C-contiguous.
     """
-    return pitch == compute_c_contiguous_pitch_for_shape(shape)
+    return pitch == c_contiguous_pitch_for_shape(shape)
 
 
 def is_contiguous(shape: tuple[int, ...], pitch: tuple[int, ...]) -> bool:
-    new_shape, new_pitch = c_permutation(shape, pitch)
+    new_shape, new_pitch = c_permuted(shape, pitch)
     return is_c_contiguous(new_shape, new_pitch)
 
 
-def c_permutation(
-    shape: tuple[int, ...],
-    pitch: tuple[int, ...],
+def c_permuted(
+    shape: tuple[int, ...], pitch: tuple[int, ...]
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """
+    Permute the dimensions by decreasing pitch, breaking ties by decreasing shape, and
+    return the new shape and pitch.
+
+    Note that this makes contiguous shapes C-contiguous.
+
+    This normalization is useful even for comparing non-contiguous shapes.
+    """
+
+    permutation = c_permutation(shape, pitch)
+    new_shape = permute(shape, permutation)
+    new_pitch = permute(pitch, permutation)
+    return new_shape, new_pitch
+
+
+def c_permutation(shape: tuple[int, ...], pitch: tuple[int, ...]) -> tuple[int, ...]:
     """
     Permute the dimensions by decreasing pitch, breaking ties by decreasing
     shape, and return the new shape and pitch.
@@ -922,18 +1021,34 @@ def c_permutation(
 
     # argsort the dimensions by decreasing pitch, breaking ties by decreasing
     # shape.
-    perm = sorted(
-        range(len(pitch)),
-        key=lambda i: (pitch[i], shape[i]),
-        reverse=True,
+    return tuple(
+        sorted(
+            range(len(pitch)),
+            key=lambda i: (pitch[i], shape[i]),
+            reverse=True,
+        )
     )
 
-    # permute the shape and pitch according to the permutation above:
-    new_shape = tuple(shape[i] for i in perm)
-    new_pitch = tuple(pitch[i] for i in perm)
 
-    # Done:
-    return new_shape, new_pitch
+def invert_permutation(permutation: tuple[int, ...]) -> tuple[int, ...]:
+    """
+    Computes the inverse of a permutation, i.e. a permutation `inv` such that
+        forall i: inv[permutation[i]] == i
+        forall i: permutation[inv[i]] == i
+    """
+
+    n = len(permutation)
+    assert set(permutation) == set(range(n)), "Invalid permutation"
+    return tuple(permutation.index(i) for i in range(n))
+
+
+def permute[T](seq: tuple[T, ...], perm: tuple[int, ...]) -> tuple[T, ...]:
+    """
+    Applies a permutation to a tuple, returning the permuted tuple.
+    """
+
+    assert len(seq) == len(perm), "Permutation length must match sequence length"
+    return tuple(seq[i] for i in perm)
 
 
 #

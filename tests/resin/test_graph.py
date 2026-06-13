@@ -3,7 +3,17 @@
 import textwrap
 from io import StringIO
 
-from resin.graph import ConstNode, ElementwiseNode, Node, ParamNode, ViewNode
+from resin.graph import (
+    Accessor,
+    ConstNode,
+    ElementwiseNode,
+    Node,
+    ParamNode,
+    ViewNode,
+    c_contiguous_pitch_for_shape,
+    invert_permutation,
+    permute,
+)
 
 
 def debug_str(node: Node) -> str:
@@ -430,3 +440,40 @@ class TestReductionDfDo:
             result = n.df_do(df_dn)
             assert result is not None
             assert len(result) == 1
+
+
+class TestAccessorMath:
+    def test_address_index_inverse(self) -> None:
+        """
+        Applying an accessor and then its inverse should yield the original index for a C-contiguous
+        accessor (i.e. 1:1 relationship between index and address).
+        """
+
+        offset = 5
+        shape = (4, 5)
+
+        accessor = Accessor(
+            offset=offset,
+            pitch=permute(c_contiguous_pitch_for_shape(shape), (1, 0)),
+            shape=shape,
+        )
+
+        for i in range(accessor.shape[0]):
+            for j in range(accessor.shape[1]):
+                index = (i, j)
+                address = accessor.address(index)
+                index_ref = accessor.index(address)
+                assert index == index_ref
+
+
+class TestPermutationMath:
+    def test_permute_inverse(self) -> None:
+        """Permuting by a given order and then by the inverse should yield the original shape."""
+        permutation = (3, 2, 0, 1)
+        inverse_permutation = invert_permutation(permutation)
+
+        xs = (100, 101, 102, 103)
+        ys = permute(xs, permutation)
+        xs_ref = permute(ys, inverse_permutation)
+
+        assert xs == xs_ref
