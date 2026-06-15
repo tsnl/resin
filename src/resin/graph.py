@@ -90,12 +90,12 @@ class Node(ABC):
         pitch: tuple[int, ...],
     ) -> "View":
         """
-        Returns a View onto this node's dense output buffer with the given access pattern,
-        in backing-buffer coordinates. Panics if the view addresses memory outside this
-        node.
+        Returns a View onto this node's dense output buffer with the given access
+        pattern, in backing-buffer coordinates. Panics if the view addresses memory
+        outside this node.
 
-        This is the deliberate escape hatch for reinterpreting a buffer. To reinterpret an
-        existing view, reach for its backing node explicitly (`v.node.view(...)`).
+        This is the deliberate escape hatch for reinterpreting a buffer. To reinterpret
+        an existing view, reach for its backing node explicitly (`v.node.view(...)`).
         """
         new = View(node=self, offset=offset, shape=shape, pitch=pitch)
         new._raise_if_out_of_backing_node_bounds()
@@ -123,9 +123,9 @@ class View:
     """
     An access pattern (offset, shape, pitch) onto a backing Node's dense output buffer.
 
-    View is the user-facing tensor type. All arithmetic operators and view operations are
-    defined here. View operations transform the accessor in place, onto the same backing
-    node; they never build chains of nodes.
+    View is the user-facing tensor type. All arithmetic operators and view operations
+    are defined here. View operations transform the accessor in place, onto the same
+    backing node; they never build chains of nodes.
     """
 
     node: "Node"
@@ -342,8 +342,9 @@ class View:
 
         - Broadcast dims (pitch 0) map one input element to many outputs, so they are
           sum-reduced.
-        - The reduced gradient is then scattered back into the backing node's dense shape
-          using this view's write location (offset, pitch). Unwritten elements are zero.
+        - The reduced gradient is then scattered back into the backing node's dense
+          shape using this view's write location (offset, pitch). Unwritten elements are
+          zero.
         """
         broadcast_axes = tuple(i for i, p in enumerate(self.pitch) if p == 0)
         x = g.reduce(axes=broadcast_axes, operator="add") if broadcast_axes else g
@@ -387,7 +388,9 @@ class View:
             )
 
     @staticmethod
-    def _from_view_or_scalar(value: "npt.ArrayLike | View", stype: ScalarType) -> "View":
+    def _from_view_or_scalar(
+        value: "npt.ArrayLike | View", stype: ScalarType
+    ) -> "View":
         return value if isinstance(value, View) else const(value, stype=stype)
 
     def _join_dtypes_for_bop(self, other: "View") -> tuple["View", "View"]:
@@ -399,9 +402,14 @@ class View:
     def _join_shapes_for_elementwise_bop(self, other: "View") -> tuple["View", "View"]:
         join = shape_join(self.shape, self.pitch, other.shape, other.pitch)
         return (
-            View(node=self.node, offset=self.offset, shape=join.shape, pitch=join.pitch1),
             View(
-                node=other.node, offset=other.offset, shape=join.shape, pitch=join.pitch2
+                node=self.node, offset=self.offset, shape=join.shape, pitch=join.pitch1
+            ),
+            View(
+                node=other.node,
+                offset=other.offset,
+                shape=join.shape,
+                pitch=join.pitch2,
             ),
         )
 
@@ -443,8 +451,12 @@ class View:
         new_o_pitch = join.pitch2[:-1] + (o.pitch[-2], o.pitch[-1])
 
         # Finalize:
-        new_self = View(node=s.node, offset=s.offset, shape=new_s_shape, pitch=new_s_pitch)
-        new_other = View(node=o.node, offset=o.offset, shape=new_o_shape, pitch=new_o_pitch)
+        new_self = View(
+            node=s.node, offset=s.offset, shape=new_s_shape, pitch=new_s_pitch
+        )
+        new_other = View(
+            node=o.node, offset=o.offset, shape=new_o_shape, pitch=new_o_pitch
+        )
         return new_self, new_other
 
 
@@ -623,8 +635,7 @@ class ReductionNode(Node):
             offset=df_dout.offset,
             shape=operand.shape,
             pitch=tuple(
-                (0 if i in self.axes else df_dout.pitch[i])
-                for i in range(operand.rank)
+                (0 if i in self.axes else df_dout.pitch[i]) for i in range(operand.rank)
             ),
         )
 
@@ -701,10 +712,10 @@ def _matmul(a: View, b: View) -> View:
 class ScatterNode(Node):
     """
     Scatter maps a dense "source" to sparse destinations in a freshly allocated,
-    C-contiguous output. Unlike a read view, (woffset, wpitch) specify *write* locations,
-    not read locations: source element at logical index `i` is written to output flat
-    index `woffset + Σ i·wpitch`. The write shape equals the source's shape. All unwritten
-    output elements are zero.
+    C-contiguous output. Unlike a read view, (woffset, wpitch) specify *write*
+    locations, not read locations: source element at logical index `i` is written to
+    output flat index `woffset + Σ i·wpitch`. The write shape equals the source's shape.
+    All unwritten output elements are zero.
 
     Example NumPy code:
 
@@ -780,8 +791,8 @@ def from_key(
     key: tuple[int | slice, ...],
 ) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
     """
-    Computes the (offset, shape, pitch) of the subview selected by `key` from a view with
-    the given (old_offset, old_shape, old_pitch), in backing-buffer coordinates.
+    Computes the (offset, shape, pitch) of the subview selected by `key` from a view
+    with the given (old_offset, old_shape, old_pitch), in backing-buffer coordinates.
     """
 
     def bounded_index(k: int) -> int:

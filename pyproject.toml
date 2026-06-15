@@ -19,10 +19,4 @@ requires = ["uv_build>=0.9.14,<0.10.0"]
 build-backend = "uv_build"
 
 [tool.ruff.lint]
-extend-select = [
-    # unsorted dunder all
-    "RUF022",
-
-    # import-outside-top-level
-    "PLC0415",
-]
+extend-select = []
