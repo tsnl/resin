@@ -7,7 +7,7 @@ class Processor:
     def __init__(
         self,
         device: wgpu.GPUDevice,
-        output_tree: rg.PyTree[rg.Node],
+        output_tree: rg.PyTree[rg.View],
     ) -> None:
         super().__init__()
 
@@ -16,10 +16,10 @@ class Processor:
         self._param_nodes = Processor._compute_param_nodes(self._output_tree)
 
     @staticmethod
-    def _compute_param_nodes(pytree: rg.PyTree[rg.Node]) -> list[rg.ParamNode]:
+    def _compute_param_nodes(pytree: rg.PyTree[rg.View]) -> list[rg.ParamNode]:
         return [
             node  #
-            for node in rg.flatten_pytree(pytree)
+            for node in rg.toposort(rg.flatten_pytree(pytree))
             if isinstance(node, rg.ParamNode)
         ]
 
@@ -51,6 +51,6 @@ class Processor:
     #
 
     @staticmethod
-    def _optimize_graph(graph: rg.PyTree[rg.Node]) -> rg.PyTree[rg.Node]:
+    def _optimize_graph(graph: rg.PyTree[rg.View]) -> rg.PyTree[rg.View]:
         # TODO: implement graph optimizations
         return graph

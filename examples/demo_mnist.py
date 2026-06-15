@@ -26,7 +26,7 @@ class MnistMlp:
             l3=nn.Linear.new(config.hidden_size, config.output_size),
         )
 
-    def __call__(self, x: rg.Node) -> rg.Node:
+    def __call__(self, x: rg.View) -> rg.View:
         x = nn.relu(self.l1(x))
         x = nn.relu(self.l2(x))
         x = nn.softmax(self.l3(x))
@@ -44,8 +44,8 @@ def main():
         output_size=num_classes,
     )
 
-    image = rg.ParamNode.new(shape=(batch_size, img_size * img_size), stype="fp32")
-    label = rg.ParamNode.new(shape=(batch_size, num_classes), stype="fp32")
+    image = rg.param(shape=(batch_size, img_size * img_size), stype="fp32")
+    label = rg.param(shape=(batch_size, num_classes), stype="fp32")
     model = MnistMlp.new(config)
     probs = model(image)
     error = nn.mean(nn.cross_entropy(probs, label))

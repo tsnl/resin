@@ -5,7 +5,7 @@ from . import graph as rg
 from .scalar import ScalarOperator, ScalarType
 
 
-def build_trivial_execution_plan(outs: rg.PyTree[rg.Node]) -> list["Kernel"]:
+def build_trivial_execution_plan(outs: rg.PyTree[rg.View]) -> list["Kernel"]:
     node_to_kernel_map = {}
 
     def map_node(node: rg.Node) -> Kernel:
@@ -23,16 +23,19 @@ def build_trivial_execution_plan(outs: rg.PyTree[rg.Node]) -> list["Kernel"]:
             case rg.ConstNode():
                 return ConstKernel(
                     shape=node.shape,
-                    pitch=node.shape,
+                    pitch=rg.c_contiguous_pitch_for_shape(node.shape),
                     stype=node.stype,
                     input=(),
                     init=node,
                 )
             case rg.ElementwiseNode():
-                input = tuple(map_node(input_node) for input_node in node.input)
+                # TODO: plumb each operand View's read accessor (offset/shape/pitch) into
+                # the kernel so it can read sparsely; for now operands are mapped by their
+                # backing node only.
+                input = tuple(map_node(iv.node) for iv in node.input)
                 return FusedElementwiseKernel(
                     shape=node.shape,
-                    pitch=node.shape,
+                    pitch=rg.c_contiguous_pitch_for_shape(node.shape),
                     stype=node.stype,
                     input=input,
                     ops=((node.operator, tuple(range(len(input)))),),

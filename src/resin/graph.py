@@ -1,15 +1,24 @@
 """
 resin.graph models the computational graph of tensor operations.
--   Node is both a tensor memory and an instruction in the graph.
+-   Node is an operation in the graph. Its output is always a dense, C-contiguous array
+    described solely by `shape`.
+-   View pairs an access pattern (offset, shape, pitch) with a backing Node. A Node reads
+    each of its operands through a (potentially sparse) View and writes a dense output.
+    View is the user-facing tensor type: all arithmetic and view operations are defined
+    on it.
+-   Each Node subclass is accompanied by free functions that construct it and return a
+    View onto its output (public for leaves: `const`, `ones`, `param`, ...; private for
+    operations: `_matmul`, `_reduction`, ...).
 -   The graph is static and acyclic, but not necessarily a tree (e.g. shared subgraphs).
 -   Parameter nodes map to buffers that must be written when executing the graph.
 
-Nodes will frequently reuse their first operand's shape, pitch, etc. This makes it
-easier for the backend to reuse memory and fuse kernels.
+Because every Node output is dense, view composition never produces chains of nodes:
+each view operation transforms the current View's accessor in place, onto the same
+backing Node. Materializing a C-contiguous intermediate is explicit, via `View.copy()`
+(a ScatterNode).
 """
 
 __all__ = [
-    "Accessor",
     "ConstNode",
     "ElementwiseNode",
     "MatmulNode",
@@ -18,15 +27,21 @@ __all__ = [
     "ParamNode",
     "ReductionNode",
     "ScatterNode",
-    "ViewNode",
+    "View",
+    "c_contiguous_pitch_for_shape",
+    "const",
+    "full",
     "is_c_contiguous",
     "is_contiguous",
+    "ones",
+    "param",
+    "zeros",
 ]
 
 import math
 from abc import ABC
-from dataclasses import dataclass, fields, replace
-from typing import Callable, Generator, Iterable, Literal
+from dataclasses import dataclass, fields
+from typing import Callable, Generator, Iterable
 
 import numpy.typing as npt
 
@@ -54,29 +69,18 @@ class NotDifferentiableException(Exception):
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class Node(ABC):
-    offset: int
+    """
+    An operation in the graph. Its output is always a dense, C-contiguous array of the
+    given `shape`. Operands are read through (potentially sparse) Views.
+    """
+
     shape: tuple[int, ...]
-    pitch: tuple[int, ...]
     stype: ScalarType
-    input: tuple["Node", ...]
-
-    def __post_init__(self):
-        assert len(self.shape) == len(self.pitch)
-
-    #
-    # Properties:
-    #
+    input: tuple["View", ...]
 
     @property
     def nbytes(self) -> int:
         return math.prod(self.shape) * stype_nbytes(self.stype)
-
-    #
-    # Operations:
-    #
-
-    def broadcast(self, ns: tuple[int, ...]) -> "Node":
-        return ViewNode.new_broadcast(input=self, ns=ns)
 
     def view(
         self,
@@ -84,124 +88,223 @@ class Node(ABC):
         offset: int = 0,
         shape: tuple[int, ...],
         pitch: tuple[int, ...],
-    ) -> "Node":
-        accessor = Accessor(offset=offset, shape=shape, pitch=pitch)
-        return ViewNode.new(input=self, accessor=accessor)
+    ) -> "View":
+        """
+        Returns a View onto this node's dense output buffer with the given access pattern,
+        in backing-buffer coordinates. Panics if the view addresses memory outside this
+        node.
 
-    def copy(self, *, stype: ScalarType | None = None) -> "Node":
-        return ScatterNode.new_copy(source=self, stype=stype)
+        This is the deliberate escape hatch for reinterpreting a buffer. To reinterpret an
+        existing view, reach for its backing node explicitly (`v.node.view(...)`).
+        """
+        new = View(node=self, offset=offset, shape=shape, pitch=pitch)
+        new._raise_if_out_of_backing_node_bounds()
+        return new
 
-    def __pow__(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="pow")
+    def df_do(self, df_dout: "View") -> "tuple[View, ...]":
+        """
+        Given ∂f/∂n (df_dout, the gradient w.r.t. this node's dense output), returns
+        (∂f/∂o₁, ∂f/∂o₂, ...) for each operand View oᵢ.
 
-    def __rpow__(self, other: "Node | Scalar") -> "Node":
-        return Node._from_node_or_scalar(other, stype=self.stype) ** self
+        Override this method in each Node subclass to implement differentiation for that
+        node type. Raises NotDifferentiableException if the node is not differentiable.
+        """
+        _ = df_dout
+        raise NotDifferentiableException(self)
 
-    def __mul__(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="mul")
 
-    def __rmul__(self, other: "Node | Scalar") -> "Node":
-        return Node._from_node_or_scalar(other, stype=self.stype) * self
+#
+# View
+#
 
-    def __truediv__(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="div")
 
-    def __rtruediv__(self, other: "Node | Scalar") -> "Node":
-        return Node._from_node_or_scalar(other, stype=self.stype) / self
+@dataclass(frozen=True, eq=False)
+class View:
+    """
+    An access pattern (offset, shape, pitch) onto a backing Node's dense output buffer.
 
-    def __add__(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="add")
+    View is the user-facing tensor type. All arithmetic operators and view operations are
+    defined here. View operations transform the accessor in place, onto the same backing
+    node; they never build chains of nodes.
+    """
 
-    def __radd__(self, other: "Node | Scalar") -> "Node":
-        return Node._from_node_or_scalar(other, stype=self.stype) + self
+    node: "Node"
+    offset: int
+    shape: tuple[int, ...]
+    pitch: tuple[int, ...]
 
-    def __sub__(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="sub")
+    def __post_init__(self):
+        assert len(self.shape) == len(self.pitch)
 
-    def __rsub__(self, other: "Node | Scalar") -> "Node":
-        return Node._from_node_or_scalar(other, stype=self.stype) - self
+    @staticmethod
+    def identity(node: "Node") -> "View":
+        """A dense, C-contiguous view that addresses the whole of `node`'s output."""
+        return View(
+            node=node,
+            offset=0,
+            shape=node.shape,
+            pitch=c_contiguous_pitch_for_shape(node.shape),
+        )
 
-    def max(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="max")
+    #
+    # Properties:
+    #
 
-    def min(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="min")
+    @property
+    def stype(self) -> ScalarType:
+        return self.node.stype
 
-    def eq(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="eq")
+    @property
+    def rank(self) -> int:
+        return len(self.shape)
 
-    def ne(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="ne")
+    @property
+    def nbytes(self) -> int:
+        return math.prod(self.shape) * stype_nbytes(self.stype)
 
-    def lt(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="lt")
+    #
+    # View operations (transform the accessor onto the same backing node):
+    #
 
-    def gt(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="gt")
+    def broadcast(self, ns: tuple[int, ...]) -> "View":
+        zs = (0,) * len(ns)
+        return View(
+            node=self.node,
+            offset=self.offset,
+            shape=ns + self.shape,
+            pitch=zs + self.pitch,
+        )
 
-    def le(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="le")
+    def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> "View":
+        key = (key,) if isinstance(key, (int, slice)) else key
+        offset, shape, pitch = from_key(self.offset, self.shape, self.pitch, key)
+        return View(node=self.node, offset=offset, shape=shape, pitch=pitch)
 
-    def ge(self, other: "Node | Scalar") -> "Node":
-        return self._elementwise_bop(other, operator="ge")
+    def permute(self, permutation: tuple[int, ...]) -> "View":
+        if sorted(permutation) != list(range(self.rank)):
+            raise ValueError(f"Bad permutation {permutation} for shape {self.shape}")
+        return View(
+            node=self.node,
+            offset=self.offset,
+            shape=tuple(self.shape[i] for i in permutation),
+            pitch=tuple(self.pitch[i] for i in permutation),
+        )
 
-    def __neg__(self) -> "Node":
-        return self._elementwise_uop(operator="neg")
+    def transpose(self) -> "View":
+        """Permutes dimensions so the last two are swapped, the rest left unaltered."""
+        identity = tuple(range(self.rank))
+        permutation = identity[:-2] + (identity[-1], identity[-2])
+        return self.permute(permutation)
 
-    def __pos__(self) -> "Node":
+    def squeeze(self, axes: tuple[int, ...]) -> "View":
+        for axis in axes:
+            if axis < 0 or axis >= self.rank:
+                raise IndexError(f"Axis {axis} out of bounds for shape {self.shape}")
+            if self.shape[axis] != 1:
+                raise ValueError(f"Cannot squeeze axis {axis} with {self.shape[axis]=}")
+        return View(
+            node=self.node,
+            offset=self.offset,
+            shape=tuple(s for i, s in enumerate(self.shape) if i not in axes),
+            pitch=tuple(p for i, p in enumerate(self.pitch) if i not in axes),
+        )
+
+    def copy(self, *, stype: ScalarType | None = None) -> "View":
+        return _copy(self, stype=stype)
+
+    #
+    # Elementwise / reduction / matmul operations (produce a new dense Node):
+    #
+
+    def __pow__(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="pow")
+
+    def __rpow__(self, other: "View | Scalar") -> "View":
+        return View._from_view_or_scalar(other, stype=self.stype) ** self
+
+    def __mul__(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="mul")
+
+    def __rmul__(self, other: "View | Scalar") -> "View":
+        return View._from_view_or_scalar(other, stype=self.stype) * self
+
+    def __truediv__(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="div")
+
+    def __rtruediv__(self, other: "View | Scalar") -> "View":
+        return View._from_view_or_scalar(other, stype=self.stype) / self
+
+    def __add__(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="add")
+
+    def __radd__(self, other: "View | Scalar") -> "View":
+        return View._from_view_or_scalar(other, stype=self.stype) + self
+
+    def __sub__(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="sub")
+
+    def __rsub__(self, other: "View | Scalar") -> "View":
+        return View._from_view_or_scalar(other, stype=self.stype) - self
+
+    def max(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="max")
+
+    def min(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="min")
+
+    def eq(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="eq")
+
+    def ne(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="ne")
+
+    def lt(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="lt")
+
+    def gt(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="gt")
+
+    def le(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="le")
+
+    def ge(self, other: "View | Scalar") -> "View":
+        return _elementwise_binary(self, other, operator="ge")
+
+    def __neg__(self) -> "View":
+        return _elementwise_unary(self, operator="neg")
+
+    def __pos__(self) -> "View":
         return self
 
-    def exp(self) -> "Node":
-        return self._elementwise_uop(operator="exp")
+    def exp(self) -> "View":
+        return _elementwise_unary(self, operator="exp")
 
-    def log(self) -> "Node":
-        return self._elementwise_uop(operator="log")
+    def log(self) -> "View":
+        return _elementwise_unary(self, operator="log")
 
-    def __invert__(self) -> "Node":
-        return self._elementwise_uop(operator="not")
+    def __invert__(self) -> "View":
+        return _elementwise_unary(self, operator="not")
 
-    def __matmul__(self, other: "Node") -> "Node":
-        return MatmulNode.new(a=self, b=other)
+    def __matmul__(self, other: "View") -> "View":
+        return _matmul(self, other)
 
-    def __rmatmul__(self, other: "Node") -> "Node":
-        return Node._from_node_or_scalar(other, stype=self.stype) @ self
-
-    def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> "Node":
-        key = (key,) if isinstance(key, (int, slice)) else key
-        return ViewNode.new_index(input=self, key=key)
+    def __rmatmul__(self, other: "View") -> "View":
+        return View._from_view_or_scalar(other, stype=self.stype) @ self
 
     def reduce(
         self,
         *,
         operator: BinaryAssocScalarOperator,
         axes: tuple[int, ...] | None,
-    ) -> "Node":
-        axes = tuple(range(len(self.shape))) if axes is None else axes
-        return ReductionNode.new(input=self, axes=axes, operator=operator)
+    ) -> "View":
+        axes = tuple(range(self.rank)) if axes is None else axes
+        return _reduction(self, axes=axes, operator=operator)
 
-    def sum(self, axes: tuple[int, ...] | None = None) -> "Node":
+    def sum(self, axes: tuple[int, ...] | None = None) -> "View":
         return self.reduce(axes=axes, operator="add")
 
-    def prod(self, axes: tuple[int, ...] | None = None) -> "Node":
+    def prod(self, axes: tuple[int, ...] | None = None) -> "View":
         return self.reduce(axes=axes, operator="mul")
-
-    def permute(self, permutation: tuple[int, ...]) -> "Node":
-        return ViewNode.new_permutation(input=self, permutation=permutation)
-
-    def transpose(self) -> "Node":
-        identity = tuple(range(len(self.shape)))
-        permutation = identity[:-2] + (identity[-1], identity[-2])
-        return self.permute(tuple(permutation))
-
-    def squeeze(self, axes: tuple[int, ...]) -> "Node":
-        for axis in axes:
-            if axis < 0 or axis >= len(self.shape):
-                raise IndexError(f"Axis {axis} out of bounds for shape {self.shape}")
-            if self.shape[axis] != 1:
-                raise ValueError(f"Cannot squeeze axis {axis} with {self.shape[axis]=}")
-        new_shape = tuple(s for i, s in enumerate(self.shape) if i not in axes)
-        new_pitch = tuple(p for i, p in enumerate(self.pitch) if i not in axes)
-        return self.view(shape=new_shape, pitch=new_pitch)
 
     #
     # Debug printing:
@@ -211,82 +314,103 @@ class Node(ABC):
         debug_print(self, out)
 
     #
-    # Differentiation
+    # Differentiation:
     #
 
-    def grad(self) -> dict["Node", "Node"]:
+    def grad(self) -> dict["Node", "View"]:
         """
-        Returns a mapping from each input tensor in the subgraph rooted at this tensor to
-        its gradient with respect to this tensor.
+        Returns a mapping from each backing Node in the subgraph rooted at this view to
+        its gradient with respect to this view.
         """
         return grad(self)
 
-    def df_do(self, df_dn: "Node") -> "tuple[Node, ...]":
+    def df_do(self, df_dview: "View") -> "tuple[View, ...]":
         """
-        Given ∂f/∂n (df_dn), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand oᵢ.
+        Given ∂f/∂(this view), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand View of the
+        backing node.
 
-        Override this method in each Node subclass to implement differentiation for that
-        node type. Raises NotDifferentiableException if the node is not differentiable.
+        Backprop factors into two linear steps: the accessor adjoint (push the gradient
+        from this view's logical space into the backing node's dense space), then the
+        node's op-adjoint (push it on to the node's operands).
         """
-        _ = df_dn
-        raise NotDifferentiableException(self)
+        return self.node.df_do(self._accessor_adjoint(df_dview))
+
+    def _accessor_adjoint(self, g: "View") -> "View":
+        """
+        Pushes a gradient `g` (w.r.t. this view's logical values) back into the backing
+        node's dense output space.
+
+        - Broadcast dims (pitch 0) map one input element to many outputs, so they are
+          sum-reduced.
+        - The reduced gradient is then scattered back into the backing node's dense shape
+          using this view's write location (offset, pitch). Unwritten elements are zero.
+        """
+        broadcast_axes = tuple(i for i, p in enumerate(self.pitch) if p == 0)
+        x = g.reduce(axes=broadcast_axes, operator="add") if broadcast_axes else g
+
+        # A dense identity view is already in the node's output space.
+        if self._is_identity():
+            return x
+
+        return _scatter(
+            source=x,
+            out_shape=self.node.shape,
+            woffset=self.offset,
+            wpitch=self.pitch,
+        )
 
     #
     # Private:
     #
 
-    def _elementwise_uop(self, operator: UnaryScalarOperator) -> "Node":
-        return ElementwiseNode(
-            offset=self.offset,
-            shape=self.shape,
-            pitch=self.pitch,
-            stype=self.stype,
-            input=(self,),
-            operator=operator,
+    def _is_identity(self) -> bool:
+        """True if this view addresses the whole backing node densely (C-contiguous)."""
+        return (
+            self.offset == 0
+            and self.shape == self.node.shape
+            and self.pitch == c_contiguous_pitch_for_shape(self.shape)
         )
 
-    def _elementwise_bop(
-        self,
-        other: "Node | Scalar",
-        operator: ScalarOperator,
-    ) -> "Node":
-        other = Node._from_node_or_scalar(other, stype=self.stype)
-        self, other = self._join_dtypes_for_bop(other)
-        self, other = self._join_shapes_for_elementwise_bop(other)
-        return ElementwiseNode(
-            offset=self.offset,
-            shape=self.shape,
-            pitch=self.pitch,
-            stype=self.stype,
-            input=(self, other),
-            operator=operator,
+    def _raise_if_out_of_backing_node_bounds(self) -> None:
+        """Panics if this view addresses memory outside the (dense) backing node."""
+        if self.offset < 0:
+            raise ValueError(f"View offset {self.offset} is negative")
+        max_address = self.offset + sum(
+            (s - 1) * p for s, p in zip(self.shape, self.pitch) if p > 0
         )
+        capacity = math.prod(self.node.shape)
+        if self.shape and math.prod(self.shape) > 0 and max_address >= capacity:
+            raise ValueError(
+                f"View (offset={self.offset}, shape={self.shape}, pitch={self.pitch}) "
+                f"addresses element {max_address} outside backing node of "
+                f"{capacity} elements"
+            )
 
     @staticmethod
-    def _from_node_or_scalar(
-        value: "npt.ArrayLike | Node", stype: ScalarType
-    ) -> "Node":
-        return value if isinstance(value, Node) else ConstNode.new(value, stype=stype)
+    def _from_view_or_scalar(value: "npt.ArrayLike | View", stype: ScalarType) -> "View":
+        return value if isinstance(value, View) else const(value, stype=stype)
 
-    def _join_dtypes_for_bop(self, other: "Node") -> tuple["Node", "Node"]:
+    def _join_dtypes_for_bop(self, other: "View") -> tuple["View", "View"]:
         res_dtype = stype_join(self.stype, other.stype)
         s = self.copy(stype=res_dtype) if self.stype != res_dtype else self
         o = other.copy(stype=res_dtype) if other.stype != res_dtype else other
         return s, o
 
-    def _join_shapes_for_elementwise_bop(self, other: "Node") -> tuple[Node, Node]:
+    def _join_shapes_for_elementwise_bop(self, other: "View") -> tuple["View", "View"]:
         join = shape_join(self.shape, self.pitch, other.shape, other.pitch)
         return (
-            self.view(shape=join.shape, pitch=join.pitch1),
-            other.view(shape=join.shape, pitch=join.pitch2),
+            View(node=self.node, offset=self.offset, shape=join.shape, pitch=join.pitch1),
+            View(
+                node=other.node, offset=other.offset, shape=join.shape, pitch=join.pitch2
+            ),
         )
 
-    def _join_shapes_for_matmul_bop(self, other: "Node") -> tuple[Node, Node]:
+    def _join_shapes_for_matmul_bop(self, other: "View") -> tuple["View", "View"]:
         s = self
         o = other
 
         # Ensure both operands are rank 2 or higher:
-        if len(s.shape) < 2 or len(o.shape) < 2:
+        if s.rank < 2 or o.rank < 2:
             raise ValueError(
                 f"Shapes {s.shape} and {o.shape} are not compatible for matmul: "
                 "both tensors must be 2D or higher"
@@ -295,10 +419,10 @@ class Node(ABC):
         # Compute broadcasting behavior by gathering corresponding dimensions into two
         # parallel arrays, joining those arrays, and then scattering the result back for
         # the original operands.
-        s_shape_gat = tuple(x for i, x in enumerate(s.shape) if i != len(s.shape) - 2)
-        s_pitch_gat = tuple(x for i, x in enumerate(s.pitch) if i != len(s.pitch) - 2)
-        o_shape_gat = tuple(x for i, x in enumerate(o.shape) if i != len(o.shape) - 1)
-        o_pitch_gat = tuple(x for i, x in enumerate(o.pitch) if i != len(o.pitch) - 1)
+        s_shape_gat = tuple(x for i, x in enumerate(s.shape) if i != s.rank - 2)
+        s_pitch_gat = tuple(x for i, x in enumerate(s.pitch) if i != s.rank - 2)
+        o_shape_gat = tuple(x for i, x in enumerate(o.shape) if i != o.rank - 1)
+        o_pitch_gat = tuple(x for i, x in enumerate(o.pitch) if i != o.rank - 1)
         join = shape_join(
             shape1=s_shape_gat,
             pitch1=s_pitch_gat,
@@ -319,135 +443,162 @@ class Node(ABC):
         new_o_pitch = join.pitch2[:-1] + (o.pitch[-2], o.pitch[-1])
 
         # Finalize:
-        new_self = s.view(shape=new_s_shape, pitch=new_s_pitch)
-        new_other = o.view(shape=new_o_shape, pitch=new_o_pitch)
+        new_self = View(node=s.node, offset=s.offset, shape=new_s_shape, pitch=new_s_pitch)
+        new_other = View(node=o.node, offset=o.offset, shape=new_o_shape, pitch=new_o_pitch)
         return new_self, new_other
+
+
+#
+# ConstNode
+#
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ConstNode(Node):
     value: npt.ArrayLike
 
-    @staticmethod
-    def new(value: "npt.ArrayLike", *, stype: ScalarType = "fp32") -> "ConstNode":
-        shape = ConstNode._infer_value_shape(value)
-        pitch = c_contiguous_pitch_for_shape(shape)
-        return ConstNode(
-            offset=0,
-            shape=shape,
-            pitch=pitch,
-            stype=stype,
-            value=value,
-            input=(),
-        )
 
-    @staticmethod
-    def ones(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> "Node":
-        return ConstNode.full(shape, v=1, stype=stype)
+def const(value: "npt.ArrayLike", *, stype: ScalarType = "fp32") -> View:
+    shape = _infer_value_shape(value)
+    return View.identity(ConstNode(shape=shape, stype=stype, input=(), value=value))
 
-    @staticmethod
-    def zeros(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> "Node":
-        return ConstNode.full(shape, v=0, stype=stype)
 
-    @staticmethod
-    def full(
-        shape: tuple[int, ...], v: Scalar, *, stype: ScalarType = "fp32"
-    ) -> "Node":
-        return ConstNode.new(v, stype=stype).broadcast(shape)
+def full(shape: tuple[int, ...], v: Scalar, *, stype: ScalarType = "fp32") -> View:
+    return const(v, stype=stype).broadcast(shape)
 
-    @staticmethod
-    def _infer_value_shape(value: "npt.ArrayLike") -> tuple[int, ...]:
-        if is_scalar(value):
-            return ()
-        assert isinstance(value, list)
-        if not value:
-            return (0,)
-        e0_shape = ConstNode._infer_value_shape(value[0])
-        for e1 in value[1:]:
-            if ConstNode._infer_value_shape(e1) != e0_shape:
-                raise ValueError("Inconsistent shapes in nested list")
-        return (len(value),) + e0_shape
+
+def ones(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> View:
+    return full(shape, 1, stype=stype)
+
+
+def zeros(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> View:
+    return full(shape, 0, stype=stype)
+
+
+def _infer_value_shape(value: "npt.ArrayLike") -> tuple[int, ...]:
+    if is_scalar(value):
+        return ()
+    assert isinstance(value, list)
+    if not value:
+        return (0,)
+    e0_shape = _infer_value_shape(value[0])
+    for e1 in value[1:]:
+        if _infer_value_shape(e1) != e0_shape:
+            raise ValueError("Inconsistent shapes in nested list")
+    return (len(value),) + e0_shape
+
+
+#
+# ParamNode
+#
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ParamNode(Node):
     label: str | None  # non-unique, for debug only
 
-    @staticmethod
-    def new(
-        *,
-        shape: tuple[int, ...],
-        stype: ScalarType,
-        label: str | None = None,
-    ) -> "ParamNode":
-        pitch = c_contiguous_pitch_for_shape(shape)
-        return ParamNode(
-            offset=0,
-            shape=shape,
-            pitch=pitch,
-            stype=stype,
-            input=(),
-            label=label,
-        )
+
+def param(
+    *,
+    shape: tuple[int, ...],
+    stype: ScalarType,
+    label: str | None = None,
+) -> View:
+    return View.identity(ParamNode(shape=shape, stype=stype, input=(), label=label))
+
+
+#
+# ElementwiseNode
+#
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ElementwiseNode(Node):
     operator: ScalarOperator
 
-    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
+    def df_do(self, df_dout: "View") -> tuple[View, ...]:
+        n = View.identity(self)
         match self.operator:
             case "neg":
-                return (-df_dn,)
+                return (-df_dout,)
             case "exp":
                 # ∂n/∂o₁ = exp(o₁) = n
-                return (df_dn * self,)
+                return (df_dout * n,)
             case "log":
                 # ∂n/∂o₁ = 1 / o₁
-                return (df_dn / self.input[0],)
+                return (df_dout / self.input[0],)
             case "pow":
                 # ∂n/∂o₁ = o₂ * o₁^(o₂ - 1) = o₂ * n / o₁
                 # ∂n/∂o₂ = log(o₁) * o₁^o₂ = log(o₁) * n
                 return (
-                    df_dn * self.input[1] * self / self.input[0],
-                    df_dn * self.input[0].log() * self,
+                    df_dout * self.input[1] * n / self.input[0],
+                    df_dout * self.input[0].log() * n,
                 )
             case "mul":
                 # ∂n/∂o₁ = o₂, ∂n/∂o₂ = o₁
                 return (
-                    df_dn * self.input[1],
-                    df_dn * self.input[0],
+                    df_dout * self.input[1],
+                    df_dout * self.input[0],
                 )
             case "div":
                 # ∂n/∂o₁ = 1 / o₂, ∂n/∂o₂ = -o₁ / o₂² = -n / o₂
                 return (
-                    df_dn / self.input[1],
-                    df_dn * -self / self.input[1],
+                    df_dout / self.input[1],
+                    df_dout * -n / self.input[1],
                 )
             case "add":
                 # ∂n/∂o₁ = ∂n/∂o₂ = 1
-                return (df_dn, df_dn)
+                return (df_dout, df_dout)
             case "sub":
                 # ∂n/∂o₁ = 1, ∂n/∂o₂ = -1
-                return (df_dn, -df_dn)
+                return (df_dout, -df_dout)
             case "max":
                 # ∂n/∂o₁ = 1 if o₁ > o₂ else 0
                 # ∂n/∂o₂ = 1 if o₂ > o₁ else 0
                 return (
-                    df_dn * self.input[0].gt(self.input[1]),
-                    df_dn * self.input[1].gt(self.input[0]),
+                    df_dout * self.input[0].gt(self.input[1]),
+                    df_dout * self.input[1].gt(self.input[0]),
                 )
             case "min":
                 # ∂n/∂o₁ = 1 if o₁ < o₂ else 0
                 # ∂n/∂o₂ = 1 if o₂ < o₁ else 0
                 return (
-                    df_dn * self.input[0].lt(self.input[1]),
-                    df_dn * self.input[1].lt(self.input[0]),
+                    df_dout * self.input[0].lt(self.input[1]),
+                    df_dout * self.input[1].lt(self.input[0]),
                 )
             case "eq" | "ne" | "lt" | "gt" | "le" | "ge":
                 raise NotDifferentiableException(self)
             case _:
                 raise NotImplementedError(f"{self.operator=}")
+
+
+def _elementwise_unary(operand: View, operator: UnaryScalarOperator) -> View:
+    return View.identity(
+        ElementwiseNode(
+            shape=operand.shape,
+            stype=operand.stype,
+            input=(operand,),
+            operator=operator,
+        )
+    )
+
+
+def _elementwise_binary(
+    a: View,
+    b: "View | Scalar",
+    operator: ScalarOperator,
+) -> View:
+    b = View._from_view_or_scalar(b, stype=a.stype)
+    a, b = a._join_dtypes_for_bop(b)
+    a, b = a._join_shapes_for_elementwise_bop(b)
+    return View.identity(
+        ElementwiseNode(shape=a.shape, stype=a.stype, input=(a, b), operator=operator)
+    )
+
+
+#
+# ReductionNode
+#
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -463,233 +614,158 @@ class ReductionNode(Node):
     operator: BinaryAssocScalarOperator
     axes: tuple[int, ...]
 
-    @staticmethod
-    def new(
-        input: "Node",
-        axes: tuple[int, ...],
-        operator: BinaryAssocScalarOperator,
-    ) -> "Node":
-        if not axes:
-            return input
+    def df_do(self, df_dout: "View") -> tuple[View, ...]:
+        operand = self.input[0]
 
-        out_shape = list(input.shape)
-        for axis in axes:
-            if axis < 0 or axis >= len(input.shape):
-                raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
-            out_shape[axis] = 1
-
-        out_shape = tuple(out_shape)
-        out_pitch = c_contiguous_pitch_for_shape(out_shape)
-
-        return ReductionNode(
-            offset=input.offset,
-            shape=out_shape,
-            pitch=out_pitch,
-            stype=input.stype,
-            input=(input,),
-            operator=operator,
-            axes=axes,
-        )
-
-    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
-        # broadcast df_dn to the input shape
-        df_dn = df_dn.view(
-            shape=self.input[0].shape,
+        # Broadcast df_dout (with reduced axes of size 1) back up to the operand shape.
+        g = View(
+            node=df_dout.node,
+            offset=df_dout.offset,
+            shape=operand.shape,
             pitch=tuple(
-                (0 if i in self.axes else df_dn.pitch[i])
-                for i in range(len(self.input[0].shape))
+                (0 if i in self.axes else df_dout.pitch[i])
+                for i in range(operand.rank)
             ),
         )
 
         match self.operator:
             case "mul":
                 # ∂n/∂o₁ = n / o₁
-                return (df_dn * (self / self.input[0]),)
+                return (g * (View.identity(self) / operand),)
             case "add":
                 # ∂n/∂o₁ = 1
-                return (df_dn,)
+                return (g,)
             case "max" | "min":
-                # ∂n/∂o₁ = 1 if o₁ is the max/min along the reduction axes, else 0
-                # Mask broadcast df_dn with the condition above.
-                # Note that the condition is identical for both "max" and "min".
-                cond = self.input[0].eq(self)
-                return (df_dn * cond,)
+                # ∂n/∂o₁ = 1 if o₁ is the max/min along the reduction axes, else 0.
+                # The condition is identical for both "max" and "min".
+                cond = operand.eq(View.identity(self))
+                return (g * cond,)
             case _:
                 raise NotImplementedError(f"{self.operator=}")
 
 
+def _reduction(
+    input: View,
+    axes: tuple[int, ...],
+    operator: BinaryAssocScalarOperator,
+) -> View:
+    if not axes:
+        return input
+
+    out_shape = list(input.shape)
+    for axis in axes:
+        if axis < 0 or axis >= input.rank:
+            raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
+        out_shape[axis] = 1
+
+    return View.identity(
+        ReductionNode(
+            shape=tuple(out_shape),
+            stype=input.stype,
+            input=(input,),
+            operator=operator,
+            axes=axes,
+        )
+    )
+
+
+#
+# MatmulNode
+#
+
+
 @dataclass(kw_only=True, frozen=True, eq=False)
 class MatmulNode(Node):
-    @staticmethod
-    def new(a: "Node", b: "Node") -> "MatmulNode":
-        a, b = a._join_dtypes_for_bop(b)
-        a, b = a._join_shapes_for_matmul_bop(b)
-        out_offset = 0
-        out_shape = a.shape[:-1] + (b.shape[-1],)
-        out_pitch = c_contiguous_pitch_for_shape(out_shape)
-        return MatmulNode(
-            offset=out_offset,
-            shape=out_shape,
-            pitch=out_pitch,
-            stype=a.stype,
-            input=(a, b),
-        )
-
-    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
+    def df_do(self, df_dout: "View") -> tuple[View, ...]:
         # ∂n/∂o₁ = df/dn @ o₂.T
         # ∂n/∂o₂ = o₁.T @ df/dn
         return (
-            df_dn @ self.input[1].transpose(),
-            self.input[0].transpose() @ df_dn,
+            df_dout @ self.input[1].transpose(),
+            self.input[0].transpose() @ df_dout,
         )
 
 
-@dataclass(kw_only=True, frozen=True, eq=False)
-class ViewNode(Node):
-    """
-    Maps each input element to zero, one, or multiple (i.e. broadcasted) output elements
-    by only changing the offset, shape, pitch.
-    """
+def _matmul(a: View, b: View) -> View:
+    a, b = a._join_dtypes_for_bop(b)
+    a, b = a._join_shapes_for_matmul_bop(b)
+    out_shape = a.shape[:-1] + (b.shape[-1],)
+    return View.identity(MatmulNode(shape=out_shape, stype=a.stype, input=(a, b)))
 
-    accessor: "Accessor"
 
-    @staticmethod
-    def new(input: "Node", accessor: "Accessor") -> "ViewNode":
-        accessor.raise_if_not_compatible(input)
-
-        if isinstance(input, ViewNode):
-            assert len(input.input) == 1
-            accessor = accessor.compose(input.accessor)
-            return ViewNode(
-                offset=accessor.offset,
-                shape=accessor.shape,
-                pitch=accessor.pitch,
-                stype=input.stype,
-                input=input.input,
-                accessor=accessor,
-            )
-        else:
-            return ViewNode(
-                offset=accessor.offset,
-                shape=accessor.shape,
-                pitch=accessor.pitch,
-                stype=input.stype,
-                input=(input,),
-                accessor=accessor,
-            )
-
-    @staticmethod
-    def new_broadcast(input: "Node", ns: tuple[int, ...]) -> "Node":
-        zs = (0,) * len(ns)
-        shape = ns + input.shape
-        pitch = zs + input.pitch
-        return input.view(offset=input.offset, shape=shape, pitch=pitch)
-
-    @staticmethod
-    def new_permutation(input: "Node", permutation: tuple[int, ...]) -> "ViewNode":
-        if sorted(permutation) != list(range(len(input.shape))):
-            raise ValueError(f"Bad permutation {permutation} for shape {input.shape}")
-        new_offset = input.offset
-        new_shape = tuple(input.shape[i] for i in permutation)
-        new_pitch = tuple(input.pitch[i] for i in permutation)
-        return ViewNode.new(
-            input=input,
-            accessor=Accessor(offset=new_offset, shape=new_shape, pitch=new_pitch),
-        )
-
-    @staticmethod
-    def new_index(input: "Node", key: tuple[int | slice, ...]) -> "ViewNode":
-        accessor = Accessor.from_key(input.offset, input.shape, input.pitch, key)
-        return ViewNode(
-            offset=accessor.offset,
-            pitch=accessor.pitch,
-            shape=accessor.shape,
-            stype=input.stype,
-            input=(input,),
-            accessor=accessor,
-        )
-
-    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
-        """
-        - A view simply maps each input index `x` to zero, one, or multiple output
-          indices `y_o`. Each index is a "flat" index, i.e. an integer that references
-          an element in some flat storage array that is viewed.
-        - Consider each case:
-          - x -> {}: the gradient flow is zero for that element.
-          - x -> {y}: the gradient flow is identity for that element.
-          - x -> {y₁, y₂, ...}: the gradient flow is a sum over elements (broadcast).
-        """
-
-        # Sum-reduce over all broadcast dimensions (i.e. pitch 0).
-        x = df_dn.reduce(
-            axes=tuple(i_dim for i_dim, p in enumerate(self.pitch) if p == 0),
-            operator="add",
-        )
-
-        # Scatter the reduced tensor back to the input shape.
-        # We can't use the original accessor because it does not account for the
-        # collapsed broadcast dimensions. Instead, we replace the accessor's shape with
-        # the reduced shape, keeping offset and pitch intact.
-        x = ScatterNode.new(
-            source=x,
-            shape=self.input[0].shape,
-            accessor=replace(self.accessor, shape=x.shape),
-        )
-
-        # Done:
-        return (x,)
+#
+# ScatterNode
+#
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ScatterNode(Node):
     """
-    Scatter maps a dense "source" to sparse destinations using view parameters. Unlike a
-    ViewNode, the view parameters specify write locations, not read locations. The
-    "shape" operand gives the shape of the output, all unwritten values are filled with
-    zeros.
+    Scatter maps a dense "source" to sparse destinations in a freshly allocated,
+    C-contiguous output. Unlike a read view, (woffset, wpitch) specify *write* locations,
+    not read locations: source element at logical index `i` is written to output flat
+    index `woffset + Σ i·wpitch`. The write shape equals the source's shape. All unwritten
+    output elements are zero.
 
     Example NumPy code:
 
     ```python
-    def scatter(source, shape, accessor) =
-        res = np.zeros(shape=shape, stype=source.stype)
-        res[key] = source
+    def scatter(source, out_shape, woffset, wpitch):
+        res = np.zeros(shape=out_shape, dtype=source.dtype)
+        # write source[i] to flat index woffset + dot(i, wpitch) of res
+        ...
         return res
-
-    # Note that `scatter` is the inverse of `view` aka `__getitem__`:
-    assert scatter(source, shape, key)[key] == source
     ```
 
-    Scatter always writes to freshly allocated C-contiguous memory.
+    `copy` (a dense round trip) is the special case where the write pattern is the dense
+    C-contiguous layout of the source shape.
     """
 
-    accessor: "Accessor"
+    woffset: int
+    wpitch: tuple[int, ...]
 
-    @staticmethod
-    def new(
-        source: "Node",
-        shape: tuple[int, ...],
-        accessor: "Accessor",
-    ) -> "ScatterNode":
-        return ScatterNode(
-            offset=0,
-            shape=shape,
-            pitch=c_contiguous_pitch_for_shape(shape),
-            stype=source.stype,
-            input=(source,),
-            accessor=accessor,
+    def df_do(self, df_dout: "View") -> tuple[View, ...]:
+        # The gradient w.r.t. the source is df_dout read back at the write locations.
+        # This requires reading in the output's dense coordinate frame, so materialize
+        # df_dout to a dense identity view first if it is not already one.
+        source = self.input[0]
+        dense = df_dout if df_dout._is_identity() else df_dout.copy()
+        return (
+            View(
+                node=dense.node,
+                offset=self.woffset,
+                shape=source.shape,
+                pitch=self.wpitch,
+            ),
         )
 
-    @staticmethod
-    def new_copy(source: "Node", stype: ScalarType | None = None) -> "Node":
-        stype = stype or source.stype
-        pitch = c_contiguous_pitch_for_shape(source.shape)
-        accessor = Accessor(offset=0, pitch=pitch, shape=source.shape)
-        return ScatterNode.new(source=source, shape=source.shape, accessor=accessor)
 
-    def df_do(self, df_dn: "Node") -> tuple[Node, ...]:
-        source_grad = ViewNode.new(df_dn, self.accessor)
-        return (source_grad,)
+def _scatter(
+    *,
+    source: View,
+    out_shape: tuple[int, ...],
+    woffset: int,
+    wpitch: tuple[int, ...],
+    stype: ScalarType | None = None,
+) -> View:
+    return View.identity(
+        ScatterNode(
+            shape=out_shape,
+            stype=stype or source.stype,
+            input=(source,),
+            woffset=woffset,
+            wpitch=wpitch,
+        )
+    )
+
+
+def _copy(source: View, stype: ScalarType | None = None) -> View:
+    return _scatter(
+        source=source,
+        out_shape=source.shape,
+        woffset=0,
+        wpitch=c_contiguous_pitch_for_shape(source.shape),
+        stype=stype or source.stype,
+    )
 
 
 #
@@ -697,252 +773,58 @@ class ScatterNode(Node):
 #
 
 
-@dataclass(frozen=True, kw_only=True)
-class Accessor:
-    offset: int
-    pitch: tuple[int, ...]
-    shape: tuple[int, ...]
+def from_key(
+    old_offset: int,
+    old_shape: tuple[int, ...],
+    old_pitch: tuple[int, ...],
+    key: tuple[int | slice, ...],
+) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
+    """
+    Computes the (offset, shape, pitch) of the subview selected by `key` from a view with
+    the given (old_offset, old_shape, old_pitch), in backing-buffer coordinates.
+    """
 
-    @property
-    def rank(self) -> int:
-        return len(self.shape)
+    def bounded_index(k: int) -> int:
+        d = old_shape[dim]
+        if not (-d <= k < d):
+            raise IndexError(f"Index {k} out of bounds for dimension {dim} of size {d}")
+        return k % d
 
-    @staticmethod
-    def from_key(
-        old_offset: int,
-        old_shape: tuple[int, ...],
-        old_pitch: tuple[int, ...],
-        key: tuple[int | slice, ...],
-    ) -> "Accessor":
-        """
-        Computes an accessor's offset, pitch, and shape for a given input tensor and
-        key.
-
-        Accessor = ViewNode (aka read accessor) or ScatterNode (aka write accessor).
-        """
-
-        def bounded_index(k: int) -> int:
-            d = old_shape[dim]
-            if not (-d <= k < d):
-                raise IndexError(
-                    f"Index {k} out of bounds for dimension {dim} of size {d}"
-                )
-            return k % d
-
-        def bounded_end(k: int) -> int:
-            d = old_shape[dim]
-            if not (0 <= k <= d):
-                raise IndexError(
-                    f"Slice end {k} out of bounds for dimension {dim} of size {d}"
-                )
-            return k
-
-        assert len(key) <= len(old_shape)
-
-        new_offset = old_offset
-        new_pitch = []
-        new_shape = []
-
-        for dim, k in enumerate(key):
-            match k:
-                case int():
-                    new_offset += bounded_index(k) * old_pitch[dim]
-                case slice():
-                    b = bounded_index(k.start) if k.start is not None else 0
-                    e = bounded_end(k.stop) if k.stop is not None else old_shape[dim]
-                    s = k.step if k.step is not None else 1
-                    a = abs(s)
-
-                    new_offset += b * old_pitch[dim]
-                    new_pitch.append(old_pitch[dim] * s)
-                    new_shape.append(max(0, (e - b + (a - 1)) // a))
-                case _:
-                    raise TypeError(f"Invalid index {k} for dimension {dim}")
-
-        for dim in range(len(key), len(old_shape)):
-            new_pitch.append(old_pitch[dim])
-            new_shape.append(old_shape[dim])
-
-        return Accessor(
-            offset=new_offset,
-            pitch=tuple(new_pitch),
-            shape=tuple(new_shape),
-        )
-
-    def raise_if_not_compatible(self, node: "Node"):
-        """
-        Raises a ValueError if the view defined by this accessor is not compatible with
-        the given node's memory layout (shape and pitch).
-
-        An accessor is incompatible with a node if it cannot be implemented as a view
-        (i.e. without copying).
-        """
-
-        old_shape = node.shape
-        old_pitch = node.pitch
-        new_shape = self.shape
-        new_pitch = self.pitch
-
-        def squeezed_c_permutation(
-            shape: tuple[int, ...],
-            pitch: tuple[int, ...],
-        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-            """
-            Returns the shape and pitch after deleting all dimensions of size 1 or
-            dimensions of pitch 0.
-            """
-
-            new_shape = []
-            new_pitch = []
-            for s, p in zip(shape, pitch):
-                if s != 1 and p != 0:
-                    new_shape.append(s)
-                    new_pitch.append(p)
-            return c_permuted(tuple(new_shape), tuple(new_pitch))
-
-        # If both old and new shapes are contiguous (not even C-contiguous), then the
-        # accessor is compatible if it addresses fewer elements than in the original.
-        old_cc_shape_pitch = c_permuted(old_shape, old_pitch)
-        new_cc_shape_pitch = c_permuted(new_shape, new_pitch)
-        if (
-            old_cc_shape_pitch == new_cc_shape_pitch
-            and is_c_contiguous(old_cc_shape_pitch[0], old_cc_shape_pitch[1])
-            and math.prod(old_shape) >= math.prod(new_shape)
-        ):
-            return
-
-        # If both old and new shapes are identical after deleting all dimensions of size
-        # 1 or dimensions of pitch 0, then the view is compatible, even if not
-        # contiguous.
-        old_squeezed_shape_pitch = squeezed_c_permutation(old_shape, old_pitch)
-        new_squeezed_shape_pitch = squeezed_c_permutation(new_shape, new_pitch)
-        if old_squeezed_shape_pitch == new_squeezed_shape_pitch:
-            return
-
-        # Otherwise, the view is not compatible.
-        raise ValueError(
-            f"Cannot view "
-            f"old tensor (shape={old_shape}, pitch={old_pitch}) as "
-            f"new tensor (shape={new_shape}, pitch={new_pitch})"
-        )
-
-    def address(self, index: tuple[int, ...]) -> int:
-        """
-        Returns the flat index in the original storage array that corresponds to the given
-        multi-dimensional index in the view defined by this accessor.
-        """
-        return self.offset + sum(i * p for i, p in zip(index, self.pitch))
-
-    def index(self, address: int) -> tuple[int, ...]:
-        """
-        Returns a multi-dimensional index in the view defined by this accessor that corresponds to
-        the given flat index in the original storage array.
-
-        Note that because stride tricks can map multiple indices to the same address, this function
-        is NOT the inverse of address UNLESS self is C-contiguous.
-        """
-
-        assert address >= self.offset
-        address -= self.offset
-
-        accessor_c_permutation = c_permutation(self.shape, self.pitch)
-        accessor_c_permutation_inverse = invert_permutation(accessor_c_permutation)
-
-        c_shape = permute(self.shape, accessor_c_permutation)
-        c_pitch = permute(self.pitch, accessor_c_permutation)
-
-        c_index = []
-        for s, p in zip(c_shape, c_pitch):
-            if p == 0:
-                c_index.append(0)
-            else:
-                i = min(s - 1, address // p)
-                address -= i * p
-                c_index.append(i)
-
-        return permute(tuple(c_index), accessor_c_permutation_inverse)
-
-    def compose(self, first: Accessor) -> Accessor:
-        """
-        Returns a single accessor whose view is equivalent to viewing through `first`, then `self`.
-        """
-
-        if self.rank != first.rank:
-            raise ValueError(
-                f"Cannot compose accessors with different ranks: {self.rank} and {first.rank}"
+    def bounded_end(k: int) -> int:
+        d = old_shape[dim]
+        if not (0 <= k <= d):
+            raise IndexError(
+                f"Slice end {k} out of bounds for dimension {dim} of size {d}"
             )
+        return k
 
-        # First, convert `self` into a sequence of `slice()` args.
-        # Then, `first.slice()` will produce the composed view.
+    assert len(key) <= len(old_shape)
 
-        # Convert self.offset into a multi-dimensional index using an auxiliary "phony" dense view.
-        per_dim_offsets = Accessor(
-            shape=first.shape,
-            pitch=c_contiguous_pitch_for_shape(first.shape),
-            offset=0,
-        ).index(self.offset)
+    new_offset = old_offset
+    new_pitch = []
+    new_shape = []
 
-        # Build slice args per-dimension:
-        per_dim_slices = tuple(
-            (o, s, p) for o, s, p in zip(per_dim_offsets, self.shape, self.pitch)
-        )
+    for dim, k in enumerate(key):
+        match k:
+            case int():
+                new_offset += bounded_index(k) * old_pitch[dim]
+            case slice():
+                b = bounded_index(k.start) if k.start is not None else 0
+                e = bounded_end(k.stop) if k.stop is not None else old_shape[dim]
+                s = k.step if k.step is not None else 1
+                a = abs(s)
 
-        # Now simply slice `first` using the per-dimension slice args we just built.
-        return first.slice(per_dim_slices)
+                new_offset += b * old_pitch[dim]
+                new_pitch.append(old_pitch[dim] * s)
+                new_shape.append(max(0, (e - b + (a - 1)) // a))
+            case _:
+                raise TypeError(f"Invalid index {k} for dimension {dim}")
 
-    def slice(
-        self,
-        raw_slices: tuple[tuple[int | None, int | None, int | None], ...],
-    ) -> Accessor:
-        """
-        Returns a new accessor that represents a sliced subview of self's view.
+    for dim in range(len(key), len(old_shape)):
+        new_pitch.append(old_pitch[dim])
+        new_shape.append(old_shape[dim])
 
-        Args:
-        -   slices: a tuple of slice objects, one for each dimension of self. Each slice specifies
-            how to slice that dimension:
-                (skip = 0, count = self.shape[dim], step = 1).
-        -   truncate: a value indicating whether to allow truncating slices that go out of bounds.
-        """
-
-        if self.rank != len(raw_slices):
-            raise ValueError(
-                f"Number of slices {len(raw_slices)} does not match accessor rank {self.rank}"
-            )
-
-        # Fill in default values in each slice:
-        slices: tuple[tuple[int, int, int], ...] = tuple(
-            (
-                skip if skip is not None else 0,
-                count if count is not None else self.shape[dim],
-                step if step is not None else 1,
-            )
-            for dim, (skip, count, step) in enumerate(raw_slices)
-        )
-
-        # Compute the updated accessor offset:
-        new_offset = self.offset + self.address(tuple(s[0] for s in slices))
-
-        # Compute the updated accessor shape and pitch:
-        new_shape = []
-        new_pitch = []
-        for dim, (skip, count, step) in enumerate(slices):
-            assert self.shape[dim] != 0
-
-            if not (
-                (0 <= skip < self.shape[dim])
-                and (0 <= skip + step * count <= self.shape[dim])
-            ):
-                raise IndexError(f"{dim=}: {skip=}, {step=}, {count=} out of bounds")
-
-            new_shape.append(count)
-            new_pitch.append(self.pitch[dim] * step)
-
-        # Done:
-        return Accessor(
-            offset=new_offset,
-            pitch=tuple(new_pitch),
-            shape=tuple(new_shape),
-        )
+    return new_offset, tuple(new_shape), tuple(new_pitch)
 
 
 @dataclass
@@ -1103,17 +985,19 @@ def permute[T](seq: tuple[T, ...], perm: tuple[int, ...]) -> tuple[T, ...]:
 #
 
 
-def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
+def debug_print(root: "View", out: SupportsWrite[str]) -> None:
     def build_tid_map() -> dict["Node", int]:
         reference_count_map = refcount([root])
-        assert reference_count_map[root] == 1, "Root tensor must have reference count 1"
+        assert reference_count_map[root.node] == 1, (
+            "Root tensor must have reference count 1"
+        )
 
         tid_map: dict["Node", int] = {}
-        for tensor, ref_count in reference_count_map.items():
+        for node, ref_count in reference_count_map.items():
             assert ref_count >= 1
             if ref_count == 1:
                 continue
-            tid_map[tensor] = len(tid_map)
+            tid_map[node] = len(tid_map)
 
         return tid_map
 
@@ -1122,52 +1006,60 @@ def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
         extra_fields = [f.name for f in fields(node) if f.name not in base_fields]
         args = ", ".join(f"{f}={getattr(node, f)!r}" for f in extra_fields)
         name = pascal_to_snake_case(node.__class__.__name__[: -len("Node")])
-        return (
-            f"{name}({args}) :: {node.stype}({node.offset},{node.shape},{node.pitch})"
-        )
+        return f"{name}({args}) :: {node.stype}{node.shape!r}"
 
-    def visit(
-        node: "Node",
-        out: SupportsWrite[str],
-        tid_map: dict["Node", int],
+    def visit_view(
+        view: "View",
+        prefix: str,
+        connector: str,
+        prefix_ext: str,
         *,
-        prefix: str = "",
-        node_type: Literal["root", "sibling", "last-sibling"] = "root",
+        is_root: bool,
     ) -> None:
-        connector = {"root": "", "sibling": "├ ", "last-sibling": "└ "}[node_type]
-        prefix_ext = {"root": "", "sibling": "│ ", "last-sibling": "  "}[node_type]
+        if view._is_identity():
+            visit_node(view.node, prefix, connector, prefix_ext, is_root=is_root)
+            return
 
+        # Render the access pattern, then the backing node as its only child.
+        print(
+            f"{prefix}{connector}view("
+            f"offset={view.offset}, shape={view.shape!r}, pitch={view.pitch!r})",
+            file=out,
+        )
+        visit_node(view.node, prefix + prefix_ext, "└ ", "  ", is_root=is_root)
+
+    def visit_node(
+        node: "Node",
+        prefix: str,
+        connector: str,
+        prefix_ext: str,
+        *,
+        is_root: bool,
+    ) -> None:
         tid = tid_map.get(node)
-        if tid is None:
-            print(f"{prefix}{connector}{headline(node)}", file=out)
+
+        if tid is not None and not is_root:
+            print(f"{prefix}{connector}%{tid}", file=out)
+            return
+
+        if tid is not None:
+            print(f"{prefix}{connector}%{tid} := {headline(node)}", file=out)
         else:
-            if node_type == "root":
-                print(
-                    f"{prefix}{connector}%{tid} := {headline(node)}",
-                    file=out,
-                )
-            else:
-                print(f"{prefix}{connector}%{tid}", file=out)
-                return
+            print(f"{prefix}{connector}{headline(node)}", file=out)
 
         child_prefix = prefix + prefix_ext
         for operand_index, operand in enumerate(node.input):
-            is_last_operand = operand_index == len(node.input) - 1
-            child_node_type = "last-sibling" if is_last_operand else "sibling"
-            visit(
-                operand,
-                out,
-                tid_map,
-                prefix=child_prefix,
-                node_type=child_node_type,
-            )
+            is_last = operand_index == len(node.input) - 1
+            c_connector = "└ " if is_last else "├ "
+            c_ext = "  " if is_last else "│ "
+            visit_view(operand, child_prefix, c_connector, c_ext, is_root=False)
 
     tid_map = build_tid_map()
 
-    visit(root, out, tid_map, prefix="", node_type="root")
+    visit_view(root, "", "", "", is_root=True)
 
-    for tensor in tid_map:
-        visit(tensor, out, tid_map, prefix="", node_type="root")
+    for node in tid_map:
+        visit_node(node, "", "", "", is_root=True)
 
 
 #
@@ -1175,10 +1067,10 @@ def debug_print(root: "Node", out: SupportsWrite[str]) -> None:
 #
 
 
-def toposort(roots: Iterable[Node]) -> list["Node"]:
+def toposort(roots: Iterable["View"]) -> list["Node"]:
     """
-    Returns a list of all tensors in the subgraph rooted at this tensor, sorted in
-    topological order (i.e. each tensor appears after all its inputs).
+    Returns a list of all nodes in the subgraph rooted at the given views, sorted in
+    topological order (i.e. each node appears after all its inputs).
     """
     visited: set["Node"] = set()
     topo_order: list["Node"] = []
@@ -1189,65 +1081,64 @@ def toposort(roots: Iterable[Node]) -> list["Node"]:
         visited.add(node)
 
         for operand in node.input:
-            visit(operand)
+            visit(operand.node)
 
         topo_order.append(node)
 
     for root in roots:
-        visit(root)
+        visit(root.node)
 
     return topo_order
 
 
-def refcount(roots: list[Node]) -> dict["Node", int]:
+def refcount(roots: Iterable["View"]) -> dict["Node", int]:
     """
-    Compute reference counts for all tensors in the subgraph rooted at this tensor.
+    Compute reference counts for all nodes in the subgraph rooted at the given views.
     """
     ref_counts: dict["Node", int] = {}
 
-    def visit(tensor: "Node") -> None:
-        if tensor in ref_counts:
-            ref_counts[tensor] += 1
+    def visit(node: "Node") -> None:
+        if node in ref_counts:
+            ref_counts[node] += 1
         else:
-            ref_counts[tensor] = 1
-            for operand in tensor.input:
-                visit(operand)
+            ref_counts[node] = 1
+            for operand in node.input:
+                visit(operand.node)
 
     for root in roots:
-        visit(root)
+        visit(root.node)
 
     return ref_counts
 
 
-def grad(f_graph: "Node") -> dict[Node, Node]:
+def grad(f: "View") -> dict["Node", "View"]:
     """
-    Given a forward graph 'f_graph' that computes a scalar output, returns a mapping
-    from each input tensor in 'f_graph' to its gradient with respect to the output.
+    Given a forward graph `f` that computes a scalar output, returns a mapping from each
+    backing Node in `f` to its gradient with respect to the output.
 
-    The returned gradient graph holds references to tensor objects in the forward graph
-    for efficient reuse of forward pass expressions in the backward pass.
+    The returned gradient graph holds references to views in the forward graph for
+    efficient reuse of forward pass expressions in the backward pass.
     """
 
-    if f_graph.shape != ():
+    if f.shape != ():
         raise ValueError("Output graph must be a scalar (i.e. have shape=())")
 
-    def accumulate_gradient(t: "Node", increment: "Node") -> None:
-        if base := grad.get(t):
-            grad[t] = base + increment
-        else:
-            grad[t] = increment
+    # grad_node[n] = ∂f / ∂(dense output of n)
+    grad_node: dict["Node", "View"] = {}
 
-    # grad[t] = ∂f / ∂t
-    grad: dict[Node, Node] = {}
+    def accumulate(view: "View", g: "View") -> None:
+        contrib = view._accessor_adjoint(g)
+        existing = grad_node.get(view.node)
+        grad_node[view.node] = (existing + contrib) if existing is not None else contrib
 
     # Initialize: ∂f / ∂f = 1
-    grad[f_graph] = ConstNode.ones(f_graph.shape, stype=f_graph.stype)
+    accumulate(f, ones(f.shape, stype=f.stype))
 
     # Traverse the graph in reverse topological order, accumulating gradients for each
     # node.
-    for node in reversed(toposort([f_graph])):
-        df_dn = grad.get(node)
-        if not df_dn:
+    for node in reversed(toposort([f])):
+        df_dn = grad_node.get(node)
+        if df_dn is None:
             continue
 
         try:
@@ -1256,10 +1147,9 @@ def grad(f_graph: "Node") -> dict[Node, Node]:
             continue
 
         for operand, df_do_i in zip(node.input, df_do):
-            accumulate_gradient(operand, df_do_i)
+            accumulate(operand, df_do_i)
 
-    # Done:
-    return grad
+    return grad_node
 
 
 #
