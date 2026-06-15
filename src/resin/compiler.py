@@ -1,14 +1,14 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from . import graph as rg
+from . import front as rf
 from .scalar import ScalarOperator, ScalarType
 
 
-def build_trivial_execution_plan(outs: rg.PyTree[rg.View]) -> list["Kernel"]:
+def build_trivial_execution_plan(outs: rf.PyTree[rf.View]) -> list["Kernel"]:
     node_to_kernel_map = {}
 
-    def map_node(node: rg.Node) -> Kernel:
+    def map_node(node: rf.Node) -> Kernel:
         nonlocal node_to_kernel_map
 
         if k := node_to_kernel_map.get(node):
@@ -18,24 +18,24 @@ def build_trivial_execution_plan(outs: rg.PyTree[rg.View]) -> list["Kernel"]:
         node_to_kernel_map[node] = k
         return k
 
-    def build_kernel_for_node(node: rg.Node) -> Kernel:
+    def build_kernel_for_node(node: rf.Node) -> Kernel:
         match node:
-            case rg.ConstNode():
+            case rf.ConstNode():
                 return ConstKernel(
                     shape=node.shape,
-                    pitch=rg.c_contiguous_pitch_for_shape(node.shape),
+                    pitch=rf.c_contiguous_pitch_for_shape(node.shape),
                     stype=node.stype,
                     input=(),
                     init=node,
                 )
-            case rg.ElementwiseNode():
+            case rf.ElementwiseNode():
                 # TODO: plumb each operand View's read accessor (offset/shape/pitch) into
                 # the kernel so it can read sparsely; for now operands are mapped by their
                 # backing node only.
                 input = tuple(map_node(iv.node) for iv in node.input)
                 return FusedElementwiseKernel(
                     shape=node.shape,
-                    pitch=rg.c_contiguous_pitch_for_shape(node.shape),
+                    pitch=rf.c_contiguous_pitch_for_shape(node.shape),
                     stype=node.stype,
                     input=input,
                     ops=((node.operator, tuple(range(len(input)))),),
@@ -43,7 +43,7 @@ def build_trivial_execution_plan(outs: rg.PyTree[rg.View]) -> list["Kernel"]:
             case _:
                 raise NotImplementedError()
 
-    nodes = rg.toposort(rg.flatten_pytree(outs))
+    nodes = rf.toposort(rf.flatten_pytree(outs))
     kernels = [map_node(node) for node in nodes]
 
     return kernels
@@ -161,7 +161,7 @@ class Kernel:
 
 @dataclass
 class ConstKernel(Kernel):
-    init: rg.ConstNode
+    init: rf.ConstNode
 
 
 @dataclass

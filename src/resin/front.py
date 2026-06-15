@@ -1,5 +1,5 @@
 """
-resin.graph models the computational graph of tensor operations.
+resin.front models the computational graph of tensor operations.
 -   Node is an operation in the graph. Its output is always a dense, C-contiguous array
     described solely by `shape`.
 -   View pairs an access pattern (offset, shape, pitch) with a backing Node. A Node reads

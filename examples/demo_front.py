@@ -1,8 +1,8 @@
-"""Demo of graph.py debug_print output for various node types."""
+"""Demo of front.py debug_print output for various node types."""
 
 import sys
 
-from resin.graph import const, param
+from resin.front import const, param
 
 
 def section(title: str) -> None:

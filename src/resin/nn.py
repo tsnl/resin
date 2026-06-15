@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass, fields, is_dataclass
 
-from . import graph as rg
+from . import front as rf
 
 
 @dataclass
@@ -9,14 +9,14 @@ class Module:
     def __post_init__(self):
         assert is_dataclass(self), "Module must be a dataclass"
 
-    def params(self) -> rg.PyTree[rg.View]:
+    def params(self) -> rf.PyTree[rf.View]:
         return Module._parse_param_tree(self)
 
     @staticmethod
     def _parse_param_tree(
-        it: Module | rg.PyTree[rg.View],
-    ) -> rg.PyTree[rg.View]:
-        if isinstance(it, rg.View):
+        it: Module | rf.PyTree[rf.View],
+    ) -> rf.PyTree[rf.View]:
+        if isinstance(it, rf.View):
             return it
         elif isinstance(it, dict):
             return {k: Module._parse_param_tree(v) for k, v in it.items()}
@@ -34,33 +34,33 @@ class Module:
 
 @dataclass
 class Linear:
-    weight: rg.View
-    bias: rg.View | None = None
+    weight: rf.View
+    bias: rf.View | None = None
 
     @staticmethod
     def new(in_features: int, out_features: int, bias: bool = True) -> "Linear":
-        weight = rg.param(shape=(out_features, in_features), stype="fp32")
-        bias_node = rg.param(shape=(out_features,), stype="fp32") if bias else None
+        weight = rf.param(shape=(out_features, in_features), stype="fp32")
+        bias_node = rf.param(shape=(out_features,), stype="fp32") if bias else None
         return Linear(weight=weight, bias=bias_node)
 
-    def __call__(self, x: rg.View) -> rg.View:
+    def __call__(self, x: rf.View) -> rf.View:
         out = self.weight @ x
         if self.bias is not None:
             out = out + self.bias
         return out
 
 
-def relu(x: rg.View) -> rg.View:
-    return x.max(rg.const(0, stype=x.stype))
+def relu(x: rf.View) -> rf.View:
+    return x.max(rf.const(0, stype=x.stype))
 
 
-def softmax(x: rg.View, axes: tuple[int, ...] = (0,)) -> rg.View:
+def softmax(x: rf.View, axes: tuple[int, ...] = (0,)) -> rf.View:
     exp_x = x.exp()
     sum_exp_x = exp_x.reduce(axes=axes, operator="add")
     return exp_x / sum_exp_x
 
 
-def cross_entropy(y_hat: rg.View, y: rg.View) -> rg.View:
+def cross_entropy(y_hat: rf.View, y: rf.View) -> rf.View:
     """
     Computes the cross-entropy loss between predicted probabilities `y_hat` and true
     labels `y`.
@@ -70,6 +70,6 @@ def cross_entropy(y_hat: rg.View, y: rg.View) -> rg.View:
     return -(y * y_hat.log()).sum(axes=(axis,)).squeeze(axes=(axis,)) / y.shape[axis]
 
 
-def mean(n: rg.View) -> rg.View:
+def mean(n: rf.View) -> rf.View:
     count = math.prod(n.shape)
     return n.sum() / count

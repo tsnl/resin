@@ -1,13 +1,13 @@
 import wgpu
 
-from . import graph as rg
+from . import front as rf
 
 
 class Processor:
     def __init__(
         self,
         device: wgpu.GPUDevice,
-        output_tree: rg.PyTree[rg.View],
+        output_tree: rf.PyTree[rf.View],
     ) -> None:
         super().__init__()
 
@@ -16,22 +16,22 @@ class Processor:
         self._param_nodes = Processor._compute_param_nodes(self._output_tree)
 
     @staticmethod
-    def _compute_param_nodes(pytree: rg.PyTree[rg.View]) -> list[rg.ParamNode]:
+    def _compute_param_nodes(pytree: rf.PyTree[rf.View]) -> list[rf.ParamNode]:
         return [
             node  #
-            for node in rg.toposort(rg.flatten_pytree(pytree))
-            if isinstance(node, rg.ParamNode)
+            for node in rf.toposort(rf.flatten_pytree(pytree))
+            if isinstance(node, rf.ParamNode)
         ]
 
     def run(
         self,
-        params: dict[rg.ParamNode, wgpu.GPUBuffer],
-    ) -> rg.PyTree[wgpu.GPUBuffer]:
+        params: dict[rf.ParamNode, wgpu.GPUBuffer],
+    ) -> rf.PyTree[wgpu.GPUBuffer]:
         self._bind_params_buffers(params)
         self._flood_buffers()
         return self._gather_output()
 
-    def _bind_params_buffers(self, params: dict[rg.ParamNode, wgpu.GPUBuffer]) -> None:
+    def _bind_params_buffers(self, params: dict[rf.ParamNode, wgpu.GPUBuffer]) -> None:
         for param_node in self._param_nodes:
             if param_node not in params:
                 raise ValueError(f"Missing buffer for parameter node {param_node}")
@@ -43,7 +43,7 @@ class Processor:
             "Flooding buffers through the graph is not implemented yet"
         )
 
-    def _gather_output(self) -> rg.PyTree[wgpu.GPUBuffer]:
+    def _gather_output(self) -> rf.PyTree[wgpu.GPUBuffer]:
         raise NotImplementedError("Gathering output buffers is not implemented yet")
 
     #
@@ -51,6 +51,6 @@ class Processor:
     #
 
     @staticmethod
-    def _optimize_graph(graph: rg.PyTree[rg.View]) -> rg.PyTree[rg.View]:
+    def _optimize_graph(graph: rf.PyTree[rf.View]) -> rf.PyTree[rf.View]:
         # TODO: implement graph optimizations
         return graph

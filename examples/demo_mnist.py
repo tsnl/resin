@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-import resin.graph as rg
+import resin.front as rf
 import resin.interp as ri
 import resin.nn as nn
 
@@ -26,7 +26,7 @@ class MnistMlp:
             l3=nn.Linear.new(config.hidden_size, config.output_size),
         )
 
-    def __call__(self, x: rg.View) -> rg.View:
+    def __call__(self, x: rf.View) -> rf.View:
         x = nn.relu(self.l1(x))
         x = nn.relu(self.l2(x))
         x = nn.softmax(self.l3(x))
@@ -44,12 +44,12 @@ def main():
         output_size=num_classes,
     )
 
-    image = rg.param(shape=(batch_size, img_size * img_size), stype="fp32")
-    label = rg.param(shape=(batch_size, num_classes), stype="fp32")
+    image = rf.param(shape=(batch_size, img_size * img_size), stype="fp32")
+    label = rf.param(shape=(batch_size, num_classes), stype="fp32")
     model = MnistMlp.new(config)
     probs = model(image)
     error = nn.mean(nn.cross_entropy(probs, label))
-    grads = rg.grad(error)
+    grads = rf.grad(error)
     # TODO: update model parameters with gradients, e.g. using SGD or Adam
 
     interp = ri.NumpyInterp({"probs": probs})
