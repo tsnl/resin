@@ -20,17 +20,17 @@ def load_shader(name: ShaderName, template_consts: dict[str, str]) -> str:
     text = load_shader_template(name)
 
     # Perform text substitution for each template const:
-    for pp_name, pp_value in template_consts.items():
+    for const_name, const_value in template_consts.items():
         text = re.sub(
             rf"""
             \/\* \s* template \s* \*\/  \s*     # /* template */
-            const \s+ {pp_name}         \s*     # const <NAME>
+            const \s+ {const_name}      \s*     # const <NAME>
             : \s* (?P<tyspec> .+?)      \s*     # : <TYPE>
             =                           \s*     # =
             \s* (?P<value> .+?)         \s*     # <VALUE_PLACEHOLDER>
             ;                                   # ;
             """,
-            rf"/* template */ const {pp_name}: \g<tyspec> = {pp_value};",
+            rf"/* template */ const {const_name}: \g<tyspec> = {const_value};",
             text,
             flags=re.VERBOSE,
         )
