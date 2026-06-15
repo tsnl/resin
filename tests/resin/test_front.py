@@ -1,10 +1,10 @@
-"""Expect tests for graph.py debug_print output."""
+"""Expect tests for front.py debug_print output."""
 
 import textwrap
 from io import StringIO
 
-import resin.front as rf
-from resin.front import (
+from resin import gpu
+from resin.gpu.front import (
     ElementwiseNode,
     View,
     const,
@@ -435,20 +435,20 @@ class TestGrad:
     def test_matmul_grad_shapes(self) -> None:
         x = param(shape=(2, 3), stype="fp32", label="x")
         w = param(shape=(3, 4), stype="fp32", label="w")
-        g = rf.grad(self._scalar(x @ w))
+        g = gpu.front.grad(self._scalar(x @ w))
         assert g[x.node].shape == x.shape
         assert g[w.node].shape == w.shape
 
     def test_broadcast_and_reduce_grad(self) -> None:
         p = param(shape=(3,), stype="fp32", label="p")
         b = param(shape=(2, 3), stype="fp32", label="b")
-        g = rf.grad(self._scalar(b + p))
+        g = gpu.front.grad(self._scalar(b + p))
         assert g[p.node].shape == p.shape
         assert g[b.node].shape == b.shape
 
     def test_copy_then_sum_grad(self) -> None:
         x = param(shape=(4,), stype="fp32", label="x")
-        g = rf.grad(self._scalar(x.copy()))
+        g = gpu.front.grad(self._scalar(x.copy()))
         assert g[x.node].shape == x.shape
 
 

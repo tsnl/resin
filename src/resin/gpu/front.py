@@ -1,5 +1,5 @@
 """
-resin.front models the computational graph of tensor operations.
+resin.gpu.front models the computational graph of tensor operations.
 -   Node is an operation in the graph. Its output is always a dense, C-contiguous array
     described solely by `shape`.
 -   View pairs an access pattern (offset, shape, pitch) with a backing Node. A Node reads
@@ -45,7 +45,7 @@ from typing import Callable, Generator, Iterable
 
 import numpy.typing as npt
 
-from .common import SupportsWrite, pascal_to_snake_case
+from ..common import SupportsWrite, pascal_to_snake_case
 from .scalar import (
     BinaryAssocScalarOperator,
     Scalar,

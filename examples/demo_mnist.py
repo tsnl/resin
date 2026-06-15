@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-import resin.front as rf
-import resin.interp as ri
 import resin.nn as nn
+from resin import gpu
 
 
 @dataclass
@@ -26,7 +25,7 @@ class MnistMlp:
             l3=nn.Linear.new(config.hidden_size, config.output_size),
         )
 
-    def __call__(self, x: rf.View) -> rf.View:
+    def __call__(self, x: gpu.front.View) -> gpu.front.View:
         x = nn.relu(self.l1(x))
         x = nn.relu(self.l2(x))
         x = nn.softmax(self.l3(x))
@@ -44,15 +43,15 @@ def main():
         output_size=num_classes,
     )
 
-    image = rf.param(shape=(batch_size, img_size * img_size), stype="fp32")
-    label = rf.param(shape=(batch_size, num_classes), stype="fp32")
+    image = gpu.front.param(shape=(batch_size, img_size * img_size), stype="fp32")
+    label = gpu.front.param(shape=(batch_size, num_classes), stype="fp32")
     model = MnistMlp.new(config)
     probs = model(image)
     error = nn.mean(nn.cross_entropy(probs, label))
-    grads = rf.grad(error)
+    grads = gpu.front.grad(error)
     # TODO: update model parameters with gradients, e.g. using SGD or Adam
 
-    interp = ri.NumpyInterp({"probs": probs})
+    # TODO: run interpreter
 
     # TODO: randomly initialize model parameters
 
@@ -62,7 +61,7 @@ def main():
     # - plug output buffer into optimizer to compute new parameter values, ideally
     #   in-place?
 
-    interp.run()
+    # interp.run()
 
 
 if __name__ == "__main__":

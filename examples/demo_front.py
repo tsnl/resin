@@ -2,7 +2,7 @@
 
 import sys
 
-from resin.front import const, param
+from resin.gpu.front import const, param
 
 
 def section(title: str) -> None:
