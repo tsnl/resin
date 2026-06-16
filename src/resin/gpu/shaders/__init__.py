@@ -17,9 +17,25 @@ type ShaderName = Literal[
 
 def load_shader(name: ShaderName, template_consts: dict[str, str]) -> str:
     # Load the shader text:
-    text = load_shader_template(name)
+    text = _load_shader_template(name)
 
     # Perform text substitution for each template const:
+    text = _render_shader_template(text, template_consts)
+
+    # Done:
+    return text
+
+
+@functools.cache
+def _load_shader_template(name: ShaderName) -> str:
+    folder_traversable = importlib.resources.files()
+    file_path = folder_traversable.joinpath(f"{name}.wgsl")
+    return file_path.read_text()
+
+
+def _render_shader_template(template_text: str, template_consts: dict[str, str]) -> str:
+    text = template_text
+
     for const_name, const_value in template_consts.items():
         text = re.sub(
             rf"""
@@ -35,12 +51,4 @@ def load_shader(name: ShaderName, template_consts: dict[str, str]) -> str:
             flags=re.VERBOSE,
         )
 
-    # Done:
     return text
-
-
-@functools.cache
-def load_shader_template(name: ShaderName) -> str:
-    folder_traversable = importlib.resources.files()
-    file_path = folder_traversable.joinpath(f"{name}.wgsl")
-    return file_path.read_text()
