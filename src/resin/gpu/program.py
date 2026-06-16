@@ -2,6 +2,8 @@ import math
 from dataclasses import dataclass
 from typing import cast
 
+from frozendict import frozendict
+
 from . import front
 from .kernel import (
     ElementwiseBinaryKernel,
@@ -24,17 +26,17 @@ from .scalar import (
 
 @dataclass(frozen=True, kw_only=True)
 class Program:
-    sinks: dict[str, BufferView]
-    queue: list[Dispatch]
-    buffers: list[Buffer]
-    buffer_views: list[BufferView]
+    sinks: frozendict[str, BufferView]
+    queue: tuple[Dispatch, ...]
+    buffers: tuple[Buffer, ...]
+    buffer_views: tuple[BufferView, ...]
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, eq=False)
 class Buffer:
     shape: tuple[int, ...]
     stype: ScalarType
-    fill: bytes | None = None
+    init: bytes | None = None
     readonly: bool
 
 
@@ -59,10 +61,26 @@ class Dispatch:
 
 
 class ProgramBuilder:
-    node_memo: dict[front.Node, Buffer]
-    view_memo: dict[front.View, BufferView]
+    buffer_memo: dict[front.Node, Buffer]
+    buffer_view_memo: dict[front.View, BufferView]
     queue: list[Dispatch]
     sinks: dict[str, BufferView]
+
+    def __init__(self):
+        super().__init__()
+
+        self.buffer_memo = {}
+        self.buffer_view_memo = {}
+        self.queue = []
+        self.sinks = {}
+
+    def finish(self) -> Program:
+        return Program(
+            sinks=frozendict(self.sinks),
+            queue=tuple(self.queue),
+            buffers=tuple(self.buffer_memo.values()),
+            buffer_views=tuple(self.buffer_view_memo.values()),
+        )
 
     def build_sink(self, name: str, view: front.View):
         if name in self.sinks:
@@ -73,7 +91,7 @@ class ProgramBuilder:
         self.sinks[name] = self._build_view(view)
 
     def _build_view(self, view: front.View) -> BufferView:
-        if bv := self.view_memo.get(view):
+        if bv := self.buffer_view_memo.get(view):
             return bv
 
         buffer = self._build_node(view.node)
@@ -84,13 +102,13 @@ class ProgramBuilder:
             shape=view.shape,
             pitch=view.pitch,
         )
-        self.view_memo[view] = bv
+        self.buffer_view_memo[view] = bv
 
         return bv
 
     def _build_node(self, node: front.Node) -> Buffer:
         # First check memoization.
-        if b := self.node_memo.get(node):
+        if b := self.buffer_memo.get(node):
             return b
 
         # Allocate output buffer.
@@ -115,7 +133,7 @@ class ProgramBuilder:
             self.queue.append(dispatch)
 
         # Memoize and return the output buffer.
-        self.node_memo[node] = output_buffer
+        self.buffer_memo[node] = output_buffer
         return output_buffer
 
     def _allocate_buffer_for_node(self, node: front.Node) -> Buffer:
@@ -125,7 +143,7 @@ class ProgramBuilder:
         return Buffer(
             shape=node.shape,
             stype=node.stype,
-            fill=(
+            init=(
                 marshall_pytensor(node.value, stype=node.stype)
                 if is_const_node
                 else None
