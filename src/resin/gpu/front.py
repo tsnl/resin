@@ -43,16 +43,14 @@ from abc import ABC
 from dataclasses import dataclass, fields
 from typing import Callable, Generator, Iterable
 
-import numpy.typing as npt
-
 from ..common import SupportsWrite, pascal_to_snake_case
+from .pytree import PyTensor, infer_pytensor_shape
 from .scalar import (
     BinaryAssocScalarOperator,
     Scalar,
     ScalarOperator,
     ScalarType,
     UnaryScalarOperator,
-    is_scalar,
     stype_join,
     stype_nbytes,
 )
@@ -76,7 +74,7 @@ class Node(ABC):
 
     shape: tuple[int, ...]
     stype: ScalarType
-    input: tuple["View", ...]
+    args: tuple["View", ...]
 
     @property
     def nbytes(self) -> int:
@@ -109,6 +107,13 @@ class Node(ABC):
         Override this method in each Node subclass to implement differentiation for that
         node type. Raises NotDifferentiableException if the node is not differentiable.
         """
+
+        # By default, nodes with no operands are trivially differentiable because they
+        # have no gradients to propagate backward.
+        if not self.args:
+            return ()
+
+        # If the node has operands but no df_do implementation, it's not differentiable.
         _ = df_dout
         raise NotDifferentiableException(self)
 
@@ -282,6 +287,12 @@ class View:
     def log(self) -> "View":
         return _elementwise_unary(self, operator="log")
 
+    def sin(self) -> "View":
+        return _elementwise_unary(self, operator="sin")
+
+    def cos(self) -> "View":
+        return _elementwise_unary(self, operator="cos")
+
     def __invert__(self) -> "View":
         return _elementwise_unary(self, operator="not")
 
@@ -388,9 +399,7 @@ class View:
             )
 
     @staticmethod
-    def _from_view_or_scalar(
-        value: "npt.ArrayLike | View", stype: ScalarType
-    ) -> "View":
+    def _from_view_or_scalar(value: "PyTensor | View", stype: ScalarType) -> "View":
         return value if isinstance(value, View) else const(value, stype=stype)
 
     def _join_dtypes_for_bop(self, other: "View") -> tuple["View", "View"]:
@@ -467,37 +476,24 @@ class View:
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ConstNode(Node):
-    value: npt.ArrayLike
+    value: PyTensor
 
 
-def const(value: "npt.ArrayLike", *, stype: ScalarType = "fp32") -> View:
-    shape = _infer_value_shape(value)
-    return View.identity(ConstNode(shape=shape, stype=stype, input=(), value=value))
+def const(value: "PyTensor", *, stype: ScalarType = "f4") -> View:
+    shape = infer_pytensor_shape(value)
+    return View.identity(ConstNode(shape=shape, stype=stype, args=(), value=value))
 
 
-def full(shape: tuple[int, ...], v: Scalar, *, stype: ScalarType = "fp32") -> View:
+def full(shape: tuple[int, ...], v: Scalar, *, stype: ScalarType = "f4") -> View:
     return const(v, stype=stype).broadcast(shape)
 
 
-def ones(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> View:
+def ones(shape: tuple[int, ...], *, stype: ScalarType = "f4") -> View:
     return full(shape, 1, stype=stype)
 
 
-def zeros(shape: tuple[int, ...], *, stype: ScalarType = "fp32") -> View:
+def zeros(shape: tuple[int, ...], *, stype: ScalarType = "f4") -> View:
     return full(shape, 0, stype=stype)
-
-
-def _infer_value_shape(value: "npt.ArrayLike") -> tuple[int, ...]:
-    if is_scalar(value):
-        return ()
-    assert isinstance(value, list)
-    if not value:
-        return (0,)
-    e0_shape = _infer_value_shape(value[0])
-    for e1 in value[1:]:
-        if _infer_value_shape(e1) != e0_shape:
-            raise ValueError("Inconsistent shapes in nested list")
-    return (len(value),) + e0_shape
 
 
 #
@@ -516,7 +512,7 @@ def param(
     stype: ScalarType,
     label: str | None = None,
 ) -> View:
-    return View.identity(ParamNode(shape=shape, stype=stype, input=(), label=label))
+    return View.identity(ParamNode(shape=shape, stype=stype, args=(), label=label))
 
 
 #
@@ -538,25 +534,31 @@ class ElementwiseNode(Node):
                 return (df_dout * n,)
             case "log":
                 # ∂n/∂o₁ = 1 / o₁
-                return (df_dout / self.input[0],)
+                return (df_dout / self.args[0],)
+            case "sin":
+                # ∂n/∂o₁ = cos(o₁)
+                return (df_dout * self.args[0].cos(),)
+            case "cos":
+                # ∂n/∂o₁ = -sin(o₁)
+                return (df_dout * -self.args[0].sin(),)
             case "pow":
                 # ∂n/∂o₁ = o₂ * o₁^(o₂ - 1) = o₂ * n / o₁
                 # ∂n/∂o₂ = log(o₁) * o₁^o₂ = log(o₁) * n
                 return (
-                    df_dout * self.input[1] * n / self.input[0],
-                    df_dout * self.input[0].log() * n,
+                    df_dout * self.args[1] * n / self.args[0],
+                    df_dout * self.args[0].log() * n,
                 )
             case "mul":
                 # ∂n/∂o₁ = o₂, ∂n/∂o₂ = o₁
                 return (
-                    df_dout * self.input[1],
-                    df_dout * self.input[0],
+                    df_dout * self.args[1],
+                    df_dout * self.args[0],
                 )
             case "div":
                 # ∂n/∂o₁ = 1 / o₂, ∂n/∂o₂ = -o₁ / o₂² = -n / o₂
                 return (
-                    df_dout / self.input[1],
-                    df_dout * -n / self.input[1],
+                    df_dout / self.args[1],
+                    df_dout * -n / self.args[1],
                 )
             case "add":
                 # ∂n/∂o₁ = ∂n/∂o₂ = 1
@@ -568,15 +570,15 @@ class ElementwiseNode(Node):
                 # ∂n/∂o₁ = 1 if o₁ > o₂ else 0
                 # ∂n/∂o₂ = 1 if o₂ > o₁ else 0
                 return (
-                    df_dout * self.input[0].gt(self.input[1]),
-                    df_dout * self.input[1].gt(self.input[0]),
+                    df_dout * self.args[0].gt(self.args[1]),
+                    df_dout * self.args[1].gt(self.args[0]),
                 )
             case "min":
                 # ∂n/∂o₁ = 1 if o₁ < o₂ else 0
                 # ∂n/∂o₂ = 1 if o₂ < o₁ else 0
                 return (
-                    df_dout * self.input[0].lt(self.input[1]),
-                    df_dout * self.input[1].lt(self.input[0]),
+                    df_dout * self.args[0].lt(self.args[1]),
+                    df_dout * self.args[1].lt(self.args[0]),
                 )
             case "eq" | "ne" | "lt" | "gt" | "le" | "ge":
                 raise NotDifferentiableException(self)
@@ -589,7 +591,7 @@ def _elementwise_unary(operand: View, operator: UnaryScalarOperator) -> View:
         ElementwiseNode(
             shape=operand.shape,
             stype=operand.stype,
-            input=(operand,),
+            args=(operand,),
             operator=operator,
         )
     )
@@ -597,14 +599,19 @@ def _elementwise_unary(operand: View, operator: UnaryScalarOperator) -> View:
 
 def _elementwise_binary(
     a: View,
-    b: "View | Scalar",
+    b: View | Scalar,
     operator: ScalarOperator,
 ) -> View:
     b = View._from_view_or_scalar(b, stype=a.stype)
     a, b = a._join_dtypes_for_bop(b)
     a, b = a._join_shapes_for_elementwise_bop(b)
     return View.identity(
-        ElementwiseNode(shape=a.shape, stype=a.stype, input=(a, b), operator=operator)
+        ElementwiseNode(
+            shape=a.shape,
+            stype=a.stype,
+            args=(a, b),
+            operator=operator,
+        )
     )
 
 
@@ -627,7 +634,7 @@ class ReductionNode(Node):
     axes: tuple[int, ...]
 
     def df_do(self, df_dout: "View") -> tuple[View, ...]:
-        operand = self.input[0]
+        operand = self.args[0]
 
         # Broadcast df_dout (with reduced axes of size 1) back up to the operand shape.
         g = View(
@@ -673,7 +680,7 @@ def _reduction(
         ReductionNode(
             shape=tuple(out_shape),
             stype=input.stype,
-            input=(input,),
+            args=(input,),
             operator=operator,
             axes=axes,
         )
@@ -691,8 +698,8 @@ class MatmulNode(Node):
         # ∂n/∂o₁ = df/dn @ o₂.T
         # ∂n/∂o₂ = o₁.T @ df/dn
         return (
-            df_dout @ self.input[1].transpose(),
-            self.input[0].transpose() @ df_dout,
+            df_dout @ self.args[1].transpose(),
+            self.args[0].transpose() @ df_dout,
         )
 
 
@@ -700,7 +707,7 @@ def _matmul(a: View, b: View) -> View:
     a, b = a._join_dtypes_for_bop(b)
     a, b = a._join_shapes_for_matmul_bop(b)
     out_shape = a.shape[:-1] + (b.shape[-1],)
-    return View.identity(MatmulNode(shape=out_shape, stype=a.stype, input=(a, b)))
+    return View.identity(MatmulNode(shape=out_shape, stype=a.stype, args=(a, b)))
 
 
 #
@@ -738,7 +745,7 @@ class ScatterNode(Node):
         # The gradient w.r.t. the source is df_dout read back at the write locations.
         # This requires reading in the output's dense coordinate frame, so materialize
         # df_dout to a dense identity view first if it is not already one.
-        source = self.input[0]
+        source = self.args[0]
         dense = df_dout if df_dout._is_identity() else df_dout.copy()
         return (
             View(
@@ -762,7 +769,7 @@ def _scatter(
         ScatterNode(
             shape=out_shape,
             stype=stype or source.stype,
-            input=(source,),
+            args=(source,),
             woffset=woffset,
             wpitch=wpitch,
         )
@@ -1059,8 +1066,8 @@ def debug_print(root: "View", out: SupportsWrite[str]) -> None:
             print(f"{prefix}{connector}{headline(node)}", file=out)
 
         child_prefix = prefix + prefix_ext
-        for operand_index, operand in enumerate(node.input):
-            is_last = operand_index == len(node.input) - 1
+        for operand_index, operand in enumerate(node.args):
+            is_last = operand_index == len(node.args) - 1
             c_connector = "└ " if is_last else "├ "
             c_ext = "  " if is_last else "│ "
             visit_view(operand, child_prefix, c_connector, c_ext, is_root=False)
@@ -1091,8 +1098,8 @@ def toposort(roots: Iterable["View"]) -> list["Node"]:
             return
         visited.add(node)
 
-        for operand in node.input:
-            visit(operand.node)
+        for arg in node.args:
+            visit(arg.node)
 
         topo_order.append(node)
 
@@ -1113,7 +1120,7 @@ def refcount(roots: Iterable["View"]) -> dict["Node", int]:
             ref_counts[node] += 1
         else:
             ref_counts[node] = 1
-            for operand in node.input:
+            for operand in node.args:
                 visit(operand.node)
 
     for root in roots:
@@ -1152,12 +1159,9 @@ def grad(f: "View") -> dict["Node", "View"]:
         if df_dn is None:
             continue
 
-        try:
-            df_do = node.df_do(df_dn)
-        except NotDifferentiableException:
-            continue
+        df_do = node.df_do(df_dn)
 
-        for operand, df_do_i in zip(node.input, df_do):
+        for operand, df_do_i in zip(node.args, df_do):
             accumulate(operand, df_do_i)
 
     return grad_node

@@ -1,23 +1,41 @@
-import functools
+import math
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal
+from typing import cast
 
-import jinja2
+from . import front
+from .kernel import (
+    ElementwiseBinaryKernel,
+    ElementwiseUnaryKernel,
+    Kernel,
+    MatmulKernel,
+)
+from .pytree import marshall_pytensor
+from .scalar import (
+    BinaryCompareOperator,
+    BinaryScalarOperator,
+    ScalarType,
+    UnaryScalarOperator,
+)
 
-from resin.gpu.scalar import ScalarType
+#
+# Program
+#
 
 
+@dataclass(frozen=True, kw_only=True)
 class Program:
+    sinks: dict[str, BufferView]
+    queue: list[Dispatch]
     buffers: list[Buffer]
     buffer_views: list[BufferView]
-    tape: list[Kernel]
 
 
 @dataclass(frozen=True, kw_only=True)
 class Buffer:
     shape: tuple[int, ...]
     stype: ScalarType
+    fill: bytes | None = None
+    readonly: bool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -29,12 +47,134 @@ class BufferView:
 
 
 @dataclass(frozen=True, kw_only=True)
-class Kernel:
-    template_name: ShaderName
-    vars: dict[str, str]
+class Dispatch:
+    kernel: Kernel
     args: tuple[BufferView, ...]
     output: Buffer
 
 
-def render_template(template_name: str, template_vars: dict[str, str]) -> str:
-    pass
+#
+# ProgramBuilder
+#
+
+
+class ProgramBuilder:
+    node_memo: dict[front.Node, Buffer]
+    view_memo: dict[front.View, BufferView]
+    queue: list[Dispatch]
+    sinks: dict[str, BufferView]
+
+    def build_sink(self, name: str, view: front.View):
+        if name in self.sinks:
+            raise ValueError(f"Sink name conflict: {name}")
+
+        # TODO: Verify acyclicity front graph
+
+        self.sinks[name] = self._build_view(view)
+
+    def _build_view(self, view: front.View) -> BufferView:
+        if bv := self.view_memo.get(view):
+            return bv
+
+        buffer = self._build_node(view.node)
+
+        bv = BufferView(
+            buffer=buffer,
+            offset=view.offset,
+            shape=view.shape,
+            pitch=view.pitch,
+        )
+        self.view_memo[view] = bv
+
+        return bv
+
+    def _build_node(self, node: front.Node) -> Buffer:
+        # First check memoization.
+        if b := self.node_memo.get(node):
+            return b
+
+        # Allocate output buffer.
+        output_buffer = self._allocate_buffer_for_node(node)
+
+        # Compute input buffer views.
+        input_buffer_views = tuple(self._build_view(view) for view in node.args)
+
+        # Generate kernel for this node.
+        # If no kernel is needed (e.g. for ConstNode), this will return None, and the
+        # KernelDispatch will be a no-op.
+        kernel = self._build_kernel_for_node(node)
+
+        # Record the kernel dispatch using the above output, input, and kernel iff the
+        # kernel is not None.
+        if kernel:
+            dispatch = Dispatch(
+                kernel=kernel,
+                args=input_buffer_views,
+                output=output_buffer,
+            )
+            self.queue.append(dispatch)
+
+        # Memoize and return the output buffer.
+        self.node_memo[node] = output_buffer
+        return output_buffer
+
+    def _allocate_buffer_for_node(self, node: front.Node) -> Buffer:
+        # ConstNode is the only special case, everything else is just an uninitialized
+        # writable buffer.
+        is_const_node = isinstance(node, front.ConstNode)
+        return Buffer(
+            shape=node.shape,
+            stype=node.stype,
+            fill=(
+                marshall_pytensor(node.value, stype=node.stype)
+                if is_const_node
+                else None
+            ),
+            readonly=is_const_node,
+        )
+
+    def _build_kernel_for_node(self, node: front.Node) -> Kernel | None:
+        match node:
+            case front.ConstNode():
+                return None  # ConstNode is a special case that doesn't require a kernel
+            case front.ElementwiseNode():
+                return self._build_kernel_for_elementwise_node(node)
+            case front.MatmulNode():
+                return self._build_kernel_for_matmul_node(node)
+            case _:
+                raise NotImplementedError(f"Unsupported node type: {type(node)}")
+
+    def _build_kernel_for_elementwise_node(self, node: front.ElementwiseNode) -> Kernel:
+        assert len(node.args) in (1, 2)
+
+        n = math.prod(node.shape)
+
+        match len(node.args):
+            case 1:
+                return ElementwiseUnaryKernel(
+                    selected_uop=cast(
+                        UnaryScalarOperator,
+                        node.operator,
+                    ),
+                    n=n,
+                    t=node.stype,
+                )
+            case 2:
+                return ElementwiseBinaryKernel(
+                    selected_bop=cast(
+                        BinaryScalarOperator | BinaryCompareOperator,
+                        node.operator,
+                    ),
+                    n=n,
+                    t=node.stype,
+                )
+            case _:
+                raise NotImplementedError()
+
+    def _build_kernel_for_matmul_node(self, node: front.MatmulNode) -> Kernel:
+        return MatmulKernel(
+            m=node.shape[0],
+            n=node.shape[1],
+            k=node.shape[2],
+            t=node.stype,
+        )

@@ -43,8 +43,8 @@ def main():
         output_size=num_classes,
     )
 
-    image = gpu.front.param(shape=(batch_size, img_size * img_size), stype="fp32")
-    label = gpu.front.param(shape=(batch_size, num_classes), stype="fp32")
+    image = gpu.front.param(shape=(batch_size, img_size * img_size), stype="f4")
+    label = gpu.front.param(shape=(batch_size, num_classes), stype="f4")
     model = MnistMlp.new(config)
     probs = model(image)
     error = nn.mean(nn.cross_entropy(probs, label))

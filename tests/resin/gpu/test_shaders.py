@@ -1,11 +1,8 @@
-import resin.gpu.shaders
+import resin.gpu.kernel
 
 
 def test_shader_template_consts():
-    loaded_shader = resin.gpu.shaders.load_shader(
-        "test-shader",
-        {"TEST_CONSTANT": "42"},
-    )
+    loaded_shader = resin.gpu.kernel.Test1Kernel(test_constant=42)
 
-    assert "const TEST_CONSTANT: u32 = 42;" in loaded_shader
+    assert "const TEST_CONSTANT = u32(42);" in loaded_shader.wgsl()
     print(loaded_shader)

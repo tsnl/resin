@@ -39,8 +39,8 @@ class Linear:
 
     @staticmethod
     def new(in_features: int, out_features: int, bias: bool = True) -> "Linear":
-        weight = gpu.front.param(shape=(out_features, in_features), stype="fp32")
-        bias_node = gpu.front.param(shape=(out_features,), stype="fp32") if bias else None
+        weight = gpu.front.param(shape=(out_features, in_features), stype="f4")
+        bias_node = gpu.front.param(shape=(out_features,), stype="f4") if bias else None
         return Linear(weight=weight, bias=bias_node)
 
     def __call__(self, x: gpu.front.View) -> gpu.front.View:
