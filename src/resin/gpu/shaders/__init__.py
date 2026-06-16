@@ -27,7 +27,7 @@ def load_shader(name: ShaderName, template_consts: dict[str, str]) -> str:
             const \s+ {const_name}      \s*     # const <NAME>
             : \s* (?P<tyspec> .+?)      \s*     # : <TYPE>
             =                           \s*     # =
-            \s* (?P<value> .+?)         \s*     # <VALUE_PLACEHOLDER>
+            (?P<value> .+?)             \s*     # <VALUE_PLACEHOLDER>
             ;                                   # ;
             """,
             rf"/* template */ const {const_name}: \g<tyspec> = {const_value};",
