@@ -1,3 +1,6 @@
+//! Performs elementwise binary operations on the GPU using WebGPU.
+//! TODO: Need to handle sparse arg views.
+
 const BOP_POW: u32 = 0;
 const BOP_MUL: u32 = 1;
 const BOP_DIV: u32 = 2;

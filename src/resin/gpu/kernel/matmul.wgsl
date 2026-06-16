@@ -1,4 +1,5 @@
 //! Performs matrix multiplication on the GPU using WebGPU.
+//! TODO: Need to handle sparse arg views.
 //! TODO: Naive implementation: need to use tiling and cooperative matrix extensions.
 
 // Template types:

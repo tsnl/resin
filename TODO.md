@@ -2,8 +2,10 @@
 
 ## Phase 1: Make It Work (Current)
 
--   Model a graph-based language for static graphs, feed-forward, no loops/mutation/tail-recursion.
--   Create an `Interpreter` that allows execution of this graph.
+-   [x] Model a graph-based language for static graphs, feed-forward, no loops/mutation/tail-recursion.
+-   [ ] Create an `Interpreter` that allows naive execution of this graph.
+    - [x] Generate `Program` specification from graph language
+    - [ ] Write kernels: need to support sparse views
 
 Also
 -   For better compiler optimization, need to rewrite `graph.py` once more, with `View` used to read/write

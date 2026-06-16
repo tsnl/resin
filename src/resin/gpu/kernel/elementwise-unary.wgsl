@@ -1,3 +1,6 @@
+//! Performs elementwise unary operations on the GPU using WebGPU.
+//! TODO: Need to handle sparse arg views.
+
 const UOP_NEG: u32 = 0;
 const UOP_EXP: u32 = 1;
 const UOP_LOG: u32 = 2;
