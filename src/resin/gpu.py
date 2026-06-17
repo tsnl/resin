@@ -22,9 +22,16 @@ from .ir import (
     IrKernel,
     IrMatmulKernel,
     IrProgram,
+    IrReductionKernel,
 )
+
 from .rpn import ScalarRpnExpr
-from .scalar import ScalarType, spell_stype_in_wgsl, stype_nbytes
+from .scalar import (
+    BinaryAssocScalarOperator,
+    ScalarType,
+    spell_stype_in_wgsl,
+    stype_nbytes,
+)
 
 #
 # GpuInterp
@@ -126,6 +133,8 @@ def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
             _emit_wgsl_for_elementwise_rpn_kernel(w, kernel, config)
         case IrMatmulKernel():
             _emit_wgsl_for_matmul_kernel(w, kernel, config)
+        case IrReductionKernel():
+            _emit_wgsl_for_reduction_kernel(w, kernel, config)
         case _:
             raise AbstractKernelException(f"Unsupported kernel type: {type(kernel)}")
 
@@ -440,6 +449,104 @@ def _define_matmul_arg_index_function(
 
         w.print(f"idx[{k_axis}] = k;")
         w.print("return idx;")
+
+
+#
+# Emit WGSL for IrReductionKernel
+#
+
+
+def _emit_wgsl_for_reduction_kernel(
+    w: "WgslWriter",
+    kernel: IrReductionKernel,
+    config: WgslKernelConfig,
+) -> None:
+    t = spell_stype_in_wgsl(kernel.stype)
+    rank = len(kernel.shape)
+    count = kernel.reduced_count
+    input_shape = kernel.input_shape
+
+    _emit_bindings(w, kernel)
+    _emit_arg_address_functions(w, kernel)
+
+    _define_reduction_input_index_function(
+        w,
+        "input_index",
+        rank=rank,
+        input_shape=input_shape,
+        axes=kernel.axes,
+    )
+
+    with _per_output_element(w, kernel, config):
+        if count == 0:
+            w.print(f"output[out_address] = {t}(0);")
+            return
+
+        w.print(
+            f"""
+            var acc: {t} = arg0[address_arg0(input_index(out_index, 0u))];
+            """
+        )
+
+        if count > 1:
+            with w.block(f"for (var ri: u32 = 1u; ri < {count}u; ri += 1u)"):
+                w.print(
+                    """
+                    let v = arg0[address_arg0(input_index(out_index, ri))];
+                    """
+                )
+                w.print(_reduction_accumulate_wgsl(kernel.operator, "acc", "v"))
+
+        w.print("output[out_address] = acc;")
+
+
+def _define_reduction_input_index_function(
+    w: "WgslWriter",
+    name: str,
+    *,
+    rank: int,
+    input_shape: tuple[int, ...],
+    axes: tuple[int, ...],
+) -> None:
+    sorted_axes = tuple(sorted(axes))
+    non_reduced_axes = tuple(i for i in range(rank) if i not in axes)
+
+    with w.block(
+        f"""
+        fn {name}(out_index: array<u32, {rank}>, ri: u32) -> array<u32, {rank}>
+        """
+    ):
+        w.print(f"var idx: array<u32, {rank}>;")
+
+        for i in non_reduced_axes:
+            w.print(f"idx[{i}] = out_index[{i}];")
+
+        if sorted_axes:
+            w.print("var remaining: u32 = ri;")
+            for axis in reversed(sorted_axes):
+                dim = input_shape[axis]
+                w.print(f"idx[{axis}] = remaining % {dim}u;")
+                w.print(f"remaining = remaining / {dim}u;")
+
+        w.print("return idx;")
+
+
+def _reduction_accumulate_wgsl(
+    operator: BinaryAssocScalarOperator,
+    acc: str,
+    value: str,
+) -> str:
+    match operator:
+        case "add":
+            return f"{acc} += {value};"
+        case "mul":
+            return f"{acc} *= {value};"
+        case "max":
+            return f"{acc} = max({acc}, {value});"
+        case "min":
+            return f"{acc} = min({acc}, {value});"
+        case _:
+            raise NotImplementedError(f"{operator=}")
 
 
 #
