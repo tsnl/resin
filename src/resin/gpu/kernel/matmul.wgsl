@@ -6,10 +6,22 @@
 /* template */ alias T = f32;
 
 // Template consts:
+/* template */ const D = 3;
 /* template */ const B = 8;
 /* template */ const M = 16;
 /* template */ const K = 16;
 /* template */ const N = 16;
+
+// Template functions:
+/* template */ fn arg0_address(index: array<u32, D>) -> u32 { return 0; }
+/* template */ fn arg1_address(index: array<u32, D>) -> u32 { return 0; }
+/* template */ fn out_address(index: array<u32, D>) -> u32 { return 0; }
+/* template */ fn flatten_shape(shape: array<u32, D>) -> u32 { return 0; }
+/* template */ fn next_index(ctr: ptr<function, u32, read_write>, max_ctr: u32) -> NextIndex { return NextIndex(false, array()); }
+
+struct NextIndex {
+
+}
 
 @group(0) @binding(0) var<storage, write> out: array<ScalarType>;
 @group(1) @binding(0) var<storage, read> arg0: array<ScalarType>;

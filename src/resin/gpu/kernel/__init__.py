@@ -5,17 +5,21 @@ __all__ = [
 import functools
 import importlib.resources
 import re
+import textwrap
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Literal
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Generator, Literal
 
 from ..scalar import (
     BinaryCompareOperator,
     BinaryScalarOperator,
+    ScalarOperator,
     ScalarType,
     UnaryScalarOperator,
     spell_stype_in_wgsl,
 )
+from ..shape import c_contiguous_pitch_for_shape, is_c_contiguous
 
 #
 # Kernel
@@ -32,133 +36,144 @@ class Kernel(ABC):
     """
 
     @abstractmethod
-    def _wgsl_template(self) -> tuple[Template, TemplateParams]: ...
-
     def wgsl(self) -> str:
         """
-        Renders the shader into a WGSL string by loading the appropriate template and
-        rendering it with the provided template parameters.
+        Renders the shader into a WGSL string.
         """
 
-        template_name, template_params = self._wgsl_template()
-        template = _load_template_string(template_name)
-        return _render_shader_template_with_params(template, template_params)
+
+@dataclass(frozen=True, kw_only=True)
+class ElementwiseRpnKernel(Kernel):
+    """
+    Accepts a scalar expression in reverse polish notation and several bound argument
+    buffers, all of the same shape and stype. Emits a single WGSL kernel for evaluating
+    the expression.
+    """
+
+    rpn_expr: ScalarRpnExpr
+    arg_accessors: tuple[Accessor, ...]
+    stype: ScalarType
+    shape: tuple[int, ...]
+
+    def __post_init__(self):
+        assert all(x.shape == self.shape for x in self.arg_accessors)
+
+    def emit_wgsl(self) -> str:
+        t = spell_stype_in_wgsl(self.stype)
+        n = len(self.arg_accessors)
+
+        # Create a WgslWriter for emitting the shader:
+        w = WgslWriter(
+            enable_f16=(self.stype == "f2"),
+        )
+
+        # Setting up bindings:
+        w.print(
+            f"""
+            @group(0) @binding(0)
+            var<storage, read_write> output: array<{t}>;
+            """
+        )
+        for i in range(n):
+            w.print(
+                f"""
+                @group(1) @binding({i})
+                var<storage, read> arg{i}: array<{t}>;
+                """,
+            )
+
+        # Define a function for evaluating the RPN expression:
+        with w.block(f"fn eval_rpn_expr({','.join(f'a{i}' for i in range(n))}) -> {t}"):
+            expr_stack = []
+            for token in self.rpn_expr.string:
+                match token:
+                    # Operand:
+                    case int():
+                        expr_stack.append(f"a{token}")
+                    # Unary operator:
+                    case "neg":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(-{operand})")
+                    case "exp":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(exp({operand}))")
+                    case "log":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(log({operand}))")
+                    case "sqrt":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(sqrt({operand}))")
+                    case "sin":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(sin({operand}))")
+                    case "cos":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(cos({operand}))")
+                    case "not":
+                        operand = expr_stack.pop()
+                        expr_stack.append(f"(abs(1.0 - {operand}))")
+                    # Binary operator:
+                    case "pow":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"pow({lhs}, {rhs})")
+                    case "mul":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"({lhs} * {rhs})")
+                    case "div":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"({lhs} / {rhs})")
+                    case "add":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"({lhs} + {rhs})")
+                    case "sub":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"({lhs} - {rhs})")
+                    case "max":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"max({lhs}, {rhs})")
+                    case "min":
+                        rhs = expr_stack.pop()
+                        lhs = expr_stack.pop()
+                        expr_stack.append(f"min({lhs}, {rhs})")
+                    # TODO: binary compare operators
+                    case _:
+                        raise NotImplementedError()
+
+            assert len(expr_stack) == 1
+            w.print(f"return {expr_stack[0]};")
+
+        # Define the entry point for the kernel:
+        with w.block(
+            """
+            @compute @workgroup_size(64)
+            fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
+            """
+        ):
+            # TODO: complete this
+            pass
+
+        return w.finish()
+
+
+@dataclass
+class ScalarRpnExpr:
+    string: tuple[ScalarOperator | int, ...]
+
+    def __getitem__(self, key: int) -> ScalarOperator | int:
+        return self.string[key]
 
 
 @dataclass(frozen=True, kw_only=True)
-class ElementwiseUnaryKernel(Kernel):
-    selected_uop: UnaryScalarOperator
-    n: int
-    t: ScalarType
-
-    UNARY_UOP_CODE_DICT: dict[UnaryScalarOperator, int] = field(
-        # Mapping defined in WGSL template file "elementwise-unary.wgsl"
-        default_factory=lambda: {
-            "neg": 0,
-            "exp": 1,
-            "log": 2,
-            "not": 3,
-            "sin": 4,
-            "cos": 5,
-        },
-        init=False,
-        repr=False,
-    )
-
-    def _wgsl_template(self) -> tuple[Template, TemplateParams]:
-        return (
-            "elementwise-unary",
-            TemplateParams(
-                consts={
-                    "SELECTED_UOP": f"{self.UNARY_UOP_CODE_DICT[self.selected_uop]}u",
-                    "N": f"{self.n}u",
-                },
-                types={
-                    "T": spell_stype_in_wgsl(self.t),
-                },
-            ),
-        )
-
-
-@dataclass(frozen=True, kw_only=True)
-class ElementwiseBinaryKernel(Kernel):
-    selected_bop: BinaryScalarOperator | BinaryCompareOperator
-    n: int
-    t: ScalarType
-
-    SCALAR_BOP_CODE_DICT: dict[BinaryScalarOperator | BinaryCompareOperator, int] = (
-        field(
-            # Mapping defined in WGSL template file "elementwise-binary.wgsl"
-            default_factory=lambda: {
-                "pow": 0,
-                "div": 1,
-                "sub": 2,
-                "mul": 3,
-                "add": 4,
-                "max": 5,
-                "min": 6,
-                "eq": 7,
-                "ne": 8,
-                "gt": 9,
-                "lt": 10,
-                "ge": 11,
-                "le": 12,
-            },
-            init=False,
-            repr=False,
-        )
-    )
-
-    def _wgsl_template(self) -> tuple[Template, TemplateParams]:
-        return (
-            "elementwise-binary",
-            TemplateParams(
-                consts={
-                    "SELECTED_BOP": f"u32({self.SCALAR_BOP_CODE_DICT[self.selected_bop]})",
-                    "N": f"u32({self.n})",
-                },
-                types={
-                    "T": spell_stype_in_wgsl(self.t),
-                },
-            ),
-        )
-
-
-@dataclass(frozen=True, kw_only=True)
-class MatmulKernel(Kernel):
-    m: int
-    n: int
-    k: int
-    t: ScalarType
-
-    def _wgsl_template(self) -> tuple[Template, TemplateParams]:
-        return (
-            "matmul",
-            TemplateParams(
-                consts={
-                    "M": f"u32({self.m})",
-                    "N": f"u32({self.n})",
-                    "K": f"u32({self.k})",
-                },
-                types={
-                    "T": spell_stype_in_wgsl(self.t),
-                },
-            ),
-        )
-
-
-@dataclass(frozen=True, kw_only=True)
-class Test1Kernel(Kernel):
-    test_constant: int
-
-    def _wgsl_template(self) -> tuple[Template, TemplateParams]:
-        return (
-            "test1",
-            TemplateParams(
-                consts={"TEST_CONSTANT": f"u32({self.test_constant})"},
-                types={},
-            ),
-        )
+class Accessor:
+    offset: int
+    shape: tuple[int, ...]
+    pitch: tuple[int, ...]
 
 
 #
@@ -227,3 +242,67 @@ def _render_shader_template_with_params(template: str, params: TemplateParams) -
 
     # Done:
     return text
+
+
+#
+# WgslWriter
+#
+
+
+class WgslWriter:
+    lines: list[str]
+
+    def __init__(
+        self,
+        *,
+        enable_f16: bool,
+    ) -> None:
+        super().__init__()
+        self.lines = []
+
+        if enable_f16:
+            self.lines.append("enable f16;")
+
+    def print(self, text: str) -> None:
+        self.lines.append(textwrap.dedent(text))
+
+    @contextmanager
+    def block(self, prefix: str = ""):
+        if prefix:
+            self.print(prefix)
+
+        self.print("{")
+        yield self
+        self.print("}")
+
+    def finish(self) -> str:
+        return "\n".join(self.lines)
+
+
+def address(index: tuple[int, ...], pitch: tuple[int, ...]) -> int:
+    return sum(i * p for i, p in zip(index, pitch))
+
+
+def index(
+    address: int,
+    shape: tuple[int, ...],
+    pitch: tuple[int, ...],
+) -> tuple[int, ...]:
+    if not is_c_contiguous(shape, pitch):
+        raise ValueError()
+
+    index = []
+    for p in pitch:
+        i, address = divmod(address, p)
+        index.append(i)
+    return tuple(index)
+
+
+def iter_index(shape: tuple[int, ...]) -> Generator[tuple[int, ...], None, None]:
+    if not shape:
+        yield ()
+        return
+
+    for i in range(shape[0]):
+        for sub_index in iter_index(shape[1:]):
+            yield (i,) + sub_index

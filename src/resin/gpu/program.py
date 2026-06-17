@@ -170,21 +170,18 @@ class ProgramBuilder:
         match len(node.args):
             case 1:
                 return ElementwiseUnaryKernel(
-                    selected_uop=cast(
-                        UnaryScalarOperator,
-                        node.operator,
-                    ),
+                    unary_op=cast(UnaryScalarOperator, node.operator),
                     n=n,
-                    t=node.stype,
+                    stype=node.stype,
                 )
             case 2:
                 return ElementwiseBinaryKernel(
-                    selected_bop=cast(
+                    binary_op=cast(
                         BinaryScalarOperator | BinaryCompareOperator,
                         node.operator,
                     ),
                     n=n,
-                    t=node.stype,
+                    stype=node.stype,
                 )
             case _:
                 raise NotImplementedError()

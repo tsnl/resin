@@ -19,7 +19,15 @@ def is_scalar(value: object) -> bool:
 #
 
 type ScalarOperator = UnaryScalarOperator | BinaryScalarOperator | BinaryCompareOperator
-type UnaryScalarOperator = Literal["neg", "exp", "log", "not", "sin", "cos"]
+type UnaryScalarOperator = Literal[
+    "neg",
+    "exp",
+    "log",
+    "sqrt",
+    "sin",
+    "cos",
+    "not",
+]
 type BinaryAssocScalarOperator = Literal["mul", "add", "max", "min"]
 type BinaryScalarOperator = Literal["pow", "div", "sub"] | BinaryAssocScalarOperator
 type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
