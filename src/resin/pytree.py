@@ -3,10 +3,6 @@ from typing import cast
 
 from .scalar import Scalar, ScalarType, is_scalar, spell_stype_in_pystruct
 
-#
-# PyTensor
-#
-
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
 
 

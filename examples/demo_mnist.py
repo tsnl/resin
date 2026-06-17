@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import resin.nn as nn
-from resin import gpu
+from resin import dsl, grad
 
 
 @dataclass
@@ -25,7 +25,7 @@ class MnistMlp:
             l3=nn.Linear.new(config.hidden_size, config.output_size),
         )
 
-    def __call__(self, x: gpu.front.View) -> gpu.front.View:
+    def __call__(self, x: dsl.View) -> dsl.View:
         x = nn.relu(self.l1(x))
         x = nn.relu(self.l2(x))
         x = nn.softmax(self.l3(x))
@@ -43,25 +43,12 @@ def main():
         output_size=num_classes,
     )
 
-    image = gpu.front.param(shape=(batch_size, img_size * img_size), stype="f4")
-    label = gpu.front.param(shape=(batch_size, num_classes), stype="f4")
+    image = dsl.param(shape=(batch_size, img_size * img_size), stype="f4")
+    label = dsl.param(shape=(batch_size, num_classes), stype="f4")
     model = MnistMlp.new(config)
     probs = model(image)
     error = nn.mean(nn.cross_entropy(probs, label))
-    grads = gpu.front.grad(error)
-    # TODO: update model parameters with gradients, e.g. using SGD or Adam
-
-    # TODO: run interpreter
-
-    # TODO: randomly initialize model parameters
-
-    # TODO: training loop
-    # - write to input buffer
-    # - run the interpreter
-    # - plug output buffer into optimizer to compute new parameter values, ideally
-    #   in-place?
-
-    # interp.run()
+    grads = grad.grad(error)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,219 @@
+__all__ = [
+    "IrBuffer",
+    "IrBufferView",
+    "IrDispatch",
+    "IrElementwiseRpnKernel",
+    "IrKernel",
+    "IrMatmulKernel",
+    "IrProgram",
+    "IrProgramBuilder",
+]
+
+from abc import ABC
+from dataclasses import dataclass
+
+from frozendict import frozendict
+
+from . import dsl
+from .accessor import Accessor
+from .pytree import marshall_pytensor
+from .rpn import ScalarRpnExpr
+from .scalar import (
+    BinaryCompareOperator,
+    BinaryScalarOperator,
+    ScalarType,
+    UnaryScalarOperator,
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrProgram:
+    sinks: frozendict[str, "IrBufferView"]
+    queue: tuple["IrDispatch", ...]
+    buffers: tuple["IrBuffer", ...]
+    buffer_views: tuple["IrBufferView", ...]
+
+
+@dataclass(frozen=True, kw_only=True, eq=False)
+class IrBuffer:
+    shape: tuple[int, ...]
+    stype: ScalarType
+    init: bytes | None = None
+    readonly: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrBufferView:
+    buffer: IrBuffer
+    accessor: Accessor
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrDispatch:
+    kernel: "IrKernel"
+    args: tuple[IrBufferView, ...]
+    output: IrBuffer
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrKernel(ABC):
+    arg_accessors: tuple[Accessor, ...]
+    stype: ScalarType
+    shape: tuple[int, ...]
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrElementwiseRpnKernel(IrKernel):
+    rpn_expr: ScalarRpnExpr
+
+    def __post_init__(self):
+        assert all(x.shape == self.shape for x in self.arg_accessors)
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrMatmulKernel(IrKernel):
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 2
+        a0, a1 = self.arg_accessors
+        assert len(a0.shape) >= 2 and len(a1.shape) >= 2
+        assert a0.shape[-1] == a1.shape[-2]
+        assert a0.shape[:-2] == a1.shape[:-2]
+        assert len(a0.shape) == len(a1.shape) == len(self.shape)
+        assert self.shape == a0.shape[:-1] + (a1.shape[-1],)
+
+    @property
+    def k(self) -> int:
+        return self.arg_accessors[0].shape[-1]
+
+
+class IrProgramBuilder:
+    buffer_memo: dict[dsl.Node, IrBuffer]
+    buffer_view_memo: dict[dsl.View, IrBufferView]
+    queue: list[IrDispatch]
+    sinks: dict[str, IrBufferView]
+
+    def __init__(self):
+        super().__init__()
+
+        self.buffer_memo = {}
+        self.buffer_view_memo = {}
+        self.queue = []
+        self.sinks = {}
+
+    def finish(self) -> IrProgram:
+        return IrProgram(
+            sinks=frozendict(self.sinks),
+            queue=tuple(self.queue),
+            buffers=tuple(self.buffer_memo.values()),
+            buffer_views=tuple(self.buffer_view_memo.values()),
+        )
+
+    def build_sink(self, name: str, view: dsl.View):
+        if name in self.sinks:
+            raise ValueError(f"Sink name conflict: {name}")
+
+        self.sinks[name] = self._build_view(view)
+
+    def _build_view(self, view: dsl.View) -> IrBufferView:
+        if bv := self.buffer_view_memo.get(view):
+            return bv
+
+        buffer = self._build_node(view.node)
+
+        bv = IrBufferView(buffer=buffer, accessor=view.accessor)
+        self.buffer_view_memo[view] = bv
+
+        return bv
+
+    def _build_node(self, node: dsl.Node) -> IrBuffer:
+        if b := self.buffer_memo.get(node):
+            return b
+
+        output_buffer = self._allocate_buffer_for_node(node)
+        input_buffer_views = tuple(self._build_view(view) for view in node.args)
+        kernel = self._build_kernel_for_node(node)
+
+        if kernel:
+            dispatch = IrDispatch(
+                kernel=kernel,
+                args=input_buffer_views,
+                output=output_buffer,
+            )
+            self.queue.append(dispatch)
+
+        self.buffer_memo[node] = output_buffer
+        return output_buffer
+
+    def _allocate_buffer_for_node(self, node: dsl.Node) -> IrBuffer:
+        is_const_node = isinstance(node, dsl.ConstNode)
+        return IrBuffer(
+            shape=node.shape,
+            stype=node.stype,
+            init=(
+                marshall_pytensor(node.value, stype=node.stype)
+                if is_const_node
+                else None
+            ),
+            readonly=is_const_node,
+        )
+
+    def _build_kernel_for_node(self, node: dsl.Node) -> IrKernel | None:
+        match node:
+            case dsl.ConstNode():
+                return None
+            case dsl.ElementwiseNode():
+                return self._build_kernel_for_elementwise_node(node)
+            case dsl.MatmulNode():
+                return self._build_kernel_for_matmul_node(node)
+            case _:
+                raise NotImplementedError(f"Unsupported node type: {type(node)}")
+
+    def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
+        return IrElementwiseRpnKernel(
+            arg_accessors=tuple(view.accessor for view in node.args),
+            stype=node.stype,
+            shape=node.shape,
+            rpn_expr=ScalarRpnExpr(string=_rpn_string_for_elementwise(node)),
+        )
+
+    def _build_kernel_for_matmul_node(self, node: dsl.MatmulNode) -> IrKernel:
+        return IrMatmulKernel(
+            arg_accessors=tuple(view.accessor for view in node.args),
+            stype=node.stype,
+            shape=node.shape,
+        )
+
+
+_UNARY_OPS: tuple[UnaryScalarOperator, ...] = (
+    "neg",
+    "exp",
+    "log",
+    "sqrt",
+    "sin",
+    "cos",
+    "not",
+)
+_BINARY_OPS: tuple[BinaryScalarOperator | BinaryCompareOperator, ...] = (
+    "pow",
+    "mul",
+    "div",
+    "add",
+    "sub",
+    "max",
+    "min",
+    "eq",
+    "ne",
+    "gt",
+    "lt",
+    "ge",
+    "le",
+)
+
+
+def _rpn_string_for_elementwise(node: dsl.ElementwiseNode) -> tuple[int | str, ...]:
+    op = node.operator
+    if op in _UNARY_OPS:
+        return (0, op)
+    if op in _BINARY_OPS:
+        return (0, 1, op)
+    raise NotImplementedError(f"{op=}")

@@ -1,22 +1,12 @@
 from typing import Literal
 
-#
-# Scalar
-#
-
-
 type Scalar = float | int
 _SCALAR_TYPES: tuple[type, ...] = (float, int)
 
 
 def is_scalar(value: object) -> bool:
-    """Check if a value is a scalar (float or int)."""
     return isinstance(value, _SCALAR_TYPES)
 
-
-#
-# ScalarOperator
-#
 
 type ScalarOperator = UnaryScalarOperator | BinaryScalarOperator | BinaryCompareOperator
 type UnaryScalarOperator = Literal[
@@ -33,12 +23,7 @@ type BinaryScalarOperator = Literal["pow", "div", "sub"] | BinaryAssocScalarOper
 type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
 
 
-#
-# ScalarType
-#
-
-
-type ScalarType = Literal["f4", "f2"]  # ~ DType in NumPy
+type ScalarType = Literal["f4", "f2"]
 type SKind = Literal["float"]
 
 
