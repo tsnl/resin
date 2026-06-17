@@ -54,6 +54,7 @@ class ElementwiseRpnKernel(Kernel):
     arg_accessors: tuple[Accessor, ...]
     stype: ScalarType
     shape: tuple[int, ...]
+    lg2_items_per_thread: int = 64
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
@@ -68,6 +69,8 @@ class ElementwiseRpnKernel(Kernel):
         )
 
         # Setting up bindings:
+        # DEF: output at @group(0) @binding(0)
+        # DEF: arg{i} at @group(1) @binding({i})
         w.print(
             f"""
             @group(0) @binding(0)
@@ -83,7 +86,12 @@ class ElementwiseRpnKernel(Kernel):
             )
 
         # Define a function for evaluating the RPN expression:
-        with w.block(f"fn eval_rpn_expr({','.join(f'a{i}' for i in range(n))}) -> {t}"):
+        # DEF: eval_rpn_expr()
+        with w.block(
+            f"""
+            fn eval_rpn_expr({",".join(f"a{i}: {t}" for i in range(n))}) -> {t}
+            """
+        ):
             expr_stack = []
             for token in self.rpn_expr.string:
                 match token:
@@ -148,15 +156,78 @@ class ElementwiseRpnKernel(Kernel):
             assert len(expr_stack) == 1
             w.print(f"return {expr_stack[0]};")
 
+        # Define `address()` function for each argument:
+        # DEF: address_arg{i}
+        for i, arg_accessor in enumerate(self.arg_accessors):
+            w.define_address_function(f"address_arg{i}", arg_accessor)
+
+        # Define `index()` function just the output:
+        # DEF: index()
+        w.define_cc_index_function(
+            "index",
+            Accessor(
+                offset=0,
+                shape=self.shape,
+                pitch=c_contiguous_pitch_for_shape(self.shape),
+            ),
+        )
+
         # Define the entry point for the kernel:
+        # DEF: main()
         with w.block(
-            """
-            @compute @workgroup_size(64)
-            fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
+            f"""
+            @compute @workgroup_size({self.lg2_items_per_thread})
+            fn main(
+                @builtin(global_invocation_id) global_id: vec3<u32>
+            )
             """
         ):
-            # TODO: complete this
-            pass
+            # Determine which output buffer address range we'll write to in this thread.
+            # These are indices into the flattened C-contiguous output tensor.
+            w.print(
+                f"""
+                let out_address_beg = global_id.x << {self.lg2_items_per_thread};
+                let out_address_end = out_address_beg + {1 << self.lg2_items_per_thread};
+                """
+            )
+
+            # Iterate over the output addresses we're responsible for, compute the
+            # corresponding input addresses, load the inputs, and call the RPN function.
+            with w.block(
+                """
+                for (
+                    var out_address = out_address_beg;
+                    out_address < out_address_end;
+                    out_address += 1
+                )
+                """
+            ):
+                with w.block("if (out_address >= arrayLength(&output))"):
+                    # Early out for threads that are out of bounds of the output buffer.
+                    w.print("return;")
+
+                # Map the output address to an index.
+                # We can resolve these indices to addresses in sparse argument views.
+                w.print(
+                    """
+                    let out_index = index(out_address);
+                    """
+                )
+
+                # For each argument, compute the corresponding address for this output
+                # index. Load the value.
+                # TODO: more efficient to fetch all values for a specific argument array
+                # at once.
+                arg_addresses = [f"address_arg{i}(out_index)" for i in range(n)]
+                arg_values = [f"arg{i}[{arg_addresses[i]}]" for i in range(n)]
+
+                # Evaluate the RPN expression for this output element and write it to
+                # the output buffer.
+                w.print(
+                    f"""
+                    output[out_address] = eval_rpn_expr({", ".join(arg_values)});
+                    """
+                )
 
         return w.finish()
 
@@ -174,6 +245,10 @@ class Accessor:
     offset: int
     shape: tuple[int, ...]
     pitch: tuple[int, ...]
+
+    def __post_init__(self):
+        assert self.offset >= 0
+        assert len(self.shape) == len(self.pitch), "Inconsistent rank"
 
 
 #
@@ -277,6 +352,42 @@ class WgslWriter:
 
     def finish(self) -> str:
         return "\n".join(self.lines)
+
+    def define_address_function(self, name: str, accessor: Accessor):
+        n = len(accessor.shape)
+
+        with self.block(
+            f"""
+            fn {name}(index: array<u32, {n}>) -> u32
+            """
+        ):
+            self.print(f"var acc: u32 = {accessor.offset};")
+            for i in range(n):
+                self.print(
+                    f"""
+                    acc += index[{i}] * {accessor.pitch[i]};  // dim {i}
+                    """
+                )
+
+    def define_cc_index_function(self, name: str, cc_accessor: Accessor):
+        assert is_c_contiguous(cc_accessor.shape, cc_accessor.pitch)
+
+        n = len(cc_accessor.shape)
+
+        with self.block(
+            f"""
+            fn {name}(address: u32) -> array<u32, {n}>
+            """
+        ):
+            self.print(f"var index: array<u32, {n}>;")
+            for i in range(n):
+                self.print(
+                    f"""
+                    index[{i}] = address / {cc_accessor.pitch[i]};  // dim {i}
+                    address = address % {cc_accessor.pitch[i]};
+                    """
+                )
+            self.print("return index;")
 
 
 def address(index: tuple[int, ...], pitch: tuple[int, ...]) -> int:
