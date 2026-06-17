@@ -49,42 +49,6 @@ from .scalar import (
 
 
 @dataclass(frozen=True)
-class WgpuAccessorSpec:
-    offset: int
-    shape: tuple[int, ...]
-    pitch: tuple[int, ...]
-
-
-@dataclass(frozen=True)
-class WgpuBufferSpec:
-    shape: tuple[int, ...]
-    stype: ScalarType
-    init: bytes | None = None
-    readonly: bool = False
-
-
-@dataclass(frozen=True)
-class WgpuBufferViewSpec:
-    buffer_index: int
-    accessor: WgpuAccessorSpec
-
-
-@dataclass(frozen=True)
-class WgpuComputePipelineSpec:
-    wgsl: str
-    dispatch_size: tuple[int, int, int]
-    num_arg_bindings: int
-    entry_point: str = "main"
-
-
-@dataclass(frozen=True)
-class WgpuDispatch:
-    pipeline_index: int
-    arg_buffer_view_indices: tuple[int, ...]
-    output_buffer_index: int
-
-
-@dataclass(frozen=True)
 class WgpuProgram:
     buffers: tuple[WgpuBufferSpec, ...]
     buffer_views: tuple[WgpuBufferViewSpec, ...]
@@ -125,6 +89,42 @@ class WgpuProgram:
     def from_msgpack(cls, data: bytes) -> "WgpuProgram":
         payload = msgpack.unpackb(data, raw=False)
         return cls.from_dict(payload)
+
+
+@dataclass(frozen=True)
+class WgpuBufferSpec:
+    shape: tuple[int, ...]
+    stype: ScalarType
+    init: bytes | None = None
+    readonly: bool = False
+
+
+@dataclass(frozen=True)
+class WgpuBufferViewSpec:
+    buffer_index: int
+    accessor: WgpuAccessorSpec
+
+
+@dataclass(frozen=True)
+class WgpuAccessorSpec:
+    offset: int
+    shape: tuple[int, ...]
+    pitch: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class WgpuComputePipelineSpec:
+    wgsl: str
+    dispatch_size: tuple[int, int, int]
+    num_arg_bindings: int
+    entry_point: str = "main"
+
+
+@dataclass(frozen=True)
+class WgpuDispatch:
+    pipeline_index: int
+    arg_buffer_view_indices: tuple[int, ...]
+    output_buffer_index: int
 
 
 def _buffer_to_dict(spec: WgpuBufferSpec) -> dict[str, Any]:

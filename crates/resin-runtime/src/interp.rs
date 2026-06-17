@@ -126,7 +126,6 @@ impl WgpuInterp {
                     }
                 })
                 .collect();
-
             let bind_group1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("resin-bind-group-1"),
                 layout: &pipeline.get_bind_group_layout(1),
@@ -175,9 +174,7 @@ impl WgpuInterp {
             .param_buffer_ids
             .get(&param_id)
             .copied()
-            .ok_or_else(|| {
-                WgpuInterpError::Program(format!("unknown param id {param_id:#x}"))
-            })
+            .ok_or_else(|| WgpuInterpError::Program(format!("unknown param id {param_id:#x}")))
     }
 
     pub fn copy_buffer_to_buffer(
@@ -189,7 +186,9 @@ impl WgpuInterp {
             WgpuInterpError::Program(format!("invalid source buffer index {src_buffer_index}"))
         })?;
         let dst = self.buffers.get(dst_buffer_index).ok_or_else(|| {
-            WgpuInterpError::Program(format!("invalid destination buffer index {dst_buffer_index}"))
+            WgpuInterpError::Program(format!(
+                "invalid destination buffer index {dst_buffer_index}"
+            ))
         })?;
         let size = src.size();
         if size != dst.size() {

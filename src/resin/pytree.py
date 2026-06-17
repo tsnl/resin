@@ -4,6 +4,7 @@ from typing import cast
 from .scalar import Scalar, ScalarType, is_scalar, spell_stype_in_pystruct
 
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
+type PyTree[T] = "dict[str, PyTree[T]] | list[PyTree[T]] | T"
 
 
 def infer_pytensor_shape(value: "PyTensor") -> tuple[int, ...]:

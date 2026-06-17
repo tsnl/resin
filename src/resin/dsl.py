@@ -34,7 +34,7 @@ from typing import Callable, Generator, Iterable
 
 from .accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from .common import SupportsWrite, pascal_to_snake_case
-from .pytree import PyTensor, infer_pytensor_shape
+from .pytree import PyTensor, PyTree, infer_pytensor_shape
 from .scalar import (
     BinaryAssocScalarOperator,
     Scalar,
@@ -565,9 +565,6 @@ def refcount(roots: Iterable["View"]) -> dict["Node", int]:
         visit(root.node)
 
     return ref_counts
-
-
-type PyTree[T] = "dict[str, PyTree[T]] | list[PyTree[T]] | T"
 
 
 def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
