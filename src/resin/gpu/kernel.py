@@ -2,11 +2,13 @@ __all__ = [
     "Kernel",
 ]
 
+import math
 import textwrap
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Generator
+from typing import Iterator
 
 from .accessor import Accessor
 from .rpn import ScalarRpnExpr
@@ -14,7 +16,7 @@ from .scalar import (
     ScalarType,
     spell_stype_in_wgsl,
 )
-from .shape import c_contiguous_pitch_for_shape, is_c_contiguous
+from .shape import is_c_contiguous
 
 #
 # Kernel
@@ -33,12 +35,129 @@ class Kernel(ABC):
     arg_accessors: tuple[Accessor, ...]
     stype: ScalarType
     shape: tuple[int, ...]
+    lg2_items_per_thread: int = 3
+    workgroup_size: int = 8
 
     @abstractmethod
     def emit_wgsl(self) -> str:
         """
         Renders the shader into a WGSL string.
         """
+
+    def dispatch_size(self) -> tuple[int, int, int]:
+        """
+        Returns `(workgroups_x, workgroups_y, workgroups_z)` for dispatching this kernel.
+
+        Each thread handles ``2 ** lg2_items_per_thread`` output elements, and each
+        workgroup contains ``workgroup_size`` threads along x.
+        """
+        n = math.prod(self.shape)
+        if n == 0:
+            return (0, 1, 1)
+
+        items_per_thread = 1 << self.lg2_items_per_thread
+        threads = (n + items_per_thread - 1) // items_per_thread
+        workgroups_x = (threads + self.workgroup_size - 1) // self.workgroup_size
+        return (workgroups_x, 1, 1)
+
+    def _make_wgsl_writer(self) -> "WgslWriter":
+        # Create a WgslWriter for emitting the shader:
+        return WgslWriter(enable_f16=(self.stype == "f2"))
+
+    def _emit_bindings(self, w: "WgslWriter") -> None:
+        t = spell_stype_in_wgsl(self.stype)
+
+        # Setting up bindings:
+        # DEF: output at @group(0) @binding(0)
+        w.print(
+            f"""
+            @group(0) @binding(0)
+            var<storage, read_write> output: array<{t}>;
+            """
+        )
+
+        # DEF: arg{i} at @group(1) @binding({i})
+        for i in range(len(self.arg_accessors)):
+            w.print(
+                f"""
+                @group(1) @binding({i})
+                var<storage, read> arg{i}: array<{t}>;
+                """
+            )
+
+    def _emit_arg_address_functions(self, w: "WgslWriter") -> None:
+        # Define `address()` function for each argument:
+        # DEF: address_arg{i}
+        for i, arg_accessor in enumerate(self.arg_accessors):
+            w.define_address_function(f"address_arg{i}", arg_accessor)
+
+    def _emit_out_index_function(self, w: "WgslWriter", name: str = "index") -> None:
+        # Define `index()` function for the output:
+        # DEF: index()
+        w.define_cc_index_function(name, Accessor.dense(self.shape))
+
+    @contextmanager
+    def _per_output_element(self, w: "WgslWriter") -> Iterator["WgslWriter"]:
+        """
+        Emit the compute entry point and loop over output elements handled by each
+        thread. Yields while emitting the body for a single output element.
+
+        Within the yielded block, the following WGSL names are in scope:
+
+        DEF: out_address — flat C-contiguous address of the output element being written
+        DEF: out_index — multidimensional output index decoded from `out_address`
+
+        Also emits:
+
+        DEF: main()
+        DEF: index()
+        """
+        self._emit_out_index_function(w)
+
+        items_per_thread = 1 << self.lg2_items_per_thread
+
+        # Define the entry point for the kernel:
+        # DEF: main()
+        with w.block(
+            f"""
+            @compute @workgroup_size({self.workgroup_size})
+            fn main(
+                @builtin(global_invocation_id) global_id: vec3<u32>
+            )
+            """
+        ):
+            # Determine which output buffer address range we'll write to in this thread.
+            # These are indices into the flattened C-contiguous output tensor.
+            w.print(
+                f"""
+                let out_address_beg = global_id.x << {self.lg2_items_per_thread}u;
+                let out_address_end = out_address_beg + {items_per_thread}u;
+                """
+            )
+
+            # Iterate over the output addresses we're responsible for.
+            with w.block(
+                """
+                for (
+                    var out_address = out_address_beg;
+                    out_address < out_address_end;
+                    out_address += 1u
+                )
+                """
+            ):
+                with w.block("if (out_address >= arrayLength(&output))"):
+                    # Early out for threads that are out of bounds of the output buffer.
+                    w.print("return;")
+
+                # Map the output address to an index.
+                # We can resolve these indices to addresses in sparse argument views.
+                w.print(
+                    """
+                    let out_index = index(out_address);
+                    """
+                )
+
+                yield w
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -50,7 +169,6 @@ class ElementwiseRpnKernel(Kernel):
     """
 
     rpn_expr: ScalarRpnExpr
-    lg2_items_per_thread: int = 3
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
@@ -60,26 +178,14 @@ class ElementwiseRpnKernel(Kernel):
         n = len(self.arg_accessors)
 
         # Create a WgslWriter for emitting the shader:
-        w = WgslWriter(
-            enable_f16=(self.stype == "f2"),
-        )
+        w = self._make_wgsl_writer()
 
-        # Setting up bindings:
+        # Emit bindings and address functions for the arguments:
         # DEF: output at @group(0) @binding(0)
         # DEF: arg{i} at @group(1) @binding({i})
-        w.print(
-            f"""
-            @group(0) @binding(0)
-            var<storage, read_write> output: array<{t}>;
-            """
-        )
-        for i in range(n):
-            w.print(
-                f"""
-                @group(1) @binding({i})
-                var<storage, read> arg{i}: array<{t}>;
-                """,
-            )
+        # DEF: address_arg{i}()
+        self._emit_bindings(w)
+        self._emit_arg_address_functions(w)
 
         # Define a function for evaluating the RPN expression:
         # DEF: eval_rpn_expr()
@@ -152,92 +258,144 @@ class ElementwiseRpnKernel(Kernel):
             assert len(expr_stack) == 1
             w.print(f"return {expr_stack[0]};")
 
-        # Define `address()` function for each argument:
-        # DEF: address_arg{i}
-        for i, arg_accessor in enumerate(self.arg_accessors):
-            w.define_address_function(f"address_arg{i}", arg_accessor)
+        with self._per_output_element(w):
+            # For each argument, compute the corresponding address for this output
+            # index. Load the value.
+            # TODO: more efficient to fetch all values for a specific argument array
+            # at once.
+            arg_addresses = [f"address_arg{i}(out_index)" for i in range(n)]
+            arg_values = [f"arg{i}[{arg_addresses[i]}]" for i in range(n)]
 
-        # Define `index()` function just the output:
-        # DEF: index()
-        w.define_cc_index_function(
-            "index",
-            Accessor(
-                offset=0,
-                shape=self.shape,
-                pitch=c_contiguous_pitch_for_shape(self.shape),
-            ),
-        )
-
-        # Define the entry point for the kernel:
-        # DEF: main()
-        with w.block(
-            f"""
-            @compute @workgroup_size({self.lg2_items_per_thread})
-            fn main(
-                @builtin(global_invocation_id) global_id: vec3<u32>
-            )
-            """
-        ):
-            # Determine which output buffer address range we'll write to in this thread.
-            # These are indices into the flattened C-contiguous output tensor.
+            # Evaluate the RPN expression for this output element and write it to
+            # the output buffer.
             w.print(
                 f"""
-                let out_address_beg = global_id.x << {self.lg2_items_per_thread};
-                let out_address_end = out_address_beg + {1 << self.lg2_items_per_thread};
+                output[out_address] = eval_rpn_expr({", ".join(arg_values)});
                 """
             )
-
-            # Iterate over the output addresses we're responsible for, compute the
-            # corresponding input addresses, load the inputs, and call the RPN function.
-            with w.block(
-                """
-                for (
-                    var out_address = out_address_beg;
-                    out_address < out_address_end;
-                    out_address += 1
-                )
-                """
-            ):
-                with w.block("if (out_address >= arrayLength(&output))"):
-                    # Early out for threads that are out of bounds of the output buffer.
-                    w.print("return;")
-
-                # Map the output address to an index.
-                # We can resolve these indices to addresses in sparse argument views.
-                w.print(
-                    """
-                    let out_index = index(out_address);
-                    """
-                )
-
-                # For each argument, compute the corresponding address for this output
-                # index. Load the value.
-                # TODO: more efficient to fetch all values for a specific argument array
-                # at once.
-                arg_addresses = [f"address_arg{i}(out_index)" for i in range(n)]
-                arg_values = [f"arg{i}[{arg_addresses[i]}]" for i in range(n)]
-
-                # Evaluate the RPN expression for this output element and write it to
-                # the output buffer.
-                w.print(
-                    f"""
-                    output[out_address] = eval_rpn_expr({", ".join(arg_values)});
-                    """
-                )
 
         return w.finish()
 
 
+@dataclass(frozen=True, kw_only=True)
 class MatmulKernel(Kernel):
     """
-    A kernel for performing matrix multiplication on 2D tensors.
+    Batched matrix multiply with sparse argument accessors.
 
-    arg0 is the left-hand-side matrix, arg1 is the right-hand-side matrix, and output
-    is the result. The kernel assumes that all matrices are in row-major order.
+    After shape joining, arg0 has shape ``batch + (m, k)``, arg1 has
+    ``batch + (k, n)``, and output is ``batch + (m, n)``. Each output element is
+    ``sum_k arg0[batch, m, k] * arg1[batch, k, n]``, with indices mapped through the
+    argument accessors.
     """
 
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 2
+        a0, a1 = self.arg_accessors
+        assert len(a0.shape) >= 2 and len(a1.shape) >= 2
+        assert a0.shape[-1] == a1.shape[-2]
+        assert a0.shape[:-2] == a1.shape[:-2]
+        assert len(a0.shape) == len(a1.shape) == len(self.shape)
+        assert self.shape == a0.shape[:-1] + (a1.shape[-1],)
+
+    @property
+    def k(self) -> int:
+        return self.arg_accessors[0].shape[-1]
+
     def emit_wgsl(self) -> str:
-        raise NotImplementedError()
+        t = spell_stype_in_wgsl(self.stype)
+        rank = len(self.shape)
+        k = self.k
+
+        # Create a WgslWriter for emitting the shader:
+        w = self._make_wgsl_writer()
+
+        # Emit bindings and address functions for the arguments:
+        # DEF: output at @group(0) @binding(0)
+        # DEF: arg{i} at @group(1) @binding({i})
+        # DEF: address_arg{i}()
+        self._emit_bindings(w)
+        self._emit_arg_address_functions(w)
+
+        # Define helpers that map (output index, k) to argument indices:
+        # DEF: arg0_index()
+        self._define_matmul_arg_index_function(
+            w,
+            "arg0_index",
+            rank=rank,
+            k_axis=rank - 1,
+            m_axis=rank - 2,
+        )
+        # DEF: arg1_index()
+        self._define_matmul_arg_index_function(
+            w,
+            "arg1_index",
+            rank=rank,
+            k_axis=rank - 2,
+            n_axis=rank - 1,
+        )
+
+        with self._per_output_element(w):
+            w.print(
+                f"""
+                var sum: {t} = {t}(0);
+                """
+            )
+
+            # For each k along the contraction axis, compute the corresponding
+            # argument indices, load the values, and accumulate their product.
+            with w.block(f"for (var ki: u32 = 0u; ki < {k}u; ki += 1u)"):
+                w.print(
+                    """
+                    let a_idx = arg0_index(out_index, ki);
+                    let b_idx = arg1_index(out_index, ki);
+                    sum += arg0[address_arg0(a_idx)] * arg1[address_arg1(b_idx)];
+                    """
+                )
+
+            # Write the accumulated dot product to the output buffer.
+            w.print("output[out_address] = sum;")
+
+        return w.finish()
+
+    def _define_matmul_arg_index_function(
+        self,
+        w: "WgslWriter",
+        name: str,
+        *,
+        rank: int,
+        k_axis: int,
+        m_axis: int | None = None,
+        n_axis: int | None = None,
+    ) -> None:
+        """
+        Emit a helper that maps an output index and contraction index `k` to an argument
+        index. Batch dimensions (all axes before the final two) are copied from the
+        output index; the trailing two axes are filled per `m_axis`/`n_axis`/`k_axis`.
+        """
+        with w.block(
+            f"""
+            fn {name}(out_index: array<u32, {rank}>, k: u32) -> array<u32, {rank}>
+            """
+        ):
+            w.print(f"var idx: array<u32, {rank}>;")
+
+            # Copy batch dimensions from the output index:
+            for i in range(rank - 2):
+                w.print(f"idx[{i}] = out_index[{i}];")
+
+            # M-axis:
+            if m_axis is not None:
+                w.print(f"idx[{m_axis}] = out_index[{m_axis}];")
+
+            # N-axis:
+            if n_axis is not None:
+                w.print(f"idx[{n_axis}] = out_index[{n_axis}];")
+
+            # K-axis:
+            w.print(f"idx[{k_axis}] = k;")
+
+            # Done
+            w.print("return idx;")
 
 
 #
