@@ -7,3 +7,7 @@ dist
 
 # Rust
 /target
+
+# Resin
+*.wgpu.json
+*.wgpu.msgpack

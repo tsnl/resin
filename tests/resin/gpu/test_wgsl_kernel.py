@@ -1,5 +1,5 @@
 from resin.accessor import Accessor
-from resin.gpu import WgslKernelConfig, dispatch_size_for_kernel
+from resin.wgpu import WgslKernelConfig, dispatch_size_for_kernel
 from resin.ir import IrElementwiseRpnKernel, IrMatmulKernel
 from resin.rpn import ScalarRpnExpr
 

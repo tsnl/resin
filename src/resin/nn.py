@@ -44,7 +44,7 @@ class Linear:
         return Linear(weight=weight, bias=bias_node)
 
     def __call__(self, x: dsl.View) -> dsl.View:
-        out = self.weight @ x
+        out = x @ self.weight.transpose()
         if self.bias is not None:
             out = out + self.bias
         return out
@@ -63,9 +63,12 @@ def softmax(x: dsl.View, axes: tuple[int, ...] = (0,)) -> dsl.View:
 def cross_entropy(y_hat: dsl.View, y: dsl.View) -> dsl.View:
     assert y_hat.shape == y.shape
     axis = len(y_hat.shape) - 1
-    return -(y * y_hat.log()).sum(axes=(axis,)).squeeze(axes=(axis,)) / y.shape[axis]
+    return -(y * y_hat.log()).sum(axes=(axis,)).squeeze(axes=(axis,))
 
 
 def mean(n: dsl.View) -> dsl.View:
     count = math.prod(n.shape)
-    return n.sum() / count
+    reduced = n.sum(axes=tuple(range(n.rank)))
+    for axis in reversed(range(reduced.rank)):
+        reduced = reduced.squeeze(axes=(axis,))
+    return reduced / count

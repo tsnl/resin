@@ -8,6 +8,7 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
+    "IrScatterKernel",
 ]
 
 from abc import ABC
@@ -92,6 +93,15 @@ class IrMatmulKernel(IrKernel):
     @property
     def k(self) -> int:
         return self.arg_accessors[0].shape[-1]
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrScatterKernel(IrKernel):
+    woffset: int
+    wpitch: tuple[int, ...]
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 1
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -195,21 +205,32 @@ class IrProgramBuilder:
         return output_buffer
 
     def _allocate_buffer_for_node(self, node: dsl.Node) -> IrBuffer:
-        is_const_node = isinstance(node, dsl.ConstNode)
-        return IrBuffer(
-            shape=node.shape,
-            stype=node.stype,
-            init=(
-                marshall_pytensor(node.value, stype=node.stype)
-                if is_const_node
-                else None
-            ),
-            readonly=is_const_node,
-        )
+        match node:
+            case dsl.ConstNode():
+                return IrBuffer(
+                    shape=node.shape,
+                    stype=node.stype,
+                    init=marshall_pytensor(node.value, stype=node.stype),
+                    readonly=True,
+                )
+            case dsl.ScatterNode():
+                return IrBuffer(
+                    shape=node.shape,
+                    stype=node.stype,
+                    init=bytes(node.nbytes),
+                    readonly=False,
+                )
+            case _:
+                return IrBuffer(
+                    shape=node.shape,
+                    stype=node.stype,
+                    init=None,
+                    readonly=False,
+                )
 
     def _build_kernel_for_node(self, node: dsl.Node) -> IrKernel | None:
         match node:
-            case dsl.ConstNode():
+            case dsl.ConstNode() | dsl.ParamNode():
                 return None
             case dsl.ElementwiseNode():
                 return self._build_kernel_for_elementwise_node(node)
@@ -217,6 +238,8 @@ class IrProgramBuilder:
                 return self._build_kernel_for_matmul_node(node)
             case dsl.ReductionNode():
                 return self._build_kernel_for_reduction_node(node)
+            case dsl.ScatterNode():
+                return self._build_kernel_for_scatter_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
@@ -242,6 +265,15 @@ class IrProgramBuilder:
             shape=node.shape,
             operator=node.operator,
             axes=node.axes,
+        )
+
+    def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
+        return IrScatterKernel(
+            arg_accessors=(node.args[0].accessor,),
+            stype=node.stype,
+            shape=node.shape,
+            woffset=node.woffset,
+            wpitch=node.wpitch,
         )
 
 

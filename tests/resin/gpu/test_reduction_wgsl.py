@@ -1,6 +1,6 @@
 from resin.accessor import Accessor
 from resin.dsl import const
-from resin.gpu import WgslKernelConfig, emit_wgsl_for_kernel
+from resin.wgpu import WgslKernelConfig, emit_wgsl_for_kernel
 from resin.ir import IrProgramBuilder, IrReductionKernel
 
 
