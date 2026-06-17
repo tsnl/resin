@@ -1,9 +1,0 @@
-# This file is a part of [tsnl/cpp_base](https://github.com/tsnl/cpp_base).
-# If you make any changes here, please consider upstreaming them so that other projects can consistently follow the same 
-# style.
-
----
-Checks: >         
-    clang-diagnostic-*,clang-analyzer-*,modernize-*,
-    readability-*,-readability-identifier-length,-readability-redundant-access-specifiers,-readability-implicit-bool-conversion,-readability-magic-numbers,
-    -misc-include-cleaner,
