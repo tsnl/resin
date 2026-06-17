@@ -12,7 +12,9 @@ dependencies = [
     "pytest>=9.0.2",
     "rich>=14.3.2",
     "ruff>=0.14.14",
-    "wgpu>=0.31.0",
+
+    # local:
+    "resin-runtime-pybind",
 ]
 
 [build-system]
@@ -21,3 +23,6 @@ build-backend = "uv_build"
 
 [tool.ruff.lint]
 extend-select = []
+
+[tool.uv.sources]
+resin-runtime-pybind = { path = "./crates/resin-runtime-pybind", editable = true }

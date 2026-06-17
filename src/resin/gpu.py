@@ -13,8 +13,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator
 
-import wgpu
-
 from .accessor import Accessor, is_c_contiguous
 from .ir import (
     IrBuffer,
@@ -24,7 +22,6 @@ from .ir import (
     IrProgram,
     IrReductionKernel,
 )
-
 from .rpn import ScalarRpnExpr
 from .scalar import (
     BinaryAssocScalarOperator,

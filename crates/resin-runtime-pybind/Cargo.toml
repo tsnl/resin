@@ -1,0 +1,12 @@
+[package]
+name = "resin-runtime-pybind"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "resin_runtime_pybind"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = "0.29.0"
+resin-runtime = { path = "../resin-runtime" }
