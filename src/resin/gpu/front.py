@@ -41,6 +41,7 @@ from dataclasses import dataclass, fields
 from typing import Callable, Generator, Iterable
 
 from ..common import SupportsWrite, pascal_to_snake_case
+from .accessor import Accessor
 from .pytree import PyTensor, infer_pytensor_shape
 from .scalar import (
     BinaryAssocScalarOperator,
@@ -96,7 +97,10 @@ class Node(ABC):
         This is the deliberate escape hatch for reinterpreting a buffer. To reinterpret
         an existing view, reach for its backing node explicitly (`v.node.view(...)`).
         """
-        new = View(node=self, offset=offset, shape=shape, pitch=pitch)
+        new = View(
+            node=self,
+            accessor=Accessor(offset=offset, shape=shape, pitch=pitch),
+        )
         new._raise_if_out_of_backing_node_bounds()
         return new
 
@@ -127,7 +131,7 @@ class Node(ABC):
 @dataclass(frozen=True, eq=False)
 class View:
     """
-    An access pattern (offset, shape, pitch) onto a backing Node's dense output buffer.
+    An access pattern onto a backing Node's dense output buffer.
 
     View is the user-facing tensor type. All arithmetic operators and view operations
     are defined here. View operations transform the accessor in place, onto the same
@@ -135,26 +139,28 @@ class View:
     """
 
     node: "Node"
-    offset: int
-    shape: tuple[int, ...]
-    pitch: tuple[int, ...]
-
-    def __post_init__(self):
-        assert len(self.shape) == len(self.pitch)
+    accessor: Accessor
 
     @staticmethod
     def identity(node: "Node") -> "View":
         """A dense, C-contiguous view that addresses the whole of `node`'s output."""
-        return View(
-            node=node,
-            offset=0,
-            shape=node.shape,
-            pitch=c_contiguous_pitch_for_shape(node.shape),
-        )
+        return View(node=node, accessor=Accessor.dense(node.shape))
 
     #
     # Properties:
     #
+
+    @property
+    def offset(self) -> int:
+        return self.accessor.offset
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.accessor.shape
+
+    @property
+    def pitch(self) -> tuple[int, ...]:
+        return self.accessor.pitch
 
     @property
     def stype(self) -> ScalarType:
@@ -162,7 +168,7 @@ class View:
 
     @property
     def rank(self) -> int:
-        return len(self.shape)
+        return self.accessor.rank
 
     @property
     def nbytes(self) -> int:
@@ -173,98 +179,19 @@ class View:
     #
 
     def broadcast(self, ns: tuple[int, ...]) -> "View":
-        zs = (0,) * len(ns)
-        return View(
-            node=self.node,
-            offset=self.offset,
-            shape=ns + self.shape,
-            pitch=zs + self.pitch,
-        )
+        return View(node=self.node, accessor=self.accessor.broadcast(ns))
 
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> "View":
-        """
-        Computes the (offset, shape, pitch) of the subview selected by `key` from a view
-        with the given (old_offset, old_shape, old_pitch), in backing-buffer coordinates.
-        """
-
-        key = (key,) if isinstance(key, (int, slice)) else key
-
-        old_offset = self.offset
-        old_shape = self.shape
-        old_pitch = self.pitch
-
-        def bounded_index(k: int) -> int:
-            d = old_shape[dim]
-            if not (-d <= k < d):
-                raise IndexError(
-                    f"Index {k} out of bounds for dimension {dim} of size {d}"
-                )
-            return k % d
-
-        def bounded_end(k: int) -> int:
-            d = old_shape[dim]
-            if not (0 <= k <= d):
-                raise IndexError(
-                    f"Slice end {k} out of bounds for dimension {dim} of size {d}"
-                )
-            return k
-
-        assert len(key) <= len(old_shape)
-
-        new_offset = old_offset
-        new_pitch = []
-        new_shape = []
-
-        for dim, k in enumerate(key):
-            match k:
-                case int():
-                    new_offset += bounded_index(k) * old_pitch[dim]
-                case slice():
-                    b = bounded_index(k.start) if k.start is not None else 0
-                    e = bounded_end(k.stop) if k.stop is not None else old_shape[dim]
-                    s = k.step if k.step is not None else 1
-                    a = abs(s)
-
-                    new_offset += b * old_pitch[dim]
-                    new_pitch.append(old_pitch[dim] * s)
-                    new_shape.append(max(0, (e - b + (a - 1)) // a))
-                case _:
-                    raise TypeError(f"Invalid index {k} for dimension {dim}")
-
-        for dim in range(len(key), len(old_shape)):
-            new_pitch.append(old_pitch[dim])
-            new_shape.append(old_shape[dim])
-
-        return View(self.node, new_offset, tuple(new_shape), tuple(new_pitch))
+        return View(node=self.node, accessor=self.accessor.narrow(key))
 
     def permute(self, permutation: tuple[int, ...]) -> "View":
-        if sorted(permutation) != list(range(self.rank)):
-            raise ValueError(f"Bad permutation {permutation} for shape {self.shape}")
-        return View(
-            node=self.node,
-            offset=self.offset,
-            shape=tuple(self.shape[i] for i in permutation),
-            pitch=tuple(self.pitch[i] for i in permutation),
-        )
+        return View(node=self.node, accessor=self.accessor.permute(permutation))
 
     def transpose(self) -> "View":
-        """Permutes dimensions so the last two are swapped, the rest left unaltered."""
-        identity = tuple(range(self.rank))
-        permutation = identity[:-2] + (identity[-1], identity[-2])
-        return self.permute(permutation)
+        return View(node=self.node, accessor=self.accessor.transpose())
 
     def squeeze(self, axes: tuple[int, ...]) -> "View":
-        for axis in axes:
-            if axis < 0 or axis >= self.rank:
-                raise IndexError(f"Axis {axis} out of bounds for shape {self.shape}")
-            if self.shape[axis] != 1:
-                raise ValueError(f"Cannot squeeze axis {axis} with {self.shape[axis]=}")
-        return View(
-            node=self.node,
-            offset=self.offset,
-            shape=tuple(s for i, s in enumerate(self.shape) if i not in axes),
-            pitch=tuple(p for i, p in enumerate(self.pitch) if i not in axes),
-        )
+        return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
     def copy(self, *, stype: ScalarType | None = None) -> "View":
         return _copy(self, stype=stype)
@@ -432,26 +359,11 @@ class View:
 
     def _is_identity(self) -> bool:
         """True if this view addresses the whole backing node densely (C-contiguous)."""
-        return (
-            self.offset == 0
-            and self.shape == self.node.shape
-            and self.pitch == c_contiguous_pitch_for_shape(self.shape)
-        )
+        return self.accessor.is_dense_c_contiguous(self.node.shape)
 
     def _raise_if_out_of_backing_node_bounds(self) -> None:
         """Panics if this view addresses memory outside the (dense) backing node."""
-        if self.offset < 0:
-            raise ValueError(f"View offset {self.offset} is negative")
-        max_address = self.offset + sum(
-            (s - 1) * p for s, p in zip(self.shape, self.pitch) if p > 0
-        )
-        capacity = math.prod(self.node.shape)
-        if self.shape and math.prod(self.shape) > 0 and max_address >= capacity:
-            raise ValueError(
-                f"View (offset={self.offset}, shape={self.shape}, pitch={self.pitch}) "
-                f"addresses element {max_address} outside backing node of "
-                f"{capacity} elements"
-            )
+        self.accessor.raise_if_addresses_out_of_bounds(math.prod(self.node.shape))
 
     @staticmethod
     def _from_view_or_scalar(value: "PyTensor | View", stype: ScalarType) -> "View":
@@ -467,13 +379,20 @@ class View:
         join = shape_join(self.shape, self.pitch, other.shape, other.pitch)
         return (
             View(
-                node=self.node, offset=self.offset, shape=join.shape, pitch=join.pitch1
+                node=self.node,
+                accessor=Accessor(
+                    offset=self.offset,
+                    shape=join.shape,
+                    pitch=join.pitch1,
+                ),
             ),
             View(
                 node=other.node,
-                offset=other.offset,
-                shape=join.shape,
-                pitch=join.pitch2,
+                accessor=Accessor(
+                    offset=other.offset,
+                    shape=join.shape,
+                    pitch=join.pitch2,
+                ),
             ),
         )
 
@@ -516,10 +435,12 @@ class View:
 
         # Finalize:
         new_self = View(
-            node=s.node, offset=s.offset, shape=new_s_shape, pitch=new_s_pitch
+            node=s.node,
+            accessor=Accessor(offset=s.offset, shape=new_s_shape, pitch=new_s_pitch),
         )
         new_other = View(
-            node=o.node, offset=o.offset, shape=new_o_shape, pitch=new_o_pitch
+            node=o.node,
+            accessor=Accessor(offset=o.offset, shape=new_o_shape, pitch=new_o_pitch),
         )
         return new_self, new_other
 
@@ -697,10 +618,13 @@ class ReductionNode(Node):
         # Broadcast df_dout (with reduced axes of size 1) back up to the operand shape.
         g = View(
             node=df_dout.node,
-            offset=df_dout.offset,
-            shape=operand.shape,
-            pitch=tuple(
-                (0 if i in self.axes else df_dout.pitch[i]) for i in range(operand.rank)
+            accessor=Accessor(
+                offset=df_dout.offset,
+                shape=operand.shape,
+                pitch=tuple(
+                    (0 if i in self.axes else df_dout.pitch[i])
+                    for i in range(operand.rank)
+                ),
             ),
         )
 
@@ -808,9 +732,11 @@ class ScatterNode(Node):
         return (
             View(
                 node=dense.node,
-                offset=self.woffset,
-                shape=source.shape,
-                pitch=self.wpitch,
+                accessor=Accessor(
+                    offset=self.woffset,
+                    shape=source.shape,
+                    pitch=self.wpitch,
+                ),
             ),
         )
 
@@ -885,9 +811,10 @@ def debug_print(root: "View", out: SupportsWrite[str]) -> None:
             return
 
         # Render the access pattern, then the backing node as its only child.
+        a = view.accessor
         print(
             f"{prefix}{connector}view("
-            f"offset={view.offset}, shape={view.shape!r}, pitch={view.pitch!r})",
+            f"offset={a.offset}, shape={a.shape!r}, pitch={a.pitch!r})",
             file=out,
         )
         visit_node(view.node, prefix + prefix_ext, "└ ", "  ", is_root=is_root)

@@ -9,11 +9,10 @@ from resin.gpu.front import (
     View,
     const,
     full,
-    invert_permutation,
     param,
-    permute,
     zeros,
 )
+from resin.gpu.shape import invert_permutation, permute
 
 
 def debug_str(view: View) -> str:

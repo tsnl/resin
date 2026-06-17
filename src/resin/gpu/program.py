@@ -1,7 +1,4 @@
-import math
 from dataclasses import dataclass
-from posix import access
-from typing import cast
 
 from frozendict import frozendict
 
@@ -96,14 +93,7 @@ class ProgramBuilder:
 
         buffer = self._build_node(view.node)
 
-        bv = BufferView(
-            buffer=buffer,
-            accessor=Accessor(
-                offset=view.offset,
-                shape=view.shape,
-                pitch=view.pitch,
-            ),
-        )
+        bv = BufferView(buffer=buffer, accessor=view.accessor)
         self.buffer_view_memo[view] = bv
 
         return bv
@@ -166,14 +156,7 @@ class ProgramBuilder:
 
     def _build_kernel_for_elementwise_node(self, node: front.ElementwiseNode) -> Kernel:
         return ElementwiseRpnKernel(
-            arg_accessors=tuple(
-                Accessor(
-                    offset=view.offset,
-                    shape=view.shape,
-                    pitch=view.pitch,
-                )
-                for view in node.args
-            ),
+            arg_accessors=tuple(view.accessor for view in node.args),
             stype=node.stype,
             shape=node.shape,
             rpn_expr=ScalarRpnExpr(string=(node.operator, 0, 1)),
@@ -181,14 +164,7 @@ class ProgramBuilder:
 
     def _build_kernel_for_matmul_node(self, node: front.MatmulNode) -> Kernel:
         return MatmulKernel(
-            arg_accessors=tuple(
-                Accessor(
-                    offset=view.offset,
-                    shape=view.shape,
-                    pitch=view.pitch,
-                )
-                for view in node.args
-            ),
+            arg_accessors=tuple(view.accessor for view in node.args),
             stype=node.stype,
             shape=node.shape,
         )

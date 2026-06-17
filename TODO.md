@@ -6,7 +6,6 @@
 -   [ ] Create an `Interpreter` that allows naive execution of this graph.
     - [x] Generate `Program` specification from graph language
     - [ ] Write kernels: need to support sparse views
-    - [ ] Extract `Accessor` as common between `front.py`, `program.py`, and now `kernel/__init__.py`.
 
 Also
 -   For better compiler optimization, need to rewrite `graph.py` once more, with `View` used to read/write
