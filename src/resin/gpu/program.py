@@ -1,17 +1,19 @@
 import math
 from dataclasses import dataclass
+from posix import access
 from typing import cast
 
 from frozendict import frozendict
 
 from . import front
+from .accessor import Accessor
 from .kernel import (
-    ElementwiseBinaryKernel,
-    ElementwiseUnaryKernel,
+    ElementwiseRpnKernel,
     Kernel,
     MatmulKernel,
 )
 from .pytree import marshall_pytensor
+from .rpn import ScalarRpnExpr
 from .scalar import (
     BinaryCompareOperator,
     BinaryScalarOperator,
@@ -43,9 +45,7 @@ class Buffer:
 @dataclass(frozen=True, kw_only=True)
 class BufferView:
     buffer: Buffer
-    offset: int
-    shape: tuple[int, ...]
-    pitch: tuple[int, ...]
+    accessor: Accessor
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -98,9 +98,11 @@ class ProgramBuilder:
 
         bv = BufferView(
             buffer=buffer,
-            offset=view.offset,
-            shape=view.shape,
-            pitch=view.pitch,
+            accessor=Accessor(
+                offset=view.offset,
+                shape=view.shape,
+                pitch=view.pitch,
+            ),
         )
         self.buffer_view_memo[view] = bv
 
@@ -163,33 +165,30 @@ class ProgramBuilder:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
     def _build_kernel_for_elementwise_node(self, node: front.ElementwiseNode) -> Kernel:
-        assert len(node.args) in (1, 2)
-
-        n = math.prod(node.shape)
-
-        match len(node.args):
-            case 1:
-                return ElementwiseUnaryKernel(
-                    unary_op=cast(UnaryScalarOperator, node.operator),
-                    n=n,
-                    stype=node.stype,
+        return ElementwiseRpnKernel(
+            arg_accessors=tuple(
+                Accessor(
+                    offset=view.offset,
+                    shape=view.shape,
+                    pitch=view.pitch,
                 )
-            case 2:
-                return ElementwiseBinaryKernel(
-                    binary_op=cast(
-                        BinaryScalarOperator | BinaryCompareOperator,
-                        node.operator,
-                    ),
-                    n=n,
-                    stype=node.stype,
-                )
-            case _:
-                raise NotImplementedError()
+                for view in node.args
+            ),
+            stype=node.stype,
+            shape=node.shape,
+            rpn_expr=ScalarRpnExpr(string=(node.operator, 0, 1)),
+        )
 
     def _build_kernel_for_matmul_node(self, node: front.MatmulNode) -> Kernel:
         return MatmulKernel(
-            m=node.shape[0],
-            n=node.shape[1],
-            k=node.shape[2],
-            t=node.stype,
+            arg_accessors=tuple(
+                Accessor(
+                    offset=view.offset,
+                    shape=view.shape,
+                    pitch=view.pitch,
+                )
+                for view in node.args
+            ),
+            stype=node.stype,
+            shape=node.shape,
         )

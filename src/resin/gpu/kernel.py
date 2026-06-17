@@ -8,8 +8,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator
 
+from .accessor import Accessor
+from .rpn import ScalarRpnExpr
 from .scalar import (
-    ScalarOperator,
     ScalarType,
     spell_stype_in_wgsl,
 )
@@ -29,6 +30,10 @@ class Kernel(ABC):
     optimizations like kernel fusion.
     """
 
+    arg_accessors: tuple[Accessor, ...]
+    stype: ScalarType
+    shape: tuple[int, ...]
+
     @abstractmethod
     def emit_wgsl(self) -> str:
         """
@@ -45,9 +50,6 @@ class ElementwiseRpnKernel(Kernel):
     """
 
     rpn_expr: ScalarRpnExpr
-    arg_accessors: tuple[Accessor, ...]
-    stype: ScalarType
-    shape: tuple[int, ...]
     lg2_items_per_thread: int = 3
 
     def __post_init__(self):
@@ -226,23 +228,16 @@ class ElementwiseRpnKernel(Kernel):
         return w.finish()
 
 
-@dataclass
-class ScalarRpnExpr:
-    string: tuple[ScalarOperator | int, ...]
+class MatmulKernel(Kernel):
+    """
+    A kernel for performing matrix multiplication on 2D tensors.
 
-    def __getitem__(self, key: int) -> ScalarOperator | int:
-        return self.string[key]
+    arg0 is the left-hand-side matrix, arg1 is the right-hand-side matrix, and output
+    is the result. The kernel assumes that all matrices are in row-major order.
+    """
 
-
-@dataclass(frozen=True, kw_only=True)
-class Accessor:
-    offset: int
-    shape: tuple[int, ...]
-    pitch: tuple[int, ...]
-
-    def __post_init__(self):
-        assert self.offset >= 0
-        assert len(self.shape) == len(self.pitch), "Inconsistent rank"
+    def emit_wgsl(self) -> str:
+        raise NotImplementedError()
 
 
 #
