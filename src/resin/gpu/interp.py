@@ -4,7 +4,7 @@ import wgpu
 from wgpu.structs import dataclass
 
 from .kernel import Kernel
-from .program import Buffer, Dispatch, Program
+from .program import Buffer, Program
 from .scalar import stype_nbytes
 
 

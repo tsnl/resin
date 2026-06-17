@@ -2,24 +2,18 @@ __all__ = [
     "Kernel",
 ]
 
-import functools
-import importlib.resources
-import re
 import textwrap
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Generator, Literal
+from typing import Generator
 
-from ..scalar import (
-    BinaryCompareOperator,
-    BinaryScalarOperator,
+from .scalar import (
     ScalarOperator,
     ScalarType,
-    UnaryScalarOperator,
     spell_stype_in_wgsl,
 )
-from ..shape import c_contiguous_pitch_for_shape, is_c_contiguous
+from .shape import c_contiguous_pitch_for_shape, is_c_contiguous
 
 #
 # Kernel
@@ -36,7 +30,7 @@ class Kernel(ABC):
     """
 
     @abstractmethod
-    def wgsl(self) -> str:
+    def emit_wgsl(self) -> str:
         """
         Renders the shader into a WGSL string.
         """
@@ -54,7 +48,7 @@ class ElementwiseRpnKernel(Kernel):
     arg_accessors: tuple[Accessor, ...]
     stype: ScalarType
     shape: tuple[int, ...]
-    lg2_items_per_thread: int = 64
+    lg2_items_per_thread: int = 3
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
@@ -252,74 +246,6 @@ class Accessor:
 
 
 #
-# ShaderTemplate
-#
-
-
-type Template = Literal[
-    "elementwise-binary",
-    "elementwise-unary",
-    "matmul",
-    "test1",
-]
-"""
-Names of shader templates that can be loaded from disk.
-Should reflect the on-disk WGSL files bundled alongside this file.
-"""
-
-
-@dataclass
-class TemplateParams:
-    consts: dict[str, str]
-    types: dict[str, str]
-
-
-@functools.cache
-def _load_template_string(template_name: Template) -> str:
-    folder_traversable = importlib.resources.files()
-    file_path = folder_traversable.joinpath(f"{template_name}.wgsl")
-    return file_path.read_text()
-
-
-def _render_shader_template_with_params(template: str, params: TemplateParams) -> str:
-    # Initialize the text to be rendered:
-    text = template
-
-    # Perform text substitution for each template const:
-    for const_name, const_value in params.consts.items():
-        text = re.sub(
-            rf"""
-            \/\* \s* template \s* \*\/  \s*     # /* template */
-            const \s+ {const_name}      \s*     # const <NAME>
-            =                           \s*     # =
-            (?P<value> .+?)             \s*     # <VALUE_PLACEHOLDER>
-            ;                                   # ;
-            """,
-            rf"/* template */ const {const_name} = {const_value};",
-            text,
-            flags=re.VERBOSE,
-        )
-
-    # Perform text substitution for each template alias:
-    for alias_name, alias_value in params.types.items():
-        text = re.sub(
-            rf"""
-            \/\* \s* template \s* \*\/  \s*     # /* template */
-            alias \s+ {alias_name}      \s*     # alias <NAME>
-            =                           \s*     # =
-            (?P<value> .+?)             \s*     # <VALUE_PLACEHOLDER>
-            ;                                   # ;
-            """,
-            rf"/* template */ type {alias_name} = {alias_value};",
-            text,
-            flags=re.VERBOSE,
-        )
-
-    # Done:
-    return text
-
-
-#
 # WgslWriter
 #
 
@@ -368,6 +294,7 @@ class WgslWriter:
                     acc += index[{i}] * {accessor.pitch[i]};  // dim {i}
                     """
                 )
+            self.print("return acc;")
 
     def define_cc_index_function(self, name: str, cc_accessor: Accessor):
         assert is_c_contiguous(cc_accessor.shape, cc_accessor.pitch)
