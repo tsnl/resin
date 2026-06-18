@@ -1,28 +1,40 @@
 [project]
 name = "resin"
 version = "0.1.0"
-description = "Add your description here"
+description = "Resin GPGPU metaprogramming"
 readme = "README.md"
 requires-python = ">=3.14"
 authors = [{ name = "Nikhil Idiculla", email = "nikhil.idiculla@gmail.com" }]
 dependencies = [
-    "clang>=21.1.7",
     "frozendict>=2.4.7",
     "msgpack>=1.1.2",
+    "resin-rt-pybind",
+]
+
+[dependency-groups]
+dev = [
+    "clang>=21.1.7",
     "pytest>=9.0.2",
     "rich>=14.3.2",
     "ruff>=0.14.14",
-
-    # local:
-    "resin-runtime-pybind",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.14,<0.10.0"]
+requires = ["uv_build>=0.9.14,<0.12"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "resin"
+module-root = "src"
+
+[tool.uv.sources]
+resin-rt-pybind = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    ".",
+    "crates/resin-rt-pybind",
+]
 
 [tool.ruff.lint]
 extend-select = []
-
-[tool.uv.sources]
-resin-runtime-pybind = { path = "./crates/resin-runtime-pybind", editable = true }

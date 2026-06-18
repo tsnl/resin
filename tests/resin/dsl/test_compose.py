@@ -3,7 +3,7 @@
 import textwrap
 from io import StringIO
 
-from resin.dsl import View, const, full, param, zeros
+from resin.dsl.dsl import View, const, full, param, zeros
 
 
 def debug_str(view: View) -> str:

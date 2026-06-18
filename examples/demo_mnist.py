@@ -4,17 +4,13 @@ import struct
 import sys
 from dataclasses import dataclass
 
-import resin_runtime_pybind
+import resin_rt_pybind
 
 import resin.nn as nn
 from resin import dsl
 from resin.dataset import MnistDataLoader, MnistDataset
-from resin.wgpu import (
-    WgpuProgram,
-    build_param_update_program,
-    commit_param_updates,
-    param_buffer_index,
-)
+from resin.train import build_param_update_program, commit_param_updates
+from resin.wgpu import WgpuProgram, param_buffer_index
 
 
 @dataclass
@@ -51,7 +47,7 @@ def _random_param_bytes(shape: tuple[int, ...]) -> bytes:
 
 
 def _write_param(
-    interp: resin_runtime_pybind.WgpuInterp,
+    interp: resin_rt_pybind.WgpuInterp,
     program: WgpuProgram,
     param_view: dsl.View,
     data: bytes,
@@ -96,7 +92,7 @@ def main() -> None:
         trainable_params=trainable_params,
         learning_rate=learning_rate,
     )
-    interp = resin_runtime_pybind.WgpuInterp(program.to_msgpack())
+    interp = resin_rt_pybind.WgpuInterp(program.to_msgpack())
 
     for param_view in trainable_params:
         _write_param(interp, program, param_view, _random_param_bytes(param_view.shape))

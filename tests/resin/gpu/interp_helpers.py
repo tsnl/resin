@@ -6,12 +6,12 @@ import math
 import struct
 from collections.abc import Mapping
 
-import resin_runtime_pybind
+import resin_rt_pybind
 
 from resin import dsl
 from resin.ir import IrProgramBuilder
-from resin.pytree import flatten_pytensor, infer_pytensor_shape, marshall_pytensor
-from resin.scalar import ScalarType, spell_stype_in_pystruct
+from resin.core.pytree import flatten_pytensor, infer_pytensor_shape, marshall_pytensor
+from resin.core.scalar import ScalarType, spell_stype_in_pystruct
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 
 type PyTensor = float | list[PyTensor]
@@ -40,7 +40,7 @@ def run_graph(
         builder.build_sink(f"__param_{index}", view)
     builder.build_sink(sink_name, sink)
     program = build_wgpu_program(builder.finish())
-    interp = resin_runtime_pybind.WgpuInterp(program.to_msgpack())
+    interp = resin_rt_pybind.WgpuInterp(program.to_msgpack())
 
     for view, value in param_items:
         node = view.node

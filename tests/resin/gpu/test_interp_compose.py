@@ -5,7 +5,8 @@ import math
 import pytest
 
 import resin.nn as nn
-from resin import dsl, grad
+from resin import dsl
+import resin.grad as grad
 from resin.nn import Linear
 
 from tests.resin.gpu.interp_helpers import run_graph, run_scalar

@@ -3,7 +3,7 @@
 import struct
 import sys
 
-import resin_runtime_pybind
+import resin_rt_pybind
 
 from resin import dsl
 from resin.ir import IrProgramBuilder
@@ -18,7 +18,7 @@ def main() -> None:
     ir_program = builder.finish()
 
     wgpu_program = build_wgpu_program(ir_program)
-    interp = resin_runtime_pybind.WgpuInterp(wgpu_program.to_msgpack())
+    interp = resin_rt_pybind.WgpuInterp(wgpu_program.to_msgpack())
     interp.run()
 
     sink_view_index = wgpu_program.sinks["out"]

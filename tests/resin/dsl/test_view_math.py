@@ -1,4 +1,4 @@
-from resin.dsl import const
+from resin.dsl.dsl import const
 
 
 class TestViewMath:

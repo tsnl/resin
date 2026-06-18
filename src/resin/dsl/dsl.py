@@ -32,10 +32,10 @@ from abc import ABC
 from dataclasses import dataclass, fields
 from typing import Callable, Generator, Iterable
 
-from .accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
-from .common import SupportsWrite, pascal_to_snake_case
-from .pytree import PyTensor, PyTree, infer_pytensor_shape
-from .scalar import (
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
+from resin.core.common import SupportsWrite, pascal_to_snake_case
+from resin.core.pytree import PyTensor, PyTree, infer_pytensor_shape
+from resin.core.scalar import (
     BinaryAssocScalarOperator,
     Scalar,
     ScalarOperator,

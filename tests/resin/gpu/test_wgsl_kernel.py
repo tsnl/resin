@@ -1,7 +1,7 @@
-from resin.accessor import Accessor
-from resin.wgpu import WgslKernelConfig, dispatch_size_for_kernel
+from resin.core.accessor import Accessor
 from resin.ir import IrElementwiseRpnKernel, IrMatmulKernel
-from resin.rpn import ScalarRpnExpr
+from resin.core.rpn import ScalarRpnExpr
+from resin.wgpu import WgslKernelConfig, dispatch_size_for_kernel
 
 
 class TestDispatchSize:

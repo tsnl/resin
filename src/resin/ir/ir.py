@@ -16,11 +16,10 @@ from dataclasses import dataclass
 
 from frozendict import frozendict
 
-from . import dsl
-from .accessor import Accessor
-from .pytree import marshall_pytensor
-from .rpn import ScalarRpnExpr
-from .scalar import (
+from resin.core.accessor import Accessor
+from resin.core.pytree import marshall_pytensor
+from resin.core.rpn import ScalarRpnExpr
+from resin.core.scalar import (
     BinaryAssocScalarOperator,
     BinaryCompareOperator,
     BinaryScalarOperator,
@@ -28,6 +27,7 @@ from .scalar import (
     ScalarType,
     UnaryScalarOperator,
 )
+from resin.dsl import dsl
 
 #
 # IrProgram
@@ -36,7 +36,8 @@ from .scalar import (
 
 @dataclass(frozen=True, kw_only=True)
 class IrProgram:
-    param_buffer_ids: frozendict[dsl.ParamNode, int]
+    # Maps Python object id of each ParamNode to its buffer index in `buffers`.
+    param_buffer_ids: frozendict[int, int]
     sinks: frozendict[str, IrBufferView]
     queue: tuple[IrDispatch, ...]
     buffers: tuple[IrBuffer, ...]
@@ -155,7 +156,7 @@ class IrProgramBuilder:
     def finish(self) -> IrProgram:
         param_buffer_ids = frozendict(
             {
-                node: index
+                id(node): index
                 for index, node in enumerate(self.buffer_memo.keys())
                 if isinstance(node, dsl.ParamNode)
             }

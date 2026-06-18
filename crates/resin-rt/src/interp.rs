@@ -1,4 +1,4 @@
-use crate::program::{WgpuPipelineSpec, WgpuProgram};
+use crate::program::{WgpuBufferSpec, WgpuPipelineSpec, WgpuProgram};
 use std::borrow::Cow;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -37,7 +37,7 @@ pub fn request_default_device() -> Result<(wgpu::Device, wgpu::Queue), WgpuInter
 
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
-            label: Some("resin-runtime"),
+            label: Some("resin"),
             required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::default(),
@@ -248,7 +248,7 @@ impl WgpuInterp {
 
 fn create_buffer(
     device: &wgpu::Device,
-    spec: &crate::program::WgpuBufferSpec,
+    spec: &WgpuBufferSpec,
 ) -> Result<wgpu::Buffer, WgpuInterpError> {
     let size = spec.byte_len().max(4);
     let usage =

@@ -1,4 +1,4 @@
-import resin_runtime_pybind
+import resin_rt_pybind
 
 from resin import dsl
 from resin.ir import IrProgramBuilder
@@ -29,7 +29,7 @@ class TestBuildWgpuProgram:
         ir_program = builder.finish()
 
         wgpu_program = build_wgpu_program(ir_program)
-        resin_runtime_pybind.WgpuInterp(wgpu_program.to_msgpack())
+        resin_rt_pybind.WgpuInterp(wgpu_program.to_msgpack())
 
     def test_elementwise_graph_has_pipeline_and_dispatch(self) -> None:
         t1 = dsl.const([1.0, 2.0], stype="f4")

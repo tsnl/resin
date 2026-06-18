@@ -1,4 +1,4 @@
-from resin.accessor import invert_permutation, permute
+from resin.core.accessor import invert_permutation, permute
 
 
 class TestPermutationMath:

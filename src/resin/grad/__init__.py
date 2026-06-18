@@ -5,8 +5,8 @@ __all__ = [
     "grad",
 ]
 
-from .accessor import Accessor
-from .dsl import (
+from resin.core.accessor import Accessor
+from resin.dsl.dsl import (
     ConstNode,
     ElementwiseNode,
     MatmulNode,

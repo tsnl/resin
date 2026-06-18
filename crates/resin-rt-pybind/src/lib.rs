@@ -1,13 +1,29 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use resin_runtime::program::WgpuProgram;
-use resin_runtime::{request_default_device, WgpuInterp, WgpuInterpError};
+use resin_rt::WgpuInterp;
+use resin_rt::{request_default_device, WgpuInterpError, WgpuProgram};
 
 fn interp_error(err: WgpuInterpError) -> PyErr {
     PyValueError::new_err(err.to_string())
 }
 
-#[pyclass(name = "WgpuInterp", module = "resin_runtime_pybind")]
+#[pyfunction]
+fn decode_wgpu_program_msgpack(program_msgpack: &[u8]) -> PyResult<()> {
+    WgpuProgram::from_msgpack(program_msgpack)
+        .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    Ok(())
+}
+
+#[pyfunction]
+fn encode_wgpu_program_msgpack(program_msgpack: &[u8]) -> PyResult<Vec<u8>> {
+    let program = WgpuProgram::from_msgpack(program_msgpack)
+        .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    program
+        .to_msgpack()
+        .map_err(|err| PyValueError::new_err(err.to_string()))
+}
+
+#[pyclass(name = "WgpuInterp", module = "resin_rt_pybind")]
 pub struct PyWgpuInterp {
     inner: WgpuInterp,
 }
@@ -16,7 +32,7 @@ pub struct PyWgpuInterp {
 impl PyWgpuInterp {
     /// Convenience constructor that acquires a default GPU device and queue.
     ///
-    /// `program_msgpack` is a MessagePack blob produced by `resin.wgpu.WgpuProgram.to_msgpack`.
+    /// `program_msgpack` is a MessagePack blob produced by `resin_wgpu.WgpuProgram.to_msgpack`.
     #[new]
     fn new(program_msgpack: &[u8]) -> PyResult<Self> {
         let program = WgpuProgram::from_msgpack(program_msgpack)
@@ -57,7 +73,9 @@ impl PyWgpuInterp {
 }
 
 #[pymodule]
-fn resin_runtime_pybind(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn resin_rt_pybind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWgpuInterp>()?;
+    m.add_function(wrap_pyfunction!(decode_wgpu_program_msgpack, m)?)?;
+    m.add_function(wrap_pyfunction!(encode_wgpu_program_msgpack, m)?)?;
     Ok(())
 }
