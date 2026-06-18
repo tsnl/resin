@@ -5,6 +5,7 @@
 # dependencies = [
 #   "resin",
 #   "resin-rt-pybind",
+#   "numpy",
 #   "torch",
 # ]
 #
@@ -25,6 +26,8 @@ import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+
+import torch
 
 from resin.dataset import MnistDataLoader, MnistDataset
 
@@ -703,29 +706,24 @@ def main() -> None:
         seed=args.seed,
     )
 
-    if args.backend == "resin":
-        _run_resin(
-            config,
-            benchmark_steps=args.benchmark_steps,
-            benchmark_warmup=args.benchmark_warmup,
-        )
-        return
-
-    try:
-        import torch  # noqa: F401
-    except ImportError as exc:
-        raise SystemExit(
-            "PyTorch backend requires torch. Install with: uv pip install torch"
-        ) from exc
-
-    _run_pytorch(
-        config,
-        optimizer_name=args.optimizer,
-        device_name=args.device,
-        match_resin_loss=args.match_resin_loss,
-        benchmark_steps=args.benchmark_steps,
-        benchmark_warmup=args.benchmark_warmup,
-    )
+    match args.backend:
+        case "resin":
+            _run_resin(
+                config,
+                benchmark_steps=args.benchmark_steps,
+                benchmark_warmup=args.benchmark_warmup,
+            )
+        case "pytorch":
+            _run_pytorch(
+                config,
+                optimizer_name=args.optimizer,
+                device_name=args.device,
+                match_resin_loss=args.match_resin_loss,
+                benchmark_steps=args.benchmark_steps,
+                benchmark_warmup=args.benchmark_warmup,
+            )
+        case _:
+            raise NotImplementedError()
 
 
 if __name__ == "__main__":
