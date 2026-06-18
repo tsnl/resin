@@ -3,11 +3,17 @@ IR->IR optimization passes.
 
 ---
 
-Ideas for optimizations
+## Ideas for optimizations
 
--   **Matmul + RPN expression fused kernel** <br/>
-    elementwise RPN expressions for each matmul argument, then matmul, then elementwise
-    RPN expressions for the matrix product.
+### Kernel fusion and scheduling
+
+-   **Elementwise RPN fusion** <br/>
+    If we have a sequence of elementwise operations, we can fuse them into a single
+    kernel.
+
+-   **Matmul + RPN epilogue fused kernel** <br/>
+    Support an RPN scalar epilogue after each matmul. Possibly also RPN prologue for
+    each argument. But epilogue first.
 
 -   **IrElementType = ScalarType | TiledScalarType** <br/>
     Replace ScalarType with IrElementType, which could be a scalar OR a tiled scalar
@@ -19,12 +25,18 @@ Ideas for optimizations
     tiled tensors by default.
 
     **IrElementType => No explicit high-level matmul** <br/>
-    If we don't have a dedicated Matmul kernel, then ReductionNode becomes the sole sync
-    point in our graph. Matmul can be expressed using elementwise tiled matmul
-    operations, reduction, and stride-tricks (need to plan this out and confirm).
-    This could make scheduling and kernel fusion much easier. We don't need an ugly
-    Matmul+RPN fused kernel. Instead, we can generate kernels with elementwise chains,
-    reductions, and more elementwise chains.
+    Matmul can be expressed using elementwise tiled matmul operations, reduction, and
+    stride-tricks. This makes scheduling and kernel fusion much easier. Instead of
+    Matmul + epilogue, we can have reduction + epilogue or prologue + reduction +
+    epilogue with matmul an elementwise operation on matrix tiles.
+
+### Constant folding
+
+-   Constant folding
+-   Constant inlining into RPN expressions, matmul, scatter, gather
+-   Dead code elimination
+
+### Big Picture Ideas
 
 -   Big symbolic scalar graph <br/>
     A totally different approach: imagine each value in a matrix is a single scalar
@@ -33,7 +45,7 @@ Ideas for optimizations
     possible? This throws out the user's conception of what is a tensor. Pretty radical,
     needs the most thought.
 
-Other emitter-side optimizations:
+### Emitter-side optimizations
 
 -   **Use SPV extensions** like `SPV_NV_tensor_addressing` to more efficiently access
     tensor elements upto 5D.
