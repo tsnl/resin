@@ -1,5 +1,15 @@
 """E2E: compose a simple graph and export a WgpuProgram MessagePack artifact."""
 
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "resin",
+# ]
+#
+# [tool.uv.sources]
+# resin = { path = "..", editable = true }
+# ///
+
 import sys
 from pathlib import Path
 

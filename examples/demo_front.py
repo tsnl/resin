@@ -1,5 +1,15 @@
 """Demo of dsl debug_print output for various node types."""
 
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "resin",
+# ]
+#
+# [tool.uv.sources]
+# resin = { path = "..", editable = true }
+# ///
+
 import sys
 
 from resin import dsl

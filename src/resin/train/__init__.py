@@ -7,9 +7,10 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from frozendict import frozendict
+
+import resin.grad as grad_mod
 from resin.dsl import dsl
 from resin.ir import IrProgramBuilder
-import resin.grad as grad_mod
 from resin.wgpu import WgpuProgram, WgslKernelConfig, build_wgpu_program
 
 
