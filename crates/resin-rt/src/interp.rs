@@ -1,6 +1,5 @@
 use crate::program::{WgpuBufferSpec, WgpuPipelineSpec, WgpuProgram};
 use std::borrow::Cow;
-use std::sync::Mutex;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -31,7 +30,6 @@ pub struct WgpuInterp {
     buffers: Vec<wgpu::Buffer>,
     pipelines: Vec<wgpu::ComputePipeline>,
     prepared_dispatches: Vec<PreparedDispatch>,
-    run_command_buffer: Mutex<wgpu::CommandBuffer>,
 }
 
 /// Acquire a default GPU device and queue for standalone use (e.g. Python dev).
@@ -86,12 +84,6 @@ impl WgpuInterp {
 
         let prepared_dispatches =
             prepare_dispatches(&device, &program, &buffers, &pipelines)?;
-        let run_command_buffer = record_run_command_buffer(
-            &device,
-            &program,
-            &pipelines,
-            &prepared_dispatches,
-        )?;
 
         Ok(Self {
             device,
@@ -100,7 +92,6 @@ impl WgpuInterp {
             buffers,
             pipelines,
             prepared_dispatches,
-            run_command_buffer: Mutex::new(run_command_buffer),
         })
     }
 
@@ -115,24 +106,28 @@ impl WgpuInterp {
             }
         }
 
-        let command_buffer = self
-            .run_command_buffer
-            .lock()
-            .map_err(|_| WgpuInterpError::Program("run command buffer lock poisoned".into()))?
-            .clone();
-        self.queue.submit(Some(command_buffer));
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("resin-run"),
+            });
 
-        let next_command_buffer = record_run_command_buffer(
-            &self.device,
-            &self.program,
-            &self.pipelines,
-            &self.prepared_dispatches,
-        )?;
-        *self
-            .run_command_buffer
-            .lock()
-            .map_err(|_| WgpuInterpError::Program("run command buffer lock poisoned".into()))? =
-            next_command_buffer;
+        for prepared in &self.prepared_dispatches {
+            let pipeline = &self.pipelines[prepared.pipeline_index];
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("resin-compute-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &prepared.bind_group, &[]);
+            pass.dispatch_workgroups(
+                prepared.dispatch_size[0],
+                prepared.dispatch_size[1],
+                prepared.dispatch_size[2],
+            );
+        }
+
+        self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
 
@@ -286,34 +281,6 @@ fn prepare_dispatches(
     }
 
     Ok(prepared)
-}
-
-fn record_run_command_buffer(
-    device: &wgpu::Device,
-    program: &WgpuProgram,
-    pipelines: &[wgpu::ComputePipeline],
-    prepared_dispatches: &[PreparedDispatch],
-) -> Result<wgpu::CommandBuffer, WgpuInterpError> {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("resin-run-bundle"),
-    });
-
-    for prepared in prepared_dispatches {
-        let pipeline = &pipelines[prepared.pipeline_index];
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("resin-compute-pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &prepared.bind_group, &[]);
-        pass.dispatch_workgroups(
-            prepared.dispatch_size[0],
-            prepared.dispatch_size[1],
-            prepared.dispatch_size[2],
-        );
-    }
-
-    Ok(encoder.finish())
 }
 
 fn create_buffer(
