@@ -118,10 +118,10 @@ impl WgpuInterp {
                             prepared.output_buffer_index
                         ))
                     })?;
-                clear_buffer_in_encoder(
-                    &mut encoder,
+                encoder.clear_buffer(
                     &self.buffers[prepared.output_buffer_index],
-                    output_spec.byte_len(),
+                    0,
+                    Some(output_spec.byte_len()),
                 );
             }
         }
@@ -154,7 +154,7 @@ impl WgpuInterp {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("resin-clear"),
             });
-        clear_buffer_in_encoder(&mut encoder, &self.buffers[buffer_index], spec.byte_len());
+        encoder.clear_buffer(&self.buffers[buffer_index], 0, Some(spec.byte_len()));
         self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
@@ -251,14 +251,6 @@ impl WgpuInterp {
         let mapped = buffer_slice.get_mapped_range();
         Ok(mapped.to_vec())
     }
-}
-
-fn clear_buffer_in_encoder(
-    encoder: &mut wgpu::CommandEncoder,
-    buffer: &wgpu::Buffer,
-    size: u64,
-) {
-    encoder.clear_buffer(buffer, 0, Some(size));
 }
 
 fn prepare_dispatches(
