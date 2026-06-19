@@ -82,8 +82,7 @@ impl WgpuInterp {
             .map(|spec| create_pipeline(&device, spec))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let prepared_dispatches =
-            prepare_dispatches(&device, &program, &buffers, &pipelines)?;
+        let prepared_dispatches = prepare_dispatches(&device, &program, &buffers, &pipelines)?;
 
         Ok(Self {
             device,
@@ -111,10 +110,7 @@ impl WgpuInterp {
                 encoder.clear_buffer(
                     &self.buffers[prepared.output_buffer_index],
                     0,
-                    Some(
-                        self.program.buffers[prepared.output_buffer_index]
-                            .byte_len(),
-                    ),
+                    Some(self.program.buffers[prepared.output_buffer_index].byte_len()),
                 );
             }
         }
@@ -255,10 +251,6 @@ fn prepare_dispatches(
             WgpuPipelineSpec::Compute(spec) => spec,
         };
         let pipeline = &pipelines[dispatch.pipeline_index];
-
-        if compute.dispatch_size == [0, 0, 0] || compute.dispatch_size[0] == 0 {
-            continue;
-        }
 
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
