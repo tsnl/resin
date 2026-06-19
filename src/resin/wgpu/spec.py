@@ -121,7 +121,7 @@ class WgpuComputePipelineSpec:
 
 @dataclass(frozen=True)
 class WgpuCopyPipelineSpec:
-    clear_output_before_dispatch: bool = False
+    """Dense C-contiguous gather lowered to GPU copy_buffer_to_buffer."""
 
 
 type WgpuPipelineSpec = WgpuComputePipelineSpec | WgpuCopyPipelineSpec
@@ -199,10 +199,7 @@ def _pipeline_to_dict(spec: WgpuPipelineSpec) -> dict[str, Any]:
                 "clear_output_before_dispatch": spec.clear_output_before_dispatch,
             }
         case WgpuCopyPipelineSpec():
-            return {
-                "kind": "copy",
-                "clear_output_before_dispatch": spec.clear_output_before_dispatch,
-            }
+            return {"kind": "copy"}
         case _:
             raise ValueError(f"unsupported pipeline spec: {spec!r}")
 
@@ -221,11 +218,7 @@ def _pipeline_from_dict(payload: dict[str, Any]) -> WgpuPipelineSpec:
                 ),
             )
         case "copy":
-            return WgpuCopyPipelineSpec(
-                clear_output_before_dispatch=payload.get(
-                    "clear_output_before_dispatch", False
-                ),
-            )
+            return WgpuCopyPipelineSpec()
         case _:
             raise ValueError(f"unsupported pipeline kind: {kind!r}")
 

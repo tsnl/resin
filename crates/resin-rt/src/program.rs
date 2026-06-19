@@ -54,10 +54,7 @@ pub enum WgpuPipelineSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct WgpuCopyPipelineSpec {
-    #[serde(default)]
-    pub clear_output_before_dispatch: bool,
-}
+pub struct WgpuCopyPipelineSpec {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WgpuComputePipelineSpec {

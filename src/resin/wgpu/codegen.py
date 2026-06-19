@@ -69,9 +69,7 @@ def build_pipeline_for_kernel(
 ) -> WgpuPipelineSpec:
     match kernel:
         case IrGatherWithAccessorKernel() if _gather_uses_copy_pipeline(kernel):
-            return WgpuCopyPipelineSpec(
-                clear_output_before_dispatch=kernel.clear_output_before_dispatch,
-            )
+            return WgpuCopyPipelineSpec()
         case _:
             return WgpuComputePipelineSpec(
                 wgsl=_emit_wgsl_for_kernel(kernel, config),

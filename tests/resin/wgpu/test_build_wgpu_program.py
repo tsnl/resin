@@ -76,8 +76,7 @@ class TestBuildWgpuProgram:
         assert len(wgpu_program.pipelines) == 1
         pipeline = wgpu_program.pipelines[0]
         assert isinstance(pipeline, WgpuCopyPipelineSpec)
-        assert pipeline.clear_output_before_dispatch is True
-        assert wgpu_program.to_dict()["pipelines"][0]["kind"] == "copy"
+        assert wgpu_program.to_dict()["pipelines"][0] == {"kind": "copy"}
 
     def test_sparse_gather_uses_compute_pipeline(self) -> None:
         t = dsl.const([1, 2, 3, 4, 5, 6], dtype="f4")

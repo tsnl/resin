@@ -1,6 +1,4 @@
-use crate::program::{
-    WgpuBufferSpec, WgpuCopyPipelineSpec, WgpuPipelineSpec, WgpuProgram,
-};
+use crate::program::{WgpuBufferSpec, WgpuPipelineSpec, WgpuProgram};
 use std::borrow::Cow;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -171,8 +169,8 @@ impl WgpuInterp {
                         );
                     }
                 }
-                (WgpuPipelineSpec::Copy(copy_spec), CompiledPipeline::Copy) => {
-                    self.run_copy_dispatch(&mut encoder, dispatch, copy_spec)?;
+                (WgpuPipelineSpec::Copy(_), CompiledPipeline::Copy) => {
+                    self.run_copy_dispatch(&mut encoder, dispatch)?;
                 }
                 _ => {
                     return Err(WgpuInterpError::Program(
@@ -190,7 +188,6 @@ impl WgpuInterp {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         dispatch: &crate::program::WgpuDispatch,
-        copy_spec: &WgpuCopyPipelineSpec,
     ) -> Result<(), WgpuInterpError> {
         let &source_view_index = dispatch
             .arg_buffer_view_indices
@@ -209,12 +206,6 @@ impl WgpuInterp {
             })?;
 
         let accessor = &source_view.accessor;
-        if !is_c_contiguous(&accessor.shape, &accessor.pitch) {
-            return Err(WgpuInterpError::Program(
-                "copy pipeline requires a C-contiguous source accessor".into(),
-            ));
-        }
-
         let element_nbytes = output_spec.dtype.nbytes() as u64;
         let copy_bytes: u64 = accessor
             .shape
@@ -231,14 +222,13 @@ impl WgpuInterp {
         }
 
         let src_offset = accessor.offset as u64 * element_nbytes;
-        let src_buffer = &self.buffers[source_view.buffer_index];
-        let dst_buffer = &self.buffers[dispatch.output_buffer_index];
-
-        if copy_spec.clear_output_before_dispatch {
-            clear_buffer_in_encoder(encoder, dst_buffer, copy_bytes);
-        }
-
-        encoder.copy_buffer_to_buffer(src_buffer, src_offset, dst_buffer, 0, copy_bytes);
+        encoder.copy_buffer_to_buffer(
+            &self.buffers[source_view.buffer_index],
+            src_offset,
+            &self.buffers[dispatch.output_buffer_index],
+            0,
+            copy_bytes,
+        );
         Ok(())
     }
 
@@ -352,16 +342,6 @@ fn clear_buffer_in_encoder(
     size: u64,
 ) {
     encoder.clear_buffer(buffer, 0, Some(size));
-}
-
-fn c_contiguous_pitch(shape: &[u32]) -> Vec<u32> {
-    (0..shape.len())
-        .map(|i| shape[i + 1..].iter().copied().product())
-        .collect()
-}
-
-fn is_c_contiguous(shape: &[u32], pitch: &[u32]) -> bool {
-    pitch == c_contiguous_pitch(shape)
 }
 
 fn create_buffer(
