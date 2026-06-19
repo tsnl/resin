@@ -9,16 +9,31 @@ pub struct WgpuProgram {
     pub schema_version: u32,
     pub param_buffer_ids: BTreeMap<u64, usize>,
     pub sinks: BTreeMap<String, usize>,
-    pub queue: Vec<WgpuDispatch>,
+    pub queue: Vec<WgpuQueueOp>,
     pub buffers: Vec<WgpuBufferSpec>,
     pub buffer_views: Vec<WgpuBufferViewSpec>,
-    pub pipelines: Vec<WgpuPipelineSpec>,
+    pub pipelines: Vec<WgpuComputePipelineSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum WgpuQueueOp {
+    #[serde(rename = "dispatch")]
+    Dispatch(WgpuDispatch),
+    #[serde(rename = "copy")]
+    Copy(WgpuCopy),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WgpuDispatch {
     pub pipeline_index: usize,
     pub arg_buffer_view_indices: Vec<usize>,
+    pub output_buffer_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WgpuCopy {
+    pub source_buffer_view_index: usize,
     pub output_buffer_index: usize,
 }
 
@@ -42,13 +57,6 @@ pub struct WgpuAccessorSpec {
     pub offset: u32,
     pub shape: Vec<u32>,
     pub pitch: Vec<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum WgpuPipelineSpec {
-    #[serde(rename = "compute")]
-    Compute(WgpuComputePipelineSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

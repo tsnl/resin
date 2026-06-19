@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import msgpack
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from frozendict import frozendict
 from resin_rt_pybind import decode_wgpu_program_msgpack
@@ -18,8 +18,10 @@ __all__ = [
     "WgpuBufferSpec",
     "WgpuBufferViewSpec",
     "WgpuComputePipelineSpec",
+    "WgpuCopy",
     "WgpuDispatch",
     "WgpuProgram",
+    "WgpuQueueOp",
 ]
 
 #
@@ -32,7 +34,7 @@ class WgpuProgram:
     buffers: tuple[WgpuBufferSpec, ...]
     buffer_views: tuple[WgpuBufferViewSpec, ...]
     pipelines: tuple[WgpuComputePipelineSpec, ...]
-    queue: tuple[WgpuDispatch, ...]
+    queue: tuple[WgpuQueueOp, ...]
     sinks: frozendict[str, int]
     param_buffer_ids: frozendict[int, int] = field(
         default_factory=lambda: frozendict[int, int]()
@@ -44,7 +46,7 @@ class WgpuProgram:
             "schema_version": self.schema_version,
             "param_buffer_ids": dict(self.param_buffer_ids),
             "sinks": dict(self.sinks),
-            "queue": [_dispatch_to_dict(d) for d in self.queue],
+            "queue": [_queue_op_to_dict(op) for op in self.queue],
             "buffers": [_buffer_to_dict(b) for b in self.buffers],
             "buffer_views": [_buffer_view_to_dict(v) for v in self.buffer_views],
             "pipelines": [_pipeline_to_dict(p) for p in self.pipelines],
@@ -56,7 +58,7 @@ class WgpuProgram:
             schema_version=payload.get("schema_version", SCHEMA_VERSION),
             param_buffer_ids=frozendict(payload.get("param_buffer_ids", {})),
             sinks=frozendict(payload["sinks"]),
-            queue=tuple(_dispatch_from_dict(d) for d in payload["queue"]),
+            queue=tuple(_queue_op_from_dict(op) for op in payload["queue"]),
             buffers=tuple(_buffer_from_dict(b) for b in payload["buffers"]),
             buffer_views=tuple(
                 _buffer_view_from_dict(v) for v in payload["buffer_views"]
@@ -124,6 +126,15 @@ class WgpuDispatch:
     output_buffer_index: int
 
 
+@dataclass(frozen=True)
+class WgpuCopy:
+    source_buffer_view_index: int
+    output_buffer_index: int
+
+
+type WgpuQueueOp = WgpuDispatch | WgpuCopy
+
+
 def _buffer_to_dict(spec: WgpuBufferSpec) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "shape": list(spec.shape),
@@ -179,7 +190,6 @@ def _buffer_view_from_dict(payload: dict[str, Any]) -> WgpuBufferViewSpec:
 
 def _pipeline_to_dict(spec: WgpuComputePipelineSpec) -> dict[str, Any]:
     return {
-        "kind": "compute",
         "wgsl": spec.wgsl,
         "entry_point": spec.entry_point,
         "dispatch_size": list(spec.dispatch_size),
@@ -189,8 +199,6 @@ def _pipeline_to_dict(spec: WgpuComputePipelineSpec) -> dict[str, Any]:
 
 
 def _pipeline_from_dict(payload: dict[str, Any]) -> WgpuComputePipelineSpec:
-    if payload["kind"] != "compute":
-        raise ValueError(f"unsupported pipeline kind: {payload['kind']!r}")
     return WgpuComputePipelineSpec(
         wgsl=payload["wgsl"],
         entry_point=payload.get("entry_point", "main"),
@@ -200,17 +208,38 @@ def _pipeline_from_dict(payload: dict[str, Any]) -> WgpuComputePipelineSpec:
     )
 
 
-def _dispatch_to_dict(spec: WgpuDispatch) -> dict[str, Any]:
-    return {
-        "pipeline_index": spec.pipeline_index,
-        "arg_buffer_view_indices": list(spec.arg_buffer_view_indices),
-        "output_buffer_index": spec.output_buffer_index,
-    }
+def _queue_op_to_dict(op: WgpuQueueOp) -> dict[str, Any]:
+    match op:
+        case WgpuDispatch():
+            return {
+                "kind": "dispatch",
+                "pipeline_index": op.pipeline_index,
+                "arg_buffer_view_indices": list(op.arg_buffer_view_indices),
+                "output_buffer_index": op.output_buffer_index,
+            }
+        case WgpuCopy():
+            return {
+                "kind": "copy",
+                "source_buffer_view_index": op.source_buffer_view_index,
+                "output_buffer_index": op.output_buffer_index,
+            }
+        case _:
+            raise ValueError(f"unsupported queue op: {op!r}")
 
 
-def _dispatch_from_dict(payload: dict[str, Any]) -> WgpuDispatch:
-    return WgpuDispatch(
-        pipeline_index=payload["pipeline_index"],
-        arg_buffer_view_indices=tuple(payload["arg_buffer_view_indices"]),
-        output_buffer_index=payload["output_buffer_index"],
-    )
+def _queue_op_from_dict(payload: dict[str, Any]) -> WgpuQueueOp:
+    kind: Literal["dispatch", "copy"] = payload["kind"]
+    match kind:
+        case "dispatch":
+            return WgpuDispatch(
+                pipeline_index=payload["pipeline_index"],
+                arg_buffer_view_indices=tuple(payload["arg_buffer_view_indices"]),
+                output_buffer_index=payload["output_buffer_index"],
+            )
+        case "copy":
+            return WgpuCopy(
+                source_buffer_view_index=payload["source_buffer_view_index"],
+                output_buffer_index=payload["output_buffer_index"],
+            )
+        case _:
+            raise ValueError(f"unsupported queue op kind: {kind!r}")
