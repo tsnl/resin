@@ -168,7 +168,7 @@ def grad(f: View) -> dict[Node, View]:
         existing = grad_node.get(view.node)
         grad_node[view.node] = (existing + contrib) if existing is not None else contrib
 
-    accumulate(f, ones(f.shape, stype=f.stype))
+    accumulate(f, ones(f.shape, dtype=f.dtype))
 
     for node in reversed(toposort([f])):
         df_dn = grad_node.get(node)

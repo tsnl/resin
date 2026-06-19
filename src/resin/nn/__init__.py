@@ -39,8 +39,8 @@ class Linear:
 
     @staticmethod
     def new(in_features: int, out_features: int, bias: bool = True) -> "Linear":
-        weight = dsl.param(shape=(out_features, in_features), stype="f4")
-        bias_node = dsl.param(shape=(out_features,), stype="f4") if bias else None
+        weight = dsl.param(shape=(out_features, in_features), dtype="f4")
+        bias_node = dsl.param(shape=(out_features,), dtype="f4") if bias else None
         return Linear(weight=weight, bias=bias_node)
 
     def __call__(self, x: dsl.View) -> dsl.View:
@@ -51,7 +51,7 @@ class Linear:
 
 
 def relu(x: dsl.View) -> dsl.View:
-    return x.max(dsl.const(0, stype=x.stype))
+    return x.max(dsl.const(0, dtype=x.dtype))
 
 
 def softmax(x: dsl.View, axes: tuple[int, ...] = (0,)) -> dsl.View:

@@ -15,20 +15,11 @@ IR->IR optimization passes.
     Support an RPN scalar epilogue after each matmul. Possibly also RPN prologue for
     each argument. But epilogue first.
 
--   **IrElementType = ScalarType | TiledScalarType** <br/>
-    Replace ScalarType with IrElementType, which could be a scalar OR a tiled scalar
-    type.
-    E.g. mat4x4_f4
-    When we perform a matmul on block matrices i.e. matrices with tile elements, we can
-    use cooperative matrix operations.
-    Tile types should be hidden from the end user. We can convert regular tensors into
-    tiled tensors by default.
-
-    **IrElementType => No explicit high-level matmul** <br/>
-    Matmul can be expressed using elementwise tiled matmul operations, reduction, and
-    stride-tricks. This makes scheduling and kernel fusion much easier. Instead of
-    Matmul + epilogue, we can have reduction + epilogue or prologue + reduction +
-    epilogue with matmul an elementwise operation on matrix tiles.
+-   **Tiled DTypes for performance** <br/>
+    Extend ``DType`` with tile types (e.g. ``"mat4x4_f4"``) so block matmul can use
+    cooperative matrix ops and fuse more cleanly with surrounding kernels. High-level
+    matmul decomposes into elementwise tiled ops, reductions, and stride-tricks —
+    easier to schedule than a dedicated matmul kernel plus epilogue.
 
 ### Constant folding
 

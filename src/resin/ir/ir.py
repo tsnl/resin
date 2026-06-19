@@ -18,13 +18,13 @@ from frozendict import frozendict
 
 from resin.core.accessor import Accessor
 from resin.core.pytree import marshall_pytensor
-from resin.core.rpn import ScalarRpnExpr
-from resin.core.scalar import (
+from .rpn import ElementRpnExpr
+from resin.core.dtype import (
     BinaryAssocScalarOperator,
     BinaryCompareOperator,
     BinaryScalarOperator,
+    DType,
     ScalarOperator,
-    ScalarType,
     UnaryScalarOperator,
 )
 from resin.dsl import dsl
@@ -47,7 +47,7 @@ class IrProgram:
 @dataclass(frozen=True, kw_only=True, eq=False)
 class IrBuffer:
     shape: tuple[int, ...]
-    stype: ScalarType
+    dtype: DType
     init: bytes | None = None
     readonly: bool
 
@@ -67,15 +67,21 @@ class IrDispatch:
 
 @dataclass(frozen=True, kw_only=True)
 class IrKernel(ABC):
+    """Base kernel. ``dtype`` is the output buffer element type.
+
+    All current kernels share one dtype for inputs and output. Tile
+    kernels may need per-operand types or epilogue-specific types later.
+    """
+
     arg_accessors: tuple[Accessor, ...]
-    stype: ScalarType
+    dtype: DType
     shape: tuple[int, ...]
     clear_output_before_dispatch: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
 class IrElementwiseRpnKernel(IrKernel):
-    rpn_expr: ScalarRpnExpr
+    rpn_expr: ElementRpnExpr
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
@@ -213,14 +219,14 @@ class IrProgramBuilder:
             case dsl.ConstNode():
                 return IrBuffer(
                     shape=node.shape,
-                    stype=node.stype,
-                    init=marshall_pytensor(node.value, stype=node.stype),
+                    dtype=node.dtype,
+                    init=marshall_pytensor(node.value, dtype=node.dtype),
                     readonly=True,
                 )
             case _:
                 return IrBuffer(
                     shape=node.shape,
-                    stype=node.stype,
+                    dtype=node.dtype,
                     init=None,
                     readonly=False,
                 )
@@ -243,22 +249,22 @@ class IrProgramBuilder:
     def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
         return IrElementwiseRpnKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
-            stype=node.stype,
+            dtype=node.dtype,
             shape=node.shape,
-            rpn_expr=ScalarRpnExpr(string=_rpn_string_for_elementwise(node)),
+            rpn_expr=ElementRpnExpr(string=_rpn_string_for_elementwise(node)),
         )
 
     def _build_kernel_for_matmul_node(self, node: dsl.MatmulNode) -> IrKernel:
         return IrMatmulKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
-            stype=node.stype,
+            dtype=node.dtype,
             shape=node.shape,
         )
 
     def _build_kernel_for_reduction_node(self, node: dsl.ReductionNode) -> IrKernel:
         return IrReductionKernel(
             arg_accessors=(node.args[0].accessor,),
-            stype=node.stype,
+            dtype=node.dtype,
             shape=node.shape,
             operator=node.operator,
             axes=node.axes,
@@ -267,7 +273,7 @@ class IrProgramBuilder:
     def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
         return IrScatterKernel(
             arg_accessors=(node.args[0].accessor,),
-            stype=node.stype,
+            dtype=node.dtype,
             shape=node.shape,
             operator=node.operator,
             woffset=node.woffset,

@@ -23,7 +23,7 @@ from resin.wgpu import build_wgpu_program
 
 
 def main() -> None:
-    t = dsl.const([1.0, 2.0, 3.0], stype="f4")
+    t = dsl.const([1.0, 2.0, 3.0], dtype="f4")
 
     builder = IrProgramBuilder()
     builder.build_sink("out", t)

@@ -349,9 +349,9 @@ def _run_resin(
 
     image = dsl.param(
         shape=(config.batch_size, config.img_size * config.img_size),
-        stype="f4",
+        dtype="f4",
     )
-    label = dsl.param(shape=(config.batch_size, config.num_classes), stype="f4")
+    label = dsl.param(shape=(config.batch_size, config.num_classes), dtype="f4")
     model = ResinMnistMlp.new(
         ResinMnistMlpConfig(
             input_size=config.img_size**2,

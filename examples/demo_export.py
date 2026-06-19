@@ -22,7 +22,7 @@ from resin.wgpu import WgpuProgram, build_wgpu_program
 
 
 def main() -> None:
-    t = dsl.const([1.0, 2.0, 3.0], stype="f4")
+    t = dsl.const([1.0, 2.0, 3.0], dtype="f4")
 
     builder = IrProgramBuilder()
     builder.build_sink("out", t)
@@ -37,7 +37,7 @@ def main() -> None:
     restored = WgpuProgram.from_msgpack(blob)
     assert restored.sinks["out"] == 0
     assert len(restored.buffers) == 1
-    assert restored.buffers[0].stype == "f4"
+    assert restored.buffers[0].dtype == "f4"
 
     print(f"wrote {out_path}", file=sys.stderr)
 

@@ -10,8 +10,8 @@ import resin_rt_pybind
 
 from resin import dsl
 from resin.ir import IrProgramBuilder
+from resin.core.dtype import DType, spell_dtype_in_pystruct
 from resin.core.pytree import flatten_pytensor, infer_pytensor_shape, marshall_pytensor
-from resin.core.scalar import ScalarType, spell_stype_in_pystruct
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 
 type PyTensor = float | list[PyTensor]
@@ -23,10 +23,10 @@ def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
 
 
 def unmarshall_buffer(
-    data: bytes, shape: tuple[int, ...], stype: ScalarType
+    data: bytes, shape: tuple[int, ...], dtype: DType
 ) -> list[float]:
     count = math.prod(shape)
-    fmt = spell_stype_in_pystruct(stype)
+    fmt = spell_dtype_in_pystruct(dtype)
     return list(struct.unpack(f"<{count}{fmt}", data))
 
 
@@ -52,12 +52,12 @@ def run_graph(
             raise ValueError(
                 f"param shape mismatch: view {view.shape}, value {expected_shape}"
             )
-        data = marshall_pytensor(value, stype=view.stype)
+        data = marshall_pytensor(value, dtype=view.dtype)
         interp.write_buffer(param_buffer_index(program, node), data)
 
     interp.run()
     raw = interp.read_buffer(sink_buffer_index(program, sink_name))
-    return unmarshall_buffer(raw, sink.shape, sink.stype)
+    return unmarshall_buffer(raw, sink.shape, sink.dtype)
 
 
 def run_scalar(

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import math
 import msgpack
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from frozendict import frozendict
-from resin.core.scalar import ScalarType
 from resin_rt_pybind import decode_wgpu_program_msgpack
+
+from resin.core.dtype import DType, dtype_nbytes
 
 SCHEMA_VERSION = 1
 
@@ -75,10 +77,22 @@ class WgpuProgram:
 
 @dataclass(frozen=True)
 class WgpuBufferSpec:
+    """Buffer metadata in a :class:`WgpuProgram`."""
+
     shape: tuple[int, ...]
-    stype: ScalarType
+    dtype: DType
     init: bytes | None = None
     readonly: bool = False
+
+    def __post_init__(self) -> None:
+        if self.init is None:
+            return
+        expected = math.prod(self.shape) * dtype_nbytes(self.dtype)
+        if len(self.init) != expected:
+            raise ValueError(
+                f"buffer init size {len(self.init)} != expected {expected} "
+                f"for shape {self.shape} and dtype {self.dtype!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -113,7 +127,7 @@ class WgpuDispatch:
 def _buffer_to_dict(spec: WgpuBufferSpec) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "shape": list(spec.shape),
-        "stype": spec.stype,
+        "dtype": spec.dtype,
         "readonly": spec.readonly,
     }
     if spec.init is not None:
@@ -127,7 +141,7 @@ def _buffer_from_dict(payload: dict[str, Any]) -> WgpuBufferSpec:
         init = bytes(init)
     return WgpuBufferSpec(
         shape=tuple(payload["shape"]),
-        stype=payload["stype"],
+        dtype=payload["dtype"],
         init=init,
         readonly=payload.get("readonly", False),
     )
