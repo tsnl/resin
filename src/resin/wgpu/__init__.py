@@ -18,6 +18,7 @@ from .spec import (
     WgpuBufferSpec,
     WgpuBufferViewSpec,
     WgpuComputePipelineSpec,
+    WgpuCopy,
     WgpuDispatch,
     WgpuProgram,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "WgpuBufferSpec",
     "WgpuBufferViewSpec",
     "WgpuComputePipelineSpec",
+    "WgpuCopy",
     "WgpuDispatch",
     "WgpuProgram",
     "dtype_nbytes",
