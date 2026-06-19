@@ -1,4 +1,4 @@
-from resin.core.dtype import DType, dtype_nbytes, spell_dtype_in_pystruct
+from resin.core.etype import ElementType, etype_nbytes, spell_etype_in_pystruct
 
 from .ir import (
     IrBuffer,
@@ -16,7 +16,7 @@ from .ir_opt import optimize
 from .rpn import ElementRpnExpr
 
 __all__ = [
-    "DType",
+    "ElementType",
     "ElementRpnExpr",
     "IrBuffer",
     "IrBufferView",
@@ -28,7 +28,7 @@ __all__ = [
     "IrProgramBuilder",
     "IrReductionKernel",
     "IrScatterKernel",
-    "dtype_nbytes",
+    "etype_nbytes",
     "optimize",
-    "spell_dtype_in_pystruct",
+    "spell_etype_in_pystruct",
 ]

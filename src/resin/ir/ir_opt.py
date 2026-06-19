@@ -15,8 +15,8 @@ IR->IR optimization passes.
     Support an RPN scalar epilogue after each matmul. Possibly also RPN prologue for
     each argument. But epilogue first.
 
--   **Tiled DTypes for performance** <br/>
-    Extend ``DType`` with tile types (e.g. ``"mat4x4_f4"``) so block matmul can use
+-   **Tiled ElementTypes for performance** <br/>
+    Extend ``ElementType`` with tile types (e.g. ``"mat4x4_f4"``) so block matmul can use
     cooperative matrix ops and fuse more cleanly with surrounding kernels. High-level
     matmul decomposes into elementwise tiled ops, reductions, and stride-tricks —
     easier to schedule than a dedicated matmul kernel plus epilogue.

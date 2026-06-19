@@ -19,13 +19,13 @@ from frozendict import frozendict
 from resin.core.accessor import Accessor
 from resin.core.pytree import marshall_pytensor
 from .rpn import ElementRpnExpr
-from resin.core.dtype import (
-    BinaryAssocScalarOperator,
+from resin.core.etype import (
+    BinaryAssocElementOperator,
     BinaryCompareOperator,
-    BinaryScalarOperator,
-    DType,
-    ScalarOperator,
-    UnaryScalarOperator,
+    BinaryElementOperator,
+    ElementType,
+    ElementOperator,
+    UnaryElementOperator,
 )
 from resin.dsl import dsl
 
@@ -47,7 +47,7 @@ class IrProgram:
 @dataclass(frozen=True, kw_only=True, eq=False)
 class IrBuffer:
     shape: tuple[int, ...]
-    dtype: DType
+    etype: ElementType
     init: bytes | None = None
     readonly: bool
 
@@ -67,14 +67,14 @@ class IrDispatch:
 
 @dataclass(frozen=True, kw_only=True)
 class IrKernel(ABC):
-    """Base kernel. ``dtype`` is the output buffer element type.
+    """Base kernel. ``etype`` is the output buffer element type.
 
-    All current kernels share one dtype for inputs and output. Tile
+    All current kernels share one etype for inputs and output. Tile
     kernels may need per-operand types or epilogue-specific types later.
     """
 
     arg_accessors: tuple[Accessor, ...]
-    dtype: DType
+    etype: ElementType
     shape: tuple[int, ...]
     clear_output_before_dispatch: bool = False
 
@@ -105,7 +105,7 @@ class IrMatmulKernel(IrKernel):
 
 @dataclass(frozen=True, kw_only=True)
 class IrScatterKernel(IrKernel):
-    operator: BinaryAssocScalarOperator | None
+    operator: BinaryAssocElementOperator | None
     woffset: int
     wpitch: tuple[int, ...]
     clear_output_before_dispatch: bool = True
@@ -116,7 +116,7 @@ class IrScatterKernel(IrKernel):
 
 @dataclass(frozen=True, kw_only=True)
 class IrReductionKernel(IrKernel):
-    operator: BinaryAssocScalarOperator
+    operator: BinaryAssocElementOperator
     axes: tuple[int, ...]
 
     def __post_init__(self):
@@ -219,14 +219,14 @@ class IrProgramBuilder:
             case dsl.ConstNode():
                 return IrBuffer(
                     shape=node.shape,
-                    dtype=node.dtype,
-                    init=marshall_pytensor(node.value, dtype=node.dtype),
+                    etype=node.etype,
+                    init=marshall_pytensor(node.value, etype=node.etype),
                     readonly=True,
                 )
             case _:
                 return IrBuffer(
                     shape=node.shape,
-                    dtype=node.dtype,
+                    etype=node.etype,
                     init=None,
                     readonly=False,
                 )
@@ -249,7 +249,7 @@ class IrProgramBuilder:
     def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
         return IrElementwiseRpnKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
-            dtype=node.dtype,
+            etype=node.etype,
             shape=node.shape,
             rpn_expr=ElementRpnExpr(string=_rpn_string_for_elementwise(node)),
         )
@@ -257,14 +257,14 @@ class IrProgramBuilder:
     def _build_kernel_for_matmul_node(self, node: dsl.MatmulNode) -> IrKernel:
         return IrMatmulKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
-            dtype=node.dtype,
+            etype=node.etype,
             shape=node.shape,
         )
 
     def _build_kernel_for_reduction_node(self, node: dsl.ReductionNode) -> IrKernel:
         return IrReductionKernel(
             arg_accessors=(node.args[0].accessor,),
-            dtype=node.dtype,
+            etype=node.etype,
             shape=node.shape,
             operator=node.operator,
             axes=node.axes,
@@ -273,7 +273,7 @@ class IrProgramBuilder:
     def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
         return IrScatterKernel(
             arg_accessors=(node.args[0].accessor,),
-            dtype=node.dtype,
+            etype=node.etype,
             shape=node.shape,
             operator=node.operator,
             woffset=node.woffset,
@@ -281,7 +281,7 @@ class IrProgramBuilder:
         )
 
 
-_UNARY_OPS: tuple[UnaryScalarOperator, ...] = (
+_UNARY_OPS: tuple[UnaryElementOperator, ...] = (
     "neg",
     "exp",
     "log",
@@ -290,7 +290,7 @@ _UNARY_OPS: tuple[UnaryScalarOperator, ...] = (
     "cos",
     "not",
 )
-_BINARY_OPS: tuple[BinaryScalarOperator | BinaryCompareOperator, ...] = (
+_BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
     "pow",
     "mul",
     "div",
@@ -309,7 +309,7 @@ _BINARY_OPS: tuple[BinaryScalarOperator | BinaryCompareOperator, ...] = (
 
 def _rpn_string_for_elementwise(
     node: dsl.ElementwiseNode,
-) -> tuple[int | ScalarOperator, ...]:
+) -> tuple[int | ElementOperator, ...]:
     op = node.operator
     if op in _UNARY_OPS:
         return (0, op)

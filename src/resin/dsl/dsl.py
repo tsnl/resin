@@ -35,26 +35,26 @@ from typing import Callable, Generator, Iterable
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
 from resin.core.pytree import PyTensor, PyTree, infer_pytensor_shape
-from resin.core.dtype import (
-    BinaryAssocScalarOperator,
-    DType,
+from resin.core.etype import (
+    BinaryAssocElementOperator,
+    ElementType,
     Scalar,
-    ScalarOperator,
-    UnaryScalarOperator,
-    dtype_join,
-    dtype_nbytes,
+    ElementOperator,
+    UnaryElementOperator,
+    etype_join,
+    etype_nbytes,
 )
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class Node(ABC):
     shape: tuple[int, ...]
-    dtype: DType
+    etype: ElementType
     args: tuple["View", ...]
 
     @property
     def nbytes(self) -> int:
-        return math.prod(self.shape) * dtype_nbytes(self.dtype)
+        return math.prod(self.shape) * etype_nbytes(self.etype)
 
     def view(
         self,
@@ -93,8 +93,8 @@ class View:
         return self.accessor.pitch
 
     @property
-    def dtype(self) -> DType:
-        return self.node.dtype
+    def etype(self) -> ElementType:
+        return self.node.etype
 
     @property
     def rank(self) -> int:
@@ -102,7 +102,7 @@ class View:
 
     @property
     def nbytes(self) -> int:
-        return math.prod(self.shape) * dtype_nbytes(self.dtype)
+        return math.prod(self.shape) * etype_nbytes(self.etype)
 
     def broadcast(self, ns: tuple[int, ...]) -> "View":
         return View(node=self.node, accessor=self.accessor.broadcast(ns))
@@ -119,38 +119,38 @@ class View:
     def squeeze(self, axes: tuple[int, ...]) -> "View":
         return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
-    def copy(self, *, dtype: DType | None = None) -> "View":
-        return _copy(self, dtype=dtype)
+    def copy(self, *, etype: ElementType | None = None) -> "View":
+        return _copy(self, etype=etype)
 
     def __pow__(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="pow")
 
     def __rpow__(self, other: "View | Scalar") -> "View":
-        return View._from_view_or_scalar(other, dtype=self.dtype) ** self
+        return View._from_view_or_scalar(other, etype=self.etype) ** self
 
     def __mul__(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="mul")
 
     def __rmul__(self, other: "View | Scalar") -> "View":
-        return View._from_view_or_scalar(other, dtype=self.dtype) * self
+        return View._from_view_or_scalar(other, etype=self.etype) * self
 
     def __truediv__(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="div")
 
     def __rtruediv__(self, other: "View | Scalar") -> "View":
-        return View._from_view_or_scalar(other, dtype=self.dtype) / self
+        return View._from_view_or_scalar(other, etype=self.etype) / self
 
     def __add__(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="add")
 
     def __radd__(self, other: "View | Scalar") -> "View":
-        return View._from_view_or_scalar(other, dtype=self.dtype) + self
+        return View._from_view_or_scalar(other, etype=self.etype) + self
 
     def __sub__(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="sub")
 
     def __rsub__(self, other: "View | Scalar") -> "View":
-        return View._from_view_or_scalar(other, dtype=self.dtype) - self
+        return View._from_view_or_scalar(other, etype=self.etype) - self
 
     def max(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="max")
@@ -204,12 +204,12 @@ class View:
         return _matmul(self, other)
 
     def __rmatmul__(self, other: "View") -> "View":
-        return View._from_view_or_scalar(other, dtype=self.dtype) @ self
+        return View._from_view_or_scalar(other, etype=self.etype) @ self
 
     def reduce(
         self,
         *,
-        operator: BinaryAssocScalarOperator,
+        operator: BinaryAssocElementOperator,
         axes: tuple[int, ...] | None,
     ) -> "View":
         axes = tuple(range(self.rank)) if axes is None else axes
@@ -231,13 +231,13 @@ class View:
         self.accessor.raise_if_addresses_out_of_bounds(math.prod(self.node.shape))
 
     @staticmethod
-    def _from_view_or_scalar(value: "PyTensor | View", dtype: DType) -> "View":
-        return value if isinstance(value, View) else const(value, dtype=dtype)
+    def _from_view_or_scalar(value: "PyTensor | View", etype: ElementType) -> "View":
+        return value if isinstance(value, View) else const(value, etype=etype)
 
-    def _join_dtypes_for_bop(self, other: "View") -> tuple["View", "View"]:
-        res_dtype = dtype_join(self.dtype, other.dtype)
-        s = self.copy(dtype=res_dtype) if self.dtype != res_dtype else self
-        o = other.copy(dtype=res_dtype) if other.dtype != res_dtype else other
+    def _join_etypes_for_bop(self, other: "View") -> tuple["View", "View"]:
+        res_etype = etype_join(self.etype, other.etype)
+        s = self.copy(etype=res_etype) if self.etype != res_etype else self
+        o = other.copy(etype=res_etype) if other.etype != res_etype else other
         return s, o
 
     def _join_shapes_for_elementwise_bop(self, other: "View") -> tuple["View", "View"]:
@@ -310,21 +310,21 @@ class ConstNode(Node):
     value: PyTensor
 
 
-def const(value: "PyTensor", *, dtype: DType = "f4") -> View:
+def const(value: "PyTensor", *, etype: ElementType = "f4") -> View:
     shape = infer_pytensor_shape(value)
-    return View.identity(ConstNode(shape=shape, dtype=dtype, args=(), value=value))
+    return View.identity(ConstNode(shape=shape, etype=etype, args=(), value=value))
 
 
-def full(shape: tuple[int, ...], v: Scalar, *, dtype: DType = "f4") -> View:
-    return const(v, dtype=dtype).broadcast(shape)
+def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType = "f4") -> View:
+    return const(v, etype=etype).broadcast(shape)
 
 
-def ones(shape: tuple[int, ...], *, dtype: DType = "f4") -> View:
-    return full(shape, 1, dtype=dtype)
+def ones(shape: tuple[int, ...], *, etype: ElementType = "f4") -> View:
+    return full(shape, 1, etype=etype)
 
 
-def zeros(shape: tuple[int, ...], *, dtype: DType = "f4") -> View:
-    return full(shape, 0, dtype=dtype)
+def zeros(shape: tuple[int, ...], *, etype: ElementType = "f4") -> View:
+    return full(shape, 0, etype=etype)
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -335,22 +335,22 @@ class ParamNode(Node):
 def param(
     *,
     shape: tuple[int, ...],
-    dtype: DType,
+    etype: ElementType,
     label: str | None = None,
 ) -> View:
-    return View.identity(ParamNode(shape=shape, dtype=dtype, args=(), label=label))
+    return View.identity(ParamNode(shape=shape, etype=etype, args=(), label=label))
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ElementwiseNode(Node):
-    operator: ScalarOperator
+    operator: ElementOperator
 
 
-def _elementwise_unary(operand: View, operator: UnaryScalarOperator) -> View:
+def _elementwise_unary(operand: View, operator: UnaryElementOperator) -> View:
     return View.identity(
         ElementwiseNode(
             shape=operand.shape,
-            dtype=operand.dtype,
+            etype=operand.etype,
             args=(operand,),
             operator=operator,
         )
@@ -360,15 +360,15 @@ def _elementwise_unary(operand: View, operator: UnaryScalarOperator) -> View:
 def _elementwise_binary(
     a: View,
     b: View | Scalar,
-    operator: ScalarOperator,
+    operator: ElementOperator,
 ) -> View:
-    b = View._from_view_or_scalar(b, dtype=a.dtype)
-    a, b = a._join_dtypes_for_bop(b)
+    b = View._from_view_or_scalar(b, etype=a.etype)
+    a, b = a._join_etypes_for_bop(b)
     a, b = a._join_shapes_for_elementwise_bop(b)
     return View.identity(
         ElementwiseNode(
             shape=a.shape,
-            dtype=a.dtype,
+            etype=a.etype,
             args=(a, b),
             operator=operator,
         )
@@ -377,14 +377,14 @@ def _elementwise_binary(
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ReductionNode(Node):
-    operator: BinaryAssocScalarOperator
+    operator: BinaryAssocElementOperator
     axes: tuple[int, ...]
 
 
 def _reduction(
     input: View,
     axes: tuple[int, ...],
-    operator: BinaryAssocScalarOperator,
+    operator: BinaryAssocElementOperator,
 ) -> View:
     if not axes:
         return input
@@ -398,7 +398,7 @@ def _reduction(
     return View.identity(
         ReductionNode(
             shape=tuple(out_shape),
-            dtype=input.dtype,
+            etype=input.etype,
             args=(input,),
             operator=operator,
             axes=axes,
@@ -412,15 +412,15 @@ class MatmulNode(Node):
 
 
 def _matmul(a: View, b: View) -> View:
-    a, b = a._join_dtypes_for_bop(b)
+    a, b = a._join_etypes_for_bop(b)
     a, b = a._join_shapes_for_matmul_bop(b)
     out_shape = a.shape[:-1] + (b.shape[-1],)
-    return View.identity(MatmulNode(shape=out_shape, dtype=a.dtype, args=(a, b)))
+    return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ScatterNode(Node):
-    operator: BinaryAssocScalarOperator | None
+    operator: BinaryAssocElementOperator | None
     woffset: int
     wpitch: tuple[int, ...]
 
@@ -431,13 +431,13 @@ def _scatter(
     out_shape: tuple[int, ...],
     woffset: int,
     wpitch: tuple[int, ...],
-    operator: BinaryAssocScalarOperator | None = None,
-    dtype: DType | None = None,
+    operator: BinaryAssocElementOperator | None = None,
+    etype: ElementType | None = None,
 ) -> View:
     return View.identity(
         ScatterNode(
             shape=out_shape,
-            dtype=dtype or source.dtype,
+            etype=etype or source.etype,
             args=(source,),
             operator=operator,
             woffset=woffset,
@@ -446,13 +446,13 @@ def _scatter(
     )
 
 
-def _copy(source: View, dtype: DType | None = None) -> View:
+def _copy(source: View, etype: ElementType | None = None) -> View:
     return _scatter(
         source=source,
         out_shape=source.shape,
         woffset=0,
         wpitch=c_contiguous_pitch_for_shape(source.shape),
-        dtype=dtype or source.dtype,
+        etype=etype or source.etype,
     )
 
 
@@ -477,7 +477,7 @@ def debug_print(root: "View", out: SupportsWrite[str]) -> None:
         extra_fields = [f.name for f in fields(node) if f.name not in base_fields]
         args = ", ".join(f"{f}={getattr(node, f)!r}" for f in extra_fields)
         name = pascal_to_snake_case(node.__class__.__name__[: -len("Node")])
-        return f"{name}({args}) :: {node.dtype}{node.shape!r}"
+        return f"{name}({args}) :: {node.etype}{node.shape!r}"
 
     def visit_view(
         view: "View",

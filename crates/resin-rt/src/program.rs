@@ -40,7 +40,7 @@ pub struct WgpuCopy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WgpuBufferSpec {
     pub shape: Vec<u32>,
-    pub dtype: DType,
+    pub etype: ElementType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init: Option<Vec<u8>>,
     pub readonly: bool,
@@ -80,7 +80,7 @@ fn default_schema_version() -> u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum DType {
+pub enum ElementType {
     #[serde(rename = "f4")]
     F4,
     #[serde(rename = "f2")]
@@ -89,12 +89,12 @@ pub enum DType {
     U4,
 }
 
-impl DType {
+impl ElementType {
     pub fn nbytes(self) -> u32 {
         match self {
-            DType::F4 => 4,
-            DType::F2 => 2,
-            DType::U4 => 4,
+            ElementType::F4 => 4,
+            ElementType::F2 => 2,
+            ElementType::U4 => 4,
         }
     }
 }
@@ -102,7 +102,7 @@ impl DType {
 impl WgpuBufferSpec {
     pub fn byte_len(&self) -> u64 {
         let count: u64 = self.shape.iter().map(|&d| d as u64).product();
-        count * self.dtype.nbytes() as u64
+        count * self.etype.nbytes() as u64
     }
 }
 
@@ -129,7 +129,7 @@ mod tests {
             queue: vec![],
             buffers: vec![WgpuBufferSpec {
                 shape: vec![3],
-                dtype: DType::F4,
+                etype: ElementType::F4,
                 init: Some(vec![0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64]),
                 readonly: true,
             }],

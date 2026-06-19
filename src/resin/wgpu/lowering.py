@@ -38,7 +38,7 @@ def build_wgpu_program(
     buffers = [
         WgpuBufferSpec(
             shape=tuple(int(dim) for dim in buffer.shape),
-            dtype=buffer.dtype,
+            etype=buffer.etype,
             init=buffer.init,
             readonly=buffer.readonly,
         )
