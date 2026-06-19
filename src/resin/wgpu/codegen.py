@@ -95,7 +95,7 @@ def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
     for i in range(len(kernel.arg_accessors)):
         w.print(
             f"""
-            @group(1) @binding({i})
+            @group(0) @binding({i + 1})
             var<storage, read> arg{i}: array<{t}>;
             """
         )
@@ -464,7 +464,7 @@ def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
     for i in range(len(kernel.arg_accessors)):
         w.print(
             f"""
-            @group(1) @binding({i})
+            @group(0) @binding({i + 1})
             var<storage, read> arg{i}: array<{t}>;
             """
         )
