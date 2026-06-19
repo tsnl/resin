@@ -167,6 +167,47 @@ class TestScatterAccumulate:
         upstream: PyTensor = [1.0, 2.0, 3.0, 4.0, 5.0]
         assert run_scalar(out, params={g: upstream}) == pytest.approx(15.0)
 
+    def test_dynamic_scatter_assign(self) -> None:
+        values = dsl.param(shape=(3,), dtype="f4")
+        indices = dsl.const([[2], [0], [1]], dtype="u4")
+        out = values.scatter(out_shape=(3,), scatter_indices=indices)
+        assert run_graph(
+            out,
+            params={values: [10.0, 20.0, 30.0]},
+        ) == pytest.approx([20.0, 30.0, 10.0])
+
+    def test_dynamic_scatter_add_colliding_indices(self) -> None:
+        values = dsl.param(shape=(4,), dtype="f4")
+        indices = dsl.const([[0], [0], [1], [2]], dtype="u4")
+        out = values.scatter(out_shape=(3,), scatter_indices=indices, operator="add")
+        assert run_graph(
+            out,
+            params={values: [1.0, 2.0, 3.0, 4.0]},
+        ) == pytest.approx([3.0, 3.0, 4.0])
+
+    def test_dynamic_scatter_2d_output(self) -> None:
+        values = dsl.param(shape=(2,), dtype="f4")
+        # trailing axis is the 2D output coordinate: source[i] -> out[indices[i, :]]
+        indices = dsl.const([[0, 1], [1, 0]], dtype="u4")
+        out = values.scatter(out_shape=(2, 2), scatter_indices=indices)
+        assert run_graph(
+            out,
+            params={values: [10.0, 20.0]},
+        ) == pytest.approx([0.0, 10.0, 20.0, 0.0])
+
+    def test_dynamic_scatter_add_gradient(self) -> None:
+        values = dsl.param(shape=(3,), dtype="f4")
+        indices = dsl.const([[0], [2], [2]], dtype="u4")
+        out = values.scatter(out_shape=(3,), scatter_indices=indices, operator="add")
+        loss = out.sum()
+        while loss.rank > 0:
+            loss = loss.squeeze(axes=(0,))
+        grads = grad.grad(loss)
+        assert run_graph(
+            grads[values.node],
+            params={values: [1.0, 2.0, 3.0]},
+        ) == pytest.approx([1.0, 1.0, 1.0])
+
 
 class TestSoftmax:
     def test_rows_sum_to_one(self) -> None:

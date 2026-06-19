@@ -7,8 +7,11 @@ __all__ = [
     "IrMatmulKernel",
     "IrProgram",
     "IrProgramBuilder",
+    "IrGatherWithAccessorKernel",
+    "IrGatherWithIndicesKernel",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrScatterWithAccessorKernel",
+    "IrScatterWithIndicesKernel",
 ]
 
 from abc import ABC
@@ -16,7 +19,7 @@ from dataclasses import dataclass
 
 from frozendict import frozendict
 
-from resin.core.accessor import Accessor
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.core.pytree import marshall_pytensor
 from .rpn import ElementRpnExpr
 from resin.core.dtype import (
@@ -104,7 +107,16 @@ class IrMatmulKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterKernel(IrKernel):
+class IrGatherWithAccessorKernel(IrKernel):
+    clear_output_before_dispatch: bool = True
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 1
+        assert self.arg_accessors[0].shape == self.shape
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrScatterWithAccessorKernel(IrKernel):
     operator: BinaryAssocScalarOperator | None
     woffset: int
     wpitch: tuple[int, ...]
@@ -112,6 +124,41 @@ class IrScatterKernel(IrKernel):
 
     def __post_init__(self):
         assert len(self.arg_accessors) == 1
+        assert len(self.wpitch) == len(self.arg_accessors[0].shape)
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrScatterWithIndicesKernel(IrKernel):
+    operator: BinaryAssocScalarOperator | None
+    woffset: int
+    out_pitch: tuple[int, ...]
+    arg_dtypes: tuple[DType, ...]
+    clear_output_before_dispatch: bool = True
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 2
+        assert len(self.arg_dtypes) == 2
+        source_accessor, indices_accessor = self.arg_accessors
+        out_rank = len(self.shape)
+        assert indices_accessor.shape[-1] == out_rank
+        assert indices_accessor.shape[:-1] == source_accessor.shape
+        assert self.out_pitch == c_contiguous_pitch_for_shape(self.shape)
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrGatherWithIndicesKernel(IrKernel):
+    woffset: int
+    out_pitch: tuple[int, ...]
+    arg_dtypes: tuple[DType, ...]
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 2
+        assert len(self.arg_dtypes) == 2
+        source_accessor, indices_accessor = self.arg_accessors
+        out_rank = len(self.out_pitch)
+        assert indices_accessor.shape[-1] == out_rank
+        assert indices_accessor.shape[:-1] == self.shape
+        assert indices_accessor.shape[:-1] == source_accessor.shape
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -241,8 +288,14 @@ class IrProgramBuilder:
                 return self._build_kernel_for_matmul_node(node)
             case dsl.ReductionNode():
                 return self._build_kernel_for_reduction_node(node)
-            case dsl.ScatterNode():
-                return self._build_kernel_for_scatter_node(node)
+            case dsl.GatherWithAccessorNode():
+                return self._build_kernel_for_gather_with_accessor_node(node)
+            case dsl.ScatterWithAccessorNode():
+                return self._build_kernel_for_scatter_with_accessor_node(node)
+            case dsl.ScatterWithIndicesNode():
+                return self._build_kernel_for_scatter_with_indices_node(node)
+            case dsl.GatherWithIndicesNode():
+                return self._build_kernel_for_gather_with_indices_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
@@ -270,14 +323,56 @@ class IrProgramBuilder:
             axes=node.axes,
         )
 
-    def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
-        return IrScatterKernel(
+    def _build_kernel_for_gather_with_accessor_node(
+        self,
+        node: dsl.GatherWithAccessorNode,
+    ) -> IrKernel:
+        return IrGatherWithAccessorKernel(
+            arg_accessors=(node.args[0].accessor,),
+            dtype=node.dtype,
+            shape=node.shape,
+        )
+
+    def _build_kernel_for_scatter_with_accessor_node(
+        self,
+        node: dsl.ScatterWithAccessorNode,
+    ) -> IrKernel:
+        return IrScatterWithAccessorKernel(
             arg_accessors=(node.args[0].accessor,),
             dtype=node.dtype,
             shape=node.shape,
             operator=node.operator,
             woffset=node.woffset,
             wpitch=node.wpitch,
+        )
+
+    def _build_kernel_for_scatter_with_indices_node(
+        self,
+        node: dsl.ScatterWithIndicesNode,
+    ) -> IrKernel:
+        source, scatter_indices = node.args
+        return IrScatterWithIndicesKernel(
+            arg_accessors=(source.accessor, scatter_indices.accessor),
+            dtype=node.dtype,
+            shape=node.shape,
+            operator=node.operator,
+            woffset=node.woffset,
+            out_pitch=c_contiguous_pitch_for_shape(node.shape),
+            arg_dtypes=(source.dtype, scatter_indices.dtype),
+        )
+
+    def _build_kernel_for_gather_with_indices_node(
+        self,
+        node: dsl.GatherWithIndicesNode,
+    ) -> IrKernel:
+        source, scatter_indices = node.args
+        return IrGatherWithIndicesKernel(
+            arg_accessors=(source.accessor, scatter_indices.accessor),
+            dtype=node.dtype,
+            shape=node.shape,
+            woffset=node.woffset,
+            out_pitch=c_contiguous_pitch_for_shape(node.out_shape),
+            arg_dtypes=(source.dtype, scatter_indices.dtype),
         )
 
 

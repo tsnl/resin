@@ -6,6 +6,7 @@ import resin_rt_pybind
 from resin import dsl
 from resin.ir import IrProgramBuilder
 from resin.wgpu import (
+    WgpuCopyPipelineSpec,
     WgpuProgram,
     build_wgpu_program,
     spell_dtype_in_pystruct,
@@ -66,11 +67,25 @@ class TestBuildWgpuProgram:
         assert len(payload["queue"]) == 1
         assert "fn main" in payload["pipelines"][0]["wgsl"]
 
-    def test_copy_scatter_pipeline_clears_output_before_dispatch(self) -> None:
+    def test_dense_gather_uses_copy_pipeline(self) -> None:
         x = dsl.param(shape=(3,), dtype="f4")
         builder = IrProgramBuilder()
         builder.build_sink("out", x.copy())
         wgpu_program = build_wgpu_program(builder.finish())
 
         assert len(wgpu_program.pipelines) == 1
-        assert wgpu_program.pipelines[0].clear_output_before_dispatch is True
+        pipeline = wgpu_program.pipelines[0]
+        assert isinstance(pipeline, WgpuCopyPipelineSpec)
+        assert pipeline.clear_output_before_dispatch is True
+        assert wgpu_program.to_dict()["pipelines"][0]["kind"] == "copy"
+
+    def test_sparse_gather_uses_compute_pipeline(self) -> None:
+        t = dsl.const([1, 2, 3, 4, 5, 6], dtype="f4")
+        builder = IrProgramBuilder()
+        builder.build_sink("out", t[::2].copy())
+        wgpu_program = build_wgpu_program(builder.finish())
+
+        assert len(wgpu_program.pipelines) == 1
+        pipeline = wgpu_program.pipelines[0]
+        assert wgpu_program.to_dict()["pipelines"][0]["kind"] == "compute"
+        assert "fn main" in pipeline.wgsl

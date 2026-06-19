@@ -2,14 +2,14 @@ from frozendict import frozendict
 from resin.dsl import dsl
 from resin.ir.ir import IrBufferView, IrProgram
 
-from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
+from .codegen import WgslKernelConfig, build_pipeline_for_kernel
 from .spec import (
     SCHEMA_VERSION,
     WgpuAccessorSpec,
     WgpuBufferSpec,
     WgpuBufferViewSpec,
-    WgpuComputePipelineSpec,
     WgpuDispatch,
+    WgpuPipelineSpec,
     WgpuProgram,
 )
 
@@ -53,28 +53,16 @@ def build_wgpu_program(
     ]
 
     kernel_to_pipeline_index: dict[int, int] = {}
-    pipelines: list[WgpuComputePipelineSpec] = []
+    pipelines: list[WgpuPipelineSpec] = []
 
     queue = []
     for dispatch in program.queue:
         kernel = dispatch.kernel
         kernel_key = id(kernel)
         if kernel_key not in kernel_to_pipeline_index:
-            wgsl = emit_wgsl_for_kernel(kernel, config)
-            dispatch_size = dispatch_size_for_kernel(kernel, config)
+            pipeline = build_pipeline_for_kernel(kernel, config)
             kernel_to_pipeline_index[kernel_key] = len(pipelines)
-            pipelines.append(
-                WgpuComputePipelineSpec(
-                    wgsl=wgsl,
-                    dispatch_size=(
-                        int(dispatch_size[0]),
-                        int(dispatch_size[1]),
-                        int(dispatch_size[2]),
-                    ),
-                    num_arg_bindings=len(kernel.arg_accessors),
-                    clear_output_before_dispatch=kernel.clear_output_before_dispatch,
-                )
-            )
+            pipelines.append(pipeline)
 
         queue.append(
             WgpuDispatch(

@@ -1,4 +1,6 @@
-use crate::program::{WgpuBufferSpec, WgpuPipelineSpec, WgpuProgram};
+use crate::program::{
+    WgpuBufferSpec, WgpuCopyPipelineSpec, WgpuPipelineSpec, WgpuProgram,
+};
 use std::borrow::Cow;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -15,12 +17,17 @@ pub enum WgpuInterpError {
     BufferMapFailed,
 }
 
+enum CompiledPipeline {
+    Compute(wgpu::ComputePipeline),
+    Copy,
+}
+
 pub struct WgpuInterp {
     device: wgpu::Device,
     queue: wgpu::Queue,
     program: WgpuProgram,
     buffers: Vec<wgpu::Buffer>,
-    pipelines: Vec<wgpu::ComputePipeline>,
+    pipelines: Vec<CompiledPipeline>,
 }
 
 /// Acquire a default GPU device and queue for standalone use (e.g. Python dev).
@@ -70,7 +77,7 @@ impl WgpuInterp {
         let pipelines = program
             .pipelines
             .iter()
-            .map(|spec| create_pipeline(&device, spec))
+            .map(|spec| compile_pipeline(&device, spec))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
@@ -94,68 +101,144 @@ impl WgpuInterp {
             });
 
         for dispatch in &self.program.queue {
-            let pipeline = &self.pipelines[dispatch.pipeline_index];
-            let compute = match &self.program.pipelines[dispatch.pipeline_index] {
-                WgpuPipelineSpec::Compute(spec) => spec,
-            };
-
-            if compute.dispatch_size == [0, 0, 0] || compute.dispatch_size[0] == 0 {
-                continue;
-            }
-
-            if compute.clear_output_before_dispatch {
-                self.clear_buffer(dispatch.output_buffer_index)?;
-            }
-
-            let output_buffer = &self.buffers[dispatch.output_buffer_index];
-            let bind_group0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("resin-bind-group-0"),
-                layout: &pipeline.get_bind_group_layout(0),
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: output_buffer.as_entire_binding(),
-                }],
-            });
-
-            let arg_entries: Vec<wgpu::BindGroupEntry<'_>> = dispatch
-                .arg_buffer_view_indices
-                .iter()
-                .enumerate()
-                .map(|(binding, &view_index)| {
-                    let view = &self.program.buffer_views[view_index];
-                    let buffer = &self.buffers[view.buffer_index];
-                    wgpu::BindGroupEntry {
-                        binding: binding as u32,
-                        resource: buffer.as_entire_binding(),
+            match (
+                &self.program.pipelines[dispatch.pipeline_index],
+                &self.pipelines[dispatch.pipeline_index],
+            ) {
+                (WgpuPipelineSpec::Compute(compute), CompiledPipeline::Compute(pipeline)) => {
+                    if compute.dispatch_size == [0, 0, 0] || compute.dispatch_size[0] == 0 {
+                        continue;
                     }
-                })
-                .collect();
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("resin-compute-pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, &bind_group0, &[]);
-                if !arg_entries.is_empty() {
-                    let bind_group1 =
-                        self.device
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("resin-bind-group-1"),
-                                layout: &pipeline.get_bind_group_layout(1),
-                                entries: &arg_entries,
-                            });
-                    pass.set_bind_group(1, &bind_group1, &[]);
+
+                    if compute.clear_output_before_dispatch {
+                        let output_spec = self.program.buffers.get(dispatch.output_buffer_index).ok_or_else(|| {
+                            WgpuInterpError::Program(format!(
+                                "invalid output buffer index {}",
+                                dispatch.output_buffer_index
+                            ))
+                        })?;
+                        clear_buffer_in_encoder(
+                            &mut encoder,
+                            &self.buffers[dispatch.output_buffer_index],
+                            output_spec.byte_len(),
+                        );
+                    }
+
+                    let output_buffer = &self.buffers[dispatch.output_buffer_index];
+                    let bind_group0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("resin-bind-group-0"),
+                        layout: &pipeline.get_bind_group_layout(0),
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: output_buffer.as_entire_binding(),
+                        }],
+                    });
+
+                    let arg_entries: Vec<wgpu::BindGroupEntry<'_>> = dispatch
+                        .arg_buffer_view_indices
+                        .iter()
+                        .enumerate()
+                        .map(|(binding, &view_index)| {
+                            let view = &self.program.buffer_views[view_index];
+                            let buffer = &self.buffers[view.buffer_index];
+                            wgpu::BindGroupEntry {
+                                binding: binding as u32,
+                                resource: buffer.as_entire_binding(),
+                            }
+                        })
+                        .collect();
+                    {
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("resin-compute-pass"),
+                            timestamp_writes: None,
+                        });
+                        pass.set_pipeline(pipeline);
+                        pass.set_bind_group(0, &bind_group0, &[]);
+                        if !arg_entries.is_empty() {
+                            let bind_group1 =
+                                self.device
+                                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("resin-bind-group-1"),
+                                        layout: &pipeline.get_bind_group_layout(1),
+                                        entries: &arg_entries,
+                                    });
+                            pass.set_bind_group(1, &bind_group1, &[]);
+                        }
+                        pass.dispatch_workgroups(
+                            compute.dispatch_size[0],
+                            compute.dispatch_size[1],
+                            compute.dispatch_size[2],
+                        );
+                    }
                 }
-                pass.dispatch_workgroups(
-                    compute.dispatch_size[0],
-                    compute.dispatch_size[1],
-                    compute.dispatch_size[2],
-                );
+                (WgpuPipelineSpec::Copy(copy_spec), CompiledPipeline::Copy) => {
+                    self.run_copy_dispatch(&mut encoder, dispatch, copy_spec)?;
+                }
+                _ => {
+                    return Err(WgpuInterpError::Program(
+                        "pipeline spec and compiled pipeline kind mismatch".to_string(),
+                    ));
+                }
             }
         }
 
         self.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    fn run_copy_dispatch(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        dispatch: &crate::program::WgpuDispatch,
+        copy_spec: &WgpuCopyPipelineSpec,
+    ) -> Result<(), WgpuInterpError> {
+        let &source_view_index = dispatch
+            .arg_buffer_view_indices
+            .first()
+            .ok_or_else(|| WgpuInterpError::Program("copy dispatch missing source arg".into()))?;
+        let source_view = &self.program.buffer_views[source_view_index];
+        let output_spec = self
+            .program
+            .buffers
+            .get(dispatch.output_buffer_index)
+            .ok_or_else(|| {
+                WgpuInterpError::Program(format!(
+                    "invalid output buffer index {}",
+                    dispatch.output_buffer_index
+                ))
+            })?;
+
+        let accessor = &source_view.accessor;
+        if !is_c_contiguous(&accessor.shape, &accessor.pitch) {
+            return Err(WgpuInterpError::Program(
+                "copy pipeline requires a C-contiguous source accessor".into(),
+            ));
+        }
+
+        let element_nbytes = output_spec.dtype.nbytes() as u64;
+        let copy_bytes: u64 = accessor
+            .shape
+            .iter()
+            .map(|&d| d as u64)
+            .product::<u64>()
+            * element_nbytes;
+        if output_spec.byte_len() != copy_bytes {
+            return Err(WgpuInterpError::Program(format!(
+                "copy size mismatch: output {} bytes, view {} bytes",
+                output_spec.byte_len(),
+                copy_bytes
+            )));
+        }
+
+        let src_offset = accessor.offset as u64 * element_nbytes;
+        let src_buffer = &self.buffers[source_view.buffer_index];
+        let dst_buffer = &self.buffers[dispatch.output_buffer_index];
+
+        if copy_spec.clear_output_before_dispatch {
+            clear_buffer_in_encoder(encoder, dst_buffer, copy_bytes);
+        }
+
+        encoder.copy_buffer_to_buffer(src_buffer, src_offset, dst_buffer, 0, copy_bytes);
         Ok(())
     }
 
@@ -263,6 +346,24 @@ impl WgpuInterp {
     }
 }
 
+fn clear_buffer_in_encoder(
+    encoder: &mut wgpu::CommandEncoder,
+    buffer: &wgpu::Buffer,
+    size: u64,
+) {
+    encoder.clear_buffer(buffer, 0, Some(size));
+}
+
+fn c_contiguous_pitch(shape: &[u32]) -> Vec<u32> {
+    (0..shape.len())
+        .map(|i| shape[i + 1..].iter().copied().product())
+        .collect()
+}
+
+fn is_c_contiguous(shape: &[u32], pitch: &[u32]) -> bool {
+    pitch == c_contiguous_pitch(shape)
+}
+
 fn create_buffer(
     device: &wgpu::Device,
     spec: &WgpuBufferSpec,
@@ -295,24 +396,34 @@ fn create_buffer(
     }
 }
 
-fn create_pipeline(
+fn compile_pipeline(
     device: &wgpu::Device,
     spec: &WgpuPipelineSpec,
-) -> Result<wgpu::ComputePipeline, WgpuInterpError> {
-    let compute = match spec {
-        WgpuPipelineSpec::Compute(compute) => compute,
-    };
+) -> Result<CompiledPipeline, WgpuInterpError> {
+    match spec {
+        WgpuPipelineSpec::Compute(compute) => {
+            Ok(CompiledPipeline::Compute(create_compute_pipeline(
+                device, compute,
+            )?))
+        }
+        WgpuPipelineSpec::Copy(_) => Ok(CompiledPipeline::Copy),
+    }
+}
 
+fn create_compute_pipeline(
+    device: &wgpu::Device,
+    spec: &crate::program::WgpuComputePipelineSpec,
+) -> Result<wgpu::ComputePipeline, WgpuInterpError> {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("resin-shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(compute.wgsl.as_str())),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(spec.wgsl.as_str())),
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("resin-pipeline"),
         layout: None,
         module: &shader,
-        entry_point: Some(compute.entry_point.as_str()),
+        entry_point: Some(spec.entry_point.as_str()),
         compilation_options: wgpu::PipelineCompilationOptions::default(),
         cache: None,
     });

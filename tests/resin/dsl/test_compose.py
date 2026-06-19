@@ -3,6 +3,8 @@
 import textwrap
 from io import StringIO
 
+import pytest
+
 from resin.dsl.dsl import View, const, full, param, zeros
 
 
@@ -179,6 +181,33 @@ class TestPermute:
         assert debug_str(t) == expected.strip()
 
 
+class TestDynamicScatter:
+    def test_debug_print(self) -> None:
+        values = const([1.0, 2.0, 3.0], dtype="f4")
+        indices = const([[2], [0], [1]], dtype="u4")
+        out = values.scatter(out_shape=(3,), scatter_indices=indices)
+        expected = textwrap.dedent(
+            """
+            scatter_with_indices(operator=None, woffset=0) :: f4(3,)
+            ├ const(value=[1.0, 2.0, 3.0]) :: f4(3,)
+            └ const(value=[[2], [0], [1]]) :: u4(3, 1)
+            """
+        )
+        assert debug_str(out) == expected.strip()
+
+    def test_rejects_float_indices(self) -> None:
+        values = const([1.0, 2.0, 3.0], dtype="f4")
+        indices = const([[2.0], [0.0], [1.0]], dtype="f4")
+        with pytest.raises(ValueError, match="unsigned integer dtype"):
+            values.scatter(out_shape=(3,), scatter_indices=indices)
+
+    def test_rejects_wrong_trailing_index_rank(self) -> None:
+        values = const([1.0, 2.0], dtype="f4")
+        indices = const([[0, 1], [1, 0]], dtype="u4")
+        with pytest.raises(ValueError, match="scatter_indices.shape\\[-1\\]"):
+            values.scatter(out_shape=(3,), scatter_indices=indices)
+
+
 class TestCompact:
     def test_compact_after_slice(self) -> None:
         t = const([[1, 2, 3], [4, 5, 6]], dtype="f4")
@@ -186,7 +215,7 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(operator=None, woffset=0, wpitch=(3, 1)) :: f4(1, 3)
+            gather_with_accessor() :: f4(1, 3)
             └ view(offset=0, shape=(1, 3), pitch=(6, 1))
               └ const(value=[[1, 2, 3], [4, 5, 6]]) :: f4(2, 3)
             """
@@ -198,7 +227,7 @@ class TestCompact:
         t2 = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(operator=None, woffset=0, wpitch=(1,)) :: f4(3,)
+            gather_with_accessor() :: f4(3,)
             └ const(value=[1, 2, 3]) :: f4(3,)
             """
         )

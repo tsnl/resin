@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import msgpack
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from frozendict import frozendict
 from resin_rt_pybind import decode_wgpu_program_msgpack
@@ -18,7 +18,9 @@ __all__ = [
     "WgpuBufferSpec",
     "WgpuBufferViewSpec",
     "WgpuComputePipelineSpec",
+    "WgpuCopyPipelineSpec",
     "WgpuDispatch",
+    "WgpuPipelineSpec",
     "WgpuProgram",
 ]
 
@@ -31,7 +33,7 @@ __all__ = [
 class WgpuProgram:
     buffers: tuple[WgpuBufferSpec, ...]
     buffer_views: tuple[WgpuBufferViewSpec, ...]
-    pipelines: tuple[WgpuComputePipelineSpec, ...]
+    pipelines: tuple["WgpuPipelineSpec", ...]
     queue: tuple[WgpuDispatch, ...]
     sinks: frozendict[str, int]
     param_buffer_ids: frozendict[int, int] = field(
@@ -118,6 +120,14 @@ class WgpuComputePipelineSpec:
 
 
 @dataclass(frozen=True)
+class WgpuCopyPipelineSpec:
+    clear_output_before_dispatch: bool = False
+
+
+type WgpuPipelineSpec = WgpuComputePipelineSpec | WgpuCopyPipelineSpec
+
+
+@dataclass(frozen=True)
 class WgpuDispatch:
     pipeline_index: int
     arg_buffer_view_indices: tuple[int, ...]
@@ -177,27 +187,47 @@ def _buffer_view_from_dict(payload: dict[str, Any]) -> WgpuBufferViewSpec:
     )
 
 
-def _pipeline_to_dict(spec: WgpuComputePipelineSpec) -> dict[str, Any]:
-    return {
-        "kind": "compute",
-        "wgsl": spec.wgsl,
-        "entry_point": spec.entry_point,
-        "dispatch_size": list(spec.dispatch_size),
-        "num_arg_bindings": spec.num_arg_bindings,
-        "clear_output_before_dispatch": spec.clear_output_before_dispatch,
-    }
+def _pipeline_to_dict(spec: WgpuPipelineSpec) -> dict[str, Any]:
+    match spec:
+        case WgpuComputePipelineSpec():
+            return {
+                "kind": "compute",
+                "wgsl": spec.wgsl,
+                "entry_point": spec.entry_point,
+                "dispatch_size": list(spec.dispatch_size),
+                "num_arg_bindings": spec.num_arg_bindings,
+                "clear_output_before_dispatch": spec.clear_output_before_dispatch,
+            }
+        case WgpuCopyPipelineSpec():
+            return {
+                "kind": "copy",
+                "clear_output_before_dispatch": spec.clear_output_before_dispatch,
+            }
+        case _:
+            raise ValueError(f"unsupported pipeline spec: {spec!r}")
 
 
-def _pipeline_from_dict(payload: dict[str, Any]) -> WgpuComputePipelineSpec:
-    if payload["kind"] != "compute":
-        raise ValueError(f"unsupported pipeline kind: {payload['kind']!r}")
-    return WgpuComputePipelineSpec(
-        wgsl=payload["wgsl"],
-        entry_point=payload.get("entry_point", "main"),
-        dispatch_size=tuple(payload["dispatch_size"]),
-        num_arg_bindings=payload["num_arg_bindings"],
-        clear_output_before_dispatch=payload.get("clear_output_before_dispatch", False),
-    )
+def _pipeline_from_dict(payload: dict[str, Any]) -> WgpuPipelineSpec:
+    kind: Literal["compute", "copy"] = payload["kind"]
+    match kind:
+        case "compute":
+            return WgpuComputePipelineSpec(
+                wgsl=payload["wgsl"],
+                entry_point=payload.get("entry_point", "main"),
+                dispatch_size=tuple(payload["dispatch_size"]),
+                num_arg_bindings=payload["num_arg_bindings"],
+                clear_output_before_dispatch=payload.get(
+                    "clear_output_before_dispatch", False
+                ),
+            )
+        case "copy":
+            return WgpuCopyPipelineSpec(
+                clear_output_before_dispatch=payload.get(
+                    "clear_output_before_dispatch", False
+                ),
+            )
+        case _:
+            raise ValueError(f"unsupported pipeline kind: {kind!r}")
 
 
 def _dispatch_to_dict(spec: WgpuDispatch) -> dict[str, Any]:

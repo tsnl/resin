@@ -1,7 +1,7 @@
 from resin.core.accessor import Accessor
 from resin.dsl.dsl import const
 from resin.ir import IrProgramBuilder, IrReductionKernel
-from resin.wgpu import WgslKernelConfig, emit_wgsl_for_kernel
+from resin.wgpu import WgslKernelConfig, WgpuComputePipelineSpec, build_pipeline_for_kernel
 
 
 class TestIrReductionKernel:
@@ -25,7 +25,9 @@ class TestEmitReductionWgsl:
             operator="add",
             axes=(1,),
         )
-        wgsl = emit_wgsl_for_kernel(kernel, WgslKernelConfig())
+        pipeline = build_pipeline_for_kernel(kernel, WgslKernelConfig())
+        assert isinstance(pipeline, WgpuComputePipelineSpec)
+        wgsl = pipeline.wgsl
 
         assert "fn input_index" in wgsl
         assert "for (var ri: u32 = 1u; ri < 3u; ri += 1u)" in wgsl
@@ -39,7 +41,9 @@ class TestEmitReductionWgsl:
             operator="max",
             axes=(0, 1),
         )
-        wgsl = emit_wgsl_for_kernel(kernel, WgslKernelConfig())
+        pipeline = build_pipeline_for_kernel(kernel, WgslKernelConfig())
+        assert isinstance(pipeline, WgpuComputePipelineSpec)
+        wgsl = pipeline.wgsl
 
         assert "for (var ri: u32 = 1u; ri < 6u; ri += 1u)" in wgsl
         assert "acc = max(acc, v);" in wgsl
@@ -52,7 +56,9 @@ class TestEmitReductionWgsl:
             operator="mul",
             axes=(1,),
         )
-        wgsl = emit_wgsl_for_kernel(kernel, WgslKernelConfig())
+        pipeline = build_pipeline_for_kernel(kernel, WgslKernelConfig())
+        assert isinstance(pipeline, WgpuComputePipelineSpec)
+        wgsl = pipeline.wgsl
 
         assert "for (var ri: u32 = 1u; ri < 1u; ri += 1u)" not in wgsl
         assert "output[out_address] = acc;" in wgsl

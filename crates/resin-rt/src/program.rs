@@ -49,6 +49,14 @@ pub struct WgpuAccessorSpec {
 pub enum WgpuPipelineSpec {
     #[serde(rename = "compute")]
     Compute(WgpuComputePipelineSpec),
+    #[serde(rename = "copy")]
+    Copy(WgpuCopyPipelineSpec),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct WgpuCopyPipelineSpec {
+    #[serde(default)]
+    pub clear_output_before_dispatch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
