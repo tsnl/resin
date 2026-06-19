@@ -23,8 +23,8 @@ type BinaryScalarOperator = Literal["pow", "div", "sub"] | BinaryAssocScalarOper
 type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
 
 
-type ScalarType = Literal["f4", "f2"]
-type SKind = Literal["float"]
+type ScalarType = Literal["f4", "f2", "u4"]
+type SKind = Literal["float", "uint"]
 
 
 def stype_join(dtype1: ScalarType, dtype2: ScalarType) -> ScalarType:
@@ -39,18 +39,22 @@ def stype(kind: SKind, nbytes: int) -> ScalarType:
             return "f4"
         case ("float", 2):
             return "f2"
+        case ("uint", 4):
+            return "u4"
         case _:
             raise ValueError(f"Unsupported stype with kind={kind} and nbytes={nbytes}")
 
 
 def stype_nbytes(stype: ScalarType) -> int:
-    return {"f4": 4, "f2": 2}[stype]
+    return {"f4": 4, "f2": 2, "u4": 4}[stype]
 
 
 def stype_kind(stype: ScalarType) -> SKind:
     match stype:
         case "f4" | "f2":
             return "float"
+        case "u4":
+            return "uint"
         case _:
             raise ValueError(f"Unsupported stype {stype}")
 
@@ -62,8 +66,8 @@ def stype_join_kind(dtype1: SKind, dtype2: SKind) -> SKind:
 
 
 def spell_stype_in_pystruct(stype: ScalarType) -> str:
-    return {"f4": "f", "f2": "e"}[stype]
+    return {"f4": "f", "f2": "e", "u4": "I"}[stype]
 
 
 def spell_stype_in_wgsl(stype: ScalarType) -> str:
-    return {"f4": "f32", "f2": "f16"}[stype]
+    return {"f4": "f32", "f2": "f16", "u4": "u32"}[stype]

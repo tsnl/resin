@@ -77,6 +77,8 @@ pub enum ScalarType {
     F4,
     #[serde(rename = "f2")]
     F2,
+    #[serde(rename = "u4")]
+    U4,
 }
 
 impl ScalarType {
@@ -84,6 +86,7 @@ impl ScalarType {
         match self {
             ScalarType::F4 => 4,
             ScalarType::F2 => 2,
+            ScalarType::U4 => 4,
         }
     }
 }
