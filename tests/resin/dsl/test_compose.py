@@ -3,6 +3,8 @@
 import textwrap
 from io import StringIO
 
+import pytest
+
 from resin.dsl.dsl import View, const, full, param, zeros
 
 
@@ -177,6 +179,33 @@ class TestPermute:
             """
         )
         assert debug_str(t) == expected.strip()
+
+
+class TestDynamicScatter:
+    def test_debug_print(self) -> None:
+        values = const([1.0, 2.0, 3.0], etype="f4")
+        indices = const([[2], [0], [1]], etype="u4")
+        out = values.scatter(out_shape=(3,), scatter_indices=indices)
+        expected = textwrap.dedent(
+            """
+            scatter_with_indices(operator=None, woffset=0) :: f4(3,)
+            ├ const(value=[1.0, 2.0, 3.0]) :: f4(3,)
+            └ const(value=[[2], [0], [1]]) :: u4(3, 1)
+            """
+        )
+        assert debug_str(out) == expected.strip()
+
+    def test_rejects_float_indices(self) -> None:
+        values = const([1.0, 2.0, 3.0], etype="f4")
+        indices = const([[2.0], [0.0], [1.0]], etype="f4")
+        with pytest.raises(ValueError, match="unsigned integer etype"):
+            values.scatter(out_shape=(3,), scatter_indices=indices)
+
+    def test_rejects_wrong_trailing_index_rank(self) -> None:
+        values = const([1.0, 2.0], etype="f4")
+        indices = const([[0, 1], [1, 0]], etype="u4")
+        with pytest.raises(ValueError, match="scatter_indices.shape\\[-1\\]"):
+            values.scatter(out_shape=(3,), scatter_indices=indices)
 
 
 class TestCompact:
