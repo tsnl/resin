@@ -5,6 +5,7 @@ from resin.ir import (
     IrMatmulKernel,
     IrScatterAccumulateKernel,
     IrScatterClobberKernel,
+    IrScatterKernel,
 )
 from resin.wgpu import (
     WgslKernelConfig,
@@ -63,6 +64,14 @@ class TestDispatchSize:
 
 
 class TestScatterCodegen:
+    def test_scatter_kernel_subtypes(self) -> None:
+        clobber = self._scatter_clobber_kernel()
+        accumulate = self._scatter_accumulate_kernel(operator="add")
+        assert isinstance(clobber, IrScatterKernel)
+        assert isinstance(accumulate, IrScatterKernel)
+        assert clobber.woffset == 0
+        assert accumulate.operator == "add"
+
     def _scatter_clobber_kernel(self, *, dtype: str = "f4") -> IrScatterClobberKernel:
         return IrScatterClobberKernel(
             arg_accessors=(Accessor.dense((2,)),),

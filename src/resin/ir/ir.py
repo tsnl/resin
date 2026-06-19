@@ -10,6 +10,7 @@ __all__ = [
     "IrReductionKernel",
     "IrScatterAccumulateKernel",
     "IrScatterClobberKernel",
+    "IrScatterKernel",
 ]
 
 from abc import ABC
@@ -105,7 +106,7 @@ class IrMatmulKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterClobberKernel(IrKernel):
+class IrScatterKernel(IrKernel):
     woffset: int
     wpitch: tuple[int, ...]
     clear_output_before_dispatch: bool = True
@@ -115,14 +116,13 @@ class IrScatterClobberKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterAccumulateKernel(IrKernel):
-    operator: BinaryAssocScalarOperator
-    woffset: int
-    wpitch: tuple[int, ...]
-    clear_output_before_dispatch: bool = True
+class IrScatterClobberKernel(IrScatterKernel):
+    pass
 
-    def __post_init__(self):
-        assert len(self.arg_accessors) == 1
+
+@dataclass(frozen=True, kw_only=True)
+class IrScatterAccumulateKernel(IrScatterKernel):
+    operator: BinaryAssocScalarOperator
 
 
 @dataclass(frozen=True, kw_only=True)

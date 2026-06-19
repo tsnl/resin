@@ -20,9 +20,8 @@ from resin.ir.ir import (
     IrReductionKernel,
     IrScatterAccumulateKernel,
     IrScatterClobberKernel,
+    IrScatterKernel,
 )
-
-type _IrScatterKernel = IrScatterClobberKernel | IrScatterAccumulateKernel
 
 __all__ = [
     "AbstractKernelException",
@@ -41,7 +40,7 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
-        case IrScatterClobberKernel() | IrScatterAccumulateKernel():
+        case IrScatterKernel():
             n = math.prod(kernel.arg_accessors[0].shape)
         case _:
             n = math.prod(kernel.shape)
@@ -460,7 +459,7 @@ def _define_matmul_arg_index_function(
 #
 
 
-def _emit_scatter_clobber_bindings(w: "WgslWriter", kernel: _IrScatterKernel) -> None:
+def _emit_scatter_clobber_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
     t = spell_dtype_in_wgsl(kernel.dtype)
     w.print(
         f"""
@@ -668,12 +667,12 @@ def _emit_scatter_accumulate_store(
 
 def _emit_wgsl_for_scatter_kernel(
     w: "WgslWriter",
-    kernel: _IrScatterKernel,
+    kernel: IrScatterKernel,
     config: WgslKernelConfig,
     *,
-    emit_bindings: Callable[["WgslWriter", _IrScatterKernel, WgslKernelConfig], None],
+    emit_bindings: Callable[["WgslWriter", IrScatterKernel, WgslKernelConfig], None],
     emit_store: Callable[
-        ["WgslWriter", _IrScatterKernel, WgslKernelConfig, str, str], None
+        ["WgslWriter", IrScatterKernel, WgslKernelConfig, str, str], None
     ],
 ) -> None:
     source_accessor = kernel.arg_accessors[0]
@@ -754,7 +753,7 @@ def _emit_wgsl_for_scatter_clobber_kernel(
 ) -> None:
     def emit_bindings(
         w: "WgslWriter",
-        kernel: _IrScatterKernel,
+        kernel: IrScatterKernel,
         config: WgslKernelConfig,
     ) -> None:
         del config
@@ -762,7 +761,7 @@ def _emit_wgsl_for_scatter_clobber_kernel(
 
     def emit_store(
         w: "WgslWriter",
-        kernel: _IrScatterKernel,
+        kernel: IrScatterKernel,
         config: WgslKernelConfig,
         out_address_expr: str,
         value_expr: str,
@@ -785,7 +784,7 @@ def _emit_wgsl_for_scatter_clobber_kernel(
 
 def _emit_scatter_accumulate_bindings_only(
     w: "WgslWriter",
-    kernel: _IrScatterKernel,
+    kernel: IrScatterKernel,
     config: WgslKernelConfig,
 ) -> None:
     assert isinstance(kernel, IrScatterAccumulateKernel)
@@ -794,7 +793,7 @@ def _emit_scatter_accumulate_bindings_only(
 
 def _emit_scatter_accumulate_store_only(
     w: "WgslWriter",
-    kernel: _IrScatterKernel,
+    kernel: IrScatterKernel,
     config: WgslKernelConfig,
     out_address_expr: str,
     value_expr: str,
@@ -825,7 +824,7 @@ def _emit_wgsl_for_scatter_accumulate_kernel(
 
 def _define_scatter_out_address_function(
     w: "WgslWriter",
-    kernel: _IrScatterKernel,
+    kernel: IrScatterKernel,
 ) -> None:
     rank = len(kernel.wpitch)
     with w.block(
