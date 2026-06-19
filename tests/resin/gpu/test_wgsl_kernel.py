@@ -1,7 +1,6 @@
 from resin.core.accessor import Accessor
-from resin.ir import IrElementwiseRpnKernel, IrMatmulKernel
-from resin.ir import ElementRpnExpr
-from resin.wgpu import WgslKernelConfig, dispatch_size_for_kernel
+from resin.ir import ElementRpnExpr, IrElementwiseRpnKernel, IrMatmulKernel, IrScatterKernel
+from resin.wgpu import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
 
 
 class TestDispatchSize:
@@ -50,3 +49,31 @@ class TestDispatchSize:
             shape=(8, 8),
         )
         assert dispatch_size_for_kernel(kernel, config) == (2, 1, 1)
+
+
+class TestEmitBindings:
+    def test_scatter_assign_uses_plain_output_binding(self) -> None:
+        kernel = IrScatterKernel(
+            arg_accessors=(Accessor.dense((3,)),),
+            dtype="f4",
+            shape=(3,),
+            operator=None,
+            woffset=0,
+            wpitch=(1,),
+        )
+        wgsl = emit_wgsl_for_kernel(kernel, WgslKernelConfig())
+        assert "var<storage, read_write> output: array<f32>;" in wgsl
+        assert "atomic<" not in wgsl
+
+    def test_scatter_add_uses_atomic_output_binding_with_output_dtype(self) -> None:
+        kernel = IrScatterKernel(
+            arg_accessors=(Accessor.dense((3,)),),
+            dtype="f4",
+            shape=(3,),
+            operator="add",
+            woffset=0,
+            wpitch=(1,),
+        )
+        wgsl = emit_wgsl_for_kernel(kernel, WgslKernelConfig())
+        assert "var<storage, read_write> output: array<atomic<u32>>;" in wgsl
+        assert "bitcast<f32>(old_bits)" in wgsl

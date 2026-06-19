@@ -82,13 +82,28 @@ class WgslKernelConfig:
     workgroup_size: int = 8
 
 
-def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
+def _spell_atomic_storage_in_wgsl(dtype: DType) -> str:
+    # WGSL storage atomics are only 32-bit integer types; floats use bitcast.
+    match dtype:
+        case "u4" | "f4" | "f2":
+            return "atomic<u32>"
+        case _:
+            raise NotImplementedError(f"{dtype=}")
+
+
+def _emit_bindings(
+    w: "WgslWriter",
+    kernel: IrKernel,
+    *,
+    atomic_output: bool = False,
+) -> None:
     t = spell_dtype_in_wgsl(kernel.dtype)
+    output_t = _spell_atomic_storage_in_wgsl(kernel.dtype) if atomic_output else t
 
     w.print(
         f"""
         @group(0) @binding(0)
-        var<storage, read_write> output: array<{t}>;
+        var<storage, read_write> output: array<{output_t}>;
         """
     )
 
@@ -445,37 +460,14 @@ def _define_matmul_arg_index_function(
 #
 
 
-def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
-    t = spell_dtype_in_wgsl(kernel.dtype)
-    if kernel.operator is None:
-        w.print(
-            f"""
-            @group(0) @binding(0)
-            var<storage, read_write> output: array<{t}>;
-            """
-        )
-    else:
-        w.print(
-            """
-            @group(0) @binding(0)
-            var<storage, read_write> output: array<atomic<u32>>;
-            """
-        )
-    for i in range(len(kernel.arg_accessors)):
-        w.print(
-            f"""
-            @group(0) @binding({i + 1})
-            var<storage, read> arg{i}: array<{t}>;
-            """
-        )
-
-
 def _scatter_atomic_accumulate_wgsl(
     operator: BinaryAssocScalarOperator,
     *,
+    dtype: DType,
     out_address_expr: str,
     value_expr: str,
 ) -> str:
+    t = spell_dtype_in_wgsl(dtype)
     match operator:
         case "add":
             combine = f"old_val + ({value_expr})"
@@ -494,7 +486,7 @@ def _scatter_atomic_accumulate_wgsl(
             let out_slot = &output[{out_address_expr}];
             loop {{
                 let old_bits = atomicLoad(out_slot);
-                let old_val = bitcast<f32>(old_bits);
+                let old_val = bitcast<{t}>(old_bits);
                 let new_val = {combine};
                 let new_bits = bitcast<u32>(new_val);
                 let exchanged = atomicCompareExchangeWeak(
@@ -524,6 +516,7 @@ def _emit_scatter_store(
         w.print(
             _scatter_atomic_accumulate_wgsl(
                 kernel.operator,
+                dtype=kernel.dtype,
                 out_address_expr=out_address_expr,
                 value_expr=value_expr,
             )
@@ -539,7 +532,7 @@ def _emit_wgsl_for_scatter_kernel(
     source_shape = source_accessor.shape
     rank = len(source_shape)
 
-    _emit_scatter_bindings(w, kernel)
+    _emit_bindings(w, kernel, atomic_output=kernel.operator is not None)
     _emit_arg_address_functions(w, kernel)
 
     if rank == 0:
