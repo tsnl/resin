@@ -1,6 +1,5 @@
 from frozendict import frozendict
 from resin.dsl import dsl
-from resin.core.accessor import Accessor
 from resin.ir.ir import IrBufferView, IrProgram
 
 from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
@@ -73,6 +72,7 @@ def build_wgpu_program(
                         int(dispatch_size[2]),
                     ),
                     num_arg_bindings=len(kernel.arg_accessors),
+                    clear_output_before_dispatch=kernel.clear_output_before_dispatch,
                 )
             )
 
@@ -114,5 +114,3 @@ def _accessor_spec(buffer_view: IrBufferView) -> WgpuAccessorSpec:
 
 def param_buffer_index(program: WgpuProgram, param: dsl.ParamNode) -> int:
     return program.param_buffer_ids[id(param)]
-
-

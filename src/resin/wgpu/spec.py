@@ -99,6 +99,7 @@ class WgpuComputePipelineSpec:
     wgsl: str
     dispatch_size: tuple[int, int, int]
     num_arg_bindings: int
+    clear_output_before_dispatch: bool = False
     entry_point: str = "main"
 
 
@@ -169,6 +170,7 @@ def _pipeline_to_dict(spec: WgpuComputePipelineSpec) -> dict[str, Any]:
         "entry_point": spec.entry_point,
         "dispatch_size": list(spec.dispatch_size),
         "num_arg_bindings": spec.num_arg_bindings,
+        "clear_output_before_dispatch": spec.clear_output_before_dispatch,
     }
 
 
@@ -180,6 +182,7 @@ def _pipeline_from_dict(payload: dict[str, Any]) -> WgpuComputePipelineSpec:
         entry_point=payload.get("entry_point", "main"),
         dispatch_size=tuple(payload["dispatch_size"]),
         num_arg_bindings=payload["num_arg_bindings"],
+        clear_output_before_dispatch=payload.get("clear_output_before_dispatch", False),
     )
 
 

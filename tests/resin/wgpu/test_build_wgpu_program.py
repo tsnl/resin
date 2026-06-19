@@ -47,3 +47,12 @@ class TestBuildWgpuProgram:
         assert payload["pipelines"][0]["kind"] == "compute"
         assert len(payload["queue"]) == 1
         assert "fn main" in payload["pipelines"][0]["wgsl"]
+
+    def test_copy_scatter_pipeline_clears_output_before_dispatch(self) -> None:
+        x = dsl.param(shape=(3,), stype="f4")
+        builder = IrProgramBuilder()
+        builder.build_sink("out", x.copy())
+        wgpu_program = build_wgpu_program(builder.finish())
+
+        assert len(wgpu_program.pipelines) == 1
+        assert wgpu_program.pipelines[0].clear_output_before_dispatch is True

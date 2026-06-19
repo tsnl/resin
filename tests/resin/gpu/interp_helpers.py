@@ -22,7 +22,9 @@ def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
     return program.buffer_views[view_index].buffer_index
 
 
-def unmarshall_buffer(data: bytes, shape: tuple[int, ...], stype: ScalarType) -> list[float]:
+def unmarshall_buffer(
+    data: bytes, shape: tuple[int, ...], stype: ScalarType
+) -> list[float]:
     count = math.prod(shape)
     fmt = spell_stype_in_pystruct(stype)
     return list(struct.unpack(f"<{count}{fmt}", data))

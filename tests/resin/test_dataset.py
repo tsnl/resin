@@ -25,9 +25,13 @@ def _write_idx_labels(path: Path, labels: list[int]) -> None:
 def tiny_mnist_cache(tmp_path: Path) -> Path:
     images = [0, 127, 255, 10, 20, 30, 40, 50, 60, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     labels = [3, 7]
-    _write_idx_images(tmp_path / "train-images-idx3-ubyte.gz", rows=3, cols=3, pixels=images)
+    _write_idx_images(
+        tmp_path / "train-images-idx3-ubyte.gz", rows=3, cols=3, pixels=images
+    )
     _write_idx_labels(tmp_path / "train-labels-idx1-ubyte.gz", labels=labels)
-    _write_idx_images(tmp_path / "t10k-images-idx3-ubyte.gz", rows=3, cols=3, pixels=images)
+    _write_idx_images(
+        tmp_path / "t10k-images-idx3-ubyte.gz", rows=3, cols=3, pixels=images
+    )
     _write_idx_labels(tmp_path / "t10k-labels-idx1-ubyte.gz", labels=labels)
     return tmp_path
 

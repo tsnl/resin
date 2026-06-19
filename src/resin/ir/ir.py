@@ -70,6 +70,7 @@ class IrKernel(ABC):
     arg_accessors: tuple[Accessor, ...]
     stype: ScalarType
     shape: tuple[int, ...]
+    clear_output_before_dispatch: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -98,8 +99,10 @@ class IrMatmulKernel(IrKernel):
 
 @dataclass(frozen=True, kw_only=True)
 class IrScatterKernel(IrKernel):
+    operator: BinaryAssocScalarOperator | None
     woffset: int
     wpitch: tuple[int, ...]
+    clear_output_before_dispatch: bool = True
 
     def __post_init__(self):
         assert len(self.arg_accessors) == 1
@@ -214,13 +217,6 @@ class IrProgramBuilder:
                     init=marshall_pytensor(node.value, stype=node.stype),
                     readonly=True,
                 )
-            case dsl.ScatterNode():
-                return IrBuffer(
-                    shape=node.shape,
-                    stype=node.stype,
-                    init=bytes(node.nbytes),
-                    readonly=False,
-                )
             case _:
                 return IrBuffer(
                     shape=node.shape,
@@ -273,6 +269,7 @@ class IrProgramBuilder:
             arg_accessors=(node.args[0].accessor,),
             stype=node.stype,
             shape=node.shape,
+            operator=node.operator,
             woffset=node.woffset,
             wpitch=node.wpitch,
         )

@@ -435,6 +435,91 @@ def _define_matmul_arg_index_function(
 #
 
 
+def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
+    t = spell_stype_in_wgsl(kernel.stype)
+    if kernel.operator is None:
+        w.print(
+            f"""
+            @group(0) @binding(0)
+            var<storage, read_write> output: array<{t}>;
+            """
+        )
+    else:
+        w.print(
+            """
+            @group(0) @binding(0)
+            var<storage, read_write> output: array<atomic<u32>>;
+            """
+        )
+    for i in range(len(kernel.arg_accessors)):
+        w.print(
+            f"""
+            @group(1) @binding({i})
+            var<storage, read> arg{i}: array<{t}>;
+            """
+        )
+
+
+def _scatter_atomic_accumulate_wgsl(
+    operator: BinaryAssocScalarOperator,
+    *,
+    out_address_expr: str,
+    value_expr: str,
+) -> str:
+    match operator:
+        case "add":
+            combine = f"old_val + ({value_expr})"
+        case "mul":
+            combine = f"old_val * ({value_expr})"
+        case "max":
+            combine = f"max(old_val, {value_expr})"
+        case "min":
+            combine = f"min(old_val, {value_expr})"
+        case _:
+            raise NotImplementedError(f"{operator=}")
+
+    return textwrap.dedent(
+        f"""
+        {{
+            let out_slot = &output[{out_address_expr}];
+            loop {{
+                let old_bits = atomicLoad(out_slot);
+                let old_val = bitcast<f32>(old_bits);
+                let new_val = {combine};
+                let new_bits = bitcast<u32>(new_val);
+                let exchanged = atomicCompareExchangeWeak(
+                    out_slot,
+                    old_bits,
+                    new_bits
+                ).exchanged;
+                if (exchanged) {{
+                    break;
+                }}
+            }}
+        }}
+        """
+    ).strip()
+
+
+def _emit_scatter_store(
+    w: "WgslWriter",
+    kernel: IrScatterKernel,
+    *,
+    out_address_expr: str,
+    value_expr: str,
+) -> None:
+    if kernel.operator is None:
+        w.print(f"output[{out_address_expr}] = {value_expr};")
+    else:
+        w.print(
+            _scatter_atomic_accumulate_wgsl(
+                kernel.operator,
+                out_address_expr=out_address_expr,
+                value_expr=value_expr,
+            )
+        )
+
+
 def _emit_wgsl_for_scatter_kernel(
     w: "WgslWriter",
     kernel: IrScatterKernel,
@@ -444,7 +529,7 @@ def _emit_wgsl_for_scatter_kernel(
     source_shape = source_accessor.shape
     rank = len(source_shape)
 
-    _emit_bindings(w, kernel)
+    _emit_scatter_bindings(w, kernel)
     _emit_arg_address_functions(w, kernel)
 
     if rank == 0:
@@ -458,10 +543,12 @@ def _emit_wgsl_for_scatter_kernel(
         ):
             with w.block("if (global_id.x > 0u)"):
                 w.print("return;")
-            w.print(
-                f"""
-                output[{kernel.woffset}u] = arg0[{_arg_address_expr(0, source_accessor, "")}];
-                """
+            value_expr = f"arg0[{_arg_address_expr(0, source_accessor, '')}]"
+            _emit_scatter_store(
+                w,
+                kernel,
+                out_address_expr=f"{kernel.woffset}u",
+                value_expr=value_expr,
             )
         return
 
@@ -498,12 +585,18 @@ def _emit_wgsl_for_scatter_kernel(
             with w.block(f"if (src_address >= {source_count}u)"):
                 w.print("return;")
 
+            value_expr = f"arg0[{_arg_address_expr(0, source_accessor, 'src_index')}]"
             w.print(
-                f"""
+                """
                 let src_index = source_index(src_address);
                 let out_address = scatter_out_address(src_index);
-                output[out_address] = arg0[{_arg_address_expr(0, source_accessor, "src_index")}];
                 """
+            )
+            _emit_scatter_store(
+                w,
+                kernel,
+                out_address_expr="out_address",
+                value_expr=value_expr,
             )
 
 

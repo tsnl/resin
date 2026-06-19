@@ -420,6 +420,7 @@ def _matmul(a: View, b: View) -> View:
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ScatterNode(Node):
+    operator: BinaryAssocScalarOperator | None
     woffset: int
     wpitch: tuple[int, ...]
 
@@ -430,6 +431,7 @@ def _scatter(
     out_shape: tuple[int, ...],
     woffset: int,
     wpitch: tuple[int, ...],
+    operator: BinaryAssocScalarOperator | None = None,
     stype: ScalarType | None = None,
 ) -> View:
     return View.identity(
@@ -437,6 +439,7 @@ def _scatter(
             shape=out_shape,
             stype=stype or source.stype,
             args=(source,),
+            operator=operator,
             woffset=woffset,
             wpitch=wpitch,
         )

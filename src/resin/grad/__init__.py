@@ -39,6 +39,7 @@ def accessor_adjoint(view: View, g: View) -> View:
     return _scatter(
         source=x,
         out_shape=view.node.shape,
+        operator="add",
         woffset=view.offset,
         wpitch=view.pitch,
     )

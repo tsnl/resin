@@ -103,6 +103,10 @@ impl WgpuInterp {
                 continue;
             }
 
+            if compute.clear_output_before_dispatch {
+                self.clear_buffer(dispatch.output_buffer_index)?;
+            }
+
             let output_buffer = &self.buffers[dispatch.output_buffer_index];
             let bind_group0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("resin-bind-group-0"),
@@ -126,12 +130,6 @@ impl WgpuInterp {
                     }
                 })
                 .collect();
-            let bind_group1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("resin-bind-group-1"),
-                layout: &pipeline.get_bind_group_layout(1),
-                entries: &arg_entries,
-            });
-
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("resin-compute-pass"),
@@ -139,7 +137,16 @@ impl WgpuInterp {
                 });
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind_group0, &[]);
-                pass.set_bind_group(1, &bind_group1, &[]);
+                if !arg_entries.is_empty() {
+                    let bind_group1 =
+                        self.device
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("resin-bind-group-1"),
+                                layout: &pipeline.get_bind_group_layout(1),
+                                entries: &arg_entries,
+                            });
+                    pass.set_bind_group(1, &bind_group1, &[]);
+                }
                 pass.dispatch_workgroups(
                     compute.dispatch_size[0],
                     compute.dispatch_size[1],
@@ -149,6 +156,16 @@ impl WgpuInterp {
         }
 
         self.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    pub fn clear_buffer(&self, buffer_index: usize) -> Result<(), WgpuInterpError> {
+        let spec = self.program.buffers.get(buffer_index).ok_or_else(|| {
+            WgpuInterpError::Program(format!("invalid buffer index {buffer_index}"))
+        })?;
+        let zeros = vec![0u8; spec.byte_len() as usize];
+        self.queue
+            .write_buffer(&self.buffers[buffer_index], 0, &zeros);
         Ok(())
     }
 

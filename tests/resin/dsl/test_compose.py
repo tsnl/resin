@@ -186,7 +186,7 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(woffset=0, wpitch=(3, 1)) :: f4(1, 3)
+            scatter(operator=None, woffset=0, wpitch=(3, 1)) :: f4(1, 3)
             └ view(offset=0, shape=(1, 3), pitch=(6, 1))
               └ const(value=[[1, 2, 3], [4, 5, 6]]) :: f4(2, 3)
             """
@@ -198,7 +198,7 @@ class TestCompact:
         t2 = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(woffset=0, wpitch=(1,)) :: f4(3,)
+            scatter(operator=None, woffset=0, wpitch=(1,)) :: f4(3,)
             └ const(value=[1, 2, 3]) :: f4(3,)
             """
         )

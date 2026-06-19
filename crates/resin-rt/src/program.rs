@@ -58,6 +58,8 @@ pub struct WgpuComputePipelineSpec {
     pub entry_point: String,
     pub dispatch_size: [u32; 3],
     pub num_arg_bindings: u32,
+    #[serde(default)]
+    pub clear_output_before_dispatch: bool,
 }
 
 fn default_entry_point() -> String {
