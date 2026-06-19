@@ -2,12 +2,13 @@ import math
 import textwrap
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from resin.core.accessor import Accessor, is_c_contiguous
 from resin.core.dtype import (
     BinaryAssocScalarOperator,
     DType,
+    dtype_kind,
     dtype_needs_enable_f16,
     spell_dtype_in_wgsl,
 )
@@ -23,6 +24,7 @@ from resin.ir.ir import (
 __all__ = [
     "AbstractKernelException",
     "WgslKernelConfig",
+    "WgslTargetFeatures",
     "dispatch_size_for_kernel",
     "emit_wgsl_for_kernel",
 ]
@@ -77,9 +79,17 @@ class AbstractKernelException(Exception):
 
 
 @dataclass(frozen=True, kw_only=True)
+class WgslTargetFeatures:
+    """wgpu adapter/device features available when compiling kernels."""
+
+    shader_float32_atomic: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
 class WgslKernelConfig:
     lg2_items_per_thread: int = 3
     workgroup_size: int = 8
+    target_features: WgslTargetFeatures = field(default_factory=WgslTargetFeatures)
 
 
 def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
@@ -445,22 +455,14 @@ def _define_matmul_arg_index_function(
 #
 
 
-def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
+def _emit_scatter_clobber_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
     t = spell_dtype_in_wgsl(kernel.dtype)
-    if kernel.operator is None:
-        w.print(
-            f"""
-            @group(0) @binding(0)
-            var<storage, read_write> output: array<{t}>;
-            """
-        )
-    else:
-        w.print(
-            """
-            @group(0) @binding(0)
-            var<storage, read_write> output: array<atomic<u32>>;
-            """
-        )
+    w.print(
+        f"""
+        @group(0) @binding(0)
+        var<storage, read_write> output: array<{t}>;
+        """
+    )
     for i in range(len(kernel.arg_accessors)):
         w.print(
             f"""
@@ -470,12 +472,89 @@ def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
         )
 
 
-def _scatter_atomic_accumulate_wgsl(
+def _scatter_accumulate_atomic_storage_wgsl(
+    output_dtype: DType,
+    operator: BinaryAssocScalarOperator,
+    features: WgslTargetFeatures,
+) -> str:
+    if (
+        output_dtype == "f4"
+        and features.shader_float32_atomic
+        and operator == "add"
+    ):
+        return "atomic<f32>"
+    return "atomic<u32>"
+
+
+def _emit_scatter_accumulate_bindings(
+    w: "WgslWriter",
+    kernel: IrScatterKernel,
+    features: WgslTargetFeatures,
+) -> None:
+    assert kernel.operator is not None
+    atomic_t = _scatter_accumulate_atomic_storage_wgsl(
+        kernel.dtype, kernel.operator, features
+    )
+    w.print(
+        f"""
+        @group(0) @binding(0)
+        var<storage, read_write> output: array<{atomic_t}>;
+        """
+    )
+    t = spell_dtype_in_wgsl(kernel.dtype)
+    for i in range(len(kernel.arg_accessors)):
+        w.print(
+            f"""
+            @group(0) @binding({i + 1})
+            var<storage, read> arg{i}: array<{t}>;
+            """
+        )
+
+
+def _scatter_accumulate_uses_native_atomic(
+    output_dtype: DType,
+    operator: BinaryAssocScalarOperator,
+    features: WgslTargetFeatures,
+) -> bool:
+    match output_dtype:
+        case "u4":
+            return operator in ("add", "max", "min")
+        case "f4":
+            return features.shader_float32_atomic and operator == "add"
+        case _:
+            return False
+
+
+def _scatter_native_accumulate_wgsl(
     operator: BinaryAssocScalarOperator,
     *,
     out_address_expr: str,
     value_expr: str,
 ) -> str:
+    match operator:
+        case "add":
+            builtin = "atomicAdd"
+        case "max":
+            builtin = "atomicMax"
+        case "min":
+            builtin = "atomicMin"
+        case _:
+            raise AssertionError(f"no native atomic for {operator=}")
+    return f"{builtin}(&output[{out_address_expr}], {value_expr});"
+
+
+def _scatter_cas_accumulate_wgsl(
+    operator: BinaryAssocScalarOperator,
+    output_dtype: DType,
+    *,
+    out_address_expr: str,
+    value_expr: str,
+) -> str:
+    if output_dtype not in ("f4", "u4"):
+        raise NotImplementedError(
+            f"atomic scatter accumulate not supported for {output_dtype=}"
+        )
+
     match operator:
         case "add":
             combine = f"old_val + ({value_expr})"
@@ -488,13 +567,35 @@ def _scatter_atomic_accumulate_wgsl(
         case _:
             raise NotImplementedError(f"{operator=}")
 
+    if dtype_kind(output_dtype) == "uint":
+        return textwrap.dedent(
+            f"""
+            {{
+                let out_slot = &output[{out_address_expr}];
+                loop {{
+                    let old_val = atomicLoad(out_slot);
+                    let new_val = {combine};
+                    let exchanged = atomicCompareExchangeWeak(
+                        out_slot,
+                        old_val,
+                        new_val
+                    ).exchanged;
+                    if (exchanged) {{
+                        break;
+                    }}
+                }}
+            }}
+            """
+        ).strip()
+
+    wgsl_t = spell_dtype_in_wgsl(output_dtype)
     return textwrap.dedent(
         f"""
         {{
             let out_slot = &output[{out_address_expr}];
             loop {{
                 let old_bits = atomicLoad(out_slot);
-                let old_val = bitcast<f32>(old_bits);
+                let old_val = bitcast<{wgsl_t}>(old_bits);
                 let new_val = {combine};
                 let new_bits = bitcast<u32>(new_val);
                 let exchanged = atomicCompareExchangeWeak(
@@ -511,22 +612,89 @@ def _scatter_atomic_accumulate_wgsl(
     ).strip()
 
 
+def _scatter_accumulate_wgsl(
+    operator: BinaryAssocScalarOperator,
+    output_dtype: DType,
+    features: WgslTargetFeatures,
+    *,
+    out_address_expr: str,
+    value_expr: str,
+) -> str:
+    if _scatter_accumulate_uses_native_atomic(output_dtype, operator, features):
+        return _scatter_native_accumulate_wgsl(
+            operator,
+            out_address_expr=out_address_expr,
+            value_expr=value_expr,
+        )
+    return _scatter_cas_accumulate_wgsl(
+        operator,
+        output_dtype,
+        out_address_expr=out_address_expr,
+        value_expr=value_expr,
+    )
+
+
+def _emit_scatter_bindings(
+    w: "WgslWriter",
+    kernel: IrScatterKernel,
+    config: WgslKernelConfig,
+) -> None:
+    if kernel.operator is None:
+        _emit_scatter_clobber_bindings(w, kernel)
+    else:
+        _emit_scatter_accumulate_bindings(w, kernel, config.target_features)
+
+
+def _emit_scatter_clobber_store(
+    w: "WgslWriter",
+    *,
+    out_address_expr: str,
+    value_expr: str,
+) -> None:
+    w.print(f"output[{out_address_expr}] = {value_expr};")
+
+
+def _emit_scatter_accumulate_store(
+    w: "WgslWriter",
+    kernel: IrScatterKernel,
+    config: WgslKernelConfig,
+    *,
+    out_address_expr: str,
+    value_expr: str,
+) -> None:
+    assert kernel.operator is not None
+    w.print(
+        _scatter_accumulate_wgsl(
+            kernel.operator,
+            kernel.dtype,
+            config.target_features,
+            out_address_expr=out_address_expr,
+            value_expr=value_expr,
+        )
+    )
+
+
 def _emit_scatter_store(
     w: "WgslWriter",
     kernel: IrScatterKernel,
+    config: WgslKernelConfig,
     *,
     out_address_expr: str,
     value_expr: str,
 ) -> None:
     if kernel.operator is None:
-        w.print(f"output[{out_address_expr}] = {value_expr};")
+        _emit_scatter_clobber_store(
+            w,
+            out_address_expr=out_address_expr,
+            value_expr=value_expr,
+        )
     else:
-        w.print(
-            _scatter_atomic_accumulate_wgsl(
-                kernel.operator,
-                out_address_expr=out_address_expr,
-                value_expr=value_expr,
-            )
+        _emit_scatter_accumulate_store(
+            w,
+            kernel,
+            config,
+            out_address_expr=out_address_expr,
+            value_expr=value_expr,
         )
 
 
@@ -539,7 +707,7 @@ def _emit_wgsl_for_scatter_kernel(
     source_shape = source_accessor.shape
     rank = len(source_shape)
 
-    _emit_scatter_bindings(w, kernel)
+    _emit_scatter_bindings(w, kernel, config)
     _emit_arg_address_functions(w, kernel)
 
     if rank == 0:
@@ -557,6 +725,7 @@ def _emit_wgsl_for_scatter_kernel(
             _emit_scatter_store(
                 w,
                 kernel,
+                config,
                 out_address_expr=f"{kernel.woffset}u",
                 value_expr=value_expr,
             )
@@ -605,6 +774,7 @@ def _emit_wgsl_for_scatter_kernel(
             _emit_scatter_store(
                 w,
                 kernel,
+                config,
                 out_address_expr="out_address",
                 value_expr=value_expr,
             )

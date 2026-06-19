@@ -9,6 +9,7 @@ from resin.core.dtype import (
 from .codegen import (
     AbstractKernelException,
     WgslKernelConfig,
+    WgslTargetFeatures,
     dispatch_size_for_kernel,
     emit_wgsl_for_kernel,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "spell_dtype_in_pystruct",
     "spell_dtype_in_wgsl",
     "WgslKernelConfig",
+    "WgslTargetFeatures",
     "build_wgpu_program",
     "dispatch_size_for_kernel",
     "emit_wgsl_for_kernel",
