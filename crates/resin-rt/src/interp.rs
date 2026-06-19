@@ -15,12 +15,21 @@ pub enum WgpuInterpError {
     BufferMapFailed,
 }
 
+struct PreparedDispatch {
+    pipeline_index: usize,
+    bind_group: wgpu::BindGroup,
+    dispatch_size: [u32; 3],
+    clear_output_before_dispatch: bool,
+    output_buffer_index: usize,
+}
+
 pub struct WgpuInterp {
     device: wgpu::Device,
     queue: wgpu::Queue,
     program: WgpuProgram,
     buffers: Vec<wgpu::Buffer>,
     pipelines: Vec<wgpu::ComputePipeline>,
+    prepared_dispatches: Vec<PreparedDispatch>,
 }
 
 /// Acquire a default GPU device and queue for standalone use (e.g. Python dev).
@@ -73,12 +82,15 @@ impl WgpuInterp {
             .map(|spec| create_pipeline(&device, spec))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let prepared_dispatches = prepare_dispatches(&device, &program, &buffers, &pipelines)?;
+
         Ok(Self {
             device,
             queue,
             program,
             buffers,
             pipelines,
+            prepared_dispatches,
         })
     }
 
@@ -93,86 +105,37 @@ impl WgpuInterp {
                 label: Some("resin-run"),
             });
 
-        for dispatch in &self.program.queue {
-            let pipeline = &self.pipelines[dispatch.pipeline_index];
-            let compute = match &self.program.pipelines[dispatch.pipeline_index] {
-                WgpuPipelineSpec::Compute(spec) => spec,
-            };
-
-            if compute.dispatch_size == [0, 0, 0] || compute.dispatch_size[0] == 0 {
-                continue;
-            }
-
-            if compute.clear_output_before_dispatch {
-                self.clear_buffer(dispatch.output_buffer_index)?;
-            }
-
-            let output_buffer = &self.buffers[dispatch.output_buffer_index];
-            let bind_group0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("resin-bind-group-0"),
-                layout: &pipeline.get_bind_group_layout(0),
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: output_buffer.as_entire_binding(),
-                }],
-            });
-
-            let arg_entries: Vec<wgpu::BindGroupEntry<'_>> = dispatch
-                .arg_buffer_view_indices
-                .iter()
-                .enumerate()
-                .map(|(binding, &view_index)| {
-                    let view = &self.program.buffer_views[view_index];
-                    let buffer = &self.buffers[view.buffer_index];
-                    wgpu::BindGroupEntry {
-                        binding: binding as u32,
-                        resource: buffer.as_entire_binding(),
-                    }
-                })
-                .collect();
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("resin-compute-pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, &bind_group0, &[]);
-                if !arg_entries.is_empty() {
-                    let bind_group1 =
-                        self.device
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("resin-bind-group-1"),
-                                layout: &pipeline.get_bind_group_layout(1),
-                                entries: &arg_entries,
-                            });
-                    pass.set_bind_group(1, &bind_group1, &[]);
-                }
-                pass.dispatch_workgroups(
-                    compute.dispatch_size[0],
-                    compute.dispatch_size[1],
-                    compute.dispatch_size[2],
+        for prepared in &self.prepared_dispatches {
+            if prepared.clear_output_before_dispatch {
+                encoder.clear_buffer(
+                    &self.buffers[prepared.output_buffer_index],
+                    0,
+                    Some(self.program.buffers[prepared.output_buffer_index].byte_len()),
                 );
             }
+        }
+
+        for prepared in &self.prepared_dispatches {
+            let pipeline = &self.pipelines[prepared.pipeline_index];
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("resin-compute-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &prepared.bind_group, &[]);
+            pass.dispatch_workgroups(
+                prepared.dispatch_size[0],
+                prepared.dispatch_size[1],
+                prepared.dispatch_size[2],
+            );
         }
 
         self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
 
-    pub fn clear_buffer(&self, buffer_index: usize) -> Result<(), WgpuInterpError> {
-        let spec = self.program.buffers.get(buffer_index).ok_or_else(|| {
-            WgpuInterpError::Program(format!("invalid buffer index {buffer_index}"))
-        })?;
-        let zeros = vec![0u8; spec.byte_len() as usize];
-        self.queue
-            .write_buffer(&self.buffers[buffer_index], 0, &zeros);
-        Ok(())
-    }
-
     pub fn write_buffer(&self, buffer_index: usize, data: &[u8]) -> Result<(), WgpuInterpError> {
-        let spec = self.program.buffers.get(buffer_index).ok_or_else(|| {
-            WgpuInterpError::Program(format!("invalid buffer index {buffer_index}"))
-        })?;
+        let spec = &self.program.buffers[buffer_index];
         if data.len() as u64 != spec.byte_len() {
             return Err(WgpuInterpError::Program(format!(
                 "write_buffer size mismatch: expected {} bytes, got {}",
@@ -261,6 +224,50 @@ impl WgpuInterp {
         let mapped = buffer_slice.get_mapped_range();
         Ok(mapped.to_vec())
     }
+}
+
+fn prepare_dispatches(
+    device: &wgpu::Device,
+    program: &WgpuProgram,
+    buffers: &[wgpu::Buffer],
+    pipelines: &[wgpu::ComputePipeline],
+) -> Result<Vec<PreparedDispatch>, WgpuInterpError> {
+    let mut prepared = Vec::with_capacity(program.queue.len());
+
+    for dispatch in &program.queue {
+        let compute = match &program.pipelines[dispatch.pipeline_index] {
+            WgpuPipelineSpec::Compute(spec) => spec,
+        };
+        let pipeline = &pipelines[dispatch.pipeline_index];
+
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffers[dispatch.output_buffer_index].as_entire_binding(),
+        }];
+        for (binding, &view_index) in dispatch.arg_buffer_view_indices.iter().enumerate() {
+            let view = &program.buffer_views[view_index];
+            entries.push(wgpu::BindGroupEntry {
+                binding: (binding + 1) as u32,
+                resource: buffers[view.buffer_index].as_entire_binding(),
+            });
+        }
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("resin-bind-group"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &entries,
+        });
+
+        prepared.push(PreparedDispatch {
+            pipeline_index: dispatch.pipeline_index,
+            bind_group,
+            dispatch_size: compute.dispatch_size,
+            clear_output_before_dispatch: compute.clear_output_before_dispatch,
+            output_buffer_index: dispatch.output_buffer_index,
+        });
+    }
+
+    Ok(prepared)
 }
 
 fn create_buffer(
