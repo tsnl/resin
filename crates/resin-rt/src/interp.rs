@@ -100,17 +100,31 @@ impl WgpuInterp {
     }
 
     pub fn run(&self) -> Result<(), WgpuInterpError> {
-        for prepared in &self.prepared_dispatches {
-            if prepared.clear_output_before_dispatch {
-                self.clear_buffer(prepared.output_buffer_index)?;
-            }
-        }
-
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("resin-run"),
             });
+
+        for prepared in &self.prepared_dispatches {
+            if prepared.clear_output_before_dispatch {
+                let output_spec = self
+                    .program
+                    .buffers
+                    .get(prepared.output_buffer_index)
+                    .ok_or_else(|| {
+                        WgpuInterpError::Program(format!(
+                            "invalid output buffer index {}",
+                            prepared.output_buffer_index
+                        ))
+                    })?;
+                clear_buffer_in_encoder(
+                    &mut encoder,
+                    &self.buffers[prepared.output_buffer_index],
+                    output_spec.byte_len(),
+                );
+            }
+        }
 
         for prepared in &self.prepared_dispatches {
             let pipeline = &self.pipelines[prepared.pipeline_index];
@@ -135,9 +149,13 @@ impl WgpuInterp {
         let spec = self.program.buffers.get(buffer_index).ok_or_else(|| {
             WgpuInterpError::Program(format!("invalid buffer index {buffer_index}"))
         })?;
-        let zeros = vec![0u8; spec.byte_len() as usize];
-        self.queue
-            .write_buffer(&self.buffers[buffer_index], 0, &zeros);
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("resin-clear"),
+            });
+        clear_buffer_in_encoder(&mut encoder, &self.buffers[buffer_index], spec.byte_len());
+        self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
 
@@ -233,6 +251,14 @@ impl WgpuInterp {
         let mapped = buffer_slice.get_mapped_range();
         Ok(mapped.to_vec())
     }
+}
+
+fn clear_buffer_in_encoder(
+    encoder: &mut wgpu::CommandEncoder,
+    buffer: &wgpu::Buffer,
+    size: u64,
+) {
+    encoder.clear_buffer(buffer, 0, Some(size));
 }
 
 fn prepare_dispatches(
