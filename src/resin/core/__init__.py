@@ -1,8 +1,8 @@
-from . import accessor, common, dtype, pytree
+from . import accessor, common, etype, pytree
 
 __all__ = [
     "accessor",
     "common",
-    "dtype",
+    "etype",
     "pytree",
 ]

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from resin.core.dtype import ScalarOperator
+from resin.core.etype import ElementOperator
 
 
 @dataclass
@@ -14,9 +14,9 @@ class RpnExpr[Operator]:
 
 
 @dataclass
-class ElementRpnExpr(RpnExpr[ScalarOperator]):
+class ElementRpnExpr(RpnExpr[ElementOperator]):
     """Per-element RPN over buffer slots.
 
-    Uses ``ScalarOperator`` today (one scalar op per buffer element). Tile
+    Uses ``ElementOperator`` today (one scalar op per buffer element). Tile
     element types may require a richer operator set or a different representation.
     """

@@ -22,7 +22,7 @@ def build_param_update_program(
     wgsl_kernel_config: WgslKernelConfig | None = None,
 ) -> tuple[WgpuProgram, frozendict[int, str]]:
     grads = grad_mod.grad(loss)
-    lr = dsl.const(learning_rate, dtype=loss.dtype)
+    lr = dsl.const(learning_rate, etype=loss.etype)
 
     updated_param_sinks: dict[int, str] = {}
     builder = IrProgramBuilder()

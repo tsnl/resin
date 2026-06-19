@@ -5,11 +5,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from resin.core.accessor import Accessor, is_c_contiguous
-from resin.core.dtype import (
-    BinaryAssocScalarOperator,
-    DType,
-    dtype_needs_enable_f16,
-    spell_dtype_in_wgsl,
+from resin.core.etype import (
+    BinaryAssocElementOperator,
+    ElementType,
+    etype_needs_enable_f16,
+    spell_etype_in_wgsl,
 )
 from resin.ir.rpn import ElementRpnExpr
 from resin.ir.ir import (
@@ -55,7 +55,7 @@ def dispatch_size_for_kernel(
 
 
 def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
-    w = WgslWriter(enable_f16=dtype_needs_enable_f16(kernel.dtype))
+    w = WgslWriter(enable_f16=etype_needs_enable_f16(kernel.etype))
 
     match kernel:
         case IrElementwiseRpnKernel():
@@ -83,7 +83,7 @@ class WgslKernelConfig:
 
 
 def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
-    t = spell_dtype_in_wgsl(kernel.dtype)
+    t = spell_etype_in_wgsl(kernel.etype)
 
     w.print(
         f"""
@@ -246,7 +246,7 @@ def _emit_wgsl_for_elementwise_rpn_kernel(
         w,
         kernel.rpn_expr,
         n=n,
-        dtype=kernel.dtype,
+        etype=kernel.etype,
     )
 
     with _per_output_element(w, kernel, config) as (w, out_address_expr):
@@ -266,9 +266,9 @@ def _emit_eval_rpn_expr(
     rpn_expr: ElementRpnExpr,
     *,
     n: int,
-    dtype: DType,
+    etype: ElementType,
 ) -> None:
-    t = spell_dtype_in_wgsl(dtype)
+    t = spell_etype_in_wgsl(etype)
 
     with w.block(
         f"""
@@ -370,7 +370,7 @@ def _emit_wgsl_for_matmul_kernel(
     kernel: IrMatmulKernel,
     config: WgslKernelConfig,
 ) -> None:
-    t = spell_dtype_in_wgsl(kernel.dtype)
+    t = spell_etype_in_wgsl(kernel.etype)
     rank = len(kernel.shape)
     k = kernel.k
 
@@ -446,7 +446,7 @@ def _define_matmul_arg_index_function(
 
 
 def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
-    t = spell_dtype_in_wgsl(kernel.dtype)
+    t = spell_etype_in_wgsl(kernel.etype)
     if kernel.operator is None:
         w.print(
             f"""
@@ -471,7 +471,7 @@ def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
 
 
 def _scatter_atomic_accumulate_wgsl(
-    operator: BinaryAssocScalarOperator,
+    operator: BinaryAssocElementOperator,
     *,
     out_address_expr: str,
     value_expr: str,
@@ -636,7 +636,7 @@ def _emit_wgsl_for_reduction_kernel(
     kernel: IrReductionKernel,
     config: WgslKernelConfig,
 ) -> None:
-    t = spell_dtype_in_wgsl(kernel.dtype)
+    t = spell_etype_in_wgsl(kernel.etype)
     rank = len(kernel.shape)
     count = kernel.reduced_count
     input_shape = kernel.input_shape
@@ -707,7 +707,7 @@ def _define_reduction_input_index_function(
 
 
 def _reduction_accumulate_wgsl(
-    operator: BinaryAssocScalarOperator,
+    operator: BinaryAssocElementOperator,
     acc: str,
     value: str,
 ) -> str:

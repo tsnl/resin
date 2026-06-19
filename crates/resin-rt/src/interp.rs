@@ -343,7 +343,7 @@ fn prepare_copy_op(program: &WgpuProgram, copy: &WgpuCopy) -> Result<PreparedCop
         })?;
 
     let accessor = &source_view.accessor;
-    let element_nbytes = output_spec.dtype.nbytes() as u64;
+    let element_nbytes = output_spec.etype.nbytes() as u64;
     let copy_bytes: u64 = accessor
         .shape
         .iter()

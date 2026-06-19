@@ -1,9 +1,9 @@
-from resin.core.dtype import (
-    DType,
-    dtype_nbytes,
-    dtype_needs_enable_f16,
-    spell_dtype_in_pystruct,
-    spell_dtype_in_wgsl,
+from resin.core.etype import (
+    ElementType,
+    etype_nbytes,
+    etype_needs_enable_f16,
+    spell_etype_in_pystruct,
+    spell_etype_in_wgsl,
 )
 
 from .codegen import (
@@ -25,7 +25,7 @@ from .spec import (
 
 __all__ = [
     "AbstractKernelException",
-    "DType",
+    "ElementType",
     "WgpuAccessorSpec",
     "WgpuBufferSpec",
     "WgpuBufferViewSpec",
@@ -33,10 +33,10 @@ __all__ = [
     "WgpuCopy",
     "WgpuDispatch",
     "WgpuProgram",
-    "dtype_nbytes",
-    "dtype_needs_enable_f16",
-    "spell_dtype_in_pystruct",
-    "spell_dtype_in_wgsl",
+    "etype_nbytes",
+    "etype_needs_enable_f16",
+    "spell_etype_in_pystruct",
+    "spell_etype_in_wgsl",
     "WgslKernelConfig",
     "build_wgpu_program",
     "dispatch_size_for_kernel",

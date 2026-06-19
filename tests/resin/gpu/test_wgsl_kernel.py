@@ -12,7 +12,7 @@ class TestDispatchSize:
                 Accessor.dense((8, 8)),
                 Accessor.dense((8, 8)),
             ),
-            dtype="f4",
+            etype="f4",
             shape=(8, 8),
         )
         assert dispatch_size_for_kernel(kernel, config) == (1, 1, 1)
@@ -21,7 +21,7 @@ class TestDispatchSize:
         config = WgslKernelConfig(lg2_items_per_thread=3, workgroup_size=8)
         kernel = IrElementwiseRpnKernel(
             arg_accessors=(Accessor.dense((65,)),),
-            dtype="f4",
+            etype="f4",
             shape=(65,),
             rpn_expr=ElementRpnExpr(string=(0,)),
         )
@@ -34,7 +34,7 @@ class TestDispatchSize:
                 Accessor.dense((0, 8)),
                 Accessor.dense((8, 4)),
             ),
-            dtype="f4",
+            etype="f4",
             shape=(0, 4),
         )
         assert dispatch_size_for_kernel(kernel, config) == (0, 1, 1)
@@ -46,7 +46,7 @@ class TestDispatchSize:
                 Accessor.dense((8, 8)),
                 Accessor.dense((8, 8)),
             ),
-            dtype="f4",
+            etype="f4",
             shape=(8, 8),
         )
         assert dispatch_size_for_kernel(kernel, config) == (2, 1, 1)

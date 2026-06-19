@@ -1,7 +1,7 @@
 import struct
 from typing import cast
 
-from .dtype import DType, Scalar, is_scalar, spell_dtype_in_pystruct
+from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
 
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
 type PyTree[T] = "dict[str, PyTree[T]] | list[PyTree[T]] | T"
@@ -20,9 +20,9 @@ def infer_pytensor_shape(value: "PyTensor") -> tuple[int, ...]:
     return (len(value),) + e0_shape
 
 
-def marshall_pytensor(value: "PyTensor", dtype: DType) -> bytes:
+def marshall_pytensor(value: "PyTensor", etype: ElementType) -> bytes:
     values = flatten_pytensor(value)
-    return struct.pack(f"<{len(values)}{spell_dtype_in_pystruct(dtype)}", *values)
+    return struct.pack(f"<{len(values)}{spell_etype_in_pystruct(etype)}", *values)
 
 
 def flatten_pytensor(value: "PyTensor") -> list[Scalar]:

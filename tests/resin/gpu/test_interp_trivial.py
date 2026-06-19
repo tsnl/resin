@@ -13,39 +13,39 @@ from tests.resin.gpu.interp_helpers import PyTensor, run_graph, run_scalar
 
 class TestConst:
     def test_1d(self) -> None:
-        out = dsl.const([1.0, 2.0, 3.0], dtype="f4")
+        out = dsl.const([1.0, 2.0, 3.0], etype="f4")
         assert run_graph(out) == pytest.approx([1.0, 2.0, 3.0])
 
     def test_2d(self) -> None:
-        out = dsl.const([[1.0, 2.0], [3.0, 4.0]], dtype="f4")
+        out = dsl.const([[1.0, 2.0], [3.0, 4.0]], etype="f4")
         assert run_graph(out) == pytest.approx([1.0, 2.0, 3.0, 4.0])
 
 
 class TestElementwiseBinary:
     def test_add(self) -> None:
-        a = dsl.param(shape=(3,), dtype="f4")
-        b = dsl.param(shape=(3,), dtype="f4")
+        a = dsl.param(shape=(3,), etype="f4")
+        b = dsl.param(shape=(3,), etype="f4")
         assert run_graph(
             a + b, params={a: [1.0, 2.0, 3.0], b: [4.0, 5.0, 6.0]}
         ) == pytest.approx([5.0, 7.0, 9.0])
 
     def test_mul(self) -> None:
-        a = dsl.param(shape=(2,), dtype="f4")
-        b = dsl.param(shape=(2,), dtype="f4")
+        a = dsl.param(shape=(2,), etype="f4")
+        b = dsl.param(shape=(2,), etype="f4")
         assert run_graph(a * b, params={a: [2.0, 3.0], b: [4.0, 5.0]}) == pytest.approx(
             [8.0, 15.0]
         )
 
     def test_sub(self) -> None:
-        a = dsl.param(shape=(2,), dtype="f4")
-        b = dsl.param(shape=(2,), dtype="f4")
+        a = dsl.param(shape=(2,), etype="f4")
+        b = dsl.param(shape=(2,), etype="f4")
         assert run_graph(a - b, params={a: [5.0, 3.0], b: [1.0, 4.0]}) == pytest.approx(
             [4.0, -1.0]
         )
 
     def test_div(self) -> None:
-        a = dsl.param(shape=(2,), dtype="f4")
-        b = dsl.param(shape=(2,), dtype="f4")
+        a = dsl.param(shape=(2,), etype="f4")
+        b = dsl.param(shape=(2,), etype="f4")
         assert run_graph(a / b, params={a: [8.0, 9.0], b: [2.0, 3.0]}) == pytest.approx(
             [4.0, 3.0]
         )
@@ -53,29 +53,29 @@ class TestElementwiseBinary:
 
 class TestElementwiseUnary:
     def test_neg(self) -> None:
-        x = dsl.param(shape=(3,), dtype="f4")
+        x = dsl.param(shape=(3,), etype="f4")
         assert run_graph(-x, params={x: [1.0, -2.0, 3.0]}) == pytest.approx(
             [-1.0, 2.0, -3.0]
         )
 
     def test_exp(self) -> None:
-        x = dsl.param(shape=(2,), dtype="f4")
+        x = dsl.param(shape=(2,), etype="f4")
         assert run_graph(x.exp(), params={x: [0.0, 1.0]}) == pytest.approx(
             [1.0, math.e]
         )
 
     def test_log(self) -> None:
-        x = dsl.param(shape=(2,), dtype="f4")
+        x = dsl.param(shape=(2,), etype="f4")
         assert run_graph(x.log(), params={x: [1.0, math.e]}) == pytest.approx(
             [0.0, 1.0]
         )
 
     def test_sqrt(self) -> None:
-        x = dsl.param(shape=(2,), dtype="f4")
+        x = dsl.param(shape=(2,), etype="f4")
         assert run_graph(x.sqrt(), params={x: [4.0, 9.0]}) == pytest.approx([2.0, 3.0])
 
     def test_relu(self) -> None:
-        x = dsl.param(shape=(4,), dtype="f4")
+        x = dsl.param(shape=(4,), etype="f4")
         out = nn.relu(x)
         assert run_graph(out, params={x: [-1.0, 0.0, 2.0, -3.0]}) == pytest.approx(
             [0.0, 0.0, 2.0, 0.0]
@@ -84,8 +84,8 @@ class TestElementwiseUnary:
 
 class TestMatmul:
     def test_2d(self) -> None:
-        a = dsl.param(shape=(2, 3), dtype="f4")
-        b = dsl.param(shape=(3, 2), dtype="f4")
+        a = dsl.param(shape=(2, 3), etype="f4")
+        b = dsl.param(shape=(3, 2), etype="f4")
         out = a @ b
         assert run_graph(
             out,
@@ -98,7 +98,7 @@ class TestMatmul:
 
 class TestReduction:
     def test_sum_all(self) -> None:
-        x = dsl.param(shape=(2, 2), dtype="f4")
+        x = dsl.param(shape=(2, 2), etype="f4")
         out = x.sum()
         while out.rank > 0:
             out = out.squeeze(axes=(0,))
@@ -107,14 +107,14 @@ class TestReduction:
         )
 
     def test_sum_axis_1(self) -> None:
-        x = dsl.param(shape=(2, 3), dtype="f4")
+        x = dsl.param(shape=(2, 3), etype="f4")
         out = x.sum(axes=(1,))
         assert run_graph(
             out, params={x: [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]}
         ) == pytest.approx([6.0, 15.0])
 
     def test_max_axis_0(self) -> None:
-        x = dsl.param(shape=(2, 2), dtype="f4")
+        x = dsl.param(shape=(2, 2), etype="f4")
         out = x.reduce(axes=(0,), operator="max")
         assert run_graph(out, params={x: [[1.0, 4.0], [3.0, 2.0]]}) == pytest.approx(
             [3.0, 4.0]
@@ -123,8 +123,8 @@ class TestReduction:
 
 class TestViewOps:
     def test_broadcast_add(self) -> None:
-        a = dsl.param(shape=(2, 3), dtype="f4")
-        b = dsl.param(shape=(3,), dtype="f4")
+        a = dsl.param(shape=(2, 3), etype="f4")
+        b = dsl.param(shape=(3,), etype="f4")
         out = a + b
         assert run_graph(
             out,
@@ -135,8 +135,8 @@ class TestViewOps:
         ) == pytest.approx([11.0, 22.0, 33.0, 14.0, 25.0, 36.0])
 
     def test_transpose_matmul(self) -> None:
-        x = dsl.param(shape=(2, 3), dtype="f4")
-        w = dsl.param(shape=(4, 3), dtype="f4")
+        x = dsl.param(shape=(2, 3), etype="f4")
+        w = dsl.param(shape=(4, 3), etype="f4")
         out = x @ w.transpose()
         assert run_graph(
             out,
@@ -152,7 +152,7 @@ class TestViewOps:
         ) == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
 
     def test_copy(self) -> None:
-        x = dsl.param(shape=(3,), dtype="f4")
+        x = dsl.param(shape=(3,), etype="f4")
         assert run_graph(x.copy(), params={x: [1.0, 2.0, 3.0]}) == pytest.approx(
             [1.0, 2.0, 3.0]
         )
@@ -160,9 +160,9 @@ class TestViewOps:
 
 class TestScatterAccumulate:
     def test_broadcast_adjoint_accumulates_to_scalar(self) -> None:
-        x = dsl.param(shape=(), dtype="f4")
+        x = dsl.param(shape=(), etype="f4")
         y = x.broadcast((5,))
-        g = dsl.param(shape=y.shape, dtype="f4")
+        g = dsl.param(shape=y.shape, etype="f4")
         out = grad.accessor_adjoint(y, g)
         upstream: PyTensor = [1.0, 2.0, 3.0, 4.0, 5.0]
         assert run_scalar(out, params={g: upstream}) == pytest.approx(15.0)
@@ -170,7 +170,7 @@ class TestScatterAccumulate:
 
 class TestSoftmax:
     def test_rows_sum_to_one(self) -> None:
-        x = dsl.param(shape=(2, 3), dtype="f4")
+        x = dsl.param(shape=(2, 3), etype="f4")
         probs = nn.softmax(x, axes=(1,))
         row_sums = probs.sum(axes=(1,))
         values = run_graph(row_sums, params={x: [[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]]})
