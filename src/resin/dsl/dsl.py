@@ -7,13 +7,16 @@ interact with directly when writing `resin` code.
 
 __all__ = [
     "ConstNode",
+    "GatherWithAccessorNode",
     "ElementwiseNode",
     "MatmulNode",
     "Node",
     "ParamNode",
     "PyTree",
     "ReductionNode",
-    "ScatterNode",
+    "GatherWithIndicesNode",
+    "ScatterWithAccessorNode",
+    "ScatterWithIndicesNode",
     "View",
     "const",
     "debug_print",
@@ -42,6 +45,7 @@ from resin.core.etype import (
     ElementOperator,
     UnaryElementOperator,
     etype_join,
+    etype_kind,
     etype_nbytes,
 )
 
@@ -121,6 +125,32 @@ class View:
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
         return _copy(self, etype=etype)
+
+    def scatter(
+        self,
+        out_shape: tuple[int, ...],
+        scatter_indices: "View",
+        *,
+        operator: BinaryAssocElementOperator | None = None,
+        woffset: int = 0,
+        etype: ElementType | None = None,
+    ) -> "View":
+        """Scatter source values into a dense output tensor.
+
+        ``scatter_indices`` must use an unsigned integer etype (``u4``). Its last
+        dimension is a multi-dimensional output index: ``scatter_indices.shape[-1]``
+        must equal ``len(out_shape)``. For a 1D output use shape ``(..., 1)``, not
+        ``(...,)`` — each row is one full output coordinate, not a flat address.
+        Leading dimensions are broadcast-joined with ``self.shape``.
+        """
+        return _scatter_with_indices(
+            source=self,
+            out_shape=out_shape,
+            scatter_indices=scatter_indices,
+            operator=operator,
+            woffset=woffset,
+            etype=etype,
+        )
 
     def __pow__(self, other: "View | Scalar") -> "View":
         return _elementwise_binary(self, other, operator="pow")
@@ -419,13 +449,45 @@ def _matmul(a: View, b: View) -> View:
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
-class ScatterNode(Node):
+class GatherWithAccessorNode(Node):
+    """Materialize a (possibly sparse) input view into a dense output buffer."""
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class ScatterWithAccessorNode(Node):
     operator: BinaryAssocElementOperator | None
     woffset: int
     wpitch: tuple[int, ...]
 
 
-def _scatter(
+@dataclass(kw_only=True, frozen=True, eq=False)
+class ScatterWithIndicesNode(Node):
+    """Scatter source values using per-element output coordinates.
+
+    ``scatter_indices`` has unsigned integer etype and shape
+    ``(*broadcast_join(source), len(out_shape))``. The trailing axis holds the
+    multi-dimensional output index for each source element.
+    """
+
+    operator: BinaryAssocElementOperator | None
+    woffset: int
+
+    @property
+    def scatter_indices(self) -> "View":
+        return self.args[1]
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class GatherWithIndicesNode(Node):
+    woffset: int
+    out_shape: tuple[int, ...]
+
+    @property
+    def scatter_indices(self) -> "View":
+        return self.args[1]
+
+
+def _scatter_with_accessor(
     *,
     source: View,
     out_shape: tuple[int, ...],
@@ -435,7 +497,7 @@ def _scatter(
     etype: ElementType | None = None,
 ) -> View:
     return View.identity(
-        ScatterNode(
+        ScatterWithAccessorNode(
             shape=out_shape,
             etype=etype or source.etype,
             args=(source,),
@@ -446,14 +508,110 @@ def _scatter(
     )
 
 
-def _copy(source: View, etype: ElementType | None = None) -> View:
-    return _scatter(
-        source=source,
-        out_shape=source.shape,
-        woffset=0,
-        wpitch=c_contiguous_pitch_for_shape(source.shape),
-        etype=etype or source.etype,
+def _join_source_with_scatter_indices(
+    source: View,
+    scatter_indices: View,
+    out_shape: tuple[int, ...],
+) -> tuple[View, View]:
+    out_rank = len(out_shape)
+    if scatter_indices.rank == 0:
+        raise ValueError("scatter_indices must have rank >= 1")
+    if scatter_indices.shape[-1] != out_rank:
+        raise ValueError(
+            f"scatter_indices.shape[-1] must equal len(out_shape) ({out_rank}), "
+            f"got shape {scatter_indices.shape}"
+        )
+    if etype_kind(scatter_indices.etype) != "uint":
+        raise ValueError(
+            f"scatter_indices must have an unsigned integer etype, got {scatter_indices.etype}"
+        )
+
+    prefix_join = shape_join(
+        shape1=source.shape,
+        pitch1=source.pitch,
+        shape2=scatter_indices.shape[:-1],
+        pitch2=scatter_indices.pitch[:-1],
     )
+    joined_source = View(
+        node=source.node,
+        accessor=Accessor(
+            offset=source.offset,
+            shape=prefix_join.shape,
+            pitch=prefix_join.pitch1,
+        ),
+    )
+    joined_indices = View(
+        node=scatter_indices.node,
+        accessor=Accessor(
+            offset=scatter_indices.offset,
+            shape=prefix_join.shape + (out_rank,),
+            pitch=prefix_join.pitch2 + (scatter_indices.pitch[-1],),
+        ),
+    )
+    return joined_source, joined_indices
+
+
+def _scatter_with_indices(
+    *,
+    source: View,
+    out_shape: tuple[int, ...],
+    scatter_indices: View,
+    woffset: int = 0,
+    operator: BinaryAssocElementOperator | None = None,
+    etype: ElementType | None = None,
+) -> View:
+    source, scatter_indices = _join_source_with_scatter_indices(
+        source,
+        scatter_indices,
+        out_shape,
+    )
+    return View.identity(
+        ScatterWithIndicesNode(
+            shape=out_shape,
+            etype=etype or source.etype,
+            args=(source, scatter_indices),
+            operator=operator,
+            woffset=woffset,
+        )
+    )
+
+
+def _gather_with_indices(
+    source: View,
+    scatter_indices: View,
+    *,
+    out_shape: tuple[int, ...],
+    woffset: int = 0,
+    etype: ElementType | None = None,
+) -> View:
+    source, scatter_indices = _join_source_with_scatter_indices(
+        source,
+        scatter_indices,
+        out_shape,
+    )
+    return View.identity(
+        GatherWithIndicesNode(
+            shape=source.shape,
+            etype=etype or source.etype,
+            args=(source, scatter_indices),
+            woffset=woffset,
+            out_shape=out_shape,
+        )
+    )
+
+
+def _gather_with_accessor(source: View, *, etype: ElementType | None = None) -> View:
+    return View.identity(
+        GatherWithAccessorNode(
+            shape=source.shape,
+            etype=etype or source.etype,
+            args=(source,),
+        )
+    )
+
+
+def _copy(source: View, etype: ElementType | None = None) -> View:
+    return _gather_with_accessor(source, etype=etype)
 
 
 def debug_print(root: "View", out: SupportsWrite[str]) -> None:

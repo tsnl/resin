@@ -1,6 +1,13 @@
 from frozendict import frozendict
+from resin.core.accessor import is_c_contiguous
 from resin.dsl import dsl
-from resin.ir.ir import IrBufferView, IrKernel, IrProgram
+from resin.ir.ir import (
+    IrBufferView,
+    IrKernel,
+    IrProgram,
+    IrReindexKernel,
+    IrReindexViaAccessor,
+)
 
 from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
 from .spec import (
@@ -9,6 +16,7 @@ from .spec import (
     WgpuBufferSpec,
     WgpuBufferViewSpec,
     WgpuComputePipelineSpec,
+    WgpuCopy,
     WgpuDispatch,
     WgpuProgram,
     WgpuQueueOp,
@@ -59,6 +67,26 @@ def build_wgpu_program(
     queue: list[WgpuQueueOp] = []
     for dispatch in program.queue:
         kernel = dispatch.kernel
+        arg_views = tuple(buffer_view_index[arg] for arg in dispatch.args)
+        output_idx = buffer_index[dispatch.output]
+
+        match kernel:
+            case IrReindexKernel(
+                direction="gather",
+                addressing=IrReindexViaAccessor(),
+            ):
+                accessor = kernel.arg_accessors[0]
+                if is_c_contiguous(accessor.shape, accessor.pitch):
+                    queue.append(
+                        WgpuCopy(
+                            source_buffer_view_index=arg_views[0],
+                            output_buffer_index=output_idx,
+                        )
+                    )
+                    continue
+            case _:
+                pass
+
         kernel_key = id(kernel)
         if kernel_key not in kernel_to_pipeline_index:
             kernel_to_pipeline_index[kernel_key] = len(pipelines)
@@ -67,10 +95,8 @@ def build_wgpu_program(
         queue.append(
             WgpuDispatch(
                 pipeline_index=kernel_to_pipeline_index[kernel_key],
-                arg_buffer_view_indices=tuple(
-                    buffer_view_index[arg] for arg in dispatch.args
-                ),
-                output_buffer_index=buffer_index[dispatch.output],
+                arg_buffer_view_indices=arg_views,
+                output_buffer_index=output_idx,
             )
         )
 

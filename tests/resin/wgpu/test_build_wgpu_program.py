@@ -65,3 +65,28 @@ class TestBuildWgpuProgram:
         assert len(payload["queue"]) == 1
         assert payload["queue"][0]["kind"] == "dispatch"
         assert "fn main" in payload["pipelines"][0]["wgsl"]
+
+    def test_dense_gather_uses_copy_queue_op(self) -> None:
+        x = dsl.param(shape=(3,), etype="f4")
+        builder = IrProgramBuilder()
+        builder.build_sink("out", x.copy())
+        wgpu_program = build_wgpu_program(builder.finish())
+
+        assert wgpu_program.pipelines == ()
+        assert len(wgpu_program.queue) == 1
+        assert wgpu_program.to_dict()["queue"][0] == {
+            "kind": "copy",
+            "source_buffer_view_index": 0,
+            "output_buffer_index": 1,
+        }
+
+    def test_sparse_gather_uses_compute_pipeline(self) -> None:
+        t = dsl.const([1, 2, 3, 4, 5, 6], etype="f4")
+        builder = IrProgramBuilder()
+        builder.build_sink("out", t[::2].copy())
+        wgpu_program = build_wgpu_program(builder.finish())
+
+        assert len(wgpu_program.pipelines) == 1
+        pipeline = wgpu_program.pipelines[0]
+        assert wgpu_program.to_dict()["queue"][0]["kind"] == "dispatch"
+        assert "fn main" in pipeline.wgsl

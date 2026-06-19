@@ -8,15 +8,19 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrReindexAddressing",
+    "IrReindexKernel",
+    "IrReindexViaAccessor",
+    "IrReindexViaIndices",
 ]
 
 from abc import ABC
 from dataclasses import dataclass
+from typing import Literal
 
 from frozendict import frozendict
 
-from resin.core.accessor import Accessor
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.core.pytree import marshall_pytensor
 from .rpn import ElementRpnExpr
 from resin.core.etype import (
@@ -104,14 +108,53 @@ class IrMatmulKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterKernel(IrKernel):
-    operator: BinaryAssocElementOperator | None
+class IrReindexViaAccessor:
     woffset: int
     wpitch: tuple[int, ...]
-    clear_output_before_dispatch: bool = True
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrReindexViaIndices:
+    woffset: int
+    out_pitch: tuple[int, ...]
+    arg_etypes: tuple[ElementType, ...]
+
+
+type IrReindexAddressing = IrReindexViaAccessor | IrReindexViaIndices
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrReindexKernel(IrKernel):
+    """Gather or scatter values via accessor layout or per-element indices."""
+
+    direction: Literal["gather", "scatter"]
+    addressing: IrReindexAddressing
+    operator: BinaryAssocElementOperator | None = None
 
     def __post_init__(self):
-        assert len(self.arg_accessors) == 1
+        match self.addressing:
+            case IrReindexViaAccessor(woffset=_woffset, wpitch=wpitch):
+                assert len(self.arg_accessors) == 1
+                source_accessor = self.arg_accessors[0]
+                if self.direction == "gather":
+                    assert source_accessor.shape == self.shape
+                    assert self.operator is None
+                else:
+                    assert len(wpitch) == len(source_accessor.shape)
+            case IrReindexViaIndices(woffset=_woffset, out_pitch=out_pitch, arg_etypes=arg_etypes):
+                assert len(self.arg_accessors) == 2
+                assert len(arg_etypes) == 2
+                source_accessor, indices_accessor = self.arg_accessors
+                if self.direction == "scatter":
+                    out_rank = len(self.shape)
+                    assert indices_accessor.shape[-1] == out_rank
+                    assert indices_accessor.shape[:-1] == source_accessor.shape
+                    assert out_pitch == c_contiguous_pitch_for_shape(self.shape)
+                else:
+                    out_rank = len(out_pitch)
+                    assert indices_accessor.shape[-1] == out_rank
+                    assert indices_accessor.shape[:-1] == self.shape
+                    assert indices_accessor.shape[:-1] == source_accessor.shape
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -241,8 +284,14 @@ class IrProgramBuilder:
                 return self._build_kernel_for_matmul_node(node)
             case dsl.ReductionNode():
                 return self._build_kernel_for_reduction_node(node)
-            case dsl.ScatterNode():
-                return self._build_kernel_for_scatter_node(node)
+            case dsl.GatherWithAccessorNode():
+                return self._build_kernel_for_gather_with_accessor_node(node)
+            case dsl.ScatterWithAccessorNode():
+                return self._build_kernel_for_scatter_with_accessor_node(node)
+            case dsl.ScatterWithIndicesNode():
+                return self._build_kernel_for_scatter_with_indices_node(node)
+            case dsl.GatherWithIndicesNode():
+                return self._build_kernel_for_gather_with_indices_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
@@ -270,14 +319,70 @@ class IrProgramBuilder:
             axes=node.axes,
         )
 
-    def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
-        return IrScatterKernel(
+    def _build_kernel_for_gather_with_accessor_node(
+        self,
+        node: dsl.GatherWithAccessorNode,
+    ) -> IrKernel:
+        return IrReindexKernel(
             arg_accessors=(node.args[0].accessor,),
             etype=node.etype,
             shape=node.shape,
+            direction="gather",
+            addressing=IrReindexViaAccessor(woffset=0, wpitch=()),
+            clear_output_before_dispatch=True,
+        )
+
+    def _build_kernel_for_scatter_with_accessor_node(
+        self,
+        node: dsl.ScatterWithAccessorNode,
+    ) -> IrKernel:
+        return IrReindexKernel(
+            arg_accessors=(node.args[0].accessor,),
+            etype=node.etype,
+            shape=node.shape,
+            direction="scatter",
+            addressing=IrReindexViaAccessor(
+                woffset=node.woffset,
+                wpitch=node.wpitch,
+            ),
             operator=node.operator,
-            woffset=node.woffset,
-            wpitch=node.wpitch,
+            clear_output_before_dispatch=True,
+        )
+
+    def _build_kernel_for_scatter_with_indices_node(
+        self,
+        node: dsl.ScatterWithIndicesNode,
+    ) -> IrKernel:
+        source, scatter_indices = node.args
+        return IrReindexKernel(
+            arg_accessors=(source.accessor, scatter_indices.accessor),
+            etype=node.etype,
+            shape=node.shape,
+            direction="scatter",
+            addressing=IrReindexViaIndices(
+                woffset=node.woffset,
+                out_pitch=c_contiguous_pitch_for_shape(node.shape),
+                arg_etypes=(source.etype, scatter_indices.etype),
+            ),
+            operator=node.operator,
+            clear_output_before_dispatch=True,
+        )
+
+    def _build_kernel_for_gather_with_indices_node(
+        self,
+        node: dsl.GatherWithIndicesNode,
+    ) -> IrKernel:
+        source, scatter_indices = node.args
+        return IrReindexKernel(
+            arg_accessors=(source.accessor, scatter_indices.accessor),
+            etype=node.etype,
+            shape=node.shape,
+            direction="gather",
+            addressing=IrReindexViaIndices(
+                woffset=node.woffset,
+                out_pitch=c_contiguous_pitch_for_shape(node.out_shape),
+                arg_etypes=(source.etype, scatter_indices.etype),
+            ),
         )
 
 

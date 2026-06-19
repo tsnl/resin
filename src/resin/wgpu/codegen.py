@@ -1,10 +1,10 @@
 import math
 import textwrap
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from resin.core.accessor import Accessor, is_c_contiguous
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, is_c_contiguous
 from resin.core.etype import (
     BinaryAssocElementOperator,
     ElementType,
@@ -17,7 +17,9 @@ from resin.ir.ir import (
     IrKernel,
     IrMatmulKernel,
     IrReductionKernel,
-    IrScatterKernel,
+    IrReindexKernel,
+    IrReindexViaAccessor,
+    IrReindexViaIndices,
 )
 
 __all__ = [
@@ -36,7 +38,7 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
-        case IrScatterKernel():
+        case IrReindexKernel(direction="scatter"):
             n = math.prod(kernel.arg_accessors[0].shape)
         case _:
             n = math.prod(kernel.shape)
@@ -64,8 +66,8 @@ def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
             _emit_wgsl_for_matmul_kernel(w, kernel, config)
         case IrReductionKernel():
             _emit_wgsl_for_reduction_kernel(w, kernel, config)
-        case IrScatterKernel():
-            _emit_wgsl_for_scatter_kernel(w, kernel, config)
+        case IrReindexKernel():
+            _emit_wgsl_for_reindex_kernel(w, kernel, config)
         case _:
             raise AbstractKernelException(f"Unsupported kernel type: {type(kernel)}")
 
@@ -441,13 +443,123 @@ def _define_matmul_arg_index_function(
 
 
 #
-# Emit WGSL for IrScatterKernel
+# Emit WGSL for IrReindexKernel
 #
 
 
-def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
-    t = spell_etype_in_wgsl(kernel.etype)
-    if kernel.operator is None:
+def _emit_wgsl_for_reindex_kernel(
+    w: "WgslWriter",
+    kernel: IrReindexKernel,
+    config: WgslKernelConfig,
+) -> None:
+    match (kernel.direction, kernel.addressing):
+        case ("gather", IrReindexViaAccessor()):
+            _emit_bindings(w, kernel)
+            _emit_arg_address_functions(w, kernel)
+            with _per_output_element(w, kernel, config) as (w, out_address_expr):
+                w.print(
+                    f"""
+                    output[{out_address_expr}] = arg0[{_arg_address_expr(0, kernel.arg_accessors[0], "out_index")}];
+                    """
+                )
+        case ("scatter", IrReindexViaAccessor(woffset=woffset, wpitch=wpitch)):
+            if wpitch:
+                _define_scatter_out_address_function(
+                    w,
+                    woffset=woffset,
+                    wpitch=wpitch,
+                )
+
+            def out_address_expr(source_index_expr: str) -> str:
+                if not kernel.arg_accessors[0].shape:
+                    return f"{woffset}u"
+                return f"scatter_out_address({source_index_expr})"
+
+            _emit_wgsl_for_source_driven_scatter(
+                w,
+                kernel,
+                config,
+                operator=kernel.operator,
+                out_address_expr_for_source_index=out_address_expr,
+            )
+        case ("scatter", IrReindexViaIndices(woffset=woffset, out_pitch=out_pitch)):
+            source_accessor, indices_accessor = kernel.arg_accessors
+            source_rank = len(source_accessor.shape)
+            out_rank = len(out_pitch)
+
+            _define_scatter_indices_at_function(
+                w,
+                source_rank=source_rank,
+                out_rank=out_rank,
+                indices_accessor=indices_accessor,
+            )
+            _define_out_address_from_indices_function(
+                w,
+                woffset=woffset,
+                out_pitch=out_pitch,
+            )
+
+            def out_address_expr(source_index_expr: str) -> str:
+                if source_rank == 0:
+                    return "out_address_from_indices(scatter_indices_at(array<u32, 0>()))"
+                return f"out_address_from_indices(scatter_indices_at({source_index_expr}))"
+
+            _emit_wgsl_for_source_driven_scatter(
+                w,
+                kernel,
+                config,
+                operator=kernel.operator,
+                out_address_expr_for_source_index=out_address_expr,
+            )
+        case ("gather", IrReindexViaIndices(woffset=woffset, out_pitch=out_pitch, arg_etypes=arg_etypes)):
+            _, indices_accessor = kernel.arg_accessors
+            source_rank = len(kernel.shape)
+            out_rank = len(out_pitch)
+
+            _emit_scatter_bindings(
+                w,
+                output_etype=kernel.etype,
+                arg_etypes=arg_etypes,
+                operator=None,
+            )
+            _emit_arg_address_functions(w, kernel)
+            _define_scatter_indices_at_function(
+                w,
+                source_rank=source_rank,
+                out_rank=out_rank,
+                indices_accessor=indices_accessor,
+            )
+            _define_out_address_from_indices_function(
+                w,
+                woffset=woffset,
+                out_pitch=out_pitch,
+            )
+
+            with _per_output_element(w, kernel, config) as (w, out_address_expr):
+                if source_rank == 0:
+                    indices_expr = "scatter_indices_at(array<u32, 0>())"
+                else:
+                    indices_expr = "scatter_indices_at(out_index)"
+                source_address_expr = f"out_address_from_indices({indices_expr})"
+                w.print(f"output[{out_address_expr}] = arg0[{source_address_expr}];")
+        case _:
+            raise AbstractKernelException(f"Unsupported reindex kernel: {kernel!r}")
+
+
+#
+# Emit WGSL for source-driven scatter (scatter reindex modes)
+#
+
+
+def _emit_scatter_bindings(
+    w: "WgslWriter",
+    *,
+    output_etype: ElementType,
+    arg_etypes: tuple[ElementType, ...],
+    operator: BinaryAssocElementOperator | None,
+) -> None:
+    t = spell_etype_in_wgsl(output_etype)
+    if operator is None:
         w.print(
             f"""
             @group(0) @binding(0)
@@ -461,11 +573,12 @@ def _emit_scatter_bindings(w: "WgslWriter", kernel: IrScatterKernel) -> None:
             var<storage, read_write> output: array<atomic<u32>>;
             """
         )
-    for i in range(len(kernel.arg_accessors)):
+    for i, arg_etype in enumerate(arg_etypes):
+        arg_t = spell_etype_in_wgsl(arg_etype)
         w.print(
             f"""
             @group(0) @binding({i + 1})
-            var<storage, read> arg{i}: array<{t}>;
+            var<storage, read> arg{i}: array<{arg_t}>;
             """
         )
 
@@ -513,33 +626,64 @@ def _scatter_atomic_accumulate_wgsl(
 
 def _emit_scatter_store(
     w: "WgslWriter",
-    kernel: IrScatterKernel,
     *,
+    operator: BinaryAssocElementOperator | None,
     out_address_expr: str,
     value_expr: str,
 ) -> None:
-    if kernel.operator is None:
+    if operator is None:
         w.print(f"output[{out_address_expr}] = {value_expr};")
     else:
         w.print(
             _scatter_atomic_accumulate_wgsl(
-                kernel.operator,
+                operator,
                 out_address_expr=out_address_expr,
                 value_expr=value_expr,
             )
         )
 
 
-def _emit_wgsl_for_scatter_kernel(
+def _define_scatter_out_address_function(
     w: "WgslWriter",
-    kernel: IrScatterKernel,
+    *,
+    woffset: int,
+    wpitch: tuple[int, ...],
+) -> None:
+    rank = len(wpitch)
+    with w.block(
+        f"""
+        fn scatter_out_address(index: array<u32, {rank}>) -> u32
+        """
+    ):
+        w.print(f"var acc: u32 = {woffset}u;")
+        for i in range(rank):
+            w.print(f"acc += index[{i}] * {wpitch[i]}u;")
+        w.print("return acc;")
+
+
+def _emit_wgsl_for_source_driven_scatter(
+    w: "WgslWriter",
+    kernel: IrKernel,
     config: WgslKernelConfig,
+    *,
+    operator: BinaryAssocElementOperator | None,
+    out_address_expr_for_source_index: Callable[[str], str],
 ) -> None:
     source_accessor = kernel.arg_accessors[0]
     source_shape = source_accessor.shape
     rank = len(source_shape)
 
-    _emit_scatter_bindings(w, kernel)
+    match kernel:
+        case IrReindexKernel(addressing=IrReindexViaIndices(arg_etypes=arg_etypes)):
+            pass
+        case _:
+            arg_etypes = tuple(kernel.etype for _ in kernel.arg_accessors)
+    _emit_scatter_bindings(
+        w,
+        output_etype=kernel.etype,
+        arg_etypes=arg_etypes,
+        operator=operator,
+    )
     _emit_arg_address_functions(w, kernel)
 
     if rank == 0:
@@ -556,14 +700,13 @@ def _emit_wgsl_for_scatter_kernel(
             value_expr = f"arg0[{_arg_address_expr(0, source_accessor, '')}]"
             _emit_scatter_store(
                 w,
-                kernel,
-                out_address_expr=f"{kernel.woffset}u",
+                operator=operator,
+                out_address_expr=out_address_expr_for_source_index(""),
                 value_expr=value_expr,
             )
         return
 
     _define_cc_index_function(w, "source_index", Accessor.dense(source_shape))
-    _define_scatter_out_address_function(w, kernel)
 
     items_per_thread = 1 << config.lg2_items_per_thread
     source_count = math.prod(source_shape)
@@ -596,33 +739,60 @@ def _emit_wgsl_for_scatter_kernel(
                 w.print("return;")
 
             value_expr = f"arg0[{_arg_address_expr(0, source_accessor, 'src_index')}]"
-            w.print(
-                """
-                let src_index = source_index(src_address);
-                let out_address = scatter_out_address(src_index);
-                """
-            )
+            w.print("let src_index = source_index(src_address);")
             _emit_scatter_store(
                 w,
-                kernel,
-                out_address_expr="out_address",
+                operator=operator,
+                out_address_expr=out_address_expr_for_source_index("src_index"),
                 value_expr=value_expr,
             )
 
 
-def _define_scatter_out_address_function(
+def _define_scatter_indices_at_function(
     w: "WgslWriter",
-    kernel: IrScatterKernel,
+    *,
+    source_rank: int,
+    out_rank: int,
+    indices_accessor: Accessor,
 ) -> None:
-    rank = len(kernel.wpitch)
+    # scatter_indices has shape (*source_shape, out_rank): the trailing axis stores
+    # the multi-dimensional output coordinate as a length-out_rank vector.
+    indices_rank = len(indices_accessor.shape)
     with w.block(
         f"""
-        fn scatter_out_address(index: array<u32, {rank}>) -> u32
+        fn scatter_indices_at(source_index: array<u32, {source_rank}>) -> array<u32, {out_rank}>
         """
     ):
-        w.print(f"var acc: u32 = {kernel.woffset}u;")
-        for i in range(rank):
-            w.print(f"acc += index[{i}] * {kernel.wpitch[i]}u;")
+        w.print(f"var result: array<u32, {out_rank}>;")
+        with w.block(f"for (var k: u32 = 0u; k < {out_rank}u; k += 1u)"):
+            if indices_rank == 0:
+                w.print(f"result[k] = arg1[{_arg_address_expr(1, indices_accessor, '')}];")
+            else:
+                w.print(f"var idx: array<u32, {indices_rank}>;")
+                for d in range(source_rank):
+                    w.print(f"idx[{d}] = source_index[{d}];")
+                w.print(f"idx[{source_rank}] = k;")
+                w.print(
+                    f"result[k] = arg1[{_arg_address_expr(1, indices_accessor, 'idx')}];"
+                )
+        w.print("return result;")
+
+
+def _define_out_address_from_indices_function(
+    w: "WgslWriter",
+    *,
+    woffset: int,
+    out_pitch: tuple[int, ...],
+) -> None:
+    out_rank = len(out_pitch)
+    with w.block(
+        f"""
+        fn out_address_from_indices(indices: array<u32, {out_rank}>) -> u32
+        """
+    ):
+        w.print(f"var acc: u32 = {woffset}u;")
+        for i in range(out_rank):
+            w.print(f"acc += indices[{i}] * {out_pitch[i]}u;")
         w.print("return acc;")
 
 

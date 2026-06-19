@@ -5,17 +5,23 @@ __all__ = [
     "grad",
 ]
 
-from resin.core.accessor import Accessor
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.dsl.dsl import (
     ConstNode,
     ElementwiseNode,
+    GatherWithAccessorNode,
+    GatherWithIndicesNode,
     MatmulNode,
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    ScatterWithAccessorNode,
+    ScatterWithIndicesNode,
     View,
-    _scatter,
+    _gather_with_accessor,
+    _gather_with_indices,
+    _scatter_with_accessor,
+    _scatter_with_indices,
     ones,
     toposort,
 )
@@ -36,7 +42,7 @@ def accessor_adjoint(view: View, g: View) -> View:
     if view._is_identity():
         return x
 
-    return _scatter(
+    return _scatter_with_accessor(
         source=x,
         out_shape=view.node.shape,
         operator="add",
@@ -64,9 +70,30 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
                 df_dout @ node.args[1].transpose(),
                 node.args[0].transpose() @ df_dout,
             )
-        case ScatterNode():
+        case GatherWithAccessorNode():
             source = node.args[0]
-            dense = df_dout if df_dout._is_identity() else df_dout.copy()
+            dense = (
+                df_dout
+                if df_dout._is_identity()
+                else _gather_with_accessor(df_dout)
+            )
+            return (
+                View(
+                    node=dense.node,
+                    accessor=Accessor(
+                        offset=0,
+                        shape=source.shape,
+                        pitch=c_contiguous_pitch_for_shape(source.shape),
+                    ),
+                ),
+            )
+        case ScatterWithAccessorNode():
+            source = node.args[0]
+            dense = (
+                df_dout
+                if df_dout._is_identity()
+                else _gather_with_accessor(df_dout)
+            )
             return (
                 View(
                     node=dense.node,
@@ -75,6 +102,34 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
                         shape=source.shape,
                         pitch=node.wpitch,
                     ),
+                ),
+            )
+        case ScatterWithIndicesNode():
+            source = node.args[0]
+            scatter_indices = node.scatter_indices
+            dense = (
+                df_dout
+                if df_dout._is_identity()
+                else _gather_with_accessor(df_dout)
+            )
+            return (
+                _gather_with_indices(
+                    dense,
+                    scatter_indices,
+                    out_shape=node.shape,
+                    woffset=node.woffset,
+                ),
+            )
+        case GatherWithIndicesNode():
+            source = node.args[0]
+            scatter_indices = node.scatter_indices
+            return (
+                _scatter_with_indices(
+                    source=df_dout,
+                    out_shape=node.out_shape,
+                    scatter_indices=scatter_indices,
+                    operator="add",
+                    woffset=node.woffset,
                 ),
             )
         case _:

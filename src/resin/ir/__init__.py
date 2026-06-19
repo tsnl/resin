@@ -10,7 +10,10 @@ from .ir import (
     IrProgram,
     IrProgramBuilder,
     IrReductionKernel,
-    IrScatterKernel,
+    IrReindexAddressing,
+    IrReindexKernel,
+    IrReindexViaAccessor,
+    IrReindexViaIndices,
 )
 from .ir_opt import optimize
 from .rpn import ElementRpnExpr
@@ -27,7 +30,10 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrReindexAddressing",
+    "IrReindexKernel",
+    "IrReindexViaAccessor",
+    "IrReindexViaIndices",
     "etype_nbytes",
     "optimize",
     "spell_etype_in_pystruct",
