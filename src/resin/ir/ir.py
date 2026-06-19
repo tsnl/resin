@@ -8,7 +8,8 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrScatterAccumulateKernel",
+    "IrScatterClobberKernel",
 ]
 
 from abc import ABC
@@ -104,8 +105,18 @@ class IrMatmulKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterKernel(IrKernel):
-    operator: BinaryAssocScalarOperator | None
+class IrScatterClobberKernel(IrKernel):
+    woffset: int
+    wpitch: tuple[int, ...]
+    clear_output_before_dispatch: bool = True
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 1
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrScatterAccumulateKernel(IrKernel):
+    operator: BinaryAssocScalarOperator
     woffset: int
     wpitch: tuple[int, ...]
     clear_output_before_dispatch: bool = True
@@ -271,14 +282,16 @@ class IrProgramBuilder:
         )
 
     def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
-        return IrScatterKernel(
+        common = dict(
             arg_accessors=(node.args[0].accessor,),
             dtype=node.dtype,
             shape=node.shape,
-            operator=node.operator,
             woffset=node.woffset,
             wpitch=node.wpitch,
         )
+        if node.operator is None:
+            return IrScatterClobberKernel(**common)
+        return IrScatterAccumulateKernel(operator=node.operator, **common)
 
 
 _UNARY_OPS: tuple[UnaryScalarOperator, ...] = (

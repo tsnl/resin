@@ -10,7 +10,8 @@ from .ir import (
     IrProgram,
     IrProgramBuilder,
     IrReductionKernel,
-    IrScatterKernel,
+    IrScatterAccumulateKernel,
+    IrScatterClobberKernel,
 )
 from .ir_opt import optimize
 from .rpn import ElementRpnExpr
@@ -27,7 +28,8 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrScatterAccumulateKernel",
+    "IrScatterClobberKernel",
     "dtype_nbytes",
     "optimize",
     "spell_dtype_in_pystruct",

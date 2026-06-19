@@ -1,5 +1,11 @@
 from resin.core.accessor import Accessor
-from resin.ir import ElementRpnExpr, IrElementwiseRpnKernel, IrMatmulKernel, IrScatterKernel
+from resin.ir import (
+    ElementRpnExpr,
+    IrElementwiseRpnKernel,
+    IrMatmulKernel,
+    IrScatterAccumulateKernel,
+    IrScatterClobberKernel,
+)
 from resin.wgpu import (
     WgslKernelConfig,
     WgslTargetFeatures,
@@ -57,13 +63,22 @@ class TestDispatchSize:
 
 
 class TestScatterCodegen:
-    def _scatter_kernel(
+    def _scatter_clobber_kernel(self, *, dtype: str = "f4") -> IrScatterClobberKernel:
+        return IrScatterClobberKernel(
+            arg_accessors=(Accessor.dense((2,)),),
+            dtype=dtype,  # type: ignore[arg-type]
+            shape=(3,),
+            woffset=0,
+            wpitch=(1,),
+        )
+
+    def _scatter_accumulate_kernel(
         self,
         *,
-        operator: str | None,
+        operator: str,
         dtype: str = "f4",
-    ) -> IrScatterKernel:
-        return IrScatterKernel(
+    ) -> IrScatterAccumulateKernel:
+        return IrScatterAccumulateKernel(
             arg_accessors=(Accessor.dense((2,)),),
             dtype=dtype,  # type: ignore[arg-type]
             shape=(3,),
@@ -73,13 +88,15 @@ class TestScatterCodegen:
         )
 
     def test_clobber_uses_plain_output_binding(self) -> None:
-        wgsl = emit_wgsl_for_kernel(self._scatter_kernel(operator=None), WgslKernelConfig())
+        wgsl = emit_wgsl_for_kernel(self._scatter_clobber_kernel(), WgslKernelConfig())
         assert "array<f32>" in wgsl
         assert "atomic<" not in wgsl
         assert "output[out_address] = " in wgsl
 
     def test_accumulate_default_uses_u32_atomic_and_cas(self) -> None:
-        wgsl = emit_wgsl_for_kernel(self._scatter_kernel(operator="add"), WgslKernelConfig())
+        wgsl = emit_wgsl_for_kernel(
+            self._scatter_accumulate_kernel(operator="add"), WgslKernelConfig()
+        )
         assert "array<atomic<u32>>" in wgsl
         assert "atomicCompareExchangeWeak" in wgsl
         assert "bitcast<f32>" in wgsl
@@ -89,7 +106,7 @@ class TestScatterCodegen:
         config = WgslKernelConfig(
             target_features=WgslTargetFeatures(shader_float32_atomic=True),
         )
-        wgsl = emit_wgsl_for_kernel(self._scatter_kernel(operator="mul"), config)
+        wgsl = emit_wgsl_for_kernel(self._scatter_accumulate_kernel(operator="mul"), config)
         assert "array<atomic<u32>>" in wgsl
         assert "atomicCompareExchangeWeak" in wgsl
         assert "atomicAdd" not in wgsl
@@ -98,14 +115,14 @@ class TestScatterCodegen:
         config = WgslKernelConfig(
             target_features=WgslTargetFeatures(shader_float32_atomic=True),
         )
-        wgsl = emit_wgsl_for_kernel(self._scatter_kernel(operator="add"), config)
+        wgsl = emit_wgsl_for_kernel(self._scatter_accumulate_kernel(operator="add"), config)
         assert "array<atomic<f32>>" in wgsl
         assert "atomicAdd(&output[out_address]" in wgsl
         assert "atomicCompareExchangeWeak" not in wgsl
 
     def test_accumulate_add_uint_uses_native_atomic(self) -> None:
         wgsl = emit_wgsl_for_kernel(
-            self._scatter_kernel(operator="add", dtype="u4"),
+            self._scatter_accumulate_kernel(operator="add", dtype="u4"),
             WgslKernelConfig(),
         )
         assert "array<atomic<u32>>" in wgsl
