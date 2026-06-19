@@ -108,20 +108,13 @@ impl WgpuInterp {
 
         for prepared in &self.prepared_dispatches {
             if prepared.clear_output_before_dispatch {
-                let output_spec = self
-                    .program
-                    .buffers
-                    .get(prepared.output_buffer_index)
-                    .ok_or_else(|| {
-                        WgpuInterpError::Program(format!(
-                            "invalid output buffer index {}",
-                            prepared.output_buffer_index
-                        ))
-                    })?;
                 encoder.clear_buffer(
                     &self.buffers[prepared.output_buffer_index],
                     0,
-                    Some(output_spec.byte_len()),
+                    Some(
+                        self.program.buffers[prepared.output_buffer_index]
+                            .byte_len(),
+                    ),
                 );
             }
         }
@@ -146,9 +139,7 @@ impl WgpuInterp {
     }
 
     pub fn clear_buffer(&self, buffer_index: usize) -> Result<(), WgpuInterpError> {
-        let spec = self.program.buffers.get(buffer_index).ok_or_else(|| {
-            WgpuInterpError::Program(format!("invalid buffer index {buffer_index}"))
-        })?;
+        let spec = &self.program.buffers[buffer_index];
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -160,9 +151,7 @@ impl WgpuInterp {
     }
 
     pub fn write_buffer(&self, buffer_index: usize, data: &[u8]) -> Result<(), WgpuInterpError> {
-        let spec = self.program.buffers.get(buffer_index).ok_or_else(|| {
-            WgpuInterpError::Program(format!("invalid buffer index {buffer_index}"))
-        })?;
+        let spec = &self.program.buffers[buffer_index];
         if data.len() as u64 != spec.byte_len() {
             return Err(WgpuInterpError::Program(format!(
                 "write_buffer size mismatch: expected {} bytes, got {}",
