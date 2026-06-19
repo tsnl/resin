@@ -134,18 +134,6 @@ impl WgpuInterp {
         Ok(())
     }
 
-    pub fn clear_buffer(&self, buffer_index: usize) -> Result<(), WgpuInterpError> {
-        let spec = &self.program.buffers[buffer_index];
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("resin-clear"),
-            });
-        encoder.clear_buffer(&self.buffers[buffer_index], 0, Some(spec.byte_len()));
-        self.queue.submit(Some(encoder.finish()));
-        Ok(())
-    }
-
     pub fn write_buffer(&self, buffer_index: usize, data: &[u8]) -> Result<(), WgpuInterpError> {
         let spec = &self.program.buffers[buffer_index];
         if data.len() as u64 != spec.byte_len() {
