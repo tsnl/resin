@@ -5,10 +5,18 @@ import inspect
 import types
 import typing
 from dataclasses import dataclass
-from typing import Callable, cast, overload, assert_never, get_args, get_origin, get_type_hints
+from typing import (
+    Callable,
+    cast,
+    overload,
+    assert_never,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from resin.core.etype import ElementType, Scalar, is_scalar
-from resin.core.pytree import PyTree, tree_map_leaves
+from resin.core.pytree import PyTree, map_pytree
 from resin.dsl.view import TensorMeta, View
 
 
@@ -55,8 +63,7 @@ def annotation_to_spec(hint: object) -> Spec:
             get_type_hints(hint, include_extras=True),
         )
         return {
-            key: annotation_to_spec(type_hint)
-            for key, type_hint in typed_hints.items()
+            key: annotation_to_spec(type_hint) for key, type_hint in typed_hints.items()
         }
 
     if hint is dict or hint is builtins.dict:
@@ -67,8 +74,7 @@ def annotation_to_spec(hint: object) -> Spec:
         if not el_args:
             raise ValueError(f"unsupported tuple annotation: {hint!r}")
         return tuple(
-            annotation_to_spec(element)
-            for element in cast(tuple[object, ...], el_args)
+            annotation_to_spec(element) for element in cast(tuple[object, ...], el_args)
         )
 
     if origin is list:
@@ -110,9 +116,7 @@ def parse_signature(fn: Callable[..., object]) -> SignatureSpec:
     if "return" not in hints:
         raise ValueError(f"unannotated return for {fn.__qualname__!r}")
     return SignatureSpec(
-        args={
-            name: annotation_to_spec(hints[name]) for name in _param_names(fn)
-        },
+        args={name: annotation_to_spec(hints[name]) for name in _param_names(fn)},
         return_spec=annotation_to_spec(hints["return"]),
     )
 
@@ -152,9 +156,7 @@ def typecheck_against_spec(value: object, spec: Spec) -> None:
                     f"expected tuple of length {len(elements)}, "
                     + f"got {len(value_tuple)}"
                 )
-            for element_value, element_spec in zip(
-                value_tuple, elements, strict=True
-            ):
+            for element_value, element_spec in zip(value_tuple, elements, strict=True):
                 typecheck_against_spec(element_value, element_spec)
         case list() as elements:
             if not isinstance(value, list):
@@ -185,14 +187,10 @@ def bind_call_args[T](
         bound[name] = value
     missing = set(names) - set(bound.keys())
     if missing:
-        raise TypeError(
-            f"missing required argument(s): {', '.join(sorted(missing))}"
-        )
+        raise TypeError(f"missing required argument(s): {', '.join(sorted(missing))}")
     extra = set(bound.keys()) - set(names)
     if extra:
-        raise TypeError(
-            f"unexpected keyword argument(s): {', '.join(sorted(extra))}"
-        )
+        raise TypeError(f"unexpected keyword argument(s): {', '.join(sorted(extra))}")
     return bound
 
 
@@ -211,11 +209,7 @@ def map_tensor_leaves(
     value: PyTree[View],
     fn: Callable[[View], View],
 ) -> PyTree[View]:
-    def apply_leaf(node: object) -> View:
-        assert isinstance(node, View)
-        return fn(node)
-
-    return tree_map_leaves(value, lambda node: isinstance(node, View), apply_leaf)
+    return map_pytree(value, fn)
 
 
 @overload

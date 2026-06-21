@@ -1,5 +1,5 @@
 from resin.core.etype import F4
-from resin.core.pytree import PyTree, flatten_pytree, map_pytree, tree_map_leaves
+from resin.core.pytree import PyTree, flatten_pytree, map_pytree
 from resin.dsl.view import View, param
 
 
@@ -20,8 +20,7 @@ class TestMapPytree:
     def test_maps_every_leaf(self) -> None:
         tree: PyTree[int] = {"a": [1, 2], "b": 3}
 
-        def double(x: object) -> int:
-            assert isinstance(x, int)
+        def double(x: int) -> int:
             return x * 2
 
         assert map_pytree(tree, double) == {"a": [2, 4], "b": 6}
@@ -29,44 +28,17 @@ class TestMapPytree:
     def test_maps_tuple_nodes(self) -> None:
         tree: PyTree[int] = (1, {"a": 2})
 
-        def increment(x: object) -> int:
-            assert isinstance(x, int)
+        def increment(x: int) -> int:
             return x + 1
 
         assert map_pytree(tree, increment) == (2, {"a": 3})
 
+    def test_callback_inspects_leaf_type(self) -> None:
+        tree: PyTree[int | str] = {"a": [1, 2], "b": "skip"}
 
-class TestTreeMapLeaves:
-    def test_only_maps_matching_leaves(self) -> None:
-        tree: PyTree[int] = {"a": [1, 2], "b": 3}
+        def maybe_double(x: int | str) -> int | str:
+            if isinstance(x, int):
+                return x * 2
+            return x
 
-        def is_int(value: object) -> bool:
-            return isinstance(value, int)
-
-        def double(x: object) -> int:
-            assert isinstance(x, int)
-            return x * 2
-
-        assert tree_map_leaves(tree, is_int, double) == {
-            "a": [2, 4],
-            "b": 6,
-        }
-
-    def test_uses_map_pytree_map_leaves_only(self) -> None:
-        tree: PyTree[int] = (1, [2, 3])
-
-        def is_int(value: object) -> bool:
-            return isinstance(value, int)
-
-        def increment(x: object) -> int:
-            assert isinstance(x, int)
-            return x + 1
-
-        mapped = tree_map_leaves(tree, is_int, increment)
-        assert mapped == (2, [3, 4])
-        assert map_pytree(
-            tree,
-            increment,
-            is_leaf=is_int,
-            map_leaves_only=True,
-        ) == mapped
+        assert map_pytree(tree, maybe_double) == {"a": [2, 4], "b": "skip"}
