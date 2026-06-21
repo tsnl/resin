@@ -28,7 +28,7 @@ class TestTypecheck:
         x = param(shape=(2,), etype=F4, label="x")
         y = param(shape=(3,), etype=F4, label="y")
         with pytest.raises(ValueError, match="expected shape"):
-            add(x=x, y=y)
+            _ = add(x=x, y=y)
 
     def test_accepts_valid_views(self) -> None:
         @typecheck

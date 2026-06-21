@@ -1,4 +1,5 @@
 import importlib
+from typing import cast
 
 import resin
 
@@ -12,7 +13,8 @@ class TestPrelude:
         assert prelude_module.View is resin.dsl.View
 
     def test_all_exports(self) -> None:
-        assert set(prelude.__all__) == {
+        exports = cast(list[str], prelude.__all__)
+        assert set(exports) == {
             "F2",
             "F4",
             "Scalar",

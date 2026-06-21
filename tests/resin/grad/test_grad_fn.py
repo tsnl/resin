@@ -52,6 +52,7 @@ class TestGradFn:
 
     def test_zero_grad_for_unreachable_input(self) -> None:
         def sum_x(x: View[F4, (2,)], y: View[F4, (2,)]) -> View[F4, ()]:
+            _ = y
             return x.sum().squeeze(axes=(0,))
 
         x = param(shape=(2,), etype=F4, label="x")
@@ -75,7 +76,7 @@ class TestGradFn:
 
     def test_rejects_unknown_grads_for(self) -> None:
         with pytest.raises(ValueError, match="unknown grads_for"):
-            grad_fn(mlp_step, grads_for=["param"])
+            _ = grad_fn(mlp_step, grads_for=["param"])
 
     def test_accepts_positional_args(self) -> None:
         x, y, params = _mlp_x(), _mlp_y(), _mlp_params()

@@ -19,11 +19,21 @@ class TestFlattenPytree:
 class TestMapPytree:
     def test_maps_every_leaf(self) -> None:
         tree: PyTree[int] = {"a": [1, 2], "b": 3}
-        assert map_pytree(tree, lambda x: x * 2) == {"a": [2, 4], "b": 6}
+
+        def double(x: object) -> int:
+            assert isinstance(x, int)
+            return x * 2
+
+        assert map_pytree(tree, double) == {"a": [2, 4], "b": 6}
 
     def test_maps_tuple_nodes(self) -> None:
         tree: PyTree[int] = (1, {"a": 2})
-        assert map_pytree(tree, lambda x: x + 1) == (2, {"a": 3})
+
+        def increment(x: object) -> int:
+            assert isinstance(x, int)
+            return x + 1
+
+        assert map_pytree(tree, increment) == (2, {"a": 3})
 
 
 class TestTreeMapLeaves:
@@ -33,7 +43,11 @@ class TestTreeMapLeaves:
         def is_int(value: object) -> bool:
             return isinstance(value, int)
 
-        assert tree_map_leaves(tree, is_int, lambda x: x * 2) == {
+        def double(x: object) -> int:
+            assert isinstance(x, int)
+            return x * 2
+
+        assert tree_map_leaves(tree, is_int, double) == {
             "a": [2, 4],
             "b": 6,
         }
@@ -44,11 +58,15 @@ class TestTreeMapLeaves:
         def is_int(value: object) -> bool:
             return isinstance(value, int)
 
-        mapped = tree_map_leaves(tree, is_int, lambda x: x + 1)
+        def increment(x: object) -> int:
+            assert isinstance(x, int)
+            return x + 1
+
+        mapped = tree_map_leaves(tree, is_int, increment)
         assert mapped == (2, [3, 4])
         assert map_pytree(
             tree,
-            lambda x: x + 1,
+            increment,
             is_leaf=is_int,
             map_leaves_only=True,
         ) == mapped

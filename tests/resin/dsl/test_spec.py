@@ -1,4 +1,6 @@
 import pytest
+from collections.abc import Callable
+from typing import cast
 
 from resin.dsl.spec import (
     SignatureSpec,
@@ -56,17 +58,17 @@ class TestAnnotationToSpec:
 
     def test_pod_int_rejected(self) -> None:
         with pytest.raises(ValueError, match="unsupported annotation"):
-            annotation_to_spec(int)
+            _ = annotation_to_spec(int)
 
     def test_bare_dict_rejected(self) -> None:
         with pytest.raises(ValueError, match="TypedDict"):
-            annotation_to_spec(dict)
+            _ = annotation_to_spec(dict)
 
     def test_view_scalar_union_rejected(self) -> None:
         from resin.core.etype import Scalar
 
         with pytest.raises(ValueError, match="View \\| Scalar"):
-            annotation_to_spec(View | Scalar)
+            _ = annotation_to_spec(View | Scalar)
 
 
 def _view(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
@@ -80,25 +82,25 @@ class TestParseSignature:
         assert spec.return_spec == TensorSpec(F4, ())
 
     def test_unannotated_param_raises(self) -> None:
-        def bad(x) -> View[F4, ()]:  # type: ignore[valid-type]
-            return x
+        def bad(x) -> View[F4, ()]:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            return x  # pyright: ignore[reportUnknownVariableType]
 
         with pytest.raises(ValueError, match="unannotated parameter"):
-            parse_signature(bad)
+            _ = parse_signature(cast(Callable[..., object], bad))
 
     def test_unannotated_return_raises(self) -> None:
         def bad(x: View[F4, ()]):  # noqa: ANN202
             return x
 
         with pytest.raises(ValueError, match="unannotated return"):
-            parse_signature(bad)
+            _ = parse_signature(bad)
 
     def test_varargs_rejected(self) -> None:
         def bad(*xs: View[F4, ()]) -> View[F4, ()]:  # type: ignore[valid-type]
             return xs[0]
 
         with pytest.raises(ValueError, match="\\*args"):
-            parse_signature(bad)
+            _ = parse_signature(bad)
 
 
 class TestTypecheckAgainstSpec:
@@ -177,7 +179,7 @@ class TestBindCallArgs:
             return_spec=TensorSpec(F4, (2,)),
         )
         with pytest.raises(TypeError, match="multiple values"):
-            bind_call_args(spec, (_view((2,)),), {"x": _view((2,))})
+            _ = bind_call_args(spec, (_view((2,)),), {"x": _view((2,))})
 
 
 class TestMaterializeSpec:
@@ -196,7 +198,7 @@ class TestMaterializeSpec:
 
     def test_list_spec_unsupported(self) -> None:
         with pytest.raises(TypeError, match="unsupported spec"):
-            materialize_spec(
+            _ = materialize_spec(
                 [TensorSpec(F4, (2,))],
                 lambda tensor_spec, label: param(
                     shape=tensor_spec.shape,
