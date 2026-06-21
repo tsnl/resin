@@ -52,12 +52,19 @@ pub struct WgpuInterp {
 /// Game engines should pass their existing `Device` and `Queue` to [`WgpuInterp::new`].
 pub fn request_default_device() -> Result<(wgpu::Device, wgpu::Queue), WgpuInterpError> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+    let adapter_options = wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: None,
         force_fallback_adapter: false,
-    }))
-    .ok_or(WgpuInterpError::NoAdapter)?;
+    };
+    let adapter = pollster::block_on(instance.request_adapter(&adapter_options))
+        .or_else(|| {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                force_fallback_adapter: true,
+                ..adapter_options
+            }))
+        })
+        .ok_or(WgpuInterpError::NoAdapter)?;
 
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
