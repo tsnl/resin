@@ -41,9 +41,6 @@ members = [
 pythonVersion = "3.14"
 # node.py <-> view.py: View is only imported under TYPE_CHECKING in node.py.
 reportImportCycles = false
-# basedpyright's recommended mode fails the CLI on warnings by default.
-failOnWarnings = false
-
 [tool.ruff.lint]
 preview = true
 explicit-preview-rules = true
