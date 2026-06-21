@@ -20,9 +20,7 @@ class Module:
         if not is_dataclass(dc) or isinstance(dc, type):
             raise TypeError(f"Unsupported type in param tree: {type(dc)}")
         return {
-            field.name: Module._parse_param_value(
-                cast(object, getattr(dc, field.name))
-            )
+            field.name: Module._parse_param_value(cast(object, getattr(dc, field.name)))
             for field in fields(dc)
         }
 
@@ -32,10 +30,7 @@ class Module:
             return value
         if isinstance(value, dict):
             value_dict = cast(dict[object, object], value)
-            return {
-                str(k): Module._parse_param_value(v)
-                for k, v in value_dict.items()
-            }
+            return {str(k): Module._parse_param_value(v) for k, v in value_dict.items()}
         if isinstance(value, list):
             value_list = cast(list[object], value)
             return [Module._parse_param_value(v) for v in value_list]

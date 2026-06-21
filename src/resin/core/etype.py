@@ -8,7 +8,9 @@ def is_scalar(value: object) -> bool:
     return isinstance(value, _SCALAR_TYPES)
 
 
-type ElementOperator = UnaryElementOperator | BinaryElementOperator | BinaryCompareOperator
+type ElementOperator = (
+    UnaryElementOperator | BinaryElementOperator | BinaryCompareOperator
+)
 type UnaryElementOperator = Literal[
     "neg",
     "exp",

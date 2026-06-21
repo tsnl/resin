@@ -64,9 +64,7 @@ class View:
         cls, params: tuple[ElementType, tuple[int, ...]]
     ) -> TensorMeta: ...
 
-    def __class_getitem__(
-        cls, params: tuple[ElementType, tuple[int, ...]]
-    ) -> object:
+    def __class_getitem__(cls, params: tuple[ElementType, tuple[int, ...]]) -> object:
         etype, shape = params
         if shape == ():
             return Annotated[View | Scalar, TensorMeta(etype, shape)]
@@ -429,7 +427,9 @@ def debug_print(root: View, out: SupportsWrite[str]) -> None:
         tid_map: dict[Node, int] = {}
         for node, ref_count in reference_count_map.items():
             if ref_count < 1:
-                raise ValueError(f"Node {node!r} has invalid reference count {ref_count}")
+                raise ValueError(
+                    f"Node {node!r} has invalid reference count {ref_count}"
+                )
             if ref_count == 1:
                 continue
             tid_map[node] = len(tid_map)

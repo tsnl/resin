@@ -75,11 +75,7 @@ class Accessor:
                     start = cast(int | None, k.start)
                     stop = cast(int | None, k.stop)
                     step = cast(int | None, k.step)
-                    b = (
-                        bounded_index(start, dim)
-                        if isinstance(start, int)
-                        else 0
-                    )
+                    b = bounded_index(start, dim) if isinstance(start, int) else 0
                     e = (
                         bounded_end(stop, dim)
                         if isinstance(stop, int)
