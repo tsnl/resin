@@ -3,6 +3,7 @@ import textwrap
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import assert_never
 
 from resin.core.accessor import Accessor, is_c_contiguous
 from resin.core.etype import (
@@ -275,7 +276,7 @@ def _emit_eval_rpn_expr(
         fn eval_rpn_expr({",".join(f"a{i}: {t}" for i in range(n))}) -> {t}
         """
     ):
-        expr_stack = []
+        expr_stack: list[str] = []
         for token in rpn_expr.string:
             match token:
                 case int():
@@ -354,7 +355,7 @@ def _emit_eval_rpn_expr(
                     lhs = expr_stack.pop()
                     expr_stack.append(f"select({t}(0), {t}(1), {lhs} != {rhs})")
                 case _:
-                    raise NotImplementedError(token)
+                    assert_never(token)
 
         assert len(expr_stack) == 1
         w.print(f"return {expr_stack[0]};")
@@ -486,7 +487,7 @@ def _scatter_atomic_accumulate_wgsl(
         case "min":
             combine = f"min(old_val, {value_expr})"
         case _:
-            raise NotImplementedError(f"{operator=}")
+            assert_never(operator)
 
     return textwrap.dedent(
         f"""
@@ -721,7 +722,7 @@ def _reduction_accumulate_wgsl(
         case "min":
             return f"{acc} = min({acc}, {value});"
         case _:
-            raise NotImplementedError(f"{operator=}")
+            assert_never(operator)
 
 
 #
