@@ -26,6 +26,14 @@ type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
 type ElementType = Literal["f4", "f2", "u4"]
 type EKind = Literal["float", "uint"]
 
+# Named element-type spellings for View[F4, (2, 3)] annotations. These exist to
+# placate Python type-checkers and ruff: if we write the string literals in type
+# annotations directly (View["f4", (2, 3)]), ruff F821 falsely treats the etype
+# spelling inside the subscript as an undefined name.
+F4: ElementType = "f4"
+F2: ElementType = "f2"
+U4: ElementType = "u4"
+
 
 def etype_join(etype1: ElementType, etype2: ElementType) -> ElementType:
     kind = etype_join_kind(etype_kind(etype1), etype_kind(etype2))
