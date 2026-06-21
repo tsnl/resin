@@ -1,8 +1,9 @@
 import math
 from dataclasses import dataclass, fields, is_dataclass
 
-import resin.dsl as dsl
 from resin.core.etype import F4
+from resin.core.pytree import PyTree
+from resin.dsl.view import View, const, param
 
 
 @dataclass
@@ -10,64 +11,68 @@ class Module:
     def __post_init__(self):
         assert is_dataclass(self), "Module must be a dataclass"
 
-    def params(self) -> dsl.PyTree[dsl.View]:
-        return Module._parse_param_tree(self)
+    def params(self) -> PyTree[View]:
+        return Module._dataclass_params(self)
 
     @staticmethod
-    def _parse_param_tree(
-        it: Module | dsl.PyTree[dsl.View],
-    ) -> dsl.PyTree[dsl.View]:
-        if isinstance(it, dsl.View):
-            return it
-        elif isinstance(it, dict):
-            return {k: Module._parse_param_tree(v) for k, v in it.items()}
-        elif isinstance(it, list):
-            return [Module._parse_param_tree(v) for v in it]
-        elif is_dataclass(it):
-            res = {}
-            for field in fields(it):
-                value = getattr(it, field.name)
-                res[field.name] = Module._parse_param_tree(value)
-            return res
-        else:
-            raise TypeError(f"Unsupported type in param tree: {type(it)}")
+    def _dataclass_params(dc: object) -> dict[str, PyTree[View]]:
+        if not is_dataclass(dc) or isinstance(dc, type):
+            raise TypeError(f"Unsupported type in param tree: {type(dc)}")
+        return {
+            field.name: Module._parse_param_value(getattr(dc, field.name))
+            for field in fields(dc)
+        }
+
+    @staticmethod
+    def _parse_param_value(value: object) -> PyTree[View]:
+        if isinstance(value, View):
+            return value
+        if isinstance(value, dict):
+            return {k: Module._parse_param_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [Module._parse_param_value(v) for v in value]
+        if isinstance(value, tuple):
+            return tuple(Module._parse_param_value(v) for v in value)
+        if is_dataclass(value):
+            return Module._dataclass_params(value)
+        raise TypeError(f"Unsupported type in param tree: {type(value)}")
 
 
 @dataclass
 class Linear:
-    weight: dsl.View
-    bias: dsl.View | None = None
+    weight: View
+    bias: View | None = None
 
     @staticmethod
     def new(in_features: int, out_features: int, bias: bool = True) -> "Linear":
-        weight = dsl.param(shape=(out_features, in_features), etype=F4)
-        bias_node = dsl.param(shape=(out_features,), etype=F4) if bias else None
+        weight = param(shape=(out_features, in_features), etype=F4)
+        bias_node = param(shape=(out_features,), etype=F4) if bias else None
         return Linear(weight=weight, bias=bias_node)
 
-    def __call__(self, x: dsl.View) -> dsl.View:
+    def __call__(self, x: View) -> View:
         out = x @ self.weight.transpose()
         if self.bias is not None:
             out = out + self.bias
         return out
 
 
-def relu(x: dsl.View) -> dsl.View:
-    return x.max(dsl.const(0, etype=x.etype))
+def relu(x: View) -> View:
+    return x.max(const(0, etype=x.etype))
 
 
-def softmax(x: dsl.View, axes: tuple[int, ...] = (0,)) -> dsl.View:
+def softmax(x: View, axes: tuple[int, ...] = (0,)) -> View:
     exp_x = x.exp()
     sum_exp_x = exp_x.reduce(axes=axes, operator="add")
     return exp_x / sum_exp_x
 
 
-def cross_entropy(y_hat: dsl.View, y: dsl.View) -> dsl.View:
+def cross_entropy(y_hat: View, y: View) -> View:
     assert y_hat.shape == y.shape
     axis = len(y_hat.shape) - 1
     return -(y * y_hat.log()).sum(axes=(axis,)).squeeze(axes=(axis,))
 
 
-def mean(n: dsl.View) -> dsl.View:
+def mean(n: View) -> View:
     count = math.prod(n.shape)
     reduced = n.sum(axes=tuple(range(n.rank)))
     for axis in reversed(range(reduced.rank)):

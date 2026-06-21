@@ -5,6 +5,7 @@ from typing import Any, cast
 from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
 
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
+# T is a valid leaf; annotate bare values as PyTree[T], not T | PyTree[T].
 type PyTree[T] = dict[str, PyTree[T]] | list[PyTree[T]] | tuple[PyTree[T], ...] | T
 
 

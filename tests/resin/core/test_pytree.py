@@ -1,4 +1,13 @@
+from resin.core.etype import F4
 from resin.core.pytree import PyTree, flatten_pytree, map_pytree, tree_map_leaves
+from resin.dsl.view import View, param
+
+
+class TestPyTreeTyping:
+    def test_leaf_value_is_pytree(self) -> None:
+        leaf = param(shape=(2,), etype=F4)
+        tree: PyTree[View] = leaf
+        assert tree is leaf
 
 
 class TestFlattenPytree:
