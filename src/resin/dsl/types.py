@@ -1,7 +1,5 @@
 """Typed-function annotations and signature parsing for the Resin DSL."""
 
-from __future__ import annotations
-
 import builtins
 import inspect
 import typing

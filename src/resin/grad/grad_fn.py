@@ -1,7 +1,5 @@
 """Per-call forward + gradient wrapper for typed DSL functions."""
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from typing import Callable
 

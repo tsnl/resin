@@ -1,7 +1,5 @@
 """Recursive walkers over Spec PyTrees and runtime values."""
 
-from __future__ import annotations
-
 from typing import Callable, TypeVar
 
 from resin.core.pytree import PyTree

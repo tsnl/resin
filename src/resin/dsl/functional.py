@@ -1,7 +1,5 @@
 """Functional helpers for typed Resin DSL functions."""
 
-from __future__ import annotations
-
 from typing import Callable
 
 from resin.core.pytree import PyTree
