@@ -37,7 +37,7 @@ from resin.core.pytree import PyTensor
 class Node(ABC):
     shape: tuple[int, ...]
     etype: ElementType | str
-    args: tuple["View", ...]
+    args: tuple[View, ...]
 
     @property
     def nbytes(self) -> int:
