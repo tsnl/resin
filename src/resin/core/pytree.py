@@ -1,6 +1,6 @@
 import struct
 from collections.abc import Callable, Generator
-from typing import Any, cast
+from typing import cast
 
 from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
 
@@ -15,13 +15,13 @@ def _is_pytree_container(value: object) -> bool:
 
 def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
     if isinstance(pytree, dict):
-        for child in pytree.values():
+        for child in cast(dict[str, PyTree[T]], pytree).values():
             yield from flatten_pytree(child)
     elif isinstance(pytree, list):
-        for child in pytree:
+        for child in cast(list[PyTree[T]], pytree):
             yield from flatten_pytree(child)
     elif isinstance(pytree, tuple):
-        for child in pytree:
+        for child in cast(tuple[PyTree[T], ...], pytree):
             yield from flatten_pytree(child)
     else:
         yield pytree
@@ -29,7 +29,7 @@ def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
 
 def map_pytree[T, U](
     pytree: PyTree[T],
-    f: Callable[[Any], U],
+    f: Callable[[object], U],
     *,
     is_leaf: Callable[[object], bool] | None = None,
     map_leaves_only: bool = False,
@@ -50,7 +50,7 @@ def map_pytree[T, U](
                 is_leaf=is_leaf,
                 map_leaves_only=map_leaves_only,
             )
-            for key, child in pytree.items()
+            for key, child in cast(dict[str, PyTree[T]], pytree).items()
         }
     if isinstance(pytree, list):
         return [
@@ -60,7 +60,7 @@ def map_pytree[T, U](
                 is_leaf=is_leaf,
                 map_leaves_only=map_leaves_only,
             )
-            for child in pytree
+            for child in cast(list[PyTree[T]], pytree)
         ]
     if isinstance(pytree, tuple):
         return tuple(
@@ -70,7 +70,7 @@ def map_pytree[T, U](
                 is_leaf=is_leaf,
                 map_leaves_only=map_leaves_only,
             )
-            for child in pytree
+            for child in cast(tuple[PyTree[T], ...], pytree)
         )
 
     if map_leaves_only:
@@ -81,7 +81,7 @@ def map_pytree[T, U](
 def tree_map_leaves[T, U](
     value: PyTree[T],
     is_leaf: Callable[[object], bool],
-    fn: Callable[[Any], U],
+    fn: Callable[[object], U],
 ) -> PyTree[U]:
     return map_pytree(value, fn, is_leaf=is_leaf, map_leaves_only=True)
 
@@ -108,7 +108,7 @@ def flatten_pytensor(value: PyTensor) -> list[Scalar]:
     if is_scalar(value):
         return [cast(Scalar, value)]
     assert isinstance(value, list)
-    result = []
+    result: list[Scalar] = []
     for e in value:
         result.extend(flatten_pytensor(e))
     return result

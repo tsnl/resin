@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+from typing import assert_never, cast
 
 #
 # Accessor
@@ -71,20 +72,27 @@ class Accessor:
                 case int():
                     new_offset += bounded_index(k, dim) * old_pitch[dim]
                 case slice():
-                    b = bounded_index(k.start, dim) if k.start is not None else 0
+                    start = cast(int | None, k.start)
+                    stop = cast(int | None, k.stop)
+                    step = cast(int | None, k.step)
+                    b = (
+                        bounded_index(start, dim)
+                        if isinstance(start, int)
+                        else 0
+                    )
                     e = (
-                        bounded_end(k.stop, dim)
-                        if k.stop is not None
+                        bounded_end(stop, dim)
+                        if isinstance(stop, int)
                         else old_shape[dim]
                     )
-                    s = k.step if k.step is not None else 1
+                    s = step if isinstance(step, int) else 1
                     a = abs(s)
 
                     new_offset += b * old_pitch[dim]
                     new_pitch.append(old_pitch[dim] * s)
                     new_shape.append(max(0, (e - b + (a - 1)) // a))
                 case _:
-                    raise TypeError(f"Invalid index {k} for dimension {dim}")
+                    assert_never(k)
 
         for dim in range(len(key), len(old_shape)):
             new_pitch.append(old_pitch[dim])
@@ -142,8 +150,8 @@ class Accessor:
             if max_address >= capacity:
                 raise ValueError(
                     f"Accessor (offset={self.offset}, shape={self.shape}, "
-                    f"pitch={self.pitch}) addresses element {max_address} outside "
-                    f"backing buffer of {capacity} elements"
+                    + f"pitch={self.pitch}) addresses element {max_address} outside "
+                    + f"backing buffer of {capacity} elements"
                 )
 
 
@@ -180,16 +188,16 @@ def shape_join(
 
     assert len(shape1) == len(shape2)
 
-    new_shape_list = []
-    new_pitch1_list = []
-    new_pitch2_list = []
+    new_shape_list: list[int] = []
+    new_pitch1_list: list[int] = []
+    new_pitch2_list: list[int] = []
     for i_dim, (s, o) in enumerate(zip(shape1, shape2)):
         if s != o and s != 1 and o != 1:
             report_shape1 = report_shape1 or shape1
             report_shape2 = report_shape2 or shape2
             raise ValueError(
                 f"Shapes {report_shape1} and {report_shape2} are not compatible for "
-                "broadcasting."
+                + "broadcasting."
             )
 
         new_shape_list.append(max(s, o))
