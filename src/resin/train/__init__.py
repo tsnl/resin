@@ -4,7 +4,7 @@ __all__ = [
 ]
 
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Protocol
 
 from frozendict import frozendict
 
@@ -12,6 +12,14 @@ import resin.grad as grad_mod
 import resin.dsl as dsl
 from resin.ir import IrProgramBuilder
 from resin.wgpu import WgpuProgram, WgslKernelConfig, build_wgpu_program
+
+
+class ParamUpdateInterpreter(Protocol):
+    def param_buffer_index(self, param_id: int) -> int: ...
+
+    def copy_buffer_to_buffer(
+        self, src_buffer_index: int, dst_buffer_index: int
+    ) -> None: ...
 
 
 def build_param_update_program(
@@ -49,7 +57,7 @@ def build_param_update_program(
 
 
 def commit_param_updates(
-    interp: Any,
+    interp: ParamUpdateInterpreter,
     program: WgpuProgram,
     updated_param_sinks: Mapping[int, str],
 ) -> None:

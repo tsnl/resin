@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass, fields, is_dataclass
+from typing import cast
 
 from resin.core.etype import F4
 from resin.core.pytree import PyTree
@@ -19,7 +20,9 @@ class Module:
         if not is_dataclass(dc) or isinstance(dc, type):
             raise TypeError(f"Unsupported type in param tree: {type(dc)}")
         return {
-            field.name: Module._parse_param_value(getattr(dc, field.name))
+            field.name: Module._parse_param_value(
+                cast(object, getattr(dc, field.name))
+            )
             for field in fields(dc)
         }
 
@@ -28,11 +31,17 @@ class Module:
         if isinstance(value, View):
             return value
         if isinstance(value, dict):
-            return {k: Module._parse_param_value(v) for k, v in value.items()}
+            value_dict = cast(dict[object, object], value)
+            return {
+                str(k): Module._parse_param_value(v)
+                for k, v in value_dict.items()
+            }
         if isinstance(value, list):
-            return [Module._parse_param_value(v) for v in value]
+            value_list = cast(list[object], value)
+            return [Module._parse_param_value(v) for v in value_list]
         if isinstance(value, tuple):
-            return tuple(Module._parse_param_value(v) for v in value)
+            value_tuple = cast(tuple[object, ...], value)
+            return tuple(Module._parse_param_value(v) for v in value_tuple)
         if is_dataclass(value):
             return Module._dataclass_params(value)
         raise TypeError(f"Unsupported type in param tree: {type(value)}")

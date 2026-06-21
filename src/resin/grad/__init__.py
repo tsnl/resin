@@ -7,16 +7,10 @@ __all__ = [
 ]
 
 from collections.abc import Sequence
-from typing import Callable
+from typing import Callable, assert_never
 
 from resin.core.accessor import Accessor
 from resin.core.pytree import PyTree
-from resin.dsl.spec import (
-    SignatureSpec,
-    bind_call_args,
-    map_tensor_leaves,
-    parse_signature,
-)
 from resin.dsl.functional import trace_from_specs
 from resin.dsl.node import (
     ConstNode,
@@ -26,6 +20,12 @@ from resin.dsl.node import (
     ParamNode,
     ReductionNode,
     ScatterNode,
+)
+from resin.dsl.spec import (
+    SignatureSpec,
+    bind_call_args,
+    map_tensor_leaves,
+    parse_signature,
 )
 from resin.dsl.view import View, ones, toposort, zeros
 
@@ -42,7 +42,7 @@ def accessor_adjoint(view: View, g: View) -> View:
     broadcast_axes = tuple(i for i, p in enumerate(view.pitch) if p == 0)
     x = g.reduce(axes=broadcast_axes, operator="add") if broadcast_axes else g
 
-    if view._is_identity():
+    if view.is_identity():
         return x
 
     return View.scatter(
@@ -75,7 +75,7 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
             )
         case ScatterNode():
             source = node.args[0]
-            dense = df_dout if df_dout._is_identity() else df_dout.copy()
+            dense = df_dout if df_dout.is_identity() else df_dout.copy()
             return (
                 View(
                     node=dense.node,
@@ -137,7 +137,7 @@ def _df_do_elementwise(node: ElementwiseNode, df_dout: View) -> tuple[View, ...]
         case "not" | "eq" | "ne" | "lt" | "gt" | "le" | "ge":
             raise NotDifferentiableException(node)
         case _:
-            raise NotImplementedError(f"{node.operator=}")
+            assert_never(node.operator)
 
 
 def _df_do_reduction(node: ReductionNode, df_dout: View) -> tuple[View, ...]:
@@ -163,7 +163,7 @@ def _df_do_reduction(node: ReductionNode, df_dout: View) -> tuple[View, ...]:
             cond = operand.eq(View.identity(node))
             return (g * cond,)
         case _:
-            raise NotImplementedError(f"{node.operator=}")
+            assert_never(node.operator)
 
 
 def grad(f: View) -> dict[Node, View]:
@@ -197,14 +197,12 @@ def grad_fn[T: View](
     grads_for: Sequence[str] | None = None,
 ) -> Callable[..., tuple[T, dict[str, PyTree[View]]]]:
     spec = parse_signature(f)
-    target_grads = tuple(
-        spec.args.keys() if grads_for is None else grads_for
-    )
+    target_grads = tuple(spec.args.keys() if grads_for is None else grads_for)
     unknown = set(target_grads) - set(spec.args)
     if unknown:
         raise ValueError(
             f"unknown grads_for argument(s): {sorted(unknown)!r}; "
-            f"expected subset of {sorted(spec.args.keys())!r}"
+            + f"expected subset of {sorted(spec.args.keys())!r}"
         )
 
     def run(
