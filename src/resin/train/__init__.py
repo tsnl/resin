@@ -63,6 +63,6 @@ def commit_param_updates(
 ) -> None:
     for param_id, sink_name in updated_param_sinks.items():
         src_view_index = program.sinks[sink_name]
-        src_buffer_index = program.buffer_views[src_view_index].buffer_index
+        src_buffer_index = program.buffer_views[src_view_index]["buffer_index"]
         dst_buffer_index = interp.param_buffer_index(param_id)
         interp.copy_buffer_to_buffer(src_buffer_index, dst_buffer_index)

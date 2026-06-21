@@ -6,21 +6,20 @@ from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_k
 from .spec import (
     SCHEMA_VERSION,
     WgpuAccessorSpec,
-    WgpuBufferSpec,
-    WgpuBufferViewSpec,
     WgpuComputePipelineSpec,
-    WgpuDispatch,
     WgpuProgram,
     WgpuQueueOp,
+    accessor_spec,
+    buffer_spec,
+    buffer_view_spec,
+    compute_pipeline_spec,
+    dispatch_op,
 )
 
 __all__ = [
     "build_wgpu_program",
     "param_buffer_index",
 ]
-
-# build_wgpu_program()
-#
 
 
 def build_wgpu_program(
@@ -36,7 +35,7 @@ def build_wgpu_program(
     }
 
     buffers = [
-        WgpuBufferSpec(
+        buffer_spec(
             shape=tuple(int(dim) for dim in buffer.shape),
             etype=buffer.etype,
             init=buffer.init,
@@ -46,7 +45,7 @@ def build_wgpu_program(
     ]
 
     buffer_views = [
-        WgpuBufferViewSpec(
+        buffer_view_spec(
             buffer_index=buffer_index[buffer_view.buffer],
             accessor=_accessor_spec(buffer_view),
         )
@@ -65,11 +64,11 @@ def build_wgpu_program(
             pipelines.append(_compute_pipeline_for_kernel(kernel, config))
 
         queue.append(
-            WgpuDispatch(
+            dispatch_op(
                 pipeline_index=kernel_to_pipeline_index[kernel_key],
-                arg_buffer_view_indices=tuple(
+                arg_buffer_view_indices=[
                     buffer_view_index[arg] for arg in dispatch.args
-                ),
+                ],
                 output_buffer_index=buffer_index[dispatch.output],
             )
         )
@@ -94,7 +93,7 @@ def build_wgpu_program(
 def _compute_pipeline_for_kernel(
     kernel: IrKernel, config: WgslKernelConfig
 ) -> WgpuComputePipelineSpec:
-    return WgpuComputePipelineSpec(
+    return compute_pipeline_spec(
         wgsl=emit_wgsl_for_kernel(kernel, config),
         dispatch_size=dispatch_size_for_kernel(kernel, config),
         num_arg_bindings=len(kernel.arg_accessors),
@@ -104,7 +103,7 @@ def _compute_pipeline_for_kernel(
 
 def _accessor_spec(buffer_view: IrBufferView) -> WgpuAccessorSpec:
     accessor = buffer_view.accessor
-    return WgpuAccessorSpec(
+    return accessor_spec(
         offset=accessor.offset,
         shape=tuple(int(dim) for dim in accessor.shape),
         pitch=tuple(int(dim) for dim in accessor.pitch),

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 import math
 from collections.abc import Callable
@@ -25,30 +23,26 @@ __all__ = [
     "WgpuQueueOp",
 ]
 
-#
-# WgpuProgram wire format (mirrors resin_rt::program)
-#
 
-
-class WgpuAccessorWire(TypedDict):
+class WgpuAccessorSpec(TypedDict):
     offset: int
     shape: list[int]
     pitch: list[int]
 
 
-class WgpuBufferWire(TypedDict):
+class WgpuBufferSpec(TypedDict):
     shape: list[int]
     etype: ElementType | str
     readonly: NotRequired[bool]
     init: NotRequired[bytes | list[int]]
 
 
-class WgpuBufferViewWire(TypedDict):
+class WgpuBufferViewSpec(TypedDict):
     buffer_index: int
-    accessor: WgpuAccessorWire
+    accessor: WgpuAccessorSpec
 
 
-class WgpuComputePipelineWire(TypedDict):
+class WgpuComputePipelineSpec(TypedDict):
     wgsl: str
     dispatch_size: list[int]
     num_arg_bindings: int
@@ -56,28 +50,28 @@ class WgpuComputePipelineWire(TypedDict):
     clear_output_before_dispatch: NotRequired[bool]
 
 
-class WgpuDispatchWire(TypedDict):
+class WgpuDispatch(TypedDict):
     kind: Literal["dispatch"]
     pipeline_index: int
     arg_buffer_view_indices: list[int]
     output_buffer_index: int
 
 
-class WgpuCopyWire(TypedDict):
+class WgpuCopy(TypedDict):
     kind: Literal["copy"]
     source_buffer_view_index: int
     output_buffer_index: int
 
 
-type WgpuQueueOpWire = WgpuDispatchWire | WgpuCopyWire
+type WgpuQueueOp = WgpuDispatch | WgpuCopy
 
 
-class WgpuProgramWire(TypedDict):
+class WgpuProgramSpec(TypedDict):
     sinks: dict[str, int]
-    queue: list[WgpuQueueOpWire]
-    buffers: list[WgpuBufferWire]
-    buffer_views: list[WgpuBufferViewWire]
-    pipelines: list[WgpuComputePipelineWire]
+    queue: list[WgpuQueueOp]
+    buffers: list[WgpuBufferSpec]
+    buffer_views: list[WgpuBufferViewSpec]
+    pipelines: list[WgpuComputePipelineSpec]
     schema_version: NotRequired[int]
     param_buffer_ids: NotRequired[dict[int, int]]
 
@@ -95,9 +89,25 @@ def _msgpack_unpackb(data: bytes, *, raw: bool) -> object:
     return unpackb(data, raw=raw)
 
 
-#
-# WgpuProgram types (mirrors resin_rt::program)
-#
+def _validate_buffer_spec(spec: WgpuBufferSpec) -> None:
+    init = spec.get("init")
+    if init is None:
+        return
+    if isinstance(init, list):
+        init = bytes(init)
+    expected = math.prod(spec["shape"]) * etype_nbytes(spec["etype"])
+    if len(init) != expected:
+        raise ValueError(
+            f"buffer init size {len(init)} != expected {expected} "
+            + f"for shape {spec['shape']} and etype {spec['etype']!r}"
+        )
+
+
+def _normalize_buffer_spec(spec: WgpuBufferSpec) -> WgpuBufferSpec:
+    init = spec.get("init")
+    if isinstance(init, list):
+        return {**spec, "init": bytes(init)}
+    return spec
 
 
 @dataclass(frozen=True)
@@ -112,29 +122,31 @@ class WgpuProgram:
     )
     schema_version: int = SCHEMA_VERSION
 
-    def to_dict(self) -> WgpuProgramWire:
+    def __post_init__(self) -> None:
+        for buffer in self.buffers:
+            _validate_buffer_spec(buffer)
+
+    def to_dict(self) -> WgpuProgramSpec:
         return {
             "schema_version": self.schema_version,
             "param_buffer_ids": dict(self.param_buffer_ids),
             "sinks": dict(self.sinks),
-            "queue": [_queue_op_to_dict(op) for op in self.queue],
-            "buffers": [_buffer_to_dict(b) for b in self.buffers],
-            "buffer_views": [_buffer_view_to_dict(v) for v in self.buffer_views],
-            "pipelines": [_pipeline_to_dict(p) for p in self.pipelines],
+            "queue": list(self.queue),
+            "buffers": list(self.buffers),
+            "buffer_views": list(self.buffer_views),
+            "pipelines": list(self.pipelines),
         }
 
     @classmethod
-    def from_dict(cls, payload: WgpuProgramWire) -> WgpuProgram:
+    def from_dict(cls, payload: WgpuProgramSpec) -> WgpuProgram:
         return cls(
             schema_version=payload.get("schema_version", SCHEMA_VERSION),
             param_buffer_ids=frozendict(payload.get("param_buffer_ids", {})),
             sinks=frozendict(payload["sinks"]),
-            queue=tuple(_queue_op_from_dict(op) for op in payload["queue"]),
-            buffers=tuple(_buffer_from_dict(b) for b in payload["buffers"]),
-            buffer_views=tuple(
-                _buffer_view_from_dict(v) for v in payload["buffer_views"]
-            ),
-            pipelines=tuple(_pipeline_from_dict(p) for p in payload["pipelines"]),
+            queue=tuple(payload["queue"]),
+            buffers=tuple(_normalize_buffer_spec(b) for b in payload["buffers"]),
+            buffer_views=tuple(payload["buffer_views"]),
+            pipelines=tuple(payload["pipelines"]),
         )
 
     def to_msgpack(self) -> bytes:
@@ -144,173 +156,106 @@ class WgpuProgram:
 
     @classmethod
     def from_msgpack(cls, data: bytes) -> WgpuProgram:
-        payload = cast(WgpuProgramWire, _msgpack_unpackb(data, raw=False))
+        payload = cast(WgpuProgramSpec, _msgpack_unpackb(data, raw=False))
         return cls.from_dict(payload)
 
 
-@dataclass(frozen=True)
-class WgpuBufferSpec:
-    """Buffer metadata in a :class:`WgpuProgram`."""
-
-    shape: tuple[int, ...]
-    etype: ElementType | str
-    init: bytes | None = None
-    readonly: bool = False
-
-    def __post_init__(self) -> None:
-        if self.init is None:
-            return
-        expected = math.prod(self.shape) * etype_nbytes(self.etype)
-        if len(self.init) != expected:
-            raise ValueError(
-                f"buffer init size {len(self.init)} != expected {expected} "
-                + f"for shape {self.shape} and etype {self.etype!r}"
-            )
-
-
-@dataclass(frozen=True)
-class WgpuBufferViewSpec:
-    buffer_index: int
-    accessor: WgpuAccessorSpec
-
-
-@dataclass(frozen=True)
-class WgpuAccessorSpec:
-    offset: int
-    shape: tuple[int, ...]
-    pitch: tuple[int, ...]
-
-
-@dataclass(frozen=True)
-class WgpuComputePipelineSpec:
-    wgsl: str
-    dispatch_size: tuple[int, int, int]
-    num_arg_bindings: int
-    clear_output_before_dispatch: bool = False
-    entry_point: str = "main"
-
-
-@dataclass(frozen=True)
-class WgpuDispatch:
-    pipeline_index: int
-    arg_buffer_view_indices: tuple[int, ...]
-    output_buffer_index: int
-
-
-@dataclass(frozen=True)
-class WgpuCopy:
-    source_buffer_view_index: int
-    output_buffer_index: int
-
-
-type WgpuQueueOp = WgpuDispatch | WgpuCopy
-
-
-def _buffer_to_dict(spec: WgpuBufferSpec) -> WgpuBufferWire:
-    payload: WgpuBufferWire = {
-        "shape": list(spec.shape),
-        "etype": spec.etype,
-        "readonly": spec.readonly,
-    }
-    if spec.init is not None:
-        payload["init"] = spec.init
-    return payload
-
-
-def _buffer_from_dict(payload: WgpuBufferWire) -> WgpuBufferSpec:
-    init: bytes | list[int] | None = payload.get("init")
-    if isinstance(init, list):
-        init = bytes(init)
-    return WgpuBufferSpec(
-        shape=tuple(payload["shape"]),
-        etype=payload["etype"],
-        init=init,
-        readonly=payload.get("readonly", False),
-    )
-
-
-def _accessor_to_dict(spec: WgpuAccessorSpec) -> WgpuAccessorWire:
+def dispatch_op(
+    *,
+    pipeline_index: int,
+    arg_buffer_view_indices: list[int],
+    output_buffer_index: int,
+) -> WgpuDispatch:
     return {
-        "offset": spec.offset,
-        "shape": list(spec.shape),
-        "pitch": list(spec.pitch),
+        "kind": "dispatch",
+        "pipeline_index": pipeline_index,
+        "arg_buffer_view_indices": arg_buffer_view_indices,
+        "output_buffer_index": output_buffer_index,
     }
 
 
-def _accessor_from_dict(payload: WgpuAccessorWire) -> WgpuAccessorSpec:
-    return WgpuAccessorSpec(
-        offset=payload["offset"],
-        shape=tuple(payload["shape"]),
-        pitch=tuple(payload["pitch"]),
-    )
-
-
-def _buffer_view_to_dict(spec: WgpuBufferViewSpec) -> WgpuBufferViewWire:
+def copy_op(
+    *,
+    source_buffer_view_index: int,
+    output_buffer_index: int,
+) -> WgpuCopy:
     return {
-        "buffer_index": spec.buffer_index,
-        "accessor": _accessor_to_dict(spec.accessor),
+        "kind": "copy",
+        "source_buffer_view_index": source_buffer_view_index,
+        "output_buffer_index": output_buffer_index,
     }
 
 
-def _buffer_view_from_dict(payload: WgpuBufferViewWire) -> WgpuBufferViewSpec:
-    return WgpuBufferViewSpec(
-        buffer_index=payload["buffer_index"],
-        accessor=_accessor_from_dict(payload["accessor"]),
-    )
+def buffer_spec(
+    *,
+    shape: list[int] | tuple[int, ...],
+    etype: ElementType | str,
+    init: bytes | None = None,
+    readonly: bool = False,
+) -> WgpuBufferSpec:
+    spec: WgpuBufferSpec = {
+        "shape": list(shape),
+        "etype": etype,
+        "readonly": readonly,
+    }
+    if init is not None:
+        spec["init"] = init
+    _validate_buffer_spec(spec)
+    return spec
 
 
-def _pipeline_to_dict(spec: WgpuComputePipelineSpec) -> WgpuComputePipelineWire:
+def buffer_view_spec(
+    *,
+    buffer_index: int,
+    accessor: WgpuAccessorSpec,
+) -> WgpuBufferViewSpec:
+    return {"buffer_index": buffer_index, "accessor": accessor}
+
+
+def accessor_spec(
+    *,
+    offset: int,
+    shape: list[int] | tuple[int, ...],
+    pitch: list[int] | tuple[int, ...],
+) -> WgpuAccessorSpec:
     return {
-        "wgsl": spec.wgsl,
-        "entry_point": spec.entry_point,
-        "dispatch_size": list(spec.dispatch_size),
-        "num_arg_bindings": spec.num_arg_bindings,
-        "clear_output_before_dispatch": spec.clear_output_before_dispatch,
+        "offset": offset,
+        "shape": list(shape),
+        "pitch": list(pitch),
     }
 
 
-def _pipeline_from_dict(payload: WgpuComputePipelineWire) -> WgpuComputePipelineSpec:
-    dispatch_size = payload["dispatch_size"]
-    return WgpuComputePipelineSpec(
-        wgsl=payload["wgsl"],
-        entry_point=payload.get("entry_point", "main"),
-        dispatch_size=(dispatch_size[0], dispatch_size[1], dispatch_size[2]),
-        num_arg_bindings=payload["num_arg_bindings"],
-        clear_output_before_dispatch=payload.get("clear_output_before_dispatch", False),
-    )
+def compute_pipeline_spec(
+    *,
+    wgsl: str,
+    dispatch_size: list[int] | tuple[int, int, int],
+    num_arg_bindings: int,
+    clear_output_before_dispatch: bool = False,
+    entry_point: str = "main",
+) -> WgpuComputePipelineSpec:
+    return {
+        "wgsl": wgsl,
+        "entry_point": entry_point,
+        "dispatch_size": list(dispatch_size),
+        "num_arg_bindings": num_arg_bindings,
+        "clear_output_before_dispatch": clear_output_before_dispatch,
+    }
 
 
-def _queue_op_to_dict(op: WgpuQueueOp) -> WgpuQueueOpWire:
-    match op:
-        case WgpuDispatch():
-            return {
-                "kind": "dispatch",
-                "pipeline_index": op.pipeline_index,
-                "arg_buffer_view_indices": list(op.arg_buffer_view_indices),
-                "output_buffer_index": op.output_buffer_index,
-            }
-        case WgpuCopy():
-            return {
-                "kind": "copy",
-                "source_buffer_view_index": op.source_buffer_view_index,
-                "output_buffer_index": op.output_buffer_index,
-            }
-        case _:
-            assert_never(op)
-
-
-def _queue_op_from_dict(payload: WgpuQueueOpWire) -> WgpuQueueOp:
+def queue_op_from_dict(payload: WgpuQueueOp) -> WgpuQueueOp:
     match payload["kind"]:
         case "dispatch":
-            return WgpuDispatch(
-                pipeline_index=payload["pipeline_index"],
-                arg_buffer_view_indices=tuple(payload["arg_buffer_view_indices"]),
-                output_buffer_index=payload["output_buffer_index"],
-            )
+            return {
+                "kind": "dispatch",
+                "pipeline_index": payload["pipeline_index"],
+                "arg_buffer_view_indices": list(payload["arg_buffer_view_indices"]),
+                "output_buffer_index": payload["output_buffer_index"],
+            }
         case "copy":
-            return WgpuCopy(
-                source_buffer_view_index=payload["source_buffer_view_index"],
-                output_buffer_index=payload["output_buffer_index"],
-            )
+            return {
+                "kind": "copy",
+                "source_buffer_view_index": payload["source_buffer_view_index"],
+                "output_buffer_index": payload["output_buffer_index"],
+            }
         case _:
             assert_never(payload["kind"])

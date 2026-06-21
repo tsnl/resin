@@ -27,14 +27,15 @@ class TestBuildWgpuProgram:
 
         assert len(restored.buffers) == 1
         buffer = restored.buffers[0]
-        assert buffer.etype == F4
-        assert buffer.init is not None
-        assert buffer.init == wgpu_program.buffers[0].init
-        assert len(buffer.init) == math.prod(buffer.shape) * etype_nbytes(
-            buffer.etype
-        )
-        fmt = spell_etype_in_pystruct(buffer.etype)
-        assert struct.unpack(f"<{math.prod(buffer.shape)}{fmt}", buffer.init) == (
+        assert buffer["etype"] == F4
+        init = buffer.get("init")
+        assert isinstance(init, bytes)
+        original_init = wgpu_program.buffers[0].get("init")
+        assert isinstance(original_init, bytes)
+        assert init == original_init
+        assert len(init) == math.prod(buffer["shape"]) * etype_nbytes(buffer["etype"])
+        fmt = spell_etype_in_pystruct(buffer["etype"])
+        assert struct.unpack(f"<{math.prod(buffer['shape'])}{fmt}", init) == (
             1.0,
             2.0,
         )

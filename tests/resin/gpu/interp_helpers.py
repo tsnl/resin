@@ -21,7 +21,7 @@ from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 
 def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
     view_index = program.sinks[sink_name]
-    return program.buffer_views[view_index].buffer_index
+    return program.buffer_views[view_index]["buffer_index"]
 
 
 def unmarshall_buffer(
