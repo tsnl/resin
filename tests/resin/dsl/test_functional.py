@@ -1,4 +1,5 @@
-from resin.dsl.dsl import ParamNode, flatten_pytree
+from resin.core.pytree import flatten_pytree
+from resin.dsl.dsl import ParamNode
 from resin.dsl.functional import trace
 from .fixtures import mlp_step
 

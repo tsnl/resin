@@ -1,13 +1,10 @@
 """Recursive walkers over Spec PyTrees and runtime values."""
 
-from typing import Callable, TypeVar
+from typing import Callable
 
-from resin.core.pytree import PyTree
+from resin.core.pytree import PyTree, tree_map_leaves
 from resin.dsl.dsl import View
 from resin.dsl.types import PodSpec, SignatureSpec, Spec, TensorSpec
-
-T = TypeVar("T")
-U = TypeVar("U")
 
 
 def validate_against_spec(value: object, spec: Spec) -> None:
@@ -65,22 +62,6 @@ def validate_kwargs(kwargs: dict[str, object], spec: SignatureSpec) -> None:
         )
     for name, arg_spec in spec.args.items():
         validate_against_spec(kwargs[name], arg_spec)
-
-
-def tree_map_leaves(
-    value: PyTree[T],
-    is_leaf: Callable[[T], bool],
-    fn: Callable[[T], U],
-) -> PyTree[U]:
-    if is_leaf(value):
-        return fn(value)
-    if isinstance(value, dict):
-        return {key: tree_map_leaves(child, is_leaf, fn) for key, child in value.items()}
-    if isinstance(value, list):
-        return [tree_map_leaves(child, is_leaf, fn) for child in value]
-    if isinstance(value, tuple):
-        return tuple(tree_map_leaves(child, is_leaf, fn) for child in value)
-    raise TypeError(f"unsupported PyTree node: {type(value).__name__}")
 
 
 def map_tensor_leaves(
