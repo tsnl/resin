@@ -312,6 +312,7 @@ def _run_resin(
 
     import resin.nn as nn
     from resin import dsl
+    from resin.core.pytree import flatten_pytree
     from resin.ir import IrProgramBuilder
     from resin.train import build_param_update_program, commit_param_updates
     from resin.wgpu import build_wgpu_program
@@ -360,7 +361,7 @@ def _run_resin(
         )
     )
     error = nn.mean(nn.cross_entropy(model(image), label))
-    trainable_params = list(dsl.flatten_pytree(model.params()))
+    trainable_params = list(flatten_pytree(model.params()))
     program, updated_param_sinks = build_param_update_program(
         error,
         trainable_params=trainable_params,

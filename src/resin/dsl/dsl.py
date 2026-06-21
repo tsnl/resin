@@ -17,9 +17,7 @@ __all__ = [
     "View",
     "const",
     "debug_print",
-    "flatten_pytree",
     "full",
-    "map_pytree",
     "ones",
     "param",
     "refcount",
@@ -30,7 +28,7 @@ __all__ = [
 import math
 from abc import ABC
 from dataclasses import dataclass, fields
-from typing import Callable, Generator, Iterable
+from typing import Callable, Iterable
 
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
@@ -570,21 +568,4 @@ def refcount(roots: Iterable["View"]) -> dict["Node", int]:
     return ref_counts
 
 
-def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
-    if isinstance(pytree, dict):
-        for v in pytree.values():
-            yield from flatten_pytree(v)
-    elif isinstance(pytree, list):
-        for v in pytree:
-            yield from flatten_pytree(v)
-    else:
-        yield pytree
 
-
-def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
-    if isinstance(pytree, dict):
-        return {k: map_pytree(v, f) for k, v in pytree.items()}
-    elif isinstance(pytree, list):
-        return [map_pytree(v, f) for v in pytree]
-    else:
-        return f(pytree)
