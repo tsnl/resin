@@ -3,6 +3,7 @@
 import textwrap
 from io import StringIO
 
+from resin.core.etype import F2, F4
 from resin.dsl import View, const, full, param, zeros
 
 
@@ -14,30 +15,30 @@ def debug_str(view: View) -> str:
 
 class TestConstants:
     def test_scalar(self) -> None:
-        t = const(42, etype="f4")
+        t = const(42, etype=F4)
         expected = "const(value=42) :: f4()"
         assert debug_str(t) == expected.strip()
 
     def test_1d(self) -> None:
-        t = const([1, 2, 3], etype="f4")
+        t = const([1, 2, 3], etype=F4)
         expected = "const(value=[1, 2, 3]) :: f4(3,)"
         assert debug_str(t) == expected.strip()
 
     def test_2d(self) -> None:
-        t = const([[1, 2], [3, 4]], etype="f4")
+        t = const([[1, 2], [3, 4]], etype=F4)
         expected = "const(value=[[1, 2], [3, 4]]) :: f4(2, 2)"
         assert debug_str(t) == expected.strip()
 
     def test_fp16(self) -> None:
-        t = const([1, 2], etype="f2")
+        t = const([1, 2], etype=F2)
         expected = "const(value=[1, 2]) :: f2(2,)"
         assert debug_str(t) == expected.strip()
 
 
 class TestElementwiseOps:
     def test_add(self) -> None:
-        t1 = const([1, 2], etype="f4")
-        t2 = const([3, 4], etype="f4")
+        t1 = const([1, 2], etype=F4)
+        t2 = const([3, 4], etype=F4)
         t = t1 + t2
         expected = textwrap.dedent(
             """
@@ -49,9 +50,9 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_chained(self) -> None:
-        t1 = const([1, 2], etype="f4")
-        t2 = const([3, 4], etype="f4")
-        t3 = const([5, 6], etype="f4")
+        t1 = const([1, 2], etype=F4)
+        t2 = const([3, 4], etype=F4)
+        t3 = const([5, 6], etype=F4)
         t = (t1 + t2) * t3
         expected = textwrap.dedent(
             """
@@ -65,7 +66,7 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_unary_chain(self) -> None:
-        t = const([1, 2, 3, 4], etype="f4")
+        t = const([1, 2, 3, 4], etype=F4)
         t = t.exp().log().exp().log()
         expected = textwrap.dedent(
             """
@@ -79,7 +80,7 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_scalar_broadcast(self) -> None:
-        t = const([[1, 2], [3, 4]], etype="f4")
+        t = const([[1, 2], [3, 4]], etype=F4)
         t = t + 10
         expected = textwrap.dedent(
             """
@@ -92,7 +93,7 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_max_with_scalar(self) -> None:
-        t = const([1, 2, 3], etype="f4")
+        t = const([1, 2, 3], etype=F4)
         t = t.max(0)
         expected = textwrap.dedent(
             """
@@ -105,8 +106,8 @@ class TestElementwiseOps:
         assert debug_str(t) == expected.strip()
 
     def test_comparison(self) -> None:
-        t1 = const([1, 2], etype="f4")
-        t2 = const([2, 1], etype="f4")
+        t1 = const([1, 2], etype=F4)
+        t2 = const([2, 1], etype=F4)
         t = t1.gt(t2)
         expected = textwrap.dedent(
             """
@@ -120,7 +121,7 @@ class TestElementwiseOps:
 
 class TestReduction:
     def test_sum(self) -> None:
-        t = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t.reduce(axes=(1,), operator="add")
         expected = textwrap.dedent(
             """
@@ -133,7 +134,7 @@ class TestReduction:
 
 class TestIndexing:
     def test_integer_index(self) -> None:
-        t = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t[0]
         expected = textwrap.dedent(
             """
@@ -144,7 +145,7 @@ class TestIndexing:
         assert debug_str(t) == expected.strip()
 
     def test_slice_with_step(self) -> None:
-        t = const([1, 2, 3, 4, 5, 6], etype="f4")
+        t = const([1, 2, 3, 4, 5, 6], etype=F4)
         t = t[::2]
         expected = textwrap.dedent(
             """
@@ -155,7 +156,7 @@ class TestIndexing:
         assert debug_str(t) == expected.strip()
 
     def test_multi_dim(self) -> None:
-        t = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t[1, 1:3]
         expected = textwrap.dedent(
             """
@@ -168,7 +169,7 @@ class TestIndexing:
 
 class TestPermute:
     def test_transpose(self) -> None:
-        t = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t.permute((1, 0))
         expected = textwrap.dedent(
             """
@@ -181,7 +182,7 @@ class TestPermute:
 
 class TestCompact:
     def test_compact_after_slice(self) -> None:
-        t = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t[(slice(None, None, 2), slice(None))]
         t = t.copy()
         expected = textwrap.dedent(
@@ -194,7 +195,7 @@ class TestCompact:
         assert debug_str(t) == expected.strip()
 
     def test_compact_noop_on_contiguous(self) -> None:
-        t = const([1, 2, 3], etype="f4")
+        t = const([1, 2, 3], etype=F4)
         t2 = t.copy()
         expected = textwrap.dedent(
             """
@@ -207,8 +208,8 @@ class TestCompact:
 
 class TestSharedSubexpressions:
     def test_shared_subgraph(self) -> None:
-        t1 = const([1, 2], etype="f4")
-        t2 = const([3, 4], etype="f4")
+        t1 = const([1, 2], etype=F4)
+        t2 = const([3, 4], etype=F4)
         t = t1 + t2
         t = t * t
         expected = textwrap.dedent(
@@ -226,8 +227,8 @@ class TestSharedSubexpressions:
 
 class TestMatmul:
     def test_matmul_2d(self) -> None:
-        t1 = const([[1, 2], [3, 4], [5, 6]], etype="f4")
-        t2 = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t1 = const([[1, 2], [3, 4], [5, 6]], etype=F4)
+        t2 = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t1 @ t2
         expected = textwrap.dedent(
             """
@@ -239,14 +240,14 @@ class TestMatmul:
         assert debug_str(t) == expected.strip()
 
     def test_matmul_batched(self) -> None:
-        t1 = const([[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]], etype="f4")
-        t2 = const([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], etype="f4")
+        t1 = const([[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]], etype=F4)
+        t2 = const([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], etype=F4)
         r = t1 @ t2
         assert r.shape == (2, 3, 3)
 
     def test_matmul_2d_broadcast_left(self) -> None:
-        t1 = const([[1, 2], [3, 4], [5, 6]], etype="f4")
-        t2 = const([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], etype="f4")
+        t1 = const([[1, 2], [3, 4], [5, 6]], etype=F4)
+        t2 = const([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], etype=F4)
         t = t1 @ t2
         expected = textwrap.dedent(
             """
@@ -259,8 +260,8 @@ class TestMatmul:
         assert debug_str(t) == expected.strip()
 
     def test_matmul_2d_broadcast_right(self) -> None:
-        t1 = const([[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]], etype="f4")
-        t2 = const([[1, 2, 3], [4, 5, 6]], etype="f4")
+        t1 = const([[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]], etype=F4)
+        t2 = const([[1, 2, 3], [4, 5, 6]], etype=F4)
         t = t1 @ t2
         expected = textwrap.dedent(
             """
@@ -275,7 +276,7 @@ class TestMatmul:
 
 class TestBroadcast:
     def test_full(self) -> None:
-        t = full((2, 3), v=1, etype="f4")
+        t = full((2, 3), v=1, etype=F4)
         expected = textwrap.dedent(
             """
             view(offset=0, shape=(2, 3), pitch=(0, 0))
@@ -285,7 +286,7 @@ class TestBroadcast:
         assert debug_str(t) == expected.strip()
 
     def test_zeros(self) -> None:
-        t = zeros((4,), etype="f4")
+        t = zeros((4,), etype=F4)
         expected = textwrap.dedent(
             """
             view(offset=0, shape=(4,), pitch=(0,))
@@ -297,6 +298,6 @@ class TestBroadcast:
 
 class TestParam:
     def test_param_node(self) -> None:
-        t = param(shape=(4,), etype="f4", label="weights")
+        t = param(shape=(4,), etype=F4, label="weights")
         expected = "param(label='weights') :: f4(4,)"
         assert debug_str(t) == expected.strip()

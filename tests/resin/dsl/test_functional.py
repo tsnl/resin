@@ -25,8 +25,8 @@ class TestTypecheck:
         def add(x: View[F4, (2,)], y: View[F4, (2,)]) -> View[F4, (2,)]:
             return x + y
 
-        x = param(shape=(2,), etype="f4", label="x")
-        y = param(shape=(3,), etype="f4", label="y")
+        x = param(shape=(2,), etype=F4, label="x")
+        y = param(shape=(3,), etype=F4, label="y")
         with pytest.raises(ValueError, match="expected shape"):
             add(x=x, y=y)
 
@@ -35,8 +35,8 @@ class TestTypecheck:
         def add(x: View[F4, (2,)], y: View[F4, (2,)]) -> View[F4, (2,)]:
             return x + y
 
-        x = param(shape=(2,), etype="f4", label="x")
-        y = param(shape=(2,), etype="f4", label="y")
+        x = param(shape=(2,), etype=F4, label="x")
+        y = param(shape=(2,), etype=F4, label="y")
         assert (add(x=x, y=y) - x - y).shape == (2,)
 
     def test_accepts_positional_args(self) -> None:
@@ -44,6 +44,6 @@ class TestTypecheck:
         def add(x: View[F4, (2,)], y: View[F4, (2,)]) -> View[F4, (2,)]:
             return x + y
 
-        x = param(shape=(2,), etype="f4", label="x")
-        y = param(shape=(2,), etype="f4", label="y")
+        x = param(shape=(2,), etype=F4, label="x")
+        y = param(shape=(2,), etype=F4, label="y")
         assert (add(x, y) - x - y).shape == (2,)

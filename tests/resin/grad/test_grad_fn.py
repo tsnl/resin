@@ -8,7 +8,7 @@ from ..dsl.fixtures import mlp_step
 
 
 def _param_tree(spec_name: str, shape: tuple[int, ...]) -> View:
-    return param(shape=shape, etype="f4", label=spec_name)
+    return param(shape=shape, etype=F4, label=spec_name)
 
 
 def _mlp_views() -> dict[str, object]:
@@ -49,13 +49,24 @@ class TestGradFn:
         def sum_x(x: View[F4, (2,)], y: View[F4, (2,)]) -> View[F4, ()]:
             return x.sum().squeeze(axes=(0,))
 
-        x = param(shape=(2,), etype="f4", label="x")
-        y = param(shape=(2,), etype="f4", label="y")
+        x = param(shape=(2,), etype=F4, label="x")
+        y = param(shape=(2,), etype=F4, label="y")
         _, grad_args = grad_fn(sum_x, grads_for=["x", "y"])(x=x, y=y)
 
         grad_map = grad(sum_x(x=x, y=y))
         assert grad_map.get(y.node) is None
         assert grad_args["y"].node is not y.node
+
+    def test_empty_grads_for_computes_no_gradients(self) -> None:
+        def sum_both(x: View[F4, (2,)], y: View[F4, (2,)]) -> View[F4, ()]:
+            return (x + y).sum().squeeze(axes=(0,))
+
+        x = param(shape=(2,), etype=F4, label="x")
+        y = param(shape=(2,), etype=F4, label="y")
+        _, grad_args = grad_fn(sum_both, grads_for=[])(x=x, y=y)
+
+        assert grad_args["x"] is x
+        assert grad_args["y"] is y
 
     def test_rejects_unknown_grads_for(self) -> None:
         with pytest.raises(ValueError, match="unknown grads_for"):

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from resin import dsl
+from resin.core.etype import F4
 from resin.ir import IrProgramBuilder
 from resin.wgpu import WgpuProgram, build_wgpu_program
 
@@ -22,7 +23,7 @@ from resin.wgpu import WgpuProgram, build_wgpu_program
 
 
 def main() -> None:
-    t = dsl.const([1.0, 2.0, 3.0], etype="f4")
+    t = dsl.const([1.0, 2.0, 3.0], etype=F4)
 
     builder = IrProgramBuilder()
     builder.build_sink("out", t)
@@ -37,7 +38,7 @@ def main() -> None:
     restored = WgpuProgram.from_msgpack(blob)
     assert restored.sinks["out"] == 0
     assert len(restored.buffers) == 1
-    assert restored.buffers[0].etype == "f4"
+    assert restored.buffers[0].etype == F4
 
     print(f"wrote {out_path}", file=sys.stderr)
 

@@ -24,6 +24,7 @@ from resin.core.etype import (
     BinaryAssocElementOperator,
     ElementType,
     ElementOperator,
+    F4,
     Scalar,
     UnaryElementOperator,
     etype_join,
@@ -293,20 +294,20 @@ class View:
 type TensorOperand = View | Scalar
 
 
-def const(value: PyTensor, *, etype: ElementType = "f4") -> View:
+def const(value: PyTensor, *, etype: ElementType = F4) -> View:
     shape = infer_pytensor_shape(value)
     return View.identity(ConstNode(shape=shape, etype=etype, args=(), value=value))
 
 
-def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType = "f4") -> View:
+def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType = F4) -> View:
     return const(v, etype=etype).broadcast(shape)
 
 
-def ones(shape: tuple[int, ...], *, etype: ElementType = "f4") -> View:
+def ones(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
     return full(shape, 1, etype=etype)
 
 
-def zeros(shape: tuple[int, ...], *, etype: ElementType = "f4") -> View:
+def zeros(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
     return full(shape, 0, etype=etype)
 
 

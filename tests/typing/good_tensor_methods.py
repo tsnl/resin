@@ -6,5 +6,5 @@ def reduce_scalar(x: View[F4, (2,)]) -> View[F4, ()]:
     return x.sum().squeeze(axes=(0,))
 
 
-_ = reduce_scalar(param(shape=(2,), etype="f4", label="x"))
-_ = reduce_scalar(const(1.0, etype="f4").broadcast((2,)))
+_ = reduce_scalar(param(shape=(2,), etype=F4, label="x"))
+_ = reduce_scalar(const(1.0, etype=F4).broadcast((2,)))

@@ -4,6 +4,7 @@ import struct
 import resin_rt_pybind
 
 from resin import dsl
+from resin.core.etype import F4
 from resin.ir import IrProgramBuilder
 from resin.wgpu import (
     WgpuProgram,
@@ -15,7 +16,7 @@ from resin.wgpu import (
 
 class TestBuildWgpuProgram:
     def test_const_graph_round_trips_msgpack(self) -> None:
-        t = dsl.const([1.0, 2.0], etype="f4")
+        t = dsl.const([1.0, 2.0], etype=F4)
         builder = IrProgramBuilder()
         builder.build_sink("out", t)
         ir_program = builder.finish()
@@ -26,7 +27,7 @@ class TestBuildWgpuProgram:
 
         assert len(restored.buffers) == 1
         buffer = restored.buffers[0]
-        assert buffer.etype == "f4"
+        assert buffer.etype == F4
         assert buffer.init is not None
         assert buffer.init == wgpu_program.buffers[0].init
         assert len(buffer.init) == math.prod(buffer.shape) * etype_nbytes(
@@ -41,7 +42,7 @@ class TestBuildWgpuProgram:
         assert restored.queue == ()
 
     def test_msgpack_loadable_by_runtime(self) -> None:
-        t = dsl.const([1.0, 2.0], etype="f4")
+        t = dsl.const([1.0, 2.0], etype=F4)
         builder = IrProgramBuilder()
         builder.build_sink("out", t)
         ir_program = builder.finish()
@@ -50,8 +51,8 @@ class TestBuildWgpuProgram:
         resin_rt_pybind.WgpuInterp(wgpu_program.to_msgpack())
 
     def test_elementwise_graph_has_pipeline_and_dispatch(self) -> None:
-        t1 = dsl.const([1.0, 2.0], etype="f4")
-        t2 = dsl.const([3.0, 4.0], etype="f4")
+        t1 = dsl.const([1.0, 2.0], etype=F4)
+        t2 = dsl.const([3.0, 4.0], etype=F4)
         out = t1 + t2
 
         builder = IrProgramBuilder()

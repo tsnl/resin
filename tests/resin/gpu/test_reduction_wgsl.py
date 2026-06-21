@@ -2,13 +2,14 @@ from resin.core.accessor import Accessor
 from resin.dsl import const
 from resin.ir import IrProgramBuilder, IrReductionKernel
 from resin.wgpu import WgslKernelConfig, emit_wgsl_for_kernel
+from resin.core.etype import F4
 
 
 class TestIrReductionKernel:
     def test_post_init_validates_shapes(self) -> None:
         kernel = IrReductionKernel(
             arg_accessors=(Accessor.dense((2, 3)),),
-            etype="f4",
+            etype=F4,
             shape=(2, 1),
             operator="add",
             axes=(1,),
@@ -20,7 +21,7 @@ class TestEmitReductionWgsl:
     def test_sum_axis_1(self) -> None:
         kernel = IrReductionKernel(
             arg_accessors=(Accessor.dense((2, 3)),),
-            etype="f4",
+            etype=F4,
             shape=(2, 1),
             operator="add",
             axes=(1,),
@@ -34,7 +35,7 @@ class TestEmitReductionWgsl:
     def test_max_multi_axis(self) -> None:
         kernel = IrReductionKernel(
             arg_accessors=(Accessor.dense((2, 3)),),
-            etype="f4",
+            etype=F4,
             shape=(1, 1),
             operator="max",
             axes=(0, 1),
@@ -47,7 +48,7 @@ class TestEmitReductionWgsl:
     def test_mul_single_element_axis(self) -> None:
         kernel = IrReductionKernel(
             arg_accessors=(Accessor.dense((4, 1)),),
-            etype="f4",
+            etype=F4,
             shape=(4, 1),
             operator="mul",
             axes=(1,),
@@ -60,7 +61,7 @@ class TestEmitReductionWgsl:
 
 class TestProgramBuilderReduction:
     def test_lowers_reduction_node(self) -> None:
-        t = const([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], etype="f4")
+        t = const([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], etype=F4)
         n = t.reduce(axes=(1,), operator="add")
 
         builder = IrProgramBuilder()

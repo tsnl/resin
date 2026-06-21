@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass, fields, is_dataclass
 
 import resin.dsl as dsl
+from resin.core.etype import F4
 
 
 @dataclass
@@ -39,8 +40,8 @@ class Linear:
 
     @staticmethod
     def new(in_features: int, out_features: int, bias: bool = True) -> "Linear":
-        weight = dsl.param(shape=(out_features, in_features), etype="f4")
-        bias_node = dsl.param(shape=(out_features,), etype="f4") if bias else None
+        weight = dsl.param(shape=(out_features, in_features), etype=F4)
+        bias_node = dsl.param(shape=(out_features,), etype=F4) if bias else None
         return Linear(weight=weight, bias=bias_node)
 
     def __call__(self, x: dsl.View) -> dsl.View:

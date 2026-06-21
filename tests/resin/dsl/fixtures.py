@@ -15,9 +15,9 @@ def mlp_step(
     params: LinearParams,
 ) -> View[F4, ()]:
     logits = (x @ params["weight"].transpose() + params["bias"]).max(
-        const(0, etype="f4")
+        const(0, etype=F4)
     )
     probs = logits.exp() / logits.exp().reduce(axes=(1,), operator="add")
     per_ex = -(y * probs.log()).reduce(axes=(1,), operator="add")
-    mean_loss = per_ex.reduce(axes=(0,), operator="add") / const(64, etype="f4")
+    mean_loss = per_ex.reduce(axes=(0,), operator="add") / const(64, etype=F4)
     return mean_loss.squeeze(axes=tuple(range(mean_loss.rank)))

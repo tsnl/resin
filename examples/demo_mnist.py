@@ -312,6 +312,7 @@ def _run_resin(
 
     import resin.nn as nn
     from resin import dsl
+    from resin.core.etype import F4
     from resin.core.pytree import flatten_pytree
     from resin.ir import IrProgramBuilder
     from resin.train import build_param_update_program, commit_param_updates
@@ -350,9 +351,9 @@ def _run_resin(
 
     image = dsl.param(
         shape=(config.batch_size, config.img_size * config.img_size),
-        etype="f4",
+        etype=F4,
     )
-    label = dsl.param(shape=(config.batch_size, config.num_classes), etype="f4")
+    label = dsl.param(shape=(config.batch_size, config.num_classes), etype=F4)
     model = ResinMnistMlp.new(
         ResinMnistMlpConfig(
             input_size=config.img_size**2,
