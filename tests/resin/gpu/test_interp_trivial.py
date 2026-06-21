@@ -9,7 +9,9 @@ import resin.nn as nn
 from resin import dsl
 from resin.core.etype import F4
 
-from tests.resin.gpu.interp_helpers import PyTensor, run_graph, run_scalar
+from resin.core.pytree import PyTensor
+
+from tests.resin.gpu.interp_helpers import run_graph, run_scalar
 
 
 class TestConst:

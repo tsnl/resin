@@ -6,10 +6,11 @@ import os
 import random
 import struct
 import urllib.request
+import urllib.response
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 MnistSplit = Literal["train", "test"]
 
@@ -31,8 +32,12 @@ def mnist_cache_dir() -> Path:
 
 def _download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as response, dest.open("wb") as out:
-        out.write(response.read())
+    with (
+        cast(urllib.response.addinfourl, urllib.request.urlopen(url)) as response,
+        dest.open("wb") as out,
+    ):
+        body = response.read()
+        _ = out.write(body)
 
 
 def ensure_mnist_cached(cache_dir: Path | None = None) -> Path:
@@ -48,12 +53,16 @@ def ensure_mnist_cached(cache_dir: Path | None = None) -> Path:
 
 def _read_idx_images(path: Path) -> tuple[int, int, int, bytes]:
     with gzip.open(path, "rb") as f:
-        magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
+        header = f.read(16)
+        magic, count, rows, cols = cast(
+            tuple[int, int, int, int],
+            struct.unpack(">IIII", header),
+        )
     if magic != _MNIST_IMAGE_MAGIC:
         raise ValueError(f"unexpected MNIST image magic: {magic:#x}")
     expected_bytes = count * rows * cols
     with gzip.open(path, "rb") as f:
-        f.seek(16)
+        _ = f.seek(16)
         data = f.read(expected_bytes)
     if len(data) != expected_bytes:
         raise ValueError(
@@ -64,11 +73,12 @@ def _read_idx_images(path: Path) -> tuple[int, int, int, bytes]:
 
 def _read_idx_labels(path: Path) -> tuple[int, bytes]:
     with gzip.open(path, "rb") as f:
-        magic, count = struct.unpack(">II", f.read(8))
+        header = f.read(8)
+        magic, count = cast(tuple[int, int], struct.unpack(">II", header))
     if magic != _MNIST_LABEL_MAGIC:
         raise ValueError(f"unexpected MNIST label magic: {magic:#x}")
     with gzip.open(path, "rb") as f:
-        f.seek(8)
+        _ = f.seek(8)
         data = f.read(count)
     if len(data) != count:
         raise ValueError(

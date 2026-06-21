@@ -1,6 +1,6 @@
 import resin.grad as grad
+from resin.core.etype import BinaryAssocElementOperator, F4
 from resin.dsl import ElementwiseNode, View, param
-from resin.core.etype import F4
 
 
 class TestAccessorAdjoint:
@@ -23,7 +23,11 @@ class TestAccessorAdjoint:
 
 
 class TestReductionDfDo:
-    def _make(self, axes, operator):
+    def _make(
+        self,
+        axes: tuple[int, ...],
+        operator: BinaryAssocElementOperator,
+    ) -> tuple[View, View, View]:
         x = param(shape=(2, 3), etype=F4, label="x")
         n = x.reduce(axes=axes, operator=operator)
         df_dn = param(shape=n.shape, etype=F4, label="df_dn")

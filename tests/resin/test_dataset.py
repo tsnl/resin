@@ -10,15 +10,15 @@ from resin.dataset import MnistDataLoader, MnistDataset
 def _write_idx_images(path: Path, rows: int, cols: int, pixels: list[int]) -> None:
     header = struct.pack(">IIII", 2051, len(pixels) // (rows * cols), rows, cols)
     with gzip.open(path, "wb") as f:
-        f.write(header)
-        f.write(bytes(pixels))
+        _ = f.write(header)
+        _ = f.write(bytes(pixels))
 
 
 def _write_idx_labels(path: Path, labels: list[int]) -> None:
     header = struct.pack(">II", 2049, len(labels))
     with gzip.open(path, "wb") as f:
-        f.write(header)
-        f.write(bytes(labels))
+        _ = f.write(header)
+        _ = f.write(bytes(labels))
 
 
 @pytest.fixture

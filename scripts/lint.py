@@ -41,7 +41,8 @@ _ALL_CHECKS: dict[str, tuple[str, ...]] = {
     ),
     "basedpyright": (
         "--level",
-        "error",
+        "warning",
+        "--warnings",
         *_CHECK_PATHS,
     ),
     "pytest": ("tests",),

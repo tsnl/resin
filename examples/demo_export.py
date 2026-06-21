@@ -33,12 +33,12 @@ def main() -> None:
     blob = wgpu_program.to_msgpack()
 
     out_path = Path.cwd() / "demo_export.wgpu.msgpack"
-    out_path.write_bytes(blob)
+    _ = out_path.write_bytes(blob)
 
     restored = WgpuProgram.from_msgpack(blob)
     assert restored.sinks["out"] == 0
     assert len(restored.buffers) == 1
-    assert restored.buffers[0].etype == F4
+    assert restored.buffers[0]["etype"] == F4
 
     print(f"wrote {out_path}", file=sys.stderr)
 

@@ -163,7 +163,7 @@ class IrProgramBuilder:
         self.sinks = {}
 
     def finish(self) -> IrProgram:
-        param_buffer_ids = frozendict(
+        param_buffer_ids: frozendict[int, int] = frozendict(
             {
                 id(node): index
                 for index, node in enumerate(self.buffer_memo.keys())

@@ -15,8 +15,9 @@ __all__ = [
 ]
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, fields
-from typing import Annotated, Iterable, overload
+from typing import Annotated, overload
 
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
@@ -63,14 +64,8 @@ class View:
         cls, params: tuple[ElementType, tuple[int, ...]]
     ) -> TensorMeta: ...
 
-    def __class_getitem__(
-        cls, params: tuple[ElementType, tuple[int, ...]]
-    ) -> object:
+    def __class_getitem__(cls, params: tuple[ElementType, tuple[int, ...]]) -> object:
         etype, shape = params
-        if not isinstance(etype, str):
-            raise TypeError(f"View etype must be a string literal, got {etype!r}")
-        if not isinstance(shape, tuple):
-            raise TypeError(f"View shape must be a tuple, got {shape!r}")
         if shape == ():
             return Annotated[View | Scalar, TensorMeta(etype, shape)]
         return TensorMeta(etype, shape)
@@ -229,7 +224,7 @@ class View:
     def debug_print(self, out: SupportsWrite[str]) -> None:
         debug_print(self, out)
 
-    def _is_identity(self) -> bool:
+    def is_identity(self) -> bool:
         return self.accessor.is_dense_c_contiguous(self.node.shape)
 
     @staticmethod
@@ -272,7 +267,7 @@ class View:
         if s.rank < 2 or o.rank < 2:
             raise ValueError(
                 f"Shapes {s.shape} and {o.shape} are not compatible for matmul: "
-                "both tensors must be 2D or higher"
+                + "both tensors must be 2D or higher"
             )
 
         s_shape_gat = tuple(x for i, x in enumerate(s.shape) if i != s.rank - 2)
@@ -432,7 +427,9 @@ def debug_print(root: View, out: SupportsWrite[str]) -> None:
         tid_map: dict[Node, int] = {}
         for node, ref_count in reference_count_map.items():
             if ref_count < 1:
-                raise ValueError(f"Node {node!r} has invalid reference count {ref_count}")
+                raise ValueError(
+                    f"Node {node!r} has invalid reference count {ref_count}"
+                )
             if ref_count == 1:
                 continue
             tid_map[node] = len(tid_map)
@@ -454,14 +451,14 @@ def debug_print(root: View, out: SupportsWrite[str]) -> None:
         *,
         is_root: bool,
     ) -> None:
-        if view._is_identity():
+        if view.is_identity():
             visit_node(view.node, prefix, connector, prefix_ext, is_root=is_root)
             return
 
         a = view.accessor
         print(
             f"{prefix}{connector}view("
-            f"offset={a.offset}, shape={a.shape!r}, pitch={a.pitch!r})",
+            + f"offset={a.offset}, shape={a.shape!r}, pitch={a.pitch!r})",
             file=out,
         )
         visit_node(view.node, prefix + prefix_ext, "└ ", "  ", is_root=is_root)

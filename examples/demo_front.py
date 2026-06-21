@@ -72,9 +72,7 @@ dsl.const([[1, 2, 3], [4, 5, 6]], etype=F4)[(1, slice(1, 3))].debug_print(
 )
 
 section("Permute (transpose)")
-dsl.const([[1, 2, 3], [4, 5, 6]], etype=F4).permute((1, 0)).debug_print(
-    out=sys.stderr
-)
+dsl.const([[1, 2, 3], [4, 5, 6]], etype=F4).permute((1, 0)).debug_print(out=sys.stderr)
 
 section("Compact after slice")
 t = dsl.const([[1, 2, 3], [4, 5, 6]], etype=F4)

@@ -1,5 +1,5 @@
 from resin.core.etype import F4
-from resin.core.pytree import PyTree, flatten_pytree, map_pytree, tree_map_leaves
+from resin.core.pytree import PyTree, flatten_pytree, map_pytree
 from resin.dsl.view import View, param
 
 
@@ -19,36 +19,26 @@ class TestFlattenPytree:
 class TestMapPytree:
     def test_maps_every_leaf(self) -> None:
         tree: PyTree[int] = {"a": [1, 2], "b": 3}
-        assert map_pytree(tree, lambda x: x * 2) == {"a": [2, 4], "b": 6}
+
+        def double(x: int) -> int:
+            return x * 2
+
+        assert map_pytree(tree, double) == {"a": [2, 4], "b": 6}
 
     def test_maps_tuple_nodes(self) -> None:
         tree: PyTree[int] = (1, {"a": 2})
-        assert map_pytree(tree, lambda x: x + 1) == (2, {"a": 3})
 
+        def increment(x: int) -> int:
+            return x + 1
 
-class TestTreeMapLeaves:
-    def test_only_maps_matching_leaves(self) -> None:
-        tree: PyTree[int] = {"a": [1, 2], "b": 3}
+        assert map_pytree(tree, increment) == (2, {"a": 3})
 
-        def is_int(value: object) -> bool:
-            return isinstance(value, int)
+    def test_callback_inspects_leaf_type(self) -> None:
+        tree: PyTree[int | str] = {"a": [1, 2], "b": "skip"}
 
-        assert tree_map_leaves(tree, is_int, lambda x: x * 2) == {
-            "a": [2, 4],
-            "b": 6,
-        }
+        def maybe_double(x: int | str) -> int | str:
+            if isinstance(x, int):
+                return x * 2
+            return x
 
-    def test_uses_map_pytree_map_leaves_only(self) -> None:
-        tree: PyTree[int] = (1, [2, 3])
-
-        def is_int(value: object) -> bool:
-            return isinstance(value, int)
-
-        mapped = tree_map_leaves(tree, is_int, lambda x: x + 1)
-        assert mapped == (2, [3, 4])
-        assert map_pytree(
-            tree,
-            lambda x: x + 1,
-            is_leaf=is_int,
-            map_leaves_only=True,
-        ) == mapped
+        assert map_pytree(tree, maybe_double) == {"a": [2, 4], "b": "skip"}

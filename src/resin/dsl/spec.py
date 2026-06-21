@@ -5,10 +5,18 @@ import inspect
 import types
 import typing
 from dataclasses import dataclass
-from typing import Callable, overload, get_args, get_origin, get_type_hints
+from typing import (
+    Callable,
+    cast,
+    overload,
+    assert_never,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from resin.core.etype import ElementType, Scalar, is_scalar
-from resin.core.pytree import PyTree, tree_map_leaves
+from resin.core.pytree import PyTree, map_pytree
 from resin.dsl.view import TensorMeta, View
 
 
@@ -23,7 +31,7 @@ type Spec = TensorSpec | dict[str, Spec] | tuple[Spec, ...] | list[Spec]
 
 def _is_view_scalar_union(hint: object) -> bool:
     origin = get_origin(hint)
-    if origin not in (types.UnionType, typing.Union):
+    if origin is not types.UnionType:
         return False
     args = get_args(hint)
     return View in args and Scalar in args
@@ -39,7 +47,7 @@ def annotation_to_spec(hint: object) -> Spec:
         args = get_args(hint)
         if len(args) != 2:
             raise ValueError(f"unsupported Annotated annotation: {hint!r}")
-        meta = args[1]
+        meta = cast(object, args[1])
         if isinstance(meta, TensorMeta):
             return TensorSpec(meta.etype, meta.shape)
         raise ValueError(f"unsupported Annotated metadata: {meta!r}")
@@ -50,25 +58,30 @@ def annotation_to_spec(hint: object) -> Spec:
         )
 
     if typing.is_typeddict(hint):
+        typed_hints = cast(
+            dict[str, object],
+            get_type_hints(hint, include_extras=True),
+        )
         return {
-            key: annotation_to_spec(type_hint)
-            for key, type_hint in get_type_hints(hint, include_extras=True).items()
+            key: annotation_to_spec(type_hint) for key, type_hint in typed_hints.items()
         }
 
     if hint is dict or hint is builtins.dict:
         raise ValueError("bare dict annotations unsupported — use TypedDict")
 
-    if origin in (tuple, typing.Tuple):
+    if origin is tuple:
         el_args = get_args(hint)
         if not el_args:
             raise ValueError(f"unsupported tuple annotation: {hint!r}")
-        return tuple(annotation_to_spec(element) for element in el_args)
+        return tuple(
+            annotation_to_spec(element) for element in cast(tuple[object, ...], el_args)
+        )
 
-    if origin in (list, typing.List):
+    if origin is list:
         el_args = get_args(hint)
         if len(el_args) != 1:
             raise ValueError(f"unsupported list annotation: {hint!r}")
-        return [annotation_to_spec(el_args[0])]
+        return [annotation_to_spec(cast(object, el_args[0]))]
 
     raise ValueError(f"unsupported annotation: {hint!r}")
 
@@ -85,7 +98,8 @@ def _param_names(fn: Callable[..., object]) -> tuple[str, ...]:
             case inspect.Parameter.POSITIONAL_ONLY:
                 raise ValueError(f"unsupported positional-only parameter: {name!r}")
             case _:
-                if parameter.annotation is inspect.Parameter.empty:
+                annotation = cast(object, parameter.annotation)
+                if annotation is inspect.Parameter.empty:
                     raise ValueError(f"unannotated parameter: {name!r}")
                 names.append(name)
     return tuple(names)
@@ -98,7 +112,7 @@ class SignatureSpec:
 
 
 def parse_signature(fn: Callable[..., object]) -> SignatureSpec:
-    hints = get_type_hints(fn, include_extras=True)
+    hints = cast(dict[str, object], get_type_hints(fn, include_extras=True))
     if "return" not in hints:
         raise ValueError(f"unannotated return for {fn.__qualname__!r}")
     return SignatureSpec(
@@ -125,29 +139,34 @@ def typecheck_against_spec(value: object, spec: Spec) -> None:
         case dict() as fields:
             if not isinstance(value, dict):
                 raise TypeError(f"expected dict, got {type(value).__name__}")
-            if set(value.keys()) != set(fields.keys()):
+            value_dict = cast(dict[str, object], value)
+            if set(value_dict.keys()) != set(fields.keys()):
                 raise ValueError(
-                    f"expected keys {set(fields.keys())!r}, got {set(value.keys())!r}"
+                    f"expected keys {set(fields.keys())!r}, "
+                    + f"got {set(value_dict.keys())!r}"
                 )
             for key, field_spec in fields.items():
-                typecheck_against_spec(value[key], field_spec)
+                typecheck_against_spec(value_dict[key], field_spec)
         case tuple() as elements:
             if not isinstance(value, tuple):
                 raise TypeError(f"expected tuple, got {type(value).__name__}")
-            if len(value) != len(elements):
+            value_tuple = cast(tuple[object, ...], value)
+            if len(value_tuple) != len(elements):
                 raise ValueError(
-                    f"expected tuple of length {len(elements)}, got {len(value)}"
+                    f"expected tuple of length {len(elements)}, "
+                    + f"got {len(value_tuple)}"
                 )
-            for element_value, element_spec in zip(value, elements, strict=True):
+            for element_value, element_spec in zip(value_tuple, elements, strict=True):
                 typecheck_against_spec(element_value, element_spec)
         case list() as elements:
             if not isinstance(value, list):
                 raise TypeError(f"expected list, got {type(value).__name__}")
+            value_list = cast(list[object], value)
             element_spec = elements[0]
-            for element_value in value:
+            for element_value in value_list:
                 typecheck_against_spec(element_value, element_spec)
         case _:
-            raise TypeError(f"unsupported spec: {spec!r}")
+            assert_never(spec)
 
 
 def bind_call_args[T](
@@ -168,14 +187,10 @@ def bind_call_args[T](
         bound[name] = value
     missing = set(names) - set(bound.keys())
     if missing:
-        raise TypeError(
-            f"missing required argument(s): {', '.join(sorted(missing))}"
-        )
+        raise TypeError(f"missing required argument(s): {', '.join(sorted(missing))}")
     extra = set(bound.keys()) - set(names)
     if extra:
-        raise TypeError(
-            f"unexpected keyword argument(s): {', '.join(sorted(extra))}"
-        )
+        raise TypeError(f"unexpected keyword argument(s): {', '.join(sorted(extra))}")
     return bound
 
 
@@ -194,7 +209,7 @@ def map_tensor_leaves(
     value: PyTree[View],
     fn: Callable[[View], View],
 ) -> PyTree[View]:
-    return tree_map_leaves(value, lambda node: isinstance(node, View), fn)
+    return map_pytree(value, fn)
 
 
 @overload

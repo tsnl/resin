@@ -17,8 +17,8 @@ def pascal_to_snake_case(s: str) -> str:
 
 
 def parse_pascal_case_id(s: str) -> list[str]:
-    result = []
-    current = []
+    result: list[str] = []
+    current: list[str] = []
     for i, c in enumerate(s):
         if c.isupper() and i > 0 and (s[i - 1].islower()):
             result.append("".join(current))
