@@ -36,7 +36,7 @@ def main() -> None:
 
     sink_view_index = wgpu_program.sinks["out"]
     buffer_view = wgpu_program.buffer_views[sink_view_index]
-    raw = interp.read_buffer(buffer_view.buffer_index)
+    raw = interp.read_buffer(buffer_view["buffer_index"])
     values = struct.unpack("<3f", raw)
 
     print(f"sink values: {values}", file=sys.stderr)
