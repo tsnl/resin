@@ -1,7 +1,6 @@
 from resin.dsl.dsl import View, param
 from resin.dsl.types import Tensor, parse_signature
-from resin.grad import grad, grad_fn
-from resin.grad.grad_fn import _build_grad_args
+from resin.grad import _build_grad_args, grad, grad_fn
 from ..dsl.fixtures import mlp_step
 
 
