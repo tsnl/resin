@@ -1,19 +1,8 @@
-"""
-resin.dsl models the computational graph of tensor operations.
-
-It is the "frontend" for the `resin` programming language, i.e. the part that users
-interact with directly when writing `resin` code.
-"""
+"""View types, annotation metadata, and tensor operation frontend."""
 
 __all__ = [
-    "ConstNode",
-    "ElementwiseNode",
-    "MatmulNode",
-    "Node",
-    "ParamNode",
-    "PyTree",
-    "ReductionNode",
-    "ScatterNode",
+    "TensorMeta",
+    "TensorOperand",
     "View",
     "const",
     "debug_print",
@@ -26,56 +15,68 @@ __all__ = [
 ]
 
 import math
-from abc import ABC
 from dataclasses import dataclass, fields
-from typing import Callable, Iterable
+from typing import Annotated, Iterable, overload
 
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
-from resin.core.pytree import PyTensor, PyTree, infer_pytensor_shape
 from resin.core.etype import (
     BinaryAssocElementOperator,
     ElementType,
-    Scalar,
     ElementOperator,
+    F4,
+    Scalar,
     UnaryElementOperator,
     etype_join,
     etype_nbytes,
 )
+from resin.core.pytree import PyTensor, infer_pytensor_shape
+from resin.dsl.node import (
+    ConstNode,
+    ElementwiseNode,
+    MatmulNode,
+    Node,
+    ParamNode,
+    ReductionNode,
+    ScatterNode,
+)
 
 
-@dataclass(kw_only=True, frozen=True, eq=False)
-class Node(ABC):
-    shape: tuple[int, ...]
+@dataclass(frozen=True)
+class TensorMeta:
     etype: ElementType
-    args: tuple["View", ...]
-
-    @property
-    def nbytes(self) -> int:
-        return math.prod(self.shape) * etype_nbytes(self.etype)
-
-    def view(
-        self,
-        *,
-        offset: int = 0,
-        shape: tuple[int, ...],
-        pitch: tuple[int, ...],
-    ) -> "View":
-        new = View(
-            node=self,
-            accessor=Accessor(offset=offset, shape=shape, pitch=pitch),
-        )
-        new._raise_if_out_of_backing_node_bounds()
-        return new
+    shape: tuple[int, ...]
 
 
 @dataclass(frozen=True, eq=False)
 class View:
-    node: "Node"
+    node: Node
     accessor: Accessor
 
+    @overload
+    def __class_getitem__(
+        cls, params: tuple[ElementType, tuple[()]]
+    ) -> Annotated[View | Scalar, TensorMeta]: ...
+
+    @overload
+    def __class_getitem__(
+        cls, params: tuple[ElementType, tuple[int, ...]]
+    ) -> TensorMeta: ...
+
+    def __class_getitem__(
+        cls, params: tuple[ElementType, tuple[int, ...]]
+    ) -> object:
+        etype, shape = params
+        if not isinstance(etype, str):
+            raise TypeError(f"View etype must be a string literal, got {etype!r}")
+        if not isinstance(shape, tuple):
+            raise TypeError(f"View shape must be a tuple, got {shape!r}")
+        if shape == ():
+            return Annotated[View | Scalar, TensorMeta(etype, shape)]
+        return TensorMeta(etype, shape)
+
     @staticmethod
-    def identity(node: "Node") -> "View":
+    def identity(node: Node) -> "View":
         return View(node=node, accessor=Accessor.dense(node.shape))
 
     @property
@@ -91,7 +92,7 @@ class View:
         return self.accessor.pitch
 
     @property
-    def etype(self) -> ElementType:
+    def etype(self) -> ElementType | str:
         return self.node.etype
 
     @property
@@ -118,88 +119,94 @@ class View:
         return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
-        return _copy(self, etype=etype)
+        return View.scatter(
+            source=self,
+            out_shape=self.shape,
+            woffset=0,
+            wpitch=c_contiguous_pitch_for_shape(self.shape),
+            etype=etype or self.etype,
+        )
 
-    def __pow__(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="pow")
+    def __pow__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="pow")
 
-    def __rpow__(self, other: "View | Scalar") -> "View":
+    def __rpow__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) ** self
 
-    def __mul__(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="mul")
+    def __mul__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="mul")
 
-    def __rmul__(self, other: "View | Scalar") -> "View":
+    def __rmul__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) * self
 
-    def __truediv__(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="div")
+    def __truediv__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="div")
 
-    def __rtruediv__(self, other: "View | Scalar") -> "View":
+    def __rtruediv__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) / self
 
-    def __add__(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="add")
+    def __add__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="add")
 
-    def __radd__(self, other: "View | Scalar") -> "View":
+    def __radd__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) + self
 
-    def __sub__(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="sub")
+    def __sub__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="sub")
 
-    def __rsub__(self, other: "View | Scalar") -> "View":
+    def __rsub__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) - self
 
-    def max(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="max")
+    def max(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="max")
 
-    def min(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="min")
+    def min(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="min")
 
-    def eq(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="eq")
+    def eq(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="eq")
 
-    def ne(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="ne")
+    def ne(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="ne")
 
-    def lt(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="lt")
+    def lt(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="lt")
 
-    def gt(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="gt")
+    def gt(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="gt")
 
-    def le(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="le")
+    def le(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="le")
 
-    def ge(self, other: "View | Scalar") -> "View":
-        return _elementwise_binary(self, other, operator="ge")
+    def ge(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary(self, other, operator="ge")
 
     def __neg__(self) -> "View":
-        return _elementwise_unary(self, operator="neg")
+        return View.elementwise_unary(self, operator="neg")
 
     def __pos__(self) -> "View":
         return self
 
     def exp(self) -> "View":
-        return _elementwise_unary(self, operator="exp")
+        return View.elementwise_unary(self, operator="exp")
 
     def log(self) -> "View":
-        return _elementwise_unary(self, operator="log")
+        return View.elementwise_unary(self, operator="log")
 
     def sqrt(self) -> "View":
-        return _elementwise_unary(self, operator="sqrt")
+        return View.elementwise_unary(self, operator="sqrt")
 
     def sin(self) -> "View":
-        return _elementwise_unary(self, operator="sin")
+        return View.elementwise_unary(self, operator="sin")
 
     def cos(self) -> "View":
-        return _elementwise_unary(self, operator="cos")
+        return View.elementwise_unary(self, operator="cos")
 
     def __invert__(self) -> "View":
-        return _elementwise_unary(self, operator="not")
+        return View.elementwise_unary(self, operator="not")
 
     def __matmul__(self, other: "View") -> "View":
-        return _matmul(self, other)
+        return View.matmul(self, other)
 
     def __rmatmul__(self, other: "View") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) @ self
@@ -211,7 +218,7 @@ class View:
         axes: tuple[int, ...] | None,
     ) -> "View":
         axes = tuple(range(self.rank)) if axes is None else axes
-        return _reduction(self, axes=axes, operator=operator)
+        return View.reduction(self, axes=axes, operator=operator)
 
     def sum(self, axes: tuple[int, ...] | None = None) -> "View":
         return self.reduce(axes=axes, operator="add")
@@ -219,17 +226,16 @@ class View:
     def prod(self, axes: tuple[int, ...] | None = None) -> "View":
         return self.reduce(axes=axes, operator="mul")
 
-    def debug_print(self, out: SupportsWrite[str]):
+    def debug_print(self, out: SupportsWrite[str]) -> None:
         debug_print(self, out)
 
     def _is_identity(self) -> bool:
         return self.accessor.is_dense_c_contiguous(self.node.shape)
 
-    def _raise_if_out_of_backing_node_bounds(self) -> None:
-        self.accessor.raise_if_addresses_out_of_bounds(math.prod(self.node.shape))
-
     @staticmethod
-    def _from_view_or_scalar(value: "PyTensor | View", etype: ElementType) -> "View":
+    def _from_view_or_scalar(
+        value: PyTensor | "View", etype: ElementType | str
+    ) -> "View":
         return value if isinstance(value, View) else const(value, etype=etype)
 
     def _join_etypes_for_bop(self, other: "View") -> tuple["View", "View"]:
@@ -302,175 +308,138 @@ class View:
         )
         return new_self, new_other
 
+    @staticmethod
+    def elementwise_unary(operand: "View", operator: UnaryElementOperator) -> "View":
+        return View.identity(
+            ElementwiseNode(
+                shape=operand.shape,
+                etype=operand.etype,
+                args=(operand,),
+                operator=operator,
+            )
+        )
 
-@dataclass(kw_only=True, frozen=True, eq=False)
-class ConstNode(Node):
-    value: PyTensor
+    @staticmethod
+    def elementwise_binary(
+        a: "View",
+        b: "View | Scalar",
+        operator: ElementOperator,
+    ) -> "View":
+        b = View._from_view_or_scalar(b, etype=a.etype)
+        a, b = a._join_etypes_for_bop(b)
+        a, b = a._join_shapes_for_elementwise_bop(b)
+        return View.identity(
+            ElementwiseNode(
+                shape=a.shape,
+                etype=a.etype,
+                args=(a, b),
+                operator=operator,
+            )
+        )
+
+    @staticmethod
+    def reduction(
+        input: "View",
+        axes: tuple[int, ...],
+        operator: BinaryAssocElementOperator,
+    ) -> "View":
+        if not axes:
+            return input
+
+        out_shape = list(input.shape)
+        for axis in axes:
+            if axis < 0 or axis >= input.rank:
+                raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
+            out_shape[axis] = 1
+
+        return View.identity(
+            ReductionNode(
+                shape=tuple(out_shape),
+                etype=input.etype,
+                args=(input,),
+                operator=operator,
+                axes=axes,
+            )
+        )
+
+    @staticmethod
+    def matmul(a: "View", b: "View") -> "View":
+        a, b = a._join_etypes_for_bop(b)
+        a, b = a._join_shapes_for_matmul_bop(b)
+        out_shape = a.shape[:-1] + (b.shape[-1],)
+        return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
+
+    @staticmethod
+    def scatter(
+        *,
+        source: "View",
+        out_shape: tuple[int, ...],
+        woffset: int,
+        wpitch: tuple[int, ...],
+        operator: BinaryAssocElementOperator | None = None,
+        etype: ElementType | str | None = None,
+    ) -> "View":
+        return View.identity(
+            ScatterNode(
+                shape=out_shape,
+                etype=etype or source.etype,
+                args=(source,),
+                operator=operator,
+                woffset=woffset,
+                wpitch=wpitch,
+            )
+        )
 
 
-def const(value: "PyTensor", *, etype: ElementType = "f4") -> View:
+type TensorOperand = View | Scalar
+
+
+def const(value: PyTensor, *, etype: ElementType | str = F4) -> View:
     shape = infer_pytensor_shape(value)
     return View.identity(ConstNode(shape=shape, etype=etype, args=(), value=value))
 
 
-def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType = "f4") -> View:
+def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType | str = F4) -> View:
     return const(v, etype=etype).broadcast(shape)
 
 
-def ones(shape: tuple[int, ...], *, etype: ElementType = "f4") -> View:
+def ones(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
     return full(shape, 1, etype=etype)
 
 
-def zeros(shape: tuple[int, ...], *, etype: ElementType = "f4") -> View:
+def zeros(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
     return full(shape, 0, etype=etype)
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
-class ParamNode(Node):
-    label: str | None
 
 
 def param(
     *,
     shape: tuple[int, ...],
-    etype: ElementType,
+    etype: ElementType | str,
     label: str | None = None,
 ) -> View:
     return View.identity(ParamNode(shape=shape, etype=etype, args=(), label=label))
 
 
-@dataclass(kw_only=True, frozen=True, eq=False)
-class ElementwiseNode(Node):
-    operator: ElementOperator
-
-
-def _elementwise_unary(operand: View, operator: UnaryElementOperator) -> View:
-    return View.identity(
-        ElementwiseNode(
-            shape=operand.shape,
-            etype=operand.etype,
-            args=(operand,),
-            operator=operator,
-        )
-    )
-
-
-def _elementwise_binary(
-    a: View,
-    b: View | Scalar,
-    operator: ElementOperator,
-) -> View:
-    b = View._from_view_or_scalar(b, etype=a.etype)
-    a, b = a._join_etypes_for_bop(b)
-    a, b = a._join_shapes_for_elementwise_bop(b)
-    return View.identity(
-        ElementwiseNode(
-            shape=a.shape,
-            etype=a.etype,
-            args=(a, b),
-            operator=operator,
-        )
-    )
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
-class ReductionNode(Node):
-    operator: BinaryAssocElementOperator
-    axes: tuple[int, ...]
-
-
-def _reduction(
-    input: View,
-    axes: tuple[int, ...],
-    operator: BinaryAssocElementOperator,
-) -> View:
-    if not axes:
-        return input
-
-    out_shape = list(input.shape)
-    for axis in axes:
-        if axis < 0 or axis >= input.rank:
-            raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
-        out_shape[axis] = 1
-
-    return View.identity(
-        ReductionNode(
-            shape=tuple(out_shape),
-            etype=input.etype,
-            args=(input,),
-            operator=operator,
-            axes=axes,
-        )
-    )
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
-class MatmulNode(Node):
-    pass
-
-
-def _matmul(a: View, b: View) -> View:
-    a, b = a._join_etypes_for_bop(b)
-    a, b = a._join_shapes_for_matmul_bop(b)
-    out_shape = a.shape[:-1] + (b.shape[-1],)
-    return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
-
-
-@dataclass(kw_only=True, frozen=True, eq=False)
-class ScatterNode(Node):
-    operator: BinaryAssocElementOperator | None
-    woffset: int
-    wpitch: tuple[int, ...]
-
-
-def _scatter(
-    *,
-    source: View,
-    out_shape: tuple[int, ...],
-    woffset: int,
-    wpitch: tuple[int, ...],
-    operator: BinaryAssocElementOperator | None = None,
-    etype: ElementType | None = None,
-) -> View:
-    return View.identity(
-        ScatterNode(
-            shape=out_shape,
-            etype=etype or source.etype,
-            args=(source,),
-            operator=operator,
-            woffset=woffset,
-            wpitch=wpitch,
-        )
-    )
-
-
-def _copy(source: View, etype: ElementType | None = None) -> View:
-    return _scatter(
-        source=source,
-        out_shape=source.shape,
-        woffset=0,
-        wpitch=c_contiguous_pitch_for_shape(source.shape),
-        etype=etype or source.etype,
-    )
-
-
-def debug_print(root: "View", out: SupportsWrite[str]) -> None:
-    def build_tid_map() -> dict["Node", int]:
+def debug_print(root: View, out: SupportsWrite[str]) -> None:
+    def build_tid_map() -> dict[Node, int]:
         reference_count_map = refcount([root])
-        assert reference_count_map[root.node] == 1, (
-            "Root tensor must have reference count 1"
-        )
+        root_ref_count = reference_count_map[root.node]
+        if root_ref_count != 1:
+            raise ValueError(
+                f"Root tensor must have reference count 1, got {root_ref_count}"
+            )
 
-        tid_map: dict["Node", int] = {}
+        tid_map: dict[Node, int] = {}
         for node, ref_count in reference_count_map.items():
-            assert ref_count >= 1
+            if ref_count < 1:
+                raise ValueError(f"Node {node!r} has invalid reference count {ref_count}")
             if ref_count == 1:
                 continue
             tid_map[node] = len(tid_map)
 
         return tid_map
 
-    def headline(node: "Node") -> str:
+    def headline(node: Node) -> str:
         base_fields = {field.name for field in fields(Node)}
         extra_fields = [f.name for f in fields(node) if f.name not in base_fields]
         args = ", ".join(f"{f}={getattr(node, f)!r}" for f in extra_fields)
@@ -478,7 +447,7 @@ def debug_print(root: "View", out: SupportsWrite[str]) -> None:
         return f"{name}({args}) :: {node.etype}{node.shape!r}"
 
     def visit_view(
-        view: "View",
+        view: View,
         prefix: str,
         connector: str,
         prefix_ext: str,
@@ -498,7 +467,7 @@ def debug_print(root: "View", out: SupportsWrite[str]) -> None:
         visit_node(view.node, prefix + prefix_ext, "└ ", "  ", is_root=is_root)
 
     def visit_node(
-        node: "Node",
+        node: Node,
         prefix: str,
         connector: str,
         prefix_ext: str,
@@ -531,11 +500,11 @@ def debug_print(root: "View", out: SupportsWrite[str]) -> None:
         visit_node(node, "", "", "", is_root=True)
 
 
-def toposort(roots: Iterable["View"]) -> list["Node"]:
-    visited: set["Node"] = set()
-    topo_order: list["Node"] = []
+def toposort(roots: Iterable[View]) -> list[Node]:
+    visited: set[Node] = set()
+    topo_order: list[Node] = []
 
-    def visit(node: "Node") -> None:
+    def visit(node: Node) -> None:
         if node in visited:
             return
         visited.add(node)
@@ -551,10 +520,10 @@ def toposort(roots: Iterable["View"]) -> list["Node"]:
     return topo_order
 
 
-def refcount(roots: Iterable["View"]) -> dict["Node", int]:
-    ref_counts: dict["Node", int] = {}
+def refcount(roots: Iterable[View]) -> dict[Node, int]:
+    ref_counts: dict[Node, int] = {}
 
-    def visit(node: "Node") -> None:
+    def visit(node: Node) -> None:
         if node in ref_counts:
             ref_counts[node] += 1
         else:
@@ -566,6 +535,3 @@ def refcount(roots: Iterable["View"]) -> dict["Node", int]:
         visit(root.node)
 
     return ref_counts
-
-
-

@@ -1,5 +1,4 @@
-from . import core, dataset, grad, ir, nn, train, wgpu
-from .dsl import dsl
+from . import core, dataset, dsl, grad, ir, nn, train, wgpu
 
 __all__ = [
     "core",

@@ -18,12 +18,13 @@ import sys
 import resin_rt_pybind
 
 from resin import dsl
+from resin.core.etype import F4
 from resin.ir import IrProgramBuilder
 from resin.wgpu import build_wgpu_program
 
 
 def main() -> None:
-    t = dsl.const([1.0, 2.0, 3.0], etype="f4")
+    t = dsl.const([1.0, 2.0, 3.0], etype=F4)
 
     builder = IrProgramBuilder()
     builder.build_sink("out", t)

@@ -3,10 +3,22 @@ __all__ = [
     "accessor_adjoint",
     "df_do",
     "grad",
+    "grad_fn",
 ]
 
+from collections.abc import Sequence
+from typing import Callable
+
 from resin.core.accessor import Accessor
-from resin.dsl.dsl import (
+from resin.core.pytree import PyTree
+from resin.dsl.spec import (
+    SignatureSpec,
+    bind_call_args,
+    map_tensor_leaves,
+    parse_signature,
+)
+from resin.dsl.functional import trace_from_specs
+from resin.dsl.node import (
     ConstNode,
     ElementwiseNode,
     MatmulNode,
@@ -14,11 +26,8 @@ from resin.dsl.dsl import (
     ParamNode,
     ReductionNode,
     ScatterNode,
-    View,
-    _scatter,
-    ones,
-    toposort,
 )
+from resin.dsl.view import View, ones, toposort, zeros
 
 
 class NotDifferentiableException(Exception):
@@ -36,7 +45,7 @@ def accessor_adjoint(view: View, g: View) -> View:
     if view._is_identity():
         return x
 
-    return _scatter(
+    return View.scatter(
         source=x,
         out_shape=view.node.shape,
         operator="add",
@@ -179,3 +188,58 @@ def grad(f: View) -> dict[Node, View]:
             accumulate(operand, df_do_i)
 
     return grad_node
+
+
+def grad_fn[T: View](
+    f: Callable[..., T],
+    *,
+    objective: Callable[[T], T] = lambda output: output,
+    grads_for: Sequence[str] | None = None,
+) -> Callable[..., tuple[T, dict[str, PyTree[View]]]]:
+    spec = parse_signature(f)
+    target_grads = tuple(
+        spec.args.keys() if grads_for is None else grads_for
+    )
+    unknown = set(target_grads) - set(spec.args)
+    if unknown:
+        raise ValueError(
+            f"unknown grads_for argument(s): {sorted(unknown)!r}; "
+            f"expected subset of {sorted(spec.args.keys())!r}"
+        )
+
+    def run(
+        *args: PyTree[View],
+        **kwargs: PyTree[View],
+    ) -> tuple[T, dict[str, PyTree[View]]]:
+        bound = bind_call_args(spec, args, kwargs)
+        forward = trace_from_specs(f, spec, bound)
+        objective_value = objective(forward)
+        grad_map = grad(objective_value)
+        grad_args = _build_grad_args(bound, grad_map, target_grads, spec)
+        return forward, grad_args
+
+    return run
+
+
+def _build_grad_args(
+    kwargs: dict[str, PyTree[View]],
+    grad_map: dict[Node, View],
+    grads_for: Sequence[str],
+    spec: SignatureSpec,
+) -> dict[str, PyTree[View]]:
+    grad_args: dict[str, PyTree[View]] = {}
+    for name in spec.args:
+        value = kwargs[name]
+        grad_args[name] = (
+            map_tensor_leaves(
+                value,
+                lambda view: (
+                    g
+                    if (g := grad_map.get(view.node)) is not None
+                    else zeros(view.shape, etype=view.etype)
+                ),
+            )
+            if name in grads_for
+            else value
+        )
+    return grad_args

@@ -1,5 +1,5 @@
 from frozendict import frozendict
-from resin.dsl import dsl
+import resin.dsl as dsl
 from resin.ir.ir import IrBufferView, IrKernel, IrProgram
 
 from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel

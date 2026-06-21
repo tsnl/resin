@@ -1,9 +1,10 @@
-from resin.dsl.dsl import const
+from resin.dsl import const
+from resin.core.etype import F4
 
 
 class TestViewMath:
     def test_chained_slice_offsets(self) -> None:
-        t = const(list(range(10)), etype="f4")
+        t = const(list(range(10)), etype=F4)
         v = t[2:8][::2]
 
         assert v.node is t.node
@@ -12,7 +13,7 @@ class TestViewMath:
         assert v.pitch == (2,)
 
     def test_permute_after_slice(self) -> None:
-        t = const([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], etype="f4")
+        t = const([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], etype=F4)
         v = t[1:].permute((1, 0))
 
         assert v.node is t.node

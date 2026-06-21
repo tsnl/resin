@@ -1,10 +1,11 @@
 import struct
 from collections.abc import Callable, Generator
-from typing import cast
+from typing import Any, cast
 
 from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
 
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
+# T is a valid leaf; annotate bare values as PyTree[T], not T | PyTree[T].
 type PyTree[T] = dict[str, PyTree[T]] | list[PyTree[T]] | tuple[PyTree[T], ...] | T
 
 
@@ -28,7 +29,7 @@ def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
 
 def map_pytree[T, U](
     pytree: PyTree[T],
-    f: Callable[[T], U],
+    f: Callable[[Any], U],
     *,
     is_leaf: Callable[[object], bool] | None = None,
     map_leaves_only: bool = False,
@@ -79,8 +80,8 @@ def map_pytree[T, U](
 
 def tree_map_leaves[T, U](
     value: PyTree[T],
-    is_leaf: Callable[[T], bool],
-    fn: Callable[[T], U],
+    is_leaf: Callable[[object], bool],
+    fn: Callable[[Any], U],
 ) -> PyTree[U]:
     return map_pytree(value, fn, is_leaf=is_leaf, map_leaves_only=True)
 
@@ -98,7 +99,7 @@ def infer_pytensor_shape(value: PyTensor) -> tuple[int, ...]:
     return (len(value),) + e0_shape
 
 
-def marshall_pytensor(value: PyTensor, etype: ElementType) -> bytes:
+def marshall_pytensor(value: PyTensor, etype: ElementType | str) -> bytes:
     values = flatten_pytensor(value)
     return struct.pack(f"<{len(values)}{spell_etype_in_pystruct(etype)}", *values)
 

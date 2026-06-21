@@ -4,9 +4,10 @@ import math
 
 import pytest
 
+import resin.grad as grad
 import resin.nn as nn
 from resin import dsl
-import resin.grad as grad
+from resin.core.etype import F4
 from resin.nn import Linear
 
 from tests.resin.gpu.interp_helpers import run_graph, run_scalar
@@ -21,15 +22,17 @@ def _scalar(view: dsl.View) -> dsl.View:
 
 class TestLinear:
     def test_forward(self) -> None:
-        x = dsl.param(shape=(2, 3), etype="f4")
+        x = dsl.param(shape=(2, 3), etype=F4)
         layer = Linear.new(3, 2, bias=True)
+        bias = layer.bias
+        assert bias is not None
         out = layer(x)
         values = run_graph(
             out,
             params={
                 x: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 layer.weight: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                layer.bias: [10.0, 20.0],
+                bias: [10.0, 20.0],
             },
         )
         assert values == pytest.approx([11.0, 20.0, 10.0, 21.0])
@@ -37,9 +40,11 @@ class TestLinear:
 
 class TestSmallMlp:
     def test_relu_linear_stack(self) -> None:
-        x = dsl.param(shape=(2, 2), etype="f4")
+        x = dsl.param(shape=(2, 2), etype=F4)
         l1 = Linear.new(2, 2, bias=False)
         l2 = Linear.new(2, 1, bias=True)
+        l2_bias = l2.bias
+        assert l2_bias is not None
         out = l2(nn.relu(l1(x)))
         values = run_graph(
             out,
@@ -47,7 +52,7 @@ class TestSmallMlp:
                 x: [[1.0, -1.0], [2.0, 3.0]],
                 l1.weight: [[1.0, 0.0], [0.0, 1.0]],
                 l2.weight: [[1.0, -1.0]],
-                l2.bias: [0.5],
+                l2_bias: [0.5],
             },
         )
         assert values == pytest.approx([1.5, -0.5])
@@ -55,8 +60,8 @@ class TestSmallMlp:
 
 class TestLossOps:
     def test_cross_entropy_single_sample(self) -> None:
-        probs = dsl.param(shape=(1, 3), etype="f4")
-        label = dsl.param(shape=(1, 3), etype="f4")
+        probs = dsl.param(shape=(1, 3), etype=F4)
+        label = dsl.param(shape=(1, 3), etype=F4)
         loss = nn.cross_entropy(probs, label)
         value = run_scalar(
             loss,
@@ -69,8 +74,8 @@ class TestLossOps:
         assert value == pytest.approx(expected)
 
     def test_mean_cross_entropy_batch(self) -> None:
-        probs = dsl.param(shape=(2, 2), etype="f4")
-        label = dsl.param(shape=(2, 2), etype="f4")
+        probs = dsl.param(shape=(2, 2), etype=F4)
+        label = dsl.param(shape=(2, 2), etype=F4)
         loss = nn.mean(nn.cross_entropy(probs, label))
         value = run_scalar(
             loss,
@@ -86,17 +91,17 @@ class TestLossOps:
 
 class TestGradExecution:
     def test_sum_param_grad_via_update(self) -> None:
-        p = dsl.param(shape=(4,), etype="f4")
+        p = dsl.param(shape=(4,), etype=F4)
         g = grad.grad(_scalar(p))[p.node]
-        updated = p + dsl.const(1.0, etype="f4") * g
+        updated = p + dsl.const(1.0, etype=F4) * g
         values = run_graph(updated, params={p: [1.0, 2.0, 3.0, 4.0]})
         assert values == pytest.approx([2.0, 3.0, 4.0, 5.0])
 
     def test_matmul_grad_via_update(self) -> None:
-        x = dsl.param(shape=(2, 2), etype="f4")
-        w = dsl.param(shape=(2, 2), etype="f4")
+        x = dsl.param(shape=(2, 2), etype=F4)
+        w = dsl.param(shape=(2, 2), etype=F4)
         g = grad.grad(_scalar(x @ w))[w.node]
-        updated = w + dsl.const(1.0, etype="f4") * g
+        updated = w + dsl.const(1.0, etype=F4) * g
         values = run_graph(
             updated,
             params={
@@ -107,19 +112,19 @@ class TestGradExecution:
         assert values == pytest.approx([4.0, 4.0, 6.0, 6.0])
 
     def test_param_update_adds_scaled_grad(self) -> None:
-        p = dsl.param(shape=(3,), etype="f4")
-        loss = _scalar(p * dsl.const([1.0, 2.0, 3.0], etype="f4"))
+        p = dsl.param(shape=(3,), etype=F4)
+        loss = _scalar(p * dsl.const([1.0, 2.0, 3.0], etype=F4))
         g = grad.grad(loss)[p.node]
-        lr = dsl.const(0.1, etype="f4")
+        lr = dsl.const(0.1, etype=F4)
         updated = p + lr * g
         values = run_graph(updated, params={p: [1.0, 1.0, 1.0]})
         assert values == pytest.approx([1.1, 1.2, 1.3])
 
     def test_param_update_subtracts_scaled_grad(self) -> None:
-        p = dsl.param(shape=(3,), etype="f4")
-        loss = _scalar(p * dsl.const([1.0, 2.0, 3.0], etype="f4"))
+        p = dsl.param(shape=(3,), etype=F4)
+        loss = _scalar(p * dsl.const([1.0, 2.0, 3.0], etype=F4))
         g = grad.grad(loss)[p.node]
-        lr = dsl.const(0.1, etype="f4")
+        lr = dsl.const(0.1, etype=F4)
         updated = p - lr * g
         values = run_graph(updated, params={p: [1.0, 1.0, 1.0]})
         assert values == pytest.approx([0.9, 0.8, 0.7])

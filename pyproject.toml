@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.8",
     "clang>=21.1.7",
     "pytest>=9.0.2",
     "rich>=14.3.2",
@@ -37,4 +38,11 @@ members = [
 ]
 
 [tool.ruff.lint]
-extend-select = []
+preview = true
+explicit-preview-rules = true
+select = ["E4", "F"]
+extend-select = ["PLC2701"]
+
+
+
+

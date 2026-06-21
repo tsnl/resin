@@ -26,8 +26,16 @@ type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
 type ElementType = Literal["f4", "f2", "u4"]
 type EKind = Literal["float", "uint"]
 
+# Named element-type spellings for View[F4, (2, 3)] annotations. These exist to
+# placate Python type-checkers and ruff: if we write the string literals in type
+# annotations directly (View["f4", (2, 3)]), ruff F821 falsely treats the etype
+# spelling inside the subscript as an undefined name.
+F4: ElementType = "f4"
+F2: ElementType = "f2"
+U4: ElementType = "u4"
 
-def etype_join(etype1: ElementType, etype2: ElementType) -> ElementType:
+
+def etype_join(etype1: ElementType | str, etype2: ElementType | str) -> ElementType:
     kind = etype_join_kind(etype_kind(etype1), etype_kind(etype2))
     nbytes = max(etype_nbytes(etype1), etype_nbytes(etype2))
     return etype(kind, nbytes)
@@ -45,11 +53,11 @@ def etype(kind: EKind, nbytes: int) -> ElementType:
             raise ValueError(f"Unsupported etype with kind={kind} and nbytes={nbytes}")
 
 
-def etype_nbytes(etype: ElementType) -> int:
+def etype_nbytes(etype: ElementType | str) -> int:
     return {"f4": 4, "f2": 2, "u4": 4}[etype]
 
 
-def etype_kind(etype: ElementType) -> EKind:
+def etype_kind(etype: ElementType | str) -> EKind:
     match etype:
         case "f4" | "f2":
             return "float"
@@ -65,13 +73,13 @@ def etype_join_kind(etype1: EKind, etype2: EKind) -> EKind:
     return etype1
 
 
-def spell_etype_in_pystruct(etype: ElementType) -> str:
+def spell_etype_in_pystruct(etype: ElementType | str) -> str:
     return {"f4": "f", "f2": "e", "u4": "I"}[etype]
 
 
-def spell_etype_in_wgsl(etype: ElementType) -> str:
+def spell_etype_in_wgsl(etype: ElementType | str) -> str:
     return {"f4": "f32", "f2": "f16", "u4": "u32"}[etype]
 
 
-def etype_needs_enable_f16(etype: ElementType) -> bool:
+def etype_needs_enable_f16(etype: ElementType | str) -> bool:
     return etype == "f2"
