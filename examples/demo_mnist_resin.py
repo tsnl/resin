@@ -1,4 +1,3 @@
-# pyright: reportImplicitRelativeImport=false
 """Resin (WGPU) backend for the MNIST MLP demo."""
 
 import math
@@ -29,7 +28,11 @@ from resin.core.pytree import flatten_pytree
 from resin.dataset import MnistDataLoader, MnistDataset
 from resin.dsl.view import View
 from resin.ir import IrProgramBuilder
-from resin.train import ParamUpdateInterpreter, build_param_update_program, commit_param_updates
+from resin.train import (
+    ParamUpdateInterpreter,
+    build_param_update_program,
+    commit_param_updates,
+)
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 
 

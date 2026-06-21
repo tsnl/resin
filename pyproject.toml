@@ -18,6 +18,7 @@ dev = [
     "pytest>=9.0.2",
     "rich>=14.3.2",
     "ruff>=0.14.14",
+    "torch>=2.12.1",
 ]
 
 [build-system]
@@ -41,6 +42,9 @@ members = [
 pythonVersion = "3.14"
 # node.py <-> view.py: View is only imported under TYPE_CHECKING in node.py.
 reportImportCycles = false
+executionEnvironments = [
+    { root = "examples" },
+]
 [tool.ruff.lint]
 preview = true
 explicit-preview-rules = true

@@ -1,22 +1,10 @@
-# pyright: reportMissingImports=false
-# pyright: reportImplicitRelativeImport=false
-# pyright: reportAny=false
-# pyright: reportUnknownMemberType=false
-# pyright: reportUnknownVariableType=false
-# pyright: reportUnknownParameterType=false
-# pyright: reportUnknownArgumentType=false
-# pyright: reportExplicitAny=false
-# pyright: reportUntypedBaseClass=false
-# pyright: reportUntypedFunctionDecorator=false
-# pyright: reportUnusedCallResult=false
-# pyright: reportImplicitStringConcatenation=false
-# pyright: reportUnannotatedClassAttribute=false
 """PyTorch backend for the MNIST MLP demo."""
 
 import random
 import struct
 import sys
 import time
+from typing import cast, override
 
 from demo_mnist_common import (
     ClassificationMetrics,
@@ -86,6 +74,10 @@ def run_pytorch(
             torch.mps.synchronize()
 
     class TorchMnistMlp(nn.Module):
+        l1: nn.Linear
+        l2: nn.Linear
+        l3: nn.Linear
+
         def __init__(
             self, *, input_size: int, hidden_size: int, output_size: int
         ) -> None:
@@ -98,19 +90,20 @@ def run_pytorch(
         def _init_params(self) -> None:
             for module in self.modules():
                 if isinstance(module, nn.Linear):
-                    nn.init.uniform_(module.weight, -0.1, 0.1)
-                    if module.bias is not None:
-                        nn.init.uniform_(module.bias, -0.1, 0.1)
+                    _ = nn.init.uniform_(module.weight, -0.1, 0.1)
+                    _ = nn.init.uniform_(module.bias, -0.1, 0.1)
 
+        @override
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            x = F.relu(self.l1(x))
-            x = F.relu(self.l2(x))
-            return F.softmax(self.l3(x), dim=-1)
+            hidden1 = cast(torch.Tensor, self.l1(x))
+            hidden2 = cast(torch.Tensor, self.l2(F.relu(hidden1)))
+            logits = cast(torch.Tensor, self.l3(hidden2))
+            return F.softmax(logits, dim=-1)
 
         def logits(self, x: torch.Tensor) -> torch.Tensor:
-            x = F.relu(self.l1(x))
-            x = F.relu(self.l2(x))
-            return self.l3(x)
+            hidden1 = cast(torch.Tensor, self.l1(x))
+            hidden2 = cast(torch.Tensor, self.l2(F.relu(hidden1)))
+            return cast(torch.Tensor, self.l3(hidden2))
 
     def cross_entropy_mean(probs: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         return -(labels * probs.clamp_min(1e-12).log()).sum(dim=-1).mean()
@@ -140,7 +133,7 @@ def run_pytorch(
         test_dataset: MnistDataset,
         device: torch.device,
     ) -> ClassificationMetrics:
-        model.eval()
+        _ = model.eval()
         confusion = [[0] * config.num_classes for _ in range(config.num_classes)]
         for image_bytes, labels in iter_test_batches(test_dataset, config.batch_size):
             images = bytes_to_image_tensor(
@@ -149,7 +142,11 @@ def run_pytorch(
                 image_size=test_dataset.image_size,
                 device=device,
             )
-            probs_flat = model(images).detach().cpu().reshape(-1).tolist()
+            probs = cast(torch.Tensor, model(images))
+            probs_flat = cast(
+                list[float],
+                probs.detach().cpu().reshape(-1).tolist(),  # pyright: ignore[reportUnknownMemberType]
+            )
             for sample_index, true_label in enumerate(labels):
                 offset = sample_index * config.num_classes
                 predicted_label = argmax(
@@ -157,13 +154,13 @@ def run_pytorch(
                     config.num_classes,
                 )
                 update_confusion(confusion, true_label, predicted_label)
-        model.train()
+        _ = model.train()
         return metrics_from_confusion(confusion)
 
     use_logits_loss = not match_resin_loss
 
     random.seed(config.seed)
-    torch.manual_seed(config.seed)
+    _ = torch.manual_seed(config.seed)  # pyright: ignore[reportUnknownMemberType]
     device = resolve_device(device_name)
 
     train_dataset = MnistDataset.load("train")
@@ -201,8 +198,8 @@ def run_pytorch(
         if use_logits_loss:
             loss = cross_entropy_mean_from_logits(model.logits(images), labels)
         else:
-            loss = cross_entropy_mean(model(images), labels)
-        loss.backward()
+            loss = cross_entropy_mean(cast(torch.Tensor, model(images)), labels)
+        loss.backward()  # pyright: ignore[reportUnknownMemberType, reportUnusedCallResult]
         optimizer.step()
         return float(loss.detach().cpu())
 
@@ -215,18 +212,18 @@ def run_pytorch(
             )
             sync_device(device)
             start = time.perf_counter()
-            train_step(image_bytes, label_bytes)
+            _ = train_step(image_bytes, label_bytes)
             sync_device(device)
             elapsed = time.perf_counter() - start
             if step >= benchmark_warmup:
                 timings.append(elapsed)
         mean_step_s = sum(timings) / len(timings)
-        print(
+        benchmark_msg = (
             f"pytorch benchmark ({optimizer_name}, {device.type}): "
-            f"mean_train_step={mean_step_s * 1e3:.3f} ms "
-            f"({1.0 / mean_step_s:.1f} steps/s)",
-            file=sys.stderr,
+            + f"mean_train_step={mean_step_s * 1e3:.3f} ms "
+            + f"({1.0 / mean_step_s:.1f} steps/s)"
         )
+        print(benchmark_msg, file=sys.stderr)
         return
 
     step = 0

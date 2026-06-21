@@ -4,8 +4,12 @@ import array
 import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from resin.dataset import MnistDataset
+
+Backend = Literal["resin", "pytorch"]
+Optimizer = Literal["adam", "adamw", "sgd"]
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,17 @@ class TrainConfig:
 
 
 @dataclass(frozen=True)
+class DemoMnistCli:
+    backend: Backend
+    train: TrainConfig
+    optimizer: Optimizer
+    device: str
+    match_resin_loss: bool
+    benchmark_steps: int
+    benchmark_warmup: int
+
+
+@dataclass(frozen=True)
 class ClassificationMetrics:
     accuracy: float
     macro_precision: float
@@ -31,9 +46,7 @@ class ClassificationMetrics:
     per_class_f1: tuple[float, ...]
 
 
-def images_batch_bytes(
-    images: bytes, indices: Sequence[int], image_size: int
-) -> bytes:
+def images_batch_bytes(images: bytes, indices: Sequence[int], image_size: int) -> bytes:
     out = array.array("f")
     for index in indices:
         offset = index * image_size
