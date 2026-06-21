@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass, fields, is_dataclass
 
-from resin.dsl import dsl
+import resin.dsl as dsl
 
 
 @dataclass

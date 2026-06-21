@@ -1,5 +1,5 @@
 import resin.grad as grad
-from resin.dsl.dsl import ElementwiseNode, View, param
+from resin.dsl import ElementwiseNode, View, param
 
 
 class TestAccessorAdjoint:

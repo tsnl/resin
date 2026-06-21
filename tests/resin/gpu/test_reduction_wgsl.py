@@ -1,5 +1,5 @@
 from resin.core.accessor import Accessor
-from resin.dsl.dsl import const
+from resin.dsl import const
 from resin.ir import IrProgramBuilder, IrReductionKernel
 from resin.wgpu import WgslKernelConfig, emit_wgsl_for_kernel
 

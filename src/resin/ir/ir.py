@@ -27,7 +27,7 @@ from resin.core.etype import (
     ElementOperator,
     UnaryElementOperator,
 )
-from resin.dsl import dsl
+import resin.dsl as dsl
 
 #
 # IrProgram

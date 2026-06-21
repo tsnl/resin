@@ -9,7 +9,7 @@ from typing import Any
 from frozendict import frozendict
 
 import resin.grad as grad_mod
-from resin.dsl import dsl
+import resin.dsl as dsl
 from resin.ir import IrProgramBuilder
 from resin.wgpu import WgpuProgram, WgslKernelConfig, build_wgpu_program
 
