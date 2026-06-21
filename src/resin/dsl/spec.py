@@ -5,7 +5,7 @@ import inspect
 import types
 import typing
 from dataclasses import dataclass
-from typing import Callable, get_args, get_origin, get_type_hints
+from typing import Callable, overload, get_args, get_origin, get_type_hints
 
 from resin.core.etype import ElementType, Scalar, is_scalar
 from resin.core.pytree import PyTree, tree_map_leaves
@@ -14,7 +14,7 @@ from resin.dsl.view import TensorMeta, View
 
 @dataclass(frozen=True)
 class TensorSpec:
-    etype: ElementType
+    etype: ElementType | str
     shape: tuple[int, ...]
 
 
@@ -150,11 +150,11 @@ def typecheck_against_spec(value: object, spec: Spec) -> None:
             raise TypeError(f"unsupported spec: {spec!r}")
 
 
-def bind_call_args(
+def bind_call_args[T](
     spec: SignatureSpec,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> dict[str, object]:
+    args: tuple[T, ...],
+    kwargs: dict[str, T],
+) -> dict[str, T]:
     names = tuple(spec.args.keys())
     if len(args) > len(names):
         raise TypeError(
@@ -179,7 +179,7 @@ def bind_call_args(
     return bound
 
 
-def validate_kwargs(kwargs: dict[str, object], spec: SignatureSpec) -> None:
+def validate_kwargs[T](kwargs: dict[str, T], spec: SignatureSpec) -> None:
     expected = set(spec.args.keys())
     actual = set(kwargs.keys())
     if actual != expected:
@@ -195,6 +195,24 @@ def map_tensor_leaves(
     fn: Callable[[View], View],
 ) -> PyTree[View]:
     return tree_map_leaves(value, lambda node: isinstance(node, View), fn)
+
+
+@overload
+def materialize_spec(
+    spec: TensorSpec,
+    make_tensor: Callable[[TensorSpec, str | None], View],
+    *,
+    path: str = "",
+) -> View: ...
+
+
+@overload
+def materialize_spec(
+    spec: Spec,
+    make_tensor: Callable[[TensorSpec, str | None], View],
+    *,
+    path: str = "",
+) -> PyTree[View]: ...
 
 
 def materialize_spec(

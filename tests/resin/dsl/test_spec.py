@@ -2,6 +2,7 @@ import pytest
 
 from resin.dsl.spec import (
     SignatureSpec,
+    Spec,
     TensorSpec,
     annotation_to_spec,
     bind_call_args,
@@ -122,13 +123,10 @@ class TestTypecheckAgainstSpec:
 
     def test_tensor_rejects_wrong_etype(self) -> None:
         with pytest.raises(ValueError, match="expected etype"):
-            typecheck_against_spec(
-                param(shape=(2,), etype="f8", label="v"),
-                TensorSpec(F4, (2,)),
-            )
+            typecheck_against_spec(_view((2,)), TensorSpec("f8", (2,)))
 
     def test_typed_dict(self) -> None:
-        spec = {
+        spec: Spec = {
             "weight": TensorSpec(F4, (2, 3)),
             "bias": TensorSpec(F4, (2,)),
         }
@@ -138,7 +136,7 @@ class TestTypecheckAgainstSpec:
         )
 
     def test_typed_dict_rejects_missing_key(self) -> None:
-        spec = {"weight": TensorSpec(F4, (2, 3))}
+        spec: Spec = {"weight": TensorSpec(F4, (2, 3))}
         with pytest.raises(ValueError, match="expected keys"):
             typecheck_against_spec({"bias": _view((2,))}, spec)
 

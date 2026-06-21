@@ -47,7 +47,7 @@ class IrProgram:
 @dataclass(frozen=True, kw_only=True, eq=False)
 class IrBuffer:
     shape: tuple[int, ...]
-    etype: ElementType
+    etype: ElementType | str
     init: bytes | None = None
     readonly: bool
 
@@ -74,7 +74,7 @@ class IrKernel(ABC):
     """
 
     arg_accessors: tuple[Accessor, ...]
-    etype: ElementType
+    etype: ElementType | str
     shape: tuple[int, ...]
     clear_output_before_dispatch: bool = False
 

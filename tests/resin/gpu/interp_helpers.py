@@ -11,11 +11,13 @@ import resin_rt_pybind
 from resin import dsl
 from resin.ir import IrProgramBuilder
 from resin.core.etype import ElementType, spell_etype_in_pystruct
-from resin.core.pytree import flatten_pytensor, infer_pytensor_shape, marshall_pytensor
+from resin.core.pytree import (
+    PyTensor,
+    flatten_pytensor,
+    infer_pytensor_shape,
+    marshall_pytensor,
+)
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
-
-type PyTensor = float | list[PyTensor]
-
 
 def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
     view_index = program.sinks[sink_name]
@@ -23,7 +25,7 @@ def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
 
 
 def unmarshall_buffer(
-    data: bytes, shape: tuple[int, ...], etype: ElementType
+    data: bytes, shape: tuple[int, ...], etype: ElementType | str
 ) -> list[float]:
     count = math.prod(shape)
     fmt = spell_etype_in_pystruct(etype)

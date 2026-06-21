@@ -82,7 +82,7 @@ class WgpuBufferSpec:
     """Buffer metadata in a :class:`WgpuProgram`."""
 
     shape: tuple[int, ...]
-    etype: ElementType
+    etype: ElementType | str
     init: bytes | None = None
     readonly: bool = False
 

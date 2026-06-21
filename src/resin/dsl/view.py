@@ -16,7 +16,7 @@ __all__ = [
 
 import math
 from dataclasses import dataclass, fields
-from typing import Annotated, Iterable
+from typing import Annotated, Iterable, overload
 
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
@@ -53,9 +53,19 @@ class View:
     node: Node
     accessor: Accessor
 
+    @overload
+    def __class_getitem__(
+        cls, params: tuple[ElementType, tuple[()]]
+    ) -> Annotated[View | Scalar, TensorMeta]: ...
+
+    @overload
     def __class_getitem__(
         cls, params: tuple[ElementType, tuple[int, ...]]
-    ) -> TensorMeta | Annotated["View | Scalar", TensorMeta]:
+    ) -> TensorMeta: ...
+
+    def __class_getitem__(
+        cls, params: tuple[ElementType, tuple[int, ...]]
+    ) -> object:
         etype, shape = params
         if not isinstance(etype, str):
             raise TypeError(f"View etype must be a string literal, got {etype!r}")
@@ -82,7 +92,7 @@ class View:
         return self.accessor.pitch
 
     @property
-    def etype(self) -> ElementType:
+    def etype(self) -> ElementType | str:
         return self.node.etype
 
     @property
@@ -217,7 +227,9 @@ class View:
         return self.accessor.is_dense_c_contiguous(self.node.shape)
 
     @staticmethod
-    def _from_view_or_scalar(value: PyTensor | "View", etype: ElementType) -> "View":
+    def _from_view_or_scalar(
+        value: PyTensor | "View", etype: ElementType | str
+    ) -> "View":
         return value if isinstance(value, View) else const(value, etype=etype)
 
     def _join_etypes_for_bop(self, other: "View") -> tuple["View", "View"]:
@@ -294,27 +306,27 @@ class View:
 type TensorOperand = View | Scalar
 
 
-def const(value: PyTensor, *, etype: ElementType = F4) -> View:
+def const(value: PyTensor, *, etype: ElementType | str = F4) -> View:
     shape = infer_pytensor_shape(value)
     return View.identity(ConstNode(shape=shape, etype=etype, args=(), value=value))
 
 
-def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType = F4) -> View:
+def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType | str = F4) -> View:
     return const(v, etype=etype).broadcast(shape)
 
 
-def ones(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
+def ones(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
     return full(shape, 1, etype=etype)
 
 
-def zeros(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
+def zeros(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
     return full(shape, 0, etype=etype)
 
 
 def param(
     *,
     shape: tuple[int, ...],
-    etype: ElementType,
+    etype: ElementType | str,
     label: str | None = None,
 ) -> View:
     return View.identity(ParamNode(shape=shape, etype=etype, args=(), label=label))
@@ -388,7 +400,7 @@ def _scatter(
     woffset: int,
     wpitch: tuple[int, ...],
     operator: BinaryAssocElementOperator | None = None,
-    etype: ElementType | None = None,
+    etype: ElementType | str | None = None,
 ) -> View:
     return View.identity(
         ScatterNode(

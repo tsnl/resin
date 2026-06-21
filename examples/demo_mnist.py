@@ -1,5 +1,7 @@
 """MNIST MLP demo with Resin (WGPU) or PyTorch backends."""
 
+# pyright: reportMissingImports=false
+
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [

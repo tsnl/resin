@@ -24,13 +24,15 @@ class TestLinear:
     def test_forward(self) -> None:
         x = dsl.param(shape=(2, 3), etype=F4)
         layer = Linear.new(3, 2, bias=True)
+        bias = layer.bias
+        assert bias is not None
         out = layer(x)
         values = run_graph(
             out,
             params={
                 x: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 layer.weight: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                layer.bias: [10.0, 20.0],
+                bias: [10.0, 20.0],
             },
         )
         assert values == pytest.approx([11.0, 20.0, 10.0, 21.0])
@@ -41,6 +43,8 @@ class TestSmallMlp:
         x = dsl.param(shape=(2, 2), etype=F4)
         l1 = Linear.new(2, 2, bias=False)
         l2 = Linear.new(2, 1, bias=True)
+        l2_bias = l2.bias
+        assert l2_bias is not None
         out = l2(nn.relu(l1(x)))
         values = run_graph(
             out,
@@ -48,7 +52,7 @@ class TestSmallMlp:
                 x: [[1.0, -1.0], [2.0, 3.0]],
                 l1.weight: [[1.0, 0.0], [0.0, 1.0]],
                 l2.weight: [[1.0, -1.0]],
-                l2.bias: [0.5],
+                l2_bias: [0.5],
             },
         )
         assert values == pytest.approx([1.5, -0.5])

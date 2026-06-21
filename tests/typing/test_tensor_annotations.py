@@ -7,10 +7,18 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _run_pyright(path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "basedpyright", str(path)],
+        [
+            sys.executable,
+            "-m",
+            "basedpyright",
+            "--pythonversion",
+            "3.14",
+            str(path),
+        ],
         capture_output=True,
         text=True,
         check=False,
+        cwd=path.parent,
     )
 
 

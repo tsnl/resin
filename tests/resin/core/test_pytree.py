@@ -1,4 +1,4 @@
-from resin.core.pytree import flatten_pytree, map_pytree, tree_map_leaves
+from resin.core.pytree import PyTree, flatten_pytree, map_pytree, tree_map_leaves
 
 
 class TestFlattenPytree:
@@ -9,17 +9,17 @@ class TestFlattenPytree:
 
 class TestMapPytree:
     def test_maps_every_leaf(self) -> None:
-        tree = {"a": [1, 2], "b": 3}
+        tree: PyTree[int] = {"a": [1, 2], "b": 3}
         assert map_pytree(tree, lambda x: x * 2) == {"a": [2, 4], "b": 6}
 
     def test_maps_tuple_nodes(self) -> None:
-        tree = (1, {"a": 2})
+        tree: PyTree[int] = (1, {"a": 2})
         assert map_pytree(tree, lambda x: x + 1) == (2, {"a": 3})
 
 
 class TestTreeMapLeaves:
     def test_only_maps_matching_leaves(self) -> None:
-        tree = {"a": [1, 2], "b": 3}
+        tree: PyTree[int] = {"a": [1, 2], "b": 3}
 
         def is_int(value: object) -> bool:
             return isinstance(value, int)
@@ -30,7 +30,7 @@ class TestTreeMapLeaves:
         }
 
     def test_uses_map_pytree_map_leaves_only(self) -> None:
-        tree = (1, [2, 3])
+        tree: PyTree[int] = (1, [2, 3])
 
         def is_int(value: object) -> bool:
             return isinstance(value, int)

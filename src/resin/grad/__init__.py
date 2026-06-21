@@ -190,12 +190,12 @@ def grad(f: View) -> dict[Node, View]:
     return grad_node
 
 
-def grad_fn(
-    f: Callable[..., PyTree[View]],
+def grad_fn[T: View](
+    f: Callable[..., T],
     *,
-    objective: Callable[[PyTree[View]], View] = lambda output: output,
+    objective: Callable[[T], T] = lambda output: output,
     grads_for: Sequence[str] | None = None,
-) -> Callable[..., tuple[PyTree[View], dict[str, PyTree[View]]]]:
+) -> Callable[..., tuple[T, dict[str, PyTree[View]]]]:
     spec = parse_signature(f)
     target_grads = tuple(
         spec.args.keys() if grads_for is None else grads_for
@@ -210,7 +210,7 @@ def grad_fn(
     def run(
         *args: PyTree[View],
         **kwargs: PyTree[View],
-    ) -> tuple[PyTree[View], dict[str, PyTree[View]]]:
+    ) -> tuple[T, dict[str, PyTree[View]]]:
         bound = bind_call_args(spec, args, kwargs)
         forward = trace_from_specs(f, spec, bound)
         objective_value = objective(forward)
