@@ -3,6 +3,7 @@ __all__ = [
     "accessor_adjoint",
     "df_do",
     "grad",
+    "grad_fn",
 ]
 
 from resin.core.accessor import Accessor
@@ -179,3 +180,6 @@ def grad(f: View) -> dict[Node, View]:
             accumulate(operand, df_do_i)
 
     return grad_node
+
+
+from resin.grad.grad_fn import grad_fn  # noqa: E402
