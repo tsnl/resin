@@ -38,7 +38,10 @@ members = [
 ]
 
 [tool.ruff.lint]
-extend-select = []
+preview = true
+explicit-preview-rules = true
+select = ["E4", "F"]
+extend-select = ["PLC2701"]
 
 
 

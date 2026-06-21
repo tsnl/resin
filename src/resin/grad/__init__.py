@@ -27,7 +27,7 @@ from resin.dsl.node import (
     ReductionNode,
     ScatterNode,
 )
-from resin.dsl.view import View, _scatter, ones, toposort, zeros
+from resin.dsl.view import View, ones, toposort, zeros
 
 
 class NotDifferentiableException(Exception):
@@ -45,7 +45,7 @@ def accessor_adjoint(view: View, g: View) -> View:
     if view._is_identity():
         return x
 
-    return _scatter(
+    return View.scatter(
         source=x,
         out_shape=view.node.shape,
         operator="add",

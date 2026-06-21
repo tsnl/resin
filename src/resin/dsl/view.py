@@ -119,88 +119,94 @@ class View:
         return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
-        return _copy(self, etype=etype)
+        return View.scatter(
+            source=self,
+            out_shape=self.shape,
+            woffset=0,
+            wpitch=c_contiguous_pitch_for_shape(self.shape),
+            etype=etype or self.etype,
+        )
 
     def __pow__(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="pow")
+        return View.elementwise_binary(self, other, operator="pow")
 
     def __rpow__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) ** self
 
     def __mul__(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="mul")
+        return View.elementwise_binary(self, other, operator="mul")
 
     def __rmul__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) * self
 
     def __truediv__(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="div")
+        return View.elementwise_binary(self, other, operator="div")
 
     def __rtruediv__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) / self
 
     def __add__(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="add")
+        return View.elementwise_binary(self, other, operator="add")
 
     def __radd__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) + self
 
     def __sub__(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="sub")
+        return View.elementwise_binary(self, other, operator="sub")
 
     def __rsub__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) - self
 
     def max(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="max")
+        return View.elementwise_binary(self, other, operator="max")
 
     def min(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="min")
+        return View.elementwise_binary(self, other, operator="min")
 
     def eq(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="eq")
+        return View.elementwise_binary(self, other, operator="eq")
 
     def ne(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="ne")
+        return View.elementwise_binary(self, other, operator="ne")
 
     def lt(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="lt")
+        return View.elementwise_binary(self, other, operator="lt")
 
     def gt(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="gt")
+        return View.elementwise_binary(self, other, operator="gt")
 
     def le(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="le")
+        return View.elementwise_binary(self, other, operator="le")
 
     def ge(self, other: "TensorOperand") -> "View":
-        return _elementwise_binary(self, other, operator="ge")
+        return View.elementwise_binary(self, other, operator="ge")
 
     def __neg__(self) -> "View":
-        return _elementwise_unary(self, operator="neg")
+        return View.elementwise_unary(self, operator="neg")
 
     def __pos__(self) -> "View":
         return self
 
     def exp(self) -> "View":
-        return _elementwise_unary(self, operator="exp")
+        return View.elementwise_unary(self, operator="exp")
 
     def log(self) -> "View":
-        return _elementwise_unary(self, operator="log")
+        return View.elementwise_unary(self, operator="log")
 
     def sqrt(self) -> "View":
-        return _elementwise_unary(self, operator="sqrt")
+        return View.elementwise_unary(self, operator="sqrt")
 
     def sin(self) -> "View":
-        return _elementwise_unary(self, operator="sin")
+        return View.elementwise_unary(self, operator="sin")
 
     def cos(self) -> "View":
-        return _elementwise_unary(self, operator="cos")
+        return View.elementwise_unary(self, operator="cos")
 
     def __invert__(self) -> "View":
-        return _elementwise_unary(self, operator="not")
+        return View.elementwise_unary(self, operator="not")
 
     def __matmul__(self, other: "View") -> "View":
-        return _matmul(self, other)
+        return View.matmul(self, other)
 
     def __rmatmul__(self, other: "View") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) @ self
@@ -212,7 +218,7 @@ class View:
         axes: tuple[int, ...] | None,
     ) -> "View":
         axes = tuple(range(self.rank)) if axes is None else axes
-        return _reduction(self, axes=axes, operator=operator)
+        return View.reduction(self, axes=axes, operator=operator)
 
     def sum(self, axes: tuple[int, ...] | None = None) -> "View":
         return self.reduce(axes=axes, operator="add")
@@ -302,6 +308,88 @@ class View:
         )
         return new_self, new_other
 
+    @staticmethod
+    def elementwise_unary(operand: "View", operator: UnaryElementOperator) -> "View":
+        return View.identity(
+            ElementwiseNode(
+                shape=operand.shape,
+                etype=operand.etype,
+                args=(operand,),
+                operator=operator,
+            )
+        )
+
+    @staticmethod
+    def elementwise_binary(
+        a: "View",
+        b: "View | Scalar",
+        operator: ElementOperator,
+    ) -> "View":
+        b = View._from_view_or_scalar(b, etype=a.etype)
+        a, b = a._join_etypes_for_bop(b)
+        a, b = a._join_shapes_for_elementwise_bop(b)
+        return View.identity(
+            ElementwiseNode(
+                shape=a.shape,
+                etype=a.etype,
+                args=(a, b),
+                operator=operator,
+            )
+        )
+
+    @staticmethod
+    def reduction(
+        input: "View",
+        axes: tuple[int, ...],
+        operator: BinaryAssocElementOperator,
+    ) -> "View":
+        if not axes:
+            return input
+
+        out_shape = list(input.shape)
+        for axis in axes:
+            if axis < 0 or axis >= input.rank:
+                raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
+            out_shape[axis] = 1
+
+        return View.identity(
+            ReductionNode(
+                shape=tuple(out_shape),
+                etype=input.etype,
+                args=(input,),
+                operator=operator,
+                axes=axes,
+            )
+        )
+
+    @staticmethod
+    def matmul(a: "View", b: "View") -> "View":
+        a, b = a._join_etypes_for_bop(b)
+        a, b = a._join_shapes_for_matmul_bop(b)
+        out_shape = a.shape[:-1] + (b.shape[-1],)
+        return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
+
+    @staticmethod
+    def scatter(
+        *,
+        source: "View",
+        out_shape: tuple[int, ...],
+        woffset: int,
+        wpitch: tuple[int, ...],
+        operator: BinaryAssocElementOperator | None = None,
+        etype: ElementType | str | None = None,
+    ) -> "View":
+        return View.identity(
+            ScatterNode(
+                shape=out_shape,
+                etype=etype or source.etype,
+                args=(source,),
+                operator=operator,
+                woffset=woffset,
+                wpitch=wpitch,
+            )
+        )
+
 
 type TensorOperand = View | Scalar
 
@@ -330,98 +418,6 @@ def param(
     label: str | None = None,
 ) -> View:
     return View.identity(ParamNode(shape=shape, etype=etype, args=(), label=label))
-
-
-def _elementwise_unary(operand: View, operator: UnaryElementOperator) -> View:
-    return View.identity(
-        ElementwiseNode(
-            shape=operand.shape,
-            etype=operand.etype,
-            args=(operand,),
-            operator=operator,
-        )
-    )
-
-
-def _elementwise_binary(
-    a: View,
-    b: View | Scalar,
-    operator: ElementOperator,
-) -> View:
-    b = View._from_view_or_scalar(b, etype=a.etype)
-    a, b = a._join_etypes_for_bop(b)
-    a, b = a._join_shapes_for_elementwise_bop(b)
-    return View.identity(
-        ElementwiseNode(
-            shape=a.shape,
-            etype=a.etype,
-            args=(a, b),
-            operator=operator,
-        )
-    )
-
-
-def _reduction(
-    input: View,
-    axes: tuple[int, ...],
-    operator: BinaryAssocElementOperator,
-) -> View:
-    if not axes:
-        return input
-
-    out_shape = list(input.shape)
-    for axis in axes:
-        if axis < 0 or axis >= input.rank:
-            raise IndexError(f"Axis {axis} out of bounds for shape {input.shape}")
-        out_shape[axis] = 1
-
-    return View.identity(
-        ReductionNode(
-            shape=tuple(out_shape),
-            etype=input.etype,
-            args=(input,),
-            operator=operator,
-            axes=axes,
-        )
-    )
-
-
-def _matmul(a: View, b: View) -> View:
-    a, b = a._join_etypes_for_bop(b)
-    a, b = a._join_shapes_for_matmul_bop(b)
-    out_shape = a.shape[:-1] + (b.shape[-1],)
-    return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
-
-
-def _scatter(
-    *,
-    source: View,
-    out_shape: tuple[int, ...],
-    woffset: int,
-    wpitch: tuple[int, ...],
-    operator: BinaryAssocElementOperator | None = None,
-    etype: ElementType | str | None = None,
-) -> View:
-    return View.identity(
-        ScatterNode(
-            shape=out_shape,
-            etype=etype or source.etype,
-            args=(source,),
-            operator=operator,
-            woffset=woffset,
-            wpitch=wpitch,
-        )
-    )
-
-
-def _copy(source: View, etype: ElementType | None = None) -> View:
-    return _scatter(
-        source=source,
-        out_shape=source.shape,
-        woffset=0,
-        wpitch=c_contiguous_pitch_for_shape(source.shape),
-        etype=etype or source.etype,
-    )
 
 
 def debug_print(root: View, out: SupportsWrite[str]) -> None:
