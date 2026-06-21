@@ -197,7 +197,9 @@ def grad_fn(
     grads_for: Sequence[str] | None = None,
 ) -> Callable[..., tuple[PyTree[View], dict[str, PyTree[View]]]]:
     spec = parse_signature(f)
-    target_grads = tuple(grads_for or spec.args.keys())
+    target_grads = tuple(
+        spec.args.keys() if grads_for is None else grads_for
+    )
     unknown = set(target_grads) - set(spec.args)
     if unknown:
         raise ValueError(
@@ -231,8 +233,11 @@ def _build_grad_args(
         grad_args[name] = (
             map_tensor_leaves(
                 value,
-                lambda view: grad_map.get(view.node)
-                or zeros(view.shape, etype=view.etype),
+                lambda view: (
+                    g
+                    if (g := grad_map.get(view.node)) is not None
+                    else zeros(view.shape, etype=view.etype)
+                ),
             )
             if name in grads_for
             else value
