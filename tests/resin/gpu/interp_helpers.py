@@ -1,6 +1,4 @@
-"""Helpers for end-to-end WgpuInterp graph execution tests."""
-
-from __future__ import annotations
+"""Helpers for end-to-end Interp graph execution tests."""
 
 import math
 import struct
@@ -45,7 +43,8 @@ def run_graph(
         builder.build_sink(f"__param_{index}", view)
     builder.build_sink(sink_name, sink)
     program = build_wgpu_program(builder.finish())
-    interp = resin_rt_pybind.WgpuInterp(program.to_msgpack())
+    interp = resin_rt_pybind.Interp("wgpu")
+    program_id = interp.admit(program.to_msgpack())
 
     for view, value in param_items:
         node = view.node
@@ -56,10 +55,14 @@ def run_graph(
                 f"param shape mismatch: view {view.shape}, value {expected_shape}"
             )
         data = marshall_pytensor(value, etype=view.etype)
-        interp.write_buffer(param_buffer_index(program, node), data)
+        interp.write_buffer(
+            program_id,
+            param_buffer_index(program, node),
+            data,
+        )
 
-    interp.run()
-    raw = interp.read_buffer(sink_buffer_index(program, sink_name))
+    interp.run(program_id)
+    raw = interp.read_buffer(program_id, sink_buffer_index(program, sink_name))
     return unmarshall_buffer(raw, sink.shape, sink.etype)
 
 

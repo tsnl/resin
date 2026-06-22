@@ -1,17 +1,35 @@
-from typing import Any
+"""Interpreter protocols for executing compiled Resin programs."""
+
+__all__ = [
+    "BufferId",
+    "Interp",
+    "ProgramId",
+]
+
+from typing import Protocol
 
 type ProgramId = int
 type BufferId = int
 
-class Interp:
-    def __init__(self, backend: str, config: dict[str, Any] | bytes | None = ...) -> None: ...
+
+class Interp(Protocol):
+    """Structural interface implemented by concrete runtimes such as ``resin_rt_pybind.Interp``."""
+
     def admit(self, program_msgpack: bytes) -> ProgramId: ...
+
     def program_count(self) -> int: ...
+
     def run(self, program_id: ProgramId) -> None: ...
+
     def write_buffer(
-        self, program_id: ProgramId, buffer_id: BufferId, data: bytes
+        self,
+        program_id: ProgramId,
+        buffer_id: BufferId,
+        data: bytes,
     ) -> None: ...
+
     def read_buffer(self, program_id: ProgramId, buffer_id: BufferId) -> bytes: ...
+
     def copy_buffer_to_buffer(
         self,
         src_program_id: ProgramId,
@@ -19,14 +37,3 @@ class Interp:
         dst_program_id: ProgramId,
         dst_buffer_id: BufferId,
     ) -> None: ...
-
-def decode_wgpu_program_msgpack(program_msgpack: bytes) -> None: ...
-def encode_wgpu_program_msgpack(program_msgpack: bytes) -> bytes: ...
-
-__all__ = [
-    "BufferId",
-    "Interp",
-    "ProgramId",
-    "decode_wgpu_program_msgpack",
-    "encode_wgpu_program_msgpack",
-]

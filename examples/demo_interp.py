@@ -31,12 +31,13 @@ def main() -> None:
     ir_program = builder.finish()
 
     wgpu_program = build_wgpu_program(ir_program)
-    interp = resin_rt_pybind.WgpuInterp(wgpu_program.to_msgpack())
-    interp.run()
+    interp = resin_rt_pybind.Interp("wgpu")
+    program_id = interp.admit(wgpu_program.to_msgpack())
+    interp.run(program_id)
 
     sink_view_index = wgpu_program.sinks["out"]
     buffer_view = wgpu_program.buffer_views[sink_view_index]
-    raw = interp.read_buffer(buffer_view["buffer_index"])
+    raw = interp.read_buffer(program_id, buffer_view["buffer_index"])
     values = struct.unpack("<3f", raw)
 
     print(f"sink values: {values}", file=sys.stderr)

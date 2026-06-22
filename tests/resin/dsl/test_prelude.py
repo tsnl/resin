@@ -22,9 +22,6 @@ class TestPrelude:
             "U4",
             "View",
             "const",
-            "grad_fn",
             "param",
-            "trace",
-            "typecheck",
             "zeros",
         }
