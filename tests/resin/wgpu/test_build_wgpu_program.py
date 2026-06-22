@@ -49,7 +49,8 @@ class TestBuildWgpuProgram:
         ir_program = builder.finish()
 
         wgpu_program = build_wgpu_program(ir_program)
-        _ = resin_rt_pybind.WgpuInterp(wgpu_program.to_msgpack())
+        interp = resin_rt_pybind.Interp("wgpu")
+        _ = interp.admit(wgpu_program.to_msgpack())
 
     def test_elementwise_graph_has_pipeline_and_dispatch(self) -> None:
         t1 = dsl.const([1.0, 2.0], etype=F4)
