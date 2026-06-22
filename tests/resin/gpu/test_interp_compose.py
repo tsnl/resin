@@ -8,7 +8,6 @@ import resin.grad as grad
 import resin.nn as nn
 from resin import dsl
 from resin.core.etype import F4
-from resin.nn import Linear
 
 from tests.resin.gpu.interp_helpers import run_graph, run_scalar
 
@@ -23,16 +22,15 @@ def _scalar(view: dsl.View) -> dsl.View:
 class TestLinear:
     def test_forward(self) -> None:
         x = dsl.param(shape=(2, 3), etype=F4)
-        layer = Linear.new(3, 2, bias=True)
-        bias = layer.bias
-        assert bias is not None
-        out = layer(x)
+        layer = nn.linear_new(3, 2, bias=True)
+        assert "bias" in layer
+        out = nn.linear(layer, x)
         values = run_graph(
             out,
             params={
                 x: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                layer.weight: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                bias: [10.0, 20.0],
+                layer["weight"]: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                layer["bias"]: [10.0, 20.0],
             },
         )
         assert values == pytest.approx([11.0, 20.0, 10.0, 21.0])
@@ -41,18 +39,17 @@ class TestLinear:
 class TestSmallMlp:
     def test_relu_linear_stack(self) -> None:
         x = dsl.param(shape=(2, 2), etype=F4)
-        l1 = Linear.new(2, 2, bias=False)
-        l2 = Linear.new(2, 1, bias=True)
-        l2_bias = l2.bias
-        assert l2_bias is not None
-        out = l2(nn.relu(l1(x)))
+        l1 = nn.linear_new(2, 2, bias=False)
+        l2 = nn.linear_new(2, 1, bias=True)
+        assert "bias" in l2
+        out = nn.linear(l2, nn.relu(nn.linear(l1, x)))
         values = run_graph(
             out,
             params={
                 x: [[1.0, -1.0], [2.0, 3.0]],
-                l1.weight: [[1.0, 0.0], [0.0, 1.0]],
-                l2.weight: [[1.0, -1.0]],
-                l2_bias: [0.5],
+                l1["weight"]: [[1.0, 0.0], [0.0, 1.0]],
+                l2["weight"]: [[1.0, -1.0]],
+                l2["bias"]: [0.5],
             },
         )
         assert values == pytest.approx([1.5, -0.5])

@@ -40,11 +40,19 @@ members = [
 
 [tool.basedpyright]
 pythonVersion = "3.14"
+
 # node.py <-> view.py: View is only imported under TYPE_CHECKING in node.py.
 reportImportCycles = false
+
+# Any is used a lot, e.g. for `getattr()`, so this lets us avoid a lot of unnecessary
+# casts to `object`.
+reportAny = false
+reportExplicitAny = false
+
 executionEnvironments = [
     { root = "examples" },
 ]
+
 [tool.ruff.lint]
 preview = true
 explicit-preview-rules = true

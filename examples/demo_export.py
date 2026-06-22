@@ -19,7 +19,7 @@ from resin.ir import IrProgramBuilder
 from resin.wgpu import WgpuProgram, build_wgpu_program
 
 # TODO: load the exported blob in a Rust game engine via WgpuProgram::from_msgpack
-# and run WgpuInterp.
+# and run Interp("wgpu").
 
 
 def main() -> None:
