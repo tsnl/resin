@@ -1,19 +1,12 @@
-from typing import TypedDict
-
 from resin.core.etype import F4
 from resin.dsl import View, const
 
 
-class LinearParams(TypedDict):
-    weight: View[F4, (10, 784)]
-    bias: View[F4, (10,)]
-
-
 def mlp_step(
-    x: View[F4, (64, 784)],
-    y: View[F4, (64, 10)],
-    params: LinearParams,
-) -> View[F4, ()]:
+    x: View,
+    y: View,
+    params: dict[str, View],
+) -> View:
     logits = (x @ params["weight"].transpose() + params["bias"]).max(const(0, etype=F4))
     probs = logits.exp() / logits.exp().reduce(axes=(1,), operator="add")
     per_ex = -(y * probs.log()).reduce(axes=(1,), operator="add")
