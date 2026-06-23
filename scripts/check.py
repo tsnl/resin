@@ -1,4 +1,4 @@
-"""Run static analysis checks for the resin codebase."""
+"""Run repository checks for the resin codebase."""
 
 import shutil
 import subprocess

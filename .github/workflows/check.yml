@@ -61,10 +61,10 @@ jobs:
               run: uv sync --group dev
 
             - name: Basedpyright
-              run: uv run python scripts/lint.py basedpyright
+              run: uv run python scripts/check.py basedpyright
 
             - name: Pytest
-              run: uv run python scripts/lint.py pytest
+              run: uv run python scripts/check.py pytest
 
             - name: Prune uv cache
               if: always()
