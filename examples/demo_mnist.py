@@ -1,180 +1,211 @@
-"""MNIST MLP demo with Resin (WGPU) or PyTorch backends."""
-
-# /// script
-# requires-python = ">=3.14"
-# dependencies = [
-#   "resin",
-#   "resin-rt-pybind",
-#   "numpy",
-#   "torch",
-# ]
-#
-# [tool.uv.sources]
-# resin = { path = "..", editable = true }
-# resin-rt-pybind = { path = "../crates/resin-rt-pybind", editable = true }
-# ///
-
 import argparse
+import math
+import random
+import struct
 import sys
-from collections.abc import Sequence
-from typing import assert_never, cast
+from typing import cast
 
-from demo_mnist_common import DemoMnistCli, TrainConfig
-from demo_mnist_pytorch import run_pytorch
-from demo_mnist_resin import run_resin
+import resin_rt_pybind
 
+import resin
+from resin.dataset import MnistDataLoader, MnistDataset
+from resin.dsl.prelude import F4
+from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 
-def _require_int(
-    value: object,
-    parser: argparse.ArgumentParser,
-    *,
-    name: str,
-) -> int:
-    if isinstance(value, int):
-        return value
-    parser.error(f"invalid {name}: {value!r}")
+IMG_W = 28
+IMG_H = 28
+IMG_WH = IMG_W * IMG_H
+NUM_CLS = 10
+BATCH_SIZE = 64
+LR = 1e-3
+STEPS = 1_000
+EVAL_INTERVAL = 100
+SEED = 0
 
-
-def _require_float(
-    value: object,
-    parser: argparse.ArgumentParser,
-    *,
-    name: str,
-) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    parser.error(f"invalid {name}: {value!r}")
+type Mlp = list[resin.nn.Linear]
 
 
-def _require_str(
-    value: object,
-    parser: argparse.ArgumentParser,
-    *,
-    name: str,
-) -> str:
-    if isinstance(value, str):
-        return value
-    parser.error(f"invalid {name}: {value!r}")
+def mlp_new(
+    in_dim: int,
+    out_dim: int,
+    n_hidden: int,
+    hidden_dim: int,
+    bias: bool,
+) -> Mlp:
+    res: list[resin.nn.Linear] = []
+    res.append(resin.nn.linear_new(in_dim, hidden_dim, bias=bias))
+    for _ in range(n_hidden - 1):
+        res.append(resin.nn.linear_new(hidden_dim, hidden_dim, bias=bias))
+    res.append(resin.nn.linear_new(hidden_dim, out_dim, bias=bias))
+    return res
 
 
-def _require_bool(
-    value: object,
-    parser: argparse.ArgumentParser,
-    *,
-    name: str,
-) -> bool:
-    if isinstance(value, bool):
-        return value
-    parser.error(f"invalid {name}: {value!r}")
+def mlp(model: Mlp, x: resin.dsl.View) -> resin.dsl.View:
+    assert len(x.shape) == 2
+    for layer in model[:-1]:
+        x = resin.nn.linear(layer, x)
+        x = resin.nn.relu(x)
+    x = resin.nn.linear(model[-1], x)
+    return resin.nn.softmax(x, axes=(1,))
 
 
-def _require_choice[T: str](
-    value: object,
-    choices: tuple[T, ...],
-    parser: argparse.ArgumentParser,
-    *,
-    name: str,
-) -> T:
-    if isinstance(value, str) and value in choices:
-        return cast(T, value)
-    parser.error(f"invalid {name}: {value!r}")
-
-
-def parse_cli(argv: Sequence[str] | None = None) -> DemoMnistCli:
-    parser = argparse.ArgumentParser(description=__doc__)
-    _ = parser.add_argument(
-        "--backend",
-        choices=("resin", "pytorch"),
-        default="resin",
-        help="Training runtime (default: resin).",
-    )
-    _ = parser.add_argument("--batch-size", type=int, default=64)
-    _ = parser.add_argument("--img-size", type=int, default=28)
-    _ = parser.add_argument("--num-classes", type=int, default=10)
-    _ = parser.add_argument("--hidden-size", type=int, default=128)
-    _ = parser.add_argument("--learning-rate", type=float, default=5e-3)
-    _ = parser.add_argument("--steps", type=int, default=100_000)
-    _ = parser.add_argument("--eval-interval", type=int, default=100)
-    _ = parser.add_argument("--seed", type=int, default=0)
-    _ = parser.add_argument(
-        "--optimizer",
-        choices=("adam", "adamw", "sgd"),
-        default="adam",
-        help="PyTorch only (default: adam). Resin always uses SGD.",
-    )
-    _ = parser.add_argument(
-        "--device",
-        default="auto",
-        help="PyTorch only: auto, cpu, mps, or cuda.",
-    )
-    _ = parser.add_argument(
-        "--match-resin-loss",
-        action="store_true",
-        help="PyTorch only: softmax in forward, then log(probs). "
-        + "Default uses log-softmax on logits.",
-    )
-    _ = parser.add_argument("--benchmark-steps", type=int, default=0)
-    _ = parser.add_argument("--benchmark-warmup", type=int, default=20)
-    args: dict[str, object] = vars(
-        parser.parse_args(list(argv) if argv is not None else None)
+def arrange_grads(
+    model: Mlp,
+    grads: dict[resin.dsl.Node, resin.dsl.View],
+) -> resin.core.pytree.PyTree[resin.dsl.View]:
+    return resin.core.pytree.map_pytree(
+        cast(resin.core.pytree.PyTree[resin.dsl.View], model),
+        lambda view: grads[view.node],
     )
 
-    return DemoMnistCli(
-        backend=_require_choice(
-            args["backend"], ("resin", "pytorch"), parser, name="backend"
-        ),
-        train=TrainConfig(
-            batch_size=_require_int(args["batch_size"], parser, name="batch_size"),
-            img_size=_require_int(args["img_size"], parser, name="img_size"),
-            num_classes=_require_int(args["num_classes"], parser, name="num_classes"),
-            hidden_size=_require_int(args["hidden_size"], parser, name="hidden_size"),
-            learning_rate=_require_float(
-                args["learning_rate"], parser, name="learning_rate"
-            ),
-            steps=_require_int(args["steps"], parser, name="steps"),
-            eval_interval=_require_int(
-                args["eval_interval"], parser, name="eval_interval"
-            ),
-            seed=_require_int(args["seed"], parser, name="seed"),
-        ),
-        optimizer=_require_choice(
-            args["optimizer"], ("adam", "adamw", "sgd"), parser, name="optimizer"
-        ),
-        device=_require_str(args["device"], parser, name="device"),
-        match_resin_loss=_require_bool(
-            args["match_resin_loss"], parser, name="match_resin_loss"
-        ),
-        benchmark_steps=_require_int(
-            args["benchmark_steps"], parser, name="benchmark_steps"
-        ),
-        benchmark_warmup=_require_int(
-            args["benchmark_warmup"], parser, name="benchmark_warmup"
-        ),
-    )
+
+def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
+    view_index = program.sinks[sink_name]
+    return program.buffer_views[view_index]["buffer_index"]
+
+
+def random_param_bytes(shape: tuple[int, ...]) -> bytes:
+    count = math.prod(shape)
+    values = [random.uniform(-0.1, 0.1) for _ in range(count)]
+    return struct.pack(f"<{count}f", *values)
+
+
+def write_param(
+    interp: resin_rt_pybind.Interp,
+    program_id: int,
+    program: WgpuProgram,
+    param_view: resin.dsl.View,
+    data: bytes,
+) -> None:
+    node = param_view.node
+    assert isinstance(node, resin.dsl.ParamNode)
+    interp.write_buffer(program_id, param_buffer_index(program, node), data)
+
+
+def commit_model(
+    interp: resin_rt_pybind.Interp,
+    program_id: int,
+    program: WgpuProgram,
+    model: resin.core.pytree.PyTree[resin.dsl.View],
+) -> None:
+    for path, model_view in resin.core.pytree.flatten_pytree_paths(model):
+        sink_name = f"new_model.{path}"
+        src_buffer = sink_buffer_index(program, sink_name)
+        node = model_view.node
+        assert isinstance(node, resin.dsl.ParamNode)
+        dst_buffer = param_buffer_index(program, node)
+        interp.copy_buffer_to_buffer(
+            program_id,
+            src_buffer,
+            program_id,
+            dst_buffer,
+        )
 
 
 def main() -> None:
-    cli = parse_cli()
-    print(f"backend={cli.backend}", file=sys.stderr)
+    ap = argparse.ArgumentParser()
+    _ = ap.add_argument("--steps", type=int, default=STEPS)
+    _ = ap.add_argument("--eval-interval", type=int, default=EVAL_INTERVAL)
+    _ = ap.add_argument("--seed", type=int, default=SEED)
+    args = ap.parse_args()
 
-    match cli.backend:
-        case "resin":
-            run_resin(
-                cli.train,
-                benchmark_steps=cli.benchmark_steps,
-                benchmark_warmup=cli.benchmark_warmup,
-            )
-        case "pytorch":
-            run_pytorch(
-                cli.train,
-                optimizer_name=cli.optimizer,
-                device_name=cli.device,
-                match_resin_loss=cli.match_resin_loss,
-                benchmark_steps=cli.benchmark_steps,
-                benchmark_warmup=cli.benchmark_warmup,
-            )
-        case _:
-            assert_never(cli.backend)
+    #
+    # Record the training program:
+    # - xs, ys, model: param buffers that can be written
+    # - new_model: output sink buffers, should be copied to model for next iter
+    #
+
+    model = mlp_new(
+        in_dim=IMG_WH,
+        out_dim=NUM_CLS,
+        n_hidden=2,
+        hidden_dim=128,
+        bias=True,
+    )
+
+    xs = resin.dsl.param(shape=(BATCH_SIZE, IMG_WH), etype=F4, label="xs")
+    ys = resin.dsl.param(shape=(BATCH_SIZE, NUM_CLS), etype=F4, label="ys")
+
+    y_hats = mlp(model, xs)
+    losses = resin.nn.cross_entropy(y_hats, ys)
+    loss = resin.nn.mean(losses)
+
+    grads_dict = resin.grad.grad(loss)
+    grads = arrange_grads(model, grads_dict)
+
+    new_model = resin.core.pytree.map_pytree(
+        resin.core.pytree.zip_pytree(
+            cast(resin.core.pytree.PyTree[resin.dsl.View], model),
+            grads,
+        ),
+        lambda pair: pair[0] - LR * pair[1],
+    )
+
+    #
+    # Compile the program
+    #
+
+    ir_program_builder = resin.ir.IrProgramBuilder()
+    ir_program_builder.build_sink("loss", loss)
+    for path, view in resin.core.pytree.flatten_pytree_paths(new_model):
+        ir_program_builder.build_sink(f"new_model.{path}", view)
+    program = build_wgpu_program(ir_program_builder.finish())
+
+    #
+    # Run the program
+    #
+
+    random.seed(args.seed)
+    train_dataset = MnistDataset.load("train")
+    data_loader = MnistDataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        seed=args.seed,
+        drop_last=True,
+    )
+    batch_iter = data_loader.iter_batches()
+
+    interp = resin_rt_pybind.Interp("wgpu")
+    program_id = interp.admit(program.to_msgpack())
+
+    model_params: list[resin.dsl.View] = list(
+        resin.core.pytree.flatten_pytree(
+            cast(resin.core.pytree.PyTree[resin.dsl.View], model)
+        )
+    )
+    for param_view in model_params:
+        write_param(
+            interp,
+            program_id,
+            program,
+            param_view,
+            random_param_bytes(param_view.shape),
+        )
+
+    loss_buffer = sink_buffer_index(program, "loss")
+
+    for step in range(args.steps):
+        try:
+            image_bytes, label_bytes = next(batch_iter)
+        except StopIteration:
+            batch_iter = data_loader.iter_batches(epoch=step)
+            image_bytes, label_bytes = next(batch_iter)
+
+        write_param(interp, program_id, program, xs, image_bytes)
+        write_param(interp, program_id, program, ys, label_bytes)
+        interp.run(program_id)
+        commit_model(
+            interp,
+            program_id,
+            program,
+            cast(resin.core.pytree.PyTree[resin.dsl.View], model),
+        )
+
+        if step % args.eval_interval == 0 or step == args.steps - 1:
+            loss_bytes = interp.read_buffer(program_id, loss_buffer)
+            loss_value = struct.unpack("<f", loss_bytes)[0]
+            print(f"step {step}: loss={loss_value:.6f}", file=sys.stderr)
 
 
 if __name__ == "__main__":
