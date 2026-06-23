@@ -18,8 +18,7 @@ IMG_WH = IMG_W * IMG_H
 NUM_CLS = 10
 BATCH_SIZE = 64
 LR = 1e-3
-STEPS = 1_000
-EVAL_INTERVAL = 100
+EPOCHS = 10
 SEED = 0
 
 type Mlp = list[resin.nn.Linear]
@@ -104,8 +103,7 @@ def commit_model(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    _ = ap.add_argument("--steps", type=int, default=STEPS)
-    _ = ap.add_argument("--eval-interval", type=int, default=EVAL_INTERVAL)
+    _ = ap.add_argument("--epochs", type=int, default=EPOCHS)
     _ = ap.add_argument("--seed", type=int, default=SEED)
     args = ap.parse_args()
 
@@ -164,8 +162,6 @@ def main() -> None:
         seed=args.seed,
         drop_last=True,
     )
-    batch_iter = data_loader.iter_batches()
-
     interp = resin_rt_pybind.Interp("wgpu")
     program_id = interp.admit(program.to_msgpack())
 
@@ -185,27 +181,21 @@ def main() -> None:
 
     loss_buffer = sink_buffer_index(program, "loss")
 
-    for step in range(args.steps):
-        try:
-            image_bytes, label_bytes = next(batch_iter)
-        except StopIteration:
-            batch_iter = data_loader.iter_batches(epoch=step)
-            image_bytes, label_bytes = next(batch_iter)
+    for epoch in range(args.epochs):
+        for image_bytes, label_bytes in data_loader.iter_batches(epoch=epoch):
+            write_param(interp, program_id, program, xs, image_bytes)
+            write_param(interp, program_id, program, ys, label_bytes)
+            interp.run(program_id)
+            commit_model(
+                interp,
+                program_id,
+                program,
+                cast(resin.core.pytree.PyTree[resin.dsl.View], model),
+            )
 
-        write_param(interp, program_id, program, xs, image_bytes)
-        write_param(interp, program_id, program, ys, label_bytes)
-        interp.run(program_id)
-        commit_model(
-            interp,
-            program_id,
-            program,
-            cast(resin.core.pytree.PyTree[resin.dsl.View], model),
-        )
-
-        if step % args.eval_interval == 0 or step == args.steps - 1:
-            loss_bytes = interp.read_buffer(program_id, loss_buffer)
-            loss_value = struct.unpack("<f", loss_bytes)[0]
-            print(f"step {step}: loss={loss_value:.6f}", file=sys.stderr)
+        loss_bytes = interp.read_buffer(program_id, loss_buffer)
+        loss_value = struct.unpack("<f", loss_bytes)[0]
+        print(f"epoch {epoch}: loss={loss_value:.6f}", file=sys.stderr)
 
 
 if __name__ == "__main__":
