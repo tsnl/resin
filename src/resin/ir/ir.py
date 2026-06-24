@@ -36,8 +36,8 @@ import resin.dsl as dsl
 
 @dataclass(frozen=True, kw_only=True)
 class IrProgram:
-    # Maps Python object id of each ParamNode to its buffer index in `buffers`.
-    param_buffer_ids: frozendict[int, int]
+    # Maps each param's stable name to its buffer index in `buffers`.
+    param_buffers: frozendict[str, int]
     sinks: frozendict[str, IrBufferView]
     queue: tuple[IrDispatch, ...]
     buffers: tuple[IrBuffer, ...]
@@ -153,6 +153,7 @@ class IrProgramBuilder:
     buffer_view_memo: dict[dsl.View, IrBufferView]
     queue: list[IrDispatch]
     sinks: dict[str, IrBufferView]
+    param_names: dict[int, str]
 
     def __init__(self):
         super().__init__()
@@ -161,17 +162,31 @@ class IrProgramBuilder:
         self.buffer_view_memo = {}
         self.queue = []
         self.sinks = {}
+        self.param_names = {}
+
+    def register_param(self, name: str, view: dsl.View) -> None:
+        node = view.node
+        if not isinstance(node, dsl.ParamNode):
+            raise TypeError(f"register_param expected a param view, got {type(node)}")
+        if name in self.param_names.values():
+            raise ValueError(f"duplicate param name: {name!r}")
+        self.param_names[id(node)] = name
+
+    def build_sink_tree(self, prefix: str, tree: dsl.PyTree[dsl.View]) -> None:
+        from resin.core.state import sink_tree
+
+        sink_tree(self, prefix, tree)
 
     def finish(self) -> IrProgram:
-        param_buffer_ids: frozendict[int, int] = frozendict(
+        param_buffers: frozendict[str, int] = frozendict(
             {
-                id(node): index
+                self.param_names.get(id(node), node.name): index
                 for index, node in enumerate(self.buffer_memo.keys())
                 if isinstance(node, dsl.ParamNode)
             }
         )
         return IrProgram(
-            param_buffer_ids=param_buffer_ids,
+            param_buffers=param_buffers,
             sinks=frozendict(self.sinks),
             queue=tuple(self.queue),
             buffers=tuple(self.buffer_memo.values()),
