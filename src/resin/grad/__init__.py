@@ -3,11 +3,13 @@ __all__ = [
     "accessor_adjoint",
     "df_do",
     "grad",
+    "grad_by_node",
 ]
 
-from typing import assert_never
+from typing import assert_never, overload
 
 from resin.core.accessor import Accessor
+from resin.core.pytree import PyTree, map_pytree
 from resin.dsl.node import (
     ConstNode,
     ElementwiseNode,
@@ -18,6 +20,12 @@ from resin.dsl.node import (
     ScatterNode,
 )
 from resin.dsl.view import View, ones, toposort
+
+
+def _param_label(node: Node) -> str:
+    if isinstance(node, ParamNode):
+        return node.name
+    return repr(node)
 
 
 class NotDifferentiableException(Exception):
@@ -156,7 +164,7 @@ def _df_do_reduction(node: ReductionNode, df_dout: View) -> tuple[View, ...]:
             assert_never(node.operator)
 
 
-def grad(f: View) -> dict[Node, View]:
+def grad_by_node(f: View) -> dict[Node, View]:
     if f.shape != ():
         raise ValueError("Output graph must be a scalar (i.e. have shape=())")
 
@@ -178,3 +186,38 @@ def grad(f: View) -> dict[Node, View]:
             accumulate(operand, df_do_i)
 
     return grad_node
+
+
+@overload
+def grad(f: View, *, wrt: None = None) -> dict[Node, View]: ...
+
+
+@overload
+def grad(f: View, *, wrt: View) -> View: ...
+
+
+@overload
+def grad(f: View, *, wrt: PyTree[View]) -> PyTree[View]: ...
+
+
+def grad(
+    f: View,
+    *,
+    wrt: View | PyTree[View] | None = None,
+) -> dict[Node, View] | View | PyTree[View]:
+    grad_node = grad_by_node(f)
+    if wrt is None:
+        return grad_node
+    if isinstance(wrt, View):
+        value = grad_node.get(wrt.node)
+        if value is None:
+            raise KeyError(f"no gradient for param {_param_label(wrt.node)!r}")
+        return value
+
+    def lookup(view: View) -> View:
+        value = grad_node.get(view.node)
+        if value is None:
+            raise KeyError(f"no gradient for param {_param_label(view.node)!r}")
+        return value
+
+    return map_pytree(wrt, lookup)
