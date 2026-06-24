@@ -45,7 +45,7 @@ def test_pyright_accepts_view_for_tensor_annotation() -> None:
         def accepts_tensor(x: View[F4, (2,)]) -> None:
             _ = x
 
-        accepts_tensor(param(shape=(2,), etype=F4, label="x"))
+        accepts_tensor(param(shape=(2,), etype=F4, name="x"))
         """
     )
     output = result.stdout + result.stderr
@@ -61,7 +61,7 @@ def test_pyright_accepts_tensor_methods_in_function_body() -> None:
         def reduce_scalar(x: View[F4, (2,)]) -> View[F4, ()]:
             return x.sum().squeeze(axes=(0,))
 
-        _ = reduce_scalar(param(shape=(2,), etype=F4, label="x"))
+        _ = reduce_scalar(param(shape=(2,), etype=F4, name="x"))
         _ = reduce_scalar(const(1.0, etype=F4).broadcast((2,)))
         """
     )

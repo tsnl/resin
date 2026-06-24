@@ -298,6 +298,6 @@ class TestBroadcast:
 
 class TestParam:
     def test_param_node(self) -> None:
-        t = param(shape=(4,), etype=F4, label="weights")
-        expected = "param(label='weights') :: f4(4,)"
+        t = param(shape=(4,), etype=F4, name="weights")
+        expected = "param(name='weights') :: f4(4,)"
         assert debug_str(t) == expected.strip()

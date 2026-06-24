@@ -5,18 +5,18 @@ from resin.dsl import ElementwiseNode, View, param
 
 class TestAccessorAdjoint:
     def test_broadcast_reduces(self) -> None:
-        x = param(shape=(3,), etype=F4, label="x")
+        x = param(shape=(3,), etype=F4, name="x")
         y = x.broadcast((4,))
-        g = param(shape=y.shape, etype=F4, label="g")
+        g = param(shape=y.shape, etype=F4, name="g")
         grad_x = grad.accessor_adjoint(y, g)
 
         assert grad_x.shape == x.shape
         assert grad_x.pitch == x.pitch
 
     def test_scalar_broadcast(self) -> None:
-        x = param(shape=(), etype=F4, label="x")
+        x = param(shape=(), etype=F4, name="x")
         y = x.broadcast((2, 3))
-        g = param(shape=y.shape, etype=F4, label="g")
+        g = param(shape=y.shape, etype=F4, name="g")
         grad_x = grad.accessor_adjoint(y, g)
 
         assert grad_x.shape == x.shape
@@ -28,9 +28,9 @@ class TestReductionDfDo:
         axes: tuple[int, ...],
         operator: BinaryAssocElementOperator,
     ) -> tuple[View, View, View]:
-        x = param(shape=(2, 3), etype=F4, label="x")
+        x = param(shape=(2, 3), etype=F4, name="x")
         n = x.reduce(axes=axes, operator=operator)
-        df_dn = param(shape=n.shape, etype=F4, label="df_dn")
+        df_dn = param(shape=n.shape, etype=F4, name="df_dn")
         return x, n, df_dn
 
     def test_add_returns_broadcast_view(self) -> None:
@@ -66,9 +66,9 @@ class TestReductionDfDo:
         assert grad_x.shape == x.shape
 
     def test_add_multi_axis(self) -> None:
-        x = param(shape=(2, 3), etype=F4, label="x")
+        x = param(shape=(2, 3), etype=F4, name="x")
         n = x.reduce(axes=(0, 1), operator="add")
-        df_dn = param(shape=n.shape, etype=F4, label="df_dn")
+        df_dn = param(shape=n.shape, etype=F4, name="df_dn")
         (grad_x,) = grad.df_do(n.node, df_dn)
 
         assert grad_x.shape == x.shape
@@ -87,20 +87,20 @@ class TestGrad:
         return s.squeeze(axes=tuple(range(s.rank)))
 
     def test_matmul_grad_shapes(self) -> None:
-        x = param(shape=(2, 3), etype=F4, label="x")
-        w = param(shape=(3, 4), etype=F4, label="w")
+        x = param(shape=(2, 3), etype=F4, name="x")
+        w = param(shape=(3, 4), etype=F4, name="w")
         g = grad.grad(self._scalar(x @ w))
         assert g[x.node].shape == x.shape
         assert g[w.node].shape == w.shape
 
     def test_broadcast_and_reduce_grad(self) -> None:
-        p = param(shape=(3,), etype=F4, label="p")
-        b = param(shape=(2, 3), etype=F4, label="b")
+        p = param(shape=(3,), etype=F4, name="p")
+        b = param(shape=(2, 3), etype=F4, name="b")
         g = grad.grad(self._scalar(b + p))
         assert g[p.node].shape == p.shape
         assert g[b.node].shape == b.shape
 
     def test_copy_then_sum_grad(self) -> None:
-        x = param(shape=(4,), etype=F4, label="x")
+        x = param(shape=(4,), etype=F4, name="x")
         g = grad.grad(self._scalar(x.copy()))
         assert g[x.node].shape == x.shape

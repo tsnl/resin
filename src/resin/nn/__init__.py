@@ -23,11 +23,11 @@ class Linear(TypedDict):
 
 
 def linear_new(m: int, n: int, *, bias: bool = True) -> Linear:
-    weight = param(shape=(n, m), etype=F4, label="weight")
+    weight = param(shape=(n, m), etype=F4)
     if bias:
         return {
             "weight": weight,
-            "bias": param(shape=(n,), etype=F4, label="bias"),
+            "bias": param(shape=(n,), etype=F4),
         }
     return {"weight": weight}
 
