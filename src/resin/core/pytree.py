@@ -42,23 +42,41 @@ Recursive JSON-like trees of ``T`` leaves nested in dict/list containers.
     | SequenceNotStr[PyTree[T]]
     | tuple[PyTree[T], ...]
 
+Leaf type ``T`` should be the payload (e.g. ``View``, ``int``), not ``dict`` or
+``list``. Nested structure belongs in the container arms, not in ``T``.
+
 Why the static alias is wider than runtime:
 
 - ``Mapping`` and ``SequenceNotStr`` (from ``useful_types``) are covariant, so
   module reprs such as ``list[Linear]`` subtype ``PyTree[View]`` without casts.
   Plain ``dict``/``list`` in the alias are invariant and break that subtyping.
+  Runtime containers are plain ``dict`` and ``list``, but walkers treat them as
+  immutable: they read structure without mutating nodes, so covariant annotations
+  are sound (nothing is ever written through the wider static type).
 - ``SequenceNotStr`` rejects ``str``, which otherwise satisfies ``Sequence``.
   Custom ``Protocol``s with a ``copy()`` return type break basedpyright's recursive
   leaf-``T`` inference in walkers.
 - ``tuple[PyTree[T], ...]`` types homogeneous tuple containers alongside list
   nodes, but walkers still treat tuples as *leaves* at runtime (only ``dict`` and
   ``list`` are recursed into).
-- Walkers use ``cast()`` after ``isinstance`` checks because pyright cannot narrow
-  the ``PyTree[T]`` union down to leaf ``T`` from runtime tests alone.
+- Walkers call :func:`expect_pytree_leaf` after ruling out ``dict`` and ``list``
+  because pyright cannot narrow the ``PyTree[T]`` union down to leaf ``T`` from
+  runtime tests alone.
 
 :func:`zip_pytree` returns :class:`PyTreeZipped` leaves instead of ``tuple[T, U]``
 so zip pairings do not collide with tuple-container nodes in the type system.
 """
+
+
+def expect_pytree_leaf[T](value: PyTree[T]) -> T:
+    """
+    Narrow a PyTree node to leaf ``T`` after ``dict``/``list`` branches are ruled out.
+
+    Walkers recurse only on ``dict`` and ``list``. If ``value`` is neither, it must
+    be a leaf. Pyright cannot infer that from ``isinstance`` alone.
+    """
+    assert not isinstance(value, (dict, list))
+    return cast(T, value)
 
 
 def _join_pytree_path(prefix: str, segment: str) -> str:
@@ -81,7 +99,7 @@ def flatten_pytree_paths[T](
                 child, prefix=_join_pytree_path(prefix, str(index))
             )
     else:
-        yield prefix, cast(T, pytree)
+        yield prefix, expect_pytree_leaf(pytree)
 
 
 def map_pytree_paths[T, U](
@@ -108,7 +126,7 @@ def map_pytree_paths[T, U](
             )
             for index, child in enumerate(cast(list[PyTree[T]], pytree))
         ]
-    return fn(prefix, cast(T, pytree))
+    return fn(prefix, expect_pytree_leaf(pytree))
 
 
 def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
@@ -119,7 +137,7 @@ def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
         for child in cast(list[PyTree[T]], pytree):
             yield from flatten_pytree(child)
     else:
-        yield cast(T, pytree)
+        yield expect_pytree_leaf(pytree)
 
 
 def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
@@ -130,7 +148,7 @@ def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
         }
     if isinstance(pytree, list):
         return [map_pytree(child, f) for child in cast(list[PyTree[T]], pytree)]
-    return f(cast(T, pytree))
+    return f(expect_pytree_leaf(pytree))
 
 
 def zip_pytree[T, U](a: PyTree[T], b: PyTree[U]) -> PyTree[PyTreeZipped[T, U]]:
@@ -155,7 +173,7 @@ def zip_pytree[T, U](a: PyTree[T], b: PyTree[U]) -> PyTree[PyTreeZipped[T, U]]:
                 for a_child, b_child in zip(a_list, b_list, strict=True)
             ]
         case _:
-            return PyTreeZipped(cast(T, a), cast(U, b))
+            return PyTreeZipped(expect_pytree_leaf(a), expect_pytree_leaf(b))
 
 
 def infer_pytensor_shape(value: PyTensor) -> tuple[int, ...]:

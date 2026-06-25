@@ -3,7 +3,6 @@ from resin.ir.ir import IrBufferView, IrKernel, IrProgram
 
 from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
 from .spec import (
-    SCHEMA_VERSION,
     WgpuAccessorSpec,
     WgpuBufferSpec,
     WgpuBufferViewSpec,
@@ -84,7 +83,6 @@ def build_wgpu_program(
         queue=tuple(queue),
         sinks=frozendict(sinks),
         param_buffers=frozendict(param_buffers),
-        schema_version=SCHEMA_VERSION,
     )
 
 

@@ -9,10 +9,7 @@ from resin_rt_pybind import decode_wgpu_program_msgpack
 
 from resin.core.etype import ElementType, etype_nbytes
 
-SCHEMA_VERSION = 2
-
 __all__ = [
-    "SCHEMA_VERSION",
     "WgpuAccessorSpec",
     "WgpuBufferSpec",
     "WgpuBufferViewSpec",
@@ -72,7 +69,6 @@ class WgpuProgramSpec(TypedDict):
     buffers: list[WgpuBufferSpec]
     buffer_views: list[WgpuBufferViewSpec]
     pipelines: list[WgpuComputePipelineSpec]
-    schema_version: NotRequired[int]
     param_buffers: NotRequired[dict[str, int]]
 
 
@@ -120,15 +116,12 @@ class WgpuProgram:
     param_buffers: frozendict[str, int] = field(
         default_factory=lambda: frozendict[str, int]()
     )
-    schema_version: int = SCHEMA_VERSION
-
     def __post_init__(self) -> None:
         for buffer in self.buffers:
             _validate_buffer_spec(buffer)
 
     def to_dict(self) -> WgpuProgramSpec:
         return {
-            "schema_version": self.schema_version,
             "param_buffers": dict(self.param_buffers),
             "sinks": dict(self.sinks),
             "queue": list(self.queue),
@@ -140,7 +133,6 @@ class WgpuProgram:
     @classmethod
     def from_dict(cls, payload: WgpuProgramSpec) -> WgpuProgram:
         return cls(
-            schema_version=payload.get("schema_version", SCHEMA_VERSION),
             param_buffers=frozendict(payload.get("param_buffers", {})),
             sinks=frozendict(payload["sinks"]),
             queue=tuple(payload["queue"]),
