@@ -3,7 +3,7 @@ import math
 import random
 import struct
 import sys
-from typing import cast
+
 
 import resin_rt_pybind
 
@@ -76,12 +76,11 @@ def main() -> None:
     losses = resin.nn.cross_entropy(y_hats, ys)
     loss = resin.nn.mean(losses)
 
-    model_tree = cast(resin.core.pytree.PyTree[resin.dsl.View], model)
-    grads = resin.grad.grad(loss, wrt=model_tree)
-    new_model = resin.opt.sgd(model_tree, grads, lr=LR)
+    grads = resin.grad.grad(loss, wrt=model)
+    new_model = resin.opt.sgd(model, grads, lr=LR)
 
     compiled = resin.runtime.compile_program(
-        params={"xs": xs, "ys": ys, "model": model_tree},
+        params={"xs": xs, "ys": ys, "model": model},
         sinks={"loss": loss, "new_model": new_model},
     )
 
@@ -100,9 +99,7 @@ def main() -> None:
     program_id = compiled.admit(interp)
     binding = compiled.binding(interp, program_id)
 
-    for param_view in resin.core.pytree.flatten_pytree(
-        cast(resin.core.pytree.PyTree[resin.dsl.View], model)
-    ):
+    for param_view in resin.core.pytree.flatten_pytree(model):
         binding.write_view(param_view, random_param_bytes(param_view.shape))
 
     for step in range(args.steps):
@@ -114,7 +111,7 @@ def main() -> None:
 
         binding.write({"xs": image_bytes, "ys": label_bytes})
         interp.run(program_id)
-        binding.commit(from_prefix="new_model", to_prefix="model", tree=model_tree)
+        binding.commit(from_prefix="new_model", to_prefix="model", tree=model)
 
         if step % args.eval_interval == 0 or step == args.steps - 1:
             loss_bytes = binding.read_sink("loss")

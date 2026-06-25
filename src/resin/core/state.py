@@ -7,7 +7,7 @@ __all__ = [
 ]
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from resin.core.pytree import PyTree, flatten_pytree_paths
 from resin.dsl.view import View
@@ -24,10 +24,7 @@ def flatten_named_views(
         if isinstance(value, View):
             flat[key] = value
             continue
-        for path, view in flatten_pytree_paths(
-            cast(PyTree[View], value),
-            prefix=key,
-        ):
+        for path, view in flatten_pytree_paths(value, prefix=key):
             flat[path] = view
     return flat
 

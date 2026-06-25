@@ -3,10 +3,7 @@ import struct
 import resin_rt_pybind
 
 from resin.core.etype import F4
-from typing import cast
-
-from resin.core.pytree import PyTree
-from resin.dsl import View, param
+from resin.dsl import param
 from resin.grad import grad
 from resin.nn import linear, linear_new, mean
 from resin.opt import sgd
@@ -25,7 +22,7 @@ def test_param_buffers_use_stable_names() -> None:
 
 def test_tree_params_and_commit() -> None:
     layer = linear_new(2, 3, bias=True)
-    model = cast(PyTree[View], [layer])
+    model = [layer]
     xs = param(shape=(1, 2), etype=F4, name="xs")
     out = linear(layer, xs)
     loss = mean(out)

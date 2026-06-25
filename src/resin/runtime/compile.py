@@ -10,8 +10,6 @@ __all__ = [
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
-
 from frozendict import frozendict
 
 import resin.dsl as dsl
@@ -123,7 +121,7 @@ def _build_sinks(
         if isinstance(value, dsl.View):
             builder.build_sink(key, value)
         else:
-            sink_tree(builder, key, cast(PyTree[dsl.View], value))
+            sink_tree(builder, key, value)
 
 
 def _manifest_for(
