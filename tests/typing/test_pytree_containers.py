@@ -34,6 +34,29 @@ def test_module_repr_subtypes_pytree() -> None:
     assert result.returncode == 0
 
 
+def test_typeddict_module_repr_does_not_subtype_pytree() -> None:
+    result = _run_pyright(
+        """
+        from typing import NotRequired, TypedDict
+        from resin.core.pytree import PyTree
+        from resin.dsl import View, param
+        from resin.core.etype import F4
+
+        class Linear(TypedDict):
+            weight: View
+            bias: NotRequired[View]
+
+        layer: Linear = {"weight": param(shape=(3, 2), etype=F4)}
+        model: list[Linear] = [layer]
+        tree: PyTree[View] = model
+        _ = tree
+        """
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "reportAssignmentType" in output
+
+
 def test_pytree_rejects_str() -> None:
     result = _run_pyright(
         """

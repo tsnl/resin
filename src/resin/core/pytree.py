@@ -44,6 +44,9 @@ Recursive JSON-like trees of ``T`` leaves nested in dict/list containers.
 
 Leaf type ``T`` should be the payload (e.g. ``View``, ``int``), not ``dict`` or
 ``list``. Nested structure belongs in the container arms, not in ``T``.
+``TypedDict`` module reprs (e.g. ``Linear``) are *not* ``Mapping[str, PyTree[T]]``
+in pyright — use ``dict[str, T]`` at PyTree boundaries, or register explicit
+paths via :func:`resin.runtime.trees.register_named_params`.
 
 Why the static alias is wider than runtime:
 

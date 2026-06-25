@@ -172,19 +172,18 @@ class IrProgramBuilder:
             raise ValueError(f"duplicate param name: {name!r}")
         self.param_names[id(node)] = name
 
-    def build_sink_tree(self, prefix: str, tree: dsl.PyTree[dsl.View]) -> None:
-        from resin.core.state import sink_tree
-
-        sink_tree(self, prefix, tree)
-
     def finish(self) -> IrProgram:
-        param_buffers: frozendict[str, int] = frozendict(
-            {
-                self.param_names.get(id(node), node.name): index
-                for index, node in enumerate(self.buffer_memo.keys())
-                if isinstance(node, dsl.ParamNode)
-            }
-        )
+        param_buffer_items: list[tuple[str, int]] = []
+        seen_names: set[str] = set()
+        for index, node in enumerate(self.buffer_memo.keys()):
+            if not isinstance(node, dsl.ParamNode):
+                continue
+            name = self.param_names.get(id(node), node.name)
+            if name in seen_names:
+                raise ValueError(f"duplicate param name: {name!r}")
+            seen_names.add(name)
+            param_buffer_items.append((name, index))
+        param_buffers: frozendict[str, int] = frozendict(param_buffer_items)
         return IrProgram(
             param_buffers=param_buffers,
             sinks=frozendict(self.sinks),

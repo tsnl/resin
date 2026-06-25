@@ -15,15 +15,17 @@ import math
 from resin.core.etype import F4
 from resin.dsl.view import View, const, param
 
+# ``dict[str, View]`` subtypes ``Mapping[str, PyTree[View]]``; ``TypedDict`` does not in
+# pyright (value types are ``object``), so module reprs use a plain dict alias here.
 type Linear = dict[str, View]
 
 
 def linear_new(m: int, n: int, *, bias: bool = True) -> Linear:
-    weight = param(shape=(n, m), etype=F4)
+    weight = param(shape=(n, m), etype=F4, name="weight")
     if bias:
         return {
             "weight": weight,
-            "bias": param(shape=(n,), etype=F4),
+            "bias": param(shape=(n,), etype=F4, name="bias"),
         }
     return {"weight": weight}
 

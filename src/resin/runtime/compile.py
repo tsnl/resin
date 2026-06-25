@@ -14,7 +14,7 @@ from frozendict import frozendict
 
 import resin.dsl as dsl
 from resin.core.pytree import PyTree, flatten_pytree_paths
-from resin.core.state import register_named_params, sink_tree
+from resin.runtime.trees import register_named_params, sink_tree
 from resin.interp import Interp, ProgramId
 from resin.ir.ir import IrProgramBuilder
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
@@ -80,9 +80,7 @@ class ParamBinding:
         self.write({name: data})
 
     def read_sink(self, name: str) -> bytes:
-        view_index = self.artifact.sinks[name]
-        buffer_view = self.artifact.buffer_views[view_index]
-        buffer_id = buffer_view["buffer_index"]
+        buffer_id = self._sink_buffer_index(name)
         return self.interp.read_buffer(self.program_id, buffer_id)
 
     def commit(
@@ -115,7 +113,7 @@ class ParamBinding:
 
 def _build_sinks(
     builder: IrProgramBuilder,
-    sinks: Mapping[str, dsl.View | PyTree[dsl.View]],
+    sinks: Mapping[str, PyTree[dsl.View]],
 ) -> None:
     for key, value in sinks.items():
         if isinstance(value, dsl.View):
@@ -142,8 +140,8 @@ def _manifest_for(
 
 def compile_program(
     *,
-    sinks: Mapping[str, dsl.View | PyTree[dsl.View]],
-    params: Mapping[str, dsl.View | PyTree[dsl.View]] | None = None,
+    sinks: Mapping[str, PyTree[dsl.View]],
+    params: Mapping[str, PyTree[dsl.View]] | None = None,
     wgsl_kernel_config: WgslKernelConfig | None = None,
 ) -> CompiledProgram:
     builder = IrProgramBuilder()
