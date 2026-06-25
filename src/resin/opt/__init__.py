@@ -11,5 +11,5 @@ from resin.dsl.view import View
 def sgd(params: PyTree[View], grads: PyTree[View], *, lr: float) -> PyTree[View]:
     return map_pytree(
         zip_pytree(params, grads),
-        lambda pair: pair[0] - lr * pair[1],
+        lambda pair: pair.a - lr * pair.b,
     )

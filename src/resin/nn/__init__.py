@@ -11,15 +11,11 @@ __all__ = [
 ]
 
 import math
-from typing import NotRequired, TypedDict
 
 from resin.core.etype import F4
 from resin.dsl.view import View, const, param
 
-
-class Linear(TypedDict):
-    weight: View
-    bias: NotRequired[View]
+type Linear = dict[str, View]
 
 
 def linear_new(m: int, n: int, *, bias: bool = True) -> Linear:

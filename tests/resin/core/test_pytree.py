@@ -8,6 +8,7 @@ from resin.core.pytree import (
     zip_pytree,
 )
 from resin.dsl.view import View, param
+from resin.nn import Linear, linear_new
 
 
 class TestPyTreeTyping:
@@ -15,6 +16,12 @@ class TestPyTreeTyping:
         leaf = param(shape=(2,), etype=F4)
         tree: PyTree[View] = leaf
         assert tree is leaf
+
+    def test_module_repr_subtypes_pytree(self) -> None:
+        layer: Linear = linear_new(2, 3, bias=True)
+        model: list[Linear] = [layer]
+        tree: PyTree[View] = model
+        assert tree is model
 
 
 class TestFlattenPytree:
@@ -59,7 +66,7 @@ class TestZipPytree:
         grads: PyTree[int] = {"w": 3, "b": 1}
         updated = map_pytree(
             zip_pytree(params, grads),
-            lambda pair: pair[0] - pair[1],
+            lambda pair: pair.a - pair.b,
         )
         assert updated == {"w": 7, "b": 1}
 

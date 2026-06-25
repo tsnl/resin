@@ -1,15 +1,64 @@
 import struct
-from collections.abc import Callable, Generator
-from typing import cast
+from collections.abc import Callable, Generator, Mapping
+from typing import NamedTuple, cast
+
+from useful_types import SequenceNotStr
 
 from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
 
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
 
-# Nested trees use dict and list nodes only. Tuples (and every other non-container
-# value) are leaves. Callers should treat containers as immutable: walkers read
-# structure without mutating it. Annotate bare leaves as PyTree[T], not T | PyTree[T].
-type PyTree[T] = dict[str, PyTree[T]] | list[PyTree[T]] | T
+
+class PyTreeZipped[T, U](NamedTuple):
+    """
+    Leaf pairing produced by :func:`zip_pytree`.
+
+    A ``NamedTuple`` so zip results have a distinct static type from both plain
+    ``tuple[T, U]`` leaves and ``tuple[PyTree[T], ...]`` containers. At runtime it
+    is still a tuple: use ``pair.a`` / ``pair.b`` or unpack/index as usual.
+    """
+
+    a: T
+    b: U
+
+
+type PyTree[T] = (
+    T
+    | Mapping[str, PyTree[T]]
+    | SequenceNotStr[PyTree[T]]
+    | tuple[PyTree[T], ...]
+)
+"""
+Recursive JSON-like trees of ``T`` leaves nested in dict/list containers.
+
+**Runtime shape** (what walkers actually recurse on)::
+
+    T | dict[str, PyTree[T]] | list[PyTree[T]]
+
+**Static annotation** (wider on purpose; see ``tests/typing/test_pytree_containers.py``)::
+
+    T
+    | Mapping[str, PyTree[T]]
+    | SequenceNotStr[PyTree[T]]
+    | tuple[PyTree[T], ...]
+
+Why the static alias is wider than runtime:
+
+- ``Mapping`` and ``SequenceNotStr`` (from ``useful_types``) are covariant, so
+  module reprs such as ``list[Linear]`` subtype ``PyTree[View]`` without casts.
+  Plain ``dict``/``list`` in the alias are invariant and break that subtyping.
+- ``SequenceNotStr`` rejects ``str``, which otherwise satisfies ``Sequence``.
+  Custom ``Protocol``s with a ``copy()`` return type break basedpyright's recursive
+  leaf-``T`` inference in walkers.
+- ``tuple[PyTree[T], ...]`` types homogeneous tuple containers alongside list
+  nodes, but walkers still treat tuples as *leaves* at runtime (only ``dict`` and
+  ``list`` are recursed into).
+- Walkers use ``cast()`` after ``isinstance`` checks because pyright cannot narrow
+  the ``PyTree[T]`` union down to leaf ``T`` from runtime tests alone.
+
+:func:`zip_pytree` returns :class:`PyTreeZipped` leaves instead of ``tuple[T, U]``
+so zip pairings do not collide with tuple-container nodes in the type system.
+"""
 
 
 def _join_pytree_path(prefix: str, segment: str) -> str:
@@ -32,7 +81,7 @@ def flatten_pytree_paths[T](
                 child, prefix=_join_pytree_path(prefix, str(index))
             )
     else:
-        yield prefix, pytree
+        yield prefix, cast(T, pytree)
 
 
 def map_pytree_paths[T, U](
@@ -59,7 +108,7 @@ def map_pytree_paths[T, U](
             )
             for index, child in enumerate(cast(list[PyTree[T]], pytree))
         ]
-    return fn(prefix, pytree)
+    return fn(prefix, cast(T, pytree))
 
 
 def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
@@ -70,7 +119,7 @@ def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
         for child in cast(list[PyTree[T]], pytree):
             yield from flatten_pytree(child)
     else:
-        yield pytree
+        yield cast(T, pytree)
 
 
 def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
@@ -81,10 +130,11 @@ def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
         }
     if isinstance(pytree, list):
         return [map_pytree(child, f) for child in cast(list[PyTree[T]], pytree)]
-    return f(pytree)
+    return f(cast(T, pytree))
 
 
-def zip_pytree[T, U](a: PyTree[T], b: PyTree[U]) -> PyTree[tuple[T, U]]:
+def zip_pytree[T, U](a: PyTree[T], b: PyTree[U]) -> PyTree[PyTreeZipped[T, U]]:
+    """Zip two PyTrees with matching structure; leaves become :class:`PyTreeZipped`."""
     if type(a) != type(b):
         raise TypeError("pytree shape mismatch")
 
@@ -105,7 +155,7 @@ def zip_pytree[T, U](a: PyTree[T], b: PyTree[U]) -> PyTree[tuple[T, U]]:
                 for a_child, b_child in zip(a_list, b_list, strict=True)
             ]
         case _:
-            return cast(tuple[T, U], (a, b))
+            return PyTreeZipped(cast(T, a), cast(U, b))
 
 
 def infer_pytensor_shape(value: PyTensor) -> tuple[int, ...]:
