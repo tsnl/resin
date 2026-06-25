@@ -1,6 +1,6 @@
 import struct
-from collections.abc import Callable, Generator, Mapping
-from typing import NamedTuple, cast
+from collections.abc import Callable, Generator, ItemsView
+from typing import NamedTuple, Protocol, cast
 
 from useful_types import SequenceNotStr
 
@@ -20,6 +20,28 @@ class PyTreeZipped[T, U](NamedTuple):
 
     a: T
     b: U
+
+
+class Mapping[K, V](Protocol):
+    """
+    Covariant stand-in for :class:`collections.abc.Mapping`, used as the dict arm
+    of :data:`PyTree`. **Covariant in both key and value.**
+
+    Exposes only ``items()``, so both ``K`` and ``V`` appear solely in covariant
+    (output) positions. Stdlib :class:`collections.abc.Mapping` is invariant in its
+    key because ``__getitem__(key)``/``get(key)`` place the key in an input
+    position; dropping those frees the key to be covariant. Key covariance lets
+    narrowed-key reprs such as ``dict[Literal["weight", "bias"], View]`` subtype
+    ``Mapping[str, PyTree[View]]`` (hence ``PyTree[View]``) without a cast, which a
+    stdlib ``Mapping[str, ...]`` arm would reject.
+
+    Walkers dispatch on ``isinstance(x, dict)`` at runtime; this protocol only
+    governs static assignability at PyTree boundaries. It deliberately shadows the
+    name ``Mapping`` within this module, so ``collections.abc.Mapping`` is not
+    imported here.
+    """
+
+    def items(self) -> ItemsView[K, V]: ...
 
 
 type PyTree[T] = (
@@ -44,18 +66,23 @@ Recursive JSON-like trees of ``T`` leaves nested in dict/list containers.
 
 Leaf type ``T`` should be the payload (e.g. ``View``, ``int``), not ``dict`` or
 ``list``. Nested structure belongs in the container arms, not in ``T``.
-``TypedDict`` module reprs (e.g. ``Linear``) are *not* ``Mapping[str, PyTree[T]]``
-in pyright — use ``dict[str, T]`` at PyTree boundaries, or register explicit
+``dict[str, T]`` and narrowed-key ``dict[Literal[...], T]`` module reprs both
+subtype the dict arm; ``TypedDict`` reprs do *not* (pyright sees their values as
+``object``) — use a plain ``dict`` at PyTree boundaries, or register explicit
 paths via :func:`resin.runtime.trees.register_named_params`.
 
 Why the static alias is wider than runtime:
 
-- ``Mapping`` and ``SequenceNotStr`` (from ``useful_types``) are covariant, so
-  module reprs such as ``list[Linear]`` subtype ``PyTree[View]`` without casts.
-  Plain ``dict``/``list`` in the alias are invariant and break that subtyping.
-  Runtime containers are plain ``dict`` and ``list``, but walkers treat them as
-  immutable: they read structure without mutating nodes, so covariant annotations
-  are sound (nothing is ever written through the wider static type).
+- ``Mapping`` (this module's covariant protocol, *not* ``collections.abc.Mapping``)
+  and ``SequenceNotStr`` (from ``useful_types``) are covariant, so module reprs such
+  as ``list[Linear]`` subtype ``PyTree[View]`` without casts. Plain ``dict``/``list``
+  in the alias are invariant and break that subtyping. ``Mapping`` exposes only
+  ``items()`` (key and value both in covariant output positions), so
+  ``dict[Literal[...], T]`` keyed reprs subtype it too — ``collections.abc.Mapping``'s
+  key-typed ``__getitem__`` forces key invariance and rejects narrowed (literal)
+  keys. Runtime containers are plain ``dict`` and ``list``, but walkers treat them
+  as immutable: they read structure without mutating nodes, so covariant
+  annotations are sound (nothing is ever written through the wider static type).
 - ``SequenceNotStr`` rejects ``str``, which otherwise satisfies ``Sequence``.
   Custom ``Protocol``s with a ``copy()`` return type break basedpyright's recursive
   leaf-``T`` inference in walkers.

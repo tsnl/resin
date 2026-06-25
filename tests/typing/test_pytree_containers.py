@@ -57,6 +57,31 @@ def test_typeddict_module_repr_does_not_subtype_pytree() -> None:
     assert "reportAssignmentType" in output
 
 
+def test_pytree_accepts_literal_keyed_dict() -> None:
+    # The dict arm is pytree.Mapping (items()-only, covariant in key and value), so a
+    # narrowed-key repr subtypes PyTree[View] without a cast — unlike collections.abc.Mapping,
+    # whose key-typed __getitem__ would force key invariance and reject it.
+    result = _run_pyright(
+        """
+        from typing import Literal
+        from resin.core.pytree import PyTree
+        from resin.dsl import View, param
+        from resin.core.etype import F4
+
+        type Mlp = dict[Literal["weights", "bias"], View]
+
+        layer: Mlp = {
+            "weights": param(shape=(3, 2), etype=F4),
+            "bias": param(shape=(3,), etype=F4),
+        }
+        tree: PyTree[View] = layer
+        model: PyTree[View] = [layer]
+        _ = (tree, model)
+        """
+    )
+    assert result.returncode == 0
+
+
 def test_pytree_rejects_str() -> None:
     result = _run_pyright(
         """
