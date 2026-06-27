@@ -2,6 +2,7 @@
 
 __all__ = [
     "Linear",
+    "Module",
     "cross_entropy",
     "linear",
     "linear_new",
@@ -11,29 +12,37 @@ __all__ = [
 ]
 
 import math
+from dataclasses import dataclass
 
 from resin.core.etype import F4
+from resin.core.pytree import Module
 from resin.dsl.view import View, const, param
 
-# ``dict[str, View]`` subtypes ``Mapping[str, PyTree[View]]``; ``TypedDict`` does not in
-# pyright (value types are ``object``), so module reprs use a plain dict alias here.
-type Linear = dict[str, View]
+
+@dataclass(frozen=True)
+class Linear[T: View](Module[T]):
+    """A dense layer as a generic dataclass :class:`Module`.
+
+    Parameterizing by the leaf type ``T`` makes the fields *be* ``T``: ``Linear[View]``
+    has all-View params by construction, and walkers preserve ``list[Linear[View]]``
+    through grad/sgd. ``bias`` is ``None`` when absent (an empty subtree).
+    """
+
+    weight: T
+    bias: T | None = None
 
 
-def linear_new(m: int, n: int, *, bias: bool = True) -> Linear:
-    weight = param(shape=(n, m), etype=F4, name="weight")
-    if bias:
-        return {
-            "weight": weight,
-            "bias": param(shape=(n,), etype=F4, name="bias"),
-        }
-    return {"weight": weight}
+def linear_new(m: int, n: int, *, bias: bool = True) -> Linear[View]:
+    return Linear(
+        weight=param(shape=(n, m), etype=F4, name="weight"),
+        bias=param(shape=(n,), etype=F4, name="bias") if bias else None,
+    )
 
 
-def linear(layer: Linear, x: View) -> View:
-    out = x @ layer["weight"].transpose()
-    if "bias" in layer:
-        out = out + layer["bias"]
+def linear(layer: Linear[View], x: View) -> View:
+    out = x @ layer.weight.transpose()
+    if layer.bias is not None:
+        out = out + layer.bias
     return out
 
 

@@ -4,12 +4,12 @@ __all__ = [
     "sgd",
 ]
 
-from resin.core.pytree import PyTree, map_pytree, zip_pytree
+from resin.core.pytree import PyTree, tree_map
 from resin.dsl.view import View
 
 
-def sgd(params: PyTree[View], grads: PyTree[View], *, lr: float) -> PyTree[View]:
-    return map_pytree(
-        zip_pytree(params, grads),
-        lambda pair: pair.a - lr * pair.b,
-    )
+def sgd[L: PyTree[View]](params: L, grads: L, *, lr: float) -> L:
+    def step(p: View, g: View) -> View:
+        return p - lr * g
+
+    return tree_map(step, params, grads)

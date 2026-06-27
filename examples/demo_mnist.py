@@ -21,7 +21,7 @@ STEPS = 1_000
 EVAL_INTERVAL = 100
 SEED = 0
 
-type Mlp = list[resin.nn.Linear]
+type Mlp = list[resin.nn.Linear[resin.dsl.View]]
 
 
 def mlp_new(
@@ -31,7 +31,7 @@ def mlp_new(
     hidden_dim: int,
     bias: bool,
 ) -> Mlp:
-    res: list[resin.nn.Linear] = []
+    res: list[resin.nn.Linear[resin.dsl.View]] = []
     res.append(resin.nn.linear_new(in_dim, hidden_dim, bias=bias))
     for _ in range(n_hidden - 1):
         res.append(resin.nn.linear_new(hidden_dim, hidden_dim, bias=bias))

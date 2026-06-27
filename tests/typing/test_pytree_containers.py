@@ -23,15 +23,31 @@ def test_module_repr_subtypes_pytree() -> None:
     result = _run_pyright(
         """
         from resin.core.pytree import PyTree
+        from resin.dsl import View
         from resin.nn import Linear, linear_new
 
-        layer: Linear = linear_new(2, 3, bias=True)
-        model: list[Linear] = [layer]
-        tree: PyTree[object] = model
+        layer: Linear[View] = linear_new(2, 3, bias=True)
+        model: list[Linear[View]] = [layer]
+        tree: PyTree[View] = model
         _ = tree
         """
     )
     assert result.returncode == 0
+
+
+def test_module_dataclass_enforces_leaf_type() -> None:
+    # Fields are typed `T`, so Linear[View] has all-View fields by construction.
+    result = _run_pyright(
+        """
+        from resin.dsl import View
+        from resin.nn import Linear
+
+        _ = Linear[View](weight=3)
+        """
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "reportArgumentType" in output
 
 
 def test_typeddict_module_repr_does_not_subtype_pytree() -> None:
@@ -128,19 +144,22 @@ def test_map_pytree_keeps_leaf_inference() -> None:
     assert result.returncode == 0
 
 
-def test_zip_pytree_leaf_is_pytree_zipped_namedtuple() -> None:
+def test_tree_map_preserves_structure_type() -> None:
+    # tree_map keeps the concrete structure type L (here list[Linear[View]]).
     result = _run_pyright(
         """
-        from resin.core.pytree import PyTree, PyTreeZipped, map_pytree, zip_pytree
+        from resin.core.pytree import tree_map
+        from resin.dsl import View
+        from resin.nn import Linear, linear_new
 
-        params: PyTree[int] = {"w": 10, "b": 2}
-        grads: PyTree[int] = {"w": 3, "b": 1}
-        zipped: PyTree[PyTreeZipped[int, int]] = zip_pytree(params, grads)
+        model: list[Linear[View]] = [linear_new(2, 3)]
+        grads: list[Linear[View]] = [linear_new(2, 3)]
 
-        def update(pair: PyTreeZipped[int, int]) -> int:
-            return pair.a - pair.b
+        def step(p: View, g: View) -> View:
+            return p - g
 
-        _ = map_pytree(zipped, update)
+        new_model: list[Linear[View]] = tree_map(step, model, grads)
+        _ = new_model
         """
     )
     assert result.returncode == 0

@@ -6,14 +6,14 @@ from resin.nn import linear, linear_new
 class TestLinear:
     def test_new_with_bias(self) -> None:
         layer = linear_new(3, 2)
-        assert layer["weight"].shape == (2, 3)
-        assert "bias" in layer
-        assert layer["bias"].shape == (2,)
+        assert layer.weight.shape == (2, 3)
+        assert layer.bias is not None
+        assert layer.bias.shape == (2,)
 
     def test_new_without_bias(self) -> None:
         layer = linear_new(3, 2, bias=False)
-        assert layer["weight"].shape == (2, 3)
-        assert "bias" not in layer
+        assert layer.weight.shape == (2, 3)
+        assert layer.bias is None
 
     def test_forward_traces_graph(self) -> None:
         layer = linear_new(3, 2)
