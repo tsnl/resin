@@ -7,12 +7,24 @@ from resin.lib.gaussians.linalg import (
     quat_to_rotmat,
     scale_rot_to_cov3d,
 )
+from resin.lib.gaussians.preprocess import preprocess_gaussians
+from resin.lib.gaussians.reference import (
+    blend_gaussians_cpu,
+    preprocess_gaussians_cpu,
+    render_gnomen_cpu,
+    sort_by_depth_cpu,
+)
 
 __all__ = [
     "GnomenCloud",
+    "blend_gaussians_cpu",
     "look_at_view_proj",
     "make_gnomen_cloud",
+    "preprocess_gaussians",
+    "preprocess_gaussians_cpu",
     "project_points",
     "quat_to_rotmat",
+    "render_gnomen_cpu",
     "scale_rot_to_cov3d",
+    "sort_by_depth_cpu",
 ]
