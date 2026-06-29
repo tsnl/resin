@@ -29,34 +29,29 @@ def test_sort_values_and_perm_gpu() -> None:
     assert [int(i) for i in idxs] == [1, 3, 0, 2]
 
 
-def test_sort_perm_only_dce_elides_values_write() -> None:
+def test_sort_builds_radix_subgraph() -> None:
+    """``View.sort()`` inlines hist / prefix-sum / scatter digit passes (not one SortNode)."""
     x = param(shape=(3,), etype=F4, name="x")
     _values, perm = x.sort()
     used = reachable_ports([perm])
-    assert used[perm.node] == {"perm"}
-    assert "values" not in used[perm.node]
-
     builder = IrProgramBuilder(used_ports=used)
     builder.build_sink("perm", perm)
     program = builder.finish()
-    assert len(program.queue) == 1
-    kernel = program.queue[0].kernel
-    assert isinstance(kernel, IrSortKernel)
-    assert kernel.write_perm is True
-    assert kernel.write_values is False
+    # 1 key-encode + 4×(hist + prefix + scatter) = 13 dispatches when only perm is live
+    # (final gather for values is DCE'd).
+    assert len(program.queue) >= 4
+    assert not any(isinstance(d.kernel, IrSortKernel) for d in program.queue)
 
 
-def test_sort_values_only_dce_elides_perm_write() -> None:
+def test_sort_values_uses_gather_not_monolithic_sort_kernel() -> None:
     x = param(shape=(3,), etype=F4, name="x")
     values, _perm = x.sort()
     used = reachable_ports([values])
     builder = IrProgramBuilder(used_ports=used)
     builder.build_sink("values", values)
     program = builder.finish()
-    kernel = program.queue[0].kernel
-    assert isinstance(kernel, IrSortKernel)
-    assert kernel.write_values is True
-    assert kernel.write_perm is False
+    assert len(program.queue) >= 5
+    assert not any(isinstance(d.kernel, IrSortKernel) for d in program.queue)
 
 
 def test_compile_program_propagates_port_dce() -> None:

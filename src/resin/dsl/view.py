@@ -340,13 +340,19 @@ class View:
             )
         )
 
-    def sort(self) -> tuple["View", "View"]:
-        node = SortNode(
-            shape=self.shape,
-            etype=self.etype,
-            args=(self,),
-        )
-        return View.port(node, "values"), View.port(node, "perm")
+    def sort(self, *, max_chunk: int | None = None) -> tuple["View", "View"]:
+        """Ascending sort → ``(sorted_values, perm)``.
+
+        Builds a **radix-sort subgraph** (sortable keys → 4× hist / exclusive
+        prefix-sum / scatter digit passes → gather values) so work stays on the
+        GPU as ordinary feed-forward nodes. ``max_chunk`` is reserved for future
+        segmented policies; the graph always covers the full leading dimension.
+        """
+        from resin.dsl.radix_subgraph import build_radix_sort_graph
+
+        if self.rank != 1:
+            raise ValueError("sort currently expects a 1D view")
+        return build_radix_sort_graph(self, max_chunk=max_chunk)
 
     @staticmethod
     def reverse_prefix_sum(x: "View", *, inclusive: bool = True) -> "View":

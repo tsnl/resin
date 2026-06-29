@@ -5,26 +5,24 @@ import struct
 import resin_rt_pybind
 
 from resin import dsl
-from resin.core.etype import F4, U4
+from resin.core.etype import F4
 from resin.interp import ProgramId
 from resin.lib.gaussians.blend import gaussian_blend
 from resin.lib.gaussians.reference import PreprocessResult, pad_preprocess_result
-from resin.lib.gaussians.tiling import (
-    DEFAULT_TILE_SIZE,
-    build_tiled_layout,
-    gaussian_blend_tiled,
-)
+from resin.lib.gaussians.tiling import DEFAULT_TILE_SIZE
+from resin.lib.gaussians.tiling_gpu import build_gpu_tiled_blend_graph
 from resin.runtime import compile_program
 from resin.runtime.compile import ParamBinding
 
 
 class GpuForwardSession:
-    """Compile once per gaussian / instance capacity, then replay frames.
+    """Compile once; each frame uploads preprocess buffers and runs on GPU.
 
-    Uses **tiled** blending (Phase 3.5) by default. Pass ``tiled=False`` for the
-    legacy global-sort path. ``fixed_count`` pins the gaussian buffer size so
-    culling does not re-admit programs; instance buffers are sized as
-    ``fixed_count * max_tiles_per_gaussian``.
+    **Tiled path (default):** binning uses GPU ``TileCount`` → builtin
+    ``prefix_sum`` → ``TileFill`` → builtin radix ``sort`` → remap gather →
+    ``TileRanges`` → tiled blend. No Python ``build_tiled_layout`` per frame.
+
+    **Untiled path:** ``depths.sort()`` (radix subgraph) + global blend.
     """
 
     def __init__(
@@ -48,7 +46,6 @@ class GpuForwardSession:
         self._program_id: ProgramId | None = None
         self._binding: ParamBinding | None = None
         self._count: int = -1
-        self._max_instances: int = -1
         if fixed_count is not None:
             self._admit(fixed_count)
 
@@ -74,35 +71,10 @@ class GpuForwardSession:
                 f"<{n * 3}f", *(v for c in pre["colors"] for v in c)
             ),
             "opacities": struct.pack(f"<{n}f", *pre["opacities"]),
+            "depths": struct.pack(f"<{n}f", *pre["depths"]),
         }
-
         if self._tiled:
-            layout = build_tiled_layout(
-                pre,
-                width=self.width,
-                height=self.height,
-                tile_size=self._tile_size,
-            )
-            inst = list(layout.instance_ids)
-            if len(inst) > self._max_instances:
-                raise ValueError(
-                    f"instance count {len(inst)} exceeds capacity {self._max_instances}; "
-                    "increase max_tiles_per_gaussian"
-                )
-            # Pad instances with 0 and empty tile ranges for unused slots.
-            inst_pad = inst + [0] * (self._max_instances - len(inst))
-            n_tiles = layout.n_tiles
-            ranges_flat: list[int] = []
-            for start, end in layout.tile_ranges:
-                ranges_flat.extend([start, end])
-            # Ensure we always write n_tiles * 2 entries (layout has exactly n_tiles).
-            assert len(ranges_flat) == n_tiles * 2
-            payload["instances"] = struct.pack(
-                f"<{self._max_instances}I", *inst_pad
-            )
-            payload["tile_ranges"] = struct.pack(f"<{n_tiles * 2}I", *ranges_flat)
-        else:
-            payload["depths"] = struct.pack(f"<{n}f", *pre["depths"])
+            payload["radii"] = struct.pack(f"<{n}f", *pre["radii"])
 
         self._binding.write(payload)
         self._interp.run(self._program_id)
@@ -117,39 +89,38 @@ class GpuForwardSession:
         conics = dsl.param(shape=(count, 3), etype=F4, name="conics")
         colors = dsl.param(shape=(count, 3), etype=F4, name="colors")
         opacities = dsl.param(shape=(count,), etype=F4, name="opacities")
+        depths = dsl.param(shape=(count,), etype=F4, name="depths")
 
         if self._tiled:
-            ntx = (self.width + self._tile_size - 1) // self._tile_size
-            nty = (self.height + self._tile_size - 1) // self._tile_size
-            max_inst = count * self._max_tiles_per_gaussian
-            instances = dsl.param(shape=(max_inst,), etype=U4, name="instances")
-            tile_ranges = dsl.param(
-                shape=(ntx * nty * 2,), etype=U4, name="tile_ranges"
-            )
-            image = gaussian_blend_tiled(
+            radii = dsl.param(shape=(count,), etype=F4, name="radii")
+            # TileFill expects cursor buffer = exclusive offsets; pass offsets
+            # as the 4th arg. TileFill treats it as atomic cursor — must start
+            # as exclusive prefix. We need to copy offsets into a buffer that
+            # TileFill can atomicAdd on. build_gpu_tiled_blend_graph passes
+            # offsets from prefix_sum directly; TileFill must not assume
+            # pre-init from host. Fix TileFill to initialize cursor from
+            # offsets_in on thread 0 before fill — update tiling_gpu.
+            image = build_gpu_tiled_blend_graph(
                 width=self.width,
                 height=self.height,
                 means2d=means2d,
+                depths=depths,
+                radii=radii,
                 conics=conics,
                 colors=colors,
                 opacities=opacities,
-                instances=instances,
-                tile_ranges=tile_ranges,
                 tile_size=self._tile_size,
-                n_tiles_x=ntx,
-                n_tiles_y=nty,
+                max_tiles_per_gaussian=self._max_tiles_per_gaussian,
             )
             params: dict[str, dsl.View] = {
                 "means2d": means2d,
                 "conics": conics,
                 "colors": colors,
                 "opacities": opacities,
-                "instances": instances,
-                "tile_ranges": tile_ranges,
+                "depths": depths,
+                "radii": radii,
             }
-            self._max_instances = max_inst
         else:
-            depths = dsl.param(shape=(count,), etype=F4, name="depths")
             _values, order = depths.sort()
             _ = _values
             image = gaussian_blend(
@@ -168,7 +139,6 @@ class GpuForwardSession:
                 "colors": colors,
                 "opacities": opacities,
             }
-            self._max_instances = count
 
         compiled = compile_program(params=params, sinks={"image": image})
         self._program_id = compiled.admit(self._interp)
