@@ -8,7 +8,7 @@ __all__ = [
 
 from typing import assert_never, overload
 
-from resin.core.accessor import Accessor
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.core.pytree import PyTree, map_pytree
 from resin.dsl.node import (
     ConstNode,
@@ -17,7 +17,7 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapNode,
 )
 from resin.dsl.view import View, ones, toposort
 
@@ -43,8 +43,10 @@ def accessor_adjoint(view: View, g: View) -> View:
     if view.is_identity():
         return x
 
-    return View.scatter(
+    return View.remap(
         source=x,
+        direction="scatter",
+        keys="accessor",
         out_shape=view.node.shape,
         operator="add",
         woffset=view.offset,
@@ -71,9 +73,33 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
                 df_dout @ node.args[1].transpose(),
                 node.args[0].transpose() @ df_dout,
             )
-        case ScatterNode():
-            source = node.args[0]
-            dense = df_dout if df_dout.is_identity() else df_dout.copy()
+        case RemapNode():
+            return _df_do_remap(node, df_dout)
+        case _:
+            raise NotDifferentiableException(node)
+
+
+def _dense_remap_gradient(df_dout: View) -> View:
+    return df_dout if df_dout.is_identity() else df_dout.copy()
+
+
+def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
+    source = node.args[0]
+    dense = _dense_remap_gradient(df_dout)
+
+    match (node.direction, node.keys):
+        case ("gather", "accessor"):
+            return (
+                View(
+                    node=dense.node,
+                    accessor=Accessor(
+                        offset=0,
+                        shape=source.shape,
+                        pitch=c_contiguous_pitch_for_shape(source.shape),
+                    ),
+                ),
+            )
+        case ("scatter", "accessor"):
             return (
                 View(
                     node=dense.node,
@@ -84,8 +110,34 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
                     ),
                 ),
             )
-        case _:
-            raise NotDifferentiableException(node)
+        case ("scatter", "indices"):
+            indices = node.indices
+            assert indices is not None
+            return (
+                View.remap(
+                    source=dense,
+                    direction="gather",
+                    keys="indices",
+                    indices=indices,
+                    source_shape=node.shape,
+                    woffset=node.woffset,
+                ),
+            )
+        case ("gather", "indices"):
+            indices = node.indices
+            assert indices is not None
+            assert node.source_shape is not None
+            return (
+                View.remap(
+                    source=dense,
+                    direction="scatter",
+                    keys="indices",
+                    indices=indices,
+                    out_shape=node.source_shape,
+                    operator="add",
+                    woffset=node.woffset,
+                ),
+            )
 
 
 def _df_do_elementwise(node: ElementwiseNode, df_dout: View) -> tuple[View, ...]:

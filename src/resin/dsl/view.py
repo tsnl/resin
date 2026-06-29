@@ -42,7 +42,9 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapDirection,
+    RemapKeys,
+    RemapNode,
 )
 
 
@@ -117,11 +119,10 @@ class View:
         return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
-        return View.scatter(
+        return View.remap(
             source=self,
-            out_shape=self.shape,
-            woffset=0,
-            wpitch=c_contiguous_pitch_for_shape(self.shape),
+            direction="gather",
+            keys="accessor",
             etype=etype or self.etype,
         )
 
@@ -414,6 +415,79 @@ class View:
         return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
 
     @staticmethod
+    def remap(
+        *,
+        source: "View",
+        direction: RemapDirection,
+        keys: RemapKeys = "accessor",
+        indices: "View | None" = None,
+        out_shape: tuple[int, ...] | None = None,
+        source_shape: tuple[int, ...] | None = None,
+        woffset: int = 0,
+        wpitch: tuple[int, ...] | None = None,
+        operator: BinaryAssocElementOperator | None = None,
+        etype: ElementType | str | None = None,
+    ) -> "View":
+        match (direction, keys):
+            case ("scatter", "accessor"):
+                if out_shape is None or wpitch is None:
+                    raise ValueError(
+                        "scatter with accessor keys requires out_shape and wpitch"
+                    )
+                node_shape = out_shape
+                args: tuple[View, ...] = (source,)
+                node_wpitch = wpitch
+                node_source_shape = None
+            case ("gather", "accessor"):
+                node_shape = source.shape
+                args = (source,)
+                node_wpitch = ()
+                node_source_shape = None
+            case ("scatter", "indices"):
+                if out_shape is None or indices is None:
+                    raise ValueError(
+                        "scatter with indices keys requires out_shape and indices"
+                    )
+                source, indices = _join_source_with_indices(source, indices, out_shape)
+                node_shape = out_shape
+                args = (source, indices)
+                node_wpitch = c_contiguous_pitch_for_shape(out_shape)
+                node_source_shape = None
+            case ("gather", "indices"):
+                if source_shape is None or indices is None:
+                    raise ValueError(
+                        "gather with indices keys requires source_shape and indices"
+                    )
+                indices = _validate_indices_view(indices, source_shape)
+                out_prefix = indices.shape[:-1]
+                source = View(
+                    node=source.node,
+                    accessor=Accessor(
+                        offset=source.offset,
+                        shape=out_prefix,
+                        pitch=c_contiguous_pitch_for_shape(out_prefix),
+                    ),
+                )
+                node_shape = out_prefix
+                args = (source, indices)
+                node_wpitch = c_contiguous_pitch_for_shape(source_shape)
+                node_source_shape = source_shape
+
+        return View.identity(
+            RemapNode(
+                shape=node_shape,
+                etype=etype or source.etype,
+                args=args,
+                direction=direction,
+                keys=keys,
+                operator=operator if direction == "scatter" else None,
+                woffset=woffset,
+                wpitch=node_wpitch,
+                source_shape=node_source_shape,
+            )
+        )
+
+    @staticmethod
     def scatter(
         *,
         source: "View",
@@ -423,19 +497,67 @@ class View:
         operator: BinaryAssocElementOperator | None = None,
         etype: ElementType | str | None = None,
     ) -> "View":
-        return View.identity(
-            ScatterNode(
-                shape=out_shape,
-                etype=etype or source.etype,
-                args=(source,),
-                operator=operator,
-                woffset=woffset,
-                wpitch=wpitch,
-            )
+        return View.remap(
+            source=source,
+            direction="scatter",
+            keys="accessor",
+            out_shape=out_shape,
+            woffset=woffset,
+            wpitch=wpitch,
+            operator=operator,
+            etype=etype,
         )
 
 
 type TensorOperand = View | Scalar
+
+
+def _validate_indices_view(indices: View, out_shape: tuple[int, ...]) -> View:
+    out_rank = len(out_shape)
+    if indices.rank == 0:
+        raise ValueError("indices must have rank >= 1")
+    if indices.shape[-1] != out_rank:
+        raise ValueError(
+            f"indices.shape[-1] must equal len(out_shape) ({out_rank}), got shape {indices.shape}"
+        )
+    if etype_kind(indices.etype) != "uint":
+        raise ValueError(
+            f"indices must have an unsigned integer etype, got {indices.etype}"
+        )
+    return indices
+
+
+def _join_source_with_indices(
+    source: View,
+    indices: View,
+    out_shape: tuple[int, ...],
+) -> tuple[View, View]:
+    indices = _validate_indices_view(indices, out_shape)
+    out_rank = len(out_shape)
+
+    prefix_join = shape_join(
+        shape1=source.shape,
+        pitch1=source.pitch,
+        shape2=indices.shape[:-1],
+        pitch2=indices.pitch[:-1],
+    )
+    joined_source = View(
+        node=source.node,
+        accessor=Accessor(
+            offset=source.offset,
+            shape=prefix_join.shape,
+            pitch=prefix_join.pitch1,
+        ),
+    )
+    joined_indices = View(
+        node=indices.node,
+        accessor=Accessor(
+            offset=indices.offset,
+            shape=prefix_join.shape + (out_rank,),
+            pitch=prefix_join.pitch2 + (indices.pitch[-1],),
+        ),
+    )
+    return joined_source, joined_indices
 
 
 def const(value: PyTensor, *, etype: ElementType | str = F4) -> View:

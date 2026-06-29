@@ -13,13 +13,13 @@ __all__ = [
     "Node",
     "ParamNode",
     "ReductionNode",
-    "ScatterNode",
+    "RemapNode",
 ]
 
 import math
 from abc import ABC
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from resin.dsl.view import View
@@ -70,8 +70,19 @@ class MatmulNode(Node):
     pass
 
 
+type RemapDirection = Literal["gather", "scatter"]
+type RemapKeys = Literal["accessor", "indices"]
+
+
 @dataclass(kw_only=True, frozen=True, eq=False)
-class ScatterNode(Node):
+class RemapNode(Node):
+    direction: RemapDirection
+    keys: RemapKeys
     operator: BinaryAssocElementOperator | None
     woffset: int
     wpitch: tuple[int, ...]
+    source_shape: tuple[int, ...] | None = None
+
+    @property
+    def indices(self) -> "View | None":
+        return self.args[1] if self.keys == "indices" else None

@@ -8,7 +8,7 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapNode,
 )
 from resin.dsl.view import (
     TensorMeta,
@@ -32,7 +32,7 @@ __all__ = [
     "ParamNode",
     "PyTree",
     "ReductionNode",
-    "ScatterNode",
+    "RemapNode",
     "TensorMeta",
     "TensorOperand",
     "View",

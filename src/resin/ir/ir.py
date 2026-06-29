@@ -8,15 +8,16 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrRemapKernel",
 ]
 
 from abc import ABC
 from dataclasses import dataclass
+from typing import Literal
 
 from frozendict import frozendict
 
-from resin.core.accessor import Accessor
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.core.pytree import marshall_pytensor
 from .rpn import ElementRpnExpr
 from resin.core.etype import (
@@ -107,15 +108,43 @@ class IrMatmulKernel(IrKernel):
         return self.arg_accessors[0].shape[-1]
 
 
+type RemapDirection = Literal["gather", "scatter"]
+type RemapKeys = Literal["accessor", "indices"]
+
+
 @dataclass(frozen=True, kw_only=True)
-class IrScatterKernel(IrKernel):
+class IrRemapKernel(IrKernel):
+    direction: RemapDirection
+    keys: RemapKeys
     operator: BinaryAssocElementOperator | None
     woffset: int
     wpitch: tuple[int, ...]
+    arg_etypes: tuple[ElementType | str, ...]
+    source_shape: tuple[int, ...] | None = None
     clear_output_before_dispatch: bool = True
 
     def __post_init__(self):
-        assert len(self.arg_accessors) == 1
+        match self.keys:
+            case "accessor":
+                assert len(self.arg_accessors) == 1
+                if self.direction == "scatter":
+                    assert len(self.wpitch) == len(self.arg_accessors[0].shape)
+            case "indices":
+                assert len(self.arg_accessors) == 2
+                assert len(self.arg_etypes) == 2
+                source_accessor, indices_accessor = self.arg_accessors
+                out_rank = (
+                    len(self.shape)
+                    if self.direction == "scatter"
+                    else len(self.wpitch)
+                )
+                assert indices_accessor.shape[-1] == out_rank
+                assert indices_accessor.shape[:-1] == source_accessor.shape
+                if self.direction == "scatter":
+                    assert self.wpitch == c_contiguous_pitch_for_shape(self.shape)
+                else:
+                    assert self.source_shape is not None
+                    assert self.wpitch == c_contiguous_pitch_for_shape(self.source_shape)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -259,8 +288,8 @@ class IrProgramBuilder:
                 return self._build_kernel_for_matmul_node(node)
             case dsl.ReductionNode():
                 return self._build_kernel_for_reduction_node(node)
-            case dsl.ScatterNode():
-                return self._build_kernel_for_scatter_node(node)
+            case dsl.RemapNode():
+                return self._build_kernel_for_remap_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
@@ -290,14 +319,21 @@ class IrProgramBuilder:
             axes=node.axes,
         )
 
-    def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
-        return IrScatterKernel(
-            arg_accessors=(node.args[0].accessor,),
+    def _build_kernel_for_remap_node(self, node: dsl.RemapNode) -> IrKernel:
+        arg_etypes = tuple(view.etype for view in node.args)
+        clear_output = node.direction == "gather" or node.operator is None
+        return IrRemapKernel(
+            arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
             shape=node.shape,
+            direction=node.direction,
+            keys=node.keys,
             operator=node.operator,
             woffset=node.woffset,
             wpitch=node.wpitch,
+            arg_etypes=arg_etypes,
+            source_shape=node.source_shape,
+            clear_output_before_dispatch=clear_output,
         )
 
 
