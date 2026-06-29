@@ -83,8 +83,8 @@ class GaussianBlendNode(CustomNode):
             height=self.height,
             count=count,
         )
-        grad_colors = View.port(grad_node, "grad_colors")
-        grad_opacities = View.port(grad_node, "grad_opacities")
+        grad_colors = View.identity(grad_node, port="grad_colors")
+        grad_opacities = View.identity(grad_node, port="grad_opacities")
         # Means/conics grads not yet implemented in the smoke backward kernel.
         grad_means = zeros(means2d.shape, etype=F4)
         grad_conics = zeros(conics.shape, etype=F4)
@@ -156,4 +156,4 @@ def gaussian_blend(
         height=height,
     )
     _ = count
-    return View.port(node, "image")
+    return View.identity(node, port="image")

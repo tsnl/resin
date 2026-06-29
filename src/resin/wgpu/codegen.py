@@ -781,102 +781,102 @@ def _emit_wgsl_for_remap_kernel(
     config: WgslKernelConfig,
 ) -> None:
     match kernel.info:
-        case RemapScatterInfo(accessor=accessor, operator=operator) if accessor is not None:
-            if accessor.pitch:
+        case RemapScatterInfo(accessor=accessor, operator=operator):
+            if accessor is not None:
+                if accessor.pitch:
+                    _define_out_address_function(
+                        w,
+                        name="scatter_out_address",
+                        woffset=accessor.offset,
+                        pitch=accessor.pitch,
+                    )
+
+                def out_address_expr(source_index_expr: str) -> str:
+                    if not kernel.arg_accessors[0].shape:
+                        return f"{accessor.offset}u"
+                    return f"scatter_out_address({source_index_expr})"
+
+                _emit_wgsl_for_source_driven_remap(
+                    w,
+                    kernel,
+                    config,
+                    operator=operator,
+                    out_address_expr_for_source_index=out_address_expr,
+                )
+            else:
+                source_accessor, indices_accessor = kernel.arg_accessors
+                out_rank = len(kernel.shape)
+                out_pitch = c_contiguous_pitch_for_shape(kernel.shape)
+                _define_indices_at_function(
+                    w,
+                    source_rank=len(source_accessor.shape),
+                    out_rank=out_rank,
+                    indices_accessor=indices_accessor,
+                )
                 _define_out_address_function(
                     w,
-                    name="scatter_out_address",
+                    name="out_address_from_indices",
+                    woffset=0,
+                    pitch=out_pitch,
+                )
+
+                def out_address_expr(source_index_expr: str) -> str:
+                    if not source_accessor.shape:
+                        return "out_address_from_indices(indices_at(array<u32, 0>()))"
+                    return f"out_address_from_indices(indices_at({source_index_expr}))"
+
+                _emit_wgsl_for_source_driven_remap(
+                    w,
+                    kernel,
+                    config,
+                    operator=operator,
+                    out_address_expr_for_source_index=out_address_expr,
+                )
+        case RemapGatherInfo(accessor=accessor):
+            if accessor is None:
+                _emit_remap_bindings(
+                    w,
+                    output_etype=kernel.etype,
+                    arg_etypes=kernel.arg_etypes,
+                    operator=None,
+                )
+                _emit_arg_address_functions(w, kernel)
+                with _per_output_element(w, kernel, config) as (w, out_addr):
+                    w.print(
+                        f"""
+                        output[{out_addr}] = arg0[{_arg_address_expr(0, kernel.arg_accessors[0], "out_index")}];
+                        """
+                    )
+            else:
+                _, indices_accessor = kernel.arg_accessors
+                source_rank = len(kernel.shape)
+                out_rank = accessor.rank
+                _emit_remap_bindings(
+                    w,
+                    output_etype=kernel.etype,
+                    arg_etypes=kernel.arg_etypes,
+                    operator=None,
+                )
+                _emit_arg_address_functions(w, kernel)
+                _define_indices_at_function(
+                    w,
+                    source_rank=source_rank,
+                    out_rank=out_rank,
+                    indices_accessor=indices_accessor,
+                )
+                _define_out_address_function(
+                    w,
+                    name="out_address_from_indices",
                     woffset=accessor.offset,
                     pitch=accessor.pitch,
                 )
-
-            def out_address_expr(source_index_expr: str) -> str:
-                if not kernel.arg_accessors[0].shape:
-                    return f"{accessor.offset}u"
-                return f"scatter_out_address({source_index_expr})"
-
-            _emit_wgsl_for_source_driven_remap(
-                w,
-                kernel,
-                config,
-                operator=operator,
-                out_address_expr_for_source_index=out_address_expr,
-            )
-        case RemapScatterInfo(accessor=None, operator=operator):
-            source_accessor, indices_accessor = kernel.arg_accessors
-            out_rank = len(kernel.shape)
-            out_pitch = c_contiguous_pitch_for_shape(kernel.shape)
-            _define_indices_at_function(
-                w,
-                source_rank=len(source_accessor.shape),
-                out_rank=out_rank,
-                indices_accessor=indices_accessor,
-            )
-            _define_out_address_function(
-                w,
-                name="out_address_from_indices",
-                woffset=0,
-                pitch=out_pitch,
-            )
-
-            def out_address_expr(source_index_expr: str) -> str:
-                if not source_accessor.shape:
-                    return "out_address_from_indices(indices_at(array<u32, 0>()))"
-                return f"out_address_from_indices(indices_at({source_index_expr}))"
-
-            _emit_wgsl_for_source_driven_remap(
-                w,
-                kernel,
-                config,
-                operator=operator,
-                out_address_expr_for_source_index=out_address_expr,
-            )
-        case RemapGatherInfo(accessor=None):
-            _emit_remap_bindings(
-                w,
-                output_etype=kernel.etype,
-                arg_etypes=kernel.arg_etypes,
-                operator=None,
-            )
-            _emit_arg_address_functions(w, kernel)
-            with _per_output_element(w, kernel, config) as (w, out_addr):
-                w.print(
-                    f"""
-                    output[{out_addr}] = arg0[{_arg_address_expr(0, kernel.arg_accessors[0], "out_index")}];
-                    """
-                )
-        case RemapGatherInfo(accessor=accessor) if accessor is not None:
-            _, indices_accessor = kernel.arg_accessors
-            source_rank = len(kernel.shape)
-            out_rank = accessor.rank
-            _emit_remap_bindings(
-                w,
-                output_etype=kernel.etype,
-                arg_etypes=kernel.arg_etypes,
-                operator=None,
-            )
-            _emit_arg_address_functions(w, kernel)
-            _define_indices_at_function(
-                w,
-                source_rank=source_rank,
-                out_rank=out_rank,
-                indices_accessor=indices_accessor,
-            )
-            _define_out_address_function(
-                w,
-                name="out_address_from_indices",
-                woffset=accessor.offset,
-                pitch=accessor.pitch,
-            )
-            with _per_output_element(w, kernel, config) as (w, out_addr):
-                if source_rank == 0:
-                    indices_expr = "indices_at(array<u32, 0>())"
-                else:
-                    indices_expr = "indices_at(out_index)"
-                source_address_expr = f"out_address_from_indices({indices_expr})"
-                w.print(f"output[{out_addr}] = arg0[{source_address_expr}];")
-        case _:
-            raise AbstractKernelException(f"Unsupported RemapInfo: {kernel.info!r}")
+                with _per_output_element(w, kernel, config) as (w, out_addr):
+                    if source_rank == 0:
+                        indices_expr = "indices_at(array<u32, 0>())"
+                    else:
+                        indices_expr = "indices_at(out_index)"
+                    source_address_expr = f"out_address_from_indices({indices_expr})"
+                    w.print(f"output[{out_addr}] = arg0[{source_address_expr}];")
 
 
 #

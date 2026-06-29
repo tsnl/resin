@@ -109,27 +109,15 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
     dense = _dense_remap_gradient(df_dout)
 
     match node.info:
-        case RemapGatherInfo(accessor=None):
-            return (
-                View(
-                    node=dense.node,
-                    port=dense.port,
-                    accessor=Accessor(
-                        offset=0,
-                        shape=source.shape,
-                        pitch=c_contiguous_pitch_for_shape(source.shape),
+        case RemapScatterInfo(accessor=accessor):
+            if accessor is not None:
+                return (
+                    View(
+                        node=dense.node,
+                        port=dense.port,
+                        accessor=accessor,
                     ),
-                ),
-            )
-        case RemapScatterInfo(accessor=accessor) if accessor is not None:
-            return (
-                View(
-                    node=dense.node,
-                    port=dense.port,
-                    accessor=accessor,
-                ),
-            )
-        case RemapScatterInfo(accessor=None):
+                )
             indices = node.indices
             assert indices is not None
             return (
@@ -142,20 +130,30 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
                     indices=indices,
                 ),
             )
-        case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
-            accessor is not None and source_shape is not None
-        ):
-            indices = node.indices
-            assert indices is not None
-            return (
-                View.remap(
-                    source=dense,
-                    info=RemapScatterInfo(operator="add"),
-                    indices=indices,
-                    out_shape=source_shape,
-                ),
-            )
-        case _:
+        case RemapGatherInfo(accessor=accessor, source_shape=source_shape):
+            if accessor is None and source_shape is None:
+                return (
+                    View(
+                        node=dense.node,
+                        port=dense.port,
+                        accessor=Accessor(
+                            offset=0,
+                            shape=source.shape,
+                            pitch=c_contiguous_pitch_for_shape(source.shape),
+                        ),
+                    ),
+                )
+            if accessor is not None and source_shape is not None:
+                indices = node.indices
+                assert indices is not None
+                return (
+                    View.remap(
+                        source=dense,
+                        info=RemapScatterInfo(operator="add"),
+                        indices=indices,
+                        out_shape=source_shape,
+                    ),
+                )
             raise NotDifferentiableException(node)
 
 

@@ -356,4 +356,4 @@ def gaussian_blend_tiled(
         n_tiles_y=n_tiles_y,
         n_instances=n_instances,
     )
-    return View.port(node, "image")
+    return View.identity(node, port="image")

@@ -49,7 +49,6 @@ from resin.dsl.node import (
     RemapInfo,
     RemapNode,
     RemapScatterInfo,
-    SortNode,
 )
 
 
@@ -88,10 +87,6 @@ class View:
             port=port,
             accessor=Accessor.dense(node.port_shape(port)),
         )
-
-    @staticmethod
-    def port(node: Node, port: str) -> "View":
-        return View.identity(node, port=port)
 
     @property
     def offset(self) -> int:
@@ -562,58 +557,63 @@ class View:
         etype: ElementType | None = None,
     ) -> "View":
         match info:
-            case RemapScatterInfo(accessor=accessor) if accessor is not None:
-                if out_shape is None:
-                    raise ValueError("scatter with accessor requires out_shape")
-                if accessor.shape != source.shape:
-                    raise ValueError("scatter accessor.shape must match source.shape")
-                node_shape = out_shape
-                args: tuple[View, ...] = (source,)
-                node_info: RemapInfo = info
-            case RemapScatterInfo(accessor=None):
-                if out_shape is None or indices is None:
-                    raise ValueError(
-                        "scatter without accessor requires out_shape and indices"
+            case RemapScatterInfo(accessor=accessor):
+                if accessor is not None:
+                    if out_shape is None:
+                        raise ValueError("scatter with accessor requires out_shape")
+                    if accessor.shape != source.shape:
+                        raise ValueError(
+                            "scatter accessor.shape must match source.shape"
+                        )
+                    node_shape = out_shape
+                    args: tuple[View, ...] = (source,)
+                    node_info: RemapInfo = info
+                else:
+                    if out_shape is None or indices is None:
+                        raise ValueError(
+                            "scatter without accessor requires out_shape and indices"
+                        )
+                    source, indices = _join_source_with_indices(
+                        source, indices, out_shape
                     )
-                source, indices = _join_source_with_indices(source, indices, out_shape)
-                node_shape = out_shape
-                args = (source, indices)
-                node_info = info
-            case RemapGatherInfo(accessor=None, source_shape=None):
-                if indices is not None:
-                    raise ValueError(
-                        "gather densify (no accessor) does not take indices"
+                    node_shape = out_shape
+                    args = (source, indices)
+                    node_info = info
+            case RemapGatherInfo(accessor=accessor, source_shape=source_shape):
+                if accessor is None and source_shape is None:
+                    if indices is not None:
+                        raise ValueError(
+                            "gather densify (no accessor) does not take indices"
+                        )
+                    node_shape = source.shape
+                    args = (source,)
+                    node_info = info
+                elif accessor is not None and source_shape is not None:
+                    if indices is None:
+                        raise ValueError("gather with accessor requires indices")
+                    if accessor.shape != source_shape:
+                        raise ValueError(
+                            "gather accessor.shape must match source_shape"
+                        )
+                    indices = _validate_indices_view(indices, source_shape)
+                    out_prefix = indices.shape[:-1]
+                    source = View(
+                        node=source.node,
+                        port=source.port,
+                        accessor=Accessor(
+                            offset=source.offset,
+                            shape=out_prefix,
+                            pitch=c_contiguous_pitch_for_shape(out_prefix),
+                        ),
                     )
-                node_shape = source.shape
-                args = (source,)
-                node_info = info
-            case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
-                accessor is not None and source_shape is not None
-            ):
-                if indices is None:
-                    raise ValueError("gather with accessor requires indices")
-                if accessor.shape != source_shape:
-                    raise ValueError("gather accessor.shape must match source_shape")
-                indices = _validate_indices_view(indices, source_shape)
-                out_prefix = indices.shape[:-1]
-                # preserve port if present in View constructor calls nearby
-                source = View(
-                    node=source.node,
-                    port=source.port,
-                    accessor=Accessor(
-                        offset=source.offset,
-                        shape=out_prefix,
-                        pitch=c_contiguous_pitch_for_shape(out_prefix),
-                    ),
-                )
-                node_shape = out_prefix
-                args = (source, indices)
-                node_info = info
-            case RemapGatherInfo():
-                raise ValueError(
-                    "gather with accessor requires source_shape; "
-                    + "gather without accessor must omit source_shape"
-                )
+                    node_shape = out_prefix
+                    args = (source, indices)
+                    node_info = info
+                else:
+                    raise ValueError(
+                        "gather with accessor requires source_shape; "
+                        + "gather without accessor must omit source_shape"
+                    )
 
         return View.identity(
             RemapNode(

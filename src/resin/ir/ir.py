@@ -17,6 +17,7 @@ __all__ = [
 from abc import ABC
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import cast
 
 from frozendict import frozendict
 
@@ -120,28 +121,27 @@ class IrRemapKernel(IrKernel):
 
     def __post_init__(self):
         match self.info:
-            case RemapScatterInfo(accessor=accessor) if accessor is not None:
-                assert len(self.arg_accessors) == 1
-                assert accessor.shape == self.arg_accessors[0].shape
-            case RemapScatterInfo(accessor=None):
-                assert len(self.arg_accessors) == 2
-                assert len(self.arg_etypes) == 2
-                source_accessor, indices_accessor = self.arg_accessors
-                assert indices_accessor.shape[-1] == len(self.shape)
-                assert indices_accessor.shape[:-1] == source_accessor.shape
-            case RemapGatherInfo(accessor=None, source_shape=None):
-                assert len(self.arg_accessors) == 1
-            case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
-                accessor is not None and source_shape is not None
-            ):
-                assert len(self.arg_accessors) == 2
-                assert len(self.arg_etypes) == 2
-                source_accessor, indices_accessor = self.arg_accessors
-                assert indices_accessor.shape[-1] == accessor.rank
-                assert indices_accessor.shape[:-1] == source_accessor.shape
-                assert accessor.shape == source_shape
-            case _:
-                raise AssertionError(f"invalid RemapInfo: {self.info!r}")
+            case RemapScatterInfo(accessor=accessor):
+                if accessor is not None:
+                    assert len(self.arg_accessors) == 1
+                    assert accessor.shape == self.arg_accessors[0].shape
+                else:
+                    assert len(self.arg_accessors) == 2
+                    assert len(self.arg_etypes) == 2
+                    source_accessor, indices_accessor = self.arg_accessors
+                    assert indices_accessor.shape[-1] == len(self.shape)
+                    assert indices_accessor.shape[:-1] == source_accessor.shape
+            case RemapGatherInfo(accessor=accessor, source_shape=source_shape):
+                if accessor is None and source_shape is None:
+                    assert len(self.arg_accessors) == 1
+                else:
+                    assert accessor is not None and source_shape is not None
+                    assert len(self.arg_accessors) == 2
+                    assert len(self.arg_etypes) == 2
+                    source_accessor, indices_accessor = self.arg_accessors
+                    assert indices_accessor.shape[-1] == accessor.rank
+                    assert indices_accessor.shape[:-1] == source_accessor.shape
+                    assert accessor.shape == source_shape
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -409,7 +409,10 @@ class IrProgramBuilder:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
     def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
-        arg_etypes = tuple(view.etype for view in node.args)
+        arg_etypes = cast(
+            tuple[ElementType, ...],
+            tuple(view.etype for view in node.args),
+        )
         return IrElementwiseRpnKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
@@ -435,7 +438,10 @@ class IrProgramBuilder:
         )
 
     def _build_kernel_for_remap_node(self, node: dsl.RemapNode) -> IrKernel:
-        arg_etypes = tuple(view.etype for view in node.args)
+        arg_etypes = cast(
+            tuple[ElementType, ...],
+            tuple(view.etype for view in node.args),
+        )
         match node.info:
             case RemapScatterInfo(operator=operator):
                 clear_output = operator is None

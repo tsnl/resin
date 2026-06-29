@@ -247,7 +247,7 @@ class SortNode(CustomNode):
         if df_dvalues is None:
             # No gradient through sorted values (e.g. only perm was consumed).
             return (View.zeros_like(self.args[0]),)
-        perm = View.port(self, "perm")
+        perm = View.identity(self, port="perm")
         n = self.shape[0]
         # Build indices as (n, 1) u4 coords into a 1D source of length n.
         indices = perm.reshape((n, 1)) if perm.rank == 1 else perm

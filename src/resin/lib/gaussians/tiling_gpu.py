@@ -356,8 +356,8 @@ def build_gpu_tiled_blend_graph(
         n_gaussians=n,
         max_instances=max_inst,
     )
-    keys = View.port(fill, "keys")
-    ids = View.port(fill, "ids")
+    keys = View.identity(fill, port="keys")
+    ids = View.identity(fill, port="ids")
 
     # Builtin radix-sort subgraph on keys; permute ids with the same perm via remap.
     _sorted_keys, perm = keys.sort()
