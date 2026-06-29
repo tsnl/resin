@@ -3,8 +3,8 @@ from typing import cast
 from resin.core.etype import F4
 from resin.core.pytree import (
     PyTree,
-    flatten_pytree,
-    flatten_pytree_paths,
+    flatten_pytree_items,
+    flatten_pytree_values,
     map_pytree,
     map_pytree_paths,
     tree_map,
@@ -29,7 +29,7 @@ class TestPyTreeTyping:
 class TestFlattenPytree:
     def test_nested_dict_list_and_tuple_leaf(self) -> None:
         tree = {"a": [1, ("b", 2)], "c": 3}
-        assert list(flatten_pytree(tree)) == [1, ("b", 2), 3]
+        assert list(flatten_pytree_values(tree)) == [1, ("b", 2), 3]
 
 
 class TestMapPytree:
@@ -57,7 +57,7 @@ class TestMapPytree:
 class TestFlattenPytreePaths:
     def test_nested_dict_paths(self) -> None:
         tree = {"l1": {"weight": 1, "bias": 2}, "l2": 3}
-        assert list(flatten_pytree_paths(tree)) == [
+        assert list(flatten_pytree_items(tree)) == [
             ("l1.weight", 1),
             ("l1.bias", 2),
             ("l2", 3),
@@ -78,18 +78,18 @@ class TestTreeMap:
 class TestModule:
     def test_params_flattens_leaves(self) -> None:
         layer = Linear.new(3, 2, bias=True)
-        ps = layer.params()
+        ps = dict(layer.items())
         assert set(ps) == {"weight", "bias"}
         assert ps["weight"] is layer.weight
         assert ps["bias"] is layer.bias
 
     def test_params_skips_none_bias(self) -> None:
         layer = Linear.new(3, 2, bias=False)
-        assert set(layer.params()) == {"weight"}
+        assert set(dict(layer.items())) == {"weight"}
 
     def test_module_in_pytree_flattens_with_field_paths(self) -> None:
         model = [Linear.new(2, 3, bias=True)]
-        assert [p for p, _ in flatten_pytree_paths(model)] == ["0.weight", "0.bias"]
+        assert [p for p, _ in flatten_pytree_items(model)] == ["0.weight", "0.bias"]
 
 
 class TestMapPytreePaths:

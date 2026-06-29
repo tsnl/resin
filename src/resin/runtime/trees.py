@@ -7,7 +7,7 @@ __all__ = [
 
 from collections.abc import Mapping
 
-from resin.core.pytree import PyTree, flatten_pytree_paths
+from resin.core.pytree import PyTree, flatten_pytree_items
 from resin.dsl.view import View
 from resin.ir.ir import IrProgramBuilder
 
@@ -16,7 +16,7 @@ def register_named_params(
     builder: IrProgramBuilder,
     params: Mapping[str, PyTree[View]],
 ) -> dict[str, View]:
-    flat = dict(flatten_pytree_paths(params))
+    flat = dict(flatten_pytree_items(params))
     for name, view in flat.items():
         builder.register_param(name, view)
     return flat
@@ -27,5 +27,5 @@ def sink_tree(
     prefix: str,
     tree: PyTree[View],
 ) -> None:
-    for path, view in flatten_pytree_paths(tree, prefix=prefix):
+    for path, view in flatten_pytree_items(tree, prefix=prefix):
         builder.build_sink(path, view)

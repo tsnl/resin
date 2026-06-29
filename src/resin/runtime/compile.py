@@ -10,13 +10,14 @@ __all__ = [
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+
 from frozendict import frozendict
 
 import resin.dsl as dsl
-from resin.core.pytree import PyTree, flatten_pytree_paths
-from resin.runtime.trees import register_named_params, sink_tree
+from resin.core.pytree import PyTree, flatten_pytree_items
 from resin.interp import Interp, ProgramId
 from resin.ir.ir import IrProgramBuilder
+from resin.runtime.trees import register_named_params, sink_tree
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 from resin.wgpu.codegen import WgslKernelConfig
 
@@ -90,7 +91,7 @@ class ParamBinding:
         to_prefix: str,
         tree: PyTree[dsl.View],
     ) -> None:
-        for rel_path, _view in flatten_pytree_paths(tree):
+        for rel_path, _view in flatten_pytree_items(tree):
             sink_name = (
                 f"{from_prefix}.{rel_path}"
                 if from_prefix and rel_path

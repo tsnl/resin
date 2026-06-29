@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import resin_rt_pybind
 
 import resin
+from resin import dsl, nn
 from resin.dataset import MnistDataLoader, MnistDataset
 from resin.dsl.prelude import F4
 
@@ -22,8 +23,8 @@ SEED = 0
 
 
 @dataclass(frozen=True)
-class Mlp(resin.nn.Module[resin.dsl.View]):
-    layers: list[resin.nn.Linear[resin.dsl.View]]
+class Mlp(nn.Module[dsl.View]):
+    layers: list[nn.Linear[dsl.View]]
 
     @staticmethod
     def new(
@@ -33,20 +34,20 @@ class Mlp(resin.nn.Module[resin.dsl.View]):
         hidden_dim: int,
         bias: bool,
     ) -> Mlp:
-        layers: list[resin.nn.Linear[resin.dsl.View]] = []
-        layers.append(resin.nn.Linear.new(in_dim, hidden_dim, bias=bias))
+        layers: list[nn.Linear[dsl.View]] = []
+        layers.append(nn.Linear.new(in_dim, hidden_dim, bias=bias))
         for _ in range(n_hidden - 1):
-            layers.append(resin.nn.Linear.new(hidden_dim, hidden_dim, bias=bias))
-        layers.append(resin.nn.Linear.new(hidden_dim, out_dim, bias=bias))
+            layers.append(nn.Linear.new(hidden_dim, hidden_dim, bias=bias))
+        layers.append(nn.Linear.new(hidden_dim, out_dim, bias=bias))
         return Mlp(layers=layers)
 
-    def __call__(self, x: resin.dsl.View) -> resin.dsl.View:
+    def __call__(self, x: dsl.View) -> dsl.View:
         assert len(x.shape) == 2
         for layer in self.layers[:-1]:
             x = layer(x)
-            x = resin.nn.relu(x)
+            x = nn.relu(x)
         x = self.layers[-1](x)
-        return resin.nn.softmax(x, axes=(1,))
+        return nn.softmax(x, axes=(1,))
 
 
 def random_param_bytes(shape: tuple[int, ...]) -> bytes:
@@ -69,12 +70,12 @@ def main() -> None:
         bias=True,
     )
 
-    xs = resin.dsl.param(shape=(BATCH_SIZE, IMG_WH), etype=F4, name="xs")
-    ys = resin.dsl.param(shape=(BATCH_SIZE, NUM_CLS), etype=F4, name="ys")
+    xs = dsl.param(shape=(BATCH_SIZE, IMG_WH), etype=F4, name="xs")
+    ys = dsl.param(shape=(BATCH_SIZE, NUM_CLS), etype=F4, name="ys")
 
     y_hats = mlp(xs)
-    losses = resin.nn.cross_entropy(y_hats, ys)
-    loss = resin.nn.mean(losses)
+    losses = nn.cross_entropy(y_hats, ys)
+    loss = nn.mean(losses)
 
     grads = resin.grad.grad(loss, wrt=mlp)
     new_model = resin.opt.sgd(mlp, grads, lr=LR)
@@ -97,7 +98,7 @@ def main() -> None:
     program_id = compiled.admit(interp)
     binding = compiled.binding(interp, program_id)
 
-    for _, param_view in mlp.params().items():
+    for param_view in mlp.values():
         binding.write_view(param_view, random_param_bytes(param_view.shape))
 
     for epoch in range(args.epochs):

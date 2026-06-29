@@ -52,14 +52,13 @@ class Module[T]:
     on concrete modules (``[T: View]``).
     """
 
-    def params(self) -> dict[str, T]:
-        """Flatten this module's leaves to ``{dotted-path: leaf}``.
+    def values(self) -> Generator[T, None, None]:
+        """Flatten this module's leaves to a generator of ``T``."""
+        yield from flatten_pytree_values(cast(Module[T], self))
 
-        The structural runtime check is the walker's :func:`expect_pytree_leaf`
-        assertion (every collected value is a genuine leaf, not an un-flattened
-        container); ``None`` fields are skipped.
-        """
-        return dict(flatten_pytree_paths(self))
+    def items(self) -> Generator[tuple[str, T], None, None]:
+        """Flatten this module's leaves to a generator of ``(dotted-path, leaf)``."""
+        yield from flatten_pytree_items(cast(Module[T], self))
 
 
 type PyTree[T] = (
@@ -144,7 +143,7 @@ def _join_pytree_path(prefix: str, segment: str) -> str:
     return segment if not prefix else f"{prefix}.{segment}"
 
 
-def flatten_pytree_paths[T](
+def flatten_pytree_items[T](
     pytree: PyTree[T],
     *,
     prefix: str = "",
@@ -153,19 +152,19 @@ def flatten_pytree_paths[T](
         return
     if isinstance(pytree, dict):
         for key, child in cast(dict[str, PyTree[T]], pytree).items():
-            yield from flatten_pytree_paths(
+            yield from flatten_pytree_items(
                 child, prefix=_join_pytree_path(prefix, key)
             )
     elif isinstance(pytree, list):
         for index, child in enumerate(cast(list[PyTree[T]], pytree)):
-            yield from flatten_pytree_paths(
+            yield from flatten_pytree_items(
                 child, prefix=_join_pytree_path(prefix, str(index))
             )
     elif isinstance(pytree, Module):
         node = cast("Module[T]", pytree)
         for field in _fields_of(node):
             child: PyTree[T] = getattr(node, field.name)
-            yield from flatten_pytree_paths(
+            yield from flatten_pytree_items(
                 child, prefix=_join_pytree_path(prefix, field.name)
             )
     else:
@@ -214,20 +213,20 @@ def map_pytree_paths[T, U](
     return fn(prefix, expect_pytree_leaf(pytree))
 
 
-def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
+def flatten_pytree_values[T](pytree: PyTree[T]) -> Generator[T, None, None]:
     if pytree is None:
         return
     if isinstance(pytree, dict):
         for child in cast(dict[str, PyTree[T]], pytree).values():
-            yield from flatten_pytree(child)
+            yield from flatten_pytree_values(child)
     elif isinstance(pytree, list):
         for child in cast(list[PyTree[T]], pytree):
-            yield from flatten_pytree(child)
+            yield from flatten_pytree_values(child)
     elif isinstance(pytree, Module):
         node = cast("Module[T]", pytree)
         for field in _fields_of(node):
             child: PyTree[T] = getattr(node, field.name)
-            yield from flatten_pytree(child)
+            yield from flatten_pytree_values(child)
     else:
         yield expect_pytree_leaf(pytree)
 
