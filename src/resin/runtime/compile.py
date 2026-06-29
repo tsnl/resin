@@ -92,10 +92,14 @@ class ParamBinding:
     ) -> None:
         for rel_path, _view in flatten_pytree_paths(tree):
             sink_name = (
-                f"{from_prefix}.{rel_path}" if from_prefix and rel_path else from_prefix or rel_path
+                f"{from_prefix}.{rel_path}"
+                if from_prefix and rel_path
+                else from_prefix or rel_path
             )
             param_name = (
-                f"{to_prefix}.{rel_path}" if to_prefix and rel_path else to_prefix or rel_path
+                f"{to_prefix}.{rel_path}"
+                if to_prefix and rel_path
+                else to_prefix or rel_path
             )
             src_buffer = self._sink_buffer_index(sink_name)
             dst_buffer = param_buffer_index(self.artifact, param_name)
@@ -145,11 +149,11 @@ def compile_program(
     wgsl_kernel_config: WgslKernelConfig | None = None,
 ) -> CompiledProgram:
     builder = IrProgramBuilder()
-    flat_params = (
-        register_named_params(builder, params) if params is not None else {}
-    )
+    flat_params = register_named_params(builder, params) if params is not None else {}
     _build_sinks(builder, sinks)
-    artifact = build_wgpu_program(builder.finish(), wgsl_kernel_config=wgsl_kernel_config)
+    artifact = build_wgpu_program(
+        builder.finish(), wgsl_kernel_config=wgsl_kernel_config
+    )
     manifest = _manifest_for(artifact, flat_params)
     view_to_name = frozendict[dsl.View, str](
         {view: name for name, view in flat_params.items()}

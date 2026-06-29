@@ -4,7 +4,6 @@ import random
 import struct
 import sys
 
-
 import resin_rt_pybind
 
 import resin

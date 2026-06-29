@@ -116,6 +116,7 @@ class WgpuProgram:
     param_buffers: frozendict[str, int] = field(
         default_factory=lambda: frozendict[str, int]()
     )
+
     def __post_init__(self) -> None:
         for buffer in self.buffers:
             _validate_buffer_spec(buffer)
