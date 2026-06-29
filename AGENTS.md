@@ -2,7 +2,10 @@
 
 Python style
 - Always use type annotations, static typechecking and `ruff` lints must pass.
-- Targeting Python >=3.14, never use `from future import __annotations__`.
+- Targeting Python >=3.14 (PEP 649 deferred annotations): do not use
+  `from __future__ import annotations`, and do not quote forward references
+  (write `PyTensor | View` and `-> View`, not `"View"`), except for names that
+  are not bound at runtime (e.g. imports only under `TYPE_CHECKING`).
 - All imports must be at the top-level.
 
 ## PR hygiene
