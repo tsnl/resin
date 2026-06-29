@@ -13,6 +13,7 @@ __all__ = [
     "MatmulNode",
     "Node",
     "ParamNode",
+    "PrefixSumNode",
     "ReductionNode",
     "RemapGatherInfo",
     "RemapInfo",
@@ -152,4 +153,35 @@ class CustomNode(Node, ABC):
     def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
         """Return ∂f/∂operand for each arg given gradients keyed by output port."""
         raise NotImplementedError(f"{type(self).__name__} has no df_do_ports")
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class PrefixSumNode(CustomNode):
+    """Exclusive prefix sum along the last axis of a 1D or ND tensor."""
+
+    inclusive: bool = False
+
+    def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
+        from resin.ir.ir import IrPrefixSumKernel
+
+        _ = used_ports
+        return IrPrefixSumKernel(
+            arg_accessors=(self.args[0].accessor,),
+            etype=self.etype,
+            shape=self.shape,
+            inclusive=self.inclusive,
+            arg_etypes=(self.args[0].etype,),
+        )
+
+    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
+        from resin.dsl.view import View
+
+        df_dout = df_douts.get(DEFAULT_PORT)
+        if df_dout is None:
+            raise KeyError(DEFAULT_PORT)
+        # Exclusive scan adjoint: grad_x[i] = sum_{j>i} grad_y[j]
+        # Inclusive scan adjoint: grad_x[i] = sum_{j>=i} grad_y[j]
+        # Implemented as reverse exclusive/inclusive prefix on the gradient.
+        rev = View.reverse_prefix_sum(df_dout, inclusive=not self.inclusive)
+        return (rev,)
 

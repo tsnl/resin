@@ -42,6 +42,7 @@ from resin.dsl.node import (
     MatmulNode,
     Node,
     ParamNode,
+    PrefixSumNode,
     ReductionNode,
     RemapGatherInfo,
     RemapInfo,
@@ -328,6 +329,49 @@ class View:
     def is_identity(self) -> bool:
         return self.accessor.is_dense_c_contiguous(self.node.port_shape(self.port))
 
+    def prefix_sum(self, *, inclusive: bool = False) -> "View":
+        return View.identity(
+            PrefixSumNode(
+                shape=self.shape,
+                etype=self.etype,
+                args=(self,),
+                inclusive=inclusive,
+            )
+        )
+
+
+    @staticmethod
+    def reverse_prefix_sum(x: "View", *, inclusive: bool = True) -> "View":
+        """Prefix-sum adjoint helper: reverse, exclusive/inclusive scan, reverse."""
+        n = x.shape[0] if x.rank >= 1 else 1
+        if x.rank != 1:
+            raise ValueError("reverse_prefix_sum expects a 1D view")
+        # Build reversal indices [n-1, n-2, ..., 0] as a const u4 tensor.
+        rev_idx_data = list(range(n - 1, -1, -1))
+        rev_idx = const(rev_idx_data, etype=U4)
+        indices = rev_idx.reshape((n, 1))
+        reversed_x = View.remap(
+            source=x,
+            info=RemapGatherInfo(
+                accessor=Accessor.dense(x.shape),
+                source_shape=x.shape,
+            ),
+            indices=indices,
+        )
+        scanned = reversed_x.prefix_sum(inclusive=inclusive)
+        return View.remap(
+            source=scanned,
+            info=RemapGatherInfo(
+                accessor=Accessor.dense(scanned.shape),
+                source_shape=scanned.shape,
+            ),
+            indices=indices,
+        )
+
+
+    @staticmethod
+    def zeros_like(x: "View") -> "View":
+        return zeros(x.shape, etype=x.etype)
 
     @staticmethod
     def _from_view_or_scalar(
