@@ -579,7 +579,12 @@ class View:
                     args = (source, indices)
                     node_info = info
             case RemapGatherInfo(accessor=accessor, source_shape=source_shape):
-                if accessor is None and source_shape is None:
+                if (accessor is None) != (source_shape is None):
+                    raise ValueError(
+                        "gather with accessor requires source_shape; "
+                        + "gather without accessor must omit source_shape"
+                    )
+                if accessor is None:
                     if indices is not None:
                         raise ValueError(
                             "gather densify (no accessor) does not take indices"
@@ -587,7 +592,8 @@ class View:
                     node_shape = source.shape
                     args = (source,)
                     node_info = info
-                elif accessor is not None and source_shape is not None:
+                else:
+                    assert source_shape is not None
                     if indices is None:
                         raise ValueError("gather with accessor requires indices")
                     if accessor.shape != source_shape:
@@ -608,11 +614,8 @@ class View:
                     node_shape = out_prefix
                     args = (source, indices)
                     node_info = info
-                else:
-                    raise ValueError(
-                        "gather with accessor requires source_shape; "
-                        + "gather without accessor must omit source_shape"
-                    )
+
+
 
         return View.identity(
             RemapNode(

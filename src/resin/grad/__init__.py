@@ -131,7 +131,9 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
                 ),
             )
         case RemapGatherInfo(accessor=accessor, source_shape=source_shape):
-            if accessor is None and source_shape is None:
+            if (accessor is None) != (source_shape is None):
+                raise NotDifferentiableException(node)
+            if accessor is None:
                 return (
                     View(
                         node=dense.node,
@@ -143,18 +145,18 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
                         ),
                     ),
                 )
-            if accessor is not None and source_shape is not None:
-                indices = node.indices
-                assert indices is not None
-                return (
-                    View.remap(
-                        source=dense,
-                        info=RemapScatterInfo(operator="add"),
-                        indices=indices,
-                        out_shape=source_shape,
-                    ),
-                )
-            raise NotDifferentiableException(node)
+            assert source_shape is not None
+            indices = node.indices
+            assert indices is not None
+            return (
+                View.remap(
+                    source=dense,
+                    info=RemapScatterInfo(operator="add"),
+                    indices=indices,
+                    out_shape=source_shape,
+                ),
+            )
+
 
 
 
