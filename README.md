@@ -26,7 +26,10 @@ uv sync --group dev
 uv run --directory crates/resin-rt-pybind maturin develop
 
 # Run checks:
-uv run python scripts/check.py
+make check
+
+# Format and apply lint fixes:
+make format
 ```
 
 ## References

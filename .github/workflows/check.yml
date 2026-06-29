@@ -25,8 +25,11 @@ jobs:
                   enable-cache: true
                   cache-dependency-glob: "uv.lock"
 
+            - name: Sync dependencies
+              run: uv sync --group dev
+
             - name: Ruff
-              run: uvx ruff check src tests examples scripts
+              run: make check-ruff
 
     check:
         name: check
@@ -61,10 +64,10 @@ jobs:
               run: uv sync --group dev
 
             - name: Basedpyright
-              run: uv run python scripts/check.py basedpyright
+              run: make check-basedpyright
 
             - name: Pytest
-              run: uv run python scripts/check.py pytest
+              run: make check-pytest
 
             - name: Prune uv cache
               if: always()
