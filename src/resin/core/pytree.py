@@ -302,7 +302,7 @@ def infer_pytensor_shape(value: PyTensor) -> tuple[int, ...]:
     return (len(value),) + e0_shape
 
 
-def marshall_pytensor(value: PyTensor, etype: ElementType | str) -> bytes:
+def marshall_pytensor(value: PyTensor, etype: ElementType) -> bytes:
     values = flatten_pytensor(value)
     return struct.pack(f"<{len(values)}{spell_etype_in_pystruct(etype)}", *values)
 

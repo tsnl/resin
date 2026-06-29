@@ -17,6 +17,7 @@ import resin.dsl as dsl
 from resin.core.pytree import PyTree, flatten_pytree_items
 from resin.interp import Interp, ProgramId
 from resin.ir.ir import IrProgramBuilder
+from resin.core.etype import ElementType
 from resin.runtime.trees import register_named_params, sink_tree
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
 from resin.wgpu.codegen import WgslKernelConfig
@@ -26,7 +27,7 @@ from resin.wgpu.codegen import WgslKernelConfig
 class ParamEntry:
     name: str
     shape: tuple[int, ...]
-    etype: str
+    etype: ElementType
     buffer_index: int
 
 

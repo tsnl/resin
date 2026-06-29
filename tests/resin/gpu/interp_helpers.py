@@ -18,7 +18,7 @@ from resin.runtime import compile_program
 
 
 def unmarshall_buffer(
-    data: bytes, shape: tuple[int, ...], etype: ElementType | str
+    data: bytes, shape: tuple[int, ...], etype: ElementType
 ) -> list[float]:
     count = math.prod(shape)
     fmt = spell_etype_in_pystruct(etype)

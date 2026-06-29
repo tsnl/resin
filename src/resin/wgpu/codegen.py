@@ -267,7 +267,7 @@ def _emit_eval_rpn_expr(
     rpn_expr: ElementRpnExpr,
     *,
     n: int,
-    etype: ElementType | str,
+    etype: ElementType,
 ) -> None:
     t = spell_etype_in_wgsl(etype)
 
