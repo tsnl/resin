@@ -23,7 +23,7 @@ SEED = 0
 
 
 @dataclass(frozen=True)
-class Mlp(nn.Module[dsl.View]):
+class Mlp(nn.Object[dsl.View]):
     layers: list[nn.Linear[dsl.View]]
 
     @staticmethod

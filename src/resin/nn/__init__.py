@@ -2,7 +2,7 @@
 
 __all__ = [
     "Linear",
-    "Module",
+    "Object",
     "cross_entropy",
     "mean",
     "relu",
@@ -13,12 +13,12 @@ import math
 from dataclasses import dataclass
 
 from resin.core.etype import F4
-from resin.core.pytree import Module
+from resin.core.pytree import Object
 from resin.dsl.view import View, const, param
 
 
 @dataclass(frozen=True)
-class Linear[T: View](Module[T]):
+class Linear[T: View](Object[T]):
     """A dense layer as a generic dataclass :class:`Module`.
 
     Parameterizing by the leaf type ``T`` makes the fields *be* ``T``: ``Linear[View]``

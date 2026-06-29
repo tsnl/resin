@@ -33,7 +33,7 @@ class Mapping[K, V](Protocol):
     def items(self) -> ItemsView[K, V]: ...
 
 
-class Module[T]:
+class Object[T]:
     """
     Base for dataclass param trees — a first-class PyTree container node.
 
@@ -54,11 +54,11 @@ class Module[T]:
 
     def values(self) -> Generator[T, None, None]:
         """Flatten this module's leaves to a generator of ``T``."""
-        yield from flatten_pytree_values(cast(Module[T], self))
+        yield from flatten_pytree_values(cast(Object[T], self))
 
     def items(self) -> Generator[tuple[str, T], None, None]:
         """Flatten this module's leaves to a generator of ``(dotted-path, leaf)``."""
-        yield from flatten_pytree_items(cast(Module[T], self))
+        yield from flatten_pytree_items(cast(Object[T], self))
 
 
 type PyTree[T] = (
@@ -66,7 +66,7 @@ type PyTree[T] = (
     | Mapping[str, PyTree[T]]
     | SequenceNotStr[PyTree[T]]
     | tuple[PyTree[T], ...]
-    | Module[T]
+    | Object[T]
 )
 """
 Recursive JSON-like trees of ``T`` leaves nested in dict/list/Module containers.
@@ -129,7 +129,7 @@ def expect_pytree_leaf[T](value: PyTree[T]) -> T:
     Walkers recurse only on ``dict``, ``list``, and ``Module``. If ``value`` is none
     of those, it must be a leaf. Pyright cannot infer that from ``isinstance`` alone.
     """
-    assert not isinstance(value, (dict, list, Module))
+    assert not isinstance(value, (dict, list, Object))
     return cast(T, value)
 
 
@@ -160,8 +160,8 @@ def flatten_pytree_items[T](
             yield from flatten_pytree_items(
                 child, prefix=_join_pytree_path(prefix, str(index))
             )
-    elif isinstance(pytree, Module):
-        node = cast("Module[T]", pytree)
+    elif isinstance(pytree, Object):
+        node = cast("Object[T]", pytree)
         for field in _fields_of(node):
             child: PyTree[T] = getattr(node, field.name)
             yield from flatten_pytree_items(
@@ -197,8 +197,8 @@ def map_pytree_paths[T, U](
             )
             for index, child in enumerate(cast(list[PyTree[T]], pytree))
         ]
-    if isinstance(pytree, Module):
-        node = cast("Module[T]", pytree)
+    if isinstance(pytree, Object):
+        node = cast("Object[T]", pytree)
         ctor = cast("Callable[..., PyTree[U]]", type(node))
         return ctor(
             **{
@@ -222,8 +222,8 @@ def flatten_pytree_values[T](pytree: PyTree[T]) -> Generator[T, None, None]:
     elif isinstance(pytree, list):
         for child in cast(list[PyTree[T]], pytree):
             yield from flatten_pytree_values(child)
-    elif isinstance(pytree, Module):
-        node = cast("Module[T]", pytree)
+    elif isinstance(pytree, Object):
+        node = cast("Object[T]", pytree)
         for field in _fields_of(node):
             child: PyTree[T] = getattr(node, field.name)
             yield from flatten_pytree_values(child)
@@ -241,8 +241,8 @@ def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
         }
     if isinstance(pytree, list):
         return [map_pytree(child, f) for child in cast(list[PyTree[T]], pytree)]
-    if isinstance(pytree, Module):
-        node = cast("Module[T]", pytree)
+    if isinstance(pytree, Object):
+        node = cast("Object[T]", pytree)
         ctor = cast("Callable[..., PyTree[U]]", type(node))
         return ctor(
             **{
@@ -275,8 +275,8 @@ def tree_map[L](fn: Callable[..., object], *trees: L) -> L:
         return cast(
             L, [tree_map(fn, *children) for children in zip(*lists, strict=True)]
         )
-    if isinstance(head, Module):
-        node = cast("Module[object]", head)
+    if isinstance(head, Object):
+        node = cast("Object[object]", head)
         ctor = cast("Callable[..., L]", type(node))
         return ctor(
             **{
