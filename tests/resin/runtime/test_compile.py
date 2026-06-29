@@ -5,7 +5,7 @@ import resin_rt_pybind
 from resin.core.etype import F4
 from resin.dsl import param
 from resin.grad import grad
-from resin.nn import linear, linear_new, mean
+from resin.nn import Linear, mean
 from resin.opt import sgd
 from resin.runtime import compile_program
 
@@ -21,10 +21,10 @@ def test_param_buffers_use_stable_names() -> None:
 
 
 def test_tree_params_and_commit() -> None:
-    layer = linear_new(2, 3, bias=True)
+    layer = Linear.new(2, 3, bias=True)
     model = [layer]
     xs = param(shape=(1, 2), etype=F4, name="xs")
-    out = linear(layer, xs)
+    out = layer(xs)
     loss = mean(out)
 
     grads = grad(loss, wrt=model)

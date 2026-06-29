@@ -31,19 +31,19 @@ def mlp_new(
     bias: bool,
 ) -> Mlp:
     res: list[resin.nn.Linear[resin.dsl.View]] = []
-    res.append(resin.nn.linear_new(in_dim, hidden_dim, bias=bias))
+    res.append(resin.nn.Linear.new(in_dim, hidden_dim, bias=bias))
     for _ in range(n_hidden - 1):
-        res.append(resin.nn.linear_new(hidden_dim, hidden_dim, bias=bias))
-    res.append(resin.nn.linear_new(hidden_dim, out_dim, bias=bias))
+        res.append(resin.nn.Linear.new(hidden_dim, hidden_dim, bias=bias))
+    res.append(resin.nn.Linear.new(hidden_dim, out_dim, bias=bias))
     return res
 
 
 def mlp(model: Mlp, x: resin.dsl.View) -> resin.dsl.View:
     assert len(x.shape) == 2
     for layer in model[:-1]:
-        x = resin.nn.linear(layer, x)
+        x = layer(x)
         x = resin.nn.relu(x)
-    x = resin.nn.linear(model[-1], x)
+    x = model[-1](x)
     return resin.nn.softmax(x, axes=(1,))
 
 
