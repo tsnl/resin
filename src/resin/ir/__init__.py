@@ -13,6 +13,7 @@ from .ir import (
     IrReductionKernel,
     IrRemapKernel,
     IrSortKernel,
+    IrWgslMultiOutputKernel,
     reachable_ports,
 )
 from .ir_opt import optimize
@@ -33,6 +34,7 @@ __all__ = [
     "IrReductionKernel",
     "IrRemapKernel",
     "IrSortKernel",
+    "IrWgslMultiOutputKernel",
     "etype_nbytes",
     "optimize",
     "reachable_ports",

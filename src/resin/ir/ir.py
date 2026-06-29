@@ -196,8 +196,22 @@ class IrSortKernel(IrKernel):
     def __post_init__(self):
         assert len(self.arg_accessors) == 1
         assert self.write_values or self.write_perm
-        # num_outputs stays 2 so binding layout is stable (values then perm);
-        # unused ports may still be allocated but not written.
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrWgslMultiOutputKernel(IrKernel):
+    """Opaque multi-output WGSL kernel (custom nodes supply full source)."""
+
+    wgsl: str
+    entry_point: str
+    dispatch_size: tuple[int, int, int]
+    arg_etypes: tuple[ElementType, ...]
+    output_etypes: tuple[ElementType, ...]
+    clear_output_before_dispatch: bool = True
+
+    def __post_init__(self):
+        assert len(self.arg_etypes) == len(self.arg_accessors)
+        assert len(self.output_etypes) == self.num_outputs
 
 
 #
