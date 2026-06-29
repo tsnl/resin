@@ -17,7 +17,9 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapGatherInfo,
+    RemapNode,
+    RemapScatterInfo,
 )
 from resin.dsl.view import View, ones, toposort
 
@@ -43,12 +45,15 @@ def accessor_adjoint(view: View, g: View) -> View:
     if view.is_identity():
         return x
 
-    return View.scatter(
+    return View.remap(
         source=x,
+        info=RemapScatterInfo(
+            accessor=Accessor(
+                offset=view.offset, shape=x.shape, pitch=view.pitch
+            ),
+            operator="add",
+        ),
         out_shape=view.node.shape,
-        operator="add",
-        woffset=view.offset,
-        wpitch=view.pitch,
     )
 
 
@@ -71,22 +76,67 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
                 df_dout @ node.args[1].transpose(),
                 node.args[0].transpose() @ df_dout,
             )
-        case ScatterNode():
-            source = node.args[0]
-            dense = df_dout if df_dout.is_identity() else df_dout.copy()
+        case RemapNode():
+            return _df_do_remap(node, df_dout)
+        case _:
+            raise NotDifferentiableException(node)
+
+
+def _dense_remap_gradient(df_dout: View) -> View:
+    return df_dout if df_dout.is_identity() else df_dout.copy()
+
+
+def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
+    source = node.args[0]
+    dense = _dense_remap_gradient(df_dout)
+
+    match node.info:
+        case RemapGatherInfo(accessor=None):
             return (
                 View(
                     node=dense.node,
                     accessor=Accessor(
-                        offset=node.woffset,
+                        offset=0,
                         shape=source.shape,
-                        pitch=node.wpitch,
+                        pitch=c_contiguous_pitch_for_shape(source.shape),
                     ),
+                ),
+            )
+        case RemapScatterInfo(accessor=accessor) if accessor is not None:
+            return (
+                View(
+                    node=dense.node,
+                    accessor=accessor,
+                ),
+            )
+        case RemapScatterInfo(accessor=None):
+            indices = node.indices
+            assert indices is not None
+            return (
+                View.remap(
+                    source=dense,
+                    info=RemapGatherInfo(
+                        accessor=Accessor.dense(node.shape),
+                        source_shape=node.shape,
+                    ),
+                    indices=indices,
+                ),
+            )
+        case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
+            accessor is not None and source_shape is not None
+        ):
+            indices = node.indices
+            assert indices is not None
+            return (
+                View.remap(
+                    source=dense,
+                    info=RemapScatterInfo(operator="add"),
+                    indices=indices,
+                    out_shape=source_shape,
                 ),
             )
         case _:
             raise NotDifferentiableException(node)
-
 
 
 
