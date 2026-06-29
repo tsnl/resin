@@ -5,6 +5,7 @@ __all__ = [
     "IrElementwiseRpnKernel",
     "IrKernel",
     "IrMatmulKernel",
+    "IrPrefixSumKernel",
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
@@ -170,6 +171,15 @@ class IrReductionKernel(IrKernel):
         return count
 
 
+@dataclass(frozen=True, kw_only=True)
+class IrPrefixSumKernel(IrKernel):
+    inclusive: bool
+    arg_etypes: tuple[ElementType | str, ...]
+    clear_output_before_dispatch: bool = True
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 1
+        assert self.arg_accessors[0].shape == self.shape
 
 
 

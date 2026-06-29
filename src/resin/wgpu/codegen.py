@@ -18,6 +18,7 @@ from resin.ir.ir import (
     IrElementwiseRpnKernel,
     IrKernel,
     IrMatmulKernel,
+    IrPrefixSumKernel,
     IrReductionKernel,
     IrRemapKernel,
 )
@@ -38,6 +39,9 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
+        case IrPrefixSumKernel():
+            # Single-threaded for correctness on small/medium vectors.
+            return (1, 1, 1) if math.prod(kernel.shape) > 0 else (0, 1, 1)
         case IrRemapKernel(info=info) if isinstance(info, RemapScatterInfo):
             n = math.prod(kernel.arg_accessors[0].shape)
         case _:
@@ -69,6 +73,8 @@ def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
             _emit_wgsl_for_reduction_kernel(w, kernel, config)
         case IrRemapKernel():
             _emit_wgsl_for_remap_kernel(w, kernel, config)
+        case IrPrefixSumKernel():
+            _emit_wgsl_for_prefix_sum_kernel(w, kernel)
         case _:
             raise AbstractKernelException(f"Unsupported kernel type: {type(kernel)}")
 
@@ -89,7 +95,7 @@ def _arg_etypes_for_kernel(kernel: IrKernel) -> tuple[str | ElementType, ...]:
     match kernel:
         case IrElementwiseRpnKernel() if kernel.arg_etypes:
             return kernel.arg_etypes
-        case IrRemapKernel():
+        case IrRemapKernel() | IrPrefixSumKernel():
             return kernel.arg_etypes
         case _:
             return tuple(kernel.etype for _ in kernel.arg_accessors)
@@ -933,6 +939,32 @@ def _reduction_accumulate_wgsl(
             return f"{acc} = min({acc}, {value});"
         case _:
             assert_never(operator)
+
+
+#
+# Emit WGSL for IrPrefixSumKernel / IrSortKernel
+#
+
+
+def _emit_wgsl_for_prefix_sum_kernel(
+    w: "WgslWriter",
+    kernel: IrPrefixSumKernel,
+) -> None:
+    _emit_bindings(w, kernel)
+    n = math.prod(kernel.shape)
+    t = spell_etype_in_wgsl(kernel.etype)
+    inclusive = kernel.inclusive
+    with w.block("@compute @workgroup_size(1)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>)"):
+        w.print("if (gid.x != 0u) { return; }")
+        w.print(f"var acc: {t} = {t}(0);")
+        with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
+            if inclusive:
+                w.print("acc = acc + arg0[i];")
+                w.print("output[i] = acc;")
+            else:
+                w.print("output[i] = acc;")
+                w.print("acc = acc + arg0[i];")
+
 
 
 
