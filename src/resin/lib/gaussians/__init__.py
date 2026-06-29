@@ -1,5 +1,6 @@
 """3D Gaussian Splatting helpers, DSL nodes, and reference implementations."""
 
+from resin.lib.gaussians.blend import GaussianBlendNode, gaussian_blend
 from resin.lib.gaussians.gnomen import GnomenCloud, make_gnomen_cloud
 from resin.lib.gaussians.linalg import (
     look_at_view_proj,
@@ -16,8 +17,10 @@ from resin.lib.gaussians.reference import (
 )
 
 __all__ = [
+    "GaussianBlendNode",
     "GnomenCloud",
     "blend_gaussians_cpu",
+    "gaussian_blend",
     "look_at_view_proj",
     "make_gnomen_cloud",
     "preprocess_gaussians",
