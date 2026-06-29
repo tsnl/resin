@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from resin.gs.image_io import save_rgb_f32_png
+from resin.gs.image_io import rgb_f32_to_rgb888_bytes, save_rgb_f32_png
 from resin.gs.reference import render_gnomen_cpu
 
 
@@ -42,6 +42,11 @@ def test_save_rgb_f32_png_center_pixel_matches_buffer(tmp_path: Path) -> None:
     row_stride = 1 + width * 3
     red = inflated[row_stride * 1 + 1 + 2 * 3]
     assert red == 255
+
+
+def test_rgb_f32_to_rgb888_bytes_clamps_linear_values() -> None:
+    rgb = rgb_f32_to_rgb888_bytes([0.0, 0.5, 1.5], width=1, height=1)
+    assert rgb == bytes([0, 128, 255])
 
 
 def test_save_rgb_f32_png_rejects_wrong_buffer_length(tmp_path: Path) -> None:

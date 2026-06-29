@@ -2,30 +2,23 @@
 
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["resin"]
+# dependencies = [
+#   "resin",
+#   "resin-rt-pybind",
+# ]
 #
 # [tool.uv.sources]
 # resin = { path = "..", editable = true }
+# resin-rt-pybind = { path = "../crates/resin-rt-pybind", editable = true }
 # ///
 
-import struct
 import sys
 from pathlib import Path
 
-import resin_rt_pybind
-
-from resin import dsl
-from resin.core.etype import F4
 from resin.gs.gnomen import make_gnomen_cloud
+from resin.gs.gpu_session import GpuForwardSession
 from resin.gs.image_io import save_rgb_f32_png
 from resin.gs.reference import preprocess_gaussians_cpu
-from resin.gs.render import (
-    argsort_depths,
-    gaussian_blend,
-    pack_means2d_flat,
-    pack_triplets_flat,
-)
-from resin.runtime import compile_program
 
 
 def main() -> None:
@@ -37,51 +30,7 @@ def main() -> None:
     print(f"depths: {pre['depths']}", file=sys.stderr)
     print(f"means2d: {pre['means2d']}", file=sys.stderr)
 
-    depths = dsl.param(shape=(n,), etype=F4, name="depths")
-    order = argsort_depths(depths)
-
-    means2d = dsl.param(shape=(n, 2), etype=F4, name="means2d")
-    conics = dsl.param(shape=(n, 3), etype=F4, name="conics")
-    colors = dsl.param(shape=(n, 3), etype=F4, name="colors")
-    opacities = dsl.param(shape=(n,), etype=F4, name="opacities")
-
-    image = gaussian_blend(
-        width=width,
-        height=height,
-        means2d=means2d,
-        conics=conics,
-        colors=colors,
-        opacities=opacities,
-        order=order,
-    )
-
-    compiled = compile_program(
-        params={
-            "depths": depths,
-            "means2d": means2d,
-            "conics": conics,
-            "colors": colors,
-            "opacities": opacities,
-        },
-        sinks={"image": image},
-    )
-    interp = resin_rt_pybind.Interp("wgpu")
-    program_id = compiled.admit(interp)
-    binding = compiled.binding(interp, program_id)
-
-    binding.write(
-        {
-            "depths": struct.pack(f"<{n}f", *pre["depths"]),
-            "means2d": struct.pack(f"<{n * 2}f", *pack_means2d_flat(pre["means2d"])),
-            "conics": struct.pack(f"<{n * 3}f", *pack_triplets_flat(pre["conics"])),
-            "colors": struct.pack(f"<{n * 3}f", *pack_triplets_flat(pre["colors"])),
-            "opacities": struct.pack(f"<{n}f", *pre["opacities"]),
-        }
-    )
-
-    interp.run(program_id)
-    raw = binding.read_sink("image")
-    pixels = struct.unpack(f"<{width * height * 3}f", raw)
+    pixels = GpuForwardSession(width=width, height=height).render(pre)
 
     cx, cy = width // 2, height // 2
     off = (cy * width + cx) * 3
