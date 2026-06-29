@@ -19,14 +19,26 @@ from resin.lib.gaussians.reference import (
     render_gnomen_cpu,
     sort_by_depth_cpu,
 )
+from resin.lib.gaussians.tiling import (
+    TiledGaussianBlendNode,
+    TiledLayout,
+    blend_gaussians_tiled_cpu,
+    build_tiled_layout,
+    gaussian_blend_tiled,
+)
 
 __all__ = [
     "FlyCamera",
     "GaussianBlendNode",
     "GnomenCloud",
     "GpuForwardSession",
+    "TiledGaussianBlendNode",
+    "TiledLayout",
     "blend_gaussians_cpu",
+    "blend_gaussians_tiled_cpu",
+    "build_tiled_layout",
     "gaussian_blend",
+    "gaussian_blend_tiled",
     "look_at_view_proj",
     "make_gnomen_cloud",
     "pad_preprocess_result",

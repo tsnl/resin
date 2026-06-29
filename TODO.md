@@ -45,6 +45,6 @@
   (`final_T`, `n_contrib`).
 - [x] **PR 3.4:** `GradGaussianBlendNode` via `df_do`; reconstruction loss smoke;
   golden forward/backward GPU tests.
-- [ ] **PR 3.5:** tiling — `tile_counts`, prefix-sum offsets, `DuplicateWithKeys` (TBD:
-  custom vs DSL), tile+depth sort, `identify_tile_ranges`, tiled blend/grad;
-  parity vs untiled (3.3–3.4).
+- [x] **PR 3.5:** tiling — `tile_counts`, prefix-sum offsets, `DuplicateWithKeys`
+  (host binning; GPU tiled blend), tile+depth sort, `identify_tile_ranges`,
+  tiled blend; parity vs untiled (3.3–3.4). Tiled grad still TBD.
