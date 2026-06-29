@@ -556,73 +556,101 @@ class View:
         etype: ElementType | None = None,
     ) -> "View":
         match info:
-            case RemapScatterInfo(accessor=accessor):
-                if accessor is not None:
-                    if out_shape is None:
-                        raise ValueError("scatter with accessor requires out_shape")
-                    if accessor.shape != source.shape:
-                        raise ValueError(
-                            "scatter accessor.shape must match source.shape"
-                        )
-                    node_shape = out_shape
-                    args: tuple[View, ...] = (source,)
-                    node_info: RemapInfo = info
-                else:
-                    if out_shape is None or indices is None:
-                        raise ValueError(
-                            "scatter without accessor requires out_shape and indices"
-                        )
-                    source, indices = _join_source_with_indices(
-                        source, indices, out_shape
-                    )
-                    node_shape = out_shape
-                    args = (source, indices)
-                    node_info = info
-            case RemapGatherInfo(accessor=accessor, source_shape=source_shape):
-                if (accessor is None) != (source_shape is None):
-                    raise ValueError(
-                        "gather with accessor requires source_shape; "
-                        + "gather without accessor must omit source_shape"
-                    )
-                if accessor is None:
-                    if indices is not None:
-                        raise ValueError(
-                            "gather densify (no accessor) does not take indices"
-                        )
-                    node_shape = source.shape
-                    args = (source,)
-                    node_info = info
-                else:
-                    assert source_shape is not None
-                    if indices is None:
-                        raise ValueError("gather with accessor requires indices")
-                    if accessor.shape != source_shape:
-                        raise ValueError(
-                            "gather accessor.shape must match source_shape"
-                        )
-                    indices = _validate_indices_view(indices, source_shape)
-                    out_prefix = indices.shape[:-1]
-                    source = View(
-                        node=source.node,
-                        port=source.port,
-                        accessor=Accessor(
-                            offset=source.offset,
-                            shape=out_prefix,
-                            pitch=c_contiguous_pitch_for_shape(out_prefix),
-                        ),
-                    )
-                    node_shape = out_prefix
-                    args = (source, indices)
-                    node_info = info
+            case RemapScatterInfo():
+                return View._remap_scatter(
+                    source=source,
+                    info=info,
+                    indices=indices,
+                    out_shape=out_shape,
+                    etype=etype,
+                )
+            case RemapGatherInfo():
+                return View._remap_gather(
+                    source=source,
+                    info=info,
+                    indices=indices,
+                    etype=etype,
+                )
 
+    @staticmethod
+    def _remap_scatter(
+        *,
+        source: "View",
+        info: RemapScatterInfo,
+        indices: "View | None",
+        out_shape: tuple[int, ...] | None,
+        etype: ElementType | None,
+    ) -> "View":
+        accessor = info.accessor
+        if accessor is not None:
+            if out_shape is None:
+                raise ValueError("scatter with accessor requires out_shape")
+            if accessor.shape != source.shape:
+                raise ValueError("scatter accessor.shape must match source.shape")
+            args: tuple[View, ...] = (source,)
+        else:
+            if out_shape is None or indices is None:
+                raise ValueError(
+                    "scatter without accessor requires out_shape and indices"
+                )
+            source, indices = _join_source_with_indices(source, indices, out_shape)
+            args = (source, indices)
+        return View.identity(
+            RemapNode(
+                shape=out_shape,
+                etype=etype or source.etype,
+                args=args,
+                info=info,
+            )
+        )
 
-
+    @staticmethod
+    def _remap_gather(
+        *,
+        source: "View",
+        info: RemapGatherInfo,
+        indices: "View | None",
+        etype: ElementType | None,
+    ) -> "View":
+        accessor = info.accessor
+        source_shape = info.source_shape
+        if (accessor is None) != (source_shape is None):
+            raise ValueError(
+                "gather with accessor requires source_shape; "
+                + "gather without accessor must omit source_shape"
+            )
+        if accessor is None:
+            if indices is not None:
+                raise ValueError(
+                    "gather densify (no accessor) does not take indices"
+                )
+            node_shape = source.shape
+            args: tuple[View, ...] = (source,)
+        else:
+            assert source_shape is not None
+            if indices is None:
+                raise ValueError("gather with accessor requires indices")
+            if accessor.shape != source_shape:
+                raise ValueError("gather accessor.shape must match source_shape")
+            indices = _validate_indices_view(indices, source_shape)
+            out_prefix = indices.shape[:-1]
+            source = View(
+                node=source.node,
+                port=source.port,
+                accessor=Accessor(
+                    offset=source.offset,
+                    shape=out_prefix,
+                    pitch=c_contiguous_pitch_for_shape(out_prefix),
+                ),
+            )
+            node_shape = out_prefix
+            args = (source, indices)
         return View.identity(
             RemapNode(
                 shape=node_shape,
                 etype=etype or source.etype,
                 args=args,
-                info=node_info,
+                info=info,
             )
         )
 
