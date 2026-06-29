@@ -29,7 +29,7 @@ class WgpuAccessorSpec(TypedDict):
 
 class WgpuBufferSpec(TypedDict):
     shape: list[int]
-    etype: ElementType | str
+    etype: ElementType
     readonly: NotRequired[bool]
     init: NotRequired[bytes | list[int]]
 

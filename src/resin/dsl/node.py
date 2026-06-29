@@ -36,7 +36,7 @@ from resin.core.pytree import PyTensor
 @dataclass(kw_only=True, frozen=True, eq=False)
 class Node(ABC):
     shape: tuple[int, ...]
-    etype: ElementType | str
+    etype: ElementType
     args: tuple[View, ...]
 
     @property

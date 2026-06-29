@@ -87,7 +87,7 @@ class View:
         return self.accessor.pitch
 
     @property
-    def etype(self) -> ElementType | str:
+    def etype(self) -> ElementType:
         return self.node.etype
 
     @property
@@ -229,7 +229,7 @@ class View:
 
     @staticmethod
     def _from_view_or_scalar(
-        value: PyTensor | "View", etype: ElementType | str
+        value: PyTensor | "View", etype: ElementType
     ) -> "View":
         return value if isinstance(value, View) else const(value, etype=etype)
 
@@ -372,7 +372,7 @@ class View:
         woffset: int,
         wpitch: tuple[int, ...],
         operator: BinaryAssocElementOperator | None = None,
-        etype: ElementType | str | None = None,
+        etype: ElementType | None = None,
     ) -> "View":
         return View.identity(
             ScatterNode(
@@ -389,20 +389,20 @@ class View:
 type TensorOperand = View | Scalar
 
 
-def const(value: PyTensor, *, etype: ElementType | str = F4) -> View:
+def const(value: PyTensor, *, etype: ElementType = F4) -> View:
     shape = infer_pytensor_shape(value)
     return View.identity(ConstNode(shape=shape, etype=etype, args=(), value=value))
 
 
-def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType | str = F4) -> View:
+def full(shape: tuple[int, ...], v: Scalar, *, etype: ElementType = F4) -> View:
     return const(v, etype=etype).broadcast(shape)
 
 
-def ones(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
+def ones(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
     return full(shape, 1, etype=etype)
 
 
-def zeros(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
+def zeros(shape: tuple[int, ...], *, etype: ElementType = F4) -> View:
     return full(shape, 0, etype=etype)
 
 
@@ -421,7 +421,7 @@ def _next_param_name(explicit: str | None) -> str:
 def param(
     *,
     shape: tuple[int, ...],
-    etype: ElementType | str,
+    etype: ElementType,
     name: str | None = None,
 ) -> View:
     return View.identity(
