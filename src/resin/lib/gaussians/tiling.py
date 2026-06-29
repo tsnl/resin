@@ -246,14 +246,17 @@ def _overlapping_tiles(
 ) -> list[int]:
     if radius < 1.0:
         radius = 1.0
-    tx0 = int(math.floor((mx - radius) / tile_size))
-    tx1 = int(math.floor((mx + radius) / tile_size))
-    ty0 = int(math.floor((my - radius) / tile_size))
-    ty1 = int(math.floor((my + radius) / tile_size))
-    tx0 = max(0, min(ntx - 1, tx0))
-    tx1 = max(0, min(ntx - 1, tx1))
-    ty0 = max(0, min(nty - 1, ty0))
-    ty1 = max(0, min(nty - 1, ty1))
+    ftx0 = (mx - radius) / tile_size
+    ftx1 = (mx + radius) / tile_size
+    fty0 = (my - radius) / tile_size
+    fty1 = (my + radius) / tile_size
+    # Fully outside the image → no tiles (do not clamp into edge tiles).
+    if ftx1 < 0.0 or fty1 < 0.0 or ftx0 >= ntx or fty0 >= nty:
+        return []
+    tx0 = max(0, min(ntx - 1, int(math.floor(ftx0))))
+    tx1 = max(0, min(ntx - 1, int(math.floor(ftx1))))
+    ty0 = max(0, min(nty - 1, int(math.floor(fty0))))
+    ty1 = max(0, min(nty - 1, int(math.floor(fty1))))
     out: list[int] = []
     for ty in range(ty0, ty1 + 1):
         for tx in range(tx0, tx1 + 1):

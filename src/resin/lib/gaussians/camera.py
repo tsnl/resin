@@ -1,7 +1,9 @@
 """Fly camera helpers for interactive 3DGS viewing."""
 
+import json
 import math
 from dataclasses import dataclass
+from typing import Any
 
 from resin.lib.gaussians.linalg import perspective_proj
 
@@ -89,3 +91,37 @@ class FlyCamera:
         self.x += f[0] * forward * step + r[0] * right * step
         self.y += f[1] * forward * step + up * step
         self.z += f[2] * forward * step + r[2] * right * step
+
+    def pose_dict(self) -> dict[str, float]:
+        """Pose fields for offline render / copy-paste (radians for yaw/pitch)."""
+        return {
+            "x": self.x,
+            "y": self.y,
+            "z": self.z,
+            "yaw": self.yaw,
+            "pitch": self.pitch,
+            "fov_y_deg": self.fov_y_deg,
+        }
+
+    def pose_json(self) -> str:
+        """Single-line JSON pose (stdout-friendly)."""
+        return json.dumps(self.pose_dict(), separators=(",", ":"))
+
+    @classmethod
+    def from_pose(cls, pose: dict[str, Any]) -> "FlyCamera":
+        """Restore from ``pose_dict`` / JSON (ignores unknown keys)."""
+        return cls(
+            x=float(pose.get("x", 0.0)),
+            y=float(pose.get("y", 0.0)),
+            z=float(pose.get("z", 0.0)),
+            yaw=float(pose.get("yaw", 0.0)),
+            pitch=float(pose.get("pitch", 0.0)),
+            fov_y_deg=float(pose.get("fov_y_deg", 60.0)),
+        )
+
+    @classmethod
+    def from_pose_json(cls, text: str) -> "FlyCamera":
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise TypeError("pose JSON must be an object")
+        return cls.from_pose(data)

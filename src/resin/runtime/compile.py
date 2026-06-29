@@ -16,7 +16,7 @@ from frozendict import frozendict
 import resin.dsl as dsl
 from resin.core.pytree import PyTree, flatten_pytree_items
 from resin.interp import Interp, ProgramId
-from resin.ir.ir import IrProgramBuilder
+from resin.ir.ir import IrProgramBuilder, reachable_ports
 from resin.core.etype import ElementType
 from resin.runtime.trees import register_named_params, sink_tree
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index

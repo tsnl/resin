@@ -34,14 +34,14 @@ class GpuForwardSession:
         fixed_count: int | None = None,
         tiled: bool = True,
         tile_size: int = DEFAULT_TILE_SIZE,
-        max_tiles_per_gaussian: int = 32,
+        max_tiles_per_gaussian: int | None = None,
     ) -> None:
         self.width: int = width
         self.height: int = height
         self._fixed_count: int | None = fixed_count
         self._tiled: bool = tiled
         self._tile_size: int = tile_size
-        self._max_tiles_per_gaussian: int = max_tiles_per_gaussian
+        self._max_tiles_per_gaussian: int | None = max_tiles_per_gaussian
         self._interp: resin_rt_pybind.Interp = interp or resin_rt_pybind.Interp("wgpu")
         self._program_id: ProgramId | None = None
         self._binding: ParamBinding | None = None

@@ -136,3 +136,36 @@ def test_tiled_gpu_matches_single_tile_cpu() -> None:
     )
     gpu = session.render(pre)
     assert gpu == pytest.approx(cpu, abs=2e-3)
+
+
+def test_tiled_gpu_matches_untiled_at_viewer_repro_pose() -> None:
+    """Regression: instance buffer must cover all tile overlaps (not a low cap).
+
+    Viewer pose that previously truncated instances when
+    ``max_tiles_per_gaussian`` was too small (max Δ ~1.0 vs untiled).
+    """
+    from resin.lib.gaussians.camera import FlyCamera
+    from resin.lib.gaussians.gpu_session import GpuForwardSession
+
+    width, height = 1280, 720
+    pose = {
+        "x": -0.0253,
+        "y": 1.4317,
+        "z": 0.6947,
+        "yaw": -0.015,
+        "pitch": -0.3825,
+        "fov_y_deg": 60.0,
+    }
+    cloud = make_gnomen_cloud()
+    cam = FlyCamera.from_pose(pose)
+    view, proj = cam.view_proj(aspect=width / height)
+    pre = preprocess_gaussians(cloud, width=width, height=height, view=view, proj=proj)
+    tiled = GpuForwardSession(
+        width=width, height=height, fixed_count=cloud.count, tiled=True
+    ).render(pre)
+    untiled = GpuForwardSession(
+        width=width, height=height, fixed_count=cloud.count, tiled=False
+    ).render(pre)
+    # Tile vs global order can differ slightly on fringe contributions; must not
+    # be the catastrophic truncation failure (Δ ~ 1).
+    assert tiled == pytest.approx(untiled, abs=5e-2)

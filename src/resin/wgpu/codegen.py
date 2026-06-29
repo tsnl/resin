@@ -338,6 +338,7 @@ def _emit_eval_rpn_expr(
     *,
     n: int,
     etype: ElementType,
+    arg_etypes: tuple[ElementType, ...] | None = None,
 ) -> None:
     t = spell_etype_in_wgsl(etype)
     if arg_etypes is None or len(arg_etypes) != n:

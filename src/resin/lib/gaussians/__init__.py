@@ -4,7 +4,8 @@ from resin.lib.gaussians.blend import GaussianBlendNode, gaussian_blend
 from resin.lib.gaussians.camera import FlyCamera
 from resin.lib.gaussians.gnomen import GnomenCloud, make_gnomen_cloud
 from resin.lib.gaussians.gpu_session import GpuForwardSession
-from resin.lib.gaussians.image_io import rgb_f32_to_rgb888_bytes
+from resin.lib.gaussians.image_io import rgb_f32_to_rgb888_bytes, save_rgb_f32_png
+from resin.lib.gaussians.offline import render_frame, render_frame_to_png
 from resin.lib.gaussians.linalg import (
     look_at_view_proj,
     project_points,
@@ -47,7 +48,10 @@ __all__ = [
     "project_points",
     "quat_to_rotmat",
     "render_gnomen_cpu",
+    "render_frame",
+    "render_frame_to_png",
     "rgb_f32_to_rgb888_bytes",
+    "save_rgb_f32_png",
     "scale_rot_to_cov3d",
     "sort_by_depth_cpu",
 ]

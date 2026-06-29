@@ -22,6 +22,7 @@ Controls:
   Q/E  — move down / up (world Y)
   mouse — look (yaw / pitch); cursor hidden and re-centered every frame
   Tab  — toggle look (releases / shows cursor when off)
+  C    — print camera pose JSON to stdout (for offline render)
   Esc  — quit
 """
 
@@ -121,7 +122,7 @@ def _draw_hud(
     view, _proj = camera.view_proj(aspect=aspect)
     look_s = "on" if look_enabled else "off"
     lines = [
-        "WASD move  QE down/up  mouse look  Tab free cursor  Esc quit",
+        "WASD move  QE down/up  mouse look  Tab free cursor  C pose  Esc quit",
         f"fps {fps:4.1f}  {pixel_w}x{pixel_h}px  "
         f"({logical_w}x{logical_h}pt @ {dpi_scale:.2f}x)  "
         f"visible {visible}/{slots}  look {look_s}",
@@ -202,12 +203,11 @@ def main() -> None:
         width=pixel_w,
         height=pixel_h,
         fixed_count=cloud.count,
-        max_tiles_per_gaussian=32768,
     )
 
     print(
         f"window {logical_w}x{logical_h}pt, framebuffer {pixel_w}x{pixel_h}px "
-        f"(dpi scale {dpi:.2f}x). controls: WASDQE, mouse look, Tab, Esc",
+        f"(dpi scale {dpi:.2f}x). controls: WASDQE, mouse look, Tab, C=pose, Esc",
         file=sys.stderr,
     )
 
@@ -234,6 +234,14 @@ def main() -> None:
                 elif event.key == pygame.K_TAB:
                     look_enabled = not look_enabled
                     _set_look(look_enabled)
+                elif event.key == pygame.K_c:
+                    # One JSON object per line on stdout for offline render / paste.
+                    print(camera.pose_json(), flush=True)
+                    print(
+                        f"# pose also on stderr: {camera.pose_json()}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
         # Re-query in case the OS changes scaling (rare) or window moves displays.
         logical_w, logical_h = _logical_window_size()

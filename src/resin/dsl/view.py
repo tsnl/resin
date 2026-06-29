@@ -23,6 +23,7 @@ from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_jo
 from resin.core.common import SupportsWrite, pascal_to_snake_case
 from resin.core.etype import (
     F4,
+    U4,
     BinaryAssocElementOperator,
     BinaryBitwiseOperator,
     ElementKind,
