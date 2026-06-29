@@ -3,9 +3,9 @@
 
 import pytest
 
-from resin.gs.gnomen import make_gnomen_cloud
-from resin.gs.linalg import look_at_view_proj, project_points, quat_to_rotmat
-from resin.gs.reference import (
+from resin.lib.gs.gnomen import make_gnomen_cloud
+from resin.lib.gs.linalg import look_at_view_proj, project_points, quat_to_rotmat
+from resin.lib.gs.reference import (
     blend_gaussians_cpu,
     preprocess_gaussians_cpu,
     render_gnomen_cpu,

@@ -3,8 +3,8 @@
 import math
 from typing import TypedDict
 
-from resin.gs.gnomen import GnomenCloud
-from resin.gs.linalg import (
+from resin.lib.gs.gnomen import GnomenCloud
+from resin.lib.gs.linalg import (
     look_at_view_proj,
     mat4_mul_vec4,
     project_points,
@@ -125,6 +125,26 @@ def preprocess_gaussians_cpu(
     )
 
 
+def pad_preprocess_result(pre: PreprocessResult, count: int) -> PreprocessResult:
+    """Pad a culled preprocess result back to a fixed gaussian slot count."""
+    n = len(pre["depths"])
+    if n == count:
+        return pre
+    if n > count:
+        msg = f"cannot pad {n} gaussians to smaller count {count}"
+        raise ValueError(msg)
+
+    pad = count - n
+    return PreprocessResult(
+        means2d=pre["means2d"] + ((-1.0, -1.0),) * pad,
+        depths=pre["depths"] + (1e6,) * pad,
+        conics=pre["conics"] + ((1.0, 0.0, 1.0),) * pad,
+        colors=pre["colors"] + ((0.0, 0.0, 0.0),) * pad,
+        opacities=pre["opacities"] + (0.0,) * pad,
+        radii=pre["radii"] + (0.0,) * pad,
+    )
+
+
 def sort_by_depth_cpu(depths: tuple[float, ...]) -> tuple[int, ...]:
     return tuple(i for i, _ in sorted(enumerate(depths), key=lambda item: item[1]))
 
@@ -175,7 +195,7 @@ def render_gnomen_cpu(
     width: int = 32,
     height: int = 32,
 ) -> tuple[float, ...]:
-    from resin.gs.gnomen import make_gnomen_cloud
+    from resin.lib.gs.gnomen import make_gnomen_cloud
 
     cloud = make_gnomen_cloud() if cloud is None else cloud
     pre = preprocess_gaussians_cpu(cloud, width=width, height=height)

@@ -7,13 +7,13 @@ import pytest
 from resin import dsl
 from resin.core.pytree import PyTensor
 from resin.core.etype import F4, U4
-from resin.gs.gnomen import make_gnomen_cloud
-from resin.gs.reference import (
+from resin.lib.gs.gnomen import make_gnomen_cloud
+from resin.lib.gs.reference import (
     blend_gaussians_cpu,
     preprocess_gaussians_cpu,
     sort_by_depth_cpu,
 )
-from resin.gs.render import argsort_depths, gaussian_blend, pack_means2d, pack_triplets
+from resin.lib.gs.render import argsort_depths, gaussian_blend, pack_means2d, pack_triplets
 
 from tests.resin.gpu.interp_helpers import run_graph
 

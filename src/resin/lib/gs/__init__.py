@@ -1,19 +1,19 @@
 """3D Gaussian Splatting helpers and reference implementations."""
 
-from resin.gs.gnomen import GnomenCloud, make_gnomen_cloud
-from resin.gs.linalg import (
+from resin.lib.gs.gnomen import GnomenCloud, make_gnomen_cloud
+from resin.lib.gs.linalg import (
     look_at_view_proj,
     project_points,
     quat_to_rotmat,
     scale_rot_to_cov3d,
 )
-from resin.gs.reference import (
+from resin.lib.gs.reference import (
     blend_gaussians_cpu,
     preprocess_gaussians_cpu,
     render_gnomen_cpu,
     sort_by_depth_cpu,
 )
-from resin.gs.render import argsort_depths, gaussian_blend
+from resin.lib.gs.render import argsort_depths, gaussian_blend
 
 __all__ = [
     "GnomenCloud",

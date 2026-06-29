@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from resin.gs.image_io import rgb_f32_to_rgb888_bytes, save_rgb_f32_png
-from resin.gs.reference import render_gnomen_cpu
+from resin.lib.gs.image_io import rgb_f32_to_rgb888_bytes, save_rgb_f32_png
+from resin.lib.gs.reference import render_gnomen_cpu
 
 
 def _png_ihdr_size(data: bytes) -> tuple[int, int]:

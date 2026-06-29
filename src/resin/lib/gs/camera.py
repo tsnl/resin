@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 
-from resin.gs.linalg import look_at_view_proj
+from resin.lib.gs.linalg import look_at_view_proj
 
 
 def _normalize3(v: tuple[float, float, float]) -> tuple[float, float, float]:

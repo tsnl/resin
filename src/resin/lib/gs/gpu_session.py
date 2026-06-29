@@ -6,10 +6,10 @@ import resin_rt_pybind
 
 from resin import dsl
 from resin.core.etype import F4
-from resin.gs.reference import PreprocessResult
+from resin.lib.gs.reference import PreprocessResult, pad_preprocess_result
 from resin.interp import ProgramId
 from resin.runtime.compile import ParamBinding
-from resin.gs.render import (
+from resin.lib.gs.render import (
     argsort_depths,
     gaussian_blend,
     pack_means2d_flat,
@@ -27,15 +27,21 @@ class GpuForwardSession:
         width: int,
         height: int,
         interp: resin_rt_pybind.Interp | None = None,
+        fixed_count: int | None = None,
     ) -> None:
         self.width: int = width
         self.height: int = height
+        self._fixed_count: int | None = fixed_count
         self._interp: resin_rt_pybind.Interp = interp or resin_rt_pybind.Interp("wgpu")
         self._program_id: ProgramId | None = None
         self._binding: ParamBinding | None = None
         self._count: int = -1
+        if fixed_count is not None:
+            self._admit(fixed_count)
 
     def render(self, pre: PreprocessResult) -> tuple[float, ...]:
+        if self._fixed_count is not None:
+            pre = pad_preprocess_result(pre, self._fixed_count)
         n = len(pre["depths"])
         if n == 0:
             return tuple(0.0 for _ in range(self.width * self.height * 3))
@@ -57,6 +63,11 @@ class GpuForwardSession:
         return struct.unpack(f"<{self.width * self.height * 3}f", raw)
 
     def _admit(self, count: int) -> None:
+        if self._count != -1:
+            # Re-admitting another program shape on the same device currently
+            # trips wgpu bind-group validation; use a fresh interpreter instead.
+            self._interp = resin_rt_pybind.Interp("wgpu")
+
         depths = dsl.param(shape=(count,), etype=F4, name="depths")
         order = argsort_depths(depths)
 

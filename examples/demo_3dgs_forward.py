@@ -15,10 +15,10 @@
 import sys
 from pathlib import Path
 
-from resin.gs.gnomen import make_gnomen_cloud
-from resin.gs.gpu_session import GpuForwardSession
-from resin.gs.image_io import save_rgb_f32_png
-from resin.gs.reference import preprocess_gaussians_cpu
+from resin.lib.gs.gnomen import make_gnomen_cloud
+from resin.lib.gs.gpu_session import GpuForwardSession
+from resin.lib.gs.image_io import save_rgb_f32_png
+from resin.lib.gs.reference import preprocess_gaussians_cpu
 
 
 def main() -> None:

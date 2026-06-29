@@ -4,9 +4,9 @@ import math
 
 import pytest
 
-from resin.gs.camera import FlyCamera
-from resin.gs.gnomen import make_gnomen_cloud
-from resin.gs.reference import preprocess_gaussians_cpu
+from resin.lib.gs.camera import FlyCamera
+from resin.lib.gs.gnomen import make_gnomen_cloud
+from resin.lib.gs.reference import preprocess_gaussians_cpu
 
 
 def test_default_forward_looks_down_negative_z() -> None:

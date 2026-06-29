@@ -4,7 +4,7 @@
 from resin.core.etype import F4, U4
 from resin.dsl import View
 from resin.dsl.node import WgslKernelNode
-from resin.gs.kernels import argsort_depths_wgsl, gaussian_blend_wgsl
+from resin.lib.gs.kernels import argsort_depths_wgsl, gaussian_blend_wgsl
 
 
 def argsort_depths(depths: View) -> View:

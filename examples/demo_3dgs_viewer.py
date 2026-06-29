@@ -5,7 +5,7 @@
 # dependencies = [
 #   "resin",
 #   "resin-rt-pybind",
-#   "pygame",
+#   "pygame-ce",
 # ]
 #
 # [tool.uv.sources]
@@ -17,11 +17,11 @@ import sys
 
 import pygame
 
-from resin.gs.camera import FlyCamera
-from resin.gs.gnomen import GnomenCloud, make_gnomen_cloud
-from resin.gs.gpu_session import GpuForwardSession
-from resin.gs.image_io import rgb_f32_to_rgb888_bytes
-from resin.gs.reference import preprocess_gaussians_cpu
+from resin.lib.gs.camera import FlyCamera
+from resin.lib.gs.gnomen import GnomenCloud, make_gnomen_cloud
+from resin.lib.gs.gpu_session import GpuForwardSession
+from resin.lib.gs.image_io import rgb_f32_to_rgb888_bytes
+from resin.lib.gs.reference import preprocess_gaussians_cpu
 
 RENDER_WIDTH = 320
 RENDER_HEIGHT = 180
@@ -66,6 +66,7 @@ def _render_frame(
     camera: FlyCamera,
     cloud: GnomenCloud,
     session: GpuForwardSession,
+    display: pygame.Surface,
 ) -> tuple[pygame.Surface, int]:
     view, proj = camera.view_proj(aspect=RENDER_WIDTH / RENDER_HEIGHT)
     pre = preprocess_gaussians_cpu(
@@ -78,7 +79,7 @@ def _render_frame(
     pixels = session.render(pre)
     rgb = rgb_f32_to_rgb888_bytes(pixels, width=RENDER_WIDTH, height=RENDER_HEIGHT)
     frame = pygame.image.frombuffer(rgb, (RENDER_WIDTH, RENDER_HEIGHT), "RGB")
-    return frame, len(pre["depths"])
+    return frame.convert(display), len(pre["depths"])
 
 
 def main() -> None:
@@ -93,11 +94,20 @@ def main() -> None:
 
     camera = FlyCamera()
     cloud = make_gnomen_cloud()
-    session = GpuForwardSession(width=RENDER_WIDTH, height=RENDER_HEIGHT)
+    session = GpuForwardSession(
+        width=RENDER_WIDTH,
+        height=RENDER_HEIGHT,
+        fixed_count=cloud.count,
+    )
 
     print("controls: WASDQE move, mouse look, Esc quit", file=sys.stderr)
 
-    frame, gaussian_count = _render_frame(camera=camera, cloud=cloud, session=session)
+    frame, gaussian_count = _render_frame(
+        camera=camera,
+        cloud=cloud,
+        session=session,
+        display=screen,
+    )
     needs_render = False
     running = True
 
@@ -119,10 +129,16 @@ def main() -> None:
             needs_render = True
 
         if needs_render:
-            frame, gaussian_count = _render_frame(camera=camera, cloud=cloud, session=session)
+            frame, gaussian_count = _render_frame(
+                camera=camera,
+                cloud=cloud,
+                session=session,
+                display=screen,
+            )
             needs_render = False
 
-        _ = pygame.transform.scale(frame, display_size, screen)
+        scaled = pygame.transform.scale(frame, display_size)
+        _ = screen.blit(scaled, (0, 0))
         _draw_help(screen, fps=clock.get_fps(), gaussian_count=gaussian_count)
         pygame.display.flip()
 
