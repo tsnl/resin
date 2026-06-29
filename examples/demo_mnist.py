@@ -1,3 +1,15 @@
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "resin",
+#   "resin-rt-pybind",
+# ]
+#
+# [tool.uv.sources]
+# resin = { path = "..", editable = true }
+# resin-rt-pybind = { path = "../crates/resin-rt-pybind", editable = true }
+# ///
+
 import argparse
 import math
 import random

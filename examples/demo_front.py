@@ -1,5 +1,3 @@
-"""Demo of dsl debug_print output for various node types."""
-
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
@@ -9,6 +7,7 @@
 # [tool.uv.sources]
 # resin = { path = "..", editable = true }
 # ///
+"""Demo of dsl debug_print output for various node types."""
 
 import sys
 

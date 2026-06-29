@@ -135,6 +135,29 @@ def sort_by_depth_cpu(depths: tuple[float, ...]) -> tuple[int, ...]:
     return tuple(i for i, _ in sorted(enumerate(depths), key=lambda item: item[1]))
 
 
+def pad_preprocess_result(pre: PreprocessResult, count: int) -> PreprocessResult:
+    """Pad a culled preprocess result to a fixed gaussian slot count.
+
+    Extra slots are placed off-screen with huge depth and zero opacity so they
+    do not affect blending. Used by interactive viewers that pin program shape.
+    """
+    n = len(pre["depths"])
+    if n == count:
+        return pre
+    if n > count:
+        raise ValueError(f"cannot pad {n} gaussians to smaller count {count}")
+
+    pad_n = count - n
+    return PreprocessResult(
+        means2d=pre["means2d"] + ((-1e3, -1e3),) * pad_n,
+        depths=pre["depths"] + (1e6,) * pad_n,
+        conics=pre["conics"] + ((1.0, 0.0, 1.0),) * pad_n,
+        colors=pre["colors"] + ((0.0, 0.0, 0.0),) * pad_n,
+        opacities=pre["opacities"] + (0.0,) * pad_n,
+        radii=pre["radii"] + (0.0,) * pad_n,
+    )
+
+
 def blend_gaussians_cpu(
     *,
     width: int,

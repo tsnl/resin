@@ -1,14 +1,15 @@
-"""E2E: compose a simple graph and export a WgpuProgram MessagePack artifact."""
-
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
 #   "resin",
+#   "resin-rt-pybind",
 # ]
 #
 # [tool.uv.sources]
 # resin = { path = "..", editable = true }
+# resin-rt-pybind = { path = "../crates/resin-rt-pybind", editable = true }
 # ///
+"""E2E: compose a simple graph and export a WgpuProgram MessagePack artifact."""
 
 import sys
 from pathlib import Path

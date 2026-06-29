@@ -100,14 +100,26 @@ def look_at_view_proj(
         (0.0, 0.0, 0.0, 1.0),
     )
 
+    proj = perspective_proj(
+        fov_y_deg=fov_y_deg, aspect=aspect, z_near=z_near, z_far=z_far
+    )
+    return view, proj
+
+
+def perspective_proj(
+    *,
+    fov_y_deg: float = 60.0,
+    aspect: float = 1.0,
+    z_near: float = 0.1,
+    z_far: float = 100.0,
+) -> tuple[tuple[float, ...], ...]:
     f = 1.0 / math.tan(math.radians(fov_y_deg) * 0.5)
-    proj = (
+    return (
         (f / aspect, 0.0, 0.0, 0.0),
         (0.0, f, 0.0, 0.0),
         (0.0, 0.0, z_far / (z_near - z_far), (z_far * z_near) / (z_near - z_far)),
         (0.0, 0.0, -1.0, 0.0),
     )
-    return view, proj
 
 
 def project_points(

@@ -1,5 +1,3 @@
-"""Render the gnomen gaussian cloud from a fixed camera on the GPU."""
-
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
@@ -11,6 +9,7 @@
 # resin = { path = "..", editable = true }
 # resin-rt-pybind = { path = "../crates/resin-rt-pybind", editable = true }
 # ///
+"""Render the gnomen gaussian cloud from a fixed camera on the GPU."""
 
 import struct
 import sys
@@ -30,7 +29,8 @@ from resin.runtime import compile_program
 
 
 def main() -> None:
-    width = height = 64
+    width = 1280
+    height = 720
     cloud = make_gnomen_cloud()
     pre = preprocess_gaussians(cloud, width=width, height=height)
     n = len(pre["depths"])

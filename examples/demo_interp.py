@@ -1,5 +1,3 @@
-"""E2E: compose a simple const graph and interpret it on the GPU."""
-
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
@@ -11,6 +9,7 @@
 # resin = { path = "..", editable = true }
 # resin-rt-pybind = { path = "../crates/resin-rt-pybind", editable = true }
 # ///
+"""E2E: compose a simple const graph and interpret it on the GPU."""
 
 import struct
 import sys
