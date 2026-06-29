@@ -1,5 +1,5 @@
 from frozendict import frozendict
-from resin.ir.ir import IrBufferView, IrKernel, IrProgram
+from resin.ir.ir import IrBufferView, IrKernel, IrProgram, IrWgslKernel
 
 from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
 from .spec import (
@@ -89,12 +89,15 @@ def build_wgpu_program(
 def _compute_pipeline_for_kernel(
     kernel: IrKernel, config: WgslKernelConfig
 ) -> WgpuComputePipelineSpec:
-    return {
+    spec: WgpuComputePipelineSpec = {
         "wgsl": emit_wgsl_for_kernel(kernel, config),
         "dispatch_size": list(dispatch_size_for_kernel(kernel, config)),
         "num_arg_bindings": len(kernel.arg_accessors),
         "clear_output_before_dispatch": kernel.clear_output_before_dispatch,
     }
+    if isinstance(kernel, IrWgslKernel):
+        spec["entry_point"] = kernel.entry_point
+    return spec
 
 
 def _accessor_spec(buffer_view: IrBufferView) -> WgpuAccessorSpec:

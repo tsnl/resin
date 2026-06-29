@@ -19,6 +19,7 @@ from resin.ir.ir import (
     IrMatmulKernel,
     IrReductionKernel,
     IrRemapKernel,
+    IrWgslKernel,
 )
 
 __all__ = [
@@ -37,6 +38,8 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
+        case IrWgslKernel():
+            return kernel.dispatch_size
         case IrRemapKernel() if kernel.direction == "scatter":
             n = math.prod(kernel.arg_accessors[0].shape)
         case _:
@@ -56,6 +59,12 @@ def dispatch_size_for_kernel(
 
 
 def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
+    match kernel:
+        case IrWgslKernel():
+            return kernel.wgsl
+        case _:
+            pass
+
     w = WgslWriter(enable_f16=etype_needs_enable_f16(kernel.etype))
 
     match kernel:

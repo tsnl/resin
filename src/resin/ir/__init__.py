@@ -11,6 +11,7 @@ from .ir import (
     IrProgramBuilder,
     IrReductionKernel,
     IrRemapKernel,
+    IrWgslKernel,
 )
 from .ir_opt import optimize
 from .rpn import ElementRpnExpr
@@ -28,6 +29,7 @@ __all__ = [
     "IrProgramBuilder",
     "IrReductionKernel",
     "IrRemapKernel",
+    "IrWgslKernel",
     "etype_nbytes",
     "optimize",
     "spell_etype_in_pystruct",

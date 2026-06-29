@@ -14,6 +14,7 @@ __all__ = [
     "ParamNode",
     "ReductionNode",
     "RemapNode",
+    "WgslKernelNode",
 ]
 
 import math
@@ -86,3 +87,12 @@ class RemapNode(Node):
     @property
     def indices(self) -> "View | None":
         return self.args[1] if self.keys == "indices" else None
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class WgslKernelNode(Node):
+    wgsl: str
+    entry_point: str
+    dispatch_size: tuple[int, int, int]
+    arg_etypes: tuple[ElementType | str, ...]
+    clear_output_before_dispatch: bool = True

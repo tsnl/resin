@@ -9,6 +9,7 @@ __all__ = [
     "IrProgramBuilder",
     "IrReductionKernel",
     "IrRemapKernel",
+    "IrWgslKernel",
 ]
 
 from abc import ABC
@@ -110,6 +111,17 @@ class IrMatmulKernel(IrKernel):
 
 type RemapDirection = Literal["gather", "scatter"]
 type RemapKeys = Literal["accessor", "indices"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class IrWgslKernel(IrKernel):
+    wgsl: str
+    entry_point: str
+    dispatch_size: tuple[int, int, int]
+    arg_etypes: tuple[ElementType | str, ...]
+
+    def __post_init__(self):
+        assert len(self.arg_etypes) == len(self.arg_accessors)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -290,6 +302,8 @@ class IrProgramBuilder:
                 return self._build_kernel_for_reduction_node(node)
             case dsl.RemapNode():
                 return self._build_kernel_for_remap_node(node)
+            case dsl.WgslKernelNode():
+                return self._build_kernel_for_wgsl_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
@@ -317,6 +331,18 @@ class IrProgramBuilder:
             shape=node.shape,
             operator=node.operator,
             axes=node.axes,
+        )
+
+    def _build_kernel_for_wgsl_node(self, node: dsl.WgslKernelNode) -> IrKernel:
+        return IrWgslKernel(
+            arg_accessors=tuple(view.accessor for view in node.args),
+            etype=node.etype,
+            shape=node.shape,
+            wgsl=node.wgsl,
+            entry_point=node.entry_point,
+            dispatch_size=node.dispatch_size,
+            arg_etypes=node.arg_etypes,
+            clear_output_before_dispatch=node.clear_output_before_dispatch,
         )
 
     def _build_kernel_for_remap_node(self, node: dsl.RemapNode) -> IrKernel:
