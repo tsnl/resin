@@ -19,6 +19,7 @@ __all__ = [
     "RemapInfo",
     "RemapNode",
     "RemapScatterInfo",
+    "SortNode",
 ]
 
 import math
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
 from resin.core.accessor import Accessor
 from resin.core.etype import (
+    U4,
     BinaryAssocElementOperator,
     ElementOperator,
     ElementType,
@@ -185,3 +187,75 @@ class PrefixSumNode(CustomNode):
         rev = View.reverse_prefix_sum(df_dout, inclusive=not self.inclusive)
         return (rev,)
 
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class SortNode(CustomNode):
+    """Sort values ascending; ports ``values`` (sorted) and ``perm`` (u4 indices)."""
+
+    perm_etype: ElementType = U4
+
+    def output_ports(self) -> tuple[str, ...]:
+        return ("values", "perm")
+
+    def port_shape(self, port: str) -> tuple[int, ...]:
+        if port not in ("values", "perm"):
+            raise KeyError(f"unknown port {port!r} on SortNode")
+        return self.shape
+
+    def port_etype(self, port: str) -> ElementType:
+        if port == "values":
+            return self.etype
+        if port == "perm":
+            return self.perm_etype
+        raise KeyError(f"unknown port {port!r} on SortNode")
+
+    def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
+        from resin.ir.ir import IrSortKernel
+
+        write_values = "values" in used_ports
+        write_perm = "perm" in used_ports
+        if not write_values and not write_perm:
+            # Node was reached only via an unused path; still emit something valid.
+            write_values = True
+        return IrSortKernel(
+            arg_accessors=(self.args[0].accessor,),
+            etype=self.etype,
+            shape=self.shape,
+            arg_etypes=(self.args[0].etype,),
+            write_values=write_values,
+            write_perm=write_perm,
+            perm_etype=self.perm_etype,
+            num_outputs=(1 if write_values else 0) + (1 if write_perm else 0),
+        )
+
+    def output_port_order_for_kernel(self, *, used_ports: frozenset[str]) -> tuple[str, ...]:
+        """Port binding order for the sort kernel (values then perm, if written)."""
+        ports: list[str] = []
+        if "values" in used_ports:
+            ports.append("values")
+        if "perm" in used_ports:
+            ports.append("perm")
+        if not ports:
+            ports.append("values")
+        return tuple(ports)
+
+    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
+        from resin.dsl.view import View
+
+        # y[i] = x[p[i]] ⇒ scatter grad_y into grad_x at p.
+        df_dvalues = df_douts.get("values")
+        if df_dvalues is None:
+            # No gradient through sorted values (e.g. only perm was consumed).
+            return (View.zeros_like(self.args[0]),)
+        perm = View.port(self, "perm")
+        n = self.shape[0]
+        # Build indices as (n, 1) u4 coords into a 1D source of length n.
+        indices = perm.reshape((n, 1)) if perm.rank == 1 else perm
+        return (
+            View.remap(
+                source=df_dvalues,
+                info=RemapScatterInfo(operator="add"),
+                indices=indices,
+                out_shape=self.shape,
+            ),
+        )
