@@ -21,6 +21,8 @@ from resin.ir.ir import (
     IrPrefixSumKernel,
     IrReductionKernel,
     IrRemapKernel,
+    IrSortKernel,
+    IrWgslMultiOutputKernel,
 )
 
 __all__ = [
@@ -39,7 +41,9 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
-        case IrPrefixSumKernel():
+        case IrWgslMultiOutputKernel():
+            return kernel.dispatch_size
+        case IrSortKernel() | IrPrefixSumKernel():
             # Single-threaded for correctness on small/medium vectors.
             return (1, 1, 1) if math.prod(kernel.shape) > 0 else (0, 1, 1)
         case IrRemapKernel(info=info) if isinstance(info, RemapScatterInfo):
@@ -62,6 +66,8 @@ def dispatch_size_for_kernel(
 
 def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
     enable_f16 = etype_needs_enable_f16(kernel.etype)
+    if isinstance(kernel, IrSortKernel):
+        enable_f16 = enable_f16 or etype_needs_enable_f16(kernel.perm_etype)
     w = WgslWriter(enable_f16=enable_f16)
 
     match kernel:
@@ -75,6 +81,10 @@ def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
             _emit_wgsl_for_remap_kernel(w, kernel, config)
         case IrPrefixSumKernel():
             _emit_wgsl_for_prefix_sum_kernel(w, kernel)
+        case IrSortKernel():
+            _emit_wgsl_for_sort_kernel(w, kernel)
+        case IrWgslMultiOutputKernel():
+            return kernel.wgsl
         case _:
             raise AbstractKernelException(f"Unsupported kernel type: {type(kernel)}")
 
@@ -95,7 +105,7 @@ def _arg_etypes_for_kernel(kernel: IrKernel) -> tuple[ElementType, ...]:
     match kernel:
         case IrElementwiseRpnKernel() if kernel.arg_etypes:
             return kernel.arg_etypes
-        case IrRemapKernel() | IrPrefixSumKernel():
+        case IrRemapKernel() | IrPrefixSumKernel() | IrSortKernel():
             return kernel.arg_etypes
         case _:
             return tuple(kernel.etype for _ in kernel.arg_accessors)
@@ -104,6 +114,35 @@ def _arg_etypes_for_kernel(kernel: IrKernel) -> tuple[ElementType, ...]:
 def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
     t = spell_etype_in_wgsl(kernel.etype)
     num_outputs = kernel.num_outputs
+
+    if isinstance(kernel, IrSortKernel):
+        bind = 0
+        if kernel.write_values:
+            w.print(
+                f"""
+                @group(0) @binding({bind})
+                var<storage, read_write> output_values: array<{t}>;
+                """
+            )
+            bind += 1
+        if kernel.write_perm:
+            pt = spell_etype_in_wgsl(kernel.perm_etype)
+            w.print(
+                f"""
+                @group(0) @binding({bind})
+                var<storage, read_write> output_perm: array<{pt}>;
+                """
+            )
+            bind += 1
+        for i, arg_etype in enumerate(_arg_etypes_for_kernel(kernel)):
+            arg_t = spell_etype_in_wgsl(arg_etype)
+            w.print(
+                f"""
+                @group(0) @binding({bind + i})
+                var<storage, read> arg{i}: array<{arg_t}>;
+                """
+            )
+        return
 
     if num_outputs == 1:
         w.print(
@@ -962,6 +1001,77 @@ def _emit_wgsl_for_prefix_sum_kernel(
                 w.print("acc = acc + arg0[i];")
 
 
+def _emit_wgsl_for_sort_kernel(w: "WgslWriter", kernel: IrSortKernel) -> None:
+    """LSD radix sort (8-bit digits) on sortable u32 keys — O(32/8 · N), not O(N²).
+
+    Still a single-thread dispatch (fits current one-shot kernel model) but scales
+    to much larger N than selection sort. Float keys use an order-preserving
+    bitcast so IEEE-754 ordering matches unsigned radix order.
+    """
+    _emit_bindings(w, kernel)
+    n = math.prod(kernel.shape)
+    t = spell_etype_in_wgsl(kernel.etype)
+    is_float = kernel.etype in ("f4", "f2") or str(kernel.etype).startswith("f")
+
+    with w.block("@compute @workgroup_size(1)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>)"):
+        w.print("if (gid.x != 0u) { return; }")
+        if n == 0:
+            return
+        # Sortable keys and ping-pong index buffers in private memory.
+        w.print(f"var keys: array<u32, {n}>;")
+        w.print(f"var idx_a: array<u32, {n}>;")
+        w.print(f"var idx_b: array<u32, {n}>;")
+        with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
+            if is_float:
+                # Order-preserving map f32 → u32 for ascending radix sort.
+                w.print("let bits = bitcast<u32>(arg0[i]);")
+                w.print(
+                    "keys[i] = select(bits ^ 0x80000000u, ~bits, (bits & 0x80000000u) != 0u);"
+                )
+            else:
+                w.print("keys[i] = arg0[i];")
+            w.print("idx_a[i] = i;")
+
+        # 4 passes × 8-bit digits (full 32-bit key).
+        w.print("var use_a: bool = true;")
+        with w.block("for (var pass_i: u32 = 0u; pass_i < 4u; pass_i++)"):
+            w.print("let shift = pass_i * 8u;")
+            w.print("var hist: array<u32, 256>;")
+            with w.block("for (var b: u32 = 0u; b < 256u; b++)"):
+                w.print("hist[b] = 0u;")
+            # Histogram over current index buffer.
+            with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
+                w.print("let id = select(idx_b[i], idx_a[i], use_a);")
+                w.print("let digit = (keys[id] >> shift) & 0xffu;")
+                w.print("hist[digit] = hist[digit] + 1u;")
+            # Exclusive prefix sum → write offsets.
+            w.print("var sum: u32 = 0u;")
+            with w.block("for (var b: u32 = 0u; b < 256u; b++)"):
+                w.print("let c = hist[b];")
+                w.print("hist[b] = sum;")
+                w.print("sum = sum + c;")
+            # Scatter into the other index buffer.
+            with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
+                w.print("let id = select(idx_b[i], idx_a[i], use_a);")
+                w.print("let digit = (keys[id] >> shift) & 0xffu;")
+                w.print("let dest = hist[digit];")
+                w.print("hist[digit] = dest + 1u;")
+                with w.block("if (use_a)"):
+                    w.print("idx_b[dest] = id;")
+                with w.block("else"):
+                    w.print("idx_a[dest] = id;")
+            w.print("use_a = !use_a;")
+
+        # After 4 passes, results live in idx_b when use_a is true (flipped at end
+        # of last pass: started true, flipped 4 times → use_a true, data in idx_b).
+        # Start use_a=true: pass0 A→B, use_a=false; pass1 B→A, use_a=true;
+        # pass2 A→B, use_a=false; pass3 B→A, use_a=true. Final data in idx_a.
+        with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
+            w.print("let id = idx_a[i];")
+            if kernel.write_values:
+                w.print(f"output_values[i] = arg0[id];")
+            if kernel.write_perm:
+                w.print("output_perm[i] = id;")
 
 
 #

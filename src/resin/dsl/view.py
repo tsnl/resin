@@ -48,6 +48,7 @@ from resin.dsl.node import (
     RemapInfo,
     RemapNode,
     RemapScatterInfo,
+    SortNode,
 )
 
 
@@ -339,6 +340,13 @@ class View:
             )
         )
 
+    def sort(self) -> tuple["View", "View"]:
+        node = SortNode(
+            shape=self.shape,
+            etype=self.etype,
+            args=(self,),
+        )
+        return View.port(node, "values"), View.port(node, "perm")
 
     @staticmethod
     def reverse_prefix_sum(x: "View", *, inclusive: bool = True) -> "View":

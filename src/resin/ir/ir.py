@@ -10,6 +10,7 @@ __all__ = [
     "IrProgramBuilder",
     "IrReductionKernel",
     "IrRemapKernel",
+    "IrSortKernel",
     "reachable_ports",
 ]
 
@@ -24,6 +25,7 @@ from resin.core.pytree import marshall_pytensor
 from resin.dsl.node import RemapGatherInfo, RemapInfo, RemapScatterInfo
 from .rpn import ElementRpnExpr
 from resin.core.etype import (
+    U4,
     BinaryAssocElementOperator,
     BinaryBitwiseOperator,
     BinaryCompareOperator,
@@ -182,6 +184,20 @@ class IrPrefixSumKernel(IrKernel):
         assert self.arg_accessors[0].shape == self.shape
 
 
+@dataclass(frozen=True, kw_only=True)
+class IrSortKernel(IrKernel):
+    arg_etypes: tuple[ElementType, ...]
+    write_values: bool
+    write_perm: bool
+    perm_etype: ElementType = U4
+    clear_output_before_dispatch: bool = True
+    num_outputs: int = 2
+
+    def __post_init__(self):
+        assert len(self.arg_accessors) == 1
+        assert self.write_values or self.write_perm
+        # num_outputs stays 2 so binding layout is stable (values then perm);
+        # unused ports may still be allocated but not written.
 
 
 #
@@ -325,7 +341,10 @@ class IrProgramBuilder:
 
         # Bind only ports the kernel actually writes (DCE may drop unused ports
         # so WGSL bind-group layout matches runtime bind group entries).
-        ports = node.output_ports()
+        if isinstance(node, dsl.SortNode):
+            ports = node.output_port_order_for_kernel(used_ports=used)
+        else:
+            ports = node.output_ports()
         outputs = tuple(self.buffer_memo[(node, p)] for p in ports)
         if kernel.num_outputs != len(outputs):
             raise ValueError(

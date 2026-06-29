@@ -15,6 +15,7 @@ from resin.dsl.node import (
     RemapInfo,
     RemapNode,
     RemapScatterInfo,
+    SortNode,
 )
 from resin.dsl.view import (
     TensorMeta,
@@ -45,6 +46,7 @@ __all__ = [
     "RemapInfo",
     "RemapNode",
     "RemapScatterInfo",
+    "SortNode",
     "TensorMeta",
     "TensorOperand",
     "View",
