@@ -80,3 +80,59 @@ def test_blend_matches_cpu_reference() -> None:
     assert len(gpu_image) == len(cpu_image)
     for a, b in zip(gpu_image, cpu_image):
         assert a == pytest.approx(b, abs=1e-4)
+
+
+def test_color_grad_smoke() -> None:
+    """Reconstruction loss pulls colors toward a target image."""
+    width = height = 16
+    cloud = make_gnomen_cloud()
+    pre = preprocess_gaussians(cloud, width=width, height=height)
+    order = sort_by_depth_cpu(pre["depths"])
+    n = len(pre["depths"])
+
+    means_p = dsl.param(shape=(n, 2), etype=F4, name="means2d")
+    conics_p = dsl.param(shape=(n, 3), etype=F4, name="conics")
+    colors_p = dsl.param(shape=(n, 3), etype=F4, name="colors")
+    opacities_p = dsl.param(shape=(n,), etype=F4, name="opacities")
+    order_p = dsl.const(list(order), etype=U4)
+    target = dsl.param(shape=(height, width, 3), etype=F4, name="target")
+
+    image = gaussian_blend(
+        width=width,
+        height=height,
+        means2d=means_p,
+        conics=conics_p,
+        colors=colors_p,
+        opacities=opacities_p,
+        order=order_p,
+    )
+    # Scalar MSE loss.
+    loss = ((image - target) * (image - target)).sum().squeeze(axes=(0, 1, 2))
+    d_colors = grad(loss, wrt=colors_p)
+
+    target_img = blend_gaussians_cpu(
+        width=width,
+        height=height,
+        means2d=pre["means2d"],
+        conics=pre["conics"],
+        colors=pre["colors"],
+        opacities=pre["opacities"],
+        order=order,
+    )
+    # Perturb colors so loss is nonzero.
+    colors_bad = [[c * 0.5 for c in rgb] for rgb in pre["colors"]]
+    grads = run_graph(
+        d_colors,
+        params={
+            means_p: cast(PyTensor, _pack_means2d(pre["means2d"])),
+            conics_p: cast(PyTensor, _pack_triplets(pre["conics"])),
+            colors_p: cast(PyTensor, colors_bad),
+            opacities_p: cast(PyTensor, list(pre["opacities"])),
+            target: cast(PyTensor, [
+                [list(target_img[i : i + 3]) for i in range(r * width * 3, (r + 1) * width * 3, 3)]
+                for r in range(height)
+            ]),
+        },
+    )
+    # At least one color channel receives a nonzero gradient.
+    assert any(abs(g) > 1e-8 for g in grads)
