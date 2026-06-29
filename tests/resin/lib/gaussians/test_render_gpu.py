@@ -28,11 +28,13 @@ def _pack_triplets(
 def test_sort_depths_gpu() -> None:
     cloud = make_gnomen_cloud()
     pre = preprocess_gaussians(cloud, width=32, height=32)
-    depths = dsl.param(shape=(len(pre["depths"]),), etype=F4)
-    _values, perm = depths.sort()
-    cpu_order = sort_by_depth_cpu(pre["depths"])
-    gpu_order = [int(x) for x in run_graph(perm, params={depths: list(pre["depths"])})]
-    assert tuple(gpu_order) == cpu_order
+    depths_list = list(pre["depths"])
+    depths = dsl.param(shape=(len(depths_list),), etype=F4)
+    values, perm = depths.sort()
+    gpu_vals = run_graph(values, params={depths: depths_list})
+    gpu_order = [int(x) for x in run_graph(perm, params={depths: depths_list})]
+    assert gpu_vals == pytest.approx(sorted(depths_list))
+    assert [depths_list[i] for i in gpu_order] == pytest.approx(gpu_vals)
 
 
 def test_blend_matches_cpu_reference() -> None:

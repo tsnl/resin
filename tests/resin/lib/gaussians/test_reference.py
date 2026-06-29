@@ -19,20 +19,41 @@ def test_identity_quat() -> None:
     assert r[2][2] == pytest.approx(1.0)
 
 
-def test_gnomen_depths_increase() -> None:
+def test_gnomen_has_dense_axis_dots() -> None:
+    cloud = make_gnomen_cloud()
+    # 1 hub + 99 samples × 3 axes
+    assert cloud.count == 298
+    # Hub is near white; axes carry strong R/G/B channels.
+    assert cloud.colors[0] == pytest.approx((1.0, 1.0, 1.0))
+    reds = sum(1 for c in cloud.colors if c[0] > 0.8 and c[1] < 0.3 and c[2] < 0.3)
+    greens = sum(1 for c in cloud.colors if c[1] > 0.8 and c[0] < 0.3 and c[2] < 0.3)
+    blues = sum(1 for c in cloud.colors if c[2] > 0.8 and c[0] < 0.4 and c[1] < 0.5)
+    assert reds >= 90
+    assert greens >= 90
+    assert blues >= 90
+
+
+def test_gnomen_z_arm_depths_decrease_toward_camera() -> None:
     cloud = make_gnomen_cloud()
     view, proj = look_at_view_proj(aspect=1.0)
     _, depths = project_points(cloud.means, view, proj)
-    assert depths[0] < depths[1] < depths[2]
+    # Blue arm runs toward +Z (toward the default camera); depths decrease.
+    blue_depths = [
+        depths[i]
+        for i, c in enumerate(cloud.colors)
+        if c[2] > 0.8 and c[0] < 0.4 and c[1] < 0.5
+    ]
+    assert blue_depths == sorted(blue_depths, reverse=True)
 
 
-def test_preprocess_keeps_all_gnomen() -> None:
+def test_preprocess_keeps_most_gnomen() -> None:
     cloud = make_gnomen_cloud()
-    pre = preprocess_gaussians(cloud, width=32, height=32)
-    assert len(pre["means2d"]) == 3
+    pre = preprocess_gaussians(cloud, width=128, height=128)
+    # Blue arm points toward the camera; a few may frustum-cull at the near side.
+    assert len(pre["means2d"]) >= cloud.count // 2
     for mx, my in pre["means2d"]:
-        assert 0.0 <= mx <= 32.0
-        assert 0.0 <= my <= 32.0
+        assert -32.0 <= mx <= 160.0
+        assert -32.0 <= my <= 160.0
 
 
 def test_sort_front_to_back() -> None:

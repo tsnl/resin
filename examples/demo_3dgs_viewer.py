@@ -202,6 +202,7 @@ def main() -> None:
         width=pixel_w,
         height=pixel_h,
         fixed_count=cloud.count,
+        max_tiles_per_gaussian=32768,
     )
 
     print(
