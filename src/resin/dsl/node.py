@@ -1,13 +1,14 @@
 """
 Computation graph node types for the Resin DSL.
 
-Nodes represent some computational work that writes to its own output buffer.
-
-Users interact with views on these nodes.
+Nodes represent computational work that writes dense buffers, one per output port.
+Users interact with views on these ports.
 """
 
 __all__ = [
+    "DEFAULT_PORT",
     "ConstNode",
+    "CustomNode",
     "ElementwiseNode",
     "MatmulNode",
     "Node",
@@ -20,12 +21,13 @@ __all__ = [
 ]
 
 import math
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from resin.dsl.view import View
+    from resin.ir.ir import IrKernel
 
 from resin.core.accessor import Accessor
 from resin.core.etype import (
@@ -36,16 +38,36 @@ from resin.core.etype import (
 )
 from resin.core.pytree import PyTensor
 
+DEFAULT_PORT = "out"
+
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class Node(ABC):
+    """Base node. Single-output nodes use ``shape``/``etype`` as port ``out``."""
+
     shape: tuple[int, ...]
     etype: ElementType | str
     args: tuple[View, ...]
 
+    def output_ports(self) -> tuple[str, ...]:
+        return (DEFAULT_PORT,)
+
+    def port_shape(self, port: str) -> tuple[int, ...]:
+        if port != DEFAULT_PORT:
+            raise KeyError(f"unknown port {port!r} on {type(self).__name__}")
+        return self.shape
+
+    def port_etype(self, port: str) -> ElementType | str:
+        if port != DEFAULT_PORT:
+            raise KeyError(f"unknown port {port!r} on {type(self).__name__}")
+        return self.etype
+
+    def port_nbytes(self, port: str) -> int:
+        return math.prod(self.port_shape(port)) * etype_nbytes(self.port_etype(port))
+
     @property
     def nbytes(self) -> int:
-        return math.prod(self.shape) * etype_nbytes(self.etype)
+        return sum(self.port_nbytes(p) for p in self.output_ports())
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -117,3 +139,17 @@ class RemapNode(Node):
     @property
     def indices(self) -> "View | None":
         return self.args[1] if len(self.args) > 1 else None
+
+
+@dataclass(kw_only=True, frozen=True, eq=False)
+class CustomNode(Node, ABC):
+    """Multi-port node with custom IR emission and optional ``df_do`` adjoint."""
+
+    @abstractmethod
+    def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
+        """Build the forward IR kernel, optionally eliding unused output ports."""
+
+    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
+        """Return ∂f/∂operand for each arg given gradients keyed by output port."""
+        raise NotImplementedError(f"{type(self).__name__} has no df_do_ports")
+

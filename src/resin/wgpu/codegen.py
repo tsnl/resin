@@ -57,7 +57,8 @@ def dispatch_size_for_kernel(
 
 
 def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
-    w = WgslWriter(enable_f16=etype_needs_enable_f16(kernel.etype))
+    enable_f16 = etype_needs_enable_f16(kernel.etype)
+    w = WgslWriter(enable_f16=enable_f16)
 
     match kernel:
         case IrElementwiseRpnKernel():
@@ -88,25 +89,37 @@ def _arg_etypes_for_kernel(kernel: IrKernel) -> tuple[str | ElementType, ...]:
     match kernel:
         case IrElementwiseRpnKernel() if kernel.arg_etypes:
             return kernel.arg_etypes
+        case IrRemapKernel():
+            return kernel.arg_etypes
         case _:
             return tuple(kernel.etype for _ in kernel.arg_accessors)
 
 
 def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
     t = spell_etype_in_wgsl(kernel.etype)
+    num_outputs = kernel.num_outputs
 
-    w.print(
-        f"""
-        @group(0) @binding(0)
-        var<storage, read_write> output: array<{t}>;
-        """
-    )
+    if num_outputs == 1:
+        w.print(
+            f"""
+            @group(0) @binding(0)
+            var<storage, read_write> output: array<{t}>;
+            """
+        )
+    else:
+        for i in range(num_outputs):
+            w.print(
+                f"""
+                @group(0) @binding({i})
+                var<storage, read_write> output{i}: array<{t}>;
+                """
+            )
 
     for i, arg_etype in enumerate(_arg_etypes_for_kernel(kernel)):
         arg_t = spell_etype_in_wgsl(arg_etype)
         w.print(
             f"""
-            @group(0) @binding({i + 1})
+            @group(0) @binding({num_outputs + i})
             var<storage, read> arg{i}: array<{arg_t}>;
             """
         )
@@ -920,6 +933,7 @@ def _reduction_accumulate_wgsl(
             return f"{acc} = min({acc}, {value});"
         case _:
             assert_never(operator)
+
 
 
 #
