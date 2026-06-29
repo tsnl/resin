@@ -53,5 +53,5 @@ def save_rgb_f32_png(
     png += _png_chunk(b"IHDR", ihdr)
     png += _png_chunk(b"IDAT", compressed)
     png += _png_chunk(b"IEND", b"")
-    out.write_bytes(png)
+    _ = out.write_bytes(png)
     return out

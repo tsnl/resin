@@ -12,11 +12,11 @@ hist/scatter kernels that scale with N.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
-from resin.core.etype import U4, ElementType, etype_kind
+from resin.core.etype import U4, etype_kind
 from resin.core.accessor import Accessor
-from resin.dsl.node import CustomNode, DEFAULT_PORT, PrefixSumNode, RemapGatherInfo
+from resin.dsl.node import CustomNode, PrefixSumNode, RemapGatherInfo
 
 if TYPE_CHECKING:
     from resin.dsl.view import View
@@ -108,6 +108,7 @@ def build_radix_sort_graph(
 class SortableKeysNode(CustomNode):
     """Map f4/u4 values to order-preserving u4 keys for radix sort."""
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -169,6 +170,7 @@ class RadixHistogramNode(CustomNode):
     shift: int
     n_keys: int
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -219,6 +221,7 @@ class RadixScatterNode(CustomNode):
     shift: int
     n_keys: int
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 

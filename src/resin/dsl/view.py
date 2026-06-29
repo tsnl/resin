@@ -357,8 +357,7 @@ class View:
         if x.rank != 1:
             raise ValueError("reverse_prefix_sum expects a 1D view")
         # Build reversal indices [n-1, n-2, ..., 0] as a const u4 tensor.
-        rev_idx_data = list(range(n - 1, -1, -1))
-        rev_idx = const(rev_idx_data, etype=U4)
+        rev_idx = const(tuple(range(n - 1, -1, -1)), etype=U4)
         indices = rev_idx.reshape((n, 1))
         reversed_x = View.remap(
             source=x,

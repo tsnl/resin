@@ -1,7 +1,7 @@
-from resin.core.etype import F4
 """GPU tests for PrefixSumNode, SortNode, multi-output ports, and DCE."""
 
-from resin.dsl import View, param
+from resin.core.etype import F4
+from resin.dsl import param
 from resin.ir.ir import IrProgramBuilder, IrSortKernel, reachable_ports
 from resin.runtime import compile_program
 from tests.resin.gpu.interp_helpers import run_graph

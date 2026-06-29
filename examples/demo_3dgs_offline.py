@@ -31,22 +31,22 @@ from resin.lib.gaussians.offline import render_frame_to_png
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
+    _ = p.add_argument(
         "-o",
         "--output",
         type=Path,
         default=Path("gnomen_offline.png"),
         help="output PNG path",
     )
-    p.add_argument(
+    _ = p.add_argument(
         "--pose",
         type=str,
         default=None,
         help='camera pose JSON object, e.g. \'{"x":0,"y":0,"z":0,"yaw":0,"pitch":0,"fov_y_deg":60}\'',
     )
-    p.add_argument("--width", type=int, default=1280)
-    p.add_argument("--height", type=int, default=720)
-    p.add_argument("--untiled", action="store_true", help="use global-sort blend")
+    _ = p.add_argument("--width", type=int, default=1280)
+    _ = p.add_argument("--height", type=int, default=720)
+    _ = p.add_argument("--untiled", action="store_true", help="use global-sort blend")
     args = p.parse_args(argv)
 
     out, visible = render_frame_to_png(

@@ -3,6 +3,7 @@
 import math
 import struct
 from collections.abc import Mapping
+from typing import cast
 
 import resin_rt_pybind
 
@@ -29,7 +30,8 @@ def run_graph(
     sink: dsl.View,
     *,
     sink_name: str = "out",
-    params: Mapping[dsl.View, PyTensor] | None = None,
+    # list[float] is the usual test form; PyTensor uses invariant list[] so we widen.
+    params: Mapping[dsl.View, PyTensor | list[float] | list[int]] | None = None,
 ) -> list[float]:
     param_items = list((params or {}).items())
     named_params = {
@@ -44,12 +46,13 @@ def run_graph(
     binding = compiled.binding(interp, program_id)
 
     for index, (view, value) in enumerate(param_items):
-        expected_shape = infer_pytensor_shape(value)
+        tensor = cast(PyTensor, value)
+        expected_shape = infer_pytensor_shape(tensor)
         if expected_shape != view.shape:
             raise ValueError(
                 f"param shape mismatch: view {view.shape}, value {expected_shape}"
             )
-        data = marshall_pytensor(value, etype=view.etype)
+        data = marshall_pytensor(tensor, etype=view.etype)
         binding.write({f"__param_{index}": data})
 
     interp.run(program_id)

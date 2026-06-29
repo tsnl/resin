@@ -121,7 +121,8 @@ class FlyCamera:
 
     @classmethod
     def from_pose_json(cls, text: str) -> "FlyCamera":
-        data = json.loads(text)
+        data: object = json.loads(text)
         if not isinstance(data, dict):
             raise TypeError("pose JSON must be an object")
-        return cls.from_pose(data)
+        # json.loads object values are dynamically typed.
+        return cls.from_pose(data)  # pyright: ignore[reportUnknownArgumentType]

@@ -25,7 +25,7 @@ __all__ = [
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from resin.dsl.view import View
@@ -154,6 +154,7 @@ class CustomNode(Node, ABC):
 
     def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
         """Return ∂f/∂operand for each arg given gradients keyed by output port."""
+        _ = df_douts
         raise NotImplementedError(f"{type(self).__name__} has no df_do_ports")
 
 
@@ -163,6 +164,7 @@ class PrefixSumNode(CustomNode):
 
     inclusive: bool = False
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
         from resin.ir.ir import IrPrefixSumKernel
 
@@ -175,6 +177,7 @@ class PrefixSumNode(CustomNode):
             arg_etypes=(self.args[0].etype,),
         )
 
+    @override
     def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
         from resin.dsl.view import View
 
@@ -194,14 +197,17 @@ class SortNode(CustomNode):
 
     perm_etype: ElementType = U4
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("values", "perm")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         if port not in ("values", "perm"):
             raise KeyError(f"unknown port {port!r} on SortNode")
         return self.shape
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         if port == "values":
             return self.etype
@@ -209,6 +215,7 @@ class SortNode(CustomNode):
             return self.perm_etype
         raise KeyError(f"unknown port {port!r} on SortNode")
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
         from resin.ir.ir import IrSortKernel
 
@@ -239,6 +246,7 @@ class SortNode(CustomNode):
             ports.append("values")
         return tuple(ports)
 
+    @override
     def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
         from resin.dsl.view import View
 

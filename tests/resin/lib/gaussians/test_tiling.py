@@ -9,7 +9,6 @@ from resin.lib.gaussians.tiling import (
     blend_gaussians_tiled_cpu,
     build_tiled_layout,
     duplicate_with_keys,
-    identify_tile_ranges,
     prefix_sum_offsets,
     tile_counts,
 )

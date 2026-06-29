@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from resin.core.etype import F4, U4, ElementType
 from resin.dsl.node import CustomNode
@@ -207,7 +207,7 @@ def blend_gaussians_tiled_cpu(
             fx = px + 0.5
             fy = py + 0.5
             r = g = b = 0.0
-            T = 1.0
+            transmittance = 1.0
             for k in range(start, end):
                 gi = layout.instance_ids[k]
                 mx, my = means2d[gi]
@@ -222,12 +222,12 @@ def blend_gaussians_tiled_cpu(
                 alpha = min(0.99, opacity * math.exp(power))
                 if alpha < 1.0 / 255.0:
                     continue
-                weight = alpha * T
+                weight = alpha * transmittance
                 r += cr * weight
                 g += cg * weight
                 b += cb * weight
-                T *= 1.0 - alpha
-                if T < 1e-4:
+                transmittance *= 1.0 - alpha
+                if transmittance < 1e-4:
                     break
             off = (py * width + px) * 3
             image[off] = r
@@ -279,19 +279,23 @@ class TiledGaussianBlendNode(CustomNode):
     n_tiles_y: int
     n_instances: int
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("image",)
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         if port != "image":
             raise KeyError(port)
         return (self.height, self.width, 3)
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         if port != "image":
             raise KeyError(port)
         return F4
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -316,6 +320,7 @@ class TiledGaussianBlendNode(CustomNode):
             clear_output_before_dispatch=True,
         )
 
+    @override
     def df_do_ports(self, df_douts: dict[str, View]) -> tuple[View, ...]:
         _ = df_douts
         means2d, conics, colors, opacities, instances, ranges = self.args

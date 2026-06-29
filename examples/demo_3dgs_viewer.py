@@ -28,12 +28,16 @@ Controls:
 
 from __future__ import annotations
 
+# pyright: reportMissingImports=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false
+# pyright: reportUnknownParameterType=false
+# pyright: reportUnusedCallResult=false
+
 import math
 import os
 import sys
-
-# Ensure SDL does not disable HiDPI before pygame initializes (macOS Retina).
-os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "0")
 
 import pygame
 
@@ -123,9 +127,11 @@ def _draw_hud(
     look_s = "on" if look_enabled else "off"
     lines = [
         "WASD move  QE down/up  mouse look  Tab free cursor  C pose  Esc quit",
-        f"fps {fps:4.1f}  {pixel_w}x{pixel_h}px  "
-        f"({logical_w}x{logical_h}pt @ {dpi_scale:.2f}x)  "
-        f"visible {visible}/{slots}  look {look_s}",
+        (
+            f"fps {fps:4.1f}  {pixel_w}x{pixel_h}px  "
+            f"({logical_w}x{logical_h}pt @ {dpi_scale:.2f}x)  "
+            f"visible {visible}/{slots}  look {look_s}"
+        ),
         f"eye   ({x:+7.3f}, {y:+7.3f}, {z:+7.3f})",
         f"yaw   {yaw_deg:+7.2f} deg   pitch {pitch_deg:+7.2f} deg",
         f"fwd   ({fx:+7.3f}, {fy:+7.3f}, {fz:+7.3f})",
@@ -169,6 +175,8 @@ def _render_frame(
 
 
 def main() -> None:
+    # Ensure SDL does not disable HiDPI before pygame initializes (macOS Retina).
+    _ = os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "0")
     _ = pygame.init()
     flags = _window_flags()
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), flags)
@@ -206,8 +214,10 @@ def main() -> None:
     )
 
     print(
-        f"window {logical_w}x{logical_h}pt, framebuffer {pixel_w}x{pixel_h}px "
-        f"(dpi scale {dpi:.2f}x). controls: WASDQE, mouse look, Tab, C=pose, Esc",
+        (
+            f"window {logical_w}x{logical_h}pt, framebuffer {pixel_w}x{pixel_h}px "
+            f"(dpi scale {dpi:.2f}x). controls: WASDQE, mouse look, Tab, C=pose, Esc"
+        ),
         file=sys.stderr,
     )
 

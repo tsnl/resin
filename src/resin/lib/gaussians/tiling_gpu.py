@@ -7,12 +7,12 @@ expand / segment-range steps. End users of the viewer/session never touch them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from resin.core.accessor import Accessor
 from resin.core.etype import F4, U4, ElementType
-from resin.dsl.node import CustomNode, DEFAULT_PORT, RemapGatherInfo
-from resin.dsl.view import View, const
+from resin.dsl.node import CustomNode, RemapGatherInfo
+from resin.dsl.view import View
 from resin.lib.gaussians.tiling import DEFAULT_TILE_SIZE, gaussian_blend_tiled
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ class TileCountNode(CustomNode):
     tile_size: int
     n_gaussians: int
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -105,10 +106,12 @@ class TileFillNode(CustomNode):
     n_gaussians: int
     max_instances: int
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         # ``cursor`` is scratch (copy of exclusive offsets); always allocated with the node.
         return ("keys", "ids", "cursor")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         if port in ("keys", "ids"):
             return (self.max_instances,)
@@ -119,9 +122,11 @@ class TileFillNode(CustomNode):
             return (ntx * nty,)
         raise KeyError(port)
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         return U4
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -237,6 +242,7 @@ class TileRangesNode(CustomNode):
     n_tiles: int
     n_instances: int
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 

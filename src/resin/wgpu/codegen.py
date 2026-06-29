@@ -1011,7 +1011,6 @@ def _emit_wgsl_for_sort_kernel(w: "WgslWriter", kernel: IrSortKernel) -> None:
     """
     _emit_bindings(w, kernel)
     n = math.prod(kernel.shape)
-    t = spell_etype_in_wgsl(kernel.etype)
     is_float = kernel.etype in ("f4", "f2") or str(kernel.etype).startswith("f")
 
     with w.block("@compute @workgroup_size(1)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>)"):
@@ -1070,7 +1069,7 @@ def _emit_wgsl_for_sort_kernel(w: "WgslWriter", kernel: IrSortKernel) -> None:
         with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
             w.print("let id = idx_a[i];")
             if kernel.write_values:
-                w.print(f"output_values[i] = arg0[id];")
+                w.print("output_values[i] = arg0[id];")
             if kernel.write_perm:
                 w.print("output_perm[i] = id;")
 

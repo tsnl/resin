@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from resin.core.etype import F4, U4, ElementType
 from resin.dsl.node import CustomNode
@@ -21,9 +21,11 @@ class GaussianBlendNode(CustomNode):
     width: int
     height: int
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("image", "final_T", "n_contrib")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         match port:
             case "image":
@@ -33,6 +35,7 @@ class GaussianBlendNode(CustomNode):
             case _:
                 raise KeyError(port)
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         match port:
             case "image" | "final_T":
@@ -42,6 +45,7 @@ class GaussianBlendNode(CustomNode):
             case _:
                 raise KeyError(port)
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -63,6 +67,7 @@ class GaussianBlendNode(CustomNode):
             clear_output_before_dispatch=True,
         )
 
+    @override
     def df_do_ports(self, df_douts: dict[str, View]) -> tuple[View, ...]:
         df_dimage = df_douts.get("image")
         if df_dimage is None:
@@ -101,9 +106,11 @@ class GradGaussianBlendNode(CustomNode):
     height: int
     count: int
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("grad_colors", "grad_opacities")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         match port:
             case "grad_colors":
@@ -113,9 +120,11 @@ class GradGaussianBlendNode(CustomNode):
             case _:
                 raise KeyError(port)
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         return F4
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
