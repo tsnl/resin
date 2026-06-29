@@ -1,3 +1,5 @@
+from typing import cast
+
 from resin.core.etype import F4
 from resin.core.pytree import (
     PyTree,
@@ -5,9 +7,10 @@ from resin.core.pytree import (
     flatten_pytree_paths,
     map_pytree,
     map_pytree_paths,
-    zip_pytree,
+    tree_map,
 )
 from resin.dsl.view import View, param
+from resin.nn import Linear, linear_new
 
 
 class TestPyTreeTyping:
@@ -15,6 +18,12 @@ class TestPyTreeTyping:
         leaf = param(shape=(2,), etype=F4)
         tree: PyTree[View] = leaf
         assert tree is leaf
+
+    def test_module_repr_subtypes_pytree(self) -> None:
+        layer: Linear[View] = linear_new(2, 3, bias=True)
+        model: list[Linear[View]] = [layer]
+        tree: PyTree[View] = model
+        assert tree is model
 
 
 class TestFlattenPytree:
@@ -33,7 +42,9 @@ class TestMapPytree:
         assert map_pytree(tree, double) == {"a": [2, 4], "b": 6}
 
     def test_callback_inspects_leaf_type(self) -> None:
-        tree: PyTree[int | str] = {"a": [1, 2], "b": "skip"}
+        # cast (not annotation) so the tree keeps type PyTree[int | str] rather than
+        # narrowing to the literal dict, whose ambiguous list leaf confuses T inference.
+        tree = cast(PyTree[int | str], {"a": [1, 2], "b": "skip"})
 
         def maybe_double(x: int | str) -> int | str:
             if isinstance(x, int):
@@ -53,15 +64,32 @@ class TestFlattenPytreePaths:
         ]
 
 
-class TestZipPytree:
-    def test_map_pytree_applies_fn_to_leaf_pairs(self) -> None:
+class TestTreeMap:
+    def test_combines_leaves_across_trees(self) -> None:
         params: PyTree[int] = {"w": 10, "b": 2}
         grads: PyTree[int] = {"w": 3, "b": 1}
-        updated = map_pytree(
-            zip_pytree(params, grads),
-            lambda pair: pair[0] - pair[1],
-        )
-        assert updated == {"w": 7, "b": 1}
+
+        def sub(p: int, g: int) -> int:
+            return p - g
+
+        assert tree_map(sub, params, grads) == {"w": 7, "b": 1}
+
+
+class TestModule:
+    def test_params_flattens_leaves(self) -> None:
+        layer = linear_new(3, 2, bias=True)
+        ps = layer.params()
+        assert set(ps) == {"weight", "bias"}
+        assert ps["weight"] is layer.weight
+        assert ps["bias"] is layer.bias
+
+    def test_params_skips_none_bias(self) -> None:
+        layer = linear_new(3, 2, bias=False)
+        assert set(layer.params()) == {"weight"}
+
+    def test_module_in_pytree_flattens_with_field_paths(self) -> None:
+        model = [linear_new(2, 3, bias=True)]
+        assert [p for p, _ in flatten_pytree_paths(model)] == ["0.weight", "0.bias"]
 
 
 class TestMapPytreePaths:

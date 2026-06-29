@@ -93,4 +93,4 @@ s = t1 + t2
 (s * s).debug_print(out=sys.stderr)
 
 section("Param node")
-dsl.param(shape=(4,), etype=F4, label="weights").debug_print(out=sys.stderr)
+dsl.param(shape=(4,), etype=F4, name="weights").debug_print(out=sys.stderr)

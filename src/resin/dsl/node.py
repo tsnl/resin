@@ -51,7 +51,7 @@ class ConstNode(Node):
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class ParamNode(Node):
-    label: str | None
+    name: str
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)

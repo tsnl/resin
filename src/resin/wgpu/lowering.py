@@ -1,10 +1,8 @@
 from frozendict import frozendict
-import resin.dsl as dsl
 from resin.ir.ir import IrBufferView, IrKernel, IrProgram
 
 from .codegen import WgslKernelConfig, dispatch_size_for_kernel, emit_wgsl_for_kernel
 from .spec import (
-    SCHEMA_VERSION,
     WgpuAccessorSpec,
     WgpuBufferSpec,
     WgpuBufferViewSpec,
@@ -72,7 +70,7 @@ def build_wgpu_program(
             }
         )
 
-    param_buffer_ids = program.param_buffer_ids
+    param_buffers = program.param_buffers
     sinks = {
         name: buffer_view_index[buffer_view]
         for name, buffer_view in program.sinks.items()
@@ -84,8 +82,7 @@ def build_wgpu_program(
         pipelines=tuple(pipelines),
         queue=tuple(queue),
         sinks=frozendict(sinks),
-        param_buffer_ids=frozendict(param_buffer_ids),
-        schema_version=SCHEMA_VERSION,
+        param_buffers=frozendict(param_buffers),
     )
 
 
@@ -109,5 +106,5 @@ def _accessor_spec(buffer_view: IrBufferView) -> WgpuAccessorSpec:
     }
 
 
-def param_buffer_index(program: WgpuProgram, param: dsl.ParamNode) -> int:
-    return program.param_buffer_ids[id(param)]
+def param_buffer_index(program: WgpuProgram, name: str) -> int:
+    return program.param_buffers[name]

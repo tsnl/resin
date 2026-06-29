@@ -1,15 +1,145 @@
 import struct
-from collections.abc import Callable, Generator
-from typing import cast
+from collections.abc import Callable, Generator, ItemsView
+from dataclasses import fields
+from typing import TYPE_CHECKING, Protocol, cast
+
+from useful_types import SequenceNotStr
 
 from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
 
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
+
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
 
-# Nested trees use dict and list nodes only. Tuples (and every other non-container
-# value) are leaves. Callers should treat containers as immutable: walkers read
-# structure without mutating it. Annotate bare leaves as PyTree[T], not T | PyTree[T].
-type PyTree[T] = dict[str, PyTree[T]] | list[PyTree[T]] | T
+
+class Mapping[K, V](Protocol):
+    """
+    Covariant stand-in for :class:`collections.abc.Mapping`, used as the dict arm
+    of :data:`PyTree`. **Covariant in both key and value.**
+
+    Exposes only ``items()``, so both ``K`` and ``V`` appear solely in covariant
+    (output) positions. Stdlib :class:`collections.abc.Mapping` is invariant in its
+    key because ``__getitem__(key)``/``get(key)`` place the key in an input
+    position; dropping those frees the key to be covariant. Key covariance lets
+    narrowed-key reprs such as ``dict[Literal["weight", "bias"], View]`` subtype
+    ``Mapping[str, PyTree[View]]`` (hence ``PyTree[View]``) without a cast, which a
+    stdlib ``Mapping[str, ...]`` arm would reject.
+
+    Walkers dispatch on ``isinstance(x, dict)`` at runtime; this protocol only
+    governs static assignability at PyTree boundaries. It deliberately shadows the
+    name ``Mapping`` within this module, so ``collections.abc.Mapping`` is not
+    imported here.
+    """
+
+    def items(self) -> ItemsView[K, V]: ...
+
+
+class Module[T]:
+    """
+    Base for dataclass param trees — a first-class PyTree container node.
+
+    Subclass as a *generic* frozen dataclass so the fields ARE the leaf type ``T``;
+    then ``Linear[View]`` has all-View fields by construction (``Linear[View](weight=3)``
+    is a static error), and walkers preserve the concrete type through grad/sgd::
+
+        @dataclass(frozen=True)
+        class Linear[T: View](Module[T]):
+            weight: T
+            bias: T | None = None
+
+    Walkers recurse ``Module`` instances over :func:`dataclasses.fields` (field name =
+    path segment), so ``list[Linear[View]]`` flattens to ``0.weight`` / ``0.bias``.
+    ``T`` is unbounded here because ``core`` stays leaf-type-agnostic; bound the leaf
+    on concrete modules (``[T: View]``).
+    """
+
+    def params(self) -> dict[str, T]:
+        """Flatten this module's leaves to ``{dotted-path: leaf}``.
+
+        The structural runtime check is the walker's :func:`expect_pytree_leaf`
+        assertion (every collected value is a genuine leaf, not an un-flattened
+        container); ``None`` fields are skipped.
+        """
+        return dict(flatten_pytree_paths(self))
+
+
+type PyTree[T] = (
+    T
+    | Mapping[str, PyTree[T]]
+    | SequenceNotStr[PyTree[T]]
+    | tuple[PyTree[T], ...]
+    | Module[T]
+)
+"""
+Recursive JSON-like trees of ``T`` leaves nested in dict/list/Module containers.
+
+**Runtime shape** (what walkers actually recurse on)::
+
+    T | dict[str, PyTree[T]] | list[PyTree[T]] | Module[T]
+
+**Static annotation** (wider on purpose; see ``tests/typing/test_pytree_containers.py``)::
+
+    T
+    | Mapping[str, PyTree[T]]
+    | SequenceNotStr[PyTree[T]]
+    | tuple[PyTree[T], ...]
+    | Module[T]
+
+Leaf type ``T`` should be the payload (e.g. ``View``, ``int``), not ``dict`` or
+``list``. Nested structure belongs in the container arms, not in ``T``.
+``dict[str, T]`` and narrowed-key ``dict[Literal[...], T]`` module reprs both
+subtype the dict arm; ``TypedDict`` reprs do *not* (pyright sees their values as
+``object``) — use a plain ``dict`` at PyTree boundaries, or register explicit
+paths via :func:`resin.runtime.trees.register_named_params`.
+
+Why the static alias is wider than runtime:
+
+- ``Mapping`` (this module's covariant protocol, *not* ``collections.abc.Mapping``)
+  and ``SequenceNotStr`` (from ``useful_types``) are covariant, so module reprs such
+  as ``list[Linear]`` subtype ``PyTree[View]`` without casts. Plain ``dict``/``list``
+  in the alias are invariant and break that subtyping. ``Mapping`` exposes only
+  ``items()`` (key and value both in covariant output positions), so
+  ``dict[Literal[...], T]`` keyed reprs subtype it too — ``collections.abc.Mapping``'s
+  key-typed ``__getitem__`` forces key invariance and rejects narrowed (literal)
+  keys. Runtime containers are plain ``dict`` and ``list``, but walkers treat them
+  as immutable: they read structure without mutating nodes, so covariant
+  annotations are sound (nothing is ever written through the wider static type).
+- ``SequenceNotStr`` rejects ``str``, which otherwise satisfies ``Sequence``.
+  Custom ``Protocol``s with a ``copy()`` return type break basedpyright's recursive
+  leaf-``T`` inference in walkers.
+- ``tuple[PyTree[T], ...]`` types homogeneous tuple containers alongside list
+  nodes, but walkers still treat tuples as *leaves* at runtime (only ``dict``,
+  ``list``, and ``Module`` are recursed into).
+- ``Module[T]`` is a dataclass container node: walkers recurse its fields via
+  :func:`dataclasses.fields`, using the field name as the path segment. ``None``
+  fields are treated as empty subtrees (no leaves), so an optional ``bias: T | None``
+  contributes nothing when unset.
+- Walkers call :func:`expect_pytree_leaf` after ruling out ``dict``, ``list``, and
+  ``Module`` because pyright cannot narrow the ``PyTree[T]`` union down to leaf ``T``
+  from runtime tests alone.
+
+:func:`tree_map` maps a callable over the leaves of N same-structured trees and
+rebuilds the structure (the concrete type ``L`` is preserved), replacing the old
+``zip_pytree``/``map_pytree`` pairing.
+"""
+
+
+def expect_pytree_leaf[T](value: PyTree[T]) -> T:
+    """
+    Narrow a PyTree node to leaf ``T`` after container branches are ruled out.
+
+    Walkers recurse only on ``dict``, ``list``, and ``Module``. If ``value`` is none
+    of those, it must be a leaf. Pyright cannot infer that from ``isinstance`` alone.
+    """
+    assert not isinstance(value, (dict, list, Module))
+    return cast(T, value)
+
+
+def _fields_of(node: object):
+    # ``node`` is statically ``object`` here, so the view to DataclassInstance is a
+    # widening cast (no reportInvalidCast); callers pass Module dataclass instances.
+    return fields(cast("DataclassInstance", node))
 
 
 def _join_pytree_path(prefix: str, segment: str) -> str:
@@ -21,6 +151,8 @@ def flatten_pytree_paths[T](
     *,
     prefix: str = "",
 ) -> Generator[tuple[str, T], None, None]:
+    if pytree is None:
+        return
     if isinstance(pytree, dict):
         for key, child in cast(dict[str, PyTree[T]], pytree).items():
             yield from flatten_pytree_paths(
@@ -31,8 +163,15 @@ def flatten_pytree_paths[T](
             yield from flatten_pytree_paths(
                 child, prefix=_join_pytree_path(prefix, str(index))
             )
+    elif isinstance(pytree, Module):
+        node = cast("Module[T]", pytree)
+        for field in _fields_of(node):
+            child: PyTree[T] = getattr(node, field.name)
+            yield from flatten_pytree_paths(
+                child, prefix=_join_pytree_path(prefix, field.name)
+            )
     else:
-        yield prefix, pytree
+        yield prefix, expect_pytree_leaf(pytree)
 
 
 def map_pytree_paths[T, U](
@@ -41,6 +180,8 @@ def map_pytree_paths[T, U](
     *,
     prefix: str = "",
 ) -> PyTree[U]:
+    if pytree is None:
+        return cast(PyTree[U], None)
     if isinstance(pytree, dict):
         return {
             key: map_pytree_paths(
@@ -59,21 +200,43 @@ def map_pytree_paths[T, U](
             )
             for index, child in enumerate(cast(list[PyTree[T]], pytree))
         ]
-    return fn(prefix, pytree)
+    if isinstance(pytree, Module):
+        node = cast("Module[T]", pytree)
+        ctor = cast("Callable[..., PyTree[U]]", type(node))
+        return ctor(
+            **{
+                field.name: map_pytree_paths(
+                    cast(PyTree[T], getattr(node, field.name)),
+                    fn,
+                    prefix=_join_pytree_path(prefix, field.name),
+                )
+                for field in _fields_of(node)
+            }
+        )
+    return fn(prefix, expect_pytree_leaf(pytree))
 
 
 def flatten_pytree[T](pytree: PyTree[T]) -> Generator[T, None, None]:
+    if pytree is None:
+        return
     if isinstance(pytree, dict):
         for child in cast(dict[str, PyTree[T]], pytree).values():
             yield from flatten_pytree(child)
     elif isinstance(pytree, list):
         for child in cast(list[PyTree[T]], pytree):
             yield from flatten_pytree(child)
+    elif isinstance(pytree, Module):
+        node = cast("Module[T]", pytree)
+        for field in _fields_of(node):
+            child: PyTree[T] = getattr(node, field.name)
+            yield from flatten_pytree(child)
     else:
-        yield pytree
+        yield expect_pytree_leaf(pytree)
 
 
 def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
+    if pytree is None:
+        return cast(PyTree[U], None)
     if isinstance(pytree, dict):
         return {
             key: map_pytree(child, f)
@@ -81,31 +244,52 @@ def map_pytree[T, U](pytree: PyTree[T], f: Callable[[T], U]) -> PyTree[U]:
         }
     if isinstance(pytree, list):
         return [map_pytree(child, f) for child in cast(list[PyTree[T]], pytree)]
-    return f(pytree)
+    if isinstance(pytree, Module):
+        node = cast("Module[T]", pytree)
+        ctor = cast("Callable[..., PyTree[U]]", type(node))
+        return ctor(
+            **{
+                field.name: map_pytree(cast(PyTree[T], getattr(node, field.name)), f)
+                for field in _fields_of(node)
+            }
+        )
+    return f(expect_pytree_leaf(pytree))
 
 
-def zip_pytree[T, U](a: PyTree[T], b: PyTree[U]) -> PyTree[tuple[T, U]]:
-    if type(a) != type(b):
-        raise TypeError("pytree shape mismatch")
+def tree_map[L](fn: Callable[..., object], *trees: L) -> L:
+    """Map ``fn`` over the leaves of N same-structured trees, rebuilding the structure.
 
-    match (a, b):
-        case dict(), dict():
-            a_dict = cast(dict[str, PyTree[T]], a)
-            b_dict = cast(dict[str, PyTree[U]], b)
-            if set(a_dict.keys()) != set(b_dict.keys()):
-                raise ValueError("pytree shape mismatch")
-            return {key: zip_pytree(a_dict[key], b_dict[key]) for key in a_dict}
-        case list(), list():
-            a_list = cast(list[PyTree[T]], a)
-            b_list = cast(list[PyTree[U]], b)
-            if len(a_list) != len(b_list):
-                raise ValueError("pytree shape mismatch")
-            return [
-                zip_pytree(a_child, b_child)
-                for a_child, b_child in zip(a_list, b_list, strict=True)
-            ]
-        case _:
-            return cast(tuple[T, U], (a, b))
+    Homomorphic and structure-preserving: the concrete tree type ``L`` (e.g.
+    ``list[Linear[View]]``) is preserved end-to-end. ``fn`` receives one leaf from
+    each tree, positionally, and returns the new leaf. ``None`` subtrees stay
+    ``None``. Replaces the old ``zip_pytree`` + ``map_pytree`` pairing.
+    """
+    head = trees[0]
+    if head is None:
+        return cast(L, None)
+    if isinstance(head, dict):
+        head_dict = cast(dict[str, PyTree[object]], head)
+        dicts = [cast(dict[str, PyTree[object]], t) for t in trees]
+        return cast(
+            L, {key: tree_map(fn, *[d[key] for d in dicts]) for key in head_dict}
+        )
+    if isinstance(head, list):
+        lists = [cast(list[PyTree[object]], t) for t in trees]
+        return cast(
+            L, [tree_map(fn, *children) for children in zip(*lists, strict=True)]
+        )
+    if isinstance(head, Module):
+        node = cast("Module[object]", head)
+        ctor = cast("Callable[..., L]", type(node))
+        return ctor(
+            **{
+                field.name: tree_map(
+                    fn, *[cast(PyTree[object], getattr(t, field.name)) for t in trees]
+                )
+                for field in _fields_of(node)
+            }
+        )
+    return cast(L, fn(*trees))
 
 
 def infer_pytensor_shape(value: PyTensor) -> tuple[int, ...]:

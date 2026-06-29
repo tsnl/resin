@@ -406,13 +406,32 @@ def zeros(shape: tuple[int, ...], *, etype: ElementType | str = F4) -> View:
     return full(shape, 0, etype=etype)
 
 
+_param_counter = 0
+
+
+def _next_param_name(explicit: str | None) -> str:
+    global _param_counter
+    if explicit is not None:
+        return explicit
+    name = f"$p{_param_counter}"
+    _param_counter += 1
+    return name
+
+
 def param(
     *,
     shape: tuple[int, ...],
     etype: ElementType | str,
-    label: str | None = None,
+    name: str | None = None,
 ) -> View:
-    return View.identity(ParamNode(shape=shape, etype=etype, args=(), label=label))
+    return View.identity(
+        ParamNode(
+            shape=shape,
+            etype=etype,
+            args=(),
+            name=_next_param_name(name),
+        )
+    )
 
 
 def debug_print(root: View, out: SupportsWrite[str]) -> None:

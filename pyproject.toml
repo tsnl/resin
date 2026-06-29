@@ -9,6 +9,7 @@ dependencies = [
     "frozendict>=2.4.7",
     "msgpack>=1.1.2",
     "resin-rt-pybind",
+    "useful-types>=0.2.1",
 ]
 
 [dependency-groups]

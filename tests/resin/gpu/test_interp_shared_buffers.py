@@ -11,7 +11,7 @@ from resin.wgpu import build_wgpu_program, param_buffer_index
 
 
 def test_copy_buffer_to_buffer_across_programs() -> None:
-    weights = dsl.param(shape=(2,), etype=F4)
+    weights = dsl.param(shape=(2,), etype=F4, name="weights")
 
     train_builder = IrProgramBuilder()
     train_builder.build_sink("out", weights)
@@ -25,10 +25,8 @@ def test_copy_buffer_to_buffer_across_programs() -> None:
     train_program_id = interp.admit(train_program.to_msgpack())
     eval_program_id = interp.admit(eval_program.to_msgpack())
 
-    weights_node = weights.node
-    assert isinstance(weights_node, dsl.ParamNode)
-    train_weights_id = param_buffer_index(train_program, weights_node)
-    eval_weights_id = param_buffer_index(eval_program, weights_node)
+    train_weights_id = param_buffer_index(train_program, "weights")
+    eval_weights_id = param_buffer_index(eval_program, "weights")
 
     payload = struct.pack("<2f", 1.0, 2.0)
     interp.write_buffer(train_program_id, train_weights_id, payload)

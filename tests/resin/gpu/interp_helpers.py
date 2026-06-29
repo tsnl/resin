@@ -7,7 +7,6 @@ from collections.abc import Mapping
 import resin_rt_pybind
 
 from resin import dsl
-from resin.ir import IrProgramBuilder
 from resin.core.etype import ElementType, spell_etype_in_pystruct
 from resin.core.pytree import (
     PyTensor,
@@ -15,12 +14,7 @@ from resin.core.pytree import (
     infer_pytensor_shape,
     marshall_pytensor,
 )
-from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
-
-
-def sink_buffer_index(program: WgpuProgram, sink_name: str) -> int:
-    view_index = program.sinks[sink_name]
-    return program.buffer_views[view_index]["buffer_index"]
+from resin.runtime import compile_program
 
 
 def unmarshall_buffer(
@@ -37,32 +31,29 @@ def run_graph(
     sink_name: str = "out",
     params: Mapping[dsl.View, PyTensor] | None = None,
 ) -> list[float]:
-    builder = IrProgramBuilder()
     param_items = list((params or {}).items())
-    for index, (view, _) in enumerate(param_items):
-        builder.build_sink(f"__param_{index}", view)
-    builder.build_sink(sink_name, sink)
-    program = build_wgpu_program(builder.finish())
+    named_params = {
+        f"__param_{index}": view for index, (view, _) in enumerate(param_items)
+    }
+    compiled = compile_program(
+        params=named_params,
+        sinks={sink_name: sink},
+    )
     interp = resin_rt_pybind.Interp("wgpu")
-    program_id = interp.admit(program.to_msgpack())
+    program_id = compiled.admit(interp)
+    binding = compiled.binding(interp, program_id)
 
-    for view, value in param_items:
-        node = view.node
-        assert isinstance(node, dsl.ParamNode)
+    for index, (view, value) in enumerate(param_items):
         expected_shape = infer_pytensor_shape(value)
         if expected_shape != view.shape:
             raise ValueError(
                 f"param shape mismatch: view {view.shape}, value {expected_shape}"
             )
         data = marshall_pytensor(value, etype=view.etype)
-        interp.write_buffer(
-            program_id,
-            param_buffer_index(program, node),
-            data,
-        )
+        binding.write({f"__param_{index}": data})
 
     interp.run(program_id)
-    raw = interp.read_buffer(program_id, sink_buffer_index(program, sink_name))
+    raw = binding.read_sink(sink_name)
     return unmarshall_buffer(raw, sink.shape, sink.etype)
 
 

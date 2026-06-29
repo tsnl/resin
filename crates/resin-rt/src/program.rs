@@ -1,13 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const SCHEMA_VERSION: u32 = 1;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WgpuProgram {
-    #[serde(default = "default_schema_version")]
-    pub schema_version: u32,
-    pub param_buffer_ids: BTreeMap<u64, usize>,
+    pub param_buffers: BTreeMap<String, usize>,
     pub sinks: BTreeMap<String, usize>,
     pub queue: Vec<WgpuQueueOp>,
     pub buffers: Vec<WgpuBufferSpec>,
@@ -74,10 +70,6 @@ fn default_entry_point() -> String {
     "main".to_string()
 }
 
-fn default_schema_version() -> u32 {
-    SCHEMA_VERSION
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ElementType {
@@ -123,8 +115,7 @@ mod tests {
     #[test]
     fn msgpack_round_trip() {
         let program = WgpuProgram {
-            schema_version: SCHEMA_VERSION,
-            param_buffer_ids: BTreeMap::new(),
+            param_buffers: BTreeMap::new(),
             sinks: BTreeMap::from([("out".to_string(), 0)]),
             queue: vec![],
             buffers: vec![WgpuBufferSpec {

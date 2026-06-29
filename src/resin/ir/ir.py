@@ -36,8 +36,8 @@ import resin.dsl as dsl
 
 @dataclass(frozen=True, kw_only=True)
 class IrProgram:
-    # Maps Python object id of each ParamNode to its buffer index in `buffers`.
-    param_buffer_ids: frozendict[int, int]
+    # Maps each param's stable name to its buffer index in `buffers`.
+    param_buffers: frozendict[str, int]
     sinks: frozendict[str, IrBufferView]
     queue: tuple[IrDispatch, ...]
     buffers: tuple[IrBuffer, ...]
@@ -153,6 +153,7 @@ class IrProgramBuilder:
     buffer_view_memo: dict[dsl.View, IrBufferView]
     queue: list[IrDispatch]
     sinks: dict[str, IrBufferView]
+    param_names: dict[int, str]
 
     def __init__(self):
         super().__init__()
@@ -161,17 +162,30 @@ class IrProgramBuilder:
         self.buffer_view_memo = {}
         self.queue = []
         self.sinks = {}
+        self.param_names = {}
+
+    def register_param(self, name: str, view: dsl.View) -> None:
+        node = view.node
+        if not isinstance(node, dsl.ParamNode):
+            raise TypeError(f"register_param expected a param view, got {type(node)}")
+        if name in self.param_names.values():
+            raise ValueError(f"duplicate param name: {name!r}")
+        self.param_names[id(node)] = name
 
     def finish(self) -> IrProgram:
-        param_buffer_ids: frozendict[int, int] = frozendict(
-            {
-                id(node): index
-                for index, node in enumerate(self.buffer_memo.keys())
-                if isinstance(node, dsl.ParamNode)
-            }
-        )
+        param_buffer_items: list[tuple[str, int]] = []
+        seen_names: set[str] = set()
+        for index, node in enumerate(self.buffer_memo.keys()):
+            if not isinstance(node, dsl.ParamNode):
+                continue
+            name = self.param_names.get(id(node), node.name)
+            if name in seen_names:
+                raise ValueError(f"duplicate param name: {name!r}")
+            seen_names.add(name)
+            param_buffer_items.append((name, index))
+        param_buffers: frozendict[str, int] = frozendict(param_buffer_items)
         return IrProgram(
-            param_buffer_ids=param_buffer_ids,
+            param_buffers=param_buffers,
             sinks=frozendict(self.sinks),
             queue=tuple(self.queue),
             buffers=tuple(self.buffer_memo.values()),
