@@ -17,6 +17,7 @@ __all__ = [
 from abc import ABC
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import cast, override
 
 from frozendict import frozendict
 
@@ -84,16 +85,23 @@ class IrKernel(ABC):
     # Number of storage bindings used as outputs (bindings 0..num_outputs-1).
     num_outputs: int = 1
 
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        """Element type of each argument buffer (default: same as output)."""
+        return tuple(self.etype for _ in self.arg_accessors)
+
 
 @dataclass(frozen=True, kw_only=True)
 class IrElementwiseRpnKernel(IrKernel):
     rpn_expr: ElementRpnExpr
-    arg_etypes: tuple[ElementType, ...] = ()
+    arg_etypes: tuple[ElementType, ...]
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
-        if self.arg_etypes and len(self.arg_etypes) != len(self.arg_accessors):
-            raise ValueError("arg_etypes length must match arg_accessors")
+        assert len(self.arg_etypes) == len(self.arg_accessors)
+
+    @override
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        return self.arg_etypes
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -118,7 +126,12 @@ class IrRemapKernel(IrKernel):
     arg_etypes: tuple[ElementType, ...]
     clear_output_before_dispatch: bool = True
 
+    @override
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        return self.arg_etypes
+
     def __post_init__(self):
+        assert len(self.arg_etypes) == len(self.arg_accessors)
         match self.info:
             case RemapScatterInfo(accessor=accessor) if accessor is not None:
                 assert len(self.arg_accessors) == 1
@@ -395,7 +408,10 @@ class IrProgramBuilder:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
     def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
-        arg_etypes = tuple(view.etype for view in node.args)
+        arg_etypes = cast(
+            tuple[ElementType, ...],
+            tuple(view.etype for view in node.args),
+        )
         return IrElementwiseRpnKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
@@ -421,7 +437,10 @@ class IrProgramBuilder:
         )
 
     def _build_kernel_for_remap_node(self, node: dsl.RemapNode) -> IrKernel:
-        arg_etypes = tuple(view.etype for view in node.args)
+        arg_etypes = cast(
+            tuple[ElementType, ...],
+            tuple(view.etype for view in node.args),
+        )
         match node.info:
             case RemapScatterInfo(operator=operator):
                 clear_output = operator is None

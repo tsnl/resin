@@ -64,11 +64,12 @@ def accessor_adjoint(view: View, g: View) -> View:
 def df_do(
     node: Node,
     df_douts: View | dict[str, View],
-) -> tuple[View, ...]:
-    """
-    Given ∂f/∂(node ports), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand.
+) -> tuple[View | None, ...]:
+    """Given ∂f/∂(node ports), return one entry per operand in ``node.args``.
 
     ``df_douts`` may be a single ``View`` (default port) or a port→View map.
+    ``None`` means no adjoint propagates through that operand (e.g. remap indices).
+    The returned tuple always has length ``len(node.args)``.
     """
     if not node.args:
         return ()
@@ -100,13 +101,10 @@ def df_do(
             raise NotDifferentiableException(node)
 
 
-def _dense_remap_gradient(df_dout: View) -> View:
-    return df_dout if df_dout.is_identity() else df_dout.copy()
 
-
-def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
+def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View | None, ...]:
     source = node.args[0]
-    dense = _dense_remap_gradient(df_dout)
+    dense = df_dout.copy()
 
     match node.info:
         case RemapGatherInfo(accessor=None):
@@ -130,8 +128,6 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
                 ),
             )
         case RemapScatterInfo(accessor=None):
-            indices = node.indices
-            assert indices is not None
             return (
                 View.remap(
                     source=dense,
@@ -139,21 +135,21 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
                         accessor=Accessor.dense(node.shape),
                         source_shape=node.shape,
                     ),
-                    indices=indices,
+                    indices=node.args[1],
                 ),
+                None,
             )
         case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
             accessor is not None and source_shape is not None
         ):
-            indices = node.indices
-            assert indices is not None
             return (
                 View.remap(
                     source=dense,
                     info=RemapScatterInfo(operator="add"),
-                    indices=indices,
+                    indices=node.args[1],
                     out_shape=source_shape,
                 ),
+                None,
             )
         case _:
             raise NotDifferentiableException(node)
@@ -276,8 +272,11 @@ def grad_by_port(f: View) -> dict[tuple[Node, str], View]:
         if not df_douts:
             continue
 
-        for operand, df_do_i in zip(node.args, df_do(node, df_douts)):
-            accumulate(operand, df_do_i)
+        df_dos = df_do(node, df_douts)
+        assert len(df_dos) == len(node.args)
+        for operand, df_do_i in zip(node.args, df_dos, strict=True):
+            if df_do_i is not None:
+                accumulate(operand, df_do_i)
 
     return grad_port
 

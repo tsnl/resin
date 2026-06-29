@@ -16,7 +16,7 @@ from frozendict import frozendict
 import resin.dsl as dsl
 from resin.core.pytree import PyTree, flatten_pytree_items
 from resin.interp import Interp, ProgramId
-from resin.ir.ir import IrProgramBuilder
+from resin.ir.ir import IrProgramBuilder, reachable_ports
 from resin.core.etype import ElementType
 from resin.runtime.trees import register_named_params, sink_tree
 from resin.wgpu import WgpuProgram, build_wgpu_program, param_buffer_index
@@ -150,7 +150,16 @@ def compile_program(
     params: Mapping[str, PyTree[dsl.View]] | None = None,
     wgsl_kernel_config: WgslKernelConfig | None = None,
 ) -> CompiledProgram:
-    builder = IrProgramBuilder()
+    # Collect all sink views for port-level reachability (forward DCE).
+    sink_views: list[dsl.View] = []
+    for value in sinks.values():
+        if isinstance(value, dsl.View):
+            sink_views.append(value)
+        else:
+            for _path, view in flatten_pytree_items(value):
+                sink_views.append(view)
+    used = reachable_ports(sink_views)
+    builder = IrProgramBuilder(used_ports=used)
     flat_params = register_named_params(builder, params) if params is not None else {}
     _build_sinks(builder, sinks)
     artifact = build_wgpu_program(

@@ -22,7 +22,6 @@ from resin.ir.ir import (
     IrReductionKernel,
     IrRemapKernel,
     IrSortKernel,
-    IrWgslMultiOutputKernel,
 )
 
 __all__ = [
@@ -41,8 +40,6 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
-        case IrWgslMultiOutputKernel():
-            return kernel.dispatch_size
         case IrSortKernel() | IrPrefixSumKernel():
             # Single-threaded for correctness on small/medium vectors.
             return (1, 1, 1) if math.prod(kernel.shape) > 0 else (0, 1, 1)
@@ -83,8 +80,6 @@ def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
             _emit_wgsl_for_prefix_sum_kernel(w, kernel)
         case IrSortKernel():
             _emit_wgsl_for_sort_kernel(w, kernel)
-        case IrWgslMultiOutputKernel():
-            return kernel.wgsl
         case _:
             raise AbstractKernelException(f"Unsupported kernel type: {type(kernel)}")
 
@@ -100,15 +95,6 @@ class WgslKernelConfig:
     lg2_items_per_thread: int = 3
     workgroup_size: int = 8
 
-
-def _arg_etypes_for_kernel(kernel: IrKernel) -> tuple[ElementType, ...]:
-    match kernel:
-        case IrElementwiseRpnKernel() if kernel.arg_etypes:
-            return kernel.arg_etypes
-        case IrRemapKernel() | IrPrefixSumKernel() | IrSortKernel():
-            return kernel.arg_etypes
-        case _:
-            return tuple(kernel.etype for _ in kernel.arg_accessors)
 
 
 def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
@@ -134,7 +120,7 @@ def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
                 """
             )
             bind += 1
-        for i, arg_etype in enumerate(_arg_etypes_for_kernel(kernel)):
+        for i, arg_etype in enumerate(kernel.operand_etypes()):
             arg_t = spell_etype_in_wgsl(arg_etype)
             w.print(
                 f"""
@@ -160,7 +146,7 @@ def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
                 """
             )
 
-    for i, arg_etype in enumerate(_arg_etypes_for_kernel(kernel)):
+    for i, arg_etype in enumerate(kernel.operand_etypes()):
         arg_t = spell_etype_in_wgsl(arg_etype)
         w.print(
             f"""
@@ -311,7 +297,7 @@ def _emit_wgsl_for_elementwise_rpn_kernel(
 
     _emit_bindings(w, kernel)
     _emit_arg_address_functions(w, kernel)
-    arg_etypes = _arg_etypes_for_kernel(kernel)
+    arg_etypes = kernel.operand_etypes()
     _emit_eval_rpn_expr(
         w,
         kernel.rpn_expr,
@@ -338,10 +324,10 @@ def _emit_eval_rpn_expr(
     *,
     n: int,
     etype: ElementType,
+    arg_etypes: tuple[ElementType, ...],
 ) -> None:
+    assert len(arg_etypes) == n
     t = spell_etype_in_wgsl(etype)
-    if arg_etypes is None or len(arg_etypes) != n:
-        arg_etypes = tuple(etype for _ in range(n))
 
     with w.block(
         f"""
@@ -702,7 +688,7 @@ def _emit_wgsl_for_source_driven_remap(
     _emit_remap_bindings(
         w,
         output_etype=kernel.etype,
-        arg_etypes=kernel.arg_etypes,
+        arg_etypes=kernel.operand_etypes(),
         operator=operator,
     )
     _emit_arg_address_functions(w, kernel)
@@ -834,7 +820,7 @@ def _emit_wgsl_for_remap_kernel(
             _emit_remap_bindings(
                 w,
                 output_etype=kernel.etype,
-                arg_etypes=kernel.arg_etypes,
+                arg_etypes=kernel.operand_etypes(),
                 operator=None,
             )
             _emit_arg_address_functions(w, kernel)
@@ -851,7 +837,7 @@ def _emit_wgsl_for_remap_kernel(
             _emit_remap_bindings(
                 w,
                 output_etype=kernel.etype,
-                arg_etypes=kernel.arg_etypes,
+                arg_etypes=kernel.operand_etypes(),
                 operator=None,
             )
             _emit_arg_address_functions(w, kernel)
@@ -1010,7 +996,6 @@ def _emit_wgsl_for_sort_kernel(w: "WgslWriter", kernel: IrSortKernel) -> None:
     """
     _emit_bindings(w, kernel)
     n = math.prod(kernel.shape)
-    t = spell_etype_in_wgsl(kernel.etype)
     is_float = kernel.etype in ("f4", "f2") or str(kernel.etype).startswith("f")
 
     with w.block("@compute @workgroup_size(1)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>)"):
@@ -1069,7 +1054,7 @@ def _emit_wgsl_for_sort_kernel(w: "WgslWriter", kernel: IrSortKernel) -> None:
         with w.block(f"for (var i: u32 = 0u; i < {n}u; i++)"):
             w.print("let id = idx_a[i];")
             if kernel.write_values:
-                w.print(f"output_values[i] = arg0[id];")
+                w.print("output_values[i] = arg0[id];")
             if kernel.write_perm:
                 w.print("output_perm[i] = id;")
 

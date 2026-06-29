@@ -25,7 +25,7 @@ __all__ = [
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from resin.dsl.view import View
@@ -139,10 +139,6 @@ type RemapInfo = RemapScatterInfo | RemapGatherInfo
 class RemapNode(Node):
     info: RemapInfo
 
-    @property
-    def indices(self) -> "View | None":
-        return self.args[1] if len(self.args) > 1 else None
-
 
 @dataclass(kw_only=True, frozen=True, eq=False)
 class CustomNode(Node, ABC):
@@ -152,8 +148,9 @@ class CustomNode(Node, ABC):
     def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
         """Build the forward IR kernel, optionally eliding unused output ports."""
 
-    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
+    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View | None", ...]:
         """Return ∂f/∂operand for each arg given gradients keyed by output port."""
+        _ = df_douts
         raise NotImplementedError(f"{type(self).__name__} has no df_do_ports")
 
 
@@ -163,6 +160,7 @@ class PrefixSumNode(CustomNode):
 
     inclusive: bool = False
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
         from resin.ir.ir import IrPrefixSumKernel
 
@@ -175,7 +173,8 @@ class PrefixSumNode(CustomNode):
             arg_etypes=(self.args[0].etype,),
         )
 
-    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
+    @override
+    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View | None", ...]:
         from resin.dsl.view import View
 
         df_dout = df_douts.get(DEFAULT_PORT)
@@ -194,14 +193,17 @@ class SortNode(CustomNode):
 
     perm_etype: ElementType = U4
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("values", "perm")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         if port not in ("values", "perm"):
             raise KeyError(f"unknown port {port!r} on SortNode")
         return self.shape
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         if port == "values":
             return self.etype
@@ -209,6 +211,7 @@ class SortNode(CustomNode):
             return self.perm_etype
         raise KeyError(f"unknown port {port!r} on SortNode")
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> "IrKernel":
         from resin.ir.ir import IrSortKernel
 
@@ -239,7 +242,8 @@ class SortNode(CustomNode):
             ports.append("values")
         return tuple(ports)
 
-    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View", ...]:
+    @override
+    def df_do_ports(self, df_douts: dict[str, "View"]) -> tuple["View | None", ...]:
         from resin.dsl.view import View
 
         # y[i] = x[p[i]] ⇒ scatter grad_y into grad_x at p.
@@ -247,7 +251,7 @@ class SortNode(CustomNode):
         if df_dvalues is None:
             # No gradient through sorted values (e.g. only perm was consumed).
             return (View.zeros_like(self.args[0]),)
-        perm = View.port(self, "perm")
+        perm = View.identity(self, port="perm")
         n = self.shape[0]
         # Build indices as (n, 1) u4 coords into a 1D source of length n.
         indices = perm.reshape((n, 1)) if perm.rank == 1 else perm
