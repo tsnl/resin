@@ -1,14 +1,12 @@
 import struct
 from collections.abc import Callable, Generator, ItemsView
 from dataclasses import fields
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import Protocol, cast
 
 from useful_types import SequenceNotStr
 
+from .common import DataclassInstance
 from .etype import ElementType, Scalar, is_scalar, spell_etype_in_pystruct
-
-if TYPE_CHECKING:
-    from _typeshed import DataclassInstance
 
 type PyTensor = Scalar | list[PyTensor] | tuple[PyTensor, ...]
 

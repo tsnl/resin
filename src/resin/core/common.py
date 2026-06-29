@@ -1,10 +1,19 @@
-from typing import Protocol, TypeVar
+from dataclasses import Field
+from typing import Any, ClassVar, Protocol, TypeVar
+
+#
+# Typeshed
+#
 
 TContra = TypeVar("TContra", contravariant=True)
 
 
 class SupportsWrite(Protocol[TContra]):
     def write(self, s: TContra, /) -> object: ...
+
+
+class DataclassInstance(Protocol):
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
 
 
 #
