@@ -8,7 +8,7 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrRemapKernel",
 ]
 
 from abc import ABC
@@ -18,6 +18,7 @@ from frozendict import frozendict
 
 from resin.core.accessor import Accessor
 from resin.core.pytree import marshall_pytensor
+from resin.dsl.node import RemapGatherInfo, RemapInfo, RemapScatterInfo
 from .rpn import ElementRpnExpr
 from resin.core.etype import (
     BinaryAssocElementOperator,
@@ -108,14 +109,35 @@ class IrMatmulKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterKernel(IrKernel):
-    operator: BinaryAssocElementOperator | None
-    woffset: int
-    wpitch: tuple[int, ...]
+class IrRemapKernel(IrKernel):
+    info: RemapInfo
+    arg_etypes: tuple[ElementType | str, ...]
     clear_output_before_dispatch: bool = True
 
     def __post_init__(self):
-        assert len(self.arg_accessors) == 1
+        match self.info:
+            case RemapScatterInfo(accessor=accessor) if accessor is not None:
+                assert len(self.arg_accessors) == 1
+                assert accessor.shape == self.arg_accessors[0].shape
+            case RemapScatterInfo(accessor=None):
+                assert len(self.arg_accessors) == 2
+                assert len(self.arg_etypes) == 2
+                source_accessor, indices_accessor = self.arg_accessors
+                assert indices_accessor.shape[-1] == len(self.shape)
+                assert indices_accessor.shape[:-1] == source_accessor.shape
+            case RemapGatherInfo(accessor=None, source_shape=None):
+                assert len(self.arg_accessors) == 1
+            case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
+                accessor is not None and source_shape is not None
+            ):
+                assert len(self.arg_accessors) == 2
+                assert len(self.arg_etypes) == 2
+                source_accessor, indices_accessor = self.arg_accessors
+                assert indices_accessor.shape[-1] == accessor.rank
+                assert indices_accessor.shape[:-1] == source_accessor.shape
+                assert accessor.shape == source_shape
+            case _:
+                raise AssertionError(f"invalid RemapInfo: {self.info!r}")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -259,8 +281,8 @@ class IrProgramBuilder:
                 return self._build_kernel_for_matmul_node(node)
             case dsl.ReductionNode():
                 return self._build_kernel_for_reduction_node(node)
-            case dsl.ScatterNode():
-                return self._build_kernel_for_scatter_node(node)
+            case dsl.RemapNode():
+                return self._build_kernel_for_remap_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
@@ -290,14 +312,20 @@ class IrProgramBuilder:
             axes=node.axes,
         )
 
-    def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
-        return IrScatterKernel(
-            arg_accessors=(node.args[0].accessor,),
+    def _build_kernel_for_remap_node(self, node: dsl.RemapNode) -> IrKernel:
+        arg_etypes = tuple(view.etype for view in node.args)
+        match node.info:
+            case RemapScatterInfo(operator=operator):
+                clear_output = operator is None
+            case RemapGatherInfo():
+                clear_output = True
+        return IrRemapKernel(
+            arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
             shape=node.shape,
-            operator=node.operator,
-            woffset=node.woffset,
-            wpitch=node.wpitch,
+            info=node.info,
+            arg_etypes=arg_etypes,
+            clear_output_before_dispatch=clear_output,
         )
 
 

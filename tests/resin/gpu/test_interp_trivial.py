@@ -7,6 +7,7 @@ import pytest
 import resin.grad as grad
 import resin.nn as nn
 from resin import dsl
+from resin.core.accessor import Accessor
 from resin.core.etype import F4, U4
 
 from resin.core.pytree import PyTensor
@@ -225,6 +226,77 @@ class TestViewOps:
         assert run_graph(x.copy(), params={x: [1.0, 2.0, 3.0]}) == pytest.approx(
             [1.0, 2.0, 3.0]
         )
+
+
+class TestRemapLayout:
+    def test_scatter_with_accessor(self) -> None:
+        src = dsl.param(shape=(2,), etype=F4)
+        out = dsl.View.remap(
+            source=src,
+            info=dsl.RemapScatterInfo(
+                accessor=Accessor(offset=1, shape=(2,), pitch=(1,)),
+            ),
+            out_shape=(4,),
+        )
+        assert run_graph(out, params={src: [10.0, 20.0]}) == pytest.approx(
+            [0.0, 10.0, 20.0, 0.0]
+        )
+
+    def test_scatter_accumulate_with_accessor(self) -> None:
+        src = dsl.param(shape=(2,), etype=F4)
+        out = dsl.View.remap(
+            source=src,
+            info=dsl.RemapScatterInfo(
+                accessor=Accessor(offset=0, shape=(2,), pitch=(1,)),
+                operator="add",
+            ),
+            out_shape=(3,),
+        )
+        assert run_graph(
+            out,
+            params={src: [1.0, 2.0]},
+        ) == pytest.approx([1.0, 2.0, 0.0])
+
+
+class TestRemapIndices:
+    def test_scatter_with_indices(self) -> None:
+        src = dsl.param(shape=(2,), etype=F4)
+        idx = dsl.const([[2], [0]], etype=U4)
+        out = dsl.View.remap(
+            source=src,
+            info=dsl.RemapScatterInfo(),
+            indices=idx,
+            out_shape=(3,),
+        )
+        assert run_graph(out, params={src: [5.0, 9.0]}) == pytest.approx(
+            [9.0, 0.0, 5.0]
+        )
+
+    def test_gather_with_indices(self) -> None:
+        src = dsl.param(shape=(4,), etype=F4)
+        idx = dsl.const([[2], [0], [3]], etype=U4)
+        out = dsl.View.remap(
+            source=src,
+            info=dsl.RemapGatherInfo(
+                accessor=Accessor.dense((4,)),
+                source_shape=(4,),
+            ),
+            indices=idx,
+        )
+        assert run_graph(
+            out, params={src: [1.0, 2.0, 3.0, 4.0]}
+        ) == pytest.approx([3.0, 1.0, 4.0])
+
+    def test_scatter_accumulate_with_indices(self) -> None:
+        src = dsl.param(shape=(2,), etype=F4)
+        idx = dsl.const([[0], [0]], etype=U4)
+        out = dsl.View.remap(
+            source=src,
+            info=dsl.RemapScatterInfo(operator="add"),
+            indices=idx,
+            out_shape=(2,),
+        )
+        assert run_graph(out, params={src: [1.0, 2.0]}) == pytest.approx([3.0, 0.0])
 
 
 class TestScatterAccumulate:
