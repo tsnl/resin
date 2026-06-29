@@ -132,7 +132,24 @@ def _df_do_elementwise(node: ElementwiseNode, df_dout: View) -> tuple[View, ...]
                 df_dout * node.args[0].lt(node.args[1]),
                 df_dout * node.args[1].lt(node.args[0]),
             )
-        case "not" | "eq" | "ne" | "lt" | "gt" | "le" | "ge":
+        case (
+            "not"
+            | "eq"
+            | "ne"
+            | "lt"
+            | "gt"
+            | "le"
+            | "ge"
+            | "floor"
+            | "ceil"
+            | "bitcast_f2u"
+            | "bitcast_u2f"
+            | "band"
+            | "bor"
+            | "bxor"
+            | "shl"
+            | "shr"
+        ):
             raise NotDifferentiableException(node)
         case _:
             assert_never(node.operator)

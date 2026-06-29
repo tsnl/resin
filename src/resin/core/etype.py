@@ -9,7 +9,10 @@ def is_scalar(value: object) -> bool:
 
 
 type ElementOperator = (
-    UnaryElementOperator | BinaryElementOperator | BinaryCompareOperator
+    UnaryElementOperator
+    | BinaryElementOperator
+    | BinaryCompareOperator
+    | BinaryBitwiseOperator
 )
 type UnaryElementOperator = Literal[
     "neg",
@@ -19,10 +22,15 @@ type UnaryElementOperator = Literal[
     "sin",
     "cos",
     "not",
+    "floor",
+    "ceil",
+    "bitcast_f2u",
+    "bitcast_u2f",
 ]
 type BinaryAssocElementOperator = Literal["mul", "add", "max", "min"]
 type BinaryElementOperator = Literal["pow", "div", "sub"] | BinaryAssocElementOperator
 type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
+type BinaryBitwiseOperator = Literal["band", "bor", "bxor", "shl", "shr"]
 
 # Tile etypes (e.g. "mat4x4_f4") extend this union as they are added.
 type ElementType = Literal["f4", "f2", "u4"]
@@ -73,6 +81,25 @@ def etype_join_kind(etype1: EKind, etype2: EKind) -> EKind:
     if etype1 != etype2:
         raise ValueError(f"Cannot join different kinds' etypes: {etype1} and {etype2}")
     return etype1
+
+
+def output_etype_for_unary(
+    operator: UnaryElementOperator,
+    operand_etype: ElementType | str,
+) -> ElementType:
+    match operator:
+        case "bitcast_f2u":
+            if etype_kind(operand_etype) != "float":
+                raise ValueError(f"bitcast_f2u expects a float operand, got {operand_etype}")
+            return "u4"
+        case "bitcast_u2f":
+            if etype_kind(operand_etype) != "uint":
+                raise ValueError(f"bitcast_u2f expects an unsigned operand, got {operand_etype}")
+            return "f4"
+        case _:
+            if operand_etype not in ("f4", "f2", "u4"):
+                raise ValueError(f"Unsupported etype {operand_etype}")
+            return operand_etype
 
 
 def spell_etype_in_pystruct(etype: ElementType | str) -> str:

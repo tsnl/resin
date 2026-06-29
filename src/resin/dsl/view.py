@@ -23,13 +23,16 @@ from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_jo
 from resin.core.common import SupportsWrite, pascal_to_snake_case
 from resin.core.etype import (
     BinaryAssocElementOperator,
+    BinaryBitwiseOperator,
     ElementType,
     ElementOperator,
     F4,
     Scalar,
     UnaryElementOperator,
     etype_join,
+    etype_kind,
     etype_nbytes,
+    output_etype_for_unary,
 )
 from resin.core.pytree import PyTensor, infer_pytensor_shape
 from resin.dsl.node import (
@@ -197,6 +200,33 @@ class View:
     def cos(self) -> "View":
         return View.elementwise_unary(self, operator="cos")
 
+    def floor(self) -> "View":
+        return View.elementwise_unary(self, operator="floor")
+
+    def ceil(self) -> "View":
+        return View.elementwise_unary(self, operator="ceil")
+
+    def bitcast_f2u(self) -> "View":
+        return View.elementwise_unary(self, operator="bitcast_f2u")
+
+    def bitcast_u2f(self) -> "View":
+        return View.elementwise_unary(self, operator="bitcast_u2f")
+
+    def band(self, other: "View") -> "View":
+        return View.elementwise_bitwise(self, other, operator="band")
+
+    def bor(self, other: "View") -> "View":
+        return View.elementwise_bitwise(self, other, operator="bor")
+
+    def bxor(self, other: "View") -> "View":
+        return View.elementwise_bitwise(self, other, operator="bxor")
+
+    def shl(self, other: "View") -> "View":
+        return View.elementwise_bitwise(self, other, operator="shl")
+
+    def shr(self, other: "View") -> "View":
+        return View.elementwise_bitwise(self, other, operator="shr")
+
     def __invert__(self) -> "View":
         return View.elementwise_unary(self, operator="not")
 
@@ -305,11 +335,30 @@ class View:
 
     @staticmethod
     def elementwise_unary(operand: "View", operator: UnaryElementOperator) -> "View":
+        out_etype = output_etype_for_unary(operator, operand.etype)
         return View.identity(
             ElementwiseNode(
                 shape=operand.shape,
-                etype=operand.etype,
+                etype=out_etype,
                 args=(operand,),
+                operator=operator,
+            )
+        )
+
+    @staticmethod
+    def elementwise_bitwise(
+        a: "View",
+        b: "View",
+        operator: BinaryBitwiseOperator,
+    ) -> "View":
+        if etype_kind(a.etype) != "uint" or etype_kind(b.etype) != "uint":
+            raise TypeError(f"bitwise {operator} requires unsigned integer operands")
+        a, b = a._join_shapes_for_elementwise_bop(b)
+        return View.identity(
+            ElementwiseNode(
+                shape=a.shape,
+                etype=a.etype,
+                args=(a, b),
                 operator=operator,
             )
         )
