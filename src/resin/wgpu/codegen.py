@@ -83,6 +83,14 @@ class WgslKernelConfig:
     workgroup_size: int = 8
 
 
+def _arg_etypes_for_kernel(kernel: IrKernel) -> tuple[str | ElementType, ...]:
+    match kernel:
+        case IrElementwiseRpnKernel() if kernel.arg_etypes:
+            return kernel.arg_etypes
+        case _:
+            return tuple(kernel.etype for _ in kernel.arg_accessors)
+
+
 def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
     t = spell_etype_in_wgsl(kernel.etype)
 
@@ -93,11 +101,12 @@ def _emit_bindings(w: "WgslWriter", kernel: IrKernel) -> None:
         """
     )
 
-    for i in range(len(kernel.arg_accessors)):
+    for i, arg_etype in enumerate(_arg_etypes_for_kernel(kernel)):
+        arg_t = spell_etype_in_wgsl(arg_etype)
         w.print(
             f"""
             @group(0) @binding({i + 1})
-            var<storage, read> arg{i}: array<{t}>;
+            var<storage, read> arg{i}: array<{arg_t}>;
             """
         )
 
@@ -243,11 +252,13 @@ def _emit_wgsl_for_elementwise_rpn_kernel(
 
     _emit_bindings(w, kernel)
     _emit_arg_address_functions(w, kernel)
+    arg_etypes = _arg_etypes_for_kernel(kernel)
     _emit_eval_rpn_expr(
         w,
         kernel.rpn_expr,
         n=n,
         etype=kernel.etype,
+        arg_etypes=arg_etypes,
     )
 
     with _per_output_element(w, kernel, config) as (w, out_address_expr):
@@ -268,12 +279,15 @@ def _emit_eval_rpn_expr(
     *,
     n: int,
     etype: ElementType | str,
+    arg_etypes: tuple[ElementType | str, ...] | None = None,
 ) -> None:
     t = spell_etype_in_wgsl(etype)
+    if arg_etypes is None or len(arg_etypes) != n:
+        arg_etypes = tuple(etype for _ in range(n))
 
     with w.block(
         f"""
-        fn eval_rpn_expr({",".join(f"a{i}: {t}" for i in range(n))}) -> {t}
+        fn eval_rpn_expr({",".join(f"a{i}: {spell_etype_in_wgsl(arg_etypes[i])}" for i in range(n))}) -> {t}
         """
     ):
         expr_stack: list[str] = []
@@ -302,6 +316,38 @@ def _emit_eval_rpn_expr(
                 case "not":
                     operand = expr_stack.pop()
                     expr_stack.append(f"(abs(1.0 - {operand}))")
+                case "floor":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"floor({operand})")
+                case "ceil":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"ceil({operand})")
+                case "bitcast_f2u":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"bitcast<u32>({operand})")
+                case "bitcast_u2f":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"bitcast<f32>({operand})")
+                case "band":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} & {rhs})")
+                case "bor":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} | {rhs})")
+                case "bxor":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} ^ {rhs})")
+                case "shl":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} << {rhs})")
+                case "shr":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} >> {rhs})")
                 case "pow":
                     rhs = expr_stack.pop()
                     lhs = expr_stack.pop()
