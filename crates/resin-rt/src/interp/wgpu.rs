@@ -36,8 +36,8 @@ struct PreparedDispatch {
     bind_group: wgpu::BindGroup,
     dispatch_size: [u32; 3],
     clear_output_before_dispatch: bool,
-    output_buffer_index: usize,
-    output_byte_len: u64,
+    output_buffer_indices: Vec<usize>,
+    output_byte_lens: Vec<u64>,
 }
 
 struct PreparedCopy {
@@ -209,11 +209,13 @@ impl WgpuInterp {
         debug_assert_ne!(prepared.dispatch_size, [0, 0, 0]);
 
         if prepared.clear_output_before_dispatch {
-            encoder.clear_buffer(
-                &loaded.buffers[prepared.output_buffer_index],
-                0,
-                Some(prepared.output_byte_len),
-            );
+            for (&index, &byte_len) in prepared
+                .output_buffer_indices
+                .iter()
+                .zip(prepared.output_byte_lens.iter())
+            {
+                encoder.clear_buffer(&loaded.buffers[index], 0, Some(byte_len));
+            }
         }
 
         let pipeline = &loaded.pipelines[prepared.pipeline_index];
@@ -526,14 +528,28 @@ fn prepare_dispatch_op(
     let compute = &program.pipelines[dispatch.pipeline_index];
     let pipeline = &pipelines[dispatch.pipeline_index];
 
-    let mut entries = vec![wgpu::BindGroupEntry {
-        binding: 0,
-        resource: buffers[dispatch.output_buffer_index].as_entire_binding(),
-    }];
-    for (binding, &view_index) in dispatch.arg_buffer_view_indices.iter().enumerate() {
+    let num_outputs = compute.num_output_bindings as usize;
+    if dispatch.output_buffer_indices.len() != num_outputs {
+        return Err(WgpuInterpError::Program(format!(
+            "dispatch output count {} != pipeline num_output_bindings {}",
+            dispatch.output_buffer_indices.len(),
+            num_outputs
+        )));
+    }
+
+    let mut entries: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(
+        num_outputs + dispatch.arg_buffer_view_indices.len(),
+    );
+    for (binding, &buffer_index) in dispatch.output_buffer_indices.iter().enumerate() {
+        entries.push(wgpu::BindGroupEntry {
+            binding: binding as u32,
+            resource: buffers[buffer_index].as_entire_binding(),
+        });
+    }
+    for (i, &view_index) in dispatch.arg_buffer_view_indices.iter().enumerate() {
         let view = &program.buffer_views[view_index];
         entries.push(wgpu::BindGroupEntry {
-            binding: (binding + 1) as u32,
+            binding: (num_outputs + i) as u32,
             resource: buffers[view.buffer_index].as_entire_binding(),
         });
     }
@@ -544,13 +560,19 @@ fn prepare_dispatch_op(
         entries: &entries,
     });
 
+    let output_byte_lens: Vec<u64> = dispatch
+        .output_buffer_indices
+        .iter()
+        .map(|&idx| program.buffers[idx].byte_len())
+        .collect();
+
     Ok(PreparedDispatch {
         pipeline_index: dispatch.pipeline_index,
         bind_group,
         dispatch_size: compute.dispatch_size,
         clear_output_before_dispatch: compute.clear_output_before_dispatch,
-        output_buffer_index: dispatch.output_buffer_index,
-        output_byte_len: program.buffers[dispatch.output_buffer_index].byte_len(),
+        output_buffer_indices: dispatch.output_buffer_indices.clone(),
+        output_byte_lens,
     })
 }
 

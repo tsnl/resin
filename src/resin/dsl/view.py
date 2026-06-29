@@ -36,6 +36,7 @@ from resin.core.etype import (
 )
 from resin.core.pytree import PyTensor, infer_pytensor_shape
 from resin.dsl.node import (
+    DEFAULT_PORT,
     ConstNode,
     ElementwiseNode,
     MatmulNode,
@@ -59,6 +60,7 @@ class TensorMeta:
 class View:
     node: Node
     accessor: Accessor
+    port: str = DEFAULT_PORT
 
     @overload
     def __class_getitem__(
@@ -77,8 +79,16 @@ class View:
         return TensorMeta(etype, shape)
 
     @staticmethod
-    def identity(node: Node) -> "View":
-        return View(node=node, accessor=Accessor.dense(node.shape))
+    def identity(node: Node, port: str = DEFAULT_PORT) -> "View":
+        return View(
+            node=node,
+            port=port,
+            accessor=Accessor.dense(node.port_shape(port)),
+        )
+
+    @staticmethod
+    def port(node: Node, port: str) -> "View":
+        return View.identity(node, port=port)
 
     @property
     def offset(self) -> int:
@@ -94,7 +104,7 @@ class View:
 
     @property
     def etype(self) -> ElementType:
-        return self.node.etype
+        return self.node.port_etype(self.port)
 
     @property
     def rank(self) -> int:
@@ -105,19 +115,56 @@ class View:
         return math.prod(self.shape) * etype_nbytes(self.etype)
 
     def broadcast(self, ns: tuple[int, ...]) -> "View":
-        return View(node=self.node, accessor=self.accessor.broadcast(ns))
+        return View(
+            node=self.node,
+            port=self.port,
+            accessor=self.accessor.broadcast(ns),
+        )
 
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> "View":
-        return View(node=self.node, accessor=self.accessor.narrow(key))
+        return View(
+            node=self.node,
+            port=self.port,
+            accessor=self.accessor.narrow(key),
+        )
 
     def permute(self, permutation: tuple[int, ...]) -> "View":
-        return View(node=self.node, accessor=self.accessor.permute(permutation))
+        return View(
+            node=self.node,
+            port=self.port,
+            accessor=self.accessor.permute(permutation),
+        )
 
     def transpose(self) -> "View":
-        return View(node=self.node, accessor=self.accessor.transpose())
+        return View(
+            node=self.node,
+            port=self.port,
+            accessor=self.accessor.transpose(),
+        )
 
     def squeeze(self, axes: tuple[int, ...]) -> "View":
-        return View(node=self.node, accessor=self.accessor.squeeze(axes))
+        return View(
+            node=self.node,
+            port=self.port,
+            accessor=self.accessor.squeeze(axes),
+        )
+
+    def reshape(self, shape: tuple[int, ...]) -> "View":
+        if math.prod(shape) != math.prod(self.shape):
+            raise ValueError(f"cannot reshape {self.shape} to {shape}")
+        if not self.is_identity() and not self.accessor.is_dense_c_contiguous(
+            self.node.port_shape(self.port)
+        ):
+            return self.copy().reshape(shape)
+        return View(
+            node=self.node,
+            port=self.port,
+            accessor=Accessor(
+                offset=self.offset,
+                shape=shape,
+                pitch=c_contiguous_pitch_for_shape(shape),
+            ),
+        )
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
         return View.remap(
@@ -279,7 +326,8 @@ class View:
         debug_print(self, out)
 
     def is_identity(self) -> bool:
-        return self.accessor.is_dense_c_contiguous(self.node.shape)
+        return self.accessor.is_dense_c_contiguous(self.node.port_shape(self.port))
+
 
     @staticmethod
     def _from_view_or_scalar(
@@ -309,6 +357,7 @@ class View:
         return (
             View(
                 node=self.node,
+                port=self.port,
                 accessor=Accessor(
                     offset=self.offset,
                     shape=join.shape,
@@ -317,6 +366,7 @@ class View:
             ),
             View(
                 node=other.node,
+                port=other.port,
                 accessor=Accessor(
                     offset=other.offset,
                     shape=join.shape,
@@ -360,10 +410,12 @@ class View:
 
         new_self = View(
             node=s.node,
+            port=s.port,
             accessor=Accessor(offset=s.offset, shape=new_s_shape, pitch=new_s_pitch),
         )
         new_other = View(
             node=o.node,
+            port=o.port,
             accessor=Accessor(offset=o.offset, shape=new_o_shape, pitch=new_o_pitch),
         )
         return new_self, new_other
@@ -488,6 +540,7 @@ class View:
                 # preserve port if present in View constructor calls nearby
                 source = View(
                     node=source.node,
+                    port=source.port,
                     accessor=Accessor(
                         offset=source.offset,
                         shape=out_prefix,
@@ -534,6 +587,56 @@ class View:
 
 
 type TensorOperand = View | Scalar
+
+
+def _validate_indices_view(indices: View, out_shape: tuple[int, ...]) -> View:
+    out_rank = len(out_shape)
+    if indices.rank == 0:
+        raise ValueError("indices must have rank >= 1")
+    if indices.shape[-1] != out_rank:
+        raise ValueError(
+            f"indices.shape[-1] must equal len(out_shape) ({out_rank}), got shape {indices.shape}"
+        )
+    if etype_kind(indices.etype) != "uint":
+        raise ValueError(
+            f"indices must have an unsigned integer etype, got {indices.etype}"
+        )
+    return indices
+
+
+def _join_source_with_indices(
+    source: View,
+    indices: View,
+    out_shape: tuple[int, ...],
+) -> tuple[View, View]:
+    indices = _validate_indices_view(indices, out_shape)
+    out_rank = len(out_shape)
+
+    prefix_join = shape_join(
+        shape1=source.shape,
+        pitch1=source.pitch,
+        shape2=indices.shape[:-1],
+        pitch2=indices.pitch[:-1],
+    )
+    joined_source = View(
+        node=source.node,
+        port=source.port,
+        accessor=Accessor(
+            offset=source.offset,
+            shape=prefix_join.shape,
+            pitch=prefix_join.pitch1,
+        ),
+    )
+    joined_indices = View(
+        node=indices.node,
+        port=indices.port,
+        accessor=Accessor(
+            offset=indices.offset,
+            shape=prefix_join.shape + (out_rank,),
+            pitch=prefix_join.pitch2 + (indices.pitch[-1],),
+        ),
+    )
+    return joined_source, joined_indices
 
 
 def const(value: PyTensor, *, etype: ElementType = F4) -> View:
@@ -607,7 +710,13 @@ def debug_print(root: View, out: SupportsWrite[str]) -> None:
         extra_fields = [f.name for f in fields(node) if f.name not in base_fields]
         args = ", ".join(f"{f}={getattr(node, f)!r}" for f in extra_fields)
         name = pascal_to_snake_case(node.__class__.__name__[: -len("Node")])
-        return f"{name}({args}) :: {node.etype}{node.shape!r}"
+        ports = node.output_ports()
+        if ports == (DEFAULT_PORT,):
+            return f"{name}({args}) :: {node.etype}{node.shape!r}"
+        port_specs = ", ".join(
+            f"{p}:{node.port_etype(p)}{node.port_shape(p)!r}" for p in ports
+        )
+        return f"{name}({args}) :: {{{port_specs}}}"
 
     def visit_view(
         view: View,
@@ -622,9 +731,10 @@ def debug_print(root: View, out: SupportsWrite[str]) -> None:
             return
 
         a = view.accessor
+        port_s = f", port={view.port!r}" if view.port != DEFAULT_PORT else ""
         print(
             f"{prefix}{connector}view("
-            + f"offset={a.offset}, shape={a.shape!r}, pitch={a.pitch!r})",
+            + f"offset={a.offset}, shape={a.shape!r}, pitch={a.pitch!r}{port_s})",
             file=out,
         )
         visit_node(view.node, prefix + prefix_ext, "└ ", "  ", is_root=is_root)

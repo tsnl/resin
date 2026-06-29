@@ -45,13 +45,15 @@ class WgpuComputePipelineSpec(TypedDict):
     num_arg_bindings: int
     entry_point: NotRequired[str]
     clear_output_before_dispatch: NotRequired[bool]
+    num_output_bindings: NotRequired[int]
 
 
 class WgpuDispatch(TypedDict):
     kind: Literal["dispatch"]
     pipeline_index: int
     arg_buffer_view_indices: list[int]
-    output_buffer_index: int
+    # One or more output buffers bound at storage slots 0..N-1.
+    output_buffer_indices: list[int]
 
 
 class WgpuCopy(TypedDict):

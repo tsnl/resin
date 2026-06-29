@@ -9,9 +9,11 @@ __all__ = [
     "IrProgramBuilder",
     "IrReductionKernel",
     "IrRemapKernel",
+    "reachable_ports",
 ]
 
 from abc import ABC
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from frozendict import frozendict
@@ -30,6 +32,7 @@ from resin.core.etype import (
     UnaryElementOperator,
 )
 import resin.dsl as dsl
+from resin.dsl.node import DEFAULT_PORT, CustomNode
 
 #
 # IrProgram
@@ -64,21 +67,19 @@ class IrBufferView:
 class IrDispatch:
     kernel: IrKernel
     args: tuple[IrBufferView, ...]
-    output: IrBuffer
+    outputs: tuple[IrBuffer, ...]
 
 
 @dataclass(frozen=True, kw_only=True)
 class IrKernel(ABC):
-    """Base kernel. ``etype`` is the output buffer element type.
-
-    All current kernels share one etype for inputs and output. Tile
-    kernels may need per-operand types or epilogue-specific types later.
-    """
+    """Base kernel. ``etype`` is the primary output buffer element type."""
 
     arg_accessors: tuple[Accessor, ...]
     etype: ElementType
     shape: tuple[int, ...]
     clear_output_before_dispatch: bool = False
+    # Number of storage bindings used as outputs (bindings 0..num_outputs-1).
+    num_outputs: int = 1
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -169,19 +170,47 @@ class IrReductionKernel(IrKernel):
         return count
 
 
+
+
+
+
+#
+# Reachability / DCE helpers
+#
+
+
+def reachable_ports(roots: Iterable[dsl.View]) -> dict[dsl.Node, set[str]]:
+    """Ports reachable walking backward from ``roots`` (forward sinks / grad roots)."""
+    result: dict[dsl.Node, set[str]] = {}
+
+    def visit(view: dsl.View) -> None:
+        ports = result.setdefault(view.node, set())
+        if view.port in ports:
+            return
+        ports.add(view.port)
+        for arg in view.node.args:
+            visit(arg)
+
+    for root in roots:
+        visit(root)
+    return result
+
+
 #
 # IrProgramBuilder
 #
 
 
 class IrProgramBuilder:
-    buffer_memo: dict[dsl.Node, IrBuffer]
+    buffer_memo: dict[tuple[dsl.Node, str], IrBuffer]
     buffer_view_memo: dict[dsl.View, IrBufferView]
     queue: list[IrDispatch]
     sinks: dict[str, IrBufferView]
     param_names: dict[int, str]
+    used_ports: dict[dsl.Node, set[str]]
+    dispatched_nodes: set[dsl.Node]
 
-    def __init__(self):
+    def __init__(self, *, used_ports: dict[dsl.Node, set[str]] | None = None):
         super().__init__()
 
         self.buffer_memo = {}
@@ -189,6 +218,8 @@ class IrProgramBuilder:
         self.queue = []
         self.sinks = {}
         self.param_names = {}
+        self.used_ports = used_ports or {}
+        self.dispatched_nodes = set()
 
     def register_param(self, name: str, view: dsl.View) -> None:
         node = view.node
@@ -201,14 +232,28 @@ class IrProgramBuilder:
     def finish(self) -> IrProgram:
         param_buffer_items: list[tuple[str, int]] = []
         seen_names: set[str] = set()
-        for index, node in enumerate(self.buffer_memo.keys()):
+        seen_nodes: set[dsl.Node] = set()
+        for (node, _port), _buffer in self.buffer_memo.items():
+            if node in seen_nodes:
+                continue
+            seen_nodes.add(node)
             if not isinstance(node, dsl.ParamNode):
                 continue
             name = self.param_names.get(id(node), node.name)
             if name in seen_names:
                 raise ValueError(f"duplicate param name: {name!r}")
             seen_names.add(name)
-            param_buffer_items.append((name, index))
+            # Param buffer index is the first buffer allocated for that node.
+            for index, (key_node, key_port) in enumerate(self.buffer_memo.keys()):
+                if key_node is node and key_port == DEFAULT_PORT:
+                    param_buffer_items.append((name, index))
+                    break
+            else:
+                # Fall back to first port of the node.
+                for index, (key_node, _key_port) in enumerate(self.buffer_memo.keys()):
+                    if key_node is node:
+                        param_buffer_items.append((name, index))
+                        break
         param_buffers: frozendict[str, int] = frozendict(param_buffer_items)
         return IrProgram(
             param_buffers=param_buffers,
@@ -224,57 +269,91 @@ class IrProgramBuilder:
 
         self.sinks[name] = self._build_view(view)
 
+    def _ports_for_node(self, node: dsl.Node) -> tuple[str, ...]:
+        if node in self.used_ports:
+            used = self.used_ports[node]
+            return tuple(p for p in node.output_ports() if p in used)
+        return node.output_ports()
+
     def _build_view(self, view: dsl.View) -> IrBufferView:
         if bv := self.buffer_view_memo.get(view):
             return bv
 
-        buffer = self._build_node(view.node)
+        buffer = self._build_node_port(view.node, view.port)
 
         bv = IrBufferView(buffer=buffer, accessor=view.accessor)
         self.buffer_view_memo[view] = bv
 
         return bv
 
-    def _build_node(self, node: dsl.Node) -> IrBuffer:
-        if b := self.buffer_memo.get(node):
+    def _build_node_port(self, node: dsl.Node, port: str) -> IrBuffer:
+        key = (node, port)
+        if b := self.buffer_memo.get(key):
+            # Ensure the node is dispatched even if another port was built first.
+            self._ensure_dispatched(node)
             return b
 
-        output_buffer = self._allocate_buffer_for_node(node)
-        input_buffer_views = tuple(self._build_view(view) for view in node.args)
-        kernel = self._build_kernel_for_node(node)
+        # Allocate all ports for this node so dispatch can bind them together.
+        for p in node.output_ports():
+            pkey = (node, p)
+            if pkey not in self.buffer_memo:
+                self.buffer_memo[pkey] = self._allocate_buffer_for_port(node, p)
 
-        if kernel:
-            dispatch = IrDispatch(
+        self._ensure_dispatched(node)
+        return self.buffer_memo[key]
+
+    def _ensure_dispatched(self, node: dsl.Node) -> None:
+        if node in self.dispatched_nodes:
+            return
+        self.dispatched_nodes.add(node)
+
+        input_buffer_views = tuple(self._build_view(view) for view in node.args)
+        used = frozenset(self._ports_for_node(node))
+        kernel = self._build_kernel_for_node(node)
+        if kernel is None:
+            return
+
+        # Bind only ports the kernel actually writes (DCE may drop unused ports
+        # so WGSL bind-group layout matches runtime bind group entries).
+        ports = node.output_ports()
+        outputs = tuple(self.buffer_memo[(node, p)] for p in ports)
+        if kernel.num_outputs != len(outputs):
+            raise ValueError(
+                f"kernel expects {kernel.num_outputs} outputs, binding {len(outputs)}"
+            )
+
+        self.queue.append(
+            IrDispatch(
                 kernel=kernel,
                 args=input_buffer_views,
-                output=output_buffer,
+                outputs=outputs,
             )
-            self.queue.append(dispatch)
+        )
 
-        self.buffer_memo[node] = output_buffer
-        return output_buffer
-
-    def _allocate_buffer_for_node(self, node: dsl.Node) -> IrBuffer:
+    def _allocate_buffer_for_port(self, node: dsl.Node, port: str) -> IrBuffer:
         match node:
-            case dsl.ConstNode():
+            case dsl.ConstNode() if port == DEFAULT_PORT:
                 return IrBuffer(
-                    shape=node.shape,
-                    etype=node.etype,
-                    init=marshall_pytensor(node.value, etype=node.etype),
+                    shape=node.port_shape(port),
+                    etype=node.port_etype(port),
+                    init=marshall_pytensor(node.value, etype=node.port_etype(port)),
                     readonly=True,
                 )
             case _:
                 return IrBuffer(
-                    shape=node.shape,
-                    etype=node.etype,
+                    shape=node.port_shape(port),
+                    etype=node.port_etype(port),
                     init=None,
                     readonly=False,
                 )
 
     def _build_kernel_for_node(self, node: dsl.Node) -> IrKernel | None:
+        used = frozenset(self._ports_for_node(node))
         match node:
             case dsl.ConstNode() | dsl.ParamNode():
                 return None
+            case CustomNode():
+                return node.build_kernel(used_ports=used)
             case dsl.ElementwiseNode():
                 return self._build_kernel_for_elementwise_node(node)
             case dsl.MatmulNode():
@@ -341,7 +420,9 @@ _UNARY_OPS: tuple[UnaryElementOperator, ...] = (
     "ceil",
     "bitcast",
 )
-_BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
+_BINARY_OPS: tuple[
+    BinaryElementOperator | BinaryCompareOperator | BinaryBitwiseOperator, ...
+] = (
     "pow",
     "mul",
     "div",
@@ -355,8 +436,6 @@ _BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
     "lt",
     "ge",
     "le",
-)
-_BITWISE_OPS: tuple[BinaryBitwiseOperator, ...] = (
     "band",
     "bor",
     "bxor",
@@ -372,7 +451,5 @@ def _rpn_string_for_elementwise(
     if op in _UNARY_OPS:
         return (0, op)
     if op in _BINARY_OPS:
-        return (0, 1, op)
-    if op in _BITWISE_OPS:
         return (0, 1, op)
     raise NotImplementedError(f"{op=}")

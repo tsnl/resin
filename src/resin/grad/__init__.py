@@ -3,6 +3,7 @@ __all__ = [
     "accessor_adjoint",
     "df_do",
     "grad",
+    "grad_by_port",
     "grad_by_node",
 ]
 
@@ -11,7 +12,9 @@ from typing import assert_never, overload
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.core.pytree import PyTree, map_pytree
 from resin.dsl.node import (
+    DEFAULT_PORT,
     ConstNode,
+    CustomNode,
     ElementwiseNode,
     MatmulNode,
     Node,
@@ -37,7 +40,7 @@ class NotDifferentiableException(Exception):
 def accessor_adjoint(view: View, g: View) -> View:
     """
     Pushes a gradient `g` (w.r.t. `view`'s logical values) back into the backing
-    node's dense output space.
+    node's dense output space for ``view.port``.
     """
     broadcast_axes = tuple(i for i, p in enumerate(view.pitch) if p == 0)
     x = g.reduce(axes=broadcast_axes, operator="add") if broadcast_axes else g
@@ -53,31 +56,46 @@ def accessor_adjoint(view: View, g: View) -> View:
             ),
             operator="add",
         ),
-        out_shape=view.node.shape,
+        out_shape=view.node.port_shape(view.port),
+        etype=view.etype,
     )
 
 
-def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
+def df_do(
+    node: Node,
+    df_douts: View | dict[str, View],
+) -> tuple[View, ...]:
     """
-    Given ∂f/∂(node's dense output), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand.
+    Given ∂f/∂(node ports), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand.
+
+    ``df_douts`` may be a single ``View`` (default port) or a port→View map.
     """
     if not node.args:
         return ()
 
+    ports: dict[str, View]
+    if isinstance(df_douts, View):
+        ports = {DEFAULT_PORT: df_douts}
+    else:
+        ports = df_douts
+
     match node:
         case ConstNode() | ParamNode():
             return ()
+        case CustomNode():
+            return node.df_do_ports(ports)
         case ElementwiseNode():
-            return _df_do_elementwise(node, df_dout)
+            return _df_do_elementwise(node, ports[DEFAULT_PORT])
         case ReductionNode():
-            return _df_do_reduction(node, df_dout)
+            return _df_do_reduction(node, ports[DEFAULT_PORT])
         case MatmulNode():
+            df_dout = ports[DEFAULT_PORT]
             return (
                 df_dout @ node.args[1].transpose(),
                 node.args[0].transpose() @ df_dout,
             )
         case RemapNode():
-            return _df_do_remap(node, df_dout)
+            return _df_do_remap(node, ports[DEFAULT_PORT])
         case _:
             raise NotDifferentiableException(node)
 
@@ -95,6 +113,7 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
             return (
                 View(
                     node=dense.node,
+                    port=dense.port,
                     accessor=Accessor(
                         offset=0,
                         shape=source.shape,
@@ -106,6 +125,7 @@ def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View, ...]:
             return (
                 View(
                     node=dense.node,
+                    port=dense.port,
                     accessor=accessor,
                 ),
             )
@@ -211,6 +231,7 @@ def _df_do_reduction(node: ReductionNode, df_dout: View) -> tuple[View, ...]:
 
     g = View(
         node=df_dout.node,
+        port=df_dout.port,
         accessor=Accessor(
             offset=df_dout.offset,
             shape=operand.shape,
@@ -232,28 +253,51 @@ def _df_do_reduction(node: ReductionNode, df_dout: View) -> tuple[View, ...]:
             assert_never(node.operator)
 
 
-def grad_by_node(f: View) -> dict[Node, View]:
+def grad_by_port(f: View) -> dict[tuple[Node, str], View]:
     if f.shape != ():
         raise ValueError("Output graph must be a scalar (i.e. have shape=())")
 
-    grad_node: dict[Node, View] = {}
+    grad_port: dict[tuple[Node, str], View] = {}
 
     def accumulate(view: View, g: View) -> None:
         contrib = accessor_adjoint(view, g)
-        existing = grad_node.get(view.node)
-        grad_node[view.node] = (existing + contrib) if existing is not None else contrib
+        key = (view.node, view.port)
+        existing = grad_port.get(key)
+        grad_port[key] = (existing + contrib) if existing is not None else contrib
 
     accumulate(f, ones(f.shape, etype=f.etype))
 
     for node in reversed(toposort([f])):
-        df_dn = grad_node.get(node)
-        if df_dn is None:
+        df_douts: dict[str, View] = {}
+        for port in node.output_ports():
+            g = grad_port.get((node, port))
+            if g is not None:
+                df_douts[port] = g
+        if not df_douts:
             continue
 
-        for operand, df_do_i in zip(node.args, df_do(node, df_dn)):
+        for operand, df_do_i in zip(node.args, df_do(node, df_douts)):
             accumulate(operand, df_do_i)
 
-    return grad_node
+    return grad_port
+
+
+def grad_by_node(f: View) -> dict[Node, View]:
+    """Backward-compatible map of node → gradient on the default/primary port."""
+    by_port = grad_by_port(f)
+    result: dict[Node, View] = {}
+    for (node, port), g in by_port.items():
+        if port == DEFAULT_PORT or (
+            port == node.output_ports()[0] and DEFAULT_PORT not in node.output_ports()
+        ):
+            result[node] = g
+        elif node not in result and port == node.output_ports()[0]:
+            result[node] = g
+    # Prefer explicit default port when present.
+    for (node, port), g in by_port.items():
+        if port == DEFAULT_PORT:
+            result[node] = g
+    return result
 
 
 @overload
@@ -273,17 +317,17 @@ def grad(
     *,
     wrt: View | PyTree[View] | None = None,
 ) -> dict[Node, View] | View | PyTree[View]:
-    grad_node = grad_by_node(f)
+    by_port = grad_by_port(f)
     if wrt is None:
-        return grad_node
+        return grad_by_node(f)
     if isinstance(wrt, View):
-        value = grad_node.get(wrt.node)
+        value = by_port.get((wrt.node, wrt.port))
         if value is None:
             raise KeyError(f"no gradient for param {_param_label(wrt.node)!r}")
         return value
 
     def lookup(view: View) -> View:
-        value = grad_node.get(view.node)
+        value = by_port.get((view.node, view.port))
         if value is None:
             raise KeyError(f"no gradient for param {_param_label(view.node)!r}")
         return value
