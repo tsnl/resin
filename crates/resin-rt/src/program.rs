@@ -24,7 +24,8 @@ pub enum WgpuQueueOp {
 pub struct WgpuDispatch {
     pub pipeline_index: usize,
     pub arg_buffer_view_indices: Vec<usize>,
-    pub output_buffer_index: usize,
+    /// Output buffers bound at storage slots 0..N-1 (N = num_output_bindings).
+    pub output_buffer_indices: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,8 +63,14 @@ pub struct WgpuComputePipelineSpec {
     pub entry_point: String,
     pub dispatch_size: [u32; 3],
     pub num_arg_bindings: u32,
+    #[serde(default = "default_num_output_bindings")]
+    pub num_output_bindings: u32,
     #[serde(default)]
     pub clear_output_before_dispatch: bool,
+}
+
+fn default_num_output_bindings() -> u32 {
+    1
 }
 
 fn default_entry_point() -> String {

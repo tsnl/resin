@@ -66,7 +66,9 @@ def build_wgpu_program(
                 "arg_buffer_view_indices": [
                     buffer_view_index[arg] for arg in dispatch.args
                 ],
-                "output_buffer_index": buffer_index[dispatch.output],
+                "output_buffer_indices": [
+                    buffer_index[out] for out in dispatch.outputs
+                ],
             }
         )
 
@@ -93,6 +95,7 @@ def _compute_pipeline_for_kernel(
         "wgsl": emit_wgsl_for_kernel(kernel, config),
         "dispatch_size": list(dispatch_size_for_kernel(kernel, config)),
         "num_arg_bindings": len(kernel.arg_accessors),
+        "num_output_bindings": kernel.num_outputs,
         "clear_output_before_dispatch": kernel.clear_output_before_dispatch,
     }
 

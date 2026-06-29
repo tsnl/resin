@@ -2,7 +2,9 @@
 
 from resin.core.pytree import PyTree
 from resin.dsl.node import (
+    DEFAULT_PORT,
     ConstNode,
+    CustomNode,
     ElementwiseNode,
     MatmulNode,
     Node,
@@ -28,7 +30,9 @@ from resin.dsl.view import (
 )
 
 __all__ = [
+    "DEFAULT_PORT",
     "ConstNode",
+    "CustomNode",
     "ElementwiseNode",
     "MatmulNode",
     "Node",
