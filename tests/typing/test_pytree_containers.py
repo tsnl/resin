@@ -24,9 +24,9 @@ def test_module_repr_subtypes_pytree() -> None:
         """
         from resin.core.pytree import PyTree
         from resin.dsl import View
-        from resin.nn import Linear, linear_new
+        from resin.nn import Linear
 
-        layer: Linear[View] = linear_new(2, 3, bias=True)
+        layer: Linear[View] = Linear.new(2, 3, bias=True)
         model: list[Linear[View]] = [layer]
         tree: PyTree[View] = model
         _ = tree
@@ -150,10 +150,10 @@ def test_tree_map_preserves_structure_type() -> None:
         """
         from resin.core.pytree import tree_map
         from resin.dsl import View
-        from resin.nn import Linear, linear_new
+        from resin.nn import Linear
 
-        model: list[Linear[View]] = [linear_new(2, 3)]
-        grads: list[Linear[View]] = [linear_new(2, 3)]
+        model: list[Linear[View]] = [Linear.new(2, 3)]
+        grads: list[Linear[View]] = [Linear.new(2, 3)]
 
         def step(p: View, g: View) -> View:
             return p - g

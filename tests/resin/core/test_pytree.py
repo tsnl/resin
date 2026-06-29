@@ -10,7 +10,7 @@ from resin.core.pytree import (
     tree_map,
 )
 from resin.dsl.view import View, param
-from resin.nn import Linear, linear_new
+from resin.nn import Linear
 
 
 class TestPyTreeTyping:
@@ -20,7 +20,7 @@ class TestPyTreeTyping:
         assert tree is leaf
 
     def test_module_repr_subtypes_pytree(self) -> None:
-        layer: Linear[View] = linear_new(2, 3, bias=True)
+        layer: Linear[View] = Linear.new(2, 3, bias=True)
         model: list[Linear[View]] = [layer]
         tree: PyTree[View] = model
         assert tree is model
@@ -77,18 +77,18 @@ class TestTreeMap:
 
 class TestModule:
     def test_params_flattens_leaves(self) -> None:
-        layer = linear_new(3, 2, bias=True)
+        layer = Linear.new(3, 2, bias=True)
         ps = layer.params()
         assert set(ps) == {"weight", "bias"}
         assert ps["weight"] is layer.weight
         assert ps["bias"] is layer.bias
 
     def test_params_skips_none_bias(self) -> None:
-        layer = linear_new(3, 2, bias=False)
+        layer = Linear.new(3, 2, bias=False)
         assert set(layer.params()) == {"weight"}
 
     def test_module_in_pytree_flattens_with_field_paths(self) -> None:
-        model = [linear_new(2, 3, bias=True)]
+        model = [Linear.new(2, 3, bias=True)]
         assert [p for p, _ in flatten_pytree_paths(model)] == ["0.weight", "0.bias"]
 
 

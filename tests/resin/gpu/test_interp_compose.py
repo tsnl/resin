@@ -22,9 +22,9 @@ def _scalar(view: dsl.View) -> dsl.View:
 class TestLinear:
     def test_forward(self) -> None:
         x = dsl.param(shape=(2, 3), etype=F4)
-        layer = nn.linear_new(3, 2, bias=True)
+        layer = nn.Linear.new(3, 2, bias=True)
         assert layer.bias is not None
-        out = nn.linear(layer, x)
+        out = layer(x)
         values = run_graph(
             out,
             params={
@@ -39,10 +39,10 @@ class TestLinear:
 class TestSmallMlp:
     def test_relu_linear_stack(self) -> None:
         x = dsl.param(shape=(2, 2), etype=F4)
-        l1 = nn.linear_new(2, 2, bias=False)
-        l2 = nn.linear_new(2, 1, bias=True)
+        l1 = nn.Linear.new(2, 2, bias=False)
+        l2 = nn.Linear.new(2, 1, bias=True)
         assert l2.bias is not None
-        out = nn.linear(l2, nn.relu(nn.linear(l1, x)))
+        out = l2(nn.relu(l1(x)))
         values = run_graph(
             out,
             params={
