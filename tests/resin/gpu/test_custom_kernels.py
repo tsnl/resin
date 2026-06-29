@@ -1,6 +1,8 @@
-"""GPU tests for PrefixSumNode and SortNode."""
+"""GPU tests for PrefixSumNode, SortNode, multi-output ports, and DCE."""
 
-from resin.dsl import param
+from resin.dsl import View, param
+from resin.ir.ir import IrProgramBuilder, IrSortKernel, reachable_ports
+from resin.runtime import compile_program
 from tests.resin.gpu.interp_helpers import run_graph
 
 
@@ -27,7 +29,57 @@ def test_sort_values_and_perm_gpu() -> None:
     assert [int(i) for i in idxs] == [1, 3, 0, 2]
 
 
+def test_sort_perm_only_dce_elides_values_write() -> None:
+    x = param(shape=(3,), etype=F4, name="x")
+    _values, perm = x.sort()
+    used = reachable_ports([perm])
+    assert used[perm.node] == {"perm"}
+    assert "values" not in used[perm.node]
+
+    builder = IrProgramBuilder(used_ports=used)
+    builder.build_sink("perm", perm)
+    program = builder.finish()
+    assert len(program.queue) == 1
+    kernel = program.queue[0].kernel
+    assert isinstance(kernel, IrSortKernel)
+    assert kernel.write_perm is True
+    assert kernel.write_values is False
+
+
+def test_sort_values_only_dce_elides_perm_write() -> None:
+    x = param(shape=(3,), etype=F4, name="x")
+    values, _perm = x.sort()
+    used = reachable_ports([values])
+    builder = IrProgramBuilder(used_ports=used)
+    builder.build_sink("values", values)
+    program = builder.finish()
+    kernel = program.queue[0].kernel
+    assert isinstance(kernel, IrSortKernel)
+    assert kernel.write_values is True
+    assert kernel.write_perm is False
+
+
+def test_compile_program_propagates_port_dce() -> None:
+    x = param(shape=(3,), etype=F4, name="x")
+    _values, perm = x.sort()
+    compiled = compile_program(params={"x": x}, sinks={"perm": perm})
+    # Program admits and runs with only perm consumed.
+    import resin_rt_pybind
+    from resin.core.pytree import marshall_pytensor
+
+    interp = resin_rt_pybind.Interp("wgpu")
+    pid = compiled.admit(interp)
+    binding = compiled.binding(interp, pid)
+    binding.write({"x": marshall_pytensor([2.0, 0.0, 1.0], etype=F4)})
+    interp.run(pid)
+    raw = binding.read_sink("perm")
+    out = run_graph(perm, params={x: [2.0, 0.0, 1.0]})
+    assert [int(i) for i in out] == [1, 2, 0]
+    assert len(raw) == 12  # 3 * u4
+
+
 def test_gather_via_sort_perm() -> None:
+    """Sorted values equal gather(x, perm) when both ports are live."""
     x = param(shape=(4,), etype=F4, name="x")
     values, perm = x.sort()
     data = [9.0, 1.0, 5.0, 3.0]
