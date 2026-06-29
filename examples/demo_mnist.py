@@ -3,6 +3,7 @@ import math
 import random
 import struct
 import sys
+from dataclasses import dataclass
 
 import resin_rt_pybind
 
@@ -20,31 +21,33 @@ STEPS = 1_000
 EVAL_INTERVAL = 100
 SEED = 0
 
-type Mlp = list[resin.nn.Linear[resin.dsl.View]]
 
+@dataclass(frozen=True)
+class Mlp(resin.nn.Module[resin.dsl.View]):
+    layers: list[resin.nn.Linear[resin.dsl.View]]
 
-def mlp_new(
-    in_dim: int,
-    out_dim: int,
-    n_hidden: int,
-    hidden_dim: int,
-    bias: bool,
-) -> Mlp:
-    res: list[resin.nn.Linear[resin.dsl.View]] = []
-    res.append(resin.nn.Linear.new(in_dim, hidden_dim, bias=bias))
-    for _ in range(n_hidden - 1):
-        res.append(resin.nn.Linear.new(hidden_dim, hidden_dim, bias=bias))
-    res.append(resin.nn.Linear.new(hidden_dim, out_dim, bias=bias))
-    return res
+    @staticmethod
+    def new(
+        in_dim: int,
+        out_dim: int,
+        n_hidden: int,
+        hidden_dim: int,
+        bias: bool,
+    ) -> Mlp:
+        layers: list[resin.nn.Linear[resin.dsl.View]] = []
+        layers.append(resin.nn.Linear.new(in_dim, hidden_dim, bias=bias))
+        for _ in range(n_hidden - 1):
+            layers.append(resin.nn.Linear.new(hidden_dim, hidden_dim, bias=bias))
+        layers.append(resin.nn.Linear.new(hidden_dim, out_dim, bias=bias))
+        return Mlp(layers=layers)
 
-
-def mlp(model: Mlp, x: resin.dsl.View) -> resin.dsl.View:
-    assert len(x.shape) == 2
-    for layer in model[:-1]:
-        x = layer(x)
-        x = resin.nn.relu(x)
-    x = model[-1](x)
-    return resin.nn.softmax(x, axes=(1,))
+    def __call__(self, x: resin.dsl.View) -> resin.dsl.View:
+        assert len(x.shape) == 2
+        for layer in self.layers[:-1]:
+            x = layer(x)
+            x = resin.nn.relu(x)
+        x = self.layers[-1](x)
+        return resin.nn.softmax(x, axes=(1,))
 
 
 def random_param_bytes(shape: tuple[int, ...]) -> bytes:
@@ -60,7 +63,7 @@ def main() -> None:
     _ = ap.add_argument("--seed", type=int, default=SEED)
     args = ap.parse_args()
 
-    model = mlp_new(
+    mlp = Mlp.new(
         in_dim=IMG_WH,
         out_dim=NUM_CLS,
         n_hidden=2,
@@ -71,15 +74,15 @@ def main() -> None:
     xs = resin.dsl.param(shape=(BATCH_SIZE, IMG_WH), etype=F4, name="xs")
     ys = resin.dsl.param(shape=(BATCH_SIZE, NUM_CLS), etype=F4, name="ys")
 
-    y_hats = mlp(model, xs)
+    y_hats = mlp(xs)
     losses = resin.nn.cross_entropy(y_hats, ys)
     loss = resin.nn.mean(losses)
 
-    grads = resin.grad.grad(loss, wrt=model)
-    new_model = resin.opt.sgd(model, grads, lr=LR)
+    grads = resin.grad.grad(loss, wrt=mlp)
+    new_model = resin.opt.sgd(mlp, grads, lr=LR)
 
     compiled = resin.runtime.compile_program(
-        params={"xs": xs, "ys": ys, "model": model},
+        params={"xs": xs, "ys": ys, "model": mlp},
         sinks={"loss": loss, "new_model": new_model},
     )
 
@@ -98,7 +101,7 @@ def main() -> None:
     program_id = compiled.admit(interp)
     binding = compiled.binding(interp, program_id)
 
-    for param_view in resin.core.pytree.flatten_pytree(model):
+    for _, param_view in mlp.params().items():
         binding.write_view(param_view, random_param_bytes(param_view.shape))
 
     for step in range(args.steps):
@@ -110,7 +113,7 @@ def main() -> None:
 
         binding.write({"xs": image_bytes, "ys": label_bytes})
         interp.run(program_id)
-        binding.commit(from_prefix="new_model", to_prefix="model", tree=model)
+        binding.commit(from_prefix="new_model", to_prefix="model", tree=mlp)
 
         if step % args.eval_interval == 0 or step == args.steps - 1:
             loss_bytes = binding.read_sink("loss")
