@@ -302,6 +302,35 @@ def _emit_eval_rpn_expr(
                 case "not":
                     operand = expr_stack.pop()
                     expr_stack.append(f"(abs(1.0 - {operand}))")
+                case "floor":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"floor({operand})")
+                case "ceil":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"ceil({operand})")
+                case "bitcast":
+                    operand = expr_stack.pop()
+                    expr_stack.append(f"bitcast<{t}>({operand})")
+                case "band":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} & {rhs})")
+                case "bor":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} | {rhs})")
+                case "bxor":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} ^ {rhs})")
+                case "shl":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} << {rhs})")
+                case "shr":
+                    rhs = expr_stack.pop()
+                    lhs = expr_stack.pop()
+                    expr_stack.append(f"({lhs} >> {rhs})")
                 case "pow":
                     rhs = expr_stack.pop()
                     lhs = expr_stack.pop()

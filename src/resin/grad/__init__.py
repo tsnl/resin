@@ -8,7 +8,7 @@ __all__ = [
 
 from typing import assert_never, overload
 
-from resin.core.accessor import Accessor
+from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape
 from resin.core.pytree import PyTree, map_pytree
 from resin.dsl.node import (
     ConstNode,
@@ -88,6 +88,8 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
             raise NotDifferentiableException(node)
 
 
+
+
 def _df_do_elementwise(node: ElementwiseNode, df_dout: View) -> tuple[View, ...]:
     n = View.identity(node)
     match node.operator:
@@ -132,7 +134,23 @@ def _df_do_elementwise(node: ElementwiseNode, df_dout: View) -> tuple[View, ...]
                 df_dout * node.args[0].lt(node.args[1]),
                 df_dout * node.args[1].lt(node.args[0]),
             )
-        case "not" | "eq" | "ne" | "lt" | "gt" | "le" | "ge":
+        case (
+            "not"
+            | "eq"
+            | "ne"
+            | "lt"
+            | "gt"
+            | "le"
+            | "ge"
+            | "floor"
+            | "ceil"
+            | "bitcast"
+            | "band"
+            | "bor"
+            | "bxor"
+            | "shl"
+            | "shr"
+        ):
             raise NotDifferentiableException(node)
         case _:
             assert_never(node.operator)
