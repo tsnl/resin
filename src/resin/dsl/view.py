@@ -42,7 +42,10 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapGatherInfo,
+    RemapInfo,
+    RemapNode,
+    RemapScatterInfo,
 )
 
 
@@ -117,12 +120,20 @@ class View:
         return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
-        return View.scatter(
+        """Return a dense C-contiguous view of this tensor.
+
+        Often used as a shorthand to ensure dense output (e.g. before an adjoint
+        that reinterprets the gradient buffer's layout). Views are immutable, so
+        if this view is already dense with the requested element type, returns
+        ``self`` unchanged.
+        """
+        out_etype = etype or self.etype
+        if out_etype == self.etype and self.is_identity():
+            return self
+        return View.remap(
             source=self,
-            out_shape=self.shape,
-            woffset=0,
-            wpitch=c_contiguous_pitch_for_shape(self.shape),
-            etype=etype or self.etype,
+            info=RemapGatherInfo(),
+            etype=out_etype,
         )
 
     def __pow__(self, other: "TensorOperand") -> "View":
@@ -441,6 +452,113 @@ class View:
         return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
 
     @staticmethod
+    def remap(
+        *,
+        source: "View",
+        info: RemapInfo,
+        indices: "View | None" = None,
+        out_shape: tuple[int, ...] | None = None,
+        etype: ElementType | None = None,
+    ) -> "View":
+        match info:
+            case RemapScatterInfo():
+                return View._remap_scatter(
+                    source=source,
+                    info=info,
+                    indices=indices,
+                    out_shape=out_shape,
+                    etype=etype,
+                )
+            case RemapGatherInfo():
+                return View._remap_gather(
+                    source=source,
+                    info=info,
+                    indices=indices,
+                    etype=etype,
+                )
+
+    @staticmethod
+    def _remap_scatter(
+        *,
+        source: "View",
+        info: RemapScatterInfo,
+        indices: "View | None",
+        out_shape: tuple[int, ...] | None,
+        etype: ElementType | None,
+    ) -> "View":
+        accessor = info.accessor
+        if accessor is not None:
+            if out_shape is None:
+                raise ValueError("scatter with accessor requires out_shape")
+            if accessor.shape != source.shape:
+                raise ValueError("scatter accessor.shape must match source.shape")
+            args: tuple[View, ...] = (source,)
+        else:
+            if out_shape is None or indices is None:
+                raise ValueError(
+                    "scatter without accessor requires out_shape and indices"
+                )
+            source, indices = _join_source_with_indices(source, indices, out_shape)
+            args = (source, indices)
+        return View.identity(
+            RemapNode(
+                shape=out_shape,
+                etype=etype or source.etype,
+                args=args,
+                info=info,
+            )
+        )
+
+    @staticmethod
+    def _remap_gather(
+        *,
+        source: "View",
+        info: RemapGatherInfo,
+        indices: "View | None",
+        etype: ElementType | None,
+    ) -> "View":
+        accessor = info.accessor
+        source_shape = info.source_shape
+        if (accessor is None) != (source_shape is None):
+            raise ValueError(
+                "gather with accessor requires source_shape; "
+                + "gather without accessor must omit source_shape"
+            )
+        if accessor is None:
+            if indices is not None:
+                raise ValueError(
+                    "gather densify (no accessor) does not take indices"
+                )
+            node_shape = source.shape
+            args: tuple[View, ...] = (source,)
+        else:
+            assert source_shape is not None
+            if indices is None:
+                raise ValueError("gather with accessor requires indices")
+            if accessor.shape != source_shape:
+                raise ValueError("gather accessor.shape must match source_shape")
+            indices = _validate_indices_view(indices, source_shape)
+            out_prefix = indices.shape[:-1]
+            source = View(
+                node=source.node,
+                accessor=Accessor(
+                    offset=source.offset,
+                    shape=out_prefix,
+                    pitch=c_contiguous_pitch_for_shape(out_prefix),
+                ),
+            )
+            node_shape = out_prefix
+            args = (source, indices)
+        return View.identity(
+            RemapNode(
+                shape=node_shape,
+                etype=etype or source.etype,
+                args=args,
+                info=info,
+            )
+        )
+
+    @staticmethod
     def scatter(
         *,
         source: "View",
@@ -450,20 +568,67 @@ class View:
         operator: BinaryAssocElementOperator | None = None,
         etype: ElementType | None = None,
     ) -> "View":
-        return View.identity(
-            ScatterNode(
-                shape=out_shape,
-                etype=etype or source.etype,
-                args=(source,),
+        return View.remap(
+            source=source,
+            info=RemapScatterInfo(
+                accessor=Accessor(offset=woffset, shape=source.shape, pitch=wpitch),
                 operator=operator,
-                woffset=woffset,
-                wpitch=wpitch,
-            )
+            ),
+            out_shape=out_shape,
+            etype=etype,
         )
 
 
-
 type TensorOperand = View | Scalar
+
+
+def _validate_indices_view(indices: View, out_shape: tuple[int, ...]) -> View:
+    out_rank = len(out_shape)
+    if indices.rank == 0:
+        raise ValueError("indices must have rank >= 1")
+    if indices.shape[-1] != out_rank:
+        raise ValueError(
+            f"indices.shape[-1] must equal len(out_shape) ({out_rank}), got shape {indices.shape}"
+        )
+    if etype_kind(indices.etype) != "uint":
+        raise ValueError(
+            f"indices must have an unsigned integer etype, got {indices.etype}"
+        )
+    return indices
+
+
+def _join_source_with_indices(
+    source: View,
+    indices: View,
+    out_shape: tuple[int, ...],
+) -> tuple[View, View]:
+    indices = _validate_indices_view(indices, out_shape)
+    out_rank = len(out_shape)
+
+    prefix_join = shape_join(
+        shape1=source.shape,
+        pitch1=source.pitch,
+        shape2=indices.shape[:-1],
+        pitch2=indices.pitch[:-1],
+    )
+    joined_source = View(
+        node=source.node,
+        accessor=Accessor(
+            offset=source.offset,
+            shape=prefix_join.shape,
+            pitch=prefix_join.pitch1,
+        ),
+    )
+    joined_indices = View(
+        node=indices.node,
+        accessor=Accessor(
+            offset=indices.offset,
+            shape=prefix_join.shape + (out_rank,),
+            pitch=prefix_join.pitch2 + (indices.pitch[-1],),
+        ),
+    )
+    return joined_source, joined_indices
+
 
 
 def const(value: PyTensor, *, etype: ElementType = F4) -> View:

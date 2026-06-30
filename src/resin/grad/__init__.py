@@ -17,7 +17,9 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapGatherInfo,
+    RemapNode,
+    RemapScatterInfo,
 )
 from resin.dsl.view import View, ones, toposort
 
@@ -43,18 +45,23 @@ def accessor_adjoint(view: View, g: View) -> View:
     if view.is_identity():
         return x
 
-    return View.scatter(
+    return View.remap(
         source=x,
+        info=RemapScatterInfo(
+            accessor=Accessor(
+                offset=view.offset, shape=x.shape, pitch=view.pitch
+            ),
+            operator="add",
+        ),
         out_shape=view.node.shape,
-        operator="add",
-        woffset=view.offset,
-        wpitch=view.pitch,
     )
 
 
-def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
-    """
-    Given ∂f/∂(node's dense output), returns (∂f/∂o₁, ∂f/∂o₂, ...) for each operand.
+def df_do(node: Node, df_dout: View) -> tuple[View | None, ...]:
+    """Given ∂f/∂(node's dense output), return one entry per operand in ``node.args``.
+
+    ``None`` means no adjoint propagates through that operand (e.g. remap indices).
+    The returned tuple always has length ``len(node.args)``.
     """
     if not node.args:
         return ()
@@ -71,22 +78,61 @@ def df_do(node: Node, df_dout: View) -> tuple[View, ...]:
                 df_dout @ node.args[1].transpose(),
                 node.args[0].transpose() @ df_dout,
             )
-        case ScatterNode():
-            source = node.args[0]
-            dense = df_dout if df_dout.is_identity() else df_dout.copy()
+        case RemapNode():
+            return _df_do_remap(node, df_dout)
+        case _:
+            raise NotDifferentiableException(node)
+
+
+def _df_do_remap(node: RemapNode, df_dout: View) -> tuple[View | None, ...]:
+    source = node.args[0]
+    dense = df_dout.copy()
+
+    match node.info:
+        case RemapGatherInfo(accessor=None):
             return (
                 View(
                     node=dense.node,
                     accessor=Accessor(
-                        offset=node.woffset,
+                        offset=0,
                         shape=source.shape,
-                        pitch=node.wpitch,
+                        pitch=c_contiguous_pitch_for_shape(source.shape),
                     ),
                 ),
             )
+        case RemapScatterInfo(accessor=accessor) if accessor is not None:
+            return (
+                View(
+                    node=dense.node,
+                    accessor=accessor,
+                ),
+            )
+        case RemapScatterInfo(accessor=None):
+            return (
+                View.remap(
+                    source=dense,
+                    info=RemapGatherInfo(
+                        accessor=Accessor.dense(node.shape),
+                        source_shape=node.shape,
+                    ),
+                    indices=node.args[1],
+                ),
+                None,
+            )
+        case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
+            accessor is not None and source_shape is not None
+        ):
+            return (
+                View.remap(
+                    source=dense,
+                    info=RemapScatterInfo(operator="add"),
+                    indices=node.args[1],
+                    out_shape=source_shape,
+                ),
+                None,
+            )
         case _:
             raise NotDifferentiableException(node)
-
 
 
 
@@ -200,8 +246,11 @@ def grad_by_node(f: View) -> dict[Node, View]:
         if df_dn is None:
             continue
 
-        for operand, df_do_i in zip(node.args, df_do(node, df_dn)):
-            accumulate(operand, df_do_i)
+        df_dos = df_do(node, df_dn)
+        assert len(df_dos) == len(node.args)
+        for operand, df_do_i in zip(node.args, df_dos, strict=True):
+            if df_do_i is not None:
+                accumulate(operand, df_do_i)
 
     return grad_node
 

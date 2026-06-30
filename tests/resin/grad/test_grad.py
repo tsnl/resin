@@ -36,6 +36,7 @@ class TestReductionDfDo:
     def test_add_returns_broadcast_view(self) -> None:
         x, n, df_dn = self._make(axes=(1,), operator="add")
         (grad_x,) = grad.df_do(n.node, df_dn)
+        assert grad_x is not None
 
         assert isinstance(grad_x, View)
         assert grad_x.shape == x.shape
@@ -44,6 +45,7 @@ class TestReductionDfDo:
     def test_mul_uses_quotient(self) -> None:
         x, n, df_dn = self._make(axes=(1,), operator="mul")
         (grad_x,) = grad.df_do(n.node, df_dn)
+        assert grad_x is not None
 
         assert isinstance(grad_x.node, ElementwiseNode)
         assert grad_x.node.operator == "mul"
@@ -52,6 +54,7 @@ class TestReductionDfDo:
     def test_max_masks_by_equality(self) -> None:
         x, n, df_dn = self._make(axes=(1,), operator="max")
         (grad_x,) = grad.df_do(n.node, df_dn)
+        assert grad_x is not None
 
         assert isinstance(grad_x.node, ElementwiseNode)
         assert grad_x.node.operator == "mul"
@@ -60,6 +63,7 @@ class TestReductionDfDo:
     def test_min_masks_by_equality(self) -> None:
         x, n, df_dn = self._make(axes=(1,), operator="min")
         (grad_x,) = grad.df_do(n.node, df_dn)
+        assert grad_x is not None
 
         assert isinstance(grad_x.node, ElementwiseNode)
         assert grad_x.node.operator == "mul"
@@ -70,6 +74,7 @@ class TestReductionDfDo:
         n = x.reduce(axes=(0, 1), operator="add")
         df_dn = param(shape=n.shape, etype=F4, name="df_dn")
         (grad_x,) = grad.df_do(n.node, df_dn)
+        assert grad_x is not None
 
         assert grad_x.shape == x.shape
 
@@ -77,8 +82,8 @@ class TestReductionDfDo:
         for op in ("add", "mul", "max", "min"):
             _, n, df_dn = self._make(axes=(0,), operator=op)
             result = grad.df_do(n.node, df_dn)
-            assert result is not None
             assert len(result) == 1
+            assert result[0] is not None
 
 
 class TestGrad:
