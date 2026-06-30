@@ -8,19 +8,22 @@ __all__ = [
     "IrProgram",
     "IrProgramBuilder",
     "IrReductionKernel",
-    "IrScatterKernel",
+    "IrRemapKernel",
 ]
 
 from abc import ABC
 from dataclasses import dataclass
+from typing import cast, override
 
 from frozendict import frozendict
 
 from resin.core.accessor import Accessor
 from resin.core.pytree import marshall_pytensor
+from resin.dsl.node import RemapGatherInfo, RemapInfo, RemapScatterInfo
 from .rpn import ElementRpnExpr
 from resin.core.etype import (
     BinaryAssocElementOperator,
+    BinaryBitwiseOperator,
     BinaryCompareOperator,
     BinaryElementOperator,
     ElementType,
@@ -67,24 +70,30 @@ class IrDispatch:
 
 @dataclass(frozen=True, kw_only=True)
 class IrKernel(ABC):
-    """Base kernel. ``etype`` is the output buffer element type.
-
-    All current kernels share one etype for inputs and output. Tile
-    kernels may need per-operand types or epilogue-specific types later.
-    """
+    """Base kernel. ``etype`` is the output buffer element type."""
 
     arg_accessors: tuple[Accessor, ...]
     etype: ElementType
     shape: tuple[int, ...]
     clear_output_before_dispatch: bool = False
 
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        """Element type of each argument buffer (default: same as output)."""
+        return tuple(self.etype for _ in self.arg_accessors)
+
 
 @dataclass(frozen=True, kw_only=True)
 class IrElementwiseRpnKernel(IrKernel):
     rpn_expr: ElementRpnExpr
+    arg_etypes: tuple[ElementType, ...]
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
+        assert len(self.arg_etypes) == len(self.arg_accessors)
+
+    @override
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        return self.arg_etypes
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -104,14 +113,38 @@ class IrMatmulKernel(IrKernel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class IrScatterKernel(IrKernel):
-    operator: BinaryAssocElementOperator | None
-    woffset: int
-    wpitch: tuple[int, ...]
+class IrRemapKernel(IrKernel):
+    info: RemapInfo
+    arg_etypes: tuple[ElementType, ...]
     clear_output_before_dispatch: bool = True
 
+    @override
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        return self.arg_etypes
+
     def __post_init__(self):
-        assert len(self.arg_accessors) == 1
+        assert len(self.arg_etypes) == len(self.arg_accessors)
+        match self.info:
+            case RemapScatterInfo(accessor=accessor) if accessor is not None:
+                assert len(self.arg_accessors) == 1
+                assert accessor.shape == self.arg_accessors[0].shape
+            case RemapScatterInfo(accessor=None):
+                assert len(self.arg_accessors) == 2
+                source_accessor, indices_accessor = self.arg_accessors
+                assert indices_accessor.shape[-1] == len(self.shape)
+                assert indices_accessor.shape[:-1] == source_accessor.shape
+            case RemapGatherInfo(accessor=None, source_shape=None):
+                assert len(self.arg_accessors) == 1
+            case RemapGatherInfo(accessor=accessor, source_shape=source_shape) if (
+                accessor is not None and source_shape is not None
+            ):
+                assert len(self.arg_accessors) == 2
+                source_accessor, indices_accessor = self.arg_accessors
+                assert indices_accessor.shape[-1] == accessor.rank
+                assert indices_accessor.shape[:-1] == source_accessor.shape
+                assert accessor.shape == source_shape
+            case _:
+                raise AssertionError(f"invalid RemapInfo: {self.info!r}")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -255,17 +288,22 @@ class IrProgramBuilder:
                 return self._build_kernel_for_matmul_node(node)
             case dsl.ReductionNode():
                 return self._build_kernel_for_reduction_node(node)
-            case dsl.ScatterNode():
-                return self._build_kernel_for_scatter_node(node)
+            case dsl.RemapNode():
+                return self._build_kernel_for_remap_node(node)
             case _:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
     def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
+        arg_etypes = cast(
+            tuple[ElementType, ...],
+            tuple(view.etype for view in node.args),
+        )
         return IrElementwiseRpnKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
             shape=node.shape,
             rpn_expr=ElementRpnExpr(string=_rpn_string_for_elementwise(node)),
+            arg_etypes=arg_etypes,
         )
 
     def _build_kernel_for_matmul_node(self, node: dsl.MatmulNode) -> IrKernel:
@@ -284,14 +322,23 @@ class IrProgramBuilder:
             axes=node.axes,
         )
 
-    def _build_kernel_for_scatter_node(self, node: dsl.ScatterNode) -> IrKernel:
-        return IrScatterKernel(
-            arg_accessors=(node.args[0].accessor,),
+    def _build_kernel_for_remap_node(self, node: dsl.RemapNode) -> IrKernel:
+        arg_etypes = cast(
+            tuple[ElementType, ...],
+            tuple(view.etype for view in node.args),
+        )
+        match node.info:
+            case RemapScatterInfo(operator=operator):
+                clear_output = operator is None
+            case RemapGatherInfo():
+                clear_output = True
+        return IrRemapKernel(
+            arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
             shape=node.shape,
-            operator=node.operator,
-            woffset=node.woffset,
-            wpitch=node.wpitch,
+            info=node.info,
+            arg_etypes=arg_etypes,
+            clear_output_before_dispatch=clear_output,
         )
 
 
@@ -303,6 +350,9 @@ _UNARY_OPS: tuple[UnaryElementOperator, ...] = (
     "sin",
     "cos",
     "not",
+    "floor",
+    "ceil",
+    "bitcast",
 )
 _BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
     "pow",
@@ -319,6 +369,13 @@ _BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
     "ge",
     "le",
 )
+_BITWISE_OPS: tuple[BinaryBitwiseOperator, ...] = (
+    "band",
+    "bor",
+    "bxor",
+    "shl",
+    "shr",
+)
 
 
 def _rpn_string_for_elementwise(
@@ -328,5 +385,7 @@ def _rpn_string_for_elementwise(
     if op in _UNARY_OPS:
         return (0, op)
     if op in _BINARY_OPS:
+        return (0, 1, op)
+    if op in _BITWISE_OPS:
         return (0, 1, op)
     raise NotImplementedError(f"{op=}")

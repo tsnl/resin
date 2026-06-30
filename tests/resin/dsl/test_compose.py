@@ -187,7 +187,7 @@ class TestCompact:
         t = t.copy()
         expected = textwrap.dedent(
             """
-            scatter(operator=None, woffset=0, wpitch=(3, 1)) :: f4(1, 3)
+            remap(info=RemapGatherInfo(accessor=None, source_shape=None)) :: f4(1, 3)
             └ view(offset=0, shape=(1, 3), pitch=(6, 1))
               └ const(value=[[1, 2, 3], [4, 5, 6]]) :: f4(2, 3)
             """
@@ -197,10 +197,10 @@ class TestCompact:
     def test_compact_noop_on_contiguous(self) -> None:
         t = const([1, 2, 3], etype=F4)
         t2 = t.copy()
+        assert t2 is t
         expected = textwrap.dedent(
             """
-            scatter(operator=None, woffset=0, wpitch=(1,)) :: f4(3,)
-            └ const(value=[1, 2, 3]) :: f4(3,)
+            const(value=[1, 2, 3]) :: f4(3,)
             """
         )
         assert debug_str(t2) == expected.strip()

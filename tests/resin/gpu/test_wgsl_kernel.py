@@ -25,6 +25,7 @@ class TestDispatchSize:
             etype=F4,
             shape=(65,),
             rpn_expr=ElementRpnExpr(string=(0,)),
+            arg_etypes=(F4,),
         )
         assert dispatch_size_for_kernel(kernel, config) == (2, 1, 1)
 

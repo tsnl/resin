@@ -22,13 +22,16 @@ from typing import Annotated, overload
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
 from resin.core.etype import (
-    BinaryAssocElementOperator,
-    ElementType,
-    ElementOperator,
     F4,
+    BinaryAssocElementOperator,
+    BinaryBitwiseOperator,
+    ElementKind,
+    ElementOperator,
+    ElementType,
     Scalar,
     UnaryElementOperator,
     etype_join,
+    etype_kind,
     etype_nbytes,
 )
 from resin.core.pytree import PyTensor, infer_pytensor_shape
@@ -39,7 +42,10 @@ from resin.dsl.node import (
     Node,
     ParamNode,
     ReductionNode,
-    ScatterNode,
+    RemapGatherInfo,
+    RemapInfo,
+    RemapNode,
+    RemapScatterInfo,
 )
 
 
@@ -114,12 +120,20 @@ class View:
         return View(node=self.node, accessor=self.accessor.squeeze(axes))
 
     def copy(self, *, etype: ElementType | None = None) -> "View":
-        return View.scatter(
+        """Return a dense C-contiguous view of this tensor.
+
+        Often used as a shorthand to ensure dense output (e.g. before an adjoint
+        that reinterprets the gradient buffer's layout). Views are immutable, so
+        if this view is already dense with the requested element type, returns
+        ``self`` unchanged.
+        """
+        out_etype = etype or self.etype
+        if out_etype == self.etype and self.is_identity():
+            return self
+        return View.remap(
             source=self,
-            out_shape=self.shape,
-            woffset=0,
-            wpitch=c_contiguous_pitch_for_shape(self.shape),
-            etype=etype or self.etype,
+            info=RemapGatherInfo(),
+            etype=out_etype,
         )
 
     def __pow__(self, other: "TensorOperand") -> "View":
@@ -152,6 +166,51 @@ class View:
     def __rsub__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) - self
 
+    def __and__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="band")
+
+    def __rand__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) & self
+
+    def __or__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="bor")
+
+    def __ror__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) | self
+
+    def __xor__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="bxor")
+
+    def __rxor__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) ^ self
+
+    def __lshift__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="shl")
+
+    def __rlshift__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) << self
+
+    def __rshift__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="shr")
+
+    def __rrshift__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) >> self
+
+    def __invert__(self) -> "View":
+        return View.elementwise_unary(self, operator="not")
+
+    def __neg__(self) -> "View":
+        return View.elementwise_unary(self, operator="neg")
+
+    def __pos__(self) -> "View":
+        return self
+
+    def __matmul__(self, other: "View") -> "View":
+        return View.matmul(self, other)
+
+    def __rmatmul__(self, other: "View") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) @ self
+
     def max(self, other: "TensorOperand") -> "View":
         return View.elementwise_binary(self, other, operator="max")
 
@@ -176,12 +235,6 @@ class View:
     def ge(self, other: "TensorOperand") -> "View":
         return View.elementwise_binary(self, other, operator="ge")
 
-    def __neg__(self) -> "View":
-        return View.elementwise_unary(self, operator="neg")
-
-    def __pos__(self) -> "View":
-        return self
-
     def exp(self) -> "View":
         return View.elementwise_unary(self, operator="exp")
 
@@ -197,14 +250,25 @@ class View:
     def cos(self) -> "View":
         return View.elementwise_unary(self, operator="cos")
 
-    def __invert__(self) -> "View":
-        return View.elementwise_unary(self, operator="not")
+    def floor(self) -> "View":
+        return View.elementwise_unary(self, operator="floor")
 
-    def __matmul__(self, other: "View") -> "View":
-        return View.matmul(self, other)
+    def ceil(self) -> "View":
+        return View.elementwise_unary(self, operator="ceil")
 
-    def __rmatmul__(self, other: "View") -> "View":
-        return View._from_view_or_scalar(other, etype=self.etype) @ self
+    def bitcast(self, etype: ElementType) -> "View":
+        if etype_nbytes(self.etype) != etype_nbytes(etype):
+            raise ValueError(
+                f"bitcast requires equal byte width, got {self.etype} -> {etype}"
+            )
+        return View.identity(
+            ElementwiseNode(
+                shape=self.shape,
+                etype=etype,
+                args=(self,),
+                operator="bitcast",
+            )
+        )
 
     def reduce(
         self,
@@ -232,6 +296,17 @@ class View:
         value: PyTensor | "View", etype: ElementType
     ) -> "View":
         return value if isinstance(value, View) else const(value, etype=etype)
+
+    @staticmethod
+    def _expect_element_type_kinds(
+        args: tuple["View", ...], expected_kind: ElementKind
+    ) -> None:
+        for i, arg in enumerate(args):
+            if etype_kind(arg.etype) != expected_kind:
+                raise TypeError(
+                    f"Expected {expected_kind} element type, got {arg.etype} for "
+                    + f"argument #{i + 1}: {arg}"
+                )
 
     def _join_etypes_for_bop(self, other: "View") -> tuple["View", "View"]:
         res_etype = etype_join(self.etype, other.etype)
@@ -315,6 +390,18 @@ class View:
         )
 
     @staticmethod
+    def elementwise_binary_bitwise(
+        a: "View",
+        b: "View | Scalar",
+        op: BinaryBitwiseOperator,
+    ) -> "View":
+        b = View._from_view_or_scalar(b, etype=a.etype)
+        View._expect_element_type_kinds((a, b), "uint")
+        a, b = a._join_shapes_for_elementwise_bop(b)
+        node = ElementwiseNode(shape=a.shape, etype=a.etype, args=(a, b), operator=op)
+        return View.identity(node)
+
+    @staticmethod
     def elementwise_binary(
         a: "View",
         b: "View | Scalar",
@@ -365,6 +452,113 @@ class View:
         return View.identity(MatmulNode(shape=out_shape, etype=a.etype, args=(a, b)))
 
     @staticmethod
+    def remap(
+        *,
+        source: "View",
+        info: RemapInfo,
+        indices: "View | None" = None,
+        out_shape: tuple[int, ...] | None = None,
+        etype: ElementType | None = None,
+    ) -> "View":
+        match info:
+            case RemapScatterInfo():
+                return View._remap_scatter(
+                    source=source,
+                    info=info,
+                    indices=indices,
+                    out_shape=out_shape,
+                    etype=etype,
+                )
+            case RemapGatherInfo():
+                return View._remap_gather(
+                    source=source,
+                    info=info,
+                    indices=indices,
+                    etype=etype,
+                )
+
+    @staticmethod
+    def _remap_scatter(
+        *,
+        source: "View",
+        info: RemapScatterInfo,
+        indices: "View | None",
+        out_shape: tuple[int, ...] | None,
+        etype: ElementType | None,
+    ) -> "View":
+        accessor = info.accessor
+        if accessor is not None:
+            if out_shape is None:
+                raise ValueError("scatter with accessor requires out_shape")
+            if accessor.shape != source.shape:
+                raise ValueError("scatter accessor.shape must match source.shape")
+            args: tuple[View, ...] = (source,)
+        else:
+            if out_shape is None or indices is None:
+                raise ValueError(
+                    "scatter without accessor requires out_shape and indices"
+                )
+            source, indices = _join_source_with_indices(source, indices, out_shape)
+            args = (source, indices)
+        return View.identity(
+            RemapNode(
+                shape=out_shape,
+                etype=etype or source.etype,
+                args=args,
+                info=info,
+            )
+        )
+
+    @staticmethod
+    def _remap_gather(
+        *,
+        source: "View",
+        info: RemapGatherInfo,
+        indices: "View | None",
+        etype: ElementType | None,
+    ) -> "View":
+        accessor = info.accessor
+        source_shape = info.source_shape
+        if (accessor is None) != (source_shape is None):
+            raise ValueError(
+                "gather with accessor requires source_shape; "
+                + "gather without accessor must omit source_shape"
+            )
+        if accessor is None:
+            if indices is not None:
+                raise ValueError(
+                    "gather densify (no accessor) does not take indices"
+                )
+            node_shape = source.shape
+            args: tuple[View, ...] = (source,)
+        else:
+            assert source_shape is not None
+            if indices is None:
+                raise ValueError("gather with accessor requires indices")
+            if accessor.shape != source_shape:
+                raise ValueError("gather accessor.shape must match source_shape")
+            indices = _validate_indices_view(indices, source_shape)
+            out_prefix = indices.shape[:-1]
+            source = View(
+                node=source.node,
+                accessor=Accessor(
+                    offset=source.offset,
+                    shape=out_prefix,
+                    pitch=c_contiguous_pitch_for_shape(out_prefix),
+                ),
+            )
+            node_shape = out_prefix
+            args = (source, indices)
+        return View.identity(
+            RemapNode(
+                shape=node_shape,
+                etype=etype or source.etype,
+                args=args,
+                info=info,
+            )
+        )
+
+    @staticmethod
     def scatter(
         *,
         source: "View",
@@ -374,19 +568,67 @@ class View:
         operator: BinaryAssocElementOperator | None = None,
         etype: ElementType | None = None,
     ) -> "View":
-        return View.identity(
-            ScatterNode(
-                shape=out_shape,
-                etype=etype or source.etype,
-                args=(source,),
+        return View.remap(
+            source=source,
+            info=RemapScatterInfo(
+                accessor=Accessor(offset=woffset, shape=source.shape, pitch=wpitch),
                 operator=operator,
-                woffset=woffset,
-                wpitch=wpitch,
-            )
+            ),
+            out_shape=out_shape,
+            etype=etype,
         )
 
 
 type TensorOperand = View | Scalar
+
+
+def _validate_indices_view(indices: View, out_shape: tuple[int, ...]) -> View:
+    out_rank = len(out_shape)
+    if indices.rank == 0:
+        raise ValueError("indices must have rank >= 1")
+    if indices.shape[-1] != out_rank:
+        raise ValueError(
+            f"indices.shape[-1] must equal len(out_shape) ({out_rank}), got shape {indices.shape}"
+        )
+    if etype_kind(indices.etype) != "uint":
+        raise ValueError(
+            f"indices must have an unsigned integer etype, got {indices.etype}"
+        )
+    return indices
+
+
+def _join_source_with_indices(
+    source: View,
+    indices: View,
+    out_shape: tuple[int, ...],
+) -> tuple[View, View]:
+    indices = _validate_indices_view(indices, out_shape)
+    out_rank = len(out_shape)
+
+    prefix_join = shape_join(
+        shape1=source.shape,
+        pitch1=source.pitch,
+        shape2=indices.shape[:-1],
+        pitch2=indices.pitch[:-1],
+    )
+    joined_source = View(
+        node=source.node,
+        accessor=Accessor(
+            offset=source.offset,
+            shape=prefix_join.shape,
+            pitch=prefix_join.pitch1,
+        ),
+    )
+    joined_indices = View(
+        node=indices.node,
+        accessor=Accessor(
+            offset=indices.offset,
+            shape=prefix_join.shape + (out_rank,),
+            pitch=prefix_join.pitch2 + (indices.pitch[-1],),
+        ),
+    )
+    return joined_source, joined_indices
+
 
 
 def const(value: PyTensor, *, etype: ElementType = F4) -> View:
