@@ -82,9 +82,12 @@ class IrKernel(ABC):
 @dataclass(frozen=True, kw_only=True)
 class IrElementwiseRpnKernel(IrKernel):
     rpn_expr: ElementRpnExpr
+    arg_etypes: tuple[ElementType, ...] = ()
 
     def __post_init__(self):
         assert all(x.shape == self.shape for x in self.arg_accessors)
+        if self.arg_etypes and len(self.arg_etypes) != len(self.arg_accessors):
+            raise ValueError("arg_etypes length must match arg_accessors")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -261,11 +264,13 @@ class IrProgramBuilder:
                 raise NotImplementedError(f"Unsupported node type: {type(node)}")
 
     def _build_kernel_for_elementwise_node(self, node: dsl.ElementwiseNode) -> IrKernel:
+        arg_etypes = tuple(view.etype for view in node.args)
         return IrElementwiseRpnKernel(
             arg_accessors=tuple(view.accessor for view in node.args),
             etype=node.etype,
             shape=node.shape,
             rpn_expr=ElementRpnExpr(string=_rpn_string_for_elementwise(node)),
+            arg_etypes=arg_etypes,
         )
 
     def _build_kernel_for_matmul_node(self, node: dsl.MatmulNode) -> IrKernel:
@@ -303,6 +308,9 @@ _UNARY_OPS: tuple[UnaryElementOperator, ...] = (
     "sin",
     "cos",
     "not",
+    "floor",
+    "ceil",
+    "bitcast",
 )
 _BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
     "pow",
@@ -319,6 +327,13 @@ _BINARY_OPS: tuple[BinaryElementOperator | BinaryCompareOperator, ...] = (
     "ge",
     "le",
 )
+_BITWISE_OPS: tuple[BinaryBitwiseOperator, ...] = (
+    "band",
+    "bor",
+    "bxor",
+    "shl",
+    "shr",
+)
 
 
 def _rpn_string_for_elementwise(
@@ -328,5 +343,7 @@ def _rpn_string_for_elementwise(
     if op in _UNARY_OPS:
         return (0, op)
     if op in _BINARY_OPS:
+        return (0, 1, op)
+    if op in _BITWISE_OPS:
         return (0, 1, op)
     raise NotImplementedError(f"{op=}")

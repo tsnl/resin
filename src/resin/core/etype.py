@@ -9,7 +9,10 @@ def is_scalar(value: object) -> bool:
 
 
 type ElementOperator = (
-    UnaryElementOperator | BinaryElementOperator | BinaryCompareOperator
+    UnaryElementOperator
+    | BinaryElementOperator
+    | BinaryCompareOperator
+    | BinaryBitwiseOperator
 )
 type UnaryElementOperator = Literal[
     "neg",
@@ -19,10 +22,14 @@ type UnaryElementOperator = Literal[
     "sin",
     "cos",
     "not",
+    "floor",
+    "ceil",
+    "bitcast",
 ]
 type BinaryAssocElementOperator = Literal["mul", "add", "max", "min"]
 type BinaryElementOperator = Literal["pow", "div", "sub"] | BinaryAssocElementOperator
 type BinaryCompareOperator = Literal["eq", "ne", "gt", "lt", "ge", "le"]
+type BinaryBitwiseOperator = Literal["band", "bor", "bxor", "shl", "shr"]
 
 # Tile etypes (e.g. "mat4x4_f4") extend this union as they are added.
 type ElementType = Literal["f4", "f2", "u4"]

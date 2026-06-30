@@ -22,13 +22,16 @@ from typing import Annotated, overload
 from resin.core.accessor import Accessor, c_contiguous_pitch_for_shape, shape_join
 from resin.core.common import SupportsWrite, pascal_to_snake_case
 from resin.core.etype import (
-    BinaryAssocElementOperator,
-    ElementType,
-    ElementOperator,
     F4,
+    BinaryAssocElementOperator,
+    BinaryBitwiseOperator,
+    ElementKind,
+    ElementOperator,
+    ElementType,
     Scalar,
     UnaryElementOperator,
     etype_join,
+    etype_kind,
     etype_nbytes,
 )
 from resin.core.pytree import PyTensor, infer_pytensor_shape
@@ -152,6 +155,51 @@ class View:
     def __rsub__(self, other: "TensorOperand") -> "View":
         return View._from_view_or_scalar(other, etype=self.etype) - self
 
+    def __and__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="band")
+
+    def __rand__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) & self
+
+    def __or__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="bor")
+
+    def __ror__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) | self
+
+    def __xor__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="bxor")
+
+    def __rxor__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) ^ self
+
+    def __lshift__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="shl")
+
+    def __rlshift__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) << self
+
+    def __rshift__(self, other: "TensorOperand") -> "View":
+        return View.elementwise_binary_bitwise(self, other, op="shr")
+
+    def __rrshift__(self, other: "TensorOperand") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) >> self
+
+    def __invert__(self) -> "View":
+        return View.elementwise_unary(self, operator="not")
+
+    def __neg__(self) -> "View":
+        return View.elementwise_unary(self, operator="neg")
+
+    def __pos__(self) -> "View":
+        return self
+
+    def __matmul__(self, other: "View") -> "View":
+        return View.matmul(self, other)
+
+    def __rmatmul__(self, other: "View") -> "View":
+        return View._from_view_or_scalar(other, etype=self.etype) @ self
+
     def max(self, other: "TensorOperand") -> "View":
         return View.elementwise_binary(self, other, operator="max")
 
@@ -176,12 +224,6 @@ class View:
     def ge(self, other: "TensorOperand") -> "View":
         return View.elementwise_binary(self, other, operator="ge")
 
-    def __neg__(self) -> "View":
-        return View.elementwise_unary(self, operator="neg")
-
-    def __pos__(self) -> "View":
-        return self
-
     def exp(self) -> "View":
         return View.elementwise_unary(self, operator="exp")
 
@@ -197,14 +239,25 @@ class View:
     def cos(self) -> "View":
         return View.elementwise_unary(self, operator="cos")
 
-    def __invert__(self) -> "View":
-        return View.elementwise_unary(self, operator="not")
+    def floor(self) -> "View":
+        return View.elementwise_unary(self, operator="floor")
 
-    def __matmul__(self, other: "View") -> "View":
-        return View.matmul(self, other)
+    def ceil(self) -> "View":
+        return View.elementwise_unary(self, operator="ceil")
 
-    def __rmatmul__(self, other: "View") -> "View":
-        return View._from_view_or_scalar(other, etype=self.etype) @ self
+    def bitcast(self, etype: ElementType) -> "View":
+        if etype_nbytes(self.etype) != etype_nbytes(etype):
+            raise ValueError(
+                f"bitcast requires equal byte width, got {self.etype} -> {etype}"
+            )
+        return View.identity(
+            ElementwiseNode(
+                shape=self.shape,
+                etype=etype,
+                args=(self,),
+                operator="bitcast",
+            )
+        )
 
     def reduce(
         self,
@@ -232,6 +285,17 @@ class View:
         value: PyTensor | "View", etype: ElementType
     ) -> "View":
         return value if isinstance(value, View) else const(value, etype=etype)
+
+    @staticmethod
+    def _expect_element_type_kinds(
+        args: tuple["View", ...], expected_kind: ElementKind
+    ) -> None:
+        for i, arg in enumerate(args):
+            if etype_kind(arg.etype) != expected_kind:
+                raise TypeError(
+                    f"Expected {expected_kind} element type, got {arg.etype} for "
+                    + f"argument #{i + 1}: {arg}"
+                )
 
     def _join_etypes_for_bop(self, other: "View") -> tuple["View", "View"]:
         res_etype = etype_join(self.etype, other.etype)
@@ -315,6 +379,18 @@ class View:
         )
 
     @staticmethod
+    def elementwise_binary_bitwise(
+        a: "View",
+        b: "View | Scalar",
+        op: BinaryBitwiseOperator,
+    ) -> "View":
+        b = View._from_view_or_scalar(b, etype=a.etype)
+        View._expect_element_type_kinds((a, b), "uint")
+        a, b = a._join_shapes_for_elementwise_bop(b)
+        node = ElementwiseNode(shape=a.shape, etype=a.etype, args=(a, b), operator=op)
+        return View.identity(node)
+
+    @staticmethod
     def elementwise_binary(
         a: "View",
         b: "View | Scalar",
@@ -384,6 +460,7 @@ class View:
                 wpitch=wpitch,
             )
         )
+
 
 
 type TensorOperand = View | Scalar
