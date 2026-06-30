@@ -22,6 +22,7 @@ from resin.ir.ir import (
     IrReductionKernel,
     IrRemapKernel,
     IrSortKernel,
+    IrWgslMultiOutputKernel,
 )
 
 __all__ = [
@@ -40,6 +41,8 @@ def dispatch_size_for_kernel(
     config: WgslKernelConfig,
 ) -> tuple[int, int, int]:
     match kernel:
+        case IrWgslMultiOutputKernel():
+            return kernel.dispatch_size
         case IrSortKernel() | IrPrefixSumKernel():
             # Single-threaded for correctness on small/medium vectors.
             return (1, 1, 1) if math.prod(kernel.shape) > 0 else (0, 1, 1)
@@ -80,6 +83,8 @@ def emit_wgsl_for_kernel(kernel: IrKernel, config: WgslKernelConfig) -> str:
             _emit_wgsl_for_prefix_sum_kernel(w, kernel)
         case IrSortKernel():
             _emit_wgsl_for_sort_kernel(w, kernel)
+        case IrWgslMultiOutputKernel():
+            return kernel.wgsl
         case _:
             raise AbstractKernelException(f"Unsupported kernel type: {type(kernel)}")
 

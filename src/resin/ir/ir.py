@@ -11,6 +11,7 @@ __all__ = [
     "IrReductionKernel",
     "IrRemapKernel",
     "IrSortKernel",
+    "IrWgslMultiOutputKernel",
     "reachable_ports",
 ]
 
@@ -221,6 +222,10 @@ class IrWgslMultiOutputKernel(IrKernel):
     arg_etypes: tuple[ElementType, ...]
     output_etypes: tuple[ElementType, ...]
     clear_output_before_dispatch: bool = True
+
+    @override
+    def operand_etypes(self) -> tuple[ElementType, ...]:
+        return self.arg_etypes
 
     def __post_init__(self):
         assert len(self.arg_etypes) == len(self.arg_accessors)

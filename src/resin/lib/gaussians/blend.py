@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from resin.core.etype import F4, U4, ElementType
 from resin.dsl.node import CustomNode
@@ -21,9 +21,11 @@ class GaussianBlendNode(CustomNode):
     width: int
     height: int
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("image", "final_T", "n_contrib")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         match port:
             case "image":
@@ -33,6 +35,7 @@ class GaussianBlendNode(CustomNode):
             case _:
                 raise KeyError(port)
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         match port:
             case "image" | "final_T":
@@ -42,6 +45,7 @@ class GaussianBlendNode(CustomNode):
             case _:
                 raise KeyError(port)
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -63,7 +67,8 @@ class GaussianBlendNode(CustomNode):
             clear_output_before_dispatch=True,
         )
 
-    def df_do_ports(self, df_douts: dict[str, View]) -> tuple[View, ...]:
+    @override
+    def df_do_ports(self, df_douts: dict[str, View]) -> tuple[View | None, ...]:
         df_dimage = df_douts.get("image")
         if df_dimage is None:
             z_m = zeros(self.args[0].shape, etype=F4)
@@ -83,14 +88,13 @@ class GaussianBlendNode(CustomNode):
             height=self.height,
             count=count,
         )
-        grad_colors = View.port(grad_node, "grad_colors")
-        grad_opacities = View.port(grad_node, "grad_opacities")
+        grad_colors = View.identity(grad_node, port="grad_colors")
+        grad_opacities = View.identity(grad_node, port="grad_opacities")
         # Means/conics grads not yet implemented in the smoke backward kernel.
         grad_means = zeros(means2d.shape, etype=F4)
         grad_conics = zeros(conics.shape, etype=F4)
         # Order (u4 indices) is not differentiable.
-        grad_order = zeros(order.shape, etype=U4)
-        return (grad_means, grad_conics, grad_colors, grad_opacities, grad_order)
+        return (grad_means, grad_conics, grad_colors, grad_opacities, None)
 
 
 @dataclass(kw_only=True, frozen=True, eq=False)
@@ -101,9 +105,11 @@ class GradGaussianBlendNode(CustomNode):
     height: int
     count: int
 
+    @override
     def output_ports(self) -> tuple[str, ...]:
         return ("grad_colors", "grad_opacities")
 
+    @override
     def port_shape(self, port: str) -> tuple[int, ...]:
         match port:
             case "grad_colors":
@@ -113,9 +119,11 @@ class GradGaussianBlendNode(CustomNode):
             case _:
                 raise KeyError(port)
 
+    @override
     def port_etype(self, port: str) -> ElementType:
         return F4
 
+    @override
     def build_kernel(self, *, used_ports: frozenset[str]) -> IrKernel:
         from resin.ir.ir import IrWgslMultiOutputKernel
 
@@ -156,4 +164,4 @@ def gaussian_blend(
         height=height,
     )
     _ = count
-    return View.port(node, "image")
+    return View.identity(node, port="image")
