@@ -81,7 +81,7 @@ fn request_device_from_adapter(
     Ok((device, queue))
 }
 
-/// Acquire a default GPU device and queue for standalone use (e.g. Python dev).
+/// Acquire a default GPU device and queue for standalone use.
 ///
 /// Game engines should pass their existing `Device` and `Queue` to [`WgpuInterp::empty`].
 pub fn request_default_device() -> Result<(wgpu::Device, wgpu::Queue), WgpuInterpError> {
@@ -367,9 +367,7 @@ impl Interp for WgpuInterp {
         WgpuInterp::program_count(self)
     }
 
-    fn admit_program(&mut self, program_msgpack: &[u8]) -> Result<ProgramId, InterpError> {
-        let program = WgpuProgram::from_msgpack(program_msgpack)
-            .map_err(|err| InterpError::Program(err.to_string()))?;
+    fn admit_program(&mut self, program: WgpuProgram) -> Result<ProgramId, InterpError> {
         WgpuInterp::admit_wgpu_program(self, program).map_err(Into::into)
     }
 

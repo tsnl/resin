@@ -3,6 +3,8 @@ mod wgpu;
 use rmpv::Value as MsgpackValue;
 use thiserror::Error;
 
+use crate::program::WgpuProgram;
+
 pub use wgpu::{request_default_device, WgpuInterp, WgpuInterpError};
 
 /// Admitted program handle returned by [`Interp::admit_program`].
@@ -42,7 +44,8 @@ pub enum InterpError {
 pub trait Interp: Send + Sync {
     fn program_count(&self) -> usize;
 
-    fn admit_program(&mut self, program_msgpack: &[u8]) -> Result<ProgramId, InterpError>;
+    /// Admit a program by value (no serialization on the execution path).
+    fn admit_program(&mut self, program: WgpuProgram) -> Result<ProgramId, InterpError>;
 
     fn run(&self, program_id: ProgramId) -> Result<(), InterpError>;
 

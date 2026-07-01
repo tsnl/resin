@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use resin_rt::{
+use resin_jit_wgpu::{
     create_interp, parse_backend, BufferId, Interp, InterpConfig, InterpError, ProgramId,
     WgpuProgram,
 };
@@ -64,8 +64,11 @@ impl PyInterp {
     }
 
     fn admit(&mut self, program_msgpack: &[u8]) -> PyResult<usize> {
+        // Python still ships programs as msgpack; decode once at the boundary.
+        let program = WgpuProgram::from_msgpack(program_msgpack)
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
         self.inner
-            .admit_program(program_msgpack)
+            .admit_program(program)
             .map(|program_id| program_id.0)
             .map_err(interp_error)
     }
