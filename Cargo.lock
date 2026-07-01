@@ -684,6 +684,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
+name = "resin-compile"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
+ "resin-ir",
+ "resin-jit-wgpu",
+]
+
+[[package]]
 name = "resin-core"
 version = "0.1.0"
 dependencies = [
@@ -696,6 +706,14 @@ version = "0.1.0"
 dependencies = [
  "resin-core",
  "serde",
+]
+
+[[package]]
+name = "resin-grad"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
 ]
 
 [[package]]
@@ -720,6 +738,14 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "wgpu",
+]
+
+[[package]]
+name = "resin-nn"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
 ]
 
 [[package]]

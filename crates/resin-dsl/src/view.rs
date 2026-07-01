@@ -135,6 +135,86 @@ impl View {
         }))
     }
 
+    pub fn exp(&self) -> Self {
+        self.elementwise_unary(UnaryElementOperator::Exp)
+    }
+
+    pub fn log(&self) -> Self {
+        self.elementwise_unary(UnaryElementOperator::Log)
+    }
+
+    pub fn sqrt(&self) -> Self {
+        self.elementwise_unary(UnaryElementOperator::Sqrt)
+    }
+
+    pub fn sin(&self) -> Self {
+        self.elementwise_unary(UnaryElementOperator::Sin)
+    }
+
+    pub fn cos(&self) -> Self {
+        self.elementwise_unary(UnaryElementOperator::Cos)
+    }
+
+    pub fn max_elem(&self, other: &Self) -> Result<Self, String> {
+        self.elementwise_binary(
+            other,
+            BinaryElementOperator::Assoc(BinaryAssocElementOperator::Max),
+        )
+    }
+
+    pub fn min_elem(&self, other: &Self) -> Result<Self, String> {
+        self.elementwise_binary(
+            other,
+            BinaryElementOperator::Assoc(BinaryAssocElementOperator::Min),
+        )
+    }
+
+    pub fn gt(&self, other: &Self) -> Result<Self, String> {
+        self.elementwise_compare(other, BinaryCompareOperator::Gt)
+    }
+
+    pub fn lt(&self, other: &Self) -> Result<Self, String> {
+        self.elementwise_compare(other, BinaryCompareOperator::Lt)
+    }
+
+    pub fn eq(&self, other: &Self) -> Result<Self, String> {
+        self.elementwise_compare(other, BinaryCompareOperator::Eq)
+    }
+
+    /// Topological order of nodes reachable from these roots (deps before dependents).
+    pub fn toposort(roots: &[Self]) -> Vec<Arc<Node>> {
+        let mut order = Vec::new();
+        let mut visiting = std::collections::HashSet::<*const Node>::new();
+        let mut visited = std::collections::HashSet::<*const Node>::new();
+
+        fn visit(
+            node: &Arc<Node>,
+            visiting: &mut std::collections::HashSet<*const Node>,
+            visited: &mut std::collections::HashSet<*const Node>,
+            order: &mut Vec<Arc<Node>>,
+        ) {
+            let key = Arc::as_ptr(node);
+            if visited.contains(&key) {
+                return;
+            }
+            assert!(
+                visiting.insert(key),
+                "cycle in computation graph"
+            );
+            for arg in &node.args {
+                visit(&arg.node, visiting, visited, order);
+            }
+            visiting.remove(&key);
+            visited.insert(key);
+            order.push(Arc::clone(node));
+        }
+
+        for root in roots {
+            visit(&root.node, &mut visiting, &mut visited, &mut order);
+        }
+        order
+    }
+
     pub fn elementwise_binary(
         &self,
         other: &Self,

@@ -15,6 +15,7 @@ pub struct Node {
 }
 
 /// Kind-specific payload only; operands live on [`Node::args`].
+#[derive(Clone)]
 pub enum NodeKind {
     Const { init: Box<[u8]> },
     Param { name: Arc<str> },
