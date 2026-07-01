@@ -701,6 +701,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "resin-dataset"
+version = "0.1.0"
+
+[[package]]
 name = "resin-dsl"
 version = "0.1.0"
 dependencies = [

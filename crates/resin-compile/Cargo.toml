@@ -8,3 +8,7 @@ resin-core = { path = "../resin-core" }
 resin-dsl = { path = "../resin-dsl" }
 resin-ir = { path = "../resin-ir" }
 resin-jit-wgpu = { path = "../resin-jit-wgpu" }
+
+[[example]]
+name = "interp_add"
+path = "examples/interp_add.rs"
