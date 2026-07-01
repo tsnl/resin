@@ -123,3 +123,15 @@ pub fn etype_join(a: ElementType, b: ElementType) -> Result<ElementType, String>
     let nbytes = a.nbytes().max(b.nbytes());
     etype(kind, nbytes)
 }
+
+pub fn spell_etype_in_wgsl(etype: ElementType) -> &'static str {
+    match etype {
+        ElementType::F4 => "f32",
+        ElementType::F2 => "f16",
+        ElementType::U4 => "u32",
+    }
+}
+
+pub fn etype_needs_enable_f16(etype: ElementType) -> bool {
+    matches!(etype, ElementType::F2)
+}

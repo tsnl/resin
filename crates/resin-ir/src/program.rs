@@ -1,6 +1,4 @@
-use resin_core::{
-    Accessor, BinaryAssocElementOperator, ElementType,
-};
+use resin_core::{Accessor, BinaryAssocElementOperator, ElementType};
 use resin_dsl::RemapInfo;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +41,53 @@ pub enum IrKernel {
     Matmul(IrMatmulKernel),
     Reduction(IrReductionKernel),
     Remap(IrRemapKernel),
+}
+
+impl IrKernel {
+    pub fn shape(&self) -> &[u32] {
+        match self {
+            Self::ElementwiseRpn(k) => &k.shape,
+            Self::Matmul(k) => &k.shape,
+            Self::Reduction(k) => &k.shape,
+            Self::Remap(k) => &k.shape,
+        }
+    }
+
+    pub fn etype(&self) -> ElementType {
+        match self {
+            Self::ElementwiseRpn(k) => k.etype,
+            Self::Matmul(k) => k.etype,
+            Self::Reduction(k) => k.etype,
+            Self::Remap(k) => k.etype,
+        }
+    }
+
+    pub fn arg_accessors(&self) -> &[Accessor] {
+        match self {
+            Self::ElementwiseRpn(k) => &k.arg_accessors,
+            Self::Matmul(k) => &k.arg_accessors,
+            Self::Reduction(k) => &k.arg_accessors,
+            Self::Remap(k) => &k.arg_accessors,
+        }
+    }
+
+    pub fn clear_output_before_dispatch(&self) -> bool {
+        match self {
+            Self::ElementwiseRpn(k) => k.clear_output_before_dispatch,
+            Self::Matmul(k) => k.clear_output_before_dispatch,
+            Self::Reduction(k) => k.clear_output_before_dispatch,
+            Self::Remap(k) => k.clear_output_before_dispatch,
+        }
+    }
+
+    pub fn operand_etypes(&self) -> Vec<ElementType> {
+        match self {
+            Self::ElementwiseRpn(k) => k.arg_etypes.clone(),
+            Self::Matmul(k) => vec![k.etype, k.etype],
+            Self::Reduction(k) => vec![k.etype],
+            Self::Remap(k) => k.arg_etypes.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

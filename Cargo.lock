@@ -712,6 +712,9 @@ name = "resin-jit-wgpu"
 version = "0.1.0"
 dependencies = [
  "pollster",
+ "resin-core",
+ "resin-dsl",
+ "resin-ir",
  "rmp-serde",
  "rmpv",
  "serde",
