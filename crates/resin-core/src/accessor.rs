@@ -1,6 +1,8 @@
 //! Strided buffer views (offset / shape / pitch).
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Accessor {
     pub offset: u32,
     pub shape: Box<[u32]>,

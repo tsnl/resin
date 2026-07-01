@@ -1,7 +1,9 @@
 [package]
-name = "resin-core"
+name = "resin-ir"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+resin-core = { path = "../resin-core" }
+resin-dsl = { path = "../resin-dsl" }
 serde = { version = "1.0", features = ["derive"] }

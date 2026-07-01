@@ -1,6 +1,8 @@
 //! Element types and operators (runtime values; not type parameters).
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ElementType {
     F4,
     F2,
@@ -11,13 +13,13 @@ pub const F4: ElementType = ElementType::F4;
 pub const F2: ElementType = ElementType::F2;
 pub const U4: ElementType = ElementType::U4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ElementKind {
     Float,
     Uint,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum UnaryElementOperator {
     Neg,
     Exp,
@@ -31,7 +33,7 @@ pub enum UnaryElementOperator {
     Bitcast,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BinaryAssocElementOperator {
     Mul,
     Add,
@@ -39,7 +41,7 @@ pub enum BinaryAssocElementOperator {
     Min,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BinaryElementOperator {
     Pow,
     Div,
@@ -47,7 +49,7 @@ pub enum BinaryElementOperator {
     Assoc(BinaryAssocElementOperator),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BinaryCompareOperator {
     Eq,
     Ne,
@@ -57,7 +59,7 @@ pub enum BinaryCompareOperator {
     Le,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BinaryBitwiseOperator {
     Band,
     Bor,
@@ -66,7 +68,7 @@ pub enum BinaryBitwiseOperator {
     Shr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ElementOperator {
     Unary(UnaryElementOperator),
     Binary(BinaryElementOperator),

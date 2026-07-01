@@ -10,8 +10,9 @@ use std::sync::Arc;
 /// Public tensor handle: identity-keyed node plus logical accessor.
 #[derive(Clone)]
 pub struct View {
-    pub(crate) node: Arc<Node>,
-    pub(crate) accessor: Accessor,
+    /// Shared graph node (identity = allocation). Public for `resin-ir` lowering.
+    pub node: Arc<Node>,
+    pub accessor: Accessor,
 }
 
 impl View {

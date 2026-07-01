@@ -1,7 +1,8 @@
 use crate::view::View;
 use resin_core::{
-    BinaryAssocElementOperator, ElementOperator, ElementType, Accessor,
+    Accessor, BinaryAssocElementOperator, ElementOperator, ElementType,
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Shared node payload; identity is the `Arc` allocation.
@@ -26,19 +27,19 @@ pub enum NodeKind {
     Remap { info: RemapInfo },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RemapInfo {
     Scatter(RemapScatterInfo),
     Gather(RemapGatherInfo),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemapScatterInfo {
     pub accessor: Option<Accessor>,
     pub operator: Option<BinaryAssocElementOperator>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemapGatherInfo {
     pub accessor: Option<Accessor>,
     pub source_shape: Option<Box<[u32]>>,

@@ -2,6 +2,7 @@
 members = [
     "crates/resin-core",
     "crates/resin-dsl",
+    "crates/resin-ir",
     "crates/resin-jit-wgpu",
     "crates/resin-rt-pybind",
 ]
