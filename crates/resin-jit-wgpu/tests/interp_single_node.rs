@@ -30,8 +30,8 @@ fn const_2d() {
 
 #[test]
 fn elementwise_add() {
-    let a = f4_param(&[3], "a");
-    let b = f4_param(&[3], "b");
+    let a = f4_param(&[3]);
+    let b = f4_param(&[3]);
     let out = &a + &b;
     let got = run_graph(&out, &[(&a, &[1.0, 2.0, 3.0]), (&b, &[4.0, 5.0, 6.0])]).expect("gpu");
     assert!(approx_eq(&got, &[5.0, 7.0, 9.0], 1e-5), "{got:?}");
@@ -39,8 +39,8 @@ fn elementwise_add() {
 
 #[test]
 fn elementwise_mul() {
-    let a = f4_param(&[2], "a");
-    let b = f4_param(&[2], "b");
+    let a = f4_param(&[2]);
+    let b = f4_param(&[2]);
     let out = &a * &b;
     let got = run_graph(&out, &[(&a, &[2.0, 3.0]), (&b, &[4.0, 5.0])]).expect("gpu");
     assert!(approx_eq(&got, &[8.0, 15.0], 1e-5), "{got:?}");
@@ -48,8 +48,8 @@ fn elementwise_mul() {
 
 #[test]
 fn elementwise_sub_div() {
-    let a = f4_param(&[2], "a");
-    let b = f4_param(&[2], "b");
+    let a = f4_param(&[2]);
+    let b = f4_param(&[2]);
     let sub = &a - &b;
     let got = run_graph(&sub, &[(&a, &[5.0, 3.0]), (&b, &[1.0, 4.0])]).expect("gpu");
     assert!(approx_eq(&got, &[4.0, -1.0], 1e-5), "{got:?}");
@@ -61,7 +61,7 @@ fn elementwise_sub_div() {
 
 #[test]
 fn elementwise_unary_neg_exp() {
-    let x = f4_param(&[2], "x");
+    let x = f4_param(&[2]);
     let neg = -&x;
     let got = run_graph(&neg, &[(&x, &[1.5, -2.0])]).expect("gpu");
     assert!(approx_eq(&got, &[-1.5, 2.0], 1e-5), "{got:?}");
@@ -73,7 +73,7 @@ fn elementwise_unary_neg_exp() {
 
 #[test]
 fn elementwise_unary_log_sqrt() {
-    let x = f4_param(&[2], "x");
+    let x = f4_param(&[2]);
     let got = run_graph(&x.log(), &[(&x, &[1.0, std::f32::consts::E])]).expect("gpu");
     assert!(approx_eq(&got, &[0.0, 1.0], 1e-4), "{got:?}");
 
@@ -83,16 +83,15 @@ fn elementwise_unary_log_sqrt() {
 
 #[test]
 fn elementwise_relu() {
-    use resin_nn::relu;
-    let x = f4_param(&[4], "x");
-    let out = relu(&x).unwrap();
+    let x = f4_param(&[4]);
+    let out = x.relu();
     let got = run_graph(&out, &[(&x, &[-1.0, 0.0, 2.0, -3.0])]).expect("gpu");
     assert!(approx_eq(&got, &[0.0, 0.0, 2.0, 0.0], 1e-5), "{got:?}");
 }
 
 #[test]
 fn reduce_sum() {
-    let x = f4_param(&[4], "x");
+    let x = f4_param(&[4]);
     let out = x
         .reduce(&[0], ElementOperator::Add)
         .unwrap()
@@ -104,7 +103,7 @@ fn reduce_sum() {
 
 #[test]
 fn reduce_max() {
-    let x = f4_param(&[4], "x");
+    let x = f4_param(&[4]);
     let out = x
         .reduce(&[0], ElementOperator::Max)
         .unwrap()
@@ -116,8 +115,8 @@ fn reduce_max() {
 
 #[test]
 fn matmul_2x3_times_3x2() {
-    let a = f4_param(&[2, 3], "a");
-    let b = f4_param(&[3, 2], "b");
+    let a = f4_param(&[2, 3]);
+    let b = f4_param(&[3, 2]);
     let out = a.matmul(&b).unwrap();
     // Python TestMatmul.test_2d
     let got = run_graph(
@@ -136,7 +135,7 @@ fn matmul_2x3_times_3x2() {
 
 #[test]
 fn reduce_sum_axis_1() {
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let out = x.reduce(&[1], ElementOperator::Add).unwrap();
     let got = run_graph(&out, &[(&x, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])]).expect("gpu");
     assert!(approx_eq(&got, &[6.0, 15.0], 1e-5), "{got:?}");
@@ -144,7 +143,7 @@ fn reduce_sum_axis_1() {
 
 #[test]
 fn reduce_max_axis_0() {
-    let x = f4_param(&[2, 2], "x");
+    let x = f4_param(&[2, 2]);
     let out = x.reduce(&[0], ElementOperator::Max).unwrap();
     let got = run_graph(&out, &[(&x, &[1.0, 4.0, 3.0, 2.0])]).expect("gpu");
     assert!(approx_eq(&got, &[3.0, 4.0], 1e-5), "{got:?}");
@@ -152,7 +151,7 @@ fn reduce_max_axis_0() {
 
 #[test]
 fn identity_copy() {
-    let x = f4_param(&[3], "x");
+    let x = f4_param(&[3]);
     let got = run_graph(&x.copy(None), &[(&x, &[1.0, 2.0, 3.0])]).expect("gpu");
     assert!(approx_eq(&got, &[1.0, 2.0, 3.0], 1e-5), "{got:?}");
 }
@@ -160,7 +159,7 @@ fn identity_copy() {
 #[test]
 fn index_row_and_step_slice_via_copy() {
     // Narrow is a view; densify with copy() so GPU writes a contiguous buffer.
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let row0 = x.index((0, ..)).unwrap().copy(None);
     let got = run_graph(&row0, &[(&x, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])]).expect("gpu");
     assert!(approx_eq(&got, &[1.0, 2.0, 3.0], 1e-5), "{got:?}");
@@ -169,7 +168,7 @@ fn index_row_and_step_slice_via_copy() {
     let got = run_graph(&sub, &[(&x, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])]).expect("gpu");
     assert!(approx_eq(&got, &[5.0, 6.0], 1e-5), "{got:?}");
 
-    let x1 = f4_param(&[6], "x1");
+    let x1 = f4_param(&[6]);
     let stepped = x1
         .index(AxisIndex::slice(None, None, 2))
         .unwrap()
@@ -182,9 +181,9 @@ fn index_row_and_step_slice_via_copy() {
 fn broadcast_scalar_adjoint_accumulates() {
     // Python TestScatterAccumulate: g over broadcast(x) → sum into scalar x.
     use resin_grad::accessor_adjoint;
-    let x = f4_param(&[], "x");
+    let x = f4_param(&[]);
     let y = x.broadcast(&[5]);
-    let g = f4_param(&[5], "g");
+    let g = f4_param(&[5]);
     let out = accessor_adjoint(&y, &g).unwrap();
     let mut scalar = out;
     while !scalar.shape().is_empty() {
@@ -197,7 +196,7 @@ fn broadcast_scalar_adjoint_accumulates() {
 #[test]
 fn softmax_rows_sum_to_one() {
     use resin_nn::softmax;
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let probs = softmax(&x, &[1]).unwrap();
     let row_sums = probs.reduce(&[1], ElementOperator::Add).unwrap();
     let got = run_graph(&row_sums, &[(&x, &[1.0, 2.0, 3.0, 0.0, 0.0, 0.0])]).expect("gpu");
@@ -207,8 +206,8 @@ fn softmax_rows_sum_to_one() {
 #[test]
 fn matmul_with_transpose_view() {
     // y = x @ W.T with W [2, 3], x [1, 3] → y [1, 2]
-    let x = f4_param(&[1, 3], "x");
-    let w = f4_param(&[2, 3], "w");
+    let x = f4_param(&[1, 3]);
+    let w = f4_param(&[2, 3]);
     let out = x.matmul(&w.transpose().unwrap()).unwrap();
     let got = run_graph(
         &out,
@@ -224,8 +223,8 @@ fn matmul_with_transpose_view() {
 
 #[test]
 fn broadcast_add_bias() {
-    let x = f4_param(&[2, 3], "x");
-    let bias = f4_param(&[3], "b");
+    let x = f4_param(&[2, 3]);
+    let bias = f4_param(&[3]);
     let out = &x + &bias;
     let got = run_graph(
         &out,
@@ -244,7 +243,7 @@ fn broadcast_add_bias() {
 #[test]
 fn gather_copy_via_remap() {
     // Identity gather densify: copy() on a non-identity view.
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let v = x.broadcast(&[1]); // leading broadcast — not identity on node
     let out = v.copy(None);
     let got = run_graph(&out, &[(&x, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])]).expect("gpu");
@@ -263,7 +262,7 @@ fn scatter_add_transpose_adjoint_shape() {
     use resin_core::Accessor;
     use resin_dsl::{RemapInfo, RemapScatterInfo};
 
-    let g = f4_param(&[3, 2], "g");
+    let g = f4_param(&[3, 2]);
     // W would be [2,3] pitch [3,1]; W.T shape [3,2] pitch [1,3]
     let out = View::remap(
         &g,

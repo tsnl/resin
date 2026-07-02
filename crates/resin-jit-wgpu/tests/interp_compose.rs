@@ -3,11 +3,9 @@
 #[path = "interp_helpers.rs"]
 mod interp_helpers;
 
-use interp_helpers::{approx_eq, f4_const, f4_param, run_graph};
-use resin_core::F4;
-use resin_dsl::{const_bytes, View};
+use interp_helpers::{approx_eq, cross_entropy, f4_const, f4_param, mean, run_graph, Linear};
+use resin_dsl::View;
 use resin_grad::grad_view;
-use resin_nn::{cross_entropy, mean, relu, Linear};
 
 fn squeeze_all(mut v: View) -> View {
     while !v.shape().is_empty() {
@@ -18,7 +16,7 @@ fn squeeze_all(mut v: View) -> View {
 
 #[test]
 fn linear_forward() {
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let layer = Linear::new(3, 2, true);
     let out = layer.forward(&x).unwrap();
     let got = run_graph(
@@ -36,11 +34,11 @@ fn linear_forward() {
 #[test]
 fn small_mlp_relu_linear_stack() {
     // Distinct param names (Linear::new always uses "weight"/"bias").
-    let x = f4_param(&[2, 2], "x");
-    let w1 = f4_param(&[2, 2], "w1");
-    let w2 = f4_param(&[1, 2], "w2");
-    let b2 = f4_param(&[1], "b2");
-    let h = relu(&x.matmul(&w1.transpose().unwrap()).unwrap()).unwrap();
+    let x = f4_param(&[2, 2]);
+    let w1 = f4_param(&[2, 2]);
+    let w2 = f4_param(&[1, 2]);
+    let b2 = f4_param(&[1]);
+    let h = x.matmul(&w1.transpose().unwrap()).unwrap().relu();
     let out = &h.matmul(&w2.transpose().unwrap()).unwrap() + &b2;
     let got = run_graph(
         &out,
@@ -57,8 +55,8 @@ fn small_mlp_relu_linear_stack() {
 
 #[test]
 fn cross_entropy_single_sample() {
-    let probs = f4_param(&[1, 3], "p");
-    let label = f4_param(&[1, 3], "y");
+    let probs = f4_param(&[1, 3]);
+    let label = f4_param(&[1, 3]);
     let loss = squeeze_all(cross_entropy(&probs, &label).unwrap());
     let got = run_graph(
         &loss,
@@ -75,8 +73,8 @@ fn cross_entropy_single_sample() {
 
 #[test]
 fn mean_cross_entropy_batch() {
-    let probs = f4_param(&[2, 2], "p");
-    let label = f4_param(&[2, 2], "y");
+    let probs = f4_param(&[2, 2]);
+    let label = f4_param(&[2, 2]);
     let loss = mean(&cross_entropy(&probs, &label).unwrap()).unwrap();
     let got = run_graph(
         &loss,
@@ -96,10 +94,10 @@ fn mean_cross_entropy_batch() {
 
 #[test]
 fn sum_param_grad_via_update() {
-    let p = f4_param(&[4], "p");
+    let p = f4_param(&[4]);
     let loss = squeeze_all(p.sum(None).unwrap());
     let g = grad_view(&loss, &p).unwrap();
-    let one = const_bytes([], F4, 1f32.to_le_bytes());
+    let one: View = 1f32.into();
     let updated = &p + &(&one * &g);
     let got = run_graph(&updated, &[(&p, &[1.0, 2.0, 3.0, 4.0])]).expect("gpu");
     assert!(approx_eq(&got, &[2.0, 3.0, 4.0, 5.0], 1e-4), "{got:?}");
@@ -107,11 +105,11 @@ fn sum_param_grad_via_update() {
 
 #[test]
 fn matmul_grad_via_update() {
-    let x = f4_param(&[2, 2], "x");
-    let w = f4_param(&[2, 2], "w");
+    let x = f4_param(&[2, 2]);
+    let w = f4_param(&[2, 2]);
     let loss = squeeze_all(x.matmul(&w).unwrap().sum(None).unwrap());
     let g = grad_view(&loss, &w).unwrap();
-    let one = const_bytes([], F4, 1f32.to_le_bytes());
+    let one: View = 1f32.into();
     let updated = &w + &(&one * &g);
     let got = run_graph(
         &updated,
@@ -123,11 +121,11 @@ fn matmul_grad_via_update() {
 
 #[test]
 fn param_update_adds_scaled_grad() {
-    let p = f4_param(&[3], "p");
+    let p = f4_param(&[3]);
     let c = f4_const(&[1.0, 2.0, 3.0]);
     let loss = squeeze_all((&p * &c).sum(None).unwrap());
     let g = grad_view(&loss, &p).unwrap();
-    let lr = const_bytes([], F4, 0.1f32.to_le_bytes());
+    let lr: View = 0.1f32.into();
     let updated = &p + &(&lr * &g);
     let got = run_graph(&updated, &[(&p, &[1.0, 1.0, 1.0])]).expect("gpu");
     assert!(approx_eq(&got, &[1.1, 1.2, 1.3], 1e-4), "{got:?}");
@@ -135,11 +133,11 @@ fn param_update_adds_scaled_grad() {
 
 #[test]
 fn param_update_subtracts_scaled_grad() {
-    let p = f4_param(&[3], "p");
+    let p = f4_param(&[3]);
     let c = f4_const(&[1.0, 2.0, 3.0]);
     let loss = squeeze_all((&p * &c).sum(None).unwrap());
     let g = grad_view(&loss, &p).unwrap();
-    let lr = const_bytes([], F4, 0.1f32.to_le_bytes());
+    let lr: View = 0.1f32.into();
     let updated = &p - &(&lr * &g);
     let got = run_graph(&updated, &[(&p, &[1.0, 1.0, 1.0])]).expect("gpu");
     assert!(approx_eq(&got, &[0.9, 0.8, 0.7], 1e-4), "{got:?}");

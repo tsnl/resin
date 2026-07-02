@@ -1,15 +1,15 @@
 //! Two pipeline instances can hold independent buffer state.
 
-use resin_core::F4;
+use resin_core::{named, F4};
 use resin_dsl::param;
-use resin_jit_wgpu::{compile, DeviceConfig};
+use resin_jit_wgpu::{compile_open, DeviceConfig};
 
 #[test]
 fn two_instances_independent_buffers() {
-    let weights = param([2], F4, "weights");
-    let factory = compile(
-        &[("weights", &weights)],
-        &[("out", &weights)],
+    let weights = param([2], F4);
+    let factory = compile_open(
+        &named("weights", weights.clone()),
+        &named("out", weights),
         DeviceConfig::default(),
         None,
     )

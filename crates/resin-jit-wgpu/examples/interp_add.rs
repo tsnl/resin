@@ -1,13 +1,19 @@
 //! Smoke: const and param paths via PipelineFactory.
 
 use resin_core::F4;
-use resin_dsl::{constant, param};
-use resin_jit_wgpu::{compile, DeviceConfig};
+use resin_core::{named, Empty};
+use resin_dsl::{constant, param, View};
+use resin_jit_wgpu::{compile_open, DeviceConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sum =
         &constant([4], &[1.0f32, 2.0, 3.0, 4.0]) + &constant([4], &[10.0f32, 20.0, 30.0, 40.0]);
-    let factory = compile(&[], &[("out", &sum)], DeviceConfig::default(), None)?;
+    let factory = compile_open(
+        &Empty::<View>::new(),
+        &named("out", sum),
+        DeviceConfig::default(),
+        None,
+    )?;
     let mut pipe = factory.create()?;
     let outs = pipe.call([])?;
     let const_out: Vec<f32> = outs["out"]
@@ -16,12 +22,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
     assert_eq!(const_out, vec![11., 22., 33., 44.]);
 
-    let a = param([4], F4, "a");
-    let b = param([4], F4, "b");
+    let a = param([4], F4);
+    let b = param([4], F4);
     let out = &a + &b;
-    let factory = compile(
-        &[("a", &a), ("b", &b)],
-        &[("out", &out)],
+    let factory = compile_open(
+        &(named("a", a.clone()), named("b", b.clone())),
+        &named("out", out),
         DeviceConfig::default(),
         None,
     )?;

@@ -149,5 +149,5 @@ fn main() {
     print_view(&(&s * &s));
 
     section("Param node");
-    print_view(&param([4], F4, "weights"));
+    print_view(&param([4], F4));
 }
