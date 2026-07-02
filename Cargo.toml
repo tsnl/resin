@@ -1,6 +1,11 @@
 [workspace]
 members = [
-    "crates/resin-rt",
-    "crates/resin-rt-pybind",
+    "crates/resin-core",
+    "crates/resin-dataset",
+    "crates/resin-dsl",
+    "crates/resin-grad",
+    "crates/resin-ir",
+    "crates/resin-jit-wgpu",
+    "crates/resin-nn",
 ]
 resolver = "3"

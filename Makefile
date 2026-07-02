@@ -1,19 +1,9 @@
-UV ?= uv
-PATHS := src tests examples
+.PHONY: check format
 
-.PHONY: check format check-ruff check-basedpyright check-pytest
-
-check: check-ruff check-basedpyright check-pytest
+check:
+	cargo test --workspace
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets -- -D warnings
 
 format:
-	$(UV) run ruff format $(PATHS)
-	$(UV) run ruff check --fix $(PATHS)
-
-check-ruff:
-	$(UV) run ruff check $(PATHS)
-
-check-basedpyright:
-	$(UV) run basedpyright --level warning --warnings $(PATHS)
-
-check-pytest:
-	$(UV) run pytest tests
+	cargo fmt --all
