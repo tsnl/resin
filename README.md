@@ -2,36 +2,50 @@
 
 [![Check](https://github.com/tsnl/resin/actions/workflows/check.yml/badge.svg)](https://github.com/tsnl/resin/actions/workflows/check.yml)
 
-A metaprogramming experiment: a minimal Python DSL for GPGPU: ML, graphics, and more.
+A metaprogramming experiment: a minimal **Rust** DSL for GPGPU (ML, graphics, and more).
 
-Users compose a graph of nodes; symbolic transformations (autodiff, optimization) operate on the graph. Custom WGSL nodes handle things like sorting (e.g. for 3D Gaussian Splatting), while standard PyTorch-like nodes cover elementwise ops, scatter-gather, reduce, etc.
+Users compose a graph of nodes; symbolic transformations (autodiff, optimization) operate on the graph. Standard PyTorch-like ops cover elementwise, matmul, scatter-gather, reduce, etc.; the WGPU backend lowers graphs to WGSL and runs them on the GPU.
 
 Design ethos: ultimate minimalism. Elegant abstractions.
+
+## Crates
+
+| Crate | Role |
+| --- | --- |
+| `resin-core` | Element types, accessors, `ParamTree` |
+| `resin-dsl` | Identity-keyed `View` / `NodeRef` graph |
+| `resin-ir` | In-place `IrProgram` building |
+| `resin-grad` | Reverse-mode autodiff (`grad_wrt` / `grad_view`) |
+| `resin-nn` | `Linear` / `Mlp`, losses, `sgd_tree` |
+| `resin-dataset` | MNIST download and batching |
+| `resin-jit-wgpu` | WGSL codegen, lowering, interpreter, examples & GPU tests |
 
 ## Development setup
 
 Prerequisites:
 
-- Python 3.14
-- [uv](https://docs.astral.sh/uv/)
-- Rust toolchain (`rustup`)
+- [Rust toolchain](https://rustup.rs/) (stable)
+- A GPU / WGPU-capable adapter (CI uses Mesa Vulkan soft GPU)
 
 ```sh
-# Install Python dependencies:
-uv sync --group dev
-
-# `resin-rt-pybind` is a workspace member (see `pyproject.toml`), but `uv sync` only
-# installs it as an editable package. The native PyO3 extension still needs to be
-# compiled separately:
-uv run --directory crates/resin-rt-pybind maturin develop
-
-# Run checks:
+# Run the full check suite (tests, fmt, clippy):
 make check
 
-# Format and apply lint fixes:
+# Format:
 make format
+
+# GPU interpreter integration tests only:
+cargo test -p resin-jit-wgpu --tests
+
+# Examples:
+cargo run -p resin-jit-wgpu --example demo_front
+cargo run -p resin-jit-wgpu --example demo_interp
+cargo run -p resin-jit-wgpu --example interp_add
+cargo run -p resin-jit-wgpu --example train_mnist --release -- 3
 ```
+
+MNIST data is cached under `~/.cache/resin/mnist` (override with `RESIN_MNIST_DIR`).
 
 ## References
 
--   [PyTorch Internals](https://blog.ezyang.com/2019/05/pytorch-internals/)
+- [PyTorch Internals](https://blog.ezyang.com/2019/05/pytorch-internals/)

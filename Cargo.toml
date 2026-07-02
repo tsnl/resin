@@ -1,10 +1,11 @@
 [workspace]
 members = [
     "crates/resin-core",
+    "crates/resin-dataset",
     "crates/resin-dsl",
-    "crates/resin-ir",
     "crates/resin-grad",
-    "crates/resin-nn",
+    "crates/resin-ir",
     "crates/resin-jit-wgpu",
+    "crates/resin-nn",
 ]
 resolver = "3"
