@@ -7,7 +7,7 @@ use resin_dataset::{BatchIndices, MnistDataset, IMG_WH, NUM_CLS};
 use resin_dsl::param;
 use resin_grad::grad_wrt;
 use resin_ir::IrProgram;
-use resin_jit_wgpu::{create_interp, AdmitProgram, Interp, InterpConfig};
+use resin_jit_wgpu::{build_wgpu_program, DeviceConfig, DeviceContext, PipelineFactory};
 use resin_nn::{cross_entropy, mean, sgd_tree, Mlp};
 
 const BATCH_SIZE: u32 = 64;
@@ -50,18 +50,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ir.build_sink("loss", &loss)?;
     ir.build_sink_tree("new_model", &new_model)?;
     ir.seal_params()?;
-    let artifact = resin_jit_wgpu::build_wgpu_program(&ir, None);
-
-    let mut interp = create_interp(InterpConfig::default())?;
-    let program_id = interp.admit_program(artifact)?;
+    let artifact = build_wgpu_program(&ir, None);
+    let ctx = DeviceContext::from_config(&DeviceConfig::default())?;
+    let factory = PipelineFactory::from_program(ctx, artifact)?;
+    let mut pipe = factory.create()?;
 
     // He/Xavier uniform: weights ~ U(-sqrt(6/fan_in), +sqrt(6/fan_in)), bias 0.
-    // (Python used uniform(±0.1) on all leaves; that often starves ReLU grads.)
     let mut rng = seed;
+    let mut weight_bytes: std::collections::BTreeMap<String, Vec<u8>> =
+        std::collections::BTreeMap::new();
     for (path, view) in mlp.flatten() {
         let name = join_param_path("model", &path);
-        let bytes = init_param_bytes(&path, view.shape(), &mut rng);
-        interp.write_param(program_id, &name, &bytes)?;
+        weight_bytes.insert(name, init_param_bytes(&path, view.shape(), &mut rng));
     }
 
     let batch_size = BATCH_SIZE as usize;
@@ -70,22 +70,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut loss_value = f32::NAN;
         while let Some(indices) = batches.next_batch() {
             let (xs_f, ys_f) = dataset.batch_f32(indices);
-            interp.write_param(program_id, "xs", &f32_slice_as_bytes(&xs_f))?;
-            interp.write_param(program_id, "ys", &f32_slice_as_bytes(&ys_f))?;
-            interp.run(program_id)?;
+            let xs_b = f32_slice_as_bytes(&xs_f);
+            let ys_b = f32_slice_as_bytes(&ys_f);
+            let outs = {
+                let mut inputs: Vec<(&str, &[u8])> =
+                    vec![("xs", xs_b.as_slice()), ("ys", ys_b.as_slice())];
+                for (name, bytes) in &weight_bytes {
+                    inputs.push((name.as_str(), bytes.as_slice()));
+                }
+                pipe.call(inputs)?
+            };
+            loss_value = f32::from_le_bytes(outs["loss"][..4].try_into()?);
 
-            let loss_bytes = interp.read_sink(program_id, "loss")?;
-            loss_value = f32::from_le_bytes(loss_bytes[..4].try_into()?);
-
-            // Commit new_model → model (host copies via read/write).
+            // Commit new_model → model on the host for the next step.
             for (path, _) in mlp.flatten() {
                 let sink_name = join_param_path("new_model", &path);
                 let param_name = join_param_path("model", &path);
-                let bytes = interp.read_sink(program_id, &sink_name)?;
-                interp.write_param(program_id, &param_name, &bytes)?;
+                weight_bytes.insert(param_name, outs[&sink_name].clone());
             }
         }
-        // Python: one line per epoch = loss of the last full batch.
         eprintln!("epoch {epoch}: loss={loss_value:.6}");
     }
 

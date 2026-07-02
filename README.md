@@ -20,7 +20,7 @@ Project goals and known gaps: [docs/GOAL.md](docs/GOAL.md).
 | `resin-grad` | Reverse-mode autodiff (`grad_wrt` / `grad_view`) |
 | `resin-nn` | `Linear` / `Mlp`, losses, `sgd_tree` |
 | `resin-dataset` | MNIST download and batching |
-| `resin-jit-wgpu` | WGSL codegen, lowering, interpreter, examples & GPU tests |
+| `resin-jit-wgpu` | WGSL codegen, lowering, `PipelineFactory` / `Pipeline`, examples & GPU tests |
 
 ## Development setup
 

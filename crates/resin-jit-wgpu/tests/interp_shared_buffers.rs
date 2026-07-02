@@ -1,45 +1,41 @@
-//! Python `test_interp_shared_buffers` parity: explicit cross-program buffer copy.
+//! Two pipeline instances can hold independent buffer state.
 
 use resin_core::F4;
 use resin_dsl::param;
-use resin_ir::IrProgram;
-use resin_jit_wgpu::{build_wgpu_program, create_interp, AdmitProgram, Interp, InterpConfig};
+use resin_jit_wgpu::{compile, DeviceConfig};
 
 #[test]
-fn copy_buffer_to_buffer_across_programs() {
+fn two_instances_independent_buffers() {
     let weights = param([2], F4, "weights");
+    let factory = compile(
+        &[("weights", &weights)],
+        &[("out", &weights)],
+        DeviceConfig::default(),
+        None,
+    )
+    .expect("compile");
+    let mut a = factory.create().unwrap();
+    let mut b = factory.create().unwrap();
 
-    let mut train_ir = IrProgram::new();
-    train_ir.register_param("weights", &weights).unwrap();
-    train_ir.build_sink("out", &weights).unwrap();
-    train_ir.seal_params().unwrap();
-    let train_prog = build_wgpu_program(&train_ir, None);
-
-    let mut eval_ir = IrProgram::new();
-    eval_ir.register_param("weights", &weights).unwrap();
-    eval_ir.build_sink("out", &weights).unwrap();
-    eval_ir.seal_params().unwrap();
-    let eval_prog = build_wgpu_program(&eval_ir, None);
-
-    let mut interp = create_interp(InterpConfig::default()).expect("interp");
-    let train_id = interp.admit_program(train_prog).unwrap();
-    let eval_id = interp.admit_program(eval_prog).unwrap();
-
-    let train_w = interp.param(train_id, "weights").unwrap();
-    let eval_w = interp.param(eval_id, "weights").unwrap();
-
-    let payload: Vec<u8> = [1.0f32, 2.0]
+    let payload_a: Vec<u8> = [1.0f32, 2.0]
         .into_iter()
         .flat_map(|x| x.to_le_bytes())
         .collect();
-    interp.write_buffer(train_id, train_w, &payload).unwrap();
-    interp
-        .copy_buffer_to_buffer(train_id, train_w, eval_id, eval_w)
-        .unwrap();
-    let raw = interp.read_buffer(eval_id, eval_w).unwrap();
-    let vals: Vec<f32> = raw
+    let payload_b: Vec<u8> = [3.0f32, 4.0]
+        .into_iter()
+        .flat_map(|x| x.to_le_bytes())
+        .collect();
+
+    let out_a = a.call([("weights", payload_a.as_slice())]).unwrap();
+    let out_b = b.call([("weights", payload_b.as_slice())]).unwrap();
+    let va: Vec<f32> = out_a["out"]
         .chunks_exact(4)
         .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
         .collect();
-    assert_eq!(vals, vec![1.0, 2.0]);
+    let vb: Vec<f32> = out_b["out"]
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+    assert_eq!(va, vec![1.0, 2.0]);
+    assert_eq!(vb, vec![3.0, 4.0]);
 }

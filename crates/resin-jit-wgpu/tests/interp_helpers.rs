@@ -1,75 +1,74 @@
 //! Shared helpers for GPU interpreter integration tests.
-//!
-//! Included via `#[path]` into multiple test binaries; not every helper is used
-//! in every file.
 #![allow(dead_code)]
 
 use resin_core::{ElementType, F4};
 use resin_dsl::{const_bytes, param, View};
-use resin_ir::IrProgram;
-use resin_jit_wgpu::{
-    build_wgpu_program, create_interp, AdmitProgram, BufferId, Interp, InterpConfig, ProgramId,
-};
+use resin_jit_wgpu::{compile, DeviceConfig, Pipeline};
 
-/// Compile `out` as the sole sink, admit, write params, run, read `out` as `f32`s.
+/// Compile `out` as the sole sink, create a pipeline instance, write params, run, read `out`.
 pub fn run_graph(
     out: &View,
     params: &[(&View, &[f32])],
 ) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-    let mut ir = IrProgram::new();
+    let mut named_params = Vec::new();
     for (i, (view, _)) in params.iter().enumerate() {
         let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
-        ir.register_param(name, view)?;
+        named_params.push((name, *view));
     }
-    ir.build_sink("out", out)?;
-    ir.seal_params()?;
-    let artifact = build_wgpu_program(&ir, None);
-
-    let mut interp = create_interp(InterpConfig::default())?;
-    let program_id = interp.admit_program(artifact)?;
-
-    for (view, data) in params {
-        let name = param_name(view).expect("param view");
-        interp.write_param(program_id, &name, &f32_bytes(data))?;
-    }
-    interp.run(program_id)?;
-    Ok(bytes_to_f32(&interp.read_sink(program_id, "out")?))
+    let param_refs: Vec<(&str, &View)> =
+        named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+    let factory = compile(&param_refs, &[("out", out)], DeviceConfig::default(), None)?;
+    let mut pipe = factory.create()?;
+    let inputs: Vec<(String, Vec<u8>)> = params
+        .iter()
+        .enumerate()
+        .map(|(i, (view, data))| {
+            let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
+            (name, f32_bytes(data))
+        })
+        .collect();
+    let input_refs: Vec<(&str, &[u8])> = inputs
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
+    let outs = pipe.call(input_refs)?;
+    Ok(bytes_to_f32(&outs["out"]))
 }
 
-/// Run the same admitted program twice with the same inputs; return both outputs.
+/// Run the same pipeline instance twice with the same inputs.
 pub fn run_graph_twice(
     out: &View,
     params: &[(&View, &[f32])],
 ) -> Result<(Vec<f32>, Vec<f32>), Box<dyn std::error::Error>> {
-    let mut ir = IrProgram::new();
+    let mut named_params = Vec::new();
     for (i, (view, _)) in params.iter().enumerate() {
         let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
-        ir.register_param(name, view)?;
+        named_params.push((name, *view));
     }
-    ir.build_sink("out", out)?;
-    ir.seal_params()?;
-    let artifact = build_wgpu_program(&ir, None);
+    let param_refs: Vec<(&str, &View)> =
+        named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+    let factory = compile(&param_refs, &[("out", out)], DeviceConfig::default(), None)?;
+    let mut pipe = factory.create()?;
 
-    let mut interp = create_interp(InterpConfig::default())?;
-    let program_id = interp.admit_program(artifact)?;
+    let write_and_run = |pipe: &mut Pipeline| -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+        let inputs: Vec<(String, Vec<u8>)> = params
+            .iter()
+            .enumerate()
+            .map(|(i, (view, data))| {
+                let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
+                (name, f32_bytes(data))
+            })
+            .collect();
+        let input_refs: Vec<(&str, &[u8])> = inputs
+            .iter()
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+        let outs = pipe.call(input_refs)?;
+        Ok(bytes_to_f32(&outs["out"]))
+    };
 
-    let write_params =
-        |interp: &mut resin_jit_wgpu::WgpuInterp| -> Result<(), Box<dyn std::error::Error>> {
-            for (view, data) in params {
-                let name = param_name(view).expect("param view");
-                interp.write_param(program_id, &name, &f32_bytes(data))?;
-            }
-            Ok(())
-        };
-
-    write_params(&mut interp)?;
-    interp.run(program_id)?;
-    let first = bytes_to_f32(&interp.read_sink(program_id, "out")?);
-
-    write_params(&mut interp)?;
-    interp.run(program_id)?;
-    let second = bytes_to_f32(&interp.read_sink(program_id, "out")?);
-
+    let first = write_and_run(&mut pipe)?;
+    let second = write_and_run(&mut pipe)?;
     Ok((first, second))
 }
 
@@ -120,45 +119,43 @@ pub fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
 
 type GradMap = std::collections::BTreeMap<String, Vec<f32>>;
 
-/// Admit `loss` + named grad sinks; write params; run once; return loss and grads by sink name.
 pub fn run_loss_grads(
     loss: &View,
     grad_sinks: &[(&str, &View)],
     params: &[(&View, &[f32])],
 ) -> Result<(f32, GradMap), Box<dyn std::error::Error>> {
-    let mut ir = IrProgram::new();
+    let mut named_params = Vec::new();
     for (i, (view, _)) in params.iter().enumerate() {
         let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
-        ir.register_param(name, view)?;
+        named_params.push((name, *view));
     }
-    ir.build_sink("loss", loss)?;
-    for (name, view) in grad_sinks {
-        ir.build_sink(*name, view)?;
-    }
-    ir.seal_params()?;
-    let artifact = build_wgpu_program(&ir, None);
-
-    let mut interp = create_interp(InterpConfig::default())?;
-    let program_id = interp.admit_program(artifact)?;
-
-    for (view, data) in params {
-        let name = param_name(view).expect("param view");
-        interp.write_param(program_id, &name, &f32_bytes(data))?;
-    }
-    interp.run(program_id)?;
-
-    let loss_v = bytes_to_f32(&interp.read_sink(program_id, "loss")?);
+    let param_refs: Vec<(&str, &View)> =
+        named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+    let mut sinks: Vec<(&str, &View)> = vec![("loss", loss)];
+    sinks.extend(grad_sinks.iter().copied());
+    let factory = compile(&param_refs, &sinks, DeviceConfig::default(), None)?;
+    let mut pipe = factory.create()?;
+    let inputs: Vec<(String, Vec<u8>)> = params
+        .iter()
+        .enumerate()
+        .map(|(i, (view, data))| {
+            let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
+            (name, f32_bytes(data))
+        })
+        .collect();
+    let input_refs: Vec<(&str, &[u8])> = inputs
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
+    let outs = pipe.call(input_refs)?;
+    let loss_v = bytes_to_f32(&outs["loss"]);
     let mut grads = GradMap::new();
     for (name, _) in grad_sinks {
-        grads.insert(
-            (*name).to_string(),
-            bytes_to_f32(&interp.read_sink(program_id, name)?),
-        );
+        grads.insert((*name).to_string(), bytes_to_f32(&outs[*name]));
     }
     Ok((loss_v[0], grads))
 }
 
-/// Central finite difference of `loss` w.r.t. one entry of a named param buffer.
 pub fn finite_diff_param(
     loss: &View,
     params: &[(&View, Vec<f32>)],
@@ -166,25 +163,38 @@ pub fn finite_diff_param(
     perturb_index: usize,
     eps: f32,
 ) -> Result<f32, Box<dyn std::error::Error>> {
-    let mut ir = IrProgram::new();
+    let mut named_params = Vec::new();
     for (i, (view, _)) in params.iter().enumerate() {
         let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
-        ir.register_param(name, view)?;
+        named_params.push((name, *view));
     }
-    ir.build_sink("loss", loss)?;
-    ir.seal_params()?;
-    let artifact = build_wgpu_program(&ir, None);
-    let mut interp = create_interp(InterpConfig::default())?;
-    let program_id = interp.admit_program(artifact)?;
+    let param_refs: Vec<(&str, &View)> =
+        named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+    let factory = compile(
+        &param_refs,
+        &[("loss", loss)],
+        DeviceConfig::default(),
+        None,
+    )?;
+    let mut pipe = factory.create()?;
 
-    let write_all = |interp: &mut resin_jit_wgpu::WgpuInterp,
-                     data: &[(&View, Vec<f32>)]|
-     -> Result<(), Box<dyn std::error::Error>> {
-        for (view, vals) in data {
-            let name = param_name(view).expect("param");
-            interp.write_param(program_id, &name, &f32_bytes(vals))?;
-        }
-        Ok(())
+    let run_with = |pipe: &mut Pipeline,
+                    data: &[(&View, Vec<f32>)]|
+     -> Result<f32, Box<dyn std::error::Error>> {
+        let inputs: Vec<(String, Vec<u8>)> = data
+            .iter()
+            .enumerate()
+            .map(|(i, (view, vals))| {
+                let name = param_name(view).unwrap_or_else(|| format!("p{i}"));
+                (name, f32_bytes(vals))
+            })
+            .collect();
+        let input_refs: Vec<(&str, &[u8])> = inputs
+            .iter()
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+        let outs = pipe.call(input_refs)?;
+        Ok(bytes_to_f32(&outs["loss"])[0])
     };
 
     let mut plus = params.to_vec();
@@ -199,16 +209,7 @@ pub fn finite_diff_param(
             vals[perturb_index] -= eps;
         }
     }
-
-    write_all(&mut interp, &plus)?;
-    interp.run(program_id)?;
-    let lp = bytes_to_f32(&interp.read_sink(program_id, "loss")?)[0];
-    write_all(&mut interp, &minus)?;
-    interp.run(program_id)?;
-    let lm = bytes_to_f32(&interp.read_sink(program_id, "loss")?)[0];
+    let lp = run_with(&mut pipe, &plus)?;
+    let lm = run_with(&mut pipe, &minus)?;
     Ok((lp - lm) / (2.0 * eps))
 }
-
-// Silence unused import when this file is compiled as its own test crate.
-#[allow(dead_code)]
-fn _use_program_id(_: ProgramId, _: BufferId) {}

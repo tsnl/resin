@@ -290,10 +290,10 @@ fn g4b_softmax_ce_no_max_sub_weight_fd() {
 /// Uses `register_param_tree` so layers get unique buffer names (`model.layers.i.weight`).
 #[test]
 fn g5_two_layer_mlp_weight_fd() {
-    use resin_core::{format_param_path, join_param_path, ParamTree, ParamTreePathElement, F4};
+    use resin_core::{format_param_path, ParamTree, ParamTreePathElement, F4};
     use resin_dsl::param;
     use resin_ir::IrProgram;
-    use resin_jit_wgpu::{build_wgpu_program, create_interp, AdmitProgram, Interp, InterpConfig};
+    use resin_jit_wgpu::{build_wgpu_program, DeviceConfig, DeviceContext, PipelineFactory};
     use resin_nn::Mlp;
     use std::collections::BTreeMap;
 
@@ -324,8 +324,9 @@ fn g5_two_layer_mlp_weight_fd() {
     ir.build_sink_tree("grad", &grads).unwrap();
     ir.seal_params().unwrap();
     let artifact = build_wgpu_program(&ir, None);
-    let mut interp = create_interp(InterpConfig::default()).expect("interp");
-    let pid = interp.admit_program(artifact).expect("admit");
+    let ctx = DeviceContext::from_config(&DeviceConfig::default()).unwrap();
+    let factory = PipelineFactory::from_program(ctx, artifact).unwrap();
+    let mut pipe = factory.create().unwrap();
 
     let xs_data = [1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let ys_data = [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0];
@@ -348,66 +349,49 @@ fn g5_two_layer_mlp_weight_fd() {
                 })
                 .collect()
         };
-        let key = format_param_path(&path);
-        let name = join_param_path("model", &path);
-        interp
-            .write_param(pid, &name, &interp_helpers::f32_bytes(&vals))
-            .unwrap();
-        weights.insert(key, vals);
+        weights.insert(format_param_path(&path), vals);
     }
-    interp
-        .write_param(pid, "xs", &interp_helpers::f32_bytes(&xs_data))
-        .unwrap();
-    interp
-        .write_param(pid, "ys", &interp_helpers::f32_bytes(&ys_data))
-        .unwrap();
-    interp.run(pid).unwrap();
 
+    let run_once = |pipe: &mut resin_jit_wgpu::Pipeline,
+                    wmap: &BTreeMap<String, Vec<f32>>,
+                    perturb: Option<(&str, usize, f32)>|
+     -> BTreeMap<String, Vec<u8>> {
+        let mut owned: Vec<(String, Vec<u8>)> = vec![
+            ("xs".into(), interp_helpers::f32_bytes(&xs_data)),
+            ("ys".into(), interp_helpers::f32_bytes(&ys_data)),
+        ];
+        for (path, vals) in wmap {
+            let mut v = vals.clone();
+            if let Some((pp, i, d)) = perturb {
+                if path == pp {
+                    v[i] += d;
+                }
+            }
+            owned.push((format!("model.{path}"), interp_helpers::f32_bytes(&v)));
+        }
+        let refs: Vec<(&str, &[u8])> = owned
+            .iter()
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+        pipe.call(refs).unwrap()
+    };
+
+    let outs = run_once(&mut pipe, &weights, None);
     let read_grad = |path: &str| -> Vec<f32> {
         let sink = format!("grad.{path}");
-        interp
-            .read_sink(pid, &sink)
-            .unwrap()
+        outs[&sink]
             .chunks_exact(4)
             .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
             .collect()
     };
 
     let fd_one = |path: &str, idx: usize, eps: f32| -> f32 {
-        let mut ir2 = IrProgram::new();
-        ir2.register_param("xs", &xs).unwrap();
-        ir2.register_param("ys", &ys).unwrap();
-        ir2.register_param_tree(&mlp, "model").unwrap();
-        ir2.build_sink("loss", &loss).unwrap();
-        ir2.seal_params().unwrap();
-        let art = build_wgpu_program(&ir2, None);
-        let mut ip = create_interp(InterpConfig::default()).unwrap();
-        let p = ip.admit_program(art).unwrap();
-        let write_all = |ip: &mut resin_jit_wgpu::WgpuInterp,
-                         wmap: &BTreeMap<String, Vec<f32>>,
-                         perturb: Option<(&str, usize, f32)>| {
-            for (path, vals) in wmap {
-                let mut v = vals.clone();
-                if let Some((pp, i, d)) = perturb {
-                    if path == pp {
-                        v[i] += d;
-                    }
-                }
-                let name = format!("model.{path}");
-                ip.write_param(p, &name, &interp_helpers::f32_bytes(&v))
-                    .unwrap();
-            }
-            ip.write_param(p, "xs", &interp_helpers::f32_bytes(&xs_data))
-                .unwrap();
-            ip.write_param(p, "ys", &interp_helpers::f32_bytes(&ys_data))
-                .unwrap();
-        };
-        write_all(&mut ip, &weights, Some((path, idx, eps)));
-        ip.run(p).unwrap();
-        let lp = f32::from_le_bytes(ip.read_sink(p, "loss").unwrap()[0..4].try_into().unwrap());
-        write_all(&mut ip, &weights, Some((path, idx, -eps)));
-        ip.run(p).unwrap();
-        let lm = f32::from_le_bytes(ip.read_sink(p, "loss").unwrap()[0..4].try_into().unwrap());
+        let mut pipe = factory.create().unwrap();
+        let plus = run_once(&mut pipe, &weights, Some((path, idx, eps)));
+        let mut pipe = factory.create().unwrap();
+        let minus = run_once(&mut pipe, &weights, Some((path, idx, -eps)));
+        let lp = f32::from_le_bytes(plus["loss"][0..4].try_into().unwrap());
+        let lm = f32::from_le_bytes(minus["loss"][0..4].try_into().unwrap());
         (lp - lm) / (2.0 * eps)
     };
 
