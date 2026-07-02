@@ -23,6 +23,7 @@ pub enum ElementKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ElementOperator {
     // unary
+    Relu,
     Neg,
     Exp,
     Log,
@@ -65,7 +66,8 @@ pub enum ElementOperator {
 impl ElementOperator {
     pub fn arity(self) -> usize {
         match self {
-            Self::Neg
+            Self::Relu
+            | Self::Neg
             | Self::Exp
             | Self::Log
             | Self::Sqrt

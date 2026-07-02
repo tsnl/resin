@@ -17,7 +17,7 @@ pub struct Node {
 #[derive(Clone)]
 pub enum NodeKind {
     Const(ConstNodeKind),
-    Param(ParamNodeKind),
+    Param,
     Elementwise(ElementwiseNodeKind),
     Matmul(MatmulNodeKind),
     Reduction(ReductionNodeKind),
@@ -27,11 +27,6 @@ pub enum NodeKind {
 #[derive(Clone)]
 pub struct ConstNodeKind {
     pub init: Box<[u8]>,
-}
-
-#[derive(Clone)]
-pub struct ParamNodeKind {
-    pub name: std::sync::Arc<str>,
 }
 
 #[derive(Clone)]

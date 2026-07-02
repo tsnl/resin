@@ -68,7 +68,7 @@ pub fn debug_print(root: &View, out: &mut dyn Write) -> std::fmt::Result {
 fn headline(node: &NodeRef) -> String {
     let kind = match &node.kind {
         NodeKind::Const(_) => "const()".to_string(),
-        NodeKind::Param(p) => format!("param(name={:?})", p.name.as_ref()),
+        NodeKind::Param => "param".into(),
         NodeKind::Elementwise(k) => format!("elementwise(op={:?})", k.op),
         NodeKind::Matmul(_) => "matmul()".to_string(),
         NodeKind::Reduction(k) => format!("reduction(op={:?}, axes={:?})", k.op, k.axes),
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn dump_shared_param_uses_tid() {
-        let x = param([2], F4, "x");
+        let x = param([2], F4);
         let y = &x + &x;
         let mut s = String::new();
         y.debug_print(&mut s).unwrap();
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn dump_non_identity_view_line() {
-        let x = param([2, 3], F4, "x");
+        let x = param([2, 3], F4);
         let v = x.broadcast(&[4]);
         let mut s = String::new();
         // Root must be identity for Python's refcount==1 rule on the node; wrap by

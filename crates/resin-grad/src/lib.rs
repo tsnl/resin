@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use resin_core::{Accessor, ElementOperator, ElementType, ParamTree};
+use resin_core::{Accessor, ElementOperator, ElementType, Tree};
 use resin_dsl::{NodeKind, NodeRef, RemapGatherInfo, RemapInfo, RemapScatterInfo, View};
 use thiserror::Error;
 
@@ -59,7 +59,7 @@ pub fn df_do(node: &NodeRef, df_dout: &View) -> Result<Vec<Option<View>>, NotDif
         return Ok(vec![]);
     }
     match &node.kind {
-        NodeKind::Const(_) | NodeKind::Param(_) => Ok(vec![]),
+        NodeKind::Const(_) | NodeKind::Param => Ok(vec![]),
         NodeKind::Elementwise(k) => df_do_elementwise(node, k.op, df_dout),
         NodeKind::Reduction(k) => df_do_reduction(node, k.op, &k.axes, df_dout),
         NodeKind::Matmul(_) => {
@@ -83,6 +83,12 @@ fn df_do_elementwise(
     let n = identity_view(node);
     let map_err = NotDifferentiableError;
     match op {
+        ElementOperator::Relu => {
+            let zero = const_scalar(0.0, node.args[0].element_type());
+            Ok(vec![Some(
+                df_dout * &node.args[0].gt(&zero).map_err(map_err)?,
+            )])
+        }
         ElementOperator::Neg => Ok(vec![Some(-df_dout)]),
         ElementOperator::Exp => Ok(vec![Some(df_dout * &n)]),
         ElementOperator::Log => Ok(vec![Some(df_dout / &node.args[0])]),
@@ -211,7 +217,7 @@ fn df_do_remap(
 
 fn const_scalar(value: f32, etype: ElementType) -> View {
     assert_eq!(etype, ElementType::F4);
-    resin_dsl::const_bytes([], etype, value.to_le_bytes())
+    value.into()
 }
 
 fn ones_scalar(etype: ElementType) -> View {
@@ -260,7 +266,7 @@ pub fn grad_by_node(f: &View) -> Result<HashMap<NodeRef, View>, String> {
     Ok(grad_node)
 }
 
-pub fn grad_wrt<M: ParamTree<Leaf = View>>(f: &View, wrt: M) -> Result<M::Map<View>, String> {
+pub fn grad_wrt<M: Tree<Leaf = View>>(f: &View, wrt: &M) -> Result<M::Map<View>, String> {
     use resin_core::format_param_path;
 
     let by_node = grad_by_node(f)?;
@@ -273,7 +279,7 @@ pub fn grad_wrt<M: ParamTree<Leaf = View>>(f: &View, wrt: M) -> Result<M::Map<Vi
             ));
         }
     }
-    Ok(wrt.map(|v| {
+    Ok(wrt.map(|_path, v| {
         by_node
             .get(&v.node_ref)
             .cloned()
@@ -297,7 +303,7 @@ mod tests {
 
     #[test]
     fn grad_of_sum_of_param() {
-        let x = param([2], F4, "x");
+        let x = param([2], F4);
         let loss = x.sum(None).unwrap().squeeze(&[0]).unwrap();
         assert!(loss.shape().is_empty());
         let g = grad_view(&loss, &x).unwrap();
@@ -307,33 +313,33 @@ mod tests {
     /// Single-leaf tree so `grad_wrt` can name the path without `resin-nn`.
     struct OneParam<T>(T);
 
-    impl<T> ParamTree for OneParam<T> {
+    impl<T> Tree for OneParam<T> {
         type Leaf = T;
         type Map<U> = OneParam<U>;
 
-        fn map<U>(self, mut f: impl FnMut(T) -> U) -> OneParam<U> {
-            OneParam(f(self.0))
+        fn flatten(&self) -> impl Iterator<Item = (resin_core::TreePath, &T)> + '_ {
+            std::iter::once((resin_core::path_name("orphan"), &self.0))
         }
 
-        fn flatten(&self) -> impl Iterator<Item = (resin_core::ParamTreePath, &T)> + '_ {
-            std::iter::once((
-                Box::from([resin_core::ParamTreePathElement::name("orphan")]),
-                &self.0,
-            ))
-        }
-
-        fn zip_with<U, O>(self, other: OneParam<U>, mut f: impl FnMut(T, U) -> O) -> OneParam<O> {
-            OneParam(f(self.0, other.0))
+        fn consume_unflatten<I>(stream: &mut resin_core::TreeLeaves<T, I>) -> Self
+        where
+            I: Iterator<Item = (resin_core::TreePath, T)>,
+        {
+            let (path, value) = stream
+                .pop()
+                .expect("Tree::unflatten for OneParam: missing leaf");
+            assert_eq!(path, resin_core::path_name("orphan"));
+            OneParam(value)
         }
     }
 
     #[test]
     fn grad_wrt_missing_param_returns_err() {
-        let x = param([2], F4, "x");
+        let x = param([2], F4);
         // Leaf in `wrt` is not an ancestor of `loss`.
-        let orphan = OneParam(param([2], F4, "y"));
+        let orphan = OneParam(param([2], F4));
         let loss = x.sum(None).unwrap().squeeze(&[0]).unwrap();
-        let err = match grad_wrt(&loss, orphan) {
+        let err = match grad_wrt(&loss, &orphan) {
             Ok(_) => panic!("expected missing-param error"),
             Err(e) => e,
         };
