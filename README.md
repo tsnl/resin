@@ -8,6 +8,8 @@ Users compose a graph of nodes; symbolic transformations (autodiff, optimization
 
 Design ethos: ultimate minimalism. Elegant abstractions.
 
+Project goals and known gaps: [doc/GOAL.md](doc/GOAL.md).
+
 ## Crates
 
 | Crate | Role |
