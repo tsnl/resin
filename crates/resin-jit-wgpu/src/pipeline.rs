@@ -1,8 +1,12 @@
 //! Compiled graph factory and per-instance pipelines.
 //!
 //! - [`PipelineFactory`]: shared immutable program (shaders/compute pipelines) + schema.
-//! - [`Pipeline`]: one executable instance with its own device buffers (not re-entrant for
-//!   overlapping GPU work; create multiple instances for triple-buffering).
+//! - [`Pipeline`]: one executable instance with its own device buffer pool — admitted
+//!   params, intermediate tensors, and sink backing stores are all allocated in
+//!   [`PipelineFactory::create`]. [`Pipeline::call`] binds a dataloader's
+//!   `Tree<Leaf = WgpuBuffer>` (or [`GpuLeaf`]) into the param slots, runs the graph,
+//!   and leaves results in the sink buffers. Not re-entrant for overlapping GPU work;
+//!   create multiple instances for triple-buffering.
 //! - [`GpuFuture`]: completion token for a submit (host `wait`; backends may later attach
 //!   native sync objects such as Vulkan semaphores).
 
@@ -10,6 +14,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use resin_core::{format_param_path, Tree};
 use resin_dsl::View;
 use resin_ir::IrProgram;
 use thiserror::Error;
@@ -19,6 +24,7 @@ use crate::lower::build_wgpu_program;
 use crate::program::{
     WgpuBufferSpec, WgpuComputePipelineSpec, WgpuCopy, WgpuDispatch, WgpuProgram, WgpuQueueOp,
 };
+use crate::session::{BufferView, GpuLeaf, Session, WgpuBuffer, WgpuSession};
 use crate::WgslKernelConfig;
 
 #[derive(Debug, Error)]
@@ -41,30 +47,8 @@ impl From<wgpu::RequestDeviceError> for PipelineError {
     }
 }
 
-/// Shared GPU device/queue (optional handle for creating many factories).
-#[derive(Clone)]
-pub struct DeviceContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-}
-
-impl DeviceContext {
-    pub fn from_config(config: &DeviceConfig) -> Result<Self, PipelineError> {
-        let (device, queue) = match &config.device_name {
-            None => request_default_device()?,
-            Some(name) => request_named_device(name)?,
-        };
-        Ok(Self { device, queue })
-    }
-
-    pub fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-
-    pub fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-}
+/// Back-compat alias for [`crate::session::WgpuSession`].
+pub type DeviceContext = WgpuSession;
 
 /// Device selection (replaces former `InterpConfig`).
 #[derive(Debug, Clone, Default)]
@@ -85,7 +69,7 @@ impl DeviceConfig {
 }
 
 struct SharedProgram {
-    ctx: DeviceContext,
+    session: WgpuSession,
     program: WgpuProgram,
     /// Immutable GPU compute pipelines (shareable across instances).
     pipelines: Vec<wgpu::ComputePipeline>,
@@ -103,23 +87,27 @@ pub struct PipelineFactory {
 
 impl PipelineFactory {
     /// Construct a factory from an already-lowered [`WgpuProgram`].
-    pub fn from_program(ctx: DeviceContext, program: WgpuProgram) -> Result<Self, PipelineError> {
+    pub fn from_program(session: WgpuSession, program: WgpuProgram) -> Result<Self, PipelineError> {
         let pipelines = program
             .pipelines
             .iter()
-            .map(|spec| create_pipeline(&ctx.device, spec))
+            .map(|spec| create_pipeline(session.device(), spec))
             .collect::<Result<Vec<_>, _>>()?;
         let input_names: Vec<String> = program.param_buffers.keys().cloned().collect();
         let output_names: Vec<String> = program.sinks.keys().cloned().collect();
         Ok(Self {
             shared: Arc::new(SharedProgram {
-                ctx,
+                session,
                 program,
                 pipelines,
                 input_names,
                 output_names,
             }),
         })
+    }
+
+    pub fn session(&self) -> &WgpuSession {
+        &self.shared.session
     }
 
     /// Allocate a fresh instance (own buffers + bind groups). Safe to run in parallel
@@ -130,10 +118,10 @@ impl PipelineFactory {
             .program
             .buffers
             .iter()
-            .map(|spec| create_buffer(&self.shared.ctx.device, spec))
+            .map(|spec| create_buffer(self.shared.session.device(), spec))
             .collect::<Result<Vec<_>, _>>()?;
         let prepared_queue = prepare_queue(
-            &self.shared.ctx.device,
+            self.shared.session.device(),
             &self.shared.program,
             &buffers,
             &self.shared.pipelines,
@@ -142,6 +130,7 @@ impl PipelineFactory {
             shared: Arc::clone(&self.shared),
             buffers,
             prepared_queue,
+            pending_binds: Vec::new(),
         })
     }
 
@@ -154,15 +143,254 @@ impl PipelineFactory {
     }
 }
 
+/// Inputs for [`Pipeline::call`] / [`Pipeline::submit`]: bind leaves into admitted param slots.
+///
+/// Prefer `Tree<Leaf = WgpuBuffer>` / [`GpuLeaf`] from a dataloader. Host byte trees and
+/// name/byte pairs remain for tests.
+pub trait PipelineInput {
+    fn bind_inputs(self, pipe: &mut Pipeline) -> Result<(), PipelineError>;
+}
+
+/// `Tree` of host bytes (tests and legacy demos).
+#[derive(Debug, Clone, Copy)]
+pub struct TreeInputs<'a, T>(pub &'a T);
+
+impl<T> PipelineInput for TreeInputs<'_, T>
+where
+    T: Tree<Leaf = Vec<u8>>,
+{
+    fn bind_inputs(self, pipe: &mut Pipeline) -> Result<(), PipelineError> {
+        for (path, bytes) in self.0.flatten() {
+            pipe.write_input(&format_param_path(&path), bytes)?;
+        }
+        Ok(())
+    }
+}
+
+/// One leaf in a GPU input tree (whole buffer or view).
+pub trait GpuTreeLeaf {
+    fn bind_into(&self, pipe: &mut Pipeline, name: &str) -> Result<(), PipelineError>;
+}
+
+impl GpuTreeLeaf for WgpuBuffer {
+    fn bind_into(&self, pipe: &mut Pipeline, name: &str) -> Result<(), PipelineError> {
+        pipe.bind_param_buffer(name, self)
+    }
+}
+
+impl GpuTreeLeaf for GpuLeaf {
+    fn bind_into(&self, pipe: &mut Pipeline, name: &str) -> Result<(), PipelineError> {
+        pipe.bind_param_leaf(name, self)
+    }
+}
+
+/// `Tree` of GPU buffers/views for [`Pipeline::call`] (same as [`PipelineInput`] on `&T`).
+#[derive(Debug, Clone, Copy)]
+pub struct TreeGpuInputs<'a, T>(pub &'a T);
+
+impl<T> PipelineInput for TreeGpuInputs<'_, T>
+where
+    T: Tree,
+    T::Leaf: GpuTreeLeaf,
+{
+    fn bind_inputs(self, pipe: &mut Pipeline) -> Result<(), PipelineError> {
+        <&T as PipelineInput>::bind_inputs(self.0, pipe)
+    }
+}
+
+impl<T> PipelineInput for &T
+where
+    T: Tree,
+    T::Leaf: GpuTreeLeaf,
+{
+    fn bind_inputs(self, pipe: &mut Pipeline) -> Result<(), PipelineError> {
+        for (path, leaf) in self.flatten() {
+            leaf.bind_into(pipe, &format_param_path(&path))?;
+        }
+        Ok(())
+    }
+}
+
+fn write_named_inputs<'a>(
+    pipe: &mut Pipeline,
+    pairs: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+) -> Result<(), PipelineError> {
+    for (name, data) in pairs {
+        pipe.write_input(name, data)?;
+    }
+    Ok(())
+}
+
+impl<const N: usize> PipelineInput for [(&str, &[u8]); N] {
+    fn bind_inputs(self, pipe: &mut Pipeline) -> Result<(), PipelineError> {
+        write_named_inputs(pipe, self)
+    }
+}
+
+impl PipelineInput for Vec<(&str, &[u8])> {
+    fn bind_inputs(self, pipe: &mut Pipeline) -> Result<(), PipelineError> {
+        write_named_inputs(pipe, self)
+    }
+}
+
+struct PendingBind {
+    dst_idx: usize,
+    src: WgpuBuffer,
+    src_offset: u64,
+    byte_len: u64,
+}
+
+/// `wgpu::Buffer` clones share one allocation; pointer identity on the wrapper is not enough.
+fn same_gpu_buffer(a: &WgpuBuffer, b: &WgpuBuffer) -> bool {
+    a == b
+}
+
 /// One executable instance: exclusive device buffers for this in-flight work.
 pub struct Pipeline {
     shared: Arc<SharedProgram>,
     buffers: Vec<wgpu::Buffer>,
     prepared_queue: Vec<PreparedQueueOp>,
+    pending_binds: Vec<PendingBind>,
 }
 
 impl Pipeline {
-    /// Write a named input parameter (must match a compile-time param).
+    pub fn session(&self) -> &WgpuSession {
+        &self.shared.session
+    }
+
+    fn param_buffer(&self, name: &str) -> Result<&WgpuBuffer, PipelineError> {
+        let idx = *self
+            .shared
+            .program
+            .param_buffers
+            .get(name)
+            .ok_or_else(|| PipelineError::Program(format!("unknown input {name:?}")))?;
+        self.buffers
+            .get(idx)
+            .ok_or_else(|| PipelineError::Program(format!("invalid buffer id {idx}")))
+    }
+
+    /// Mirror compile-time param paths into this instance's admitted param buffers.
+    pub fn param_tree<M: Tree<Leaf = View>>(
+        &self,
+        template: &M,
+    ) -> Result<M::Map<WgpuBuffer>, PipelineError> {
+        let leaves = template
+            .flatten()
+            .map(|(path, _)| {
+                let name = format_param_path(&path);
+                self.param_buffer(&name).cloned().map(|buf| (path, buf))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(<M::Map<WgpuBuffer> as Tree>::unflatten(leaves))
+    }
+
+    /// Mirror compile-time sink paths into this instance's sink backing buffers.
+    pub fn sink_tree<M: Tree<Leaf = View>>(
+        &self,
+        template: &M,
+    ) -> Result<M::Map<WgpuBuffer>, PipelineError> {
+        let leaves = template
+            .flatten()
+            .map(|(path, _)| {
+                let name = format_param_path(&path);
+                self.sink_buffer(&name).cloned().map(|buf| (path, buf))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(<M::Map<WgpuBuffer> as Tree>::unflatten(leaves))
+    }
+
+    fn sink_buffer(&self, name: &str) -> Result<&WgpuBuffer, PipelineError> {
+        let view_idx = *self
+            .shared
+            .program
+            .sinks
+            .get(name)
+            .ok_or_else(|| PipelineError::Program(format!("unknown output {name:?}")))?;
+        let buf_idx = self.shared.program.buffer_views[view_idx].buffer_index;
+        self.buffers
+            .get(buf_idx)
+            .ok_or_else(|| PipelineError::Program(format!("invalid buffer id {buf_idx}")))
+    }
+
+    /// Bind a GPU leaf into a pipeline-owned param slot (device copy when needed).
+    pub fn bind_param_leaf(&mut self, name: &str, leaf: &GpuLeaf) -> Result<(), PipelineError> {
+        match leaf {
+            GpuLeaf::Buffer(src) => self.bind_param_buffer(name, src),
+            GpuLeaf::View(view) => self.bind_param_view(name, view),
+        }
+    }
+
+    /// Bind a whole buffer into a pipeline-owned param slot.
+    pub fn bind_param_buffer(&mut self, name: &str, src: &WgpuBuffer) -> Result<(), PipelineError> {
+        self.queue_param_bind(name, src, 0, src.size())
+    }
+
+    fn bind_param_view(&mut self, name: &str, view: &BufferView) -> Result<(), PipelineError> {
+        self.queue_param_bind(name, &view.buffer, view.offset, view.byte_len)
+    }
+
+    fn queue_param_bind(
+        &mut self,
+        name: &str,
+        src: &WgpuBuffer,
+        src_offset: u64,
+        byte_len: u64,
+    ) -> Result<(), PipelineError> {
+        let idx = *self
+            .shared
+            .program
+            .param_buffers
+            .get(name)
+            .ok_or_else(|| PipelineError::Program(format!("unknown input {name:?}")))?;
+        let dst = self
+            .buffers
+            .get(idx)
+            .ok_or_else(|| PipelineError::Program(format!("invalid buffer id {idx}")))?;
+        if byte_len != dst.size() {
+            return Err(PipelineError::Program(format!(
+                "bind {name:?}: size mismatch {byte_len} vs {}",
+                dst.size()
+            )));
+        }
+        if src_offset + byte_len > src.size() {
+            return Err(PipelineError::Program(format!(
+                "bind {name:?}: source range exceeds buffer size {}",
+                src.size()
+            )));
+        }
+        if same_gpu_buffer(dst, src) && src_offset == 0 {
+            return Ok(());
+        }
+        self.pending_binds.push(PendingBind {
+            dst_idx: idx,
+            src: src.clone(),
+            src_offset,
+            byte_len,
+        });
+        Ok(())
+    }
+
+    /// Device-copy matching leaves from `src` onto `dst` (same tree shape and visit order).
+    pub fn copy_tree<S, D>(&mut self, src: &S, dst: &D) -> Result<(), PipelineError>
+    where
+        S: Tree<Leaf = WgpuBuffer>,
+        D: Tree<Leaf = WgpuBuffer>,
+    {
+        for ((path_s, src_buf), (path_d, dst_buf)) in src.flatten().zip(dst.flatten()) {
+            if path_s != path_d {
+                return Err(PipelineError::Program(format!(
+                    "copy_tree path mismatch: {} vs {}",
+                    format_param_path(&path_s),
+                    format_param_path(&path_d)
+                )));
+            }
+            self.queue_buffer_copy(dst_buf, src_buf)?;
+        }
+        Ok(())
+    }
+
+    /// Write a named input parameter from host bytes (batch upload).
     pub fn write_input(&self, name: &str, data: &[u8]) -> Result<(), PipelineError> {
         let idx = *self
             .shared
@@ -186,27 +414,44 @@ impl Pipeline {
         self.read_buffer_index(buf_idx)
     }
 
-    /// Upload all inputs, submit GPU work, return a completion future (does not wait).
-    pub fn submit<'a>(
-        &mut self,
-        inputs: impl IntoIterator<Item = (&'a str, &'a [u8])>,
-    ) -> Result<GpuFuture, PipelineError> {
-        for (name, data) in inputs {
-            self.write_input(name, data)?;
-        }
+    /// Bind inputs, submit GPU work, return a completion future (does not wait).
+    pub fn submit(&mut self, inputs: impl PipelineInput) -> Result<GpuFuture, PipelineError> {
+        inputs.bind_inputs(self)?;
         self.encode_and_submit()?;
         Ok(GpuFuture {
-            device: self.shared.ctx.device.clone(),
+            device: self.shared.session.device().clone(),
         })
     }
 
-    /// Upload inputs, submit, wait, read all outputs (simple synchronous helper).
-    pub fn call<'a>(
-        &mut self,
-        inputs: impl IntoIterator<Item = (&'a str, &'a [u8])>,
-    ) -> Result<BTreeMap<String, Vec<u8>>, PipelineError> {
-        let fut = self.submit(inputs)?;
+    /// Bind inputs, run, wait — outputs remain in sink buffers (gather via [`Self::sink_tree`]).
+    pub fn call_bound(&mut self, inputs: impl PipelineInput) -> Result<(), PipelineError> {
+        inputs.bind_inputs(self)?;
+        let fut = self.submit_written()?;
         fut.wait();
+        Ok(())
+    }
+
+    /// Bind a GPU input tree, run, return the output tree (same shape as compile-time sinks).
+    pub fn call_trees<In, Out>(
+        &mut self,
+        inputs: &In,
+        outputs: &Out,
+    ) -> Result<Out::Map<WgpuBuffer>, PipelineError>
+    where
+        In: Tree,
+        In::Leaf: GpuTreeLeaf,
+        Out: Tree<Leaf = View>,
+    {
+        self.call_bound(inputs)?;
+        self.sink_tree(outputs)
+    }
+
+    /// Bind inputs, submit, wait, read all sinks to host bytes (test helper).
+    pub fn call(
+        &mut self,
+        inputs: impl PipelineInput,
+    ) -> Result<BTreeMap<String, Vec<u8>>, PipelineError> {
+        self.call_bound(inputs)?;
         let mut out = BTreeMap::new();
         for name in &self.shared.output_names {
             out.insert(name.clone(), self.read_output(name)?);
@@ -214,22 +459,38 @@ impl Pipeline {
         Ok(out)
     }
 
-    /// Submit with inputs already written via [`Self::write_input`].
-    pub fn submit_written(&mut self) -> Result<GpuFuture, PipelineError> {
-        self.encode_and_submit()?;
+    /// Submit queued param binds only (e.g. after [`Self::copy_tree`]).
+    pub fn flush_binds(&mut self) -> Result<GpuFuture, PipelineError> {
+        self.encode_binds_only()?;
         Ok(GpuFuture {
-            device: self.shared.ctx.device.clone(),
+            device: self.shared.session.device().clone(),
         })
     }
 
-    fn encode_and_submit(&self) -> Result<(), PipelineError> {
+    /// Submit with inputs already bound.
+    pub fn submit_written(&mut self) -> Result<GpuFuture, PipelineError> {
+        self.encode_and_submit()?;
+        Ok(GpuFuture {
+            device: self.shared.session.device().clone(),
+        })
+    }
+
+    fn encode_and_submit(&mut self) -> Result<(), PipelineError> {
         let mut encoder =
             self.shared
-                .ctx
-                .device
+                .session
+                .device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("resin-pipeline-run"),
                 });
+
+        for bind in self.pending_binds.drain(..) {
+            let dst = &self.buffers[bind.dst_idx];
+            if same_gpu_buffer(&bind.src, dst) && bind.src_offset == 0 {
+                continue;
+            }
+            encoder.copy_buffer_to_buffer(&bind.src, bind.src_offset, dst, 0, bind.byte_len);
+        }
 
         for prepared in &self.prepared_queue {
             match prepared {
@@ -256,6 +517,9 @@ impl Pipeline {
                     );
                 }
                 PreparedQueueOp::Copy(c) => {
+                    if c.source_buffer_index == c.output_buffer_index && c.src_offset == 0 {
+                        continue;
+                    }
                     encoder.copy_buffer_to_buffer(
                         &self.buffers[c.source_buffer_index],
                         c.src_offset,
@@ -266,7 +530,29 @@ impl Pipeline {
                 }
             }
         }
-        self.shared.ctx.queue.submit(Some(encoder.finish()));
+        self.shared.session.queue().submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    fn encode_binds_only(&mut self) -> Result<(), PipelineError> {
+        if self.pending_binds.is_empty() {
+            return Ok(());
+        }
+        let mut encoder =
+            self.shared
+                .session
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("resin-pipeline-binds"),
+                });
+        for bind in self.pending_binds.drain(..) {
+            let dst = &self.buffers[bind.dst_idx];
+            if same_gpu_buffer(&bind.src, dst) && bind.src_offset == 0 {
+                continue;
+            }
+            encoder.copy_buffer_to_buffer(&bind.src, bind.src_offset, dst, 0, bind.byte_len);
+        }
+        self.shared.session.queue().submit(Some(encoder.finish()));
         Ok(())
     }
 
@@ -288,8 +574,7 @@ impl Pipeline {
             .buffers
             .get(index)
             .ok_or_else(|| PipelineError::Program(format!("invalid buffer id {index}")))?;
-        self.shared.ctx.queue.write_buffer(buffer, 0, data);
-        Ok(())
+        self.shared.session.write_buffer(buffer, 0, data)
     }
 
     fn read_buffer_index(&self, index: usize) -> Result<Vec<u8>, PipelineError> {
@@ -297,43 +582,45 @@ impl Pipeline {
             .buffers
             .get(index)
             .ok_or_else(|| PipelineError::Program(format!("invalid buffer id {index}")))?;
-        let size = buffer.size();
-        let staging = self
-            .shared
-            .ctx
-            .device
-            .create_buffer(&wgpu::BufferDescriptor {
-                label: Some("resin-read-staging"),
-                size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-        let mut encoder =
-            self.shared
-                .ctx
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("resin-read"),
-                });
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
-        self.shared.ctx.queue.submit(Some(encoder.finish()));
+        self.shared.session.read_buffer(buffer)
+    }
 
-        let buffer_slice = staging.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
+    fn buffer_index(&self, buf: &WgpuBuffer) -> Result<usize, PipelineError> {
+        self.buffers
+            .iter()
+            .position(|b| same_gpu_buffer(b, buf))
+            .ok_or_else(|| {
+                PipelineError::Program("buffer not owned by this pipeline instance".into())
+            })
+    }
+
+    fn queue_buffer_copy(
+        &mut self,
+        dst: &WgpuBuffer,
+        src: &WgpuBuffer,
+    ) -> Result<(), PipelineError> {
+        let byte_len = dst.size();
+        if byte_len != src.size() {
+            return Err(PipelineError::Program(format!(
+                "copy_tree size mismatch: {} vs {}",
+                src.size(),
+                byte_len
+            )));
+        }
+        if same_gpu_buffer(dst, src) {
+            return Ok(());
+        }
+        let dst_idx = self.buffer_index(dst)?;
+        if same_gpu_buffer(src, &self.buffers[dst_idx]) {
+            return Ok(());
+        }
+        self.pending_binds.push(PendingBind {
+            dst_idx,
+            src: src.clone(),
+            src_offset: 0,
+            byte_len,
         });
-        self.shared.ctx.device.poll(wgpu::Maintain::Wait);
-        receiver
-            .recv()
-            .map_err(|_| PipelineError::BufferMapFailed)?
-            .map_err(|_| PipelineError::BufferMapFailed)?;
-        let data = {
-            let mapped = buffer_slice.get_mapped_range();
-            mapped.to_vec()
-        };
-        staging.unmap();
-        Ok(data)
+        Ok(())
     }
 }
 
@@ -354,11 +641,76 @@ impl GpuFuture {
     }
 }
 
-/// Trace-time compile: register params + sinks, lower, build a [`PipelineFactory`].
-pub fn compile(
+/// Trace-time compile from input/output [`Tree`]s of [`View`] leaves.
+///
+/// Paths become dotted buffer names (`model.layers.0.weight`). Wrap roots with
+/// [`resin_core::Named`] so names are non-empty:
+///
+/// ```ignore
+/// use resin_core::{named, Empty};
+/// let session = WgpuSession::open(DeviceConfig::default())?;
+/// compile(
+///     &(named("a", a), named("b", b)),
+///     &named("out", out),
+///     &session,
+///     None,
+/// )?;
+/// ```
+pub fn compile<I, O>(
+    inputs: &I,
+    outputs: &O,
+    session: &WgpuSession,
+    config: Option<WgslKernelConfig>,
+) -> Result<PipelineFactory, PipelineError>
+where
+    I: Tree<Leaf = View>,
+    O: Tree<Leaf = View>,
+{
+    let mut ir = IrProgram::new();
+    for (path, view) in inputs.flatten() {
+        let name = format_param_path(&path);
+        if name.is_empty() {
+            return Err(PipelineError::Compile(
+                "compile input leaf has empty path; wrap with Named".into(),
+            ));
+        }
+        ir.register_param(name, view)
+            .map_err(PipelineError::Compile)?;
+    }
+    for (path, view) in outputs.flatten() {
+        let name = format_param_path(&path);
+        if name.is_empty() {
+            return Err(PipelineError::Compile(
+                "compile output leaf has empty path; wrap with Named".into(),
+            ));
+        }
+        ir.build_sink(name, view).map_err(PipelineError::Compile)?;
+    }
+    ir.seal_params().map_err(PipelineError::Compile)?;
+    let artifact = build_wgpu_program(&ir, config);
+    PipelineFactory::from_program(session.clone(), artifact)
+}
+
+/// Open a session and compile (convenience when the session is not reused).
+pub fn compile_open<I, O>(
+    inputs: &I,
+    outputs: &O,
+    device: DeviceConfig,
+    config: Option<WgslKernelConfig>,
+) -> Result<PipelineFactory, PipelineError>
+where
+    I: Tree<Leaf = View>,
+    O: Tree<Leaf = View>,
+{
+    let session = WgpuSession::open(&device)?;
+    compile(inputs, outputs, &session, config)
+}
+
+/// Low-level stringly compile (params/sinks as name slices). Prefer [`compile`].
+pub fn compile_named(
     params: &[(&str, &View)],
     sinks: &[(&str, &View)],
-    device: DeviceConfig,
+    session: &WgpuSession,
     config: Option<WgslKernelConfig>,
 ) -> Result<PipelineFactory, PipelineError> {
     let mut ir = IrProgram::new();
@@ -371,57 +723,18 @@ pub fn compile(
     }
     ir.seal_params().map_err(PipelineError::Compile)?;
     let artifact = build_wgpu_program(&ir, config);
-    let ctx = DeviceContext::from_config(&device)?;
-    PipelineFactory::from_program(ctx, artifact)
+    PipelineFactory::from_program(session.clone(), artifact)
 }
 
-// --- device acquisition ---
-
-fn request_default_device() -> Result<(wgpu::Device, wgpu::Queue), PipelineError> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter_options = wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&adapter_options))
-        .or_else(|| {
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                force_fallback_adapter: true,
-                ..adapter_options
-            }))
-        })
-        .ok_or_else(|| PipelineError::Backend("no suitable GPU adapter found".into()))?;
-    request_device_from_adapter(adapter)
-}
-
-fn request_named_device(device_name: &str) -> Result<(wgpu::Device, wgpu::Queue), PipelineError> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = instance
-        .enumerate_adapters(wgpu::Backends::all())
-        .into_iter()
-        .find(|adapter| adapter.get_info().name == device_name)
-        .ok_or_else(|| {
-            PipelineError::Config(format!(
-                "no GPU adapter found with device_name '{device_name}'"
-            ))
-        })?;
-    request_device_from_adapter(adapter)
-}
-
-fn request_device_from_adapter(
-    adapter: wgpu::Adapter,
-) -> Result<(wgpu::Device, wgpu::Queue), PipelineError> {
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("resin"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-        },
-        None,
-    ))?;
-    Ok((device, queue))
+/// Open a session and [`compile_named`].
+pub fn compile_named_open(
+    params: &[(&str, &View)],
+    sinks: &[(&str, &View)],
+    device: DeviceConfig,
+    config: Option<WgslKernelConfig>,
+) -> Result<PipelineFactory, PipelineError> {
+    let session = WgpuSession::open(&device)?;
+    compile_named(params, sinks, &session, config)
 }
 
 // --- prepare bind groups (per instance; pipelines shared) ---

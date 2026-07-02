@@ -302,7 +302,8 @@ fn emit_eval_rpn(
 fn apply_op(stack: &mut Vec<String>, op: ElementOperator, t: &str) {
     match op {
         // unary
-        ElementOperator::Neg
+        ElementOperator::Relu
+        | ElementOperator::Neg
         | ElementOperator::Exp
         | ElementOperator::Log
         | ElementOperator::Sqrt
@@ -314,6 +315,7 @@ fn apply_op(stack: &mut Vec<String>, op: ElementOperator, t: &str) {
         | ElementOperator::Bitcast => {
             let x = stack.pop().expect("rpn unary");
             let e = match op {
+                ElementOperator::Relu => format!("max({x}, {t}(0))"),
                 ElementOperator::Neg => format!("(-{x})"),
                 ElementOperator::Exp => format!("(exp({x}))"),
                 ElementOperator::Log => format!("(log({x}))"),
