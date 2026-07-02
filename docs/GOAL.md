@@ -20,9 +20,10 @@ inverse rendering—yet the tooling split is painful:
   but not platform-agnostic.
 - **Specialized differentiable frameworks** (e.g. Dr.Jit / Mitsuba-class tools)
   pursue “write math, get gradients and a renderer,” but they are not always a
-  general substrate for mixed ML + graphics pipelines, and they typically do
-  not expose or target **fixed-function** hardware (raster, ROP, ray tracing) as
-  first-class portable nodes. Portability to WebGPU-class targets is limited.
+  general substrate for mixed ML + graphics pipelines, and they typically reach
+  **fixed-function** hardware (raster, ROP, ray tracing) only through
+  vendor-locked paths—e.g. ray tracing via CUDA/OptiX, which does drive NVIDIA’s
+  RT Cores but is not portable—rather than as portable, WebGPU-class nodes.
 
 ### The promise
 
@@ -39,7 +40,7 @@ That is Resin’s bet:
 | --- | --- |
 | **Easy to compose** | PyTorch-shaped programming model: graphs of ops, modules as `ParamTree`s, reverse-mode autodiff where rules exist. |
 | **Powerful** | Same expressiveness trajectory as hand-written WGSL/Vulkan *compute* (and, over time, optional fixed-function nodes). Compiler fusion and scheduling close the performance gap where possible. |
-| **Portable** | Primary path: emit WGSL and run on wgpu/WebGPU. Later: direct Vulkan (or other) backends for performance-critical native apps. |
+| **Portable** | Primary path: emit WGSL and run on native wgpu today; browser WebGPU is the portability target (packaging still open—see gaps). Later: direct Vulkan (or other) backends for performance-critical native apps. |
 | **Versatile** | Tensors and linear algebra as the foundation for scriptable GPU pipelines—not a fixed 2D blit API. |
 
 SDL2 is a useful *analogy for delight and minimal ceremony*, not a product
@@ -56,9 +57,11 @@ The multi-stage core (DSL graph → IR → backend artifact → admit/run) is
 
 Application-facing helpers sit **on top** of the core:
 
-- **ML:** `Trainer`, `SgdOptimizer`, later `AdamOptimizer`, `MuonOptimizer`,
-  etc.—special cases of *minimize a scalar loss over a `ParamTree` of
-  parameters*, with data iteration and logging as library code.
+- **ML:** today `sgd_tree` (a free function) applies an SGD step over a
+  `ParamTree`; the intended object form is `SgdOptimizer`, later
+  `AdamOptimizer`, `MuonOptimizer`, and a `Trainer`—all special cases of
+  *minimize a scalar loss over a `ParamTree` of parameters*, with data
+  iteration and logging as library code.
 - **Graphics / inverse rendering (later):** session objects that bind cameras,
   scene tensors, and losses; still “compile a graph, run with bindings,” not a
   different language.
@@ -116,8 +119,7 @@ bound program object that accepts a **`ParamTree` of GPU buffers** (and
 similarly structured inputs) and returns a **`ParamTree` of GPU buffers**
 (outputs / updated params).
 
-That idea **works well** as the packaging and typing hinge, with a few
-constraints made explicit:
+This is the packaging and typing hinge, with the following properties:
 
 1. **Shape of the tree is fixed at compile time.** The `ParamTree` structure
    (paths, leaf ranks/dtypes) must match what was registered when the graph was
@@ -141,8 +143,8 @@ constraints made explicit:
 6. **Host orchestration** (`Trainer`, data loaders, presentation) still sits
    outside: the HOF is the **GPU step**, not the full application.
 
-So: **yes**—a compile-time fixed `ParamTree → ParamTree` (or
-`&ParamTree → ParamTree` / in-place `&mut ParamTree`) object is a sound target
+This gives a compile-time fixed `ParamTree → ParamTree` (or
+`&ParamTree → ParamTree` / in-place `&mut ParamTree`) object—a sound target
 for packaging and a cleaner type boundary than free-floating buffer ids. It
 aligns with existing `ParamTree`, `AdmitProgram`, and `Interp` directions
 rather than replacing them.
