@@ -328,8 +328,10 @@ impl Pipeline {
             .recv()
             .map_err(|_| PipelineError::BufferMapFailed)?
             .map_err(|_| PipelineError::BufferMapFailed)?;
-        let data = buffer_slice.get_mapped_range().to_vec();
-        drop(buffer_slice);
+        let data = {
+            let mapped = buffer_slice.get_mapped_range();
+            mapped.to_vec()
+        };
         staging.unmap();
         Ok(data)
     }
