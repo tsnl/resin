@@ -3,6 +3,7 @@ members = [
     "crates/resin-core",
     "crates/resin-dsl",
     "crates/resin-ir",
+    "crates/resin-grad",
     "crates/resin-jit-wgpu",
 ]
 resolver = "3"
