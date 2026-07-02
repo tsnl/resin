@@ -1,6 +1,3 @@
 [workspace]
-members = [
-    "crates/resin-rt",
-    "crates/resin-rt-pybind",
-]
+members = ["crates/resin-rt"]
 resolver = "3"
