@@ -8,8 +8,8 @@ mod view;
 
 pub use debug_print::{debug_print, refcount};
 pub use node::{
-    ConstNodeKind, ElementwiseNodeKind, MatmulNodeKind, Node, NodeKind, ParamNodeKind,
-    ReductionNodeKind, RemapGatherInfo, RemapInfo, RemapNodeKind, RemapScatterInfo,
+    ConstNodeKind, ElementwiseNodeKind, MatmulNodeKind, Node, NodeKind, ReductionNodeKind,
+    RemapGatherInfo, RemapInfo, RemapNodeKind, RemapScatterInfo,
 };
 pub use node_ref::NodeRef;
 pub use prelude::{const_bytes, constant, full, full_u32, ones, param, zeros, ConstData};

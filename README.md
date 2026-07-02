@@ -14,7 +14,7 @@ Project goals and known gaps: [docs/GOAL.md](docs/GOAL.md).
 
 | Crate | Role |
 | --- | --- |
-| `resin-core` | Element types, accessors, `ParamTree` |
+| `resin-core` | Element types, accessors, `Tree` |
 | `resin-dsl` | Identity-keyed `View` / `NodeRef` graph |
 | `resin-ir` | In-place `IrProgram` building |
 | `resin-grad` | Reverse-mode autodiff (`grad_wrt` / `grad_view`) |

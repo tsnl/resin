@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "crates/resin-tree",
+    "crates/resin-tree-derive",
     "crates/resin-core",
     "crates/resin-dataset",
     "crates/resin-dsl",

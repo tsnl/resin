@@ -1,25 +1,19 @@
 //! Common constructors for the DSL frontend.
 
-use std::sync::Arc;
-
 use resin_core::{ElementType, F4, U4};
 
-use crate::node::{ConstNodeKind, Node, NodeKind, ParamNodeKind};
+use crate::node::{ConstNodeKind, Node, NodeKind};
 use crate::node_ref::NodeRef;
 use crate::view::View;
 
-/// Named parameter leaf (host-writable buffer).
-pub fn param(
-    shape: impl Into<Box<[u32]>>,
-    element_type: ElementType,
-    name: impl Into<Arc<str>>,
-) -> View {
+/// Parameter leaf (host-writable buffer). Register with a name via [`Tree`] paths at compile time.
+pub fn param(shape: impl Into<Box<[u32]>>, element_type: ElementType) -> View {
     let shape = shape.into();
     View::identity(NodeRef::new(Node {
         shape,
         element_type,
         args: vec![],
-        kind: NodeKind::Param(ParamNodeKind { name: name.into() }),
+        kind: NodeKind::Param,
     }))
 }
 

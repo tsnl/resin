@@ -3,14 +3,13 @@
 #[path = "interp_helpers.rs"]
 mod interp_helpers;
 
-use interp_helpers::{approx_eq, f4_param, run_graph};
-use resin_nn::{cross_entropy, mean, relu, softmax, Linear};
+use interp_helpers::{approx_eq, cross_entropy, f4_param, mean, run_graph, softmax, Linear};
 
 /// Linear no bias: `y = x @ W.T`.
 #[test]
 fn chain_linear_no_bias() {
-    let x = f4_param(&[2, 3], "x");
-    let w = f4_param(&[2, 3], "w");
+    let x = f4_param(&[2, 3]);
+    let w = f4_param(&[2, 3]);
     let y = x.matmul(&w.transpose().unwrap()).unwrap();
     // x = [[1,0,2],[0,1,0]], W = [[1,0,0],[0,1,0]] → y = [[1,0],[0,1]]
     let got = run_graph(
@@ -27,7 +26,7 @@ fn chain_linear_no_bias() {
 /// Linear + bias.
 #[test]
 fn chain_linear_bias() {
-    let x = f4_param(&[2, 2], "x");
+    let x = f4_param(&[2, 2]);
     let layer = Linear::new(2, 2, true);
     let y = layer.forward(&x).unwrap();
     let got = run_graph(
@@ -46,9 +45,9 @@ fn chain_linear_bias() {
 /// Linear + ReLU.
 #[test]
 fn chain_linear_relu() {
-    let x = f4_param(&[2, 2], "x");
+    let x = f4_param(&[2, 2]);
     let layer = Linear::new(2, 2, true);
-    let y = relu(&layer.forward(&x).unwrap()).unwrap();
+    let y = layer.forward(&x).unwrap().relu();
     let got = run_graph(
         &y,
         &[
@@ -65,7 +64,7 @@ fn chain_linear_relu() {
 /// Softmax axis 1: rows sum to 1.
 #[test]
 fn chain_softmax_rows_sum_to_one() {
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let p = softmax(&x, &[1]).unwrap();
     let got = run_graph(&p, &[(&x, &[1.0, 2.0, 3.0, 0.0, 0.0, 0.0])]).expect("gpu");
     assert_eq!(got.len(), 6);
@@ -82,8 +81,8 @@ fn chain_softmax_rows_sum_to_one() {
 /// Softmax + CE + mean on fixed tensors (host formula).
 #[test]
 fn chain_softmax_ce_mean_host_formula() {
-    let x = f4_param(&[2, 2], "x");
-    let y = f4_param(&[2, 2], "y");
+    let x = f4_param(&[2, 2]);
+    let y = f4_param(&[2, 2]);
     let layer = Linear::new(2, 2, true);
     let logits = layer.forward(&x).unwrap();
     let probs = softmax(&logits, &[1]).unwrap();

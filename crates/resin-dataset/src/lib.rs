@@ -1,4 +1,8 @@
-//! Host dataset loaders (MNIST and friends).
+//! Host dataset loaders (MNIST and friends) and session-agnostic minibatch iteration.
+
+mod minibatch;
+
+pub use minibatch::{BatchDataset, Minibatch, MinibatchLoader, MinibatchWriter};
 
 use std::fs::{self, File};
 use std::io::Read;
@@ -57,19 +61,33 @@ impl MnistDataset {
 
     /// One-hot `f32` labels and normalized `f32` images for a contiguous batch of indices.
     pub fn batch_f32(&self, indices: &[usize]) -> (Vec<f32>, Vec<f32>) {
-        let b = indices.len();
-        let mut xs = vec![0f32; b * IMG_WH];
-        let mut ys = vec![0f32; b * NUM_CLS];
-        for (row, &idx) in indices.iter().enumerate() {
-            let base = idx * IMG_WH;
-            for i in 0..IMG_WH {
-                xs[row * IMG_WH + i] = self.images[base + i] as f32 / 255.0;
-            }
-            let label = self.labels[idx] as usize;
-            ys[row * NUM_CLS + label] = 1.0;
-        }
-        (xs, ys)
+        batch_f32_from_indices(&self.images, &self.labels, indices)
     }
+}
+
+impl BatchDataset for MnistDataset {
+    fn len(&self) -> usize {
+        self.n
+    }
+
+    fn batch_f32(&self, indices: &[usize]) -> (Vec<f32>, Vec<f32>) {
+        batch_f32_from_indices(&self.images, &self.labels, indices)
+    }
+}
+
+fn batch_f32_from_indices(images: &[u8], labels: &[u8], indices: &[usize]) -> (Vec<f32>, Vec<f32>) {
+    let b = indices.len();
+    let mut xs = vec![0f32; b * IMG_WH];
+    let mut ys = vec![0f32; b * NUM_CLS];
+    for (row, &idx) in indices.iter().enumerate() {
+        let base = idx * IMG_WH;
+        for i in 0..IMG_WH {
+            xs[row * IMG_WH + i] = images[base + i] as f32 / 255.0;
+        }
+        let label = labels[idx] as usize;
+        ys[row * NUM_CLS + label] = 1.0;
+    }
+    (xs, ys)
 }
 
 fn ensure_mnist_file(cache_dir: &Path, name: &str) -> Result<PathBuf, String> {

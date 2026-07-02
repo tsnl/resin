@@ -10,8 +10,8 @@ use resin_dsl::{RemapInfo, RemapScatterInfo, View};
 
 #[test]
 fn elementwise_add_rerun_stable() {
-    let a = f4_param(&[3], "a");
-    let b = f4_param(&[3], "b");
+    let a = f4_param(&[3]);
+    let b = f4_param(&[3]);
     let out = &a + &b;
     let (r1, r2) =
         run_graph_twice(&out, &[(&a, &[1.0, 2.0, 3.0]), (&b, &[4.0, 5.0, 6.0])]).expect("gpu");
@@ -21,8 +21,8 @@ fn elementwise_add_rerun_stable() {
 
 #[test]
 fn matmul_rerun_stable() {
-    let a = f4_param(&[2, 2], "a");
-    let b = f4_param(&[2, 2], "b");
+    let a = f4_param(&[2, 2]);
+    let b = f4_param(&[2, 2]);
     let out = a.matmul(&b).unwrap();
     let (r1, r2) = run_graph_twice(
         &out,
@@ -38,7 +38,7 @@ fn matmul_rerun_stable() {
 fn scatter_add_rerun_not_double_count() {
     // Without clearing the output buffer, a second run would atomic-add into
     // leftover values and double (or worse) the result.
-    let g = f4_param(&[3, 2], "g");
+    let g = f4_param(&[3, 2]);
     let out = View::remap(
         &g,
         RemapInfo::Scatter(RemapScatterInfo {
@@ -62,7 +62,7 @@ fn scatter_add_rerun_not_double_count() {
 
 #[test]
 fn scatter_add_three_runs() {
-    let g = f4_param(&[2], "g");
+    let g = f4_param(&[2]);
     // Scatter each element to itself (identity scatter-add into [2]).
     let out = View::remap(
         &g,
@@ -83,7 +83,7 @@ fn scatter_add_three_runs() {
 
 #[test]
 fn gather_rerun_stable() {
-    let x = f4_param(&[4], "x");
+    let x = f4_param(&[4]);
     // Force non-identity: permute then densify-copy (gather).
     let v = x.permute(&[0]).unwrap();
     let out = v.copy(None);

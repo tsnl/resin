@@ -5,56 +5,18 @@ mod interp_helpers;
 
 use std::collections::BTreeMap;
 
-use interp_helpers::{f32_bytes, max_abs_diff};
-use resin_core::{format_param_path, join_param_path, ParamTree, ParamTreePathElement, F4};
+use interp_helpers::{
+    cross_entropy, f32_bytes, forward_probs, max_abs_diff, mean, mlp_classifier, softmax, Layer,
+    Linear,
+};
+use resin_core::{format_param_path, join_param_path, named, Tree, F4};
 use resin_dsl::param;
 use resin_grad::grad_wrt;
-use resin_ir::IrProgram;
-use resin_jit_wgpu::{build_wgpu_program, DeviceConfig, DeviceContext, Pipeline, PipelineFactory};
-use resin_nn::{cross_entropy, mean, sgd_tree, Linear, Mlp};
+use resin_jit_wgpu::{compile_open, DeviceConfig, Pipeline};
+use resin_nn::{initialize_tree, sgd_tree, InitMethod};
 
 const LR: f32 = 1e-3;
 const CE_FLOOR: f32 = 16.0;
-
-fn clone_mlp(mlp: &Mlp<resin_dsl::View>) -> Mlp<resin_dsl::View> {
-    Mlp {
-        layers: mlp
-            .layers
-            .iter()
-            .map(|l| Linear {
-                weight: l.weight.clone(),
-                bias: l.bias.clone(),
-            })
-            .collect(),
-    }
-}
-
-fn clone_linear(l: &Linear<resin_dsl::View>) -> Linear<resin_dsl::View> {
-    Linear {
-        weight: l.weight.clone(),
-        bias: l.bias.clone(),
-    }
-}
-
-fn init_leaf(path: &[ParamTreePathElement], shape: &[u32], rng: &mut u64) -> Vec<f32> {
-    let n: usize = shape.iter().map(|&d| d as usize).product();
-    let is_bias = matches!(
-        path.last(),
-        Some(ParamTreePathElement::Name(s)) if s.as_ref() == "bias"
-    );
-    if is_bias {
-        return vec![0.0; n];
-    }
-    let fan_in = *shape.last().unwrap_or(&1) as f32;
-    let scale = (2.0 / fan_in).sqrt();
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u = ((*rng >> 11) as f32) * (1.0 / ((1u64 << 53) as f32));
-        out.push((u * 2.0 - 1.0) * scale);
-    }
-    out
-}
 
 fn bytes_to_f32(b: &[u8]) -> Vec<f32> {
     b.chunks_exact(4)
@@ -72,7 +34,7 @@ struct TrainProg {
 
 impl TrainProg {
     fn admit_mlp(
-        mlp: &Mlp<resin_dsl::View>,
+        mlp: &Vec<Layer<resin_dsl::View>>,
         xs_shape: [u32; 2],
         ys_shape: [u32; 2],
         with_new_model: bool,
@@ -80,32 +42,48 @@ impl TrainProg {
         xs: Vec<f32>,
         ys: Vec<f32>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let xs_v = param(xs_shape, F4, "xs");
-        let ys_v = param(ys_shape, F4, "ys");
-        let loss = mean(&cross_entropy(&mlp.forward(xs_v.clone())?, &ys_v)?)?;
-        let grads = grad_wrt(&loss, clone_mlp(mlp))?;
-        let new_model = sgd_tree(clone_mlp(mlp), clone_mlp(&grads), LR);
+        let xs_v = param(xs_shape, F4);
+        let ys_v = param(ys_shape, F4);
+        let loss = mean(&cross_entropy(&forward_probs(mlp, &xs_v)?, &ys_v)?)?;
+        let grads = grad_wrt(&loss, mlp)?;
+        let new_model = sgd_tree(mlp, &grads, LR);
 
-        let mut ir = IrProgram::new();
-        ir.register_param("xs", &xs_v)?;
-        ir.register_param("ys", &ys_v)?;
-        ir.register_param_tree(mlp, "model")?;
-        ir.build_sink("loss", &loss)?;
-        ir.build_sink_tree("grad", &grads)?;
-        if with_new_model {
-            ir.build_sink_tree("new_model", &new_model)?;
-        }
-        ir.seal_params()?;
-        let artifact = build_wgpu_program(&ir, None);
-        let ctx = DeviceContext::from_config(&DeviceConfig::default())?;
-        let factory = PipelineFactory::from_program(ctx, artifact)?;
+        let inputs = (
+            named("xs", xs_v),
+            named("ys", ys_v),
+            named("model", mlp.to_vec()),
+        );
+        let factory = if with_new_model {
+            compile_open(
+                &inputs,
+                &(
+                    named("loss", loss),
+                    named("grad", grads),
+                    named("new_model", new_model),
+                ),
+                DeviceConfig::default(),
+                None,
+            )?
+        } else {
+            compile_open(
+                &inputs,
+                &(named("loss", loss), named("grad", grads)),
+                DeviceConfig::default(),
+                None,
+            )?
+        };
         let pipe = factory.create()?;
 
-        let mut rng = rng_seed;
         let mut weights = BTreeMap::new();
-        for (path, view) in mlp.flatten() {
-            let vals = init_leaf(&path, view.shape(), &mut rng);
-            weights.insert(format_param_path(&path), vals);
+        for (path, bytes) in initialize_tree(
+            mlp,
+            InitMethod::He {
+                seed: rng_seed.to_le_bytes().into(),
+            },
+        )
+        .flatten()
+        {
+            weights.insert(format_param_path(&path), bytes_to_f32(bytes));
         }
 
         Ok(Self {
@@ -159,7 +137,7 @@ fn synth_batch_b() -> (Vec<f32>, Vec<f32>) {
 #[test]
 fn s1_graph_sgd_matches_host_step() {
     let (xs, ys) = synth_batch_a();
-    let mlp = Mlp::new(3, 2, 1, 4, true);
+    let mlp = mlp_classifier(3, 2, 1, 4, true);
     let mut prog = TrainProg::admit_mlp(&mlp, [4, 3], [4, 2], true, 42, xs, ys).expect("gpu");
     let outs = prog.run_once().expect("run");
 
@@ -181,7 +159,7 @@ fn s1_graph_sgd_matches_host_step() {
 #[test]
 fn s2_same_batch_multi_step_loss_decreases() {
     let (xs, ys) = synth_batch_a();
-    let mlp = Mlp::new(3, 2, 1, 4, true);
+    let mlp = mlp_classifier(3, 2, 1, 4, true);
     let mut prog = TrainProg::admit_mlp(&mlp, [4, 3], [4, 2], false, 7, xs, ys).expect("gpu");
     let mut losses = Vec::new();
     for _ in 0..20 {
@@ -202,7 +180,7 @@ fn s2_same_batch_multi_step_loss_decreases() {
 fn s3_two_batches_one_step_each_finite() {
     let (xs_a, ys_a) = synth_batch_a();
     let (xs_b, ys_b) = synth_batch_b();
-    let mlp = Mlp::new(3, 2, 1, 4, true);
+    let mlp = mlp_classifier(3, 2, 1, 4, true);
     let mut prog = TrainProg::admit_mlp(&mlp, [4, 3], [4, 2], false, 11, xs_a, ys_a).expect("gpu");
     let l0 = prog.host_sgd_step().expect("batch a");
     assert!(l0.is_finite() && l0 < CE_FLOOR, "batch a loss={l0}");
@@ -215,7 +193,7 @@ fn s3_two_batches_one_step_each_finite() {
 #[test]
 fn s4_restore_init_weights_rerun_matches_step0_loss() {
     let (xs, ys) = synth_batch_a();
-    let mlp = Mlp::new(3, 2, 1, 4, true);
+    let mlp = mlp_classifier(3, 2, 1, 4, true);
     let mut prog = TrainProg::admit_mlp(&mlp, [4, 3], [4, 2], false, 99, xs, ys).expect("gpu");
     let w0 = prog.weights.clone();
     let loss0 = bytes_to_f32(&prog.run_once().expect("run0")["loss"])[0];
@@ -234,36 +212,44 @@ fn s4_restore_init_weights_rerun_matches_step0_loss() {
 fn s1b_linear_graph_sgd_matches_host() {
     let (xs, ys) = synth_batch_a();
     let layer = Linear::new(3, 2, true);
-    let xs_v = param([4, 3], F4, "xs");
-    let ys_v = param([4, 2], F4, "ys");
+    let xs_v = param([4, 3], F4);
+    let ys_v = param([4, 2], F4);
     let logits = layer.forward(&xs_v).unwrap();
-    let loss =
-        mean(&cross_entropy(&resin_nn::softmax(&logits, &[1]).unwrap(), &ys_v).unwrap()).unwrap();
-    let grads = grad_wrt(&loss, clone_linear(&layer)).unwrap();
-    let new_model = sgd_tree(clone_linear(&layer), clone_linear(&grads), LR);
+    let loss = mean(&cross_entropy(&softmax(&logits, &[1]).unwrap(), &ys_v).unwrap()).unwrap();
+    let grads = grad_wrt(&loss, &layer).unwrap();
+    let new_model = sgd_tree(&layer, &grads, LR);
 
-    let mut ir = IrProgram::new();
-    ir.register_param("xs", &xs_v).unwrap();
-    ir.register_param("ys", &ys_v).unwrap();
-    ir.register_param_tree(&layer, "model").unwrap();
-    ir.build_sink("loss", &loss).unwrap();
-    ir.build_sink_tree("grad", &grads).unwrap();
-    ir.build_sink_tree("new_model", &new_model).unwrap();
-    ir.seal_params().unwrap();
-    let artifact = build_wgpu_program(&ir, None);
-    let ctx = DeviceContext::from_config(&DeviceConfig::default()).unwrap();
-    let factory = PipelineFactory::from_program(ctx, artifact).unwrap();
+    let factory = compile_open(
+        &(
+            named("xs", xs_v),
+            named("ys", ys_v),
+            named("model", layer.clone()),
+        ),
+        &(
+            named("loss", loss),
+            named("grad", grads),
+            named("new_model", new_model),
+        ),
+        DeviceConfig::default(),
+        None,
+    )
+    .unwrap();
     let mut pipe = factory.create().unwrap();
 
-    let mut rng = 3u64;
     let mut host_w = BTreeMap::new();
     let mut inputs_owned: Vec<(String, Vec<u8>)> =
         vec![("xs".into(), f32_bytes(&xs)), ("ys".into(), f32_bytes(&ys))];
-    for (path, view) in layer.flatten() {
-        let vals = init_leaf(&path, view.shape(), &mut rng);
-        let name = join_param_path("model", &path);
-        inputs_owned.push((name, f32_bytes(&vals)));
-        host_w.insert(format_param_path(&path), vals);
+    for (path, bytes) in initialize_tree(
+        &layer,
+        InitMethod::He {
+            seed: 3u64.to_le_bytes().into(),
+        },
+    )
+    .flatten()
+    {
+        let vals = bytes_to_f32(bytes);
+        host_w.insert(format_param_path(&path), vals.clone());
+        inputs_owned.push((join_param_path("model", &path), f32_bytes(&vals)));
     }
     let input_refs: Vec<(&str, &[u8])> = inputs_owned
         .iter()

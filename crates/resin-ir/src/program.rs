@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use resin_core::{join_param_path, Accessor, ElementOperator, ElementType, ParamTree};
+use resin_core::{join_param_path, Accessor, ElementOperator, ElementType, Tree};
 use resin_dsl::{NodeKind, NodeRef, RemapInfo, View};
 use serde::{Deserialize, Serialize};
 
@@ -83,7 +83,7 @@ impl IrProgram {
 
     pub fn register_param(&mut self, name: impl Into<String>, view: &View) -> Result<(), String> {
         match &view.node_ref.kind {
-            NodeKind::Param(_) => {}
+            NodeKind::Param => {}
             _ => return Err("register_param expected a param view".into()),
         }
         let name = name.into();
@@ -98,7 +98,7 @@ impl IrProgram {
         Ok(())
     }
 
-    pub fn register_param_tree<M: ParamTree<Leaf = View>>(
+    pub fn register_tree<M: Tree<Leaf = View>>(
         &mut self,
         tree: &M,
         prefix: &str,
@@ -119,7 +119,7 @@ impl IrProgram {
         Ok(())
     }
 
-    pub fn build_sink_tree<M: ParamTree<Leaf = View>>(
+    pub fn build_sink_tree<M: Tree<Leaf = View>>(
         &mut self,
         prefix: &str,
         tree: &M,
@@ -174,12 +174,12 @@ impl IrProgram {
         self.buffers.push(buffer);
         self.buffer_memo.insert(node.clone(), buffer_index);
 
-        if let NodeKind::Param(p) = &node.kind {
+        if let NodeKind::Param = &node.kind {
             let name = self
                 .param_name_overrides
                 .get(&node)
-                .cloned()
-                .unwrap_or_else(|| p.name.to_string());
+                .expect("param must be registered with a buffer name before lowering")
+                .clone();
             self.param_at_buffer.insert(buffer_index, name);
         }
 
@@ -215,7 +215,7 @@ fn allocate_buffer(node: &resin_dsl::Node) -> IrBuffer {
 fn kernel_for_node(node: &resin_dsl::Node) -> Option<IrKernel> {
     let arg_accessors: Vec<Accessor> = node.args.iter().map(|v| v.accessor.clone()).collect();
     match &node.kind {
-        NodeKind::Const(_) | NodeKind::Param(_) => None,
+        NodeKind::Const(_) | NodeKind::Param => None,
         NodeKind::Elementwise(k) => {
             let arg_etypes: Vec<_> = node.args.iter().map(|v| v.element_type()).collect();
             Some(IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
@@ -344,8 +344,8 @@ mod tests {
 
     #[test]
     fn lower_add_of_params() {
-        let a = param([2, 3], F4, "a");
-        let b = param([2, 3], F4, "b");
+        let a = param([2, 3], F4);
+        let b = param([2, 3], F4);
         let c = &a + &b;
 
         let mut program = IrProgram::new();

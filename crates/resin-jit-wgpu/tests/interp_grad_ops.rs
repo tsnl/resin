@@ -5,9 +5,11 @@
 #[path = "interp_helpers.rs"]
 mod interp_helpers;
 
-use interp_helpers::{approx_eq, f4_param, finite_diff_param, max_abs_diff, run_loss_grads};
+use interp_helpers::{
+    approx_eq, cross_entropy, f4_param, finite_diff_param, forward_probs, max_abs_diff, mean,
+    run_loss_grads, softmax, Linear,
+};
 use resin_grad::{grad_view, grad_wrt};
-use resin_nn::{cross_entropy, mean, relu, softmax, Linear};
 
 /// G1: `L = mean(y)`, `y = x @ W.T` (W is `[out, in]`).
 /// Analytic: `∂L/∂y = 1/(B*O)`, `∂L/∂W[o,i] = sum_b x[b,i] / (B*O)`,
@@ -15,11 +17,11 @@ use resin_nn::{cross_entropy, mean, relu, softmax, Linear};
 #[test]
 fn g1_mean_of_matmul_weight_and_input_grad() {
     // B=2, in=3, out=2. W [2,3], x [2,3] — use y = x @ W.T so W.T is [3,2].
-    let x = f4_param(&[2, 3], "x");
-    let w = f4_param(&[2, 3], "w");
+    let x = f4_param(&[2, 3]);
+    let w = f4_param(&[2, 3]);
     let y = x.matmul(&w.transpose().unwrap()).unwrap();
     let loss = mean(&y).unwrap();
-    // Single Views use grad_view (View is not a ParamTree leaf tree).
+    // Single Views use grad_view (View is not a Tree leaf tree).
     let gw = grad_view(&loss, &w).unwrap();
     let gx = grad_view(&loss, &x).unwrap();
 
@@ -66,18 +68,11 @@ fn g1_mean_of_matmul_weight_and_input_grad() {
 /// `∂L/∂b[o] = B / (B*O) = 1/O`.
 #[test]
 fn g2_mean_of_linear_bias_and_weight_grad() {
-    let x = f4_param(&[2, 4], "x");
+    let x = f4_param(&[2, 4]);
     let layer = Linear::new(4, 3, true); // W [3,4]
     let y = layer.forward(&x).unwrap();
     let loss = mean(&y).unwrap();
-    let grads = grad_wrt(
-        &loss,
-        Linear {
-            weight: layer.weight.clone(),
-            bias: layer.bias.clone(),
-        },
-    )
-    .unwrap();
+    let grads = grad_wrt(&loss, &layer).unwrap();
 
     let x_data = [1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let mut w_data = vec![0.1f32; 12];
@@ -121,18 +116,11 @@ fn g2_mean_of_linear_bias_and_weight_grad() {
 /// G3: `y = relu(x @ W.T + b)`, `L = mean(y)` — FD on one weight and one bias.
 #[test]
 fn g3_relu_linear_grad_matches_fd() {
-    let x = f4_param(&[2, 3], "x");
+    let x = f4_param(&[2, 3]);
     let layer = Linear::new(3, 2, true);
-    let y = relu(&layer.forward(&x).unwrap()).unwrap();
+    let y = layer.forward(&x).unwrap().relu();
     let loss = mean(&y).unwrap();
-    let grads = grad_wrt(
-        &loss,
-        Linear {
-            weight: layer.weight.clone(),
-            bias: layer.bias.clone(),
-        },
-    )
-    .unwrap();
+    let grads = grad_wrt(&loss, &layer).unwrap();
 
     let x_data = [1.0f32, -1.0, 0.5, 0.2, 0.3, -0.4];
     let w_data = [0.5f32, -0.2, 0.1, -0.3, 0.4, 0.2];
@@ -155,8 +143,8 @@ fn g3_relu_linear_grad_matches_fd() {
         (layer.bias.as_ref().unwrap(), b_data.to_vec()),
     ];
     let eps = 1e-3f32;
-    let fd_w0 = finite_diff_param(&loss, &params_owned, "weight", 0, eps).expect("fd w");
-    let fd_b0 = finite_diff_param(&loss, &params_owned, "bias", 0, eps).expect("fd b");
+    let fd_w0 = finite_diff_param(&loss, &params_owned, 1, 0, eps).expect("fd w");
+    let fd_b0 = finite_diff_param(&loss, &params_owned, 2, 0, eps).expect("fd b");
     let gw0 = gmap["gw"][0];
     let gb0 = gmap["gb"][0];
     assert!(
@@ -173,20 +161,13 @@ fn g3_relu_linear_grad_matches_fd() {
 /// FD on bias (expect match) and one weight entry.
 #[test]
 fn g4_softmax_ce_linear_grad_bias_and_weight_fd() {
-    let x = f4_param(&[2, 4], "x");
-    let y = f4_param(&[2, 3], "y");
+    let x = f4_param(&[2, 4]);
+    let y = f4_param(&[2, 3]);
     let layer = Linear::new(4, 3, true);
     let logits = layer.forward(&x).unwrap();
     let probs = softmax(&logits, &[1]).unwrap();
     let loss = mean(&cross_entropy(&probs, &y).unwrap()).unwrap();
-    let grads = grad_wrt(
-        &loss,
-        Linear {
-            weight: layer.weight.clone(),
-            bias: layer.bias.clone(),
-        },
-    )
-    .unwrap();
+    let grads = grad_wrt(&loss, &layer).unwrap();
 
     let x_data = [1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let y_data = [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0]; // one-hot
@@ -213,7 +194,7 @@ fn g4_softmax_ce_linear_grad_bias_and_weight_fd() {
     ];
     let eps = 1e-3f32;
     let fd_b: Vec<f32> = (0..3)
-        .map(|i| finite_diff_param(&loss, &params_owned, "bias", i, eps).expect("fd b"))
+        .map(|i| finite_diff_param(&loss, &params_owned, 3, i, eps).expect("fd b"))
         .collect();
     let gb = &gmap["gb"];
     let bias_err = max_abs_diff(gb, &fd_b);
@@ -222,7 +203,7 @@ fn g4_softmax_ce_linear_grad_bias_and_weight_fd() {
         "bias autodiff={gb:?} FD={fd_b:?} max_err={bias_err}"
     );
 
-    let fd_w0 = finite_diff_param(&loss, &params_owned, "weight", 0, eps).expect("fd w");
+    let fd_w0 = finite_diff_param(&loss, &params_owned, 2, 0, eps).expect("fd w");
     let gw0 = gmap["gw"][0];
     let weight_err = (gw0 - fd_w0).abs();
     // Document known risk: full-MLP FD mismatch was large; this isolates last layer.
@@ -236,8 +217,8 @@ fn g4_softmax_ce_linear_grad_bias_and_weight_fd() {
 /// G4b: same as G4 but **without** stable-softmax max (exp only). Separates Max-adjoint issues.
 #[test]
 fn g4b_softmax_ce_no_max_sub_weight_fd() {
-    let x = f4_param(&[2, 4], "x");
-    let y = f4_param(&[2, 3], "y");
+    let x = f4_param(&[2, 4]);
+    let y = f4_param(&[2, 3]);
     let layer = Linear::new(4, 3, true);
     let logits = layer.forward(&x).unwrap();
     // Unstable softmax: exp / sum (no max sub)
@@ -247,14 +228,7 @@ fn g4b_softmax_ce_no_max_sub_weight_fd() {
         .unwrap();
     let probs = &exp_x / &sum_exp;
     let loss = mean(&cross_entropy(&probs, &y).unwrap()).unwrap();
-    let grads = grad_wrt(
-        &loss,
-        Linear {
-            weight: layer.weight.clone(),
-            bias: layer.bias.clone(),
-        },
-    )
-    .unwrap();
+    let grads = grad_wrt(&loss, &layer).unwrap();
 
     let x_data = [1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let y_data = [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0];
@@ -278,7 +252,7 @@ fn g4b_softmax_ce_no_max_sub_weight_fd() {
         (&layer.weight, w_data),
         (layer.bias.as_ref().unwrap(), b_data.to_vec()),
     ];
-    let fd_w0 = finite_diff_param(&loss, &params_owned, "weight", 0, 1e-3).expect("fd");
+    let fd_w0 = finite_diff_param(&loss, &params_owned, 2, 0, 1e-3).expect("fd");
     let gw0 = gmap["gw"][0];
     assert!(
         (gw0 - fd_w0).abs() < 5e-3,
@@ -287,45 +261,32 @@ fn g4b_softmax_ce_no_max_sub_weight_fd() {
 }
 
 /// G5: two-layer MLP (`relu` hidden then linear) + softmax+CE — FD on last and first weights.
-/// Uses `register_param_tree` so layers get unique buffer names (`model.layers.i.weight`).
+/// Tree `compile` prefixes give unique buffer names (`model.i.weight`).
 #[test]
 fn g5_two_layer_mlp_weight_fd() {
-    use resin_core::{format_param_path, ParamTree, ParamTreePathElement, F4};
+    use interp_helpers::mlp_classifier;
+    use resin_core::{format_param_path, named, Tree, TreePathElement, F4};
     use resin_dsl::param;
-    use resin_ir::IrProgram;
-    use resin_jit_wgpu::{build_wgpu_program, DeviceConfig, DeviceContext, PipelineFactory};
-    use resin_nn::Mlp;
+    use resin_jit_wgpu::{compile_open, DeviceConfig};
     use std::collections::BTreeMap;
 
-    let mlp = Mlp::new(4, 3, 1, 5, true); // in=4, hidden=5, out=3
-    let xs = param([2, 4], F4, "xs");
-    let ys = param([2, 3], F4, "ys");
-    let loss = mean(&cross_entropy(&mlp.forward(xs.clone()).unwrap(), &ys).unwrap()).unwrap();
-    let grads = grad_wrt(
-        &loss,
-        Mlp {
-            layers: mlp
-                .layers
-                .iter()
-                .map(|l| Linear {
-                    weight: l.weight.clone(),
-                    bias: l.bias.clone(),
-                })
-                .collect(),
-        },
+    let mlp = mlp_classifier(4, 3, 1, 5, true); // in=4, hidden=5, out=3
+    let xs = param([2, 4], F4);
+    let ys = param([2, 3], F4);
+    let loss = mean(&cross_entropy(&forward_probs(&mlp, &xs).unwrap(), &ys).unwrap()).unwrap();
+    let grads = grad_wrt(&loss, &mlp).unwrap();
+
+    let factory = compile_open(
+        &(
+            named("xs", xs),
+            named("ys", ys),
+            named("model", mlp.clone()),
+        ),
+        &(named("loss", loss), named("grad", grads)),
+        DeviceConfig::default(),
+        None,
     )
     .unwrap();
-
-    let mut ir = IrProgram::new();
-    ir.register_param("xs", &xs).unwrap();
-    ir.register_param("ys", &ys).unwrap();
-    ir.register_param_tree(&mlp, "model").unwrap();
-    ir.build_sink("loss", &loss).unwrap();
-    ir.build_sink_tree("grad", &grads).unwrap();
-    ir.seal_params().unwrap();
-    let artifact = build_wgpu_program(&ir, None);
-    let ctx = DeviceContext::from_config(&DeviceConfig::default()).unwrap();
-    let factory = PipelineFactory::from_program(ctx, artifact).unwrap();
     let mut pipe = factory.create().unwrap();
 
     let xs_data = [1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
@@ -335,8 +296,8 @@ fn g5_two_layer_mlp_weight_fd() {
     for (path, view) in mlp.flatten() {
         let n: usize = view.shape().iter().map(|&d| d as usize).product();
         let is_bias = matches!(
-            path.last(),
-            Some(ParamTreePathElement::Name(s)) if s.as_ref() == "bias"
+            path.back(),
+            Some(TreePathElement::Name(s)) if s.as_ref() == "bias"
         );
         let vals: Vec<f32> = if is_bias {
             vec![0.0; n]
@@ -396,8 +357,8 @@ fn g5_two_layer_mlp_weight_fd() {
     };
 
     let eps = 1e-3f32;
-    // Last layer weight (layers.1.weight) and first layer weight (layers.0.weight)
-    for path in ["layers.1.weight", "layers.0.weight", "layers.1.bias"] {
+    // model.0 linear, model.1 relu, model.2 linear (n_hidden=1); paths omit `model.` prefix here
+    for path in ["2.weight", "0.weight", "2.bias"] {
         let ad = read_grad(path)[0];
         let fd = fd_one(path, 0, eps);
         let err = (ad - fd).abs();

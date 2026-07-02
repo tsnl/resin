@@ -3,13 +3,42 @@ use crate::node::{
     RemapInfo, RemapNodeKind,
 };
 use crate::node_ref::NodeRef;
-use resin_core::{shape_join, Accessor, ElementOperator, ElementType, IntoIndexKey, F4, U4};
+use resin_core::{
+    shape_join, Accessor, ElementOperator, ElementType, IntoIndexKey, Leaf, Tree, TreePath, F4, U4,
+};
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Shl, Shr, Sub};
 /// Public tensor handle: identity-keyed node plus logical accessor.
 #[derive(Clone)]
 pub struct View {
     pub node_ref: NodeRef,
     pub accessor: Accessor,
+}
+
+/// A lone [`View`] is a single-leaf param tree (empty path). Prefer wrapping with
+/// [`resin_core::Named`] at compile roots so buffer names are non-empty.
+impl Tree for View {
+    type Leaf = View;
+    type Map<U> = Leaf<U>;
+
+    fn flatten(&self) -> impl Iterator<Item = (TreePath, &View)> + '_ {
+        std::iter::once((resin_core::path_empty(), self))
+    }
+
+    fn consume_unflatten<I>(stream: &mut resin_core::TreeLeaves<View, I>) -> Self
+    where
+        I: Iterator<Item = (resin_core::TreePath, View)>,
+    {
+        match stream.pop() {
+            None => panic!("Tree::unflatten for View: missing leaf"),
+            Some((path, view)) => {
+                assert!(
+                    path.is_empty(),
+                    "Tree::unflatten for View: unexpected path {path:?}"
+                );
+                view
+            }
+        }
+    }
 }
 
 /// Rank-0 F4 constant (Python bare `const(1.0)`). Prefer `1.0f32.into()` / `View::from(1.0)`.
@@ -119,6 +148,10 @@ impl View {
         debug_assert_eq!(op.arity(), 2);
         let (a, b) = join_for_elementwise(self, other)?;
         Self::elementwise(vec![a, b], op)
+    }
+
+    pub fn relu(&self) -> Self {
+        self.elementwise_unary(ElementOperator::Relu)
     }
 
     pub fn exp(&self) -> Self {
@@ -384,8 +417,8 @@ mod tests {
 
     #[test]
     fn identity_and_add_allocate_distinct_nodes() {
-        let a = param([2, 3], F4, "a");
-        let b = param([2, 3], F4, "b");
+        let a = param([2, 3], F4);
+        let b = param([2, 3], F4);
         let c = &a + &b;
         assert!(a.node_ref != c.node_ref);
         assert_eq!(c.shape(), &[2, 3]);
@@ -394,15 +427,15 @@ mod tests {
 
     #[test]
     fn same_param_cloned_shares_node() {
-        let a = param([4], F4, "x");
+        let a = param([4], F4);
         let b = a.clone();
         assert_eq!(a.node_ref, b.node_ref);
     }
 
     #[test]
     fn matmul_shapes() {
-        let a = param([2, 3], F4, "a");
-        let b = param([3, 5], F4, "b");
+        let a = param([2, 3], F4);
+        let b = param([3, 5], F4);
         let c = a.matmul(&b).unwrap();
         assert_eq!(c.shape(), &[2, 5]);
     }

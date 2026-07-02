@@ -126,8 +126,8 @@ mod tests {
 
     #[test]
     fn lower_add_emits_pipeline() {
-        let a = param([4], F4, "a");
-        let b = param([4], F4, "b");
+        let a = param([4], F4);
+        let b = param([4], F4);
         let c = &a + &b;
         let mut ir = IrProgram::new();
         ir.register_param("a", &a).unwrap();

@@ -1,9 +1,11 @@
 //! Shared helpers for GPU interpreter integration tests.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 use resin_core::{ElementType, F4};
+
 use resin_dsl::{const_bytes, param, View};
-use resin_jit_wgpu::{compile, DeviceConfig, Pipeline};
+use resin_jit_wgpu::{compile_named_open, DeviceConfig, Pipeline};
+pub use resin_nn::{classifier_layers, cross_entropy, forward_probs, mean, softmax, Layer, Linear};
 
 /// Compile `out` as the sole sink, create a pipeline instance, write params, run, read `out`.
 pub fn run_graph(
@@ -17,7 +19,7 @@ pub fn run_graph(
     }
     let param_refs: Vec<(&str, &View)> =
         named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
-    let factory = compile(&param_refs, &[("out", out)], DeviceConfig::default(), None)?;
+    let factory = compile_named_open(&param_refs, &[("out", out)], DeviceConfig::default(), None)?;
     let mut pipe = factory.create()?;
     let inputs: Vec<(String, Vec<u8>)> = params
         .iter()
@@ -47,7 +49,7 @@ pub fn run_graph_twice(
     }
     let param_refs: Vec<(&str, &View)> =
         named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
-    let factory = compile(&param_refs, &[("out", out)], DeviceConfig::default(), None)?;
+    let factory = compile_named_open(&param_refs, &[("out", out)], DeviceConfig::default(), None)?;
     let mut pipe = factory.create()?;
 
     let write_and_run = |pipe: &mut Pipeline| -> Result<Vec<f32>, Box<dyn std::error::Error>> {
@@ -75,7 +77,7 @@ pub fn run_graph_twice(
 fn param_name(view: &View) -> Option<String> {
     use resin_dsl::NodeKind;
     match &view.node_ref.kind {
-        NodeKind::Param(p) => Some(p.name.to_string()),
+        NodeKind::Param => None,
         _ => None,
     }
 }
@@ -93,8 +95,19 @@ pub fn approx_eq(a: &[f32], b: &[f32], tol: f32) -> bool {
             .all(|(x, y)| (x - y).abs() <= tol || (x.is_nan() && y.is_nan()))
 }
 
-pub fn f4_param(shape: &[u32], name: &str) -> View {
-    param(shape.to_vec().into_boxed_slice(), F4, name)
+pub fn f4_param(shape: &[u32]) -> View {
+    param(shape.to_vec(), F4)
+}
+
+/// Classifier layer stack for tests (alias of [`classifier_layers`]).
+pub fn mlp_classifier(
+    in_dim: u32,
+    out_dim: u32,
+    n_hidden: usize,
+    hidden_dim: u32,
+    bias: bool,
+) -> Vec<Layer<resin_dsl::View>> {
+    classifier_layers(in_dim, out_dim, n_hidden, hidden_dim, bias)
 }
 
 pub fn f4_const(data: &[f32]) -> View {
@@ -133,7 +146,7 @@ pub fn run_loss_grads(
         named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
     let mut sinks: Vec<(&str, &View)> = vec![("loss", loss)];
     sinks.extend(grad_sinks.iter().copied());
-    let factory = compile(&param_refs, &sinks, DeviceConfig::default(), None)?;
+    let factory = compile_named_open(&param_refs, &sinks, DeviceConfig::default(), None)?;
     let mut pipe = factory.create()?;
     let inputs: Vec<(String, Vec<u8>)> = params
         .iter()
@@ -159,7 +172,7 @@ pub fn run_loss_grads(
 pub fn finite_diff_param(
     loss: &View,
     params: &[(&View, Vec<f32>)],
-    perturb_name: &str,
+    param_index: usize,
     perturb_index: usize,
     eps: f32,
 ) -> Result<f32, Box<dyn std::error::Error>> {
@@ -170,7 +183,7 @@ pub fn finite_diff_param(
     }
     let param_refs: Vec<(&str, &View)> =
         named_params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
-    let factory = compile(
+    let factory = compile_named_open(
         &param_refs,
         &[("loss", loss)],
         DeviceConfig::default(),
@@ -199,16 +212,8 @@ pub fn finite_diff_param(
 
     let mut plus = params.to_vec();
     let mut minus = params.to_vec();
-    for (view, vals) in &mut plus {
-        if param_name(view).as_deref() == Some(perturb_name) {
-            vals[perturb_index] += eps;
-        }
-    }
-    for (view, vals) in &mut minus {
-        if param_name(view).as_deref() == Some(perturb_name) {
-            vals[perturb_index] -= eps;
-        }
-    }
+    plus[param_index].1[perturb_index] += eps;
+    minus[param_index].1[perturb_index] -= eps;
     let lp = run_with(&mut pipe, &plus)?;
     let lm = run_with(&mut pipe, &minus)?;
     Ok((lp - lm) / (2.0 * eps))

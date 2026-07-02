@@ -1,9 +1,8 @@
 [package]
-name = "resin-dataset"
+name = "resin-tree"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-resin-core = { path = "../resin-core" }
-resin-tree = { path = "../resin-tree" }
+im = "15"
 resin-tree-derive = { path = "../resin-tree-derive" }
