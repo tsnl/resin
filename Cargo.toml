@@ -1,3 +1,7 @@
 [workspace]
-members = ["crates/resin-jit-wgpu"]
+members = [
+    "crates/resin-core",
+    "crates/resin-dsl",
+    "crates/resin-jit-wgpu",
+]
 resolver = "3"
