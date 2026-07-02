@@ -2,7 +2,6 @@ use super::{BufferId, Interp, InterpConfig, InterpError, ProgramId};
 use crate::program::{
     WgpuBufferSpec, WgpuComputePipelineSpec, WgpuCopy, WgpuDispatch, WgpuProgram, WgpuQueueOp,
 };
-use rmpv::Value as MsgpackValue;
 use std::borrow::Cow;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -81,7 +80,7 @@ fn request_device_from_adapter(
     Ok((device, queue))
 }
 
-/// Acquire a default GPU device and queue for standalone use (e.g. Python dev).
+/// Acquire a default GPU device and queue for standalone use.
 ///
 /// Game engines should pass their existing `Device` and `Queue` to [`WgpuInterp::empty`].
 pub fn request_default_device() -> Result<(wgpu::Device, wgpu::Queue), WgpuInterpError> {
@@ -125,14 +124,11 @@ impl WgpuInterp {
     }
 
     pub fn from_config(config: &InterpConfig) -> Result<Self, InterpError> {
-        let device_name = parse_wgpu_config(config)?;
-        let (device, queue) = match device_name.as_deref() {
-            None | Some("") | Some("default") => {
-                request_default_device().map_err(InterpError::from)?
-            }
-            Some(name) => request_named_device(name).map_err(|err| match err {
+        let (device, queue) = match &config.device_name {
+            None => request_default_device().map_err(InterpError::from)?,
+            Some(device_name) => request_named_device(device_name).map_err(|err| match err {
                 WgpuInterpError::NoAdapter => InterpError::Config(format!(
-                    "no GPU adapter found with device_name '{name}'"
+                    "no GPU adapter found with device_name '{device_name}'"
                 )),
                 other => other.into(),
             })?,
@@ -160,8 +156,7 @@ impl WgpuInterp {
             .map(|spec| create_pipeline(&self.device, spec))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let prepared_queue =
-            prepare_queue(&self.device, &program, &buffers, &pipelines)?;
+        let prepared_queue = prepare_queue(&self.device, &program, &buffers, &pipelines)?;
 
         let program_id = self.programs.len();
         self.programs.push(LoadedProgram {
@@ -254,13 +249,9 @@ impl WgpuInterp {
         data: &[u8],
     ) -> Result<(), WgpuInterpError> {
         let loaded = self.loaded_program(program_id.0)?;
-        let spec = loaded
-            .program
-            .buffers
-            .get(buffer_id.0)
-            .ok_or_else(|| {
-                WgpuInterpError::Program(format!("invalid buffer id {}", buffer_id.0))
-            })?;
+        let spec = loaded.program.buffers.get(buffer_id.0).ok_or_else(|| {
+            WgpuInterpError::Program(format!("invalid buffer id {}", buffer_id.0))
+        })?;
         if data.len() as u64 != spec.byte_len() {
             return Err(WgpuInterpError::Program(format!(
                 "write_buffer size mismatch: expected {} bytes, got {}",
@@ -356,9 +347,9 @@ impl WgpuInterp {
     }
 
     fn loaded_program(&self, program_id: usize) -> Result<&LoadedProgram, WgpuInterpError> {
-        self.programs.get(program_id).ok_or_else(|| {
-            WgpuInterpError::Program(format!("invalid program id {program_id}"))
-        })
+        self.programs
+            .get(program_id)
+            .ok_or_else(|| WgpuInterpError::Program(format!("invalid program id {program_id}")))
     }
 }
 
@@ -367,10 +358,27 @@ impl Interp for WgpuInterp {
         WgpuInterp::program_count(self)
     }
 
-    fn admit_program(&mut self, program_msgpack: &[u8]) -> Result<ProgramId, InterpError> {
-        let program = WgpuProgram::from_msgpack(program_msgpack)
-            .map_err(|err| InterpError::Program(err.to_string()))?;
-        WgpuInterp::admit_wgpu_program(self, program).map_err(Into::into)
+    fn param(&self, program_id: ProgramId, name: &str) -> Result<BufferId, InterpError> {
+        let prog = self.program(program_id).map_err(InterpError::from)?;
+        prog.param_buffers
+            .get(name)
+            .copied()
+            .map(BufferId)
+            .ok_or_else(|| InterpError::Program(format!("unknown param {name:?}")))
+    }
+
+    fn sink(&self, program_id: ProgramId, name: &str) -> Result<BufferId, InterpError> {
+        let prog = self.program(program_id).map_err(InterpError::from)?;
+        let view_idx = *prog
+            .sinks
+            .get(name)
+            .ok_or_else(|| InterpError::Program(format!("unknown sink {name:?}")))?;
+        let buf = prog
+            .buffer_views
+            .get(view_idx)
+            .ok_or_else(|| InterpError::Program(format!("invalid sink view {view_idx}")))?
+            .buffer_index;
+        Ok(BufferId(buf))
     }
 
     fn run(&self, program_id: ProgramId) -> Result<(), InterpError> {
@@ -412,87 +420,9 @@ impl Interp for WgpuInterp {
     }
 }
 
-fn parse_wgpu_config(config: &InterpConfig) -> Result<Option<String>, InterpError> {
-    match config {
-        MsgpackValue::Nil => Ok(None),
-        MsgpackValue::Map(map) => {
-            let mut device_name = None;
-            for (key, value) in map {
-                let key_name = match key {
-                    MsgpackValue::String(key_str) => key_str.as_str().ok_or_else(|| {
-                        InterpError::Config("config keys must be UTF-8 strings".into())
-                    })?,
-                    _ => return Err(InterpError::Config("config keys must be strings".into())),
-                };
-                match key_name {
-                    "device_name" => {
-                        let name = match value {
-                            MsgpackValue::String(name) => name.as_str().ok_or_else(|| {
-                                InterpError::Config(
-                                    "device_name must be a UTF-8 string".into(),
-                                )
-                            })?,
-                            _ => {
-                                return Err(InterpError::Config(
-                                    "device_name must be a string".into(),
-                                ));
-                            }
-                        };
-                        if device_name.is_some() {
-                            return Err(InterpError::Config(
-                                "duplicate device_name config key".into(),
-                            ));
-                        }
-                        device_name = Some(name.to_string());
-                    }
-                    other => {
-                        return Err(InterpError::Config(format!(
-                            "unknown config key: {other}"
-                        )));
-                    }
-                }
-            }
-            Ok(device_name)
-        }
-        _ => Err(InterpError::Config("config must be a map or null".into())),
-    }
-}
-
-#[cfg(test)]
-mod config_tests {
-    use super::*;
-    use rmpv::Value as MsgpackValue;
-
-    #[test]
-    fn rejects_unknown_config_key() {
-        let config = MsgpackValue::Map(vec![(
-            MsgpackValue::String("bogus".into()),
-            MsgpackValue::from(1),
-        )]);
-        assert!(matches!(
-            parse_wgpu_config(&config),
-            Err(InterpError::Config(message)) if message.contains("unknown config key")
-        ));
-    }
-
-    #[test]
-    fn rejects_non_string_device_name() {
-        let config = MsgpackValue::Map(vec![(
-            MsgpackValue::String("device_name".into()),
-            MsgpackValue::from(1),
-        )]);
-        assert!(matches!(
-            parse_wgpu_config(&config),
-            Err(InterpError::Config(message)) if message.contains("device_name must be a string")
-        ));
-    }
-
-    #[test]
-    fn accepts_nil_config() {
-        assert!(matches!(
-            parse_wgpu_config(&MsgpackValue::Nil),
-            Ok(None)
-        ));
+impl super::AdmitProgram<WgpuProgram> for WgpuInterp {
+    fn admit_program(&mut self, program: WgpuProgram) -> Result<ProgramId, InterpError> {
+        WgpuInterp::admit_wgpu_program(self, program).map_err(Into::into)
     }
 }
 
@@ -506,12 +436,10 @@ fn prepare_queue(
         .queue
         .iter()
         .map(|op| match op {
-            WgpuQueueOp::Dispatch(dispatch) => Ok(PreparedQueueOp::Dispatch(
-                prepare_dispatch_op(device, program, buffers, pipelines, dispatch)?,
-            )),
-            WgpuQueueOp::Copy(copy) => {
-                Ok(PreparedQueueOp::Copy(prepare_copy_op(program, copy)?))
-            }
+            WgpuQueueOp::Dispatch(dispatch) => Ok(PreparedQueueOp::Dispatch(prepare_dispatch_op(
+                device, program, buffers, pipelines, dispatch,
+            )?)),
+            WgpuQueueOp::Copy(copy) => Ok(PreparedQueueOp::Copy(prepare_copy_op(program, copy)?)),
         })
         .collect()
 }
@@ -571,12 +499,8 @@ fn prepare_copy_op(
 
     let accessor = &source_view.accessor;
     let element_nbytes = output_spec.etype.nbytes() as u64;
-    let copy_bytes: u64 = accessor
-        .shape
-        .iter()
-        .map(|&d| d as u64)
-        .product::<u64>()
-        * element_nbytes;
+    let copy_bytes: u64 =
+        accessor.shape.iter().map(|&d| d as u64).product::<u64>() * element_nbytes;
     if output_spec.byte_len() != copy_bytes {
         return Err(WgpuInterpError::Program(format!(
             "copy size mismatch: output {} bytes, view {} bytes",
