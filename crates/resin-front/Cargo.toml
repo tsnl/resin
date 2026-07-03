@@ -1,0 +1,9 @@
+[package]
+name = "resin-front"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+resin-core = { path = "../resin-core" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"

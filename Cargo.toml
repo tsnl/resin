@@ -1,13 +1,8 @@
 [workspace]
 members = [
-    "crates/resin-tree",
-    "crates/resin-tree-derive",
     "crates/resin-core",
-    "crates/resin-dataset",
-    "crates/resin-dsl",
-    "crates/resin-grad",
-    "crates/resin-ir",
-    "crates/resin-jit-wgpu",
-    "crates/resin-nn",
+    "crates/resin-derive",
+    "crates/resin-front",
+    "crates/resin-util",
 ]
 resolver = "3"

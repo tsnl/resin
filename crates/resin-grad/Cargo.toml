@@ -1,9 +1,0 @@
-[package]
-name = "resin-grad"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-resin-core = { path = "../resin-core" }
-resin-dsl = { path = "../resin-dsl" }
-thiserror = "2.0"
