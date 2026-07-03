@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-resin-tree = { path = "../resin-tree" }
+im = "15"
+resin-derive = { path = "../resin-derive" }
 serde = { version = "1.0", features = ["derive"] }

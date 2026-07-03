@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{format_param_path, path_name, path_starts_with, path_tail, TreePath, TreePathElement};
+use super::{format_param_path, path_name, path_starts_with, path_tail, TreePath, TreePathElement};
 
 /// Peekable leaf stream in [`crate::Tree::flatten`] visit order.
 pub struct TreeLeaves<L, I> {

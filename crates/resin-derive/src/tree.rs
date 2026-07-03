@@ -1,40 +1,13 @@
-//! `#[derive(Tree)]` for host module trees.
+//! `#[derive(Tree)]` expansion for host module trees.
 
-use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::spanned::Spanned;
 use syn::{
-    parse_macro_input, parse_quote, Data, DataStruct, DeriveInput, Field, Fields, GenericParam,
-    Generics, Ident, Type,
+    parse_quote, Data, DataStruct, DeriveInput, Field, Fields, GenericParam, Generics, Ident, Type,
 };
 
-#[proc_macro_derive(Tree, attributes(tree))]
-pub fn derive_tree(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    expand(&input).into()
-}
-
-fn crate_path(input: &DeriveInput) -> TokenStream2 {
-    for attr in &input.attrs {
-        if !attr.path().is_ident("tree") {
-            continue;
-        }
-        let Ok(syn::Meta::NameValue(nv)) = attr.parse_args() else {
-            continue;
-        };
-        if !nv.path.is_ident("crate") {
-            continue;
-        }
-        let syn::Expr::Path(path) = nv.value else {
-            continue;
-        };
-        return quote!(::#path);
-    }
-    quote!(::resin_tree)
-}
-
-fn expand(input: &DeriveInput) -> TokenStream2 {
+pub fn expand(input: &DeriveInput) -> TokenStream2 {
     let crt = crate_path(input);
     let name = &input.ident;
 
@@ -182,6 +155,25 @@ fn expand(input: &DeriveInput) -> TokenStream2 {
             }
         }
     }
+}
+
+fn crate_path(input: &DeriveInput) -> TokenStream2 {
+    for attr in &input.attrs {
+        if !attr.path().is_ident("tree") {
+            continue;
+        }
+        let Ok(syn::Meta::NameValue(nv)) = attr.parse_args() else {
+            continue;
+        };
+        if !nv.path.is_ident("crate") {
+            continue;
+        }
+        let syn::Expr::Path(path) = nv.value else {
+            continue;
+        };
+        return quote!(::#path);
+    }
+    quote!(::resin_core)
 }
 
 struct FieldSpec {

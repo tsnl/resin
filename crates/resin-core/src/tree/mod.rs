@@ -3,8 +3,6 @@
 //! Paths are [`TreePath`] (`im::Vector` with `push_front`). [`Tree::unflatten`]
 //! consumes a [`TreeLeaves`] stream in [`Tree::flatten`] visit order.
 
-extern crate self as resin_tree;
-
 mod leaf_stream;
 
 use std::cmp::Ordering;
@@ -16,7 +14,7 @@ pub use leaf_stream::{
     take_named_children, take_named_indexed_children, take_next_leaf, take_optional_leaf,
     TreeLeaves,
 };
-pub use resin_tree_derive::Tree;
+pub use resin_derive::Tree;
 
 /// One segment of a structured param path (`layers` / `0` / `weight`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
