@@ -52,23 +52,30 @@ the core DSL.
 
 ### Layering (core vs application)
 
-The multi-stage core (DSL graph → IR → backend artifact → admit/run) is
-**intentional**. Delightful orchestration is not the job of the lowest layer.
+The stack is deliberately staged: **trace a graph, compile once, call many
+times.** Orchestration (dataloaders, logging, presentation) is not the job of
+the lowest layer.
 
-Application-facing helpers sit **on top** of the core:
+| Crate | Role |
+| --- | --- |
+| `resin-core` | Element types, accessors, `Tree` |
+| `resin-derive` | `#[derive(Tree)]` |
+| `resin-front` | DSL graph (`dsl`), autodiff (`grad`), NN helpers (`nn`) |
+| `resin-util` | Host utilities (`dataset`, …) |
+| `resin-jit` *(planned)* | Lowering, optimization, WGSL codegen, GPU execution |
+
+Application-facing helpers sit **on top** of `resin-front`:
 
 - **ML:** today `sgd_tree` (a free function) applies an SGD step over a
-  `Tree`; the intended object form is `SgdOptimizer`, later
-  `AdamOptimizer`, `MuonOptimizer`, and a `Trainer`—all special cases of
-  *minimize a scalar loss over a `Tree` of parameters*, with data
-  iteration and logging as library code.
-- **Graphics / inverse rendering (later):** session objects that bind cameras,
-  scene tensors, and losses; still “compile a graph, run with bindings,” not a
-  different language.
+  `Tree`; later `SgdOptimizer`, `AdamOptimizer`, `MuonOptimizer`, and a
+  `Trainer`—all special cases of *minimize a scalar loss over a `Tree` of
+  parameters*, with data iteration and logging as library code.
+- **Graphics / inverse rendering (later):** scene/camera/loss session objects;
+  still “compile a graph, call with `Tree<Buffer>`,” not a different language.
 
-The core stays small: **identity-keyed graphs, Trees, autodiff, lowering,
-backend-agnostic `Interp`.** Framework ergonomics grow as libraries, not as a
-monolithic runtime.
+`resin-core` + `resin-front` stay small: **identity-keyed graphs, Trees,
+autodiff.** `resin-jit` owns compilation and the callable runtime; framework
+ergonomics grow as libraries, not as a monolithic runtime.
 
 ### Near-term product focus
 
@@ -92,8 +99,9 @@ demos and APIs should claim.
 
 | Gap | Notes |
 | --- | --- |
-| No high-level `Trainer` / optimizer objects | Host loops still wire `admit`, `write_param`, `run`, `read_sink`, and optional `new_model` commits. Intended to be filled by ML helpers atop the DSL, not by bloating IR. |
-| Multi-stage mental model | Users who only want “train a net” must learn graph build + compile + admit. Mitigated by domain libraries; the core remains a compiler. |
+| No `resin-jit` yet | Legacy `resin-ir` / `resin-jit-wgpu` removed; GPU examples are TODO stubs until the new callable JIT lands. |
+| No high-level `Trainer` / optimizer objects | Intended ML helpers atop `resin-front`, not inside the JIT. |
+| Multi-stage mental model | Users who only want “train a net” must learn graph build + compile + call. Mitigated by domain libraries; the core remains a compiler. |
 
 ### Expressiveness (ops and graphs)
 
@@ -106,81 +114,160 @@ demos and APIs should claim.
 | Scatter-accumulate path is F4-focused | Asserted for atomic u32↔f32 CAS; other dtypes need design work. |
 | Indexing | Strided `narrow` / `index` with ranges; no negative slice steps while pitch is unsigned. |
 
-### Types, packaging, and the “compiled function” idea
+### Types and packaging
 
 | Gap | Notes |
 | --- | --- |
-| `View` is a graph node + accessor, not a resident device tensor | Mental model is still “build a program,” not “array with values on GPU.” |
+| `View` is a graph node + accessor, not a resident device tensor | At JIT boundaries, leaves become `WgpuBuffer` handles; tracing stays on `View`. |
 | Limited dtypes / weak static shapes | F4/F2/U4; shapes are runtime. Typing ladder and shape checks can return later. |
-| Packaging / deploy story thin | Native wgpu works; browser WebGPU packaging, versioned artifacts, and language bindings are open. |
+| Packaging / deploy story thin | Native wgpu first; browser WebGPU packaging, versioned artifacts, and language bindings are open. |
 
-**Proposed direction:** the compiler returns a **higher-order callable**—a
-bound program object that accepts a **`Tree` of GPU buffers** (and
-similarly structured inputs) and returns a **`Tree` of GPU buffers**
-(outputs / updated params).
+---
 
-This is the packaging and typing hinge, with the following properties:
+## JIT callable API (north star)
 
-1. **Shape of the tree is fixed at compile time.** The `Tree` structure
-   (paths, leaf ranks/dtypes) must match what was registered when the graph was
-   built—same contract as today’s named params/sinks, but structured.
-2. **Leaves are buffer handles, not host `Vec<f32>`.** The callable binds
-   already-admitted device storage (or uploads once into owned slots). That
-   unifies “module weights,” “batch inputs,” and “outputs” under one tree API
-   and removes ad hoc stringly `write_param("model.layers.0.weight")` from
-   app code.
-3. **It is the natural type of an admitted program.** Today:
-   `let factory = compile(&inputs_tree, &outputs_tree, …)?;` then
-   `factory.create()?.call(…)`. Next: bind/call with `Tree` of buffer
-   handles (not just stringly byte slices) so the callable’s I/O shape matches
-   the trees used at compile time.
-4. **It does not by itself fix static shapes or dtypes**—but it *localizes*
-   them: the callable’s type (or a schema object) can carry leaf metadata
-   (shape, `ElementType`, read-only vs mutable) for checking at bind time.
-5. **In-place vs functional updates** must be chosen: optimizers may want
-   mutable parameter leaves (write back into the same buffers) while pure
-   inference returns new output leaves. Both fit a Tree API if mutability
-   is part of the leaf policy.
-6. **Host orchestration** (`Trainer`, data loaders, presentation) still sits
-   outside: the HOF is the **GPU step**, not the full application.
+The DSL/tracing side is already JAX-shaped. The gap is **packaging**: JAX treats
+compilation as **function specialization** (`jit(f)(*pytrees)`); resin should
+expose the same contract with **`Tree<WgpuBuffer>`** leaves at call time.
 
-This gives a compile-time fixed `Tree → Tree` (or
-`&Tree → Tree` / in-place `&mut Tree`) object—a sound target
-for packaging and a cleaner type boundary than free-floating buffer ids. It
-aligns with existing `Tree`, `AdmitProgram`, and `Interp` directions
-rather than replacing them.
+### Mental model
 
-### API north star: implicit buffer motion
+```
+JAX:     trace → compile → cache → call(pytree) → pytree
+Resin:   trace → compile → call(Tree<Buffer>) → Tree<Buffer>
+```
 
-Application code should read like a **pure, immutable graph language**: build
-`View` graphs, `compile` them, call with tree-shaped values. **Device memory
-motion is not user-visible plumbing.** Uploads, binds, sink gather, weight
-commits, and handoffs between compiled steps belong **inside** callable
-boundaries (`call_trees`, `next_minibatch`, chained pipelines)—not as explicit
-`write_buffer`, `copy_tree`, `flush_binds`, or string-keyed readbacks in
-training loops.
+No user-managed `Pipeline` instances, `factory.create()`, `param_tree` /
+`sink_tree`, `copy_tree`, `flush_binds`, or string-keyed `write_param` in
+application code.
 
-| In the north star | Today (stepping stones) |
+### User-facing API
+
+```rust
+// Once, at setup (cached by input/output Tree structure + leaf shapes/dtypes)
+let train_step = compile(&TrainStepIn::schema(), &TrainStepOut::schema(), &session)?;
+
+// Every step — caller-owned WgpuBuffer leaves, no factory/create/bind/flush
+let out: TrainStepOut<WgpuBuffer> = train_step.call(&step_in)?;
+```
+
+| JAX | Resin target |
 | --- | --- |
-| `call_trees(in) → out` returns updated `Tree<Buffer>` | `copy_tree(new_model → model)` + `flush_binds` after each step |
-| SGD writes into `model.*` param slots in the trace | Separate `new_model` sink + device copy back |
-| Dataloader yields `Minibatch<Buffer>`; call binds it | `SessionWriter` + manual `read_buffer_f32` on a loss leaf |
-| Pipeline chain: output tree feeds next input tree | Possible via buffer handles, not yet a single combinator |
+| `jit(f)(*pytrees)` | `compiled.call(&In::Map<Buffer>)` |
+| Leaves are device arrays | Leaves are `WgpuBuffer` (optional subrange views) |
+| Returns new pytree | Returns `Out::Map<WgpuBuffer>` |
+| Buffer assignment hidden | `MemoryPlan` + arena layout hidden inside `call` |
+| Async; block when needed | `call` submits; `block_until_ready()` / `CallFuture::wait()` when host needs values |
+
+**Properties:**
+
+1. **Tree shape is fixed at compile time.** Input/output `Tree` structure
+   (paths, leaf ranks, dtypes) must match the schema registered when the graph
+   was built.
+2. **Leaves at the boundary are GPU buffers, not host `Vec<f32>`.** Unifies
+   weights, batch inputs, and outputs under one tree API.
+3. **Compile returns a callable, not an interpreter handle.** One object;
+   invoke like a function.
+4. **`IoSchema` per leaf** (compile-time metadata): `Param { path, shape,
+   etype, mutable }` maps to input-tree leaves; `Sink { path, shape, etype }`
+   for true outputs (`loss`, …). If `mutable`, the output aliases the input
+   handle (in-place SGD).
+5. **Host orchestration stays outside.** Dataloaders, logging, presentation
+   are libraries; the callable is the **GPU step**.
+
+### Stateless API, pooled memory (implementation)
+
+**Stateless API** does not mean “allocate from the driver on every tensor.”
+Distinguish what callers see from what the runtime caches:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  CompiledFn (immutable, shareable, Arc)                 │
+│  - WGSL + compute pipelines (created once)              │
+│  - Static dispatch queue                                │
+│  - MemoryPlan (arena peak size + slot offsets)          │
+│  - IoSchema: In/Out Tree paths, shapes, mutability      │
+└─────────────────────────────────────────────────────────┘
+         │
+         │  .call(session, &inputs)   — no user-visible Pipeline
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Per-call ephemeral state (stack/local)                   │
+│  - arena Buffer (or bump from session pool)             │
+│  - bind groups for this call’s buffer handles           │
+│  - command encoder + submit → CallFuture                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Per-call buffer policy:**
+
+| Kind | Policy |
+| --- | --- |
+| **Inputs** (params, minibatch) | **Borrow** caller’s `WgpuBuffer` handles; do not realloc. |
+| **Intermediates** (forward/backward temps) | One **arena** per call; slots assigned at compile time via liveness / reuse (XLA-style `MemoryPlan`). WGSL binds use `BufferBinding { buffer: &arena, offset, size }`. |
+| **Outputs** | **In-place** for mutable params (SGD writes `model.*` in the trace, not a separate `new_model` sink). **Fresh small buffers** for true sinks (`loss`, …). Returning arena subranges is not JAX-like (invalid after next call). |
+
+**Efficiency notes:**
+
+- One `create_buffer(peak_arena)` per call is acceptable; one buffer **per IR
+  node** per call is not — compile-time liveness must collapse intermediates
+  into the arena.
+- A **session bump pool** (reuse one arena allocation, reset offset each call)
+  keeps the API stateless while avoiding driver churn every batch.
+- Bind groups may be rebuilt each `call` initially (~O(dispatches)); long-term,
+  dynamic buffer offsets can reuse layouts.
+
+**Async:** `call` submits work and returns a `CallFuture` holding output
+handles. Host readback (`loss` scalar) is opt-in, once per epoch — not per
+batch.
+
+### Implicit buffer motion
+
+Application code reads like a **pure graph language**: build `View` graphs,
+`compile`, `call` with tree-shaped buffers. Uploads, binds, arena wiring,
+and in-place param updates belong **inside** `call` — not as explicit
+`write_buffer`, `copy_tree`, or string-keyed readbacks in training loops.
 
 **Allowed exceptions** where explicit control may surface:
 
-- Multiple pipeline instances in flight (triple-buffering, `submit` without
-  immediate `wait`)
-- External systems (swapchain present, filesystem, host debug readback in tests)
+- Pipelining / overlap (`submit` without immediate `wait`)
+- External systems (swapchain, filesystem, debug readback in tests)
 
-The MNIST example still exposes buffer copies and scalar readback—these are
-**gaps** relative to the north star, not the target API shape.
+### MNIST loop at the north star
+
+```rust
+let step = compile(&inputs, &outputs, …)?;
+let mut model = init_model_buffers(&step, seed)?;
+
+for epoch in 0..epochs {
+    for batch in loader.batches(&dataset, epoch) {
+        let out = step.call(&TrainStepIn { minibatch: batch, model: model.clone() })?;
+        // With in-place SGD in the trace, model handles are unchanged; no new_model copy.
+    }
+    let loss = out.loss.read_f32().wait()?;  // once per epoch
+}
+```
+
+### `resin-jit` implementation order
+
+The author will implement `resin-jit` by hand. Suggested sequence (DSL
+unchanged):
+
+1. **`MemoryPlan`** in lowering — liveness + arena offsets; stop planning one
+   device buffer per graph node at runtime.
+2. **`CompiledFn::call`** — `Tree<Buffer>` I/O; replace user-visible pipeline
+   instances.
+3. **In-place param policy** in traces (`sgd_tree` writes `model.*`, not
+   separate sinks).
+4. **Session bump pool** (optional) — amortize arena alloc without exposing
+   state.
+5. **Dynamic bind offsets** — if bind-group rebuild shows up in profiles.
 
 ### Backends and presentation (explicitly non-blocking for now)
 
 | Gap | Notes |
 | --- | --- |
-| Single production backend (wgpu / WGSL) | Acceptable; Vulkan/native paths can follow once the IR and callable packaging stabilize. |
+| Single production backend (wgpu / WGSL) | Acceptable; Vulkan/native paths can follow once `resin-jit` and callable packaging stabilize. |
 | No swapchain / window in core | Intended for a **presentation helper** (winit/wgpu glue), not the DSL crate. |
 | Custom kernels, hardware raster, hardware RT | Roadmap after Gaussians/compute foundations; extension nodes, not a reason to stall the core. |
 
@@ -197,9 +284,11 @@ The MNIST example still exposes buffer copies and scalar readback—these are
 
 Resin’s goal is a **portable, tensor-native language for GPU programs**—easy to
 compose, powerful enough for modern ML and compute-style graphics, with a path
-to fixed-function and multi-backend performance. The core stays a minimal
-compiler/runtime; **Trainers, optimizers, presentation, and scene APIs** are
-libraries. **Gaussians and compute-on-tensors** lead; mesh and hardware
-raster/RT follow. The medium-term packaging target is a **compiled higher-order
-function over `Tree`s of GPU buffers**, which fits the current architecture
-and addresses both ergonomics and a clearer type boundary for deployment.
+to fixed-function and multi-backend performance. **`resin-core` + `resin-front`**
+own tracing and autodiff; **`resin-jit`** (planned) owns lowering and a
+**stateless JAX-style callable** — `compile` once, then
+`call(Tree<WgpuBuffer>) → Tree<WgpuBuffer>` with compile-time `MemoryPlan`,
+per-call arena allocation for intermediates, and in-place param updates where
+the trace allows. **Trainers, optimizers, presentation, and scene APIs** are
+libraries on top. **Gaussians and compute-on-tensors** lead; mesh and hardware
+raster/RT follow.
