@@ -68,6 +68,7 @@ dependencies = [
  "arrayvec",
  "hashbrown",
  "paste",
+ "resin-macros",
 ]
 
 [[package]]
@@ -82,6 +83,7 @@ dependencies = [
 name = "resin-macros"
 version = "0.1.0"
 dependencies = [
+ "proc-macro2",
  "quote",
  "syn",
 ]

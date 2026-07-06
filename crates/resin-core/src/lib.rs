@@ -1,10 +1,8 @@
-mod list;
 mod macros;
 mod tree;
 
 // Export basics:
-pub use list::List;
-pub use tree::{Tree, TreeLeaf, TreePathPart};
+pub use tree::Tree;
 
 // Re-export "vendored" dependencies:
 pub use arrayvec;
