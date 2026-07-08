@@ -49,6 +49,14 @@ fn map_field(value: TokenStream, ty: &Type, leaf: &Ident) -> TokenStream {
     }
 }
 
+fn visit_field(value: TokenStream, ty: &Type, leaf: &Ident) -> TokenStream {
+    if is_leaf(ty, leaf) {
+        quote! { f(#value) }
+    } else {
+        quote! { resin_core::Tree::for_each_leaf(#value, &mut f) }
+    }
+}
+
 fn map_fields(fields: &Fields, leaf: &Ident, from_self: bool) -> TokenStream {
     match fields {
         Fields::Named(named) => {
@@ -107,20 +115,55 @@ fn container(name: &Ident, variant: Option<&Ident>, fields: &Fields, mapped: Tok
     }
 }
 
+fn visit_fields(fields: &Fields, leaf: &Ident, from_self: bool) -> TokenStream {
+    match fields {
+        Fields::Named(named) => {
+            let visited = named.named.iter().map(|field| {
+                let ident = field.ident.as_ref().expect("named field");
+                let value = if from_self {
+                    quote! { &self.#ident }
+                } else {
+                    quote! { #ident }
+                };
+                visit_field(value, &field.ty, leaf)
+            });
+            quote! { #(#visited;)* }
+        }
+        Fields::Unnamed(unnamed) => {
+            let visited = unnamed.unnamed.iter().enumerate().map(|(i, field)| {
+                let value = if from_self {
+                    quote! { &self.#i }
+                } else {
+                    let binding = Ident::new(&format!("__f{i}"), proc_macro2::Span::call_site());
+                    quote! { #binding }
+                };
+                visit_field(value, &field.ty, leaf)
+            });
+            quote! { #(#visited;)* }
+        }
+        Fields::Unit => TokenStream::new(),
+    }
+}
+
 fn tree_impl(
     name: &Ident,
     leaf: &Ident,
     impl_generics: &syn::ImplGenerics<'_>,
     ty_generics: &syn::TypeGenerics<'_>,
     where_clause: Option<&syn::WhereClause>,
-    body: TokenStream,
+    map_body: TokenStream,
+    visit_body: TokenStream,
 ) -> TokenStream {
     quote! {
         impl #impl_generics resin_core::Tree<#leaf> for #name #ty_generics #where_clause {
             type Mapped<U: Clone> = #name::<U>;
 
             fn map<U: Clone>(&self, f: impl Fn(&#leaf) -> U) -> #name::<U> {
-                #body
+                #map_body
+            }
+
+            fn for_each_leaf(&self, mut f: impl FnMut(&#leaf)) {
+                #visit_body
             }
         }
     }
@@ -133,8 +176,9 @@ fn derive_struct(item: ItemStruct) -> TokenStream {
     };
     let (impl_g, ty_g, where_g) = generics.split_for_impl();
     let name = &item.ident;
-    let body = container(name, None, &item.fields, map_fields(&item.fields, &leaf, true));
-    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, body).into()
+    let map_body = container(name, None, &item.fields, map_fields(&item.fields, &leaf, true));
+    let visit_body = visit_fields(&item.fields, &leaf, true);
+    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, map_body, visit_body).into()
 }
 
 fn derive_enum(item: ItemEnum) -> TokenStream {
@@ -145,14 +189,21 @@ fn derive_enum(item: ItemEnum) -> TokenStream {
     let (impl_g, ty_g, where_g) = generics.split_for_impl();
     let name = &item.ident;
 
-    let arms = item.variants.iter().map(|variant| {
+    let map_arms = item.variants.iter().map(|variant| {
         let v = &variant.ident;
         let pattern = match_pattern(v, &variant.fields);
         let mapped = map_fields(&variant.fields, &leaf, false);
         let expr = container(name, Some(v), &variant.fields, mapped);
         quote! { #pattern => #expr }
     });
+    let visit_arms = item.variants.iter().map(|variant| {
+        let v = &variant.ident;
+        let pattern = match_pattern(v, &variant.fields);
+        let visited = visit_fields(&variant.fields, &leaf, false);
+        quote! { #pattern => { #visited } }
+    });
 
-    let body = quote! { match self { #(#arms,)* } };
-    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, body).into()
+    let map_body = quote! { match self { #(#map_arms,)* } };
+    let visit_body = quote! { match self { #(#visit_arms,)* } };
+    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, map_body, visit_body).into()
 }

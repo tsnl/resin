@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 resin-core = { path = "crates/resin-core" }
 resin-dsl = { path = "crates/resin-dsl" }
+resin-ir = { path = "crates/resin-ir" }
 resin-macros = { path = "crates/resin-macros" }
 
 [workspace]
