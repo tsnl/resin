@@ -98,6 +98,26 @@ impl RpnExpr {
         Self { atoms }
     }
 
+    /// The expression that is just a reference to argument `i`.
+    pub fn arg(i: u32) -> Self {
+        Self { atoms: vec![RpnAtom::Arg(i)] }
+    }
+
+    /// Substitute every `Arg(i)` with `f(i)`, leaving operators in place.
+    /// This is RPN–RPN fusion: substituting another kernel's expression for
+    /// an argument splices the two into one; substituting [`RpnExpr::arg`]
+    /// renumbers.
+    pub fn map_args(&self, f: &mut dyn FnMut(u32) -> RpnExpr) -> RpnExpr {
+        let mut atoms = Vec::with_capacity(self.atoms.len());
+        for atom in &self.atoms {
+            match atom {
+                RpnAtom::Arg(i) => atoms.extend(f(*i).atoms),
+                RpnAtom::Op(op) => atoms.push(RpnAtom::Op(*op)),
+            }
+        }
+        RpnExpr { atoms }
+    }
+
     /// Check stack discipline: every op has its operands, one value remains.
     /// All `Arg` indices must be below `num_args`.
     pub fn validate(&self, num_args: usize) -> Result<(), Error> {
