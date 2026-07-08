@@ -4,7 +4,8 @@
 
 use resin_dsl::{grad_wrt, Tensor};
 use resin_gaussians::{
-    gnomen_cloud, render, render_reference, Camera, CloudData, GaussianCloud,
+    gnomen_cloud, render, render_reference, render_view, Camera, CloudData, GaussianCloud,
+    RenderScene,
 };
 use resin_jit::backends::cpu::{CpuJit, CpuTensor};
 use resin_jit::{ConcreteTensor, Jit};
@@ -220,4 +221,37 @@ fn sgd_on_colors_decreases_loss() {
         losses.last().unwrap() < &(0.5 * losses[0]),
         "loss did not decrease: {losses:?}"
     );
+}
+
+#[test]
+fn tensor_camera_matches_constant_camera_across_views() {
+    // One compiled program, camera moved via parameters; must agree with the
+    // constant-camera path (and hence the scalar reference) for every pose.
+    let data = gnomen_cloud();
+    let (w, h) = (10, 10);
+    let f = CpuJit.jit(move |scene: &RenderScene<Tensor>| {
+        render_view(&scene.cloud, &scene.view, &scene.proj, w, h)
+    });
+
+    for eye_x in [0.0f32, 0.3, -0.4] {
+        let camera = Camera::look_at(
+            [eye_x, 0.1, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+            60.0,
+            0.1,
+            100.0,
+            w,
+            h,
+        );
+        let scene = RenderScene {
+            cloud: cloud_tensors(&data),
+            view: CpuTensor::from_f32(&[4, 4], &camera.view_flat()),
+            proj: CpuTensor::from_f32(&[4, 4], &camera.proj_flat()),
+        };
+        let moved = f.call(&scene).unwrap().to_f32();
+        let constant = render_cpu(&data, &camera);
+        let diff = max_abs_diff(&moved, &constant);
+        assert!(diff < 1e-5, "eye_x {eye_x}: diff {diff}");
+    }
 }
