@@ -130,6 +130,12 @@ fn run_dispatch(
         IrKernel::Matmul(kernel) => run_matmul(kernel, &arg_views, storage, out_index)?,
         IrKernel::Reduction(kernel) => run_reduction(kernel, &arg_views, storage, out_index)?,
         IrKernel::Remap(kernel) => run_remap(kernel, &arg_views, storage, out_index)?,
+        IrKernel::TraceRays(kernel) => {
+            super::hw::run_trace_rays(kernel, &arg_views, storage, out_index)?
+        }
+        IrKernel::Rasterize(kernel) => {
+            super::hw::run_rasterize(kernel, &arg_views, storage, out_index)?
+        }
     }
     Ok(())
 }
@@ -634,12 +640,12 @@ fn write_value(bytes: &mut [u8], etype: ElementType, value: Value) -> Result<(),
     }
 }
 
-fn read_f32_view(buffer: &[u8], accessor: &Accessor, coords: &[u32]) -> Result<f32, RunError> {
+pub(super) fn read_f32_view(buffer: &[u8], accessor: &Accessor, coords: &[u32]) -> Result<f32, RunError> {
     let offset = accessor_offset(accessor, coords)?;
     read_f32(buffer, offset)
 }
 
-fn read_u32_view(buffer: &[u8], accessor: &Accessor, coords: &[u32]) -> Result<u32, RunError> {
+pub(super) fn read_u32_view(buffer: &[u8], accessor: &Accessor, coords: &[u32]) -> Result<u32, RunError> {
     let offset = accessor_offset(accessor, coords)?;
     read_u32(buffer, offset)
 }
@@ -710,6 +716,6 @@ fn read_u32(bytes: &[u8], index: usize) -> Result<u32, RunError> {
     Ok(u32::from_le_bytes(chunk))
 }
 
-fn write_f32(bytes: &mut [u8], value: f32) {
+pub(super) fn write_f32(bytes: &mut [u8], value: f32) {
     bytes.copy_from_slice(&value.to_le_bytes());
 }

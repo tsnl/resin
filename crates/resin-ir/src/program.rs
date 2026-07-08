@@ -4,6 +4,7 @@ use resin_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::error::IrError;
+use crate::hw::{IrRasterizeKernel, IrTraceRaysKernel};
 use crate::refs::{validate_tree_indices, BufferRef, BufferViewRef};
 use crate::remap::RemapInfo;
 use crate::rpn::ElementRpnExpr;
@@ -53,6 +54,8 @@ pub enum IrKernel {
     Matmul(IrMatmulKernel),
     Reduction(IrReductionKernel),
     Remap(IrRemapKernel),
+    TraceRays(IrTraceRaysKernel),
+    Rasterize(IrRasterizeKernel),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +103,8 @@ impl IrKernel {
             IrKernel::Matmul(k) => &k.arg_accessors,
             IrKernel::Reduction(k) => &k.arg_accessors,
             IrKernel::Remap(k) => &k.arg_accessors,
+            IrKernel::TraceRays(k) => &k.arg_accessors,
+            IrKernel::Rasterize(k) => &k.arg_accessors,
         }
     }
 
@@ -109,6 +114,8 @@ impl IrKernel {
             IrKernel::Matmul(k) => k.element_type,
             IrKernel::Reduction(k) => k.element_type,
             IrKernel::Remap(k) => k.element_type,
+            IrKernel::TraceRays(k) => k.element_type,
+            IrKernel::Rasterize(k) => k.element_type,
         }
     }
 
@@ -118,6 +125,8 @@ impl IrKernel {
             IrKernel::Matmul(k) => &k.shape,
             IrKernel::Reduction(k) => &k.shape,
             IrKernel::Remap(k) => &k.shape,
+            IrKernel::TraceRays(k) => &k.shape,
+            IrKernel::Rasterize(k) => &k.shape,
         }
     }
 
@@ -127,14 +136,19 @@ impl IrKernel {
             IrKernel::Matmul(k) => k.clear_output_before_dispatch,
             IrKernel::Reduction(k) => k.clear_output_before_dispatch,
             IrKernel::Remap(k) => k.clear_output_before_dispatch,
+            IrKernel::TraceRays(k) => k.clear_output_before_dispatch,
+            IrKernel::Rasterize(k) => k.clear_output_before_dispatch,
         }
     }
 
     /// Shape the kernel's threads iterate over. Equal to [`IrKernel::shape`]
-    /// except for scatter remaps, which iterate the source.
+    /// except for scatter remaps (which iterate the source), ray tracing
+    /// (one thread per ray), and rasterization (one thread per pixel).
     pub fn thread_shape(&self) -> &[u32] {
         match self {
             IrKernel::Remap(k) => k.thread_shape(),
+            IrKernel::TraceRays(k) => k.thread_shape(),
+            IrKernel::Rasterize(k) => k.thread_shape(),
             other => other.shape(),
         }
     }
@@ -144,6 +158,8 @@ impl IrKernel {
         match self {
             IrKernel::ElementwiseRpn(k) => k.arg_element_types.clone(),
             IrKernel::Remap(k) => k.arg_element_types.clone(),
+            IrKernel::TraceRays(k) => k.arg_element_types.clone(),
+            IrKernel::Rasterize(k) => k.arg_element_types.clone(),
             IrKernel::Matmul(k) => vec![k.element_type; k.arg_accessors.len()],
             IrKernel::Reduction(k) => vec![k.element_type; k.arg_accessors.len()],
         }
@@ -155,6 +171,8 @@ impl IrKernel {
             IrKernel::Matmul(k) => k.validate(),
             IrKernel::Reduction(k) => k.validate(),
             IrKernel::Remap(k) => k.validate(),
+            IrKernel::TraceRays(k) => k.validate(),
+            IrKernel::Rasterize(k) => k.validate(),
         }
     }
 

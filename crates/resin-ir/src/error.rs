@@ -100,6 +100,45 @@ pub enum IrError {
         operator: resin_core::BinaryAssocElementOperator,
     },
 
+    // --- Hardware kernels (trace_rays / rasterize) ---
+    #[error("{kernel} requires {expected} argument(s), got {got}")]
+    HwArgCount {
+        kernel: &'static str,
+        expected: usize,
+        got: usize,
+    },
+
+    #[error("{kernel} arg {arg} element type must be {expected:?}, got {got:?}")]
+    HwArgElementType {
+        kernel: &'static str,
+        arg: usize,
+        expected: resin_core::ElementType,
+        got: resin_core::ElementType,
+    },
+
+    #[error("{kernel} output element type must be F4, got {got:?}")]
+    HwOutputElementType {
+        kernel: &'static str,
+        got: resin_core::ElementType,
+    },
+
+    #[error("{kernel} arg {arg} shape must be {expected:?}, got {got:?}")]
+    HwArgShape {
+        kernel: &'static str,
+        arg: usize,
+        expected: Box<[u32]>,
+        got: Box<[u32]>,
+    },
+
+    #[error("{kernel} output shape {got:?} has the wrong rank or record width")]
+    HwOutputShape {
+        kernel: &'static str,
+        got: Box<[u32]>,
+    },
+
+    #[error("{kernel} must clear its output before dispatch")]
+    HwMustClear { kernel: &'static str },
+
     // --- Program ---
     #[error("dispatch arg view index {index} out of range (len {len})")]
     DispatchArgViewOutOfRange { index: usize, len: usize },

@@ -117,6 +117,16 @@ fn backward(grad_map: &mut GradMap, node: &Tensor, df_dout: &Tensor) -> Result<(
         }
         TensorKind::Transpose { arg } => backward_transpose(grad_map, arg, df_dout),
         TensorKind::Squeeze { arg, axes } => backward_squeeze(grad_map, arg, axes, df_dout),
+        // Visibility is piecewise constant: which primitive a ray or pixel
+        // sees does not change under infinitesimal perturbation (except on a
+        // measure-zero set of silhouettes), so no gradient flows through the
+        // hardware nodes. Shading composes downstream from gathers and
+        // elementwise math, which carry the appearance gradients.
+        TensorKind::TraceRays { .. } | TensorKind::Rasterize { .. } => Ok(()),
+        TensorKind::Reshape { arg, .. } => {
+            accumulate(grad_map, arg, df_dout.reshape(arg.shape()));
+            Ok(())
+        }
     }
 }
 

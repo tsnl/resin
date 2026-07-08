@@ -175,6 +175,11 @@ fn headline(tensor: &Tensor) -> String {
         TensorKind::Squeeze { axes, .. } => {
             format!("squeeze(axes={})", format_tuple(axes))
         }
+        TensorKind::TraceRays { .. } => "trace_rays()".to_string(),
+        TensorKind::Rasterize { .. } => "rasterize()".to_string(),
+        TensorKind::Reshape { shape, .. } => {
+            format!("reshape(shape={})", format_tuple(shape))
+        }
     };
     format!(
         "{kind} :: {}{}",

@@ -15,7 +15,8 @@ use resin_core::{
 use resin_dsl::{ElementOperator, IndexKeyElement, ScatterOp, Tensor, TensorKind};
 use resin_ir::{
     BufferRef, BufferViewRef, IrBuffer, IrBufferView, IrDispatch, IrElementwiseRpnKernel,
-    IrKernel, IrMatmulKernel, IrProgram, IrReductionKernel, IrRemapKernel, RemapInfo,
+    IrKernel, IrMatmulKernel, IrProgram, IrRasterizeKernel, IrReductionKernel, IrRemapKernel,
+    IrTraceRaysKernel, RemapInfo,
 };
 
 use crate::error::{tensor_kind_name, CompileError};
@@ -51,6 +52,11 @@ struct ProgramBuilder {
     /// Memo for materializing tensors only (each owns a buffer).
     tensor_buffers: HashMap<Tensor, BufferRef>,
     view_memo: HashMap<ViewKey, BufferViewRef>,
+    /// Memo for densified hardware-node arguments (avoids duplicate copies).
+    dense_view_memo: HashMap<Tensor, BufferViewRef>,
+    /// Memo for strided-reshape identity copies (one per reshape node, not
+    /// one per consumer).
+    reshape_copy_memo: HashMap<Tensor, BufferRef>,
 }
 
 impl ProgramBuilder {
@@ -99,6 +105,37 @@ impl ProgramBuilder {
             TensorKind::Index { arg, key } => {
                 let (buffer, arg_acc) = self.resolve_view(arg)?;
                 Ok((buffer, compose_index(&arg_acc, key)?))
+            }
+            TensorKind::Reshape { arg, shape } => {
+                let new_shape = shape_u32(shape)?;
+                // Memoized: a shared strided reshape must materialize its
+                // identity copy once, not once per consumer.
+                if let Some(&copy_buffer) = self.reshape_copy_memo.get(tensor) {
+                    return Ok((copy_buffer, Accessor::dense(new_shape, 0)));
+                }
+                let (buffer, arg_acc) = self.resolve_view(arg)?;
+                let contiguous = arg_acc.pitch.as_ref()
+                    == c_contiguous_pitch_for_shape(&arg_acc.shape).as_ref();
+                if contiguous {
+                    // Row-major reinterpretation is pure accessor arithmetic.
+                    let pitch = c_contiguous_pitch_for_shape(&new_shape);
+                    Ok((
+                        buffer,
+                        Accessor {
+                            offset: arg_acc.offset,
+                            shape: new_shape,
+                            pitch,
+                        },
+                    ))
+                } else {
+                    // Strided source: materialize an identity copy, then view
+                    // the dense copy under the new shape.
+                    let element_type = map_element_type(arg.element_type())?;
+                    let copy_buffer =
+                        self.materialize_dense_copy(buffer, &arg_acc, element_type)?;
+                    self.reshape_copy_memo.insert(tensor.clone(), copy_buffer);
+                    Ok((copy_buffer, Accessor::dense(new_shape, 0)))
+                }
             }
             _ => {
                 let buffer = self.buffer_for_tensor(tensor)?;
@@ -278,10 +315,68 @@ impl ProgramBuilder {
                     output_buffer_index: BufferRef::new(self.buffers.len()),
                 })
             }
+            TensorKind::TraceRays {
+                origins,
+                directions,
+                t_min,
+                t_max,
+                vertices,
+                triangles,
+            } => {
+                // Hardware executors consume raw device buffers (acceleration
+                // structure builds, vertex pulling), so every argument is
+                // densified if it arrives as a strided view.
+                let args = [
+                    origins.clone(),
+                    directions.clone(),
+                    t_min.clone(),
+                    t_max.clone(),
+                    vertices.clone(),
+                    triangles.clone(),
+                ];
+                let arg_views = args
+                    .iter()
+                    .map(|arg| self.dense_view_for_tensor(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(IrDispatch {
+                    kernel: IrKernel::TraceRays(IrTraceRaysKernel {
+                        arg_accessors: self.arg_accessors(&arg_views)?,
+                        arg_element_types: self.arg_element_types(&args)?,
+                        element_type,
+                        shape: shape.clone(),
+                        clear_output_before_dispatch: false,
+                    }),
+                    arg_view_indices: arg_views,
+                    output_buffer_index: BufferRef::new(self.buffers.len()),
+                })
+            }
+            TensorKind::Rasterize {
+                clip_positions,
+                triangles,
+            } => {
+                let args = [clip_positions.clone(), triangles.clone()];
+                let arg_views = args
+                    .iter()
+                    .map(|arg| self.dense_view_for_tensor(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(IrDispatch {
+                    kernel: IrKernel::Rasterize(IrRasterizeKernel {
+                        arg_accessors: self.arg_accessors(&arg_views)?,
+                        arg_element_types: self.arg_element_types(&args)?,
+                        element_type,
+                        shape: shape.clone(),
+                        // Background pixels must read (prim=0, hit=0, u=0, v=0).
+                        clear_output_before_dispatch: true,
+                    }),
+                    arg_view_indices: arg_views,
+                    output_buffer_index: BufferRef::new(self.buffers.len()),
+                })
+            }
             TensorKind::Broadcast { .. }
             | TensorKind::Transpose { .. }
             | TensorKind::Squeeze { .. }
-            | TensorKind::Index { .. } => {
+            | TensorKind::Index { .. }
+            | TensorKind::Reshape { .. } => {
                 unreachable!("view ops are handled in resolve_view")
             }
         };
@@ -323,6 +418,59 @@ impl ProgramBuilder {
             .collect()
     }
 
+    /// View of `tensor` guaranteed dense C-contiguous from buffer offset 0.
+    /// Strided/broadcast/offset views are materialized with an identity
+    /// elementwise copy (hardware nodes consume raw buffers).
+    fn dense_view_for_tensor(&mut self, tensor: &Tensor) -> Result<BufferViewRef, CompileError> {
+        if let Some(view) = self.dense_view_memo.get(tensor) {
+            return Ok(*view);
+        }
+        let (buffer, accessor) = self.resolve_view(tensor)?;
+        let node_shape = accessor.shape.clone();
+        let view = if accessor.is_dense_c_contiguous(&node_shape) {
+            self.intern_view(buffer, accessor)?
+        } else {
+            let element_type = map_element_type(tensor.element_type())?;
+            let copy_buffer = self.materialize_dense_copy(buffer, &accessor, element_type)?;
+            self.intern_view(copy_buffer, Accessor::dense(node_shape, 0))?
+        };
+        self.dense_view_memo.insert(tensor.clone(), view);
+        Ok(view)
+    }
+
+    /// Copy `accessor`'s elements (over `buffer`) into a fresh dense buffer
+    /// via an identity elementwise kernel — the one way strided data becomes
+    /// contiguous storage.
+    fn materialize_dense_copy(
+        &mut self,
+        buffer: BufferRef,
+        accessor: &Accessor,
+        element_type: resin_core::ElementType,
+    ) -> Result<BufferRef, CompileError> {
+        let src_view = self.intern_view(buffer, accessor.clone())?;
+        let copy_buffer = self.push_buffer(IrBuffer {
+            shape: accessor.shape.clone(),
+            element_type,
+            init: None,
+            readonly: false,
+        });
+        self.queue.push(IrDispatch {
+            kernel: IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
+                arg_accessors: vec![accessor.clone()],
+                arg_element_types: vec![element_type],
+                element_type,
+                shape: accessor.shape.clone(),
+                rpn_expr: resin_ir::ElementRpnExpr {
+                    atoms: vec![resin_ir::RpnAtom::Arg(0)],
+                },
+                clear_output_before_dispatch: false,
+            }),
+            arg_view_indices: vec![src_view],
+            output_buffer_index: copy_buffer,
+        });
+        Ok(copy_buffer)
+    }
+
     fn arg_accessors(&self, views: &[BufferViewRef]) -> Result<Vec<Accessor>, CompileError> {
         views
             .iter()
@@ -353,6 +501,7 @@ fn is_view_op(kind: &TensorKind) -> bool {
             | TensorKind::Transpose { .. }
             | TensorKind::Squeeze { .. }
             | TensorKind::Index { .. }
+            | TensorKind::Reshape { .. }
     )
 }
 

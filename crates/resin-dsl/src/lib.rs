@@ -2,9 +2,11 @@ use resin_core::*;
 
 mod debug_print;
 pub mod grad;
+pub mod hw;
 pub mod prelude;
 mod tensor;
 
 pub use debug_print::{debug_print, debug_str, dedent, refcount};
 pub use grad::{grad, grad_wrt, GradError};
+pub use hw::{rasterize, trace_rays};
 pub use tensor::{ElementOperator, ElementType, IndexKeyElement, ScatterOp, Tensor, TensorKind};

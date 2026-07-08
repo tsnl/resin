@@ -1,5 +1,6 @@
 mod accessor;
 mod element_type;
+pub mod hw;
 mod macros;
 mod tree;
 

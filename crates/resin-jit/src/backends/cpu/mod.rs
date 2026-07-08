@@ -2,6 +2,7 @@
 
 mod error;
 mod exec;
+mod hw;
 mod jit;
 mod program;
 mod tensor;

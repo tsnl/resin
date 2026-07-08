@@ -30,9 +30,9 @@ impl Hash for Tensor {
 }
 
 pub struct TensorInner {
-    element_type: ElementType,
-    shape: Box<[usize]>,
-    kind: TensorKind,
+    pub(crate) element_type: ElementType,
+    pub(crate) shape: Box<[usize]>,
+    pub(crate) kind: TensorKind,
 }
 
 pub enum TensorKind {
@@ -86,6 +86,30 @@ pub enum TensorKind {
     Squeeze {
         arg: Tensor,
         axes: Box<[usize]>,
+    },
+    /// Fixed-function closest-hit ray tracing (see [`crate::hw::trace_rays`]).
+    /// Output `[N, TRACE_HIT_WIDTH]` hit records; discrete, zero gradient.
+    TraceRays {
+        origins: Tensor,
+        directions: Tensor,
+        t_min: Tensor,
+        t_max: Tensor,
+        vertices: Tensor,
+        triangles: Tensor,
+    },
+    /// Fixed-function depth-tested rasterization into a visibility buffer
+    /// (see [`crate::hw::rasterize`]). Output `[H, W, RASTER_PIXEL_WIDTH]`;
+    /// discrete, zero gradient.
+    Rasterize {
+        clip_positions: Tensor,
+        triangles: Tensor,
+    },
+    /// Reinterpret the (row-major) elements under a new shape with the same
+    /// element count. A pure view when the source is contiguous; lowered
+    /// through an identity copy otherwise.
+    Reshape {
+        arg: Tensor,
+        shape: Box<[usize]>,
     },
 }
 
@@ -712,6 +736,28 @@ impl Tensor {
             self.squeeze(&axes)
         }
     }
+
+    /// Reinterpret the row-major elements under `shape` (element count must
+    /// match). A pure view when the source is contiguous.
+    pub fn reshape(&self, shape: &[usize]) -> Self {
+        assert_eq!(
+            self.shape().iter().product::<usize>(),
+            shape.iter().product::<usize>(),
+            "reshape must preserve the element count: {:?} -> {shape:?}",
+            self.shape()
+        );
+        if self.shape() == shape {
+            return self.clone();
+        }
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: shape.into(),
+            kind: TensorKind::Reshape {
+                arg: self.clone(),
+                shape: shape.into(),
+            },
+        })
+    }
 }
 
 fn index_output_shape(_arg_shape: &[usize], key: &[IndexKeyElement]) -> Box<[usize]> {
@@ -756,6 +802,26 @@ impl Tensor {
             TensorKind::ScatterIndex { source, .. } => vec![source.clone()],
             TensorKind::Transpose { arg } => vec![arg.clone()],
             TensorKind::Squeeze { arg, .. } => vec![arg.clone()],
+            TensorKind::TraceRays {
+                origins,
+                directions,
+                t_min,
+                t_max,
+                vertices,
+                triangles,
+            } => vec![
+                origins.clone(),
+                directions.clone(),
+                t_min.clone(),
+                t_max.clone(),
+                vertices.clone(),
+                triangles.clone(),
+            ],
+            TensorKind::Rasterize {
+                clip_positions,
+                triangles,
+            } => vec![clip_positions.clone(), triangles.clone()],
+            TensorKind::Reshape { arg, .. } => vec![arg.clone()],
         }
     }
     /// Post-order traversal of the subgraph reachable from `self` (inputs before outputs).

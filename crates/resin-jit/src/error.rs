@@ -56,6 +56,8 @@ pub enum RunError {
     AccessorRank { coords: usize, shape: usize },
     #[error("wgpu: {0}")]
     Wgpu(String),
+    #[error("vulkan: {0}")]
+    Vulkan(String),
 }
 
 pub(crate) fn tensor_kind_name(kind: &TensorKind) -> &'static str {
@@ -71,5 +73,8 @@ pub(crate) fn tensor_kind_name(kind: &TensorKind) -> &'static str {
         TensorKind::ScatterIndex { .. } => "scatter_index",
         TensorKind::Transpose { .. } => "transpose",
         TensorKind::Squeeze { .. } => "squeeze",
+        TensorKind::TraceRays { .. } => "trace_rays",
+        TensorKind::Rasterize { .. } => "rasterize",
+        TensorKind::Reshape { .. } => "reshape",
     }
 }
