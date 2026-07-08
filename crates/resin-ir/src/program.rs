@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::IrError;
 use crate::refs::{validate_tree_indices, BufferRef, BufferViewRef};
-use crate::remap::{RemapGatherInfo, RemapInfo, RemapScatterInfo};
+use crate::remap::RemapInfo;
 use crate::rpn::ElementRpnExpr;
 
 /// Compiled middle-end program.
@@ -127,6 +127,15 @@ impl IrKernel {
             IrKernel::Matmul(k) => k.clear_output_before_dispatch,
             IrKernel::Reduction(k) => k.clear_output_before_dispatch,
             IrKernel::Remap(k) => k.clear_output_before_dispatch,
+        }
+    }
+
+    /// Shape the kernel's threads iterate over. Equal to [`IrKernel::shape`]
+    /// except for scatter remaps, which iterate the source.
+    pub fn thread_shape(&self) -> &[u32] {
+        match self {
+            IrKernel::Remap(k) => k.thread_shape(),
+            other => other.shape(),
         }
     }
 
@@ -283,6 +292,44 @@ impl IrReductionKernel {
 }
 
 impl IrRemapKernel {
+    /// Shape the kernel's threads iterate over: the output for gathers, the
+    /// source for scatters (which write sparsely into the output).
+    pub fn thread_shape(&self) -> &[u32] {
+        if self.info.is_scatter() {
+            &self.arg_accessors[0].shape
+        } else {
+            &self.shape
+        }
+    }
+
+    fn validate_row_indices(&self) -> Result<(), IrError> {
+        if self.arg_accessors.len() != 2 {
+            return Err(IrError::RemapArgCount {
+                info: self.info.name(),
+                expected: 2,
+                got: self.arg_accessors.len(),
+            });
+        }
+        let indices = &self.arg_accessors[1];
+        if indices.rank() != 1 || self.arg_element_types[1] != ElementType::U4 {
+            return Err(IrError::RemapIndices {
+                shape: indices.shape.clone(),
+                element_type: self.arg_element_types[1],
+            });
+        }
+        let source = &self.arg_accessors[0];
+        if source.rank() == 0 || self.shape.is_empty() {
+            return Err(IrError::RemapSourceRankZero);
+        }
+        if source.shape[1..] != self.shape[1..] {
+            return Err(IrError::RemapRowShape {
+                source_shape: source.shape.clone(),
+                output: self.shape.clone(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), IrError> {
         if self.arg_element_types.len() != self.arg_accessors.len() {
             return Err(IrError::RemapArgElementTypesLen {
@@ -290,82 +337,48 @@ impl IrRemapKernel {
                 accessors: self.arg_accessors.len(),
             });
         }
+        if self.info.is_scatter() && !self.clear_output_before_dispatch {
+            return Err(IrError::RemapScatterMustClear);
+        }
         match &self.info {
-            RemapInfo::Scatter(RemapScatterInfo { accessor, .. }) => {
-                if let Some(accessor) = accessor {
-                    if self.arg_accessors.len() != 1 {
-                        return Err(IrError::ScatterAccessorArgCount {
-                            got: self.arg_accessors.len(),
-                        });
-                    }
-                    if accessor.shape.as_ref() != self.arg_accessors[0].shape.as_ref() {
-                        return Err(IrError::ScatterAccessorShape {
-                            accessor: accessor.shape.clone(),
-                            source_shape: self.arg_accessors[0].shape.clone(),
-                        });
-                    }
-                } else if self.arg_accessors.len() != 2 {
-                    return Err(IrError::ScatterArgCount {
-                        got: self.arg_accessors.len(),
+            RemapInfo::GatherRows => {
+                self.validate_row_indices()?;
+                let indices = &self.arg_accessors[1];
+                if self.shape[0] != indices.shape[0] {
+                    return Err(IrError::RemapGatherRows {
+                        output: self.shape[0],
+                        indices: indices.shape[0],
                     });
-                } else {
-                    let source_accessor = &self.arg_accessors[0];
-                    let indices_accessor = &self.arg_accessors[1];
-                    if indices_accessor.shape[indices_accessor.shape.len() - 1]
-                        != self.shape.len() as u32
-                    {
-                        return Err(IrError::ScatterIndicesTrailing {
-                            trailing: indices_accessor.shape[indices_accessor.shape.len() - 1],
-                            output_rank: self.shape.len(),
-                        });
-                    }
-                    if indices_accessor.shape[..indices_accessor.shape.len() - 1]
-                        != source_accessor.shape[..]
-                    {
-                        return Err(IrError::ScatterBatchShape);
-                    }
                 }
             }
-            RemapInfo::Gather(RemapGatherInfo {
-                accessor,
-                source_shape,
-            }) => {
-                if accessor.is_none() && source_shape.is_none() {
-                    if self.arg_accessors.len() != 1 {
-                        return Err(IrError::GatherImplicitArgCount {
-                            got: self.arg_accessors.len(),
-                        });
-                    }
-                } else if let (Some(accessor), Some(source_shape)) = (accessor, source_shape) {
-                    if self.arg_accessors.len() != 2 {
-                        return Err(IrError::GatherAccessorArgCount {
-                            got: self.arg_accessors.len(),
-                        });
-                    }
-                    let source_accessor = &self.arg_accessors[0];
-                    let indices_accessor = &self.arg_accessors[1];
-                    if indices_accessor.shape[indices_accessor.shape.len() - 1] != accessor.rank() as u32
-                    {
-                        return Err(IrError::GatherIndicesTrailing {
-                            trailing: indices_accessor.shape[indices_accessor.shape.len() - 1],
-                            accessor_rank: accessor.rank(),
-                        });
-                    }
-                    if indices_accessor.shape[..indices_accessor.shape.len() - 1]
-                        != source_accessor.shape[..]
-                    {
-                        return Err(IrError::GatherBatchShape);
-                    }
-                    if accessor.shape.as_ref() != source_shape.as_ref() {
-                        return Err(IrError::GatherAccessorSourceShape {
-                            accessor: accessor.shape.clone(),
-                            source_shape: source_shape.clone(),
-                        });
-                    }
-                } else {
-                    return Err(IrError::InvalidGatherInfo {
-                        has_accessor: accessor.is_some(),
-                        has_source_shape: source_shape.is_some(),
+            RemapInfo::ScatterRows { operator } => {
+                self.validate_row_indices()?;
+                let source = &self.arg_accessors[0];
+                let indices = &self.arg_accessors[1];
+                if indices.shape[0] != source.shape[0] {
+                    return Err(IrError::RemapIndicesLen {
+                        indices: indices.shape[0],
+                        rows: source.shape[0],
+                    });
+                }
+                if let Some(op) = operator
+                    && *op != BinaryAssocElementOperator::Add
+                {
+                    return Err(IrError::RemapScatterOperator { operator: *op });
+                }
+            }
+            RemapInfo::ScatterView { accessor } => {
+                if self.arg_accessors.len() != 1 {
+                    return Err(IrError::RemapArgCount {
+                        info: self.info.name(),
+                        expected: 1,
+                        got: self.arg_accessors.len(),
+                    });
+                }
+                if accessor.shape.as_ref() != self.arg_accessors[0].shape.as_ref() {
+                    return Err(IrError::ScatterViewShape {
+                        accessor: accessor.shape.clone(),
+                        source_shape: self.arg_accessors[0].shape.clone(),
                     });
                 }
             }

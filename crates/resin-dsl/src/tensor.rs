@@ -4,7 +4,7 @@ use paste::paste;
 use std::{
     collections::HashSet,
     hash::Hash,
-    ops::{Add, Div, Mul, Neg, Range, Rem, Sub},
+    ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Range, Rem, Shl, Shr, Sub},
     sync::Arc,
 };
 
@@ -53,10 +53,20 @@ pub enum TensorKind {
         arg: Tensor,
         key: Box<[IndexKeyElement]>,
     },
-    Remap {
-        key: Tensor,
+    /// Row gather along axis 0: `out[i, tail…] = source[indices[i], tail…]`.
+    /// Out-of-range indices clamp to the last row.
+    Gather {
         source: Tensor,
-        direction: RemapDirection,
+        indices: Tensor,
+    },
+    /// Row scatter along axis 0 into a zero-initialized target:
+    /// `out[indices[i], tail…] ⊕= source[i, tail…]`. Out-of-range indices are
+    /// dropped. With [`ScatterOp::Write`], duplicate indices are unordered
+    /// (last-writer-wins nondeterministically on GPU).
+    Scatter {
+        source: Tensor,
+        indices: Tensor,
+        op: ScatterOp,
     },
     Broadcast {
         arg: Tensor,
@@ -79,14 +89,15 @@ pub enum TensorKind {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ElementType {
     F32,
+    U32,
 }
 impl ElementType {
     pub fn nbytes(&self) -> usize {
         match self {
-            ElementType::F32 => 4,
+            ElementType::F32 | ElementType::U32 => 4,
         }
     }
 }
@@ -99,6 +110,12 @@ pub enum ElementOperator {
     Exp,
     Relu,
     Abs,
+    Sqrt,
+    Floor,
+    /// Numeric value conversion to the node's element type.
+    Cast,
+    /// Bit reinterpretation as the node's element type.
+    Bitcast,
 
     // Binary
     Pow,
@@ -107,7 +124,33 @@ pub enum ElementOperator {
     Rem,
     Add,
     Sub,
+    Min,
+    Max,
     Matmul,
+
+    // Comparisons: 0/1 mask in the operand element type.
+    CmpEq,
+    CmpNe,
+    CmpLt,
+    CmpLe,
+    CmpGt,
+    CmpGe,
+
+    // Bitwise (U32 only).
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+}
+
+/// Accumulation rule for [`TensorKind::Scatter`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScatterOp {
+    /// Overwrite the target row (unordered for duplicate indices).
+    Write,
+    /// Accumulate into the target row.
+    Add,
 }
 
 type ElementwiseArgs = ArrayVec<Tensor, MAX_ELEMENTWISE_ARGS>;
@@ -117,12 +160,6 @@ const MAX_ELEMENTWISE_ARGS: usize = 2;
 pub enum IndexKeyElement {
     Single(usize),
     Slice(Range<usize>),
-}
-
-#[derive(Clone, Copy)]
-pub enum RemapDirection {
-    Gather,  // output := source[key]
-    Scatter, // output[key] := source
 }
 
 //
@@ -191,15 +228,58 @@ impl Tensor {
         })
     }
 
+    pub fn constant_u32(shape: &[usize], values: &[u32]) -> Self {
+        assert_eq!(
+            shape.iter().product::<usize>(),
+            values.len(),
+            "constant_u32: shape/values length mismatch"
+        );
+        let mut data = Vec::with_capacity(values.len() * ElementType::U32.nbytes());
+        for &value in values {
+            data.extend_from_slice(&u32::to_le_bytes(value));
+        }
+        Tensor::from(TensorInner {
+            element_type: ElementType::U32,
+            shape: shape.into(),
+            kind: TensorKind::Constant {
+                bytes: data.into_boxed_slice(),
+            },
+        })
+    }
+
+    /// `[0, 1, …, n-1]` as a U32 constant.
+    pub fn iota(n: usize) -> Self {
+        let values: Vec<u32> = (0..n as u32).collect();
+        Tensor::constant_u32(&[n], &values)
+    }
+
     pub fn full(shape: &[usize], value: f32, element_type: ElementType) -> Self {
         let count = shape.iter().product::<usize>();
-        let bytes = f32::to_le_bytes(value);
+        let bytes = match element_type {
+            ElementType::F32 => f32::to_le_bytes(value),
+            ElementType::U32 => u32::to_le_bytes(value as u32),
+        };
         let mut data = Vec::with_capacity(count * element_type.nbytes());
         for _ in 0..count {
             data.extend_from_slice(&bytes);
         }
         Tensor::from(TensorInner {
             element_type,
+            shape: shape.into(),
+            kind: TensorKind::Constant {
+                bytes: data.into_boxed_slice(),
+            },
+        })
+    }
+
+    pub fn full_u32(shape: &[usize], value: u32) -> Self {
+        let count = shape.iter().product::<usize>();
+        let mut data = Vec::with_capacity(count * ElementType::U32.nbytes());
+        for _ in 0..count {
+            data.extend_from_slice(&u32::to_le_bytes(value));
+        }
+        Tensor::from(TensorInner {
+            element_type: ElementType::U32,
             shape: shape.into(),
             kind: TensorKind::Constant {
                 bytes: data.into_boxed_slice(),
@@ -217,6 +297,13 @@ impl Tensor {
     ) -> Self {
         let mut args = arrvec![self.clone()];
         args.extend(extra_args);
+        for arg in args.iter().skip(1) {
+            assert_eq!(
+                arg.element_type(),
+                self.element_type(),
+                "elementwise {operator:?}: operand element types must match"
+            );
+        }
 
         let shape = if operator == ElementOperator::Matmul {
             matmul_output_shape(self.shape(), args[1].shape())
@@ -228,6 +315,19 @@ impl Tensor {
             element_type: self.inner.element_type,
             shape,
             kind: TensorKind::Elementwise { operator, args },
+        })
+    }
+
+    /// Unary elementwise node whose element type differs from its operand's.
+    #[inline]
+    fn new_type_change(&self, operator: ElementOperator, element_type: ElementType) -> Self {
+        Tensor::from(TensorInner {
+            element_type,
+            shape: self.inner.shape.clone(),
+            kind: TensorKind::Elementwise {
+                operator,
+                args: arrvec![self.clone()],
+            },
         })
     }
 }
@@ -283,6 +383,11 @@ impl_binary_elementwise!(Div, ElementOperator::Div);
 impl_binary_elementwise!(Rem, ElementOperator::Rem);
 impl_binary_elementwise!(Add, ElementOperator::Add);
 impl_binary_elementwise!(Sub, ElementOperator::Sub);
+impl_binary_elementwise!(BitAnd, ElementOperator::BitAnd, bitand);
+impl_binary_elementwise!(BitOr, ElementOperator::BitOr, bitor);
+impl_binary_elementwise!(BitXor, ElementOperator::BitXor, bitxor);
+impl_binary_elementwise!(Shl, ElementOperator::Shl, shl);
+impl_binary_elementwise!(Shr, ElementOperator::Shr, shr);
 
 impl Tensor {
     pub fn log(&self) -> Self {
@@ -297,9 +402,74 @@ impl Tensor {
     pub fn abs(&self) -> Self {
         self.new_elementwise(ElementOperator::Abs, [])
     }
+    pub fn sqrt(&self) -> Self {
+        self.new_elementwise(ElementOperator::Sqrt, [])
+    }
+    pub fn floor(&self) -> Self {
+        self.new_elementwise(ElementOperator::Floor, [])
+    }
     pub fn pow(&self, rhs: &Self) -> Self {
         self.new_elementwise(ElementOperator::Pow, [rhs.clone()])
     }
+    pub fn minimum(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::Min, [rhs.clone()])
+    }
+    pub fn maximum(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::Max, [rhs.clone()])
+    }
+
+    pub fn cmp_eq(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::CmpEq, [rhs.clone()])
+    }
+    pub fn cmp_ne(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::CmpNe, [rhs.clone()])
+    }
+    pub fn cmp_lt(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::CmpLt, [rhs.clone()])
+    }
+    pub fn cmp_le(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::CmpLe, [rhs.clone()])
+    }
+    pub fn cmp_gt(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::CmpGt, [rhs.clone()])
+    }
+    pub fn cmp_ge(&self, rhs: &Self) -> Self {
+        self.new_elementwise(ElementOperator::CmpGe, [rhs.clone()])
+    }
+
+    /// Numeric value conversion (`f32 ↔ u32`); no-op when the type matches.
+    pub fn cast(&self, element_type: ElementType) -> Self {
+        if self.element_type() == element_type {
+            return self.clone();
+        }
+        self.new_type_change(ElementOperator::Cast, element_type)
+    }
+
+    /// Reinterpret raw bits as `element_type` (same width).
+    pub fn bitcast(&self, element_type: ElementType) -> Self {
+        if self.element_type() == element_type {
+            return self.clone();
+        }
+        assert_eq!(
+            self.element_type().nbytes(),
+            element_type.nbytes(),
+            "bitcast requires equal element widths"
+        );
+        self.new_type_change(ElementOperator::Bitcast, element_type)
+    }
+
+    /// `self` is a 0/1 mask: `mask * on_true + (1 - mask) * on_false`.
+    ///
+    /// Composed from arithmetic ops, so it works for both F32 and U32 and
+    /// needs no dedicated kernel. No gradient flows through the mask.
+    pub fn select(&self, on_true: &Self, on_false: &Self) -> Self {
+        let one = match self.element_type() {
+            ElementType::F32 => Self::full(self.shape(), 1.0, ElementType::F32),
+            ElementType::U32 => Self::full_u32(self.shape(), 1),
+        };
+        self.clone() * on_true.clone() + (one - self.clone()) * on_false.clone()
+    }
+
     pub fn matmul(&self, rhs: &Self) -> Self {
         self.new_elementwise(ElementOperator::Matmul, [rhs.clone()])
     }
@@ -325,7 +495,32 @@ impl Tensor {
         })
     }
 
-    pub(crate) fn scatter_index(&self, target_shape: &[usize], key: &[IndexKeyElement]) -> Self {
+    /// Embed `self` into a zero-filled `target_shape` tensor at the region
+    /// described by `key` (the inverse of [`Tensor::index`]).
+    pub fn scatter_index(&self, target_shape: &[usize], key: &[IndexKeyElement]) -> Self {
+        assert_eq!(
+            key.len(),
+            target_shape.len(),
+            "scatter_index key must cover every target axis"
+        );
+        let region_shape = index_output_shape(target_shape, key);
+        assert_eq!(
+            region_shape.as_ref(),
+            self.shape(),
+            "scatter_index source shape must match the key region"
+        );
+        for (axis, element) in key.iter().enumerate() {
+            let dim = target_shape[axis];
+            match element {
+                IndexKeyElement::Single(i) => {
+                    assert!(*i < dim, "index {i} out of range for axis {axis} (dim {dim})")
+                }
+                IndexKeyElement::Slice(range) => assert!(
+                    range.start <= range.end && range.end <= dim,
+                    "slice {range:?} out of range for axis {axis} (dim {dim})"
+                ),
+            }
+        }
         Tensor::from(TensorInner {
             element_type: self.element_type(),
             shape: target_shape.into(),
@@ -337,24 +532,79 @@ impl Tensor {
         })
     }
 
-    pub(crate) fn new_remap(
-        key: Tensor,
-        source: Tensor,
-        direction: RemapDirection,
-        shape: &[usize],
-    ) -> Self {
+    /// `out[i, tail…] = self[indices[i], tail…]` (indices: rank-1 U32).
+    pub fn gather_rows(&self, indices: &Tensor) -> Self {
+        assert_eq!(
+            indices.element_type(),
+            ElementType::U32,
+            "gather_rows indices must be U32"
+        );
+        assert_eq!(indices.shape().len(), 1, "gather_rows indices must be rank 1");
+        assert!(!self.shape().is_empty(), "gather_rows source must have rank >= 1");
+        let mut shape = self.shape().to_vec();
+        shape[0] = indices.shape()[0];
         Tensor::from(TensorInner {
-            element_type: source.element_type(),
+            element_type: self.element_type(),
             shape: shape.into(),
-            kind: TensorKind::Remap {
-                key,
-                source,
-                direction,
+            kind: TensorKind::Gather {
+                source: self.clone(),
+                indices: indices.clone(),
             },
         })
     }
 
+    /// `out[indices[i], tail…] ⊕= self[i, tail…]` into a zero-filled
+    /// `[target_len, tail…]` tensor (indices: rank-1 U32, one per row of `self`).
+    pub fn scatter_rows(&self, indices: &Tensor, target_len: usize, op: ScatterOp) -> Self {
+        assert_eq!(
+            indices.element_type(),
+            ElementType::U32,
+            "scatter_rows indices must be U32"
+        );
+        assert_eq!(indices.shape().len(), 1, "scatter_rows indices must be rank 1");
+        assert!(!self.shape().is_empty(), "scatter_rows source must have rank >= 1");
+        assert_eq!(
+            indices.shape()[0],
+            self.shape()[0],
+            "scatter_rows: one index per source row"
+        );
+        let mut shape = self.shape().to_vec();
+        shape[0] = target_len;
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: shape.into(),
+            kind: TensorKind::Scatter {
+                source: self.clone(),
+                indices: indices.clone(),
+                op,
+            },
+        })
+    }
+
+    /// Slice/select by static key (`Single` keeps a size-1 axis). Lowers to a
+    /// pure accessor view — no kernel.
+    pub fn index(&self, key: &[IndexKeyElement]) -> Self {
+        Self::new_index(self.clone(), key)
+    }
+
     pub(crate) fn new_index(arg: Tensor, key: &[IndexKeyElement]) -> Self {
+        assert_eq!(
+            key.len(),
+            arg.shape().len(),
+            "index key must cover every axis"
+        );
+        for (axis, element) in key.iter().enumerate() {
+            let dim = arg.shape()[axis];
+            match element {
+                IndexKeyElement::Single(i) => {
+                    assert!(*i < dim, "index {i} out of range for axis {axis} (dim {dim})")
+                }
+                IndexKeyElement::Slice(range) => assert!(
+                    range.start <= range.end && range.end <= dim,
+                    "slice {range:?} out of range for axis {axis} (dim {dim})"
+                ),
+            }
+        }
         let shape = index_output_shape(arg.shape(), key);
         Tensor::from(TensorInner {
             element_type: arg.element_type(),
@@ -462,8 +712,13 @@ impl Tensor {
             TensorKind::Elementwise { args, .. } => Vec::from(args.as_slice()),
             TensorKind::Reduction { arg, .. } => vec![arg.clone()],
             TensorKind::Index { arg, .. } => vec![arg.clone()],
-            TensorKind::Remap { key, source, .. } => {
-                vec![key.clone(), source.clone()]
+            TensorKind::Gather { source, indices } => {
+                vec![source.clone(), indices.clone()]
+            }
+            TensorKind::Scatter {
+                source, indices, ..
+            } => {
+                vec![source.clone(), indices.clone()]
             }
             TensorKind::Broadcast { arg, .. } => vec![arg.clone()],
             TensorKind::ScatterIndex { source, .. } => vec![source.clone()],

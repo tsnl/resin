@@ -12,6 +12,12 @@ pub trait ConcreteTensor: Clone + Send + Sync {
     /// Read all elements as host `f32` (row-major).
     fn to_f32(&self) -> Vec<f32>;
 
+    /// Build a U32 tensor from host `u32` values (row-major).
+    fn from_u32(shape: &[usize], values: &[u32]) -> Self;
+
+    /// Read all elements as host `u32` (row-major; requires a U32 tensor).
+    fn to_u32(&self) -> Vec<u32>;
+
     /// Read a rank-0 tensor as a single `f32`.
     fn scalar_f32(&self) -> f32 {
         assert!(

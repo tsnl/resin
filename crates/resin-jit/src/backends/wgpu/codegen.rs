@@ -9,7 +9,8 @@ use resin_core::{
     UnaryElementOperator,
 };
 use resin_ir::{
-    IrElementwiseRpnKernel, IrKernel, IrMatmulKernel, IrReductionKernel, RpnAtom,
+    IrElementwiseRpnKernel, IrKernel, IrMatmulKernel, IrReductionKernel, IrRemapKernel,
+    RemapInfo, RpnAtom,
 };
 
 use super::error::WgpuLowerError;
@@ -31,7 +32,8 @@ impl Default for WgslKernelConfig {
 }
 
 pub fn dispatch_size_for_kernel(kernel: &IrKernel, config: &WgslKernelConfig) -> [u32; 3] {
-    let n = shape_len(kernel.shape());
+    // Scatter remaps iterate the source, not the output.
+    let n = shape_len(kernel.thread_shape());
     if n == 0 {
         return [0, 1, 1];
     }
@@ -50,9 +52,7 @@ pub fn emit_wgsl_for_kernel(
         IrKernel::ElementwiseRpn(k) => emit_elementwise(&mut w, k, config)?,
         IrKernel::Matmul(k) => emit_matmul(&mut w, k, config)?,
         IrKernel::Reduction(k) => emit_reduction(&mut w, k, config)?,
-        IrKernel::Remap(_) => {
-            return Err(WgpuLowerError::UnsupportedKernel("remap"));
-        }
+        IrKernel::Remap(k) => emit_remap(&mut w, k, config)?,
     }
     Ok(w.finish())
 }
@@ -298,6 +298,7 @@ fn apply_op(stack: &mut Vec<String>, op: ElementOperator, t: &str) {
                 UnaryElementOperator::Floor => format!("floor({x})"),
                 UnaryElementOperator::Ceil => format!("ceil({x})"),
                 UnaryElementOperator::Bitcast => format!("bitcast<{t}>({x})"),
+                UnaryElementOperator::Convert => format!("{t}({x})"),
             };
             stack.push(e);
         }
@@ -349,6 +350,161 @@ fn apply_op(stack: &mut Vec<String>, op: ElementOperator, t: &str) {
             stack.push(e);
         }
     }
+}
+
+/// Loop over `thread_shape` elements with a literal element-count guard
+/// (used by scatter kernels, whose thread count differs from the output size).
+fn per_thread_element<F: Fn(&mut WgslWriter, &str)>(
+    w: &mut WgslWriter,
+    thread_shape: &[u32],
+    config: &WgslKernelConfig,
+    body: F,
+) {
+    let total = shape_len(thread_shape);
+    let items_per_thread = 1u32 << config.lg2_items_per_thread;
+    w.block(
+        &format!(
+            "@compute @workgroup_size({})\nfn main(\n@builtin(global_invocation_id) global_id: vec3<u32>\n)",
+            config.workgroup_size
+        ),
+        |w| {
+            w.print(&format!(
+                "let t_beg = global_id.x << {}u;\nlet t_end = t_beg + {items_per_thread}u;",
+                config.lg2_items_per_thread
+            ));
+            w.block(
+                "for (\nvar t = t_beg;\nt < t_end;\nt += 1u\n)",
+                |w| {
+                    w.block(&format!("if (t >= {total}u)"), |w| {
+                        w.print("return;");
+                    });
+                    body(w, "t");
+                },
+            );
+        },
+    );
+}
+
+/// `fn {name}(index) -> u32`: dense C-contiguous address into `shape`.
+fn define_dense_address_function(w: &mut WgslWriter, name: &str, shape: &[u32]) {
+    let accessor = Accessor::dense(shape, 0);
+    define_address_function(w, name, &accessor);
+}
+
+fn emit_remap(
+    w: &mut WgslWriter,
+    kernel: &IrRemapKernel,
+    config: &WgslKernelConfig,
+) -> Result<(), WgpuLowerError> {
+    let t = spell_etype(kernel.element_type)?;
+    match &kernel.info {
+        RemapInfo::GatherRows => {
+            let rank = kernel.shape.len();
+            let src_rows = kernel.arg_accessors[0].shape[0];
+            emit_bindings(w, kernel.element_type, &kernel.arg_element_types)?;
+            emit_arg_address_functions(w, &kernel.arg_accessors);
+            per_output_element(w, &kernel.shape, config, |w, out_addr| {
+                w.print(&format!(
+                    "let row = min(arg1[{}], {}u);",
+                    arg_address_expr(1, &kernel.arg_accessors[1], "array<u32, 1>(out_index[0])"),
+                    src_rows.saturating_sub(1),
+                ));
+                w.print(&format!("var src_index: array<u32, {rank}> = out_index;"));
+                w.print("src_index[0] = row;");
+                w.print(&format!(
+                    "output[{out_addr}] = arg0[{}];",
+                    arg_address_expr(0, &kernel.arg_accessors[0], "src_index")
+                ));
+            });
+        }
+        RemapInfo::ScatterRows { operator } => {
+            let src_shape = kernel.arg_accessors[0].shape.clone();
+            let rank = src_shape.len();
+            let out_rows = kernel.shape[0];
+            let atomic_output = operator.is_some();
+            if atomic_output {
+                // Atomic accumulation binds the output as atomic<u32> words
+                // (f32 adds go through a compare-exchange loop on the bits).
+                w.print(
+                    "@group(0) @binding(0)\nvar<storage, read_write> output: array<atomic<u32>>;",
+                );
+                for (i, arg_etype) in kernel.arg_element_types.iter().enumerate() {
+                    let arg_t = spell_etype(*arg_etype)?;
+                    w.print(&format!(
+                        "@group(0) @binding({})\nvar<storage, read> arg{i}: array<{arg_t}>;",
+                        i + 1
+                    ));
+                }
+            } else {
+                emit_bindings(w, kernel.element_type, &kernel.arg_element_types)?;
+            }
+            emit_arg_address_functions(w, &kernel.arg_accessors);
+            define_cc_index_function(w, "src_index_of", &src_shape);
+            define_dense_address_function(w, "out_address_of", &kernel.shape);
+            if atomic_output && kernel.element_type == ElementType::F4 {
+                w.block("fn atomic_add_f32(addr: u32, value: f32)", |w| {
+                    w.print("var old = atomicLoad(&output[addr]);");
+                    w.block("loop", |w| {
+                        w.print(
+                            "let new_bits = bitcast<u32>(bitcast<f32>(old) + value);\nlet result = atomicCompareExchangeWeak(&output[addr], old, new_bits);",
+                        );
+                        w.block("if (result.exchanged)", |w| {
+                            w.print("break;");
+                        });
+                        w.print("old = result.old_value;");
+                    });
+                });
+            }
+            per_thread_element(w, &src_shape, config, |w, thread| {
+                w.print(&format!("var s_index = src_index_of({thread});"));
+                w.print(&format!(
+                    "let row = arg1[{}];",
+                    arg_address_expr(1, &kernel.arg_accessors[1], "array<u32, 1>(s_index[0])")
+                ));
+                w.block(&format!("if (row < {out_rows}u)"), |w| {
+                    w.print(&format!("var o_index: array<u32, {rank}> = s_index;"));
+                    w.print("o_index[0] = row;");
+                    w.print("let out_addr = out_address_of(o_index);");
+                    let src_value = format!(
+                        "arg0[{}]",
+                        arg_address_expr(0, &kernel.arg_accessors[0], "s_index")
+                    );
+                    match (operator, kernel.element_type) {
+                        (None, _) => w.print(&format!("output[out_addr] = {src_value};")),
+                        (Some(_), ElementType::U4) => {
+                            w.print(&format!("atomicAdd(&output[out_addr], {src_value});"))
+                        }
+                        (Some(_), _) => {
+                            w.print(&format!("atomic_add_f32(out_addr, {src_value});"))
+                        }
+                    }
+                });
+            });
+        }
+        RemapInfo::ScatterView { accessor } => {
+            let src_shape = kernel.arg_accessors[0].shape.clone();
+            emit_bindings(w, kernel.element_type, &kernel.arg_element_types)?;
+            emit_arg_address_functions(w, &kernel.arg_accessors);
+            define_cc_index_function(w, "src_index_of", &src_shape);
+            define_address_function(w, "out_address_of", accessor);
+            per_thread_element(w, &src_shape, config, |w, thread| {
+                if src_shape.is_empty() {
+                    w.print(&format!(
+                        "let _ = {thread};\noutput[out_address_of()] = arg0[{}];",
+                        arg_address_expr(0, &kernel.arg_accessors[0], "")
+                    ));
+                } else {
+                    w.print(&format!("var s_index = src_index_of({thread});"));
+                    w.print(&format!(
+                        "output[out_address_of(s_index)] = arg0[{}];",
+                        arg_address_expr(0, &kernel.arg_accessors[0], "s_index")
+                    ));
+                }
+            });
+        }
+    }
+    let _ = t;
+    Ok(())
 }
 
 fn emit_matmul(
@@ -524,6 +680,89 @@ mod tests {
         assert!(wgsl.contains("eval_rpn_expr"), "{wgsl}");
         assert!(wgsl.contains("f32"), "{wgsl}");
         assert!(wgsl.contains("@compute"), "{wgsl}");
+    }
+
+    #[test]
+    fn convert_emits_value_cast() {
+        let kernel = IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
+            arg_accessors: vec![Accessor::dense([4], 0)],
+            arg_element_types: vec![resin_core::U4],
+            element_type: F4,
+            shape: Box::from([4]),
+            rpn_expr: ElementRpnExpr {
+                atoms: vec![
+                    RpnAtom::Arg(0),
+                    RpnAtom::Op(ElementOperator::Unary(UnaryElementOperator::Convert)),
+                ],
+            },
+            clear_output_before_dispatch: false,
+        });
+        let wgsl = emit_wgsl_for_kernel(&kernel, &WgslKernelConfig::default()).unwrap();
+        assert!(wgsl.contains("f32(a0)"), "{wgsl}");
+    }
+
+    fn gather_kernel() -> IrKernel {
+        IrKernel::Remap(IrRemapKernel {
+            arg_accessors: vec![Accessor::dense([8, 2], 0), Accessor::dense([4], 0)],
+            arg_element_types: vec![F4, resin_core::U4],
+            element_type: F4,
+            shape: Box::from([4, 2]),
+            info: RemapInfo::GatherRows,
+            clear_output_before_dispatch: false,
+        })
+    }
+
+    fn scatter_kernel(operator: Option<BinaryAssocElementOperator>, etype: ElementType) -> IrKernel {
+        IrKernel::Remap(IrRemapKernel {
+            arg_accessors: vec![Accessor::dense([4, 2], 0), Accessor::dense([4], 0)],
+            arg_element_types: vec![etype, resin_core::U4],
+            element_type: etype,
+            shape: Box::from([8, 2]),
+            info: RemapInfo::ScatterRows { operator },
+            clear_output_before_dispatch: true,
+        })
+    }
+
+    #[test]
+    fn gather_rows_clamps_indices() {
+        let wgsl = emit_wgsl_for_kernel(&gather_kernel(), &WgslKernelConfig::default()).unwrap();
+        assert!(wgsl.contains("min(arg1["), "{wgsl}");
+        assert!(wgsl.contains("@compute"), "{wgsl}");
+    }
+
+    #[test]
+    fn scatter_add_f32_uses_cas_loop() {
+        let kernel = scatter_kernel(Some(BinaryAssocElementOperator::Add), F4);
+        let wgsl = emit_wgsl_for_kernel(&kernel, &WgslKernelConfig::default()).unwrap();
+        assert!(wgsl.contains("array<atomic<u32>>"), "{wgsl}");
+        assert!(wgsl.contains("atomicCompareExchangeWeak"), "{wgsl}");
+    }
+
+    #[test]
+    fn scatter_add_u32_uses_atomic_add() {
+        let kernel = scatter_kernel(Some(BinaryAssocElementOperator::Add), resin_core::U4);
+        let wgsl = emit_wgsl_for_kernel(&kernel, &WgslKernelConfig::default()).unwrap();
+        assert!(wgsl.contains("atomicAdd"), "{wgsl}");
+    }
+
+    #[test]
+    fn scatter_write_is_plain_store() {
+        let kernel = scatter_kernel(None, F4);
+        let wgsl = emit_wgsl_for_kernel(&kernel, &WgslKernelConfig::default()).unwrap();
+        assert!(!wgsl.contains("atomic"), "{wgsl}");
+        assert!(wgsl.contains("output[out_addr] ="), "{wgsl}");
+    }
+
+    #[test]
+    fn scatter_dispatch_iterates_source() {
+        // Source has 4×2 = 8 elements; output has 8×2 = 16. Threads follow the source.
+        let config = WgslKernelConfig {
+            lg2_items_per_thread: 0,
+            workgroup_size: 1,
+        };
+        let kernel = scatter_kernel(None, F4);
+        assert_eq!(dispatch_size_for_kernel(&kernel, &config), [8, 1, 1]);
+        assert_eq!(dispatch_size_for_kernel(&gather_kernel(), &config), [8, 1, 1]);
     }
 
     #[test]

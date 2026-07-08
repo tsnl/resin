@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::tensor::{
-    ElementOperator, ElementType, IndexKeyElement, RemapDirection, Tensor, TensorKind,
+    ElementOperator, ElementType, IndexKeyElement, ScatterOp, Tensor, TensorKind,
 };
 
 /// Reference counts for tensors reachable from `roots` (by pointer identity).
@@ -157,8 +157,9 @@ fn headline(tensor: &Tensor) -> String {
             format_tuple(axes)
         ),
         TensorKind::Index { key, .. } => format!("index(key={})", format_index_key(key)),
-        TensorKind::Remap { direction, .. } => {
-            format!("remap(direction='{}')", remap_direction_name(*direction))
+        TensorKind::Gather { .. } => "gather_rows()".to_string(),
+        TensorKind::Scatter { op, .. } => {
+            format!("scatter_rows(op='{}')", scatter_op_name(*op))
         }
         TensorKind::Broadcast { axes, target_shape, .. } => format!(
             "broadcast(axes={}, target_shape={})",
@@ -185,6 +186,7 @@ fn headline(tensor: &Tensor) -> String {
 fn element_type_name(element_type: ElementType) -> &'static str {
     match element_type {
         ElementType::F32 => "f32",
+        ElementType::U32 => "u32",
     }
 }
 
@@ -195,20 +197,37 @@ fn operator_name(operator: ElementOperator) -> &'static str {
         ElementOperator::Exp => "exp",
         ElementOperator::Relu => "relu",
         ElementOperator::Abs => "abs",
+        ElementOperator::Sqrt => "sqrt",
+        ElementOperator::Floor => "floor",
+        ElementOperator::Cast => "cast",
+        ElementOperator::Bitcast => "bitcast",
         ElementOperator::Pow => "pow",
         ElementOperator::Mul => "mul",
         ElementOperator::Div => "div",
         ElementOperator::Rem => "rem",
         ElementOperator::Add => "add",
         ElementOperator::Sub => "sub",
+        ElementOperator::Min => "min",
+        ElementOperator::Max => "max",
         ElementOperator::Matmul => "matmul",
+        ElementOperator::CmpEq => "cmp_eq",
+        ElementOperator::CmpNe => "cmp_ne",
+        ElementOperator::CmpLt => "cmp_lt",
+        ElementOperator::CmpLe => "cmp_le",
+        ElementOperator::CmpGt => "cmp_gt",
+        ElementOperator::CmpGe => "cmp_ge",
+        ElementOperator::BitAnd => "bit_and",
+        ElementOperator::BitOr => "bit_or",
+        ElementOperator::BitXor => "bit_xor",
+        ElementOperator::Shl => "shl",
+        ElementOperator::Shr => "shr",
     }
 }
 
-fn remap_direction_name(direction: RemapDirection) -> &'static str {
-    match direction {
-        RemapDirection::Gather => "gather",
-        RemapDirection::Scatter => "scatter",
+fn scatter_op_name(op: ScatterOp) -> &'static str {
+    match op {
+        ScatterOp::Write => "write",
+        ScatterOp::Add => "add",
     }
 }
 
@@ -251,7 +270,19 @@ fn format_index_key(key: &[IndexKeyElement]) -> String {
 fn format_constant(bytes: &[u8], tensor: &Tensor) -> String {
     match tensor.element_type() {
         ElementType::F32 => format_f32_constant(bytes, tensor.shape()),
+        ElementType::U32 => format_u32_constant(bytes, tensor.shape()),
     }
+}
+
+fn format_u32_constant(bytes: &[u8], shape: &[usize]) -> String {
+    let values: Vec<u32> = bytes
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes(chunk.try_into().expect("u32 chunk")))
+        .collect();
+    if shape.is_empty() {
+        return format!("value={}", values.first().copied().unwrap_or(0));
+    }
+    format!("value={values:?}")
 }
 
 fn format_f32_constant(bytes: &[u8], shape: &[usize]) -> String {

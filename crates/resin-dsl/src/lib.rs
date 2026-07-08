@@ -7,4 +7,4 @@ mod tensor;
 
 pub use debug_print::{debug_print, debug_str, dedent, refcount};
 pub use grad::{grad, grad_wrt, GradError};
-pub use tensor::{ElementOperator, ElementType, Tensor, TensorKind};
+pub use tensor::{ElementOperator, ElementType, IndexKeyElement, ScatterOp, Tensor, TensorKind};

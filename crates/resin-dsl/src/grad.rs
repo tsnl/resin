@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::Tree;
-use crate::tensor::{ElementOperator, IndexKeyElement, RemapDirection, Tensor, TensorKind};
+use crate::tensor::{ElementOperator, IndexKeyElement, ScatterOp, Tensor, TensorKind};
 
 /// grad computes the gradient of a tree of tensors.
 ///
@@ -105,11 +105,12 @@ fn backward(grad_map: &mut GradMap, node: &Tensor, df_dout: &Tensor) -> Result<(
             arg,
         } => backward_reduction(grad_map, node, *operator, axes, arg, df_dout),
         TensorKind::Index { arg, key } => backward_index(grad_map, arg, key, df_dout),
-        TensorKind::Remap {
-            key,
-            source,
-            direction,
-        } => backward_remap(grad_map, key, source, direction, df_dout),
+        TensorKind::Gather { source, indices } => {
+            backward_gather(grad_map, source, indices, df_dout)
+        }
+        TensorKind::Scatter {
+            source, indices, ..
+        } => backward_scatter(grad_map, source, indices, df_dout),
         TensorKind::Broadcast { arg, axes, .. } => backward_broadcast(grad_map, arg, axes, df_dout),
         TensorKind::ScatterIndex { source, key, .. } => {
             backward_scatter_index(grad_map, source, key, df_dout)
@@ -245,6 +246,37 @@ fn backward_elementwise(
             let sign = args[0].clone() / (args[0].clone().abs() + eps);
             accumulate(grad_map, &args[0], df_dout.clone() * sign);
         }
+        ElementOperator::Sqrt => {
+            let half = args[0].full_like(0.5);
+            accumulate(grad_map, &args[0], df_dout.clone() * half / n());
+        }
+        ElementOperator::Min => {
+            let lhs_wins = args[0].cmp_le(&args[1]);
+            accumulate(grad_map, &args[0], df_dout.clone() * lhs_wins.clone());
+            let rhs_wins = args[0].cmp_gt(&args[1]);
+            accumulate(grad_map, &args[1], df_dout.clone() * rhs_wins);
+        }
+        ElementOperator::Max => {
+            let lhs_wins = args[0].cmp_ge(&args[1]);
+            accumulate(grad_map, &args[0], df_dout.clone() * lhs_wins.clone());
+            let rhs_wins = args[0].cmp_lt(&args[1]);
+            accumulate(grad_map, &args[1], df_dout.clone() * rhs_wins);
+        }
+        // Piecewise-constant and integer ops: zero gradient, no propagation.
+        ElementOperator::Floor
+        | ElementOperator::Cast
+        | ElementOperator::Bitcast
+        | ElementOperator::CmpEq
+        | ElementOperator::CmpNe
+        | ElementOperator::CmpLt
+        | ElementOperator::CmpLe
+        | ElementOperator::CmpGt
+        | ElementOperator::CmpGe
+        | ElementOperator::BitAnd
+        | ElementOperator::BitOr
+        | ElementOperator::BitXor
+        | ElementOperator::Shl
+        | ElementOperator::Shr => {}
         ElementOperator::Add => {
             accumulate(grad_map, &args[0], df_dout.clone());
             accumulate(grad_map, &args[1], df_dout.clone());
@@ -316,28 +348,31 @@ fn backward_reduction(
     Ok(())
 }
 
-fn backward_remap(
+/// Gather adjoint: rows read multiple times accumulate their contributions,
+/// so d/dsource is a scatter-add of `df_dout` through the same indices.
+/// Indices are integer data — no gradient flows into them.
+fn backward_gather(
     grad_map: &mut GradMap,
-    key: &Tensor,
     source: &Tensor,
-    direction: &RemapDirection,
+    indices: &Tensor,
     df_dout: &Tensor,
 ) -> Result<(), GradError> {
-    let _ = key;
-    let grad_source = match direction {
-        RemapDirection::Gather => Tensor::new_remap(
-            key.clone(),
-            df_dout.clone(),
-            RemapDirection::Scatter,
-            source.shape(),
-        ),
-        RemapDirection::Scatter => Tensor::new_remap(
-            key.clone(),
-            df_dout.clone(),
-            RemapDirection::Gather,
-            source.shape(),
-        ),
-    };
+    let grad_source = df_dout.scatter_rows(indices, source.shape()[0], ScatterOp::Add);
+    accumulate(grad_map, source, grad_source);
+    Ok(())
+}
+
+/// Scatter adjoint: each source row lands at `indices[i]`, so d/dsource is a
+/// gather of `df_dout` through the same indices. For `ScatterOp::Write` with
+/// duplicate indices this is a subgradient (all writers receive the adjoint of
+/// the surviving row).
+fn backward_scatter(
+    grad_map: &mut GradMap,
+    source: &Tensor,
+    indices: &Tensor,
+    df_dout: &Tensor,
+) -> Result<(), GradError> {
+    let grad_source = df_dout.gather_rows(indices);
     accumulate(grad_map, source, grad_source);
     Ok(())
 }

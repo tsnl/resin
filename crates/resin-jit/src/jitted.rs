@@ -106,6 +106,18 @@ mod tests {
             let n = self.shape.iter().product::<usize>().max(1);
             vec![0.0; if self.shape.is_empty() { 1 } else { n }]
         }
+
+        fn from_u32(shape: &[usize], values: &[u32]) -> Self {
+            assert_eq!(shape.iter().product::<usize>(), values.len());
+            Self {
+                shape: shape.into(),
+            }
+        }
+
+        fn to_u32(&self) -> Vec<u32> {
+            let n = self.shape.iter().product::<usize>().max(1);
+            vec![0; if self.shape.is_empty() { 1 } else { n }]
+        }
     }
 
     impl TestTensor {

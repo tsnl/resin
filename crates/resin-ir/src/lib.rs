@@ -14,5 +14,5 @@ pub use program::{
     IrProgram, IrReductionKernel, IrRemapKernel,
 };
 pub use refs::{BufferRef, BufferViewRef};
-pub use remap::{RemapGatherInfo, RemapInfo, RemapScatterInfo};
+pub use remap::RemapInfo;
 pub use rpn::{ElementRpnExpr, RpnAtom};

@@ -50,6 +50,24 @@ impl ConcreteTensor for WgpuTensor {
             .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
             .collect()
     }
+
+    fn from_u32(shape: &[usize], values: &[u32]) -> Self {
+        assert_eq!(shape.iter().product::<usize>(), values.len());
+        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        Self {
+            shape: shape.into(),
+            element_type: ElementType::U32,
+            bytes: bytes.into_boxed_slice(),
+        }
+    }
+
+    fn to_u32(&self) -> Vec<u32> {
+        assert_eq!(self.element_type, ElementType::U32);
+        self.bytes
+            .chunks_exact(4)
+            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
 }
 
 impl WgpuTensor {

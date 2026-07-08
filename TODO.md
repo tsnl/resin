@@ -56,17 +56,17 @@ user code.
 
 ### Phase 1: primitive breadth (dtypes, integer ops, gather/scatter)
 
-- [ ] **1.1 U32 end-to-end.** `ElementType::U32` in the DSL (IR already has
+- [x] **1.1 U32 end-to-end.** `ElementType::U32` in the DSL (IR already has
   `U4`); `constant_u32` / `iota`; typed CPU interpreter (element-kind aware
   RPN evaluation instead of f32-only).
-- [ ] **1.2 Element ops.** Bitwise (`&`, `|`, `^`, `<<`, `>>`), comparisons
+- [x] **1.2 Element ops.** Bitwise (`&`, `|`, `^`, `<<`, `>>`), comparisons
   (`eq/ne/lt/le/gt/ge` → 0/1 mask), `min`/`max`, `floor`/`sqrt`, value cast
   (`f32 ↔ u32`) and `bitcast`, library-level `select(mask, a, b)`. CPU + WGSL
   execution for all; adjoints where meaningful (compare/floor: zero grad).
-- [ ] **1.3 Slicing as views.** `Tensor::index` (slice/single keys) lowers to
+- [x] **1.3 Slicing as views.** `Tensor::index` (slice/single keys) lowers to
   a pure accessor view (offset arithmetic, no kernel); `scatter_index`
   (pad/embed into a larger zero tensor) lowers to a scatter-view kernel.
-- [ ] **1.4 Row gather/scatter.** `gather_rows(src, idx)` (`out[i,…] =
+- [x] **1.4 Row gather/scatter.** `gather_rows(src, idx)` (`out[i,…] =
   src[idx[i],…]`) and `scatter_rows(src, idx, len, op)` (`out[idx[i],…] ⊕=
   src[i,…]`, `⊕ ∈ {write, add, min, max}`) lowering to `IrRemapKernel`;
   execution on CPU and WGSL (u32 `atomicAdd`, f32 CAS loop for add);

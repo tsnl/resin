@@ -15,6 +15,7 @@ pub(crate) fn shape_u32(shape: &[usize]) -> Result<Box<[u32]>, CompileError> {
 pub(crate) fn map_element_type(element_type: DslElementType) -> Result<IrElementType, CompileError> {
     match element_type {
         DslElementType::F32 => Ok(IrElementType::F4),
+        DslElementType::U32 => Ok(IrElementType::U4),
     }
 }
 
@@ -22,8 +23,8 @@ pub(crate) fn map_element_operator(
     operator: ElementOperator,
 ) -> Result<resin_core::ElementOperator, CompileError> {
     use resin_core::{
-        BinaryAssocElementOperator, BinaryElementOperator, ElementOperator as IrOp,
-        UnaryElementOperator,
+        BinaryAssocElementOperator, BinaryBitwiseOperator, BinaryCompareOperator,
+        BinaryElementOperator, ElementOperator as IrOp, UnaryElementOperator,
     };
 
     match operator {
@@ -32,6 +33,10 @@ pub(crate) fn map_element_operator(
         ElementOperator::Exp => Ok(IrOp::Unary(UnaryElementOperator::Exp)),
         ElementOperator::Relu => Ok(IrOp::Unary(UnaryElementOperator::Relu)),
         ElementOperator::Abs => Ok(IrOp::Unary(UnaryElementOperator::Abs)),
+        ElementOperator::Sqrt => Ok(IrOp::Unary(UnaryElementOperator::Sqrt)),
+        ElementOperator::Floor => Ok(IrOp::Unary(UnaryElementOperator::Floor)),
+        ElementOperator::Cast => Ok(IrOp::Unary(UnaryElementOperator::Convert)),
+        ElementOperator::Bitcast => Ok(IrOp::Unary(UnaryElementOperator::Bitcast)),
         ElementOperator::Mul => Ok(IrOp::Binary(BinaryElementOperator::Assoc(
             BinaryAssocElementOperator::Mul,
         ))),
@@ -40,7 +45,24 @@ pub(crate) fn map_element_operator(
             BinaryAssocElementOperator::Add,
         ))),
         ElementOperator::Sub => Ok(IrOp::Binary(BinaryElementOperator::Sub)),
+        ElementOperator::Min => Ok(IrOp::Binary(BinaryElementOperator::Assoc(
+            BinaryAssocElementOperator::Min,
+        ))),
+        ElementOperator::Max => Ok(IrOp::Binary(BinaryElementOperator::Assoc(
+            BinaryAssocElementOperator::Max,
+        ))),
         ElementOperator::Pow => Ok(IrOp::Binary(BinaryElementOperator::Pow)),
+        ElementOperator::CmpEq => Ok(IrOp::Compare(BinaryCompareOperator::Eq)),
+        ElementOperator::CmpNe => Ok(IrOp::Compare(BinaryCompareOperator::Ne)),
+        ElementOperator::CmpLt => Ok(IrOp::Compare(BinaryCompareOperator::Lt)),
+        ElementOperator::CmpLe => Ok(IrOp::Compare(BinaryCompareOperator::Le)),
+        ElementOperator::CmpGt => Ok(IrOp::Compare(BinaryCompareOperator::Gt)),
+        ElementOperator::CmpGe => Ok(IrOp::Compare(BinaryCompareOperator::Ge)),
+        ElementOperator::BitAnd => Ok(IrOp::Bitwise(BinaryBitwiseOperator::Band)),
+        ElementOperator::BitOr => Ok(IrOp::Bitwise(BinaryBitwiseOperator::Bor)),
+        ElementOperator::BitXor => Ok(IrOp::Bitwise(BinaryBitwiseOperator::Bxor)),
+        ElementOperator::Shl => Ok(IrOp::Bitwise(BinaryBitwiseOperator::Shl)),
+        ElementOperator::Shr => Ok(IrOp::Bitwise(BinaryBitwiseOperator::Shr)),
         ElementOperator::Rem
         | ElementOperator::Matmul => Err(CompileError::UnsupportedOperator(operator)),
     }

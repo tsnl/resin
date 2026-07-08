@@ -42,7 +42,11 @@ pub enum UnaryElementOperator {
     Not,
     Floor,
     Ceil,
+    /// Reinterpret the operand's bits as the kernel output element type.
     Bitcast,
+    /// Numeric value conversion to the kernel output element type
+    /// (f32 → u32 truncates toward zero; u32 → f32 rounds to nearest).
+    Convert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

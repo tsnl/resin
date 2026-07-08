@@ -58,50 +58,46 @@ pub enum IrError {
         accessors: usize,
     },
 
-    // --- Remap: scatter ---
-    #[error("scatter with accessor requires one argument, got {got}")]
-    ScatterAccessorArgCount { got: usize },
+    #[error("remap ({info}) requires {expected} argument(s), got {got}")]
+    RemapArgCount {
+        info: &'static str,
+        expected: usize,
+        got: usize,
+    },
 
-    #[error("scatter accessor shape {accessor:?} != source shape {source_shape:?}")]
-    ScatterAccessorShape {
+    #[error("remap indices must be rank-1 U4, got shape {shape:?} element type {element_type:?}")]
+    RemapIndices {
+        shape: Box<[u32]>,
+        element_type: resin_core::ElementType,
+    },
+
+    #[error("remap indices length {indices} != source rows {rows}")]
+    RemapIndicesLen { indices: u32, rows: u32 },
+
+    #[error("remap source/output row shapes differ: source {source_shape:?}, output {output:?}")]
+    RemapRowShape {
+        source_shape: Box<[u32]>,
+        output: Box<[u32]>,
+    },
+
+    #[error("remap gather output rows {output} != indices length {indices}")]
+    RemapGatherRows { output: u32, indices: u32 },
+
+    #[error("remap source must have rank >= 1")]
+    RemapSourceRankZero,
+
+    #[error("scatter_view accessor shape {accessor:?} != source shape {source_shape:?}")]
+    ScatterViewShape {
         accessor: Box<[u32]>,
         source_shape: Box<[u32]>,
     },
 
-    #[error("scatter without accessor requires two arguments, got {got}")]
-    ScatterArgCount { got: usize },
+    #[error("remap scatter kernels must clear their output before dispatch")]
+    RemapScatterMustClear,
 
-    #[error("scatter indices trailing dim {trailing} must match output rank {output_rank}")]
-    ScatterIndicesTrailing { trailing: u32, output_rank: usize },
-
-    #[error("scatter indices/source batch shape mismatch")]
-    ScatterBatchShape,
-
-    // --- Remap: gather ---
-    #[error("gather with implicit source requires one argument, got {got}")]
-    GatherImplicitArgCount { got: usize },
-
-    #[error("gather with accessor requires two arguments, got {got}")]
-    GatherAccessorArgCount { got: usize },
-
-    #[error("gather indices trailing dim {trailing} must match accessor rank {accessor_rank}")]
-    GatherIndicesTrailing { trailing: u32, accessor_rank: usize },
-
-    #[error("gather indices/source batch shape mismatch")]
-    GatherBatchShape,
-
-    #[error("gather accessor shape {accessor:?} != source_shape {source_shape:?}")]
-    GatherAccessorSourceShape {
-        accessor: Box<[u32]>,
-        source_shape: Box<[u32]>,
-    },
-
-    #[error(
-        "invalid RemapGatherInfo: accessor present={has_accessor}, source_shape present={has_source_shape}"
-    )]
-    InvalidGatherInfo {
-        has_accessor: bool,
-        has_source_shape: bool,
+    #[error("remap scatter operator {operator:?} not supported")]
+    RemapScatterOperator {
+        operator: resin_core::BinaryAssocElementOperator,
     },
 
     // --- Program ---

@@ -12,10 +12,10 @@ use std::collections::HashMap;
 use resin_core::{
     c_contiguous_pitch_for_shape, shape_join, Accessor, BinaryAssocElementOperator, Tree,
 };
-use resin_dsl::{ElementOperator, Tensor, TensorKind};
+use resin_dsl::{ElementOperator, IndexKeyElement, ScatterOp, Tensor, TensorKind};
 use resin_ir::{
     BufferRef, BufferViewRef, IrBuffer, IrBufferView, IrDispatch, IrElementwiseRpnKernel,
-    IrKernel, IrMatmulKernel, IrProgram, IrReductionKernel,
+    IrKernel, IrMatmulKernel, IrProgram, IrReductionKernel, IrRemapKernel, RemapInfo,
 };
 
 use crate::error::{tensor_kind_name, CompileError};
@@ -95,6 +95,10 @@ impl ProgramBuilder {
             TensorKind::Squeeze { arg, axes } => {
                 let (buffer, arg_acc) = self.resolve_view(arg)?;
                 Ok((buffer, arg_acc.squeeze(axes)?))
+            }
+            TensorKind::Index { arg, key } => {
+                let (buffer, arg_acc) = self.resolve_view(arg)?;
+                Ok((buffer, compose_index(&arg_acc, key)?))
             }
             _ => {
                 let buffer = self.buffer_for_tensor(tensor)?;
@@ -207,13 +211,78 @@ impl ProgramBuilder {
                     output_buffer_index: BufferRef::new(self.buffers.len()),
                 })
             }
+            TensorKind::Gather { source, indices } => {
+                let arg_views = vec![
+                    self.view_for_tensor(source)?,
+                    self.view_for_tensor(indices)?,
+                ];
+                Some(IrDispatch {
+                    kernel: IrKernel::Remap(IrRemapKernel {
+                        arg_accessors: self.arg_accessors(&arg_views)?,
+                        arg_element_types: self
+                            .arg_element_types(&[source.clone(), indices.clone()])?,
+                        element_type,
+                        shape: shape.clone(),
+                        info: RemapInfo::GatherRows,
+                        clear_output_before_dispatch: false,
+                    }),
+                    arg_view_indices: arg_views,
+                    output_buffer_index: BufferRef::new(self.buffers.len()),
+                })
+            }
+            TensorKind::Scatter {
+                source,
+                indices,
+                op,
+            } => {
+                let arg_views = vec![
+                    self.view_for_tensor(source)?,
+                    self.view_for_tensor(indices)?,
+                ];
+                let operator = match op {
+                    ScatterOp::Write => None,
+                    ScatterOp::Add => Some(BinaryAssocElementOperator::Add),
+                };
+                Some(IrDispatch {
+                    kernel: IrKernel::Remap(IrRemapKernel {
+                        arg_accessors: self.arg_accessors(&arg_views)?,
+                        arg_element_types: self
+                            .arg_element_types(&[source.clone(), indices.clone()])?,
+                        element_type,
+                        shape: shape.clone(),
+                        info: RemapInfo::ScatterRows { operator },
+                        clear_output_before_dispatch: true,
+                    }),
+                    arg_view_indices: arg_views,
+                    output_buffer_index: BufferRef::new(self.buffers.len()),
+                })
+            }
+            TensorKind::ScatterIndex {
+                source,
+                key,
+                target_shape,
+            } => {
+                let arg_views = vec![self.view_for_tensor(source)?];
+                let target_shape = shape_u32(target_shape)?;
+                let accessor = region_accessor(&target_shape, key);
+                Some(IrDispatch {
+                    kernel: IrKernel::Remap(IrRemapKernel {
+                        arg_accessors: self.arg_accessors(&arg_views)?,
+                        arg_element_types: self.arg_element_types(std::slice::from_ref(source))?,
+                        element_type,
+                        shape: shape.clone(),
+                        info: RemapInfo::ScatterView { accessor },
+                        clear_output_before_dispatch: true,
+                    }),
+                    arg_view_indices: arg_views,
+                    output_buffer_index: BufferRef::new(self.buffers.len()),
+                })
+            }
             TensorKind::Broadcast { .. }
             | TensorKind::Transpose { .. }
-            | TensorKind::Squeeze { .. } => {
+            | TensorKind::Squeeze { .. }
+            | TensorKind::Index { .. } => {
                 unreachable!("view ops are handled in resolve_view")
-            }
-            kind => {
-                return Err(CompileError::UnsupportedTensorKind(tensor_kind_name(kind)));
             }
         };
 
@@ -283,7 +352,54 @@ fn is_view_op(kind: &TensorKind) -> bool {
         TensorKind::Broadcast { .. }
             | TensorKind::Transpose { .. }
             | TensorKind::Squeeze { .. }
+            | TensorKind::Index { .. }
     )
+}
+
+/// Compose a static index key onto an accessor: pure offset/shape arithmetic,
+/// no kernel. `Single` keeps a size-1 axis (rank is preserved).
+fn compose_index(
+    arg_acc: &Accessor,
+    key: &[IndexKeyElement],
+) -> Result<Accessor, CompileError> {
+    debug_assert_eq!(key.len(), arg_acc.rank(), "index key covers every axis");
+    let mut offset = arg_acc.offset;
+    let mut shape = Vec::with_capacity(key.len());
+    for (axis, element) in key.iter().enumerate() {
+        let (start, len) = match element {
+            IndexKeyElement::Single(i) => (*i, 1usize),
+            IndexKeyElement::Slice(range) => (range.start, range.end - range.start),
+        };
+        offset += u32::try_from(start)
+            .map_err(|_| CompileError::ShapeOverflow(start))?
+            * arg_acc.pitch[axis];
+        shape.push(u32::try_from(len).map_err(|_| CompileError::ShapeOverflow(len))?);
+    }
+    Ok(Accessor {
+        offset,
+        shape: shape.into(),
+        pitch: arg_acc.pitch.clone(),
+    })
+}
+
+/// Accessor addressing the `key` region of a dense buffer with `target_shape`.
+fn region_accessor(target_shape: &[u32], key: &[IndexKeyElement]) -> Accessor {
+    let pitch = c_contiguous_pitch_for_shape(target_shape);
+    let mut offset = 0u32;
+    let mut shape = Vec::with_capacity(key.len());
+    for (axis, element) in key.iter().enumerate() {
+        let (start, len) = match element {
+            IndexKeyElement::Single(i) => (*i, 1usize),
+            IndexKeyElement::Slice(range) => (range.start, range.end - range.start),
+        };
+        offset += start as u32 * pitch[axis];
+        shape.push(len as u32);
+    }
+    Accessor {
+        offset,
+        shape: shape.into(),
+        pitch,
+    }
 }
 
 /// Explicit-axis broadcast (`axes[i]` = output axis for source axis `i`).
