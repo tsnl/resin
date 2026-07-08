@@ -1,0 +1,5 @@
+[submodule "data/hf/dylanebert-3dgs"]
+	path = data/hf/dylanebert-3dgs
+	url = https://huggingface.co/datasets/dylanebert/3dgs
+	shallow = true
+	ignore = dirty
