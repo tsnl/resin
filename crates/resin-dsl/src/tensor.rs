@@ -2,7 +2,7 @@ use super::*;
 use arrayvec::ArrayVec;
 use paste::paste;
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     hash::Hash,
     ops::{Add, Div, Mul, Neg, Range, Rem, Sub},
     sync::Arc,
@@ -58,14 +58,34 @@ pub enum TensorKind {
         source: Tensor,
         direction: RemapDirection,
     },
+    Broadcast {
+        arg: Tensor,
+        target_shape: Box<[usize]>,
+        axes: Box<[usize]>,
+    },
+    ScatterIndex {
+        source: Tensor,
+        key: Box<[IndexKeyElement]>,
+        target_shape: Box<[usize]>,
+    },
+    Transpose {
+        arg: Tensor,
+    },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ElementType {
     F32,
 }
+impl ElementType {
+    pub fn nbytes(&self) -> usize {
+        match self {
+            ElementType::F32 => 4,
+        }
+    }
+}
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ElementOperator {
     // Unary
     Neg,
@@ -87,11 +107,13 @@ pub enum ElementOperator {
 type ElementwiseArgs = ArrayVec<Tensor, MAX_ELEMENTWISE_ARGS>;
 const MAX_ELEMENTWISE_ARGS: usize = 2;
 
+#[derive(Clone)]
 pub enum IndexKeyElement {
     Single(usize),
     Slice(Range<usize>),
 }
 
+#[derive(Clone, Copy)]
 pub enum RemapDirection {
     Gather,  // output := source[key]
     Scatter, // output[key] := source
@@ -109,6 +131,75 @@ impl From<Arc<TensorInner>> for Tensor {
 impl From<TensorInner> for Tensor {
     fn from(inner: TensorInner) -> Self {
         Tensor::from(Arc::new(inner))
+    }
+}
+
+impl Tensor {
+    pub fn shape(&self) -> &[usize] {
+        &self.inner.shape
+    }
+    pub fn kind(&self) -> &TensorKind {
+        &self.inner.kind
+    }
+    pub fn element_type(&self) -> ElementType {
+        self.inner.element_type
+    }
+}
+
+impl Tensor {
+    pub fn zeros(shape: &[usize], element_type: ElementType) -> Self {
+        let nbytes = shape.iter().product::<usize>() * element_type.nbytes();
+        Tensor::from(TensorInner {
+            element_type,
+            shape: shape.into(),
+            kind: TensorKind::Constant {
+                bytes: vec![0u8; nbytes].into_boxed_slice(),
+            },
+        })
+    }
+    pub fn zeros_like(&self) -> Self {
+        Tensor::zeros(self.shape(), self.element_type())
+    }
+    pub fn ones_like(&self) -> Self {
+        Self::full(self.shape(), 1.0, self.element_type())
+    }
+    pub(crate) fn full_like(&self, value: f32) -> Self {
+        Self::full(self.shape(), value, self.element_type())
+    }
+    #[cfg(test)]
+    pub(crate) fn constant_f32(shape: &[usize], values: &[f32]) -> Self {
+        assert_eq!(
+            shape.iter().product::<usize>(),
+            values.len(),
+            "constant_f32: shape/values length mismatch"
+        );
+        let mut data = Vec::with_capacity(values.len() * ElementType::F32.nbytes());
+        for &value in values {
+            data.extend_from_slice(&f32::to_le_bytes(value));
+        }
+        Tensor::from(TensorInner {
+            element_type: ElementType::F32,
+            shape: shape.into(),
+            kind: TensorKind::Constant {
+                bytes: data.into_boxed_slice(),
+            },
+        })
+    }
+
+    pub(crate) fn full(shape: &[usize], value: f32, element_type: ElementType) -> Self {
+        let count = shape.iter().product::<usize>();
+        let bytes = f32::to_le_bytes(value);
+        let mut data = Vec::with_capacity(count * element_type.nbytes());
+        for _ in 0..count {
+            data.extend_from_slice(&bytes);
+        }
+        Tensor::from(TensorInner {
+            element_type,
+            shape: shape.into(),
+            kind: TensorKind::Constant {
+                bytes: data.into_boxed_slice(),
+            },
+        })
     }
 }
 
@@ -187,6 +278,99 @@ impl Tensor {
     pub fn matmul(&self, rhs: &Self) -> Self {
         self.new_elementwise(ElementOperator::Matmul, [rhs.clone()])
     }
+    pub fn transpose(&self) -> Self {
+        let shape = self.shape();
+        assert_eq!(shape.len(), 2, "transpose requires a rank-2 tensor");
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: Box::from([shape[1], shape[0]]),
+            kind: TensorKind::Transpose { arg: self.clone() },
+        })
+    }
+
+    pub(crate) fn broadcast_to(&self, target_shape: &[usize], axes: &[usize]) -> Self {
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: target_shape.into(),
+            kind: TensorKind::Broadcast {
+                arg: self.clone(),
+                target_shape: target_shape.into(),
+                axes: axes.into(),
+            },
+        })
+    }
+
+    pub(crate) fn scatter_index(&self, target_shape: &[usize], key: &[IndexKeyElement]) -> Self {
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: target_shape.into(),
+            kind: TensorKind::ScatterIndex {
+                source: self.clone(),
+                key: key.into(),
+                target_shape: target_shape.into(),
+            },
+        })
+    }
+
+    pub(crate) fn new_remap(
+        key: Tensor,
+        source: Tensor,
+        direction: RemapDirection,
+        shape: &[usize],
+    ) -> Self {
+        Tensor::from(TensorInner {
+            element_type: source.element_type(),
+            shape: shape.into(),
+            kind: TensorKind::Remap {
+                key,
+                source,
+                direction,
+            },
+        })
+    }
+
+    pub(crate) fn new_index(arg: Tensor, key: &[IndexKeyElement]) -> Self {
+        let shape = index_output_shape(arg.shape(), key);
+        Tensor::from(TensorInner {
+            element_type: arg.element_type(),
+            shape,
+            kind: TensorKind::Index {
+                arg,
+                key: key.into(),
+            },
+        })
+    }
+
+    pub(crate) fn sum_axes(&self, axes: &[usize]) -> Self {
+        let shape = reduction_output_shape(self.shape(), axes);
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape,
+            kind: TensorKind::Reduction {
+                operator: ElementOperator::Add,
+                axes: axes.into(),
+                arg: self.clone(),
+            },
+        })
+    }
+}
+
+fn index_output_shape(_arg_shape: &[usize], key: &[IndexKeyElement]) -> Box<[usize]> {
+    key.iter()
+        .map(|element| match element {
+            IndexKeyElement::Single(_) => 1,
+            IndexKeyElement::Slice(range) => range.end - range.start,
+        })
+        .collect()
+}
+
+fn reduction_output_shape(arg_shape: &[usize], axes: &[usize]) -> Box<[usize]> {
+    let mut axes: HashSet<usize> = axes.iter().copied().collect();
+    arg_shape
+        .iter()
+        .enumerate()
+        .map(|(axis, &dim)| if axes.remove(&axis) { 1 } else { dim })
+        .collect()
 }
 
 //
@@ -194,7 +378,7 @@ impl Tensor {
 //
 
 impl Tensor {
-    fn data_dependencies(&self) -> Vec<Tensor> {
+    pub(crate) fn data_dependencies(&self) -> Vec<Tensor> {
         match &self.inner.kind {
             TensorKind::Constant { .. } => Vec::default(),
             TensorKind::Parameter => Vec::default(),
@@ -204,21 +388,71 @@ impl Tensor {
             TensorKind::Remap { key, source, .. } => {
                 vec![key.clone(), source.clone()]
             }
+            TensorKind::Broadcast { arg, .. } => vec![arg.clone()],
+            TensorKind::ScatterIndex { source, .. } => vec![source.clone()],
+            TensorKind::Transpose { arg } => vec![arg.clone()],
         }
     }
-    pub fn detect_cyclic_dependencies(roots: &[Tensor]) -> bool {
-        let mut visited = HashSet::with_capacity(roots.len());
-        let mut queue = VecDeque::from(roots.to_vec());
-        while let Some(tensor) = queue.pop_front() {
-            let newly_inserted = visited.insert(tensor.clone());
-            if !newly_inserted {
-                // Same tensor was already visited, so we have a cycle.
-                return true;
-            }
-            for dep in tensor.data_dependencies() {
-                queue.push_back(dep);
-            }
+    /// Post-order traversal of the subgraph reachable from `self` (inputs before outputs).
+    pub(crate) fn toposort(&self) -> Result<Vec<Tensor>, CyclicGraph> {
+        let mut order = Vec::new();
+        let mut visited = HashSet::new();
+        let mut stack = HashSet::new();
+        Self::collect_postorder(self, &mut order, &mut visited, &mut stack)?;
+        Ok(order)
+    }
+
+    fn collect_postorder(
+        node: &Tensor,
+        order: &mut Vec<Tensor>,
+        visited: &mut HashSet<Tensor>,
+        stack: &mut HashSet<Tensor>,
+    ) -> Result<(), CyclicGraph> {
+        if visited.contains(node) {
+            return Ok(());
         }
-        false
+        if !stack.insert(node.clone()) {
+            return Err(CyclicGraph);
+        }
+        for dep in node.data_dependencies() {
+            Self::collect_postorder(&dep, order, visited, stack)?;
+        }
+        stack.remove(node);
+        visited.insert(node.clone());
+        order.push(node.clone());
+        Ok(())
     }
 }
+
+#[cfg(test)]
+impl Tensor {
+    pub(crate) fn parameter(shape: &[usize]) -> Self {
+        Tensor::from(TensorInner {
+            element_type: ElementType::F32,
+            shape: shape.into(),
+            kind: TensorKind::Parameter,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toposort_allows_shared_operands() {
+        let a = Tensor::parameter(&[]);
+        let loss = a.clone() + a.clone();
+        assert!(loss.toposort().is_ok());
+    }
+
+    #[test]
+    fn zeros_respects_element_type() {
+        let tensor = Tensor::zeros(&[2, 3], ElementType::F32);
+        assert_eq!(tensor.element_type(), ElementType::F32);
+    }
+}
+
+/// The tensor dependency graph contains a cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CyclicGraph;

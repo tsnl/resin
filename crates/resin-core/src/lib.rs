@@ -9,4 +9,4 @@ pub use arrayvec;
 pub use paste;
 
 // Export common collections
-pub use hashbrown::{HashMap, HashSet};
+pub use hashbrown::{HashMap, HashSet, hash_map};
