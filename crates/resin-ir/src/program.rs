@@ -146,6 +146,20 @@ impl IrKernel {
             IrKernel::Remap(k) => k.validate(),
         }
     }
+
+    pub fn as_matmul(&self) -> Option<&IrMatmulKernel> {
+        match self {
+            IrKernel::Matmul(k) => Some(k),
+            _ => None,
+        }
+    }
+
+    pub fn as_reduction(&self) -> Option<&IrReductionKernel> {
+        match self {
+            IrKernel::Reduction(k) => Some(k),
+            _ => None,
+        }
+    }
 }
 
 impl IrElementwiseRpnKernel {
@@ -483,21 +497,5 @@ mod tests {
             clear_output_before_dispatch: false,
         });
         kernel.validate().unwrap();
-    }
-}
-
-impl IrKernel {
-    pub fn as_matmul(&self) -> Option<&IrMatmulKernel> {
-        match self {
-            IrKernel::Matmul(k) => Some(k),
-            _ => None,
-        }
-    }
-
-    pub fn as_reduction(&self) -> Option<&IrReductionKernel> {
-        match self {
-            IrKernel::Reduction(k) => Some(k),
-            _ => None,
-        }
     }
 }

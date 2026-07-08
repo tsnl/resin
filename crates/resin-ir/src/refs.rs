@@ -44,14 +44,13 @@ impl RefIndex for BufferViewRef {
     }
 }
 
-pub(crate) fn validate_tree_indices<T, R: RefIndex>(
+pub(crate) fn validate_tree_indices<T, R: RefIndex + Copy>(
     tree: &T,
     len: usize,
     kind: &str,
 ) -> Result<(), String>
 where
     T: Tree<R>,
-    R: Copy,
 {
     let mut error = None;
     tree.for_each_leaf(|r| {

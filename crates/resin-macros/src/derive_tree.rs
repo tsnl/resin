@@ -1,18 +1,17 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Fields, Generics, Ident, ItemEnum, ItemStruct, Type, parse_quote};
+use syn::{Fields, Generics, Ident, Index, ItemEnum, ItemStruct, Type, parse_quote};
 
 pub fn main(item: TokenStream) -> TokenStream {
     let item: syn::Item = match syn::parse(item.into()) {
         Ok(item) => item,
-        Err(err) => return err.to_compile_error().into(),
+        Err(err) => return err.to_compile_error(),
     };
     match item {
         syn::Item::Struct(s) => derive_struct(s),
         syn::Item::Enum(e) => derive_enum(e),
         _ => syn::Error::new_spanned(item, "#[derive(Tree)] requires struct or enum")
-            .to_compile_error()
-            .into(),
+            .to_compile_error(),
     }
 }
 
@@ -22,8 +21,7 @@ fn leaf_generics(generics: &Generics, span: proc_macro2::Span) -> Result<(Ident,
         (Some(tp), None) => tp.ident.clone(),
         _ => {
             return Err(syn::Error::new(span, "derive Tree requires exactly one type parameter")
-                .to_compile_error()
-                .into());
+                .to_compile_error());
         }
     };
 
@@ -75,7 +73,8 @@ fn map_fields(fields: &Fields, leaf: &Ident, from_self: bool) -> TokenStream {
         Fields::Unnamed(unnamed) => {
             let mapped = unnamed.unnamed.iter().enumerate().map(|(i, field)| {
                 let value = if from_self {
-                    quote! { &self.#i }
+                    let index = Index::from(i);
+                    quote! { &self.#index }
                 } else {
                     let binding = Ident::new(&format!("__f{i}"), proc_macro2::Span::call_site());
                     quote! { #binding }
@@ -132,7 +131,8 @@ fn visit_fields(fields: &Fields, leaf: &Ident, from_self: bool) -> TokenStream {
         Fields::Unnamed(unnamed) => {
             let visited = unnamed.unnamed.iter().enumerate().map(|(i, field)| {
                 let value = if from_self {
-                    quote! { &self.#i }
+                    let index = Index::from(i);
+                    quote! { &self.#index }
                 } else {
                     let binding = Ident::new(&format!("__f{i}"), proc_macro2::Span::call_site());
                     quote! { #binding }
@@ -178,7 +178,7 @@ fn derive_struct(item: ItemStruct) -> TokenStream {
     let name = &item.ident;
     let map_body = container(name, None, &item.fields, map_fields(&item.fields, &leaf, true));
     let visit_body = visit_fields(&item.fields, &leaf, true);
-    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, map_body, visit_body).into()
+    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, map_body, visit_body)
 }
 
 fn derive_enum(item: ItemEnum) -> TokenStream {
@@ -205,5 +205,5 @@ fn derive_enum(item: ItemEnum) -> TokenStream {
 
     let map_body = quote! { match self { #(#map_arms,)* } };
     let visit_body = quote! { match self { #(#visit_arms,)* } };
-    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, map_body, visit_body).into()
+    tree_impl(name, &leaf, &impl_g, &ty_g, where_g, map_body, visit_body)
 }

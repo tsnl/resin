@@ -51,6 +51,9 @@ mod tests {
         Pair { a: T, b: T },
     }
 
+    #[derive(Tree)]
+    struct TupleNode<T>(T, Vec<T>);
+
     #[test]
     fn map_doubles_leaves() {
         let tree = TestNode {
@@ -75,6 +78,19 @@ mod tests {
             x: 1,
             y: vec![2, 3],
         };
+        let mut leaves = Vec::new();
+        tree.for_each_leaf(|v| leaves.push(*v));
+        leaves.sort_unstable();
+        assert_eq!(leaves, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn tuple_struct_maps_and_visits() {
+        let tree = TupleNode(1, vec![2, 3]);
+        let mapped = tree.map(|&v| v * 2);
+        assert_eq!(mapped.0, 2);
+        assert_eq!(mapped.1, vec![4, 6]);
+
         let mut leaves = Vec::new();
         tree.for_each_leaf(|v| leaves.push(*v));
         leaves.sort_unstable();
