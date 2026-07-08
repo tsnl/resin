@@ -112,6 +112,7 @@ pub enum ElementOperator {
     Abs,
     Sqrt,
     Floor,
+    Ceil,
     /// Numeric value conversion to the node's element type.
     Cast,
     /// Bit reinterpretation as the node's element type.
@@ -308,7 +309,7 @@ impl Tensor {
         let shape = if operator == ElementOperator::Matmul {
             matmul_output_shape(self.shape(), args[1].shape())
         } else {
-            self.inner.shape.clone()
+            elementwise_output_shape(&args, operator)
         };
 
         Tensor::from(TensorInner {
@@ -330,6 +331,34 @@ impl Tensor {
             },
         })
     }
+}
+
+/// NumPy trailing-align broadcast join of all operand shapes. Lowering
+/// expands each operand's accessor to this shape (pitch-0 views, no copies).
+fn elementwise_output_shape(args: &[Tensor], operator: ElementOperator) -> Box<[usize]> {
+    let rank = args
+        .iter()
+        .map(|arg| arg.shape().len())
+        .max()
+        .unwrap_or(0);
+    let mut shape = vec![1usize; rank];
+    for arg in args {
+        let arg_shape = arg.shape();
+        let pad = rank - arg_shape.len();
+        for (i, &dim) in arg_shape.iter().enumerate() {
+            let idx = pad + i;
+            if shape[idx] == 1 {
+                shape[idx] = dim;
+            } else {
+                assert!(
+                    dim == 1 || dim == shape[idx],
+                    "elementwise {operator:?}: incompatible operand shapes \
+                     ({arg_shape:?} vs joined {shape:?})",
+                );
+            }
+        }
+    }
+    shape.into()
 }
 
 fn matmul_output_shape(lhs: &[usize], rhs: &[usize]) -> Box<[usize]> {
@@ -407,6 +436,9 @@ impl Tensor {
     }
     pub fn floor(&self) -> Self {
         self.new_elementwise(ElementOperator::Floor, [])
+    }
+    pub fn ceil(&self) -> Self {
+        self.new_elementwise(ElementOperator::Ceil, [])
     }
     pub fn pow(&self, rhs: &Self) -> Self {
         self.new_elementwise(ElementOperator::Pow, [rhs.clone()])

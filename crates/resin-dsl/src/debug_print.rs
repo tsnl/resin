@@ -199,6 +199,7 @@ fn operator_name(operator: ElementOperator) -> &'static str {
         ElementOperator::Abs => "abs",
         ElementOperator::Sqrt => "sqrt",
         ElementOperator::Floor => "floor",
+        ElementOperator::Ceil => "ceil",
         ElementOperator::Cast => "cast",
         ElementOperator::Bitcast => "bitcast",
         ElementOperator::Pow => "pow",

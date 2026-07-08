@@ -35,6 +35,7 @@ pub(crate) fn map_element_operator(
         ElementOperator::Abs => Ok(IrOp::Unary(UnaryElementOperator::Abs)),
         ElementOperator::Sqrt => Ok(IrOp::Unary(UnaryElementOperator::Sqrt)),
         ElementOperator::Floor => Ok(IrOp::Unary(UnaryElementOperator::Floor)),
+        ElementOperator::Ceil => Ok(IrOp::Unary(UnaryElementOperator::Ceil)),
         ElementOperator::Cast => Ok(IrOp::Unary(UnaryElementOperator::Convert)),
         ElementOperator::Bitcast => Ok(IrOp::Unary(UnaryElementOperator::Bitcast)),
         ElementOperator::Mul => Ok(IrOp::Binary(BinaryElementOperator::Assoc(

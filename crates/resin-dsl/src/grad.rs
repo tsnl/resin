@@ -264,6 +264,7 @@ fn backward_elementwise(
         }
         // Piecewise-constant and integer ops: zero gradient, no propagation.
         ElementOperator::Floor
+        | ElementOperator::Ceil
         | ElementOperator::Cast
         | ElementOperator::Bitcast
         | ElementOperator::CmpEq
