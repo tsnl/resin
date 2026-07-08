@@ -1,3 +1,13 @@
+[package]
+name = "resin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+resin-core = { path = "crates/resin-core" }
+resin-dsl = { path = "crates/resin-dsl" }
+resin-macros = { path = "crates/resin-macros" }
+
 [workspace]
 members = ["crates/*"]
 resolver = "3"

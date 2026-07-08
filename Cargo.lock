@@ -62,6 +62,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "resin"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
+ "resin-macros",
+]
+
+[[package]]
 name = "resin-core"
 version = "0.1.0"
 dependencies = [
