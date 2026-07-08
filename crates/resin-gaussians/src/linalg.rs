@@ -89,15 +89,21 @@ fn rotmat_rows(w: &Tensor, x: &Tensor, y: &Tensor, z: &Tensor) -> [[Tensor; 3]; 
     ]
 }
 
-/// `m · [x, y, z, 1]` for a host 4×4 matrix over `[N]` coordinate columns.
-pub(crate) fn transform_point(
-    m: &[[f32; 4]; 4],
-    x: &Tensor,
-    y: &Tensor,
-    z: &Tensor,
-) -> [Tensor; 4] {
+/// Element `[r, c]` of a `[4, 4]` matrix tensor as a rank-0 view.
+pub(crate) fn mat_elem(m: &Tensor, r: usize, c: usize) -> Tensor {
+    m.index(&[IndexKeyElement::Single(r), IndexKeyElement::Single(c)])
+        .squeeze_all()
+}
+
+/// `m · [x, y, z, 1]` for a `[4, 4]` matrix *tensor* over `[N]` coordinate
+/// columns. Matrix elements are rank-0 views, so a camera passed as a JIT
+/// parameter costs no recompilation to move.
+pub(crate) fn transform_point(m: &Tensor, x: &Tensor, y: &Tensor, z: &Tensor) -> [Tensor; 4] {
     let row = |r: usize| -> Tensor {
-        x.clone() * sc(m[r][0]) + y.clone() * sc(m[r][1]) + z.clone() * sc(m[r][2]) + sc(m[r][3])
+        x.clone() * mat_elem(m, r, 0)
+            + y.clone() * mat_elem(m, r, 1)
+            + z.clone() * mat_elem(m, r, 2)
+            + mat_elem(m, r, 3)
     };
     [row(0), row(1), row(2), row(3)]
 }

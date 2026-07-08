@@ -9,7 +9,7 @@ use resin_dsl::Tensor;
 
 use crate::camera::Camera;
 use crate::cloud::GaussianCloud;
-use crate::linalg::{col, sc, scale_rot_to_cov3d, transform_point};
+use crate::linalg::{col, mat_elem, sc, scale_rot_to_cov3d, transform_point};
 
 /// Screen-space per-gaussian attributes, all `[N]` except `color` (`[N, 3]`).
 pub struct Preprocessed {
@@ -29,23 +29,43 @@ pub struct Preprocessed {
     pub valid: Tensor,
 }
 
+/// Constant-camera convenience wrapper over [`preprocess_view`].
 pub fn preprocess(cloud: &GaussianCloud<Tensor>, camera: &Camera) -> Preprocessed {
-    let width = camera.width as f32;
-    let height = camera.height as f32;
+    let (view, proj) = camera.matrix_constants();
+    preprocess_view(cloud, &view, &proj, camera.width, camera.height)
+}
+
+/// Preprocess with the camera as *graph inputs*: `view` and `proj` are
+/// `[4, 4]` tensors (parameters or constants). Passing them as JIT parameters
+/// lets a compiled renderer move the camera every call with zero
+/// recompilation — the basis for the interactive viewer and multi-view
+/// training. Image dimensions stay compile-time (they fix output shapes).
+pub fn preprocess_view(
+    cloud: &GaussianCloud<Tensor>,
+    view: &Tensor,
+    proj: &Tensor,
+    width: usize,
+    height: usize,
+) -> Preprocessed {
+    assert_eq!(view.shape(), &[4, 4], "view must be a [4,4] tensor");
+    assert_eq!(proj.shape(), &[4, 4], "proj must be a [4,4] tensor");
+    let width = width as f32;
+    let height = height as f32;
 
     let mx = col(&cloud.means, 0);
     let my = col(&cloud.means, 1);
     let mz = col(&cloud.means, 2);
 
-    let cam = transform_point(&camera.view, &mx, &my, &mz);
-    let clip = transform_point(&camera.proj, &cam[0], &cam[1], &cam[2]);
+    let cam = transform_point(view, &mx, &my, &mz);
+    let clip = transform_point(proj, &cam[0], &cam[1], &cam[2]);
 
     let w_ok = clip[3].abs().cmp_gt(&sc(1e-8));
     let w_safe = w_ok.select(&clip[3], &sc(1.0));
     let ndc_x = clip[0].clone() / w_safe.clone();
     let ndc_y = clip[1].clone() / w_safe;
     let mean_px = (ndc_x * sc(0.5) + sc(0.5)) * sc(width);
-    let mean_py = (ndc_y * sc(0.5) + sc(0.5)) * sc(height);
+    // NDC y is up; pixel rows count down.
+    let mean_py = (sc(0.5) - ndc_y * sc(0.5)) * sc(height);
 
     let depth = cam[2].clone();
     let mut valid = depth.cmp_gt(&sc(1e-4));
@@ -55,14 +75,14 @@ pub fn preprocess(cloud: &GaussianCloud<Tensor>, camera: &Camera) -> Preprocesse
 
     // EWA projection of the 3D covariance to a 2D conic.
     let [c00, c01, c02, c11, c12, c22] = scale_rot_to_cov3d(&cloud.scales, &cloud.quats);
-    let fx = camera.focal_x();
-    let fy = camera.focal_y();
+    let fx = mat_elem(proj, 0, 0);
+    let fy = mat_elem(proj, 1, 1);
     let tz_inv = sc(1.0) / tz;
     let tz2_inv = tz_inv.clone() * tz_inv.clone();
-    let j00 = tz_inv.clone() * sc(fx);
-    let j02 = cam[0].clone() * tz2_inv.clone() * sc(-fx);
-    let j11 = tz_inv * sc(fy);
-    let j12 = cam[1].clone() * tz2_inv * sc(-fy);
+    let j00 = tz_inv.clone() * fx.clone();
+    let j02 = cam[0].clone() * tz2_inv.clone() * (-fx);
+    let j11 = tz_inv * fy.clone();
+    let j12 = cam[1].clone() * tz2_inv * (-fy);
 
     let t00 = j00.clone() * c00 + j02.clone() * c02.clone();
     let t01 = j00.clone() * c01 + j02.clone() * c12.clone();

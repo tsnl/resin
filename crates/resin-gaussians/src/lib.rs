@@ -14,14 +14,20 @@
 //! restores locality with the same combinators — see TODO.md.
 
 mod camera;
+mod chunked;
 mod cloud;
 mod linalg;
+pub mod ply;
 mod preprocess;
 mod reference;
 mod render;
+mod train;
 
 pub use camera::Camera;
+pub use chunked::{chunked_renderer, ChunkState, ScreenAttrs};
+pub use ply::{load_ply, read_ply, PlyError};
 pub use cloud::{gnomen_cloud, CloudData, GaussianCloud};
-pub use preprocess::{preprocess, Preprocessed};
+pub use preprocess::{preprocess, preprocess_view, Preprocessed};
 pub use reference::render_reference;
-pub use render::render;
+pub use render::{render, render_view, RenderScene};
+pub use train::{activate, mse, sgd_step, sigmoid, RawGaussianCloud, SgdRates, TrainStep};

@@ -70,7 +70,8 @@ fn preprocess_one(data: &CloudData, camera: &Camera, i: usize) -> PreGaussian {
     let clip = mat4_mul_point4(&camera.proj, cam);
     let cw = if clip[3].abs() > 1e-8 { clip[3] } else { 1.0 };
     let px = (clip[0] / cw * 0.5 + 0.5) * w;
-    let py = (clip[1] / cw * 0.5 + 0.5) * h;
+    // NDC y is up; pixel rows count down.
+    let py = (0.5 - clip[1] / cw * 0.5) * h;
     let depth = cam[2];
 
     let mut valid = depth > 1e-4;

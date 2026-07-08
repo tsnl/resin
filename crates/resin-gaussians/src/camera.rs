@@ -53,7 +53,10 @@ impl Camera {
                 z_far / (z_near - z_far),
                 (z_far * z_near) / (z_near - z_far),
             ],
-            [0.0, 0.0, -1.0, 0.0],
+            // w = +view_z: this view convention keeps depth positive in
+            // front of the camera, so the perspective divide must not flip
+            // signs (a -1 here mirrors both screen axes).
+            [0.0, 0.0, 1.0, 0.0],
         ];
         Self {
             view,
@@ -74,6 +77,46 @@ impl Camera {
             100.0,
             width,
             height,
+        )
+    }
+
+    /// Orbit camera: eye on a sphere of `radius` around `center` at the given
+    /// yaw/pitch (degrees), looking at `center`. COLMAP-convention 3DGS
+    /// checkpoints are y-down; pass `up = [0.0, -1.0, 0.0]` for those.
+    #[allow(clippy::too_many_arguments)]
+    pub fn orbit(
+        center: [f32; 3],
+        radius: f32,
+        yaw_deg: f32,
+        pitch_deg: f32,
+        up: [f32; 3],
+        fov_y_deg: f32,
+        width: usize,
+        height: usize,
+    ) -> Self {
+        let (yaw, pitch) = (yaw_deg.to_radians(), pitch_deg.to_radians());
+        let eye = [
+            center[0] + radius * yaw.sin() * pitch.cos(),
+            center[1] + radius * pitch.sin(),
+            center[2] + radius * yaw.cos() * pitch.cos(),
+        ];
+        Self::look_at(eye, center, up, fov_y_deg, 0.01, 100.0, width, height)
+    }
+
+    /// Row-major flattened matrices for tensor upload.
+    pub fn view_flat(&self) -> Vec<f32> {
+        self.view.iter().flatten().copied().collect()
+    }
+
+    pub fn proj_flat(&self) -> Vec<f32> {
+        self.proj.iter().flatten().copied().collect()
+    }
+
+    /// `[4, 4]` constant tensors for the constant-camera render path.
+    pub fn matrix_constants(&self) -> (resin_dsl::Tensor, resin_dsl::Tensor) {
+        (
+            resin_dsl::Tensor::constant_f32(&[4, 4], &self.view_flat()),
+            resin_dsl::Tensor::constant_f32(&[4, 4], &self.proj_flat()),
         )
     }
 

@@ -5,18 +5,43 @@
 
 use resin_dsl::sort::argsort_f32;
 use resin_dsl::{cumprod_exclusive, IndexKeyElement, Tensor};
+use resin_macros::Tree;
 
 use crate::camera::Camera;
 use crate::cloud::GaussianCloud;
 use crate::linalg::{col, sc};
-use crate::preprocess::preprocess;
+use crate::preprocess::preprocess_view;
 
-/// Render `cloud` through `camera` to an `[H, W, 3]` RGB image (black
-/// background, front-to-back alpha compositing).
+/// A renderable scene as one JIT parameter tree: cloud attributes plus
+/// `[4, 4]` view/proj matrices. Compile a renderer over this once, then move
+/// the camera (or the gaussians) every call with no recompilation.
+#[derive(Debug, Clone, Tree)]
+pub struct RenderScene<T> {
+    pub cloud: GaussianCloud<T>,
+    pub view: T,
+    pub proj: T,
+}
+
+/// Render `cloud` through a host [`Camera`] (matrices baked as constants).
 pub fn render(cloud: &GaussianCloud<Tensor>, camera: &Camera) -> Tensor {
-    let pre = preprocess(cloud, camera);
+    let (view, proj) = camera.matrix_constants();
+    render_view(cloud, &view, &proj, camera.width, camera.height)
+}
+
+/// Render with the camera as graph inputs (`[4, 4]` view/proj tensors).
+/// Compile once with the camera as a JIT parameter, then move it every call.
+/// Output is an `[H, W, 3]` RGB image (black background, front-to-back alpha
+/// compositing).
+pub fn render_view(
+    cloud: &GaussianCloud<Tensor>,
+    view: &Tensor,
+    proj: &Tensor,
+    width: usize,
+    height: usize,
+) -> Tensor {
+    let pre = preprocess_view(cloud, view, proj, width, height);
     let n = pre.depth.shape()[0];
-    let (h, w) = (camera.height, camera.width);
+    let (h, w) = (height, width);
 
     // Global front-to-back order. Culled gaussians keep zero alpha, so their
     // position in the order is irrelevant.
@@ -76,7 +101,7 @@ pub fn render(cloud: &GaussianCloud<Tensor>, camera: &Camera) -> Tensor {
     image.expect("three channels")
 }
 
-fn pixel_center_grids(w: usize, h: usize) -> (Tensor, Tensor) {
+pub(crate) fn pixel_center_grids(w: usize, h: usize) -> (Tensor, Tensor) {
     let mut xs = Vec::with_capacity(h * w);
     let mut ys = Vec::with_capacity(h * w);
     for y in 0..h {
