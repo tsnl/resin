@@ -42,6 +42,7 @@ pub mod dsl;
 pub mod ir;
 pub mod jit;
 pub mod ops;
+pub mod physics;
 pub mod tree;
 
 pub use resin_macros::Tree;
