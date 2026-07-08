@@ -6,13 +6,15 @@ edition = "2024"
 [features]
 default = ["cpu", "wgpu"]
 cpu = []
-wgpu = []
+wgpu = ["dep:wgpu", "dep:pollster"]
 
 [dependencies]
 resin-core = { path = "../resin-core" }
 resin-dsl = { path = "../resin-dsl" }
 resin-ir = { path = "../resin-ir" }
 thiserror = "2.0.18"
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
 
 [dev-dependencies]
 resin-macros = { path = "../resin-macros" }

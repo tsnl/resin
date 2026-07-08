@@ -42,19 +42,23 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_jit_with_generic_inputs() {
-        use crate::jit::{JitError, RunError};
+        use crate::jit::ConcreteTensor;
+
+        // Skip when the machine has no GPU adapter (CI without Metal/Vulkan).
+        if crate::jit::backends::wgpu::shared_context_available() == false {
+            eprintln!("skip wgpu_jit_with_generic_inputs: no GPU");
+            return;
+        }
 
         let jit = WgpuJit;
-        let add = jit.jit(|inputs: &InputsMapped<Tensor>| inputs.a.clone() - inputs.b.clone());
+        let add = jit.jit(|inputs: &InputsMapped<Tensor>| inputs.a.clone() + inputs.b.clone());
         let params: Inputs<WgpuJit> = Inputs {
-            a: jit.zeros(&[4], ElementType::F32),
-            b: jit.zeros(&[4], ElementType::F32),
+            a: crate::jit::backends::wgpu::WgpuTensor::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
+            b: crate::jit::backends::wgpu::WgpuTensor::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
         };
 
-        assert!(matches!(
-            add.call(&params),
-            Err(JitError::Run(RunError::NotImplemented))
-        ));
+        let out = add.call(&params).expect("wgpu jit add");
+        assert_eq!(out.to_f32(), vec![11.0, 22.0, 33.0, 44.0]);
     }
 
     #[test]

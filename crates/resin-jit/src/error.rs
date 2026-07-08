@@ -54,6 +54,8 @@ pub enum RunError {
     RpnEmptyStack,
     #[error("accessor rank mismatch: coords={coords}, shape={shape}")]
     AccessorRank { coords: usize, shape: usize },
+    #[error("wgpu: {0}")]
+    Wgpu(String),
 }
 
 pub(crate) fn tensor_kind_name(kind: &TensorKind) -> &'static str {
