@@ -4,3 +4,4 @@ target
 # Added by cargo
 
 /target
+*.ppm

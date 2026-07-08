@@ -91,17 +91,17 @@ user code.
 
 ### Phase 3: 3DGS renderer (library crate)
 
-- [ ] **3.1 Linalg helpers.** Batched quaternion → rotation, `scale_rot_to_cov3d`,
+- [x] **3.1 Linalg helpers.** Batched quaternion → rotation, `scale_rot_to_cov3d`,
   view/projection application, symmetric 2×2 inverse — all `[N, …]` tensor
   ops built from Phase 1 primitives.
-- [ ] **3.2 `preprocess_gaussians`.** 3D means/scales/rotations → 2D means,
+- [x] **3.2 `preprocess_gaussians`.** 3D means/scales/rotations → 2D means,
   depths, conics, radii + validity mask (masking replaces culling: shapes stay
   static, invalid gaussians contribute zero alpha).
-- [ ] **3.3 Forward render (untiled).** Depth `argsort` → `gather_rows` all
+- [x] **3.3 Forward render (untiled).** Depth `argsort` → `gather_rows` all
   attributes → per-pixel alpha `[N, H, W]` from conics → transmittance
   `T = exclusive_scan(*, 1-α)` → image = `Σᵢ colorᵢ · αᵢ · Tᵢ` (reduction).
   Golden tests against a scalar CPU reference; PPM demo example.
-- [ ] **3.4 Backward + training smoke.** No new code paths — `grad_wrt`
+- [x] **3.4 Backward + training smoke.** No new code paths — `grad_wrt`
   through the whole renderer (scan/gather/scatter adjoints compose). MSE
   reconstruction loss, a few optimization steps on a tiny scene, loss
   decreases.

@@ -656,6 +656,7 @@ dependencies = [
  "resin-core",
  "resin-dataset",
  "resin-dsl",
+ "resin-gaussians",
  "resin-jit",
  "resin-macros",
 ]
@@ -683,6 +684,16 @@ dependencies = [
  "paste",
  "resin-core",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "resin-gaussians"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
+ "resin-jit",
+ "resin-macros",
 ]
 
 [[package]]

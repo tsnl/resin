@@ -12,6 +12,7 @@ wgpu = ["resin-jit/wgpu"]
 resin-core = { path = "crates/resin-core" }
 resin-dataset = { path = "crates/resin-dataset" }
 resin-dsl = { path = "crates/resin-dsl" }
+resin-gaussians = { path = "crates/resin-gaussians" }
 resin-jit = { path = "crates/resin-jit" }
 resin-macros = { path = "crates/resin-macros" }
 
@@ -33,6 +34,12 @@ path = "examples/train_mnist.rs"
 name = "mnist_profile"
 path = "examples/mnist_profile.rs"
 required-features = ["cpu"]
+
+[[example]]
+name = "demo_3dgs"
+path = "examples/demo_3dgs.rs"
+# Renders on wgpu when a GPU adapter is present, otherwise on the CPU
+# interpreter (pick with --backend).
 
 [workspace]
 members = ["crates/*"]
