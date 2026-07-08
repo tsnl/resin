@@ -1,0 +1,23 @@
+[package]
+name = "resin-viewer"
+version = "0.1.0"
+edition = "2024"
+
+# Presentation helper (GLU-to-GL relative to the core, per docs/GOAL.md):
+# a winit window + CPU present of images produced by the resin renderer.
+
+[features]
+default = ["cpu", "wgpu"]
+cpu = ["resin-jit/cpu"]
+wgpu = ["resin-jit/wgpu"]
+
+[dependencies]
+resin-dsl = { path = "../resin-dsl" }
+resin-gaussians = { path = "../resin-gaussians" }
+resin-jit = { path = "../resin-jit", default-features = false }
+softbuffer = "0.4"
+winit = "0.30"
+
+[[bin]]
+name = "resin-viewer"
+path = "src/main.rs"
