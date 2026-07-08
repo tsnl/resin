@@ -74,17 +74,17 @@ user code.
 
 ### Phase 2: combinators, not kernels
 
-- [ ] **2.1 `scan`.** Higher-order inclusive/exclusive scan along an axis:
+- [x] **2.1 `scan`.** Higher-order inclusive/exclusive scan along an axis:
   `scan(x, axis, identity, |a, b| …)` traces the closure per step and unrolls
   Hillis–Steele (`log₂ n` shift + combine passes of existing ops). `cumsum` /
   `cumprod` wrappers. Autodiff through `scan` needs no new rules — verify with
   gradient tests.
-- [ ] **2.2 `argsort` / `sort_by_key`.** LSD radix sort composed from
+- [x] **2.2 `argsort` / `sort_by_key`.** LSD radix sort composed from
   bit-extract + `scan` + `scatter_rows` (stable 1-bit split per pass,
   configurable key width); `float_sort_key` (order-preserving f32 → u32
   bijection via bitcast + sign trick). Sorted *values* stay differentiable
   through `gather_rows`; the permutation itself is integer data.
-- [ ] **2.3 Elementwise fusion pass.** IR optimization: fuse single-consumer
+- [x] **2.3 Elementwise fusion pass.** IR optimization: fuse single-consumer
   elementwise chains into one RPN kernel (the RPN kernel already takes N args
   and an arbitrary expression). Keeps combinator-generated graphs at a sane
   dispatch count without changing their semantics.
