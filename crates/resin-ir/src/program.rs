@@ -393,6 +393,15 @@ impl<P: Tree<BufferRef>, S: Tree<BufferViewRef>> IrProgram<P, S> {
                 });
             }
         }
+        for (view, buffer_view) in self.buffer_views.iter().enumerate() {
+            if buffer_view.buffer_index.index() >= self.buffers.len() {
+                return Err(IrError::BufferViewBufferOutOfRange {
+                    view,
+                    index: buffer_view.buffer_index.index(),
+                    len: self.buffers.len(),
+                });
+            }
+        }
         validate_tree_indices(&self.params, self.buffers.len(), "param buffer")?;
         validate_tree_indices(&self.sinks, self.buffer_views.len(), "sink view")?;
         Ok(())
@@ -527,6 +536,34 @@ mod tests {
     }
 
     #[test]
+    fn program_rejects_invalid_buffer_view_buffer_index() {
+        let program = IrProgram::<BufferRef, BufferViewRef> {
+            params: BufferRef::new(0),
+            sinks: BufferViewRef::new(0),
+            queue: vec![],
+            buffers: vec![IrBuffer {
+                shape: Box::from([4]),
+                etype: F4,
+                init: None,
+                readonly: false,
+            }],
+            buffer_views: vec![IrBufferView {
+                buffer_index: BufferRef::new(1),
+                accessor: Accessor::dense([4], 0),
+            }],
+        };
+        let err = program.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            IrError::BufferViewBufferOutOfRange {
+                view: 0,
+                index: 1,
+                len: 1,
+            }
+        ));
+    }
+
+    #[test]
     fn unary_elementwise_rpn() {
         let shape: Box<[u32]> = Box::from([4]);
         let kernel = IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
@@ -583,6 +620,74 @@ mod tests {
 
         let json = serde_json::to_string(&program).unwrap();
         let restored: IrProgram = serde_json::from_str(&json).unwrap();
+        assert_eq!(program, restored);
+    }
+
+    #[test]
+    fn program_tree_serde_round_trip() {
+        use resin_macros::Tree;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Clone, PartialEq, Eq, Tree, Serialize, Deserialize)]
+        struct ParamTree<T> {
+            weight: T,
+            bias: T,
+        }
+
+        #[derive(Debug, Clone, PartialEq, Eq, Tree, Serialize, Deserialize)]
+        struct SinkTree<T> {
+            loss: T,
+            grads: ParamTree<T>,
+        }
+
+        let shape: Box<[u32]> = Box::from([2, 3]);
+        let program = IrProgram::<ParamTree<BufferRef>, SinkTree<BufferViewRef>> {
+            params: ParamTree {
+                weight: BufferRef::new(0),
+                bias: BufferRef::new(1),
+            },
+            sinks: SinkTree {
+                loss: BufferViewRef::new(0),
+                grads: ParamTree {
+                    weight: BufferViewRef::new(1),
+                    bias: BufferViewRef::new(2),
+                },
+            },
+            queue: vec![],
+            buffers: vec![
+                IrBuffer {
+                    shape: shape.clone(),
+                    etype: F4,
+                    init: None,
+                    readonly: false,
+                },
+                IrBuffer {
+                    shape: Box::from([3]),
+                    etype: F4,
+                    init: None,
+                    readonly: false,
+                },
+            ],
+            buffer_views: vec![
+                IrBufferView {
+                    buffer_index: BufferRef::new(0),
+                    accessor: Accessor::dense(shape.clone(), 0),
+                },
+                IrBufferView {
+                    buffer_index: BufferRef::new(0),
+                    accessor: Accessor::dense(shape.clone(), 0),
+                },
+                IrBufferView {
+                    buffer_index: BufferRef::new(1),
+                    accessor: Accessor::dense([3], 0),
+                },
+            ],
+        };
+        program.validate().unwrap();
+
+        let json = serde_json::to_string(&program).unwrap();
+        let restored: IrProgram<ParamTree<BufferRef>, SinkTree<BufferViewRef>> =
+            serde_json::from_str(&json).unwrap();
         assert_eq!(program, restored);
     }
 }

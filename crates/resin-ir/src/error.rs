@@ -107,4 +107,11 @@ pub enum IrError {
         index: usize,
         len: usize,
     },
+
+    #[error("buffer_view[{view}] buffer_index {index} out of range (len {len})")]
+    BufferViewBufferOutOfRange {
+        view: usize,
+        index: usize,
+        len: usize,
+    },
 }
