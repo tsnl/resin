@@ -658,6 +658,7 @@ dependencies = [
  "resin-dsl",
  "resin-jit",
  "resin-macros",
+ "resin-render",
 ]
 
 [[package]]
@@ -700,6 +701,7 @@ dependencies = [
 name = "resin-jit"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "naga",
  "pollster",
  "resin-core",
@@ -717,6 +719,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "resin-render"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
+ "resin-jit",
+ "resin-macros",
 ]
 
 [[package]]

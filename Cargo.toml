@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["cpu", "wgpu"]
+default = ["cpu", "wgpu", "vulkan"]
 cpu = ["resin-jit/cpu"]
 wgpu = ["resin-jit/wgpu"]
+vulkan = ["resin-jit/vulkan"]
 
 [dependencies]
 resin-core = { path = "crates/resin-core" }
@@ -14,6 +15,7 @@ resin-dataset = { path = "crates/resin-dataset" }
 resin-dsl = { path = "crates/resin-dsl" }
 resin-jit = { path = "crates/resin-jit" }
 resin-macros = { path = "crates/resin-macros" }
+resin-render = { path = "crates/resin-render" }
 
 [[example]]
 name = "demo_front"
@@ -33,6 +35,16 @@ path = "examples/train_mnist.rs"
 name = "mnist_profile"
 path = "examples/mnist_profile.rs"
 required-features = ["cpu"]
+
+[[example]]
+name = "demo_pathtrace"
+path = "examples/demo_pathtrace.rs"
+# Needs at least one of `cpu` / `wgpu` / `vulkan` (selected via --backend).
+
+[[example]]
+name = "demo_raster"
+path = "examples/demo_raster.rs"
+# Needs at least one of `cpu` / `wgpu` / `vulkan` (selected via --backend).
 
 [workspace]
 members = ["crates/*"]

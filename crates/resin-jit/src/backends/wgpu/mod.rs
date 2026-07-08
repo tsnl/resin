@@ -3,16 +3,17 @@
 //! Optimizations belong in the IR layer. This backend emits one compute shader
 //! per IR kernel and executes the queue as written.
 
-mod codegen;
 mod error;
 mod jit;
 mod lower;
 mod program;
+mod raster;
 mod runtime;
 mod tensor;
+mod trace;
 
 #[doc(hidden)]
-pub use codegen::{emit_wgsl_for_kernel, WgslKernelConfig};
+pub use crate::backends::wgsl::{emit_wgsl_for_kernel, WgslKernelConfig};
 pub use error::{WgpuLowerError, WgpuRuntimeError};
 pub use jit::WgpuJit;
 pub use program::WgpuProgram;

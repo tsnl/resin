@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["cpu", "wgpu"]
+default = ["cpu", "wgpu", "vulkan"]
 cpu = []
 wgpu = ["dep:wgpu", "dep:pollster"]
+vulkan = ["dep:ash", "dep:naga"]
 
 [dependencies]
 resin-core = { path = "../resin-core" }
@@ -15,6 +16,8 @@ resin-ir = { path = "../resin-ir" }
 thiserror = "2.0.18"
 wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
+ash = { version = "0.38", optional = true }
+naga = { version = "24", features = ["wgsl-in", "spv-out"], optional = true }
 
 [dev-dependencies]
 naga = { version = "24", features = ["wgsl-in"] }

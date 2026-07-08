@@ -1,4 +1,6 @@
-//! Naive WGSL emission for IR kernels.
+//! Naive WGSL emission for IR kernels, shared by every WGSL-consuming
+//! backend: wgpu compiles the text directly, the Vulkan backend translates
+//! it to SPIR-V through naga.
 //!
 //! No fusion, tiling heuristics, or shared-memory opts — one IR kernel → one
 //! compute shader that indexes storage via the kernel's arg accessors.
@@ -13,7 +15,14 @@ use resin_ir::{
     RemapInfo, RpnAtom,
 };
 
-use super::error::WgpuLowerError;
+/// Errors from shared WGSL kernel emission.
+#[derive(Debug, thiserror::Error)]
+pub enum WgslError {
+    #[error("unsupported kernel for WGSL emission: {0}")]
+    UnsupportedKernel(&'static str),
+    #[error("WGSL emission error: {0}")]
+    Message(String),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct WgslKernelConfig {
@@ -46,13 +55,22 @@ pub fn dispatch_size_for_kernel(kernel: &IrKernel, config: &WgslKernelConfig) ->
 pub fn emit_wgsl_for_kernel(
     kernel: &IrKernel,
     config: &WgslKernelConfig,
-) -> Result<String, WgpuLowerError> {
+) -> Result<String, WgslError> {
     let mut w = WgslWriter::new();
     match kernel {
         IrKernel::ElementwiseRpn(k) => emit_elementwise(&mut w, k, config)?,
         IrKernel::Matmul(k) => emit_matmul(&mut w, k, config)?,
         IrKernel::Reduction(k) => emit_reduction(&mut w, k, config)?,
         IrKernel::Remap(k) => emit_remap(&mut w, k, config)?,
+        // Hardware kernels are not plain storage-binding compute shaders:
+        // they need auxiliary state (acceleration structures / BVH buffers /
+        // render targets) and are lowered as dedicated backend steps.
+        IrKernel::TraceRays(_) => {
+            return Err(WgslError::UnsupportedKernel("trace_rays"));
+        }
+        IrKernel::Rasterize(_) => {
+            return Err(WgslError::UnsupportedKernel("rasterize"));
+        }
     }
     Ok(w.finish())
 }
@@ -65,10 +83,10 @@ fn shape_len(shape: &[u32]) -> u64 {
     }
 }
 
-fn spell_etype(etype: ElementType) -> Result<&'static str, WgpuLowerError> {
+fn spell_etype(etype: ElementType) -> Result<&'static str, WgslError> {
     match etype {
         ElementType::F4 => Ok("f32"),
-        ElementType::F2 => Err(WgpuLowerError::Message(
+        ElementType::F2 => Err(WgslError::Message(
             "f16 WGSL not enabled in naive backend".into(),
         )),
         ElementType::U4 => Ok("u32"),
@@ -111,7 +129,7 @@ fn emit_bindings(
     w: &mut WgslWriter,
     output_etype: ElementType,
     arg_etypes: &[ElementType],
-) -> Result<(), WgpuLowerError> {
+) -> Result<(), WgslError> {
     let t = spell_etype(output_etype)?;
     w.print(&format!(
         "@group(0) @binding(0)\nvar<storage, read_write> output: array<{t}>;"
@@ -226,7 +244,7 @@ fn emit_elementwise(
     w: &mut WgslWriter,
     kernel: &IrElementwiseRpnKernel,
     config: &WgslKernelConfig,
-) -> Result<(), WgpuLowerError> {
+) -> Result<(), WgslError> {
     emit_bindings(w, kernel.element_type, &kernel.arg_element_types)?;
     emit_arg_address_functions(w, &kernel.arg_accessors);
     emit_eval_rpn(
@@ -258,7 +276,7 @@ fn emit_eval_rpn(
     atoms: &[RpnAtom],
     etype: ElementType,
     arg_etypes: &[ElementType],
-) -> Result<(), WgpuLowerError> {
+) -> Result<(), WgslError> {
     let t = spell_etype(etype)?;
     let mut params = Vec::new();
     for (i, e) in arg_etypes.iter().enumerate() {
@@ -395,7 +413,7 @@ fn emit_remap(
     w: &mut WgslWriter,
     kernel: &IrRemapKernel,
     config: &WgslKernelConfig,
-) -> Result<(), WgpuLowerError> {
+) -> Result<(), WgslError> {
     let t = spell_etype(kernel.element_type)?;
     match &kernel.info {
         RemapInfo::GatherRows => {
@@ -511,11 +529,11 @@ fn emit_matmul(
     w: &mut WgslWriter,
     kernel: &IrMatmulKernel,
     config: &WgslKernelConfig,
-) -> Result<(), WgpuLowerError> {
+) -> Result<(), WgslError> {
     let t = spell_etype(kernel.element_type)?;
     let rank = kernel.shape.len();
     if rank < 2 {
-        return Err(WgpuLowerError::Message("matmul rank < 2".into()));
+        return Err(WgslError::Message("matmul rank < 2".into()));
     }
     let k_dim = kernel.arg_accessors[0].shape[rank - 1];
     let arg_etypes = vec![kernel.element_type; 2];
@@ -571,7 +589,7 @@ fn emit_reduction(
     w: &mut WgslWriter,
     kernel: &IrReductionKernel,
     config: &WgslKernelConfig,
-) -> Result<(), WgpuLowerError> {
+) -> Result<(), WgslError> {
     let t = spell_etype(kernel.element_type)?;
     let rank = kernel.shape.len();
     let input_shape = &kernel.arg_accessors[0].shape;

@@ -8,6 +8,16 @@ pub enum WgpuLowerError {
     Message(String),
 }
 
+impl From<crate::backends::wgsl::WgslError> for WgpuLowerError {
+    fn from(err: crate::backends::wgsl::WgslError) -> Self {
+        use crate::backends::wgsl::WgslError;
+        match err {
+            WgslError::UnsupportedKernel(kernel) => WgpuLowerError::UnsupportedKernel(kernel),
+            WgslError::Message(msg) => WgpuLowerError::Message(msg),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum WgpuRuntimeError {
     #[error("no suitable GPU adapter found")]
