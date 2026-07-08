@@ -172,6 +172,9 @@ fn headline(tensor: &Tensor) -> String {
             format_tuple(target_shape)
         ),
         TensorKind::Transpose { .. } => "transpose()".to_string(),
+        TensorKind::Reshape { shape, .. } => {
+            format!("reshape(shape={})", format_tuple(shape))
+        }
         TensorKind::Squeeze { axes, .. } => {
             format!("squeeze(axes={})", format_tuple(axes))
         }

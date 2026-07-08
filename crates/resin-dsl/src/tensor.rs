@@ -81,6 +81,12 @@ pub enum TensorKind {
     Transpose {
         arg: Tensor,
     },
+    /// Reinterpret a C-contiguous view as a new shape (same element count).
+    /// Lowers to a pure accessor view — no kernel.
+    Reshape {
+        arg: Tensor,
+        shape: Box<[usize]>,
+    },
     /// Drop size-1 axes (NumPy-style squeeze). Required to turn keepdims
     /// reductions into true scalars for reverse-mode autodiff.
     Squeeze {
@@ -505,6 +511,29 @@ impl Tensor {
     pub fn matmul(&self, rhs: &Self) -> Self {
         self.new_elementwise(ElementOperator::Matmul, [rhs.clone()])
     }
+    /// View `self` as `shape` (must preserve the element count). The operand
+    /// must lower to a dense C-contiguous view (materialized outputs and
+    /// contiguous slices qualify; broadcast/transpose views do not).
+    pub fn reshape(&self, shape: &[usize]) -> Self {
+        assert_eq!(
+            shape.iter().product::<usize>(),
+            self.shape().iter().product::<usize>(),
+            "reshape must preserve the element count ({:?} -> {shape:?})",
+            self.shape()
+        );
+        if shape == self.shape() {
+            return self.clone();
+        }
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: shape.into(),
+            kind: TensorKind::Reshape {
+                arg: self.clone(),
+                shape: shape.into(),
+            },
+        })
+    }
+
     pub fn transpose(&self) -> Self {
         let shape = self.shape();
         assert_eq!(shape.len(), 2, "transpose requires a rank-2 tensor");
@@ -755,6 +784,7 @@ impl Tensor {
             TensorKind::Broadcast { arg, .. } => vec![arg.clone()],
             TensorKind::ScatterIndex { source, .. } => vec![source.clone()],
             TensorKind::Transpose { arg } => vec![arg.clone()],
+            TensorKind::Reshape { arg, .. } => vec![arg.clone()],
             TensorKind::Squeeze { arg, .. } => vec![arg.clone()],
         }
     }

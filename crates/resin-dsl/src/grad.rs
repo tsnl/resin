@@ -116,6 +116,10 @@ fn backward(grad_map: &mut GradMap, node: &Tensor, df_dout: &Tensor) -> Result<(
             backward_scatter_index(grad_map, source, key, df_dout)
         }
         TensorKind::Transpose { arg } => backward_transpose(grad_map, arg, df_dout),
+        TensorKind::Reshape { arg, .. } => {
+            accumulate(grad_map, arg, df_dout.reshape(arg.shape()));
+            Ok(())
+        }
         TensorKind::Squeeze { arg, axes } => backward_squeeze(grad_map, arg, axes, df_dout),
     }
 }
