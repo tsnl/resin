@@ -100,6 +100,27 @@ impl ProgramBuilder {
                 let (buffer, arg_acc) = self.resolve_view(arg)?;
                 Ok((buffer, compose_index(&arg_acc, key)?))
             }
+            TensorKind::Reshape { arg, shape } => {
+                let (buffer, arg_acc) = self.resolve_view(arg)?;
+                let new_shape = shape_u32(shape)?;
+                // Only a contiguous run of elements can be re-strided freely.
+                let contiguous =
+                    arg_acc.pitch == c_contiguous_pitch_for_shape(&arg_acc.shape);
+                if !contiguous {
+                    return Err(CompileError::UnsupportedTensorKind(
+                        "reshape of a non-contiguous view",
+                    ));
+                }
+                let pitch = c_contiguous_pitch_for_shape(&new_shape);
+                Ok((
+                    buffer,
+                    Accessor {
+                        offset: arg_acc.offset,
+                        shape: new_shape,
+                        pitch,
+                    },
+                ))
+            }
             _ => {
                 let buffer = self.buffer_for_tensor(tensor)?;
                 let shape = shape_u32(tensor.shape())?;
@@ -281,7 +302,8 @@ impl ProgramBuilder {
             TensorKind::Broadcast { .. }
             | TensorKind::Transpose { .. }
             | TensorKind::Squeeze { .. }
-            | TensorKind::Index { .. } => {
+            | TensorKind::Index { .. }
+            | TensorKind::Reshape { .. } => {
                 unreachable!("view ops are handled in resolve_view")
             }
         };
@@ -353,6 +375,7 @@ fn is_view_op(kind: &TensorKind) -> bool {
             | TensorKind::Transpose { .. }
             | TensorKind::Squeeze { .. }
             | TensorKind::Index { .. }
+            | TensorKind::Reshape { .. }
     )
 }
 

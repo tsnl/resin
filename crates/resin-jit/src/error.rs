@@ -70,6 +70,7 @@ pub(crate) fn tensor_kind_name(kind: &TensorKind) -> &'static str {
         TensorKind::Broadcast { .. } => "broadcast",
         TensorKind::ScatterIndex { .. } => "scatter_index",
         TensorKind::Transpose { .. } => "transpose",
+        TensorKind::Reshape { .. } => "reshape",
         TensorKind::Squeeze { .. } => "squeeze",
     }
 }
