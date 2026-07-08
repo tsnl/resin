@@ -1,0 +1,18 @@
+[package]
+name = "resin-render"
+version = "0.1.0"
+edition = "2024"
+
+# resin-jit is a full dependency (not just dev): `pathtrace::render` /
+# `raster::render` are generic over the `Jit` trait so callers pick the
+# backend. Default features stay OFF — the library needs only the trait, and
+# pulling backends here would defeat feature subtraction (e.g.
+# `--no-default-features --features cpu`) in every downstream crate.
+[dependencies]
+resin-core = { path = "../resin-core" }
+resin-dsl = { path = "../resin-dsl" }
+resin-jit = { path = "../resin-jit", default-features = false }
+resin-macros = { path = "../resin-macros" }
+
+[dev-dependencies]
+resin-jit = { path = "../resin-jit" }
