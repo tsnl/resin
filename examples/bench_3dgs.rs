@@ -17,8 +17,8 @@ use std::time::Instant;
 use resin::dsl::{cumsum, grad_wrt, ElementType, Tensor};
 use resin::dsl::sort::argsort_f32;
 use resin::gaussians::{
-    chunked_renderer, gnomen_cloud, load_ply, render, render_view, Camera, CloudData,
-    GaussianCloud, RenderScene,
+    chunked_renderer, gnomen_cloud, load_ply, render, render_tiled, render_view, Camera,
+    CloudData, GaussianCloud, RenderScene, TiledConfig,
 };
 use resin::jit::{ConcreteTensor, Jit};
 
@@ -109,6 +109,35 @@ fn run_all<J: Jit>(jit: J, opts: &Options) {
         });
         report(
             &format!("render dense N={n} {side}x{side}"),
+            &stats,
+            first,
+            steady,
+        );
+    }
+
+    // --- tiled render (same scene as the last dense case) -----------------
+    {
+        let (n, side) = (1_024usize, 64usize);
+        let cfg = TiledConfig {
+            tile: 16,
+            max_tiles_per_gaussian: 9,
+            tile_capacity: 192,
+        };
+        let data = synthetic_cloud(n);
+        let camera = Camera::gnomen_default(side, side);
+        let stats = tiled_stats(n, side, side, cfg);
+        let f = {
+            let (w, h) = (side, side);
+            jit.clone().jit(move |scene: &RenderScene<Tensor>| {
+                render_tiled(&scene.cloud, &scene.view, &scene.proj, w, h, &cfg)
+            })
+        };
+        let scene = scene_tensors::<J>(&data, &camera);
+        let (first, steady) = time_calls(opts.reps, || {
+            f.call(&scene).unwrap();
+        });
+        report(
+            &format!("render tiled N={n} {side}x{side} t16 C192"),
             &stats,
             first,
             steady,
@@ -276,6 +305,30 @@ fn render_stats(n: usize, w: usize, h: usize) -> Stats {
                 opacities: params[4].clone(),
             };
             vec![render_view(&cloud, &params[5], &params[6], w, h)]
+        },
+    )
+}
+
+fn tiled_stats(n: usize, w: usize, h: usize, cfg: TiledConfig) -> Stats {
+    ir_stats(
+        &[
+            ("means", vec![n, 3], ElementType::F32),
+            ("scales", vec![n, 3], ElementType::F32),
+            ("quats", vec![n, 4], ElementType::F32),
+            ("colors", vec![n, 3], ElementType::F32),
+            ("opacities", vec![n], ElementType::F32),
+            ("view", vec![4, 4], ElementType::F32),
+            ("proj", vec![4, 4], ElementType::F32),
+        ],
+        |params| {
+            let cloud = GaussianCloud {
+                means: params[0].clone(),
+                scales: params[1].clone(),
+                quats: params[2].clone(),
+                colors: params[3].clone(),
+                opacities: params[4].clone(),
+            };
+            vec![render_tiled(&cloud, &params[5], &params[6], w, h, &cfg)]
         },
     )
 }

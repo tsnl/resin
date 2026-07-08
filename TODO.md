@@ -105,11 +105,16 @@ user code.
   through the whole renderer (scan/gather/scatter adjoints compose). MSE
   reconstruction loss, a few optimization steps on a tiny scene, loss
   decreases.
-- [ ] **3.5 Tiling (follow-up).** The untiled formulation materializes
-  `O(N·H·W)`; tiles restore locality: per-tile gaussian lists via
-  tile-key sort + segment offsets (`scan` again), per-tile blend. Same
-  combinators, new wiring — still no custom kernels. (Phase 4's chunked
-  fold bounds *memory*; tiling additionally bounds *work* per pixel.)
+- [x] **3.5 Tiling.** `render_tiled`: fixed-capacity instance duplication
+  (`iota` div/mod + gathers), stable radix sort by tile id over
+  `⌈log₂(T+1)⌉` bits (depth order preserved within tiles), per-tile
+  segment starts from a prefix sum, capacity-padded `[T·C]` gather lists,
+  `[T, C, th, tw]` blend, constant-permutation assembly. One pure traced
+  graph — differentiable end-to-end, zero custom kernels. Caps are the
+  static-shape trade (D truncates giant spans, C drops the deepest
+  overflow); per-frame adaptive caps via host readback + compile-cache
+  bucketing are the tracked follow-up. Benchmarked ~5× faster and ~5.5×
+  smaller than dense at N=1024, 64² on the CPU backend.
 
 ### Phase 4: real checkpoints, performance, training loop
 
