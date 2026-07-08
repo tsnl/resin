@@ -1,72 +1,94 @@
-//! Public API: build graphs with [`dsl`], bind functions with [`jit::Jit::jit`],
-//! and run them on concrete backend arrays.
+//! Resin: a small, portable compiler for tensor programs.
 //!
-//! Middle-end IR and lowered programs are internal to the JIT pipeline.
+//! The pipeline has three stages:
+//!
+//! 1. [`dsl`] — trace an expression graph of [`dsl::Tensor`]s (with
+//!    reverse-mode autodiff via [`dsl::grad_wrt`]).
+//! 2. [`ir`] — lower the graph to a flat queue of kernel dispatches over
+//!    buffers and strided views, then optimize it.
+//! 3. [`jit`] — run the program on a backend: [`jit::CpuJit`] interprets it,
+//!    [`jit::WgpuJit`] emits WGSL and dispatches through wgpu.
+//!
+//! Structured inputs and outputs are [`Tree`]s (pytrees): derive `Tree` on a
+//! struct of tensors and pass it straight to a jitted function.
+//!
+//! ```no_run
+//! use resin::{Tree, dsl::Tensor, jit::{Array, CpuJit, Jit}};
+//!
+//! #[derive(Tree)]
+//! struct Pair<T> {
+//!     a: T,
+//!     b: T,
+//! }
+//!
+//! let add = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
+//! let out = add
+//!     .call(&Pair {
+//!         a: Array::from_f32(&[2], &[1.0, 2.0]),
+//!         b: Array::from_f32(&[2], &[10.0, 20.0]),
+//!     })
+//!     .unwrap();
+//! assert_eq!(out.data(), &[11.0, 22.0]);
+//! ```
+//!
+//! Everything is f32 for now; more element types can return when a backend
+//! needs them.
 
-pub use resin_core as core;
-pub use resin_dataset as dataset;
-pub use resin_dsl as dsl;
-pub use resin_jit as jit;
-pub use resin_macros as macros;
+// Let the `Tree` derive refer to this crate as `resin` from within itself.
+extern crate self as resin;
+
+pub mod dataset;
+pub mod dsl;
+pub mod ir;
+pub mod jit;
+pub mod ops;
+pub mod tree;
+
+pub use resin_macros::Tree;
+pub use tree::Tree;
 
 #[cfg(test)]
 mod tests {
-    use crate::dsl::{ElementType, Tensor};
-    use crate::jit::Jit;
-    use resin_macros::Tree;
-
-    #[cfg(feature = "cpu")]
-    use crate::jit::backends::cpu::CpuJit;
-    #[cfg(feature = "wgpu")]
-    use crate::jit::backends::wgpu::WgpuJit;
+    use crate::Tree;
+    use crate::dsl::Tensor;
+    use crate::jit::{Array, CpuJit, Jit};
 
     #[derive(Tree)]
-    struct Inputs<J: Jit> {
-        a: J::Tensor,
-        b: J::Tensor,
+    struct Inputs<T> {
+        a: T,
+        b: T,
     }
 
     #[test]
-    #[cfg(feature = "cpu")]
-    fn cpu_jit_with_generic_inputs() {
-        let jit = CpuJit;
-        let add = jit.jit(|inputs: &InputsMapped<Tensor>| inputs.a.clone() + inputs.b.clone());
-        let params: Inputs<CpuJit> = Inputs {
-            a: jit.zeros(&[2, 3], ElementType::F32),
-            b: jit.zeros(&[2, 3], ElementType::F32),
-        };
-
-        add.call(&params).expect("cpu jit add");
+    fn cpu_jit_add() {
+        let add = CpuJit.jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
+        let out = add
+            .call(&Inputs {
+                a: Array::from_f32(&[2, 2], &[1.0, 2.0, 3.0, 4.0]),
+                b: Array::from_f32(&[2, 2], &[10.0, 20.0, 30.0, 40.0]),
+            })
+            .expect("cpu jit add");
+        assert_eq!(out.data(), &[11.0, 22.0, 33.0, 44.0]);
     }
 
     #[test]
     #[cfg(feature = "wgpu")]
-    fn wgpu_jit_with_generic_inputs() {
-        use crate::jit::ConcreteTensor;
+    fn wgpu_jit_add() {
+        use crate::jit::WgpuJit;
 
         // Skip when the machine has no GPU adapter (CI without Metal/Vulkan).
-        if crate::jit::backends::wgpu::shared_context_available() == false {
-            eprintln!("skip wgpu_jit_with_generic_inputs: no GPU");
+        if !crate::jit::wgpu::gpu_available() {
+            eprintln!("skip wgpu_jit_add: no GPU");
             return;
         }
 
-        let jit = WgpuJit;
-        let add = jit.jit(|inputs: &InputsMapped<Tensor>| inputs.a.clone() + inputs.b.clone());
-        let params: Inputs<WgpuJit> = Inputs {
-            a: crate::jit::backends::wgpu::WgpuTensor::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
-            b: crate::jit::backends::wgpu::WgpuTensor::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
-        };
-
-        let out = add.call(&params).expect("wgpu jit add");
-        assert_eq!(out.to_f32(), vec![11.0, 22.0, 33.0, 44.0]);
-    }
-
-    #[test]
-    fn backends_implement_jit_trait() {
-        fn assert_jit<J: Jit>(_jit: J) {}
-        #[cfg(feature = "cpu")]
-        assert_jit(CpuJit);
-        #[cfg(feature = "wgpu")]
-        assert_jit(WgpuJit);
+        let add = WgpuJit.jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
+        let out = add
+            .call(&Inputs {
+                a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
+                b: Array::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
+            })
+            .expect("wgpu jit add");
+        assert_eq!(out.data(), &[11.0, 22.0, 33.0, 44.0]);
     }
 }

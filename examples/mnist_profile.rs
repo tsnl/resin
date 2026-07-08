@@ -1,9 +1,10 @@
+//! Time a single forward pass of the MNIST MLP on the CPU interpreter.
+
 use std::time::Instant;
 
+use resin::Tree;
 use resin::dsl::Tensor;
-use resin::jit::backends::cpu::{CpuJit, CpuTensor};
-use resin::jit::{ConcreteTensor, Jit};
-use resin_macros::Tree;
+use resin::jit::{Array, CpuJit, Jit};
 
 #[derive(Tree, Clone)]
 struct LinearParams<T> {
@@ -19,9 +20,8 @@ struct MlpParams<T> {
 }
 
 #[derive(Tree, Clone)]
-struct TrainStepIn<T> {
+struct ForwardIn<T> {
     xs: T,
-    ys: T,
     model: MlpParams<T>,
 }
 
@@ -37,27 +37,20 @@ fn forward(model: &MlpParams<Tensor>, x: &Tensor) -> Tensor {
 }
 
 fn main() {
-    let jit = CpuJit;
-    let f = jit.jit(|step: &TrainStepIn<Tensor>| forward(&step.model, &step.xs));
-    let step = TrainStepIn {
-        xs: CpuTensor::from_f32(&[8, 784], &vec![0.1; 8 * 784]),
-        ys: CpuTensor::from_f32(&[8, 10], &vec![0.0; 80]),
+    let f = CpuJit.jit(|input: &ForwardIn<Tensor>| forward(&input.model, &input.xs));
+    let layer = |i: usize, o: usize| LinearParams {
+        weight: Array::from_f32(&[i, o], &vec![0.01; i * o]),
+        bias: Array::from_f32(&[o], &vec![0.0; o]),
+    };
+    let input = ForwardIn {
+        xs: Array::from_f32(&[8, 784], &vec![0.1; 8 * 784]),
         model: MlpParams {
-            layer0: LinearParams {
-                weight: CpuTensor::from_f32(&[784, 32], &vec![0.01; 784 * 32]),
-                bias: CpuTensor::from_f32(&[32], &vec![0.0; 32]),
-            },
-            layer1: LinearParams {
-                weight: CpuTensor::from_f32(&[32, 32], &vec![0.01; 32 * 32]),
-                bias: CpuTensor::from_f32(&[32], &vec![0.0; 32]),
-            },
-            layer2: LinearParams {
-                weight: CpuTensor::from_f32(&[32, 10], &vec![0.01; 32 * 10]),
-                bias: CpuTensor::from_f32(&[10], &vec![0.0; 10]),
-            },
+            layer0: layer(784, 32),
+            layer1: layer(32, 32),
+            layer2: layer(32, 10),
         },
     };
     let t0 = Instant::now();
-    let _ = f.call(&step).unwrap();
+    let _ = f.call(&input).unwrap();
     eprintln!("forward-only call: {:?}", t0.elapsed());
 }
