@@ -21,6 +21,7 @@ pub mod ply;
 mod preprocess;
 mod reference;
 mod render;
+mod tiled;
 mod train;
 
 pub use camera::Camera;
@@ -30,4 +31,5 @@ pub use cloud::{gnomen_cloud, CloudData, GaussianCloud};
 pub use preprocess::{preprocess, preprocess_view, Preprocessed};
 pub use reference::render_reference;
 pub use render::{render, render_view, RenderScene};
+pub use tiled::{render_tiled, TiledConfig};
 pub use train::{activate, mse, sgd_step, sigmoid, RawGaussianCloud, SgdRates, TrainStep};
