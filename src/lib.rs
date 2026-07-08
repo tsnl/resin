@@ -7,6 +7,7 @@ pub use resin_core as core;
 pub use resin_dataset as dataset;
 pub use resin_dsl as dsl;
 pub use resin_gaussians as gaussians;
+pub use resin_ir as ir;
 pub use resin_jit as jit;
 pub use resin_macros as macros;
 

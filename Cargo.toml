@@ -13,6 +13,7 @@ resin-core = { path = "crates/resin-core" }
 resin-dataset = { path = "crates/resin-dataset" }
 resin-dsl = { path = "crates/resin-dsl" }
 resin-gaussians = { path = "crates/resin-gaussians" }
+resin-ir = { path = "crates/resin-ir" }
 resin-jit = { path = "crates/resin-jit" }
 resin-macros = { path = "crates/resin-macros" }
 
@@ -34,6 +35,16 @@ path = "examples/train_mnist.rs"
 name = "mnist_profile"
 path = "examples/mnist_profile.rs"
 required-features = ["cpu"]
+
+[[example]]
+name = "train_3dgs"
+path = "examples/train_3dgs.rs"
+required-features = ["cpu"]
+
+[[example]]
+name = "bench_3dgs"
+path = "examples/bench_3dgs.rs"
+# Program-shape stats plus wall-clock timings on cpu/wgpu.
 
 [[example]]
 name = "demo_3dgs"

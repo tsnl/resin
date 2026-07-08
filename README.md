@@ -25,6 +25,8 @@ Roadmap: [TODO.md](TODO.md).
 | `resin-jit` | DSL → IR lowering, `Jit` trait, compile cache; CPU interpreter and WGPU (WGSL) backends |
 | `resin-macros` | `#[derive(Tree)]` for user parameter/output structs |
 | `resin-dataset` | MNIST download and batching |
+| `resin-gaussians` | 3D Gaussian Splatting as a library of graph functions (render, train, PLY) |
+| `resin-viewer` | winit + softbuffer presentation helper (interactive orbit viewer) |
 
 The root `resin` crate re-exports the public surface and hosts the examples.
 
@@ -48,6 +50,16 @@ cargo fmt --all
 cargo run --example demo_front
 cargo run --example interp_add
 cargo run --example train_mnist --release
+cargo run --example demo_3dgs --release
+cargo run --example train_3dgs --release
+cargo run --example bench_3dgs --release -- --backend cpu
+
+# 3DGS checkpoint data (HuggingFace submodule; LFS files stay as pointers,
+# the test scenes are stored raw):
+GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --depth 1
+
+# Interactive viewer (drag to orbit, scroll to zoom):
+cargo run -p resin-viewer --release -- --ply data/hf/dylanebert-3dgs/luigi/luigi.ply
 ```
 
 MNIST data is cached under a local cache directory (see

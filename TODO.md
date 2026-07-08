@@ -108,7 +108,35 @@ user code.
 - [ ] **3.5 Tiling (follow-up).** The untiled formulation materializes
   `O(N·H·W)`; tiles restore locality: per-tile gaussian lists via
   tile-key sort + segment offsets (`scan` again), per-tile blend. Same
-  combinators, new wiring — still no custom kernels.
+  combinators, new wiring — still no custom kernels. (Phase 4's chunked
+  fold bounds *memory*; tiling additionally bounds *work* per pixel.)
+
+### Phase 4: real checkpoints, performance, training loop
+
+- [x] **4.1 Camera as data.** `render_view` / `preprocess_view` take `[4, 4]`
+  view/proj *tensors*; compile once, move the camera every call (basis for
+  the viewer and multi-view training). Fixed the inherited projection
+  convention (`w = +depth`, screen y down) in both tensor and reference
+  paths.
+- [x] **4.2 Checkpoints.** Minimal 3DGS PLY loader (INRIA layout, SH DC only)
+  with standard activations; `data/hf/dylanebert-3dgs` HuggingFace submodule
+  (shallow; `GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --depth 1`);
+  parity tests render the real `luigi` checkpoint.
+- [x] **4.3 Chunked renderer.** Host-side fold over depth-sorted chunks
+  carrying `(image, transmittance)` — compositing is associative, so this is
+  exact. Peak memory `O(K·H·W)` instead of `O(N·H·W)`; renders full
+  checkpoints. Forward-only (the fold crosses program boundaries).
+- [x] **4.4 Benchmarks.** `bench_3dgs` example: dispatch counts and buffer
+  bytes of optimized programs (backend-independent) + first/steady wall
+  times for scan, sort, dense render, render+grad, chunked checkpoint;
+  `--backend wgpu` on GPU machines.
+- [x] **4.5 Training path.** `RawGaussianCloud` (log-scale / logit
+  parameterization) + `activate()`; the backward pass is `grad_wrt` on the
+  forward — no renderer adjoint code. Multi-view SGD test converges ~100×;
+  `train_3dgs` example.
+- [x] **4.6 Viewer.** `resin-viewer` (winit + softbuffer): drag-orbit /
+  scroll-zoom over the compiled camera-as-parameter renderer; `--offscreen`
+  headless mode; `--ply` loads checkpoints.
 
 ### Deferred / non-goals for this arc
 

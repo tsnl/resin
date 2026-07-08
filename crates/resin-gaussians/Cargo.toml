@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 resin-core = { path = "../resin-core" }
 resin-dsl = { path = "../resin-dsl" }
+resin-jit = { path = "../resin-jit", default-features = false }
 resin-macros = { path = "../resin-macros" }
+thiserror = "2.0.18"
 
 [dev-dependencies]
 resin-jit = { path = "../resin-jit", default-features = false, features = ["cpu"] }
