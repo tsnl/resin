@@ -78,8 +78,9 @@ name = "resin"
 version = "0.1.0"
 dependencies = [
  "resin-core",
+ "resin-dataset",
  "resin-dsl",
- "resin-ir",
+ "resin-jit",
  "resin-macros",
 ]
 
@@ -94,6 +95,10 @@ dependencies = [
  "serde",
  "thiserror",
 ]
+
+[[package]]
+name = "resin-dataset"
+version = "0.1.0"
 
 [[package]]
 name = "resin-dsl"
@@ -112,6 +117,17 @@ dependencies = [
  "resin-macros",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "resin-jit"
+version = "0.1.0"
+dependencies = [
+ "resin-core",
+ "resin-dsl",
+ "resin-ir",
+ "resin-macros",
  "thiserror",
 ]
 

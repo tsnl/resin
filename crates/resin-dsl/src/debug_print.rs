@@ -171,6 +171,9 @@ fn headline(tensor: &Tensor) -> String {
             format_tuple(target_shape)
         ),
         TensorKind::Transpose { .. } => "transpose()".to_string(),
+        TensorKind::Squeeze { axes, .. } => {
+            format!("squeeze(axes={})", format_tuple(axes))
+        }
     };
     format!(
         "{kind} :: {}{}",
@@ -179,8 +182,8 @@ fn headline(tensor: &Tensor) -> String {
     )
 }
 
-fn element_type_name(etype: ElementType) -> &'static str {
-    match etype {
+fn element_type_name(element_type: ElementType) -> &'static str {
+    match element_type {
         ElementType::F32 => "f32",
     }
 }
@@ -372,7 +375,7 @@ mod tests {
 
     #[test]
     fn dump_parameter() {
-        let tensor = Tensor::parameter(&[4]);
+        let tensor = Tensor::parameter(&[4], ElementType::F32);
         assert_eq!(debug_str(&tensor), "parameter() :: f32(4,)");
     }
 }

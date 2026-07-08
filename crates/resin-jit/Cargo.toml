@@ -1,0 +1,18 @@
+[package]
+name = "resin-jit"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["cpu", "wgpu"]
+cpu = []
+wgpu = []
+
+[dependencies]
+resin-core = { path = "../resin-core" }
+resin-dsl = { path = "../resin-dsl" }
+resin-ir = { path = "../resin-ir" }
+thiserror = "2.0.18"
+
+[dev-dependencies]
+resin-macros = { path = "../resin-macros" }

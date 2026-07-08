@@ -28,7 +28,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrBuffer {
     pub shape: Box<[u32]>,
-    pub etype: ElementType,
+    pub element_type: ElementType,
     pub init: Option<Box<[u8]>>,
     pub readonly: bool,
 }
@@ -46,7 +46,7 @@ pub struct IrDispatch {
     pub output_buffer_index: BufferRef,
 }
 
-/// Middle-end kernel. `etype` is the output buffer element type.
+/// Middle-end kernel. `element_type` is the output buffer element type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrKernel {
     ElementwiseRpn(IrElementwiseRpnKernel),
@@ -58,8 +58,8 @@ pub enum IrKernel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrElementwiseRpnKernel {
     pub arg_accessors: Vec<Accessor>,
-    pub arg_etypes: Vec<ElementType>,
-    pub etype: ElementType,
+    pub arg_element_types: Vec<ElementType>,
+    pub element_type: ElementType,
     pub shape: Box<[u32]>,
     pub rpn_expr: ElementRpnExpr,
     pub clear_output_before_dispatch: bool,
@@ -68,7 +68,7 @@ pub struct IrElementwiseRpnKernel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrMatmulKernel {
     pub arg_accessors: Vec<Accessor>,
-    pub etype: ElementType,
+    pub element_type: ElementType,
     pub shape: Box<[u32]>,
     pub clear_output_before_dispatch: bool,
 }
@@ -76,7 +76,7 @@ pub struct IrMatmulKernel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrReductionKernel {
     pub arg_accessors: Vec<Accessor>,
-    pub etype: ElementType,
+    pub element_type: ElementType,
     pub shape: Box<[u32]>,
     pub operator: BinaryAssocElementOperator,
     pub axes: Box<[u32]>,
@@ -86,8 +86,8 @@ pub struct IrReductionKernel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrRemapKernel {
     pub arg_accessors: Vec<Accessor>,
-    pub arg_etypes: Vec<ElementType>,
-    pub etype: ElementType,
+    pub arg_element_types: Vec<ElementType>,
+    pub element_type: ElementType,
     pub shape: Box<[u32]>,
     pub info: RemapInfo,
     pub clear_output_before_dispatch: bool,
@@ -103,12 +103,12 @@ impl IrKernel {
         }
     }
 
-    pub fn etype(&self) -> ElementType {
+    pub fn element_type(&self) -> ElementType {
         match self {
-            IrKernel::ElementwiseRpn(k) => k.etype,
-            IrKernel::Matmul(k) => k.etype,
-            IrKernel::Reduction(k) => k.etype,
-            IrKernel::Remap(k) => k.etype,
+            IrKernel::ElementwiseRpn(k) => k.element_type,
+            IrKernel::Matmul(k) => k.element_type,
+            IrKernel::Reduction(k) => k.element_type,
+            IrKernel::Remap(k) => k.element_type,
         }
     }
 
@@ -130,13 +130,13 @@ impl IrKernel {
         }
     }
 
-    /// Element type of each argument buffer (defaults to output etype when unspecified).
-    pub fn operand_etypes(&self) -> Vec<ElementType> {
+    /// Element type of each argument buffer (defaults to output element type when unspecified).
+    pub fn operand_element_types(&self) -> Vec<ElementType> {
         match self {
-            IrKernel::ElementwiseRpn(k) => k.arg_etypes.clone(),
-            IrKernel::Remap(k) => k.arg_etypes.clone(),
-            IrKernel::Matmul(k) => vec![k.etype; k.arg_accessors.len()],
-            IrKernel::Reduction(k) => vec![k.etype; k.arg_accessors.len()],
+            IrKernel::ElementwiseRpn(k) => k.arg_element_types.clone(),
+            IrKernel::Remap(k) => k.arg_element_types.clone(),
+            IrKernel::Matmul(k) => vec![k.element_type; k.arg_accessors.len()],
+            IrKernel::Reduction(k) => vec![k.element_type; k.arg_accessors.len()],
         }
     }
 
@@ -174,9 +174,9 @@ impl IrElementwiseRpnKernel {
                 });
             }
         }
-        if self.arg_etypes.len() != self.arg_accessors.len() {
-            return Err(IrError::ElementwiseArgEtypesLen {
-                etypes: self.arg_etypes.len(),
+        if self.arg_element_types.len() != self.arg_accessors.len() {
+            return Err(IrError::ElementwiseArgElementTypesLen {
+                element_types: self.arg_element_types.len(),
                 accessors: self.arg_accessors.len(),
             });
         }
@@ -284,9 +284,9 @@ impl IrReductionKernel {
 
 impl IrRemapKernel {
     pub fn validate(&self) -> Result<(), IrError> {
-        if self.arg_etypes.len() != self.arg_accessors.len() {
-            return Err(IrError::RemapArgEtypesLen {
-                etypes: self.arg_etypes.len(),
+        if self.arg_element_types.len() != self.arg_accessors.len() {
+            return Err(IrError::RemapArgElementTypesLen {
+                element_types: self.arg_element_types.len(),
                 accessors: self.arg_accessors.len(),
             });
         }
@@ -424,7 +424,7 @@ mod tests {
                 Accessor::dense([2, 4], 0),
                 Accessor::dense([4, 3], 0),
             ],
-            etype: F4,
+            element_type: F4,
             shape: Box::from([2, 3]),
             clear_output_before_dispatch: false,
         });
@@ -437,8 +437,8 @@ mod tests {
         let shape: Box<[u32]> = Box::from([2, 3]);
         let kernel = IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
             arg_accessors: vec![Accessor::dense(shape.clone(), 0), Accessor::dense(shape.clone(), 0)],
-            arg_etypes: vec![F4, F4],
-            etype: F4,
+            arg_element_types: vec![F4, F4],
+            element_type: F4,
             shape,
             rpn_expr: ElementRpnExpr {
                 atoms: vec![
@@ -458,7 +458,7 @@ mod tests {
     fn reduction_kernel_validates() {
         let kernel = IrKernel::Reduction(IrReductionKernel {
             arg_accessors: vec![Accessor::dense([2, 3, 4], 0)],
-            etype: F4,
+            element_type: F4,
             shape: Box::from([2, 1, 4]),
             operator: BinaryAssocElementOperator::Add,
             axes: Box::from([1]),
@@ -506,13 +506,13 @@ mod tests {
             buffers: vec![
                 IrBuffer {
                     shape: Box::from([4, 4]),
-                    etype: F4,
+                    element_type: F4,
                     init: None,
                     readonly: false,
                 },
                 IrBuffer {
                     shape: Box::from([4]),
-                    etype: F4,
+                    element_type: F4,
                     init: None,
                     readonly: false,
                 },
@@ -543,7 +543,7 @@ mod tests {
             queue: vec![],
             buffers: vec![IrBuffer {
                 shape: Box::from([4]),
-                etype: F4,
+                element_type: F4,
                 init: None,
                 readonly: false,
             }],
@@ -568,8 +568,8 @@ mod tests {
         let shape: Box<[u32]> = Box::from([4]);
         let kernel = IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
             arg_accessors: vec![Accessor::dense(shape.clone(), 0)],
-            arg_etypes: vec![F4],
-            etype: F4,
+            arg_element_types: vec![F4],
+            element_type: F4,
             shape,
             rpn_expr: ElementRpnExpr {
                 atoms: vec![
@@ -591,8 +591,8 @@ mod tests {
             queue: vec![IrDispatch {
                 kernel: IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
                     arg_accessors: vec![Accessor::dense(shape.clone(), 0)],
-                    arg_etypes: vec![F4],
-                    etype: F4,
+                    arg_element_types: vec![F4],
+                    element_type: F4,
                     shape: shape.clone(),
                     rpn_expr: ElementRpnExpr {
                         atoms: vec![
@@ -607,7 +607,7 @@ mod tests {
             }],
             buffers: vec![IrBuffer {
                 shape: shape.clone(),
-                etype: F4,
+                element_type: F4,
                 init: Some(Box::from([1u8, 2, 3, 4])),
                 readonly: true,
             }],
@@ -657,13 +657,13 @@ mod tests {
             buffers: vec![
                 IrBuffer {
                     shape: shape.clone(),
-                    etype: F4,
+                    element_type: F4,
                     init: None,
                     readonly: false,
                 },
                 IrBuffer {
                     shape: Box::from([3]),
-                    etype: F4,
+                    element_type: F4,
                     init: None,
                     readonly: false,
                 },

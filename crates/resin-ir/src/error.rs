@@ -6,8 +6,13 @@ pub enum IrError {
     #[error("elementwise arg shape {arg:?} != kernel shape {kernel:?}")]
     ElementwiseArgShape { arg: Box<[u32]>, kernel: Box<[u32]> },
 
-    #[error("elementwise arg_etypes length {etypes} != arg_accessors length {accessors}")]
-    ElementwiseArgEtypesLen { etypes: usize, accessors: usize },
+    #[error(
+        "elementwise arg_element_types length {element_types} != arg_accessors length {accessors}"
+    )]
+    ElementwiseArgElementTypesLen {
+        element_types: usize,
+        accessors: usize,
+    },
 
     // --- Matmul ---
     #[error("matmul requires exactly two arguments, got {got}")]
@@ -45,8 +50,13 @@ pub enum IrError {
     ReductionPreservedAxis { axis: usize, output: u32, input: u32 },
 
     // --- Remap (shared) ---
-    #[error("remap arg_etypes length {etypes} != arg_accessors length {accessors}")]
-    RemapArgEtypesLen { etypes: usize, accessors: usize },
+    #[error(
+        "remap arg_element_types length {element_types} != arg_accessors length {accessors}"
+    )]
+    RemapArgElementTypesLen {
+        element_types: usize,
+        accessors: usize,
+    },
 
     // --- Remap: scatter ---
     #[error("scatter with accessor requires one argument, got {got}")]

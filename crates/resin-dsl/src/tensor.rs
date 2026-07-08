@@ -71,6 +71,12 @@ pub enum TensorKind {
     Transpose {
         arg: Tensor,
     },
+    /// Drop size-1 axes (NumPy-style squeeze). Required to turn keepdims
+    /// reductions into true scalars for reverse-mode autodiff.
+    Squeeze {
+        arg: Tensor,
+        axes: Box<[usize]>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -166,8 +172,7 @@ impl Tensor {
     pub(crate) fn full_like(&self, value: f32) -> Self {
         Self::full(self.shape(), value, self.element_type())
     }
-    #[cfg(test)]
-    pub(crate) fn constant_f32(shape: &[usize], values: &[f32]) -> Self {
+    pub fn constant_f32(shape: &[usize], values: &[f32]) -> Self {
         assert_eq!(
             shape.iter().product::<usize>(),
             values.len(),
@@ -186,7 +191,7 @@ impl Tensor {
         })
     }
 
-    pub(crate) fn full(shape: &[usize], value: f32, element_type: ElementType) -> Self {
+    pub fn full(shape: &[usize], value: f32, element_type: ElementType) -> Self {
         let count = shape.iter().product::<usize>();
         let bytes = f32::to_le_bytes(value);
         let mut data = Vec::with_capacity(count * element_type.nbytes());
@@ -213,12 +218,32 @@ impl Tensor {
         let mut args = arrvec![self.clone()];
         args.extend(extra_args);
 
+        let shape = if operator == ElementOperator::Matmul {
+            matmul_output_shape(self.shape(), args[1].shape())
+        } else {
+            self.inner.shape.clone()
+        };
+
         Tensor::from(TensorInner {
             element_type: self.inner.element_type,
-            shape: self.inner.shape.clone(),
+            shape,
             kind: TensorKind::Elementwise { operator, args },
         })
     }
+}
+
+fn matmul_output_shape(lhs: &[usize], rhs: &[usize]) -> Box<[usize]> {
+    assert!(lhs.len() >= 2 && rhs.len() >= 2, "matmul requires rank >= 2");
+    assert_eq!(
+        lhs[lhs.len() - 1],
+        rhs[rhs.len() - 2],
+        "matmul inner dimension mismatch: {} != {}",
+        lhs[lhs.len() - 1],
+        rhs[rhs.len() - 2],
+    );
+    let mut out = lhs[..lhs.len() - 1].to_vec();
+    out.push(rhs[rhs.len() - 1]);
+    out.into()
 }
 
 macro_rules! impl_unary_elementwise {
@@ -288,7 +313,7 @@ impl Tensor {
         })
     }
 
-    pub(crate) fn broadcast_to(&self, target_shape: &[usize], axes: &[usize]) -> Self {
+    pub fn broadcast_to(&self, target_shape: &[usize], axes: &[usize]) -> Self {
         Tensor::from(TensorInner {
             element_type: self.element_type(),
             shape: target_shape.into(),
@@ -341,7 +366,7 @@ impl Tensor {
         })
     }
 
-    pub(crate) fn sum_axes(&self, axes: &[usize]) -> Self {
+    pub fn sum_axes(&self, axes: &[usize]) -> Self {
         let shape = reduction_output_shape(self.shape(), axes);
         Tensor::from(TensorInner {
             element_type: self.element_type(),
@@ -352,6 +377,58 @@ impl Tensor {
                 arg: self.clone(),
             },
         })
+    }
+
+    /// Remove the given size-1 axes. Axes must be unique and in-bounds.
+    pub fn squeeze(&self, axes: &[usize]) -> Self {
+        let shape = self.shape();
+        let mut seen = HashSet::new();
+        for &axis in axes {
+            assert!(
+                axis < shape.len(),
+                "squeeze axis {axis} out of range for rank {}",
+                shape.len()
+            );
+            assert!(
+                seen.insert(axis),
+                "squeeze axes must be unique, got {axes:?}"
+            );
+            assert_eq!(
+                shape[axis], 1,
+                "cannot squeeze axis {axis} with size {}",
+                shape[axis]
+            );
+        }
+        let new_shape: Box<[usize]> = shape
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !seen.contains(i))
+            .map(|(_, &d)| d)
+            .collect();
+        Tensor::from(TensorInner {
+            element_type: self.element_type(),
+            shape: new_shape,
+            kind: TensorKind::Squeeze {
+                arg: self.clone(),
+                axes: axes.into(),
+            },
+        })
+    }
+
+    /// Squeeze every size-1 axis (no-op if none).
+    pub fn squeeze_all(&self) -> Self {
+        let axes: Vec<usize> = self
+            .shape()
+            .iter()
+            .enumerate()
+            .filter(|&(_, &d)| d == 1)
+            .map(|(i, _)| i)
+            .collect();
+        if axes.is_empty() {
+            self.clone()
+        } else {
+            self.squeeze(&axes)
+        }
     }
 }
 
@@ -391,6 +468,7 @@ impl Tensor {
             TensorKind::Broadcast { arg, .. } => vec![arg.clone()],
             TensorKind::ScatterIndex { source, .. } => vec![source.clone()],
             TensorKind::Transpose { arg } => vec![arg.clone()],
+            TensorKind::Squeeze { arg, .. } => vec![arg.clone()],
         }
     }
     /// Post-order traversal of the subgraph reachable from `self` (inputs before outputs).
@@ -424,11 +502,13 @@ impl Tensor {
     }
 }
 
-#[cfg(test)]
 impl Tensor {
-    pub(crate) fn parameter(shape: &[usize]) -> Self {
+    /// Trace-time parameter placeholder (shape and dtype only; no buffer).
+    ///
+    /// Created by the JIT when lifting concrete arrays into a DSL graph.
+    pub fn parameter(shape: &[usize], element_type: ElementType) -> Self {
         Tensor::from(TensorInner {
-            element_type: ElementType::F32,
+            element_type,
             shape: shape.into(),
             kind: TensorKind::Parameter,
         })
@@ -441,7 +521,7 @@ mod tests {
 
     #[test]
     fn toposort_allows_shared_operands() {
-        let a = Tensor::parameter(&[]);
+        let a = Tensor::parameter(&[], ElementType::F32);
         let loss = a.clone() + a.clone();
         assert!(loss.toposort().is_ok());
     }
@@ -450,6 +530,25 @@ mod tests {
     fn zeros_respects_element_type() {
         let tensor = Tensor::zeros(&[2, 3], ElementType::F32);
         assert_eq!(tensor.element_type(), ElementType::F32);
+    }
+
+    #[test]
+    fn sum_axes_is_keepdims() {
+        let t = Tensor::parameter(&[8, 10], ElementType::F32);
+        let s = t.sum_axes(&[0]);
+        assert_eq!(s.shape(), &[1, 10]);
+    }
+
+    #[test]
+    fn squeeze_all_after_full_sum_yields_scalar() {
+        // Regression: mean_all used `while !shape.is_empty() { sum_axes([0]) }`,
+        // which never terminates under keepdims (shape stays [1, …]).
+        let t = Tensor::parameter(&[8, 10], ElementType::F32);
+        let axes: Vec<usize> = (0..t.shape().len()).collect();
+        let reduced = t.sum_axes(&axes);
+        assert_eq!(reduced.shape(), &[1, 1]);
+        let scalar = reduced.squeeze_all();
+        assert!(scalar.shape().is_empty(), "got {:?}", scalar.shape());
     }
 }
 

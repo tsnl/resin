@@ -1,15 +1,16 @@
 mod accessor;
-mod etype;
+mod element_type;
 mod macros;
 mod tree;
 
 pub use accessor::{
     c_contiguous_pitch_for_shape, shape_join, Accessor, ShapeError, ShapeJoin,
 };
-pub use etype::{
-    etype, etype_join, etype_join_kind, etype_kind, etype_nbytes, BinaryAssocElementOperator,
-    BinaryBitwiseOperator, BinaryCompareOperator, BinaryElementOperator, ElementKind,
-    ElementOperator, ElementType, EtypeError, UnaryElementOperator, F2, F4, U4,
+pub use element_type::{
+    element_type, element_type_join, element_type_join_kind, element_type_kind,
+    element_type_nbytes, BinaryAssocElementOperator, BinaryBitwiseOperator,
+    BinaryCompareOperator, BinaryElementOperator, ElementKind, ElementOperator, ElementType,
+    ElementTypeError, UnaryElementOperator, F2, F4, U4,
 };
 
 // Export basics:

@@ -6,4 +6,5 @@ pub mod prelude;
 mod tensor;
 
 pub use debug_print::{debug_print, debug_str, dedent, refcount};
-pub use grad::{GradError, grad};
+pub use grad::{grad, grad_wrt, GradError};
+pub use tensor::{ElementOperator, ElementType, Tensor, TensorKind};

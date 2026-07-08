@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 /// Errors from element-type operations.
 #[derive(Debug, thiserror::Error)]
-pub enum EtypeError {
-    #[error("unsupported etype with kind={kind:?} and nbytes={nbytes}")]
+pub enum ElementTypeError {
+    #[error("unsupported element type with kind={kind:?} and nbytes={nbytes}")]
     Unsupported { kind: ElementKind, nbytes: u32 },
 
-    #[error("cannot join etypes of different kinds: {lhs:?} and {rhs:?}")]
+    #[error("cannot join element types of different kinds: {lhs:?} and {rhs:?}")]
     KindMismatch { lhs: ElementKind, rhs: ElementKind },
 }
 
@@ -34,6 +34,8 @@ pub enum UnaryElementOperator {
     Neg,
     Exp,
     Log,
+    Relu,
+    Abs,
     Sqrt,
     Sin,
     Cos,
@@ -102,32 +104,41 @@ impl ElementType {
     }
 }
 
-pub fn etype_nbytes(etype: ElementType) -> u32 {
-    etype.nbytes()
+pub fn element_type_nbytes(element_type: ElementType) -> u32 {
+    element_type.nbytes()
 }
 
-pub fn etype_kind(etype: ElementType) -> ElementKind {
-    etype.kind()
+pub fn element_type_kind(element_type: ElementType) -> ElementKind {
+    element_type.kind()
 }
 
-pub fn etype(kind: ElementKind, nbytes: u32) -> Result<ElementType, EtypeError> {
+pub fn element_type(
+    kind: ElementKind,
+    nbytes: u32,
+) -> Result<ElementType, ElementTypeError> {
     match (kind, nbytes) {
         (ElementKind::Float, 4) => Ok(ElementType::F4),
         (ElementKind::Float, 2) => Ok(ElementType::F2),
         (ElementKind::Uint, 4) => Ok(ElementType::U4),
-        _ => Err(EtypeError::Unsupported { kind, nbytes }),
+        _ => Err(ElementTypeError::Unsupported { kind, nbytes }),
     }
 }
 
-pub fn etype_join_kind(a: ElementKind, b: ElementKind) -> Result<ElementKind, EtypeError> {
+pub fn element_type_join_kind(
+    a: ElementKind,
+    b: ElementKind,
+) -> Result<ElementKind, ElementTypeError> {
     if a != b {
-        return Err(EtypeError::KindMismatch { lhs: a, rhs: b });
+        return Err(ElementTypeError::KindMismatch { lhs: a, rhs: b });
     }
     Ok(a)
 }
 
-pub fn etype_join(a: ElementType, b: ElementType) -> Result<ElementType, EtypeError> {
-    let kind = etype_join_kind(a.kind(), b.kind())?;
+pub fn element_type_join(
+    a: ElementType,
+    b: ElementType,
+) -> Result<ElementType, ElementTypeError> {
+    let kind = element_type_join_kind(a.kind(), b.kind())?;
     let nbytes = a.nbytes().max(b.nbytes());
-    etype(kind, nbytes)
+    element_type(kind, nbytes)
 }

@@ -3,7 +3,14 @@ pub trait Tree<T: Clone> {
 
     fn map<U: Clone>(&self, f: impl Fn(&T) -> U) -> Self::Mapped<U>;
 
+    fn try_map<U: Clone, E>(
+        &self,
+        f: impl FnMut(&T) -> Result<U, E>,
+    ) -> Result<Self::Mapped<U>, E>;
+
     fn for_each_leaf(&self, f: impl FnMut(&T));
+
+    fn for_each_leaf_mut(&mut self, f: impl FnMut(&mut T));
 }
 
 /// A bare leaf is a single-node tree.
@@ -14,7 +21,15 @@ impl<T: Clone> Tree<T> for T {
         f(self)
     }
 
+    fn try_map<U: Clone, E>(&self, mut f: impl FnMut(&T) -> Result<U, E>) -> Result<U, E> {
+        f(self)
+    }
+
     fn for_each_leaf(&self, mut f: impl FnMut(&T)) {
+        f(self);
+    }
+
+    fn for_each_leaf_mut(&mut self, mut f: impl FnMut(&mut T)) {
         f(self);
     }
 }
@@ -26,7 +41,17 @@ impl<T: Clone> Tree<T> for Vec<T> {
         self.iter().map(|leaf| f(leaf)).collect()
     }
 
+    fn try_map<U: Clone, E>(&self, mut f: impl FnMut(&T) -> Result<U, E>) -> Result<Vec<U>, E> {
+        self.iter().map(|leaf| f(leaf)).collect()
+    }
+
     fn for_each_leaf(&self, mut f: impl FnMut(&T)) {
+        for leaf in self {
+            f(leaf);
+        }
+    }
+
+    fn for_each_leaf_mut(&mut self, mut f: impl FnMut(&mut T)) {
         for leaf in self {
             f(leaf);
         }

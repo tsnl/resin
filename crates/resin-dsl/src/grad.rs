@@ -8,6 +8,20 @@ use crate::tensor::{ElementOperator, IndexKeyElement, RemapDirection, Tensor, Te
 /// The function `f` is called once to trace the computation graph of the value
 /// function, and the gradients are computed using reverse-mode automatic
 /// differentiation.
+/// Gradients of a traced scalar `loss` with respect to each leaf of `params`.
+pub fn grad_wrt<T: Tree<Tensor>>(loss: &Tensor, params: &T) -> Result<T::Mapped<Tensor>, GradError> {
+    if !loss.shape().is_empty() {
+        return Err(GradError::NonScalarOutput(Box::from(loss.shape())));
+    }
+    let grad_map = grad_by_node(loss)?;
+    Ok(params.map(|param| {
+        grad_map
+            .get(param)
+            .cloned()
+            .unwrap_or_else(|| Tensor::zeros_like(param))
+    }))
+}
+
 pub fn grad<T: Clone + Tree<Tensor, Mapped<Tensor> = T>>(
     f: impl Fn(T) -> Tensor,
 ) -> impl Fn(T) -> Result<(Tensor, T), GradError> {
@@ -101,6 +115,7 @@ fn backward(grad_map: &mut GradMap, node: &Tensor, df_dout: &Tensor) -> Result<(
             backward_scatter_index(grad_map, source, key, df_dout)
         }
         TensorKind::Transpose { arg } => backward_transpose(grad_map, arg, df_dout),
+        TensorKind::Squeeze { arg, axes } => backward_squeeze(grad_map, arg, axes, df_dout),
     }
 }
 
@@ -128,7 +143,61 @@ fn backward_broadcast(
     axes: &[usize],
     df_dout: &Tensor,
 ) -> Result<(), GradError> {
-    accumulate(grad_map, arg, df_dout.sum_axes(axes));
+    // `axes[i]` maps arg axis `i` → output axis. Sum over output axes that were
+    // expanded (unmapped, or mapped from a size-1 arg dim), then squeeze only
+    // the unmapped axes so the result matches `arg.shape()`.
+    let out_rank = df_dout.shape().len();
+    let arg_shape = arg.shape();
+    let mut out_to_arg = vec![None; out_rank];
+    for (arg_axis, &out_axis) in axes.iter().enumerate() {
+        out_to_arg[out_axis] = Some(arg_axis);
+    }
+
+    let mut sum_axes = Vec::new();
+    let mut unmapped = Vec::new();
+    for out_axis in 0..out_rank {
+        match out_to_arg[out_axis] {
+            None => {
+                sum_axes.push(out_axis);
+                unmapped.push(out_axis);
+            }
+            Some(arg_axis)
+                if arg_shape[arg_axis] == 1 && df_dout.shape()[out_axis] > 1 =>
+            {
+                sum_axes.push(out_axis);
+            }
+            Some(_) => {}
+        }
+    }
+
+    let mut g = df_dout.clone();
+    if !sum_axes.is_empty() {
+        g = g.sum_axes(&sum_axes);
+    }
+    unmapped.sort_unstable();
+    for &axis in unmapped.iter().rev() {
+        g = g.squeeze(&[axis]);
+    }
+    accumulate(grad_map, arg, g);
+    Ok(())
+}
+
+fn backward_squeeze(
+    grad_map: &mut GradMap,
+    arg: &Tensor,
+    axes: &[usize],
+    df_dout: &Tensor,
+) -> Result<(), GradError> {
+    // Inverse of squeeze: re-insert size-1 axes via broadcast.
+    let squeezed: HashSet<usize> = axes.iter().copied().collect();
+    let mapping: Vec<usize> = (0..arg.shape().len())
+        .filter(|a| !squeezed.contains(a))
+        .collect();
+    accumulate(
+        grad_map,
+        arg,
+        df_dout.broadcast_to(arg.shape(), &mapping),
+    );
     Ok(())
 }
 
@@ -231,7 +300,11 @@ fn backward_reduction(
     arg: &Tensor,
     df_dout: &Tensor,
 ) -> Result<(), GradError> {
-    let g = df_dout.broadcast_to(arg.shape(), axes);
+    let _ = axes;
+    // Reductions are keepdims: `df_dout` already has the same rank as `arg`
+    // (unit sizes on reduced axes). Expand those units by identity broadcast.
+    let identity: Vec<usize> = (0..arg.shape().len()).collect();
+    let g = df_dout.broadcast_to(arg.shape(), &identity);
     let grad_arg = match operator {
         ElementOperator::Add => g,
         ElementOperator::Mul => g * arg.clone() / node.clone(),
@@ -273,18 +346,18 @@ fn backward_remap(
 mod tests {
     use super::*;
     use crate::debug_print::{debug_str, dedent};
-    use crate::tensor::Tensor;
+    use crate::tensor::{ElementType, Tensor};
 
     #[test]
     fn grad_shared_operand_succeeds() {
-        let a = Tensor::parameter(&[]);
+        let a = Tensor::parameter(&[], ElementType::F32);
         let grad_fn = grad(|params: Vec<Tensor>| params[0].clone() + params[0].clone());
         assert!(grad_fn(vec![a]).is_ok());
     }
 
     #[test]
     fn grad_rejects_non_scalar_output() {
-        let a = Tensor::parameter(&[2]);
+        let a = Tensor::parameter(&[2], ElementType::F32);
         let grad_fn = grad(|params: Vec<Tensor>| params[0].clone());
         assert!(matches!(
             grad_fn(vec![a]),
@@ -294,8 +367,8 @@ mod tests {
 
     #[test]
     fn grad_rejects_undifferentiable_rem() {
-        let a = Tensor::parameter(&[]);
-        let b = Tensor::parameter(&[]);
+        let a = Tensor::parameter(&[], ElementType::F32);
+        let b = Tensor::parameter(&[], ElementType::F32);
         let grad_fn = grad(|params: Vec<Tensor>| params[0].clone() % params[1].clone());
         assert!(matches!(
             grad_fn(vec![a, b]),
@@ -307,8 +380,8 @@ mod tests {
 
     #[test]
     fn grad_add_expect() {
-        let a = Tensor::parameter(&[]);
-        let b = Tensor::parameter(&[]);
+        let a = Tensor::parameter(&[], ElementType::F32);
+        let b = Tensor::parameter(&[], ElementType::F32);
         let grad_fn = grad(|params: Vec<Tensor>| params[0].clone() + params[1].clone());
         let (_, grads) = grad_fn(vec![a, b]).unwrap();
         assert_eq!(debug_str(&grads[0]), "constant(value=1) :: f32()");
@@ -317,7 +390,7 @@ mod tests {
 
     #[test]
     fn grad_shared_operand_expect() {
-        let a = Tensor::parameter(&[]);
+        let a = Tensor::parameter(&[], ElementType::F32);
         let grad_fn = grad(|params: Vec<Tensor>| params[0].clone() + params[0].clone());
         let (_, grads) = grad_fn(vec![a]).unwrap();
         let expected = dedent(
@@ -333,8 +406,8 @@ mod tests {
 
     #[test]
     fn grad_mul_expect() {
-        let a = Tensor::parameter(&[]);
-        let b = Tensor::parameter(&[]);
+        let a = Tensor::parameter(&[], ElementType::F32);
+        let b = Tensor::parameter(&[], ElementType::F32);
         let grad_fn = grad(|params: Vec<Tensor>| params[0].clone() * params[1].clone());
         let (_, grads) = grad_fn(vec![a, b]).unwrap();
         let grad_a = debug_str(&grads[0]);
