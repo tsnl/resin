@@ -1,0 +1,13 @@
+<mujoco model="double pendulum">
+  <option timestep="0.002"/>
+  <worldbody>
+    <body name="upper" pos="0.4 0 1.6">
+      <joint type="hinge" pos="-0.4 0 0" axis="0 1 0"/>
+      <geom type="sphere" size="0.06" mass="0.8"/>
+      <body name="lower" pos="0.35 0 0">
+        <joint type="hinge" pos="-0.35 0 0" axis="0 1 0"/>
+        <geom type="sphere" size="0.05" mass="0.5"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,9 @@
+<mujoco model="pendulum">
+  <option timestep="0.002"/>
+  <worldbody>
+    <body name="bob" pos="0.6 0 1.4">
+      <joint type="hinge" pos="-0.6 0 0" axis="0 1 0"/>
+      <geom type="sphere" size="0.08" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

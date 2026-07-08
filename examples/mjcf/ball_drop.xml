@@ -1,0 +1,10 @@
+<mujoco model="ball drop">
+  <option timestep="0.002"/>
+  <worldbody>
+    <geom type="plane" size="5 5 1"/>
+    <body name="ball" pos="0 0 0.5">
+      <freejoint/>
+      <geom type="sphere" size="0.15" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>
