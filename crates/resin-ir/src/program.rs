@@ -1,7 +1,9 @@
 use resin_core::{
     Accessor, BinaryAssocElementOperator, ElementType, Tree,
 };
+use serde::{Deserialize, Serialize};
 
+use crate::error::IrError;
 use crate::refs::{validate_tree_indices, BufferRef, BufferViewRef};
 use crate::remap::{RemapGatherInfo, RemapInfo, RemapScatterInfo};
 use crate::rpn::ElementRpnExpr;
@@ -10,7 +12,7 @@ use crate::rpn::ElementRpnExpr;
 ///
 /// Param leaves are [`BufferRef`]s into [`IrProgram::buffers`]; sink leaves are
 /// [`BufferViewRef`]s into [`IrProgram::buffer_views`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrProgram<P = BufferRef, S = BufferViewRef>
 where
     P: Tree<BufferRef>,
@@ -23,7 +25,7 @@ where
     pub buffer_views: Vec<IrBufferView>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrBuffer {
     pub shape: Box<[u32]>,
     pub etype: ElementType,
@@ -31,13 +33,13 @@ pub struct IrBuffer {
     pub readonly: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrBufferView {
     pub buffer_index: BufferRef,
     pub accessor: Accessor,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrDispatch {
     pub kernel: IrKernel,
     pub arg_view_indices: Vec<BufferViewRef>,
@@ -45,7 +47,7 @@ pub struct IrDispatch {
 }
 
 /// Middle-end kernel. `etype` is the output buffer element type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrKernel {
     ElementwiseRpn(IrElementwiseRpnKernel),
     Matmul(IrMatmulKernel),
@@ -53,7 +55,7 @@ pub enum IrKernel {
     Remap(IrRemapKernel),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrElementwiseRpnKernel {
     pub arg_accessors: Vec<Accessor>,
     pub arg_etypes: Vec<ElementType>,
@@ -63,7 +65,7 @@ pub struct IrElementwiseRpnKernel {
     pub clear_output_before_dispatch: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrMatmulKernel {
     pub arg_accessors: Vec<Accessor>,
     pub etype: ElementType,
@@ -71,7 +73,7 @@ pub struct IrMatmulKernel {
     pub clear_output_before_dispatch: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrReductionKernel {
     pub arg_accessors: Vec<Accessor>,
     pub etype: ElementType,
@@ -81,7 +83,7 @@ pub struct IrReductionKernel {
     pub clear_output_before_dispatch: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrRemapKernel {
     pub arg_accessors: Vec<Accessor>,
     pub arg_etypes: Vec<ElementType>,
@@ -138,7 +140,7 @@ impl IrKernel {
         }
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), IrError> {
         match self {
             IrKernel::ElementwiseRpn(k) => k.validate(),
             IrKernel::Matmul(k) => k.validate(),
@@ -163,17 +165,20 @@ impl IrKernel {
 }
 
 impl IrElementwiseRpnKernel {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), IrError> {
         for accessor in &self.arg_accessors {
             if accessor.shape.as_ref() != self.shape.as_ref() {
-                return Err(format!(
-                    "elementwise arg shape {:?} != kernel shape {:?}",
-                    accessor.shape, self.shape
-                ));
+                return Err(IrError::ElementwiseArgShape {
+                    arg: accessor.shape.clone(),
+                    kernel: self.shape.clone(),
+                });
             }
         }
         if self.arg_etypes.len() != self.arg_accessors.len() {
-            return Err("elementwise arg_etypes length mismatch".into());
+            return Err(IrError::ElementwiseArgEtypesLen {
+                etypes: self.arg_etypes.len(),
+                accessors: self.arg_accessors.len(),
+            });
         }
         Ok(())
     }
@@ -184,23 +189,28 @@ impl IrMatmulKernel {
         self.arg_accessors[0].shape[self.arg_accessors[0].shape.len() - 1]
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), IrError> {
         if self.arg_accessors.len() != 2 {
-            return Err("matmul requires exactly two arguments".into());
+            return Err(IrError::MatmulArgCount {
+                got: self.arg_accessors.len(),
+            });
         }
         let a0 = &self.arg_accessors[0];
         let a1 = &self.arg_accessors[1];
         if a0.shape.len() < 2 || a1.shape.len() < 2 {
-            return Err("matmul arguments must be at least rank 2".into());
+            return Err(IrError::MatmulRankTooLow);
         }
         if a0.shape[a0.shape.len() - 1] != a1.shape[a1.shape.len() - 2] {
-            return Err("matmul inner dimension mismatch".into());
+            return Err(IrError::MatmulInnerDim {
+                lhs: a0.shape[a0.shape.len() - 1],
+                rhs: a1.shape[a1.shape.len() - 2],
+            });
         }
         if a0.shape[..a0.shape.len() - 2] != a1.shape[..a1.shape.len() - 2] {
-            return Err("matmul batch dimensions mismatch".into());
+            return Err(IrError::MatmulBatchDims);
         }
         if a0.shape.len() != a1.shape.len() || a0.shape.len() != self.shape.len() {
-            return Err("matmul rank mismatch".into());
+            return Err(IrError::MatmulRankMismatch);
         }
         let expected: Box<[u32]> = a0.shape[..a0.shape.len() - 1]
             .iter()
@@ -208,10 +218,10 @@ impl IrMatmulKernel {
             .copied()
             .collect();
         if self.shape.as_ref() != expected.as_ref() {
-            return Err(format!(
-                "matmul output shape {:?} != expected {:?}",
-                self.shape, expected
-            ));
+            return Err(IrError::MatmulOutputShape {
+                output: self.shape.clone(),
+                expected,
+            });
         }
         Ok(())
     }
@@ -229,23 +239,31 @@ impl IrReductionKernel {
             .product()
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), IrError> {
         if self.arg_accessors.len() != 1 {
-            return Err("reduction requires exactly one argument".into());
+            return Err(IrError::ReductionArgCount {
+                got: self.arg_accessors.len(),
+            });
         }
         let input_shape = self.input_shape();
         if input_shape.len() != self.shape.len() {
-            return Err("reduction input/output rank mismatch".into());
+            return Err(IrError::ReductionRankMismatch {
+                input: input_shape.len(),
+                output: self.shape.len(),
+            });
         }
         for &axis in &self.axes {
             if axis as usize >= self.shape.len() {
-                return Err(format!("reduction axis {axis} out of range"));
+                return Err(IrError::ReductionAxisOutOfRange {
+                    axis,
+                    rank: self.shape.len(),
+                });
             }
             if self.shape[axis as usize] != 1 {
-                return Err(format!(
-                    "reduction output axis {axis} must be size 1, got {}",
-                    self.shape[axis as usize]
-                ));
+                return Err(IrError::ReductionAxisNotUnit {
+                    axis,
+                    size: self.shape[axis as usize],
+                });
             }
         }
         for (i, (&out_dim, &in_dim)) in self.shape.iter().zip(input_shape.iter()).enumerate() {
@@ -253,9 +271,11 @@ impl IrReductionKernel {
                 continue;
             }
             if out_dim != in_dim {
-                return Err(format!(
-                    "reduction preserved axis {i}: output {out_dim} != input {in_dim}"
-                ));
+                return Err(IrError::ReductionPreservedAxis {
+                    axis: i,
+                    output: out_dim,
+                    input: in_dim,
+                });
             }
         }
         Ok(())
@@ -263,33 +283,46 @@ impl IrReductionKernel {
 }
 
 impl IrRemapKernel {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), IrError> {
         if self.arg_etypes.len() != self.arg_accessors.len() {
-            return Err("remap arg_etypes length mismatch".into());
+            return Err(IrError::RemapArgEtypesLen {
+                etypes: self.arg_etypes.len(),
+                accessors: self.arg_accessors.len(),
+            });
         }
         match &self.info {
             RemapInfo::Scatter(RemapScatterInfo { accessor, .. }) => {
                 if let Some(accessor) = accessor {
                     if self.arg_accessors.len() != 1 {
-                        return Err("scatter with accessor requires one argument".into());
+                        return Err(IrError::ScatterAccessorArgCount {
+                            got: self.arg_accessors.len(),
+                        });
                     }
                     if accessor.shape.as_ref() != self.arg_accessors[0].shape.as_ref() {
-                        return Err("scatter accessor shape mismatch".into());
+                        return Err(IrError::ScatterAccessorShape {
+                            accessor: accessor.shape.clone(),
+                            source_shape: self.arg_accessors[0].shape.clone(),
+                        });
                     }
                 } else if self.arg_accessors.len() != 2 {
-                    return Err("scatter without accessor requires two arguments".into());
+                    return Err(IrError::ScatterArgCount {
+                        got: self.arg_accessors.len(),
+                    });
                 } else {
                     let source_accessor = &self.arg_accessors[0];
                     let indices_accessor = &self.arg_accessors[1];
                     if indices_accessor.shape[indices_accessor.shape.len() - 1]
                         != self.shape.len() as u32
                     {
-                        return Err("scatter indices trailing dim must match output rank".into());
+                        return Err(IrError::ScatterIndicesTrailing {
+                            trailing: indices_accessor.shape[indices_accessor.shape.len() - 1],
+                            output_rank: self.shape.len(),
+                        });
                     }
                     if indices_accessor.shape[..indices_accessor.shape.len() - 1]
                         != source_accessor.shape[..]
                     {
-                        return Err("scatter indices/source batch shape mismatch".into());
+                        return Err(IrError::ScatterBatchShape);
                     }
                 }
             }
@@ -299,28 +332,41 @@ impl IrRemapKernel {
             }) => {
                 if accessor.is_none() && source_shape.is_none() {
                     if self.arg_accessors.len() != 1 {
-                        return Err("gather with implicit source requires one argument".into());
+                        return Err(IrError::GatherImplicitArgCount {
+                            got: self.arg_accessors.len(),
+                        });
                     }
                 } else if let (Some(accessor), Some(source_shape)) = (accessor, source_shape) {
                     if self.arg_accessors.len() != 2 {
-                        return Err("gather with accessor requires two arguments".into());
+                        return Err(IrError::GatherAccessorArgCount {
+                            got: self.arg_accessors.len(),
+                        });
                     }
                     let source_accessor = &self.arg_accessors[0];
                     let indices_accessor = &self.arg_accessors[1];
                     if indices_accessor.shape[indices_accessor.shape.len() - 1] != accessor.rank() as u32
                     {
-                        return Err("gather indices trailing dim must match accessor rank".into());
+                        return Err(IrError::GatherIndicesTrailing {
+                            trailing: indices_accessor.shape[indices_accessor.shape.len() - 1],
+                            accessor_rank: accessor.rank(),
+                        });
                     }
                     if indices_accessor.shape[..indices_accessor.shape.len() - 1]
                         != source_accessor.shape[..]
                     {
-                        return Err("gather indices/source batch shape mismatch".into());
+                        return Err(IrError::GatherBatchShape);
                     }
                     if accessor.shape.as_ref() != source_shape.as_ref() {
-                        return Err("gather accessor/source_shape mismatch".into());
+                        return Err(IrError::GatherAccessorSourceShape {
+                            accessor: accessor.shape.clone(),
+                            source_shape: source_shape.clone(),
+                        });
                     }
                 } else {
-                    return Err(format!("invalid RemapGatherInfo: {accessor:?}, {source_shape:?}"));
+                    return Err(IrError::InvalidGatherInfo {
+                        has_accessor: accessor.is_some(),
+                        has_source_shape: source_shape.is_some(),
+                    });
                 }
             }
         }
@@ -329,22 +375,22 @@ impl IrRemapKernel {
 }
 
 impl<P: Tree<BufferRef>, S: Tree<BufferViewRef>> IrProgram<P, S> {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), IrError> {
         for dispatch in &self.queue {
             dispatch.kernel.validate()?;
             for view_ref in &dispatch.arg_view_indices {
                 if view_ref.index() >= self.buffer_views.len() {
-                    return Err(format!(
-                        "dispatch arg view index {} out of range",
-                        view_ref.index()
-                    ));
+                    return Err(IrError::DispatchArgViewOutOfRange {
+                        index: view_ref.index(),
+                        len: self.buffer_views.len(),
+                    });
                 }
             }
             if dispatch.output_buffer_index.index() >= self.buffers.len() {
-                return Err(format!(
-                    "dispatch output buffer index {} out of range",
-                    dispatch.output_buffer_index.index()
-                ));
+                return Err(IrError::DispatchOutputBufferOutOfRange {
+                    index: dispatch.output_buffer_index.index(),
+                    len: self.buffers.len(),
+                });
             }
         }
         validate_tree_indices(&self.params, self.buffers.len(), "param buffer")?;
@@ -497,5 +543,46 @@ mod tests {
             clear_output_before_dispatch: false,
         });
         kernel.validate().unwrap();
+    }
+
+    #[test]
+    fn program_serde_round_trip() {
+        let shape: Box<[u32]> = Box::from([2, 3]);
+        let program = IrProgram::<BufferRef, BufferViewRef> {
+            params: BufferRef::new(0),
+            sinks: BufferViewRef::new(0),
+            queue: vec![IrDispatch {
+                kernel: IrKernel::ElementwiseRpn(IrElementwiseRpnKernel {
+                    arg_accessors: vec![Accessor::dense(shape.clone(), 0)],
+                    arg_etypes: vec![F4],
+                    etype: F4,
+                    shape: shape.clone(),
+                    rpn_expr: ElementRpnExpr {
+                        atoms: vec![
+                            RpnAtom::Arg(0),
+                            RpnAtom::Op(ElementOperator::Unary(UnaryElementOperator::Neg)),
+                        ],
+                    },
+                    clear_output_before_dispatch: false,
+                }),
+                arg_view_indices: vec![BufferViewRef::new(0)],
+                output_buffer_index: BufferRef::new(0),
+            }],
+            buffers: vec![IrBuffer {
+                shape: shape.clone(),
+                etype: F4,
+                init: Some(Box::from([1u8, 2, 3, 4])),
+                readonly: true,
+            }],
+            buffer_views: vec![IrBufferView {
+                buffer_index: BufferRef::new(0),
+                accessor: Accessor::dense(shape, 0),
+            }],
+        };
+        program.validate().unwrap();
+
+        let json = serde_json::to_string(&program).unwrap();
+        let restored: IrProgram = serde_json::from_str(&json).unwrap();
+        assert_eq!(program, restored);
     }
 }

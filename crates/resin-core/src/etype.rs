@@ -2,6 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Errors from element-type operations.
+#[derive(Debug, thiserror::Error)]
+pub enum EtypeError {
+    #[error("unsupported etype with kind={kind:?} and nbytes={nbytes}")]
+    Unsupported { kind: ElementKind, nbytes: u32 },
+
+    #[error("cannot join etypes of different kinds: {lhs:?} and {rhs:?}")]
+    KindMismatch { lhs: ElementKind, rhs: ElementKind },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ElementType {
     F4,
@@ -100,25 +110,23 @@ pub fn etype_kind(etype: ElementType) -> ElementKind {
     etype.kind()
 }
 
-pub fn etype(kind: ElementKind, nbytes: u32) -> Result<ElementType, String> {
+pub fn etype(kind: ElementKind, nbytes: u32) -> Result<ElementType, EtypeError> {
     match (kind, nbytes) {
         (ElementKind::Float, 4) => Ok(ElementType::F4),
         (ElementKind::Float, 2) => Ok(ElementType::F2),
         (ElementKind::Uint, 4) => Ok(ElementType::U4),
-        _ => Err(format!(
-            "unsupported etype with kind={kind:?} and nbytes={nbytes}"
-        )),
+        _ => Err(EtypeError::Unsupported { kind, nbytes }),
     }
 }
 
-pub fn etype_join_kind(a: ElementKind, b: ElementKind) -> Result<ElementKind, String> {
+pub fn etype_join_kind(a: ElementKind, b: ElementKind) -> Result<ElementKind, EtypeError> {
     if a != b {
-        return Err(format!("cannot join different kinds' etypes: {a:?} and {b:?}"));
+        return Err(EtypeError::KindMismatch { lhs: a, rhs: b });
     }
     Ok(a)
 }
 
-pub fn etype_join(a: ElementType, b: ElementType) -> Result<ElementType, String> {
+pub fn etype_join(a: ElementType, b: ElementType) -> Result<ElementType, EtypeError> {
     let kind = etype_join_kind(a.kind(), b.kind())?;
     let nbytes = a.nbytes().max(b.nbytes());
     etype(kind, nbytes)

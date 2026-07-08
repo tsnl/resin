@@ -1,11 +1,14 @@
 use resin_core::Tree;
+use serde::{Deserialize, Serialize};
+
+use crate::error::IrError;
 
 /// Index into an [`IrProgram`](crate::program::IrProgram)'s `buffers` table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BufferRef(pub usize);
 
 /// Index into an [`IrProgram`](crate::program::IrProgram)'s `buffer_views` table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BufferViewRef(pub usize);
 
 impl BufferRef {
@@ -47,8 +50,8 @@ impl RefIndex for BufferViewRef {
 pub(crate) fn validate_tree_indices<T, R: RefIndex + Copy>(
     tree: &T,
     len: usize,
-    kind: &str,
-) -> Result<(), String>
+    kind: &'static str,
+) -> Result<(), IrError>
 where
     T: Tree<R>,
 {
@@ -56,7 +59,7 @@ where
     tree.for_each_leaf(|r| {
         let index = r.index();
         if error.is_none() && index >= len {
-            error = Some(format!("{kind} index {index} out of range (len {len})"));
+            error = Some(IrError::TreeIndexOutOfRange { kind, index, len });
         }
     });
     if let Some(err) = error {

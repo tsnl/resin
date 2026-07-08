@@ -2,6 +2,31 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Errors from shape and accessor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ShapeError {
+    #[error("inconsistent rank: shape {shape:?} ({} dims) vs pitch {pitch:?} ({} dims)", .shape.len(), .pitch.len())]
+    RankMismatch { shape: Box<[u32]>, pitch: Box<[u32]> },
+
+    #[error("bad permutation {permutation:?} for shape {shape:?}")]
+    BadPermutation {
+        permutation: Box<[usize]>,
+        shape: Box<[u32]>,
+    },
+
+    #[error("transpose requires rank >= 2, got {rank}")]
+    TransposeRankTooLow { rank: usize },
+
+    #[error("squeeze axis {axis} out of range for rank {rank}")]
+    SqueezeAxisOutOfRange { axis: usize, rank: usize },
+
+    #[error("cannot squeeze axis {axis} with size {size}")]
+    SqueezeNonUnit { axis: usize, size: u32 },
+
+    #[error("incompatible shapes for elementwise: {lhs:?} vs {rhs:?}")]
+    IncompatibleShapes { lhs: Box<[u32]>, rhs: Box<[u32]> },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Accessor {
     pub offset: u32,
@@ -10,15 +35,21 @@ pub struct Accessor {
 }
 
 impl Accessor {
-    pub fn new(offset: u32, shape: impl Into<Box<[u32]>>, pitch: impl Into<Box<[u32]>>) -> Self {
+    pub fn new(
+        offset: u32,
+        shape: impl Into<Box<[u32]>>,
+        pitch: impl Into<Box<[u32]>>,
+    ) -> Result<Self, ShapeError> {
         let shape = shape.into();
         let pitch = pitch.into();
-        assert_eq!(shape.len(), pitch.len(), "inconsistent rank");
-        Self {
+        if shape.len() != pitch.len() {
+            return Err(ShapeError::RankMismatch { shape, pitch });
+        }
+        Ok(Self {
             offset,
             shape,
             pitch,
-        }
+        })
     }
 
     /// C-contiguous accessor addressing `shape` from `offset`.
@@ -50,17 +81,22 @@ impl Accessor {
         let mut pitch = Vec::with_capacity(leading_shape.len() + self.pitch.len());
         pitch.extend(std::iter::repeat_n(0u32, leading_shape.len()));
         pitch.extend_from_slice(&self.pitch);
-        Self::new(self.offset, shape, pitch)
+        // `shape` and `pitch` are built in lockstep, so ranks always match.
+        Self {
+            offset: self.offset,
+            shape: shape.into_boxed_slice(),
+            pitch: pitch.into_boxed_slice(),
+        }
     }
 
-    pub fn permute(&self, permutation: &[usize]) -> Result<Self, String> {
+    pub fn permute(&self, permutation: &[usize]) -> Result<Self, ShapeError> {
         let mut sorted = permutation.to_vec();
         sorted.sort_unstable();
         if sorted != (0..self.rank()).collect::<Vec<_>>() {
-            return Err(format!(
-                "bad permutation {permutation:?} for shape {:?}",
-                self.shape
-            ));
+            return Err(ShapeError::BadPermutation {
+                permutation: permutation.into(),
+                shape: self.shape.clone(),
+            });
         }
         let shape: Box<[u32]> = permutation.iter().map(|&i| self.shape[i]).collect();
         let pitch: Box<[u32]> = permutation.iter().map(|&i| self.pitch[i]).collect();
@@ -71,9 +107,9 @@ impl Accessor {
         })
     }
 
-    pub fn transpose(&self) -> Result<Self, String> {
+    pub fn transpose(&self) -> Result<Self, ShapeError> {
         if self.rank() < 2 {
-            return Err("transpose requires rank >= 2".into());
+            return Err(ShapeError::TransposeRankTooLow { rank: self.rank() });
         }
         let mut perm: Vec<usize> = (0..self.rank()).collect();
         let n = perm.len();
@@ -81,16 +117,19 @@ impl Accessor {
         self.permute(&perm)
     }
 
-    pub fn squeeze(&self, axes: &[usize]) -> Result<Self, String> {
+    pub fn squeeze(&self, axes: &[usize]) -> Result<Self, ShapeError> {
         for &axis in axes {
             if axis >= self.rank() {
-                return Err(format!("squeeze axis {axis} out of range for rank {}", self.rank()));
+                return Err(ShapeError::SqueezeAxisOutOfRange {
+                    axis,
+                    rank: self.rank(),
+                });
             }
             if self.shape[axis] != 1 {
-                return Err(format!(
-                    "cannot squeeze axis {axis} with size {}",
-                    self.shape[axis]
-                ));
+                return Err(ShapeError::SqueezeNonUnit {
+                    axis,
+                    size: self.shape[axis],
+                });
             }
         }
         let mut shape = Vec::new();
@@ -102,7 +141,7 @@ impl Accessor {
             shape.push(self.shape[i]);
             pitch.push(self.pitch[i]);
         }
-        Ok(Self::new(self.offset, shape, pitch))
+        Self::new(self.offset, shape, pitch)
     }
 }
 
@@ -129,9 +168,19 @@ pub fn shape_join(
     pitch1: &[u32],
     shape2: &[u32],
     pitch2: &[u32],
-) -> Result<ShapeJoin, String> {
-    assert_eq!(shape1.len(), pitch1.len());
-    assert_eq!(shape2.len(), pitch2.len());
+) -> Result<ShapeJoin, ShapeError> {
+    if shape1.len() != pitch1.len() {
+        return Err(ShapeError::RankMismatch {
+            shape: shape1.into(),
+            pitch: pitch1.into(),
+        });
+    }
+    if shape2.len() != pitch2.len() {
+        return Err(ShapeError::RankMismatch {
+            shape: shape2.into(),
+            pitch: pitch2.into(),
+        });
+    }
     let rank = shape1.len().max(shape2.len());
     let mut out_shape = vec![1u32; rank];
     let mut out_pitch1 = vec![0u32; rank];
@@ -152,9 +201,10 @@ pub fn shape_join(
         } else if d2 == 1 {
             d1
         } else {
-            return Err(format!(
-                "incompatible shapes for elementwise: {shape1:?} vs {shape2:?}"
-            ));
+            return Err(ShapeError::IncompatibleShapes {
+                lhs: shape1.into(),
+                rhs: shape2.into(),
+            });
         };
         out_shape[i] = d;
         out_pitch1[i] = if d1 == 1 { 0 } else { p1 };

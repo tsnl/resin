@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 resin-core = { path = "../resin-core" }
 serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.18"
 
 [dev-dependencies]
 resin-macros = { path = "../resin-macros" }
+serde_json = "1.0"
