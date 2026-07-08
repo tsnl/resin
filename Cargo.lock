@@ -700,6 +700,7 @@ dependencies = [
 name = "resin-jit"
 version = "0.1.0"
 dependencies = [
+ "naga",
  "pollster",
  "resin-core",
  "resin-dsl",

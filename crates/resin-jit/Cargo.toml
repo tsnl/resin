@@ -17,4 +17,5 @@ wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 
 [dev-dependencies]
+naga = { version = "24", features = ["wgsl-in"] }
 resin-macros = { path = "../resin-macros" }

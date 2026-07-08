@@ -11,6 +11,8 @@ mod program;
 mod runtime;
 mod tensor;
 
+#[doc(hidden)]
+pub use codegen::{emit_wgsl_for_kernel, WgslKernelConfig};
 pub use error::{WgpuLowerError, WgpuRuntimeError};
 pub use jit::WgpuJit;
 pub use program::WgpuProgram;
