@@ -104,7 +104,8 @@ fn train_step_graph() -> (TrainStepIn<Tensor>, TrainStepOut<Tensor>) {
 fn ir_program(passes: OptPasses) -> Program {
     let (input, output) = train_step_graph();
     let raw = lower(&input, &output).expect("lower");
-    optimize_with(raw, passes)
+    // Opt is optional; backend layout (dead-elim + arena pack) always runs.
+    resin::ir::layout::prepare_for_backend(optimize_with(raw, passes))
 }
 
 fn filled(shape: &[usize], value: f32) -> Array {

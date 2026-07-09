@@ -1,8 +1,9 @@
 //! WebGPU backend: IR → WGSL lowering, dispatched through wgpu.
 //!
-//! After [`crate::ir::optimize::pack_arenas`], a program has one buffer per
-//! element type. Shaders bind those **heaps** (≤2 storage buffers) and address
-//! logical tensors via view offsets — not one binding per temporary.
+//! Expects a program that has gone through
+//! [`crate::ir::layout::prepare_for_backend`] (one buffer per element type).
+//! Shaders bind those **heaps** (≤2 storage buffers) and address logical
+//! tensors via view offsets — not one binding per temporary.
 
 mod codegen;
 mod runtime;
@@ -77,8 +78,8 @@ impl Jit for WgpuJit {
     type Artifact = WgpuProgram;
 
     fn lower(&self, program: &Program) -> Result<WgpuProgram, Error> {
-        // Always pack so shaders bind ≤1 heap per dtype (idempotent if already packed).
-        let program = crate::ir::optimize::pack_arenas(program.clone());
+        // Defensive: prepare is idempotent if the compile path already ran it.
+        let program = crate::ir::layout::prepare_for_backend(program.clone());
         program.validate()?;
         ensure_fits_u32(&program)?;
         let config = self.config;

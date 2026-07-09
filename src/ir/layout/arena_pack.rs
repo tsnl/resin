@@ -155,8 +155,6 @@ fn arena_index(etypes: &[ElementType], e: ElementType) -> usize {
 mod tests {
     use super::*;
     use crate::dsl::Tensor;
-    use crate::ir::optimize::OptPasses;
-    use crate::ir::optimize::optimize_with;
     use crate::jit::lower::lower;
     use crate::ops::ElementType;
 
@@ -186,7 +184,7 @@ mod tests {
         let k = Tensor::parameter_typed(&[4], ElementType::U32);
         let out = x.cast(ElementType::U32) + k.clone();
         let raw = lower(&Pair { a: x, b: k }, &out).unwrap();
-        let packed = pack_arenas(optimize_with(raw, OptPasses::None));
+        let packed = pack_arenas(raw);
         assert_eq!(packed.buffers.len(), 2);
         packed.validate().unwrap();
     }

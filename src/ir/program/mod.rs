@@ -46,9 +46,10 @@ pub struct BufferViewRef(pub usize);
 /// A compiled program: kernels to run in order, plus the buffer slots that
 /// correspond to the caller's parameter and output leaves (in tree-walk order).
 ///
-/// **Params and sinks are both views.** After [`crate::ir::optimize::pack_arenas`],
-/// they typically address slices of a small number of arena buffers (one per
-/// element type). Sinks never need a private buffer of their own.
+/// **Params and sinks are both views.** After
+/// [`crate::ir::layout::prepare_for_backend`], they typically address slices of
+/// a small number of arena buffers (one per element type). Sinks never need a
+/// private buffer of their own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     /// Dense views of caller-supplied inputs (tree-walk order).

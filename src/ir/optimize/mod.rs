@@ -1,13 +1,14 @@
-//! IR→IR optimization passes.
+//! IR→IR **optimization** passes (optional, may be skipped for A/B).
 //!
 //! Implemented:
 //!
 //! - **Elementwise fusion** ([`fuse_elementwise`]) — producer→consumer chains
 //!   of elementwise dispatches collapse into single kernels, to a fixed
 //!   point. See [`kernel_fusion`].
-//! - **Arena packing** ([`pack_arenas`]) — one buffer per element type; every
-//!   param/sink/arg is a view into those heaps (sum-of-sizes layout). Lets
-//!   backends bind O(dtypes) storage buffers instead of O(temps).
+//!
+//! Storage layout (arena packing, dead-buffer elim) is **not** an opt pass —
+//! see [`crate::ir::layout::prepare_for_backend`], which always runs after
+//! this stage and before JIT.
 //!
 //! Planned:
 //!
@@ -17,39 +18,37 @@
 //! - **Matmul epilogues** — fuse a trailing expression into a matmul
 //!   (subsumed by the tiled representation once that lands).
 //! - **Constant folding and dead-dispatch elimination.**
-//! - **Arena lifetime reuse** — overlap non-interfering temps inside an arena
-//!   (v1 uses sum-of-sizes, no reuse).
 
-mod arena_pack;
 mod kernel_fusion;
 
-pub use arena_pack::pack_arenas;
 pub use kernel_fusion::fuse_elementwise;
 
 use super::Program;
 
-/// Which IR optimization passes to run.
+/// Which IR optimization passes to run (layout is separate — always applied).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OptPasses {
-    /// No IR passes — identity (for A/B benchmarks).
+    /// No optimization passes.
     None,
-    /// Elementwise fusion only (no arena pack).
+    /// Elementwise fusion only.
     Fuse,
-    /// Full pipeline: fusion then arena packing.
+    /// Full optimization pipeline (currently fusion only).
     #[default]
     All,
 }
 
-/// Run the default middle-end pipeline ([`OptPasses::All`]).
+/// Run the default middle-end optimization pipeline ([`OptPasses::All`]).
+///
+/// Does **not** pack arenas; call [`crate::ir::layout::prepare_for_backend`]
+/// after this before backend lower.
 pub fn optimize(program: Program) -> Program {
     optimize_with(program, OptPasses::All)
 }
 
-/// Run a selected set of middle-end passes.
+/// Run a selected set of middle-end optimization passes.
 pub fn optimize_with(program: Program, passes: OptPasses) -> Program {
     match passes {
         OptPasses::None => program,
-        OptPasses::Fuse => fuse_elementwise(program),
-        OptPasses::All => pack_arenas(fuse_elementwise(program)),
+        OptPasses::Fuse | OptPasses::All => fuse_elementwise(program),
     }
 }

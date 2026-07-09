@@ -241,8 +241,11 @@ where
             match cache.get(&key) {
                 Some(artifact) => artifact.clone(),
                 None => {
-                    let program =
-                        ir::optimize::optimize(lower::lower(&traced_params, &traced_out)?);
+                    // optimize? → layout (dead-elim + arena pack) → backend.
+                    // Layout always runs, even when opt is a no-op.
+                    let program = ir::layout::prepare_for_backend(ir::optimize::optimize(
+                        lower::lower(&traced_params, &traced_out)?,
+                    ));
                     let artifact = self.jit.lower(&program)?;
                     cache.insert(key, artifact.clone());
                     artifact
