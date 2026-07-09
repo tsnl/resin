@@ -58,7 +58,7 @@ struct OuterInnerPair {
 
 /// Find one producer→consumer pair and fuse it. Returns false at fixed point.
 fn fuse_one(program: &mut Program) -> bool {
-    let Some(pair) = find_outer_inner_pair(program) else {
+    let Some(pair) = find_fusible_producer_consumer_pair(program) else {
         return false;
     };
     apply_fusion(program, pair);
@@ -66,7 +66,7 @@ fn fuse_one(program: &mut Program) -> bool {
 }
 
 /// Scan the queue for the next fusable elementwise→elementwise edge.
-fn find_outer_inner_pair(program: &Program) -> Option<OuterInnerPair> {
+fn find_fusible_producer_consumer_pair(program: &Program) -> Option<OuterInnerPair> {
     for (consumer, dispatch) in program.queue.iter().enumerate() {
         let Kernel::Elementwise(outer) = &dispatch.kernel else {
             continue;
