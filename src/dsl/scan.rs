@@ -70,6 +70,10 @@ pub fn shift_axis(x: &Tensor, axis: usize, offset: usize, fill: &Tensor) -> Tens
 /// closure is called once per doubling step at trace time to build the
 /// unrolled graph; gradients flow through whatever graph `op` builds.
 ///
+/// The fold runs left-to-right: `out[i] = x[0] ⊕ x[1] ⊕ … ⊕ x[i]`, so the
+/// earlier operand is passed on the left. This only matters when `op` is
+/// non-commutative.
+///
 /// **Implementation:** Hillis–Steele (shift-by-stride + combine), unrolled into
 /// existing ops. Work is O(n log n).
 ///
@@ -90,7 +94,9 @@ pub fn scan(
     let mut stride = 1;
     while stride < n {
         let shifted = shift_axis(&acc, axis, stride, identity);
-        acc = op(&acc, &shifted);
+        // `shifted` holds the earlier window, so it is the left operand: a
+        // prefix scan combines earlier elements before later ones.
+        acc = op(&shifted, &acc);
         assert_eq!(acc.shape(), shape, "scan: op must preserve the operand shape");
         stride *= 2;
     }

@@ -76,6 +76,24 @@ fn scan_with_max_operator() {
 }
 
 #[test]
+fn scan_folds_left_to_right_for_noncommutative_op() {
+    // `op(l, r) = r` ("keep the later element") is associative and
+    // non-commutative, and 0.0 is a left identity — all a left-to-right scan
+    // relies on, since the shift only ever feeds the identity as the earlier
+    // (left) operand. The inclusive scan of "keep later" is therefore the
+    // input unchanged: x[0] ⊕ … ⊕ x[i] = x[i]. Folding the later element on
+    // the left instead collapses the scan to a single shifted element.
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let identity = Tensor::full(&[], 0.0);
+        scan(&input.x, 0, &identity, |_earlier, later| later.clone())
+    });
+    let values = [3.0, 1.0, 4.0, 1.0, 5.0]; // non-power-of-two length
+    let x = HostArray::from_f32(&[5], &values);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.to_f32(), values);
+}
+
+#[test]
 fn grad_of_cumsum_is_reverse_cumsum() {
     // loss = sum(w * cumsum(x)) → dloss/dx[i] = sum_{j>=i} w[j].
     let f = CpuJit.jit(|input: &In<Tensor>| {
