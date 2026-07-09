@@ -909,6 +909,7 @@ name = "resin"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "naga",
  "pollster",
  "resin-macros",
  "thiserror 2.0.18",

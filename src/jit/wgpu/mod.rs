@@ -33,6 +33,15 @@ pub struct PipelineSpec {
     pub workgroups: [u32; 3],
 }
 
+/// Emit WGSL for a single kernel (used by validation tests).
+pub fn emit_wgsl_for_dispatch(
+    program: &Program,
+    dispatch_index: usize,
+    config: &KernelConfig,
+) -> String {
+    codegen::emit_dispatch(program, &program.queue[dispatch_index], config)
+}
+
 impl Jit for WgpuJit {
     type Artifact = WgpuProgram;
 
@@ -44,13 +53,7 @@ impl Jit for WgpuJit {
         let mut pipelines: Vec<PipelineSpec> = Vec::new();
         let mut pipeline_of = Vec::with_capacity(program.queue.len());
         for dispatch in &program.queue {
-            let args: Vec<_> = dispatch
-                .args
-                .iter()
-                .map(|&r| &program.view(r).accessor)
-                .collect();
-            let out = &program.view(dispatch.output).accessor;
-            let wgsl = codegen::emit(&dispatch.kernel, &args, out, &config);
+            let wgsl = codegen::emit_dispatch(program, dispatch, &config);
             // Identical WGSL implies identical dispatch geometry; reuse it.
             let index = pipelines
                 .iter()
@@ -58,7 +61,7 @@ impl Jit for WgpuJit {
                 .unwrap_or_else(|| {
                     pipelines.push(PipelineSpec {
                         wgsl,
-                        workgroups: codegen::workgroups(out, &config),
+                        workgroups: codegen::workgroups_for(program, dispatch, &config),
                     });
                     pipelines.len() - 1
                 });

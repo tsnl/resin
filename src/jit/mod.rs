@@ -7,7 +7,8 @@
 //! ```
 //!
 //! Each call traces the function over parameter placeholders, compiles on
-//! cache miss (keyed by parameter shapes), and invokes the lowered program.
+//! cache miss (keyed by parameter shapes + element types), and invokes the
+//! lowered program.
 
 pub mod cpu;
 pub mod lower;
@@ -25,10 +26,11 @@ use std::sync::Mutex;
 
 use crate::dsl::Tensor;
 use crate::ir;
+use crate::ops::ElementType;
 use crate::tree::Tree;
 
-/// Compile-cache key: the parameter leaves' shapes.
-type ShapeKey = Vec<Box<[usize]>>;
+/// Compile-cache key: the parameter leaves' shapes and element types.
+type ShapeKey = Vec<(Box<[usize]>, ElementType)>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -40,26 +42,57 @@ pub enum Error {
     Size { expected: usize, got: usize },
     #[error("param/output leaf count does not match compiled program")]
     LeafCount,
+    #[error("element type mismatch: expected {expected:?}, got {got:?}")]
+    ElementType { expected: ElementType, got: ElementType },
     #[error("wgpu: {0}")]
     Wgpu(String),
 }
 
-/// A concrete f32 array: the value type jitted functions are called with.
+/// Host array payload (typed).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrayData {
+    F32(Box<[f32]>),
+    U32(Box<[u32]>),
+}
+
+impl ArrayData {
+    pub fn len(&self) -> usize {
+        match self {
+            ArrayData::F32(v) => v.len(),
+            ArrayData::U32(v) => v.len(),
+        }
+    }
+
+    pub fn element_type(&self) -> ElementType {
+        match self {
+            ArrayData::F32(_) => ElementType::F32,
+            ArrayData::U32(_) => ElementType::U32,
+        }
+    }
+}
+
+/// A concrete array: the value type jitted functions are called with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Array {
     shape: Box<[usize]>,
-    data: Box<[f32]>,
+    data: ArrayData,
 }
 
 impl Array {
     pub fn zeros(shape: &[usize]) -> Self {
-        Self {
-            shape: shape.into(),
-            data: vec![0.0; ir::element_count(shape)].into(),
-        }
+        Self::zeros_typed(shape, ElementType::F32)
     }
 
-    /// Row-major values.
+    pub fn zeros_typed(shape: &[usize], element_type: ElementType) -> Self {
+        let n = ir::element_count(shape);
+        let data = match element_type {
+            ElementType::F32 => ArrayData::F32(vec![0.0; n].into()),
+            ElementType::U32 => ArrayData::U32(vec![0; n].into()),
+        };
+        Self { shape: shape.into(), data }
+    }
+
+    /// Row-major f32 values.
     pub fn from_f32(shape: &[usize], values: &[f32]) -> Self {
         assert_eq!(
             ir::element_count(shape),
@@ -67,26 +100,85 @@ impl Array {
             "from_f32: shape {shape:?} does not hold {} values",
             values.len()
         );
-        Self { shape: shape.into(), data: values.into() }
+        Self {
+            shape: shape.into(),
+            data: ArrayData::F32(values.into()),
+        }
+    }
+
+    /// Row-major u32 values.
+    pub fn from_u32(shape: &[usize], values: &[u32]) -> Self {
+        assert_eq!(
+            ir::element_count(shape),
+            values.len(),
+            "from_u32: shape {shape:?} does not hold {} values",
+            values.len()
+        );
+        Self {
+            shape: shape.into(),
+            data: ArrayData::U32(values.into()),
+        }
     }
 
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }
 
-    /// Row-major elements.
+    pub fn element_type(&self) -> ElementType {
+        self.data.element_type()
+    }
+
+    /// Row-major f32 elements (panics if not f32).
     pub fn data(&self) -> &[f32] {
-        &self.data
+        match &self.data {
+            ArrayData::F32(v) => v,
+            ArrayData::U32(_) => panic!("Array::data requires f32"),
+        }
     }
 
     pub fn data_mut(&mut self) -> &mut [f32] {
+        match &mut self.data {
+            ArrayData::F32(v) => v,
+            ArrayData::U32(_) => panic!("Array::data_mut requires f32"),
+        }
+    }
+
+    pub fn data_u32(&self) -> &[u32] {
+        match &self.data {
+            ArrayData::U32(v) => v,
+            ArrayData::F32(_) => panic!("Array::data_u32 requires u32"),
+        }
+    }
+
+    pub fn data_u32_mut(&mut self) -> &mut [u32] {
+        match &mut self.data {
+            ArrayData::U32(v) => v,
+            ArrayData::F32(_) => panic!("Array::data_u32_mut requires u32"),
+        }
+    }
+
+    /// Clone as a dense f32 Vec (panics if not f32).
+    pub fn to_f32(&self) -> Vec<f32> {
+        self.data().to_vec()
+    }
+
+    /// Clone as a dense u32 Vec (panics if not u32).
+    pub fn to_u32(&self) -> Vec<u32> {
+        self.data_u32().to_vec()
+    }
+
+    pub fn as_data(&self) -> &ArrayData {
+        &self.data
+    }
+
+    pub fn as_data_mut(&mut self) -> &mut ArrayData {
         &mut self.data
     }
 
-    /// The single element of a rank-0 array.
+    /// The single element of a rank-0 f32 array.
     pub fn scalar(&self) -> f32 {
         assert!(self.shape.is_empty(), "scalar() requires rank 0, got {:?}", self.shape);
-        self.data[0]
+        self.data()[0]
     }
 }
 
@@ -132,11 +224,18 @@ where
 {
     /// Trace, compile (if this shape signature is new), and run.
     pub fn call(&self, params: &P) -> Result<O::Mapped<Array>, Error> {
-        let traced_params = params.map(|array| Tensor::parameter(array.shape()));
+        let traced_params = params.map(|array| {
+            Tensor::parameter_typed(array.shape(), array.element_type())
+        });
         let traced_out = (self.f)(&traced_params);
-        let mut outputs = traced_out.map(|tensor| Array::zeros(tensor.shape()));
+        let mut outputs =
+            traced_out.map(|tensor| Array::zeros_typed(tensor.shape(), tensor.element_type()));
 
-        let key: ShapeKey = params.leaves().iter().map(|a| a.shape.clone()).collect();
+        let key: ShapeKey = params
+            .leaves()
+            .iter()
+            .map(|a| (a.shape.clone(), a.element_type()))
+            .collect();
         let artifact = {
             let mut cache = self.cache.lock().expect("compile cache poisoned");
             match cache.get(&key) {

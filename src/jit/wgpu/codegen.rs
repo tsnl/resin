@@ -4,8 +4,8 @@
 //! IR layer. Addressing is emitted as flat scalar arithmetic (no arrays or
 //! helper functions), which keeps shaders trivial for drivers to compile.
 
-use crate::ir::{Accessor, Expr, Kernel, dense_pitch, element_count};
-use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
+use crate::ir::{Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, dense_pitch, element_count};
+use crate::ops::{AssocOp, BinaryOp, ElementType, Op, UnaryOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KernelConfig {
@@ -20,8 +20,23 @@ impl Default for KernelConfig {
     }
 }
 
-pub fn workgroups(out: &Accessor, config: &KernelConfig) -> [u32; 3] {
-    let count = element_count(&out.shape) as u64;
+/// Thread count for a dispatch (scatter remaps iterate the source).
+pub fn workgroups_for(program: &Program, dispatch: &Dispatch, config: &KernelConfig) -> [u32; 3] {
+    let shape = thread_shape(program, dispatch);
+    workgroups_for_shape(shape, config)
+}
+
+fn thread_shape<'a>(program: &'a Program, dispatch: &'a Dispatch) -> &'a [usize] {
+    match &dispatch.kernel {
+        Kernel::Remap { info } if info.is_scatter() => {
+            &program.view(dispatch.args[0]).accessor.shape
+        }
+        _ => &program.view(dispatch.output).accessor.shape,
+    }
+}
+
+fn workgroups_for_shape(shape: &[usize], config: &KernelConfig) -> [u32; 3] {
+    let count = element_count(shape) as u64;
     if count == 0 {
         return [0, 1, 1];
     }
@@ -29,26 +44,74 @@ pub fn workgroups(out: &Accessor, config: &KernelConfig) -> [u32; 3] {
     [threads.div_ceil(u64::from(config.workgroup_size)).max(1) as u32, 1, 1]
 }
 
+/// Emit WGSL for one dispatch (typed bindings, remap atomics).
+pub fn emit_dispatch(program: &Program, dispatch: &Dispatch, config: &KernelConfig) -> String {
+    let out_view = program.view(dispatch.output);
+    let out = &out_view.accessor;
+    let out_etype = program.buffer(out_view.buffer).element_type;
+    let args: Vec<&Accessor> = dispatch
+        .args
+        .iter()
+        .map(|&r| &program.view(r).accessor)
+        .collect();
+    let arg_types: Vec<ElementType> = dispatch
+        .args
+        .iter()
+        .map(|&r| program.buffer(program.view(r).buffer).element_type)
+        .collect();
+    emit(&dispatch.kernel, &args, &arg_types, out, out_etype, config)
+}
+
 pub fn emit(
     kernel: &Kernel,
     args: &[&Accessor],
+    arg_types: &[ElementType],
     out: &Accessor,
+    out_etype: ElementType,
     config: &KernelConfig,
 ) -> String {
     let mut w = Writer::default();
-    w.print("@group(0) @binding(0)\nvar<storage, read_write> output: array<f32>;");
-    for i in 0..args.len() {
+    match kernel {
+        Kernel::Elementwise { expr } => {
+            emit_bindings(&mut w, out_etype, arg_types, false);
+            emit_elementwise(&mut w, expr, args, out, out_etype, config);
+        }
+        Kernel::Matmul => {
+            emit_bindings(&mut w, out_etype, arg_types, false);
+            emit_matmul(&mut w, args, out, config);
+        }
+        Kernel::Reduction { op, axes } => {
+            emit_bindings(&mut w, out_etype, arg_types, false);
+            emit_reduction(&mut w, *op, axes, args, out, out_etype, config);
+        }
+        Kernel::Remap { info } => emit_remap(&mut w, info, args, arg_types, out, out_etype, config),
+    }
+    w.finish()
+}
+
+fn spell_etype(etype: ElementType) -> &'static str {
+    match etype {
+        ElementType::F32 => "f32",
+        ElementType::U32 => "u32",
+    }
+}
+
+fn emit_bindings(w: &mut Writer, out_etype: ElementType, arg_types: &[ElementType], atomic_out: bool) {
+    if atomic_out {
+        w.print("@group(0) @binding(0)\nvar<storage, read_write> output: array<atomic<u32>>;");
+    } else {
+        let t = spell_etype(out_etype);
         w.print(&format!(
-            "@group(0) @binding({})\nvar<storage, read> arg{i}: array<f32>;",
+            "@group(0) @binding(0)\nvar<storage, read_write> output: array<{t}>;"
+        ));
+    }
+    for (i, &arg_etype) in arg_types.iter().enumerate() {
+        let t = spell_etype(arg_etype);
+        w.print(&format!(
+            "@group(0) @binding({})\nvar<storage, read> arg{i}: array<{t}>;",
             i + 1
         ));
     }
-    match kernel {
-        Kernel::Elementwise { expr } => emit_elementwise(&mut w, expr, args, out, config),
-        Kernel::Matmul => emit_matmul(&mut w, args, out, config),
-        Kernel::Reduction { op, axes } => emit_reduction(&mut w, *op, axes, args, out, config),
-    }
-    w.finish()
 }
 
 #[derive(Default)]
@@ -74,8 +137,7 @@ impl Writer {
     }
 }
 
-/// Emit `let i{k} = …` statements decoding `lin` (a row-major linear index
-/// over `shape`) into coordinates; returns the coordinate names.
+/// Emit `let i{k} = …` statements decoding `lin` into coordinates.
 fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
     let pitch = dense_pitch(shape);
     let coords: Vec<String> = (0..shape.len()).map(|k| format!("i{k}")).collect();
@@ -85,8 +147,6 @@ fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
     coords
 }
 
-/// Inline address expression: `offset + Σ coordᵢ · pitchᵢ` (zero-pitch terms
-/// dropped, so broadcasts read one address).
 fn address(accessor: &Accessor, coords: &[String]) -> String {
     let mut expr = format!("{}u", accessor.offset);
     for (coord, &pitch) in coords.iter().zip(&accessor.pitch) {
@@ -97,8 +157,6 @@ fn address(accessor: &Accessor, coords: &[String]) -> String {
     expr
 }
 
-/// Emit the entry point. `body` writes code for one output element; it gets
-/// the names of the output coordinates (`i0…`, decoded from `lin`).
 fn per_output_element(
     w: &mut Writer,
     out: &Accessor,
@@ -117,10 +175,6 @@ fn per_output_element(
                 w.print("return;");
                 return;
             }
-            // Clamping by arrayLength never changes `count` for a valid
-            // program (views are bounds-checked against their buffers); it
-            // keeps the loop bound out of const-folding, which llvmpipe's
-            // JIT has been seen to miscompile for fully-constant guards.
             w.print(&format!("let count = min({count}u, arrayLength(&output));"));
             w.print(&format!("let lin_beg = gid.x << {}u;", config.lg2_items_per_thread));
             w.block(
@@ -135,16 +189,49 @@ fn per_output_element(
     );
 }
 
+/// Loop over a source shape with a literal element-count guard (scatter).
+fn per_thread_element(
+    w: &mut Writer,
+    shape: &[usize],
+    config: &KernelConfig,
+    body: impl FnOnce(&mut Writer, &str, &[String]),
+) {
+    let count = element_count(shape);
+    let items = 1u32 << config.lg2_items_per_thread;
+    w.block(
+        &format!(
+            "@compute @workgroup_size({})\nfn main(@builtin(global_invocation_id) gid: vec3<u32>)",
+            config.workgroup_size
+        ),
+        |w| {
+            if count == 0 {
+                w.print("return;");
+                return;
+            }
+            w.print(&format!("let lin_beg = gid.x << {}u;", config.lg2_items_per_thread));
+            w.block(
+                &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
+                |w| {
+                    w.block(&format!("if (lin >= {count}u)"), |w| w.print("return;"));
+                    let coords = emit_decode(w, shape, "lin");
+                    body(w, "lin", &coords);
+                },
+            );
+        },
+    );
+}
+
 fn emit_elementwise(
     w: &mut Writer,
     expr: &Expr,
     args: &[&Accessor],
     out: &Accessor,
+    out_etype: ElementType,
     config: &KernelConfig,
 ) {
     let free = expr.loads();
     debug_assert_eq!(free.len(), args.len());
-    emit_expr_fn(w, expr, args.len());
+    emit_expr_fn(w, expr, args.len(), out_etype);
     per_output_element(w, out, config, |w, coords| {
         let loads: Vec<String> = args
             .iter()
@@ -159,29 +246,70 @@ fn emit_elementwise(
     });
 }
 
-/// `fn elem(a0: f32, …) -> f32` evaluating the expression as nested WGSL.
-fn emit_expr_fn(w: &mut Writer, expr: &Expr, num_args: usize) {
-    let params: Vec<String> = (0..num_args).map(|i| format!("a{i}: f32")).collect();
+fn emit_expr_fn(w: &mut Writer, expr: &Expr, num_args: usize, out_etype: ElementType) {
+    // Argument types: for type-changing unaries the free load may differ.
+    // We emit load params as the same type as their buffers — callers pass
+    // typed arg bindings; spell_expr inserts casts as needed. For simplicity
+    // we type every `a{i}` from a walk that uses out_etype for non-cast trees
+    // and f32/u32 for each free load via the op tree.
     let free = expr.loads();
-    w.block(&format!("fn elem({}) -> f32", params.join(", ")), |w| {
-        w.print(&format!("return {};", spell_expr(expr, &free)));
+    let arg_types = infer_load_types(expr, &free, out_etype);
+    let params: Vec<String> = (0..num_args)
+        .map(|i| format!("a{i}: {}", spell_etype(arg_types[i])))
+        .collect();
+    let ret = spell_etype(out_etype);
+    w.block(&format!("fn elem({}) -> {ret}", params.join(", ")), |w| {
+        w.print(&format!("return {};", spell_expr(expr, &free, out_etype)));
     });
 }
 
-fn spell_expr(expr: &Expr, free: &[crate::ir::BufferViewRef]) -> String {
+/// Load types for `elem` params. Cast/bitcast kernels convert from the other
+/// width type; everything else inherits the kernel output type.
+fn infer_load_types(expr: &Expr, free: &[BufferViewRef], out_etype: ElementType) -> Vec<ElementType> {
+    let mut types = vec![out_etype; free.len()];
+    fn walk(expr: &Expr, free: &[BufferViewRef], expected: ElementType, types: &mut [ElementType]) {
+        match expr {
+            Expr::Load(v) => {
+                if let Some(i) = free.iter().position(|x| x == v) {
+                    types[i] = expected;
+                }
+            }
+            Expr::Op { op, args } => match op {
+                Op::Unary(UnaryOp::Cast { to } | UnaryOp::Bitcast { to }) => {
+                    // Result is `to`; operand is the other type.
+                    let src = match to {
+                        ElementType::F32 => ElementType::U32,
+                        ElementType::U32 => ElementType::F32,
+                    };
+                    walk(&args[0], free, src, types);
+                }
+                _ => {
+                    for arg in args.iter() {
+                        walk(arg, free, expected, types);
+                    }
+                }
+            },
+        }
+    }
+    walk(expr, free, out_etype, &mut types);
+    types
+}
+
+fn spell_expr(expr: &Expr, free: &[BufferViewRef], out_etype: ElementType) -> String {
     match expr {
         Expr::Load(v) => {
             let i = free.iter().position(|x| x == v).expect("load in free list");
             format!("a{i}")
         }
         Expr::Op { op, args } => {
-            let parts: Vec<String> = args.iter().map(|a| spell_expr(a, free)).collect();
-            spell_op(*op, &parts)
+            let parts: Vec<String> = args.iter().map(|a| spell_expr(a, free, out_etype)).collect();
+            spell_op(*op, &parts, out_etype)
         }
     }
 }
 
-fn spell_op(op: Op, args: &[String]) -> String {
+fn spell_op(op: Op, args: &[String], out_etype: ElementType) -> String {
+    let t = spell_etype(out_etype);
     match op {
         Op::Unary(op) => {
             let x = &args[0];
@@ -194,6 +322,10 @@ fn spell_op(op: Op, args: &[String]) -> String {
                 UnaryOp::Sqrt => format!("sqrt({x})"),
                 UnaryOp::Sin => format!("sin({x})"),
                 UnaryOp::Cos => format!("cos({x})"),
+                UnaryOp::Floor => format!("floor({x})"),
+                UnaryOp::Ceil => format!("ceil({x})"),
+                UnaryOp::Bitcast { to } => format!("bitcast<{}>({x})", spell_etype(to)),
+                UnaryOp::Cast { to } => format!("{}({x})", spell_etype(to)),
             }
         }
         Op::Binary(op) => {
@@ -206,6 +338,17 @@ fn spell_op(op: Op, args: &[String]) -> String {
                 BinaryOp::Sub => format!("(({a}) - ({b}))"),
                 BinaryOp::Div => format!("(({a}) / ({b}))"),
                 BinaryOp::Pow => format!("pow({a}, {b})"),
+                BinaryOp::CmpEq => format!("select({t}(0), {t}(1), ({a}) == ({b}))"),
+                BinaryOp::CmpNe => format!("select({t}(0), {t}(1), ({a}) != ({b}))"),
+                BinaryOp::CmpLt => format!("select({t}(0), {t}(1), ({a}) < ({b}))"),
+                BinaryOp::CmpLe => format!("select({t}(0), {t}(1), ({a}) <= ({b}))"),
+                BinaryOp::CmpGt => format!("select({t}(0), {t}(1), ({a}) > ({b}))"),
+                BinaryOp::CmpGe => format!("select({t}(0), {t}(1), ({a}) >= ({b}))"),
+                BinaryOp::Band => format!("(({a}) & ({b}))"),
+                BinaryOp::Bor => format!("(({a}) | ({b}))"),
+                BinaryOp::Bxor => format!("(({a}) ^ ({b}))"),
+                BinaryOp::Shl => format!("(({a}) << ({b}))"),
+                BinaryOp::Shr => format!("(({a}) >> ({b}))"),
             }
         }
     }
@@ -215,7 +358,6 @@ fn emit_matmul(w: &mut Writer, args: &[&Accessor], out: &Accessor, config: &Kern
     let rank = out.rank();
     let k = args[0].shape[rank - 1];
     per_output_element(w, out, config, |w, coords| {
-        // A reads [batch…, i, t]; B reads [batch…, t, j].
         let mut a_coords = coords.to_vec();
         a_coords[rank - 1] = "t".into();
         let mut b_coords = coords.to_vec();
@@ -239,18 +381,18 @@ fn emit_reduction(
     axes: &[usize],
     args: &[&Accessor],
     out: &Accessor,
+    out_etype: ElementType,
     config: &KernelConfig,
 ) {
     let input = args[0];
     let mut sorted_axes: Vec<usize> = axes.to_vec();
     sorted_axes.sort_unstable();
     let count: usize = sorted_axes.iter().map(|&axis| input.shape[axis]).product();
+    let t = spell_etype(out_etype);
 
     per_output_element(w, out, config, |w, coords| {
-        w.print(&format!("var acc: f32 = {};", identity_literal(op)));
+        w.print(&format!("var acc: {t} = {};", identity_literal(op, out_etype)));
         w.block(&format!("for (var ri: u32 = 0u; ri < {count}u; ri += 1u)"), |w| {
-            // Decode `ri` into the reduced axes (last sorted axis fastest);
-            // other coordinates come from the output position.
             let mut in_coords = coords.to_vec();
             let mut stride = 1;
             for &axis in sorted_axes.iter().rev() {
@@ -271,20 +413,106 @@ fn emit_reduction(
     });
 }
 
-/// WGSL literal for the fold identity (bit patterns for ±inf).
-fn identity_literal(op: AssocOp) -> &'static str {
-    match op {
-        AssocOp::Add => "0.0",
-        AssocOp::Mul => "1.0",
-        AssocOp::Max => "bitcast<f32>(0xff800000u)",
-        AssocOp::Min => "bitcast<f32>(0x7f800000u)",
+fn identity_literal(op: AssocOp, etype: ElementType) -> String {
+    match (op, etype) {
+        (AssocOp::Add, ElementType::F32) => "0.0".into(),
+        (AssocOp::Mul, ElementType::F32) => "1.0".into(),
+        (AssocOp::Max, ElementType::F32) => "bitcast<f32>(0xff800000u)".into(),
+        (AssocOp::Min, ElementType::F32) => "bitcast<f32>(0x7f800000u)".into(),
+        (AssocOp::Add, ElementType::U32) => "0u".into(),
+        (AssocOp::Mul, ElementType::U32) => "1u".into(),
+        (AssocOp::Max, ElementType::U32) => "0u".into(),
+        (AssocOp::Min, ElementType::U32) => "0xffffffffu".into(),
+    }
+}
+
+fn emit_remap(
+    w: &mut Writer,
+    info: &RemapInfo,
+    args: &[&Accessor],
+    arg_types: &[ElementType],
+    out: &Accessor,
+    out_etype: ElementType,
+    config: &KernelConfig,
+) {
+    let t = spell_etype(out_etype);
+    match info {
+        RemapInfo::GatherRows => {
+            let src_rows = args[0].shape[0];
+            emit_bindings(w, out_etype, arg_types, false);
+            per_output_element(w, out, config, |w, coords| {
+                let idx_coords = [coords[0].clone()];
+                w.print(&format!(
+                    "let row = min(arg1[{}], {}u);",
+                    address(args[1], &idx_coords),
+                    src_rows.saturating_sub(1),
+                ));
+                let mut src_coords = coords.to_vec();
+                src_coords[0] = "row".into();
+                w.print(&format!(
+                    "output[{}] = arg0[{}];",
+                    address(out, coords),
+                    address(args[0], &src_coords),
+                ));
+            });
+        }
+        RemapInfo::ScatterRows { operator } => {
+            let src = args[0];
+            let out_rows = out.shape[0];
+            let atomic = operator.is_some();
+            emit_bindings(w, out_etype, arg_types, atomic);
+            if atomic && out_etype == ElementType::F32 {
+                w.block("fn atomic_add_f32(addr: u32, value: f32)", |w| {
+                    w.print("var old = atomicLoad(&output[addr]);");
+                    w.block("loop", |w| {
+                        w.print(
+                            "let new_bits = bitcast<u32>(bitcast<f32>(old) + value);\nlet result = atomicCompareExchangeWeak(&output[addr], old, new_bits);",
+                        );
+                        w.block("if (result.exchanged)", |w| {
+                            w.print("break;");
+                        });
+                        w.print("old = result.old_value;");
+                    });
+                });
+            }
+            per_thread_element(w, &src.shape, config, |w, _lin, coords| {
+                let idx_coords = [coords[0].clone()];
+                w.print(&format!("let row = arg1[{}];", address(args[1], &idx_coords)));
+                w.block(&format!("if (row < {out_rows}u)"), |w| {
+                    let mut o_coords = coords.to_vec();
+                    o_coords[0] = "row".into();
+                    let out_addr = address(out, &o_coords);
+                    let src_val = format!("arg0[{}]", address(src, coords));
+                    match (operator, out_etype) {
+                        (None, _) => w.print(&format!("output[{out_addr}] = {src_val};")),
+                        (Some(_), ElementType::U32) => {
+                            w.print(&format!("atomicAdd(&output[{out_addr}], {src_val});"))
+                        }
+                        (Some(_), ElementType::F32) => {
+                            w.print(&format!("atomic_add_f32({out_addr}, {src_val});"))
+                        }
+                    }
+                });
+            });
+        }
+        RemapInfo::ScatterView { accessor } => {
+            emit_bindings(w, out_etype, arg_types, false);
+            let src = args[0];
+            per_thread_element(w, &src.shape, config, |w, _lin, coords| {
+                w.print(&format!(
+                    "output[{}] = arg0[{}];",
+                    address(accessor, coords),
+                    address(src, coords),
+                ));
+            });
+            let _ = t;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::BufferViewRef;
     use crate::ops::Op;
 
     fn load_op(op: Op, n: usize) -> Kernel {
@@ -298,7 +526,9 @@ mod tests {
         let wgsl = emit(
             &load_op(Op::ADD, 2),
             &[&a, &a],
+            &[ElementType::F32, ElementType::F32],
             &a,
+            ElementType::F32,
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("@compute"), "{wgsl}");
@@ -312,7 +542,9 @@ mod tests {
         let wgsl = emit(
             &load_op(Op::RELU, 1),
             &[&a],
+            &[ElementType::F32],
             &a,
+            ElementType::F32,
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("max(a0, 0.0)"), "{wgsl}");
@@ -325,10 +557,11 @@ mod tests {
         let wgsl = emit(
             &load_op(Op::MUL, 2),
             &[&out, &scalar],
+            &[ElementType::F32, ElementType::F32],
             &out,
+            ElementType::F32,
             &KernelConfig::default(),
         );
-        // Zero-pitch dims contribute no address terms: the scalar loads `arg1[0u]`.
         assert!(wgsl.contains("arg1[0u]"), "{wgsl}");
     }
 
@@ -337,7 +570,14 @@ mod tests {
         let a = Accessor::dense([2, 4], 0);
         let b = Accessor::dense([4, 3], 0);
         let out = Accessor::dense([2, 3], 0);
-        let wgsl = emit(&Kernel::Matmul, &[&a, &b], &out, &KernelConfig::default());
+        let wgsl = emit(
+            &Kernel::Matmul,
+            &[&a, &b],
+            &[ElementType::F32, ElementType::F32],
+            &out,
+            ElementType::F32,
+            &KernelConfig::default(),
+        );
         assert!(wgsl.contains("t < 4u"), "{wgsl}");
         assert!(wgsl.contains("i0 * 4u + t * 1u"), "{wgsl}");
     }
@@ -349,9 +589,28 @@ mod tests {
         let wgsl = emit(
             &Kernel::Reduction { op: AssocOp::Max, axes: Box::from([1]) },
             &[&input],
+            &[ElementType::F32],
             &out,
+            ElementType::F32,
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("bitcast<f32>(0xff800000u)"), "{wgsl}");
+    }
+
+    #[test]
+    fn gather_rows_shader_emits() {
+        let src = Accessor::dense([4, 2], 0);
+        let idx = Accessor::dense([3], 0);
+        let out = Accessor::dense([3, 2], 0);
+        let wgsl = emit(
+            &Kernel::Remap { info: RemapInfo::GatherRows },
+            &[&src, &idx],
+            &[ElementType::F32, ElementType::U32],
+            &out,
+            ElementType::F32,
+            &KernelConfig::default(),
+        );
+        assert!(wgsl.contains("arg1["), "{wgsl}");
+        assert!(wgsl.contains("min("), "{wgsl}");
     }
 }

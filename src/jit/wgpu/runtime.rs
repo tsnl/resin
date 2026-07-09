@@ -9,8 +9,9 @@ use std::sync::OnceLock;
 use wgpu::util::DeviceExt;
 
 use super::WgpuProgram;
-use crate::ir::{Accessor, element_count};
-use crate::jit::Error;
+use crate::ir::{Accessor, BufferData, Kernel, element_count};
+use crate::jit::{Array, ArrayData, Error};
+use crate::ops::ElementType;
 
 pub struct Context {
     pub device: wgpu::Device,
@@ -59,8 +60,8 @@ fn create_context() -> Result<Context, String> {
 pub fn run(
     ctx: &Context,
     program: &WgpuProgram,
-    params: &[&crate::jit::Array],
-    outputs: &mut [&mut crate::jit::Array],
+    params: &[&Array],
+    outputs: &mut [&mut Array],
 ) -> Result<(), Error> {
     let ir = &program.ir;
     let buffers: Vec<wgpu::Buffer> = ir
@@ -73,7 +74,7 @@ pub fn run(
             let size = byte_len(spec.len());
             match &spec.init {
                 Some(init) => {
-                    let mut contents = f32s_to_bytes(init);
+                    let mut contents = buffer_data_to_bytes(init);
                     contents.resize(size as usize, 0); // wgpu minimum size
                     ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("resin-buffer"),
@@ -93,11 +94,18 @@ pub fn run(
 
     for (array, &buffer_ref) in params.iter().zip(&ir.params) {
         let expected = ir.buffer(buffer_ref).len();
-        if array.data().len() != expected {
-            return Err(Error::Size { expected, got: array.data().len() });
+        let expected_type = ir.buffer(buffer_ref).element_type;
+        if array.element_type() != expected_type {
+            return Err(Error::ElementType {
+                expected: expected_type,
+                got: array.element_type(),
+            });
+        }
+        if array.as_data().len() != expected {
+            return Err(Error::Size { expected, got: array.as_data().len() });
         }
         ctx.queue
-            .write_buffer(&buffers[buffer_ref.0], 0, &f32s_to_bytes(array.data()));
+            .write_buffer(&buffers[buffer_ref.0], 0, &array_data_to_bytes(array.as_data()));
     }
 
     let pipelines: Vec<wgpu::ComputePipeline> = program
@@ -125,6 +133,14 @@ pub fn run(
 
     for (dispatch, &pipeline_index) in ir.queue.iter().zip(&program.pipeline_of) {
         let spec = &program.pipelines[pipeline_index];
+        // Scatter remaps write sparsely into a cleared target (matches CPU).
+        if let Kernel::Remap { info } = &dispatch.kernel
+            && info.is_scatter()
+        {
+            let out_buf = &buffers[ir.view(dispatch.output).buffer.0];
+            let nbytes = byte_len(ir.buffer(ir.view(dispatch.output).buffer).len());
+            encoder.clear_buffer(out_buf, 0, Some(nbytes));
+        }
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
             resource: buffers[ir.view(dispatch.output).buffer.0].as_entire_binding(),
@@ -157,8 +173,22 @@ pub fn run(
 
     for (array, &sink) in outputs.iter_mut().zip(&ir.sinks) {
         let view = ir.view(sink);
+        let etype = ir.buffer(view.buffer).element_type;
         let raw = read_buffer(ctx, &buffers[view.buffer.0], byte_len(ir.buffer(view.buffer).len()))?;
-        densify(&bytes_to_f32s(&raw), &view.accessor, array.data_mut())?;
+        match (etype, array.as_data_mut()) {
+            (ElementType::F32, ArrayData::F32(dst)) => {
+                densify_f32(&bytes_to_f32s(&raw), &view.accessor, dst)?;
+            }
+            (ElementType::U32, ArrayData::U32(dst)) => {
+                densify_u32(&bytes_to_u32s(&raw), &view.accessor, dst)?;
+            }
+            _ => {
+                return Err(Error::ElementType {
+                    expected: etype,
+                    got: array.element_type(),
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -167,14 +197,31 @@ fn byte_len(elements: usize) -> u64 {
     (elements as u64 * 4).max(4)
 }
 
-fn f32s_to_bytes(values: &[f32]) -> Vec<u8> {
-    values.iter().flat_map(|v| v.to_le_bytes()).collect()
+fn buffer_data_to_bytes(data: &BufferData) -> Vec<u8> {
+    match data {
+        BufferData::F32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+        BufferData::U32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+    }
+}
+
+fn array_data_to_bytes(data: &ArrayData) -> Vec<u8> {
+    match data {
+        ArrayData::F32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+        ArrayData::U32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
+    }
 }
 
 fn bytes_to_f32s(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+        .collect()
+}
+
+fn bytes_to_u32s(bytes: &[u8]) -> Vec<u32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
         .collect()
 }
 
@@ -207,9 +254,24 @@ fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8
     Ok(mapped.to_vec())
 }
 
-/// Densify a pitched view into a row-major host slice (same semantics as the
-/// CPU backend's sink gather).
-fn densify(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
+fn densify_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
+    let count = element_count(&accessor.shape);
+    if out.len() != count {
+        return Err(Error::Size { expected: count, got: out.len() });
+    }
+    let mut coords = vec![0; accessor.rank()];
+    for (linear, slot) in out.iter_mut().enumerate() {
+        let mut rem = linear;
+        for axis in (0..accessor.rank()).rev() {
+            coords[axis] = rem % accessor.shape[axis];
+            rem /= accessor.shape[axis];
+        }
+        *slot = buffer[accessor.index(&coords)];
+    }
+    Ok(())
+}
+
+fn densify_u32(buffer: &[u32], accessor: &Accessor, out: &mut [u32]) -> Result<(), Error> {
     let count = element_count(&accessor.shape);
     if out.len() != count {
         return Err(Error::Size { expected: count, got: out.len() });
