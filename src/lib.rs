@@ -82,7 +82,7 @@ mod tests {
             return;
         }
 
-        let add = WgpuJit.jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
+        let add = WgpuJit::default().jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
         let out = add
             .call(&Inputs {
                 a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),

@@ -41,9 +41,15 @@ cargo run --example interp_add                       # smallest end-to-end run
 cargo run --example demo_front                       # DSL graph pretty-printer
 cargo run --example train_mnist -- --quick 2         # MNIST MLP on the CPU
 cargo run --example train_mnist -- --backend wgpu 2  # same, through WGSL
+cargo bench --bench mnist_train                      # train-step: cpu/wgpu × opt on/off
 ```
 
 `train_mnist` downloads MNIST to `~/.cache/resin/mnist` on first run.
+
+The `mnist_train` Criterion bench times one full MLP train step (forward + MSE +
+grads + SGD). Matrix: **backend** (`cpu` interpreter / `wgpu`) × **IR opt**
+(none / `tile_matmuls`+`fuse_elementwise`). wgpu cells are skipped if no
+adapter is available. Use `--save-baseline` / `--baseline` to track regressions.
 
 ## Layout
 

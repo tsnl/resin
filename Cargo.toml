@@ -13,6 +13,13 @@ thiserror = "2"
 wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "mnist_train"
+harness = false
+
 [workspace]
 members = ["crates/resin-macros"]
 resolver = "3"

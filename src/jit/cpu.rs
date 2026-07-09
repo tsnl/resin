@@ -5,7 +5,9 @@
 //! validated IR program itself.
 
 use super::{Array, Error, Jit};
-use crate::ir::{Accessor, Dispatch, Expr, Kernel, Program, element_count};
+use crate::ir::{
+    Accessor, Dispatch, Element, Expr, Kernel, Program, TILE, TILE_LANES, element_count,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CpuJit;
@@ -70,13 +72,23 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
         })
         .collect();
 
-    let count = element_count(&out.shape);
+    let count = element_count(&out.shape());
     let mut coords = vec![0; out.rank()];
 
     match &dispatch.kernel {
-        Kernel::Elementwise(expr) => {
+        Kernel::Elementwise { expr, element: Element::F32Tile16 } => {
+            // Each element is a 16×16 matrix; Mul is matrix multiply.
             for linear in 0..count {
-                decode(linear, &out.shape, &mut coords);
+                decode(linear, &out.shape(), &mut coords);
+                let tile = eval_tile_expr(expr, program, storage, &coords);
+                let base = out.index(&coords) * TILE_LANES;
+                storage[out_buffer][base..base + TILE_LANES].copy_from_slice(&tile);
+            }
+        }
+
+        Kernel::Elementwise { expr, element: Element::F32 } => {
+            for linear in 0..count {
+                decode(linear, &out.shape(), &mut coords);
                 let value = eval_expr(expr, program, storage, &coords);
                 storage[out_buffer][out.index(&coords)] = value;
             }
@@ -84,11 +96,11 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
 
         Kernel::Matmul => {
             let rank = out.rank();
-            let k = args[0].1.shape[rank - 1];
+            let k = args[0].1.shape()[rank - 1];
             let mut a_coords = vec![0; rank];
             let mut b_coords = vec![0; rank];
             for linear in 0..count {
-                decode(linear, &out.shape, &mut coords);
+                decode(linear, &out.shape(), &mut coords);
                 a_coords.copy_from_slice(&coords); // [batch…, i, _]
                 b_coords.copy_from_slice(&coords); // [batch…, _, j]
                 let mut sum = 0.0;
@@ -104,13 +116,13 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
 
         Kernel::Reduction { op, axes } => {
             for linear in 0..count {
-                decode(linear, &out.shape, &mut coords);
+                decode(linear, &out.shape(), &mut coords);
                 storage[out_buffer][out.index(&coords)] = op.identity();
             }
             let (in_buffer, input) = &args[0];
             let mut in_coords = vec![0; input.rank()];
-            for linear in 0..element_count(&input.shape) {
-                decode(linear, &input.shape, &mut in_coords);
+            for linear in 0..element_count(&input.shape()) {
+                decode(linear, &input.shape(), &mut in_coords);
                 coords.copy_from_slice(&in_coords);
                 for &axis in axes.iter() {
                     coords[axis] = 0;
@@ -125,19 +137,19 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
 
 /// Densify a view into a row-major host slice (sink readback).
 fn gather(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
-    let count = element_count(&accessor.shape);
+    let count = element_count(&accessor.shape());
     if out.len() != count {
         return Err(Error::Size { expected: count, got: out.len() });
     }
     let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
-        decode(linear, &accessor.shape, &mut coords);
+        decode(linear, &accessor.shape(), &mut coords);
         *slot = buffer[accessor.index(&coords)];
     }
     Ok(())
 }
 
-/// Evaluate an elementwise expression at `coords`.
+/// Evaluate a plain f32 elementwise expression at `coords`.
 fn eval_expr(
     expr: &Expr,
     program: &Program,
@@ -157,6 +169,42 @@ fn eval_expr(
             op.apply(&vals[..op.arity()])
         }
     }
+}
+
+/// Evaluate a tile elementwise expression at `coords` (Mul = tile matmul).
+fn eval_tile_expr(
+    expr: &Expr,
+    program: &Program,
+    storage: &[Vec<f32>],
+    coords: &[usize],
+) -> Box<[f32]> {
+    match expr {
+        Expr::Load(view) => {
+            let view = program.view(*view);
+            let base = view.accessor.index(coords) * TILE_LANES;
+            storage[view.buffer.0][base..base + TILE_LANES].into()
+        }
+        Expr::Op { op: _, args } => {
+            // Validation admits only Mul on tiles.
+            let lhs = eval_tile_expr(&args[0], program, storage, coords);
+            let rhs = eval_tile_expr(&args[1], program, storage, coords);
+            tile_matmul(&lhs, &rhs)
+        }
+    }
+}
+
+/// 16×16 tile matrix product.
+fn tile_matmul(lhs: &[f32], rhs: &[f32]) -> Box<[f32]> {
+    let mut out = vec![0.0; TILE_LANES];
+    for r in 0..TILE {
+        for s in 0..TILE {
+            let a = lhs[r * TILE + s];
+            for c in 0..TILE {
+                out[r * TILE + c] += a * rhs[s * TILE + c];
+            }
+        }
+    }
+    out.into()
 }
 
 /// Row-major linear index → coordinates.

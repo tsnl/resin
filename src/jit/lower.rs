@@ -84,7 +84,7 @@ impl Builder {
                 let expr = Expr::new_op(*op, arg_views.iter().copied().map(Expr::Load));
                 // Binding list is free loads (deduped); the tree may load one view twice.
                 let loads = expr.loads();
-                self.push_dispatch(tensor.shape(), Kernel::Elementwise(expr), loads)
+                self.push_dispatch(tensor.shape(), Kernel::elementwise(expr), loads)
             }
             TensorKind::Matmul { lhs, rhs } => {
                 let args = vec![self.view_for(lhs)?, self.view_for(rhs)?];
@@ -169,25 +169,7 @@ fn broadcast_axes(
     target: &[usize],
     axes: &[usize],
 ) -> Result<Accessor, crate::ir::Error> {
-    if axes.len() != accessor.rank() {
-        return Err(crate::ir::Error(format!(
-            "broadcast axes {axes:?} do not match rank {}",
-            accessor.rank()
-        )));
-    }
-    let mut pitch = vec![0; target.len()];
-    for (input_axis, &out_axis) in axes.iter().enumerate() {
-        if out_axis >= target.len() {
-            return Err(crate::ir::Error(format!(
-                "broadcast axis {out_axis} out of range for target {target:?}"
-            )));
-        }
-        // Size-1 dims that expand keep pitch 0.
-        if accessor.shape[input_axis] != 1 || target[out_axis] == 1 {
-            pitch[out_axis] = accessor.pitch[input_axis];
-        }
-    }
-    Ok(Accessor { offset: accessor.offset, shape: target.into(), pitch: pitch.into() })
+    accessor.map_axes(target, axes)
 }
 
 #[cfg(test)]
@@ -210,7 +192,7 @@ mod tests {
         let program = lower(&Pair { a, b }, &out).unwrap();
         assert_eq!(program.buffers.len(), 3);
         assert_eq!(program.queue.len(), 1);
-        assert!(matches!(program.queue[0].kernel, Kernel::Elementwise(_)));
+        assert!(matches!(program.queue[0].kernel, Kernel::Elementwise { .. }));
     }
 
     #[test]
@@ -221,7 +203,7 @@ mod tests {
 
         assert_eq!(program.buffers.len(), 2);
         assert_eq!(program.queue.len(), 1);
-        let Kernel::Elementwise(expr) = &program.queue[0].kernel else {
+        let Kernel::Elementwise { expr, .. } = &program.queue[0].kernel else {
             panic!("expected elementwise");
         };
         assert!(matches!(expr, Expr::Op { op: Op::ADD, .. }));
@@ -248,7 +230,7 @@ mod tests {
         let program = lower(&Pair { a, b }, &out).unwrap();
         assert_eq!(program.queue.len(), 1);
         assert!(matches!(program.queue[0].kernel, Kernel::Matmul));
-        assert_eq!(program.output_shape(&program.queue[0]), &[2, 3]);
+        assert_eq!(&*program.output_shape(&program.queue[0]), &[2, 3]);
     }
 
     #[test]
@@ -259,8 +241,8 @@ mod tests {
 
         let dispatch = &program.queue[0];
         assert!(matches!(dispatch.kernel, Kernel::Reduction { .. }));
-        assert_eq!(&*program.view(dispatch.args[0]).accessor.shape, &[8, 10]);
-        assert_eq!(program.output_shape(dispatch), &[1, 10]);
+        assert_eq!(&*program.view(dispatch.args[0]).accessor.shape(), &[8, 10]);
+        assert_eq!(&*program.output_shape(dispatch), &[1, 10]);
     }
 
     #[test]
@@ -270,8 +252,8 @@ mod tests {
         let program = lower(&w, &out).unwrap();
 
         let arg1 = program.view(program.queue[0].args[1]);
-        assert_eq!(&*arg1.accessor.shape, &[4, 3]);
-        assert_eq!(&*arg1.accessor.pitch, &[0, 0]);
+        assert_eq!(&*arg1.accessor.shape(), &[4, 3]);
+        assert_eq!(&*arg1.accessor.strided().pitch, &[0, 0]);
     }
 
     #[test]
@@ -283,8 +265,8 @@ mod tests {
         assert_eq!(program.queue.len(), 0, "broadcast must not enqueue a kernel");
         assert_eq!(program.buffers.len(), 1);
         let sink = program.view(program.sinks[0]);
-        assert_eq!(&*sink.accessor.shape, &[2, 3]);
-        assert_eq!(&*sink.accessor.pitch, &[0, 1]);
+        assert_eq!(&*sink.accessor.shape(), &[2, 3]);
+        assert_eq!(&*sink.accessor.strided().pitch, &[0, 1]);
     }
 
     #[test]
@@ -295,8 +277,8 @@ mod tests {
 
         assert_eq!(program.queue.len(), 0);
         let sink = program.view(program.sinks[0]);
-        assert_eq!(&*sink.accessor.shape, &[3, 2]);
-        assert_eq!(&*sink.accessor.pitch, &[1, 3]);
+        assert_eq!(&*sink.accessor.shape(), &[3, 2]);
+        assert_eq!(&*sink.accessor.strided().pitch, &[1, 3]);
     }
 
     #[test]
@@ -306,7 +288,7 @@ mod tests {
         let program = lower(&a, &out).unwrap();
 
         assert_eq!(program.queue.len(), 0);
-        assert_eq!(&*program.view(program.sinks[0]).accessor.shape, &[4]);
+        assert_eq!(&*program.view(program.sinks[0]).accessor.shape(), &[4]);
     }
 
     #[test]
@@ -323,8 +305,8 @@ mod tests {
         assert!(matches!(program.queue[0].kernel, Kernel::Matmul));
 
         let bias_arg = program.view(program.queue[1].args[1]);
-        assert_eq!(&*bias_arg.accessor.shape, &[2, 3]);
-        assert_eq!(&*bias_arg.accessor.pitch, &[0, 1]);
+        assert_eq!(&*bias_arg.accessor.shape(), &[2, 3]);
+        assert_eq!(&*bias_arg.accessor.strided().pitch, &[0, 1]);
     }
 
     #[test]
@@ -336,7 +318,7 @@ mod tests {
 
         assert_eq!(program.queue.len(), 1, "transpose is a view on b");
         let b_arg = program.view(program.queue[0].args[1]);
-        assert_eq!(&*b_arg.accessor.shape, &[4, 3]);
-        assert_eq!(&*b_arg.accessor.pitch, &[1, 4]);
+        assert_eq!(&*b_arg.accessor.shape(), &[4, 3]);
+        assert_eq!(&*b_arg.accessor.strided().pitch, &[1, 4]);
     }
 }
