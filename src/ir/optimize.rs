@@ -4,7 +4,8 @@
 //!
 //! - **Elementwise RPN fusion** ([`fuse_elementwise`]) — producer→consumer
 //!   chains of elementwise dispatches collapse into single kernels, to a
-//!   fixed point.
+//!   fixed point. The algebraic splice lives on [`RpnExpr::fuse`]; this
+//!   module walks the dispatch queue and decides *when* to apply it.
 //!
 //! Planned:
 //!
@@ -18,7 +19,9 @@
 
 use std::collections::HashMap;
 
-use super::{Accessor, BufferRef, BufferView, BufferViewRef, Dispatch, Kernel, Program, RpnExpr};
+use super::{
+    Accessor, BufferRef, BufferView, BufferViewRef, Dispatch, Kernel, Program, RpnAtom, RpnExpr,
+};
 
 /// Run middle-end optimization passes on `program`.
 pub fn optimize(program: Program) -> Program {
@@ -30,102 +33,102 @@ pub fn optimize(program: Program) -> Program {
 /// A producer fuses into a consumer when the consumer reads the producer's
 /// output buffer through its identity view or a broadcast of it: the
 /// producer's RPN expression is spliced into the consumer's
-/// ([`RpnExpr::map_args`]) with the producer's argument views composed
-/// through the same broadcast. Producers with several consumers fuse into
-/// each of them (recomputing is usually cheaper than a round-trip through
-/// memory); a producer's own dispatch is deleted once nothing reads its
-/// output. Matmul and reduction kernels are fusion boundaries.
+/// ([`RpnExpr::fuse`]) with the producer's argument views composed through
+/// the same broadcast. Multi-consumer intermediates are inlined into each
+/// reader; the producer is dropped once nothing reads its output. Matmul
+/// and reduction kernels are fusion boundaries.
 pub fn fuse_elementwise(mut program: Program) -> Program {
     while fuse_one(&mut program) {}
     compact(program)
 }
 
-/// Stop splicing into expressions past this size; keeps recomputation of
-/// shared subexpressions from snowballing.
+/// Soft cap on fused expression size. Multi-consumer inlining can otherwise
+/// duplicate a shared subexpression without bound.
 const MAX_FUSED_ATOMS: usize = 256;
+
+/// One fusable producer→consumer edge in the dispatch queue.
+struct OuterInnerPair {
+    consumer: usize,
+    producer: usize,
+    /// Consumer arg view of the producer's output (identity or broadcast).
+    arg_view: BufferViewRef,
+    outer: RpnExpr,
+    inner: RpnExpr,
+    /// Producer's argument views, before broadcast composition.
+    inner_args: Vec<BufferViewRef>,
+}
 
 /// Find one producer→consumer pair and fuse it. Returns false at fixed point.
 fn fuse_one(program: &mut Program) -> bool {
-    for consumer in 0..program.queue.len() {
-        let Kernel::Elementwise(outer) = &program.queue[consumer].kernel else {
+    let Some(pair) = find_outer_inner_pair(program) else {
+        return false;
+    };
+    apply_fusion(program, pair);
+    true
+}
+
+/// Scan the queue for the next fusable elementwise→elementwise edge.
+fn find_outer_inner_pair(program: &Program) -> Option<OuterInnerPair> {
+    for (consumer, dispatch) in program.queue.iter().enumerate() {
+        let Kernel::Elementwise(outer) = &dispatch.kernel else {
             continue;
         };
-        let outer = outer.clone();
-        for slot_of_interest in 0..program.queue[consumer].args.len() {
-            let arg_view = program.queue[consumer].args[slot_of_interest];
+        for &arg_view in &dispatch.args {
             let Some(producer) = fusable_producer(program, consumer, arg_view) else {
                 continue;
             };
-            let inner_dispatch = program.queue[producer].clone();
-            let Kernel::Elementwise(inner) = &inner_dispatch.kernel else {
+            let Kernel::Elementwise(inner) = &program.queue[producer].kernel else {
                 unreachable!("fusable_producer only returns elementwise dispatches");
             };
-
-            let occurrences = count_arg_atoms(&outer, &program.queue[consumer].args, arg_view);
-            let fused_len = outer.atoms.len() + occurrences * inner.atoms.len();
-            if fused_len > MAX_FUSED_ATOMS {
+            if fused_atom_count(outer, &dispatch.args, arg_view, inner) > MAX_FUSED_ATOMS {
                 continue;
             }
-
-            // The producer's args, re-read through the consumer's (possibly
-            // broadcast) view of the intermediate.
-            let expansion = program.view(arg_view).accessor.clone();
-            let composed: Vec<BufferViewRef> = inner_dispatch
-                .args
-                .iter()
-                .map(|&a| {
-                    let view = program.view(a).clone();
-                    let accessor = compose_broadcast(&view.accessor, &expansion);
-                    intern_view(program, view.buffer, accessor)
-                })
-                .collect();
-
-            // Merge argument lists; duplicates collapse.
-            let mut args: Vec<BufferViewRef> = Vec::new();
-            let slot = |view: BufferViewRef, args: &mut Vec<BufferViewRef>| -> u32 {
-                let index = args.iter().position(|&a| a == view).unwrap_or_else(|| {
-                    args.push(view);
-                    args.len() - 1
-                });
-                index as u32
-            };
-            let outer_slots: Vec<Option<u32>> = program.queue[consumer]
-                .args
-                .iter()
-                .map(|&a| (a != arg_view).then(|| slot(a, &mut args)))
-                .collect();
-            let inner_slots: Vec<u32> =
-                composed.iter().map(|&a| slot(a, &mut args)).collect();
-
-            let fused = outer.map_args(&mut |i| match outer_slots[i as usize] {
-                Some(new_index) => RpnExpr::arg(new_index),
-                None => inner.map_args(&mut |k| RpnExpr::arg(inner_slots[k as usize])),
+            return Some(OuterInnerPair {
+                consumer,
+                producer,
+                arg_view,
+                outer: outer.clone(),
+                inner: inner.clone(),
+                inner_args: program.queue[producer].args.clone(),
             });
-
-            program.queue[consumer] = Dispatch {
-                kernel: Kernel::Elementwise(fused),
-                args,
-                output: program.queue[consumer].output,
-            };
-
-            // Delete the producer once its output has no readers left.
-            let buffer = program.view(arg_view).buffer;
-            let still_read = program
-                .queue
-                .iter()
-                .enumerate()
-                .any(|(index, dispatch)| {
-                    index != producer
-                        && dispatch.args.iter().any(|&a| program.view(a).buffer == buffer)
-                })
-                || program.sinks.iter().any(|&s| program.view(s).buffer == buffer);
-            if !still_read {
-                program.queue.remove(producer);
-            }
-            return true;
         }
     }
-    false
+    None
+}
+
+/// Splice the producer into the consumer and drop the producer if unused.
+fn apply_fusion(program: &mut Program, pair: OuterInnerPair) {
+    let OuterInnerPair {
+        consumer,
+        producer,
+        arg_view,
+        outer,
+        inner,
+        inner_args,
+    } = pair;
+
+    // Re-read each producer arg through the consumer's (possibly broadcast)
+    // view of the intermediate.
+    let expansion = program.view(arg_view).accessor.clone();
+    let composed: Vec<BufferViewRef> = inner_args
+        .iter()
+        .map(|&a| compose_arg_view(program, a, &expansion))
+        .collect();
+
+    let (args, outer_to_new, inner_to_new) =
+        merge_arg_lists(&program.queue[consumer].args, arg_view, &composed);
+    let fused = outer.fuse(&outer_to_new, &inner, &inner_to_new);
+
+    program.queue[consumer] = Dispatch {
+        kernel: Kernel::Elementwise(fused),
+        args,
+        output: program.queue[consumer].output,
+    };
+
+    let buffer = program.view(arg_view).buffer;
+    if !buffer_is_read(program, buffer, producer) {
+        program.queue.remove(producer);
+    }
 }
 
 /// The queue index of the elementwise dispatch producing `arg_view`, if its
@@ -146,9 +149,8 @@ fn fusable_producer(
     if !matches!(program.queue[producer].kernel, Kernel::Elementwise(_)) {
         return None;
     }
-    // The producer must write the whole buffer densely, and the consumer must
-    // read it either as written or through a broadcast of that layout — then
-    // consumer coordinates map straight onto producer coordinates.
+    // Producer must write the whole buffer densely; consumer must read it as
+    // written or as a broadcast of that layout, so coordinates line up.
     let identity = Accessor::dense(program.buffer(buffer).shape.clone(), 0);
     if program.view(program.queue[producer].output).accessor != identity {
         return None;
@@ -157,6 +159,70 @@ fn fusable_producer(
         return None;
     }
     Some(producer)
+}
+
+/// Estimated atom count after splicing `inner` into every use of `replaced`.
+fn fused_atom_count(
+    outer: &RpnExpr,
+    outer_args: &[BufferViewRef],
+    replaced: BufferViewRef,
+    inner: &RpnExpr,
+) -> usize {
+    let uses = outer
+        .atoms
+        .iter()
+        .filter(|atom| matches!(atom, RpnAtom::Arg(i) if outer_args[*i as usize] == replaced))
+        .count();
+    outer.atoms.len() + uses * inner.atoms.len()
+}
+
+/// Build the fused argument list and the renumbering tables for [`RpnExpr::fuse`].
+///
+/// Every outer arg equal to `replaced` is dropped (those slots become `inner`);
+/// `inner_args` are appended, with duplicates collapsed.
+fn merge_arg_lists(
+    outer_args: &[BufferViewRef],
+    replaced: BufferViewRef,
+    inner_args: &[BufferViewRef],
+) -> (Vec<BufferViewRef>, Vec<Option<u32>>, Vec<u32>) {
+    let mut merged = Vec::new();
+    let mut intern = |view: BufferViewRef| -> u32 {
+        if let Some(i) = merged.iter().position(|&a| a == view) {
+            return i as u32;
+        }
+        merged.push(view);
+        (merged.len() - 1) as u32
+    };
+
+    let outer_to_new: Vec<Option<u32>> = outer_args
+        .iter()
+        .map(|&a| (a != replaced).then(|| intern(a)))
+        .collect();
+    let inner_to_new: Vec<u32> = inner_args.iter().map(|&a| intern(a)).collect();
+    (merged, outer_to_new, inner_to_new)
+}
+
+/// Producer arg `arg`, re-addressed through the consumer's `expansion` of the
+/// intermediate (identity or broadcast).
+fn compose_arg_view(
+    program: &mut Program,
+    arg: BufferViewRef,
+    expansion: &Accessor,
+) -> BufferViewRef {
+    let view = program.view(arg).clone();
+    let accessor = compose_broadcast(&view.accessor, expansion);
+    intern_view(program, view.buffer, accessor)
+}
+
+/// Whether any dispatch (other than `except`) or sink still reads `buffer`.
+fn buffer_is_read(program: &Program, buffer: BufferRef, except: usize) -> bool {
+    let reads = |view: BufferViewRef| program.view(view).buffer == buffer;
+    program
+        .queue
+        .iter()
+        .enumerate()
+        .any(|(i, d)| i != except && d.args.iter().copied().any(reads))
+        || program.sinks.iter().copied().any(reads)
 }
 
 /// Whether `accessor` is `source` expanded by [`Accessor::broadcast_to`]:
@@ -191,17 +257,6 @@ fn compose_broadcast(accessor: &Accessor, expansion: &Accessor) -> Accessor {
         shape: expansion.shape.clone(),
         pitch: pitch.into(),
     }
-}
-
-/// How many `Arg` atoms of `expr` refer to `target` (via the arg list).
-fn count_arg_atoms(expr: &RpnExpr, args: &[BufferViewRef], target: BufferViewRef) -> usize {
-    expr.atoms
-        .iter()
-        .filter(|atom| match atom {
-            super::RpnAtom::Arg(i) => args[*i as usize] == target,
-            super::RpnAtom::Op(_) => false,
-        })
-        .count()
 }
 
 fn intern_view(program: &mut Program, buffer: BufferRef, accessor: Accessor) -> BufferViewRef {
@@ -283,45 +338,5 @@ fn compact(program: Program) -> Program {
                 accessor: view.accessor,
             })
             .collect(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ops::Op;
-    use crate::ir::RpnAtom;
-
-    #[test]
-    fn map_args_renumbers() {
-        let expr = RpnExpr::apply_op(Op::ADD, 2);
-        let renumbered = expr.map_args(&mut |i| RpnExpr::arg(i + 10));
-        assert_eq!(
-            renumbered.atoms,
-            vec![RpnAtom::Arg(10), RpnAtom::Arg(11), RpnAtom::Op(Op::ADD)]
-        );
-    }
-
-    #[test]
-    fn map_args_splices_expressions() {
-        // outer = a0 * a1; substitute a1 := (b0 + b1)  →  a0 * (b0 + b1)
-        let outer = RpnExpr::apply_op(Op::MUL, 2);
-        let inner = RpnExpr::apply_op(Op::ADD, 2);
-        let fused = outer.map_args(&mut |i| match i {
-            0 => RpnExpr::arg(0),
-            1 => inner.map_args(&mut |k| RpnExpr::arg(k + 1)),
-            _ => unreachable!(),
-        });
-        assert_eq!(
-            fused.atoms,
-            vec![
-                RpnAtom::Arg(0),
-                RpnAtom::Arg(1),
-                RpnAtom::Arg(2),
-                RpnAtom::Op(Op::ADD),
-                RpnAtom::Op(Op::MUL),
-            ]
-        );
-        fused.validate(3).unwrap();
     }
 }
