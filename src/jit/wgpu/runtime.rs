@@ -1,15 +1,12 @@
-//! WebGPU runtime: upload arenas, one shared bind group, dispatch, read back.
+//! WebGPU runtime: upload params into existing arenas, dispatch, read back.
 //!
-//! Pipelines and the bind-group layout live on the [`super::WgpuProgram`]
-//! artifact (compiled in `lower`). Each invoke only creates arena GPU buffers
-//! and a single bind group covering all of them.
+//! Pipelines, arena buffers, bind-group layout, and bind group live on the
+//! [`super::WgpuProgram`] artifact. Invoke does not allocate those objects.
 
 use std::sync::OnceLock;
 
-use wgpu::util::DeviceExt;
-
 use super::WgpuProgram;
-use crate::ir::{Accessor, BufferData, Kernel, element_count};
+use crate::ir::{Accessor, Kernel, element_count};
 use crate::jit::{Array, ArrayData, Error};
 use crate::ops::ElementType;
 
@@ -56,7 +53,7 @@ fn create_context() -> Result<Context, String> {
     Ok(Context { device, queue })
 }
 
-/// Upload params → run the dispatch queue → densify sinks back to the host.
+/// Write params → dispatch queue → densify sinks. Uses artifact arenas/pipelines.
 pub fn run(
     ctx: &Context,
     program: &WgpuProgram,
@@ -64,27 +61,9 @@ pub fn run(
     outputs: &mut [&mut Array],
 ) -> Result<(), Error> {
     let ir = &program.ir;
-    let usage = wgpu::BufferUsages::STORAGE
-        | wgpu::BufferUsages::COPY_DST
-        | wgpu::BufferUsages::COPY_SRC;
+    let arenas = &program.gpu.arenas;
 
-    // One GPU buffer per arena; binding i ↔ buffers[i].
-    let mut host_shadow: Vec<Vec<u8>> = ir
-        .buffers
-        .iter()
-        .map(|spec| {
-            let size = byte_len(spec.len()) as usize;
-            match &spec.init {
-                Some(init) => {
-                    let mut bytes = buffer_data_to_bytes(init);
-                    bytes.resize(size, 0);
-                    bytes
-                }
-                None => vec![0u8; size],
-            }
-        })
-        .collect();
-
+    // Paint param slices into existing arenas (dense views → contiguous write).
     for (array, &param) in params.iter().zip(&ir.params) {
         let view = ir.view(param);
         let etype = ir.buffer(view.buffer).element_type;
@@ -101,38 +80,8 @@ pub fn run(
                 got: array.as_data().len(),
             });
         }
-        write_dense_region(
-            &mut host_shadow[view.buffer.0],
-            &view.accessor,
-            array.as_data(),
-        )?;
+        write_dense_region_queue(ctx, &arenas[view.buffer.0], &view.accessor, array.as_data())?;
     }
-
-    let buffers: Vec<wgpu::Buffer> = host_shadow
-        .iter()
-        .map(|bytes| {
-            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("resin-arena"),
-                contents: bytes,
-                usage,
-            })
-        })
-        .collect();
-
-    // One bind group for the whole program (shared layout on every pipeline).
-    let entries: Vec<wgpu::BindGroupEntry> = buffers
-        .iter()
-        .enumerate()
-        .map(|(i, buf)| wgpu::BindGroupEntry {
-            binding: i as u32,
-            resource: buf.as_entire_binding(),
-        })
-        .collect();
-    let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("resin-arenas"),
-        layout: &program.gpu.bind_group_layout,
-        entries: &entries,
-    });
 
     let mut encoder = ctx
         .device
@@ -143,7 +92,7 @@ pub fn run(
         if let Kernel::Remap { info } = &dispatch.kernel
             && info.is_scatter()
         {
-            clear_dense_region_gpu(ctx, &mut encoder, &buffers, ir, dispatch.output)?;
+            clear_dense_region_gpu(&mut encoder, arenas, ir, dispatch.output)?;
         }
 
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -151,7 +100,7 @@ pub fn run(
             timestamp_writes: None,
         });
         pass.set_pipeline(&slot.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_bind_group(0, &program.gpu.bind_group, &[]);
         let [x, y, z] = slot.workgroups;
         if x > 0 {
             pass.dispatch_workgroups(x, y, z);
@@ -164,7 +113,8 @@ pub fn run(
         let view = ir.view(sink);
         let etype = ir.buffer(view.buffer).element_type;
         let arena_len = ir.buffer(view.buffer).len();
-        let raw = read_buffer(ctx, &buffers[view.buffer.0], byte_len(arena_len))?;
+        // Full-arena readback (simple); densify the sink view on the host.
+        let raw = read_buffer(ctx, &arenas[view.buffer.0], byte_len(arena_len))?;
         match (etype, array.as_data_mut()) {
             (ElementType::F32, ArrayData::F32(dst)) => {
                 densify_f32(&bytes_to_f32s(&raw), &view.accessor, dst)?;
@@ -184,9 +134,8 @@ pub fn run(
 }
 
 fn clear_dense_region_gpu(
-    ctx: &Context,
     encoder: &mut wgpu::CommandEncoder,
-    buffers: &[wgpu::Buffer],
+    arenas: &[wgpu::Buffer],
     ir: &crate::ir::Program,
     output: crate::ir::BufferViewRef,
 ) -> Result<(), Error> {
@@ -199,17 +148,21 @@ fn clear_dense_region_gpu(
     let offset_bytes = (acc.offset as u64) * 4;
     let size_bytes = count * 4;
     if size_bytes > 0 {
-        encoder.clear_buffer(&buffers[view.buffer.0], offset_bytes, Some(size_bytes));
+        encoder.clear_buffer(&arenas[view.buffer.0], offset_bytes, Some(size_bytes));
     }
-    let _ = ctx;
     Ok(())
 }
 
-fn write_dense_region(
-    shadow: &mut [u8],
+/// Dense param views are contiguous in the arena → one `write_buffer`.
+fn write_dense_region_queue(
+    ctx: &Context,
+    arena: &wgpu::Buffer,
     accessor: &Accessor,
     data: &ArrayData,
 ) -> Result<(), Error> {
+    if !accessor.is_dense() {
+        return Err(Error::Wgpu("param upload requires dense view".into()));
+    }
     let count = element_count(&accessor.shape);
     if data.len() != count {
         return Err(Error::Size {
@@ -217,37 +170,17 @@ fn write_dense_region(
             got: data.len(),
         });
     }
-    let mut coords = vec![0; accessor.rank()];
-    match data {
-        ArrayData::F32(src) => {
-            for (linear, &value) in src.iter().enumerate() {
-                decode(linear, &accessor.shape, &mut coords);
-                let i = accessor.index(&coords);
-                let bytes = value.to_le_bytes();
-                shadow[i * 4..i * 4 + 4].copy_from_slice(&bytes);
-            }
-        }
-        ArrayData::U32(src) => {
-            for (linear, &value) in src.iter().enumerate() {
-                decode(linear, &accessor.shape, &mut coords);
-                let i = accessor.index(&coords);
-                let bytes = value.to_le_bytes();
-                shadow[i * 4..i * 4 + 4].copy_from_slice(&bytes);
-            }
-        }
-    }
+    let offset = (accessor.offset as u64) * 4;
+    let bytes = match data {
+        ArrayData::F32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>(),
+        ArrayData::U32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>(),
+    };
+    ctx.queue.write_buffer(arena, offset, &bytes);
     Ok(())
 }
 
 fn byte_len(elements: usize) -> u64 {
     (elements as u64 * 4).max(4)
-}
-
-fn buffer_data_to_bytes(data: &BufferData) -> Vec<u8> {
-    match data {
-        BufferData::F32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-        BufferData::U32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-    }
 }
 
 fn bytes_to_f32s(raw: &[u8]) -> Vec<f32> {
