@@ -6,6 +6,11 @@
 //!   bodies live in [`program::expr`]
 //! - [`accessor`] — strided addressing (broadcast / transpose / squeeze)
 //! - [`optimize`] — IR→IR passes (kernel fusion, tiling, …)
+//!
+//! Invariants (enforced by [`Program::validate`]):
+//!
+//! - **Dense kernel outputs** — every dispatch writes through
+//!   [`Accessor::Dense`]. Args may be non-dense; see [`program`].
 
 mod accessor;
 pub mod optimize;
@@ -13,6 +18,5 @@ mod program;
 
 pub use accessor::{Accessor, dense_pitch, element_count};
 pub use program::{
-    Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Element, Error, Expr, Kernel, Program,
-    TILE, TILE_LANES,
+    Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Error, Expr, Kernel, Program,
 };

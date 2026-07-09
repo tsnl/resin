@@ -1,24 +1,24 @@
 //! Elementwise kernel fusion: inline producer expressions into consumers.
 //!
-//! Producer→consumer chains of same-[`Element`] elementwise dispatches
-//! collapse into single kernels, to a fixed point. Fusion is tree
-//! substitution ([`Expr::substitute`]).
+//! Producer→consumer chains of elementwise dispatches collapse into single
+//! kernels, to a fixed point. Fusion is tree substitution
+//! ([`Expr::substitute`]).
 
 use std::collections::HashMap;
 
 use crate::ir::{
-    Accessor, BufferRef, BufferView, BufferViewRef, Dispatch, Element, Expr, Kernel, Program,
+    Accessor, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program,
 };
 
 /// Fuse adjacent elementwise dispatches to a fixed point.
 ///
-/// A producer fuses into a consumer when both are elementwise with the same
-/// [`Element`], and the consumer loads the producer's write view (or a
-/// broadcast of it): the producer's expression is substituted for that load
-/// ([`Expr::substitute`]), with producer loads composed through the same view
-/// relationship. Multi-consumer intermediates are inlined into each reader;
-/// the producer is dropped once nothing reads its output. Matmul and reduction
-/// are fusion boundaries.
+/// A producer fuses into a consumer when both are elementwise and the
+/// consumer loads the producer's write view (or a broadcast of it): the
+/// producer's expression is substituted for that load ([`Expr::substitute`]),
+/// with producer loads composed through the same view relationship.
+/// Multi-consumer intermediates are inlined into each reader; the producer is
+/// dropped once nothing reads its output. Matmul and reduction are fusion
+/// boundaries.
 pub fn fuse_elementwise(mut program: Program) -> Program {
     while fuse_one(&mut program) {}
     compact(program)
@@ -32,8 +32,6 @@ const MAX_FUSED_NODES: usize = 256;
 struct ProducerConsumerPair {
     consumer: usize,
     producer: usize,
-    /// Shared element type of both kernels (must match to fuse).
-    element: Element,
     /// Consumer load of the producer's output (identity or broadcast).
     arg_view: BufferViewRef,
     consumer_expr: Expr,
@@ -52,12 +50,12 @@ fn fuse_one(program: &mut Program) -> bool {
 /// Scan the queue for the next fusable elementwise→elementwise edge.
 fn find_fusible_producer_consumer_pair(program: &Program) -> Option<ProducerConsumerPair> {
     for (consumer, dispatch) in program.queue.iter().enumerate() {
-        let Kernel::Elementwise { expr: consumer_expr, element } = &dispatch.kernel else {
+        let Kernel::Elementwise { expr: consumer_expr } = &dispatch.kernel else {
             continue;
         };
         for &arg_view in &dispatch.args {
             let Some((producer, producer_expr)) =
-                fusable_producer(program, consumer, arg_view, *element)
+                fusable_producer(program, consumer, arg_view)
             else {
                 continue;
             };
@@ -71,7 +69,6 @@ fn find_fusible_producer_consumer_pair(program: &Program) -> Option<ProducerCons
             return Some(ProducerConsumerPair {
                 consumer,
                 producer,
-                element: *element,
                 arg_view,
                 consumer_expr: consumer_expr.clone(),
                 producer_expr,
@@ -86,7 +83,6 @@ fn apply_fusion(program: &mut Program, pair: ProducerConsumerPair) {
     let ProducerConsumerPair {
         consumer,
         producer,
-        element,
         arg_view,
         consumer_expr,
         producer_expr,
@@ -105,7 +101,7 @@ fn apply_fusion(program: &mut Program, pair: ProducerConsumerPair) {
     let args = fused.loads();
 
     program.queue[consumer] = Dispatch {
-        kernel: Kernel::Elementwise { expr: fused, element },
+        kernel: Kernel::Elementwise { expr: fused },
         args,
         output: program.queue[consumer].output,
     };
@@ -127,17 +123,15 @@ fn count_load_occurrences(expr: &Expr, target: BufferViewRef) -> usize {
 /// Index and body of the dispatch producing `arg_view`, if it can be inlined
 /// into `queue[consumer]` at that load.
 ///
-/// A producer is fusable when three criteria hold:
+/// A producer is fusable when:
 ///
 /// 1. **Kernel compatibility** — producer is elementwise (same iteration model
 ///    as the consumer).
-/// 2. **Datatype compatibility** — [`same_element_type`].
-/// 3. **Shape compatibility** — [`fusible_view_relationship`].
+/// 2. **Shape compatibility** — [`fusible_view_relationship`].
 fn fusable_producer(
     program: &Program,
     consumer: usize,
     arg_view: BufferViewRef,
-    consumer_element: Element,
 ) -> Option<(usize, Expr)> {
     let buffer = program.view(arg_view).buffer;
     let producer = program
@@ -148,24 +142,15 @@ fn fusable_producer(
         return None;
     }
 
-    // Kernel compatibility: elementwise.
-    let Kernel::Elementwise { expr, element } = &program.queue[producer].kernel else {
+    let Kernel::Elementwise { expr } = &program.queue[producer].kernel else {
         return None;
     };
 
-    if !same_element_type(*element, consumer_element) {
-        return None;
-    }
     if !fusible_view_relationship(program, producer, arg_view) {
         return None;
     }
 
     Some((producer, expr.clone()))
-}
-
-/// Datatype compatibility: producer and consumer share an [`Element`].
-fn same_element_type(producer: Element, consumer: Element) -> bool {
-    producer == consumer
 }
 
 /// Shape compatibility: consumer reads the producer's write view, or a
@@ -217,7 +202,7 @@ fn compact(program: Program) -> Program {
             live_views[arg.0] = true;
         }
         live_views[dispatch.output.0] = true;
-        if let Kernel::Elementwise { expr, .. } = &dispatch.kernel {
+        if let Kernel::Elementwise { expr } = &dispatch.kernel {
             for v in expr.loads() {
                 live_views[v.0] = true;
             }
@@ -259,9 +244,7 @@ fn compact(program: Program) -> Program {
             .into_iter()
             .map(|d| Dispatch {
                 kernel: match d.kernel {
-                    Kernel::Elementwise { expr, element } => {
-                        Kernel::Elementwise { expr: map_expr(expr), element }
-                    }
+                    Kernel::Elementwise { expr } => Kernel::Elementwise { expr: map_expr(expr) },
                     other => other,
                 },
                 args: d.args.iter().map(|a| map_view(*a)).collect(),

@@ -239,10 +239,9 @@ fn mnist_train_step(c: &mut Criterion) {
     group.finish();
 
     eprintln!(
-        "dispatch counts: none={} fuse={} tile={} all={}",
+        "dispatch counts: none={} fuse={} all={}",
         ir_program(OptPasses::None).queue.len(),
         ir_program(OptPasses::Fuse).queue.len(),
-        ir_program(OptPasses::Tile).queue.len(),
         ir_program(OptPasses::All).queue.len(),
     );
 }

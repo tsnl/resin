@@ -27,7 +27,7 @@ assert_eq!(out.data(), &[11.0, 22.0]);
 | --- | --- | --- |
 | Trace | `resin::dsl` | Build an immutable `Tensor` expression graph; reverse-mode autodiff (`grad_wrt`). |
 | Lower | `resin::jit::lower` | Graph → `resin::ir::Program`: a queue of kernel dispatches over flat f32 buffers and strided views. Broadcast/transpose/squeeze are pitch tricks on accessors, never copies. |
-| Optimize | `resin::ir::optimize` | IR→IR passes (kernel fusion, tiling — in progress). |
+| Optimize | `resin::ir::optimize` | IR→IR passes (kernel fusion; tiling planned). |
 | Run | `resin::jit` | `CpuJit` interprets the IR; `WgpuJit` emits one WGSL compute shader per kernel and dispatches through wgpu. |
 
 Structured inputs/outputs are pytrees: `#[derive(Tree)]` on any struct or enum
@@ -48,8 +48,8 @@ cargo bench --bench mnist_train                      # train-step: cpu/wgpu × o
 
 The `mnist_train` Criterion bench times one full MLP train step (forward + MSE +
 grads + SGD). Matrix: **backend** (`cpu` interpreter / `wgpu`) × **IR opt**
-(none / `tile_matmuls`+`fuse_elementwise`). wgpu cells are skipped if no
-adapter is available. Use `--save-baseline` / `--baseline` to track regressions.
+(none / `fuse_elementwise`). wgpu cells are skipped if no adapter is available.
+Use `--save-baseline` / `--baseline` to track regressions.
 
 ## Layout
 

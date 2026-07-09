@@ -1,13 +1,10 @@
 //! WGSL emission: one IR dispatch → one compute shader.
 //!
-//! Naive by design — no fusion, tiling, or shared-memory tricks; those belong
-//! in the IR layer. Addressing is emitted as flat scalar arithmetic (no
-//! arrays or helper functions), which keeps shaders trivial for drivers to
-//! compile.
+//! Naive by design — no fusion or shared-memory tricks; those belong in the
+//! IR layer. Addressing is emitted as flat scalar arithmetic (no arrays or
+//! helper functions), which keeps shaders trivial for drivers to compile.
 
-use crate::ir::{
-    Accessor, Element, Expr, Kernel, TILE, TILE_LANES, dense_pitch, element_count,
-};
+use crate::ir::{Accessor, Expr, Kernel, dense_pitch, element_count};
 use crate::jit::Error;
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 
@@ -16,35 +13,18 @@ pub struct KernelConfig {
     /// log2 of elements processed per thread (naive strip-mining).
     pub lg2_items_per_thread: u32,
     pub workgroup_size: u32,
-    /// Emit tiled kernels with the `chromium_experimental_subgroup_matrix`
-    /// WGSL extension, decomposing each 16x16 tile into MMAs of this size
-    /// (8 or 16, per the adapter's subgroup-matrix configs). `None` emits a
-    /// portable per-lane fallback. wgpu/naga cannot parse the extension yet,
-    /// so the extension path is for shaders executed by Dawn/Chrome.
-    pub subgroup_matrix_size: Option<usize>,
 }
 
 impl Default for KernelConfig {
     fn default() -> Self {
-        Self { lg2_items_per_thread: 3, workgroup_size: 64, subgroup_matrix_size: None }
+        Self { lg2_items_per_thread: 3, workgroup_size: 64 }
     }
 }
 
-/// Workgroup x-size for subgroup-matrix kernels: a multiple of every common
-/// `maxSubgroupSize` (extra subgroups redundantly compute the same tile).
-const SUBGROUP_WORKGROUP: usize = 64;
-
-pub fn workgroups(kernel: &Kernel, out: &Accessor, config: &KernelConfig) -> [u32; 3] {
-    let mut count = element_count(&out.shape()) as u64;
+pub fn workgroups(_kernel: &Kernel, out: &Accessor, config: &KernelConfig) -> [u32; 3] {
+    let count = element_count(&out.shape()) as u64;
     if count == 0 {
         return [0, 1, 1];
-    }
-    if let Kernel::Elementwise { element: Element::F32Tile16, .. } = kernel {
-        if config.subgroup_matrix_size.is_some() {
-            // One workgroup per output tile.
-            return [count as u32, 1, 1];
-        }
-        count *= TILE_LANES as u64; // fallback: one thread strip per lane
     }
     let threads = count.div_ceil(1 << config.lg2_items_per_thread);
     [threads.div_ceil(u64::from(config.workgroup_size)).max(1) as u32, 1, 1]
@@ -57,11 +37,6 @@ pub fn emit(
     config: &KernelConfig,
 ) -> Result<String, Error> {
     let mut w = Writer::default();
-    if let (Kernel::Elementwise { element: Element::F32Tile16, .. }, Some(_)) =
-        (kernel, config.subgroup_matrix_size)
-    {
-        w.print("enable chromium_experimental_subgroup_matrix;");
-    }
     w.print("@group(0) @binding(0)\nvar<storage, read_write> output: array<f32>;");
     for i in 0..args.len() {
         w.print(&format!(
@@ -70,12 +45,7 @@ pub fn emit(
         ));
     }
     match kernel {
-        Kernel::Elementwise { expr, element: Element::F32 } => {
-            emit_elementwise(&mut w, expr, args, out, config)
-        }
-        Kernel::Elementwise { expr, element: Element::F32Tile16 } => {
-            emit_tiled(&mut w, expr, args, out, config)?
-        }
+        Kernel::Elementwise { expr } => emit_elementwise(&mut w, expr, args, out, config),
         Kernel::Matmul => emit_matmul(&mut w, args, out, config),
         Kernel::Reduction { op, axes } => emit_reduction(&mut w, *op, axes, args, out, config),
     }
@@ -241,131 +211,6 @@ fn spell_op(op: Op, args: &[String]) -> String {
             }
         }
     }
-}
-
-/// Tiled elementwise kernels: v1 supports exactly `tileC = tileA × tileB`,
-/// which is all the tiling pass generates.
-fn tiled_mul_args(expr: &Expr) -> Result<(usize, usize), Error> {
-    match expr {
-        Expr::Op { op: crate::ops::Op::MUL, args } => match args.as_ref() {
-            [Expr::Load(a), Expr::Load(b)] => {
-                let free = expr.loads();
-                let ia = free.iter().position(|v| v == a).unwrap();
-                let ib = free.iter().position(|v| v == b).unwrap();
-                Ok((ia, ib))
-            }
-            _ => Err(Error::Wgpu(
-                "tiled elementwise kernels support exactly `Load * Load` for now".into(),
-            )),
-        },
-        _ => Err(Error::Wgpu(
-            "tiled elementwise kernels support exactly `Load * Load` for now".into(),
-        )),
-    }
-}
-
-fn emit_tiled(
-    w: &mut Writer,
-    expr: &Expr,
-    args: &[&Accessor],
-    out: &Accessor,
-    config: &KernelConfig,
-) -> Result<(), Error> {
-    let (a, b) = tiled_mul_args(expr)?;
-    match config.subgroup_matrix_size {
-        Some(mma) => emit_tiled_subgroup(w, args[a], args[b], out, mma),
-        None => emit_tiled_fallback(w, args[a], args[b], out, config),
-    }
-    Ok(())
-}
-
-/// Portable path: one thread per output lane, plain dot product within the
-/// 16x16 tile. Accessors address tiles; lane address = tile address x 256.
-fn emit_tiled_fallback(
-    w: &mut Writer,
-    a: &Accessor,
-    b: &Accessor,
-    out: &Accessor,
-    config: &KernelConfig,
-) {
-    let tiles = element_count(&out.shape());
-    let lanes = tiles * TILE_LANES;
-    let items = 1u32 << config.lg2_items_per_thread;
-    w.block(
-        &format!(
-            "@compute @workgroup_size({})\nfn main(@builtin(global_invocation_id) gid: vec3<u32>)",
-            config.workgroup_size
-        ),
-        |w| {
-            if lanes == 0 {
-                w.print("return;");
-                return;
-            }
-            w.print(&format!("let count = min({lanes}u, arrayLength(&output));"));
-            w.print(&format!("let lin_beg = gid.x << {}u;", config.lg2_items_per_thread));
-            w.block(
-                &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
-                |w| {
-                    w.block("if (lin >= count)", |w| w.print("return;"));
-                    w.print(&format!("let tile = lin / {TILE_LANES}u;"));
-                    w.print(&format!("let lane = lin % {TILE_LANES}u;"));
-                    w.print(&format!("let row = lane / {TILE}u;"));
-                    w.print(&format!("let col = lane % {TILE}u;"));
-                    let coords = emit_decode(w, &out.shape(), "tile");
-                    w.print(&format!("let a_tile = {};", address(a, &coords)));
-                    w.print(&format!("let b_tile = {};", address(b, &coords)));
-                    w.print(&format!("let out_tile = {};", address(out, &coords)));
-                    w.print("var sum: f32 = 0.0;");
-                    w.block(&format!("for (var s: u32 = 0u; s < {TILE}u; s += 1u)"), |w| {
-                        w.print(&format!(
-                            "sum += arg0[a_tile * {TILE_LANES}u + row * {TILE}u + s] * arg1[b_tile * {TILE_LANES}u + s * {TILE}u + col];"
-                        ));
-                    });
-                    w.print(&format!(
-                        "output[out_tile * {TILE_LANES}u + row * {TILE}u + col] = sum;"
-                    ));
-                },
-            );
-        },
-    );
-}
-
-/// Cooperative-matrix path (Dawn/Chrome only until wgpu's WGSL frontend
-/// learns the extension): one workgroup per output tile, decomposed into
-/// `mma`-sized subgroup matrix multiply-accumulates.
-fn emit_tiled_subgroup(w: &mut Writer, a: &Accessor, b: &Accessor, out: &Accessor, mma: usize) {
-    assert!(TILE.is_multiple_of(mma), "subgroup matrix size must divide {TILE}");
-    let blocks = TILE / mma;
-    let tiles = element_count(&out.shape());
-    w.block(
-        &format!(
-            "@compute @workgroup_size({SUBGROUP_WORKGROUP})\nfn main(@builtin(workgroup_id) wg: vec3<u32>)"
-        ),
-        |w| {
-            w.block(&format!("if (wg.x >= {tiles}u)"), |w| w.print("return;"));
-            let coords = emit_decode(w, &out.shape(), "wg.x");
-            w.print(&format!("let a_base = ({}) * {TILE_LANES}u;", address(a, &coords)));
-            w.print(&format!("let b_base = ({}) * {TILE_LANES}u;", address(b, &coords)));
-            w.print(&format!("let out_base = ({}) * {TILE_LANES}u;", address(out, &coords)));
-            w.block(&format!("for (var bi = 0u; bi < {blocks}u; bi += 1u)"), |w| {
-                w.block(&format!("for (var bj = 0u; bj < {blocks}u; bj += 1u)"), |w| {
-                    w.print(&format!("var acc: subgroup_matrix_result<f32, {mma}, {mma}>;"));
-                    w.block(&format!("for (var s = 0u; s < {blocks}u; s += 1u)"), |w| {
-                        w.print(&format!(
-                            "let a = subgroupMatrixLoad<subgroup_matrix_left<f32, {mma}, {mma}>>(&arg0, a_base + (bi * {TILE}u + s) * {mma}u, false, {TILE}u);"
-                        ));
-                        w.print(&format!(
-                            "let b = subgroupMatrixLoad<subgroup_matrix_right<f32, {mma}, {mma}>>(&arg1, b_base + (s * {TILE}u + bj) * {mma}u, false, {TILE}u);"
-                        ));
-                        w.print("acc = subgroupMatrixMultiplyAccumulate(a, b, acc);");
-                    });
-                    w.print(&format!(
-                        "subgroupMatrixStore(&output, out_base + (bi * {TILE}u + bj) * {mma}u, acc, false, {TILE}u);"
-                    ));
-                });
-            });
-        },
-    );
 }
 
 fn emit_matmul(w: &mut Writer, args: &[&Accessor], out: &Accessor, config: &KernelConfig) {

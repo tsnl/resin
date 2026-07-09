@@ -5,9 +5,7 @@
 //! validated IR program itself.
 
 use super::{Array, Error, Jit};
-use crate::ir::{
-    Accessor, Dispatch, Element, Expr, Kernel, Program, TILE, TILE_LANES, element_count,
-};
+use crate::ir::{Accessor, Dispatch, Expr, Kernel, Program, element_count};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CpuJit;
@@ -76,17 +74,7 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
     let mut coords = vec![0; out.rank()];
 
     match &dispatch.kernel {
-        Kernel::Elementwise { expr, element: Element::F32Tile16 } => {
-            // Each element is a 16×16 matrix; Mul is matrix multiply.
-            for linear in 0..count {
-                decode(linear, &out.shape(), &mut coords);
-                let tile = eval_tile_expr(expr, program, storage, &coords);
-                let base = out.index(&coords) * TILE_LANES;
-                storage[out_buffer][base..base + TILE_LANES].copy_from_slice(&tile);
-            }
-        }
-
-        Kernel::Elementwise { expr, element: Element::F32 } => {
+        Kernel::Elementwise { expr } => {
             for linear in 0..count {
                 decode(linear, &out.shape(), &mut coords);
                 let value = eval_expr(expr, program, storage, &coords);
@@ -169,42 +157,6 @@ fn eval_expr(
             op.apply(&vals[..op.arity()])
         }
     }
-}
-
-/// Evaluate a tile elementwise expression at `coords` (Mul = tile matmul).
-fn eval_tile_expr(
-    expr: &Expr,
-    program: &Program,
-    storage: &[Vec<f32>],
-    coords: &[usize],
-) -> Box<[f32]> {
-    match expr {
-        Expr::Load(view) => {
-            let view = program.view(*view);
-            let base = view.accessor.index(coords) * TILE_LANES;
-            storage[view.buffer.0][base..base + TILE_LANES].into()
-        }
-        Expr::Op { op: _, args } => {
-            // Validation admits only Mul on tiles.
-            let lhs = eval_tile_expr(&args[0], program, storage, coords);
-            let rhs = eval_tile_expr(&args[1], program, storage, coords);
-            tile_matmul(&lhs, &rhs)
-        }
-    }
-}
-
-/// 16×16 tile matrix product.
-fn tile_matmul(lhs: &[f32], rhs: &[f32]) -> Box<[f32]> {
-    let mut out = vec![0.0; TILE_LANES];
-    for r in 0..TILE {
-        for s in 0..TILE {
-            let a = lhs[r * TILE + s];
-            for c in 0..TILE {
-                out[r * TILE + c] += a * rhs[s * TILE + c];
-            }
-        }
-    }
-    out.into()
 }
 
 /// Row-major linear index → coordinates.

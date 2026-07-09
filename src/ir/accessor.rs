@@ -76,6 +76,11 @@ impl Accessor {
         Accessor::Dense { shape: shape.into(), offset }
     }
 
+    /// Whether this is a structural [`Accessor::Dense`] (kernel-output law).
+    pub fn is_dense(&self) -> bool {
+        matches!(self, Accessor::Dense { .. })
+    }
+
     /// Iteration / result shape of this accessor.
     pub fn shape(&self) -> Box<[usize]> {
         self.strided().shape

@@ -8,6 +8,18 @@
 //!
 //! Elementwise bodies are [`Expr`] trees ([`expr`]) whose leaves are stable
 //! [`BufferViewRef`]s.
+//!
+//! # Dense kernel outputs
+//!
+//! Every dispatch's **output** is [`Accessor::Dense`] (C-contiguous in element
+//! units). Shape and pitch count **elements**, not bytes.
+//!
+//! **Arguments** may use any accessor (broadcast, transpose, strided gather,
+//! …). Layout conversion into a denser domain is always **read non-dense →
+//! write dense** (a materializing copy when needed), never a non-dense store.
+//!
+//! Lowering already emits dense outputs; passes must preserve the rule.
+//! [`Program::validate`] rejects any dispatch that does not.
 
 mod expr;
 
@@ -61,47 +73,24 @@ pub struct BufferView {
     pub accessor: Accessor,
 }
 
+/// One kernel invocation: read `args`, write `output`.
+///
+/// `output` must be [`Accessor::Dense`] (see module-level dense-output law).
+/// `args` may be non-dense.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dispatch {
     pub kernel: Kernel,
     pub args: Vec<BufferViewRef>,
+    /// Iteration space and write view; must be dense.
     pub output: BufferViewRef,
-}
-
-/// What one element of an elementwise kernel's iteration space is.
-///
-/// With [`Element::F32Tile16`], views address a grid of 16×16 f32 tiles: each
-/// element is 256 contiguous lanes (row-major within the tile), so lane
-/// address = element address × 256. `Mul` on tiles is **matrix multiply**
-/// (tiles are matrices); no other operators are defined on tiles yet.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum Element {
-    #[default]
-    F32,
-    F32Tile16,
-}
-
-/// Side length and lane count of a [`Element::F32Tile16`] tile.
-pub const TILE: usize = 16;
-pub const TILE_LANES: usize = TILE * TILE;
-
-impl Element {
-    /// f32 lanes per element.
-    pub fn lanes(self) -> usize {
-        match self {
-            Element::F32 => 1,
-            Element::F32Tile16 => TILE_LANES,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kernel {
     /// Per-element expression over loads, evaluated at every coordinate of
     /// the output view. Load views must match the output shape; `args` is the
-    /// free-load list of the expression (binding order for backends). Views
-    /// are addressed in units of `element`.
-    Elementwise { expr: Expr, element: Element },
+    /// free-load list of the expression (binding order for backends).
+    Elementwise { expr: Expr },
     /// `args[0] @ args[1]` with matching batch dims.
     Matmul,
     /// Fold `args[0]` with `op` along `axes` (keepdims: output has size 1 there).
@@ -109,9 +98,9 @@ pub enum Kernel {
 }
 
 impl Kernel {
-    /// Plain f32 elementwise kernel.
+    /// Elementwise kernel over `expr`.
     pub fn elementwise(expr: Expr) -> Self {
-        Kernel::Elementwise { expr, element: Element::F32 }
+        Kernel::Elementwise { expr }
     }
 }
 
@@ -193,11 +182,15 @@ impl Program {
                 return Err(Error(format!("view {} out of range", r.0)));
             }
         }
+        // Dense-output law: kernels write C-contiguous element grids only.
+        if !self.view(dispatch.output).accessor.is_dense() {
+            return Err(Error("kernel output must be dense".into()));
+        }
         let out_shape = self.view(dispatch.output).accessor.shape();
         let arg_shape = |i: usize| self.view(dispatch.args[i]).accessor.shape();
 
         match &dispatch.kernel {
-            Kernel::Elementwise { expr, element } => {
+            Kernel::Elementwise { expr } => {
                 // Expr arity is checked at construction ([`Expr::new_op`]).
                 if expr.loads() != dispatch.args {
                     return Err(Error(
@@ -210,14 +203,6 @@ impl Program {
                         return Err(Error(format!(
                             "elementwise arg {i} shape {shape:?} != output shape {out_shape:?}"
                         )));
-                    }
-                }
-                if *element == Element::F32Tile16 {
-                    if !expr_only_mul(expr) {
-                        return Err(Error("only Mul is defined on f32 tiles".into()));
-                    }
-                    for &r in dispatch.args.iter().chain([&dispatch.output]) {
-                        self.validate_view_lanes(r, element.lanes())?;
                     }
                 }
             }
@@ -281,40 +266,6 @@ impl Program {
             }
         }
         Ok(())
-    }
-
-    /// Check that a view stays inside its buffer when each of its elements
-    /// spans `lanes` f32 lanes.
-    fn validate_view_lanes(&self, r: BufferViewRef, lanes: usize) -> Result<(), Error> {
-        let view = self.view(r);
-        let strided = view.accessor.strided();
-        if element_count(&strided.shape) == 0 {
-            return Ok(());
-        }
-        let max_element = strided.offset
-            + strided
-                .shape
-                .iter()
-                .zip(&strided.pitch)
-                .map(|(&d, &p)| (d - 1) * p)
-                .sum::<usize>();
-        let len = self.buffer(view.buffer).len();
-        if (max_element + 1) * lanes > len {
-            return Err(Error(format!(
-                "view {} reaches lane {} of a {len}-lane buffer",
-                r.0,
-                (max_element + 1) * lanes - 1
-            )));
-        }
-        Ok(())
-    }
-}
-
-/// Tile elementwise bodies may only use `Mul` (matrix multiply on tiles).
-fn expr_only_mul(expr: &Expr) -> bool {
-    match expr {
-        Expr::Load(_) => true,
-        Expr::Op { op, args } => *op == crate::ops::Op::MUL && args.iter().all(expr_only_mul),
     }
 }
 
@@ -421,5 +372,26 @@ mod tests {
             accessor: Accessor::dense([4], 0),
         });
         assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_non_dense_kernel_output() {
+        let mut p = empty_program();
+        let a = push_buffer(&mut p, &[2, 3]);
+        let out = push_buffer(&mut p, &[2, 3]);
+        let va = dense_view(&mut p, a);
+        // Transposed write view — valid as a *read*, not as a kernel output.
+        p.views.push(BufferView {
+            buffer: out,
+            accessor: Accessor::dense([3, 2], 0).transpose().unwrap(),
+        });
+        let vout = BufferViewRef(p.views.len() - 1);
+        p.queue.push(Dispatch {
+            kernel: Kernel::elementwise(Expr::new_op(Op::NEG, [Expr::Load(va)])),
+            args: vec![va],
+            output: vout,
+        });
+        let err = p.validate().unwrap_err();
+        assert!(err.0.contains("dense"), "{err}");
     }
 }

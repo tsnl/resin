@@ -18,18 +18,6 @@ pub struct WgpuJit {
     pub config: KernelConfig,
 }
 
-impl WgpuJit {
-    /// Emit tiled kernels with `chromium_experimental_subgroup_matrix`,
-    /// decomposed into `mma`-sized (8 or 16) multiply-accumulates. The
-    /// shaders only run on runtimes that implement the extension (Dawn /
-    /// Chrome); use [`WgpuJit::lower`] to extract the WGSL.
-    pub fn with_subgroup_matrix(mma: usize) -> Self {
-        Self {
-            config: KernelConfig { subgroup_matrix_size: Some(mma), ..KernelConfig::default() },
-        }
-    }
-}
-
 /// Lowered artifact: the IR program plus one WGSL pipeline per distinct shader.
 #[derive(Debug, Clone)]
 pub struct WgpuProgram {
