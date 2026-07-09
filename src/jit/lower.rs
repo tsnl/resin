@@ -80,12 +80,14 @@ impl Builder {
                     shape: tensor.shape().into(),
                     element_type: etype,
                     init: Some(init),
+                    atomic: false,
                 })
             }
             TensorKind::Parameter => self.push_buffer(Buffer {
                 shape: tensor.shape().into(),
                 element_type: etype,
                 init: None,
+                atomic: false,
             }),
             TensorKind::Elementwise { op, args } => {
                 // Resolve each arg, then align it to the output shape
@@ -218,6 +220,7 @@ impl Builder {
             shape: shape.into(),
             element_type,
             init: None,
+            atomic: false,
         });
         let output = self.intern_view(buffer, Accessor::dense(shape, 0));
         self.queue.push(Dispatch { kernel, args, output });

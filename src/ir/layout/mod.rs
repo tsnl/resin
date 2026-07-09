@@ -9,7 +9,8 @@
 //! ```
 //!
 //! Dead-elim first so packing only sees live buffers/views. Packing is required
-//! for the WGSL binding model (≤1 heap per dtype) regardless of fusion.
+//! for the WGSL binding model: one heap per `(dtype, atomic)` key (plain vs RMW
+//! targets), regardless of fusion.
 
 mod arena_pack;
 mod dead_elim;

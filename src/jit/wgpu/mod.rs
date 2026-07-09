@@ -12,6 +12,7 @@ pub use codegen::KernelConfig;
 
 use super::{Array, Error, Jit};
 use crate::ir::{BufferRef, Program};
+use crate::ops::ElementType;
 
 /// Whether a GPU adapter is available (for tests / graceful skip).
 pub fn gpu_available() -> bool {
@@ -49,27 +50,27 @@ pub fn emit_wgsl_for_dispatch(
     codegen::emit_dispatch(program, &program.queue[dispatch_index], config)
 }
 
-/// Binding order for heaps used by `dispatch` (must match codegen).
+/// Binding order for heaps used by `dispatch` (must match codegen `heaps_for`).
+/// One entry per distinct `(etype, atomic)` arena touched by output or args.
 pub fn heap_buffers_for(program: &Program, dispatch: &crate::ir::Dispatch) -> Vec<BufferRef> {
-    let out_e = program.buffer(program.view(dispatch.output).buffer).element_type;
-    let mut etypes = vec![out_e];
+    let out = program.buffer(program.view(dispatch.output).buffer);
+    let mut keys: Vec<(ElementType, bool)> = vec![(out.element_type, out.atomic)];
     for &arg in &dispatch.args {
-        let e = program.buffer(program.view(arg).buffer).element_type;
-        if !etypes.contains(&e) {
-            etypes.push(e);
+        let b = program.buffer(program.view(arg).buffer);
+        let k = (b.element_type, b.atomic);
+        if !keys.contains(&k) {
+            keys.push(k);
         }
     }
-    // Map etype → the arena BufferRef in the packed program (unique per etype).
-    etypes
-        .into_iter()
-        .map(|e| {
+    keys.into_iter()
+        .map(|(etype, atomic)| {
             program
                 .buffers
                 .iter()
                 .enumerate()
-                .find(|(_, b)| b.element_type == e)
+                .find(|(_, b)| b.element_type == etype && b.atomic == atomic)
                 .map(|(i, _)| BufferRef(i))
-                .expect("heap etype present")
+                .expect("heap arena present")
         })
         .collect()
 }

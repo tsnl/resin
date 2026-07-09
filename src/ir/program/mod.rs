@@ -85,11 +85,18 @@ impl BufferData {
 }
 
 /// One flat buffer of homogeneous elements. `init` marks a constant.
+///
+/// [`Buffer::atomic`] is a **layout** hint for backends (WGSL needs
+/// `array<atomic<u32>>` for RMW). It is not a separate IR buffer kind: ordinary
+/// logical buffers that are written by atomic scatter land in an atomic arena
+/// after [`crate::ir::layout::pack_arenas`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Buffer {
     pub shape: Box<[usize]>,
     pub element_type: ElementType,
     pub init: Option<BufferData>,
+    /// When true, GPU storage is atomic-typed (scatter-add targets, etc.).
+    pub atomic: bool,
 }
 
 impl Buffer {
@@ -429,6 +436,7 @@ mod tests {
             shape: shape.into(),
             element_type: ElementType::F32,
             init: None,
+            atomic: false,
         });
         BufferRef(program.buffers.len() - 1)
     }
