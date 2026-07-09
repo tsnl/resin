@@ -347,7 +347,7 @@ fn scatter_dense(slot: &mut Slot, accessor: &Accessor, data: &ArrayData) -> Resu
         return Err(Error::Size { expected: count, got: data.len() });
     }
     let mut coords = vec![0; accessor.rank()];
-match (slot, data) {
+    match (slot, data) {
         (Slot::F32(dst), ArrayData::F32(src)) => {
             for (linear, &value) in src.iter().enumerate() {
                 decode(linear, &accessor.shape, &mut coords);
@@ -647,5 +647,16 @@ mod tests {
             })
             .unwrap();
         assert_eq!(out.to_u32(), vec![11, 22, 33]);
+    }
+
+    #[test]
+    fn transpose_sink_runs() {
+        // A bare transpose output is a strided sink; layout densifies it.
+        let f = CpuJit.jit(|x: &Tensor| x.transpose());
+        let out = f
+            .call(&HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+            .unwrap();
+        assert_eq!(out.shape(), &[3, 2]);
+        assert_eq!(out.data(), &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
     }
 }

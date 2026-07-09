@@ -115,6 +115,11 @@ impl Jit for WgpuJit {
     fn lower(&self, program: &Program) -> Result<WgpuProgram, Error> {
         program.validate()?;
         ensure_fits_u32(program)?;
+        debug_assert!(
+            is_arena_packed(program),
+            "WgpuJit::lower expects an arena-packed program; \
+             run ir::layout::prepare_for_backend first"
+        );
         let ctx = runtime::shared_context()?;
         let config = self.config;
 
@@ -219,6 +224,13 @@ fn ensure_fits_u32(program: &Program) -> Result<(), Error> {
     Ok(())
 }
 
+/// At most one buffer per `(element_type, atomic)` key — the post-packing
+/// invariant this backend's binding model relies on (distinct heap names).
+fn is_arena_packed(program: &Program) -> bool {
+    let keys = codegen::program_heap_keys(program);
+    (0..keys.len()).all(|i| !keys[..i].contains(&keys[i]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,30 +257,43 @@ mod tests {
         assert_eq!(program.buffers.len(), 1);
     }
 
+    // Each shader binds only the heaps it uses (at their program-wide binding
+    // indices); the pipeline layout still covers every arena. Pure codegen —
+    // no GPU needed.
     #[test]
-    fn shared_bind_layout_declares_all_heaps() {
-        if !gpu_available() {
-            eprintln!("skip: no GPU");
-            return;
-        }
+    fn kernels_declare_only_the_heaps_they_use() {
         use crate::dsl::ScatterOp;
+        use crate::ir::Kernel;
 
+        // Scatter-add touches f32-plain (source), u32-plain (indices), and
+        // f32-atomic (RMW target). The plain add shares the program but touches
+        // only f32-plain, so it must bind a strict subset.
         let x = Tensor::parameter(&[4]);
         let indices = Tensor::constant_u32(&[4], &[0, 1, 0, 2]);
-        let out = x.scatter_rows(&indices, 3, ScatterOp::Add);
-        let program = prepare_for_backend(lower(&x, &out).unwrap());
-        let artifact = WgpuJit::default().lower(&program).unwrap();
-        let n_arenas = program.buffers.len();
-        assert!(n_arenas >= 2);
-        for p in &artifact.gpu.pipelines {
-            for i in 0..n_arenas {
-                assert!(
-                    p.wgsl.contains(&format!("@binding({i})")),
-                    "missing binding {i} in {}",
-                    p.wgsl
-                );
+        let scattered = x.scatter_rows(&indices, 3, ScatterOp::Add);
+        let doubled = x.clone() + x.clone();
+        let program = prepare_for_backend(lower(&x, &vec![scattered, doubled]).unwrap());
+        assert!(program.buffers.len() >= 3, "expected f32/u32/atomic arenas");
+
+        let config = KernelConfig::default();
+        let (mut saw_add, mut saw_scatter) = (false, false);
+        for (i, dispatch) in program.queue.iter().enumerate() {
+            let wgsl = emit_wgsl_for_dispatch(&program, i, &config);
+            match dispatch.kernel {
+                Kernel::Elementwise { .. } => {
+                    saw_add = true;
+                    assert!(wgsl.contains("heap_f32"), "{wgsl}");
+                    assert!(!wgsl.contains("heap_atomic_f32"), "add binds no atomic:\n{wgsl}");
+                    assert!(!wgsl.contains("heap_u32"), "add binds no u32:\n{wgsl}");
+                }
+                Kernel::Remap { .. } => {
+                    saw_scatter = true;
+                    assert!(wgsl.contains("heap_atomic_f32"), "{wgsl}");
+                }
+                _ => {}
             }
         }
+        assert!(saw_add && saw_scatter, "expected both kernels present");
     }
 }
 
@@ -363,5 +388,22 @@ mod e2e_tests {
         assert_eq!(f.call(&a).unwrap().host().unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
         assert_eq!(f.call(&b).unwrap().host().unwrap().data(), &[5.0, 5.0, 5.0, 5.0]);
         assert_eq!(f.call(&a).unwrap().host().unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
+    }
+
+    #[test]
+    fn wgpu_transpose_sink_runs() {
+        if no_gpu() {
+            return;
+        }
+        // A bare transpose is a strided sink: layout densifies it so the sink
+        // has a contiguous region to copy out. Previously this errored on wgpu.
+        let f = WgpuJit::default().jit(|x: &Tensor| x.transpose());
+        let out = f
+            .call(&up(HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])))
+            .unwrap()
+            .host()
+            .unwrap();
+        assert_eq!(out.shape(), &[3, 2]);
+        assert_eq!(out.data(), &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
     }
 }
