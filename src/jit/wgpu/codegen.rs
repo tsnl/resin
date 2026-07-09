@@ -283,7 +283,7 @@ mod tests {
 
     fn load_op(op: Op, n: usize) -> Kernel {
         let views = (0..n).map(BufferViewRef);
-        Kernel::Elementwise(Expr::apply_op(op, views))
+        Kernel::Elementwise(Expr::new_op(op, views.map(Expr::Load)))
     }
 
     #[test]

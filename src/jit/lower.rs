@@ -81,7 +81,7 @@ impl Builder {
                         Ok(self.intern_view(buffer, aligned))
                     })
                     .collect::<Result<Vec<_>, Error>>()?;
-                let expr = Expr::apply_op(*op, arg_views.iter().copied());
+                let expr = Expr::new_op(*op, arg_views.iter().copied().map(Expr::Load));
                 // Binding list is free loads (deduped); the tree may load one view twice.
                 let loads = expr.loads();
                 self.push_dispatch(tensor.shape(), Kernel::Elementwise(expr), loads)

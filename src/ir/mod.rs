@@ -163,7 +163,7 @@ impl Program {
 
         match &dispatch.kernel {
             Kernel::Elementwise(expr) => {
-                expr.validate()?;
+                // Expr arity is checked at construction ([`Expr::new_op`]).
                 if expr.loads() != dispatch.args {
                     return Err(Error(
                         "elementwise args must be the free loads of the expression".into(),
@@ -283,7 +283,7 @@ mod tests {
             dense_view(&mut p, out),
         );
         p.queue.push(Dispatch {
-            kernel: Kernel::Elementwise(Expr::apply_op(Op::ADD, [va, vb])),
+            kernel: Kernel::Elementwise(Expr::new_op(Op::ADD, [Expr::Load(va), Expr::Load(vb)])),
             args: vec![va, vb],
             output: vout,
         });
@@ -297,7 +297,7 @@ mod tests {
         let out = push_buffer(&mut p, &[3, 2]);
         let (va, vout) = (dense_view(&mut p, a), dense_view(&mut p, out));
         p.queue.push(Dispatch {
-            kernel: Kernel::Elementwise(Expr::apply_op(Op::NEG, [va])),
+            kernel: Kernel::Elementwise(Expr::new_op(Op::NEG, [Expr::Load(va)])),
             args: vec![va],
             output: vout,
         });

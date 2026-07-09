@@ -4,8 +4,11 @@
 //! not dense argument slots — so fusion is substitution of one tree into
 //! another, with no renumbering. Free loads of the result become the
 //! dispatch's argument list.
+//!
+//! Well-formedness is checked at construction ([`Expr::new_op`]), not by a
+//! separate validate pass.
 
-use super::{BufferViewRef, Error};
+use super::BufferViewRef;
 use crate::ops::Op;
 
 /// Tree expression over buffer views and scalar operators.
@@ -13,15 +16,22 @@ use crate::ops::Op;
 pub enum Expr {
     /// Read one element from this view at the kernel's output coordinates.
     Load(BufferViewRef),
-    /// Apply `op` to `args` (`args.len() == op.arity()`).
+    /// Apply `op` to `args` (`args.len() == op.arity()`). Build with [`Expr::new_op`].
     Op { op: Op, args: Box<[Expr]> },
 }
 
 impl Expr {
-    /// A single operator over loads: `op(Load(v0), …, Load(vN-1))`.
-    pub fn apply_op(op: Op, loads: impl IntoIterator<Item = BufferViewRef>) -> Self {
-        let args: Box<[Expr]> = loads.into_iter().map(Expr::Load).collect();
-        debug_assert_eq!(args.len(), op.arity());
+    /// Construct `op(args…)`. Arity is checked here — the only intended way
+    /// to build [`Expr::Op`] nodes.
+    pub fn new_op(op: Op, args: impl IntoIterator<Item = Expr>) -> Self {
+        let args: Box<[Expr]> = args.into_iter().collect();
+        assert_eq!(
+            args.len(),
+            op.arity(),
+            "op {op:?} wants {} args, got {}",
+            op.arity(),
+            args.len()
+        );
         Expr::Op { op, args }
     }
 
@@ -55,14 +65,13 @@ impl Expr {
         }
     }
 
-    /// Rewrite every load with `f`. Ops are rebuilt around the new children.
+    /// Rewrite every load with `f`. Ops are rebuilt via [`Expr::new_op`].
     pub fn map_loads(&self, f: &mut dyn FnMut(BufferViewRef) -> Expr) -> Expr {
         match self {
             Expr::Load(v) => f(*v),
-            Expr::Op { op, args } => Expr::Op {
-                op: *op,
-                args: args.iter().map(|a| a.map_loads(f)).collect(),
-            },
+            Expr::Op { op, args } => {
+                Expr::new_op(*op, args.iter().map(|a| a.map_loads(f)))
+            }
         }
     }
 
@@ -76,26 +85,6 @@ impl Expr {
             }
         })
     }
-
-    /// Check operator arities.
-    pub fn validate(&self) -> Result<(), Error> {
-        match self {
-            Expr::Load(_) => Ok(()),
-            Expr::Op { op, args } => {
-                if args.len() != op.arity() {
-                    return Err(Error(format!(
-                        "op {op:?} wants {} args, got {}",
-                        op.arity(),
-                        args.len()
-                    )));
-                }
-                for arg in args.iter() {
-                    arg.validate()?;
-                }
-                Ok(())
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -108,8 +97,8 @@ mod tests {
     }
 
     #[test]
-    fn apply_op_builds_loads() {
-        let expr = Expr::apply_op(Op::ADD, [v(0), v(1)]);
+    fn new_op_builds_tree() {
+        let expr = Expr::new_op(Op::ADD, [Expr::Load(v(0)), Expr::Load(v(1))]);
         assert_eq!(
             expr,
             Expr::Op {
@@ -123,8 +112,8 @@ mod tests {
     #[test]
     fn substitute_inlines_a_load() {
         // outer: v0 * v1 ; replace v1 with (v2 + v3)
-        let outer = Expr::apply_op(Op::MUL, [v(0), v(1)]);
-        let inner = Expr::apply_op(Op::ADD, [v(2), v(3)]);
+        let outer = Expr::new_op(Op::MUL, [Expr::Load(v(0)), Expr::Load(v(1))]);
+        let inner = Expr::new_op(Op::ADD, [Expr::Load(v(2)), Expr::Load(v(3))]);
         let fused = outer.substitute(v(1), &inner);
         assert_eq!(
             fused,
@@ -140,22 +129,18 @@ mod tests {
             }
         );
         assert_eq!(fused.loads(), vec![v(0), v(2), v(3)]);
-        fused.validate().unwrap();
     }
 
     #[test]
     fn map_loads_rewrites_leaves() {
-        let expr = Expr::apply_op(Op::NEG, [v(0)]);
+        let expr = Expr::new_op(Op::NEG, [Expr::Load(v(0))]);
         let mapped = expr.map_loads(&mut |x| Expr::Load(BufferViewRef(x.0 + 10)));
         assert_eq!(mapped.loads(), vec![v(10)]);
     }
 
     #[test]
-    fn validate_rejects_arity_mismatch() {
-        let bad = Expr::Op {
-            op: Op::ADD,
-            args: Box::from([Expr::Load(v(0))]),
-        };
-        assert!(bad.validate().is_err());
+    #[should_panic(expected = "wants 2 args, got 1")]
+    fn new_op_rejects_arity_mismatch() {
+        let _ = Expr::new_op(Op::ADD, [Expr::Load(v(0))]);
     }
 }
