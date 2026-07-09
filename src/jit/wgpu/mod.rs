@@ -7,15 +7,14 @@
 //! ## Bind groups
 //!
 //! Every kernel shares one **program-wide** bind-group layout:
-//! `@binding(i)` ↔ `program.buffers[i]` (the packed arenas). One bind group
-//! is built once with the arena GPU buffers and reused every invoke.
+//! `@binding(i)` ↔ `program.buffers[i]` (the packed arenas). Each invoke
+//! creates arena GPU buffers and **one** bind group for all dispatches.
 //!
-//! ## Pipelines & arenas
+//! ## Pipelines
 //!
-//! Compiled pipelines **and** arena `wgpu::Buffer`s live on the [`WgpuProgram`]
-//! artifact (built in [`WgpuJit::lower`]). Invoke only `write_buffer`s params,
-//! records dispatches, and reads sinks — no per-invoke buffer/pipeline create.
-//! The shape-keyed compile cache on [`crate::jit::JittedFn`] holds the artifact.
+//! Compiled compute pipelines live on the [`WgpuProgram`] artifact (built in
+//! [`WgpuJit::lower`]). Arena buffers are recreated each invoke (simple; sizes
+//! are small relative to dispatch work once pipelines are cached).
 
 mod codegen;
 mod runtime;
@@ -24,10 +23,8 @@ pub use codegen::KernelConfig;
 
 use std::sync::Arc;
 
-use wgpu::util::DeviceExt;
-
 use super::{Array, Error, Jit};
-use crate::ir::{BufferData, Program};
+use crate::ir::Program;
 
 /// Whether a GPU adapter is available (for tests / graceful skip).
 pub fn gpu_available() -> bool {
@@ -49,22 +46,15 @@ pub struct CompiledPipeline {
 }
 
 /// GPU objects shared across clones of a [`WgpuProgram`] (via [`Arc`]).
-///
-/// **Not safe for concurrent `invoke` on the same artifact** — arena buffers
-/// are updated in place each call.
 #[derive(Debug)]
 pub struct WgpuGpuState {
     /// Deduped pipelines for this program.
     pub pipelines: Vec<CompiledPipeline>,
     /// Shared by every pipeline: `@binding(i)` = arena `buffers[i]`.
     pub bind_group_layout: wgpu::BindGroupLayout,
-    /// Packed arena storage (sizes fixed for this shape signature).
-    pub arenas: Vec<wgpu::Buffer>,
-    /// Binds all arenas; valid for every pipeline.
-    pub bind_group: wgpu::BindGroup,
 }
 
-/// Lowered artifact: IR + compiled GPU state.
+/// Lowered artifact: IR + compiled pipelines.
 ///
 /// Cheap to clone (`gpu` is [`Arc`]); the jitted-fn compile cache stores these.
 #[derive(Debug, Clone)]
@@ -121,48 +111,6 @@ impl Jit for WgpuJit {
             push_constant_ranges: &[],
         });
 
-        // Arena GPU buffers once (constants painted at create; params rewritten each invoke).
-        let usage = wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC;
-        let arenas: Vec<wgpu::Buffer> = program
-            .buffers
-            .iter()
-            .map(|spec| {
-                let size = ((spec.len() as u64) * 4).max(4);
-                match &spec.init {
-                    Some(init) => {
-                        let mut bytes = buffer_data_to_bytes(init);
-                        bytes.resize(size as usize, 0);
-                        ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("resin-arena"),
-                            contents: &bytes,
-                            usage,
-                        })
-                    }
-                    None => ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("resin-arena"),
-                        size,
-                        usage,
-                        mapped_at_creation: false,
-                    }),
-                }
-            })
-            .collect();
-
-        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("resin-arenas"),
-            layout: &bind_group_layout,
-            entries: &arenas
-                .iter()
-                .enumerate()
-                .map(|(i, buf)| wgpu::BindGroupEntry {
-                    binding: i as u32,
-                    resource: buf.as_entire_binding(),
-                })
-                .collect::<Vec<_>>(),
-        });
-
         let mut pipelines: Vec<CompiledPipeline> = Vec::new();
         let mut pipeline_of = Vec::with_capacity(program.queue.len());
         for dispatch in &program.queue {
@@ -189,12 +137,7 @@ impl Jit for WgpuJit {
 
         Ok(WgpuProgram {
             ir: program.clone(),
-            gpu: Arc::new(WgpuGpuState {
-                pipelines,
-                bind_group_layout,
-                arenas,
-                bind_group,
-            }),
+            gpu: Arc::new(WgpuGpuState { pipelines, bind_group_layout }),
             pipeline_of,
         })
     }
@@ -210,13 +153,6 @@ impl Jit for WgpuJit {
         }
         let ctx = runtime::shared_context()?;
         runtime::run(ctx, program, params, outputs)
-    }
-}
-
-fn buffer_data_to_bytes(data: &BufferData) -> Vec<u8> {
-    match data {
-        BufferData::F32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-        BufferData::U32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
     }
 }
 
@@ -243,7 +179,7 @@ mod tests {
     use crate::jit::lower::lower;
 
     #[test]
-    fn lower_creates_arenas_and_pipelines() {
+    fn lower_compiles_pipelines_and_shared_layout() {
         if !gpu_available() {
             eprintln!("skip: no GPU");
             return;
@@ -254,11 +190,11 @@ mod tests {
         let artifact = WgpuJit::default().lower(&program).unwrap();
         assert_eq!(artifact.pipeline_of.len(), program.queue.len());
         assert!(!artifact.gpu.pipelines.is_empty());
-        assert_eq!(artifact.gpu.arenas.len(), program.buffers.len());
         for p in &artifact.gpu.pipelines {
             assert!(p.wgsl.contains("heap_f32"), "{}", p.wgsl);
             assert!(p.wgsl.contains("@binding(0)"), "{}", p.wgsl);
         }
+        assert_eq!(program.buffers.len(), 1);
     }
 
     #[test]
@@ -352,7 +288,7 @@ mod e2e_tests {
     }
 
     #[test]
-    fn wgpu_repeated_invoke_reuses_arenas_and_pipelines() {
+    fn wgpu_repeated_invoke_reuses_compiled_pipelines() {
         if no_gpu() {
             return;
         }
@@ -367,7 +303,6 @@ mod e2e_tests {
         };
         assert_eq!(f.call(&a).unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
         assert_eq!(f.call(&b).unwrap().data(), &[5.0, 5.0, 5.0, 5.0]);
-        // Params overwritten; second result must not leak first invoke.
         assert_eq!(f.call(&a).unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
     }
 }
