@@ -34,8 +34,10 @@ pub fn lower(
         views: Vec::new(),
     };
     for tensor in params.leaves() {
-        let buffer = builder.buffer_for(tensor)?;
-        program.params.push(buffer);
+        // Params are dense views of their buffers so arena packing can place
+        // them as slices without a separate param-buffer identity.
+        let view = builder.view_for(tensor)?;
+        program.params.push(view);
     }
     for tensor in sinks.leaves() {
         let view = builder.view_for(tensor)?;
@@ -78,12 +80,14 @@ impl Builder {
                     shape: tensor.shape().into(),
                     element_type: etype,
                     init: Some(init),
+                    atomic: false,
                 })
             }
             TensorKind::Parameter => self.push_buffer(Buffer {
                 shape: tensor.shape().into(),
                 element_type: etype,
                 init: None,
+                atomic: false,
             }),
             TensorKind::Elementwise { op, args } => {
                 // Resolve each arg, then align it to the output shape
@@ -216,6 +220,7 @@ impl Builder {
             shape: shape.into(),
             element_type,
             init: None,
+            atomic: false,
         });
         let output = self.intern_view(buffer, Accessor::dense(shape, 0));
         self.queue.push(Dispatch { kernel, args, output });

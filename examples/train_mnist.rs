@@ -1,7 +1,9 @@
 //! MNIST MLP training.
 //!
-//! Traces forward + MSE loss + reverse-mode grad + SGD into one jitted train
-//! step. The training loop is backend-agnostic; `main` picks CPU vs wgpu.
+//! One jitted train step (forward + MSE + reverse-mode grad + SGD). The first
+//! `call` traces and compiles; later minibatches only upload the batch, invoke,
+//! and keep the model on-device (same cost model as `mnist_train` Criterion).
+//! Loss is `.host()`'d once per epoch. Backend-agnostic; `main` picks CPU/wgpu.
 //!
 //! Usage:
 //!   cargo run --example train_mnist
@@ -15,7 +17,7 @@ use std::path::PathBuf;
 use resin::Tree;
 use resin::dataset::{BatchIndices, IMG_WH, MnistDataset, NUM_CLS};
 use resin::dsl::{Tensor, grad_wrt};
-use resin::jit::{Array, Jit};
+use resin::jit::{DeviceValue, HostArray, Jit};
 
 const LR: f32 = 1e-3;
 const SEED: u64 = 0;
@@ -101,14 +103,14 @@ fn trace_train_step(step: &TrainStepIn<Tensor>) -> TrainStepOut<Tensor> {
     TrainStepOut { loss, new_model: sgd_step(&step.model, &grads, LR) }
 }
 
-fn random_model(hidden: usize, seed: u64) -> MlpParams<Array> {
+fn random_model(hidden: usize, seed: u64) -> MlpParams<HostArray> {
     let mut rng = seed;
     let mut layer = |in_dim: usize, out_dim: usize| LinearParams {
-        weight: Array::from_f32(
+        weight: HostArray::from_f32(
             &[in_dim, out_dim],
             &(0..in_dim * out_dim).map(|_| next_uniform(&mut rng)).collect::<Vec<_>>(),
         ),
-        bias: Array::from_f32(
+        bias: HostArray::from_f32(
             &[out_dim],
             &(0..out_dim).map(|_| next_uniform(&mut rng)).collect::<Vec<_>>(),
         ),
@@ -140,33 +142,69 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
     let dataset = MnistDataset::load("train", &cache).expect("load MNIST");
     eprintln!("loaded {} samples", dataset.n);
 
-    let train = jit.jit(trace_train_step);
-    let mut model = random_model(config.hidden, SEED);
+    // Clone: `jit()` consumes self; we still need `upload` on the original.
+    let train = jit.clone().jit(trace_train_step);
+    // Model stays device-local across minibatches; only loss is `.host()`'d per epoch.
+    let mut model = random_model(config.hidden, SEED)
+        .try_map(&mut |a| jit.upload(a))
+        .expect("upload model");
     let mut batches = BatchIndices::new(dataset.n, config.batch_size, SEED, true);
+
+    // Warm-up: first call traces + compiles once for this shape signature.
+    {
+        let (xs, ys) = dataset.batch_f32(
+            batches.next_batch().expect("at least one batch"),
+        );
+        let out = train
+            .call(&TrainStepIn {
+                xs: jit
+                    .upload(&HostArray::from_f32(&[config.batch_size, IMG_WH], &xs))
+                    .expect("upload xs"),
+                ys: jit
+                    .upload(&HostArray::from_f32(&[config.batch_size, NUM_CLS], &ys))
+                    .expect("upload ys"),
+                model,
+            })
+            .expect("warm-up train step");
+        model = out.new_model;
+        batches.rewind(SEED);
+    }
 
     for epoch in 0..config.epochs {
         batches.rewind(SEED + epoch as u64);
-        let mut loss = f32::NAN;
+        let mut last_loss: Option<J::Value> = None;
         let mut batch_index = 0;
+        let t0 = std::time::Instant::now();
 
         while let Some(indices) = batches.next_batch() {
             if config.max_batches.is_some_and(|limit| batch_index >= limit) {
                 break;
             }
             let (xs, ys) = dataset.batch_f32(indices);
+            // Same shapes → no re-trace; upload batch + invoke only.
             let out = train
                 .call(&TrainStepIn {
-                    xs: Array::from_f32(&[config.batch_size, IMG_WH], &xs),
-                    ys: Array::from_f32(&[config.batch_size, NUM_CLS], &ys),
+                    xs: jit
+                        .upload(&HostArray::from_f32(&[config.batch_size, IMG_WH], &xs))
+                        .expect("upload xs"),
+                    ys: jit
+                        .upload(&HostArray::from_f32(&[config.batch_size, NUM_CLS], &ys))
+                        .expect("upload ys"),
                     model,
                 })
                 .expect("train step");
-            loss = out.loss.scalar();
             model = out.new_model;
+            last_loss = Some(out.loss);
             batch_index += 1;
         }
 
-        eprintln!("epoch {epoch}: loss={loss:.6}");
+        let loss = last_loss
+            .map(|l| l.host().expect("loss host").scalar())
+            .unwrap_or(f32::NAN);
+        eprintln!(
+            "epoch {epoch}: loss={loss:.6}  {batch_index} steps in {:.2?} (last-batch loss; host once/epoch)",
+            t0.elapsed()
+        );
     }
 }
 

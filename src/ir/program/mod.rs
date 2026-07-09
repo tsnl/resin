@@ -45,9 +45,16 @@ pub struct BufferViewRef(pub usize);
 
 /// A compiled program: kernels to run in order, plus the buffer slots that
 /// correspond to the caller's parameter and output leaves (in tree-walk order).
+///
+/// **Params and sinks are both views.** After
+/// [`crate::ir::layout::prepare_for_backend`], they typically address slices of
+/// a small number of arena buffers (one per element type). Sinks never need a
+/// private buffer of their own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    pub params: Vec<BufferRef>,
+    /// Dense views of caller-supplied inputs (tree-walk order).
+    pub params: Vec<BufferViewRef>,
+    /// Views of outputs to densify back to the host (tree-walk order).
     pub sinks: Vec<BufferViewRef>,
     pub queue: Vec<Dispatch>,
     pub buffers: Vec<Buffer>,
@@ -78,11 +85,18 @@ impl BufferData {
 }
 
 /// One flat buffer of homogeneous elements. `init` marks a constant.
+///
+/// [`Buffer::atomic`] is a **layout** hint for backends (WGSL needs
+/// `array<atomic<u32>>` for RMW). It is not a separate IR buffer kind: ordinary
+/// logical buffers that are written by atomic scatter land in an atomic arena
+/// after [`crate::ir::layout::pack_arenas`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Buffer {
     pub shape: Box<[usize]>,
     pub element_type: ElementType,
     pub init: Option<BufferData>,
+    /// When true, GPU storage is atomic-typed (scatter-add targets, etc.).
+    pub atomic: bool,
 }
 
 impl Buffer {
@@ -173,14 +187,9 @@ impl Program {
                 }
             }
         }
-        for r in &self.params {
-            if r.0 >= self.buffers.len() {
-                return Err(Error(format!("param buffer {} out of range", r.0)));
-            }
-        }
-        for r in &self.sinks {
+        for r in self.params.iter().chain(&self.sinks) {
             if r.0 >= self.views.len() {
-                return Err(Error(format!("sink view {} out of range", r.0)));
+                return Err(Error(format!("param/sink view {} out of range", r.0)));
             }
         }
         for (i, buffer) in self.buffers.iter().enumerate() {
@@ -427,6 +436,7 @@ mod tests {
             shape: shape.into(),
             element_type: ElementType::F32,
             init: None,
+            atomic: false,
         });
         BufferRef(program.buffers.len() - 1)
     }

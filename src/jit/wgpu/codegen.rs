@@ -44,47 +44,92 @@ fn workgroups_for_shape(shape: &[usize], config: &KernelConfig) -> [u32; 3] {
     [threads.div_ceil(u64::from(config.workgroup_size)).max(1) as u32, 1, 1]
 }
 
-/// Emit WGSL for one dispatch (typed bindings, remap atomics).
+/// Program-wide heap layout: `@binding(i)` ↔ `program.buffers[i]`.
+///
+/// Every kernel declares **all** arenas so pipelines share one bind-group layout
+/// and one bind group per invoke.
+pub fn program_heap_keys(program: &Program) -> Vec<(ElementType, bool)> {
+    program
+        .buffers
+        .iter()
+        .map(|b| (b.element_type, b.atomic))
+        .collect()
+}
+
+/// Emit WGSL for one dispatch.
+///
+/// Bindings are the full program heap layout (not per-kernel). Atomic RMW
+/// targets live on separate arenas from plain storage of the same etype.
 pub fn emit_dispatch(program: &Program, dispatch: &Dispatch, config: &KernelConfig) -> String {
     let out_view = program.view(dispatch.output);
     let out = &out_view.accessor;
-    let out_etype = program.buffer(out_view.buffer).element_type;
+    let out_buf = program.buffer(out_view.buffer);
+    let out_etype = out_buf.element_type;
+    let out_atomic = out_buf.atomic;
+
     let args: Vec<&Accessor> = dispatch
         .args
         .iter()
         .map(|&r| &program.view(r).accessor)
         .collect();
-    let arg_types: Vec<ElementType> = dispatch
+    let arg_meta: Vec<(ElementType, bool)> = dispatch
         .args
         .iter()
-        .map(|&r| program.buffer(program.view(r).buffer).element_type)
+        .map(|&r| {
+            let b = program.buffer(program.view(r).buffer);
+            (b.element_type, b.atomic)
+        })
         .collect();
-    emit(&dispatch.kernel, &args, &arg_types, out, out_etype, config)
+
+    let program_heaps = program_heap_keys(program);
+    emit(
+        &dispatch.kernel,
+        &args,
+        &arg_meta,
+        out,
+        out_etype,
+        out_atomic,
+        &program_heaps,
+        config,
+    )
 }
 
 pub fn emit(
     kernel: &Kernel,
     args: &[&Accessor],
-    arg_types: &[ElementType],
+    // Per-arg (element_type, atomic_heap).
+    arg_meta: &[(ElementType, bool)],
     out: &Accessor,
     out_etype: ElementType,
+    out_atomic: bool,
+    // Full program heap list in binding order (`@binding(i)` = entry i).
+    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) -> String {
     let mut w = Writer::default();
+    emit_heap_bindings(&mut w, program_heaps);
     match kernel {
         Kernel::Elementwise { expr } => {
-            emit_bindings(&mut w, out_etype, arg_types, false);
-            emit_elementwise(&mut w, expr, args, out, out_etype, config);
+            emit_elementwise(
+                &mut w, expr, args, arg_meta, out, out_etype, out_atomic, program_heaps, config,
+            );
         }
         Kernel::Matmul => {
-            emit_bindings(&mut w, out_etype, arg_types, false);
-            emit_matmul(&mut w, args, out, config);
+            emit_matmul(
+                &mut w, args, arg_meta, out, out_etype, out_atomic, program_heaps, config,
+            );
         }
         Kernel::Reduction { op, axes } => {
-            emit_bindings(&mut w, out_etype, arg_types, false);
-            emit_reduction(&mut w, *op, axes, args, out, out_etype, config);
+            emit_reduction(
+                &mut w, *op, axes, args, arg_meta, out, out_etype, out_atomic, program_heaps,
+                config,
+            );
         }
-        Kernel::Remap { info } => emit_remap(&mut w, info, args, arg_types, out, out_etype, config),
+        Kernel::Remap { info } => {
+            emit_remap(
+                &mut w, info, args, arg_meta, out, out_etype, out_atomic, program_heaps, config,
+            );
+        }
     }
     w.finish()
 }
@@ -96,21 +141,62 @@ fn spell_etype(etype: ElementType) -> &'static str {
     }
 }
 
-fn emit_bindings(w: &mut Writer, out_etype: ElementType, arg_types: &[ElementType], atomic_out: bool) {
-    if atomic_out {
-        w.print("@group(0) @binding(0)\nvar<storage, read_write> output: array<atomic<u32>>;");
-    } else {
-        let t = spell_etype(out_etype);
-        w.print(&format!(
-            "@group(0) @binding(0)\nvar<storage, read_write> output: array<{t}>;"
-        ));
+fn heap_name(etype: ElementType, atomic: bool) -> &'static str {
+    match (etype, atomic) {
+        (ElementType::F32, false) => "heap_f32",
+        (ElementType::F32, true) => "heap_atomic_f32",
+        (ElementType::U32, false) => "heap_u32",
+        (ElementType::U32, true) => "heap_atomic_u32",
     }
-    for (i, &arg_etype) in arg_types.iter().enumerate() {
-        let t = spell_etype(arg_etype);
-        w.print(&format!(
-            "@group(0) @binding({})\nvar<storage, read> arg{i}: array<{t}>;",
-            i + 1
-        ));
+}
+
+fn emit_heap_bindings(w: &mut Writer, heaps: &[(ElementType, bool)]) {
+    for (i, &(etype, atomic)) in heaps.iter().enumerate() {
+        let name = heap_name(etype, atomic);
+        if atomic {
+            // RMW targets only; f32 values stored as bit patterns.
+            w.print(&format!(
+                "@group(0) @binding({i})\nvar<storage, read_write> {name}: array<atomic<u32>>;"
+            ));
+        } else {
+            let t = spell_etype(etype);
+            w.print(&format!(
+                "@group(0) @binding({i})\nvar<storage, read_write> {name}: array<{t}>;"
+            ));
+        }
+    }
+}
+
+/// Touch every heap so naga keeps all bindings (shared layout requires it).
+fn keep_all_heaps(w: &mut Writer, program_heaps: &[(ElementType, bool)]) {
+    for &(etype, atomic) in program_heaps {
+        let name = heap_name(etype, atomic);
+        // arrayLength is a use of the resource; result is unused.
+        w.print(&format!("let _keep_{name} = arrayLength(&{name});"));
+    }
+}
+
+fn read_at(etype: ElementType, atomic: bool, addr: &str) -> String {
+    let name = heap_name(etype, atomic);
+    if atomic {
+        match etype {
+            ElementType::U32 => format!("atomicLoad(&{name}[{addr}])"),
+            ElementType::F32 => format!("bitcast<f32>(atomicLoad(&{name}[{addr}]))"),
+        }
+    } else {
+        format!("{name}[{addr}]")
+    }
+}
+
+fn write_at(etype: ElementType, atomic: bool, addr: &str, value: &str) -> String {
+    let name = heap_name(etype, atomic);
+    if atomic {
+        match etype {
+            ElementType::U32 => format!("atomicStore(&{name}[{addr}], {value});"),
+            ElementType::F32 => format!("atomicStore(&{name}[{addr}], bitcast<u32>({value}));"),
+        }
+    } else {
+        format!("{name}[{addr}] = {value};")
     }
 }
 
@@ -160,6 +246,7 @@ fn address(accessor: &Accessor, coords: &[String]) -> String {
 fn per_output_element(
     w: &mut Writer,
     out: &Accessor,
+    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
     body: impl FnOnce(&mut Writer, &[String]),
 ) {
@@ -171,11 +258,14 @@ fn per_output_element(
             config.workgroup_size
         ),
         |w| {
+            keep_all_heaps(w, program_heaps);
             if count == 0 {
                 w.print("return;");
                 return;
             }
-            w.print(&format!("let count = min({count}u, arrayLength(&output));"));
+            // Literal count: after arena packing, arrayLength is the whole heap,
+            // not this view's region.
+            w.print(&format!("let count = {count}u;"));
             w.print(&format!("let lin_beg = gid.x << {}u;", config.lg2_items_per_thread));
             w.block(
                 &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
@@ -193,6 +283,7 @@ fn per_output_element(
 fn per_thread_element(
     w: &mut Writer,
     shape: &[usize],
+    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
     body: impl FnOnce(&mut Writer, &str, &[String]),
 ) {
@@ -204,6 +295,7 @@ fn per_thread_element(
             config.workgroup_size
         ),
         |w| {
+            keep_all_heaps(w, program_heaps);
             if count == 0 {
                 w.print("return;");
                 return;
@@ -225,24 +317,25 @@ fn emit_elementwise(
     w: &mut Writer,
     expr: &Expr,
     args: &[&Accessor],
+    arg_meta: &[(ElementType, bool)],
     out: &Accessor,
     out_etype: ElementType,
+    out_atomic: bool,
+    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
     let free = expr.loads();
     debug_assert_eq!(free.len(), args.len());
     emit_expr_fn(w, expr, args.len(), out_etype);
-    per_output_element(w, out, config, |w, coords| {
+    per_output_element(w, out, program_heaps, config, |w, coords| {
         let loads: Vec<String> = args
             .iter()
-            .enumerate()
-            .map(|(i, a)| format!("arg{i}[{}]", address(a, coords)))
+            .zip(arg_meta.iter())
+            .map(|(a, &(et, atomic))| read_at(et, atomic, &address(a, coords)))
             .collect();
-        w.print(&format!(
-            "output[{}] = elem({});",
-            address(out, coords),
-            loads.join(", ")
-        ));
+        let dest = address(out, coords);
+        let call = format!("elem({})", loads.join(", "));
+        w.print(&write_at(out_etype, out_atomic, &dest, &call));
     });
 }
 
@@ -354,10 +447,19 @@ fn spell_op(op: Op, args: &[String], out_etype: ElementType) -> String {
     }
 }
 
-fn emit_matmul(w: &mut Writer, args: &[&Accessor], out: &Accessor, config: &KernelConfig) {
+fn emit_matmul(
+    w: &mut Writer,
+    args: &[&Accessor],
+    arg_meta: &[(ElementType, bool)],
+    out: &Accessor,
+    out_etype: ElementType,
+    out_atomic: bool,
+    program_heaps: &[(ElementType, bool)],
+    config: &KernelConfig,
+) {
     let rank = out.rank();
     let k = args[0].shape[rank - 1];
-    per_output_element(w, out, config, |w, coords| {
+    per_output_element(w, out, program_heaps, config, |w, coords| {
         let mut a_coords = coords.to_vec();
         a_coords[rank - 1] = "t".into();
         let mut b_coords = coords.to_vec();
@@ -366,12 +468,12 @@ fn emit_matmul(w: &mut Writer, args: &[&Accessor], out: &Accessor, config: &Kern
         w.print("var sum: f32 = 0.0;");
         w.block(&format!("for (var t: u32 = 0u; t < {k}u; t += 1u)"), |w| {
             w.print(&format!(
-                "sum += arg0[{}] * arg1[{}];",
-                address(args[0], &a_coords),
-                address(args[1], &b_coords),
+                "sum += {} * {};",
+                read_at(arg_meta[0].0, arg_meta[0].1, &address(args[0], &a_coords)),
+                read_at(arg_meta[1].0, arg_meta[1].1, &address(args[1], &b_coords)),
             ));
         });
-        w.print(&format!("output[{}] = sum;", address(out, coords)));
+        w.print(&write_at(out_etype, out_atomic, &address(out, coords), "sum"));
     });
 }
 
@@ -380,8 +482,11 @@ fn emit_reduction(
     op: AssocOp,
     axes: &[usize],
     args: &[&Accessor],
+    arg_meta: &[(ElementType, bool)],
     out: &Accessor,
     out_etype: ElementType,
+    out_atomic: bool,
+    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
     let input = args[0];
@@ -390,7 +495,7 @@ fn emit_reduction(
     let count: usize = sorted_axes.iter().map(|&axis| input.shape[axis]).product();
     let t = spell_etype(out_etype);
 
-    per_output_element(w, out, config, |w, coords| {
+    per_output_element(w, out, program_heaps, config, |w, coords| {
         w.print(&format!("var acc: {t} = {};", identity_literal(op, out_etype)));
         w.block(&format!("for (var ri: u32 = 0u; ri < {count}u; ri += 1u)"), |w| {
             let mut in_coords = coords.to_vec();
@@ -401,7 +506,7 @@ fn emit_reduction(
                 w.print(&format!("let r{axis} = (ri / {stride}u) % {dim}u;"));
                 stride *= dim;
             }
-            let value = format!("arg0[{}]", address(input, &in_coords));
+            let value = read_at(arg_meta[0].0, arg_meta[0].1, &address(input, &in_coords));
             w.print(&match op {
                 AssocOp::Add => format!("acc += {value};"),
                 AssocOp::Mul => format!("acc *= {value};"),
@@ -409,7 +514,7 @@ fn emit_reduction(
                 AssocOp::Min => format!("acc = min(acc, {value});"),
             });
         });
-        w.print(&format!("output[{}] = acc;", address(out, coords)));
+        w.print(&write_at(out_etype, out_atomic, &address(out, coords), "acc"));
     });
 }
 
@@ -430,44 +535,43 @@ fn emit_remap(
     w: &mut Writer,
     info: &RemapInfo,
     args: &[&Accessor],
-    arg_types: &[ElementType],
+    arg_meta: &[(ElementType, bool)],
     out: &Accessor,
     out_etype: ElementType,
+    out_atomic: bool,
+    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
-    let t = spell_etype(out_etype);
     match info {
         RemapInfo::GatherRows => {
             let src_rows = args[0].shape[0];
-            emit_bindings(w, out_etype, arg_types, false);
-            per_output_element(w, out, config, |w, coords| {
+            per_output_element(w, out, program_heaps, config, |w, coords| {
                 let idx_coords = [coords[0].clone()];
                 w.print(&format!(
-                    "let row = min(arg1[{}], {}u);",
-                    address(args[1], &idx_coords),
+                    "let row = min({}, {}u);",
+                    read_at(arg_meta[1].0, arg_meta[1].1, &address(args[1], &idx_coords)),
                     src_rows.saturating_sub(1),
                 ));
                 let mut src_coords = coords.to_vec();
                 src_coords[0] = "row".into();
-                w.print(&format!(
-                    "output[{}] = arg0[{}];",
-                    address(out, coords),
-                    address(args[0], &src_coords),
-                ));
+                let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(args[0], &src_coords));
+                w.print(&write_at(out_etype, out_atomic, &address(out, coords), &val));
             });
         }
         RemapInfo::ScatterRows { operator } => {
             let src = args[0];
             let out_rows = out.shape[0];
-            let atomic = operator.is_some();
-            emit_bindings(w, out_etype, arg_types, atomic);
-            if atomic && out_etype == ElementType::F32 {
+            let out_heap = heap_name(out_etype, out_atomic);
+            // Atomic scatter-add targets live on the atomic heap; plain scatter-write
+            // uses the plain heap and normal stores.
+            if operator.is_some() && out_etype == ElementType::F32 {
+                debug_assert!(out_atomic, "f32 scatter-add output must be on atomic arena");
                 w.block("fn atomic_add_f32(addr: u32, value: f32)", |w| {
-                    w.print("var old = atomicLoad(&output[addr]);");
+                    w.print(&format!("var old = atomicLoad(&{out_heap}[addr]);"));
                     w.block("loop", |w| {
-                        w.print(
-                            "let new_bits = bitcast<u32>(bitcast<f32>(old) + value);\nlet result = atomicCompareExchangeWeak(&output[addr], old, new_bits);",
-                        );
+                        w.print(&format!(
+                            "let new_bits = bitcast<u32>(bitcast<f32>(old) + value);\nlet result = atomicCompareExchangeWeak(&{out_heap}[addr], old, new_bits);"
+                        ));
                         w.block("if (result.exchanged)", |w| {
                             w.print("break;");
                         });
@@ -475,37 +579,37 @@ fn emit_remap(
                     });
                 });
             }
-            per_thread_element(w, &src.shape, config, |w, _lin, coords| {
+            per_thread_element(w, &src.shape, program_heaps, config, |w, _lin, coords| {
                 let idx_coords = [coords[0].clone()];
-                w.print(&format!("let row = arg1[{}];", address(args[1], &idx_coords)));
+                w.print(&format!(
+                    "let row = {};",
+                    read_at(arg_meta[1].0, arg_meta[1].1, &address(args[1], &idx_coords))
+                ));
                 w.block(&format!("if (row < {out_rows}u)"), |w| {
                     let mut o_coords = coords.to_vec();
                     o_coords[0] = "row".into();
                     let out_addr = address(out, &o_coords);
-                    let src_val = format!("arg0[{}]", address(src, coords));
+                    let src_val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
                     match (operator, out_etype) {
-                        (None, _) => w.print(&format!("output[{out_addr}] = {src_val};")),
+                        (None, _) => {
+                            w.print(&write_at(out_etype, out_atomic, &out_addr, &src_val));
+                        }
                         (Some(_), ElementType::U32) => {
-                            w.print(&format!("atomicAdd(&output[{out_addr}], {src_val});"))
+                            w.print(&format!("atomicAdd(&{out_heap}[{out_addr}], {src_val});"));
                         }
                         (Some(_), ElementType::F32) => {
-                            w.print(&format!("atomic_add_f32({out_addr}, {src_val});"))
+                            w.print(&format!("atomic_add_f32({out_addr}, {src_val});"));
                         }
                     }
                 });
             });
         }
         RemapInfo::ScatterView { accessor } => {
-            emit_bindings(w, out_etype, arg_types, false);
             let src = args[0];
-            per_thread_element(w, &src.shape, config, |w, _lin, coords| {
-                w.print(&format!(
-                    "output[{}] = arg0[{}];",
-                    address(accessor, coords),
-                    address(src, coords),
-                ));
+            per_thread_element(w, &src.shape, program_heaps, config, |w, _lin, coords| {
+                let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
+                w.print(&write_at(out_etype, out_atomic, &address(accessor, coords), &val));
             });
-            let _ = t;
         }
     }
 }
@@ -526,12 +630,16 @@ mod tests {
         let wgsl = emit(
             &load_op(Op::ADD, 2),
             &[&a, &a],
-            &[ElementType::F32, ElementType::F32],
+            &[(ElementType::F32, false), (ElementType::F32, false)],
             &a,
             ElementType::F32,
+            false,
+            &[(ElementType::F32, false)],
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("@compute"), "{wgsl}");
+        assert!(wgsl.contains("heap_f32"), "{wgsl}");
+        assert!(!wgsl.contains("heap_atomic"), "{wgsl}");
         assert!(wgsl.contains("fn elem(a0: f32, a1: f32) -> f32"), "{wgsl}");
         assert!(wgsl.contains("((a0) + (a1))"), "{wgsl}");
     }
@@ -542,9 +650,11 @@ mod tests {
         let wgsl = emit(
             &load_op(Op::RELU, 1),
             &[&a],
-            &[ElementType::F32],
+            &[(ElementType::F32, false)],
             &a,
             ElementType::F32,
+            false,
+            &[(ElementType::F32, false)],
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("max(a0, 0.0)"), "{wgsl}");
@@ -557,12 +667,14 @@ mod tests {
         let wgsl = emit(
             &load_op(Op::MUL, 2),
             &[&out, &scalar],
-            &[ElementType::F32, ElementType::F32],
+            &[(ElementType::F32, false), (ElementType::F32, false)],
             &out,
             ElementType::F32,
+            false,
+            &[(ElementType::F32, false)],
             &KernelConfig::default(),
         );
-        assert!(wgsl.contains("arg1[0u]"), "{wgsl}");
+        assert!(wgsl.contains("heap_f32[0u]"), "{wgsl}");
     }
 
     #[test]
@@ -573,9 +685,11 @@ mod tests {
         let wgsl = emit(
             &Kernel::Matmul,
             &[&a, &b],
-            &[ElementType::F32, ElementType::F32],
+            &[(ElementType::F32, false), (ElementType::F32, false)],
             &out,
             ElementType::F32,
+            false,
+            &[(ElementType::F32, false)],
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("t < 4u"), "{wgsl}");
@@ -589,9 +703,11 @@ mod tests {
         let wgsl = emit(
             &Kernel::Reduction { op: AssocOp::Max, axes: Box::from([1]) },
             &[&input],
-            &[ElementType::F32],
+            &[(ElementType::F32, false)],
             &out,
             ElementType::F32,
+            false,
+            &[(ElementType::F32, false)],
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("bitcast<f32>(0xff800000u)"), "{wgsl}");
@@ -605,12 +721,43 @@ mod tests {
         let wgsl = emit(
             &Kernel::Remap { info: RemapInfo::GatherRows },
             &[&src, &idx],
-            &[ElementType::F32, ElementType::U32],
+            &[(ElementType::F32, false), (ElementType::U32, false)],
             &out,
             ElementType::F32,
+            false,
+            &[(ElementType::F32, false), (ElementType::U32, false)],
             &KernelConfig::default(),
         );
-        assert!(wgsl.contains("arg1["), "{wgsl}");
+        assert!(wgsl.contains("heap_u32["), "{wgsl}");
+        assert!(wgsl.contains("heap_f32["), "{wgsl}");
         assert!(wgsl.contains("min("), "{wgsl}");
+    }
+
+    #[test]
+    fn scatter_add_binds_atomic_heap_not_plain() {
+        let src = Accessor::dense([4], 0);
+        let idx = Accessor::dense([4], 0);
+        let out = Accessor::dense([3], 0);
+        let wgsl = emit(
+            &Kernel::Remap {
+                info: RemapInfo::ScatterRows { operator: Some(AssocOp::Add) },
+            },
+            &[&src, &idx],
+            &[(ElementType::F32, false), (ElementType::U32, false)],
+            &out,
+            ElementType::F32,
+            true, // output on atomic arena
+            &[
+                (ElementType::F32, false),
+                (ElementType::U32, false),
+                (ElementType::F32, true),
+            ],
+            &KernelConfig::default(),
+        );
+        assert!(wgsl.contains("heap_atomic_f32"), "{wgsl}");
+        assert!(wgsl.contains("heap_f32"), "{wgsl}"); // plain source
+        assert!(wgsl.contains("atomic_add_f32"), "{wgsl}");
+        // Source reads must not go through atomics.
+        assert!(wgsl.contains("heap_f32["), "{wgsl}");
     }
 }

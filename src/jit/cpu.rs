@@ -5,7 +5,7 @@
 //! typed ([`Slot`]): f32 and u32 buffers stay separate. The artifact is the
 //! validated IR program itself.
 
-use super::{Array, ArrayData, Error, Jit};
+use super::{HostArray, ArrayData, Error, Jit};
 use crate::ir::{
     Accessor, BufferData, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, element_count,
 };
@@ -26,20 +26,6 @@ impl Slot {
         match self {
             Slot::F32(_) => ElementType::F32,
             Slot::U32(_) => ElementType::U32,
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Slot::F32(v) => v.len(),
-            Slot::U32(v) => v.len(),
-        }
-    }
-
-    fn clear(&mut self) {
-        match self {
-            Slot::F32(v) => v.fill(0.0),
-            Slot::U32(v) => v.fill(0),
         }
     }
 
@@ -74,17 +60,30 @@ enum Value {
 
 impl Jit for CpuJit {
     type Artifact = Program;
+    type Value = HostArray;
 
     fn lower(&self, program: &Program) -> Result<Program, Error> {
         program.validate()?;
         Ok(program.clone())
     }
 
+    fn alloc_output(
+        &self,
+        shape: &[usize],
+        element_type: ElementType,
+    ) -> Result<HostArray, Error> {
+        Ok(HostArray::zeros_typed(shape, element_type))
+    }
+
+    fn upload(&self, host: &HostArray) -> Result<HostArray, Error> {
+        Ok(host.clone())
+    }
+
     fn invoke(
         &self,
         program: &Program,
-        params: &[&Array],
-        outputs: &mut [&mut Array],
+        params: &[&HostArray],
+        outputs: &mut [&mut HostArray],
     ) -> Result<(), Error> {
         if params.len() != program.params.len() || outputs.len() != program.sinks.len() {
             return Err(Error::LeafCount);
@@ -101,26 +100,25 @@ impl Jit for CpuJit {
             })
             .collect();
 
-        for (array, &buffer) in params.iter().zip(&program.params) {
-            let expected_type = program.buffer(buffer).element_type;
+        for (array, &param) in params.iter().zip(&program.params) {
+            let view = program.view(param);
+            let expected_type = program.buffer(view.buffer).element_type;
             if array.element_type() != expected_type {
                 return Err(Error::ElementType {
                     expected: expected_type,
                     got: array.element_type(),
                 });
             }
-            let slot = &mut storage[buffer.0];
-            if array.as_data().len() != slot.len() {
+            // Dense param views: copy host data into the view's arena region.
+            let acc = &view.accessor;
+            let count = element_count(&acc.shape);
+            if array.as_data().len() != count {
                 return Err(Error::Size {
-                    expected: slot.len(),
+                    expected: count,
                     got: array.as_data().len(),
                 });
             }
-            match (slot, array.as_data()) {
-                (Slot::F32(dst), ArrayData::F32(src)) => dst.copy_from_slice(src),
-                (Slot::U32(dst), ArrayData::U32(src)) => dst.copy_from_slice(src),
-                _ => unreachable!("element type checked above"),
-            }
+            scatter_dense(&mut storage[view.buffer.0], acc, array.as_data())?;
         }
 
         for dispatch in &program.queue {
@@ -170,7 +168,8 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Slot]) {
         .collect();
 
     if matches!(&dispatch.kernel, Kernel::Remap { info } if info.is_scatter()) {
-        storage[out_buffer].clear();
+        // Clear only the dense output region (arenas hold many logical buffers).
+        clear_dense_region(&mut storage[out_buffer], &out);
     }
 
     let count = element_count(&out.shape);
@@ -326,6 +325,52 @@ fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, A
             )
         })
         .collect()
+}
+
+fn clear_dense_region(slot: &mut Slot, out: &Accessor) {
+    let count = element_count(&out.shape);
+    let mut coords = vec![0; out.rank()];
+    for linear in 0..count {
+        decode(linear, &out.shape, &mut coords);
+        let i = out.index(&coords);
+        match slot {
+            Slot::F32(v) => v[i] = 0.0,
+            Slot::U32(v) => v[i] = 0,
+        }
+    }
+}
+
+/// Write a dense host array into a (possibly offset) dense view.
+fn scatter_dense(slot: &mut Slot, accessor: &Accessor, data: &ArrayData) -> Result<(), Error> {
+    let count = element_count(&accessor.shape);
+    if data.len() != count {
+        return Err(Error::Size { expected: count, got: data.len() });
+    }
+    let mut coords = vec![0; accessor.rank()];
+match (slot, data) {
+        (Slot::F32(dst), ArrayData::F32(src)) => {
+            for (linear, &value) in src.iter().enumerate() {
+                decode(linear, &accessor.shape, &mut coords);
+                dst[accessor.index(&coords)] = value;
+            }
+            Ok(())
+        }
+        (Slot::U32(dst), ArrayData::U32(src)) => {
+            for (linear, &value) in src.iter().enumerate() {
+                decode(linear, &accessor.shape, &mut coords);
+                dst[accessor.index(&coords)] = value;
+            }
+            Ok(())
+        }
+        (Slot::F32(_), ArrayData::U32(_)) => Err(Error::ElementType {
+            expected: ElementType::F32,
+            got: ElementType::U32,
+        }),
+        (Slot::U32(_), ArrayData::F32(_)) => Err(Error::ElementType {
+            expected: ElementType::U32,
+            got: ElementType::F32,
+        }),
+    }
 }
 
 fn gather_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
@@ -501,7 +546,7 @@ mod tests {
     use crate::dsl::Tensor;
     use crate::dsl::grad_wrt;
 
-    #[derive(resin_macros::Tree)]
+    #[derive(resin_macros::Tree, Clone)]
     struct Pair<T> {
         a: T,
         b: T,
@@ -512,8 +557,8 @@ mod tests {
         let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let out = f
             .call(&Pair {
-                a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
-                b: Array::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
+                a: HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
+                b: HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
             })
             .unwrap();
         assert_eq!(out.data(), &[11.0, 22.0, 33.0, 44.0]);
@@ -523,7 +568,7 @@ mod tests {
     fn sum_axes_then_squeeze_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
         let out = f
-            .call(&Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+            .call(&HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
             .unwrap();
         assert!((out.scalar() - 21.0).abs() < 1e-5);
     }
@@ -531,13 +576,13 @@ mod tests {
     #[test]
     fn scalar_mul_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.clone() * Tensor::scalar(0.5));
-        let out = f.call(&Array::from_f32(&[2, 2], &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let out = f.call(&HostArray::from_f32(&[2, 2], &[2.0, 4.0, 6.0, 8.0])).unwrap();
         assert_eq!(out.data(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
     fn bias_add_broadcast_view_runs() {
-        #[derive(resin_macros::Tree)]
+        #[derive(resin_macros::Tree, Clone)]
         struct LinearIn<T> {
             x: T,
             w: T,
@@ -549,9 +594,9 @@ mod tests {
         });
         let out = f
             .call(&LinearIn {
-                x: Array::from_f32(&[2, 2], &[1.0, 0.0, 0.0, 1.0]),
-                w: Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                bias: Array::from_f32(&[3], &[10.0, 20.0, 30.0]),
+                x: HostArray::from_f32(&[2, 2], &[1.0, 0.0, 0.0, 1.0]),
+                w: HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                bias: HostArray::from_f32(&[3], &[10.0, 20.0, 30.0]),
             })
             .unwrap();
         assert_eq!(out.data(), &[11.0, 22.0, 33.0, 14.0, 25.0, 36.0]);
@@ -562,8 +607,8 @@ mod tests {
         let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.matmul(&p.b.transpose()));
         let out = f
             .call(&Pair {
-                a: Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                b: Array::from_f32(&[2, 3], &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+                a: HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                b: HostArray::from_f32(&[2, 3], &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
             })
             .unwrap();
         assert_eq!(out.shape(), &[2, 2]);
@@ -573,7 +618,7 @@ mod tests {
     #[test]
     fn unary_chain_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.exp().log().sqrt());
-        let out = f.call(&Array::from_f32(&[2], &[4.0, 9.0])).unwrap();
+        let out = f.call(&HostArray::from_f32(&[2], &[4.0, 9.0])).unwrap();
         assert_eq!(out.data(), &[2.0, 3.0]);
     }
 
@@ -586,7 +631,7 @@ mod tests {
             let grad = grad_wrt(&loss, x).expect("grad");
             x.clone() - grad * Tensor::scalar(0.1)
         });
-        let out = f.call(&Array::from_f32(&[2], &[0.0, 5.0])).unwrap();
+        let out = f.call(&HostArray::from_f32(&[2], &[0.0, 5.0])).unwrap();
         // grad = 2(x-3)/2 = (x-3); step: 0 → 0.3, 5 → 4.8
         assert!((out.data()[0] - 0.3).abs() < 1e-5, "{:?}", out.data());
         assert!((out.data()[1] - 4.8).abs() < 1e-5, "{:?}", out.data());
@@ -597,8 +642,8 @@ mod tests {
         let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let out = f
             .call(&Pair {
-                a: Array::from_u32(&[3], &[1, 2, 3]),
-                b: Array::from_u32(&[3], &[10, 20, 30]),
+                a: HostArray::from_u32(&[3], &[1, 2, 3]),
+                b: HostArray::from_u32(&[3], &[10, 20, 30]),
             })
             .unwrap();
         assert_eq!(out.to_u32(), vec![11, 22, 33]);

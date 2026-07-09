@@ -1,16 +1,19 @@
-//! WebGPU runtime: create buffers, bind, dispatch, read back.
+//! WebGPU runtime: arenas for the invoke, one bind group, dispatch, sinks.
 //!
-//! Naive: each invoke rebuilds GPU objects from the lowered program. Only the
-//! device/queue pair is shared (and cached process-wide).
+//! Pipelines and the bind-group layout live on the [`super::WgpuProgram`]
+//! artifact. Arena GPU buffers are created each invoke. Sinks become compact
+//! [`super::WgpuArray`] storage buffers (GPU copy from the arena — no map).
+//!
+//! **Invariant:** this module never `poll(Wait)`s except inside
+//! [`host_download`] (used only by [`super::WgpuArray::host`]).
 
-use std::borrow::Cow;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use wgpu::util::DeviceExt;
 
-use super::WgpuProgram;
+use super::{WgpuArray, WgpuProgram};
 use crate::ir::{Accessor, BufferData, Kernel, element_count};
-use crate::jit::{Array, ArrayData, Error};
+use crate::jit::{ArrayData, DeviceValue, Error, HostArray};
 use crate::ops::ElementType;
 
 pub struct Context {
@@ -56,139 +59,231 @@ fn create_context() -> Result<Context, String> {
     Ok(Context { device, queue })
 }
 
-/// Upload params → run the dispatch queue → densify sinks back to the host.
+fn storage_copy_usage() -> wgpu::BufferUsages {
+    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC
+}
+
+/// Upload a host array into a new storage buffer (no GPU wait).
+pub fn upload_host(ctx: &Context, host: &HostArray) -> Result<WgpuArray, Error> {
+    let bytes = array_data_to_bytes(host.as_data());
+    let size = byte_len(host.as_data().len());
+    let mut contents = bytes;
+    contents.resize(size as usize, 0);
+    let buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("resin-value"),
+        contents: &contents,
+        usage: storage_copy_usage(),
+    });
+    Ok(WgpuArray {
+        shape: host.shape().into(),
+        element_type: host.element_type(),
+        buffer: Arc::new(buffer),
+    })
+}
+
+/// Empty storage buffer for an output leaf (filled by [`run`]).
+pub fn alloc_empty(ctx: &Context, shape: &[usize], element_type: ElementType) -> WgpuArray {
+    let n = element_count(shape);
+    let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("resin-value"),
+        size: byte_len(n),
+        usage: storage_copy_usage(),
+        mapped_at_creation: false,
+    });
+    WgpuArray {
+        shape: shape.into(),
+        element_type,
+        buffer: Arc::new(buffer),
+    }
+}
+
+/// Params → arenas → dispatch → compact sink buffers. Submits work; does not wait.
 pub fn run(
     ctx: &Context,
     program: &WgpuProgram,
-    params: &[&Array],
-    outputs: &mut [&mut Array],
+    params: &[&WgpuArray],
+    outputs: &mut [&mut WgpuArray],
 ) -> Result<(), Error> {
     let ir = &program.ir;
-    let buffers: Vec<wgpu::Buffer> = ir
+
+    let host_shadow: Vec<Vec<u8>> = ir
         .buffers
         .iter()
         .map(|spec| {
-            let usage = wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC;
-            let size = byte_len(spec.len());
+            let size = byte_len(spec.len()) as usize;
             match &spec.init {
                 Some(init) => {
-                    let mut contents = buffer_data_to_bytes(init);
-                    contents.resize(size as usize, 0); // wgpu minimum size
-                    ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("resin-buffer"),
-                        contents: &contents,
-                        usage,
-                    })
+                    let mut bytes = buffer_data_to_bytes(init);
+                    bytes.resize(size, 0);
+                    bytes
                 }
-                None => ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("resin-buffer"),
-                    size,
-                    usage,
-                    mapped_at_creation: false,
-                }),
+                None => vec![0u8; size],
             }
         })
         .collect();
 
-    for (array, &buffer_ref) in params.iter().zip(&ir.params) {
-        let expected = ir.buffer(buffer_ref).len();
-        let expected_type = ir.buffer(buffer_ref).element_type;
-        if array.element_type() != expected_type {
-            return Err(Error::ElementType {
-                expected: expected_type,
-                got: array.element_type(),
-            });
-        }
-        if array.as_data().len() != expected {
-            return Err(Error::Size { expected, got: array.as_data().len() });
-        }
-        ctx.queue
-            .write_buffer(&buffers[buffer_ref.0], 0, &array_data_to_bytes(array.as_data()));
-    }
-
-    let pipelines: Vec<wgpu::ComputePipeline> = program
-        .pipelines
+    let arenas: Vec<wgpu::Buffer> = host_shadow
         .iter()
-        .map(|spec| {
-            let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("resin-shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&spec.wgsl)),
-            });
-            ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("resin-pipeline"),
-                layout: None,
-                module: &shader,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
+        .map(|bytes| {
+            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("resin-arena"),
+                contents: bytes,
+                usage: storage_copy_usage(),
             })
         })
         .collect();
+
+    let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("resin-arenas"),
+        layout: &program.gpu.bind_group_layout,
+        entries: &arenas
+            .iter()
+            .enumerate()
+            .map(|(i, buf)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: buf.as_entire_binding(),
+            })
+            .collect::<Vec<_>>(),
+    });
 
     let mut encoder = ctx
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("resin-run") });
 
+    for (array, &param) in params.iter().zip(&ir.params) {
+        let view = ir.view(param);
+        let etype = ir.buffer(view.buffer).element_type;
+        if array.element_type() != etype {
+            return Err(Error::ElementType {
+                expected: etype,
+                got: array.element_type(),
+            });
+        }
+        let count = element_count(&view.accessor.shape);
+        if array.nelem() != count {
+            return Err(Error::Size {
+                expected: count,
+                got: array.nelem(),
+            });
+        }
+        copy_dense_into_arena(&mut encoder, array, &arenas[view.buffer.0], &view.accessor)?;
+    }
+
     for (dispatch, &pipeline_index) in ir.queue.iter().zip(&program.pipeline_of) {
-        let spec = &program.pipelines[pipeline_index];
-        // Scatter remaps write sparsely into a cleared target (matches CPU).
+        let slot = &program.gpu.pipelines[pipeline_index];
         if let Kernel::Remap { info } = &dispatch.kernel
             && info.is_scatter()
         {
-            let out_buf = &buffers[ir.view(dispatch.output).buffer.0];
-            let nbytes = byte_len(ir.buffer(ir.view(dispatch.output).buffer).len());
-            encoder.clear_buffer(out_buf, 0, Some(nbytes));
+            clear_dense_region_gpu(&mut encoder, &arenas, ir, dispatch.output)?;
         }
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffers[ir.view(dispatch.output).buffer.0].as_entire_binding(),
-        }];
-        for (i, &arg) in dispatch.args.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: (i + 1) as u32,
-                resource: buffers[ir.view(arg).buffer.0].as_entire_binding(),
-            });
-        }
-        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("resin-bind-group"),
-            layout: &pipelines[pipeline_index].get_bind_group_layout(0),
-            entries: &entries,
-        });
 
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("resin-compute"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&pipelines[pipeline_index]);
+        pass.set_pipeline(&slot.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let [x, y, z] = spec.workgroups;
+        let [x, y, z] = slot.workgroups;
         if x > 0 {
             pass.dispatch_workgroups(x, y, z);
         }
     }
 
-    ctx.queue.submit(Some(encoder.finish()));
-
     for (array, &sink) in outputs.iter_mut().zip(&ir.sinks) {
         let view = ir.view(sink);
         let etype = ir.buffer(view.buffer).element_type;
-        let raw = read_buffer(ctx, &buffers[view.buffer.0], byte_len(ir.buffer(view.buffer).len()))?;
-        match (etype, array.as_data_mut()) {
-            (ElementType::F32, ArrayData::F32(dst)) => {
-                densify_f32(&bytes_to_f32s(&raw), &view.accessor, dst)?;
-            }
-            (ElementType::U32, ArrayData::U32(dst)) => {
-                densify_u32(&bytes_to_u32s(&raw), &view.accessor, dst)?;
-            }
-            _ => {
-                return Err(Error::ElementType {
-                    expected: etype,
-                    got: array.element_type(),
-                });
-            }
+        let acc = &view.accessor;
+        let count = element_count(&acc.shape);
+        if array.element_type() != etype {
+            return Err(Error::ElementType {
+                expected: etype,
+                got: array.element_type(),
+            });
         }
+        if array.nelem() != count {
+            return Err(Error::Size {
+                expected: count,
+                got: array.nelem(),
+            });
+        }
+        if !acc.is_dense() {
+            return Err(Error::Wgpu(
+                "sink view must be dense for device-local copy".into(),
+            ));
+        }
+        // Reuse the pre-allocated output buffer when size matches (call path).
+        let sink_buf = Arc::clone(&array.buffer);
+        let src_off = (acc.offset as u64) * 4;
+        let size = byte_len(count);
+        if count > 0 {
+            encoder.copy_buffer_to_buffer(
+                &arenas[view.buffer.0],
+                src_off,
+                &sink_buf,
+                0,
+                size,
+            );
+        }
+    }
+
+    ctx.queue.submit(Some(encoder.finish()));
+    Ok(())
+}
+
+/// Map a dense storage buffer to a [`HostArray`]. **Waits on the GPU.**
+pub fn host_download(ctx: &Context, array: &WgpuArray) -> Result<HostArray, Error> {
+    let n = array.nelem();
+    let raw = read_buffer(ctx, &array.buffer, byte_len(n))?;
+    match array.element_type {
+        ElementType::F32 => {
+            let vals = bytes_to_f32s(&raw);
+            debug_assert!(vals.len() >= n);
+            Ok(HostArray::from_f32(array.shape(), &vals[..n]))
+        }
+        ElementType::U32 => {
+            let vals = bytes_to_u32s(&raw);
+            debug_assert!(vals.len() >= n);
+            Ok(HostArray::from_u32(array.shape(), &vals[..n]))
+        }
+    }
+}
+
+fn copy_dense_into_arena(
+    encoder: &mut wgpu::CommandEncoder,
+    src: &WgpuArray,
+    arena: &wgpu::Buffer,
+    accessor: &Accessor,
+) -> Result<(), Error> {
+    if !accessor.is_dense() {
+        return Err(Error::Wgpu(
+            "param view must be dense for device-local copy".into(),
+        ));
+    }
+    let count = element_count(&accessor.shape);
+    let dst_off = (accessor.offset as u64) * 4;
+    let size = byte_len(count);
+    if count > 0 {
+        encoder.copy_buffer_to_buffer(&src.buffer, 0, arena, dst_off, size);
+    }
+    Ok(())
+}
+
+fn clear_dense_region_gpu(
+    encoder: &mut wgpu::CommandEncoder,
+    arenas: &[wgpu::Buffer],
+    ir: &crate::ir::Program,
+    output: crate::ir::BufferViewRef,
+) -> Result<(), Error> {
+    let view = ir.view(output);
+    let acc = &view.accessor;
+    if !acc.is_dense() {
+        return Err(Error::Wgpu("scatter clear requires dense output view".into()));
+    }
+    let count = element_count(&acc.shape) as u64;
+    let offset_bytes = (acc.offset as u64) * 4;
+    let size_bytes = count * 4;
+    if size_bytes > 0 {
+        encoder.clear_buffer(&arenas[view.buffer.0], offset_bytes, Some(size_bytes));
     }
     Ok(())
 }
@@ -211,28 +306,26 @@ fn array_data_to_bytes(data: &ArrayData) -> Vec<u8> {
     }
 }
 
-fn bytes_to_f32s(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(4)
+fn bytes_to_f32s(raw: &[u8]) -> Vec<f32> {
+    raw.chunks_exact(4)
         .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
         .collect()
 }
 
-fn bytes_to_u32s(bytes: &[u8]) -> Vec<u32> {
-    bytes
-        .chunks_exact(4)
+fn bytes_to_u32s(raw: &[u8]) -> Vec<u32> {
+    raw.chunks_exact(4)
         .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
         .collect()
 }
 
+/// Map + wait. Only called from [`host_download`].
 fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8>, Error> {
     let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("resin-read-staging"),
+        label: Some("resin-readback"),
         size,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-
     let mut encoder = ctx
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("resin-read") });
@@ -244,46 +337,12 @@ fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    let _ = ctx.device.poll(wgpu::Maintain::Wait);
+    ctx.device.poll(wgpu::Maintain::Wait);
     receiver
         .recv()
-        .map_err(|_| Error::Wgpu("buffer map callback dropped".into()))?
-        .map_err(|e| Error::Wgpu(format!("buffer map failed: {e:?}")))?;
-
-    let mapped = slice.get_mapped_range();
-    Ok(mapped.to_vec())
-}
-
-fn densify_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
-    let count = element_count(&accessor.shape);
-    if out.len() != count {
-        return Err(Error::Size { expected: count, got: out.len() });
-    }
-    let mut coords = vec![0; accessor.rank()];
-    for (linear, slot) in out.iter_mut().enumerate() {
-        let mut rem = linear;
-        for axis in (0..accessor.rank()).rev() {
-            coords[axis] = rem % accessor.shape[axis];
-            rem /= accessor.shape[axis];
-        }
-        *slot = buffer[accessor.index(&coords)];
-    }
-    Ok(())
-}
-
-fn densify_u32(buffer: &[u32], accessor: &Accessor, out: &mut [u32]) -> Result<(), Error> {
-    let count = element_count(&accessor.shape);
-    if out.len() != count {
-        return Err(Error::Size { expected: count, got: out.len() });
-    }
-    let mut coords = vec![0; accessor.rank()];
-    for (linear, slot) in out.iter_mut().enumerate() {
-        let mut rem = linear;
-        for axis in (0..accessor.rank()).rev() {
-            coords[axis] = rem % accessor.shape[axis];
-            rem /= accessor.shape[axis];
-        }
-        *slot = buffer[accessor.index(&coords)];
-    }
-    Ok(())
+        .map_err(|_| Error::Wgpu("readback channel closed".into()))?
+        .map_err(|e| Error::Wgpu(format!("map_async: {e}")))?;
+    let data = slice.get_mapped_range().to_vec();
+    staging.unmap();
+    Ok(data)
 }

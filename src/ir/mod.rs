@@ -6,7 +6,10 @@
 //!   bodies live in [`program::expr`]
 //! - [`accessor`] — strided addressing (broadcast / transpose / squeeze)
 //! - [`remap`] — gather / scatter kernel descriptors
-//! - [`optimize`] — IR→IR passes (kernel fusion, …)
+//! - [`optimize`] — optional IR→IR rewrites (kernel fusion, …)
+//! - [`layout`] — final backend prep (dead-elim + arena packing); always runs
+//!
+//! Pipeline: `lower → optimize? → layout::prepare_for_backend → jit`.
 //!
 //! Invariants (enforced by [`Program::validate`]):
 //!
@@ -15,6 +18,7 @@
 //!   [`program`].
 
 mod accessor;
+pub mod layout;
 pub mod optimize;
 mod program;
 mod remap;
