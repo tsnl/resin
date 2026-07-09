@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::{Remap, ScatterOp, Tensor, TensorKind};
-use crate::ops::{AssocOp, BinaryOp, ElementType, Op, UnaryOp};
+use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 use crate::tree::Tree;
 
 #[derive(Debug, thiserror::Error)]
@@ -56,10 +56,17 @@ fn grad_by_node(loss: &Tensor) -> Result<GradMap, GradError> {
 }
 
 fn accumulate(grads: &mut GradMap, tensor: &Tensor, adjoint: Tensor) {
-    // Integer / non-float tensors do not receive floating gradients.
-    if tensor.element_type() != ElementType::F32 {
+    // Only real-valued primals carry adjoints. Integers (indices, masks-as-u32,
+    // bit ops) are discrete — see [`ElementType::is_float`]. When f16/f64 are
+    // added they become floats and flow through here without a new special case.
+    if !tensor.element_type().is_float() {
         return;
     }
+    debug_assert_eq!(
+        adjoint.element_type(),
+        tensor.element_type(),
+        "adjoint etype must match the primal (seeded by loss.ones_like())"
+    );
     // Broadcasting in a forward op fans one input element out to many output
     // elements, so the adjoint sums back down to the input's shape.
     let adjoint = sum_to_shape(&adjoint, tensor.shape());

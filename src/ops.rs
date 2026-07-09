@@ -1,12 +1,16 @@
 //! Scalar operators and element types shared by the DSL graph and the IR.
 //!
-//! f32 is the default story; u32 exists so integer indexing and masks can be
-//! first-class (gather indices, bit packing, compare→mask).
+//! f32 is the default real type; u32 exists so integer indexing and masks can
+//! be first-class (gather indices, bit packing, compare→mask). Reverse-mode
+//! autodiff tracks **float** types ([`ElementType::is_float`]), not a
+//! hard-coded list of "f32 only" — when f16/f64 land they join that class.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ElementType {
     F32,
     U32,
+    // Future reals (same autodiff class as F32): F16, F64.
+    // Future ints (not differentiated): I32, U8, …
 }
 
 impl ElementType {
@@ -19,6 +23,14 @@ impl ElementType {
             ElementType::F32 => "f32",
             ElementType::U32 => "u32",
         }
+    }
+
+    /// Real-valued types reverse-mode tracks. Integers are discrete: no gradient.
+    ///
+    /// This is the property autodiff should branch on — not equality with
+    /// [`ElementType::F32`]. Adding `F16` / `F64` means returning `true` here.
+    pub fn is_float(self) -> bool {
+        matches!(self, ElementType::F32)
     }
 }
 
