@@ -4,23 +4,23 @@ use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::optimize::fuse_elementwise;
 use resin::ir::{Kernel, Program};
-use resin::jit::{Array, CpuJit, Jit, lower};
+use resin::jit::{HostArray, CpuJit, Jit, lower};
 
 /// Run `program` on the CPU backend and densify its sinks.
-fn run(program: &Program, params: &[&Array]) -> Vec<Vec<f32>> {
+fn run(program: &Program, params: &[&HostArray]) -> Vec<Vec<f32>> {
     let artifact = CpuJit.lower(program).expect("valid program");
-    let mut outputs: Vec<Array> = program
+    let mut outputs: Vec<HostArray> = program
         .sinks
         .iter()
-        .map(|&sink| Array::zeros(&program.view(sink).accessor.shape))
+        .map(|&sink| HostArray::zeros(&program.view(sink).accessor.shape))
         .collect();
-    let mut output_refs: Vec<&mut Array> = outputs.iter_mut().collect();
+    let mut output_refs: Vec<&mut HostArray> = outputs.iter_mut().collect();
     CpuJit.invoke(&artifact, params, &mut output_refs).expect("run");
     outputs.into_iter().map(|array| array.data().to_vec()).collect()
 }
 
 /// Fused and unfused programs must agree on all sinks.
-fn assert_equivalent(program: Program, params: &[&Array]) -> (usize, usize) {
+fn assert_equivalent(program: Program, params: &[&HostArray]) -> (usize, usize) {
     let fused = fuse_elementwise(program.clone());
     fused.validate().expect("fused program stays valid");
     let expected = run(&program, params);
@@ -39,7 +39,7 @@ fn unary_chain_fuses_to_one_kernel() {
     let x = Tensor::parameter(&[8]);
     let out = x.exp().log().sqrt().relu();
     let program = lower(&x, &out).unwrap();
-    let input = Array::from_f32(&[8], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let input = HostArray::from_f32(&[8], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
 
     let (before, after) = assert_equivalent(program.clone(), &[&input]);
     assert_eq!(before, 4);
@@ -61,12 +61,12 @@ fn binary_tree_fuses_to_one_kernel() {
     let out = ((a.clone() + b.clone()) * (c.clone() - d.clone())).relu();
     let program = lower(&vec![a, b, c, d], &out).unwrap();
     let params = [
-        Array::from_f32(&[4], &[1.0, -2.0, 3.0, -4.0]),
-        Array::from_f32(&[4], &[0.5, 0.5, 0.5, 0.5]),
-        Array::from_f32(&[4], &[2.0, 2.0, 2.0, 2.0]),
-        Array::from_f32(&[4], &[1.0, 3.0, 1.0, 3.0]),
+        HostArray::from_f32(&[4], &[1.0, -2.0, 3.0, -4.0]),
+        HostArray::from_f32(&[4], &[0.5, 0.5, 0.5, 0.5]),
+        HostArray::from_f32(&[4], &[2.0, 2.0, 2.0, 2.0]),
+        HostArray::from_f32(&[4], &[1.0, 3.0, 1.0, 3.0]),
     ];
-    let param_refs: Vec<&Array> = params.iter().collect();
+    let param_refs: Vec<&HostArray> = params.iter().collect();
 
     let (before, after) = assert_equivalent(program, &param_refs);
     assert_eq!(before, 4);
@@ -81,7 +81,7 @@ fn shared_operand_inlines_into_both_slots() {
     let t = x.clone() * x.clone();
     let out = t.exp() + t.clone();
     let program = lower(&x, &out).unwrap();
-    let input = Array::from_f32(&[4], &[0.1, 0.2, 0.3, 0.4]);
+    let input = HostArray::from_f32(&[4], &[0.1, 0.2, 0.3, 0.4]);
 
     let (before, after) = assert_equivalent(program, &[&input]);
     assert_eq!(before, 3);
@@ -96,7 +96,7 @@ fn sink_visible_intermediate_is_not_fused_away() {
     let t = x.clone() + x.clone();
     let y = t.relu();
     let program = lower(&x, &vec![t, y]).unwrap();
-    let input = Array::from_f32(&[4], &[-1.0, 2.0, -3.0, 4.0]);
+    let input = HostArray::from_f32(&[4], &[-1.0, 2.0, -3.0, 4.0]);
 
     let (before, after) = assert_equivalent(program, &[&input]);
     assert_eq!(before, 2);
@@ -113,10 +113,10 @@ fn broadcast_consumed_intermediate_fuses() {
     let out = c.clone() * t.broadcast_to(&[2, 3], &[1]);
     let program = lower(&vec![x, c], &out).unwrap();
     let params = [
-        Array::from_f32(&[3], &[1.0, 2.0, 3.0]),
-        Array::from_f32(&[2, 3], &[1.0, 1.0, 1.0, 2.0, 2.0, 2.0]),
+        HostArray::from_f32(&[3], &[1.0, 2.0, 3.0]),
+        HostArray::from_f32(&[2, 3], &[1.0, 1.0, 1.0, 2.0, 2.0, 2.0]),
     ];
-    let param_refs: Vec<&Array> = params.iter().collect();
+    let param_refs: Vec<&HostArray> = params.iter().collect();
 
     let (before, after) = assert_equivalent(program, &param_refs);
     assert_eq!(before, 2);
@@ -131,10 +131,10 @@ fn sgd_update_with_scalar_lr_fuses_to_one_kernel() {
     let out = w.clone() - (g.clone() * g.clone()) * Tensor::scalar(0.1);
     let program = lower(&vec![w, g], &out).unwrap();
     let params = [
-        Array::from_f32(&[4, 3], &[1.0; 12]),
-        Array::from_f32(&[4, 3], &[2.0; 12]),
+        HostArray::from_f32(&[4, 3], &[1.0; 12]),
+        HostArray::from_f32(&[4, 3], &[2.0; 12]),
     ];
-    let param_refs: Vec<&Array> = params.iter().collect();
+    let param_refs: Vec<&HostArray> = params.iter().collect();
 
     let (before, after) = assert_equivalent(program, &param_refs);
     assert_eq!(before, 3);
@@ -148,7 +148,7 @@ fn multi_consumer_intermediate_fuses_by_recomputation() {
     let t = x.clone() + x.clone();
     let out = t.exp() * t.relu();
     let program = lower(&x, &out).unwrap();
-    let input = Array::from_f32(&[4], &[-1.0, 0.5, 2.0, -0.25]);
+    let input = HostArray::from_f32(&[4], &[-1.0, 0.5, 2.0, -0.25]);
 
     let (before, after) = assert_equivalent(program, &[&input]);
     assert_eq!(before, 4);
@@ -162,10 +162,10 @@ fn matmul_is_a_fusion_boundary() {
     let out = (x.matmul(&w) + Tensor::full(&[2, 2], 1.0)).relu();
     let program = lower(&vec![x, w], &out).unwrap();
     let params = [
-        Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-        Array::from_f32(&[3, 2], &[1.0, 0.0, 0.0, 1.0, 1.0, 0.0]),
+        HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+        HostArray::from_f32(&[3, 2], &[1.0, 0.0, 0.0, 1.0, 1.0, 0.0]),
     ];
-    let param_refs: Vec<&Array> = params.iter().collect();
+    let param_refs: Vec<&HostArray> = params.iter().collect();
 
     let (before, after) = assert_equivalent(program, &param_refs);
     assert_eq!(before, 3, "matmul, add, relu");
@@ -174,7 +174,7 @@ fn matmul_is_a_fusion_boundary() {
     let fused = fuse_elementwise(lower_again(&param_refs));
     assert!(fused.queue.iter().any(|d| matches!(d.kernel, Kernel::Matmul)));
 
-    fn lower_again(_params: &[&Array]) -> Program {
+    fn lower_again(_params: &[&HostArray]) -> Program {
         let x = Tensor::parameter(&[2, 3]);
         let w = Tensor::parameter(&[3, 2]);
         let out = (x.clone().matmul(&w) + Tensor::full(&[2, 2], 1.0)).relu();
@@ -246,7 +246,7 @@ fn mlp_train_step_fuses_substantially_and_matches() {
                 ((seed >> 40) as f32 / (1u64 << 24) as f32) - 0.5
             })
             .collect();
-        Array::from_f32(shape, &values)
+        HostArray::from_f32(shape, &values)
     };
     let params = [
         random(&[4, 6]),
@@ -256,7 +256,7 @@ fn mlp_train_step_fuses_substantially_and_matches() {
         random(&[5, 3]),
         random(&[3]),
     ];
-    let param_refs: Vec<&Array> = params.iter().collect();
+    let param_refs: Vec<&HostArray> = params.iter().collect();
 
     let (before, after) = assert_equivalent(program, &param_refs);
     // 31 dispatches collapse to 17: 5 matmuls + 3 reductions (boundaries) and

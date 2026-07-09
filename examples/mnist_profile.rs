@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use resin::Tree;
 use resin::dsl::Tensor;
-use resin::jit::{Array, CpuJit, Jit};
+use resin::jit::{HostArray, CpuJit, Jit};
 
 #[derive(Tree, Clone)]
 struct LinearParams<T> {
@@ -39,11 +39,11 @@ fn forward(model: &MlpParams<Tensor>, x: &Tensor) -> Tensor {
 fn main() {
     let f = CpuJit.jit(|input: &ForwardIn<Tensor>| forward(&input.model, &input.xs));
     let layer = |i: usize, o: usize| LinearParams {
-        weight: Array::from_f32(&[i, o], &vec![0.01; i * o]),
-        bias: Array::from_f32(&[o], &vec![0.0; o]),
+        weight: HostArray::from_f32(&[i, o], &vec![0.01; i * o]),
+        bias: HostArray::from_f32(&[o], &vec![0.0; o]),
     };
     let input = ForwardIn {
-        xs: Array::from_f32(&[8, 784], &vec![0.1; 8 * 784]),
+        xs: HostArray::from_f32(&[8, 784], &vec![0.1; 8 * 784]),
         model: MlpParams {
             layer0: layer(784, 32),
             layer1: layer(32, 32),

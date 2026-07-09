@@ -10,11 +10,12 @@
 //! `@binding(i)` ↔ `program.buffers[i]` (the packed arenas). Each invoke
 //! creates arena GPU buffers and **one** bind group for all dispatches.
 //!
-//! ## Pipelines
+//! ## Pipelines & values
 //!
 //! Compiled compute pipelines live on the [`WgpuProgram`] artifact (built in
-//! [`WgpuJit::lower`]). Arena buffers are recreated each invoke (simple; sizes
-//! are small relative to dispatch work once pipelines are cached).
+//! [`WgpuJit::lower`]). [`WgpuArray`] is the device-local [`crate::jit::Jit::Value`]:
+//! a dense storage buffer per leaf. [`WgpuArray::host`] is the only path that
+//! waits on the GPU.
 
 mod codegen;
 mod runtime;
@@ -23,8 +24,9 @@ pub use codegen::KernelConfig;
 
 use std::sync::Arc;
 
-use super::{Array, Error, Jit};
+use super::{DeviceValue, Error, HostArray, Jit};
 use crate::ir::Program;
+use crate::ops::ElementType;
 
 /// Whether a GPU adapter is available (for tests / graceful skip).
 pub fn gpu_available() -> bool {
@@ -34,6 +36,38 @@ pub fn gpu_available() -> bool {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuJit {
     pub config: KernelConfig,
+}
+
+/// Dense device-local array: one storage buffer, row-major elements.
+///
+/// Produced by [`WgpuJit::upload`] / invoke sinks. Call [`host`](DeviceValue::host)
+/// only when you need CPU bytes (synchronizes the GPU).
+#[derive(Debug, Clone)]
+pub struct WgpuArray {
+    pub(crate) shape: Box<[usize]>,
+    pub(crate) element_type: ElementType,
+    pub(crate) buffer: Arc<wgpu::Buffer>,
+}
+
+impl WgpuArray {
+    pub fn nelem(&self) -> usize {
+        crate::ir::element_count(&self.shape)
+    }
+}
+
+impl DeviceValue for WgpuArray {
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn element_type(&self) -> ElementType {
+        self.element_type
+    }
+
+    fn host(&self) -> Result<HostArray, Error> {
+        let ctx = runtime::shared_context()?;
+        runtime::host_download(ctx, self)
+    }
 }
 
 /// One compiled compute pipeline plus its dispatch geometry.
@@ -76,6 +110,7 @@ pub fn emit_wgsl_for_dispatch(
 
 impl Jit for WgpuJit {
     type Artifact = WgpuProgram;
+    type Value = WgpuArray;
 
     fn lower(&self, program: &Program) -> Result<WgpuProgram, Error> {
         program.validate()?;
@@ -83,7 +118,6 @@ impl Jit for WgpuJit {
         let ctx = runtime::shared_context()?;
         let config = self.config;
 
-        // Shared bind-group layout: one storage buffer per IR arena, binding = index.
         let bgl_entries: Vec<wgpu::BindGroupLayoutEntry> = program
             .buffers
             .iter()
@@ -142,11 +176,25 @@ impl Jit for WgpuJit {
         })
     }
 
+    fn alloc_output(
+        &self,
+        shape: &[usize],
+        element_type: ElementType,
+    ) -> Result<WgpuArray, Error> {
+        let ctx = runtime::shared_context()?;
+        Ok(runtime::alloc_empty(ctx, shape, element_type))
+    }
+
+    fn upload(&self, host: &HostArray) -> Result<WgpuArray, Error> {
+        let ctx = runtime::shared_context()?;
+        runtime::upload_host(ctx, host)
+    }
+
     fn invoke(
         &self,
         program: &WgpuProgram,
-        params: &[&Array],
-        outputs: &mut [&mut Array],
+        params: &[&WgpuArray],
+        outputs: &mut [&mut WgpuArray],
     ) -> Result<(), Error> {
         if params.len() != program.ir.params.len() || outputs.len() != program.ir.sinks.len() {
             return Err(Error::LeafCount);
@@ -228,6 +276,7 @@ mod tests {
 mod e2e_tests {
     use super::*;
     use crate::dsl::Tensor;
+    use crate::jit::DeviceValue;
 
     #[derive(resin_macros::Tree)]
     struct Pair<T> {
@@ -244,6 +293,10 @@ mod e2e_tests {
         }
     }
 
+    fn up(host: HostArray) -> WgpuArray {
+        WgpuJit::default().upload(&host).unwrap()
+    }
+
     #[test]
     fn wgpu_add_runs() {
         if no_gpu() {
@@ -252,9 +305,11 @@ mod e2e_tests {
         let f = WgpuJit::default().jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let out = f
             .call(&Pair {
-                a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
-                b: Array::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
+                a: up(HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0])),
+                b: up(HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0])),
             })
+            .unwrap()
+            .host()
             .unwrap();
         assert_eq!(out.data(), &[11.0, 22.0, 33.0, 44.0]);
     }
@@ -267,9 +322,11 @@ mod e2e_tests {
         let f = WgpuJit::default().jit(|p: &Pair<Tensor>| p.a.matmul(&p.b));
         let out = f
             .call(&Pair {
-                a: Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                b: Array::from_f32(&[3, 2], &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+                a: up(HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])),
+                b: up(HostArray::from_f32(&[3, 2], &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0])),
             })
+            .unwrap()
+            .host()
             .unwrap();
         assert_eq!(out.shape(), &[2, 2]);
         assert_eq!(out.data(), &[1.0, 2.0, 4.0, 5.0]);
@@ -282,27 +339,29 @@ mod e2e_tests {
         }
         let f = WgpuJit::default().jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
         let out = f
-            .call(&Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+            .call(&up(HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])))
+            .unwrap()
+            .host()
             .unwrap();
         assert!((out.scalar() - 21.0).abs() < 1e-5);
     }
 
     #[test]
-    fn wgpu_repeated_invoke_reuses_compiled_pipelines() {
+    fn wgpu_repeated_invoke_keeps_weights_on_device() {
         if no_gpu() {
             return;
         }
         let f = WgpuJit::default().jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let a = Pair {
-            a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
-            b: Array::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
+            a: up(HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0])),
+            b: up(HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0])),
         };
         let b = Pair {
-            a: Array::from_f32(&[4], &[2.0, 2.0, 2.0, 2.0]),
-            b: Array::from_f32(&[4], &[3.0, 3.0, 3.0, 3.0]),
+            a: up(HostArray::from_f32(&[4], &[2.0, 2.0, 2.0, 2.0])),
+            b: up(HostArray::from_f32(&[4], &[3.0, 3.0, 3.0, 3.0])),
         };
-        assert_eq!(f.call(&a).unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
-        assert_eq!(f.call(&b).unwrap().data(), &[5.0, 5.0, 5.0, 5.0]);
-        assert_eq!(f.call(&a).unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
+        assert_eq!(f.call(&a).unwrap().host().unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
+        assert_eq!(f.call(&b).unwrap().host().unwrap().data(), &[5.0, 5.0, 5.0, 5.0]);
+        assert_eq!(f.call(&a).unwrap().host().unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
     }
 }

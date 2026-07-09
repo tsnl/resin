@@ -5,7 +5,7 @@
 //! typed ([`Slot`]): f32 and u32 buffers stay separate. The artifact is the
 //! validated IR program itself.
 
-use super::{Array, ArrayData, Error, Jit};
+use super::{HostArray, ArrayData, Error, Jit};
 use crate::ir::{
     Accessor, BufferData, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, element_count,
 };
@@ -60,17 +60,30 @@ enum Value {
 
 impl Jit for CpuJit {
     type Artifact = Program;
+    type Value = HostArray;
 
     fn lower(&self, program: &Program) -> Result<Program, Error> {
         program.validate()?;
         Ok(program.clone())
     }
 
+    fn alloc_output(
+        &self,
+        shape: &[usize],
+        element_type: ElementType,
+    ) -> Result<HostArray, Error> {
+        Ok(HostArray::zeros_typed(shape, element_type))
+    }
+
+    fn upload(&self, host: &HostArray) -> Result<HostArray, Error> {
+        Ok(host.clone())
+    }
+
     fn invoke(
         &self,
         program: &Program,
-        params: &[&Array],
-        outputs: &mut [&mut Array],
+        params: &[&HostArray],
+        outputs: &mut [&mut HostArray],
     ) -> Result<(), Error> {
         if params.len() != program.params.len() || outputs.len() != program.sinks.len() {
             return Err(Error::LeafCount);
@@ -544,8 +557,8 @@ mod tests {
         let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let out = f
             .call(&Pair {
-                a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
-                b: Array::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
+                a: HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
+                b: HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
             })
             .unwrap();
         assert_eq!(out.data(), &[11.0, 22.0, 33.0, 44.0]);
@@ -555,7 +568,7 @@ mod tests {
     fn sum_axes_then_squeeze_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
         let out = f
-            .call(&Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+            .call(&HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
             .unwrap();
         assert!((out.scalar() - 21.0).abs() < 1e-5);
     }
@@ -563,7 +576,7 @@ mod tests {
     #[test]
     fn scalar_mul_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.clone() * Tensor::scalar(0.5));
-        let out = f.call(&Array::from_f32(&[2, 2], &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let out = f.call(&HostArray::from_f32(&[2, 2], &[2.0, 4.0, 6.0, 8.0])).unwrap();
         assert_eq!(out.data(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
@@ -581,9 +594,9 @@ mod tests {
         });
         let out = f
             .call(&LinearIn {
-                x: Array::from_f32(&[2, 2], &[1.0, 0.0, 0.0, 1.0]),
-                w: Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                bias: Array::from_f32(&[3], &[10.0, 20.0, 30.0]),
+                x: HostArray::from_f32(&[2, 2], &[1.0, 0.0, 0.0, 1.0]),
+                w: HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                bias: HostArray::from_f32(&[3], &[10.0, 20.0, 30.0]),
             })
             .unwrap();
         assert_eq!(out.data(), &[11.0, 22.0, 33.0, 14.0, 25.0, 36.0]);
@@ -594,8 +607,8 @@ mod tests {
         let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.matmul(&p.b.transpose()));
         let out = f
             .call(&Pair {
-                a: Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                b: Array::from_f32(&[2, 3], &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+                a: HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                b: HostArray::from_f32(&[2, 3], &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
             })
             .unwrap();
         assert_eq!(out.shape(), &[2, 2]);
@@ -605,7 +618,7 @@ mod tests {
     #[test]
     fn unary_chain_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.exp().log().sqrt());
-        let out = f.call(&Array::from_f32(&[2], &[4.0, 9.0])).unwrap();
+        let out = f.call(&HostArray::from_f32(&[2], &[4.0, 9.0])).unwrap();
         assert_eq!(out.data(), &[2.0, 3.0]);
     }
 
@@ -618,7 +631,7 @@ mod tests {
             let grad = grad_wrt(&loss, x).expect("grad");
             x.clone() - grad * Tensor::scalar(0.1)
         });
-        let out = f.call(&Array::from_f32(&[2], &[0.0, 5.0])).unwrap();
+        let out = f.call(&HostArray::from_f32(&[2], &[0.0, 5.0])).unwrap();
         // grad = 2(x-3)/2 = (x-3); step: 0 → 0.3, 5 → 4.8
         assert!((out.data()[0] - 0.3).abs() < 1e-5, "{:?}", out.data());
         assert!((out.data()[1] - 4.8).abs() < 1e-5, "{:?}", out.data());
@@ -629,8 +642,8 @@ mod tests {
         let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let out = f
             .call(&Pair {
-                a: Array::from_u32(&[3], &[1, 2, 3]),
-                b: Array::from_u32(&[3], &[10, 20, 30]),
+                a: HostArray::from_u32(&[3], &[1, 2, 3]),
+                b: HostArray::from_u32(&[3], &[10, 20, 30]),
             })
             .unwrap();
         assert_eq!(out.to_u32(), vec![11, 22, 33]);

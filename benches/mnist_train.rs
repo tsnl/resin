@@ -21,10 +21,10 @@ use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::optimize::{OptPasses, optimize_with};
 use resin::ir::Program;
 use resin::jit::lower::lower;
-use resin::jit::{Array, CpuJit, Jit};
+use resin::jit::{DeviceValue, HostArray, CpuJit, Jit};
 
 #[cfg(feature = "wgpu")]
-use resin::jit::wgpu::{WgpuJit, WgpuProgram, gpu_available};
+use resin::jit::wgpu::{WgpuArray, WgpuJit, WgpuProgram, gpu_available};
 
 const BATCH: usize = 64;
 const HIDDEN: usize = 128;
@@ -108,13 +108,13 @@ fn ir_program(passes: OptPasses) -> Program {
     resin::ir::layout::prepare_for_backend(optimize_with(raw, passes))
 }
 
-fn filled(shape: &[usize], value: f32) -> Array {
+fn filled(shape: &[usize], value: f32) -> HostArray {
     let n: usize = shape.iter().product();
-    Array::from_f32(shape, &vec![value; n])
+    HostArray::from_f32(shape, &vec![value; n])
 }
 
 /// Parameter leaves matching `TrainStepIn` declaration order.
-fn param_arrays() -> TrainStepIn<Array> {
+fn param_arrays() -> TrainStepIn<HostArray> {
     let layer = |i: usize, o: usize| LinearParams {
         weight: filled(&[i, o], 0.01),
         bias: filled(&[o], 0.0),
@@ -130,7 +130,7 @@ fn param_arrays() -> TrainStepIn<Array> {
     }
 }
 
-fn output_arrays() -> TrainStepOut<Array> {
+fn output_arrays() -> TrainStepOut<HostArray> {
     let layer = |i: usize, o: usize| LinearParams {
         weight: filled(&[i, o], 0.0),
         bias: filled(&[o], 0.0),
@@ -169,7 +169,7 @@ fn mnist_train_step(c: &mut Criterion) {
         let artifact = CpuJit.lower(&program).expect("cpu lower");
         eprintln!("cpu/{opt_name}: {n} dispatches");
 
-        let param_refs: Vec<&Array> = params.leaves();
+        let param_refs: Vec<&HostArray> = params.leaves();
         let mut out_refs = outputs.leaves_mut();
         CpuJit
             .invoke(&artifact, &param_refs, &mut out_refs)
@@ -182,7 +182,7 @@ fn mnist_train_step(c: &mut Criterion) {
             &artifact,
             |b, artifact| {
                 b.iter(|| {
-                    let param_refs: Vec<&Array> = params.leaves();
+                    let param_refs: Vec<&HostArray> = params.leaves();
                     let mut out_refs = outputs.leaves_mut();
                     CpuJit
                         .invoke(artifact, &param_refs, &mut out_refs)
@@ -195,17 +195,24 @@ fn mnist_train_step(c: &mut Criterion) {
     }
 
     // --- WebGPU ----------------------------------------------------------
+    // Device-local values: invoke does not wait. Timed path skips `.host()`.
     #[cfg(feature = "wgpu")]
     {
         if !gpu_available() {
             eprintln!("wgpu: no adapter — skipping gpu cases");
         } else {
-            // GPU steps are much faster; more samples, less wall time per cell.
             group.sample_size(50);
             group.warm_up_time(Duration::from_secs(1));
             group.measurement_time(Duration::from_secs(10));
 
             let jit = WgpuJit::default();
+            let gpu_params: TrainStepIn<WgpuArray> = params
+                .try_map(&mut |h| jit.upload(h))
+                .expect("upload params");
+            let mut gpu_outputs: TrainStepOut<WgpuArray> = outputs
+                .try_map(&mut |h| jit.upload(h))
+                .expect("upload outputs");
+
             for (opt_name, passes) in opt_cases {
                 let program = ir_program(passes);
                 let n = program.queue.len();
@@ -215,24 +222,27 @@ fn mnist_train_step(c: &mut Criterion) {
                     artifact.gpu.pipelines.len()
                 );
 
-                let param_refs: Vec<&Array> = params.leaves();
-                let mut out_refs = outputs.leaves_mut();
-                jit.invoke(&artifact, &param_refs, &mut out_refs)
-                    .expect("wgpu smoke");
-                drop(out_refs);
-                black_box(outputs.loss.scalar());
+                {
+                    let param_refs: Vec<&WgpuArray> = gpu_params.leaves();
+                    let mut out_refs = gpu_outputs.leaves_mut();
+                    jit.invoke(&artifact, &param_refs, &mut out_refs)
+                        .expect("wgpu smoke");
+                }
+                // One host sync outside the timed loop (correctness smoke only).
+                black_box(gpu_outputs.loss.host().expect("loss host").scalar());
 
                 group.bench_with_input(
                     BenchmarkId::new("wgpu", opt_name),
                     &artifact,
                     |b, artifact| {
                         b.iter(|| {
-                            let param_refs: Vec<&Array> = params.leaves();
-                            let mut out_refs = outputs.leaves_mut();
+                            let param_refs: Vec<&WgpuArray> = gpu_params.leaves();
+                            let mut out_refs = gpu_outputs.leaves_mut();
                             jit.invoke(artifact, &param_refs, &mut out_refs)
                                 .expect("wgpu invoke");
                             drop(out_refs);
-                            black_box(outputs.loss.scalar());
+                            // No `.host()` — measure submit path only.
+                            black_box(&gpu_outputs.loss);
                         });
                     },
                 );
