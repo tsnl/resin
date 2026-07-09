@@ -47,13 +47,13 @@ pub fn fuse_elementwise(mut program: Program) -> Program {
 const MAX_FUSED_NODES: usize = 256;
 
 /// One fusable producer→consumer edge in the dispatch queue.
-struct OuterInnerPair {
+struct ProducerConsumerPair {
     consumer: usize,
     producer: usize,
     /// Consumer load of the producer's output (identity or broadcast).
     arg_view: BufferViewRef,
-    outer: Expr,
-    inner: Expr,
+    consumer_expr: Expr,
+    producer_expr: Expr,
 }
 
 /// Find one producer→consumer pair and fuse it. Returns false at fixed point.
@@ -66,27 +66,27 @@ fn fuse_one(program: &mut Program) -> bool {
 }
 
 /// Scan the queue for the next fusable elementwise→elementwise edge.
-fn find_fusible_producer_consumer_pair(program: &Program) -> Option<OuterInnerPair> {
+fn find_fusible_producer_consumer_pair(program: &Program) -> Option<ProducerConsumerPair> {
     for (consumer, dispatch) in program.queue.iter().enumerate() {
-        let Kernel::Elementwise(outer) = &dispatch.kernel else {
+        let Kernel::Elementwise(consumer_expr) = &dispatch.kernel else {
             continue;
         };
         for &arg_view in &dispatch.args {
-            let Some((producer, inner)) = fusable_producer(program, consumer, arg_view) else {
+            let Some((producer, producer_expr)) = fusable_producer(program, consumer, arg_view) else {
                 continue;
             };
-            // Each use of the intermediate becomes a full copy of `inner`.
-            let uses = count_load_occurrences(outer, arg_view);
-            let fused_nodes = outer.node_count() + uses * inner.node_count();
+            // Each use of the intermediate becomes a full copy of `producer_expr`.
+            let uses = count_load_occurrences(consumer_expr, arg_view);
+            let fused_nodes = consumer_expr.node_count() + uses * producer_expr.node_count();
             if fused_nodes > MAX_FUSED_NODES {
                 continue;
             }
-            return Some(OuterInnerPair {
+            return Some(ProducerConsumerPair {
                 consumer,
                 producer,
                 arg_view,
-                outer: outer.clone(),
-                inner,
+                consumer_expr: consumer_expr.clone(),
+                producer_expr,
             });
         }
     }
@@ -94,23 +94,23 @@ fn find_fusible_producer_consumer_pair(program: &Program) -> Option<OuterInnerPa
 }
 
 /// Splice the producer into the consumer and drop the producer if unused.
-fn apply_fusion(program: &mut Program, pair: OuterInnerPair) {
-    let OuterInnerPair {
+fn apply_fusion(program: &mut Program, pair: ProducerConsumerPair) {
+    let ProducerConsumerPair {
         consumer,
         producer,
         arg_view,
-        outer,
-        inner,
+        consumer_expr,
+        producer_expr,
     } = pair;
 
     // Re-read each producer load through the consumer's (possibly broadcast)
     // view of the intermediate.
     let expansion = program.view(arg_view).accessor.clone();
-    let inner = inner.map_loads(&mut |v| {
+    let producer_expr = producer_expr.map_loads(&mut |v| {
         Expr::Load(compose_arg_view(program, v, &expansion))
     });
 
-    let fused = outer.substitute(arg_view, &inner);
+    let fused = consumer_expr.substitute(arg_view, &producer_expr);
     let args = fused.loads();
 
     program.queue[consumer] = Dispatch {
