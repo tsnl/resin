@@ -72,11 +72,8 @@ fn find_fusible_producer_consumer_pair(program: &Program) -> Option<OuterInnerPa
             continue;
         };
         for &arg_view in &dispatch.args {
-            let Some(producer) = fusable_producer(program, consumer, arg_view) else {
+            let Some((producer, inner)) = fusable_producer(program, consumer, arg_view) else {
                 continue;
-            };
-            let Kernel::Elementwise(inner) = &program.queue[producer].kernel else {
-                unreachable!("fusable_producer only returns elementwise dispatches");
             };
             // Each use of the intermediate becomes a full copy of `inner`.
             let uses = count_load_occurrences(outer, arg_view);
@@ -89,7 +86,7 @@ fn find_fusible_producer_consumer_pair(program: &Program) -> Option<OuterInnerPa
                 producer,
                 arg_view,
                 outer: outer.clone(),
-                inner: inner.clone(),
+                inner,
             });
         }
     }
@@ -136,13 +133,13 @@ fn count_load_occurrences(expr: &Expr, target: BufferViewRef) -> usize {
     }
 }
 
-/// The queue index of the elementwise dispatch producing `arg_view`, if its
-/// expression can be inlined into `queue[consumer]` at that load.
+/// Index and body of the elementwise dispatch producing `arg_view`, if it
+/// can be inlined into `queue[consumer]` at that load.
 fn fusable_producer(
     program: &Program,
     consumer: usize,
     arg_view: BufferViewRef,
-) -> Option<usize> {
+) -> Option<(usize, Expr)> {
     let buffer = program.view(arg_view).buffer;
     let producer = program
         .queue
@@ -151,9 +148,9 @@ fn fusable_producer(
     if producer >= consumer {
         return None;
     }
-    if !matches!(program.queue[producer].kernel, Kernel::Elementwise(_)) {
+    let Kernel::Elementwise(expr) = &program.queue[producer].kernel else {
         return None;
-    }
+    };
     // Producer must write the whole buffer densely; consumer must read it as
     // written or as a broadcast of that layout, so coordinates line up.
     let identity = Accessor::dense(program.buffer(buffer).shape.clone(), 0);
@@ -163,7 +160,7 @@ fn fusable_producer(
     if !is_broadcast_of(&program.view(arg_view).accessor, &identity) {
         return None;
     }
-    Some(producer)
+    Some((producer, expr.clone()))
 }
 
 /// Producer load `arg`, re-addressed through the consumer's `expansion` of the
