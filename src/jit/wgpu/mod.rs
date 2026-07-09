@@ -1,9 +1,9 @@
 //! WebGPU backend: IR → WGSL lowering, dispatched through wgpu.
 //!
-//! Expects a program that has gone through
-//! [`crate::ir::layout::prepare_for_backend`] (one buffer per element type).
-//! Shaders bind those **heaps** (≤2 storage buffers) and address logical
-//! tensors via view offsets — not one binding per temporary.
+//! **Contract:** `program` is already backend-ready — i.e. it has been through
+//! [`crate::ir::layout::prepare_for_backend`] (dead-elim + arena pack). Layout
+//! is not this backend's job. Shaders bind one heap per dtype and address
+//! logical tensors via view offsets.
 
 mod codegen;
 mod runtime;
@@ -78,17 +78,15 @@ impl Jit for WgpuJit {
     type Artifact = WgpuProgram;
 
     fn lower(&self, program: &Program) -> Result<WgpuProgram, Error> {
-        // Defensive: prepare is idempotent if the compile path already ran it.
-        let program = crate::ir::layout::prepare_for_backend(program.clone());
         program.validate()?;
-        ensure_fits_u32(&program)?;
+        ensure_fits_u32(program)?;
         let config = self.config;
 
         let mut pipelines: Vec<PipelineSpec> = Vec::new();
         let mut pipeline_of = Vec::with_capacity(program.queue.len());
         for dispatch in &program.queue {
-            let wgsl = codegen::emit_dispatch(&program, dispatch, &config);
-            let heap_buffers = heap_buffers_for(&program, dispatch);
+            let wgsl = codegen::emit_dispatch(program, dispatch, &config);
+            let heap_buffers = heap_buffers_for(program, dispatch);
             // Identical WGSL implies identical bind layout; reuse it.
             let index = pipelines
                 .iter()
@@ -96,7 +94,7 @@ impl Jit for WgpuJit {
                 .unwrap_or_else(|| {
                     pipelines.push(PipelineSpec {
                         wgsl,
-                        workgroups: codegen::workgroups_for(&program, dispatch, &config),
+                        workgroups: codegen::workgroups_for(program, dispatch, &config),
                         heap_buffers: heap_buffers.clone(),
                     });
                     pipelines.len() - 1
@@ -104,7 +102,7 @@ impl Jit for WgpuJit {
             pipeline_of.push(index);
         }
 
-        Ok(WgpuProgram { ir: program, pipelines, pipeline_of })
+        Ok(WgpuProgram { ir: program.clone(), pipelines, pipeline_of })
     }
 
     fn invoke(
@@ -144,18 +142,19 @@ mod tests {
 
     #[test]
     fn lower_dedups_identical_shaders() {
+        use crate::ir::layout::prepare_for_backend;
+
         let a = Tensor::parameter(&[4]);
         // Two structurally identical adds in a row.
         let out = (a.clone() + a.clone()) + (a.clone() + a.clone());
-        let program = lower(&a, &out).unwrap();
+        let program = prepare_for_backend(lower(&a, &out).unwrap());
         let artifact = WgpuJit::default().lower(&program).unwrap();
-        assert_eq!(artifact.pipeline_of.len(), artifact.ir.queue.len());
-        // After arena packing, binding layout is heap-based; identical bodies still share.
+        assert_eq!(artifact.pipeline_of.len(), program.queue.len());
         assert!(
-            artifact.pipelines.len() <= artifact.ir.queue.len(),
+            artifact.pipelines.len() <= program.queue.len(),
             "pipelines={} queue={}",
             artifact.pipelines.len(),
-            artifact.ir.queue.len()
+            program.queue.len()
         );
         assert!(artifact.pipelines[0].wgsl.contains("heap_f32"));
         assert!(artifact.pipelines[0].heap_buffers.len() <= 2);
