@@ -11,9 +11,15 @@
 
 mod debug;
 pub mod grad;
+pub mod scan;
+pub mod sort;
 
 pub use debug::{debug_print, debug_str, dedent};
 pub use grad::{GradError, grad, grad_wrt};
+pub use scan::{
+    cumprod, cumprod_exclusive, cumsum, cumsum_exclusive, scan, scan_exclusive, shift_axis,
+};
+pub use sort::{argsort_f32, argsort_u32, float_sort_key};
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
