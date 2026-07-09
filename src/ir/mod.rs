@@ -16,7 +16,7 @@ mod accessor;
 pub mod optimize;
 mod program;
 
-pub use accessor::{Accessor, dense_pitch, element_count};
+pub use accessor::{Accessor, Strided, dense_pitch, element_count};
 pub use program::{
     Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Error, Expr, Kernel, Program,
 };

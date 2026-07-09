@@ -13,7 +13,7 @@ pub fn gpu_available() -> bool {
     runtime::shared_context().is_ok()
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuJit {
     pub config: KernelConfig,
 }
@@ -50,7 +50,7 @@ impl Jit for WgpuJit {
                 .map(|&r| &program.view(r).accessor)
                 .collect();
             let out = &program.view(dispatch.output).accessor;
-            let wgsl = codegen::emit(&dispatch.kernel, &args, out, &config)?;
+            let wgsl = codegen::emit(&dispatch.kernel, &args, out, &config);
             // Identical WGSL implies identical dispatch geometry; reuse it.
             let index = pipelines
                 .iter()
@@ -58,7 +58,7 @@ impl Jit for WgpuJit {
                 .unwrap_or_else(|| {
                     pipelines.push(PipelineSpec {
                         wgsl,
-                        workgroups: codegen::workgroups(&dispatch.kernel, out, &config),
+                        workgroups: codegen::workgroups(out, &config),
                     });
                     pipelines.len() - 1
                 });

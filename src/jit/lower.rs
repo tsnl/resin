@@ -116,7 +116,7 @@ impl Builder {
         match tensor.kind() {
             TensorKind::Broadcast { arg, axes } => {
                 let (buffer, accessor) = self.resolve_view(arg)?;
-                Ok((buffer, broadcast_axes(&accessor, tensor.shape(), axes)?))
+                Ok((buffer, accessor.map_axes(tensor.shape(), axes)?))
             }
             TensorKind::Transpose { arg } => {
                 let (buffer, accessor) = self.resolve_view(arg)?;
@@ -161,15 +161,6 @@ impl Builder {
         self.queue.push(Dispatch { kernel, args, output });
         buffer
     }
-}
-
-/// Explicit-axis broadcast (`axes[i]` = output axis of input axis `i`).
-fn broadcast_axes(
-    accessor: &Accessor,
-    target: &[usize],
-    axes: &[usize],
-) -> Result<Accessor, crate::ir::Error> {
-    accessor.map_axes(target, axes)
 }
 
 #[cfg(test)]

@@ -2,10 +2,13 @@
 //!
 //! Kernels consume views (buffer + accessor) directly: broadcast, transpose,
 //! and squeeze are pitch tricks, never densifying copies. The artifact is the
-//! validated IR program itself.
+//! validated IR program itself. Hot loops use materialised [`Strided`] maps so
+//! indexing does not re-walk the accessor tree per element.
 
 use super::{Array, Error, Jit};
-use crate::ir::{Accessor, Dispatch, Expr, Kernel, Program, element_count};
+use crate::ir::{
+    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, Strided, element_count,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CpuJit;
@@ -60,35 +63,38 @@ impl Jit for CpuJit {
 /// Execute one dispatch. The program is validated, so indexing is in bounds.
 fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]) {
     let out_view = program.view(dispatch.output);
-    let (out_buffer, out) = (out_view.buffer.0, out_view.accessor.clone());
-    let args: Vec<(usize, Accessor)> = dispatch
+    let out_buffer = out_view.buffer.0;
+    let out = out_view.accessor.strided();
+    let args: Vec<(usize, Strided)> = dispatch
         .args
         .iter()
         .map(|&r| {
             let view = program.view(r);
-            (view.buffer.0, view.accessor.clone())
+            (view.buffer.0, view.accessor.strided())
         })
         .collect();
 
-    let count = element_count(&out.shape());
+    let count = element_count(&out.shape);
     let mut coords = vec![0; out.rank()];
 
     match &dispatch.kernel {
         Kernel::Elementwise { expr } => {
+            // Materialise each free load once; the tree indexes this table.
+            let loads = resolve_loads(expr, program);
             for linear in 0..count {
-                decode(linear, &out.shape(), &mut coords);
-                let value = eval_expr(expr, program, storage, &coords);
+                decode(linear, &out.shape, &mut coords);
+                let value = eval_expr(expr, &loads, storage, &coords);
                 storage[out_buffer][out.index(&coords)] = value;
             }
         }
 
         Kernel::Matmul => {
             let rank = out.rank();
-            let k = args[0].1.shape()[rank - 1];
+            let k = args[0].1.shape[rank - 1];
             let mut a_coords = vec![0; rank];
             let mut b_coords = vec![0; rank];
             for linear in 0..count {
-                decode(linear, &out.shape(), &mut coords);
+                decode(linear, &out.shape, &mut coords);
                 a_coords.copy_from_slice(&coords); // [batch…, i, _]
                 b_coords.copy_from_slice(&coords); // [batch…, _, j]
                 let mut sum = 0.0;
@@ -104,13 +110,13 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
 
         Kernel::Reduction { op, axes } => {
             for linear in 0..count {
-                decode(linear, &out.shape(), &mut coords);
+                decode(linear, &out.shape, &mut coords);
                 storage[out_buffer][out.index(&coords)] = op.identity();
             }
             let (in_buffer, input) = &args[0];
             let mut in_coords = vec![0; input.rank()];
-            for linear in 0..element_count(&input.shape()) {
-                decode(linear, &input.shape(), &mut in_coords);
+            for linear in 0..element_count(&input.shape) {
+                decode(linear, &input.shape, &mut in_coords);
                 coords.copy_from_slice(&in_coords);
                 for &axis in axes.iter() {
                     coords[axis] = 0;
@@ -123,36 +129,51 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
     }
 }
 
+/// Buffer + affine map for each free load in `expr` (one strided() per view).
+fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, Strided)> {
+    expr.loads()
+        .into_iter()
+        .map(|r| {
+            let view = program.view(r);
+            (r, view.buffer.0, view.accessor.strided())
+        })
+        .collect()
+}
+
 /// Densify a view into a row-major host slice (sink readback).
 fn gather(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
-    let count = element_count(&accessor.shape());
+    let s = accessor.strided();
+    let count = element_count(&s.shape);
     if out.len() != count {
         return Err(Error::Size { expected: count, got: out.len() });
     }
-    let mut coords = vec![0; accessor.rank()];
+    let mut coords = vec![0; s.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
-        decode(linear, &accessor.shape(), &mut coords);
-        *slot = buffer[accessor.index(&coords)];
+        decode(linear, &s.shape, &mut coords);
+        *slot = buffer[s.index(&coords)];
     }
     Ok(())
 }
 
-/// Evaluate a plain f32 elementwise expression at `coords`.
+/// Evaluate an elementwise expression at `coords` using pre-materialised loads.
 fn eval_expr(
     expr: &Expr,
-    program: &Program,
+    loads: &[(BufferViewRef, usize, Strided)],
     storage: &[Vec<f32>],
     coords: &[usize],
 ) -> f32 {
     match expr {
         Expr::Load(view) => {
-            let view = program.view(*view);
-            storage[view.buffer.0][view.accessor.index(coords)]
+            let (_, buffer, strided) = loads
+                .iter()
+                .find(|(r, _, _)| r == view)
+                .expect("load is a free load of the expression");
+            storage[*buffer][strided.index(coords)]
         }
         Expr::Op { op, args } => {
             let mut vals = [0.0f32; 2];
             for (i, arg) in args.iter().enumerate() {
-                vals[i] = eval_expr(arg, program, storage, coords);
+                vals[i] = eval_expr(arg, loads, storage, coords);
             }
             op.apply(&vals[..op.arity()])
         }

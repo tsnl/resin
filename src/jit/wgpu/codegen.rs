@@ -5,7 +5,6 @@
 //! helper functions), which keeps shaders trivial for drivers to compile.
 
 use crate::ir::{Accessor, Expr, Kernel, dense_pitch, element_count};
-use crate::jit::Error;
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +20,7 @@ impl Default for KernelConfig {
     }
 }
 
-pub fn workgroups(_kernel: &Kernel, out: &Accessor, config: &KernelConfig) -> [u32; 3] {
+pub fn workgroups(out: &Accessor, config: &KernelConfig) -> [u32; 3] {
     let count = element_count(&out.shape()) as u64;
     if count == 0 {
         return [0, 1, 1];
@@ -35,7 +34,7 @@ pub fn emit(
     args: &[&Accessor],
     out: &Accessor,
     config: &KernelConfig,
-) -> Result<String, Error> {
+) -> String {
     let mut w = Writer::default();
     w.print("@group(0) @binding(0)\nvar<storage, read_write> output: array<f32>;");
     for i in 0..args.len() {
@@ -49,7 +48,7 @@ pub fn emit(
         Kernel::Matmul => emit_matmul(&mut w, args, out, config),
         Kernel::Reduction { op, axes } => emit_reduction(&mut w, *op, axes, args, out, config),
     }
-    Ok(w.finish())
+    w.finish()
 }
 
 #[derive(Default)]
@@ -302,7 +301,7 @@ mod tests {
             &[&a, &a],
             &a,
             &KernelConfig::default(),
-        ).unwrap();
+        );
         assert!(wgsl.contains("@compute"), "{wgsl}");
         assert!(wgsl.contains("fn elem(a0: f32, a1: f32) -> f32"), "{wgsl}");
         assert!(wgsl.contains("((a0) + (a1))"), "{wgsl}");
@@ -316,7 +315,7 @@ mod tests {
             &[&a],
             &a,
             &KernelConfig::default(),
-        ).unwrap();
+        );
         assert!(wgsl.contains("max(a0, 0.0)"), "{wgsl}");
     }
 
@@ -329,7 +328,7 @@ mod tests {
             &[&out, &scalar],
             &out,
             &KernelConfig::default(),
-        ).unwrap();
+        );
         // Zero-pitch dims contribute no address terms: the scalar loads `arg1[0u]`.
         assert!(wgsl.contains("arg1[0u]"), "{wgsl}");
     }
@@ -339,7 +338,7 @@ mod tests {
         let a = Accessor::dense([2, 4], 0);
         let b = Accessor::dense([4, 3], 0);
         let out = Accessor::dense([2, 3], 0);
-        let wgsl = emit(&Kernel::Matmul, &[&a, &b], &out, &KernelConfig::default()).unwrap();
+        let wgsl = emit(&Kernel::Matmul, &[&a, &b], &out, &KernelConfig::default());
         assert!(wgsl.contains("t < 4u"), "{wgsl}");
         assert!(wgsl.contains("i0 * 4u + t * 1u"), "{wgsl}");
     }
@@ -353,7 +352,7 @@ mod tests {
             &[&input],
             &out,
             &KernelConfig::default(),
-        ).unwrap();
+        );
         assert!(wgsl.contains("bitcast<f32>(0xff800000u)"), "{wgsl}");
     }
 }
