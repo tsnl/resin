@@ -187,7 +187,11 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Slot]) {
         }
 
         Kernel::Matmul => {
-            assert_eq!(out_etype, ElementType::F32, "matmul is f32-only");
+            // DSL admits any float etype; CPU implements f32 today (the only float).
+            assert!(
+                out_etype.is_float(),
+                "matmul requires float output, got {out_etype:?}"
+            );
             let rank = out.rank();
             let k = args[0].1.shape[rank - 1];
             let mut a_coords = vec![0; rank];

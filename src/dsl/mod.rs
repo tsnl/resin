@@ -398,6 +398,7 @@ impl Neg for Tensor {
 
 impl Tensor {
     /// Matrix product over the last two axes; leading axes are batch dims.
+    /// Float tensors only (not integers); both operands must share an etype.
     pub fn matmul(&self, rhs: &Tensor) -> Self {
         let (a, b) = (self.shape(), rhs.shape());
         assert!(a.len() >= 2 && b.len() >= 2, "matmul requires rank >= 2");
@@ -406,13 +407,22 @@ impl Tensor {
             b[b.len() - 2],
             "matmul inner dimension mismatch: {a:?} @ {b:?}"
         );
-        assert_eq!(self.element_type(), ElementType::F32, "matmul is f32-only");
-        assert_eq!(rhs.element_type(), ElementType::F32, "matmul is f32-only");
+        assert!(
+            self.element_type().is_float() && rhs.element_type().is_float(),
+            "matmul requires float operands, got {:?} and {:?}",
+            self.element_type(),
+            rhs.element_type()
+        );
+        assert_eq!(
+            self.element_type(),
+            rhs.element_type(),
+            "matmul operand element types must match"
+        );
         let mut shape = a[..a.len() - 1].to_vec();
         shape.push(b[b.len() - 1]);
         Tensor::new(
             shape,
-            ElementType::F32,
+            self.element_type(),
             TensorKind::Matmul { lhs: self.clone(), rhs: rhs.clone() },
         )
     }
@@ -492,9 +502,17 @@ impl Tensor {
         if axes.is_empty() { self.clone() } else { self.squeeze(&axes) }
     }
 
-    /// Mean over all elements, as a true scalar (f32 only).
+    /// Mean over all elements, as a true scalar. Float tensors only
+    /// (integer average is not defined here).
+    ///
+    /// The divisor is currently an f32 constant; that matches today's only
+    /// float etype. When f16/f64 land, the count should be a same-etype scalar.
     pub fn mean_all(&self) -> Self {
-        assert_eq!(self.element_type(), ElementType::F32, "mean_all is f32-only");
+        assert!(
+            self.element_type().is_float(),
+            "mean_all requires a float tensor, got {:?}",
+            self.element_type()
+        );
         let count = crate::ir::element_count(self.shape()) as f32;
         let summed = if self.shape().is_empty() {
             self.clone()
