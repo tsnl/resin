@@ -200,7 +200,7 @@ fn main() {
     match backend.as_str() {
         "cpu" => train_mnist(resin::jit::CpuJit, config),
         #[cfg(feature = "wgpu")]
-        "wgpu" | "gpu" => train_mnist(resin::jit::WgpuJit, config),
+        "wgpu" | "gpu" => train_mnist(resin::jit::WgpuJit::default(), config),
         other => panic!("unknown backend {other:?} (was resin built with that feature?)"),
     }
 }

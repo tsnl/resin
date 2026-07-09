@@ -1,11 +1,13 @@
 //! Strided views over flat buffers (offset / shape / pitch).
+//!
+//! Pitch tricks express broadcast (pitch 0), transpose (swapped pitches), and
+//! squeeze without touching storage. Equality is by the affine map — two
+//! accessors that address the same way compare equal regardless of how they
+//! were built.
 
-use super::Error;
+use super::program::Error;
 
 /// Maps N-d coordinates to a linear element offset: `offset + Σ coordᵢ · pitchᵢ`.
-///
-/// Pitch tricks express broadcast (pitch 0), transpose (swapped pitches), and
-/// squeeze without touching storage.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Accessor {
     pub offset: usize,
@@ -19,6 +21,11 @@ impl Accessor {
         let shape = shape.into();
         let pitch = dense_pitch(&shape);
         Self { offset, shape, pitch }
+    }
+
+    /// Whether this is C-contiguous (kernel-output law).
+    pub fn is_dense(&self) -> bool {
+        self.pitch.as_ref() == dense_pitch(&self.shape).as_ref()
     }
 
     pub fn rank(&self) -> usize {
@@ -99,6 +106,74 @@ impl Accessor {
             pitch: pitch.into(),
         })
     }
+
+    /// Explicit-axis broadcast: `axes[i]` is the output axis for input axis `i`.
+    /// Unmapped axes are broadcast (pitch 0).
+    pub fn map_axes(&self, target: &[usize], axes: &[usize]) -> Result<Self, Error> {
+        let rank = self.rank();
+        if axes.len() != rank {
+            return Err(Error(format!(
+                "broadcast axes {axes:?} do not match rank {rank}"
+            )));
+        }
+        let mut pitch = vec![0; target.len()];
+        for (input_axis, &out_axis) in axes.iter().enumerate() {
+            if out_axis >= target.len() {
+                return Err(Error(format!(
+                    "broadcast axis {out_axis} out of range for target {target:?}"
+                )));
+            }
+            // Size-1 dims that expand keep pitch 0.
+            if self.shape[input_axis] != 1 || target[out_axis] == 1 {
+                pitch[out_axis] = self.pitch[input_axis];
+            }
+        }
+        Ok(Self {
+            offset: self.offset,
+            shape: target.into(),
+            pitch: pitch.into(),
+        })
+    }
+
+    /// Whether `self` is `source` expanded by trailing broadcast (or equal).
+    pub fn is_broadcast_of(&self, source: &Accessor) -> bool {
+        if self == source {
+            return true;
+        }
+        if self.offset != source.offset || self.rank() < source.rank() {
+            return false;
+        }
+        let lead = self.rank() - source.rank();
+        if self.pitch[..lead].iter().any(|&p| p != 0) {
+            return false;
+        }
+        source.shape.iter().zip(&source.pitch).enumerate().all(|(i, (&dim, &pitch))| {
+            let (out_dim, out_pitch) = (self.shape[lead + i], self.pitch[lead + i]);
+            (out_dim == dim && out_pitch == pitch) || (dim == 1 && out_pitch == 0)
+        })
+    }
+
+    /// Re-address this accessor through a consumer view of a producer write
+    /// (`source`): identity when `expansion == source`, otherwise pitch compose
+    /// through `expansion`'s shape (broadcast axes stay pitch 0).
+    pub fn compose_through(&self, source: &Accessor, expansion: &Accessor) -> Accessor {
+        if expansion == source {
+            return self.clone();
+        }
+        debug_assert!(expansion.rank() >= self.rank());
+        let lead = expansion.rank() - self.rank();
+        let mut pitch = vec![0; expansion.rank()];
+        for (i, &p) in self.pitch.iter().enumerate() {
+            if expansion.pitch[lead + i] != 0 {
+                pitch[lead + i] = p;
+            }
+        }
+        Accessor {
+            offset: self.offset,
+            shape: expansion.shape.clone(),
+            pitch: pitch.into(),
+        }
+    }
 }
 
 /// C-contiguous (row-major) pitch for a shape.
@@ -126,6 +201,7 @@ mod tests {
         let a = Accessor::dense([2, 3], 0);
         assert_eq!(&*a.pitch, &[3, 1]);
         assert_eq!(a.index(&[1, 2]), 5);
+        assert!(a.is_dense());
     }
 
     #[test]
@@ -134,6 +210,7 @@ mod tests {
         let b = a.broadcast_to(&[2, 3]).unwrap();
         assert_eq!(&*b.shape, &[2, 3]);
         assert_eq!(&*b.pitch, &[0, 0]);
+        assert!(!b.is_dense());
     }
 
     #[test]
@@ -153,11 +230,39 @@ mod tests {
         let a = Accessor::dense([2, 3], 0).transpose().unwrap();
         assert_eq!(&*a.shape, &[3, 2]);
         assert_eq!(&*a.pitch, &[1, 3]);
+        assert!(!a.is_dense());
     }
 
     #[test]
     fn squeeze_drops_unit_axes() {
         let a = Accessor::dense([1, 4], 0).squeeze(&[0]).unwrap();
         assert_eq!(&*a.shape, &[4]);
+        assert!(a.is_dense());
+    }
+
+    #[test]
+    fn is_broadcast_of_trailing() {
+        let dense = Accessor::dense([3], 0);
+        let b = dense.broadcast_to(&[2, 3]).unwrap();
+        assert!(b.is_broadcast_of(&dense));
+        assert!(dense.is_broadcast_of(&dense));
+    }
+
+    #[test]
+    fn compose_through_broadcast() {
+        let write = Accessor::dense([3], 0);
+        let read = write.broadcast_to(&[2, 3]).unwrap();
+        let arg = Accessor::dense([3], 0);
+        let composed = arg.compose_through(&write, &read);
+        assert_eq!(&*composed.shape, &[2, 3]);
+        assert_eq!(&*composed.pitch, &[0, 1]);
+    }
+
+    #[test]
+    fn map_axes_places_pitch() {
+        let a = Accessor::dense([3], 0);
+        let b = a.map_axes(&[2, 3], &[1]).unwrap();
+        assert_eq!(&*b.shape, &[2, 3]);
+        assert_eq!(&*b.pitch, &[0, 1]);
     }
 }

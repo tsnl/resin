@@ -12,10 +12,10 @@ use crate::ir::{
 
 /// Fuse adjacent elementwise dispatches to a fixed point.
 ///
-/// A producer fuses into a consumer when the consumer loads the producer's
-/// output buffer through its identity view or a broadcast of it: the
+/// A producer fuses into a consumer when both are elementwise and the
+/// consumer loads the producer's write view (or a broadcast of it): the
 /// producer's expression is substituted for that load ([`Expr::substitute`]),
-/// with the producer's own loads composed through the same broadcast.
+/// with producer loads composed through the same view relationship.
 /// Multi-consumer intermediates are inlined into each reader; the producer is
 /// dropped once nothing reads its output. Matmul and reduction are fusion
 /// boundaries.
@@ -50,16 +50,19 @@ fn fuse_one(program: &mut Program) -> bool {
 /// Scan the queue for the next fusable elementwise→elementwise edge.
 fn find_fusible_producer_consumer_pair(program: &Program) -> Option<ProducerConsumerPair> {
     for (consumer, dispatch) in program.queue.iter().enumerate() {
-        let Kernel::Elementwise(consumer_expr) = &dispatch.kernel else {
+        let Kernel::Elementwise { expr: consumer_expr } = &dispatch.kernel else {
             continue;
         };
         for &arg_view in &dispatch.args {
-            let Some((producer, producer_expr)) = fusable_producer(program, consumer, arg_view) else {
+            let Some((producer, producer_expr)) =
+                fusable_producer(program, consumer, arg_view)
+            else {
                 continue;
             };
             // Each use of the intermediate becomes a full copy of `producer_expr`.
             let uses = count_load_occurrences(consumer_expr, arg_view);
-            let fused_nodes = consumer_expr.node_count() + uses * producer_expr.node_count();
+            let fused_nodes =
+                consumer_expr.node_count() + uses * producer_expr.node_count();
             if fused_nodes > MAX_FUSED_NODES {
                 continue;
             }
@@ -85,18 +88,20 @@ fn apply_fusion(program: &mut Program, pair: ProducerConsumerPair) {
         producer_expr,
     } = pair;
 
-    // Re-read each producer load through the consumer's (possibly broadcast)
-    // view of the intermediate.
-    let expansion = program.view(arg_view).accessor.clone();
+    // Re-read each producer load through the consumer's view of the intermediate.
+    let write = program.view(program.queue[producer].output).accessor.clone();
+    let read = program.view(arg_view).accessor.clone();
     let producer_expr = producer_expr.map_loads(&mut |v| {
-        Expr::Load(compose_arg_view(program, v, &expansion))
+        let arg = program.view(v).clone();
+        let composed = arg.accessor.compose_through(&write, &read);
+        Expr::Load(intern_view(program, arg.buffer, composed))
     });
 
     let fused = consumer_expr.substitute(arg_view, &producer_expr);
     let args = fused.loads();
 
     program.queue[consumer] = Dispatch {
-        kernel: Kernel::Elementwise(fused),
+        kernel: Kernel::Elementwise { expr: fused },
         args,
         output: program.queue[consumer].output,
     };
@@ -115,8 +120,14 @@ fn count_load_occurrences(expr: &Expr, target: BufferViewRef) -> usize {
     }
 }
 
-/// Index and body of the elementwise dispatch producing `arg_view`, if it
-/// can be inlined into `queue[consumer]` at that load.
+/// Index and body of the dispatch producing `arg_view`, if it can be inlined
+/// into `queue[consumer]` at that load.
+///
+/// A producer is fusable when:
+///
+/// 1. **Kernel compatibility** — producer is elementwise (same iteration model
+///    as the consumer).
+/// 2. **Shape compatibility** — [`fusible_view_relationship`].
 fn fusable_producer(
     program: &Program,
     consumer: usize,
@@ -130,31 +141,28 @@ fn fusable_producer(
     if producer >= consumer {
         return None;
     }
-    let Kernel::Elementwise(expr) = &program.queue[producer].kernel else {
+
+    let Kernel::Elementwise { expr } = &program.queue[producer].kernel else {
         return None;
     };
-    // Producer must write the whole buffer densely; consumer must read it as
-    // written or as a broadcast of that layout, so coordinates line up.
-    let identity = Accessor::dense(program.buffer(buffer).shape.clone(), 0);
-    if program.view(program.queue[producer].output).accessor != identity {
+
+    if !fusible_view_relationship(program, producer, arg_view) {
         return None;
     }
-    if !is_broadcast_of(&program.view(arg_view).accessor, &identity) {
-        return None;
-    }
+
     Some((producer, expr.clone()))
 }
 
-/// Producer load `arg`, re-addressed through the consumer's `expansion` of the
-/// intermediate (identity or broadcast).
-fn compose_arg_view(
-    program: &mut Program,
-    arg: BufferViewRef,
-    expansion: &Accessor,
-) -> BufferViewRef {
-    let view = program.view(arg).clone();
-    let accessor = compose_broadcast(&view.accessor, expansion);
-    intern_view(program, view.buffer, accessor)
+/// Shape compatibility: consumer reads the producer's write view, or a
+/// broadcast of it ([`Accessor::is_broadcast_of`]).
+fn fusible_view_relationship(
+    program: &Program,
+    producer: usize,
+    arg_view: BufferViewRef,
+) -> bool {
+    let write = &program.view(program.queue[producer].output).accessor;
+    let read = &program.view(arg_view).accessor;
+    read.is_broadcast_of(write)
 }
 
 /// Whether any dispatch (other than `except`) or sink still reads `buffer`.
@@ -166,40 +174,6 @@ fn buffer_is_read(program: &Program, buffer: BufferRef, except: usize) -> bool {
         .enumerate()
         .any(|(i, d)| i != except && d.args.iter().copied().any(reads))
         || program.sinks.iter().copied().any(reads)
-}
-
-/// Whether `accessor` is `source` expanded by [`Accessor::broadcast_to`]:
-/// trailing-aligned, with source pitches kept and everything else pitch 0.
-fn is_broadcast_of(accessor: &Accessor, source: &Accessor) -> bool {
-    if accessor.offset != source.offset || accessor.rank() < source.rank() {
-        return false;
-    }
-    let lead = accessor.rank() - source.rank();
-    if accessor.pitch[..lead].iter().any(|&p| p != 0) {
-        return false;
-    }
-    source.shape.iter().zip(&source.pitch).enumerate().all(|(i, (&dim, &pitch))| {
-        let (out_dim, out_pitch) = (accessor.shape[lead + i], accessor.pitch[lead + i]);
-        (out_dim == dim && out_pitch == pitch) || (dim == 1 && out_pitch == 0)
-    })
-}
-
-/// Re-read `accessor` (over the producer's iteration space) through the
-/// consumer's `expansion` of that space: pitches follow expanded axes, and
-/// broadcast axes stay pitch 0.
-fn compose_broadcast(accessor: &Accessor, expansion: &Accessor) -> Accessor {
-    let lead = expansion.rank() - accessor.rank();
-    let mut pitch = vec![0; expansion.rank()];
-    for (i, &p) in accessor.pitch.iter().enumerate() {
-        if expansion.pitch[lead + i] != 0 {
-            pitch[lead + i] = p;
-        }
-    }
-    Accessor {
-        offset: accessor.offset,
-        shape: expansion.shape.clone(),
-        pitch: pitch.into(),
-    }
 }
 
 fn intern_view(program: &mut Program, buffer: BufferRef, accessor: Accessor) -> BufferViewRef {
@@ -228,7 +202,7 @@ fn compact(program: Program) -> Program {
             live_views[arg.0] = true;
         }
         live_views[dispatch.output.0] = true;
-        if let Kernel::Elementwise(expr) = &dispatch.kernel {
+        if let Kernel::Elementwise { expr } = &dispatch.kernel {
             for v in expr.loads() {
                 live_views[v.0] = true;
             }
@@ -260,9 +234,7 @@ fn compact(program: Program) -> Program {
         .collect();
 
     let map_view = |r: BufferViewRef| BufferViewRef(view_map[&r.0]);
-    let map_expr = |expr: Expr| {
-        expr.map_loads(&mut |v| Expr::Load(map_view(v)))
-    };
+    let map_expr = |expr: Expr| expr.map_loads(&mut |v| Expr::Load(map_view(v)));
 
     Program {
         params: program.params.iter().map(|p| BufferRef(buffer_map[&p.0])).collect(),
@@ -272,7 +244,7 @@ fn compact(program: Program) -> Program {
             .into_iter()
             .map(|d| Dispatch {
                 kernel: match d.kernel {
-                    Kernel::Elementwise(expr) => Kernel::Elementwise(map_expr(expr)),
+                    Kernel::Elementwise { expr } => Kernel::Elementwise { expr: map_expr(expr) },
                     other => other,
                 },
                 args: d.args.iter().map(|a| map_view(*a)).collect(),

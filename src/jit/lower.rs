@@ -84,7 +84,7 @@ impl Builder {
                 let expr = Expr::new_op(*op, arg_views.iter().copied().map(Expr::Load));
                 // Binding list is free loads (deduped); the tree may load one view twice.
                 let loads = expr.loads();
-                self.push_dispatch(tensor.shape(), Kernel::Elementwise(expr), loads)
+                self.push_dispatch(tensor.shape(), Kernel::elementwise(expr), loads)
             }
             TensorKind::Matmul { lhs, rhs } => {
                 let args = vec![self.view_for(lhs)?, self.view_for(rhs)?];
@@ -116,7 +116,7 @@ impl Builder {
         match tensor.kind() {
             TensorKind::Broadcast { arg, axes } => {
                 let (buffer, accessor) = self.resolve_view(arg)?;
-                Ok((buffer, broadcast_axes(&accessor, tensor.shape(), axes)?))
+                Ok((buffer, accessor.map_axes(tensor.shape(), axes)?))
             }
             TensorKind::Transpose { arg } => {
                 let (buffer, accessor) = self.resolve_view(arg)?;
@@ -163,33 +163,6 @@ impl Builder {
     }
 }
 
-/// Explicit-axis broadcast (`axes[i]` = output axis of input axis `i`).
-fn broadcast_axes(
-    accessor: &Accessor,
-    target: &[usize],
-    axes: &[usize],
-) -> Result<Accessor, crate::ir::Error> {
-    if axes.len() != accessor.rank() {
-        return Err(crate::ir::Error(format!(
-            "broadcast axes {axes:?} do not match rank {}",
-            accessor.rank()
-        )));
-    }
-    let mut pitch = vec![0; target.len()];
-    for (input_axis, &out_axis) in axes.iter().enumerate() {
-        if out_axis >= target.len() {
-            return Err(crate::ir::Error(format!(
-                "broadcast axis {out_axis} out of range for target {target:?}"
-            )));
-        }
-        // Size-1 dims that expand keep pitch 0.
-        if accessor.shape[input_axis] != 1 || target[out_axis] == 1 {
-            pitch[out_axis] = accessor.pitch[input_axis];
-        }
-    }
-    Ok(Accessor { offset: accessor.offset, shape: target.into(), pitch: pitch.into() })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,7 +183,7 @@ mod tests {
         let program = lower(&Pair { a, b }, &out).unwrap();
         assert_eq!(program.buffers.len(), 3);
         assert_eq!(program.queue.len(), 1);
-        assert!(matches!(program.queue[0].kernel, Kernel::Elementwise(_)));
+        assert!(matches!(program.queue[0].kernel, Kernel::Elementwise { .. }));
     }
 
     #[test]
@@ -221,7 +194,7 @@ mod tests {
 
         assert_eq!(program.buffers.len(), 2);
         assert_eq!(program.queue.len(), 1);
-        let Kernel::Elementwise(expr) = &program.queue[0].kernel else {
+        let Kernel::Elementwise { expr, .. } = &program.queue[0].kernel else {
             panic!("expected elementwise");
         };
         assert!(matches!(expr, Expr::Op { op: Op::ADD, .. }));
@@ -248,7 +221,7 @@ mod tests {
         let program = lower(&Pair { a, b }, &out).unwrap();
         assert_eq!(program.queue.len(), 1);
         assert!(matches!(program.queue[0].kernel, Kernel::Matmul));
-        assert_eq!(program.output_shape(&program.queue[0]), &[2, 3]);
+        assert_eq!(&*program.output_shape(&program.queue[0]), &[2, 3]);
     }
 
     #[test]
@@ -260,7 +233,7 @@ mod tests {
         let dispatch = &program.queue[0];
         assert!(matches!(dispatch.kernel, Kernel::Reduction { .. }));
         assert_eq!(&*program.view(dispatch.args[0]).accessor.shape, &[8, 10]);
-        assert_eq!(program.output_shape(dispatch), &[1, 10]);
+        assert_eq!(&*program.output_shape(dispatch), &[1, 10]);
     }
 
     #[test]

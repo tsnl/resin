@@ -2,10 +2,13 @@
 //!
 //! Kernels consume views (buffer + accessor) directly: broadcast, transpose,
 //! and squeeze are pitch tricks, never densifying copies. The artifact is the
-//! validated IR program itself.
+//! validated IR program itself. Hot loops clone each view's [`Accessor`] once
+//! so indexing does not re-walk shared structure per element.
 
 use super::{Array, Error, Jit};
-use crate::ir::{Accessor, Dispatch, Expr, Kernel, Program, element_count};
+use crate::ir::{
+    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, element_count,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CpuJit;
@@ -60,7 +63,8 @@ impl Jit for CpuJit {
 /// Execute one dispatch. The program is validated, so indexing is in bounds.
 fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]) {
     let out_view = program.view(dispatch.output);
-    let (out_buffer, out) = (out_view.buffer.0, out_view.accessor.clone());
+    let out_buffer = out_view.buffer.0;
+    let out = out_view.accessor.clone();
     let args: Vec<(usize, Accessor)> = dispatch
         .args
         .iter()
@@ -74,10 +78,11 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
     let mut coords = vec![0; out.rank()];
 
     match &dispatch.kernel {
-        Kernel::Elementwise(expr) => {
+        Kernel::Elementwise { expr } => {
+            let loads = resolve_loads(expr, program);
             for linear in 0..count {
                 decode(linear, &out.shape, &mut coords);
-                let value = eval_expr(expr, program, storage, &coords);
+                let value = eval_expr(expr, &loads, storage, &coords);
                 storage[out_buffer][out.index(&coords)] = value;
             }
         }
@@ -123,6 +128,17 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
     }
 }
 
+/// Buffer + accessor for each free load in `expr` (cloned once per view).
+fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, Accessor)> {
+    expr.loads()
+        .into_iter()
+        .map(|r| {
+            let view = program.view(r);
+            (r, view.buffer.0, view.accessor.clone())
+        })
+        .collect()
+}
+
 /// Densify a view into a row-major host slice (sink readback).
 fn gather(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
     let count = element_count(&accessor.shape);
@@ -137,22 +153,25 @@ fn gather(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Er
     Ok(())
 }
 
-/// Evaluate an elementwise expression at `coords`.
+/// Evaluate an elementwise expression at `coords` using pre-cloned loads.
 fn eval_expr(
     expr: &Expr,
-    program: &Program,
+    loads: &[(BufferViewRef, usize, Accessor)],
     storage: &[Vec<f32>],
     coords: &[usize],
 ) -> f32 {
     match expr {
         Expr::Load(view) => {
-            let view = program.view(*view);
-            storage[view.buffer.0][view.accessor.index(coords)]
+            let (_, buffer, accessor) = loads
+                .iter()
+                .find(|(r, _, _)| r == view)
+                .expect("load is a free load of the expression");
+            storage[*buffer][accessor.index(coords)]
         }
         Expr::Op { op, args } => {
             let mut vals = [0.0f32; 2];
             for (i, arg) in args.iter().enumerate() {
-                vals[i] = eval_expr(arg, program, storage, coords);
+                vals[i] = eval_expr(arg, loads, storage, coords);
             }
             op.apply(&vals[..op.arity()])
         }

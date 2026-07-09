@@ -14,7 +14,9 @@ pub fn gpu_available() -> bool {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct WgpuJit;
+pub struct WgpuJit {
+    pub config: KernelConfig,
+}
 
 /// Lowered artifact: the IR program plus one WGSL pipeline per distinct shader.
 #[derive(Debug, Clone)]
@@ -37,7 +39,7 @@ impl Jit for WgpuJit {
     fn lower(&self, program: &Program) -> Result<WgpuProgram, Error> {
         program.validate()?;
         ensure_fits_u32(program)?;
-        let config = KernelConfig::default();
+        let config = self.config;
 
         let mut pipelines: Vec<PipelineSpec> = Vec::new();
         let mut pipeline_of = Vec::with_capacity(program.queue.len());
@@ -107,7 +109,7 @@ mod tests {
         // Two structurally identical adds in a row.
         let out = (a.clone() + a.clone()) + (a.clone() + a.clone());
         let program = lower(&a, &out).unwrap();
-        let artifact = WgpuJit.lower(&program).unwrap();
+        let artifact = WgpuJit::default().lower(&program).unwrap();
         assert_eq!(artifact.pipeline_of.len(), program.queue.len());
         assert!(artifact.pipelines.len() < program.queue.len());
         assert!(artifact.pipelines[0].wgsl.contains("@compute"));
@@ -139,7 +141,7 @@ mod e2e_tests {
         if no_gpu() {
             return;
         }
-        let f = WgpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
+        let f = WgpuJit::default().jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
         let out = f
             .call(&Pair {
                 a: Array::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
@@ -154,7 +156,7 @@ mod e2e_tests {
         if no_gpu() {
             return;
         }
-        let f = WgpuJit.jit(|p: &Pair<Tensor>| p.a.matmul(&p.b));
+        let f = WgpuJit::default().jit(|p: &Pair<Tensor>| p.a.matmul(&p.b));
         let out = f
             .call(&Pair {
                 a: Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
@@ -170,7 +172,7 @@ mod e2e_tests {
         if no_gpu() {
             return;
         }
-        let f = WgpuJit.jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
+        let f = WgpuJit::default().jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
         let out = f
             .call(&Array::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
             .unwrap();

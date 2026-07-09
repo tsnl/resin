@@ -1,14 +1,13 @@
 //! WGSL emission: one IR dispatch → one compute shader.
 //!
-//! Naive by design — no fusion, tiling, or shared-memory tricks; those belong
-//! in the IR layer. Addressing is emitted as flat scalar arithmetic (no
-//! arrays or helper functions), which keeps shaders trivial for drivers to
-//! compile.
+//! Naive by design — no fusion or shared-memory tricks; those belong in the
+//! IR layer. Addressing is emitted as flat scalar arithmetic (no arrays or
+//! helper functions), which keeps shaders trivial for drivers to compile.
 
 use crate::ir::{Accessor, Expr, Kernel, dense_pitch, element_count};
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KernelConfig {
     /// log2 of elements processed per thread (naive strip-mining).
     pub lg2_items_per_thread: u32,
@@ -30,7 +29,12 @@ pub fn workgroups(out: &Accessor, config: &KernelConfig) -> [u32; 3] {
     [threads.div_ceil(u64::from(config.workgroup_size)).max(1) as u32, 1, 1]
 }
 
-pub fn emit(kernel: &Kernel, args: &[&Accessor], out: &Accessor, config: &KernelConfig) -> String {
+pub fn emit(
+    kernel: &Kernel,
+    args: &[&Accessor],
+    out: &Accessor,
+    config: &KernelConfig,
+) -> String {
     let mut w = Writer::default();
     w.print("@group(0) @binding(0)\nvar<storage, read_write> output: array<f32>;");
     for i in 0..args.len() {
@@ -40,7 +44,7 @@ pub fn emit(kernel: &Kernel, args: &[&Accessor], out: &Accessor, config: &Kernel
         ));
     }
     match kernel {
-        Kernel::Elementwise(expr) => emit_elementwise(&mut w, expr, args, out, config),
+        Kernel::Elementwise { expr } => emit_elementwise(&mut w, expr, args, out, config),
         Kernel::Matmul => emit_matmul(&mut w, args, out, config),
         Kernel::Reduction { op, axes } => emit_reduction(&mut w, *op, axes, args, out, config),
     }
@@ -68,6 +72,17 @@ impl Writer {
     fn finish(self) -> String {
         self.lines.join("\n")
     }
+}
+
+/// Emit `let i{k} = …` statements decoding `lin` (a row-major linear index
+/// over `shape`) into coordinates; returns the coordinate names.
+fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
+    let pitch = dense_pitch(shape);
+    let coords: Vec<String> = (0..shape.len()).map(|k| format!("i{k}")).collect();
+    for (k, coord) in coords.iter().enumerate() {
+        w.print(&format!("let {coord} = ({lin} / {}u) % {}u;", pitch[k], shape[k]));
+    }
+    coords
 }
 
 /// Inline address expression: `offset + Σ coordᵢ · pitchᵢ` (zero-pitch terms
@@ -112,15 +127,7 @@ fn per_output_element(
                 &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
                 |w| {
                     w.block("if (lin >= count)", |w| w.print("return;"));
-                    let pitch = dense_pitch(&out.shape);
-                    let coords: Vec<String> =
-                        (0..out.rank()).map(|k| format!("i{k}")).collect();
-                    for (k, coord) in coords.iter().enumerate() {
-                        w.print(&format!(
-                            "let {coord} = (lin / {}u) % {}u;",
-                            pitch[k], out.shape[k]
-                        ));
-                    }
+                    let coords = emit_decode(w, &out.shape, "lin");
                     body(w, &coords);
                 },
             );
@@ -135,9 +142,8 @@ fn emit_elementwise(
     out: &Accessor,
     config: &KernelConfig,
 ) {
-    // Free-load order of `expr` matches the dispatch arg list.
-    let loads = expr.loads();
-    debug_assert_eq!(loads.len(), args.len());
+    let free = expr.loads();
+    debug_assert_eq!(free.len(), args.len());
     emit_expr_fn(w, expr, args.len());
     per_output_element(w, out, config, |w, coords| {
         let loads: Vec<String> = args
@@ -283,7 +289,7 @@ mod tests {
 
     fn load_op(op: Op, n: usize) -> Kernel {
         let views = (0..n).map(BufferViewRef);
-        Kernel::Elementwise(Expr::new_op(op, views.map(Expr::Load)))
+        Kernel::elementwise(Expr::new_op(op, views.map(Expr::Load)))
     }
 
     #[test]
