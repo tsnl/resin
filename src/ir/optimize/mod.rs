@@ -5,6 +5,9 @@
 //! - **Elementwise fusion** ([`fuse_elementwise`]) — producer→consumer chains
 //!   of elementwise dispatches collapse into single kernels, to a fixed
 //!   point. See [`kernel_fusion`].
+//! - **Arena packing** ([`pack_arenas`]) — one buffer per element type; every
+//!   param/sink/arg is a view into those heaps (sum-of-sizes layout). Lets
+//!   backends bind O(dtypes) storage buffers instead of O(temps).
 //!
 //! Planned:
 //!
@@ -14,9 +17,13 @@
 //! - **Matmul epilogues** — fuse a trailing expression into a matmul
 //!   (subsumed by the tiled representation once that lands).
 //! - **Constant folding and dead-dispatch elimination.**
+//! - **Arena lifetime reuse** — overlap non-interfering temps inside an arena
+//!   (v1 uses sum-of-sizes, no reuse).
 
+mod arena_pack;
 mod kernel_fusion;
 
+pub use arena_pack::pack_arenas;
 pub use kernel_fusion::fuse_elementwise;
 
 use super::Program;
@@ -26,9 +33,9 @@ use super::Program;
 pub enum OptPasses {
     /// No IR passes — identity (for A/B benchmarks).
     None,
-    /// Elementwise fusion only.
+    /// Elementwise fusion only (no arena pack).
     Fuse,
-    /// Full pipeline (currently fusion only).
+    /// Full pipeline: fusion then arena packing.
     #[default]
     All,
 }
@@ -42,6 +49,7 @@ pub fn optimize(program: Program) -> Program {
 pub fn optimize_with(program: Program, passes: OptPasses) -> Program {
     match passes {
         OptPasses::None => program,
-        OptPasses::Fuse | OptPasses::All => fuse_elementwise(program),
+        OptPasses::Fuse => fuse_elementwise(program),
+        OptPasses::All => pack_arenas(fuse_elementwise(program)),
     }
 }

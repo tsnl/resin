@@ -29,20 +29,6 @@ impl Slot {
         }
     }
 
-    fn len(&self) -> usize {
-        match self {
-            Slot::F32(v) => v.len(),
-            Slot::U32(v) => v.len(),
-        }
-    }
-
-    fn clear(&mut self) {
-        match self {
-            Slot::F32(v) => v.fill(0.0),
-            Slot::U32(v) => v.fill(0),
-        }
-    }
-
     fn f32s(&self) -> &[f32] {
         match self {
             Slot::F32(v) => v,
@@ -101,26 +87,25 @@ impl Jit for CpuJit {
             })
             .collect();
 
-        for (array, &buffer) in params.iter().zip(&program.params) {
-            let expected_type = program.buffer(buffer).element_type;
+        for (array, &param) in params.iter().zip(&program.params) {
+            let view = program.view(param);
+            let expected_type = program.buffer(view.buffer).element_type;
             if array.element_type() != expected_type {
                 return Err(Error::ElementType {
                     expected: expected_type,
                     got: array.element_type(),
                 });
             }
-            let slot = &mut storage[buffer.0];
-            if array.as_data().len() != slot.len() {
+            // Dense param views: copy host data into the view's arena region.
+            let acc = &view.accessor;
+            let count = element_count(&acc.shape);
+            if array.as_data().len() != count {
                 return Err(Error::Size {
-                    expected: slot.len(),
+                    expected: count,
                     got: array.as_data().len(),
                 });
             }
-            match (slot, array.as_data()) {
-                (Slot::F32(dst), ArrayData::F32(src)) => dst.copy_from_slice(src),
-                (Slot::U32(dst), ArrayData::U32(src)) => dst.copy_from_slice(src),
-                _ => unreachable!("element type checked above"),
-            }
+            scatter_dense(&mut storage[view.buffer.0], acc, array.as_data())?;
         }
 
         for dispatch in &program.queue {
@@ -170,7 +155,8 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Slot]) {
         .collect();
 
     if matches!(&dispatch.kernel, Kernel::Remap { info } if info.is_scatter()) {
-        storage[out_buffer].clear();
+        // Clear only the dense output region (arenas hold many logical buffers).
+        clear_dense_region(&mut storage[out_buffer], &out);
     }
 
     let count = element_count(&out.shape);
@@ -326,6 +312,52 @@ fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, A
             )
         })
         .collect()
+}
+
+fn clear_dense_region(slot: &mut Slot, out: &Accessor) {
+    let count = element_count(&out.shape);
+    let mut coords = vec![0; out.rank()];
+    for linear in 0..count {
+        decode(linear, &out.shape, &mut coords);
+        let i = out.index(&coords);
+        match slot {
+            Slot::F32(v) => v[i] = 0.0,
+            Slot::U32(v) => v[i] = 0,
+        }
+    }
+}
+
+/// Write a dense host array into a (possibly offset) dense view.
+fn scatter_dense(slot: &mut Slot, accessor: &Accessor, data: &ArrayData) -> Result<(), Error> {
+    let count = element_count(&accessor.shape);
+    if data.len() != count {
+        return Err(Error::Size { expected: count, got: data.len() });
+    }
+    let mut coords = vec![0; accessor.rank()];
+match (slot, data) {
+        (Slot::F32(dst), ArrayData::F32(src)) => {
+            for (linear, &value) in src.iter().enumerate() {
+                decode(linear, &accessor.shape, &mut coords);
+                dst[accessor.index(&coords)] = value;
+            }
+            Ok(())
+        }
+        (Slot::U32(dst), ArrayData::U32(src)) => {
+            for (linear, &value) in src.iter().enumerate() {
+                decode(linear, &accessor.shape, &mut coords);
+                dst[accessor.index(&coords)] = value;
+            }
+            Ok(())
+        }
+        (Slot::F32(_), ArrayData::U32(_)) => Err(Error::ElementType {
+            expected: ElementType::F32,
+            got: ElementType::U32,
+        }),
+        (Slot::U32(_), ArrayData::F32(_)) => Err(Error::ElementType {
+            expected: ElementType::U32,
+            got: ElementType::F32,
+        }),
+    }
 }
 
 fn gather_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {

@@ -232,7 +232,7 @@ fn compact(program: Program) -> Program {
     }
     let mut live_buffers = vec![false; program.buffers.len()];
     for &param in &program.params {
-        live_buffers[param.0] = true;
+        live_views[param.0] = true;
     }
     for (index, view) in program.views.iter().enumerate() {
         if live_views[index] {
@@ -259,7 +259,7 @@ fn compact(program: Program) -> Program {
     let map_expr = |expr: Expr| expr.map_loads(&mut |v| Expr::Load(map_view(v)));
 
     Program {
-        params: program.params.iter().map(|p| BufferRef(buffer_map[&p.0])).collect(),
+        params: program.params.iter().map(|p| map_view(*p)).collect(),
         sinks: program.sinks.iter().map(|s| map_view(*s)).collect(),
         queue: program
             .queue

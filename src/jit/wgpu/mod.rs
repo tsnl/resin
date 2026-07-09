@@ -1,4 +1,8 @@
-//! WebGPU backend: naive IR → WGSL lowering, dispatched through wgpu.
+//! WebGPU backend: IR → WGSL lowering, dispatched through wgpu.
+//!
+//! After [`crate::ir::optimize::pack_arenas`], a program has one buffer per
+//! element type. Shaders bind those **heaps** (≤2 storage buffers) and address
+//! logical tensors via view offsets — not one binding per temporary.
 
 mod codegen;
 mod runtime;
@@ -6,7 +10,7 @@ mod runtime;
 pub use codegen::KernelConfig;
 
 use super::{Array, Error, Jit};
-use crate::ir::Program;
+use crate::ir::{BufferRef, Program};
 
 /// Whether a GPU adapter is available (for tests / graceful skip).
 pub fn gpu_available() -> bool {
@@ -31,6 +35,8 @@ pub struct WgpuProgram {
 pub struct PipelineSpec {
     pub wgsl: String,
     pub workgroups: [u32; 3],
+    /// Arena buffers bound by this shader, in `@binding` order (matches codegen).
+    pub heap_buffers: Vec<BufferRef>,
 }
 
 /// Emit WGSL for a single kernel (used by validation tests).
@@ -42,33 +48,62 @@ pub fn emit_wgsl_for_dispatch(
     codegen::emit_dispatch(program, &program.queue[dispatch_index], config)
 }
 
+/// Binding order for heaps used by `dispatch` (must match codegen).
+pub fn heap_buffers_for(program: &Program, dispatch: &crate::ir::Dispatch) -> Vec<BufferRef> {
+    let out_e = program.buffer(program.view(dispatch.output).buffer).element_type;
+    let mut etypes = vec![out_e];
+    for &arg in &dispatch.args {
+        let e = program.buffer(program.view(arg).buffer).element_type;
+        if !etypes.contains(&e) {
+            etypes.push(e);
+        }
+    }
+    // Map etype → the arena BufferRef in the packed program (unique per etype).
+    etypes
+        .into_iter()
+        .map(|e| {
+            program
+                .buffers
+                .iter()
+                .enumerate()
+                .find(|(_, b)| b.element_type == e)
+                .map(|(i, _)| BufferRef(i))
+                .expect("heap etype present")
+        })
+        .collect()
+}
+
 impl Jit for WgpuJit {
     type Artifact = WgpuProgram;
 
     fn lower(&self, program: &Program) -> Result<WgpuProgram, Error> {
+        // Always pack so shaders bind ≤1 heap per dtype (idempotent if already packed).
+        let program = crate::ir::optimize::pack_arenas(program.clone());
         program.validate()?;
-        ensure_fits_u32(program)?;
+        ensure_fits_u32(&program)?;
         let config = self.config;
 
         let mut pipelines: Vec<PipelineSpec> = Vec::new();
         let mut pipeline_of = Vec::with_capacity(program.queue.len());
         for dispatch in &program.queue {
-            let wgsl = codegen::emit_dispatch(program, dispatch, &config);
-            // Identical WGSL implies identical dispatch geometry; reuse it.
+            let wgsl = codegen::emit_dispatch(&program, dispatch, &config);
+            let heap_buffers = heap_buffers_for(&program, dispatch);
+            // Identical WGSL implies identical bind layout; reuse it.
             let index = pipelines
                 .iter()
                 .position(|p| p.wgsl == wgsl)
                 .unwrap_or_else(|| {
                     pipelines.push(PipelineSpec {
                         wgsl,
-                        workgroups: codegen::workgroups_for(program, dispatch, &config),
+                        workgroups: codegen::workgroups_for(&program, dispatch, &config),
+                        heap_buffers: heap_buffers.clone(),
                     });
                     pipelines.len() - 1
                 });
             pipeline_of.push(index);
         }
 
-        Ok(WgpuProgram { ir: program.clone(), pipelines, pipeline_of })
+        Ok(WgpuProgram { ir: program, pipelines, pipeline_of })
     }
 
     fn invoke(
@@ -113,9 +148,16 @@ mod tests {
         let out = (a.clone() + a.clone()) + (a.clone() + a.clone());
         let program = lower(&a, &out).unwrap();
         let artifact = WgpuJit::default().lower(&program).unwrap();
-        assert_eq!(artifact.pipeline_of.len(), program.queue.len());
-        assert!(artifact.pipelines.len() < program.queue.len());
-        assert!(artifact.pipelines[0].wgsl.contains("@compute"));
+        assert_eq!(artifact.pipeline_of.len(), artifact.ir.queue.len());
+        // After arena packing, binding layout is heap-based; identical bodies still share.
+        assert!(
+            artifact.pipelines.len() <= artifact.ir.queue.len(),
+            "pipelines={} queue={}",
+            artifact.pipelines.len(),
+            artifact.ir.queue.len()
+        );
+        assert!(artifact.pipelines[0].wgsl.contains("heap_f32"));
+        assert!(artifact.pipelines[0].heap_buffers.len() <= 2);
     }
 }
 

@@ -45,9 +45,15 @@ pub struct BufferViewRef(pub usize);
 
 /// A compiled program: kernels to run in order, plus the buffer slots that
 /// correspond to the caller's parameter and output leaves (in tree-walk order).
+///
+/// **Params and sinks are both views.** After [`crate::ir::optimize::pack_arenas`],
+/// they typically address slices of a small number of arena buffers (one per
+/// element type). Sinks never need a private buffer of their own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    pub params: Vec<BufferRef>,
+    /// Dense views of caller-supplied inputs (tree-walk order).
+    pub params: Vec<BufferViewRef>,
+    /// Views of outputs to densify back to the host (tree-walk order).
     pub sinks: Vec<BufferViewRef>,
     pub queue: Vec<Dispatch>,
     pub buffers: Vec<Buffer>,
@@ -173,14 +179,9 @@ impl Program {
                 }
             }
         }
-        for r in &self.params {
-            if r.0 >= self.buffers.len() {
-                return Err(Error(format!("param buffer {} out of range", r.0)));
-            }
-        }
-        for r in &self.sinks {
+        for r in self.params.iter().chain(&self.sinks) {
             if r.0 >= self.views.len() {
-                return Err(Error(format!("sink view {} out of range", r.0)));
+                return Err(Error(format!("param/sink view {} out of range", r.0)));
             }
         }
         for (i, buffer) in self.buffers.iter().enumerate() {

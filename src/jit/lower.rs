@@ -34,8 +34,10 @@ pub fn lower(
         views: Vec::new(),
     };
     for tensor in params.leaves() {
-        let buffer = builder.buffer_for(tensor)?;
-        program.params.push(buffer);
+        // Params are dense views of their buffers so arena packing can place
+        // them as slices without a separate param-buffer identity.
+        let view = builder.view_for(tensor)?;
+        program.params.push(view);
     }
     for tensor in sinks.leaves() {
         let view = builder.view_for(tensor)?;

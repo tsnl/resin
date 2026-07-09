@@ -1,7 +1,8 @@
-//! WebGPU runtime: create buffers, bind, dispatch, read back.
+//! WebGPU runtime: create arena heaps, bind, dispatch, read back.
 //!
-//! Naive: each invoke rebuilds GPU objects from the lowered program. Only the
-//! device/queue pair is shared (and cached process-wide).
+//! After arena packing the IR has one buffer per element type. Each invoke
+//! allocates those few GPU buffers, uploads param **regions**, binds the heaps
+//! each shader needs (≤2), and densifies sink views back to the host.
 
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -64,49 +65,61 @@ pub fn run(
     outputs: &mut [&mut Array],
 ) -> Result<(), Error> {
     let ir = &program.ir;
-    let buffers: Vec<wgpu::Buffer> = ir
+    let usage = wgpu::BufferUsages::STORAGE
+        | wgpu::BufferUsages::COPY_DST
+        | wgpu::BufferUsages::COPY_SRC;
+
+    // One GPU buffer per arena (typically 1–2).
+    let mut host_shadow: Vec<Vec<u8>> = ir
         .buffers
         .iter()
         .map(|spec| {
-            let usage = wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC;
-            let size = byte_len(spec.len());
+            let size = byte_len(spec.len()) as usize;
             match &spec.init {
                 Some(init) => {
-                    let mut contents = buffer_data_to_bytes(init);
-                    contents.resize(size as usize, 0); // wgpu minimum size
-                    ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("resin-buffer"),
-                        contents: &contents,
-                        usage,
-                    })
+                    let mut bytes = buffer_data_to_bytes(init);
+                    bytes.resize(size, 0);
+                    bytes
                 }
-                None => ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("resin-buffer"),
-                    size,
-                    usage,
-                    mapped_at_creation: false,
-                }),
+                None => vec![0u8; size],
             }
         })
         .collect();
 
-    for (array, &buffer_ref) in params.iter().zip(&ir.params) {
-        let expected = ir.buffer(buffer_ref).len();
-        let expected_type = ir.buffer(buffer_ref).element_type;
-        if array.element_type() != expected_type {
+    // Paint param views into the arena shadows.
+    for (array, &param) in params.iter().zip(&ir.params) {
+        let view = ir.view(param);
+        let etype = ir.buffer(view.buffer).element_type;
+        if array.element_type() != etype {
             return Err(Error::ElementType {
-                expected: expected_type,
+                expected: etype,
                 got: array.element_type(),
             });
         }
-        if array.as_data().len() != expected {
-            return Err(Error::Size { expected, got: array.as_data().len() });
+        let count = element_count(&view.accessor.shape);
+        if array.as_data().len() != count {
+            return Err(Error::Size {
+                expected: count,
+                got: array.as_data().len(),
+            });
         }
-        ctx.queue
-            .write_buffer(&buffers[buffer_ref.0], 0, &array_data_to_bytes(array.as_data()));
+        write_dense_region(
+            &mut host_shadow[view.buffer.0],
+            &view.accessor,
+            array.as_data(),
+        )?;
     }
+
+    let buffers: Vec<wgpu::Buffer> = host_shadow
+        .iter()
+        .map(|bytes| {
+            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("resin-arena"),
+                contents: bytes,
+                usage,
+            })
+        })
+        .collect();
 
     let pipelines: Vec<wgpu::ComputePipeline> = program
         .pipelines
@@ -133,24 +146,29 @@ pub fn run(
 
     for (dispatch, &pipeline_index) in ir.queue.iter().zip(&program.pipeline_of) {
         let spec = &program.pipelines[pipeline_index];
-        // Scatter remaps write sparsely into a cleared target (matches CPU).
+        // Scatter remaps write sparsely into a cleared **region** of the arena.
         if let Kernel::Remap { info } = &dispatch.kernel
             && info.is_scatter()
         {
-            let out_buf = &buffers[ir.view(dispatch.output).buffer.0];
-            let nbytes = byte_len(ir.buffer(ir.view(dispatch.output).buffer).len());
-            encoder.clear_buffer(out_buf, 0, Some(nbytes));
+            clear_dense_region_gpu(
+                ctx,
+                &mut encoder,
+                &buffers,
+                ir,
+                dispatch.output,
+            )?;
         }
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffers[ir.view(dispatch.output).buffer.0].as_entire_binding(),
-        }];
-        for (i, &arg) in dispatch.args.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: (i + 1) as u32,
-                resource: buffers[ir.view(arg).buffer.0].as_entire_binding(),
-            });
-        }
+
+        let entries: Vec<wgpu::BindGroupEntry> = spec
+            .heap_buffers
+            .iter()
+            .enumerate()
+            .map(|(i, &buf)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: buffers[buf.0].as_entire_binding(),
+            })
+            .collect();
+
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("resin-bind-group"),
             layout: &pipelines[pipeline_index].get_bind_group_layout(0),
@@ -174,7 +192,8 @@ pub fn run(
     for (array, &sink) in outputs.iter_mut().zip(&ir.sinks) {
         let view = ir.view(sink);
         let etype = ir.buffer(view.buffer).element_type;
-        let raw = read_buffer(ctx, &buffers[view.buffer.0], byte_len(ir.buffer(view.buffer).len()))?;
+        let arena_len = ir.buffer(view.buffer).len();
+        let raw = read_buffer(ctx, &buffers[view.buffer.0], byte_len(arena_len))?;
         match (etype, array.as_data_mut()) {
             (ElementType::F32, ArrayData::F32(dst)) => {
                 densify_f32(&bytes_to_f32s(&raw), &view.accessor, dst)?;
@@ -193,6 +212,64 @@ pub fn run(
     Ok(())
 }
 
+/// Zero a dense output view inside its arena (byte-ranged clear).
+fn clear_dense_region_gpu(
+    ctx: &Context,
+    encoder: &mut wgpu::CommandEncoder,
+    buffers: &[wgpu::Buffer],
+    ir: &crate::ir::Program,
+    output: crate::ir::BufferViewRef,
+) -> Result<(), Error> {
+    let view = ir.view(output);
+    let acc = &view.accessor;
+    // Dense view: contiguous element range [offset, offset+count).
+    if !acc.is_dense() {
+        return Err(Error::Wgpu("scatter clear requires dense output view".into()));
+    }
+    let count = element_count(&acc.shape) as u64;
+    let offset_bytes = (acc.offset as u64) * 4;
+    let size_bytes = count * 4;
+    if size_bytes > 0 {
+        encoder.clear_buffer(&buffers[view.buffer.0], offset_bytes, Some(size_bytes));
+    }
+    let _ = ctx;
+    Ok(())
+}
+
+fn write_dense_region(
+    shadow: &mut [u8],
+    accessor: &Accessor,
+    data: &ArrayData,
+) -> Result<(), Error> {
+    let count = element_count(&accessor.shape);
+    if data.len() != count {
+        return Err(Error::Size {
+            expected: count,
+            got: data.len(),
+        });
+    }
+    let mut coords = vec![0; accessor.rank()];
+    match data {
+        ArrayData::F32(src) => {
+            for (linear, &value) in src.iter().enumerate() {
+                decode(linear, &accessor.shape, &mut coords);
+                let i = accessor.index(&coords);
+                let bytes = value.to_le_bytes();
+                shadow[i * 4..i * 4 + 4].copy_from_slice(&bytes);
+            }
+        }
+        ArrayData::U32(src) => {
+            for (linear, &value) in src.iter().enumerate() {
+                decode(linear, &accessor.shape, &mut coords);
+                let i = accessor.index(&coords);
+                let bytes = value.to_le_bytes();
+                shadow[i * 4..i * 4 + 4].copy_from_slice(&bytes);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn byte_len(elements: usize) -> u64 {
     (elements as u64 * 4).max(4)
 }
@@ -204,35 +281,25 @@ fn buffer_data_to_bytes(data: &BufferData) -> Vec<u8> {
     }
 }
 
-fn array_data_to_bytes(data: &ArrayData) -> Vec<u8> {
-    match data {
-        ArrayData::F32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-        ArrayData::U32(v) => v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-    }
-}
-
-fn bytes_to_f32s(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(4)
+fn bytes_to_f32s(raw: &[u8]) -> Vec<f32> {
+    raw.chunks_exact(4)
         .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
         .collect()
 }
 
-fn bytes_to_u32s(bytes: &[u8]) -> Vec<u32> {
-    bytes
-        .chunks_exact(4)
+fn bytes_to_u32s(raw: &[u8]) -> Vec<u32> {
+    raw.chunks_exact(4)
         .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
         .collect()
 }
 
 fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8>, Error> {
     let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("resin-read-staging"),
+        label: Some("resin-readback"),
         size,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-
     let mut encoder = ctx
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("resin-read") });
@@ -244,14 +311,14 @@ fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    let _ = ctx.device.poll(wgpu::Maintain::Wait);
+    ctx.device.poll(wgpu::Maintain::Wait);
     receiver
         .recv()
-        .map_err(|_| Error::Wgpu("buffer map callback dropped".into()))?
-        .map_err(|e| Error::Wgpu(format!("buffer map failed: {e:?}")))?;
-
-    let mapped = slice.get_mapped_range();
-    Ok(mapped.to_vec())
+        .map_err(|_| Error::Wgpu("readback channel closed".into()))?
+        .map_err(|e| Error::Wgpu(format!("map_async: {e}")))?;
+    let data = slice.get_mapped_range().to_vec();
+    staging.unmap();
+    Ok(data)
 }
 
 fn densify_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
@@ -261,11 +328,7 @@ fn densify_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(
     }
     let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
-        let mut rem = linear;
-        for axis in (0..accessor.rank()).rev() {
-            coords[axis] = rem % accessor.shape[axis];
-            rem /= accessor.shape[axis];
-        }
+        decode(linear, &accessor.shape, &mut coords);
         *slot = buffer[accessor.index(&coords)];
     }
     Ok(())
@@ -278,12 +341,17 @@ fn densify_u32(buffer: &[u32], accessor: &Accessor, out: &mut [u32]) -> Result<(
     }
     let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
-        let mut rem = linear;
-        for axis in (0..accessor.rank()).rev() {
-            coords[axis] = rem % accessor.shape[axis];
-            rem /= accessor.shape[axis];
-        }
+        decode(linear, &accessor.shape, &mut coords);
         *slot = buffer[accessor.index(&coords)];
     }
     Ok(())
+}
+
+fn decode(linear: usize, shape: &[usize], coords: &mut [usize]) {
+    debug_assert_eq!(coords.len(), shape.len());
+    let mut rem = linear;
+    for axis in (0..shape.len()).rev() {
+        coords[axis] = rem % shape[axis];
+        rem /= shape[axis];
+    }
 }
