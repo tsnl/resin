@@ -12,7 +12,7 @@ fn run(program: &Program, params: &[&Array]) -> Vec<Vec<f32>> {
     let mut outputs: Vec<Array> = program
         .sinks
         .iter()
-        .map(|&sink| Array::zeros(&program.view(sink).accessor.shape()))
+        .map(|&sink| Array::zeros(&program.view(sink).accessor.shape))
         .collect();
     let mut output_refs: Vec<&mut Array> = outputs.iter_mut().collect();
     CpuJit.invoke(&artifact, params, &mut output_refs).expect("run");

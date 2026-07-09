@@ -11,12 +11,12 @@
 //!
 //! # Dense kernel outputs
 //!
-//! Every dispatch's **output** is [`Accessor::Dense`] (C-contiguous in element
-//! units). Shape and pitch count **elements**, not bytes.
+//! Every dispatch's **output** is C-contiguous ([`Accessor::is_dense`]). Shape
+//! and pitch count **elements**, not bytes.
 //!
-//! **Arguments** may use any accessor (broadcast, transpose, strided gather,
-//! …). Layout conversion into a denser domain is always **read non-dense →
-//! write dense** (a materializing copy when needed), never a non-dense store.
+//! **Arguments** may use any accessor (broadcast, transpose, …). Layout
+//! conversion into a denser domain is always **read non-dense → write dense**
+//! (a materializing copy when needed), never a non-dense store.
 //!
 //! Lowering already emits dense outputs; passes must preserve the rule.
 //! [`Program::validate`] rejects any dispatch that does not.
@@ -75,8 +75,7 @@ pub struct BufferView {
 
 /// One kernel invocation: read `args`, write `output`.
 ///
-/// `output` must be [`Accessor::Dense`] (see module-level dense-output law).
-/// `args` may be non-dense.
+/// `output` must be C-contiguous ([`Accessor::is_dense`]); `args` may not be.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dispatch {
     pub kernel: Kernel,
@@ -115,7 +114,7 @@ impl Program {
 
     /// Shape of a dispatch's iteration space (its output view's shape).
     pub fn output_shape(&self, dispatch: &Dispatch) -> Box<[usize]> {
-        self.view(dispatch.output).accessor.shape()
+        self.view(dispatch.output).accessor.shape.clone()
     }
 
     pub fn validate(&self) -> Result<(), Error> {
@@ -123,20 +122,19 @@ impl Program {
             if view.buffer.0 >= self.buffers.len() {
                 return Err(Error(format!("view {i} buffer {} out of range", view.buffer.0)));
             }
-            let strided = view.accessor.strided();
-            if strided.shape.len() != strided.pitch.len() {
+            let a = &view.accessor;
+            if a.shape.len() != a.pitch.len() {
                 return Err(Error(format!(
                     "view {i} shape {:?} and pitch {:?} rank mismatch",
-                    strided.shape, strided.pitch
+                    a.shape, a.pitch
                 )));
             }
             // Backends index through views unchecked; prove them in bounds here.
-            if element_count(&strided.shape) > 0 {
-                let max_index = strided.offset
-                    + strided
-                        .shape
+            if element_count(&a.shape) > 0 {
+                let max_index = a.offset
+                    + a.shape
                         .iter()
-                        .zip(&strided.pitch)
+                        .zip(&a.pitch)
                         .map(|(&d, &p)| (d - 1) * p)
                         .sum::<usize>();
                 let len = self.buffer(view.buffer).len();
@@ -186,8 +184,8 @@ impl Program {
         if !self.view(dispatch.output).accessor.is_dense() {
             return Err(Error("kernel output must be dense".into()));
         }
-        let out_shape = self.view(dispatch.output).accessor.shape();
-        let arg_shape = |i: usize| self.view(dispatch.args[i]).accessor.shape();
+        let out_shape = self.view(dispatch.output).accessor.shape.clone();
+        let arg_shape = |i: usize| self.view(dispatch.args[i]).accessor.shape.clone();
 
         match &dispatch.kernel {
             Kernel::Elementwise { expr } => {
@@ -198,8 +196,8 @@ impl Program {
                     ));
                 }
                 for (i, &r) in dispatch.args.iter().enumerate() {
-                    let shape = self.view(r).accessor.shape();
-                    if shape != out_shape {
+                    let shape = &self.view(r).accessor.shape;
+                    if shape != &out_shape {
                         return Err(Error(format!(
                             "elementwise arg {i} shape {shape:?} != output shape {out_shape:?}"
                         )));
@@ -380,10 +378,14 @@ mod tests {
         let a = push_buffer(&mut p, &[2, 3]);
         let out = push_buffer(&mut p, &[2, 3]);
         let va = dense_view(&mut p, a);
-        // Transposed write view — valid as a *read*, not as a kernel output.
+        // Non-C-contiguous write view (pitch ≠ dense_pitch) — invalid as output.
         p.views.push(BufferView {
             buffer: out,
-            accessor: Accessor::dense([3, 2], 0).transpose().unwrap(),
+            accessor: Accessor {
+                offset: 0,
+                shape: Box::from([2, 3]),
+                pitch: Box::from([1, 2]),
+            },
         });
         let vout = BufferViewRef(p.views.len() - 1);
         p.queue.push(Dispatch {

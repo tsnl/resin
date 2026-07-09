@@ -21,7 +21,7 @@ impl Default for KernelConfig {
 }
 
 pub fn workgroups(out: &Accessor, config: &KernelConfig) -> [u32; 3] {
-    let count = element_count(&out.shape()) as u64;
+    let count = element_count(&out.shape) as u64;
     if count == 0 {
         return [0, 1, 1];
     }
@@ -88,9 +88,8 @@ fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
 /// Inline address expression: `offset + Σ coordᵢ · pitchᵢ` (zero-pitch terms
 /// dropped, so broadcasts read one address).
 fn address(accessor: &Accessor, coords: &[String]) -> String {
-    let s = accessor.strided();
-    let mut expr = format!("{}u", s.offset);
-    for (coord, &pitch) in coords.iter().zip(&s.pitch) {
+    let mut expr = format!("{}u", accessor.offset);
+    for (coord, &pitch) in coords.iter().zip(&accessor.pitch) {
         if pitch != 0 {
             expr.push_str(&format!(" + {coord} * {pitch}u"));
         }
@@ -106,7 +105,7 @@ fn per_output_element(
     config: &KernelConfig,
     body: impl FnOnce(&mut Writer, &[String]),
 ) {
-    let count = element_count(&out.shape());
+    let count = element_count(&out.shape);
     let items = 1u32 << config.lg2_items_per_thread;
     w.block(
         &format!(
@@ -128,7 +127,7 @@ fn per_output_element(
                 &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
                 |w| {
                     w.block("if (lin >= count)", |w| w.print("return;"));
-                    let coords = emit_decode(w, &out.shape(), "lin");
+                    let coords = emit_decode(w, &out.shape, "lin");
                     body(w, &coords);
                 },
             );
@@ -214,7 +213,7 @@ fn spell_op(op: Op, args: &[String]) -> String {
 
 fn emit_matmul(w: &mut Writer, args: &[&Accessor], out: &Accessor, config: &KernelConfig) {
     let rank = out.rank();
-    let k = args[0].shape()[rank - 1];
+    let k = args[0].shape[rank - 1];
     per_output_element(w, out, config, |w, coords| {
         // A reads [batch…, i, t]; B reads [batch…, t, j].
         let mut a_coords = coords.to_vec();
@@ -245,7 +244,7 @@ fn emit_reduction(
     let input = args[0];
     let mut sorted_axes: Vec<usize> = axes.to_vec();
     sorted_axes.sort_unstable();
-    let count: usize = sorted_axes.iter().map(|&axis| input.shape()[axis]).product();
+    let count: usize = sorted_axes.iter().map(|&axis| input.shape[axis]).product();
 
     per_output_element(w, out, config, |w, coords| {
         w.print(&format!("var acc: f32 = {};", identity_literal(op)));
@@ -255,7 +254,7 @@ fn emit_reduction(
             let mut in_coords = coords.to_vec();
             let mut stride = 1;
             for &axis in sorted_axes.iter().rev() {
-                let dim = input.shape()[axis];
+                let dim = input.shape[axis];
                 in_coords[axis] = format!("r{axis}");
                 w.print(&format!("let r{axis} = (ri / {stride}u) % {dim}u;"));
                 stride *= dim;

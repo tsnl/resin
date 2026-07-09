@@ -232,7 +232,7 @@ mod tests {
 
         let dispatch = &program.queue[0];
         assert!(matches!(dispatch.kernel, Kernel::Reduction { .. }));
-        assert_eq!(&*program.view(dispatch.args[0]).accessor.shape(), &[8, 10]);
+        assert_eq!(&*program.view(dispatch.args[0]).accessor.shape, &[8, 10]);
         assert_eq!(&*program.output_shape(dispatch), &[1, 10]);
     }
 
@@ -243,8 +243,8 @@ mod tests {
         let program = lower(&w, &out).unwrap();
 
         let arg1 = program.view(program.queue[0].args[1]);
-        assert_eq!(&*arg1.accessor.shape(), &[4, 3]);
-        assert_eq!(&*arg1.accessor.strided().pitch, &[0, 0]);
+        assert_eq!(&*arg1.accessor.shape, &[4, 3]);
+        assert_eq!(&*arg1.accessor.pitch, &[0, 0]);
     }
 
     #[test]
@@ -256,8 +256,8 @@ mod tests {
         assert_eq!(program.queue.len(), 0, "broadcast must not enqueue a kernel");
         assert_eq!(program.buffers.len(), 1);
         let sink = program.view(program.sinks[0]);
-        assert_eq!(&*sink.accessor.shape(), &[2, 3]);
-        assert_eq!(&*sink.accessor.strided().pitch, &[0, 1]);
+        assert_eq!(&*sink.accessor.shape, &[2, 3]);
+        assert_eq!(&*sink.accessor.pitch, &[0, 1]);
     }
 
     #[test]
@@ -268,8 +268,8 @@ mod tests {
 
         assert_eq!(program.queue.len(), 0);
         let sink = program.view(program.sinks[0]);
-        assert_eq!(&*sink.accessor.shape(), &[3, 2]);
-        assert_eq!(&*sink.accessor.strided().pitch, &[1, 3]);
+        assert_eq!(&*sink.accessor.shape, &[3, 2]);
+        assert_eq!(&*sink.accessor.pitch, &[1, 3]);
     }
 
     #[test]
@@ -279,7 +279,7 @@ mod tests {
         let program = lower(&a, &out).unwrap();
 
         assert_eq!(program.queue.len(), 0);
-        assert_eq!(&*program.view(program.sinks[0]).accessor.shape(), &[4]);
+        assert_eq!(&*program.view(program.sinks[0]).accessor.shape, &[4]);
     }
 
     #[test]
@@ -296,8 +296,8 @@ mod tests {
         assert!(matches!(program.queue[0].kernel, Kernel::Matmul));
 
         let bias_arg = program.view(program.queue[1].args[1]);
-        assert_eq!(&*bias_arg.accessor.shape(), &[2, 3]);
-        assert_eq!(&*bias_arg.accessor.strided().pitch, &[0, 1]);
+        assert_eq!(&*bias_arg.accessor.shape, &[2, 3]);
+        assert_eq!(&*bias_arg.accessor.pitch, &[0, 1]);
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod tests {
 
         assert_eq!(program.queue.len(), 1, "transpose is a view on b");
         let b_arg = program.view(program.queue[0].args[1]);
-        assert_eq!(&*b_arg.accessor.shape(), &[4, 3]);
-        assert_eq!(&*b_arg.accessor.strided().pitch, &[1, 4]);
+        assert_eq!(&*b_arg.accessor.shape, &[4, 3]);
+        assert_eq!(&*b_arg.accessor.pitch, &[1, 4]);
     }
 }

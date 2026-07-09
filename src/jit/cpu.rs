@@ -2,12 +2,12 @@
 //!
 //! Kernels consume views (buffer + accessor) directly: broadcast, transpose,
 //! and squeeze are pitch tricks, never densifying copies. The artifact is the
-//! validated IR program itself. Hot loops use materialised [`Strided`] maps so
-//! indexing does not re-walk the accessor tree per element.
+//! validated IR program itself. Hot loops clone each view's [`Accessor`] once
+//! so indexing does not re-walk shared structure per element.
 
 use super::{Array, Error, Jit};
 use crate::ir::{
-    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, Strided, element_count,
+    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, element_count,
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -64,13 +64,13 @@ impl Jit for CpuJit {
 fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]) {
     let out_view = program.view(dispatch.output);
     let out_buffer = out_view.buffer.0;
-    let out = out_view.accessor.strided();
-    let args: Vec<(usize, Strided)> = dispatch
+    let out = out_view.accessor.clone();
+    let args: Vec<(usize, Accessor)> = dispatch
         .args
         .iter()
         .map(|&r| {
             let view = program.view(r);
-            (view.buffer.0, view.accessor.strided())
+            (view.buffer.0, view.accessor.clone())
         })
         .collect();
 
@@ -79,7 +79,6 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
 
     match &dispatch.kernel {
         Kernel::Elementwise { expr } => {
-            // Materialise each free load once; the tree indexes this table.
             let loads = resolve_loads(expr, program);
             for linear in 0..count {
                 decode(linear, &out.shape, &mut coords);
@@ -129,46 +128,45 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
     }
 }
 
-/// Buffer + affine map for each free load in `expr` (one strided() per view).
-fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, Strided)> {
+/// Buffer + accessor for each free load in `expr` (cloned once per view).
+fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, Accessor)> {
     expr.loads()
         .into_iter()
         .map(|r| {
             let view = program.view(r);
-            (r, view.buffer.0, view.accessor.strided())
+            (r, view.buffer.0, view.accessor.clone())
         })
         .collect()
 }
 
 /// Densify a view into a row-major host slice (sink readback).
 fn gather(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
-    let s = accessor.strided();
-    let count = element_count(&s.shape);
+    let count = element_count(&accessor.shape);
     if out.len() != count {
         return Err(Error::Size { expected: count, got: out.len() });
     }
-    let mut coords = vec![0; s.rank()];
+    let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
-        decode(linear, &s.shape, &mut coords);
-        *slot = buffer[s.index(&coords)];
+        decode(linear, &accessor.shape, &mut coords);
+        *slot = buffer[accessor.index(&coords)];
     }
     Ok(())
 }
 
-/// Evaluate an elementwise expression at `coords` using pre-materialised loads.
+/// Evaluate an elementwise expression at `coords` using pre-cloned loads.
 fn eval_expr(
     expr: &Expr,
-    loads: &[(BufferViewRef, usize, Strided)],
+    loads: &[(BufferViewRef, usize, Accessor)],
     storage: &[Vec<f32>],
     coords: &[usize],
 ) -> f32 {
     match expr {
         Expr::Load(view) => {
-            let (_, buffer, strided) = loads
+            let (_, buffer, accessor) = loads
                 .iter()
                 .find(|(r, _, _)| r == view)
                 .expect("load is a free load of the expression");
-            storage[*buffer][strided.index(coords)]
+            storage[*buffer][accessor.index(coords)]
         }
         Expr::Op { op, args } => {
             let mut vals = [0.0f32; 2];

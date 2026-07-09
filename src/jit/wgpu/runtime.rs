@@ -210,19 +210,18 @@ fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8
 /// Densify a pitched view into a row-major host slice (same semantics as the
 /// CPU backend's sink gather).
 fn densify(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
-    let s = accessor.strided();
-    let count = element_count(&s.shape);
+    let count = element_count(&accessor.shape);
     if out.len() != count {
         return Err(Error::Size { expected: count, got: out.len() });
     }
-    let mut coords = vec![0; s.rank()];
+    let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
         let mut rem = linear;
-        for axis in (0..s.rank()).rev() {
-            coords[axis] = rem % s.shape[axis];
-            rem /= s.shape[axis];
+        for axis in (0..accessor.rank()).rev() {
+            coords[axis] = rem % accessor.shape[axis];
+            rem /= accessor.shape[axis];
         }
-        *slot = buffer[s.index(&coords)];
+        *slot = buffer[accessor.index(&coords)];
     }
     Ok(())
 }

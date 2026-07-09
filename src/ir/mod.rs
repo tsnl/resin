@@ -5,18 +5,19 @@
 //! - [`program`] — buffers, views, dispatches, kernels, validation; elementwise
 //!   bodies live in [`program::expr`]
 //! - [`accessor`] — strided addressing (broadcast / transpose / squeeze)
-//! - [`optimize`] — IR→IR passes (kernel fusion, tiling, …)
+//! - [`optimize`] — IR→IR passes (kernel fusion, …)
 //!
 //! Invariants (enforced by [`Program::validate`]):
 //!
-//! - **Dense kernel outputs** — every dispatch writes through
-//!   [`Accessor::Dense`]. Args may be non-dense; see [`program`].
+//! - **Dense kernel outputs** — every dispatch writes a C-contiguous
+//!   [`Accessor`] ([`Accessor::is_dense`]). Args may be non-dense; see
+//!   [`program`].
 
 mod accessor;
 pub mod optimize;
 mod program;
 
-pub use accessor::{Accessor, Strided, dense_pitch, element_count};
+pub use accessor::{Accessor, dense_pitch, element_count};
 pub use program::{
     Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Error, Expr, Kernel, Program,
 };

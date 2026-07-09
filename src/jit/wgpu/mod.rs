@@ -86,7 +86,7 @@ impl Jit for WgpuJit {
 fn ensure_fits_u32(program: &Program) -> Result<(), Error> {
     let too_big = program.buffers.iter().any(|b| b.len() > u32::MAX as usize)
         || program.views.iter().any(|v| {
-            let a = v.accessor.strided();
+            let a = &v.accessor;
             a.offset > u32::MAX as usize
                 || a.shape.iter().any(|&d| d > u32::MAX as usize)
                 || a.pitch.iter().any(|&p| p > u32::MAX as usize)
