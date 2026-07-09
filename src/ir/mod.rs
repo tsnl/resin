@@ -8,11 +8,11 @@
 //! iteration space.
 
 mod accessor;
+mod expr;
 pub mod optimize;
-mod rpn;
 
 pub use accessor::{Accessor, dense_pitch, element_count};
-pub use rpn::{RpnAtom, RpnExpr};
+pub use expr::Expr;
 
 use crate::ops::AssocOp;
 
@@ -70,9 +70,10 @@ pub struct Dispatch {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kernel {
-    /// Per-element RPN expression over the args, evaluated at every
-    /// coordinate of the output view. Arg views must match the output shape.
-    Elementwise(RpnExpr),
+    /// Per-element expression over loads, evaluated at every coordinate of
+    /// the output view. Load views must match the output shape; `args` is the
+    /// free-load list of the expression (binding order for backends).
+    Elementwise(Expr),
     /// `args[0] @ args[1]` with matching batch dims.
     Matmul,
     /// Fold `args[0]` with `op` along `axes` (keepdims: output has size 1 there).
@@ -161,8 +162,13 @@ impl Program {
         let arg = |i: usize| &self.view(dispatch.args[i]).accessor;
 
         match &dispatch.kernel {
-            Kernel::Elementwise(rpn) => {
-                rpn.validate(dispatch.args.len())?;
+            Kernel::Elementwise(expr) => {
+                expr.validate()?;
+                if expr.loads() != dispatch.args {
+                    return Err(Error(
+                        "elementwise args must be the free loads of the expression".into(),
+                    ));
+                }
                 for (i, &r) in dispatch.args.iter().enumerate() {
                     let shape = &self.view(r).accessor.shape;
                     if shape != &out.shape {
@@ -277,7 +283,7 @@ mod tests {
             dense_view(&mut p, out),
         );
         p.queue.push(Dispatch {
-            kernel: Kernel::Elementwise(RpnExpr::apply_op(Op::ADD, 2)),
+            kernel: Kernel::Elementwise(Expr::apply_op(Op::ADD, [va, vb])),
             args: vec![va, vb],
             output: vout,
         });
@@ -291,7 +297,7 @@ mod tests {
         let out = push_buffer(&mut p, &[3, 2]);
         let (va, vout) = (dense_view(&mut p, a), dense_view(&mut p, out));
         p.queue.push(Dispatch {
-            kernel: Kernel::Elementwise(RpnExpr::apply_op(Op::NEG, 1)),
+            kernel: Kernel::Elementwise(Expr::apply_op(Op::NEG, [va])),
             args: vec![va],
             output: vout,
         });

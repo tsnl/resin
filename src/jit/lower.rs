@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use super::Error;
 use crate::dsl::{Tensor, TensorKind};
 use crate::ir::{
-    Accessor, Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Kernel, Program, RpnExpr,
+    Accessor, Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program,
 };
 use crate::tree::Tree;
 
@@ -81,8 +81,10 @@ impl Builder {
                         Ok(self.intern_view(buffer, aligned))
                     })
                     .collect::<Result<Vec<_>, Error>>()?;
-                let kernel = Kernel::Elementwise(RpnExpr::apply_op(*op, args.len()));
-                self.push_dispatch(tensor.shape(), kernel, arg_views)
+                let expr = Expr::apply_op(*op, arg_views.iter().copied());
+                // Binding list is free loads (deduped); the tree may load one view twice.
+                let loads = expr.loads();
+                self.push_dispatch(tensor.shape(), Kernel::Elementwise(expr), loads)
             }
             TensorKind::Matmul { lhs, rhs } => {
                 let args = vec![self.view_for(lhs)?, self.view_for(rhs)?];
@@ -192,7 +194,6 @@ fn broadcast_axes(
 mod tests {
     use super::*;
     use crate::ops::Op;
-    use crate::ir::RpnAtom;
 
     #[derive(resin_macros::Tree)]
     struct Pair<T> {
@@ -220,10 +221,13 @@ mod tests {
 
         assert_eq!(program.buffers.len(), 2);
         assert_eq!(program.queue.len(), 1);
-        let Kernel::Elementwise(rpn) = &program.queue[0].kernel else {
+        let Kernel::Elementwise(expr) = &program.queue[0].kernel else {
             panic!("expected elementwise");
         };
-        assert!(matches!(rpn.atoms.last(), Some(RpnAtom::Op(Op::ADD))));
+        assert!(matches!(expr, Expr::Op { op: Op::ADD, .. }));
+        // Same view loaded twice; free-load list collapses to one arg.
+        assert_eq!(expr.loads().len(), 1);
+        assert_eq!(program.queue[0].args.len(), 1);
     }
 
     #[test]

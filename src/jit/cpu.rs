@@ -5,7 +5,7 @@
 //! validated IR program itself.
 
 use super::{Array, Error, Jit};
-use crate::ir::{Accessor, Dispatch, Kernel, Program, RpnAtom, element_count};
+use crate::ir::{Accessor, Dispatch, Expr, Kernel, Program, element_count};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CpuJit;
@@ -74,26 +74,11 @@ fn run_dispatch(program: &Program, dispatch: &Dispatch, storage: &mut [Vec<f32>]
     let mut coords = vec![0; out.rank()];
 
     match &dispatch.kernel {
-        Kernel::Elementwise(rpn) => {
-            let mut stack = Vec::with_capacity(rpn.atoms.len());
+        Kernel::Elementwise(expr) => {
             for linear in 0..count {
                 decode(linear, &out.shape, &mut coords);
-                stack.clear();
-                for atom in &rpn.atoms {
-                    match atom {
-                        RpnAtom::Arg(i) => {
-                            let (buffer, accessor) = &args[*i as usize];
-                            stack.push(storage[*buffer][accessor.index(&coords)]);
-                        }
-                        RpnAtom::Op(op) => {
-                            let operands = stack.len() - op.arity();
-                            let value = op.apply(&stack[operands..]);
-                            stack.truncate(operands);
-                            stack.push(value);
-                        }
-                    }
-                }
-                storage[out_buffer][out.index(&coords)] = stack[0];
+                let value = eval_expr(expr, program, storage, &coords);
+                storage[out_buffer][out.index(&coords)] = value;
             }
         }
 
@@ -150,6 +135,28 @@ fn gather(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Er
         *slot = buffer[accessor.index(&coords)];
     }
     Ok(())
+}
+
+/// Evaluate an elementwise expression at `coords`.
+fn eval_expr(
+    expr: &Expr,
+    program: &Program,
+    storage: &[Vec<f32>],
+    coords: &[usize],
+) -> f32 {
+    match expr {
+        Expr::Load(view) => {
+            let view = program.view(*view);
+            storage[view.buffer.0][view.accessor.index(coords)]
+        }
+        Expr::Op { op, args } => {
+            let mut vals = [0.0f32; 2];
+            for (i, arg) in args.iter().enumerate() {
+                vals[i] = eval_expr(arg, program, storage, coords);
+            }
+            op.apply(&vals[..op.arity()])
+        }
+    }
 }
 
 /// Row-major linear index → coordinates.
