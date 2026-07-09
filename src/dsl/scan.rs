@@ -66,8 +66,17 @@ pub fn shift_axis(x: &Tensor, axis: usize, offset: usize, fill: &Tensor) -> Tens
 /// Inclusive scan of `x` along `axis` with a user-traced binary operator.
 ///
 /// `op` must be associative with identity element `identity` (a scalar
-/// tensor); it is called `⌈log₂ n⌉` times at trace time to build the unrolled
-/// graph. Gradients flow through whatever graph `op` builds.
+/// tensor) — a monoid. Commutativity and inverses are not required. The
+/// closure is called once per doubling step at trace time to build the
+/// unrolled graph; gradients flow through whatever graph `op` builds.
+///
+/// **Implementation:** Hillis–Steele (shift-by-stride + combine), unrolled into
+/// existing ops. Work is O(n log n).
+///
+/// TODO: swap the unroll under the hood for work-efficient Blelloch
+/// (upsweep + downsweep) under the same monoid contract — same API, no inverse
+/// operator. Real O(n) work needs shrinking/expanding intermediate shapes, not
+/// n-wide masked kernels at every level.
 pub fn scan(
     x: &Tensor,
     axis: usize,
