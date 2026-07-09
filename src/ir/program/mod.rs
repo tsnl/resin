@@ -4,7 +4,8 @@
 //! a [`BufferView`] — a buffer plus an [`Accessor`] — so broadcast, transpose,
 //! and squeeze are pitch tricks rather than copies. A [`Dispatch`] pairs a
 //! [`Kernel`] with its argument views and one output view; the output view's
-//! shape is the kernel's iteration space.
+//! shape is the kernel's iteration space (except scatter remaps, which iterate
+//! the source).
 //!
 //! Elementwise bodies are [`Expr`] trees ([`expr`]) whose leaves are stable
 //! [`BufferViewRef`]s.
@@ -26,7 +27,8 @@ mod expr;
 pub use expr::Expr;
 
 use super::accessor::{Accessor, element_count};
-use crate::ops::AssocOp;
+use super::remap::RemapInfo;
+use crate::ops::{AssocOp, ElementType};
 
 /// Invalid-IR error. The message is the diagnostic; there is no error taxonomy.
 #[derive(Debug, thiserror::Error)]
@@ -52,11 +54,35 @@ pub struct Program {
     pub views: Vec<BufferView>,
 }
 
-/// One flat f32 buffer. `init` marks a constant with its contents.
+/// Host-side constant payload for a buffer (typed).
+#[derive(Debug, Clone, PartialEq)]
+pub enum BufferData {
+    F32(Box<[f32]>),
+    U32(Box<[u32]>),
+}
+
+impl BufferData {
+    pub fn len(&self) -> usize {
+        match self {
+            BufferData::F32(v) => v.len(),
+            BufferData::U32(v) => v.len(),
+        }
+    }
+
+    pub fn element_type(&self) -> ElementType {
+        match self {
+            BufferData::F32(_) => ElementType::F32,
+            BufferData::U32(_) => ElementType::U32,
+        }
+    }
+}
+
+/// One flat buffer of homogeneous elements. `init` marks a constant.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Buffer {
     pub shape: Box<[usize]>,
-    pub init: Option<Box<[f32]>>,
+    pub element_type: ElementType,
+    pub init: Option<BufferData>,
 }
 
 impl Buffer {
@@ -94,6 +120,8 @@ pub enum Kernel {
     Matmul,
     /// Fold `args[0]` with `op` along `axes` (keepdims: output has size 1 there).
     Reduction { op: AssocOp, axes: Box<[usize]> },
+    /// Gather / scatter data movement (see [`RemapInfo`]).
+    Remap { info: RemapInfo },
 }
 
 impl Kernel {
@@ -112,7 +140,7 @@ impl Program {
         &self.views[r.0]
     }
 
-    /// Shape of a dispatch's iteration space (its output view's shape).
+    /// Shape of a dispatch's output buffer view.
     pub fn output_shape(&self, dispatch: &Dispatch) -> Box<[usize]> {
         self.view(dispatch.output).accessor.shape.clone()
     }
@@ -156,15 +184,22 @@ impl Program {
             }
         }
         for (i, buffer) in self.buffers.iter().enumerate() {
-            if let Some(init) = &buffer.init
-                && init.len() != buffer.len()
-            {
-                return Err(Error(format!(
-                    "buffer {i} init has {} elements, shape {:?} wants {}",
-                    init.len(),
-                    buffer.shape,
-                    buffer.len()
-                )));
+            if let Some(init) = &buffer.init {
+                if init.len() != buffer.len() {
+                    return Err(Error(format!(
+                        "buffer {i} init has {} elements, shape {:?} wants {}",
+                        init.len(),
+                        buffer.shape,
+                        buffer.len()
+                    )));
+                }
+                if init.element_type() != buffer.element_type {
+                    return Err(Error(format!(
+                        "buffer {i} init type {:?} != buffer type {:?}",
+                        init.element_type(),
+                        buffer.element_type
+                    )));
+                }
             }
         }
         for (i, dispatch) in self.queue.iter().enumerate() {
@@ -262,6 +297,102 @@ impl Program {
                     return Err(Error(format!("reduction axis {axis} out of range")));
                 }
             }
+            Kernel::Remap { info } => self.validate_remap(dispatch, info, &out_shape)?,
+        }
+        Ok(())
+    }
+
+    fn validate_remap(
+        &self,
+        dispatch: &Dispatch,
+        info: &RemapInfo,
+        out_shape: &[usize],
+    ) -> Result<(), Error> {
+        let out_etype = self.buffer(self.view(dispatch.output).buffer).element_type;
+        match info {
+            RemapInfo::GatherRows | RemapInfo::ScatterRows { .. } => {
+                if dispatch.args.len() != 2 {
+                    return Err(Error(format!(
+                        "remap {} takes 2 args, got {}",
+                        info.name(),
+                        dispatch.args.len()
+                    )));
+                }
+                let src = self.view(dispatch.args[0]);
+                let idx = self.view(dispatch.args[1]);
+                let idx_etype = self.buffer(idx.buffer).element_type;
+                if idx.accessor.rank() != 1 || idx_etype != ElementType::U32 {
+                    return Err(Error(format!(
+                        "remap indices must be rank-1 u32, got rank {} {:?}",
+                        idx.accessor.rank(),
+                        idx_etype
+                    )));
+                }
+                if src.accessor.rank() == 0 || out_shape.is_empty() {
+                    return Err(Error("remap source/output must have rank >= 1".into()));
+                }
+                if src.accessor.shape[1..] != out_shape[1..] {
+                    return Err(Error(format!(
+                        "remap row shape: source {:?} vs output {:?}",
+                        src.accessor.shape, out_shape
+                    )));
+                }
+                let src_etype = self.buffer(src.buffer).element_type;
+                if src_etype != out_etype {
+                    return Err(Error(format!(
+                        "remap source type {:?} != output {:?}",
+                        src_etype, out_etype
+                    )));
+                }
+                match info {
+                    RemapInfo::GatherRows => {
+                        if out_shape[0] != idx.accessor.shape[0] {
+                            return Err(Error(format!(
+                                "gather_rows: output rows {} != indices {}",
+                                out_shape[0], idx.accessor.shape[0]
+                            )));
+                        }
+                    }
+                    RemapInfo::ScatterRows { operator } => {
+                        if idx.accessor.shape[0] != src.accessor.shape[0] {
+                            return Err(Error(format!(
+                                "scatter_rows: indices {} != source rows {}",
+                                idx.accessor.shape[0], src.accessor.shape[0]
+                            )));
+                        }
+                        if let Some(op) = operator
+                            && *op != AssocOp::Add
+                        {
+                            return Err(Error(format!(
+                                "scatter_rows only supports Add accumulation, got {op:?}"
+                            )));
+                        }
+                    }
+                    RemapInfo::ScatterView { .. } => unreachable!(),
+                }
+            }
+            RemapInfo::ScatterView { accessor } => {
+                if dispatch.args.len() != 1 {
+                    return Err(Error(format!(
+                        "scatter_view takes 1 arg, got {}",
+                        dispatch.args.len()
+                    )));
+                }
+                let src = self.view(dispatch.args[0]);
+                if accessor.shape.as_ref() != src.accessor.shape.as_ref() {
+                    return Err(Error(format!(
+                        "scatter_view accessor shape {:?} != source {:?}",
+                        accessor.shape, src.accessor.shape
+                    )));
+                }
+                let src_etype = self.buffer(src.buffer).element_type;
+                if src_etype != out_etype {
+                    return Err(Error(format!(
+                        "scatter_view source type {:?} != output {:?}",
+                        src_etype, out_etype
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -292,7 +423,11 @@ mod tests {
     }
 
     fn push_buffer(program: &mut Program, shape: &[usize]) -> BufferRef {
-        program.buffers.push(Buffer { shape: shape.into(), init: None });
+        program.buffers.push(Buffer {
+            shape: shape.into(),
+            element_type: ElementType::F32,
+            init: None,
+        });
         BufferRef(program.buffers.len() - 1)
     }
 

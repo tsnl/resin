@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use super::{Tensor, TensorKind};
+use super::{ConstantData, IndexKeyElement, Remap, ScatterOp, Tensor, TensorKind};
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 
 /// Render `tensor` as a multi-line graph dump. Shared nodes print as `%id`
@@ -75,7 +75,7 @@ fn visit(
 fn headline(tensor: &Tensor) -> String {
     let kind = match tensor.kind() {
         TensorKind::Constant { values } => {
-            format!("constant(value={})", format_values(values, tensor.shape()))
+            format!("constant(value={})", format_constant(values, tensor.shape()))
         }
         TensorKind::Parameter => "parameter()".to_string(),
         TensorKind::Elementwise { op, .. } => format!("elementwise(op='{}')", op_name(*op)),
@@ -90,8 +90,42 @@ fn headline(tensor: &Tensor) -> String {
         ),
         TensorKind::Transpose { .. } => "transpose()".to_string(),
         TensorKind::Squeeze { axes, .. } => format!("squeeze(axes={})", tuple(axes)),
+        TensorKind::Index { key, .. } => format!("index(key={})", format_key(key)),
+        TensorKind::Remap(remap) => match remap {
+            Remap::GatherRows { .. } => "remap(gather_rows)".to_string(),
+            Remap::ScatterRows { op, .. } => {
+                format!("remap(scatter_rows, op='{}')", scatter_op_name(*op))
+            }
+            Remap::ScatterView { key, target_shape, .. } => format!(
+                "remap(scatter_view, key={}, target_shape={})",
+                format_key(key),
+                tuple(target_shape)
+            ),
+        },
     };
-    format!("{kind} :: f32{}", shape(tensor.shape()))
+    format!(
+        "{kind} :: {}{}",
+        tensor.element_type().name(),
+        shape(tensor.shape())
+    )
+}
+
+fn scatter_op_name(op: ScatterOp) -> &'static str {
+    match op {
+        ScatterOp::Write => "write",
+        ScatterOp::Add => "add",
+    }
+}
+
+fn format_key(key: &[IndexKeyElement]) -> String {
+    let parts: Vec<String> = key
+        .iter()
+        .map(|k| match k {
+            IndexKeyElement::Single(i) => i.to_string(),
+            IndexKeyElement::Slice(r) => format!("{}:{}", r.start, r.end),
+        })
+        .collect();
+    format!("({})", parts.join(", "))
 }
 
 fn op_name(op: Op) -> &'static str {
@@ -105,12 +139,27 @@ fn op_name(op: Op) -> &'static str {
             UnaryOp::Sqrt => "sqrt",
             UnaryOp::Sin => "sin",
             UnaryOp::Cos => "cos",
+            UnaryOp::Floor => "floor",
+            UnaryOp::Ceil => "ceil",
+            UnaryOp::Bitcast { .. } => "bitcast",
+            UnaryOp::Cast { .. } => "cast",
         },
         Op::Binary(op) => match op {
             BinaryOp::Assoc(op) => assoc_op_name(op),
             BinaryOp::Sub => "sub",
             BinaryOp::Div => "div",
             BinaryOp::Pow => "pow",
+            BinaryOp::CmpEq => "cmp_eq",
+            BinaryOp::CmpNe => "cmp_ne",
+            BinaryOp::CmpLt => "cmp_lt",
+            BinaryOp::CmpLe => "cmp_le",
+            BinaryOp::CmpGt => "cmp_gt",
+            BinaryOp::CmpGe => "cmp_ge",
+            BinaryOp::Band => "band",
+            BinaryOp::Bor => "bor",
+            BinaryOp::Bxor => "bxor",
+            BinaryOp::Shl => "shl",
+            BinaryOp::Shr => "shr",
         },
     }
 }
@@ -142,7 +191,19 @@ fn tuple(values: &[usize]) -> String {
     )
 }
 
-fn format_values(values: &[f32], shape: &[usize]) -> String {
+fn format_constant(values: &ConstantData, shape: &[usize]) -> String {
+    match values {
+        ConstantData::F32(v) => format_f32_values(v, shape),
+        ConstantData::U32(v) => {
+            if shape.is_empty() {
+                return format!("{}", v.first().copied().unwrap_or(0));
+            }
+            format!("{v:?}")
+        }
+    }
+}
+
+fn format_f32_values(values: &[f32], shape: &[usize]) -> String {
     if shape.is_empty() {
         return format!("{}", values.first().copied().unwrap_or(0.0));
     }

@@ -31,8 +31,7 @@
 //! assert_eq!(out.data(), &[11.0, 22.0]);
 //! ```
 //!
-//! Everything is f32 for now; more element types can return when a backend
-//! needs them.
+//! Element types are f32 (default) and u32 (indices, masks, bit packing).
 
 // Let the `Tree` derive refer to this crate as `resin` from within itself.
 extern crate self as resin;
@@ -44,6 +43,8 @@ pub mod jit;
 pub mod ops;
 pub mod tree;
 
+pub use dsl::{IndexKeyElement, ScatterOp};
+pub use ops::ElementType;
 pub use resin_macros::Tree;
 pub use tree::Tree;
 

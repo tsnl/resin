@@ -1,17 +1,22 @@
 //! Lower a traced DSL graph to an IR program.
 //!
 //! **Kernels write buffers; views are accessors.** Materializing nodes
-//! (constants, parameters, elementwise, matmul, reduction) allocate a buffer
-//! and enqueue a dispatch. View nodes (broadcast, transpose, squeeze) compose
-//! an [`Accessor`] over an existing buffer and cost nothing at run time.
+//! (constants, parameters, elementwise, matmul, reduction, remap) allocate a
+//! buffer and enqueue a dispatch. View nodes (broadcast, transpose, squeeze,
+//! index) compose an [`Accessor`] over an existing buffer and cost nothing at
+//! run time.
 
 use std::collections::HashMap;
 
 use super::Error;
-use crate::dsl::{Tensor, TensorKind};
-use crate::ir::{
-    Accessor, Buffer, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program,
+use crate::dsl::{
+    ConstantData, IndexKeyElement, Remap, ScatterOp, Tensor, TensorKind,
 };
+use crate::ir::{
+    Accessor, Buffer, BufferData, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel,
+    Program, RemapInfo,
+};
+use crate::ops::{AssocOp, ElementType};
 use crate::tree::Tree;
 
 /// Lower `sinks` (traced outputs) to an IR program whose parameter slots
@@ -62,14 +67,24 @@ impl Builder {
             return Ok(buffer);
         }
 
+        let etype = tensor.element_type();
         let buffer = match tensor.kind() {
-            TensorKind::Constant { values } => self.push_buffer(Buffer {
-                shape: tensor.shape().into(),
-                init: Some(values.clone()),
-            }),
-            TensorKind::Parameter => {
-                self.push_buffer(Buffer { shape: tensor.shape().into(), init: None })
+            TensorKind::Constant { values } => {
+                let init = match values {
+                    ConstantData::F32(v) => BufferData::F32(v.clone()),
+                    ConstantData::U32(v) => BufferData::U32(v.clone()),
+                };
+                self.push_buffer(Buffer {
+                    shape: tensor.shape().into(),
+                    element_type: etype,
+                    init: Some(init),
+                })
             }
+            TensorKind::Parameter => self.push_buffer(Buffer {
+                shape: tensor.shape().into(),
+                element_type: etype,
+                init: None,
+            }),
             TensorKind::Elementwise { op, args } => {
                 // Resolve each arg, then align it to the output shape
                 // (NumPy trailing broadcast) so the kernel iterates uniformly.
@@ -84,19 +99,55 @@ impl Builder {
                 let expr = Expr::new_op(*op, arg_views.iter().copied().map(Expr::Load));
                 // Binding list is free loads (deduped); the tree may load one view twice.
                 let loads = expr.loads();
-                self.push_dispatch(tensor.shape(), Kernel::elementwise(expr), loads)
+                self.push_dispatch(tensor.shape(), etype, Kernel::elementwise(expr), loads)
             }
             TensorKind::Matmul { lhs, rhs } => {
                 let args = vec![self.view_for(lhs)?, self.view_for(rhs)?];
-                self.push_dispatch(tensor.shape(), Kernel::Matmul, args)
+                self.push_dispatch(tensor.shape(), etype, Kernel::Matmul, args)
             }
             TensorKind::Reduction { op, axes, arg } => {
                 let args = vec![self.view_for(arg)?];
                 let kernel = Kernel::Reduction { op: *op, axes: axes.clone() };
-                self.push_dispatch(tensor.shape(), kernel, args)
+                self.push_dispatch(tensor.shape(), etype, kernel, args)
             }
-            TensorKind::Broadcast { .. } | TensorKind::Transpose { .. }
-            | TensorKind::Squeeze { .. } => {
+            TensorKind::Remap(remap) => {
+                let (info, args) = match remap {
+                    Remap::GatherRows { source, indices } => (
+                        RemapInfo::GatherRows,
+                        vec![self.view_for(source)?, self.view_for(indices)?],
+                    ),
+                    Remap::ScatterRows {
+                        source,
+                        indices,
+                        op,
+                        ..
+                    } => {
+                        let operator = match op {
+                            ScatterOp::Write => None,
+                            ScatterOp::Add => Some(AssocOp::Add),
+                        };
+                        (
+                            RemapInfo::ScatterRows { operator },
+                            vec![self.view_for(source)?, self.view_for(indices)?],
+                        )
+                    }
+                    Remap::ScatterView {
+                        source,
+                        key,
+                        target_shape,
+                    } => (
+                        RemapInfo::ScatterView {
+                            accessor: region_accessor(target_shape, key),
+                        },
+                        vec![self.view_for(source)?],
+                    ),
+                };
+                self.push_dispatch(tensor.shape(), etype, Kernel::Remap { info }, args)
+            }
+            TensorKind::Broadcast { .. }
+            | TensorKind::Transpose { .. }
+            | TensorKind::Squeeze { .. }
+            | TensorKind::Index { .. } => {
                 return Err(Error::Unsupported("view node has no buffer"));
             }
         };
@@ -126,6 +177,10 @@ impl Builder {
                 let (buffer, accessor) = self.resolve_view(arg)?;
                 Ok((buffer, accessor.squeeze(axes)?))
             }
+            TensorKind::Index { arg, key } => {
+                let (buffer, accessor) = self.resolve_view(arg)?;
+                Ok((buffer, compose_index(&accessor, key)))
+            }
             _ => {
                 let buffer = self.buffer_for(tensor)?;
                 Ok((buffer, Accessor::dense(tensor.shape(), 0)))
@@ -153,13 +208,59 @@ impl Builder {
     fn push_dispatch(
         &mut self,
         shape: &[usize],
+        element_type: ElementType,
         kernel: Kernel,
         args: Vec<BufferViewRef>,
     ) -> BufferRef {
-        let buffer = self.push_buffer(Buffer { shape: shape.into(), init: None });
+        let buffer = self.push_buffer(Buffer {
+            shape: shape.into(),
+            element_type,
+            init: None,
+        });
         let output = self.intern_view(buffer, Accessor::dense(shape, 0));
         self.queue.push(Dispatch { kernel, args, output });
         buffer
+    }
+}
+
+/// Compose a static index key onto an accessor: pure offset/shape arithmetic.
+/// `Single` keeps a size-1 axis (rank is preserved).
+fn compose_index(arg_acc: &Accessor, key: &[IndexKeyElement]) -> Accessor {
+    debug_assert_eq!(key.len(), arg_acc.rank(), "index key covers every axis");
+    let mut offset = arg_acc.offset;
+    let mut shape = Vec::with_capacity(key.len());
+    for (axis, element) in key.iter().enumerate() {
+        let (start, len) = match element {
+            IndexKeyElement::Single(i) => (*i, 1usize),
+            IndexKeyElement::Slice(range) => (range.start, range.end - range.start),
+        };
+        offset += start * arg_acc.pitch[axis];
+        shape.push(len);
+    }
+    Accessor {
+        offset,
+        shape: shape.into(),
+        pitch: arg_acc.pitch.clone(),
+    }
+}
+
+/// Accessor addressing the `key` region of a dense buffer with `target_shape`.
+fn region_accessor(target_shape: &[usize], key: &[IndexKeyElement]) -> Accessor {
+    let pitch = crate::ir::dense_pitch(target_shape);
+    let mut offset = 0;
+    let mut shape = Vec::with_capacity(key.len());
+    for (axis, element) in key.iter().enumerate() {
+        let (start, len) = match element {
+            IndexKeyElement::Single(i) => (*i, 1usize),
+            IndexKeyElement::Slice(range) => (range.start, range.end - range.start),
+        };
+        offset += start * pitch[axis];
+        shape.push(len);
+    }
+    Accessor {
+        offset,
+        shape: shape.into(),
+        pitch,
     }
 }
 
@@ -311,5 +412,30 @@ mod tests {
         let b_arg = program.view(program.queue[0].args[1]);
         assert_eq!(&*b_arg.accessor.shape, &[4, 3]);
         assert_eq!(&*b_arg.accessor.pitch, &[1, 4]);
+    }
+
+    #[test]
+    fn lower_gather_rows_is_remap() {
+        let x = Tensor::parameter(&[4, 2]);
+        let indices = Tensor::constant_u32(&[3], &[0, 2, 1]);
+        let out = x.gather_rows(&indices);
+        let program = lower(&x, &out).unwrap();
+        assert_eq!(program.queue.len(), 1);
+        assert!(matches!(
+            program.queue[0].kernel,
+            Kernel::Remap { info: RemapInfo::GatherRows }
+        ));
+        assert_eq!(&*program.output_shape(&program.queue[0]), &[3, 2]);
+    }
+
+    #[test]
+    fn lower_index_is_view_not_kernel() {
+        let x = Tensor::parameter(&[6]);
+        let out = x.index(&[IndexKeyElement::Slice(2..5)]);
+        let program = lower(&x, &out).unwrap();
+        assert_eq!(program.queue.len(), 0);
+        let sink = program.view(program.sinks[0]);
+        assert_eq!(&*sink.accessor.shape, &[3]);
+        assert_eq!(sink.accessor.offset, 2);
     }
 }

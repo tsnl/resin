@@ -146,11 +146,33 @@ fn fusable_producer(
         return None;
     };
 
+    // Cast/bitcast change element type mid-tree; keep them as fusion barriers
+    // so backends evaluate each typed kernel in isolation.
+    if expr_changes_element_type(expr) {
+        return None;
+    }
+
     if !fusible_view_relationship(program, producer, arg_view) {
         return None;
     }
 
+    // Only fuse when producer and consumer buffers share an element type.
+    let prod_etype = program.buffer(program.view(program.queue[producer].output).buffer).element_type;
+    let cons_etype = program.buffer(program.view(program.queue[consumer].output).buffer).element_type;
+    if prod_etype != cons_etype {
+        return None;
+    }
+
     Some((producer, expr.clone()))
+}
+
+fn expr_changes_element_type(expr: &Expr) -> bool {
+    match expr {
+        Expr::Load(_) => false,
+        Expr::Op { op, args } => {
+            op.changes_element_type() || args.iter().any(expr_changes_element_type)
+        }
+    }
 }
 
 /// Shape compatibility: consumer reads the producer's write view, or a

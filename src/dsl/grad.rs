@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::{Tensor, TensorKind};
+use super::{Remap, ScatterOp, Tensor, TensorKind};
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 use crate::tree::Tree;
 
@@ -56,6 +56,17 @@ fn grad_by_node(loss: &Tensor) -> Result<GradMap, GradError> {
 }
 
 fn accumulate(grads: &mut GradMap, tensor: &Tensor, adjoint: Tensor) {
+    // Only real-valued primals carry adjoints. Integers (indices, masks-as-u32,
+    // bit ops) are discrete — see [`ElementType::is_float`]. When f16/f64 are
+    // added they become floats and flow through here without a new special case.
+    if !tensor.element_type().is_float() {
+        return;
+    }
+    debug_assert_eq!(
+        adjoint.element_type(),
+        tensor.element_type(),
+        "adjoint etype must match the primal (seeded by loss.ones_like())"
+    );
     // Broadcasting in a forward op fans one input element out to many output
     // elements, so the adjoint sums back down to the input's shape.
     let adjoint = sum_to_shape(&adjoint, tensor.shape());
@@ -146,6 +157,26 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
                 (0..arg.shape().len()).filter(|a| !axes.contains(a)).collect();
             accumulate(grads, arg, adjoint.broadcast_to(arg.shape(), &mapping));
         }
+
+        TensorKind::Index { arg, key } => {
+            accumulate(grads, arg, adjoint.scatter_index(arg.shape(), key));
+        }
+
+        TensorKind::Remap(remap) => match remap {
+            Remap::GatherRows { source, indices } => {
+                // Gather adjoint is scatter-add through the same indices.
+                let grad_source =
+                    adjoint.scatter_rows(indices, source.shape()[0], ScatterOp::Add);
+                accumulate(grads, source, grad_source);
+            }
+            Remap::ScatterRows { source, indices, .. } => {
+                // Scatter adjoint is gather through the same indices.
+                accumulate(grads, source, adjoint.gather_rows(indices));
+            }
+            Remap::ScatterView { source, key, .. } => {
+                accumulate(grads, source, Tensor::new_index(adjoint.clone(), key));
+            }
+        },
     }
     Ok(())
 }
@@ -163,23 +194,27 @@ fn backward_elementwise(
     match op {
         Op::Unary(op) => {
             let x = &args[0];
-            let dx = match op {
-                UnaryOp::Neg => -g(),
-                UnaryOp::Exp => g() * n(),
-                UnaryOp::Log => g() / x.clone(),
+            match op {
+                // Piecewise-constant / type-change: zero gradient.
+                UnaryOp::Floor
+                | UnaryOp::Ceil
+                | UnaryOp::Cast { .. }
+                | UnaryOp::Bitcast { .. } => {}
+                UnaryOp::Neg => accumulate(grads, x, -g()),
+                UnaryOp::Exp => accumulate(grads, x, g() * n()),
+                UnaryOp::Log => accumulate(grads, x, g() / x.clone()),
                 UnaryOp::Abs => {
                     let eps = Tensor::scalar(1e-12);
-                    g() * (x.clone() / (x.abs() + eps))
+                    accumulate(grads, x, g() * (x.clone() / (x.abs() + eps)));
                 }
                 UnaryOp::Relu => {
                     let eps = Tensor::scalar(1e-12);
-                    g() * (x.relu() / (x.abs() + eps))
+                    accumulate(grads, x, g() * (x.relu() / (x.abs() + eps)));
                 }
-                UnaryOp::Sqrt => g() / (Tensor::scalar(2.0) * n()),
-                UnaryOp::Sin => g() * x.cos(),
-                UnaryOp::Cos => -(g() * x.sin()),
-            };
-            accumulate(grads, x, dx);
+                UnaryOp::Sqrt => accumulate(grads, x, g() / (Tensor::scalar(2.0) * n())),
+                UnaryOp::Sin => accumulate(grads, x, g() * x.cos()),
+                UnaryOp::Cos => accumulate(grads, x, -(g() * x.sin())),
+            }
         }
         Op::Binary(op) => {
             let (a, b) = (&args[0], &args[1]);
@@ -204,9 +239,31 @@ fn backward_elementwise(
                     accumulate(grads, a, g() * b.clone() * n() / a.clone());
                     accumulate(grads, b, g() * a.log() * n());
                 }
-                BinaryOp::Assoc(AssocOp::Max | AssocOp::Min) => {
-                    return Err(GradError::Undifferentiable("elementwise max/min"));
+                BinaryOp::Assoc(AssocOp::Min) => {
+                    // Subgradient: lhs wins on ties (<=).
+                    let lhs_wins = a.cmp_le(b);
+                    accumulate(grads, a, g() * lhs_wins);
+                    let rhs_wins = a.cmp_gt(b);
+                    accumulate(grads, b, g() * rhs_wins);
                 }
+                BinaryOp::Assoc(AssocOp::Max) => {
+                    let lhs_wins = a.cmp_ge(b);
+                    accumulate(grads, a, g() * lhs_wins);
+                    let rhs_wins = a.cmp_lt(b);
+                    accumulate(grads, b, g() * rhs_wins);
+                }
+                // Integer / piecewise-constant: zero gradient.
+                BinaryOp::CmpEq
+                | BinaryOp::CmpNe
+                | BinaryOp::CmpLt
+                | BinaryOp::CmpLe
+                | BinaryOp::CmpGt
+                | BinaryOp::CmpGe
+                | BinaryOp::Band
+                | BinaryOp::Bor
+                | BinaryOp::Bxor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => {}
             }
         }
     }
