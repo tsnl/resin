@@ -46,8 +46,9 @@ fn workgroups_for_shape(shape: &[usize], config: &KernelConfig) -> [u32; 3] {
 
 /// Program-wide heap layout: `@binding(i)` ↔ `program.buffers[i]`.
 ///
-/// Every kernel declares **all** arenas so pipelines share one bind-group layout
-/// and one bind group per invoke.
+/// A shader declares only the heaps it uses, each at its program-wide binding
+/// index; the pipeline's bind-group layout still covers every arena, so one
+/// bind group serves all dispatches.
 pub fn program_heap_keys(program: &Program) -> Vec<(ElementType, bool)> {
     program
         .buffers
@@ -107,31 +108,38 @@ pub fn emit(
     config: &KernelConfig,
 ) -> String {
     let mut w = Writer::default();
-    emit_heap_bindings(&mut w, program_heaps);
+    let used = used_heaps(out_etype, out_atomic, arg_meta);
+    emit_heap_bindings(&mut w, program_heaps, &used);
     match kernel {
         Kernel::Elementwise { expr } => {
-            emit_elementwise(
-                &mut w, expr, args, arg_meta, out, out_etype, out_atomic, program_heaps, config,
-            );
+            emit_elementwise(&mut w, expr, args, arg_meta, out, out_etype, out_atomic, config);
         }
         Kernel::Matmul => {
-            emit_matmul(
-                &mut w, args, arg_meta, out, out_etype, out_atomic, program_heaps, config,
-            );
+            emit_matmul(&mut w, args, arg_meta, out, out_etype, out_atomic, config);
         }
         Kernel::Reduction { op, axes } => {
-            emit_reduction(
-                &mut w, *op, axes, args, arg_meta, out, out_etype, out_atomic, program_heaps,
-                config,
-            );
+            emit_reduction(&mut w, *op, axes, args, arg_meta, out, out_etype, out_atomic, config);
         }
         Kernel::Remap { info } => {
-            emit_remap(
-                &mut w, info, args, arg_meta, out, out_etype, out_atomic, program_heaps, config,
-            );
+            emit_remap(&mut w, info, args, arg_meta, out, out_etype, out_atomic, config);
         }
     }
     w.finish()
+}
+
+/// Heaps one kernel touches: its output plus every argument, deduped.
+fn used_heaps(
+    out_etype: ElementType,
+    out_atomic: bool,
+    arg_meta: &[(ElementType, bool)],
+) -> Vec<(ElementType, bool)> {
+    let mut used = vec![(out_etype, out_atomic)];
+    for &m in arg_meta {
+        if !used.contains(&m) {
+            used.push(m);
+        }
+    }
+    used
 }
 
 fn spell_etype(etype: ElementType) -> &'static str {
@@ -150,8 +158,18 @@ fn heap_name(etype: ElementType, atomic: bool) -> &'static str {
     }
 }
 
-fn emit_heap_bindings(w: &mut Writer, heaps: &[(ElementType, bool)]) {
-    for (i, &(etype, atomic)) in heaps.iter().enumerate() {
+/// Declare the heaps in `used`, each at its program-wide binding index. Unused
+/// arenas are skipped — the shader binds a subset of the pipeline layout, which
+/// wgpu permits, so no filler is needed to keep bindings alive.
+fn emit_heap_bindings(
+    w: &mut Writer,
+    program_heaps: &[(ElementType, bool)],
+    used: &[(ElementType, bool)],
+) {
+    for (i, &(etype, atomic)) in program_heaps.iter().enumerate() {
+        if !used.contains(&(etype, atomic)) {
+            continue;
+        }
         let name = heap_name(etype, atomic);
         if atomic {
             // RMW targets only; f32 values stored as bit patterns.
@@ -164,15 +182,6 @@ fn emit_heap_bindings(w: &mut Writer, heaps: &[(ElementType, bool)]) {
                 "@group(0) @binding({i})\nvar<storage, read_write> {name}: array<{t}>;"
             ));
         }
-    }
-}
-
-/// Touch every heap so naga keeps all bindings (shared layout requires it).
-fn keep_all_heaps(w: &mut Writer, program_heaps: &[(ElementType, bool)]) {
-    for &(etype, atomic) in program_heaps {
-        let name = heap_name(etype, atomic);
-        // arrayLength is a use of the resource; result is unused.
-        w.print(&format!("let _keep_{name} = arrayLength(&{name});"));
     }
 }
 
@@ -246,7 +255,6 @@ fn address(accessor: &Accessor, coords: &[String]) -> String {
 fn per_output_element(
     w: &mut Writer,
     out: &Accessor,
-    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
     body: impl FnOnce(&mut Writer, &[String]),
 ) {
@@ -258,7 +266,6 @@ fn per_output_element(
             config.workgroup_size
         ),
         |w| {
-            keep_all_heaps(w, program_heaps);
             if count == 0 {
                 w.print("return;");
                 return;
@@ -283,7 +290,6 @@ fn per_output_element(
 fn per_thread_element(
     w: &mut Writer,
     shape: &[usize],
-    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
     body: impl FnOnce(&mut Writer, &str, &[String]),
 ) {
@@ -295,7 +301,6 @@ fn per_thread_element(
             config.workgroup_size
         ),
         |w| {
-            keep_all_heaps(w, program_heaps);
             if count == 0 {
                 w.print("return;");
                 return;
@@ -321,13 +326,12 @@ fn emit_elementwise(
     out: &Accessor,
     out_etype: ElementType,
     out_atomic: bool,
-    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
     let free = expr.loads();
     debug_assert_eq!(free.len(), args.len());
     emit_expr_fn(w, expr, args.len(), out_etype);
-    per_output_element(w, out, program_heaps, config, |w, coords| {
+    per_output_element(w, out, config, |w, coords| {
         let loads: Vec<String> = args
             .iter()
             .zip(arg_meta.iter())
@@ -454,12 +458,11 @@ fn emit_matmul(
     out: &Accessor,
     out_etype: ElementType,
     out_atomic: bool,
-    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
     let rank = out.rank();
     let k = args[0].shape[rank - 1];
-    per_output_element(w, out, program_heaps, config, |w, coords| {
+    per_output_element(w, out, config, |w, coords| {
         let mut a_coords = coords.to_vec();
         a_coords[rank - 1] = "t".into();
         let mut b_coords = coords.to_vec();
@@ -486,7 +489,6 @@ fn emit_reduction(
     out: &Accessor,
     out_etype: ElementType,
     out_atomic: bool,
-    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
     let input = args[0];
@@ -495,7 +497,7 @@ fn emit_reduction(
     let count: usize = sorted_axes.iter().map(|&axis| input.shape[axis]).product();
     let t = spell_etype(out_etype);
 
-    per_output_element(w, out, program_heaps, config, |w, coords| {
+    per_output_element(w, out, config, |w, coords| {
         w.print(&format!("var acc: {t} = {};", identity_literal(op, out_etype)));
         w.block(&format!("for (var ri: u32 = 0u; ri < {count}u; ri += 1u)"), |w| {
             let mut in_coords = coords.to_vec();
@@ -539,13 +541,12 @@ fn emit_remap(
     out: &Accessor,
     out_etype: ElementType,
     out_atomic: bool,
-    program_heaps: &[(ElementType, bool)],
     config: &KernelConfig,
 ) {
     match info {
         RemapInfo::GatherRows => {
             let src_rows = args[0].shape[0];
-            per_output_element(w, out, program_heaps, config, |w, coords| {
+            per_output_element(w, out, config, |w, coords| {
                 let idx_coords = [coords[0].clone()];
                 w.print(&format!(
                     "let row = min({}, {}u);",
@@ -579,7 +580,7 @@ fn emit_remap(
                     });
                 });
             }
-            per_thread_element(w, &src.shape, program_heaps, config, |w, _lin, coords| {
+            per_thread_element(w, &src.shape, config, |w, _lin, coords| {
                 let idx_coords = [coords[0].clone()];
                 w.print(&format!(
                     "let row = {};",
@@ -606,7 +607,7 @@ fn emit_remap(
         }
         RemapInfo::ScatterView { accessor } => {
             let src = args[0];
-            per_thread_element(w, &src.shape, program_heaps, config, |w, _lin, coords| {
+            per_thread_element(w, &src.shape, config, |w, _lin, coords| {
                 let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
                 w.print(&write_at(out_etype, out_atomic, &address(accessor, coords), &val));
             });

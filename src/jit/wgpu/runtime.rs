@@ -213,7 +213,7 @@ pub fn run(
         }
         // Reuse the pre-allocated output buffer when size matches (call path).
         let sink_buf = Arc::clone(&array.buffer);
-        let src_off = (acc.offset as u64) * 4;
+        let src_off = acc.offset as u64 * BYTES_PER_ELEMENT;
         let size = byte_len(count);
         if count > 0 {
             encoder.copy_buffer_to_buffer(
@@ -260,7 +260,7 @@ fn copy_dense_into_arena(
         ));
     }
     let count = element_count(&accessor.shape);
-    let dst_off = (accessor.offset as u64) * 4;
+    let dst_off = accessor.offset as u64 * BYTES_PER_ELEMENT;
     let size = byte_len(count);
     if count > 0 {
         encoder.copy_buffer_to_buffer(&src.buffer, 0, arena, dst_off, size);
@@ -280,16 +280,20 @@ fn clear_dense_region_gpu(
         return Err(Error::Wgpu("scatter clear requires dense output view".into()));
     }
     let count = element_count(&acc.shape) as u64;
-    let offset_bytes = (acc.offset as u64) * 4;
-    let size_bytes = count * 4;
+    let offset_bytes = acc.offset as u64 * BYTES_PER_ELEMENT;
+    let size_bytes = count * BYTES_PER_ELEMENT;
     if size_bytes > 0 {
         encoder.clear_buffer(&arenas[view.buffer.0], offset_bytes, Some(size_bytes));
     }
     Ok(())
 }
 
+/// Both element types (f32, u32) are 4 bytes; all buffer offsets and sizes are
+/// in bytes, so element counts scale by this.
+const BYTES_PER_ELEMENT: u64 = 4;
+
 fn byte_len(elements: usize) -> u64 {
-    (elements as u64 * 4).max(4)
+    (elements as u64 * BYTES_PER_ELEMENT).max(BYTES_PER_ELEMENT)
 }
 
 fn buffer_data_to_bytes(data: &BufferData) -> Vec<u8> {

@@ -195,7 +195,9 @@ fn mnist_train_step(c: &mut Criterion) {
     }
 
     // --- WebGPU ----------------------------------------------------------
-    // Device-local values: invoke does not wait. Timed path skips `.host()`.
+    // Device-local values: invoke submits without waiting. The timed loop drains
+    // the GPU with `.host()` every `HOST_EVERY` steps, so the measurement covers
+    // real GPU execution (amortized) rather than encode+submit alone.
     #[cfg(feature = "wgpu")]
     {
         if !gpu_available() {
@@ -235,14 +237,25 @@ fn mnist_train_step(c: &mut Criterion) {
                     BenchmarkId::new("wgpu", opt_name),
                     &artifact,
                     |b, artifact| {
+                        // Block on the GPU every `HOST_EVERY` steps: submits stay
+                        // off the critical path, but the queue drains instead of
+                        // growing unbounded, so the timing reflects real GPU work
+                        // amortized over the batch — not encode+submit alone.
+                        const HOST_EVERY: u32 = 1000;
+                        let mut until_host = HOST_EVERY;
                         b.iter(|| {
                             let param_refs: Vec<&WgpuArray> = gpu_params.leaves();
                             let mut out_refs = gpu_outputs.leaves_mut();
                             jit.invoke(artifact, &param_refs, &mut out_refs)
                                 .expect("wgpu invoke");
                             drop(out_refs);
-                            // No `.host()` — measure submit path only.
-                            black_box(&gpu_outputs.loss);
+                            until_host -= 1;
+                            if until_host == 0 {
+                                until_host = HOST_EVERY;
+                                black_box(gpu_outputs.loss.host().expect("loss host").scalar());
+                            } else {
+                                black_box(&gpu_outputs.loss);
+                            }
                         });
                     },
                 );
