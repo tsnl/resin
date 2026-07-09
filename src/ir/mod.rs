@@ -8,11 +8,13 @@
 //! iteration space.
 
 mod accessor;
+mod expr;
 pub mod optimize;
 
 pub use accessor::{Accessor, dense_pitch, element_count};
+pub use expr::Expr;
 
-use crate::ops::{AssocOp, Op};
+use crate::ops::AssocOp;
 
 /// Invalid-IR error. The message is the diagnostic; there is no error taxonomy.
 #[derive(Debug, thiserror::Error)]
@@ -68,61 +70,14 @@ pub struct Dispatch {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kernel {
-    /// Per-element RPN expression over the args, evaluated at every
-    /// coordinate of the output view. Arg views must match the output shape.
-    Elementwise(RpnExpr),
+    /// Per-element expression over loads, evaluated at every coordinate of
+    /// the output view. Load views must match the output shape; `args` is the
+    /// free-load list of the expression (binding order for backends).
+    Elementwise(Expr),
     /// `args[0] @ args[1]` with matching batch dims.
     Matmul,
     /// Fold `args[0]` with `op` along `axes` (keepdims: output has size 1 there).
     Reduction { op: AssocOp, axes: Box<[usize]> },
-}
-
-/// Reverse-polish expression over argument indices and scalar operators.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RpnExpr {
-    pub atoms: Vec<RpnAtom>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RpnAtom {
-    /// Index into the dispatch argument list.
-    Arg(u32),
-    Op(Op),
-}
-
-impl RpnExpr {
-    /// The trivial expression `op(arg0, …, argN-1)`.
-    pub fn apply_op(op: Op, arity: usize) -> Self {
-        let mut atoms: Vec<RpnAtom> = (0..arity as u32).map(RpnAtom::Arg).collect();
-        atoms.push(RpnAtom::Op(op));
-        Self { atoms }
-    }
-
-    /// Check stack discipline: every op has its operands, one value remains.
-    /// All `Arg` indices must be below `num_args`.
-    pub fn validate(&self, num_args: usize) -> Result<(), Error> {
-        let mut depth = 0usize;
-        for atom in &self.atoms {
-            match atom {
-                RpnAtom::Arg(i) => {
-                    if *i as usize >= num_args {
-                        return Err(Error(format!("rpn arg {i} out of range ({num_args} args)")));
-                    }
-                    depth += 1;
-                }
-                RpnAtom::Op(op) => {
-                    if depth < op.arity() {
-                        return Err(Error(format!("rpn stack underflow at {op:?}")));
-                    }
-                    depth = depth - op.arity() + 1;
-                }
-            }
-        }
-        if depth != 1 {
-            return Err(Error(format!("rpn leaves {depth} values on the stack, want 1")));
-        }
-        Ok(())
-    }
 }
 
 impl Program {
@@ -207,8 +162,13 @@ impl Program {
         let arg = |i: usize| &self.view(dispatch.args[i]).accessor;
 
         match &dispatch.kernel {
-            Kernel::Elementwise(rpn) => {
-                rpn.validate(dispatch.args.len())?;
+            Kernel::Elementwise(expr) => {
+                // Expr arity is checked at construction ([`Expr::new_op`]).
+                if expr.loads() != dispatch.args {
+                    return Err(Error(
+                        "elementwise args must be the free loads of the expression".into(),
+                    ));
+                }
                 for (i, &r) in dispatch.args.iter().enumerate() {
                     let shape = &self.view(r).accessor.shape;
                     if shape != &out.shape {
@@ -285,6 +245,7 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ops::Op;
 
     fn dense_view(program: &mut Program, buffer: BufferRef) -> BufferViewRef {
         let shape = program.buffer(buffer).shape.clone();
@@ -322,7 +283,7 @@ mod tests {
             dense_view(&mut p, out),
         );
         p.queue.push(Dispatch {
-            kernel: Kernel::Elementwise(RpnExpr::apply_op(Op::ADD, 2)),
+            kernel: Kernel::Elementwise(Expr::new_op(Op::ADD, [Expr::Load(va), Expr::Load(vb)])),
             args: vec![va, vb],
             output: vout,
         });
@@ -336,7 +297,7 @@ mod tests {
         let out = push_buffer(&mut p, &[3, 2]);
         let (va, vout) = (dense_view(&mut p, a), dense_view(&mut p, out));
         p.queue.push(Dispatch {
-            kernel: Kernel::Elementwise(RpnExpr::apply_op(Op::NEG, 1)),
+            kernel: Kernel::Elementwise(Expr::new_op(Op::NEG, [Expr::Load(va)])),
             args: vec![va],
             output: vout,
         });
@@ -386,15 +347,4 @@ mod tests {
         assert!(p.validate().is_err());
     }
 
-    #[test]
-    fn rpn_validate_catches_underflow_and_leftovers() {
-        assert!(RpnExpr { atoms: vec![RpnAtom::Op(Op::ADD)] }.validate(0).is_err());
-        assert!(
-            RpnExpr { atoms: vec![RpnAtom::Arg(0), RpnAtom::Arg(0)] }
-                .validate(1)
-                .is_err()
-        );
-        assert!(RpnExpr::apply_op(Op::ADD, 2).validate(2).is_ok());
-        assert!(RpnExpr::apply_op(Op::ADD, 2).validate(1).is_err());
-    }
 }

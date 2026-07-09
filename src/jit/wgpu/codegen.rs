@@ -5,7 +5,7 @@
 //! arrays or helper functions), which keeps shaders trivial for drivers to
 //! compile.
 
-use crate::ir::{Accessor, Kernel, RpnAtom, RpnExpr, dense_pitch, element_count};
+use crate::ir::{Accessor, Expr, Kernel, dense_pitch, element_count};
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 
 #[derive(Debug, Clone, Copy)]
@@ -40,7 +40,7 @@ pub fn emit(kernel: &Kernel, args: &[&Accessor], out: &Accessor, config: &Kernel
         ));
     }
     match kernel {
-        Kernel::Elementwise(rpn) => emit_elementwise(&mut w, rpn, args, out, config),
+        Kernel::Elementwise(expr) => emit_elementwise(&mut w, expr, args, out, config),
         Kernel::Matmul => emit_matmul(&mut w, args, out, config),
         Kernel::Reduction { op, axes } => emit_reduction(&mut w, *op, axes, args, out, config),
     }
@@ -130,12 +130,15 @@ fn per_output_element(
 
 fn emit_elementwise(
     w: &mut Writer,
-    rpn: &RpnExpr,
+    expr: &Expr,
     args: &[&Accessor],
     out: &Accessor,
     config: &KernelConfig,
 ) {
-    emit_rpn_fn(w, rpn, args.len());
+    // Free-load order of `expr` matches the dispatch arg list.
+    let loads = expr.loads();
+    debug_assert_eq!(loads.len(), args.len());
+    emit_expr_fn(w, expr, args.len());
     per_output_element(w, out, config, |w, coords| {
         let loads: Vec<String> = args
             .iter()
@@ -143,29 +146,33 @@ fn emit_elementwise(
             .map(|(i, a)| format!("arg{i}[{}]", address(a, coords)))
             .collect();
         w.print(&format!(
-            "output[{}] = rpn({});",
+            "output[{}] = elem({});",
             address(out, coords),
             loads.join(", ")
         ));
     });
 }
 
-/// `fn rpn(a0: f32, …) -> f32` evaluating the expression symbolically.
-fn emit_rpn_fn(w: &mut Writer, rpn: &RpnExpr, num_args: usize) {
+/// `fn elem(a0: f32, …) -> f32` evaluating the expression as nested WGSL.
+fn emit_expr_fn(w: &mut Writer, expr: &Expr, num_args: usize) {
     let params: Vec<String> = (0..num_args).map(|i| format!("a{i}: f32")).collect();
-    w.block(&format!("fn rpn({}) -> f32", params.join(", ")), |w| {
-        let mut stack: Vec<String> = Vec::new();
-        for atom in &rpn.atoms {
-            match atom {
-                RpnAtom::Arg(i) => stack.push(format!("a{i}")),
-                RpnAtom::Op(op) => {
-                    let operands = stack.split_off(stack.len() - op.arity());
-                    stack.push(spell_op(*op, &operands));
-                }
-            }
-        }
-        w.print(&format!("return {};", stack[0]));
+    let free = expr.loads();
+    w.block(&format!("fn elem({}) -> f32", params.join(", ")), |w| {
+        w.print(&format!("return {};", spell_expr(expr, &free)));
     });
+}
+
+fn spell_expr(expr: &Expr, free: &[crate::ir::BufferViewRef]) -> String {
+    match expr {
+        Expr::Load(v) => {
+            let i = free.iter().position(|x| x == v).expect("load in free list");
+            format!("a{i}")
+        }
+        Expr::Op { op, args } => {
+            let parts: Vec<String> = args.iter().map(|a| spell_expr(a, free)).collect();
+            spell_op(*op, &parts)
+        }
+    }
 }
 
 fn spell_op(op: Op, args: &[String]) -> String {
@@ -271,19 +278,25 @@ fn identity_literal(op: AssocOp) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::BufferViewRef;
     use crate::ops::Op;
+
+    fn load_op(op: Op, n: usize) -> Kernel {
+        let views = (0..n).map(BufferViewRef);
+        Kernel::Elementwise(Expr::new_op(op, views.map(Expr::Load)))
+    }
 
     #[test]
     fn elementwise_add_shader_shape() {
         let a = Accessor::dense([4], 0);
         let wgsl = emit(
-            &Kernel::Elementwise(RpnExpr::apply_op(Op::ADD, 2)),
+            &load_op(Op::ADD, 2),
             &[&a, &a],
             &a,
             &KernelConfig::default(),
         );
         assert!(wgsl.contains("@compute"), "{wgsl}");
-        assert!(wgsl.contains("fn rpn(a0: f32, a1: f32) -> f32"), "{wgsl}");
+        assert!(wgsl.contains("fn elem(a0: f32, a1: f32) -> f32"), "{wgsl}");
         assert!(wgsl.contains("((a0) + (a1))"), "{wgsl}");
     }
 
@@ -291,7 +304,7 @@ mod tests {
     fn relu_emits_max() {
         let a = Accessor::dense([8], 0);
         let wgsl = emit(
-            &Kernel::Elementwise(RpnExpr::apply_op(Op::RELU, 1)),
+            &load_op(Op::RELU, 1),
             &[&a],
             &a,
             &KernelConfig::default(),
@@ -304,7 +317,7 @@ mod tests {
         let out = Accessor::dense([2, 3], 0);
         let scalar = Accessor::dense([], 0).broadcast_to(&[2, 3]).unwrap();
         let wgsl = emit(
-            &Kernel::Elementwise(RpnExpr::apply_op(Op::MUL, 2)),
+            &load_op(Op::MUL, 2),
             &[&out, &scalar],
             &out,
             &KernelConfig::default(),
