@@ -241,17 +241,35 @@ pub trait Jit: Clone {
 
     /// Bind `f` to this backend, producing a callable that traces, compiles,
     /// and runs.
-    fn jit<P, O, F>(self, f: F) -> JittedFn<Self, P, O, F> {
+    fn jit<P, O, F>(self, f: F) -> JittedFn<Self, P, O, F>
+    where
+        O: Tree<Tensor>,
+    {
         JittedFn { jit: self, f, cache: Mutex::new(HashMap::new()), _io: PhantomData }
     }
 }
 
+/// Output leaf shapes (and etypes) cached with the compiled artifact so we can
+/// allocate device outputs without re-tracing.
+type OutShapes<O> = <O as Tree<Tensor>>::Mapped<(Box<[usize]>, ElementType)>;
+
+struct Compiled<J: Jit, O: Tree<Tensor>> {
+    artifact: J::Artifact,
+    out_shapes: OutShapes<O>,
+}
+
 /// A traceable function bound to a [`Jit`] backend. Parameters are a [`Tree`]
 /// of device-local values; the trace function sees the same tree of [`Tensor`]s.
-pub struct JittedFn<J: Jit, P, O, F> {
+///
+/// **Trace once per shape signature** (like the benches): compile is cached, and
+/// subsequent `call`s only allocate outputs + `invoke`.
+pub struct JittedFn<J: Jit, P, O, F>
+where
+    O: Tree<Tensor>,
+{
     jit: J,
     f: F,
-    cache: Mutex<HashMap<ShapeKey, J::Artifact>>,
+    cache: Mutex<HashMap<ShapeKey, Compiled<J, O>>>,
     _io: PhantomData<fn(&P) -> O>,
 }
 
@@ -261,42 +279,55 @@ where
     P: Tree<J::Value>,
     O: Tree<Tensor>,
     F: Fn(&P::Mapped<Tensor>) -> O,
+    // Shape skeleton has the same tree shape as `O`; mapping leaves yields `O::Mapped<Value>`.
+    OutShapes<O>: Clone + Tree<(Box<[usize]>, ElementType), Mapped<J::Value> = O::Mapped<J::Value>>,
 {
-    /// Trace, compile (if this shape signature is new), and run.
+    /// Run the jitted function.
+    ///
+    /// First call for a parameter shape signature traces, lowers, optimizes,
+    /// lays out, and compiles. Later calls with the same shapes skip the trace
+    /// and only allocate outputs + invoke (same cost model as the Criterion
+    /// benches' timed loop).
     ///
     /// Returns device-local outputs. Call [`.host()`](DeviceValue::host) on a
     /// leaf only when you need bytes on the CPU (that may sync the GPU).
     pub fn call(&self, params: &P) -> Result<O::Mapped<J::Value>, Error> {
-        let traced_params = params.map(|array| {
-            Tensor::parameter_typed(array.shape(), array.element_type())
-        });
-        let traced_out = (self.f)(&traced_params);
-        let mut outputs = traced_out.try_map(&mut |tensor| {
-            self.jit.alloc_output(tensor.shape(), tensor.element_type())
-        })?;
-
         let key: ShapeKey = params
             .leaves()
             .iter()
             .map(|a| (a.shape().into(), a.element_type()))
             .collect();
-        let artifact = {
+
+        let (artifact, out_shapes) = {
             let mut cache = self.cache.lock().expect("compile cache poisoned");
-            match cache.get(&key) {
-                Some(artifact) => artifact.clone(),
-                None => {
-                    // optimize? → layout (dead-elim + arena pack) → backend.
-                    // Layout always runs, even when opt is a no-op.
-                    let program = ir::layout::prepare_for_backend(ir::optimize::optimize(
-                        lower::lower(&traced_params, &traced_out)?,
-                    ));
-                    let artifact = self.jit.lower(&program)?;
-                    cache.insert(key, artifact.clone());
-                    artifact
-                }
+            if let Some(entry) = cache.get(&key) {
+                (entry.artifact.clone(), entry.out_shapes.clone())
+            } else {
+                let traced_params = params.map(|array| {
+                    Tensor::parameter_typed(array.shape(), array.element_type())
+                });
+                let traced_out = (self.f)(&traced_params);
+                let out_shapes = traced_out
+                    .map(|t| (Box::<[usize]>::from(t.shape()), t.element_type()));
+                // optimize? → layout (dead-elim + arena pack) → backend.
+                let program = ir::layout::prepare_for_backend(ir::optimize::optimize(
+                    lower::lower(&traced_params, &traced_out)?,
+                ));
+                let artifact = self.jit.lower(&program)?;
+                cache.insert(
+                    key,
+                    Compiled {
+                        artifact: artifact.clone(),
+                        out_shapes: out_shapes.clone(),
+                    },
+                );
+                (artifact, out_shapes)
             }
         };
 
+        let mut outputs = out_shapes.try_map(&mut |(shape, etype)| {
+            self.jit.alloc_output(shape.as_ref(), *etype)
+        })?;
         self.jit.invoke(&artifact, &params.leaves(), &mut outputs.leaves_mut())?;
         Ok(outputs)
     }
@@ -346,7 +377,7 @@ mod tests {
         }
     }
 
-    #[derive(resin_macros::Tree)]
+    #[derive(resin_macros::Tree, Clone)]
     struct In<T> {
         x: T,
     }
@@ -366,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn call_traces_every_time() {
+    fn call_traces_once_per_shape_signature() {
         let traces = Arc::new(AtomicUsize::new(0));
         let traces_in_f = traces.clone();
         let f = CountingJit { lowers: Arc::new(AtomicUsize::new(0)) }.jit(
@@ -377,6 +408,9 @@ mod tests {
         );
         f.call(&In { x: HostArray::zeros(&[]) }).unwrap();
         f.call(&In { x: HostArray::zeros(&[]) }).unwrap();
-        assert_eq!(traces.load(Ordering::SeqCst), 2);
+        assert_eq!(traces.load(Ordering::SeqCst), 1, "same shapes: no re-trace");
+
+        f.call(&In { x: HostArray::zeros(&[3]) }).unwrap();
+        assert_eq!(traces.load(Ordering::SeqCst), 2, "new shapes re-trace");
     }
 }

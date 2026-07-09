@@ -4,7 +4,7 @@ use resin::Tree;
 use resin::dsl::Tensor;
 use resin::jit::{DeviceValue, HostArray, CpuJit, Jit};
 
-#[derive(Tree)]
+#[derive(Tree, Clone)]
 struct Pair<T> {
     a: T,
     b: T,

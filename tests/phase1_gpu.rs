@@ -13,12 +13,12 @@ use resin::jit::{DeviceValue, HostArray, Jit};
 use resin::ops::ElementType;
 use resin::Tree;
 
-#[derive(Tree)]
+#[derive(Tree, Clone)]
 struct In<T> {
     x: T,
 }
 
-#[derive(Tree)]
+#[derive(Tree, Clone)]
 struct Pair<T> {
     a: T,
     b: T,
@@ -214,13 +214,13 @@ fn phase1_mixed_graph() {
         return;
     }
 
-    #[derive(Tree)]
+    #[derive(Tree, Clone)]
     struct MixedIn<T> {
         x: T,
         k: T,
     }
 
-    #[derive(Tree)]
+    #[derive(Tree, Clone)]
     struct MixedOut<T> {
         loss: T,
         grad: T,

@@ -16,7 +16,7 @@
 //! ```no_run
 //! use resin::{Tree, dsl::Tensor, jit::{DeviceValue, HostArray, CpuJit, Jit}};
 //!
-//! #[derive(Tree)]
+//! #[derive(Tree, Clone)]
 //! struct Pair<T> {
 //!     a: T,
 //!     b: T,
@@ -57,7 +57,7 @@ mod tests {
     use crate::dsl::Tensor;
     use crate::jit::{DeviceValue, HostArray, CpuJit, Jit};
 
-    #[derive(Tree)]
+    #[derive(Tree, Clone)]
     struct Inputs<T> {
         a: T,
         b: T,

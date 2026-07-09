@@ -278,7 +278,7 @@ mod e2e_tests {
     use crate::dsl::Tensor;
     use crate::jit::DeviceValue;
 
-    #[derive(resin_macros::Tree)]
+    #[derive(resin_macros::Tree, Clone)]
     struct Pair<T> {
         a: T,
         b: T,

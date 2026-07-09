@@ -1,7 +1,9 @@
 //! MNIST MLP training.
 //!
-//! Traces forward + MSE loss + reverse-mode grad + SGD into one jitted train
-//! step. The training loop is backend-agnostic; `main` picks CPU vs wgpu.
+//! One jitted train step (forward + MSE + reverse-mode grad + SGD). The first
+//! `call` traces and compiles; later minibatches only upload the batch, invoke,
+//! and keep the model on-device (same cost model as `mnist_train` Criterion).
+//! Loss is `.host()`'d once per epoch. Backend-agnostic; `main` picks CPU/wgpu.
 //!
 //! Usage:
 //!   cargo run --example train_mnist
@@ -148,16 +150,38 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
         .expect("upload model");
     let mut batches = BatchIndices::new(dataset.n, config.batch_size, SEED, true);
 
+    // Warm-up: first call traces + compiles once for this shape signature.
+    {
+        let (xs, ys) = dataset.batch_f32(
+            batches.next_batch().expect("at least one batch"),
+        );
+        let out = train
+            .call(&TrainStepIn {
+                xs: jit
+                    .upload(&HostArray::from_f32(&[config.batch_size, IMG_WH], &xs))
+                    .expect("upload xs"),
+                ys: jit
+                    .upload(&HostArray::from_f32(&[config.batch_size, NUM_CLS], &ys))
+                    .expect("upload ys"),
+                model,
+            })
+            .expect("warm-up train step");
+        model = out.new_model;
+        batches.rewind(SEED);
+    }
+
     for epoch in 0..config.epochs {
         batches.rewind(SEED + epoch as u64);
         let mut last_loss: Option<J::Value> = None;
         let mut batch_index = 0;
+        let t0 = std::time::Instant::now();
 
         while let Some(indices) = batches.next_batch() {
             if config.max_batches.is_some_and(|limit| batch_index >= limit) {
                 break;
             }
             let (xs, ys) = dataset.batch_f32(indices);
+            // Same shapes → no re-trace; upload batch + invoke only.
             let out = train
                 .call(&TrainStepIn {
                     xs: jit
@@ -177,7 +201,10 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
         let loss = last_loss
             .map(|l| l.host().expect("loss host").scalar())
             .unwrap_or(f32::NAN);
-        eprintln!("epoch {epoch}: loss={loss:.6} (last-batch; host once/epoch)");
+        eprintln!(
+            "epoch {epoch}: loss={loss:.6}  {batch_index} steps in {:.2?} (last-batch loss; host once/epoch)",
+            t0.elapsed()
+        );
     }
 }
 

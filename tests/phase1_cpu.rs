@@ -6,12 +6,12 @@ use resin::jit::{HostArray, CpuJit, Jit};
 use resin::ops::ElementType;
 use resin::Tree;
 
-#[derive(Tree)]
+#[derive(Tree, Clone)]
 struct In<T> {
     x: T,
 }
 
-#[derive(Tree)]
+#[derive(Tree, Clone)]
 struct Pair<T> {
     a: T,
     b: T,

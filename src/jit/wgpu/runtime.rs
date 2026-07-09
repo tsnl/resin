@@ -211,12 +211,8 @@ pub fn run(
                 "sink view must be dense for device-local copy".into(),
             ));
         }
-        let sink_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("resin-sink"),
-            size: byte_len(count),
-            usage: storage_copy_usage(),
-            mapped_at_creation: false,
-        });
+        // Reuse the pre-allocated output buffer when size matches (call path).
+        let sink_buf = Arc::clone(&array.buffer);
         let src_off = (acc.offset as u64) * 4;
         let size = byte_len(count);
         if count > 0 {
@@ -228,11 +224,6 @@ pub fn run(
                 size,
             );
         }
-        **array = WgpuArray {
-            shape: (*acc.shape).into(),
-            element_type: etype,
-            buffer: Arc::new(sink_buf),
-        };
     }
 
     ctx.queue.submit(Some(encoder.finish()));

@@ -546,7 +546,7 @@ mod tests {
     use crate::dsl::Tensor;
     use crate::dsl::grad_wrt;
 
-    #[derive(resin_macros::Tree)]
+    #[derive(resin_macros::Tree, Clone)]
     struct Pair<T> {
         a: T,
         b: T,
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn bias_add_broadcast_view_runs() {
-        #[derive(resin_macros::Tree)]
+        #[derive(resin_macros::Tree, Clone)]
         struct LinearIn<T> {
             x: T,
             w: T,
