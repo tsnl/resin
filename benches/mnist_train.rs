@@ -210,7 +210,10 @@ fn mnist_train_step(c: &mut Criterion) {
                 let program = ir_program(passes);
                 let n = program.queue.len();
                 let artifact: WgpuProgram = jit.lower(&program).expect("wgpu lower");
-                eprintln!("wgpu/{opt_name}: {n} dispatches, {} pipelines", artifact.pipelines.len());
+                eprintln!(
+                    "wgpu/{opt_name}: {n} dispatches, {} pipelines",
+                    artifact.gpu.pipelines.len()
+                );
 
                 let param_refs: Vec<&Array> = params.leaves();
                 let mut out_refs = outputs.leaves_mut();
