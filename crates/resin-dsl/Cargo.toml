@@ -1,9 +1,0 @@
-[package]
-name = "resin-dsl"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-paste = "1.0.15"
-resin-core = { path = "../resin-core" }
-thiserror = "2.0.18"

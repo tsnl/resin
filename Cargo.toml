@@ -4,36 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["cpu", "wgpu"]
-cpu = ["resin-jit/cpu"]
-wgpu = ["resin-jit/wgpu"]
+default = ["wgpu"]
+wgpu = ["dep:wgpu", "dep:pollster"]
 
 [dependencies]
-resin-core = { path = "crates/resin-core" }
-resin-dataset = { path = "crates/resin-dataset" }
-resin-dsl = { path = "crates/resin-dsl" }
-resin-jit = { path = "crates/resin-jit" }
 resin-macros = { path = "crates/resin-macros" }
-
-[[example]]
-name = "demo_front"
-path = "examples/demo_front.rs"
-
-[[example]]
-name = "interp_add"
-path = "examples/interp_add.rs"
-required-features = ["cpu"]
-
-[[example]]
-name = "train_mnist"
-path = "examples/train_mnist.rs"
-# Needs at least one of `cpu` / `wgpu` (selected at runtime via --backend).
-
-[[example]]
-name = "mnist_profile"
-path = "examples/mnist_profile.rs"
-required-features = ["cpu"]
+thiserror = "2"
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
 
 [workspace]
-members = ["crates/*"]
+members = ["crates/resin-macros"]
 resolver = "3"
