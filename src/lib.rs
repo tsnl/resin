@@ -41,6 +41,7 @@ extern crate self as resin;
 
 pub mod dataset;
 pub mod dsl;
+pub mod gaussians;
 pub mod ir;
 pub mod jit;
 pub mod ops;
