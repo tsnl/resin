@@ -39,7 +39,6 @@
 // Let the `Tree` derive refer to this crate as `resin` from within itself.
 extern crate self as resin;
 
-pub mod dataset;
 pub mod dsl;
 pub mod ir;
 pub mod jit;

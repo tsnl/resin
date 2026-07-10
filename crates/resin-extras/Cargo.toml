@@ -1,0 +1,8 @@
+[package]
+name = "resin-extras"
+version = "0.1.0"
+edition = "2024"
+description = "Host datasets and streaming HTML notebooks for resin examples"
+
+[dependencies]
+plotly = "0.14"

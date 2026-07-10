@@ -15,11 +15,12 @@ pollster = { version = "0.4", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+resin-extras = { path = "crates/resin-extras" }
 
 [[bench]]
 name = "mnist_train"
 harness = false
 
 [workspace]
-members = ["crates/resin-macros"]
+members = ["crates/resin-macros", "crates/resin-extras"]
 resolver = "3"

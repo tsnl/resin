@@ -15,7 +15,7 @@ use std::env;
 use std::path::PathBuf;
 
 use resin::Tree;
-use resin::dataset::{BatchIndices, IMG_WH, MnistDataset, NUM_CLS};
+use resin_extras::dataset::{BatchIndices, IMG_WH, MnistDataset, NUM_CLS};
 use resin::dsl::{Tensor, grad_wrt};
 use resin::jit::{DeviceValue, HostArray, Jit};
 

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use resin::Tree;
-use resin::dataset::{IMG_WH, NUM_CLS};
+use resin_extras::dataset::{IMG_WH, NUM_CLS};
 use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::optimize::{OptPasses, optimize_with};
 use resin::ir::Program;
