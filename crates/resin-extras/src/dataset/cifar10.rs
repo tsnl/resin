@@ -10,16 +10,19 @@ use std::path::{Path, PathBuf};
 pub const IMG_W: usize = 32;
 pub const IMG_H: usize = 32;
 pub const IMG_C: usize = 3;
+
 /// Planar CHW size: `C * H * W`.
 pub const IMG_CHW: usize = IMG_C * IMG_H * IMG_W;
-pub const NUM_CLS: usize = 10;
+pub const NUM_CLASSES: usize = 10;
 
 const RECORD: usize = 1 + IMG_CHW;
 const BATCH_N: usize = 10_000;
+
 /// One batch file is exactly `BATCH_N` records.
 const BATCH_BYTES: u64 = (BATCH_N * RECORD) as u64;
 const ARCHIVE: &str = "cifar-10-binary.tar.gz";
 const EXTRACTED_DIR: &str = "cifar-10-batches-bin";
+
 /// Fast mirror first; official host as fallback.
 const URLS: &[&str] = &[
     "http://mirror.tensorflow.org/www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz",
@@ -46,13 +49,13 @@ const ALL_BATCHES: &[&str] = &[
 ];
 
 /// CIFAR-10 images as planar `u8` pixels (0–255, CHW) and labels (0–9).
-pub struct Cifar10Dataset {
+pub struct Dataset {
     pub images: Vec<u8>,
     pub labels: Vec<u8>,
     pub n: usize,
 }
 
-impl Cifar10Dataset {
+impl Dataset {
     pub fn load(split: &str, cache_dir: impl AsRef<Path>) -> Result<Self, String> {
         let batch_names: &[&str] = match split {
             "train" => TRAIN_BATCHES,
@@ -84,14 +87,14 @@ impl Cifar10Dataset {
 fn batch_f32_from_indices(images: &[u8], labels: &[u8], indices: &[usize]) -> (Vec<f32>, Vec<f32>) {
     let b = indices.len();
     let mut xs = vec![0f32; b * IMG_CHW];
-    let mut ys = vec![0f32; b * NUM_CLS];
+    let mut ys = vec![0f32; b * NUM_CLASSES];
     for (row, &idx) in indices.iter().enumerate() {
         let base = idx * IMG_CHW;
         for i in 0..IMG_CHW {
             xs[row * IMG_CHW + i] = images[base + i] as f32 / 255.0;
         }
         let label = labels[idx] as usize;
-        ys[row * NUM_CLS + label] = 1.0;
+        ys[row * NUM_CLASSES + label] = 1.0;
     }
     (xs, ys)
 }
@@ -111,9 +114,8 @@ fn ensure_cifar10_dir(cache_dir: &Path) -> Result<PathBuf, String> {
         let _ = fs::remove_file(&tgz_path);
         let _ = fs::remove_dir_all(&data_dir);
         ensure_archive(&tgz_path)?;
-        extract_tgz(&tgz_path, cache_dir).map_err(|e2| {
-            format!("{e}; retry after re-download also failed: {e2}")
-        })?;
+        extract_tgz(&tgz_path, cache_dir)
+            .map_err(|e2| format!("{e}; retry after re-download also failed: {e2}"))?;
     }
     if !batches_ok(&data_dir) {
         return Err(format!(
@@ -142,15 +144,16 @@ fn ensure_archive(tgz_path: &Path) -> Result<(), String> {
 
     let mut last_err = String::from("no download URLs tried");
     for url in URLS {
-        eprintln!("downloading CIFAR-10 → {} …\n  from {url}", tgz_path.display());
+        eprintln!(
+            "downloading CIFAR-10 → {} …\n  from {url}",
+            tgz_path.display()
+        );
         match download(url, tgz_path) {
             Ok(()) => match md5_hex(tgz_path) {
                 Ok(sum) if sum == ARCHIVE_MD5 => return Ok(()),
                 Ok(sum) => {
                     let _ = fs::remove_file(tgz_path);
-                    last_err = format!(
-                        "MD5 mismatch for {url}: got {sum}, expected {ARCHIVE_MD5}"
-                    );
+                    last_err = format!("MD5 mismatch for {url}: got {sum}, expected {ARCHIVE_MD5}");
                 }
                 Err(e) => {
                     let _ = fs::remove_file(tgz_path);
@@ -190,13 +193,15 @@ fn download(url: &str, dest: &Path) -> Result<(), String> {
 
 /// Lowercase hex MD5 via `md5sum` (Linux/coreutils) or `md5 -q` (macOS).
 fn md5_hex(path: &Path) -> Result<String, String> {
-    let try_md5sum = std::process::Command::new("md5sum")
-        .arg(path)
-        .output();
+    let try_md5sum = std::process::Command::new("md5sum").arg(path).output();
     if let Ok(out) = try_md5sum {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout);
-            let hex = s.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+            let hex = s
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
             if hex.len() == 32 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
                 return Ok(hex);
             }
@@ -214,7 +219,9 @@ fn md5_hex(path: &Path) -> Result<String, String> {
             String::from_utf8_lossy(&out.stderr)
         ));
     }
-    let hex = String::from_utf8_lossy(&out.stdout).trim().to_ascii_lowercase();
+    let hex = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .to_ascii_lowercase();
     if hex.len() == 32 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(hex)
     } else {

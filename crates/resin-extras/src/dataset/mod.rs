@@ -3,9 +3,6 @@
 pub mod cifar10;
 pub mod mnist;
 
-pub use cifar10::Cifar10Dataset;
-pub use mnist::{IMG_H, IMG_W, IMG_WH, MnistDataset, NUM_CLS};
-
 /// Shuffled batch index iterator (Fisher–Yates with LCG).
 pub struct BatchIndices {
     order: Vec<usize>,

@@ -74,16 +74,21 @@ impl Notebook {
         self.plot_n += 1;
         let id = format!("plot-{}", self.plot_n);
         let inline = plot.to_inline_html(Some(&id));
-        self.append(&format!("<div class=\"plot\">{inline}</div>\n"))
+        self.html(&format!("<div class=\"plot\">{inline}</div>"))
     }
 
     /// Embed a PNG as a self-contained `data:` image (no external files).
     pub fn image_png(&mut self, alt: &str, png: &[u8]) -> Result<(), String> {
         let b64 = base64_encode(png);
-        self.append(&format!(
-            "<p><img alt=\"{}\" src=\"data:image/png;base64,{b64}\"/></p>\n",
+        self.html(&format!(
+            "<p><center><img alt=\"{}\" src=\"data:image/png;base64,{b64}\"/></center></p>",
             escape(alt)
         ))
+    }
+
+    /// Append a horizontal rule `<hr/>`.
+    pub fn hr(&mut self) -> Result<(), String> {
+        self.html("<hr/>")
     }
 
     fn append(&mut self, chunk: &str) -> Result<(), String> {
@@ -92,6 +97,7 @@ impl Notebook {
             .open(&self.path)
             .map_err(|e| e.to_string())?;
         f.write_all(chunk.as_bytes()).map_err(|e| e.to_string())?;
+        f.write(b"\n\n").map_err(|e| e.to_string())?;
         f.flush().map_err(|e| e.to_string())?;
         Ok(())
     }

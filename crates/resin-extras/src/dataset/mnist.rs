@@ -10,13 +10,13 @@ pub const IMG_WH: usize = IMG_W * IMG_H;
 pub const NUM_CLS: usize = 10;
 
 /// MNIST images as `u8` pixels (0–255) and labels as class indices (0–9).
-pub struct MnistDataset {
+pub struct Dataset {
     pub images: Vec<u8>,
     pub labels: Vec<u8>,
     pub n: usize,
 }
 
-impl MnistDataset {
+impl Dataset {
     pub fn load(split: &str, cache_dir: impl AsRef<Path>) -> Result<Self, String> {
         let (img_name, lbl_name) = match split {
             "train" => ("train-images-idx3-ubyte", "train-labels-idx1-ubyte"),

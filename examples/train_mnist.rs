@@ -15,7 +15,7 @@ use std::env;
 use std::path::PathBuf;
 
 use resin::Tree;
-use resin_extras::dataset::{BatchIndices, IMG_WH, MnistDataset, NUM_CLS};
+use resin_extras::dataset::{BatchIndices, IMG_WH, Dataset, NUM_CLS};
 use resin::dsl::{Tensor, grad_wrt};
 use resin::jit::{DeviceValue, HostArray, Jit};
 
@@ -139,7 +139,7 @@ fn mnist_cache_dir() -> PathBuf {
 fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
     let cache = mnist_cache_dir();
     eprintln!("loading MNIST train from {} …", cache.display());
-    let dataset = MnistDataset::load("train", &cache).expect("load MNIST");
+    let dataset = Dataset::load("train", &cache).expect("load MNIST");
     eprintln!("loaded {} samples", dataset.n);
 
     // Clone: `jit()` consumes self; we still need `upload` on the original.
