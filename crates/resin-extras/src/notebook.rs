@@ -106,6 +106,22 @@ impl Notebook {
 const HEAD_CLOSE_BODY_OPEN: &str = r#"
 </head>
 <body>
+<button type="button" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">Dark</button>
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-toggle");
+  function apply(dark) {
+    root.classList.toggle("dark", dark);
+    btn.textContent = dark ? "Light" : "Dark";
+    try { localStorage.setItem("resin-notebook-theme", dark ? "dark" : "light"); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem("resin-notebook-theme"); } catch (e) {}
+  apply(saved === "dark" || (saved == null && window.matchMedia("(prefers-color-scheme: dark)").matches));
+  btn.addEventListener("click", function () { apply(!root.classList.contains("dark")); });
+})();
+</script>
 "#;
 
 fn write_head(f: &mut File, title: &str) -> Result<(), String> {
@@ -119,15 +135,55 @@ fn write_head(f: &mut File, title: &str) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     writeln!(f, "<title>{}</title>", escape(title)).map_err(|e| e.to_string())?;
+    // Apply stored theme before first paint to avoid a light→dark flash.
+    writeln!(
+        f,
+        r#"<script>
+(function () {{
+  try {{
+    var t = localStorage.getItem("resin-notebook-theme");
+    if (t === "dark" || (t == null && window.matchMedia("(prefers-color-scheme: dark)").matches))
+      document.documentElement.classList.add("dark");
+  }} catch (e) {{}}
+}})();
+</script>"#
+    )
+    .map_err(|e| e.to_string())?;
     writeln!(
         f,
         r#"<style>
-  body {{ font-family: system-ui, sans-serif; max-width: 52rem; margin: 1.5rem auto; padding: 0 1rem; line-height: 1.5; color: #111; }}
+  :root {{ color-scheme: light; }}
+  html.dark {{ color-scheme: dark; }}
+  body {{ font-family: system-ui, sans-serif; max-width: 52rem; margin: 1.5rem auto; padding: 0 1rem; line-height: 1.5; color: #111; background: #fff; }}
+  html.dark body {{ color: #e4e4e7; background: #18181b; }}
   h1, h2 {{ line-height: 1.2; }}
   .plot {{ margin: 1rem 0; }}
   img {{ max-width: 100%; height: auto; }}
   code, pre {{ font-family: ui-monospace, monospace; }}
   pre {{ background: #f4f4f5; padding: 0.75rem 1rem; overflow-x: auto; }}
+  html.dark pre {{ background: #27272a; }}
+  hr {{ border: none; border-top: 1px solid #e4e4e7; }}
+  html.dark hr {{ border-top-color: #3f3f46; }}
+  #theme-toggle {{
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
+    font: inherit;
+    font-size: 0.875rem;
+    line-height: 1;
+    padding: 0.4rem 0.7rem;
+    cursor: pointer;
+    color: #111;
+    background: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 0.375rem;
+  }}
+  html.dark #theme-toggle {{
+    color: #e4e4e7;
+    background: #27272a;
+    border-color: #3f3f46;
+  }}
 </style>"#
     )
     .map_err(|e| e.to_string())?;
@@ -214,6 +270,8 @@ mod tests {
         assert!(html.contains("Plotly.newPlot") || html.contains("Plotly."));
         // Offline Plotly.js is large and inlined in the head.
         assert!(html.contains("plotly") || html.len() > 100_000);
+        assert!(html.contains("id=\"theme-toggle\""));
+        assert!(html.contains("position: absolute"));
         assert!(!html.contains("</html>"));
     }
 
