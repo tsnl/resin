@@ -6,3 +6,4 @@ description = "Host datasets and streaming HTML notebooks for resin examples"
 
 [dependencies]
 plotly = "0.14"
+rand = "0.9"

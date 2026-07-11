@@ -1,6 +1,7 @@
 use std::error::Error;
 
-use resin_extras::{dataset, notebook::Notebook};
+use resin_extras::dataset::{self, Dataset, Split};
+use resin_extras::notebook::Notebook;
 
 const CLASSES: &'static [&'static str; 10] = &[
     "plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck",
@@ -22,13 +23,13 @@ fn headline(nb: &mut Notebook) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn load_dataset(nb: &mut Notebook) -> Result<dataset::cifar10::Dataset, Box<dyn Error>> {
+fn load_dataset(nb: &mut Notebook) -> Result<dataset::Cifar10, Box<dyn Error>> {
     const NUM_CLASSES: usize = dataset::cifar10::NUM_CLASSES;
     const EXAMPLES_PER_CLASS: usize = 10;
 
     nb.h2("Load dataset, and show a few examples")?;
     let dataset = {
-        let dataset = dataset::cifar10::Dataset::load("train", "data/cifar-10")?;
+        let dataset = dataset::Cifar10::load(Split::Train)?;
 
         let layout = plotly::Layout::new()
             .title("CIFAR-10 Train Set Examples")
@@ -50,7 +51,7 @@ fn load_dataset(nb: &mut Notebook) -> Result<dataset::cifar10::Dataset, Box<dyn 
 }
 
 fn group_dataset_images_by_class<const NUM_CLASSES: usize>(
-    dataset: &dataset::cifar10::Dataset,
+    dataset: &dataset::Cifar10,
     examples_per_class: usize,
 ) -> [Vec<u8>; NUM_CLASSES] {
     let mut groups_by_class: [Vec<u8>; NUM_CLASSES] = [const { Vec::default() }; NUM_CLASSES];

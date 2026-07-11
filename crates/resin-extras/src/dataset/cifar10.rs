@@ -1,4 +1,4 @@
-//! CIFAR-10 host loader: download, binary batch parse, and batch normalization.
+//! CIFAR-10 host dataset: download the binary tarball, parse batch files.
 //!
 //! Official binary layout (channel-first planar RGB): each sample is 1 label
 //! byte + 3072 pixel bytes (`R…` then `G…` then `B…`, each plane 32×32).
@@ -6,6 +6,8 @@
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+
+use super::{dataset_dir, download_file, Dataset, Split};
 
 pub const IMG_W: usize = 32;
 pub const IMG_H: usize = 32;
@@ -48,24 +50,41 @@ const ALL_BATCHES: &[&str] = &[
     "test_batch.bin",
 ];
 
+/// One CIFAR-10 sample: normalized planar CHW pixels and class index.
+pub struct Example {
+    pub image: Vec<f32>,
+    pub label: u8,
+}
+
 /// CIFAR-10 images as planar `u8` pixels (0–255, CHW) and labels (0–9).
-pub struct Dataset {
+pub struct Cifar10 {
     pub images: Vec<u8>,
     pub labels: Vec<u8>,
     pub n: usize,
 }
 
-impl Dataset {
-    pub fn load(split: &str, cache_dir: impl AsRef<Path>) -> Result<Self, String> {
-        let batch_names: &[&str] = match split {
-            "train" => TRAIN_BATCHES,
-            "test" => TEST_BATCHES,
-            other => return Err(format!("unknown CIFAR-10 split: {other}")),
-        };
-        let cache_dir = cache_dir.as_ref();
-        fs::create_dir_all(cache_dir).map_err(|e| e.to_string())?;
-        let data_dir = ensure_cifar10_dir(cache_dir)?;
+impl Dataset for Cifar10 {
+    /// Row index into the split. Richer keys (index + aug params) can replace
+    /// this later; [`get`](Dataset::get) stays a pure function of the key.
+    type Key = usize;
+    type Item = Example;
 
+    const NAME: &'static str = "cifar-10";
+
+    fn download() -> Result<PathBuf, String> {
+        let dir = dataset_dir(Self::NAME);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        ensure_extracted(&dir)?;
+        Ok(dir)
+    }
+
+    fn load(split: Split) -> Result<Self, String> {
+        let dir = Self::download()?;
+        let batch_names: &[&str] = match split {
+            Split::Train => TRAIN_BATCHES,
+            Split::Test => TEST_BATCHES,
+        };
+        let data_dir = dir.join(EXTRACTED_DIR);
         let mut images = Vec::new();
         let mut labels = Vec::new();
         for name in batch_names {
@@ -78,28 +97,41 @@ impl Dataset {
         Ok(Self { images, labels, n })
     }
 
-    /// Normalized `f32` images (planar CHW) and one-hot `f32` labels.
-    pub fn batch_f32(&self, indices: &[usize]) -> (Vec<f32>, Vec<f32>) {
-        batch_f32_from_indices(&self.images, &self.labels, indices)
+    fn len(&self) -> usize {
+        self.n
     }
-}
 
-fn batch_f32_from_indices(images: &[u8], labels: &[u8], indices: &[usize]) -> (Vec<f32>, Vec<f32>) {
-    let b = indices.len();
-    let mut xs = vec![0f32; b * IMG_CHW];
-    let mut ys = vec![0f32; b * NUM_CLASSES];
-    for (row, &idx) in indices.iter().enumerate() {
-        let base = idx * IMG_CHW;
-        for i in 0..IMG_CHW {
-            xs[row * IMG_CHW + i] = images[base + i] as f32 / 255.0;
+    fn get(&self, &index: &usize) -> Example {
+        let base = index * IMG_CHW;
+        let image = self.images[base..base + IMG_CHW]
+            .iter()
+            .map(|&p| p as f32 / 255.0)
+            .collect();
+        Example {
+            image,
+            label: self.labels[index],
         }
-        let label = labels[idx] as usize;
-        ys[row * NUM_CLASSES + label] = 1.0;
     }
-    (xs, ys)
 }
 
-fn ensure_cifar10_dir(cache_dir: &Path) -> Result<PathBuf, String> {
+impl Cifar10 {
+    /// Collate keys into stacked planar CHW `f32` images and one-hot labels.
+    pub fn batch_f32(&self, keys: &[usize]) -> (Vec<f32>, Vec<f32>) {
+        let b = keys.len();
+        let mut xs = vec![0f32; b * IMG_CHW];
+        let mut ys = vec![0f32; b * NUM_CLASSES];
+        for (row, key) in keys.iter().enumerate() {
+            let ex = self.get(key);
+            xs[row * IMG_CHW..(row + 1) * IMG_CHW].copy_from_slice(&ex.image);
+            ys[row * NUM_CLASSES + ex.label as usize] = 1.0;
+        }
+        (xs, ys)
+    }
+}
+
+// ── Download ─────────────────────────────────────────────────────────────────
+
+fn ensure_extracted(cache_dir: &Path) -> Result<PathBuf, String> {
     let data_dir = cache_dir.join(EXTRACTED_DIR);
     if batches_ok(&data_dir) {
         return Ok(data_dir);
@@ -148,7 +180,7 @@ fn ensure_archive(tgz_path: &Path) -> Result<(), String> {
             "downloading CIFAR-10 → {} …\n  from {url}",
             tgz_path.display()
         );
-        match download(url, tgz_path) {
+        match download_file(url, tgz_path) {
             Ok(()) => match md5_hex(tgz_path) {
                 Ok(sum) if sum == ARCHIVE_MD5 => return Ok(()),
                 Ok(sum) => {
@@ -167,28 +199,6 @@ fn ensure_archive(tgz_path: &Path) -> Result<(), String> {
         }
     }
     Err(format!("CIFAR-10 download failed: {last_err}"))
-}
-
-fn download(url: &str, dest: &Path) -> Result<(), String> {
-    // Write to a temp path then rename so a killed curl never leaves a
-    // "complete-looking" truncated archive.
-    let tmp = dest.with_extension("tar.gz.partial");
-    let _ = fs::remove_file(&tmp);
-    let status = std::process::Command::new("curl")
-        .args(["-fL", "--retry", "3", "--retry-delay", "2", "-o"])
-        .arg(&tmp)
-        .arg(url)
-        .status()
-        .map_err(|e| format!("failed to spawn curl: {e}"))?;
-    if !status.success() {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("curl failed for {url}: {status}"));
-    }
-    fs::rename(&tmp, dest).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("failed to finalize download: {e}")
-    })?;
-    Ok(())
 }
 
 /// Lowercase hex MD5 via `md5sum` (Linux/coreutils) or `md5 -q` (macOS).
@@ -245,6 +255,8 @@ fn extract_tgz(tgz: &Path, dest_dir: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+
+// ── Load / parse ─────────────────────────────────────────────────────────────
 
 fn read_batch(path: &Path, images: &mut Vec<u8>, labels: &mut Vec<u8>) -> Result<(), String> {
     let mut f = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;

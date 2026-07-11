@@ -12,12 +12,11 @@
 //!   cargo run --example train_mnist -- --quick 2
 
 use std::env;
-use std::path::PathBuf;
 
 use resin::Tree;
-use resin_extras::dataset::{BatchIndices, IMG_WH, Dataset, NUM_CLS};
 use resin::dsl::{Tensor, grad_wrt};
 use resin::jit::{DeviceValue, HostArray, Jit};
+use resin_extras::dataset::{Dataset, IMG_WH, IndexSampler, Mnist, NUM_CLS, Sampler, Split};
 
 const LR: f32 = 1e-3;
 const SEED: u64 = 0;
@@ -32,12 +31,22 @@ struct RunConfig {
 
 impl RunConfig {
     fn full(epochs: usize) -> Self {
-        Self { epochs, batch_size: 64, hidden: 128, max_batches: None }
+        Self {
+            epochs,
+            batch_size: 64,
+            hidden: 128,
+            max_batches: None,
+        }
     }
 
     /// Tiny smoke config for CI / quick iteration.
     fn quick(epochs: usize) -> Self {
-        Self { epochs, batch_size: 8, hidden: 32, max_batches: Some(4) }
+        Self {
+            epochs,
+            batch_size: 8,
+            hidden: 32,
+            max_batches: Some(4),
+        }
     }
 }
 
@@ -100,7 +109,10 @@ fn trace_train_step(step: &TrainStepIn<Tensor>) -> TrainStepOut<Tensor> {
     let pred = forward(&step.model, &step.xs);
     let loss = mse_loss(&pred, &step.ys);
     let grads = grad_wrt(&loss, &step.model).expect("differentiable train step");
-    TrainStepOut { loss, new_model: sgd_step(&step.model, &grads, LR) }
+    TrainStepOut {
+        loss,
+        new_model: sgd_step(&step.model, &grads, LR),
+    }
 }
 
 fn random_model(hidden: usize, seed: u64) -> MlpParams<HostArray> {
@@ -108,11 +120,15 @@ fn random_model(hidden: usize, seed: u64) -> MlpParams<HostArray> {
     let mut layer = |in_dim: usize, out_dim: usize| LinearParams {
         weight: HostArray::from_f32(
             &[in_dim, out_dim],
-            &(0..in_dim * out_dim).map(|_| next_uniform(&mut rng)).collect::<Vec<_>>(),
+            &(0..in_dim * out_dim)
+                .map(|_| next_uniform(&mut rng))
+                .collect::<Vec<_>>(),
         ),
         bias: HostArray::from_f32(
             &[out_dim],
-            &(0..out_dim).map(|_| next_uniform(&mut rng)).collect::<Vec<_>>(),
+            &(0..out_dim)
+                .map(|_| next_uniform(&mut rng))
+                .collect::<Vec<_>>(),
         ),
     };
     MlpParams {
@@ -129,17 +145,9 @@ fn next_uniform(rng: &mut u64) -> f32 {
     u * 0.2 - 0.1
 }
 
-fn mnist_cache_dir() -> PathBuf {
-    env::var_os("RESIN_MNIST_DIR")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/resin/mnist")))
-        .unwrap_or_else(|| PathBuf::from("target/mnist"))
-}
-
 fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
-    let cache = mnist_cache_dir();
-    eprintln!("loading MNIST train from {} …", cache.display());
-    let dataset = Dataset::load("train", &cache).expect("load MNIST");
+    eprintln!("loading MNIST train …");
+    let dataset = Mnist::load(Split::Train).expect("load MNIST");
     eprintln!("loaded {} samples", dataset.n);
 
     // Clone: `jit()` consumes self; we still need `upload` on the original.
@@ -148,13 +156,11 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
     let mut model = random_model(config.hidden, SEED)
         .try_map(&mut |a| jit.upload(a))
         .expect("upload model");
-    let mut batches = BatchIndices::new(dataset.n, config.batch_size, SEED, true);
+    let mut sampler = IndexSampler::new(dataset.len(), config.batch_size, SEED, true);
 
     // Warm-up: first call traces + compiles once for this shape signature.
     {
-        let (xs, ys) = dataset.batch_f32(
-            batches.next_batch().expect("at least one batch"),
-        );
+        let (xs, ys) = dataset.batch_f32(sampler.next_batch().expect("at least one batch"));
         let out = train
             .call(&TrainStepIn {
                 xs: jit
@@ -167,20 +173,20 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
             })
             .expect("warm-up train step");
         model = out.new_model;
-        batches.rewind(SEED);
+        sampler.reset(SEED);
     }
 
     for epoch in 0..config.epochs {
-        batches.rewind(SEED + epoch as u64);
+        sampler.reset(SEED + epoch as u64);
         let mut last_loss: Option<J::Value> = None;
         let mut batch_index = 0;
         let t0 = std::time::Instant::now();
 
-        while let Some(indices) = batches.next_batch() {
+        while let Some(keys) = sampler.next_batch() {
             if config.max_batches.is_some_and(|limit| batch_index >= limit) {
                 break;
             }
-            let (xs, ys) = dataset.batch_f32(indices);
+            let (xs, ys) = dataset.batch_f32(keys);
             // Same shapes → no re-trace; upload batch + invoke only.
             let out = train
                 .call(&TrainStepIn {
@@ -229,7 +235,11 @@ fn parse_args() -> (RunConfig, String) {
     }
 
     let epochs = epochs.unwrap_or(2);
-    let config = if quick { RunConfig::quick(epochs) } else { RunConfig::full(epochs) };
+    let config = if quick {
+        RunConfig::quick(epochs)
+    } else {
+        RunConfig::full(epochs)
+    };
     (config, backend)
 }
 

@@ -44,7 +44,8 @@ cargo run --example train_mnist -- --backend wgpu 2  # same, through WGSL
 cargo bench --bench mnist_train                      # train-step: cpu/wgpu × opt on/off
 ```
 
-`train_mnist` downloads MNIST to `~/.cache/resin/mnist` on first run.
+`train_mnist` downloads MNIST to `~/.cache/resin/mnist` on first run
+(override the shared root with `RESIN_DATA_DIR`).
 
 The `mnist_train` Criterion bench times one full MLP train step (forward + MSE +
 grads + SGD). Matrix: **backend** (`cpu` interpreter / `wgpu`) × **IR opt**
