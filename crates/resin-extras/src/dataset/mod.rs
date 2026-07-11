@@ -5,6 +5,7 @@
 //! parameters (crop, flip, …) into the key so the dataset stays pure.
 //!
 //! [`IndexSampler`] is the basic shuffle-over-row-indices implementation.
+//!
 //! Streaming sources (`IterDataset` / `IterSampler`) are intentionally out of
 //! scope here; add them later as a parallel path when shard/token streams land.
 
@@ -19,37 +20,6 @@ pub mod sampler;
 pub use cifar10::Cifar10;
 pub use mnist::{IMG_H, IMG_W, IMG_WH, Mnist, NUM_CLS};
 pub use sampler::{IndexSampler, Sampler};
-
-// ── Shared root ──────────────────────────────────────────────────────────────
-
-/// Root directory for all dataset downloads.
-///
-/// Order: `RESIN_DATA_DIR` env, else `~/.cache/resin`, else `./data`.
-pub fn data_root() -> PathBuf {
-    if let Some(dir) = env::var_os("RESIN_DATA_DIR") {
-        return PathBuf::from(dir);
-    }
-    if let Some(home) = env::var_os("HOME") {
-        return PathBuf::from(home).join(".cache/resin");
-    }
-    PathBuf::from("data")
-}
-
-/// `data_root()/name` — the on-disk directory for one dataset.
-pub fn dataset_dir(name: &str) -> PathBuf {
-    data_root().join(name)
-}
-
-// ── Split ────────────────────────────────────────────────────────────────────
-
-/// Train or test partition of a dataset.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Split {
-    Train,
-    Test,
-}
-
-// ── Dataset (map-style) ──────────────────────────────────────────────────────
 
 /// Map-style dataset: deterministic lookup by key.
 ///
@@ -88,7 +58,30 @@ pub trait Dataset: Sized {
     fn get(&self, key: &Self::Key) -> Self::Item;
 }
 
-// ── Shared download helper ───────────────────────────────────────────────────
+/// `data_root()/name` — the on-disk directory for one dataset.
+pub fn dataset_dir(name: &str) -> PathBuf {
+    data_root().join(name)
+}
+
+/// Root directory for all dataset downloads.
+///
+/// Order: `RESIN_DATA_DIR` env, else `~/.cache/resin`, else `./data`.
+pub fn data_root() -> PathBuf {
+    if let Some(dir) = env::var_os("RESIN_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return PathBuf::from(home).join(".cache/resin");
+    }
+    PathBuf::from("data")
+}
+
+/// Train or test partition of a dataset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Split {
+    Train,
+    Test,
+}
 
 /// Download `url` to `dest` via curl. Writes through a `.partial` sibling so a
 /// killed curl never leaves a truncated file that looks complete.

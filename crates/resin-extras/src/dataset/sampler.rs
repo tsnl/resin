@@ -58,12 +58,11 @@ impl Sampler for IndexSampler {
     type Key = usize;
 
     fn next_batch(&mut self) -> Option<&[usize]> {
-        if self.pos + self.batch_size > self.order.len() {
-            return None;
-        }
         let start = self.pos;
-        self.pos += self.batch_size;
-        Some(&self.order[start..self.pos])
+        let end = (self.pos + self.batch_size).min(self.order.len());
+        self.pos = end;
+        let slice = &self.order[start..end];
+        if slice.is_empty() { None } else { Some(slice) }
     }
 
     fn reset(&mut self, seed: u64) {
