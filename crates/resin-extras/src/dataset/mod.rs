@@ -17,8 +17,6 @@ pub mod cifar10;
 pub mod mnist;
 pub mod sampler;
 
-pub use cifar10::Cifar10;
-pub use mnist::{IMG_H, IMG_W, IMG_WH, Mnist, NUM_CLS};
 pub use sampler::{IndexSampler, Sampler};
 
 /// Map-style dataset: deterministic lookup by key.

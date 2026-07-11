@@ -16,7 +16,8 @@ use std::env;
 use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
 use resin::jit::{DeviceValue, HostArray, Jit};
-use resin_extras::dataset::{Dataset, IMG_WH, IndexSampler, Mnist, NUM_CLS, Sampler, Split};
+use resin_extras::dataset::mnist::{self, Mnist};
+use resin_extras::dataset::{Dataset, IndexSampler, Sampler, Split};
 
 const LR: f32 = 1e-3;
 const SEED: u64 = 0;
@@ -132,9 +133,9 @@ fn random_model(hidden: usize, seed: u64) -> MlpParams<HostArray> {
         ),
     };
     MlpParams {
-        layer0: layer(IMG_WH, hidden),
+        layer0: layer(mnist::IMG_WH, hidden),
         layer1: layer(hidden, hidden),
-        layer2: layer(hidden, NUM_CLS),
+        layer2: layer(hidden, mnist::NUM_CLS),
     }
 }
 
@@ -164,10 +165,10 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
         let out = train
             .call(&TrainStepIn {
                 xs: jit
-                    .upload(&HostArray::from_f32(&[config.batch_size, IMG_WH], &xs))
+                    .upload(&HostArray::from_f32(&[config.batch_size, mnist::IMG_WH], &xs))
                     .expect("upload xs"),
                 ys: jit
-                    .upload(&HostArray::from_f32(&[config.batch_size, NUM_CLS], &ys))
+                    .upload(&HostArray::from_f32(&[config.batch_size, mnist::NUM_CLS], &ys))
                     .expect("upload ys"),
                 model,
             })
@@ -191,10 +192,10 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
             let out = train
                 .call(&TrainStepIn {
                     xs: jit
-                        .upload(&HostArray::from_f32(&[config.batch_size, IMG_WH], &xs))
+                        .upload(&HostArray::from_f32(&[config.batch_size, mnist::IMG_WH], &xs))
                         .expect("upload xs"),
                     ys: jit
-                        .upload(&HostArray::from_f32(&[config.batch_size, NUM_CLS], &ys))
+                        .upload(&HostArray::from_f32(&[config.batch_size, mnist::NUM_CLS], &ys))
                         .expect("upload ys"),
                     model,
                 })

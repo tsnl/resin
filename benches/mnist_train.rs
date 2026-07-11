@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use resin::Tree;
-use resin_extras::dataset::{IMG_WH, NUM_CLS};
+use resin_extras::dataset::mnist;
 use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::optimize::{OptPasses, optimize_with};
 use resin::ir::Program;
@@ -68,16 +68,16 @@ fn forward(model: &MlpParams<Tensor>, x: &Tensor) -> Tensor {
 }
 
 fn train_step_graph() -> (TrainStepIn<Tensor>, TrainStepOut<Tensor>) {
-    let xs = Tensor::parameter(&[BATCH, IMG_WH]);
-    let ys = Tensor::parameter(&[BATCH, NUM_CLS]);
+    let xs = Tensor::parameter(&[BATCH, mnist::IMG_WH]);
+    let ys = Tensor::parameter(&[BATCH, mnist::NUM_CLS]);
     let layer = |i: usize, o: usize| LinearParams {
         weight: Tensor::parameter(&[i, o]),
         bias: Tensor::parameter(&[o]),
     };
     let model = MlpParams {
-        layer0: layer(IMG_WH, HIDDEN),
+        layer0: layer(mnist::IMG_WH, HIDDEN),
         layer1: layer(HIDDEN, HIDDEN),
-        layer2: layer(HIDDEN, NUM_CLS),
+        layer2: layer(HIDDEN, mnist::NUM_CLS),
     };
     let pred = forward(&model, &xs);
     let diff = pred - ys.clone();
@@ -120,12 +120,12 @@ fn param_arrays() -> TrainStepIn<HostArray> {
         bias: filled(&[o], 0.0),
     };
     TrainStepIn {
-        xs: filled(&[BATCH, IMG_WH], 0.1),
-        ys: filled(&[BATCH, NUM_CLS], 0.0),
+        xs: filled(&[BATCH, mnist::IMG_WH], 0.1),
+        ys: filled(&[BATCH, mnist::NUM_CLS], 0.0),
         model: MlpParams {
-            layer0: layer(IMG_WH, HIDDEN),
+            layer0: layer(mnist::IMG_WH, HIDDEN),
             layer1: layer(HIDDEN, HIDDEN),
-            layer2: layer(HIDDEN, NUM_CLS),
+            layer2: layer(HIDDEN, mnist::NUM_CLS),
         },
     }
 }
@@ -138,9 +138,9 @@ fn output_arrays() -> TrainStepOut<HostArray> {
     TrainStepOut {
         loss: filled(&[], 0.0),
         new_model: MlpParams {
-            layer0: layer(IMG_WH, HIDDEN),
+            layer0: layer(mnist::IMG_WH, HIDDEN),
             layer1: layer(HIDDEN, HIDDEN),
-            layer2: layer(HIDDEN, NUM_CLS),
+            layer2: layer(HIDDEN, mnist::NUM_CLS),
         },
     }
 }
