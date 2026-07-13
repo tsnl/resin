@@ -1,13 +1,4 @@
-//! Host datasets (map-style) and samplers.
-//!
-//! A [`Dataset`] is an indexable table: deterministic `get(key) → item`. Keys are
-//! not limited to plain row indices — a [`Sampler`] may put augmentation
-//! parameters (crop, flip, …) into the key so the dataset stays pure.
-//!
-//! [`IndexSampler`] is the basic shuffle-over-row-indices implementation.
-//!
-//! Streaming sources (`IterDataset` / `IterSampler`) are intentionally out of
-//! scope here; add them later as a parallel path when shard/token streams land.
+//! Dataset = key-value map containing training data, resident in host memory.
 
 use std::env;
 use std::fs;
@@ -15,36 +6,14 @@ use std::path::{Path, PathBuf};
 
 pub mod cifar10;
 pub mod mnist;
-pub mod sampler;
 
-pub use sampler::{IndexSampler, Sampler};
-
-/// Map-style dataset: deterministic lookup by key.
-///
-/// # Keys
-///
-/// [`Key`] may be a plain row index (`usize`) or a richer value that also
-/// carries sampler-drawn augmentation parameters. Implementors must treat
-/// [`get`](Dataset::get) as a pure function of `(self, key)` — no hidden RNG.
-/// That keeps multi-worker / cache / resume behavior boring and correct.
-///
-/// # Streaming
-///
-/// For shard streams and LM pretraining, prefer a future `IterDataset` rather
-/// than stretching this trait.
 pub trait Dataset: Sized {
-    /// Lookup key. Often `usize` (row index); may include aug parameters.
     type Key;
+    type Val<'a>
+    where
+        Self: 'a;
 
-    /// One sample returned by [`get`](Dataset::get).
-    type Item;
-
-    /// Subdirectory under [`data_root`], e.g. `"mnist"` or `"cifar-10"`.
     const NAME: &'static str;
-
-    /// Ensure raw files exist under [`dataset_dir`]`(Self::NAME)`. Idempotent.
-    /// Returns the dataset directory path.
-    fn download() -> Result<PathBuf, String>;
 
     /// Load a train or test split. Downloads first if needed.
     fn load(split: Split) -> Result<Self, String>;
@@ -52,8 +21,8 @@ pub trait Dataset: Sized {
     /// Number of underlying rows (the domain of plain index keys).
     fn len(&self) -> usize;
 
-    /// Deterministic sample for `key`. Must not draw random numbers internally.
-    fn get(&self, key: &Self::Key) -> Self::Item;
+    /// Deterministic sample for `key`.
+    fn get<'a>(&'a self, key: &Self::Key) -> Self::Val<'a>;
 }
 
 /// `data_root()/name` — the on-disk directory for one dataset.

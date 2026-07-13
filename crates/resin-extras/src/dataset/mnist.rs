@@ -4,16 +4,17 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::{dataset_dir, download_file, Dataset, Split};
+use super::{Dataset, Split, dataset_dir, download_file};
 
 pub const IMG_W: usize = 28;
 pub const IMG_H: usize = 28;
 pub const IMG_WH: usize = IMG_W * IMG_H;
-pub const NUM_CLS: usize = 10;
+pub const CLASSES: &'static [&'static str; 10] =
+    &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 /// One MNIST sample: normalized pixels and class index.
-pub struct Example {
-    pub image: Vec<f32>,
+pub struct Example<'a> {
+    pub image: &'a [u8],
     pub label: u8,
 }
 
@@ -28,23 +29,9 @@ impl Dataset for Mnist {
     /// Row index into the split. Richer keys (index + aug params) can replace
     /// this later; [`get`](Dataset::get) stays a pure function of the key.
     type Key = usize;
-    type Item = Example;
+    type Val<'a> = Example<'a>;
 
     const NAME: &'static str = "mnist";
-
-    fn download() -> Result<PathBuf, String> {
-        let dir = dataset_dir(Self::NAME);
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        for name in [
-            "train-images-idx3-ubyte",
-            "train-labels-idx1-ubyte",
-            "t10k-images-idx3-ubyte",
-            "t10k-labels-idx1-ubyte",
-        ] {
-            ensure_file(&dir, name)?;
-        }
-        Ok(dir)
-    }
 
     fn load(split: Split) -> Result<Self, String> {
         let dir = Self::download()?;
@@ -65,35 +52,31 @@ impl Dataset for Mnist {
         self.n
     }
 
-    fn get(&self, &index: &usize) -> Example {
+    fn get<'a>(&'a self, &index: &usize) -> Example<'a> {
         let base = index * IMG_WH;
-        let image = self.images[base..base + IMG_WH]
-            .iter()
-            .map(|&p| p as f32 / 255.0)
-            .collect();
-        Example {
-            image,
-            label: self.labels[index],
-        }
-    }
-}
-
-impl Mnist {
-    /// Collate keys into stacked `f32` images and one-hot labels.
-    pub fn batch_f32(&self, keys: &[usize]) -> (Vec<f32>, Vec<f32>) {
-        let b = keys.len();
-        let mut xs = vec![0f32; b * IMG_WH];
-        let mut ys = vec![0f32; b * NUM_CLS];
-        for (row, key) in keys.iter().enumerate() {
-            let ex = self.get(key);
-            xs[row * IMG_WH..(row + 1) * IMG_WH].copy_from_slice(&ex.image);
-            ys[row * NUM_CLS + ex.label as usize] = 1.0;
-        }
-        (xs, ys)
+        let image = &self.images[base..base + IMG_WH];
+        let label = self.labels[index];
+        Example { image, label }
     }
 }
 
 // ── Download ─────────────────────────────────────────────────────────────────
+
+impl Mnist {
+    fn download() -> Result<PathBuf, String> {
+        let dir = dataset_dir(Self::NAME);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        for name in [
+            "train-images-idx3-ubyte",
+            "train-labels-idx1-ubyte",
+            "t10k-images-idx3-ubyte",
+            "t10k-labels-idx1-ubyte",
+        ] {
+            ensure_file(&dir, name)?;
+        }
+        Ok(dir)
+    }
+}
 
 fn ensure_file(dir: &Path, name: &str) -> Result<PathBuf, String> {
     let path = dir.join(name);

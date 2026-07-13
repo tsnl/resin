@@ -1,24 +1,33 @@
-//! Samplers: produce batches of dataset keys for training epochs.
+//! Samplers: generate dataset keys for random sampling, shuffling, and augmentation.
 //!
-//! Samplers own any RNG used for shuffle / augmentation parameters. Pair a
-//! sampler's [`Key`](Sampler::Key) with a [`Dataset`](crate::dataset::Dataset)
-//! that uses the same key type; keep [`get`](crate::dataset::Dataset::get) pure.
-//!
-//! Streaming counterparts (`IterSampler`) can land later next to `IterDataset`.
+//! Unlike a dataset, may be non-deterministic and stateful. Samplers can shuffle,
+//! augment, or drop samples.
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
+
+use crate::dataset::Dataset;
 
 /// Produces batches of keys for one training epoch.
 pub trait Sampler {
     type Key;
 
     /// Next batch of keys, or `None` when the epoch is exhausted.
-    fn next_batch(&mut self) -> Option<&[Self::Key]>;
+    fn next_batch_keys(&mut self) -> Option<&[Self::Key]>;
 
     /// Start a new epoch: reseed the RNG and reshuffle / reset position.
     fn reset(&mut self, seed: u64);
+
+    /// Convenience helper: call `next_batch_keys()` and then `dataset.get(key)` for
+    /// each key.
+    fn next_batch<'d, D: Dataset<Key = Self::Key>>(
+        &mut self,
+        dataset: &'d D,
+    ) -> Option<Vec<D::Val<'d>>> {
+        self.next_batch_keys()
+            .map(|keys| keys.iter().map(|k| dataset.get(k)).collect())
+    }
 }
 
 /// Shuffle sampler over plain row indices (`Key = usize`).
@@ -57,7 +66,7 @@ impl IndexSampler {
 impl Sampler for IndexSampler {
     type Key = usize;
 
-    fn next_batch(&mut self) -> Option<&[usize]> {
+    fn next_batch_keys(&mut self) -> Option<&[usize]> {
         let start = self.pos;
         let end = (self.pos + self.batch_size).min(self.order.len());
         self.pos = end;

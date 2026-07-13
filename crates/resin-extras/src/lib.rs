@@ -5,3 +5,4 @@
 
 pub mod dataset;
 pub mod notebook;
+pub mod sampler;

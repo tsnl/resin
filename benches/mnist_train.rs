@@ -16,12 +16,12 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use resin::Tree;
-use resin_extras::dataset::mnist;
 use resin::dsl::{Tensor, grad_wrt};
-use resin::ir::optimize::{OptPasses, optimize_with};
 use resin::ir::Program;
+use resin::ir::optimize::{OptPasses, optimize_with};
 use resin::jit::lower::lower;
-use resin::jit::{DeviceValue, HostArray, CpuJit, Jit};
+use resin::jit::{CpuJit, DeviceValue, HostArray, Jit};
+use resin_extras::dataset::mnist;
 
 #[cfg(feature = "wgpu")]
 use resin::jit::wgpu::{WgpuArray, WgpuJit, WgpuProgram, gpu_available};
@@ -69,7 +69,7 @@ fn forward(model: &MlpParams<Tensor>, x: &Tensor) -> Tensor {
 
 fn train_step_graph() -> (TrainStepIn<Tensor>, TrainStepOut<Tensor>) {
     let xs = Tensor::parameter(&[BATCH, mnist::IMG_WH]);
-    let ys = Tensor::parameter(&[BATCH, mnist::NUM_CLS]);
+    let ys = Tensor::parameter(&[BATCH, mnist::CLASSES.len()]);
     let layer = |i: usize, o: usize| LinearParams {
         weight: Tensor::parameter(&[i, o]),
         bias: Tensor::parameter(&[o]),
@@ -77,7 +77,7 @@ fn train_step_graph() -> (TrainStepIn<Tensor>, TrainStepOut<Tensor>) {
     let model = MlpParams {
         layer0: layer(mnist::IMG_WH, HIDDEN),
         layer1: layer(HIDDEN, HIDDEN),
-        layer2: layer(HIDDEN, mnist::NUM_CLS),
+        layer2: layer(HIDDEN, mnist::CLASSES.len()),
     };
     let pred = forward(&model, &xs);
     let diff = pred - ys.clone();
@@ -98,7 +98,10 @@ fn train_step_graph() -> (TrainStepIn<Tensor>, TrainStepOut<Tensor>) {
             bias: model.layer2.bias.clone() - grads.layer2.bias * lr.clone(),
         },
     };
-    (TrainStepIn { xs, ys, model }, TrainStepOut { loss, new_model })
+    (
+        TrainStepIn { xs, ys, model },
+        TrainStepOut { loss, new_model },
+    )
 }
 
 fn ir_program(passes: OptPasses) -> Program {
@@ -121,11 +124,11 @@ fn param_arrays() -> TrainStepIn<HostArray> {
     };
     TrainStepIn {
         xs: filled(&[BATCH, mnist::IMG_WH], 0.1),
-        ys: filled(&[BATCH, mnist::NUM_CLS], 0.0),
+        ys: filled(&[BATCH, mnist::CLASSES.len()], 0.0),
         model: MlpParams {
             layer0: layer(mnist::IMG_WH, HIDDEN),
             layer1: layer(HIDDEN, HIDDEN),
-            layer2: layer(HIDDEN, mnist::NUM_CLS),
+            layer2: layer(HIDDEN, mnist::CLASSES.len()),
         },
     }
 }
@@ -140,7 +143,7 @@ fn output_arrays() -> TrainStepOut<HostArray> {
         new_model: MlpParams {
             layer0: layer(mnist::IMG_WH, HIDDEN),
             layer1: layer(HIDDEN, HIDDEN),
-            layer2: layer(HIDDEN, mnist::NUM_CLS),
+            layer2: layer(HIDDEN, mnist::CLASSES.len()),
         },
     }
 }

@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::{dataset_dir, download_file, Dataset, Split};
+use super::{Dataset, Split, dataset_dir, download_file};
 
 pub const IMG_W: usize = 32;
 pub const IMG_H: usize = 32;
@@ -51,8 +51,8 @@ const ALL_BATCHES: &[&str] = &[
 ];
 
 /// One CIFAR-10 sample: normalized planar CHW pixels and class index.
-pub struct Example {
-    pub image: Vec<f32>,
+pub struct Example<'a> {
+    pub image: &'a [u8],
     pub label: u8,
 }
 
@@ -67,16 +67,9 @@ impl Dataset for Cifar10 {
     /// Row index into the split. Richer keys (index + aug params) can replace
     /// this later; [`get`](Dataset::get) stays a pure function of the key.
     type Key = usize;
-    type Item = Example;
+    type Val<'a> = Example<'a>;
 
     const NAME: &'static str = "cifar-10";
-
-    fn download() -> Result<PathBuf, String> {
-        let dir = dataset_dir(Self::NAME);
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        ensure_extracted(&dir)?;
-        Ok(dir)
-    }
 
     fn load(split: Split) -> Result<Self, String> {
         let dir = Self::download()?;
@@ -101,35 +94,24 @@ impl Dataset for Cifar10 {
         self.n
     }
 
-    fn get(&self, &index: &usize) -> Example {
+    fn get<'a>(&'a self, &index: &usize) -> Example<'a> {
         let base = index * IMG_CHW;
-        let image = self.images[base..base + IMG_CHW]
-            .iter()
-            .map(|&p| p as f32 / 255.0)
-            .collect();
-        Example {
-            image,
-            label: self.labels[index],
-        }
-    }
-}
-
-impl Cifar10 {
-    /// Collate keys into stacked planar CHW `f32` images and one-hot labels.
-    pub fn batch_f32(&self, keys: &[usize]) -> (Vec<f32>, Vec<f32>) {
-        let b = keys.len();
-        let mut xs = vec![0f32; b * IMG_CHW];
-        let mut ys = vec![0f32; b * NUM_CLASSES];
-        for (row, key) in keys.iter().enumerate() {
-            let ex = self.get(key);
-            xs[row * IMG_CHW..(row + 1) * IMG_CHW].copy_from_slice(&ex.image);
-            ys[row * NUM_CLASSES + ex.label as usize] = 1.0;
-        }
-        (xs, ys)
+        let image = &self.images[base..base + IMG_CHW];
+        let label = self.labels[index];
+        Example { image, label }
     }
 }
 
 // ── Download ─────────────────────────────────────────────────────────────────
+
+impl Cifar10 {
+    fn download() -> Result<PathBuf, String> {
+        let dir = dataset_dir(Self::NAME);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        ensure_extracted(&dir)?;
+        Ok(dir)
+    }
+}
 
 fn ensure_extracted(cache_dir: &Path) -> Result<PathBuf, String> {
     let data_dir = cache_dir.join(EXTRACTED_DIR);

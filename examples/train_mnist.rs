@@ -135,7 +135,7 @@ fn random_model(hidden: usize, seed: u64) -> MlpParams<HostArray> {
     MlpParams {
         layer0: layer(mnist::IMG_WH, hidden),
         layer1: layer(hidden, hidden),
-        layer2: layer(hidden, mnist::NUM_CLS),
+        layer2: layer(hidden, mnist::CLASSES.len()),
     }
 }
 
@@ -149,7 +149,8 @@ fn next_uniform(rng: &mut u64) -> f32 {
 fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
     eprintln!("loading MNIST train …");
     let dataset = Mnist::load(Split::Train).expect("load MNIST");
-    eprintln!("loaded {} samples", dataset.n);
+    let mut sampler = IndexSampler::new(dataset.len(), config.batch_size, SEED, true);
+    eprintln!("loaded {} samples", dataset.len());
 
     // Clone: `jit()` consumes self; we still need `upload` on the original.
     let train = jit.clone().jit(trace_train_step);
@@ -161,14 +162,33 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
 
     // Warm-up: first call traces + compiles once for this shape signature.
     {
-        let (xs, ys) = dataset.batch_f32(sampler.next_batch().expect("at least one batch"));
+        let (xs, ys) = sampler.next_batch().expect("warm-up batch").iter().fold(
+            (
+                Vec::with_capacity(config.batch_size * mnist::IMG_WH),
+                Vec::with_capacity(config.batch_size * mnist::CLASSES.len()),
+            ),
+            |(mut xs, mut ys), &key| {
+                let example = dataset.get(&key);
+                xs.extend_from_slice(example.image);
+                let mut one_hot = vec![0.0; mnist::CLASSES.len()];
+                one_hot[example.label as usize] = 1.0;
+                ys.extend_from_slice(&one_hot);
+                (xs, ys)
+            },
+        );
         let out = train
             .call(&TrainStepIn {
                 xs: jit
-                    .upload(&HostArray::from_f32(&[config.batch_size, mnist::IMG_WH], &xs))
+                    .upload(&HostArray::from_f32(
+                        &[config.batch_size, mnist::IMG_WH],
+                        &xs,
+                    ))
                     .expect("upload xs"),
                 ys: jit
-                    .upload(&HostArray::from_f32(&[config.batch_size, mnist::NUM_CLS], &ys))
+                    .upload(&HostArray::from_f32(
+                        &[config.batch_size, mnist::CLASSES.len()],
+                        &ys,
+                    ))
                     .expect("upload ys"),
                 model,
             })
@@ -192,10 +212,16 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
             let out = train
                 .call(&TrainStepIn {
                     xs: jit
-                        .upload(&HostArray::from_f32(&[config.batch_size, mnist::IMG_WH], &xs))
+                        .upload(&HostArray::from_f32(
+                            &[config.batch_size, mnist::IMG_WH],
+                            &xs,
+                        ))
                         .expect("upload xs"),
                     ys: jit
-                        .upload(&HostArray::from_f32(&[config.batch_size, mnist::NUM_CLS], &ys))
+                        .upload(&HostArray::from_f32(
+                            &[config.batch_size, mnist::CLASSES.len()],
+                            &ys,
+                        ))
                         .expect("upload ys"),
                     model,
                 })
