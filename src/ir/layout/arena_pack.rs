@@ -175,7 +175,7 @@ mod tests {
     use super::*;
     use crate::dsl::{ScatterOp, Tensor};
     use crate::ir::layout::prepare_for_backend;
-    use crate::jit::lower::lower;
+    use crate::ir::lower;
     use crate::ops::ElementType;
 
     #[derive(resin_macros::Tree)]

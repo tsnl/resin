@@ -19,7 +19,7 @@ use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::Program;
 use resin::ir::optimize::{OptPasses, optimize_with};
-use resin::jit::lower::lower;
+use resin::ir::lower;
 use resin::jit::{CpuJit, DeviceValue, HostArray, Jit};
 use resin_extras::dataset::mnist;
 

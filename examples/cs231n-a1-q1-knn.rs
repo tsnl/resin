@@ -1,7 +1,6 @@
 use std::collections::BinaryHeap;
 use std::error::Error;
 
-use resin::Tree;
 use resin_extras::dataset::{self, Dataset, Split, cifar10};
 use resin_extras::notebook::Notebook;
 use resin_extras::notebook::mosaic::{mosaic, plot_image};

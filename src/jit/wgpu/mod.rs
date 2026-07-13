@@ -236,7 +236,7 @@ mod tests {
     use super::*;
     use crate::dsl::Tensor;
     use crate::ir::layout::prepare_for_backend;
-    use crate::jit::lower::lower;
+    use crate::ir::lower;
 
     #[test]
     fn lower_compiles_pipelines_and_shared_layout() {

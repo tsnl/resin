@@ -20,12 +20,10 @@
 //! waits on the GPU.
 
 pub mod cpu;
-pub mod lower;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
 
 pub use cpu::CpuJit;
-pub use lower::lower;
 #[cfg(feature = "wgpu")]
 pub use wgpu::{WgpuArray, WgpuJit};
 
@@ -43,8 +41,6 @@ type ShapeKey = Vec<(Box<[usize]>, ElementType)>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("cannot lower tensor kind: {0}")]
-    Unsupported(&'static str),
     #[error(transparent)]
     Ir(#[from] ir::Error),
     #[error("expected {expected} elements, got {got}")]
@@ -345,9 +341,9 @@ where
     fn trace_compile(&self, params: &P) -> Result<Compiled<J, O>, Error> {
         let traced_out = (self.f)(params);
         let out_shapes = traced_out.map(|t| (Box::<[usize]>::from(t.shape()), t.element_type()));
-        // optimize? → layout (dead-elim + arena pack) → backend.
+        // lower (dense sinks) → optimize? → layout (dead-elim + arena pack) → backend.
         let program = ir::layout::prepare_for_backend(ir::optimize::optimize(
-            lower::lower(params, &traced_out)?,
+            ir::lower(params, &traced_out)?,
         ));
         let artifact = self.jit.lower(&program)?;
         Ok(Compiled {

@@ -8,7 +8,8 @@
 //!
 //! Storage layout (arena packing, dead-buffer elim) is **not** an opt pass —
 //! see [`crate::ir::layout::prepare_for_backend`], which always runs after
-//! this stage and before JIT.
+//! this stage and before JIT. Sink densification happens earlier, in
+//! [`crate::ir::lower`], so these passes can see identity densify copies.
 //!
 //! Planned:
 //!

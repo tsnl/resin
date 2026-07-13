@@ -54,7 +54,7 @@ pub struct BufferViewRef(pub usize);
 pub struct Program {
     /// Dense views of caller-supplied inputs (tree-walk order).
     pub params: Vec<BufferViewRef>,
-    /// Views of outputs to densify back to the host (tree-walk order).
+    /// Dense views of outputs to copy back to the host (tree-walk order).
     pub sinks: Vec<BufferViewRef>,
     pub queue: Vec<Dispatch>,
     pub buffers: Vec<Buffer>,

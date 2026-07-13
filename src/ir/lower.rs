@@ -5,26 +5,27 @@
 //! buffer and enqueue a dispatch. View nodes (broadcast, transpose, squeeze,
 //! index) compose an [`Accessor`] over an existing buffer and cost nothing at
 //! run time.
+//!
+//! **Sinks are dense.** A traced function may end in a strided view (transpose,
+//! broadcast, mid-stride slice). Backends copy each sink out as one contiguous
+//! block, so lowering densifies non-dense sinks with an identity elementwise
+//! copy up-front — in the program graph, before optimize — so fusion (and later
+//! passes) can see and potentially elide that copy. Dense-with-offset sinks
+//! (e.g. a contiguous slice) are already dense and left alone.
 
 use std::collections::HashMap;
 
-use super::Error;
-use crate::dsl::{
-    ConstantData, IndexKeyElement, Remap, ScatterOp, Tensor, TensorKind,
+use super::{
+    Accessor, Buffer, BufferData, BufferRef, BufferView, BufferViewRef, Dispatch, Error, Expr,
+    Kernel, Program, RemapInfo, dense_pitch,
 };
-use crate::ir::{
-    Accessor, Buffer, BufferData, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel,
-    Program, RemapInfo,
-};
+use crate::dsl::{ConstantData, IndexKeyElement, Remap, ScatterOp, Tensor, TensorKind};
 use crate::ops::{AssocOp, ElementType};
 use crate::tree::Tree;
 
 /// Lower `sinks` (traced outputs) to an IR program whose parameter slots
-/// follow `params`' leaf order.
-pub fn lower(
-    params: &impl Tree<Tensor>,
-    sinks: &impl Tree<Tensor>,
-) -> Result<Program, Error> {
+/// follow `params`' leaf order. Every sink view is C-contiguous afterwards.
+pub fn lower(params: &impl Tree<Tensor>, sinks: &impl Tree<Tensor>) -> Result<Program, Error> {
     let mut builder = Builder::default();
     let mut program = Program {
         params: Vec::new(),
@@ -41,7 +42,7 @@ pub fn lower(
     }
     for tensor in sinks.leaves() {
         let view = builder.view_for(tensor)?;
-        program.sinks.push(view);
+        program.sinks.push(builder.ensure_dense(view));
     }
     program.queue = builder.queue;
     program.buffers = builder.buffers;
@@ -111,7 +112,10 @@ impl Builder {
             }
             TensorKind::Reduction { op, axes, arg } => {
                 let args = vec![self.view_for(arg)?];
-                let kernel = Kernel::Reduction { op: *op, axes: axes.clone() };
+                let kernel = Kernel::Reduction {
+                    op: *op,
+                    axes: axes.clone(),
+                };
                 self.push_dispatch(tensor.shape(), etype, kernel, args)
             }
             TensorKind::Remap(remap) => {
@@ -152,7 +156,7 @@ impl Builder {
             | TensorKind::Transpose { .. }
             | TensorKind::Squeeze { .. }
             | TensorKind::Index { .. } => {
-                return Err(Error::Unsupported("view node has no buffer"));
+                return Err(Error("view node has no buffer".into()));
             }
         };
         self.materialized.insert(tensor.clone(), buffer);
@@ -192,6 +196,29 @@ impl Builder {
         }
     }
 
+    /// If `view` is not C-contiguous, enqueue an identity copy into a fresh
+    /// dense buffer and return that output. Already-dense views (including
+    /// dense-with-offset) are returned unchanged.
+    fn ensure_dense(&mut self, view: BufferViewRef) -> BufferViewRef {
+        let (shape, etype) = {
+            let v = &self.views[view.0];
+            if v.accessor.is_dense() {
+                return view;
+            }
+            (
+                v.accessor.shape.clone(),
+                self.buffers[v.buffer.0].element_type,
+            )
+        };
+        let buffer = self.push_dispatch(
+            &shape,
+            etype,
+            Kernel::elementwise(Expr::Load(view)),
+            vec![view],
+        );
+        self.intern_view(buffer, Accessor::dense(shape, 0))
+    }
+
     fn intern_view(&mut self, buffer: BufferRef, accessor: Accessor) -> BufferViewRef {
         let view = BufferView { buffer, accessor };
         if let Some(&r) = self.view_memo.get(&view) {
@@ -223,7 +250,11 @@ impl Builder {
             atomic: false,
         });
         let output = self.intern_view(buffer, Accessor::dense(shape, 0));
-        self.queue.push(Dispatch { kernel, args, output });
+        self.queue.push(Dispatch {
+            kernel,
+            args,
+            output,
+        });
         buffer
     }
 }
@@ -251,7 +282,7 @@ fn compose_index(arg_acc: &Accessor, key: &[IndexKeyElement]) -> Accessor {
 
 /// Accessor addressing the `key` region of a dense buffer with `target_shape`.
 fn region_accessor(target_shape: &[usize], key: &[IndexKeyElement]) -> Accessor {
-    let pitch = crate::ir::dense_pitch(target_shape);
+    let pitch = dense_pitch(target_shape);
     let mut offset = 0;
     let mut shape = Vec::with_capacity(key.len());
     for (axis, element) in key.iter().enumerate() {
@@ -289,7 +320,10 @@ mod tests {
         let program = lower(&Pair { a, b }, &out).unwrap();
         assert_eq!(program.buffers.len(), 3);
         assert_eq!(program.queue.len(), 1);
-        assert!(matches!(program.queue[0].kernel, Kernel::Elementwise { .. }));
+        assert!(matches!(
+            program.queue[0].kernel,
+            Kernel::Elementwise { .. }
+        ));
     }
 
     #[test]
@@ -354,38 +388,47 @@ mod tests {
     }
 
     #[test]
-    fn lower_broadcast_is_view_not_kernel() {
+    fn lower_broadcast_view_densifies_as_sink() {
+        // Broadcast is a pitch trick; the strided sink is densified with one copy.
         let bias = Tensor::parameter(&[3]);
         let out = bias.broadcast_to(&[2, 3], &[1]);
         let program = lower(&bias, &out).unwrap();
 
-        assert_eq!(program.queue.len(), 0, "broadcast must not enqueue a kernel");
-        assert_eq!(program.buffers.len(), 1);
+        assert_eq!(program.queue.len(), 1, "only the sink densify copy");
+        assert_eq!(program.buffers.len(), 2);
         let sink = program.view(program.sinks[0]);
+        assert!(sink.accessor.is_dense());
         assert_eq!(&*sink.accessor.shape, &[2, 3]);
-        assert_eq!(&*sink.accessor.pitch, &[0, 1]);
+        // The densify reads the strided broadcast view.
+        let arg = program.view(program.queue[0].args[0]);
+        assert_eq!(&*arg.accessor.shape, &[2, 3]);
+        assert_eq!(&*arg.accessor.pitch, &[0, 1]);
     }
 
     #[test]
-    fn lower_transpose_is_view_not_kernel() {
+    fn lower_transpose_view_densifies_as_sink() {
         let a = Tensor::parameter(&[2, 3]);
         let out = a.transpose();
         let program = lower(&a, &out).unwrap();
 
-        assert_eq!(program.queue.len(), 0);
+        assert_eq!(program.queue.len(), 1, "only the sink densify copy");
         let sink = program.view(program.sinks[0]);
+        assert!(sink.accessor.is_dense());
         assert_eq!(&*sink.accessor.shape, &[3, 2]);
-        assert_eq!(&*sink.accessor.pitch, &[1, 3]);
+        let arg = program.view(program.queue[0].args[0]);
+        assert_eq!(&*arg.accessor.pitch, &[1, 3]);
     }
 
     #[test]
     fn lower_squeeze_is_view_not_kernel() {
+        // Squeeze of a dense [1, 4] is already dense; no densify copy.
         let a = Tensor::parameter(&[1, 4]);
         let out = a.squeeze(&[0]);
         let program = lower(&a, &out).unwrap();
 
         assert_eq!(program.queue.len(), 0);
         assert_eq!(&*program.view(program.sinks[0]).accessor.shape, &[4]);
+        assert!(program.view(program.sinks[0]).accessor.is_dense());
     }
 
     #[test]
@@ -428,13 +471,16 @@ mod tests {
         assert_eq!(program.queue.len(), 1);
         assert!(matches!(
             program.queue[0].kernel,
-            Kernel::Remap { info: RemapInfo::GatherRows }
+            Kernel::Remap {
+                info: RemapInfo::GatherRows
+            }
         ));
         assert_eq!(&*program.output_shape(&program.queue[0]), &[3, 2]);
     }
 
     #[test]
     fn lower_index_is_view_not_kernel() {
+        // Contiguous mid-buffer slice is dense-with-offset; no densify copy.
         let x = Tensor::parameter(&[6]);
         let out = x.index(&[IndexKeyElement::Slice(2..5)]);
         let program = lower(&x, &out).unwrap();
@@ -442,5 +488,15 @@ mod tests {
         let sink = program.view(program.sinks[0]);
         assert_eq!(&*sink.accessor.shape, &[3]);
         assert_eq!(sink.accessor.offset, 2);
+        assert!(sink.accessor.is_dense());
+    }
+
+    #[test]
+    fn lower_dense_sink_is_untouched() {
+        let a = Tensor::parameter(&[4]);
+        let out = a.clone() + a.clone();
+        let program = lower(&a, &out).unwrap();
+        assert_eq!(program.queue.len(), 1, "no densify copy for a dense sink");
+        assert!(program.view(program.sinks[0]).accessor.is_dense());
     }
 }

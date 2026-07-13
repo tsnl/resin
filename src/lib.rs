@@ -4,9 +4,9 @@
 //!
 //! 1. [`dsl`] — trace an expression graph of [`dsl::Tensor`]s (with
 //!    reverse-mode autodiff via [`dsl::grad_wrt`]).
-//! 2. [`ir`] — lower the graph to a flat queue of kernel dispatches over
-//!    buffers and strided views; optional optimize; then
-//!    [`ir::layout::prepare_for_backend`] (dead-elim + arena pack).
+//! 2. [`ir`] — [`ir::lower`] the graph to a flat queue of kernel dispatches
+//!    over buffers and strided views (sinks densified up-front); optional
+//!    optimize; then [`ir::layout::prepare_for_backend`] (dead-elim + arena pack).
 //! 3. [`jit`] — run the program on a backend: [`jit::CpuJit`] interprets it,
 //!    [`jit::WgpuJit`] emits WGSL and dispatches through wgpu.
 //!

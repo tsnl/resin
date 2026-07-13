@@ -4,9 +4,10 @@ use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::optimize::fuse_elementwise;
 use resin::ir::{Kernel, Program};
-use resin::jit::{HostArray, CpuJit, Jit, lower};
+use resin::ir::lower;
+use resin::jit::{HostArray, CpuJit, Jit};
 
-/// Run `program` on the CPU backend and densify its sinks.
+/// Run `program` on the CPU backend.
 fn run(program: &Program, params: &[&HostArray]) -> Vec<Vec<f32>> {
     let artifact = CpuJit.lower(program).expect("valid program");
     let mut outputs: Vec<HostArray> = program
