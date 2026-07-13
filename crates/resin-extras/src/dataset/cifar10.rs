@@ -12,10 +12,14 @@ use super::{Dataset, Split, dataset_dir, download_file};
 pub const IMG_W: usize = 32;
 pub const IMG_H: usize = 32;
 pub const IMG_C: usize = 3;
+pub type Image = [u8; IMG_CHW];
 
 /// Planar CHW size: `C * H * W`.
 pub const IMG_CHW: usize = IMG_C * IMG_H * IMG_W;
-pub const NUM_CLASSES: usize = 10;
+
+pub const CLASSES: &[&str; 10] = &[
+    "plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck",
+];
 
 const RECORD: usize = 1 + IMG_CHW;
 const BATCH_N: usize = 10_000;
@@ -50,15 +54,15 @@ const ALL_BATCHES: &[&str] = &[
     "test_batch.bin",
 ];
 
-/// One CIFAR-10 sample: normalized planar CHW pixels and class index.
+/// One CIFAR-10 sample: planar CHW pixels and class index.
 pub struct Example<'a> {
-    pub image: &'a [u8],
+    pub image: &'a Image,
     pub label: u8,
 }
 
 /// CIFAR-10 images as planar `u8` pixels (0–255, CHW) and labels (0–9).
 pub struct Cifar10 {
-    pub images: Vec<u8>,
+    pub images: Vec<Image>,
     pub labels: Vec<u8>,
     pub n: usize,
 }
@@ -84,7 +88,7 @@ impl Dataset for Cifar10 {
             read_batch(&data_dir.join(name), &mut images, &mut labels)?;
         }
         let n = labels.len();
-        if images.len() != n * IMG_CHW {
+        if images.len() != n {
             return Err("CIFAR-10 image/label count mismatch".into());
         }
         Ok(Self { images, labels, n })
@@ -95,10 +99,14 @@ impl Dataset for Cifar10 {
     }
 
     fn get<'a>(&'a self, &index: &usize) -> Example<'a> {
-        let base = index * IMG_CHW;
-        let image = &self.images[base..base + IMG_CHW];
-        let label = self.labels[index];
-        Example { image, label }
+        Example {
+            image: &self.images[index],
+            label: self.labels[index],
+        }
+    }
+
+    fn keys(&self) -> impl Iterator<Item = usize> + '_ {
+        0..self.len()
     }
 }
 
@@ -240,17 +248,18 @@ fn extract_tgz(tgz: &Path, dest_dir: &Path) -> Result<(), String> {
 
 // ── Load / parse ─────────────────────────────────────────────────────────────
 
-fn read_batch(path: &Path, images: &mut Vec<u8>, labels: &mut Vec<u8>) -> Result<(), String> {
+fn read_batch(path: &Path, images: &mut Vec<Image>, labels: &mut Vec<u8>) -> Result<(), String> {
     let mut f = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut buf = vec![0u8; BATCH_N * RECORD];
     f.read_exact(&mut buf)
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    images.reserve(BATCH_N * IMG_CHW);
+    images.reserve(BATCH_N);
     labels.reserve(BATCH_N);
     for rec in 0..BATCH_N {
         let off = rec * RECORD;
         labels.push(buf[off]);
-        images.extend_from_slice(&buf[off + 1..off + RECORD]);
+        let pixels = &buf[off + 1..off + RECORD];
+        images.push(Image::try_from(pixels).expect("record pixels are IMG_CHW"));
     }
     Ok(())
 }

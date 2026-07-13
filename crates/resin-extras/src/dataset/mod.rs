@@ -1,4 +1,7 @@
 //! Dataset = key-value map containing training data, resident in host memory.
+//!
+//! Walk the map with [`Dataset::keys`] / [`Dataset::iter`] — not an `Iterator`
+//! impl on the store itself (values may borrow from the dataset).
 
 use std::env;
 use std::fs;
@@ -23,6 +26,22 @@ pub trait Dataset: Sized {
 
     /// Deterministic sample for `key`.
     fn get<'a>(&'a self, key: &Self::Key) -> Self::Val<'a>;
+
+    /// Every key in the map (order is dataset-defined; e.g. `0..len()`).
+    fn keys(&self) -> impl Iterator<Item = Self::Key> + '_;
+
+    /// `(key, value)` pairs via [`keys`](Self::keys) + [`get`](Self::get).
+    fn iter(&self) -> impl Iterator<Item = (Self::Key, Self::Val<'_>)> + '_ {
+        self.keys().map(|k| {
+            let v = self.get(&k);
+            (k, v)
+        })
+    }
+
+    /// Every value in the map
+    fn values(&self) -> impl Iterator<Item = Self::Val<'_>> + '_ {
+        self.keys().map(|k| self.get(&k))
+    }
 }
 
 /// `data_root()/name` — the on-disk directory for one dataset.
@@ -73,4 +92,46 @@ pub(crate) fn download_file(url: &str, dest: &Path) -> Result<(), String> {
         format!("failed to finalize download: {e}")
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tiny host map: label is the value (owned so the test stays free of downloads).
+    struct Tiny {
+        labels: Vec<u8>,
+    }
+
+    impl Dataset for Tiny {
+        type Key = usize;
+        type Val<'a> = u8;
+
+        const NAME: &'static str = "tiny";
+
+        fn load(_split: Split) -> Result<Self, String> {
+            unreachable!("test fixture")
+        }
+
+        fn len(&self) -> usize {
+            self.labels.len()
+        }
+
+        fn get<'a>(&'a self, &index: &usize) -> u8 {
+            self.labels[index]
+        }
+
+        fn keys(&self) -> impl Iterator<Item = usize> + '_ {
+            0..self.len()
+        }
+    }
+
+    #[test]
+    fn keys_and_iter_walk_in_order() {
+        let d = Tiny {
+            labels: vec![3, 1, 4],
+        };
+        assert_eq!(d.keys().collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert_eq!(d.iter().collect::<Vec<_>>(), vec![(0, 3), (1, 1), (2, 4)]);
+    }
 }

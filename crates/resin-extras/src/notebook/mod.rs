@@ -13,6 +13,8 @@
 //! live-server --path . --open out/my-notebook.html
 //! ```
 
+pub mod mosaic;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};

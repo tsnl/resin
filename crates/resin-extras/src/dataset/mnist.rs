@@ -9,18 +9,20 @@ use super::{Dataset, Split, dataset_dir, download_file};
 pub const IMG_W: usize = 28;
 pub const IMG_H: usize = 28;
 pub const IMG_WH: usize = IMG_W * IMG_H;
+pub type Image = [u8; IMG_WH];
+
 pub const CLASSES: &'static [&'static str; 10] =
     &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 /// One MNIST sample: normalized pixels and class index.
 pub struct Example<'a> {
-    pub image: &'a [u8],
+    pub image: &'a Image,
     pub label: u8,
 }
 
 /// MNIST images as `u8` pixels (0–255) and labels as class indices (0–9).
 pub struct Mnist {
-    pub images: Vec<u8>,
+    pub images: Vec<Image>,
     pub labels: Vec<u8>,
     pub n: usize,
 }
@@ -41,7 +43,7 @@ impl Dataset for Mnist {
         };
         let images = read_idx_images(&dir.join(img_name))?;
         let labels = read_idx_labels(&dir.join(lbl_name))?;
-        if images.len() / IMG_WH != labels.len() {
+        if images.len() != labels.len() {
             return Err("MNIST image/label count mismatch".into());
         }
         let n = labels.len();
@@ -53,10 +55,14 @@ impl Dataset for Mnist {
     }
 
     fn get<'a>(&'a self, &index: &usize) -> Example<'a> {
-        let base = index * IMG_WH;
-        let image = &self.images[base..base + IMG_WH];
-        let label = self.labels[index];
-        Example { image, label }
+        Example {
+            image: &self.images[index],
+            label: self.labels[index],
+        }
+    }
+
+    fn keys(&self) -> impl Iterator<Item = usize> + '_ {
+        0..self.len()
     }
 }
 
@@ -113,7 +119,7 @@ fn read_u32_be(r: &mut impl Read) -> Result<u32, String> {
     Ok(u32::from_be_bytes(buf))
 }
 
-fn read_idx_images(path: &Path) -> Result<Vec<u8>, String> {
+fn read_idx_images(path: &Path) -> Result<Vec<Image>, String> {
     let mut f = File::open(path).map_err(|e| e.to_string())?;
     let magic = read_u32_be(&mut f)?;
     if magic != 2051 {
@@ -125,9 +131,14 @@ fn read_idx_images(path: &Path) -> Result<Vec<u8>, String> {
     if rows != IMG_H || cols != IMG_W {
         return Err(format!("unexpected MNIST image size {rows}x{cols}"));
     }
-    let mut data = vec![0u8; n * IMG_WH];
-    f.read_exact(&mut data).map_err(|e| e.to_string())?;
-    Ok(data)
+    // One bulk read, then split into fixed-size rows.
+    let mut flat = vec![0u8; n * IMG_WH];
+    f.read_exact(&mut flat).map_err(|e| e.to_string())?;
+    let images = flat
+        .chunks_exact(IMG_WH)
+        .map(|chunk| Image::try_from(chunk).expect("chunk is IMG_WH"))
+        .collect();
+    Ok(images)
 }
 
 fn read_idx_labels(path: &Path) -> Result<Vec<u8>, String> {

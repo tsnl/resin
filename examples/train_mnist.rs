@@ -1,9 +1,9 @@
 //! MNIST MLP training.
 //!
-//! One jitted train step (forward + MSE + reverse-mode grad + SGD). The first
-//! `call` traces and compiles; later minibatches only upload the batch, invoke,
-//! and keep the model on-device (same cost model as `mnist_train` Criterion).
-//! Loss is `.host()`'d once per epoch. Backend-agnostic; `main` picks CPU/wgpu.
+//! One jitted train step (forward + MSE + reverse-mode grad + SGD). Compile
+//! once from abstract parameter shapes; minibatches only collate on the host,
+//! upload, invoke, and keep the model on-device. Loss is `.host()`'d once per
+//! epoch. Backend-agnostic; `main` picks CPU/wgpu.
 //!
 //! Usage:
 //!   cargo run --example train_mnist
@@ -17,7 +17,8 @@ use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
 use resin::jit::{DeviceValue, HostArray, Jit};
 use resin_extras::dataset::mnist::{self, Mnist};
-use resin_extras::dataset::{Dataset, IndexSampler, Sampler, Split};
+use resin_extras::dataset::{Dataset, Split};
+use resin_extras::sampler::{IndexSampler, Sampler};
 
 const LR: f32 = 1e-3;
 const SEED: u64 = 0;
@@ -116,6 +117,23 @@ fn trace_train_step(step: &TrainStepIn<Tensor>) -> TrainStepOut<Tensor> {
     }
 }
 
+/// Abstract inputs for one train step — shapes only, for [`JittedFn::compile`].
+fn train_step_shapes(batch_size: usize, hidden: usize) -> TrainStepIn<Tensor> {
+    let layer = |in_dim: usize, out_dim: usize| LinearParams {
+        weight: Tensor::parameter(&[in_dim, out_dim]),
+        bias: Tensor::parameter(&[out_dim]),
+    };
+    TrainStepIn {
+        xs: Tensor::parameter(&[batch_size, mnist::IMG_WH]),
+        ys: Tensor::parameter(&[batch_size, mnist::CLASSES.len()]),
+        model: MlpParams {
+            layer0: layer(mnist::IMG_WH, hidden),
+            layer1: layer(hidden, hidden),
+            layer2: layer(hidden, mnist::CLASSES.len()),
+        },
+    }
+}
+
 fn random_model(hidden: usize, seed: u64) -> MlpParams<HostArray> {
     let mut rng = seed;
     let mut layer = |in_dim: usize, out_dim: usize| LinearParams {
@@ -146,56 +164,42 @@ fn next_uniform(rng: &mut u64) -> f32 {
     u * 0.2 - 0.1
 }
 
+/// Host collate: keys → normalized images + one-hot labels (train-step policy).
+fn collate_batch(dataset: &Mnist, keys: &[usize]) -> (HostArray, HostArray) {
+    let b = keys.len();
+    let mut xs = vec![0f32; b * mnist::IMG_WH];
+    let mut ys = vec![0f32; b * mnist::CLASSES.len()];
+    for (row, key) in keys.iter().enumerate() {
+        let ex = dataset.get(key);
+        let x_base = row * mnist::IMG_WH;
+        for (j, &px) in ex.image.iter().enumerate() {
+            xs[x_base + j] = px as f32 / 255.0;
+        }
+        ys[row * mnist::CLASSES.len() + ex.label as usize] = 1.0;
+    }
+    (
+        HostArray::from_f32(&[b, mnist::IMG_WH], &xs),
+        HostArray::from_f32(&[b, mnist::CLASSES.len()], &ys),
+    )
+}
+
 fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
     eprintln!("loading MNIST train …");
     let dataset = Mnist::load(Split::Train).expect("load MNIST");
-    let mut sampler = IndexSampler::new(dataset.len(), config.batch_size, SEED, true);
     eprintln!("loaded {} samples", dataset.len());
 
     // Clone: `jit()` consumes self; we still need `upload` on the original.
     let train = jit.clone().jit(trace_train_step);
+    // Trace once from shapes — no dataset/sampler involvement.
+    train
+        .compile(&train_step_shapes(config.batch_size, config.hidden))
+        .expect("compile train step");
+
     // Model stays device-local across minibatches; only loss is `.host()`'d per epoch.
     let mut model = random_model(config.hidden, SEED)
         .try_map(&mut |a| jit.upload(a))
         .expect("upload model");
     let mut sampler = IndexSampler::new(dataset.len(), config.batch_size, SEED, true);
-
-    // Warm-up: first call traces + compiles once for this shape signature.
-    {
-        let (xs, ys) = sampler.next_batch().expect("warm-up batch").iter().fold(
-            (
-                Vec::with_capacity(config.batch_size * mnist::IMG_WH),
-                Vec::with_capacity(config.batch_size * mnist::CLASSES.len()),
-            ),
-            |(mut xs, mut ys), &key| {
-                let example = dataset.get(&key);
-                xs.extend_from_slice(example.image);
-                let mut one_hot = vec![0.0; mnist::CLASSES.len()];
-                one_hot[example.label as usize] = 1.0;
-                ys.extend_from_slice(&one_hot);
-                (xs, ys)
-            },
-        );
-        let out = train
-            .call(&TrainStepIn {
-                xs: jit
-                    .upload(&HostArray::from_f32(
-                        &[config.batch_size, mnist::IMG_WH],
-                        &xs,
-                    ))
-                    .expect("upload xs"),
-                ys: jit
-                    .upload(&HostArray::from_f32(
-                        &[config.batch_size, mnist::CLASSES.len()],
-                        &ys,
-                    ))
-                    .expect("upload ys"),
-                model,
-            })
-            .expect("warm-up train step");
-        model = out.new_model;
-        sampler.reset(SEED);
-    }
 
     for epoch in 0..config.epochs {
         sampler.reset(SEED + epoch as u64);
@@ -203,26 +207,16 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
         let mut batch_index = 0;
         let t0 = std::time::Instant::now();
 
-        while let Some(keys) = sampler.next_batch() {
+        while let Some(keys) = sampler.next_batch_keys() {
             if config.max_batches.is_some_and(|limit| batch_index >= limit) {
                 break;
             }
-            let (xs, ys) = dataset.batch_f32(keys);
-            // Same shapes → no re-trace; upload batch + invoke only.
+            let (xs, ys) = collate_batch(&dataset, keys);
+            // Same shapes → cache hit; upload batch + invoke only.
             let out = train
                 .call(&TrainStepIn {
-                    xs: jit
-                        .upload(&HostArray::from_f32(
-                            &[config.batch_size, mnist::IMG_WH],
-                            &xs,
-                        ))
-                        .expect("upload xs"),
-                    ys: jit
-                        .upload(&HostArray::from_f32(
-                            &[config.batch_size, mnist::CLASSES.len()],
-                            &ys,
-                        ))
-                        .expect("upload ys"),
+                    xs: jit.upload(&xs).expect("upload xs"),
+                    ys: jit.upload(&ys).expect("upload ys"),
                     model,
                 })
                 .expect("train step");
