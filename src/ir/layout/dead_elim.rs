@@ -6,9 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::ir::{
-    BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program,
-};
+use crate::ir::{BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program};
 
 /// Keep only views/buffers reachable from params, sinks, or the dispatch queue.
 pub fn eliminate_dead(program: Program) -> Program {
@@ -64,7 +62,9 @@ pub fn eliminate_dead(program: Program) -> Program {
             .into_iter()
             .map(|d| Dispatch {
                 kernel: match d.kernel {
-                    Kernel::Elementwise { expr } => Kernel::Elementwise { expr: map_expr(expr) },
+                    Kernel::Elementwise { expr } => Kernel::Elementwise {
+                        expr: map_expr(expr),
+                    },
                     other => other,
                 },
                 args: d.args.iter().map(|a| map_view(*a)).collect(),

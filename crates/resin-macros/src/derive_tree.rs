@@ -86,7 +86,11 @@ fn derive_struct(item: ItemStruct) -> TokenStream {
     // Field access for `&self` methods, and destructured bindings for `&mut`.
     let (shared_values, mut_bindings): (Vec<TokenStream>, TokenStream) = match &item.fields {
         Fields::Named(named) => {
-            let idents: Vec<_> = named.named.iter().map(|f| f.ident.clone().expect("named")).collect();
+            let idents: Vec<_> = named
+                .named
+                .iter()
+                .map(|f| f.ident.clone().expect("named"))
+                .collect();
             let values = idents.iter().map(|i| quote! { &self.#i }).collect();
             (values, quote! { let Self { #(#idents),* } = self; })
         }

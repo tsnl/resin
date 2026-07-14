@@ -20,7 +20,11 @@ impl Accessor {
     pub fn dense(shape: impl Into<Box<[usize]>>, offset: usize) -> Self {
         let shape = shape.into();
         let pitch = dense_pitch(&shape);
-        Self { offset, shape, pitch }
+        Self {
+            offset,
+            shape,
+            pitch,
+        }
     }
 
     /// Whether this is C-contiguous (kernel-output law).
@@ -66,7 +70,9 @@ impl Accessor {
                     )));
                 }
                 Some(&size) if size != 1 => {
-                    return Err(Error(format!("cannot squeeze axis {axis} with size {size}")));
+                    return Err(Error(format!(
+                        "cannot squeeze axis {axis} with size {size}"
+                    )));
                 }
                 Some(_) => {}
             }
@@ -74,8 +80,14 @@ impl Accessor {
         let keep = |i: &usize| !axes.contains(i);
         Ok(Self {
             offset: self.offset,
-            shape: (0..self.rank()).filter(keep).map(|i| self.shape[i]).collect(),
-            pitch: (0..self.rank()).filter(keep).map(|i| self.pitch[i]).collect(),
+            shape: (0..self.rank())
+                .filter(keep)
+                .map(|i| self.shape[i])
+                .collect(),
+            pitch: (0..self.rank())
+                .filter(keep)
+                .map(|i| self.pitch[i])
+                .collect(),
         })
     }
 
@@ -86,7 +98,10 @@ impl Accessor {
             return Ok(self.clone());
         }
         let lead = target.len().checked_sub(self.rank()).ok_or_else(|| {
-            Error(format!("cannot broadcast {:?} down to {target:?}", self.shape))
+            Error(format!(
+                "cannot broadcast {:?} down to {target:?}",
+                self.shape
+            ))
         })?;
         let mut pitch = vec![0; target.len()];
         for (i, (&dim, &p)) in self.shape.iter().zip(&self.pitch).enumerate() {
@@ -147,10 +162,15 @@ impl Accessor {
         if self.pitch[..lead].iter().any(|&p| p != 0) {
             return false;
         }
-        source.shape.iter().zip(&source.pitch).enumerate().all(|(i, (&dim, &pitch))| {
-            let (out_dim, out_pitch) = (self.shape[lead + i], self.pitch[lead + i]);
-            (out_dim == dim && out_pitch == pitch) || (dim == 1 && out_pitch == 0)
-        })
+        source
+            .shape
+            .iter()
+            .zip(&source.pitch)
+            .enumerate()
+            .all(|(i, (&dim, &pitch))| {
+                let (out_dim, out_pitch) = (self.shape[lead + i], self.pitch[lead + i]);
+                (out_dim == dim && out_pitch == pitch) || (dim == 1 && out_pitch == 0)
+            })
     }
 
     /// Re-address this accessor through a consumer view of a producer write

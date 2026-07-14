@@ -102,7 +102,10 @@ mod tests {
 
     #[test]
     fn map_doubles_leaves() {
-        let tree = TestNode { x: 1, y: vec![2, 3] };
+        let tree = TestNode {
+            x: 1,
+            y: vec![2, 3],
+        };
         let mapped = tree.map(|&v| v * 2);
         assert_eq!(mapped.x, 2);
         assert_eq!(mapped.y, vec![4, 6]);
@@ -110,7 +113,10 @@ mod tests {
 
     #[test]
     fn try_map_propagates_errors() {
-        let tree = TestNode { x: 1, y: vec![2, 3] };
+        let tree = TestNode {
+            x: 1,
+            y: vec![2, 3],
+        };
         let result: Result<TestNode<i32>, &str> =
             tree.try_map(&mut |&v| if v == 3 { Err("three") } else { Ok(v) });
         assert_eq!(result.err(), Some("three"));
@@ -125,13 +131,19 @@ mod tests {
 
     #[test]
     fn leaves_visit_in_declaration_order() {
-        let tree = TestNode { x: 1, y: vec![2, 3] };
+        let tree = TestNode {
+            x: 1,
+            y: vec![2, 3],
+        };
         assert_eq!(tree.leaves(), vec![&1, &2, &3]);
     }
 
     #[test]
     fn leaves_mut_can_write() {
-        let mut tree = TestNode { x: 1, y: vec![2, 3] };
+        let mut tree = TestNode {
+            x: 1,
+            y: vec![2, 3],
+        };
         for leaf in tree.leaves_mut() {
             *leaf *= 10;
         }

@@ -140,11 +140,17 @@ pub fn pack_arenas(program: Program) -> Program {
                 Kernel::Remap {
                     info: RemapInfo::ScatterView { accessor },
                 } => Kernel::Remap {
-                    info: RemapInfo::ScatterView { accessor: shift(out_buf, &accessor) },
+                    info: RemapInfo::ScatterView {
+                        accessor: shift(out_buf, &accessor),
+                    },
                 },
                 other => other,
             };
-            Dispatch { kernel, args: d.args, output: d.output }
+            Dispatch {
+                kernel,
+                args: d.args,
+                output: d.output,
+            }
         })
         .collect();
 
@@ -161,7 +167,10 @@ pub fn pack_arenas(program: Program) -> Program {
 fn is_packed(program: &Program) -> bool {
     let mut seen: Vec<ArenaKey> = Vec::new();
     for b in &program.buffers {
-        let k = ArenaKey { etype: b.element_type, atomic: b.atomic };
+        let k = ArenaKey {
+            etype: b.element_type,
+            atomic: b.atomic,
+        };
         if seen.contains(&k) {
             return false;
         }

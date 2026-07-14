@@ -69,9 +69,7 @@ impl Expr {
     pub fn map_loads(&self, f: &mut dyn FnMut(BufferViewRef) -> Expr) -> Expr {
         match self {
             Expr::Load(v) => f(*v),
-            Expr::Op { op, args } => {
-                Expr::new_op(*op, args.iter().map(|a| a.map_loads(f)))
-            }
+            Expr::Op { op, args } => Expr::new_op(*op, args.iter().map(|a| a.map_loads(f))),
         }
     }
 

@@ -6,7 +6,7 @@
 
 use resin::Tree;
 use resin::dsl::{
-    argsort_f32, argsort_u32, cumprod_exclusive, cumsum, cumsum_exclusive, grad_wrt, scan, Tensor,
+    Tensor, argsort_f32, argsort_u32, cumprod_exclusive, cumsum, cumsum_exclusive, grad_wrt, scan,
 };
 use resin::jit::{CpuJit, HostArray, Jit};
 

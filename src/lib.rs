@@ -54,7 +54,7 @@ pub use tree::Tree;
 mod tests {
     use crate::Tree;
     use crate::dsl::Tensor;
-    use crate::jit::{DeviceValue, HostArray, CpuJit, Jit};
+    use crate::jit::{CpuJit, DeviceValue, HostArray, Jit};
 
     #[derive(Tree, Clone)]
     struct Inputs<T> {
@@ -91,8 +91,12 @@ mod tests {
         let add = jit.jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
         let out = add
             .call(&Inputs {
-                a: jit.upload(&HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0])).unwrap(),
-                b: jit.upload(&HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0])).unwrap(),
+                a: jit
+                    .upload(&HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]))
+                    .unwrap(),
+                b: jit
+                    .upload(&HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]))
+                    .unwrap(),
             })
             .expect("wgpu jit add")
             .host()

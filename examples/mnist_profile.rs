@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use resin::Tree;
 use resin::dsl::Tensor;
-use resin::jit::{HostArray, CpuJit, Jit};
+use resin::jit::{CpuJit, HostArray, Jit};
 
 #[derive(Tree, Clone)]
 struct LinearParams<T> {

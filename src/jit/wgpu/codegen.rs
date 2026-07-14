@@ -4,7 +4,9 @@
 //! IR layer. Addressing is emitted as flat scalar arithmetic (no arrays or
 //! helper functions), which keeps shaders trivial for drivers to compile.
 
-use crate::ir::{Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, dense_pitch, element_count};
+use crate::ir::{
+    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, dense_pitch, element_count,
+};
 use crate::ops::{AssocOp, BinaryOp, ElementType, Op, UnaryOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +18,10 @@ pub struct KernelConfig {
 
 impl Default for KernelConfig {
     fn default() -> Self {
-        Self { lg2_items_per_thread: 3, workgroup_size: 64 }
+        Self {
+            lg2_items_per_thread: 3,
+            workgroup_size: 64,
+        }
     }
 }
 
@@ -41,7 +46,11 @@ fn workgroups_for_shape(shape: &[usize], config: &KernelConfig) -> [u32; 3] {
         return [0, 1, 1];
     }
     let threads = count.div_ceil(1 << config.lg2_items_per_thread);
-    [threads.div_ceil(u64::from(config.workgroup_size)).max(1) as u32, 1, 1]
+    [
+        threads.div_ceil(u64::from(config.workgroup_size)).max(1) as u32,
+        1,
+        1,
+    ]
 }
 
 /// Program-wide heap layout: `@binding(i)` ↔ `program.buffers[i]`.
@@ -112,16 +121,22 @@ pub fn emit(
     emit_heap_bindings(&mut w, program_heaps, &used);
     match kernel {
         Kernel::Elementwise { expr } => {
-            emit_elementwise(&mut w, expr, args, arg_meta, out, out_etype, out_atomic, config);
+            emit_elementwise(
+                &mut w, expr, args, arg_meta, out, out_etype, out_atomic, config,
+            );
         }
         Kernel::Matmul => {
             emit_matmul(&mut w, args, arg_meta, out, out_etype, out_atomic, config);
         }
         Kernel::Reduction { op, axes } => {
-            emit_reduction(&mut w, *op, axes, args, arg_meta, out, out_etype, out_atomic, config);
+            emit_reduction(
+                &mut w, *op, axes, args, arg_meta, out, out_etype, out_atomic, config,
+            );
         }
         Kernel::Remap { info } => {
-            emit_remap(&mut w, info, args, arg_meta, out, out_etype, out_atomic, config);
+            emit_remap(
+                &mut w, info, args, arg_meta, out, out_etype, out_atomic, config,
+            );
         }
     }
     w.finish()
@@ -237,7 +252,10 @@ fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
     let pitch = dense_pitch(shape);
     let coords: Vec<String> = (0..shape.len()).map(|k| format!("i{k}")).collect();
     for (k, coord) in coords.iter().enumerate() {
-        w.print(&format!("let {coord} = ({lin} / {}u) % {}u;", pitch[k], shape[k]));
+        w.print(&format!(
+            "let {coord} = ({lin} / {}u) % {}u;",
+            pitch[k], shape[k]
+        ));
     }
     coords
 }
@@ -273,7 +291,10 @@ fn per_output_element(
             // Literal count: after arena packing, arrayLength is the whole heap,
             // not this view's region.
             w.print(&format!("let count = {count}u;"));
-            w.print(&format!("let lin_beg = gid.x << {}u;", config.lg2_items_per_thread));
+            w.print(&format!(
+                "let lin_beg = gid.x << {}u;",
+                config.lg2_items_per_thread
+            ));
             w.block(
                 &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
                 |w| {
@@ -305,7 +326,10 @@ fn per_thread_element(
                 w.print("return;");
                 return;
             }
-            w.print(&format!("let lin_beg = gid.x << {}u;", config.lg2_items_per_thread));
+            w.print(&format!(
+                "let lin_beg = gid.x << {}u;",
+                config.lg2_items_per_thread
+            ));
             w.block(
                 &format!("for (var lin = lin_beg; lin < lin_beg + {items}u; lin += 1u)"),
                 |w| {
@@ -362,7 +386,11 @@ fn emit_expr_fn(w: &mut Writer, expr: &Expr, num_args: usize, out_etype: Element
 
 /// Load types for `elem` params. Cast/bitcast kernels convert from the other
 /// width type; everything else inherits the kernel output type.
-fn infer_load_types(expr: &Expr, free: &[BufferViewRef], out_etype: ElementType) -> Vec<ElementType> {
+fn infer_load_types(
+    expr: &Expr,
+    free: &[BufferViewRef],
+    out_etype: ElementType,
+) -> Vec<ElementType> {
     let mut types = vec![out_etype; free.len()];
     fn walk(expr: &Expr, free: &[BufferViewRef], expected: ElementType, types: &mut [ElementType]) {
         match expr {
@@ -399,7 +427,10 @@ fn spell_expr(expr: &Expr, free: &[BufferViewRef], out_etype: ElementType) -> St
             format!("a{i}")
         }
         Expr::Op { op, args } => {
-            let parts: Vec<String> = args.iter().map(|a| spell_expr(a, free, out_etype)).collect();
+            let parts: Vec<String> = args
+                .iter()
+                .map(|a| spell_expr(a, free, out_etype))
+                .collect();
             spell_op(*op, &parts, out_etype)
         }
     }
@@ -476,7 +507,12 @@ fn emit_matmul(
                 read_at(arg_meta[1].0, arg_meta[1].1, &address(args[1], &b_coords)),
             ));
         });
-        w.print(&write_at(out_etype, out_atomic, &address(out, coords), "sum"));
+        w.print(&write_at(
+            out_etype,
+            out_atomic,
+            &address(out, coords),
+            "sum",
+        ));
     });
 }
 
@@ -498,25 +534,36 @@ fn emit_reduction(
     let t = spell_etype(out_etype);
 
     per_output_element(w, out, config, |w, coords| {
-        w.print(&format!("var acc: {t} = {};", identity_literal(op, out_etype)));
-        w.block(&format!("for (var ri: u32 = 0u; ri < {count}u; ri += 1u)"), |w| {
-            let mut in_coords = coords.to_vec();
-            let mut stride = 1;
-            for &axis in sorted_axes.iter().rev() {
-                let dim = input.shape[axis];
-                in_coords[axis] = format!("r{axis}");
-                w.print(&format!("let r{axis} = (ri / {stride}u) % {dim}u;"));
-                stride *= dim;
-            }
-            let value = read_at(arg_meta[0].0, arg_meta[0].1, &address(input, &in_coords));
-            w.print(&match op {
-                AssocOp::Add => format!("acc += {value};"),
-                AssocOp::Mul => format!("acc *= {value};"),
-                AssocOp::Max => format!("acc = max(acc, {value});"),
-                AssocOp::Min => format!("acc = min(acc, {value});"),
-            });
-        });
-        w.print(&write_at(out_etype, out_atomic, &address(out, coords), "acc"));
+        w.print(&format!(
+            "var acc: {t} = {};",
+            identity_literal(op, out_etype)
+        ));
+        w.block(
+            &format!("for (var ri: u32 = 0u; ri < {count}u; ri += 1u)"),
+            |w| {
+                let mut in_coords = coords.to_vec();
+                let mut stride = 1;
+                for &axis in sorted_axes.iter().rev() {
+                    let dim = input.shape[axis];
+                    in_coords[axis] = format!("r{axis}");
+                    w.print(&format!("let r{axis} = (ri / {stride}u) % {dim}u;"));
+                    stride *= dim;
+                }
+                let value = read_at(arg_meta[0].0, arg_meta[0].1, &address(input, &in_coords));
+                w.print(&match op {
+                    AssocOp::Add => format!("acc += {value};"),
+                    AssocOp::Mul => format!("acc *= {value};"),
+                    AssocOp::Max => format!("acc = max(acc, {value});"),
+                    AssocOp::Min => format!("acc = min(acc, {value});"),
+                });
+            },
+        );
+        w.print(&write_at(
+            out_etype,
+            out_atomic,
+            &address(out, coords),
+            "acc",
+        ));
     });
 }
 
@@ -556,7 +603,12 @@ fn emit_remap(
                 let mut src_coords = coords.to_vec();
                 src_coords[0] = "row".into();
                 let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(args[0], &src_coords));
-                w.print(&write_at(out_etype, out_atomic, &address(out, coords), &val));
+                w.print(&write_at(
+                    out_etype,
+                    out_atomic,
+                    &address(out, coords),
+                    &val,
+                ));
             });
         }
         RemapInfo::ScatterRows { operator } => {
@@ -609,7 +661,12 @@ fn emit_remap(
             let src = args[0];
             per_thread_element(w, &src.shape, config, |w, _lin, coords| {
                 let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
-                w.print(&write_at(out_etype, out_atomic, &address(accessor, coords), &val));
+                w.print(&write_at(
+                    out_etype,
+                    out_atomic,
+                    &address(accessor, coords),
+                    &val,
+                ));
             });
         }
     }
@@ -702,7 +759,10 @@ mod tests {
         let input = Accessor::dense([2, 3], 0);
         let out = Accessor::dense([2, 1], 0);
         let wgsl = emit(
-            &Kernel::Reduction { op: AssocOp::Max, axes: Box::from([1]) },
+            &Kernel::Reduction {
+                op: AssocOp::Max,
+                axes: Box::from([1]),
+            },
             &[&input],
             &[(ElementType::F32, false)],
             &out,
@@ -720,7 +780,9 @@ mod tests {
         let idx = Accessor::dense([3], 0);
         let out = Accessor::dense([3, 2], 0);
         let wgsl = emit(
-            &Kernel::Remap { info: RemapInfo::GatherRows },
+            &Kernel::Remap {
+                info: RemapInfo::GatherRows,
+            },
             &[&src, &idx],
             &[(ElementType::F32, false), (ElementType::U32, false)],
             &out,
@@ -741,7 +803,9 @@ mod tests {
         let out = Accessor::dense([3], 0);
         let wgsl = emit(
             &Kernel::Remap {
-                info: RemapInfo::ScatterRows { operator: Some(AssocOp::Add) },
+                info: RemapInfo::ScatterRows {
+                    operator: Some(AssocOp::Add),
+                },
             },
             &[&src, &idx],
             &[(ElementType::F32, false), (ElementType::U32, false)],

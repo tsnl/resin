@@ -48,7 +48,10 @@ pub enum Error {
     #[error("param/output leaf count does not match compiled program")]
     LeafCount,
     #[error("element type mismatch: expected {expected:?}, got {got:?}")]
-    ElementType { expected: ElementType, got: ElementType },
+    ElementType {
+        expected: ElementType,
+        got: ElementType,
+    },
     #[error("wgpu: {0}")]
     Wgpu(String),
 }
@@ -94,7 +97,10 @@ impl HostArray {
             ElementType::F32 => ArrayData::F32(vec![0.0; n].into()),
             ElementType::U32 => ArrayData::U32(vec![0; n].into()),
         };
-        Self { shape: shape.into(), data }
+        Self {
+            shape: shape.into(),
+            data,
+        }
     }
 
     /// Row-major f32 values.
@@ -182,7 +188,11 @@ impl HostArray {
 
     /// The single element of a rank-0 f32 array.
     pub fn scalar(&self) -> f32 {
-        assert!(self.shape.is_empty(), "scalar() requires rank 0, got {:?}", self.shape);
+        assert!(
+            self.shape.is_empty(),
+            "scalar() requires rank 0, got {:?}",
+            self.shape
+        );
         self.data()[0]
     }
 }
@@ -224,7 +234,11 @@ pub trait Jit: Clone {
     fn lower(&self, program: &ir::Program) -> Result<Self::Artifact, Error>;
 
     /// Empty output leaf (zeros on host; uninitialized storage buffer on GPU).
-    fn alloc_output(&self, shape: &[usize], element_type: ElementType) -> Result<Self::Value, Error>;
+    fn alloc_output(
+        &self,
+        shape: &[usize],
+        element_type: ElementType,
+    ) -> Result<Self::Value, Error>;
 
     /// Copy a [`HostArray`] onto this backend's device (no GPU wait on wgpu).
     fn upload(&self, host: &HostArray) -> Result<Self::Value, Error>;
@@ -244,7 +258,12 @@ pub trait Jit: Clone {
         P: Tree<Tensor>,
         O: Tree<Tensor>,
     {
-        JittedFn { jit: self, f, cache: Mutex::new(HashMap::new()), _io: PhantomData }
+        JittedFn {
+            jit: self,
+            f,
+            cache: Mutex::new(HashMap::new()),
+            _io: PhantomData,
+        }
     }
 }
 
@@ -320,9 +339,8 @@ where
             if let Some(entry) = cache.get(&key) {
                 (entry.artifact.clone(), entry.out_shapes.clone())
             } else {
-                let abstract_params = params.map(|array| {
-                    Tensor::parameter_typed(array.shape(), array.element_type())
-                });
+                let abstract_params = params
+                    .map(|array| Tensor::parameter_typed(array.shape(), array.element_type()));
                 let compiled = self.trace_compile(&abstract_params)?;
                 let artifact = compiled.artifact.clone();
                 let out_shapes = compiled.out_shapes.clone();
@@ -331,10 +349,10 @@ where
             }
         };
 
-        let mut outputs = out_shapes.try_map(&mut |(shape, etype)| {
-            self.jit.alloc_output(shape.as_ref(), *etype)
-        })?;
-        self.jit.invoke(&artifact, &params.leaves(), &mut outputs.leaves_mut())?;
+        let mut outputs = out_shapes
+            .try_map(&mut |(shape, etype)| self.jit.alloc_output(shape.as_ref(), *etype))?;
+        self.jit
+            .invoke(&artifact, &params.leaves(), &mut outputs.leaves_mut())?;
         Ok(outputs)
     }
 
@@ -342,9 +360,10 @@ where
         let traced_out = (self.f)(params);
         let out_shapes = traced_out.map(|t| (Box::<[usize]>::from(t.shape()), t.element_type()));
         // lower (dense sinks) → optimize? → layout (dead-elim + arena pack) → backend.
-        let program = ir::layout::prepare_for_backend(ir::optimize::optimize(
-            ir::lower(params, &traced_out)?,
-        ));
+        let program = ir::layout::prepare_for_backend(ir::optimize::optimize(ir::lower(
+            params,
+            &traced_out,
+        )?));
         let artifact = self.jit.lower(&program)?;
         Ok(Compiled {
             artifact,
@@ -421,14 +440,29 @@ mod tests {
     #[test]
     fn call_compiles_once_per_shape_signature() {
         let lowers = Arc::new(AtomicUsize::new(0));
-        let f = CountingJit { lowers: lowers.clone() }
-            .jit(|input: &In<Tensor>| input.x.clone() + input.x.clone());
+        let f = CountingJit {
+            lowers: lowers.clone(),
+        }
+        .jit(|input: &In<Tensor>| input.x.clone() + input.x.clone());
 
-        f.call(&In { x: HostArray::zeros(&[]) }).unwrap();
-        f.call(&In { x: HostArray::zeros(&[]) }).unwrap();
-        assert_eq!(lowers.load(Ordering::SeqCst), 1, "same shapes hit the cache");
+        f.call(&In {
+            x: HostArray::zeros(&[]),
+        })
+        .unwrap();
+        f.call(&In {
+            x: HostArray::zeros(&[]),
+        })
+        .unwrap();
+        assert_eq!(
+            lowers.load(Ordering::SeqCst),
+            1,
+            "same shapes hit the cache"
+        );
 
-        f.call(&In { x: HostArray::zeros(&[3]) }).unwrap();
+        f.call(&In {
+            x: HostArray::zeros(&[3]),
+        })
+        .unwrap();
         assert_eq!(lowers.load(Ordering::SeqCst), 2, "new shapes recompile");
     }
 
@@ -436,17 +470,27 @@ mod tests {
     fn call_traces_once_per_shape_signature() {
         let traces = Arc::new(AtomicUsize::new(0));
         let traces_in_f = traces.clone();
-        let f = CountingJit { lowers: Arc::new(AtomicUsize::new(0)) }.jit(
-            move |input: &In<Tensor>| {
-                traces_in_f.fetch_add(1, Ordering::SeqCst);
-                input.x.clone()
-            },
-        );
-        f.call(&In { x: HostArray::zeros(&[]) }).unwrap();
-        f.call(&In { x: HostArray::zeros(&[]) }).unwrap();
+        let f = CountingJit {
+            lowers: Arc::new(AtomicUsize::new(0)),
+        }
+        .jit(move |input: &In<Tensor>| {
+            traces_in_f.fetch_add(1, Ordering::SeqCst);
+            input.x.clone()
+        });
+        f.call(&In {
+            x: HostArray::zeros(&[]),
+        })
+        .unwrap();
+        f.call(&In {
+            x: HostArray::zeros(&[]),
+        })
+        .unwrap();
         assert_eq!(traces.load(Ordering::SeqCst), 1, "same shapes: no re-trace");
 
-        f.call(&In { x: HostArray::zeros(&[3]) }).unwrap();
+        f.call(&In {
+            x: HostArray::zeros(&[3]),
+        })
+        .unwrap();
         assert_eq!(traces.load(Ordering::SeqCst), 2, "new shapes re-trace");
     }
 
@@ -455,7 +499,10 @@ mod tests {
         let lowers = Arc::new(AtomicUsize::new(0));
         let traces = Arc::new(AtomicUsize::new(0));
         let traces_in_f = traces.clone();
-        let f = CountingJit { lowers: lowers.clone() }.jit(move |input: &In<Tensor>| {
+        let f = CountingJit {
+            lowers: lowers.clone(),
+        }
+        .jit(move |input: &In<Tensor>| {
             traces_in_f.fetch_add(1, Ordering::SeqCst);
             input.x.clone() + input.x.clone()
         });

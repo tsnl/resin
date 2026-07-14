@@ -5,7 +5,7 @@
 //! typed ([`Slot`]): f32 and u32 buffers stay separate. The artifact is the
 //! validated IR program itself.
 
-use super::{HostArray, ArrayData, Error, Jit};
+use super::{ArrayData, Error, HostArray, Jit};
 use crate::ir::{
     Accessor, BufferData, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, element_count,
 };
@@ -67,11 +67,7 @@ impl Jit for CpuJit {
         Ok(program.clone())
     }
 
-    fn alloc_output(
-        &self,
-        shape: &[usize],
-        element_type: ElementType,
-    ) -> Result<HostArray, Error> {
+    fn alloc_output(&self, shape: &[usize], element_type: ElementType) -> Result<HostArray, Error> {
         Ok(HostArray::zeros_typed(shape, element_type))
     }
 
@@ -312,7 +308,10 @@ fn reduce(op: AssocOp, acc: Value, value: Value) -> Value {
     }
 }
 
-fn resolve_loads(expr: &Expr, program: &Program) -> Vec<(BufferViewRef, usize, Accessor, ElementType)> {
+fn resolve_loads(
+    expr: &Expr,
+    program: &Program,
+) -> Vec<(BufferViewRef, usize, Accessor, ElementType)> {
     expr.loads()
         .into_iter()
         .map(|r| {
@@ -344,7 +343,10 @@ fn clear_dense_region(slot: &mut Slot, out: &Accessor) {
 fn scatter_dense(slot: &mut Slot, accessor: &Accessor, data: &ArrayData) -> Result<(), Error> {
     let count = element_count(&accessor.shape);
     if data.len() != count {
-        return Err(Error::Size { expected: count, got: data.len() });
+        return Err(Error::Size {
+            expected: count,
+            got: data.len(),
+        });
     }
     let mut coords = vec![0; accessor.rank()];
     match (slot, data) {
@@ -376,7 +378,10 @@ fn scatter_dense(slot: &mut Slot, accessor: &Accessor, data: &ArrayData) -> Resu
 fn gather_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<(), Error> {
     let count = element_count(&accessor.shape);
     if out.len() != count {
-        return Err(Error::Size { expected: count, got: out.len() });
+        return Err(Error::Size {
+            expected: count,
+            got: out.len(),
+        });
     }
     let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
@@ -389,7 +394,10 @@ fn gather_f32(buffer: &[f32], accessor: &Accessor, out: &mut [f32]) -> Result<()
 fn gather_u32(buffer: &[u32], accessor: &Accessor, out: &mut [u32]) -> Result<(), Error> {
     let count = element_count(&accessor.shape);
     if out.len() != count {
-        return Err(Error::Size { expected: count, got: out.len() });
+        return Err(Error::Size {
+            expected: count,
+            got: out.len(),
+        });
     }
     let mut coords = vec![0; accessor.rank()];
     for (linear, slot) in out.iter_mut().enumerate() {
@@ -466,11 +474,9 @@ fn apply_op(op: Op, args: &[Value], out_etype: ElementType) -> Value {
                 BinaryOp::CmpLe => mask_f(a <= b_val, out_etype),
                 BinaryOp::CmpGt => mask_f(a > b_val, out_etype),
                 BinaryOp::CmpGe => mask_f(a >= b_val, out_etype),
-                BinaryOp::Band
-                | BinaryOp::Bor
-                | BinaryOp::Bxor
-                | BinaryOp::Shl
-                | BinaryOp::Shr => panic!("bitwise ops are u32-only"),
+                BinaryOp::Band | BinaryOp::Bor | BinaryOp::Bxor | BinaryOp::Shl | BinaryOp::Shr => {
+                    panic!("bitwise ops are u32-only")
+                }
             },
             (Value::U(a), Value::U(b_val)) => match b {
                 BinaryOp::Assoc(op) => Value::U(op.apply_u32(a, b_val)),
@@ -568,7 +574,10 @@ mod tests {
     fn sum_axes_then_squeeze_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
         let out = f
-            .call(&HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+            .call(&HostArray::from_f32(
+                &[2, 3],
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            ))
             .unwrap();
         assert!((out.scalar() - 21.0).abs() < 1e-5);
     }
@@ -576,7 +585,9 @@ mod tests {
     #[test]
     fn scalar_mul_runs() {
         let f = CpuJit.jit(|x: &Tensor| x.clone() * Tensor::scalar(0.5));
-        let out = f.call(&HostArray::from_f32(&[2, 2], &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let out = f
+            .call(&HostArray::from_f32(&[2, 2], &[2.0, 4.0, 6.0, 8.0]))
+            .unwrap();
         assert_eq!(out.data(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
@@ -654,7 +665,10 @@ mod tests {
         // A bare transpose output is a strided sink; layout densifies it.
         let f = CpuJit.jit(|x: &Tensor| x.transpose());
         let out = f
-            .call(&HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+            .call(&HostArray::from_f32(
+                &[2, 3],
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            ))
             .unwrap();
         assert_eq!(out.shape(), &[3, 2]);
         assert_eq!(out.data(), &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);

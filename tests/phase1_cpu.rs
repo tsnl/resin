@@ -1,10 +1,10 @@
 //! Phase 1 end-to-end tests on the CPU interpreter: integer dtype, bitwise /
 //! compare / select ops, casts, slicing views, and row gather/scatter.
 
-use resin::dsl::{grad_wrt, IndexKeyElement, ScatterOp, Tensor};
-use resin::jit::{HostArray, CpuJit, Jit};
-use resin::ops::ElementType;
 use resin::Tree;
+use resin::dsl::{IndexKeyElement, ScatterOp, Tensor, grad_wrt};
+use resin::jit::{CpuJit, HostArray, Jit};
+use resin::ops::ElementType;
 
 #[derive(Tree, Clone)]
 struct In<T> {
@@ -80,12 +80,8 @@ fn cast_u32_to_f32() {
 
 #[test]
 fn bitcast_round_trips() {
-    let f = CpuJit.jit(|input: &In<Tensor>| {
-        input
-            .x
-            .bitcast(ElementType::U32)
-            .bitcast(ElementType::F32)
-    });
+    let f = CpuJit
+        .jit(|input: &In<Tensor>| input.x.bitcast(ElementType::U32).bitcast(ElementType::F32));
     let x = HostArray::from_f32(&[3], &[-1.5, 0.0, 42.0]);
     let out = f.call(&In { x }).unwrap();
     assert_eq!(out.to_f32(), vec![-1.5, 0.0, 42.0]);
@@ -101,9 +97,7 @@ fn bitcast_matches_host_bits() {
 
 #[test]
 fn floor_sqrt_min_max() {
-    let f = CpuJit.jit(|p: &Pair<Tensor>| {
-        p.a.floor().maximum(&p.b) + p.a.sqrt().minimum(&p.b)
-    });
+    let f = CpuJit.jit(|p: &Pair<Tensor>| p.a.floor().maximum(&p.b) + p.a.sqrt().minimum(&p.b));
     let p = Pair {
         a: HostArray::from_f32(&[2], &[4.9, 9.1]),
         b: HostArray::from_f32(&[2], &[3.0, 10.0]),
@@ -125,9 +119,7 @@ fn iota_is_a_u32_range() {
 
 #[test]
 fn index_slice_is_a_view() {
-    let f = CpuJit.jit(|input: &In<Tensor>| {
-        input.x.index(&[IndexKeyElement::Slice(2..5)])
-    });
+    let f = CpuJit.jit(|input: &In<Tensor>| input.x.index(&[IndexKeyElement::Slice(2..5)]));
     let x = HostArray::from_f32(&[6], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
     let out = f.call(&In { x }).unwrap();
     assert_eq!(out.shape(), &[3]);
@@ -220,11 +212,7 @@ fn grad_flows_through_gather_as_scatter_add() {
     // loss = sum(x[[1, 1, 3]]) → dloss/dx = [0, 2, 0, 1].
     let f = CpuJit.jit(|input: &In<Tensor>| {
         let indices = Tensor::constant_u32(&[3], &[1, 1, 3]);
-        let loss = input
-            .x
-            .gather_rows(&indices)
-            .sum_axes(&[0])
-            .squeeze_all();
+        let loss = input.x.gather_rows(&indices).sum_axes(&[0]).squeeze_all();
         grad_wrt(&loss, &input.x).unwrap()
     });
     let x = HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]);

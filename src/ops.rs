@@ -47,9 +47,13 @@ pub enum UnaryOp {
     Floor,
     Ceil,
     /// Reinterpret bits as `to` (same width).
-    Bitcast { to: ElementType },
+    Bitcast {
+        to: ElementType,
+    },
     /// Numeric conversion to `to` (f32→u32 truncates toward zero).
-    Cast { to: ElementType },
+    Cast {
+        to: ElementType,
+    },
 }
 
 /// Associative binary operators (usable as reduction folds).
@@ -209,10 +213,18 @@ impl Op {
                     UnaryOp::Ceil => x.ceil(),
                     // Same-type cast/bitcast is identity at the f32 layer;
                     // cross-type kernels go through the typed interpreter.
-                    UnaryOp::Bitcast { to: ElementType::F32 }
-                    | UnaryOp::Cast { to: ElementType::F32 } => x,
-                    UnaryOp::Bitcast { to: ElementType::U32 }
-                    | UnaryOp::Cast { to: ElementType::U32 } => {
+                    UnaryOp::Bitcast {
+                        to: ElementType::F32,
+                    }
+                    | UnaryOp::Cast {
+                        to: ElementType::F32,
+                    } => x,
+                    UnaryOp::Bitcast {
+                        to: ElementType::U32,
+                    }
+                    | UnaryOp::Cast {
+                        to: ElementType::U32,
+                    } => {
                         panic!("f32 apply cannot produce u32; use typed eval")
                     }
                 }

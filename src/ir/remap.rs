@@ -22,9 +22,7 @@ pub enum RemapInfo {
     /// Out-of-range indices are dropped. `operator: None` overwrites
     /// (unordered for duplicate indices); `Some(Add)` accumulates.
     /// Threads iterate the source shape.
-    ScatterRows {
-        operator: Option<AssocOp>,
-    },
+    ScatterRows { operator: Option<AssocOp> },
 
     /// `out[accessor(coords)] = source[coords]` into a cleared output
     /// (pad/embed a region). Args: `[source]`; `accessor.shape` must equal the

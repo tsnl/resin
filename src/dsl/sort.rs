@@ -17,9 +17,16 @@ use crate::ops::ElementType;
 /// `keys.gather_rows(&order)` is sorted, and `order[i]` is the original index
 /// of the i-th smallest key. Keys must be rank 1.
 pub fn argsort_u32(keys: &Tensor, bits: u32) -> Tensor {
-    assert_eq!(keys.element_type(), ElementType::U32, "argsort_u32: keys must be U32");
+    assert_eq!(
+        keys.element_type(),
+        ElementType::U32,
+        "argsort_u32: keys must be U32"
+    );
     assert_eq!(keys.shape().len(), 1, "argsort_u32: keys must be rank 1");
-    assert!((1..=32).contains(&bits), "argsort_u32: bits must be in 1..=32");
+    assert!(
+        (1..=32).contains(&bits),
+        "argsort_u32: bits must be in 1..=32"
+    );
     let n = keys.shape()[0];
     let mut order = Tensor::iota(n);
     if n <= 1 {
@@ -57,7 +64,11 @@ pub fn argsort_u32(keys: &Tensor, bits: u32) -> Tensor {
 /// The usual trick: flip all bits of negative floats, flip only the sign bit
 /// of non-negative ones. Sort the result with [`argsort_u32`] (32 bits).
 pub fn float_sort_key(x: &Tensor) -> Tensor {
-    assert_eq!(x.element_type(), ElementType::F32, "float_sort_key: input must be F32");
+    assert_eq!(
+        x.element_type(),
+        ElementType::F32,
+        "float_sort_key: input must be F32"
+    );
     let bits = x.bitcast(ElementType::U32);
     let sign = bits.clone() >> Tensor::full_u32(x.shape(), 31);
     let mask = sign.select(
@@ -89,7 +100,10 @@ mod tests {
     fn argsort_length_one_is_iota() {
         let keys = Tensor::parameter_typed(&[1], ElementType::U32);
         let order = argsort_u32(&keys, 32);
-        assert!(matches!(order.kind(), super::super::TensorKind::Constant { .. }));
+        assert!(matches!(
+            order.kind(),
+            super::super::TensorKind::Constant { .. }
+        ));
     }
 
     #[test]

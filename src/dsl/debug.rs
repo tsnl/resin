@@ -75,13 +75,20 @@ fn visit(
 fn headline(tensor: &Tensor) -> String {
     let kind = match tensor.kind() {
         TensorKind::Constant { values } => {
-            format!("constant(value={})", format_constant(values, tensor.shape()))
+            format!(
+                "constant(value={})",
+                format_constant(values, tensor.shape())
+            )
         }
         TensorKind::Parameter => "parameter()".to_string(),
         TensorKind::Elementwise { op, .. } => format!("elementwise(op='{}')", op_name(*op)),
         TensorKind::Matmul { .. } => "matmul()".to_string(),
         TensorKind::Reduction { op, axes, .. } => {
-            format!("reduction(op='{}', axes={})", assoc_op_name(*op), tuple(axes))
+            format!(
+                "reduction(op='{}', axes={})",
+                assoc_op_name(*op),
+                tuple(axes)
+            )
         }
         TensorKind::Broadcast { axes, .. } => format!(
             "broadcast(axes={}, target_shape={})",
@@ -96,7 +103,9 @@ fn headline(tensor: &Tensor) -> String {
             Remap::ScatterRows { op, .. } => {
                 format!("remap(scatter_rows, op='{}')", scatter_op_name(*op))
             }
-            Remap::ScatterView { key, target_shape, .. } => format!(
+            Remap::ScatterView {
+                key, target_shape, ..
+            } => format!(
                 "remap(scatter_view, key={}, target_shape={})",
                 format_key(key),
                 tuple(target_shape)
@@ -179,7 +188,10 @@ fn shape(dims: &[usize]) -> String {
         [dim] => format!("({dim},)"),
         dims => format!(
             "({})",
-            dims.iter().map(usize::to_string).collect::<Vec<_>>().join(", ")
+            dims.iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
     }
 }
@@ -187,7 +199,11 @@ fn shape(dims: &[usize]) -> String {
 fn tuple(values: &[usize]) -> String {
     format!(
         "({})",
-        values.iter().map(usize::to_string).collect::<Vec<_>>().join(", ")
+        values
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
     )
 }
 
@@ -214,7 +230,11 @@ fn format_f32_values(values: &[f32], shape: &[usize]) -> String {
     let rows: Vec<String> = values
         .chunks(cols)
         .map(|row| {
-            let cells = row.iter().map(f32::to_string).collect::<Vec<_>>().join(", ");
+            let cells = row
+                .iter()
+                .map(f32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("[{cells}]")
         })
         .collect();
@@ -231,7 +251,13 @@ pub fn dedent(s: &str) -> String {
         .min()
         .unwrap_or(0);
     s.lines()
-        .map(|line| if line.trim().is_empty() { "" } else { &line[margin..] })
+        .map(|line| {
+            if line.trim().is_empty() {
+                ""
+            } else {
+                &line[margin..]
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
         .trim_end()
@@ -255,7 +281,10 @@ mod tests {
 
     #[test]
     fn dump_scalar_constant() {
-        assert_eq!(debug_str(&Tensor::scalar(42.0)), "constant(value=42) :: f32()");
+        assert_eq!(
+            debug_str(&Tensor::scalar(42.0)),
+            "constant(value=42) :: f32()"
+        );
     }
 
     #[test]
@@ -301,6 +330,9 @@ mod tests {
 
     #[test]
     fn dump_parameter() {
-        assert_eq!(debug_str(&Tensor::parameter(&[4])), "parameter() :: f32(4,)");
+        assert_eq!(
+            debug_str(&Tensor::parameter(&[4])),
+            "parameter() :: f32(4,)"
+        );
     }
 }

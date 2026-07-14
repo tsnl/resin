@@ -2,10 +2,10 @@
 
 use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
+use resin::ir::lower;
 use resin::ir::optimize::fuse_elementwise;
 use resin::ir::{Kernel, Program};
-use resin::ir::lower;
-use resin::jit::{HostArray, CpuJit, Jit};
+use resin::jit::{CpuJit, HostArray, Jit};
 
 /// Run `program` on the CPU backend.
 fn run(program: &Program, params: &[&HostArray]) -> Vec<Vec<f32>> {
@@ -16,8 +16,13 @@ fn run(program: &Program, params: &[&HostArray]) -> Vec<Vec<f32>> {
         .map(|&sink| HostArray::zeros(&program.view(sink).accessor.shape))
         .collect();
     let mut output_refs: Vec<&mut HostArray> = outputs.iter_mut().collect();
-    CpuJit.invoke(&artifact, params, &mut output_refs).expect("run");
-    outputs.into_iter().map(|array| array.data().to_vec()).collect()
+    CpuJit
+        .invoke(&artifact, params, &mut output_refs)
+        .expect("run");
+    outputs
+        .into_iter()
+        .map(|array| array.data().to_vec())
+        .collect()
 }
 
 /// Fused and unfused programs must agree on all sinks.
@@ -173,7 +178,12 @@ fn matmul_is_a_fusion_boundary() {
     assert_eq!(after, 2, "add and relu fuse; matmul stays");
 
     let fused = fuse_elementwise(lower_again(&param_refs));
-    assert!(fused.queue.iter().any(|d| matches!(d.kernel, Kernel::Matmul)));
+    assert!(
+        fused
+            .queue
+            .iter()
+            .any(|d| matches!(d.kernel, Kernel::Matmul))
+    );
 
     fn lower_again(_params: &[&HostArray]) -> Program {
         let x = Tensor::parameter(&[2, 3]);

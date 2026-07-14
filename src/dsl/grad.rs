@@ -25,7 +25,12 @@ pub fn grad_wrt<T: Tree<Tensor>>(
         return Err(GradError::NonScalarLoss(loss.shape().into()));
     }
     let grads = grad_by_node(loss)?;
-    Ok(params.map(|param| grads.get(param).cloned().unwrap_or_else(|| param.zeros_like())))
+    Ok(params.map(|param| {
+        grads
+            .get(param)
+            .cloned()
+            .unwrap_or_else(|| param.zeros_like())
+    }))
 }
 
 /// JAX-style transform: `grad(f)` maps params to `(loss, gradients)`.
@@ -133,9 +138,7 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
             let sum_axes: Vec<usize> = (0..out_rank)
                 .filter(|&out_axis| match mapped[out_axis] {
                     None => true,
-                    Some(arg_axis) => {
-                        arg.shape()[arg_axis] == 1 && adjoint.shape()[out_axis] > 1
-                    }
+                    Some(arg_axis) => arg.shape()[arg_axis] == 1 && adjoint.shape()[out_axis] > 1,
                 })
                 .collect();
             let unmapped: Vec<usize> = (0..out_rank).filter(|&a| mapped[a].is_none()).collect();
@@ -153,8 +156,9 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
 
         TensorKind::Squeeze { arg, axes } => {
             // Re-insert the squeezed size-1 axes via broadcast.
-            let mapping: Vec<usize> =
-                (0..arg.shape().len()).filter(|a| !axes.contains(a)).collect();
+            let mapping: Vec<usize> = (0..arg.shape().len())
+                .filter(|a| !axes.contains(a))
+                .collect();
             accumulate(grads, arg, adjoint.broadcast_to(arg.shape(), &mapping));
         }
 
@@ -165,11 +169,12 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
         TensorKind::Remap(remap) => match remap {
             Remap::GatherRows { source, indices } => {
                 // Gather adjoint is scatter-add through the same indices.
-                let grad_source =
-                    adjoint.scatter_rows(indices, source.shape()[0], ScatterOp::Add);
+                let grad_source = adjoint.scatter_rows(indices, source.shape()[0], ScatterOp::Add);
                 accumulate(grads, source, grad_source);
             }
-            Remap::ScatterRows { source, indices, .. } => {
+            Remap::ScatterRows {
+                source, indices, ..
+            } => {
                 // Scatter adjoint is gather through the same indices.
                 accumulate(grads, source, adjoint.gather_rows(indices));
             }
@@ -196,10 +201,8 @@ fn backward_elementwise(
             let x = &args[0];
             match op {
                 // Piecewise-constant / type-change: zero gradient.
-                UnaryOp::Floor
-                | UnaryOp::Ceil
-                | UnaryOp::Cast { .. }
-                | UnaryOp::Bitcast { .. } => {}
+                UnaryOp::Floor | UnaryOp::Ceil | UnaryOp::Cast { .. } | UnaryOp::Bitcast { .. } => {
+                }
                 UnaryOp::Neg => accumulate(grads, x, -g()),
                 UnaryOp::Exp => accumulate(grads, x, g() * n()),
                 UnaryOp::Log => accumulate(grads, x, g() / x.clone()),
@@ -332,6 +335,9 @@ mod tests {
         let loss = used.clone() * used.clone();
         let grads = grad_wrt(&loss, &vec![used, unused.clone()]).unwrap();
         assert_eq!(grads[1].shape(), unused.shape());
-        assert_eq!(debug_str(&grads[1]), "constant(value=[0.0, 0.0, 0.0]) :: f32(3,)");
+        assert_eq!(
+            debug_str(&grads[1]),
+            "constant(value=[0.0, 0.0, 0.0]) :: f32(3,)"
+        );
     }
 }

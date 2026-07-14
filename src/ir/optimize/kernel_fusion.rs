@@ -4,9 +4,7 @@
 //! kernels, to a fixed point. Fusion is tree substitution
 //! ([`Expr::substitute`]).
 
-use crate::ir::{
-    Accessor, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program,
-};
+use crate::ir::{Accessor, BufferRef, BufferView, BufferViewRef, Dispatch, Expr, Kernel, Program};
 
 /// Fuse adjacent elementwise dispatches to a fixed point.
 ///
@@ -51,19 +49,20 @@ fn fuse_one(program: &mut Program) -> bool {
 /// Scan the queue for the next fusable elementwise→elementwise edge.
 fn find_fusible_producer_consumer_pair(program: &Program) -> Option<ProducerConsumerPair> {
     for (consumer, dispatch) in program.queue.iter().enumerate() {
-        let Kernel::Elementwise { expr: consumer_expr } = &dispatch.kernel else {
+        let Kernel::Elementwise {
+            expr: consumer_expr,
+        } = &dispatch.kernel
+        else {
             continue;
         };
         for &arg_view in &dispatch.args {
-            let Some((producer, producer_expr)) =
-                fusable_producer(program, consumer, arg_view)
+            let Some((producer, producer_expr)) = fusable_producer(program, consumer, arg_view)
             else {
                 continue;
             };
             // Each use of the intermediate becomes a full copy of `producer_expr`.
             let uses = count_load_occurrences(consumer_expr, arg_view);
-            let fused_nodes =
-                consumer_expr.node_count() + uses * producer_expr.node_count();
+            let fused_nodes = consumer_expr.node_count() + uses * producer_expr.node_count();
             if fused_nodes > MAX_FUSED_NODES {
                 continue;
             }
@@ -90,7 +89,10 @@ fn apply_fusion(program: &mut Program, pair: ProducerConsumerPair) {
     } = pair;
 
     // Re-read each producer load through the consumer's view of the intermediate.
-    let write = program.view(program.queue[producer].output).accessor.clone();
+    let write = program
+        .view(program.queue[producer].output)
+        .accessor
+        .clone();
     let read = program.view(arg_view).accessor.clone();
     let producer_expr = producer_expr.map_loads(&mut |v| {
         let arg = program.view(v).clone();
@@ -158,8 +160,12 @@ fn fusable_producer(
     }
 
     // Only fuse when producer and consumer buffers share an element type.
-    let prod_etype = program.buffer(program.view(program.queue[producer].output).buffer).element_type;
-    let cons_etype = program.buffer(program.view(program.queue[consumer].output).buffer).element_type;
+    let prod_etype = program
+        .buffer(program.view(program.queue[producer].output).buffer)
+        .element_type;
+    let cons_etype = program
+        .buffer(program.view(program.queue[consumer].output).buffer)
+        .element_type;
     if prod_etype != cons_etype {
         return None;
     }
@@ -178,11 +184,7 @@ fn expr_changes_element_type(expr: &Expr) -> bool {
 
 /// Shape compatibility: consumer reads the producer's write view, or a
 /// broadcast of it ([`Accessor::is_broadcast_of`]).
-fn fusible_view_relationship(
-    program: &Program,
-    producer: usize,
-    arg_view: BufferViewRef,
-) -> bool {
+fn fusible_view_relationship(program: &Program, producer: usize, arg_view: BufferViewRef) -> bool {
     let write = &program.view(program.queue[producer].output).accessor;
     let read = &program.view(arg_view).accessor;
     read.is_broadcast_of(write)
@@ -211,5 +213,3 @@ fn intern_view(program: &mut Program, buffer: BufferRef, accessor: Accessor) -> 
         });
     BufferViewRef(index)
 }
-
-

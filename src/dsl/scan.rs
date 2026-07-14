@@ -18,7 +18,10 @@ use crate::ops::ElementType;
 pub fn shift_axis(x: &Tensor, axis: usize, offset: usize, fill: &Tensor) -> Tensor {
     let shape = x.shape();
     assert!(axis < shape.len(), "shift_axis: axis {axis} out of range");
-    assert!(fill.shape().is_empty(), "shift_axis: fill must be a scalar tensor");
+    assert!(
+        fill.shape().is_empty(),
+        "shift_axis: fill must be a scalar tensor"
+    );
     assert_eq!(
         fill.element_type(),
         x.element_type(),
@@ -97,7 +100,11 @@ pub fn scan(
         // `shifted` holds the earlier window, so it is the left operand: a
         // prefix scan combines earlier elements before later ones.
         acc = op(&shifted, &acc);
-        assert_eq!(acc.shape(), shape, "scan: op must preserve the operand shape");
+        assert_eq!(
+            acc.shape(),
+            shape,
+            "scan: op must preserve the operand shape"
+        );
         stride *= 2;
     }
     acc
@@ -156,8 +163,12 @@ fn one_scalar(like: &Tensor) -> Tensor {
 
 fn is_zero_constant(t: &Tensor) -> bool {
     match t.kind() {
-        TensorKind::Constant { values: ConstantData::F32(v) } => v.iter().all(|&x| x == 0.0),
-        TensorKind::Constant { values: ConstantData::U32(v) } => v.iter().all(|&x| x == 0),
+        TensorKind::Constant {
+            values: ConstantData::F32(v),
+        } => v.iter().all(|&x| x == 0.0),
+        TensorKind::Constant {
+            values: ConstantData::U32(v),
+        } => v.iter().all(|&x| x == 0),
         _ => false,
     }
 }

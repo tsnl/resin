@@ -162,7 +162,10 @@ impl Program {
     pub fn validate(&self) -> Result<(), Error> {
         for (i, view) in self.views.iter().enumerate() {
             if view.buffer.0 >= self.buffers.len() {
-                return Err(Error(format!("view {i} buffer {} out of range", view.buffer.0)));
+                return Err(Error(format!(
+                    "view {i} buffer {} out of range",
+                    view.buffer.0
+                )));
             }
             let a = &view.accessor;
             if a.shape.len() != a.pitch.len() {
@@ -250,7 +253,10 @@ impl Program {
             }
             Kernel::Matmul => {
                 if dispatch.args.len() != 2 {
-                    return Err(Error(format!("matmul takes 2 args, got {}", dispatch.args.len())));
+                    return Err(Error(format!(
+                        "matmul takes 2 args, got {}",
+                        dispatch.args.len()
+                    )));
                 }
                 let (a, b) = (arg_shape(0), arg_shape(1));
                 let rank = a.len();
@@ -500,7 +506,10 @@ mod tests {
         let out = push_buffer(&mut p, &[2, 1, 4]);
         let (va, vout) = (dense_view(&mut p, a), dense_view(&mut p, out));
         p.queue.push(Dispatch {
-            kernel: Kernel::Reduction { op: AssocOp::Add, axes: Box::from([1]) },
+            kernel: Kernel::Reduction {
+                op: AssocOp::Add,
+                axes: Box::from([1]),
+            },
             args: vec![va],
             output: vout,
         });

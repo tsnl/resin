@@ -69,11 +69,13 @@ pub fn upload_host(ctx: &Context, host: &HostArray) -> Result<WgpuArray, Error> 
     let size = byte_len(host.as_data().len());
     let mut contents = bytes;
     contents.resize(size as usize, 0);
-    let buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("resin-value"),
-        contents: &contents,
-        usage: storage_copy_usage(),
-    });
+    let buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("resin-value"),
+            contents: &contents,
+            usage: storage_copy_usage(),
+        });
     Ok(WgpuArray {
         shape: host.shape().into(),
         element_type: host.element_type(),
@@ -125,11 +127,12 @@ pub fn run(
     let arenas: Vec<wgpu::Buffer> = host_shadow
         .iter()
         .map(|bytes| {
-            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("resin-arena"),
-                contents: bytes,
-                usage: storage_copy_usage(),
-            })
+            ctx.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("resin-arena"),
+                    contents: bytes,
+                    usage: storage_copy_usage(),
+                })
         })
         .collect();
 
@@ -148,7 +151,9 @@ pub fn run(
 
     let mut encoder = ctx
         .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("resin-run") });
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("resin-run"),
+        });
 
     for (array, &param) in params.iter().zip(&ir.params) {
         let view = ir.view(param);
@@ -216,13 +221,7 @@ pub fn run(
         let src_off = acc.offset as u64 * BYTES_PER_ELEMENT;
         let size = byte_len(count);
         if count > 0 {
-            encoder.copy_buffer_to_buffer(
-                &arenas[view.buffer.0],
-                src_off,
-                &sink_buf,
-                0,
-                size,
-            );
+            encoder.copy_buffer_to_buffer(&arenas[view.buffer.0], src_off, &sink_buf, 0, size);
         }
     }
 
@@ -277,7 +276,9 @@ fn clear_dense_region_gpu(
     let view = ir.view(output);
     let acc = &view.accessor;
     if !acc.is_dense() {
-        return Err(Error::Wgpu("scatter clear requires dense output view".into()));
+        return Err(Error::Wgpu(
+            "scatter clear requires dense output view".into(),
+        ));
     }
     let count = element_count(&acc.shape) as u64;
     let offset_bytes = acc.offset as u64 * BYTES_PER_ELEMENT;
@@ -332,7 +333,9 @@ fn read_buffer(ctx: &Context, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8
     });
     let mut encoder = ctx
         .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("resin-read") });
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("resin-read"),
+        });
     encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
     ctx.queue.submit(Some(encoder.finish()));
 

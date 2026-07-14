@@ -7,11 +7,11 @@
 
 #![cfg(feature = "wgpu")]
 
-use resin::dsl::{grad_wrt, IndexKeyElement, ScatterOp, Tensor};
-use resin::jit::wgpu::{gpu_available, WgpuJit};
+use resin::Tree;
+use resin::dsl::{IndexKeyElement, ScatterOp, Tensor, grad_wrt};
+use resin::jit::wgpu::{WgpuJit, gpu_available};
 use resin::jit::{DeviceValue, HostArray, Jit};
 use resin::ops::ElementType;
-use resin::Tree;
 
 #[derive(Tree, Clone)]
 struct In<T> {
@@ -70,9 +70,8 @@ fn cast_round_trip() {
     if no_gpu() {
         return;
     }
-    let f = WgpuJit::default().jit(|input: &In<Tensor>| {
-        input.x.cast(ElementType::U32).cast(ElementType::F32)
-    });
+    let f = WgpuJit::default()
+        .jit(|input: &In<Tensor>| input.x.cast(ElementType::U32).cast(ElementType::F32));
     let x = up(HostArray::from_f32(&[4], &[0.0, 1.0, 2.0, 7.0]));
     let out = f.call(&In { x }).unwrap().host().unwrap();
     assert_eq!(out.to_f32(), vec![0.0, 1.0, 2.0, 7.0]);
@@ -83,9 +82,8 @@ fn bitcast_round_trips() {
     if no_gpu() {
         return;
     }
-    let f = WgpuJit::default().jit(|input: &In<Tensor>| {
-        input.x.bitcast(ElementType::U32).bitcast(ElementType::F32)
-    });
+    let f = WgpuJit::default()
+        .jit(|input: &In<Tensor>| input.x.bitcast(ElementType::U32).bitcast(ElementType::F32));
     let x = up(HostArray::from_f32(&[3], &[-1.5, 0.0, 42.0]));
     let out = f.call(&In { x }).unwrap().host().unwrap();
     assert_eq!(out.to_f32(), vec![-1.5, 0.0, 42.0]);
@@ -114,7 +112,10 @@ fn gather_rows_2d() {
         let indices = Tensor::constant_u32(&[3], &[2, 0, 3]);
         input.x.gather_rows(&indices)
     });
-    let x = up(HostArray::from_f32(&[4, 2], &[0.0, 1.0, 10.0, 11.0, 20.0, 21.0, 30.0, 31.0]));
+    let x = up(HostArray::from_f32(
+        &[4, 2],
+        &[0.0, 1.0, 10.0, 11.0, 20.0, 21.0, 30.0, 31.0],
+    ));
     let out = f.call(&In { x }).unwrap().host().unwrap();
     assert_eq!(out.shape(), &[3, 2]);
     assert_eq!(out.to_f32(), vec![20.0, 21.0, 0.0, 1.0, 30.0, 31.0]);

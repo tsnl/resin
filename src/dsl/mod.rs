@@ -89,22 +89,45 @@ pub enum Remap {
 }
 
 pub enum TensorKind {
-    Constant { values: ConstantData },
+    Constant {
+        values: ConstantData,
+    },
     /// Placeholder bound to a caller-supplied array at run time.
     Parameter,
-    Elementwise { op: Op, args: Vec<Tensor> },
-    Matmul { lhs: Tensor, rhs: Tensor },
+    Elementwise {
+        op: Op,
+        args: Vec<Tensor>,
+    },
+    Matmul {
+        lhs: Tensor,
+        rhs: Tensor,
+    },
     /// Keepdims reduction: reduced axes stay with size 1.
-    Reduction { op: AssocOp, axes: Box<[usize]>, arg: Tensor },
+    Reduction {
+        op: AssocOp,
+        axes: Box<[usize]>,
+        arg: Tensor,
+    },
     /// Explicit broadcast: `axes[i]` is the output axis of input axis `i`.
     /// The node's shape is the broadcast target.
-    Broadcast { arg: Tensor, axes: Box<[usize]> },
-    Transpose { arg: Tensor },
+    Broadcast {
+        arg: Tensor,
+        axes: Box<[usize]>,
+    },
+    Transpose {
+        arg: Tensor,
+    },
     /// Drop size-1 axes (NumPy-style squeeze). Turns keepdims reductions
     /// into true scalars for reverse-mode autodiff.
-    Squeeze { arg: Tensor, axes: Box<[usize]> },
+    Squeeze {
+        arg: Tensor,
+        axes: Box<[usize]>,
+    },
     /// Static slice/select; pure accessor view at lower time.
-    Index { arg: Tensor, key: Box<[IndexKeyElement]> },
+    Index {
+        arg: Tensor,
+        key: Box<[IndexKeyElement]>,
+    },
     /// Materializing gather/scatter (see [`Remap`]).
     Remap(Remap),
 }
@@ -124,7 +147,11 @@ impl Hash for Tensor {
 impl Tensor {
     fn new(shape: impl Into<Box<[usize]>>, element_type: ElementType, kind: TensorKind) -> Self {
         Tensor {
-            inner: Arc::new(Inner { shape: shape.into(), element_type, kind }),
+            inner: Arc::new(Inner {
+                shape: shape.into(),
+                element_type,
+                kind,
+            }),
         }
     }
 
@@ -159,7 +186,9 @@ impl Tensor {
         Tensor::new(
             shape,
             ElementType::F32,
-            TensorKind::Constant { values: ConstantData::F32(values.into()) },
+            TensorKind::Constant {
+                values: ConstantData::F32(values.into()),
+            },
         )
     }
 
@@ -177,7 +206,9 @@ impl Tensor {
         Tensor::new(
             shape,
             ElementType::U32,
-            TensorKind::Constant { values: ConstantData::U32(values.into()) },
+            TensorKind::Constant {
+                values: ConstantData::U32(values.into()),
+            },
         )
     }
 
@@ -258,7 +289,10 @@ impl Tensor {
         Tensor::new(
             self.shape(),
             self.element_type(),
-            TensorKind::Elementwise { op: Op::Unary(op), args: vec![self.clone()] },
+            TensorKind::Elementwise {
+                op: Op::Unary(op),
+                args: vec![self.clone()],
+            },
         )
     }
 
@@ -271,7 +305,10 @@ impl Tensor {
         Tensor::new(
             broadcast_shapes(self.shape(), rhs.shape()),
             self.element_type(),
-            TensorKind::Elementwise { op, args: vec![self.clone(), rhs.clone()] },
+            TensorKind::Elementwise {
+                op,
+                args: vec![self.clone(), rhs.clone()],
+            },
         )
     }
 
@@ -280,7 +317,10 @@ impl Tensor {
         Tensor::new(
             self.shape(),
             element_type,
-            TensorKind::Elementwise { op, args: vec![self.clone()] },
+            TensorKind::Elementwise {
+                op,
+                args: vec![self.clone()],
+            },
         )
     }
 
@@ -429,7 +469,10 @@ impl Tensor {
         Tensor::new(
             shape,
             self.element_type(),
-            TensorKind::Matmul { lhs: self.clone(), rhs: rhs.clone() },
+            TensorKind::Matmul {
+                lhs: self.clone(),
+                rhs: rhs.clone(),
+            },
         )
     }
 
@@ -454,7 +497,10 @@ impl Tensor {
         Tensor::new(
             target_shape,
             self.element_type(),
-            TensorKind::Broadcast { arg: self.clone(), axes: axes.into() },
+            TensorKind::Broadcast {
+                arg: self.clone(),
+                axes: axes.into(),
+            },
         )
     }
 
@@ -470,7 +516,11 @@ impl Tensor {
         Tensor::new(
             shape,
             self.element_type(),
-            TensorKind::Reduction { op: AssocOp::Add, axes: axes.into(), arg: self.clone() },
+            TensorKind::Reduction {
+                op: AssocOp::Add,
+                axes: axes.into(),
+                arg: self.clone(),
+            },
         )
     }
 
@@ -480,8 +530,15 @@ impl Tensor {
         let mut seen = HashSet::new();
         for &axis in axes {
             assert!(axis < shape.len(), "squeeze axis {axis} out of range");
-            assert!(seen.insert(axis), "squeeze axes must be unique, got {axes:?}");
-            assert_eq!(shape[axis], 1, "cannot squeeze axis {axis} of size {}", shape[axis]);
+            assert!(
+                seen.insert(axis),
+                "squeeze axes must be unique, got {axes:?}"
+            );
+            assert_eq!(
+                shape[axis], 1,
+                "cannot squeeze axis {axis} of size {}",
+                shape[axis]
+            );
         }
         let new_shape: Box<[usize]> = shape
             .iter()
@@ -492,7 +549,10 @@ impl Tensor {
         Tensor::new(
             new_shape,
             self.element_type(),
-            TensorKind::Squeeze { arg: self.clone(), axes: axes.into() },
+            TensorKind::Squeeze {
+                arg: self.clone(),
+                axes: axes.into(),
+            },
         )
     }
 
@@ -505,7 +565,11 @@ impl Tensor {
             .filter(|&(_, &d)| d == 1)
             .map(|(i, _)| i)
             .collect();
-        if axes.is_empty() { self.clone() } else { self.squeeze(&axes) }
+        if axes.is_empty() {
+            self.clone()
+        } else {
+            self.squeeze(&axes)
+        }
     }
 
     /// Mean over all elements, as a true scalar. Float tensors only
@@ -536,12 +600,19 @@ impl Tensor {
     }
 
     pub(crate) fn new_index(arg: Tensor, key: &[IndexKeyElement]) -> Self {
-        assert_eq!(key.len(), arg.shape().len(), "index key must cover every axis");
+        assert_eq!(
+            key.len(),
+            arg.shape().len(),
+            "index key must cover every axis"
+        );
         for (axis, element) in key.iter().enumerate() {
             let dim = arg.shape()[axis];
             match element {
                 IndexKeyElement::Single(i) => {
-                    assert!(*i < dim, "index {i} out of range for axis {axis} (dim {dim})")
+                    assert!(
+                        *i < dim,
+                        "index {i} out of range for axis {axis} (dim {dim})"
+                    )
                 }
                 IndexKeyElement::Slice(range) => assert!(
                     range.start <= range.end && range.end <= dim,
@@ -553,7 +624,10 @@ impl Tensor {
         Tensor::new(
             shape,
             arg.element_type(),
-            TensorKind::Index { arg, key: key.into() },
+            TensorKind::Index {
+                arg,
+                key: key.into(),
+            },
         )
     }
 
@@ -566,8 +640,15 @@ impl Tensor {
                     ElementType::U32,
                     "gather_rows indices must be U32"
                 );
-                assert_eq!(indices.shape().len(), 1, "gather_rows indices must be rank 1");
-                assert!(!source.shape().is_empty(), "gather_rows source must have rank >= 1");
+                assert_eq!(
+                    indices.shape().len(),
+                    1,
+                    "gather_rows indices must be rank 1"
+                );
+                assert!(
+                    !source.shape().is_empty(),
+                    "gather_rows source must have rank >= 1"
+                );
                 let mut shape = source.shape().to_vec();
                 shape[0] = indices.shape()[0];
                 (shape.into_boxed_slice(), source.element_type())
@@ -583,8 +664,15 @@ impl Tensor {
                     ElementType::U32,
                     "scatter_rows indices must be U32"
                 );
-                assert_eq!(indices.shape().len(), 1, "scatter_rows indices must be rank 1");
-                assert!(!source.shape().is_empty(), "scatter_rows source must have rank >= 1");
+                assert_eq!(
+                    indices.shape().len(),
+                    1,
+                    "scatter_rows indices must be rank 1"
+                );
+                assert!(
+                    !source.shape().is_empty(),
+                    "scatter_rows source must have rank >= 1"
+                );
                 assert_eq!(
                     indices.shape()[0],
                     source.shape()[0],
@@ -614,7 +702,10 @@ impl Tensor {
                     let dim = target_shape[axis];
                     match element {
                         IndexKeyElement::Single(i) => {
-                            assert!(*i < dim, "index {i} out of range for axis {axis} (dim {dim})")
+                            assert!(
+                                *i < dim,
+                                "index {i} out of range for axis {axis} (dim {dim})"
+                            )
                         }
                         IndexKeyElement::Slice(range) => assert!(
                             range.start <= range.end && range.end <= dim,
@@ -684,7 +775,9 @@ impl Tensor {
             | TensorKind::Index { arg, .. } => vec![arg.clone()],
             TensorKind::Remap(remap) => match remap {
                 Remap::GatherRows { source, indices }
-                | Remap::ScatterRows { source, indices, .. } => {
+                | Remap::ScatterRows {
+                    source, indices, ..
+                } => {
                     vec![source.clone(), indices.clone()]
                 }
                 Remap::ScatterView { source, .. } => vec![source.clone()],

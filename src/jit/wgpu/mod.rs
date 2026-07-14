@@ -144,48 +144,60 @@ impl Jit for WgpuJit {
                     label: Some("resin-arena-bgl"),
                     entries: &bgl_entries,
                 });
-        let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("resin-pipeline-layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = ctx
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("resin-pipeline-layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let mut pipelines: Vec<CompiledPipeline> = Vec::new();
         let mut pipeline_of = Vec::with_capacity(program.queue.len());
         for dispatch in &program.queue {
             let wgsl = codegen::emit_dispatch(program, dispatch, &config);
             let workgroups = codegen::workgroups_for(program, dispatch, &config);
-            let index = pipelines.iter().position(|p| p.wgsl == wgsl).unwrap_or_else(|| {
-                let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("resin-shader"),
-                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(wgsl.clone())),
+            let index = pipelines
+                .iter()
+                .position(|p| p.wgsl == wgsl)
+                .unwrap_or_else(|| {
+                    let shader = ctx
+                        .device
+                        .create_shader_module(wgpu::ShaderModuleDescriptor {
+                            label: Some("resin-shader"),
+                            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(wgsl.clone())),
+                        });
+                    let pipeline =
+                        ctx.device
+                            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                                label: Some("resin-pipeline"),
+                                layout: Some(&pipeline_layout),
+                                module: &shader,
+                                entry_point: Some("main"),
+                                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                                cache: None,
+                            });
+                    pipelines.push(CompiledPipeline {
+                        pipeline,
+                        workgroups,
+                        wgsl,
+                    });
+                    pipelines.len() - 1
                 });
-                let pipeline = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("resin-pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some("main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    cache: None,
-                });
-                pipelines.push(CompiledPipeline { pipeline, workgroups, wgsl });
-                pipelines.len() - 1
-            });
             pipeline_of.push(index);
         }
 
         Ok(WgpuProgram {
             ir: program.clone(),
-            gpu: Arc::new(WgpuGpuState { pipelines, bind_group_layout }),
+            gpu: Arc::new(WgpuGpuState {
+                pipelines,
+                bind_group_layout,
+            }),
             pipeline_of,
         })
     }
 
-    fn alloc_output(
-        &self,
-        shape: &[usize],
-        element_type: ElementType,
-    ) -> Result<WgpuArray, Error> {
+    fn alloc_output(&self, shape: &[usize], element_type: ElementType) -> Result<WgpuArray, Error> {
         let ctx = runtime::shared_context()?;
         Ok(runtime::alloc_empty(ctx, shape, element_type))
     }
@@ -283,7 +295,10 @@ mod tests {
                 Kernel::Elementwise { .. } => {
                     saw_add = true;
                     assert!(wgsl.contains("heap_f32"), "{wgsl}");
-                    assert!(!wgsl.contains("heap_atomic_f32"), "add binds no atomic:\n{wgsl}");
+                    assert!(
+                        !wgsl.contains("heap_atomic_f32"),
+                        "add binds no atomic:\n{wgsl}"
+                    );
                     assert!(!wgsl.contains("heap_u32"), "add binds no u32:\n{wgsl}");
                 }
                 Kernel::Remap { .. } => {
@@ -347,8 +362,14 @@ mod e2e_tests {
         let f = WgpuJit::default().jit(|p: &Pair<Tensor>| p.a.matmul(&p.b));
         let out = f
             .call(&Pair {
-                a: up(HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])),
-                b: up(HostArray::from_f32(&[3, 2], &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0])),
+                a: up(HostArray::from_f32(
+                    &[2, 3],
+                    &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                )),
+                b: up(HostArray::from_f32(
+                    &[3, 2],
+                    &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                )),
             })
             .unwrap()
             .host()
@@ -364,7 +385,10 @@ mod e2e_tests {
         }
         let f = WgpuJit::default().jit(|x: &Tensor| x.sum_axes(&[0, 1]).squeeze_all());
         let out = f
-            .call(&up(HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])))
+            .call(&up(HostArray::from_f32(
+                &[2, 3],
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            )))
             .unwrap()
             .host()
             .unwrap();
@@ -385,9 +409,18 @@ mod e2e_tests {
             a: up(HostArray::from_f32(&[4], &[2.0, 2.0, 2.0, 2.0])),
             b: up(HostArray::from_f32(&[4], &[3.0, 3.0, 3.0, 3.0])),
         };
-        assert_eq!(f.call(&a).unwrap().host().unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
-        assert_eq!(f.call(&b).unwrap().host().unwrap().data(), &[5.0, 5.0, 5.0, 5.0]);
-        assert_eq!(f.call(&a).unwrap().host().unwrap().data(), &[11.0, 22.0, 33.0, 44.0]);
+        assert_eq!(
+            f.call(&a).unwrap().host().unwrap().data(),
+            &[11.0, 22.0, 33.0, 44.0]
+        );
+        assert_eq!(
+            f.call(&b).unwrap().host().unwrap().data(),
+            &[5.0, 5.0, 5.0, 5.0]
+        );
+        assert_eq!(
+            f.call(&a).unwrap().host().unwrap().data(),
+            &[11.0, 22.0, 33.0, 44.0]
+        );
     }
 
     #[test]
@@ -399,7 +432,10 @@ mod e2e_tests {
         // has a contiguous region to copy out. Previously this errored on wgpu.
         let f = WgpuJit::default().jit(|x: &Tensor| x.transpose());
         let out = f
-            .call(&up(HostArray::from_f32(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])))
+            .call(&up(HostArray::from_f32(
+                &[2, 3],
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            )))
             .unwrap()
             .host()
             .unwrap();
