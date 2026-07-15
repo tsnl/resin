@@ -1,8 +1,8 @@
 //! A program: buffers, views, and a queue of kernel dispatches.
 //!
 //! Kernels never address buffers directly: every read and write goes through
-//! a [`BufferView`] — a buffer plus an [`Accessor`] — so broadcast, transpose,
-//! and squeeze are pitch tricks rather than copies. A [`Dispatch`] pairs a
+//! a [`BufferView`] — a buffer plus an [`Accessor`] — so broadcast, permute,
+//! and squeeze are stride tricks rather than copies. A [`Dispatch`] pairs a
 //! [`Kernel`] with its argument views and one output view; the output view's
 //! shape is the kernel's iteration space (except scatter remaps, which iterate
 //! the source).
@@ -13,9 +13,9 @@
 //! # Dense kernel outputs
 //!
 //! Every dispatch's **output** is C-contiguous ([`Accessor::is_dense`]). Shape
-//! and pitch count **elements**, not bytes.
+//! and stride count **elements**, not bytes.
 //!
-//! **Arguments** may use any accessor (broadcast, transpose, …). Layout
+//! **Arguments** may use any accessor (broadcast, permute, unfold, …). Layout
 //! conversion into a denser domain is always **read non-dense → write dense**
 //! (a materializing copy when needed), never a non-dense store.
 //!
@@ -168,10 +168,10 @@ impl Program {
                 )));
             }
             let a = &view.accessor;
-            if a.shape.len() != a.pitch.len() {
+            if a.shape.len() != a.stride.len() {
                 return Err(Error(format!(
-                    "view {i} shape {:?} and pitch {:?} rank mismatch",
-                    a.shape, a.pitch
+                    "view {i} shape {:?} and stride {:?} rank mismatch",
+                    a.shape, a.stride
                 )));
             }
             // Backends index through views unchecked; prove them in bounds here.
@@ -179,8 +179,8 @@ impl Program {
                 let max_index = a.offset
                     + a.shape
                         .iter()
-                        .zip(&a.pitch)
-                        .map(|(&d, &p)| (d - 1) * p)
+                        .zip(&a.stride)
+                        .map(|(&d, &s)| (d - 1) * s)
                         .sum::<usize>();
                 let len = self.buffer(view.buffer).len();
                 if max_index >= len {
@@ -383,10 +383,12 @@ impl Program {
                             )));
                         }
                     }
-                    RemapInfo::ScatterView { .. } => unreachable!(),
+                    RemapInfo::ScatterView { .. } | RemapInfo::GatherView { .. } => {
+                        unreachable!()
+                    }
                 }
             }
-            RemapInfo::ScatterView { accessor } => {
+            RemapInfo::ScatterView { map } => {
                 if dispatch.args.len() != 1 {
                     return Err(Error(format!(
                         "scatter_view takes 1 arg, got {}",
@@ -394,10 +396,10 @@ impl Program {
                     )));
                 }
                 let src = self.view(dispatch.args[0]);
-                if accessor.shape.as_ref() != src.accessor.shape.as_ref() {
+                if map.shape.as_ref() != src.accessor.shape.as_ref() {
                     return Err(Error(format!(
-                        "scatter_view accessor shape {:?} != source {:?}",
-                        accessor.shape, src.accessor.shape
+                        "scatter_view map shape {:?} != source {:?}",
+                        map.shape, src.accessor.shape
                     )));
                 }
                 let src_etype = self.buffer(src.buffer).element_type;
@@ -407,6 +409,36 @@ impl Program {
                         src_etype, out_etype
                     )));
                 }
+                let out_len = self.buffer(self.view(dispatch.output).buffer).len();
+                if element_count(&map.shape) > 0 && map.max_index() >= out_len {
+                    return Err(Error(format!(
+                        "scatter_view map reaches element {} of a {out_len}-element output",
+                        map.max_index()
+                    )));
+                }
+            }
+            RemapInfo::GatherView { map } => {
+                if dispatch.args.len() != 1 {
+                    return Err(Error(format!(
+                        "gather_view takes 1 arg, got {}",
+                        dispatch.args.len()
+                    )));
+                }
+                if map.shape.as_ref() != out_shape {
+                    return Err(Error(format!(
+                        "gather_view map shape {:?} != output {out_shape:?}",
+                        map.shape
+                    )));
+                }
+                let src = self.view(dispatch.args[0]);
+                let src_etype = self.buffer(src.buffer).element_type;
+                if src_etype != out_etype {
+                    return Err(Error(format!(
+                        "gather_view source type {:?} != output {:?}",
+                        src_etype, out_etype
+                    )));
+                }
+                // OOR linear indices read as zero at run time; no bound check here.
             }
         }
         Ok(())
@@ -532,13 +564,13 @@ mod tests {
         let a = push_buffer(&mut p, &[2, 3]);
         let out = push_buffer(&mut p, &[2, 3]);
         let va = dense_view(&mut p, a);
-        // Non-C-contiguous write view (pitch ≠ dense_pitch) — invalid as output.
+        // Non-C-contiguous write view (stride ≠ dense_stride) — invalid as output.
         p.views.push(BufferView {
             buffer: out,
             accessor: Accessor {
                 offset: 0,
                 shape: Box::from([2, 3]),
-                pitch: Box::from([1, 2]),
+                stride: Box::from([1, 2]),
             },
         });
         let vout = BufferViewRef(p.views.len() - 1);

@@ -2,22 +2,23 @@
 //!
 //! **Kernels write buffers; views are accessors.** Materializing nodes
 //! (constants, parameters, elementwise, matmul, reduction, remap) allocate a
-//! buffer and enqueue a dispatch. View nodes (broadcast, transpose, squeeze,
-//! index) compose an [`Accessor`] over an existing buffer and cost nothing at
-//! run time.
+//! buffer and enqueue a dispatch. View nodes (broadcast, permute, unfold,
+//! squeeze, index) compose an [`Accessor`] over an existing buffer and cost
+//! nothing at run time.
 //!
-//! **Sinks are dense.** A traced function may end in a strided view (transpose,
-//! broadcast, mid-stride slice). Backends copy each sink out as one contiguous
-//! block, so lowering densifies non-dense sinks with an identity elementwise
-//! copy up-front — in the program graph, before optimize — so fusion (and later
-//! passes) can see and potentially elide that copy. Dense-with-offset sinks
-//! (e.g. a contiguous slice) are already dense and left alone.
+//! **Sinks are dense.** A traced function may end in a strided view (permute,
+//! unfold, broadcast, mid-stride slice). Backends copy each sink out as one
+//! contiguous block, so lowering densifies non-dense sinks with an identity
+//! elementwise copy up-front — in the program graph, before optimize — so
+//! fusion (and later passes) can see and potentially elide that copy.
+//! Dense-with-offset sinks (e.g. a contiguous slice) are already dense and
+//! left alone.
 
 use std::collections::HashMap;
 
 use super::{
     Accessor, Buffer, BufferData, BufferRef, BufferView, BufferViewRef, Dispatch, Error, Expr,
-    Kernel, Program, RemapInfo, dense_pitch,
+    Kernel, Program, RemapInfo,
 };
 use crate::dsl::{ConstantData, IndexKeyElement, Remap, ScatterOp, Tensor, TensorKind};
 use crate::ops::{AssocOp, ElementType};
@@ -139,21 +140,20 @@ impl Builder {
                             vec![self.view_for(source)?, self.view_for(indices)?],
                         )
                     }
-                    Remap::ScatterView {
-                        source,
-                        key,
-                        target_shape,
-                    } => (
-                        RemapInfo::ScatterView {
-                            accessor: region_accessor(target_shape, key),
-                        },
+                    Remap::ScatterView { source, map, .. } => (
+                        RemapInfo::ScatterView { map: map.clone() },
+                        vec![self.view_for(source)?],
+                    ),
+                    Remap::GatherView { source, map } => (
+                        RemapInfo::GatherView { map: map.clone() },
                         vec![self.view_for(source)?],
                     ),
                 };
                 self.push_dispatch(tensor.shape(), etype, Kernel::Remap { info }, args)
             }
             TensorKind::Broadcast { .. }
-            | TensorKind::Transpose { .. }
+            | TensorKind::Permute { .. }
+            | TensorKind::Unfold { .. }
             | TensorKind::Squeeze { .. }
             | TensorKind::Index { .. } => {
                 return Err(Error("view node has no buffer".into()));
@@ -177,9 +177,18 @@ impl Builder {
                 let (buffer, accessor) = self.resolve_view(arg)?;
                 Ok((buffer, accessor.map_axes(tensor.shape(), axes)?))
             }
-            TensorKind::Transpose { arg } => {
+            TensorKind::Permute { arg, axes } => {
                 let (buffer, accessor) = self.resolve_view(arg)?;
-                Ok((buffer, accessor.transpose()?))
+                Ok((buffer, accessor.permute(axes)?))
+            }
+            TensorKind::Unfold {
+                arg,
+                axis,
+                size,
+                step,
+            } => {
+                let (buffer, accessor) = self.resolve_view(arg)?;
+                Ok((buffer, accessor.unfold(*axis, *size, *step)?))
             }
             TensorKind::Squeeze { arg, axes } => {
                 let (buffer, accessor) = self.resolve_view(arg)?;
@@ -270,33 +279,13 @@ fn compose_index(arg_acc: &Accessor, key: &[IndexKeyElement]) -> Accessor {
             IndexKeyElement::Single(i) => (*i, 1usize),
             IndexKeyElement::Slice(range) => (range.start, range.end - range.start),
         };
-        offset += start * arg_acc.pitch[axis];
+        offset += start * arg_acc.stride[axis];
         shape.push(len);
     }
     Accessor {
         offset,
         shape: shape.into(),
-        pitch: arg_acc.pitch.clone(),
-    }
-}
-
-/// Accessor addressing the `key` region of a dense buffer with `target_shape`.
-fn region_accessor(target_shape: &[usize], key: &[IndexKeyElement]) -> Accessor {
-    let pitch = dense_pitch(target_shape);
-    let mut offset = 0;
-    let mut shape = Vec::with_capacity(key.len());
-    for (axis, element) in key.iter().enumerate() {
-        let (start, len) = match element {
-            IndexKeyElement::Single(i) => (*i, 1usize),
-            IndexKeyElement::Slice(range) => (range.start, range.end - range.start),
-        };
-        offset += start * pitch[axis];
-        shape.push(len);
-    }
-    Accessor {
-        offset,
-        shape: shape.into(),
-        pitch,
+        stride: arg_acc.stride.clone(),
     }
 }
 
@@ -384,12 +373,12 @@ mod tests {
 
         let arg1 = program.view(program.queue[0].args[1]);
         assert_eq!(&*arg1.accessor.shape, &[4, 3]);
-        assert_eq!(&*arg1.accessor.pitch, &[0, 0]);
+        assert_eq!(&*arg1.accessor.stride, &[0, 0]);
     }
 
     #[test]
     fn lower_broadcast_view_densifies_as_sink() {
-        // Broadcast is a pitch trick; the strided sink is densified with one copy.
+        // Broadcast is a stride trick; the strided sink is densified with one copy.
         let bias = Tensor::parameter(&[3]);
         let out = bias.broadcast_to(&[2, 3], &[1]);
         let program = lower(&bias, &out).unwrap();
@@ -402,7 +391,7 @@ mod tests {
         // The densify reads the strided broadcast view.
         let arg = program.view(program.queue[0].args[0]);
         assert_eq!(&*arg.accessor.shape, &[2, 3]);
-        assert_eq!(&*arg.accessor.pitch, &[0, 1]);
+        assert_eq!(&*arg.accessor.stride, &[0, 1]);
     }
 
     #[test]
@@ -416,7 +405,36 @@ mod tests {
         assert!(sink.accessor.is_dense());
         assert_eq!(&*sink.accessor.shape, &[3, 2]);
         let arg = program.view(program.queue[0].args[0]);
-        assert_eq!(&*arg.accessor.pitch, &[1, 3]);
+        assert_eq!(&*arg.accessor.stride, &[1, 3]);
+    }
+
+    #[test]
+    fn lower_permute_view_densifies_as_sink() {
+        let a = Tensor::parameter(&[2, 3, 4]);
+        let out = a.permute(&[2, 0, 1]);
+        let program = lower(&a, &out).unwrap();
+
+        assert_eq!(program.queue.len(), 1, "only the sink densify copy");
+        let sink = program.view(program.sinks[0]);
+        assert!(sink.accessor.is_dense());
+        assert_eq!(&*sink.accessor.shape, &[4, 2, 3]);
+        let arg = program.view(program.queue[0].args[0]);
+        assert_eq!(&*arg.accessor.stride, &[1, 12, 4]);
+    }
+
+    #[test]
+    fn lower_unfold_view_densifies_as_sink() {
+        let a = Tensor::parameter(&[7]);
+        let out = a.unfold(0, 3, 1);
+        let program = lower(&a, &out).unwrap();
+
+        assert_eq!(program.queue.len(), 1, "only the sink densify copy");
+        let sink = program.view(program.sinks[0]);
+        assert!(sink.accessor.is_dense());
+        assert_eq!(&*sink.accessor.shape, &[5, 3]);
+        let arg = program.view(program.queue[0].args[0]);
+        assert_eq!(&*arg.accessor.shape, &[5, 3]);
+        assert_eq!(&*arg.accessor.stride, &[1, 1]);
     }
 
     #[test]
@@ -433,7 +451,7 @@ mod tests {
 
     #[test]
     fn lower_bias_add_uses_broadcast_view() {
-        // y = x @ W + bias: the bias operand is a pitch-0 view, not a copy.
+        // y = x @ W + bias: the bias operand is a stride-0 view, not a copy.
         let x = Tensor::parameter(&[2, 4]);
         let w = Tensor::parameter(&[4, 3]);
         let bias = Tensor::parameter(&[3]);
@@ -446,7 +464,7 @@ mod tests {
 
         let bias_arg = program.view(program.queue[1].args[1]);
         assert_eq!(&*bias_arg.accessor.shape, &[2, 3]);
-        assert_eq!(&*bias_arg.accessor.pitch, &[0, 1]);
+        assert_eq!(&*bias_arg.accessor.stride, &[0, 1]);
     }
 
     #[test]
@@ -459,7 +477,7 @@ mod tests {
         assert_eq!(program.queue.len(), 1, "transpose is a view on b");
         let b_arg = program.view(program.queue[0].args[1]);
         assert_eq!(&*b_arg.accessor.shape, &[4, 3]);
-        assert_eq!(&*b_arg.accessor.pitch, &[1, 4]);
+        assert_eq!(&*b_arg.accessor.stride, &[1, 4]);
     }
 
     #[test]

@@ -2,9 +2,64 @@
 
 use std::collections::HashMap;
 
-use super::{Remap, ScatterOp, Tensor, TensorKind};
+use super::{IndexKeyElement, Remap, ScatterOp, Tensor, TensorKind};
 use crate::ops::{AssocOp, BinaryOp, Op, UnaryOp};
 use crate::tree::Tree;
+
+/// Inverse of a permutation: `inv[axes[i]] = i`.
+fn inverse_permutation(axes: &[usize]) -> Vec<usize> {
+    let mut inv = vec![0; axes.len()];
+    for (i, &a) in axes.iter().enumerate() {
+        inv[a] = i;
+    }
+    inv
+}
+
+/// VJP of [`Tensor::unfold`]: scatter-add each window offset back into the
+/// source axis (overlapping windows sum). Built from permute + scatter_rows.
+fn fold_unfold_adjoint(
+    adjoint: &Tensor,
+    arg_shape: &[usize],
+    axis: usize,
+    size: usize,
+    step: usize,
+) -> Tensor {
+    let rank = arg_shape.len();
+    debug_assert_eq!(adjoint.shape().len(), rank + 1);
+    debug_assert_eq!(adjoint.shape()[rank], size);
+    let n_win = adjoint.shape()[axis];
+    let dim = arg_shape[axis];
+
+    // Move the windowed axis to front so scatter_rows can place rows.
+    let mut to_front = Vec::with_capacity(rank);
+    to_front.push(axis);
+    to_front.extend((0..rank).filter(|&i| i != axis));
+    let from_front = inverse_permutation(&to_front);
+
+    let mut acc = Tensor::zeros_typed(arg_shape, adjoint.element_type());
+    for j in 0..size {
+        // adjoint[..., j] has shape of the windowed tensor (rank == input rank).
+        let key: Vec<IndexKeyElement> = adjoint
+            .shape()
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| {
+                if i == rank {
+                    IndexKeyElement::Slice(j..j + 1)
+                } else {
+                    IndexKeyElement::Slice(0..d)
+                }
+            })
+            .collect();
+        let window = adjoint.index(&key).squeeze(&[rank]);
+        let rows = window.permute(&to_front);
+        let indices: Vec<u32> = (0..n_win).map(|i| (j + i * step) as u32).collect();
+        let idx = Tensor::constant_u32(&[n_win], &indices);
+        let scattered = rows.scatter_rows(&idx, dim, ScatterOp::Add);
+        acc = acc + scattered.permute(&from_front);
+    }
+    acc
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum GradError {
@@ -152,7 +207,22 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
             accumulate(grads, arg, g);
         }
 
-        TensorKind::Transpose { arg } => accumulate(grads, arg, adjoint.transpose()),
+        TensorKind::Permute { arg, axes } => {
+            accumulate(grads, arg, adjoint.permute(&inverse_permutation(axes)));
+        }
+
+        TensorKind::Unfold {
+            arg,
+            axis,
+            size,
+            step,
+        } => {
+            accumulate(
+                grads,
+                arg,
+                fold_unfold_adjoint(adjoint, arg.shape(), *axis, *size, *step),
+            );
+        }
 
         TensorKind::Squeeze { arg, axes } => {
             // Re-insert the squeezed size-1 axes via broadcast.
@@ -178,8 +248,19 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
                 // Scatter adjoint is gather through the same indices.
                 accumulate(grads, source, adjoint.gather_rows(indices));
             }
-            Remap::ScatterView { source, key, .. } => {
-                accumulate(grads, source, Tensor::new_index(adjoint.clone(), key));
+            Remap::ScatterView {
+                source, map, ..
+            } => {
+                // Dual: read the adjoint through the same map.
+                accumulate(grads, source, adjoint.gather_view(map.clone()));
+            }
+            Remap::GatherView { source, map } => {
+                // Dual: scatter the adjoint through the same map.
+                accumulate(
+                    grads,
+                    source,
+                    adjoint.scatter_view(map.clone(), source.shape()),
+                );
             }
         },
     }
@@ -340,4 +421,21 @@ mod tests {
             "constant(value=[0.0, 0.0, 0.0]) :: f32(3,)"
         );
     }
+
+    #[test]
+    fn grad_permute_inverts_axes() {
+        let x = Tensor::parameter(&[2, 3, 4]);
+        let loss = x.permute(&[2, 0, 1]).mean_all();
+        let g = grad_wrt(&loss, &x).unwrap();
+        assert_eq!(g.shape(), &[2, 3, 4]);
+    }
+
+    #[test]
+    fn grad_unfold_restores_input_shape() {
+        let x = Tensor::parameter(&[5]);
+        let loss = x.unfold(0, 3, 1).mean_all();
+        let g = grad_wrt(&loss, &x).unwrap();
+        assert_eq!(g.shape(), &[5]);
+    }
+
 }

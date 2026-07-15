@@ -1,35 +1,35 @@
-//! Strided views over flat buffers (offset / shape / pitch).
+//! Strided views over flat buffers (offset / shape / stride).
 //!
-//! Pitch tricks express broadcast (pitch 0), transpose (swapped pitches), and
-//! squeeze without touching storage. Equality is by the affine map — two
-//! accessors that address the same way compare equal regardless of how they
-//! were built.
+//! Stride tricks express broadcast (stride 0), permute (reordered strides),
+//! unfold (window stride + step), and squeeze without touching storage.
+//! Equality is by the affine map — two accessors that address the same way
+//! compare equal regardless of how they were built.
 
 use super::program::Error;
 
-/// Maps N-d coordinates to a linear element offset: `offset + Σ coordᵢ · pitchᵢ`.
+/// Maps N-d coordinates to a linear element offset: `offset + Σ coordᵢ · strideᵢ`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Accessor {
     pub offset: usize,
     pub shape: Box<[usize]>,
-    pub pitch: Box<[usize]>,
+    pub stride: Box<[usize]>,
 }
 
 impl Accessor {
     /// C-contiguous accessor addressing `shape` from `offset`.
     pub fn dense(shape: impl Into<Box<[usize]>>, offset: usize) -> Self {
         let shape = shape.into();
-        let pitch = dense_pitch(&shape);
+        let stride = dense_stride(&shape);
         Self {
             offset,
             shape,
-            pitch,
+            stride,
         }
     }
 
     /// Whether this is C-contiguous (kernel-output law).
     pub fn is_dense(&self) -> bool {
-        self.pitch.as_ref() == dense_pitch(&self.shape).as_ref()
+        self.stride.as_ref() == dense_stride(&self.shape).as_ref()
     }
 
     pub fn rank(&self) -> usize {
@@ -42,9 +42,52 @@ impl Accessor {
         self.offset
             + coords
                 .iter()
-                .zip(&self.pitch)
-                .map(|(c, p)| c * p)
+                .zip(&self.stride)
+                .map(|(c, s)| c * s)
                 .sum::<usize>()
+    }
+
+    /// Highest linear element index this accessor can touch (empty shape → offset).
+    pub fn max_index(&self) -> usize {
+        if self.shape.iter().any(|&d| d == 0) {
+            return self.offset;
+        }
+        self.offset
+            + self
+                .shape
+                .iter()
+                .zip(&self.stride)
+                .map(|(&d, &s)| (d - 1) * s)
+                .sum::<usize>()
+    }
+
+    /// Reorder axes: `out.shape[i] = self.shape[axes[i]]` (NumPy / PyTorch axes).
+    pub fn permute(&self, axes: &[usize]) -> Result<Self, Error> {
+        let n = self.rank();
+        if axes.len() != n {
+            return Err(Error(format!(
+                "permute axes {axes:?} do not match rank {n}"
+            )));
+        }
+        let mut seen = vec![false; n];
+        for &a in axes {
+            if a >= n {
+                return Err(Error(format!(
+                    "permute axis {a} out of range for rank {n}"
+                )));
+            }
+            if seen[a] {
+                return Err(Error(format!(
+                    "permute axes must be a permutation, got {axes:?}"
+                )));
+            }
+            seen[a] = true;
+        }
+        Ok(Self {
+            offset: self.offset,
+            shape: axes.iter().map(|&a| self.shape[a]).collect(),
+            stride: axes.iter().map(|&a| self.stride[a]).collect(),
+        })
     }
 
     /// Swap the last two axes.
@@ -53,10 +96,49 @@ impl Accessor {
         if n < 2 {
             return Err(Error(format!("transpose requires rank >= 2, got {n}")));
         }
-        let mut out = self.clone();
-        out.shape.swap(n - 2, n - 1);
-        out.pitch.swap(n - 2, n - 1);
-        Ok(out)
+        let mut axes: Vec<usize> = (0..n).collect();
+        axes.swap(n - 2, n - 1);
+        self.permute(&axes)
+    }
+
+    /// Sliding windows along `axis`: shape gains a trailing window axis of
+    /// length `size`, and `axis` shrinks to the number of windows.
+    ///
+    /// `out[..., i, ..., j] = self[..., i * step + j, ...]` for
+    /// `j ∈ 0..size` and `i ∈ 0..n_win` with `n_win = (dim - size) / step + 1`
+    /// (remainder dropped, PyTorch-style).
+    pub fn unfold(&self, axis: usize, size: usize, step: usize) -> Result<Self, Error> {
+        let n = self.rank();
+        if axis >= n {
+            return Err(Error(format!(
+                "unfold axis {axis} out of range for rank {n}"
+            )));
+        }
+        if size == 0 {
+            return Err(Error("unfold size must be >= 1".into()));
+        }
+        if step == 0 {
+            return Err(Error("unfold step must be >= 1".into()));
+        }
+        let dim = self.shape[axis];
+        if size > dim {
+            return Err(Error(format!(
+                "unfold size {size} exceeds axis {axis} dim {dim}"
+            )));
+        }
+        let n_win = (dim - size) / step + 1;
+        let base = self.stride[axis];
+        let mut shape = self.shape.to_vec();
+        shape[axis] = n_win;
+        shape.push(size);
+        let mut stride = self.stride.to_vec();
+        stride[axis] = base * step;
+        stride.push(base);
+        Ok(Self {
+            offset: self.offset,
+            shape: shape.into(),
+            stride: stride.into(),
+        })
     }
 
     /// Remove the given size-1 axes.
@@ -84,15 +166,15 @@ impl Accessor {
                 .filter(keep)
                 .map(|i| self.shape[i])
                 .collect(),
-            pitch: (0..self.rank())
+            stride: (0..self.rank())
                 .filter(keep)
-                .map(|i| self.pitch[i])
+                .map(|i| self.stride[i])
                 .collect(),
         })
     }
 
     /// Broadcast to `target` with NumPy trailing alignment: missing or size-1
-    /// axes get pitch 0.
+    /// axes get stride 0.
     pub fn broadcast_to(&self, target: &[usize]) -> Result<Self, Error> {
         if self.shape.as_ref() == target {
             return Ok(self.clone());
@@ -103,11 +185,11 @@ impl Accessor {
                 self.shape
             ))
         })?;
-        let mut pitch = vec![0; target.len()];
-        for (i, (&dim, &p)) in self.shape.iter().zip(&self.pitch).enumerate() {
+        let mut stride = vec![0; target.len()];
+        for (i, (&dim, &s)) in self.shape.iter().zip(&self.stride).enumerate() {
             let want = target[lead + i];
             if dim == want {
-                pitch[lead + i] = p;
+                stride[lead + i] = s;
             } else if dim != 1 {
                 return Err(Error(format!(
                     "cannot broadcast {:?} to {target:?}",
@@ -118,12 +200,12 @@ impl Accessor {
         Ok(Self {
             offset: self.offset,
             shape: target.into(),
-            pitch: pitch.into(),
+            stride: stride.into(),
         })
     }
 
     /// Explicit-axis broadcast: `axes[i]` is the output axis for input axis `i`.
-    /// Unmapped axes are broadcast (pitch 0).
+    /// Unmapped axes are broadcast (stride 0).
     pub fn map_axes(&self, target: &[usize], axes: &[usize]) -> Result<Self, Error> {
         let rank = self.rank();
         if axes.len() != rank {
@@ -131,22 +213,22 @@ impl Accessor {
                 "broadcast axes {axes:?} do not match rank {rank}"
             )));
         }
-        let mut pitch = vec![0; target.len()];
+        let mut stride = vec![0; target.len()];
         for (input_axis, &out_axis) in axes.iter().enumerate() {
             if out_axis >= target.len() {
                 return Err(Error(format!(
                     "broadcast axis {out_axis} out of range for target {target:?}"
                 )));
             }
-            // Size-1 dims that expand keep pitch 0.
+            // Size-1 dims that expand keep stride 0.
             if self.shape[input_axis] != 1 || target[out_axis] == 1 {
-                pitch[out_axis] = self.pitch[input_axis];
+                stride[out_axis] = self.stride[input_axis];
             }
         }
         Ok(Self {
             offset: self.offset,
             shape: target.into(),
-            pitch: pitch.into(),
+            stride: stride.into(),
         })
     }
 
@@ -159,52 +241,53 @@ impl Accessor {
             return false;
         }
         let lead = self.rank() - source.rank();
-        if self.pitch[..lead].iter().any(|&p| p != 0) {
+        if self.stride[..lead].iter().any(|&s| s != 0) {
             return false;
         }
         source
             .shape
             .iter()
-            .zip(&source.pitch)
+            .zip(&source.stride)
             .enumerate()
-            .all(|(i, (&dim, &pitch))| {
-                let (out_dim, out_pitch) = (self.shape[lead + i], self.pitch[lead + i]);
-                (out_dim == dim && out_pitch == pitch) || (dim == 1 && out_pitch == 0)
+            .all(|(i, (&dim, &src_stride))| {
+                let (out_dim, out_stride) = (self.shape[lead + i], self.stride[lead + i]);
+                (out_dim == dim && out_stride == src_stride)
+                    || (dim == 1 && out_stride == 0)
             })
     }
 
     /// Re-address this accessor through a consumer view of a producer write
-    /// (`source`): identity when `expansion == source`, otherwise pitch compose
-    /// through `expansion`'s shape (broadcast axes stay pitch 0).
+    /// (`source`): identity when `expansion == source`, otherwise stride-compose
+    /// through `expansion`'s shape (broadcast axes stay stride 0).
     pub fn compose_through(&self, source: &Accessor, expansion: &Accessor) -> Accessor {
         if expansion == source {
             return self.clone();
         }
         debug_assert!(expansion.rank() >= self.rank());
         let lead = expansion.rank() - self.rank();
-        let mut pitch = vec![0; expansion.rank()];
-        for (i, &p) in self.pitch.iter().enumerate() {
-            if expansion.pitch[lead + i] != 0 {
-                pitch[lead + i] = p;
+        let mut stride = vec![0; expansion.rank()];
+        for (i, &s) in self.stride.iter().enumerate() {
+            if expansion.stride[lead + i] != 0 {
+                stride[lead + i] = s;
             }
         }
         Accessor {
             offset: self.offset,
             shape: expansion.shape.clone(),
-            pitch: pitch.into(),
+            stride: stride.into(),
         }
     }
 }
 
-/// C-contiguous (row-major) pitch for a shape.
-pub fn dense_pitch(shape: &[usize]) -> Box<[usize]> {
-    let mut pitch = vec![0; shape.len()];
-    let mut stride = 1;
+/// C-contiguous (row-major) strides for a shape.
+pub fn dense_stride(shape: &[usize]) -> Box<[usize]> {
+    let mut stride = vec![0; shape.len()];
+    let mut run = 1;
     for i in (0..shape.len()).rev() {
-        pitch[i] = stride;
-        stride *= shape[i];
+        stride[i] = run;
+        run *= shape[i];
     }
-    pitch.into()
+    stride.into()
 }
 
 /// Number of elements in a shape (scalars have one).
@@ -217,9 +300,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dense_pitch_2d() {
+    fn dense_stride_2d() {
         let a = Accessor::dense([2, 3], 0);
-        assert_eq!(&*a.pitch, &[3, 1]);
+        assert_eq!(&*a.stride, &[3, 1]);
         assert_eq!(a.index(&[1, 2]), 5);
         assert!(a.is_dense());
     }
@@ -229,7 +312,7 @@ mod tests {
         let a = Accessor::dense([], 0);
         let b = a.broadcast_to(&[2, 3]).unwrap();
         assert_eq!(&*b.shape, &[2, 3]);
-        assert_eq!(&*b.pitch, &[0, 0]);
+        assert_eq!(&*b.stride, &[0, 0]);
         assert!(!b.is_dense());
     }
 
@@ -237,7 +320,7 @@ mod tests {
     fn broadcast_trailing_alignment() {
         let a = Accessor::dense([3], 0);
         let b = a.broadcast_to(&[2, 3]).unwrap();
-        assert_eq!(&*b.pitch, &[0, 1]);
+        assert_eq!(&*b.stride, &[0, 1]);
     }
 
     #[test]
@@ -249,8 +332,46 @@ mod tests {
     fn transpose_swaps_last_two() {
         let a = Accessor::dense([2, 3], 0).transpose().unwrap();
         assert_eq!(&*a.shape, &[3, 2]);
-        assert_eq!(&*a.pitch, &[1, 3]);
+        assert_eq!(&*a.stride, &[1, 3]);
         assert!(!a.is_dense());
+    }
+
+    #[test]
+    fn permute_reorders_axes() {
+        let a = Accessor::dense([2, 3, 4], 0).permute(&[2, 0, 1]).unwrap();
+        assert_eq!(&*a.shape, &[4, 2, 3]);
+        assert_eq!(&*a.stride, &[1, 12, 4]);
+        assert_eq!(a.index(&[1, 1, 2]), 1 + 12 + 8);
+    }
+
+    #[test]
+    fn permute_rejects_non_permutation() {
+        assert!(Accessor::dense([2, 3], 0).permute(&[0, 0]).is_err());
+        assert!(Accessor::dense([2, 3], 0).permute(&[0]).is_err());
+    }
+
+    #[test]
+    fn unfold_1d_overlapping() {
+        // [0,1,2,3,4,5,6] → windows of 3 step 1
+        let a = Accessor::dense([7], 0).unfold(0, 3, 1).unwrap();
+        assert_eq!(&*a.shape, &[5, 3]);
+        assert_eq!(&*a.stride, &[1, 1]);
+        assert_eq!(a.index(&[0, 0]), 0);
+        assert_eq!(a.index(&[0, 2]), 2);
+        assert_eq!(a.index(&[1, 0]), 1);
+        assert_eq!(a.index(&[4, 2]), 6);
+    }
+
+    #[test]
+    fn unfold_2d_spatial_axis() {
+        // Row-major [2, 5], unfold width with size 3 step 2 → [2, 2, 3]
+        let a = Accessor::dense([2, 5], 0).unfold(1, 3, 2).unwrap();
+        assert_eq!(&*a.shape, &[2, 2, 3]);
+        assert_eq!(&*a.stride, &[5, 2, 1]);
+        assert_eq!(a.index(&[0, 0, 0]), 0);
+        assert_eq!(a.index(&[0, 0, 2]), 2);
+        assert_eq!(a.index(&[0, 1, 0]), 2);
+        assert_eq!(a.index(&[1, 0, 1]), 6);
     }
 
     #[test]
@@ -275,14 +396,14 @@ mod tests {
         let arg = Accessor::dense([3], 0);
         let composed = arg.compose_through(&write, &read);
         assert_eq!(&*composed.shape, &[2, 3]);
-        assert_eq!(&*composed.pitch, &[0, 1]);
+        assert_eq!(&*composed.stride, &[0, 1]);
     }
 
     #[test]
-    fn map_axes_places_pitch() {
+    fn map_axes_places_stride() {
         let a = Accessor::dense([3], 0);
         let b = a.map_axes(&[2, 3], &[1]).unwrap();
         assert_eq!(&*b.shape, &[2, 3]);
-        assert_eq!(&*b.pitch, &[0, 1]);
+        assert_eq!(&*b.stride, &[0, 1]);
     }
 }

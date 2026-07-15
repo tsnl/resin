@@ -137,13 +137,17 @@ pub fn pack_arenas(program: Program) -> Program {
         .map(|d| {
             let out_buf = old_views[d.output.0].buffer;
             let kernel = match d.kernel {
+                // Scatter map is buffer-absolute on the dense output arena.
                 Kernel::Remap {
-                    info: RemapInfo::ScatterView { accessor },
+                    info: RemapInfo::ScatterView { map },
                 } => Kernel::Remap {
                     info: RemapInfo::ScatterView {
-                        accessor: shift(out_buf, &accessor),
+                        map: shift(out_buf, &map),
                     },
                 },
+                // Gather map is a dense-logical index into the source *view*
+                // shape (decoded through the source accessor at run time) — not
+                // a raw buffer address, so packing must not shift it.
                 other => other,
             };
             Dispatch {

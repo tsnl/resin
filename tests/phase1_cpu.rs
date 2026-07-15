@@ -152,6 +152,91 @@ fn scatter_index_pads_with_zeros() {
 }
 
 #[test]
+fn pad_embeds_with_zeros() {
+    let f = CpuJit.jit(|input: &In<Tensor>| input.x.pad(&[(1, 2)]));
+    let x = HostArray::from_f32(&[3], &[10.0, 20.0, 30.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.shape(), &[6]);
+    assert_eq!(out.to_f32(), vec![0.0, 10.0, 20.0, 30.0, 0.0, 0.0]);
+}
+
+#[test]
+fn pad_2d_is_asymmetric() {
+    let f = CpuJit.jit(|input: &In<Tensor>| input.x.pad(&[(1, 0), (0, 1)]));
+    // 2×2 → 3×3 with a top row and right column of zeros.
+    let x = HostArray::from_f32(&[2, 2], &[1.0, 2.0, 3.0, 4.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.shape(), &[3, 3]);
+    assert_eq!(
+        out.to_f32(),
+        vec![0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 3.0, 4.0, 0.0]
+    );
+}
+
+#[test]
+fn gather_view_crops_via_affine_map() {
+    use resin::Accessor;
+    // Dense [6], take the middle four elements starting at index 1.
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 1,
+            shape: Box::from([4]),
+            stride: Box::from([1usize]),
+        };
+        input.x.gather_view(map)
+    });
+    let x = HostArray::from_f32(&[6], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.to_f32(), vec![2.0, 3.0, 4.0, 5.0]);
+}
+
+#[test]
+fn gather_view_oor_reads_zero() {
+    use resin::Accessor;
+    // Map reaches past the end of a length-3 source.
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 2,
+            shape: Box::from([3]),
+            stride: Box::from([1usize]),
+        };
+        input.x.gather_view(map)
+    });
+    let x = HostArray::from_f32(&[3], &[10.0, 20.0, 30.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.to_f32(), vec![30.0, 0.0, 0.0]);
+}
+
+#[test]
+fn grad_of_pad_is_crop() {
+    // loss = sum(pad(x)); grad is 1 on the interior.
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let loss = input.x.pad(&[(1, 1)]).sum_axes(&[0]).squeeze_all();
+        grad_wrt(&loss, &input.x).unwrap()
+    });
+    let x = HostArray::from_f32(&[3], &[1.0, 2.0, 3.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.to_f32(), vec![1.0, 1.0, 1.0]);
+}
+
+#[test]
+fn grad_of_gather_view_scatters() {
+    use resin::Accessor;
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 1,
+            shape: Box::from([2]),
+            stride: Box::from([1usize]),
+        };
+        let loss = input.x.gather_view(map).sum_axes(&[0]).squeeze_all();
+        grad_wrt(&loss, &input.x).unwrap()
+    });
+    let x = HostArray::from_f32(&[4], &[0.0, 0.0, 0.0, 0.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.to_f32(), vec![0.0, 1.0, 1.0, 0.0]);
+}
+
+#[test]
 fn gather_rows_2d() {
     let f = CpuJit.jit(|input: &In<Tensor>| {
         let indices = Tensor::constant_u32(&[3], &[2, 0, 3]);

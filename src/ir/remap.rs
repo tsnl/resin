@@ -1,8 +1,8 @@
 //! Data-movement kernel descriptors (gather / scatter).
 //!
 //! One remap kernel covers data movement pure accessor views cannot express:
-//! dynamically indexed row permutations and strided region writes (pad/embed).
-//! Slicing, broadcast, and transpose stay views.
+//! dynamically indexed row permutations and static affine scatter/gather
+//! (pad/embed/crop). Slicing, broadcast, permute, and unfold stay views.
 
 use super::Accessor;
 use crate::ops::AssocOp;
@@ -24,11 +24,20 @@ pub enum RemapInfo {
     /// Threads iterate the source shape.
     ScatterRows { operator: Option<AssocOp> },
 
-    /// `out[accessor(coords)] = source[coords]` into a cleared output
-    /// (pad/embed a region). Args: `[source]`; `accessor.shape` must equal the
-    /// source shape and address the output buffer. Threads iterate the source
-    /// shape.
-    ScatterView { accessor: Accessor },
+    /// `out[map(coords)] = source[coords]` into a cleared output (pad/embed).
+    ///
+    /// Args: `[source]`; `map.shape` equals the source shape and addresses the
+    /// **output** buffer. Threads iterate the source shape.
+    ScatterView { map: Accessor },
+
+    /// `out[coords] = source[decode(map(coords))]` (OOR → zero).
+    ///
+    /// Args: `[source]`; `map.shape` equals the output shape. `map` yields a
+    /// **dense-logical linear index** into `source`'s shape (then addressed
+    /// through the source view, so broadcast sources work). Indices past
+    /// `element_count(source.shape)` read as zero. Prefer [`ScatterView`] for
+    /// padding (unsigned maps cannot express negative offsets).
+    GatherView { map: Accessor },
 }
 
 impl RemapInfo {
@@ -37,6 +46,7 @@ impl RemapInfo {
             RemapInfo::GatherRows => "gather_rows",
             RemapInfo::ScatterRows { .. } => "scatter_rows",
             RemapInfo::ScatterView { .. } => "scatter_view",
+            RemapInfo::GatherView { .. } => "gather_view",
         }
     }
 

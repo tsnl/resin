@@ -46,6 +46,7 @@ pub mod ops;
 pub mod tree;
 
 pub use dsl::{IndexKeyElement, ScatterOp};
+pub use ir::Accessor;
 pub use ops::ElementType;
 pub use resin_macros::Tree;
 pub use tree::Tree;

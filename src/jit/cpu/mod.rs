@@ -1,7 +1,7 @@
 //! CPU interpreter backend.
 //!
 //! Kernels consume views (buffer + accessor) directly: broadcast, transpose,
-//! squeeze, and index are pitch tricks, never densifying copies. Storage is
+//! squeeze, and index are stride tricks, never densifying copies. Storage is
 //! typed ([`Slot`]): f32 and u32 buffers stay separate. The artifact is the
 //! validated IR program itself.
 
@@ -288,15 +288,46 @@ fn run_remap(
                 write_slot(&mut storage[out_buffer], out_i, value);
             }
         }
-        RemapInfo::ScatterView { accessor } => {
+        RemapInfo::ScatterView { map } => {
             let count = element_count(&src_acc.shape);
             let mut coords = vec![0; src_acc.rank()];
             for linear in 0..count {
                 decode(linear, &src_acc.shape, &mut coords);
                 let value = read_slot(&storage[*src_buf], src_acc.index(&coords), out_etype);
-                write_slot(&mut storage[out_buffer], accessor.index(&coords), value);
+                write_slot(&mut storage[out_buffer], map.index(&coords), value);
             }
         }
+        RemapInfo::GatherView { map } => {
+            // `map` yields a dense-logical linear index into `src_acc.shape`
+            // (dual of scatter's dense-output addressing). Decode → source
+            // view address so broadcast/strided sources work. OOR → zero.
+            let src_n = element_count(&src_acc.shape);
+            let count = element_count(&out.shape);
+            let mut out_coords = vec![0; out.rank()];
+            let mut src_coords = vec![0; src_acc.rank()];
+            for linear in 0..count {
+                decode(linear, &out.shape, &mut out_coords);
+                let logical = map.index(&out_coords);
+                let value = if logical >= src_n {
+                    zero_value(out_etype)
+                } else {
+                    decode(logical, &src_acc.shape, &mut src_coords);
+                    read_slot(
+                        &storage[*src_buf],
+                        src_acc.index(&src_coords),
+                        out_etype,
+                    )
+                };
+                write_slot(&mut storage[out_buffer], out.index(&out_coords), value);
+            }
+        }
+    }
+}
+
+fn zero_value(etype: ElementType) -> Value {
+    match etype {
+        ElementType::F32 => Value::F(0.0),
+        ElementType::U32 => Value::U(0),
     }
 }
 
@@ -672,5 +703,75 @@ mod tests {
             .unwrap();
         assert_eq!(out.shape(), &[3, 2]);
         assert_eq!(out.data(), &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn permute_sink_runs() {
+        let f = CpuJit.jit(|x: &Tensor| x.permute(&[2, 0, 1]));
+        let out = f
+            .call(&HostArray::from_f32(
+                &[2, 2, 3],
+                // [0,0,:]=0,1,2  [0,1,:]=3,4,5  [1,0,:]=6,7,8  [1,1,:]=9,10,11
+                &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+            ))
+            .unwrap();
+        // shape [3, 2, 2]; out[c, n, h] = in[n, h, c]
+        assert_eq!(out.shape(), &[3, 2, 2]);
+        assert_eq!(
+            out.data(),
+            &[0.0, 3.0, 6.0, 9.0, 1.0, 4.0, 7.0, 10.0, 2.0, 5.0, 8.0, 11.0]
+        );
+    }
+
+    #[test]
+    fn unfold_sink_runs() {
+        let f = CpuJit.jit(|x: &Tensor| x.unfold(0, 3, 1));
+        let out = f
+            .call(&HostArray::from_f32(
+                &[5],
+                &[10.0, 20.0, 30.0, 40.0, 50.0],
+            ))
+            .unwrap();
+        assert_eq!(out.shape(), &[3, 3]);
+        assert_eq!(
+            out.data(),
+            &[
+                10.0, 20.0, 30.0, // window 0
+                20.0, 30.0, 40.0, // window 1
+                30.0, 40.0, 50.0, // window 2
+            ]
+        );
+    }
+
+    #[test]
+    fn unfold_mul_sum_is_sliding_dot() {
+        // 1-d conv: unfold → broadcast kernel → mul → sum over window.
+        let f = CpuJit.jit(|p: &Pair<Tensor>| {
+            let windows = p.a.unfold(0, 3, 1); // [3, 3]
+            let k = p.b.broadcast_to(&[3, 3], &[1]);
+            (windows * k).sum_axes(&[1]).squeeze_all()
+        });
+        let out = f
+            .call(&Pair {
+                a: HostArray::from_f32(&[5], &[1.0, 2.0, 3.0, 4.0, 5.0]),
+                b: HostArray::from_f32(&[3], &[1.0, 0.0, -1.0]),
+            })
+            .unwrap();
+        // dots: 1-3=-2, 2-4=-2, 3-5=-2
+        assert_eq!(out.data(), &[-2.0, -2.0, -2.0]);
+    }
+
+    #[test]
+    fn grad_through_overlapping_unfold() {
+        // loss = sum(unfold(x, size=3, step=1)); each interior point appears in 3 windows.
+        let f = CpuJit.jit(|x: &Tensor| {
+            let loss = x.unfold(0, 3, 1).sum_axes(&[0, 1]).squeeze_all();
+            grad_wrt(&loss, x).expect("grad")
+        });
+        let out = f
+            .call(&HostArray::from_f32(&[5], &[0.0, 0.0, 0.0, 0.0, 0.0]))
+            .unwrap();
+        // windows cover indices: [0,1,2], [1,2,3], [2,3,4] → counts 1,2,3,2,1
+        assert_eq!(out.data(), &[1.0, 2.0, 3.0, 2.0, 1.0]);
     }
 }
