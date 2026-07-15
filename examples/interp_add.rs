@@ -2,7 +2,7 @@
 
 use resin::Tree;
 use resin::dsl::Tensor;
-use resin::jit::{CpuJit, DeviceValue, HostArray, Jit};
+use resin::jit::{CpuJit, DeviceArray, HostArray, Jit};
 
 #[derive(Tree, Clone)]
 struct Pair<T> {
@@ -12,8 +12,9 @@ struct Pair<T> {
 
 fn main() {
     let sum = CpuJit.jit(|pair: &Pair<Tensor>| pair.a.clone() + pair.b.clone());
+    // Host staging in, device array out (`call_host` uploads then calls).
     let out = sum
-        .call(&Pair {
+        .call_host(&Pair {
             a: HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
             b: HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
         })

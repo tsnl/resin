@@ -14,7 +14,7 @@
 //! struct of tensors and pass it straight to a jitted function.
 //!
 //! ```no_run
-//! use resin::{Tree, dsl::Tensor, jit::{DeviceValue, HostArray, CpuJit, Jit}};
+//! use resin::{Tree, dsl::Tensor, jit::{DeviceArray, HostArray, CpuJit, Jit}};
 //!
 //! #[derive(Tree, Clone)]
 //! struct Pair<T> {
@@ -24,7 +24,7 @@
 //!
 //! let add = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
 //! let out = add
-//!     .call(&Pair {
+//!     .call_host(&Pair {
 //!         a: HostArray::from_f32(&[2], &[1.0, 2.0]),
 //!         b: HostArray::from_f32(&[2], &[10.0, 20.0]),
 //!     })
@@ -54,7 +54,7 @@ pub use tree::Tree;
 mod tests {
     use crate::Tree;
     use crate::dsl::Tensor;
-    use crate::jit::{CpuJit, DeviceValue, HostArray, Jit};
+    use crate::jit::{CpuJit, DeviceArray, HostArray, Jit};
 
     #[derive(Tree, Clone)]
     struct Inputs<T> {
@@ -66,7 +66,7 @@ mod tests {
     fn cpu_jit_add() {
         let add = CpuJit.jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
         let out = add
-            .call(&Inputs {
+            .call_host(&Inputs {
                 a: HostArray::from_f32(&[2, 2], &[1.0, 2.0, 3.0, 4.0]),
                 b: HostArray::from_f32(&[2, 2], &[10.0, 20.0, 30.0, 40.0]),
             })
@@ -87,16 +87,11 @@ mod tests {
             return;
         }
 
-        let jit = WgpuJit::default();
-        let add = jit.jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
+        let add = WgpuJit::default().jit(|inputs: &Inputs<Tensor>| inputs.a.clone() + inputs.b.clone());
         let out = add
-            .call(&Inputs {
-                a: jit
-                    .upload(&HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]))
-                    .unwrap(),
-                b: jit
-                    .upload(&HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]))
-                    .unwrap(),
+            .call_host(&Inputs {
+                a: HostArray::from_f32(&[4], &[1.0, 2.0, 3.0, 4.0]),
+                b: HostArray::from_f32(&[4], &[10.0, 20.0, 30.0, 40.0]),
             })
             .expect("wgpu jit add")
             .host()

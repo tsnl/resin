@@ -60,14 +60,14 @@ enum Value {
 
 impl Jit for CpuJit {
     type Artifact = Program;
-    type Value = HostArray;
+    type Array = HostArray;
 
     fn lower(&self, program: &Program) -> Result<Program, Error> {
         program.validate()?;
         Ok(program.clone())
     }
 
-    fn alloc_output(&self, shape: &[usize], element_type: ElementType) -> Result<HostArray, Error> {
+    fn alloc(&self, shape: &[usize], element_type: ElementType) -> Result<HostArray, Error> {
         Ok(HostArray::zeros_typed(shape, element_type))
     }
 

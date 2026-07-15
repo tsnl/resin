@@ -2,18 +2,18 @@
 //!
 //! Pipelines and the bind-group layout live on the [`super::WgpuProgram`]
 //! artifact. Arena GPU buffers are created each invoke. Sinks become compact
-//! [`super::WgpuArray`] storage buffers (GPU copy from the arena — no map).
+//! [`super::Array`] storage buffers (GPU copy from the arena — no map).
 //!
 //! **Invariant:** this module never `poll(Wait)`s except inside
-//! [`host_download`] (used only by [`super::WgpuArray::host`]).
+//! [`host_download`] (used only by [`super::Array::host`]).
 
 use std::sync::{Arc, OnceLock};
 
 use wgpu::util::DeviceExt;
 
-use super::{WgpuArray, WgpuProgram};
+use super::{Array, WgpuProgram};
 use crate::ir::{Accessor, BufferData, Kernel, element_count};
-use crate::jit::{ArrayData, DeviceValue, Error, HostArray};
+use crate::jit::{ArrayData, DeviceArray, Error, HostArray};
 use crate::ops::ElementType;
 
 pub struct Context {
@@ -64,7 +64,7 @@ fn storage_copy_usage() -> wgpu::BufferUsages {
 }
 
 /// Upload a host array into a new storage buffer (no GPU wait).
-pub fn upload_host(ctx: &Context, host: &HostArray) -> Result<WgpuArray, Error> {
+pub fn upload_host(ctx: &Context, host: &HostArray) -> Result<Array, Error> {
     let bytes = array_data_to_bytes(host.as_data());
     let size = byte_len(host.as_data().len());
     let mut contents = bytes;
@@ -76,7 +76,7 @@ pub fn upload_host(ctx: &Context, host: &HostArray) -> Result<WgpuArray, Error> 
             contents: &contents,
             usage: storage_copy_usage(),
         });
-    Ok(WgpuArray {
+    Ok(Array {
         shape: host.shape().into(),
         element_type: host.element_type(),
         buffer: Arc::new(buffer),
@@ -84,7 +84,7 @@ pub fn upload_host(ctx: &Context, host: &HostArray) -> Result<WgpuArray, Error> 
 }
 
 /// Empty storage buffer for an output leaf (filled by [`run`]).
-pub fn alloc_empty(ctx: &Context, shape: &[usize], element_type: ElementType) -> WgpuArray {
+pub fn alloc_empty(ctx: &Context, shape: &[usize], element_type: ElementType) -> Array {
     let n = element_count(shape);
     let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("resin-value"),
@@ -92,7 +92,7 @@ pub fn alloc_empty(ctx: &Context, shape: &[usize], element_type: ElementType) ->
         usage: storage_copy_usage(),
         mapped_at_creation: false,
     });
-    WgpuArray {
+    Array {
         shape: shape.into(),
         element_type,
         buffer: Arc::new(buffer),
@@ -103,8 +103,8 @@ pub fn alloc_empty(ctx: &Context, shape: &[usize], element_type: ElementType) ->
 pub fn run(
     ctx: &Context,
     program: &WgpuProgram,
-    params: &[&WgpuArray],
-    outputs: &mut [&mut WgpuArray],
+    params: &[&Array],
+    outputs: &mut [&mut Array],
 ) -> Result<(), Error> {
     let ir = &program.ir;
 
@@ -230,7 +230,7 @@ pub fn run(
 }
 
 /// Map a dense storage buffer to a [`HostArray`]. **Waits on the GPU.**
-pub fn host_download(ctx: &Context, array: &WgpuArray) -> Result<HostArray, Error> {
+pub fn host_download(ctx: &Context, array: &Array) -> Result<HostArray, Error> {
     let n = array.nelem();
     let raw = read_buffer(ctx, &array.buffer, byte_len(n))?;
     match array.element_type {
@@ -249,7 +249,7 @@ pub fn host_download(ctx: &Context, array: &WgpuArray) -> Result<HostArray, Erro
 
 fn copy_dense_into_arena(
     encoder: &mut wgpu::CommandEncoder,
-    src: &WgpuArray,
+    src: &Array,
     arena: &wgpu::Buffer,
     accessor: &Accessor,
 ) -> Result<(), Error> {

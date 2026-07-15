@@ -20,11 +20,13 @@ use resin::dsl::{Tensor, grad_wrt};
 use resin::ir::Program;
 use resin::ir::lower;
 use resin::ir::optimize::{OptPasses, optimize_with};
-use resin::jit::{CpuJit, DeviceValue, HostArray, Jit};
+use resin::jit::{CpuJit, DeviceArray, HostArray, Jit};
 use resin_extras::dataset::mnist;
 
 #[cfg(feature = "wgpu")]
-use resin::jit::wgpu::{WgpuArray, WgpuJit, WgpuProgram, gpu_available};
+use resin::jit::{Array, WgpuJit};
+#[cfg(feature = "wgpu")]
+use resin::jit::wgpu::{WgpuProgram, gpu_available};
 
 const BATCH: usize = 64;
 const HIDDEN: usize = 128;
@@ -211,12 +213,10 @@ fn mnist_train_step(c: &mut Criterion) {
             group.measurement_time(Duration::from_secs(10));
 
             let jit = WgpuJit::default();
-            let gpu_params: TrainStepIn<WgpuArray> = params
-                .try_map(&mut |h| jit.upload(h))
-                .expect("upload params");
-            let mut gpu_outputs: TrainStepOut<WgpuArray> = outputs
-                .try_map(&mut |h| jit.upload(h))
-                .expect("upload outputs");
+            let gpu_params: TrainStepIn<Array> =
+                jit.upload_tree(&params).expect("upload params");
+            let mut gpu_outputs: TrainStepOut<Array> =
+                jit.upload_tree(&outputs).expect("upload outputs");
 
             for (opt_name, passes) in opt_cases {
                 let program = ir_program(passes);
@@ -228,13 +228,13 @@ fn mnist_train_step(c: &mut Criterion) {
                 );
 
                 {
-                    let param_refs: Vec<&WgpuArray> = gpu_params.leaves();
+                    let param_refs: Vec<&Array> = gpu_params.leaves();
                     let mut out_refs = gpu_outputs.leaves_mut();
                     jit.invoke(&artifact, &param_refs, &mut out_refs)
                         .expect("wgpu smoke");
                 }
                 // One host sync outside the timed loop (correctness smoke only).
-                black_box(gpu_outputs.loss.host().expect("loss host").scalar());
+                black_box(gpu_outputs.loss.scalar().expect("loss scalar"));
 
                 group.bench_with_input(
                     BenchmarkId::new("wgpu", opt_name),
@@ -247,7 +247,7 @@ fn mnist_train_step(c: &mut Criterion) {
                         const HOST_EVERY: u32 = 1000;
                         let mut until_host = HOST_EVERY;
                         b.iter(|| {
-                            let param_refs: Vec<&WgpuArray> = gpu_params.leaves();
+                            let param_refs: Vec<&Array> = gpu_params.leaves();
                             let mut out_refs = gpu_outputs.leaves_mut();
                             jit.invoke(artifact, &param_refs, &mut out_refs)
                                 .expect("wgpu invoke");
@@ -255,7 +255,7 @@ fn mnist_train_step(c: &mut Criterion) {
                             until_host -= 1;
                             if until_host == 0 {
                                 until_host = HOST_EVERY;
-                                black_box(gpu_outputs.loss.host().expect("loss host").scalar());
+                                black_box(gpu_outputs.loss.scalar().expect("loss scalar"));
                             } else {
                                 black_box(&gpu_outputs.loss);
                             }

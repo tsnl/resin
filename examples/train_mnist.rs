@@ -1,9 +1,9 @@
 //! MNIST MLP training.
 //!
 //! One jitted train step (forward + MSE + reverse-mode grad + SGD). Compile
-//! once from abstract parameter shapes; minibatches only collate on the host,
-//! upload, invoke, and keep the model on-device. Loss is `.host()`'d once per
-//! epoch. Backend-agnostic; `main` picks CPU/wgpu.
+//! once from abstract parameter shapes; minibatches collate on the host,
+//! upload batch leaves, and keep the model as device arrays. Loss is read
+//! with `.scalar()` once per epoch. Backend-agnostic; `main` picks CPU/wgpu.
 //!
 //! Usage:
 //!   cargo run --example train_mnist
@@ -15,7 +15,7 @@ use std::env;
 
 use resin::Tree;
 use resin::dsl::{Tensor, grad_wrt};
-use resin::jit::{DeviceValue, HostArray, Jit};
+use resin::jit::{DeviceArray, HostArray, Jit};
 use resin_extras::dataset::mnist::{self, Mnist};
 use resin_extras::dataset::{Dataset, Split};
 use resin_extras::sampler::{IndexSampler, Sampler};
@@ -195,15 +195,15 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
         .compile(&train_step_shapes(config.batch_size, config.hidden))
         .expect("compile train step");
 
-    // Model stays device-local across minibatches; only loss is `.host()`'d per epoch.
-    let mut model = random_model(config.hidden, SEED)
-        .try_map(&mut |a| jit.upload(a))
+    // Model stays device-local across minibatches; loss is `.scalar()`'d once per epoch.
+    let mut model = jit
+        .upload_tree(&random_model(config.hidden, SEED))
         .expect("upload model");
     let mut sampler = IndexSampler::new(dataset.len(), config.batch_size, SEED, true);
 
     for epoch in 0..config.epochs {
         sampler.reset(SEED + epoch as u64);
-        let mut last_loss: Option<J::Value> = None;
+        let mut last_loss: Option<J::Array> = None;
         let mut batch_index = 0;
         let t0 = std::time::Instant::now();
 
@@ -212,7 +212,7 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
                 break;
             }
             let (xs, ys) = collate_batch(&dataset, keys);
-            // Same shapes → cache hit; upload batch + invoke only.
+            // Same shapes → cache hit; upload batch leaves + invoke only.
             let out = train
                 .call(&TrainStepIn {
                     xs: jit.upload(&xs).expect("upload xs"),
@@ -226,7 +226,7 @@ fn train_mnist<J: Jit>(jit: J, config: RunConfig) {
         }
 
         let loss = last_loss
-            .map(|l| l.host().expect("loss host").scalar())
+            .map(|l| l.scalar().expect("loss scalar"))
             .unwrap_or(f32::NAN);
         eprintln!(
             "epoch {epoch}: loss={loss:.6}  {batch_index} steps in {:.2?} (last-batch loss; host once/epoch)",

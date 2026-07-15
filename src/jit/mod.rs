@@ -1,9 +1,11 @@
-//! JAX-style JIT: bind a trace function to a backend, call it with values.
+//! JAX-style JIT: bind a trace function to a backend, call it with arrays.
 //!
 //! ```no_run
-//! # use resin::{Tree, dsl::Tensor, jit::{DeviceValue, HostArray, CpuJit, Jit}};
+//! # use resin::{Tree, dsl::Tensor, jit::{DeviceArray, HostArray, CpuJit, Jit}};
 //! let double = CpuJit.jit(|x: &Tensor| x.clone() + x.clone());
-//! let out = double.call(&HostArray::from_f32(&[2], &[1.0, 2.0])).unwrap();
+//! let out = double
+//!     .call_host(&HostArray::from_f32(&[2], &[1.0, 2.0]))
+//!     .unwrap();
 //! assert_eq!(out.host().unwrap().data(), &[2.0, 4.0]);
 //! ```
 //!
@@ -12,12 +14,15 @@
 //! lowered program. Use [`JittedFn::compile`] to trace from abstract
 //! [`Tensor::parameter`] trees (shapes only) without a dummy batch or run.
 //!
-//! ## Host vs device values
+//! ## Host vs device arrays
 //!
-//! [`HostArray`] is always process memory. Each backend's [`Jit::Value`] is
-//! **device-local** for that backend (`HostArray` on CPU; a GPU buffer on
-//! wgpu). Convert with [`DeviceValue::host`] — the only place the wgpu path
-//! waits on the GPU.
+//! - [`HostArray`]: process memory — staging for IO, tests, and dataloaders.
+//! - [`Jit::Array`]: resident storage for a backend. On CPU this *is*
+//!   [`HostArray`]; on wgpu it is a GPU buffer ([`wgpu::Array`]).
+//! - [`Jit::upload`] / [`Jit::upload_tree`] move host → device.
+//! - [`DeviceArray::host`] / [`DeviceArray::scalar`] read back (may sync GPU).
+//! - [`JittedFn::call`] takes device arrays; [`JittedFn::call_host`] uploads
+//!   a host tree then calls (handy for demos and all-host pipelines).
 
 pub mod cpu;
 #[cfg(feature = "wgpu")]
@@ -25,7 +30,7 @@ pub mod wgpu;
 
 pub use cpu::CpuJit;
 #[cfg(feature = "wgpu")]
-pub use wgpu::{WgpuArray, WgpuJit};
+pub use wgpu::{Array, WgpuJit};
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -79,7 +84,11 @@ impl ArrayData {
     }
 }
 
-/// Process-memory array: staging, inspection, and `CpuJit::Value`.
+/// Process-memory array: staging for IO, tests, and dataloaders.
+///
+/// On [`CpuJit`], this is also [`Jit::Array`] (compute and staging share
+/// storage). On wgpu, upload into [`wgpu::Array`] before [`JittedFn::call`],
+/// or use [`JittedFn::call_host`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostArray {
     shape: Box<[usize]>,
@@ -197,17 +206,22 @@ impl HostArray {
     }
 }
 
-/// Backend-local value: shape/etype always; bytes live on that backend's device.
+/// Backend-resident array: shape/etype always; bytes live on that backend's device.
 ///
-/// [`host`](DeviceValue::host) materializes a [`HostArray`]. On wgpu that is
+/// [`host`](DeviceArray::host) materializes a [`HostArray`]. On wgpu that is
 /// the only path that waits for GPU completion.
-pub trait DeviceValue: Clone {
+pub trait DeviceArray: Clone {
     fn shape(&self) -> &[usize];
     fn element_type(&self) -> ElementType;
     fn host(&self) -> Result<HostArray, Error>;
+
+    /// Rank-0 f32 value (downloads to host first; may sync the GPU).
+    fn scalar(&self) -> Result<f32, Error> {
+        Ok(self.host()?.scalar())
+    }
 }
 
-impl DeviceValue for HostArray {
+impl DeviceArray for HostArray {
     fn shape(&self) -> &[usize] {
         &self.shape
     }
@@ -225,34 +239,39 @@ impl DeviceValue for HostArray {
 ///
 /// `invoke` receives parameter and output leaves in the same order as
 /// [`ir::Program::params`] / [`ir::Program::sinks`]. Outputs are allocated with
-/// [`Jit::alloc_output`] (traced shapes); the backend fills them.
+/// [`Jit::alloc`] (traced shapes); the backend fills them.
 pub trait Jit: Clone {
     type Artifact: Clone;
-    /// Device-local value type for this backend.
-    type Value: DeviceValue;
+    /// Device-resident array type for this backend.
+    type Array: DeviceArray;
 
     fn lower(&self, program: &ir::Program) -> Result<Self::Artifact, Error>;
 
     /// Empty output leaf (zeros on host; uninitialized storage buffer on GPU).
-    fn alloc_output(
-        &self,
-        shape: &[usize],
-        element_type: ElementType,
-    ) -> Result<Self::Value, Error>;
+    fn alloc(&self, shape: &[usize], element_type: ElementType) -> Result<Self::Array, Error>;
 
     /// Copy a [`HostArray`] onto this backend's device (no GPU wait on wgpu).
-    fn upload(&self, host: &HostArray) -> Result<Self::Value, Error>;
+    fn upload(&self, host: &HostArray) -> Result<Self::Array, Error>;
+
+    /// Upload every leaf of a host tree. Models and large params that should
+    /// stay device-local across steps use this once, then [`JittedFn::call`].
+    fn upload_tree<T: Tree<HostArray>>(
+        &self,
+        tree: &T,
+    ) -> Result<T::Mapped<Self::Array>, Error> {
+        tree.try_map(&mut |h| self.upload(h))
+    }
 
     fn invoke(
         &self,
         artifact: &Self::Artifact,
-        params: &[&Self::Value],
-        outputs: &mut [&mut Self::Value],
+        params: &[&Self::Array],
+        outputs: &mut [&mut Self::Array],
     ) -> Result<(), Error>;
 
     /// Bind `f` to this backend, producing a callable that traces, compiles,
     /// and runs. `P` is the **abstract** parameter tree (`Tensor` leaves) that
-    /// `f` receives; [`JittedFn::call`] takes the same tree of device values.
+    /// `f` receives; [`JittedFn::call`] takes the same tree of device arrays.
     fn jit<P, O, F>(self, f: F) -> JittedFn<Self, P, O, F>
     where
         P: Tree<Tensor>,
@@ -280,7 +299,7 @@ struct Compiled<J: Jit, O: Tree<Tensor>> {
 ///
 /// `P` is the abstract parameter tree (`Tensor` leaves — usually
 /// [`Tensor::parameter`] placeholders). [`call`](Self::call) takes the same
-/// tree of device-local values (`P::Mapped<J::Value>`).
+/// tree of device-resident arrays (`P::Mapped<J::Array>`).
 ///
 /// **Trace once per shape signature** (like the benches): compile is cached, and
 /// subsequent `call`s only allocate outputs + `invoke`. Prefer
@@ -301,11 +320,11 @@ where
     P: Tree<Tensor>,
     O: Tree<Tensor>,
     F: Fn(&P) -> O,
-    // Value tree for params has the same structure as `P`; mapping leaves to
-    // `Tensor` recovers `P` (needed when `call` builds placeholders from values).
-    P::Mapped<J::Value>: Tree<J::Value, Mapped<Tensor> = P>,
-    // Shape skeleton has the same tree shape as `O`; mapping leaves yields `O::Mapped<Value>`.
-    OutShapes<O>: Clone + Tree<(Box<[usize]>, ElementType), Mapped<J::Value> = O::Mapped<J::Value>>,
+    // Array tree for params has the same structure as `P`; mapping leaves to
+    // `Tensor` recovers `P` (needed when `call` builds placeholders from arrays).
+    P::Mapped<J::Array>: Tree<J::Array, Mapped<Tensor> = P>,
+    // Shape skeleton has the same tree shape as `O`; mapping leaves yields `O::Mapped<Array>`.
+    OutShapes<O>: Clone + Tree<(Box<[usize]>, ElementType), Mapped<J::Array> = O::Mapped<J::Array>>,
 {
     /// Trace, lower, and compile for `params`' shapes without running.
     ///
@@ -323,16 +342,17 @@ where
         Ok(())
     }
 
-    /// Run the jitted function.
+    /// Run the jitted function with device-resident inputs.
     ///
     /// First call for a parameter shape signature traces, lowers, optimizes,
     /// lays out, and compiles (unless [`compile`] already did). Later calls
     /// with the same shapes only allocate outputs + invoke.
     ///
-    /// Returns device-local outputs. Call [`.host()`](DeviceValue::host) on a
-    /// leaf only when you need bytes on the CPU (that may sync the GPU).
-    pub fn call(&self, params: &P::Mapped<J::Value>) -> Result<O::Mapped<J::Value>, Error> {
-        let key = shape_key_values(params);
+    /// Returns device-local outputs. Call [`.host()`](DeviceArray::host) or
+    /// [`.scalar()`](DeviceArray::scalar) on a leaf only when you need bytes
+    /// on the CPU (that may sync the GPU).
+    pub fn call(&self, params: &P::Mapped<J::Array>) -> Result<O::Mapped<J::Array>, Error> {
+        let key = shape_key_arrays(params);
 
         let (artifact, out_shapes) = {
             let mut cache = self.cache.lock().expect("compile cache poisoned");
@@ -350,10 +370,20 @@ where
         };
 
         let mut outputs = out_shapes
-            .try_map(&mut |(shape, etype)| self.jit.alloc_output(shape.as_ref(), *etype))?;
+            .try_map(&mut |(shape, etype)| self.jit.alloc(shape.as_ref(), *etype))?;
         self.jit
             .invoke(&artifact, &params.leaves(), &mut outputs.leaves_mut())?;
         Ok(outputs)
+    }
+
+    /// Upload every host leaf, then [`call`]. Convenience for demos and
+    /// pipelines that keep nothing resident across steps.
+    pub fn call_host(&self, params: &P::Mapped<HostArray>) -> Result<O::Mapped<J::Array>, Error>
+    where
+        P::Mapped<HostArray>: Tree<HostArray, Mapped<J::Array> = P::Mapped<J::Array>>,
+    {
+        let device = self.jit.upload_tree(params)?;
+        self.call(&device)
     }
 
     fn trace_compile(&self, params: &P) -> Result<Compiled<J, O>, Error> {
@@ -380,7 +410,7 @@ fn shape_key_tensors<P: Tree<Tensor>>(params: &P) -> ShapeKey {
         .collect()
 }
 
-fn shape_key_values<V: DeviceValue, T: Tree<V>>(params: &T) -> ShapeKey {
+fn shape_key_arrays<A: DeviceArray, T: Tree<A>>(params: &T) -> ShapeKey {
     params
         .leaves()
         .iter()
@@ -403,18 +433,14 @@ mod tests {
 
     impl Jit for CountingJit {
         type Artifact = ();
-        type Value = HostArray;
+        type Array = HostArray;
 
         fn lower(&self, _program: &ir::Program) -> Result<(), Error> {
             self.lowers.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
 
-        fn alloc_output(
-            &self,
-            shape: &[usize],
-            element_type: ElementType,
-        ) -> Result<HostArray, Error> {
+        fn alloc(&self, shape: &[usize], element_type: ElementType) -> Result<HostArray, Error> {
             Ok(HostArray::zeros_typed(shape, element_type))
         }
 
@@ -520,5 +546,17 @@ mod tests {
         .unwrap();
         assert_eq!(traces.load(Ordering::SeqCst), 1, "call reuses compile");
         assert_eq!(lowers.load(Ordering::SeqCst), 1, "no second lower");
+    }
+
+    #[test]
+    fn call_host_uploads_then_runs() {
+        let f = CountingJit {
+            lowers: Arc::new(AtomicUsize::new(0)),
+        }
+        .jit(|input: &In<Tensor>| input.x.clone());
+        f.call_host(&In {
+            x: HostArray::from_f32(&[2], &[1.0, 2.0]),
+        })
+        .unwrap();
     }
 }

@@ -5,7 +5,7 @@ Rust, differentiate them, and run them on the CPU or on the GPU via
 WebGPU/WGSL. See [docs/GOAL.md](docs/GOAL.md) for the long-term vision.
 
 ```rust
-use resin::{Tree, dsl::Tensor, jit::{Array, CpuJit, Jit}};
+use resin::{Tree, dsl::Tensor, jit::{DeviceArray, HostArray, CpuJit, Jit}};
 
 #[derive(Tree)]
 struct Pair<T> {
@@ -14,12 +14,25 @@ struct Pair<T> {
 }
 
 let add = CpuJit.jit(|p: &Pair<Tensor>| p.a.clone() + p.b.clone());
-let out = add.call(&Pair {
-    a: Array::from_f32(&[2], &[1.0, 2.0]),
-    b: Array::from_f32(&[2], &[10.0, 20.0]),
-})?;
+let out = add
+    .call_host(&Pair {
+        a: HostArray::from_f32(&[2], &[1.0, 2.0]),
+        b: HostArray::from_f32(&[2], &[10.0, 20.0]),
+    })?
+    .host()?;
 assert_eq!(out.data(), &[11.0, 22.0]);
 ```
+
+## Arrays
+
+| Type | Role |
+| --- | --- |
+| `HostArray` | Process memory — staging for IO, tests, dataloaders. |
+| `Jit::Array` | Device-resident storage for a backend. On CPU this is `HostArray`; on wgpu it is a GPU buffer (`jit::Array`). |
+| `Jit::upload` / `upload_tree` | Host → device (no GPU wait on wgpu). |
+| `DeviceArray::host` / `scalar` | Device → host (syncs GPU on wgpu). |
+| `JittedFn::call` | Runs with device arrays (keep weights resident). |
+| `JittedFn::call_host` | Uploads a host tree, then calls (demos / all-host pipelines). |
 
 ## Pipeline
 
@@ -32,7 +45,7 @@ assert_eq!(out.data(), &[11.0, 22.0]);
 
 Structured inputs/outputs are pytrees: `#[derive(Tree)]` on any struct or enum
 with one type parameter, and the JIT maps leaves to buffers in declaration
-order. Everything is f32 for now.
+order. Element types are f32 (default) and u32.
 
 ## Examples
 
