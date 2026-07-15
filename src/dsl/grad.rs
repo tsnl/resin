@@ -251,15 +251,17 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
             Remap::ScatterView {
                 source, map, ..
             } => {
-                // Dual: read the adjoint through the same map.
+                // Dual: read the adjoint through the same map (OOR → zero).
                 accumulate(grads, source, adjoint.gather_view(map.clone()));
             }
             Remap::GatherView { source, map } => {
-                // Dual: scatter the adjoint through the same map.
+                // Dual: scatter-add the adjoint through the same map.
+                // Add accumulates non-injective maps; OOR writes are dropped
+                // (mirrors gather's OOR→zero).
                 accumulate(
                     grads,
                     source,
-                    adjoint.scatter_view(map.clone(), source.shape()),
+                    adjoint.scatter_view_op(map.clone(), source.shape(), ScatterOp::Add),
                 );
             }
         },

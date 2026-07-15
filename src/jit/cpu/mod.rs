@@ -288,13 +288,30 @@ fn run_remap(
                 write_slot(&mut storage[out_buffer], out_i, value);
             }
         }
-        RemapInfo::ScatterView { map } => {
+        RemapInfo::ScatterView { map, operator } => {
+            // Dense-logical linear index into the output shape; OOR drops.
+            let out_n = element_count(&out.shape);
             let count = element_count(&src_acc.shape);
             let mut coords = vec![0; src_acc.rank()];
+            let mut out_coords = vec![0; out.rank()];
             for linear in 0..count {
                 decode(linear, &src_acc.shape, &mut coords);
+                let logical = map.index(&coords);
+                if logical >= out_n {
+                    continue;
+                }
+                decode(logical, &out.shape, &mut out_coords);
+                let out_i = out.index(&out_coords);
                 let value = read_slot(&storage[*src_buf], src_acc.index(&coords), out_etype);
-                write_slot(&mut storage[out_buffer], map.index(&coords), value);
+                let value = match operator {
+                    None => value,
+                    Some(AssocOp::Add) => {
+                        let current = read_slot(&storage[out_buffer], out_i, out_etype);
+                        reduce(AssocOp::Add, current, value)
+                    }
+                    Some(op) => panic!("unsupported scatter_view operator {op:?}"),
+                };
+                write_slot(&mut storage[out_buffer], out_i, value);
             }
         }
         RemapInfo::GatherView { map } => {

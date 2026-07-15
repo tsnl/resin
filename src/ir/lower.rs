@@ -140,10 +140,21 @@ impl Builder {
                             vec![self.view_for(source)?, self.view_for(indices)?],
                         )
                     }
-                    Remap::ScatterView { source, map, .. } => (
-                        RemapInfo::ScatterView { map: map.clone() },
-                        vec![self.view_for(source)?],
-                    ),
+                    Remap::ScatterView {
+                        source, map, op, ..
+                    } => {
+                        let operator = match op {
+                            ScatterOp::Write => None,
+                            ScatterOp::Add => Some(AssocOp::Add),
+                        };
+                        (
+                            RemapInfo::ScatterView {
+                                map: map.clone(),
+                                operator,
+                            },
+                            vec![self.view_for(source)?],
+                        )
+                    }
                     Remap::GatherView { source, map } => (
                         RemapInfo::GatherView { map: map.clone() },
                         vec![self.view_for(source)?],

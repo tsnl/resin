@@ -107,9 +107,13 @@ fn headline(tensor: &Tensor) -> String {
                 format!("remap(scatter_rows, op='{}')", scatter_op_name(*op))
             }
             Remap::ScatterView {
-                map, target_shape, ..
+                map,
+                target_shape,
+                op,
+                ..
             } => format!(
-                "remap(scatter_view, map_offset={}, map_shape={}, target_shape={})",
+                "remap(scatter_view, op='{}', map_offset={}, map_shape={}, target_shape={})",
+                scatter_op_name(*op),
                 map.offset,
                 tuple(&map.shape),
                 tuple(target_shape)
