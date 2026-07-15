@@ -19,9 +19,7 @@
 //!
 //! Call after dead-elim so only live buffers are packed.
 
-use crate::ir::{
-    Accessor, Buffer, BufferData, BufferRef, BufferView, Kernel, Program, RemapInfo,
-};
+use crate::ir::{Accessor, Buffer, BufferData, BufferRef, BufferView, Kernel, Program};
 use crate::ops::ElementType;
 
 /// Arena identity: element type plus whether GPU storage is atomic-typed.

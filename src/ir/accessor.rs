@@ -47,20 +47,6 @@ impl Accessor {
                 .sum::<usize>()
     }
 
-    /// Highest linear element index this accessor can touch (empty shape → offset).
-    pub fn max_index(&self) -> usize {
-        if self.shape.iter().any(|&d| d == 0) {
-            return self.offset;
-        }
-        self.offset
-            + self
-                .shape
-                .iter()
-                .zip(&self.stride)
-                .map(|(&d, &s)| (d - 1) * s)
-                .sum::<usize>()
-    }
-
     /// Reorder axes: `out.shape[i] = self.shape[axes[i]]` (NumPy / PyTorch axes).
     pub fn permute(&self, axes: &[usize]) -> Result<Self, Error> {
         let n = self.rank();
