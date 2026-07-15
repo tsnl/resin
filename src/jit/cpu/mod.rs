@@ -791,4 +791,28 @@ mod tests {
         // windows cover indices: [0,1,2], [1,2,3], [2,3,4] → counts 1,2,3,2,1
         assert_eq!(out.data(), &[1.0, 2.0, 3.0, 2.0, 1.0]);
     }
+
+    #[test]
+    fn grad_through_2d_unfold() {
+        // Unfold width of a dense [2, 5] with size 3 step 1 → [2, 3, 3].
+        // loss = sum(windows): each row's coverage is [1,2,3,2,1] independently.
+        let f = CpuJit.jit(|x: &Tensor| {
+            let loss = x.unfold(1, 3, 1).sum_axes(&[0, 1, 2]).squeeze_all();
+            grad_wrt(&loss, x).expect("grad")
+        });
+        let out = f
+            .call(&HostArray::from_f32(
+                &[2, 5],
+                &[
+                    0.0, 0.0, 0.0, 0.0, 0.0, // row 0
+                    0.0, 0.0, 0.0, 0.0, 0.0, // row 1
+                ],
+            ))
+            .unwrap();
+        assert_eq!(out.shape(), &[2, 5]);
+        assert_eq!(
+            out.data(),
+            &[1.0, 2.0, 3.0, 2.0, 1.0, 1.0, 2.0, 3.0, 2.0, 1.0]
+        );
+    }
 }

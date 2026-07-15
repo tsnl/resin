@@ -789,16 +789,30 @@ impl Tensor {
         Tensor::new(shape, element_type, TensorKind::Remap(kind))
     }
 
-    /// Embed `self` into a zero-filled `target_shape` through affine `map`
-    /// (`map.shape == self.shape`; dense-logical index into the target).
-    /// OOR map indices are dropped. Default `op` is overwrite.
+    /// Embed `self` into a zero-filled `target_shape` through affine `map`.
+    ///
+    /// `map.shape` must equal `self.shape`. For each source coordinate `c`,
+    /// `map.index(c)` is treated as a **dense-logical linear index** into
+    /// `target_shape` (row-major); out-of-range indices are dropped. Default
+    /// `op` is overwrite ([`ScatterOp::Write`]).
+    ///
+    /// Build `map` like a NumPy stride-tricks view of the target: e.g. pad uses
+    /// `offset = sum(before_i * dense_stride(target)[i])`, `stride =
+    /// dense_stride(target)`, `shape = self.shape`. Prefer [`Self::pad`] /
+    /// [`Self::scatter_index`] when they fit.
+    ///
+    /// **Autodiff:** the VJP is [`Self::gather_view`] with the same map. That is
+    /// exact for injective maps (pad, crop duals). Non-injective **Write**
+    /// (last-write-wins) is not a clean dual — use [`Self::scatter_view_op`]
+    /// with [`ScatterOp::Add`] when collisions must accumulate.
     pub fn scatter_view(&self, map: Accessor, target_shape: &[usize]) -> Self {
         self.scatter_view_op(map, target_shape, ScatterOp::Write)
     }
 
     /// Like [`Self::scatter_view`], with an explicit write/accumulate op.
-    /// Use [`ScatterOp::Add`] as the VJP dual of a (possibly non-injective)
-    /// [`Self::gather_view`].
+    ///
+    /// [`ScatterOp::Add`] is the VJP dual of a (possibly non-injective)
+    /// [`Self::gather_view`]: repeated logical targets sum, OOR still drops.
     pub fn scatter_view_op(&self, map: Accessor, target_shape: &[usize], op: ScatterOp) -> Self {
         Tensor::remap(Remap::ScatterView {
             source: self.clone(),
@@ -814,12 +828,15 @@ impl Tensor {
         self.scatter_view(region_map(target_shape, key), target_shape)
     }
 
-    /// Materializing gather: `out[c] = self[decode(map(c))]`, where `map`
-    /// yields a dense-logical linear index into `self`'s shape (OOR → zero).
-    /// `map.shape` is the output shape (any rank relative to `self`).
+    /// Materializing gather: `out[c] = self[decode(map(c))]`.
     ///
-    /// Autodiff dual is `scatter_view_op(..., Add)`, which drops OOR writes
-    /// and accumulates when the map is non-injective.
+    /// `map.shape` is the **output** shape (any rank relative to `self`).
+    /// `map.index(c)` is a dense-logical linear index into `self`'s shape
+    /// (row-major); OOR → zero. Same map style as [`Self::scatter_view`]
+    /// (offset / shape / stride on an [`crate::ir::Accessor`]).
+    ///
+    /// **Autodiff:** dual is `scatter_view_op(..., Add)` — OOR writes drop and
+    /// non-injective maps accumulate (unlike overwrite scatter).
     pub fn gather_view(&self, map: Accessor) -> Self {
         Tensor::remap(Remap::GatherView {
             source: self.clone(),

@@ -17,6 +17,10 @@ fn inverse_permutation(axes: &[usize]) -> Vec<usize> {
 
 /// VJP of [`Tensor::unfold`]: scatter-add each window offset back into the
 /// source axis (overlapping windows sum). Built from permute + scatter_rows.
+///
+/// One pass per window offset `j`: windows share storage when `step < size`, so
+/// each `j` must land at source indices `j, j+step, …` and **add** (no single
+/// strided scatter-add primitive yet).
 fn fold_unfold_adjoint(
     adjoint: &Tensor,
     arg_shape: &[usize],
