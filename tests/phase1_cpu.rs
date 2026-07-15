@@ -237,6 +237,43 @@ fn grad_of_gather_view_scatters() {
 }
 
 #[test]
+fn grad_of_oor_gather_view_drops() {
+    // Forward OOR → 0; backward must not panic and must not write OOR slots.
+    use resin::Accessor;
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 2,
+            shape: Box::from([3]),
+            stride: Box::from([1usize]),
+        };
+        let loss = input.x.gather_view(map).sum_axes(&[0]).squeeze_all();
+        grad_wrt(&loss, &input.x).unwrap()
+    });
+    let x = HostArray::from_f32(&[3], &[10.0, 20.0, 30.0]);
+    let out = f.call(&In { x }).unwrap();
+    // logical indices 2,3,4 → only index 2 is in range
+    assert_eq!(out.to_f32(), vec![0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn grad_of_noninjective_gather_view_accumulates() {
+    // Stride-0 map: every output reads source[0]; VJP must sum adjoints.
+    use resin::Accessor;
+    let f = CpuJit.jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 0,
+            shape: Box::from([3]),
+            stride: Box::from([0usize]),
+        };
+        let loss = input.x.gather_view(map).sum_axes(&[0]).squeeze_all();
+        grad_wrt(&loss, &input.x).unwrap()
+    });
+    let x = HostArray::from_f32(&[2], &[0.0, 0.0]);
+    let out = f.call(&In { x }).unwrap();
+    assert_eq!(out.to_f32(), vec![3.0, 0.0]);
+}
+
+#[test]
 fn gather_rows_2d() {
     let f = CpuJit.jit(|input: &In<Tensor>| {
         let indices = Tensor::constant_u32(&[3], &[2, 0, 3]);

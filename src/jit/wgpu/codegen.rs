@@ -657,16 +657,59 @@ fn emit_remap(
                 });
             });
         }
-        RemapInfo::ScatterView { map } => {
+        RemapInfo::ScatterView { map, operator } => {
+            // Dense-logical linear index into the output; OOR drops.
             let src = args[0];
+            let out_n = element_count(&out.shape);
+            let out_heap = heap_name(out_etype, out_atomic);
+            if operator.is_some() && out_etype == ElementType::F32 {
+                debug_assert!(out_atomic, "f32 scatter_view-add output must be on atomic arena");
+                w.block("fn atomic_add_f32(addr: u32, value: f32)", |w| {
+                    w.print(&format!("var old = atomicLoad(&{out_heap}[addr]);"));
+                    w.block("loop", |w| {
+                        w.print(&format!(
+                            "let new_bits = bitcast<u32>(bitcast<f32>(old) + value);\nlet result = atomicCompareExchangeWeak(&{out_heap}[addr], old, new_bits);"
+                        ));
+                        w.block("if (result.exchanged)", |w| {
+                            w.print("break;");
+                        });
+                        w.print("old = result.old_value;");
+                    });
+                });
+            }
             per_thread_element(w, &src.shape, config, |w, _lin, coords| {
-                let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
-                w.print(&write_at(
-                    out_etype,
-                    out_atomic,
-                    &address(map, coords),
-                    &val,
-                ));
+                let logical = address(map, coords);
+                w.print(&format!("let logical = {logical};"));
+                w.block(&format!("if (logical < {out_n}u)"), |w| {
+                    // Decode logical → dense out coords.
+                    let mut stride = 1usize;
+                    let mut decode_parts = Vec::new();
+                    for axis in (0..out.rank()).rev() {
+                        let dim = out.shape[axis];
+                        decode_parts.push(format!(
+                            "let o{axis} = (logical / {stride}u) % {dim}u;"
+                        ));
+                        stride *= dim;
+                    }
+                    for line in decode_parts.into_iter().rev() {
+                        w.print(&line);
+                    }
+                    let out_coords: Vec<String> =
+                        (0..out.rank()).map(|a| format!("o{a}")).collect();
+                    let out_addr = address(out, &out_coords);
+                    let src_val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
+                    match (operator, out_etype) {
+                        (None, _) => {
+                            w.print(&write_at(out_etype, out_atomic, &out_addr, &src_val));
+                        }
+                        (Some(_), ElementType::U32) => {
+                            w.print(&format!("atomicAdd(&{out_heap}[{out_addr}], {src_val});"));
+                        }
+                        (Some(_), ElementType::F32) => {
+                            w.print(&format!("atomic_add_f32({out_addr}, {src_val});"));
+                        }
+                    }
+                });
             });
         }
         RemapInfo::GatherView { map } => {

@@ -26,7 +26,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Range, Shl, Shr, Sub};
 use std::sync::Arc;
 
-use crate::ir::{Accessor, dense_stride, element_count as shape_elems};
+use crate::ir::{Accessor, dense_stride};
 use crate::ops::{AssocOp, ElementType, Op, UnaryOp};
 
 /// A node in the expression graph. Cheap to clone; equality and hashing are
@@ -81,15 +81,18 @@ pub enum Remap {
         op: ScatterOp,
         target_rows: usize,
     },
-    /// `out[map(c)] = source[c]` into zeros of `target_shape` (pad/embed).
-    /// `map` addresses the **output**; `map.shape` equals `source.shape`.
+    /// `out[decode(map(c))] ⊕= source[c]` into zeros of `target_shape`.
+    /// `map` yields a dense-logical index into the target; OOR drops.
+    /// `map.shape` equals `source.shape`. `op` is write or accumulate.
     ScatterView {
         source: Tensor,
         map: Accessor,
         target_shape: Box<[usize]>,
+        op: ScatterOp,
     },
-    /// `out[c] = source[map(c)]` with OOR linear indices reading as zero.
-    /// `map` addresses the **source**; `map.shape` is the output shape.
+    /// `out[c] = source[decode(map(c))]` with OOR linear indices reading as zero.
+    /// `map` yields a dense-logical index into the source; `map.shape` is the
+    /// output shape. Rank of `map` need not match the source rank.
     GatherView { source: Tensor, map: Accessor },
 }
 
@@ -764,6 +767,7 @@ impl Tensor {
                 source,
                 map,
                 target_shape,
+                ..
             } => {
                 assert_eq!(
                     map.shape.as_ref(),
@@ -772,37 +776,49 @@ impl Tensor {
                     map.shape,
                     source.shape()
                 );
-                assert_eq!(
-                    map.rank(),
-                    target_shape.len(),
-                    "scatter_view: map rank must match target rank"
-                );
-                assert!(
-                    shape_elems(target_shape) == 0 || map.max_index() < shape_elems(target_shape),
-                    "scatter_view: map reaches past target {:?}",
-                    target_shape
-                );
+                // Map yields a dense-logical linear index into `target_shape`;
+                // OOR indices are dropped at run time (dual of gather_view).
                 (target_shape.clone(), source.element_type())
             }
             Remap::GatherView { source, map } => {
-                assert_eq!(
-                    map.rank(),
-                    source.shape().len(),
-                    "gather_view: map rank must match source rank"
-                );
+                // Map yields a dense-logical linear index into the source shape
+                // (any rank); map.shape is the output shape.
                 (map.shape.clone(), source.element_type())
             }
         };
         Tensor::new(shape, element_type, TensorKind::Remap(kind))
     }
 
-    /// Embed `self` into a zero-filled `target_shape` through affine `map`
-    /// (`map.shape == self.shape`; `map` addresses the target).
+    /// Embed `self` into a zero-filled `target_shape` through affine `map`.
+    ///
+    /// `map.shape` must equal `self.shape`. For each source coordinate `c`,
+    /// `map.index(c)` is treated as a **dense-logical linear index** into
+    /// `target_shape` (row-major); out-of-range indices are dropped. Default
+    /// `op` is overwrite ([`ScatterOp::Write`]).
+    ///
+    /// Build `map` like a NumPy stride-tricks view of the target: e.g. pad uses
+    /// `offset = sum(before_i * dense_stride(target)[i])`, `stride =
+    /// dense_stride(target)`, `shape = self.shape`. Prefer [`Self::pad`] /
+    /// [`Self::scatter_index`] when they fit.
+    ///
+    /// **Autodiff:** the VJP is [`Self::gather_view`] with the same map. That is
+    /// exact for injective maps (pad, crop duals). Non-injective **Write**
+    /// (last-write-wins) is not a clean dual — use [`Self::scatter_view_op`]
+    /// with [`ScatterOp::Add`] when collisions must accumulate.
     pub fn scatter_view(&self, map: Accessor, target_shape: &[usize]) -> Self {
+        self.scatter_view_op(map, target_shape, ScatterOp::Write)
+    }
+
+    /// Like [`Self::scatter_view`], with an explicit write/accumulate op.
+    ///
+    /// [`ScatterOp::Add`] is the VJP dual of a (possibly non-injective)
+    /// [`Self::gather_view`]: repeated logical targets sum, OOR still drops.
+    pub fn scatter_view_op(&self, map: Accessor, target_shape: &[usize], op: ScatterOp) -> Self {
         Tensor::remap(Remap::ScatterView {
             source: self.clone(),
             map,
             target_shape: target_shape.into(),
+            op,
         })
     }
 
@@ -812,9 +828,15 @@ impl Tensor {
         self.scatter_view(region_map(target_shape, key), target_shape)
     }
 
-    /// Materializing gather: `out[c] = self[decode(map(c))]`, where `map`
-    /// yields a dense-logical linear index into `self`'s shape (OOR → zero).
-    /// `map.shape` is the output shape.
+    /// Materializing gather: `out[c] = self[decode(map(c))]`.
+    ///
+    /// `map.shape` is the **output** shape (any rank relative to `self`).
+    /// `map.index(c)` is a dense-logical linear index into `self`'s shape
+    /// (row-major); OOR → zero. Same map style as [`Self::scatter_view`]
+    /// (offset / shape / stride on an [`crate::ir::Accessor`]).
+    ///
+    /// **Autodiff:** dual is `scatter_view_op(..., Add)` — OOR writes drop and
+    /// non-injective maps accumulate (unlike overwrite scatter).
     pub fn gather_view(&self, map: Accessor) -> Self {
         Tensor::remap(Remap::GatherView {
             source: self.clone(),

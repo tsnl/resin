@@ -288,13 +288,30 @@ fn run_remap(
                 write_slot(&mut storage[out_buffer], out_i, value);
             }
         }
-        RemapInfo::ScatterView { map } => {
+        RemapInfo::ScatterView { map, operator } => {
+            // Dense-logical linear index into the output shape; OOR drops.
+            let out_n = element_count(&out.shape);
             let count = element_count(&src_acc.shape);
             let mut coords = vec![0; src_acc.rank()];
+            let mut out_coords = vec![0; out.rank()];
             for linear in 0..count {
                 decode(linear, &src_acc.shape, &mut coords);
+                let logical = map.index(&coords);
+                if logical >= out_n {
+                    continue;
+                }
+                decode(logical, &out.shape, &mut out_coords);
+                let out_i = out.index(&out_coords);
                 let value = read_slot(&storage[*src_buf], src_acc.index(&coords), out_etype);
-                write_slot(&mut storage[out_buffer], map.index(&coords), value);
+                let value = match operator {
+                    None => value,
+                    Some(AssocOp::Add) => {
+                        let current = read_slot(&storage[out_buffer], out_i, out_etype);
+                        reduce(AssocOp::Add, current, value)
+                    }
+                    Some(op) => panic!("unsupported scatter_view operator {op:?}"),
+                };
+                write_slot(&mut storage[out_buffer], out_i, value);
             }
         }
         RemapInfo::GatherView { map } => {
@@ -773,5 +790,29 @@ mod tests {
             .unwrap();
         // windows cover indices: [0,1,2], [1,2,3], [2,3,4] → counts 1,2,3,2,1
         assert_eq!(out.data(), &[1.0, 2.0, 3.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn grad_through_2d_unfold() {
+        // Unfold width of a dense [2, 5] with size 3 step 1 → [2, 3, 3].
+        // loss = sum(windows): each row's coverage is [1,2,3,2,1] independently.
+        let f = CpuJit.jit(|x: &Tensor| {
+            let loss = x.unfold(1, 3, 1).sum_axes(&[0, 1, 2]).squeeze_all();
+            grad_wrt(&loss, x).expect("grad")
+        });
+        let out = f
+            .call(&HostArray::from_f32(
+                &[2, 5],
+                &[
+                    0.0, 0.0, 0.0, 0.0, 0.0, // row 0
+                    0.0, 0.0, 0.0, 0.0, 0.0, // row 1
+                ],
+            ))
+            .unwrap();
+        assert_eq!(out.shape(), &[2, 5]);
+        assert_eq!(
+            out.data(),
+            &[1.0, 2.0, 3.0, 2.0, 1.0, 1.0, 2.0, 3.0, 2.0, 1.0]
+        );
     }
 }

@@ -239,6 +239,57 @@ fn pad_and_gather_view_run_on_gpu() {
 }
 
 #[test]
+fn grad_of_oor_gather_view_on_gpu() {
+    if no_gpu() {
+        return;
+    }
+    use resin::Accessor;
+    let f = WgpuJit::default().jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 2,
+            shape: Box::from([3]),
+            stride: Box::from([1usize]),
+        };
+        let loss = input.x.gather_view(map).sum_axes(&[0]).squeeze_all();
+        grad_wrt(&loss, &input.x).unwrap()
+    });
+    let out = f
+        .call_host(&In {
+            x: HostArray::from_f32(&[3], &[10.0, 20.0, 30.0]),
+        })
+        .unwrap()
+        .host()
+        .unwrap();
+    assert_eq!(out.to_f32(), vec![0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn grad_of_noninjective_gather_view_on_gpu() {
+    // Exercises atomic scatter_view Add under arena packing.
+    if no_gpu() {
+        return;
+    }
+    use resin::Accessor;
+    let f = WgpuJit::default().jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 0,
+            shape: Box::from([3]),
+            stride: Box::from([0usize]),
+        };
+        let loss = input.x.gather_view(map).sum_axes(&[0]).squeeze_all();
+        grad_wrt(&loss, &input.x).unwrap()
+    });
+    let out = f
+        .call_host(&In {
+            x: HostArray::from_f32(&[2], &[0.0, 0.0]),
+        })
+        .unwrap()
+        .host()
+        .unwrap();
+    assert_eq!(out.to_f32(), vec![3.0, 0.0]);
+}
+
+#[test]
 fn u32_gather_rows() {
     if no_gpu() {
         return;

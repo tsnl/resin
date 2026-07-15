@@ -24,11 +24,16 @@ pub enum RemapInfo {
     /// Threads iterate the source shape.
     ScatterRows { operator: Option<AssocOp> },
 
-    /// `out[map(coords)] = source[coords]` into a cleared output (pad/embed).
+    /// `out[decode(map(c))] ⊕= source[c]` into a cleared output (pad/embed).
     ///
-    /// Args: `[source]`; `map.shape` equals the source shape and addresses the
-    /// **output** buffer. Threads iterate the source shape.
-    ScatterView { map: Accessor },
+    /// Args: `[source]`; `map.shape` equals the source shape. `map` yields a
+    /// **dense-logical linear index** into the output shape (OOR dropped).
+    /// `operator: None` overwrites; `Some(Add)` accumulates (atomic on GPU).
+    /// Threads iterate the source shape.
+    ScatterView {
+        map: Accessor,
+        operator: Option<AssocOp>,
+    },
 
     /// `out[coords] = source[decode(map(coords))]` (OOR → zero).
     ///
@@ -55,6 +60,19 @@ impl RemapInfo {
         matches!(
             self,
             RemapInfo::ScatterRows { .. } | RemapInfo::ScatterView { .. }
+        )
+    }
+
+    /// Whether this scatter uses RMW accumulation (needs atomic storage on GPU).
+    pub fn is_atomic_scatter(&self) -> bool {
+        matches!(
+            self,
+            RemapInfo::ScatterRows {
+                operator: Some(_)
+            } | RemapInfo::ScatterView {
+                operator: Some(_),
+                ..
+            }
         )
     }
 }

@@ -17,6 +17,10 @@ fn inverse_permutation(axes: &[usize]) -> Vec<usize> {
 
 /// VJP of [`Tensor::unfold`]: scatter-add each window offset back into the
 /// source axis (overlapping windows sum). Built from permute + scatter_rows.
+///
+/// One pass per window offset `j`: windows share storage when `step < size`, so
+/// each `j` must land at source indices `j, j+step, …` and **add** (no single
+/// strided scatter-add primitive yet).
 fn fold_unfold_adjoint(
     adjoint: &Tensor,
     arg_shape: &[usize],
@@ -251,15 +255,17 @@ fn backward(grads: &mut GradMap, node: &Tensor, adjoint: &Tensor) -> Result<(), 
             Remap::ScatterView {
                 source, map, ..
             } => {
-                // Dual: read the adjoint through the same map.
+                // Dual: read the adjoint through the same map (OOR → zero).
                 accumulate(grads, source, adjoint.gather_view(map.clone()));
             }
             Remap::GatherView { source, map } => {
-                // Dual: scatter the adjoint through the same map.
+                // Dual: scatter-add the adjoint through the same map.
+                // Add accumulates non-injective maps; OOR writes are dropped
+                // (mirrors gather's OOR→zero).
                 accumulate(
                     grads,
                     source,
-                    adjoint.scatter_view(map.clone(), source.shape()),
+                    adjoint.scatter_view_op(map.clone(), source.shape(), ScatterOp::Add),
                 );
             }
         },

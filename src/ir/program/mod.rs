@@ -388,7 +388,7 @@ impl Program {
                     }
                 }
             }
-            RemapInfo::ScatterView { map } => {
+            RemapInfo::ScatterView { map, operator } => {
                 if dispatch.args.len() != 1 {
                     return Err(Error(format!(
                         "scatter_view takes 1 arg, got {}",
@@ -409,13 +409,14 @@ impl Program {
                         src_etype, out_etype
                     )));
                 }
-                let out_len = self.buffer(self.view(dispatch.output).buffer).len();
-                if element_count(&map.shape) > 0 && map.max_index() >= out_len {
+                if let Some(op) = operator
+                    && *op != AssocOp::Add
+                {
                     return Err(Error(format!(
-                        "scatter_view map reaches element {} of a {out_len}-element output",
-                        map.max_index()
+                        "scatter_view only supports Add accumulation, got {op:?}"
                     )));
                 }
+                // Dense-logical map indices past the output are dropped at run time.
             }
             RemapInfo::GatherView { map } => {
                 if dispatch.args.len() != 1 {

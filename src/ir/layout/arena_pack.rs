@@ -19,9 +19,7 @@
 //!
 //! Call after dead-elim so only live buffers are packed.
 
-use crate::ir::{
-    Accessor, Buffer, BufferData, BufferRef, BufferView, Dispatch, Kernel, Program, RemapInfo,
-};
+use crate::ir::{Accessor, Buffer, BufferData, BufferRef, BufferView, Kernel, Program};
 use crate::ops::ElementType;
 
 /// Arena identity: element type plus whether GPU storage is atomic-typed.
@@ -44,9 +42,8 @@ pub fn pack_arenas(program: Program) -> Program {
     // Logical buffers that are outputs of atomic scatter-add (need RMW storage).
     let mut atomic_target = vec![false; program.buffers.len()];
     for dispatch in &program.queue {
-        if let Kernel::Remap {
-            info: RemapInfo::ScatterRows { operator: Some(_) },
-        } = &dispatch.kernel
+        if let Kernel::Remap { info } = &dispatch.kernel
+            && info.is_atomic_scatter()
         {
             let out_buf = program.view(dispatch.output).buffer.0;
             atomic_target[out_buf] = true;
@@ -130,38 +127,12 @@ pub fn pack_arenas(program: Program) -> Program {
         })
         .collect();
 
-    let old_views = &program.views;
-    let new_queue: Vec<Dispatch> = program
-        .queue
-        .into_iter()
-        .map(|d| {
-            let out_buf = old_views[d.output.0].buffer;
-            let kernel = match d.kernel {
-                // Scatter map is buffer-absolute on the dense output arena.
-                Kernel::Remap {
-                    info: RemapInfo::ScatterView { map },
-                } => Kernel::Remap {
-                    info: RemapInfo::ScatterView {
-                        map: shift(out_buf, &map),
-                    },
-                },
-                // Gather map is a dense-logical index into the source *view*
-                // shape (decoded through the source accessor at run time) — not
-                // a raw buffer address, so packing must not shift it.
-                other => other,
-            };
-            Dispatch {
-                kernel,
-                args: d.args,
-                output: d.output,
-            }
-        })
-        .collect();
-
+    // Affine remap maps are dense-logical indices (decoded through views at
+    // run time), not raw buffer addresses — packing only shifts views above.
     Program {
         params: program.params,
         sinks: program.sinks,
-        queue: new_queue,
+        queue: program.queue,
         buffers: new_buffers,
         views,
     }
