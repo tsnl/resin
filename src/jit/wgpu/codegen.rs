@@ -5,7 +5,7 @@
 //! helper functions), which keeps shaders trivial for drivers to compile.
 
 use crate::ir::{
-    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, dense_pitch, element_count,
+    Accessor, BufferViewRef, Dispatch, Expr, Kernel, Program, RemapInfo, dense_stride, element_count,
 };
 use crate::ops::{AssocOp, BinaryOp, ElementType, Op, UnaryOp};
 
@@ -249,12 +249,12 @@ impl Writer {
 
 /// Emit `let i{k} = …` statements decoding `lin` into coordinates.
 fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
-    let pitch = dense_pitch(shape);
+    let stride = dense_stride(shape);
     let coords: Vec<String> = (0..shape.len()).map(|k| format!("i{k}")).collect();
     for (k, coord) in coords.iter().enumerate() {
         w.print(&format!(
             "let {coord} = ({lin} / {}u) % {}u;",
-            pitch[k], shape[k]
+            stride[k], shape[k]
         ));
     }
     coords
@@ -262,9 +262,9 @@ fn emit_decode(w: &mut Writer, shape: &[usize], lin: &str) -> Vec<String> {
 
 fn address(accessor: &Accessor, coords: &[String]) -> String {
     let mut expr = format!("{}u", accessor.offset);
-    for (coord, &pitch) in coords.iter().zip(&accessor.pitch) {
-        if pitch != 0 {
-            expr.push_str(&format!(" + {coord} * {pitch}u"));
+    for (coord, &stride) in coords.iter().zip(&accessor.stride) {
+        if stride != 0 {
+            expr.push_str(&format!(" + {coord} * {stride}u"));
         }
     }
     expr
@@ -657,15 +657,65 @@ fn emit_remap(
                 });
             });
         }
-        RemapInfo::ScatterView { accessor } => {
+        RemapInfo::ScatterView { map } => {
             let src = args[0];
             per_thread_element(w, &src.shape, config, |w, _lin, coords| {
                 let val = read_at(arg_meta[0].0, arg_meta[0].1, &address(src, coords));
                 w.print(&write_at(
                     out_etype,
                     out_atomic,
-                    &address(accessor, coords),
+                    &address(map, coords),
                     &val,
+                ));
+            });
+        }
+        RemapInfo::GatherView { map } => {
+            // Dense-logical linear index into the source view shape, then
+            // address through the source accessor (handles broadcast).
+            let src = args[0];
+            let n = element_count(&src.shape);
+            let (src_et, src_atomic) = arg_meta[0];
+            let zero = match out_etype {
+                ElementType::F32 => "0.0",
+                ElementType::U32 => "0u",
+            };
+            per_output_element(w, out, config, |w, coords| {
+                let logical = address(map, coords);
+                w.print(&format!("let logical = {logical};"));
+                // Clamp before decode so the load is always in-bounds; select
+                // restores OOR → zero (WGSL `select` evaluates both arms).
+                if n == 0 {
+                    w.print(&write_at(
+                        out_etype,
+                        out_atomic,
+                        &address(out, coords),
+                        zero,
+                    ));
+                    return;
+                }
+                w.print(&format!("let safe = min(logical, {}u);", n - 1));
+                let mut stride = 1usize;
+                let mut decode_parts = Vec::new();
+                for axis in (0..src.rank()).rev() {
+                    let dim = src.shape[axis];
+                    decode_parts.push(format!("let s{axis} = (safe / {stride}u) % {dim}u;"));
+                    stride *= dim;
+                }
+                for line in decode_parts.into_iter().rev() {
+                    w.print(&line);
+                }
+                let src_coords: Vec<String> =
+                    (0..src.rank()).map(|a| format!("s{a}")).collect();
+                let src_addr = address(src, &src_coords);
+                let loaded = read_at(src_et, src_atomic, &src_addr);
+                w.print(&format!(
+                    "let val = select({zero}, {loaded}, logical < {n}u);"
+                ));
+                w.print(&write_at(
+                    out_etype,
+                    out_atomic,
+                    &address(out, coords),
+                    "val",
                 ));
             });
         }

@@ -39,7 +39,7 @@ assert_eq!(out.data(), &[11.0, 22.0]);
 | Stage | Module | What it does |
 | --- | --- | --- |
 | Trace | `resin::dsl` | Build an immutable `Tensor` expression graph; reverse-mode autodiff (`grad_wrt`). |
-| Lower | `resin::ir::lower` | Graph → `resin::ir::Program`: a queue of kernel dispatches over flat f32 buffers and strided views. Broadcast/transpose/squeeze are pitch tricks on accessors; strided sinks are densified up-front so optimize can see those copies. |
+| Lower | `resin::ir::lower` | Graph → `resin::ir::Program`: a queue of kernel dispatches over flat f32 buffers and strided views. Broadcast/permute/unfold/squeeze are stride tricks on accessors; strided sinks are densified up-front so optimize can see those copies. |
 | Optimize | `resin::ir::optimize` | IR→IR passes (kernel fusion; tiling planned). |
 | Run | `resin::jit` | `CpuJit` interprets the IR; `WgpuJit` emits one WGSL compute shader per kernel and dispatches through wgpu. |
 

@@ -205,6 +205,40 @@ fn scatter_index_pads_with_zeros() {
 }
 
 #[test]
+fn pad_and_gather_view_run_on_gpu() {
+    if no_gpu() {
+        return;
+    }
+    use resin::Accessor;
+    let pad = WgpuJit::default().jit(|input: &In<Tensor>| input.x.pad(&[(1, 1)]));
+    let out = pad
+        .call_host(&In {
+            x: HostArray::from_f32(&[3], &[1.0, 2.0, 3.0]),
+        })
+        .unwrap()
+        .host()
+        .unwrap();
+    assert_eq!(out.to_f32(), vec![0.0, 1.0, 2.0, 3.0, 0.0]);
+
+    let crop = WgpuJit::default().jit(|input: &In<Tensor>| {
+        let map = Accessor {
+            offset: 1,
+            shape: Box::from([3]),
+            stride: Box::from([1usize]),
+        };
+        input.x.gather_view(map)
+    });
+    let out = crop
+        .call_host(&In {
+            x: HostArray::from_f32(&[5], &[9.0, 1.0, 2.0, 3.0, 9.0]),
+        })
+        .unwrap()
+        .host()
+        .unwrap();
+    assert_eq!(out.to_f32(), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
 fn u32_gather_rows() {
     if no_gpu() {
         return;

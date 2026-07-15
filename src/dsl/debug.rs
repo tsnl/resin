@@ -95,7 +95,10 @@ fn headline(tensor: &Tensor) -> String {
             tuple(axes),
             tuple(tensor.shape())
         ),
-        TensorKind::Transpose { .. } => "transpose()".to_string(),
+        TensorKind::Permute { axes, .. } => format!("permute(axes={})", tuple(axes)),
+        TensorKind::Unfold {
+            axis, size, step, ..
+        } => format!("unfold(axis={axis}, size={size}, step={step})"),
         TensorKind::Squeeze { axes, .. } => format!("squeeze(axes={})", tuple(axes)),
         TensorKind::Index { key, .. } => format!("index(key={})", format_key(key)),
         TensorKind::Remap(remap) => match remap {
@@ -104,11 +107,17 @@ fn headline(tensor: &Tensor) -> String {
                 format!("remap(scatter_rows, op='{}')", scatter_op_name(*op))
             }
             Remap::ScatterView {
-                key, target_shape, ..
+                map, target_shape, ..
             } => format!(
-                "remap(scatter_view, key={}, target_shape={})",
-                format_key(key),
+                "remap(scatter_view, map_offset={}, map_shape={}, target_shape={})",
+                map.offset,
+                tuple(&map.shape),
                 tuple(target_shape)
+            ),
+            Remap::GatherView { map, .. } => format!(
+                "remap(gather_view, map_offset={}, map_shape={})",
+                map.offset,
+                tuple(&map.shape)
             ),
         },
     };

@@ -228,7 +228,7 @@ fn ensure_fits_u32(program: &Program) -> Result<(), Error> {
             let a = &v.accessor;
             a.offset > u32::MAX as usize
                 || a.shape.iter().any(|&d| d > u32::MAX as usize)
-                || a.pitch.iter().any(|&p| p > u32::MAX as usize)
+                || a.stride.iter().any(|&s| s > u32::MAX as usize)
         });
     if too_big {
         return Err(Error::Wgpu("program does not fit u32 address space".into()));

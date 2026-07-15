@@ -5,7 +5,7 @@
 //! - [`lower`] — DSL tensor graph → [`Program`] (includes sink densification)
 //! - [`program`] — buffers, views, dispatches, kernels, validation; elementwise
 //!   bodies live in [`program::expr`]
-//! - [`accessor`] — strided addressing (broadcast / transpose / squeeze)
+//! - [`accessor`] — strided addressing (broadcast / permute / unfold / squeeze)
 //! - [`remap`] — gather / scatter kernel descriptors
 //! - [`optimize`] — optional IR→IR rewrites (kernel fusion, …)
 //! - [`layout`] — final backend prep (dead-elim + arena packing); always runs
@@ -27,7 +27,7 @@ pub mod optimize;
 mod program;
 mod remap;
 
-pub use accessor::{Accessor, dense_pitch, element_count};
+pub use accessor::{Accessor, dense_stride, element_count};
 pub use lower::lower;
 pub use program::{
     Buffer, BufferData, BufferRef, BufferView, BufferViewRef, Dispatch, Error, Expr, Kernel,

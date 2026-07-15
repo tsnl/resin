@@ -111,7 +111,7 @@ fn sink_visible_intermediate_is_not_fused_away() {
 
 #[test]
 fn broadcast_consumed_intermediate_fuses() {
-    // t is consumed through a pitch-0 broadcast view; the producer's args are
+    // t is consumed through a stride-0 broadcast view; the producer's args are
     // composed through the same broadcast and the intermediate disappears.
     let x = Tensor::parameter(&[3]);
     let c = Tensor::parameter(&[2, 3]);

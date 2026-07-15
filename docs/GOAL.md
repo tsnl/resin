@@ -104,7 +104,7 @@ demos and APIs should claim.
 | No hardware raster / RT nodes yet | Explicitly deferred; compute-on-tensors first (Gaussians). |
 | Autodiff only for implemented reverse rules | New ops need VJPs; discontinuous rendering ops need special treatment later. |
 | Scatter-accumulate path is F4-focused | Asserted for atomic u32↔f32 CAS; other dtypes need design work. |
-| Indexing | Strided `narrow` / `index` with ranges; no negative slice steps while pitch is unsigned. |
+| Indexing | Strided `narrow` / `index` with ranges; no negative slice steps while stride is unsigned. |
 
 ### Types, packaging, and the “compiled function” idea
 

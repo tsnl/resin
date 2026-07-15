@@ -2,7 +2,7 @@
 //!
 //! A [`Tensor`] is a node in an immutable expression graph: constants,
 //! parameters, elementwise ops, matmul, reductions, remaps (gather/scatter),
-//! and view ops (broadcast / transpose / squeeze / index). Building tensors
+//! and view ops (broadcast / permute / unfold / squeeze / index). Building tensors
 //! performs no compute — the JIT lowers a traced graph to [`crate::ir`] and
 //! runs it on a backend.
 //!
@@ -26,6 +26,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Range, Shl, Shr, Sub};
 use std::sync::Arc;
 
+use crate::ir::{Accessor, dense_stride, element_count as shape_elems};
 use crate::ops::{AssocOp, ElementType, Op, UnaryOp};
 
 /// A node in the expression graph. Cheap to clone; equality and hashing are
@@ -66,8 +67,8 @@ pub enum IndexKeyElement {
 
 /// Materializing data-movement; lowers 1:1 to [`crate::ir::Kernel::Remap`].
 ///
-/// Not three sibling kinds — gather and scatter share one materializing node
-/// shape so lower / grad / debug match once.
+/// Dynamic row remaps use U32 index arrays. Static affine remaps use an
+/// [`Accessor`] map (pad/embed/crop) — dual gather/scatter share one map.
 #[derive(Clone)]
 pub enum Remap {
     /// `out[i, tail…] = source[indices[i], tail…]` (OOR clamps).
@@ -80,12 +81,16 @@ pub enum Remap {
         op: ScatterOp,
         target_rows: usize,
     },
-    /// Embed source into a zero-filled `target_shape` at `key` (inverse of index).
+    /// `out[map(c)] = source[c]` into zeros of `target_shape` (pad/embed).
+    /// `map` addresses the **output**; `map.shape` equals `source.shape`.
     ScatterView {
         source: Tensor,
-        key: Box<[IndexKeyElement]>,
+        map: Accessor,
         target_shape: Box<[usize]>,
     },
+    /// `out[c] = source[map(c)]` with OOR linear indices reading as zero.
+    /// `map` addresses the **source**; `map.shape` is the output shape.
+    GatherView { source: Tensor, map: Accessor },
 }
 
 pub enum TensorKind {
@@ -114,8 +119,17 @@ pub enum TensorKind {
         arg: Tensor,
         axes: Box<[usize]>,
     },
-    Transpose {
+    /// Axis reorder: pure stride permute at lower time.
+    Permute {
         arg: Tensor,
+        axes: Box<[usize]>,
+    },
+    /// Sliding windows along one axis; trailing window dim appended.
+    Unfold {
+        arg: Tensor,
+        axis: usize,
+        size: usize,
+        step: usize,
     },
     /// Drop size-1 axes (NumPy-style squeeze). Turns keepdims reductions
     /// into true scalars for reverse-mode autodiff.
@@ -476,13 +490,77 @@ impl Tensor {
         )
     }
 
-    pub fn transpose(&self) -> Self {
-        let shape = self.shape();
-        assert_eq!(shape.len(), 2, "transpose requires a rank-2 tensor");
+    /// Reorder axes (NumPy / PyTorch): `out.shape[i] = self.shape[axes[i]]`.
+    /// Pure view — lowers to a stride permute.
+    pub fn permute(&self, axes: &[usize]) -> Self {
+        let rank = self.shape().len();
+        assert_eq!(
+            axes.len(),
+            rank,
+            "permute: expected {rank} axes, got {}",
+            axes.len()
+        );
+        let mut seen = vec![false; rank];
+        for &a in axes {
+            assert!(a < rank, "permute axis {a} out of range for rank {rank}");
+            assert!(
+                !seen[a],
+                "permute axes must be a permutation, got {axes:?}"
+            );
+            seen[a] = true;
+        }
+        let shape: Box<[usize]> = axes.iter().map(|&a| self.shape()[a]).collect();
         Tensor::new(
-            [shape[1], shape[0]],
+            shape,
             self.element_type(),
-            TensorKind::Transpose { arg: self.clone() },
+            TensorKind::Permute {
+                arg: self.clone(),
+                axes: axes.into(),
+            },
+        )
+    }
+
+    /// Matrix transpose: `permute([1, 0])` on a rank-2 tensor.
+    pub fn transpose(&self) -> Self {
+        assert_eq!(
+            self.shape().len(),
+            2,
+            "transpose requires a rank-2 tensor"
+        );
+        self.permute(&[1, 0])
+    }
+
+    /// Sliding windows along `axis`. Replaces that axis with the number of
+    /// windows and appends a trailing axis of length `size`:
+    ///
+    /// `out[..., i, ..., j] = self[..., i * step + j, ...]`
+    /// with `n_win = (dim - size) / step + 1` (remainder dropped).
+    ///
+    /// Pure view — composed windowing for conv is elementwise mul + reduce
+    /// over the window axes, not im2col.
+    pub fn unfold(&self, axis: usize, size: usize, step: usize) -> Self {
+        let shape = self.shape();
+        assert!(axis < shape.len(), "unfold axis {axis} out of range");
+        assert!(size >= 1, "unfold size must be >= 1");
+        assert!(step >= 1, "unfold step must be >= 1");
+        let dim = shape[axis];
+        assert!(
+            size <= dim,
+            "unfold size {size} exceeds axis {axis} dim {dim}"
+        );
+        let n_win = (dim - size) / step + 1;
+        let mut out_shape = shape.to_vec();
+        out_shape[axis] = n_win;
+        out_shape.push(size);
+        Tensor::new(
+            out_shape,
+            self.element_type(),
+            TensorKind::Unfold {
+                arg: self.clone(),
+                axis,
+                size,
+                step,
+            },
         )
     }
 
@@ -684,49 +762,91 @@ impl Tensor {
             }
             Remap::ScatterView {
                 source,
-                key,
+                map,
                 target_shape,
             } => {
                 assert_eq!(
-                    key.len(),
-                    target_shape.len(),
-                    "scatter_view key must cover every target axis"
-                );
-                let region_shape = index_output_shape(key);
-                assert_eq!(
-                    region_shape.as_ref(),
+                    map.shape.as_ref(),
                     source.shape(),
-                    "scatter_view source shape must match the key region"
+                    "scatter_view: map shape {:?} must match source {:?}",
+                    map.shape,
+                    source.shape()
                 );
-                for (axis, element) in key.iter().enumerate() {
-                    let dim = target_shape[axis];
-                    match element {
-                        IndexKeyElement::Single(i) => {
-                            assert!(
-                                *i < dim,
-                                "index {i} out of range for axis {axis} (dim {dim})"
-                            )
-                        }
-                        IndexKeyElement::Slice(range) => assert!(
-                            range.start <= range.end && range.end <= dim,
-                            "slice {range:?} out of range for axis {axis} (dim {dim})"
-                        ),
-                    }
-                }
+                assert_eq!(
+                    map.rank(),
+                    target_shape.len(),
+                    "scatter_view: map rank must match target rank"
+                );
+                assert!(
+                    shape_elems(target_shape) == 0 || map.max_index() < shape_elems(target_shape),
+                    "scatter_view: map reaches past target {:?}",
+                    target_shape
+                );
                 (target_shape.clone(), source.element_type())
+            }
+            Remap::GatherView { source, map } => {
+                assert_eq!(
+                    map.rank(),
+                    source.shape().len(),
+                    "gather_view: map rank must match source rank"
+                );
+                (map.shape.clone(), source.element_type())
             }
         };
         Tensor::new(shape, element_type, TensorKind::Remap(kind))
     }
 
-    /// Embed `self` into a zero-filled `target_shape` tensor at the region
-    /// described by `key` (the inverse of [`Tensor::index`]).
-    pub fn scatter_index(&self, target_shape: &[usize], key: &[IndexKeyElement]) -> Self {
+    /// Embed `self` into a zero-filled `target_shape` through affine `map`
+    /// (`map.shape == self.shape`; `map` addresses the target).
+    pub fn scatter_view(&self, map: Accessor, target_shape: &[usize]) -> Self {
         Tensor::remap(Remap::ScatterView {
             source: self.clone(),
-            key: key.into(),
+            map,
             target_shape: target_shape.into(),
         })
+    }
+
+    /// Embed `self` into a zero-filled `target_shape` at the region described
+    /// by `key` (the inverse of [`Tensor::index`]).
+    pub fn scatter_index(&self, target_shape: &[usize], key: &[IndexKeyElement]) -> Self {
+        self.scatter_view(region_map(target_shape, key), target_shape)
+    }
+
+    /// Materializing gather: `out[c] = self[decode(map(c))]`, where `map`
+    /// yields a dense-logical linear index into `self`'s shape (OOR → zero).
+    /// `map.shape` is the output shape.
+    pub fn gather_view(&self, map: Accessor) -> Self {
+        Tensor::remap(Remap::GatherView {
+            source: self.clone(),
+            map,
+        })
+    }
+
+    /// Zero-pad each axis by `(before, after)`. Implemented as scatter into a
+    /// larger canvas (affine embed).
+    pub fn pad(&self, padding: &[(usize, usize)]) -> Self {
+        let rank = self.shape().len();
+        assert_eq!(
+            padding.len(),
+            rank,
+            "pad: one (before, after) pair per axis, got {} for rank {rank}",
+            padding.len()
+        );
+        let mut target_shape = Vec::with_capacity(rank);
+        for (axis, &(before, after)) in padding.iter().enumerate() {
+            target_shape.push(before + self.shape()[axis] + after);
+        }
+        let target_stride = dense_stride(&target_shape);
+        let mut offset = 0;
+        for (axis, &(before, _)) in padding.iter().enumerate() {
+            offset += before * target_stride[axis];
+        }
+        let map = Accessor {
+            offset,
+            shape: self.shape().into(),
+            stride: target_stride,
+        };
+        self.scatter_view(map, &target_shape)
     }
 
     /// `out[i, tail…] = self[indices[i], tail…]` (indices: rank-1 U32).
@@ -746,6 +866,41 @@ impl Tensor {
             op,
             target_rows: target_len,
         })
+    }
+}
+
+/// Dense-region accessor for a static index key over `target_shape`.
+fn region_map(target_shape: &[usize], key: &[IndexKeyElement]) -> Accessor {
+    assert_eq!(
+        key.len(),
+        target_shape.len(),
+        "region key must cover every target axis"
+    );
+    let stride = dense_stride(target_shape);
+    let mut offset = 0;
+    let mut shape = Vec::with_capacity(key.len());
+    for (axis, element) in key.iter().enumerate() {
+        let dim = target_shape[axis];
+        let (start, len) = match element {
+            IndexKeyElement::Single(i) => {
+                assert!(*i < dim, "index {i} out of range for axis {axis} (dim {dim})");
+                (*i, 1usize)
+            }
+            IndexKeyElement::Slice(range) => {
+                assert!(
+                    range.start <= range.end && range.end <= dim,
+                    "slice {range:?} out of range for axis {axis} (dim {dim})"
+                );
+                (range.start, range.end - range.start)
+            }
+        };
+        offset += start * stride[axis];
+        shape.push(len);
+    }
+    Accessor {
+        offset,
+        shape: shape.into(),
+        stride,
     }
 }
 
@@ -770,7 +925,8 @@ impl Tensor {
             TensorKind::Matmul { lhs, rhs } => vec![lhs.clone(), rhs.clone()],
             TensorKind::Reduction { arg, .. }
             | TensorKind::Broadcast { arg, .. }
-            | TensorKind::Transpose { arg }
+            | TensorKind::Permute { arg, .. }
+            | TensorKind::Unfold { arg, .. }
             | TensorKind::Squeeze { arg, .. }
             | TensorKind::Index { arg, .. } => vec![arg.clone()],
             TensorKind::Remap(remap) => match remap {
@@ -780,7 +936,9 @@ impl Tensor {
                 } => {
                     vec![source.clone(), indices.clone()]
                 }
-                Remap::ScatterView { source, .. } => vec![source.clone()],
+                Remap::ScatterView { source, .. } | Remap::GatherView { source, .. } => {
+                    vec![source.clone()]
+                }
             },
         }
     }
@@ -848,6 +1006,21 @@ mod tests {
         let a = Tensor::parameter(&[2, 4]);
         let b = Tensor::parameter(&[4, 3]);
         assert_eq!(a.matmul(&b).shape(), &[2, 3]);
+    }
+
+    #[test]
+    fn permute_reorders_shape() {
+        let t = Tensor::parameter(&[2, 3, 4]);
+        assert_eq!(t.permute(&[2, 0, 1]).shape(), &[4, 2, 3]);
+        let m = Tensor::parameter(&[2, 3]);
+        assert_eq!(m.transpose().shape(), &[3, 2]);
+    }
+
+    #[test]
+    fn unfold_appends_window_axis() {
+        let t = Tensor::parameter(&[2, 8]);
+        // (8 - 3) / 2 + 1 = 3 windows
+        assert_eq!(t.unfold(1, 3, 2).shape(), &[2, 3, 3]);
     }
 
     #[test]
