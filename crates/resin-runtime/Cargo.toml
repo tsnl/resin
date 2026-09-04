@@ -1,0 +1,10 @@
+[package]
+name = "resin-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }

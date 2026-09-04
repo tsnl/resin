@@ -3,6 +3,10 @@ name = "resin"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "crates/resin-runtime"]
+resolver = "3"
+
 [lib]
 path = "src/lib.rs"
 
