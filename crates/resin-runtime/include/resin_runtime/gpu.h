@@ -17,6 +17,31 @@ typedef struct ResinCommandBuffer ResinCommandBuffer;
 
 typedef uint64_t ResinDeviceAddress;
 
+#define RESIN_GPU_DEVICE_NAME_MAX 256
+
+typedef enum ResinGpuDeviceType {
+    RESIN_GPU_DEVICE_OTHER = 0,
+    RESIN_GPU_DEVICE_INTEGRATED = 1,
+    RESIN_GPU_DEVICE_DISCRETE = 2,
+    RESIN_GPU_DEVICE_VIRTUAL = 3,
+    RESIN_GPU_DEVICE_CPU = 4
+} ResinGpuDeviceType;
+
+typedef struct ResinGpuDeviceInfo {
+    uint32_t index;
+    ResinGpuDeviceType kind;
+    uint32_t vendor_id;
+    uint32_t device_id;
+    uint32_t api_version;
+    uint32_t driver_version;
+    uint32_t suitable;
+    uint32_t reserved;
+    uint64_t device_local_bytes;
+    uint64_t host_visible_device_local_bytes;
+    uint64_t max_buffer_size;
+    char name[RESIN_GPU_DEVICE_NAME_MAX];
+} ResinGpuDeviceInfo;
+
 typedef enum ResinMemory {
     /* Persistently mapped, coherent memory; device-local when the hardware permits. */
     RESIN_MEMORY_DEFAULT = 0,
@@ -26,8 +51,15 @@ typedef enum ResinMemory {
     RESIN_MEMORY_READBACK = 2
 } ResinMemory;
 
-/* Every object created from a GPU must be destroyed before that GPU. */
+/* `count` is Vulkan physical-device order. `enumerate` writes min(count, available)
+   infos; too-small `count` returns INCOMPLETE. */
+ResinStatus resin_gpu_device_count(uint32_t *count);
+ResinStatus resin_gpu_enumerate_devices(ResinGpuDeviceInfo *infos, uint32_t count);
+
+/* Every object created from a GPU must be destroyed before that GPU.
+   `resin_gpu_create` picks the highest-scoring suitable device. */
 ResinStatus resin_gpu_create(ResinGpu **out_gpu);
+ResinStatus resin_gpu_create_at(uint32_t index, ResinGpu **out_gpu);
 void resin_gpu_destroy(ResinGpu *gpu);
 
 /* Suballocates a range from a persistently mapped BDA heap.

@@ -5,6 +5,7 @@
 
 mod device;
 
+use std::ffi::c_char;
 use std::ops::Range;
 use std::ptr;
 use std::slice;
@@ -15,7 +16,36 @@ use ash::{Device, Entry, Instance, ext, khr, vk};
 use crate::allocator::RangeAllocator;
 use crate::{ResinMemory, ResinStatus};
 
-use device::create_device;
+use device::{create_device, create_device_at};
+
+pub const GPU_DEVICE_NAME_MAX: usize = 256;
+
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResinGpuDeviceType {
+    Other = 0,
+    Integrated = 1,
+    Discrete = 2,
+    Virtual = 3,
+    Cpu = 4,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ResinGpuDeviceInfo {
+    pub index: u32,
+    pub kind: ResinGpuDeviceType,
+    pub vendor_id: u32,
+    pub device_id: u32,
+    pub api_version: u32,
+    pub driver_version: u32,
+    pub suitable: u32,
+    pub reserved: u32,
+    pub device_local_bytes: u64,
+    pub host_visible_device_local_bytes: u64,
+    pub max_buffer_size: u64,
+    pub name: [c_char; GPU_DEVICE_NAME_MAX],
+}
 
 const DEFAULT_ALIGNMENT: usize = 16;
 const HEAP_BLOCK_BYTES: usize = 16 * 1024 * 1024;
@@ -93,8 +123,29 @@ pub struct ResinCommandBuffer {
 
 impl ResinGpu {
     pub fn create() -> Result<Self, ResinStatus> {
-        let created = create_device()?;
+        Self::from_context(create_device()?)
+    }
 
+    pub fn create_at(index: u32) -> Result<Self, ResinStatus> {
+        Self::from_context(create_device_at(index)?)
+    }
+
+    pub fn device_count() -> Result<u32, ResinStatus> {
+        Ok(device::enumerate_devices()?.len() as u32)
+    }
+
+    pub fn enumerate_devices(infos: &mut [ResinGpuDeviceInfo]) -> Result<(), ResinStatus> {
+        let devices = device::enumerate_devices()?;
+        let written = infos.len().min(devices.len());
+        infos[..written].copy_from_slice(&devices[..written]);
+        if written < devices.len() {
+            Err(ResinStatus::Incomplete)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn from_context(created: device::DeviceContext) -> Result<Self, ResinStatus> {
         let pool_info = vk::CommandPoolCreateInfo::default()
             .queue_family_index(created.queue_family)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);

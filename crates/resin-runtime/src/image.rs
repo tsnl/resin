@@ -86,7 +86,7 @@ pub unsafe extern "C" fn resin_image_read_png(
         return ResinStatus::InvalidArgument;
     };
 
-    let decoded = match read_png(path, requested_channels) {
+    let decoded = match image_read_png(path, requested_channels) {
         Ok(decoded) => decoded,
         Err(status) => return status,
     };
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn resin_image_free(pixels: *mut c_void) {
 }
 
 /// Packed 8-bit pixels, top-left origin. `channels` is 1=Y, 2=YA, 3=RGB, 4=RGBA.
-pub fn write_png(
+pub fn image_write_png(
     path: impl AsRef<Path>,
     width: u32,
     height: u32,
@@ -141,7 +141,10 @@ pub struct PngImage {
 }
 
 /// Packed 8-bit pixels. `requested_channels` 0 keeps the file's channel count.
-pub fn read_png(path: impl AsRef<Path>, requested_channels: u32) -> Result<PngImage, ResinStatus> {
+pub fn image_read_png(
+    path: impl AsRef<Path>,
+    requested_channels: u32,
+) -> Result<PngImage, ResinStatus> {
     if requested_channels != 0 && color_type(requested_channels).is_none() {
         return Err(ResinStatus::InvalidArgument);
     }

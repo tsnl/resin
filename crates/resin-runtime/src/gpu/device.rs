@@ -7,7 +7,7 @@ use ash::{Device, Entry, Instance, ext, khr, vk};
 
 use crate::ResinStatus;
 
-use super::vk_status;
+use super::{ResinGpuDeviceInfo, ResinGpuDeviceType, vk_status};
 
 pub struct DeviceContext {
     pub entry: Entry,
@@ -24,8 +24,44 @@ pub struct DeviceContext {
 }
 
 pub fn create_device() -> Result<DeviceContext, ResinStatus> {
-    let entry = unsafe { Entry::load() }.map_err(|_| ResinStatus::VulkanUnavailable)?;
+    let (entry, instance, physical_devices) = create_instance()?;
+    if physical_devices.is_empty() {
+        unsafe { instance.destroy_instance(None) };
+        return Err(ResinStatus::VulkanUnavailable);
+    }
+    let Some(selected) = select_device(&instance, &physical_devices) else {
+        unsafe { instance.destroy_instance(None) };
+        return Err(ResinStatus::Unsupported);
+    };
+    finish_device(entry, instance, selected)
+}
 
+pub fn create_device_at(index: u32) -> Result<DeviceContext, ResinStatus> {
+    let (entry, instance, physical_devices) = create_instance()?;
+    let Some(&physical) = physical_devices.get(index as usize) else {
+        unsafe { instance.destroy_instance(None) };
+        return Err(ResinStatus::InvalidArgument);
+    };
+    let Some(selected) = inspect_device(&instance, physical) else {
+        unsafe { instance.destroy_instance(None) };
+        return Err(ResinStatus::Unsupported);
+    };
+    finish_device(entry, instance, selected)
+}
+
+pub fn enumerate_devices() -> Result<Vec<ResinGpuDeviceInfo>, ResinStatus> {
+    let (_entry, instance, physical_devices) = create_instance()?;
+    let infos = physical_devices
+        .iter()
+        .enumerate()
+        .map(|(index, &physical)| physical_device_info(&instance, physical, index as u32))
+        .collect();
+    unsafe { instance.destroy_instance(None) };
+    Ok(infos)
+}
+
+fn create_instance() -> Result<(Entry, Instance, Vec<vk::PhysicalDevice>), ResinStatus> {
+    let entry = unsafe { Entry::load() }.map_err(|_| ResinStatus::VulkanUnavailable)?;
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"resin")
         .application_version(0)
@@ -34,21 +70,18 @@ pub fn create_device() -> Result<DeviceContext, ResinStatus> {
         .api_version(vk::API_VERSION_1_3);
     let instance_info = vk::InstanceCreateInfo::default().application_info(&app_info);
     let instance = unsafe { entry.create_instance(&instance_info, None) }.map_err(vk_status)?;
-
     let physical_devices = unsafe { instance.enumerate_physical_devices() }.map_err(|err| {
         unsafe { instance.destroy_instance(None) };
         vk_status(err)
     })?;
-    if physical_devices.is_empty() {
-        unsafe { instance.destroy_instance(None) };
-        return Err(ResinStatus::VulkanUnavailable);
-    }
+    Ok((entry, instance, physical_devices))
+}
 
-    let Some(selected) = select_device(&instance, &physical_devices) else {
-        unsafe { instance.destroy_instance(None) };
-        return Err(ResinStatus::Unsupported);
-    };
-
+fn finish_device(
+    entry: Entry,
+    instance: Instance,
+    selected: SelectedDevice,
+) -> Result<DeviceContext, ResinStatus> {
     let queue_priorities = [1.0f32];
     let queue_info = vk::DeviceQueueCreateInfo::default()
         .queue_family_index(selected.queue_family)
@@ -183,6 +216,64 @@ struct SelectedDevice {
     shader_clock_enabled: bool,
     atomic_float_enabled: bool,
     optional_extensions: Vec<*const c_char>,
+}
+
+fn physical_device_info(
+    instance: &Instance,
+    physical: vk::PhysicalDevice,
+    index: u32,
+) -> ResinGpuDeviceInfo {
+    let properties = unsafe { instance.get_physical_device_properties(physical) };
+    let kind = match properties.device_type {
+        vk::PhysicalDeviceType::INTEGRATED_GPU => ResinGpuDeviceType::Integrated,
+        vk::PhysicalDeviceType::DISCRETE_GPU => ResinGpuDeviceType::Discrete,
+        vk::PhysicalDeviceType::VIRTUAL_GPU => ResinGpuDeviceType::Virtual,
+        vk::PhysicalDeviceType::CPU => ResinGpuDeviceType::Cpu,
+        _ => ResinGpuDeviceType::Other,
+    };
+    let mut maint4 = vk::PhysicalDeviceMaintenance4Properties::default();
+    let mut props2 = vk::PhysicalDeviceProperties2::default().push_next(&mut maint4);
+    unsafe { instance.get_physical_device_properties2(physical, &mut props2) };
+    let memory = unsafe { instance.get_physical_device_memory_properties(physical) };
+    let (device_local_bytes, host_visible_device_local_bytes) = heap_sizes(&memory);
+
+    ResinGpuDeviceInfo {
+        index,
+        kind,
+        vendor_id: properties.vendor_id,
+        device_id: properties.device_id,
+        api_version: properties.api_version,
+        driver_version: properties.driver_version,
+        suitable: u32::from(inspect_device(instance, physical).is_some()),
+        reserved: 0,
+        device_local_bytes,
+        host_visible_device_local_bytes,
+        max_buffer_size: maint4.max_buffer_size,
+        name: properties.device_name,
+    }
+}
+
+fn heap_sizes(memory: &vk::PhysicalDeviceMemoryProperties) -> (u64, u64) {
+    let mut device_local = 0u64;
+    let mut host_visible_device_local = 0u64;
+    for heap_index in 0..memory.memory_heap_count {
+        let heap = memory.memory_heaps[heap_index as usize];
+        if !heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) {
+            continue;
+        }
+        device_local += heap.size;
+        let host_visible = (0..memory.memory_type_count).any(|type_index| {
+            let ty = memory.memory_types[type_index as usize];
+            ty.heap_index == heap_index
+                && ty
+                    .property_flags
+                    .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
+        });
+        if host_visible {
+            host_visible_device_local += heap.size;
+        }
+    }
+    (device_local, host_visible_device_local)
 }
 
 fn select_device(instance: &Instance, devices: &[vk::PhysicalDevice]) -> Option<SelectedDevice> {

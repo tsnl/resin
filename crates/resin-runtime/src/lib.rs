@@ -11,7 +11,10 @@ use std::ffi::c_void;
 use std::os::raw::c_char;
 use std::ptr;
 
-pub use gpu::{ResinAllocation, ResinCommandBuffer, ResinGpu, ResinImage, ResinPipeline};
+pub use gpu::{
+    GPU_DEVICE_NAME_MAX, ResinAllocation, ResinCommandBuffer, ResinGpu, ResinGpuDeviceInfo,
+    ResinGpuDeviceType, ResinImage, ResinPipeline,
+};
 
 #[doc(hidden)]
 pub mod testing {
@@ -39,9 +42,7 @@ pub mod testing {
         GpuLock { file }
     }
 }
-pub use image::{
-    PngImage, read_png, resin_image_free, resin_image_read_png, resin_image_write_png, write_png,
-};
+pub use image::{PngImage, image_read_png, image_write_png};
 
 pub type ResinDeviceAddress = u64;
 
@@ -55,6 +56,7 @@ pub enum ResinStatus {
     OutOfMemory = 4,
     VulkanError = 5,
     IoError = 6,
+    Incomplete = 7,
 }
 
 #[repr(i32)]
@@ -78,6 +80,7 @@ impl ResinStatus {
             4 => Some(Self::OutOfMemory),
             5 => Some(Self::VulkanError),
             6 => Some(Self::IoError),
+            7 => Some(Self::Incomplete),
             _ => None,
         }
     }
@@ -95,6 +98,47 @@ impl ResinMemory {
 }
 
 /// # Safety
+/// `count` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_device_count(count: *mut u32) -> ResinStatus {
+    if count.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe { *count = 0 };
+    match ResinGpu::device_count() {
+        Ok(n) => {
+            unsafe { *count = n };
+            ResinStatus::Success
+        }
+        Err(status) => status,
+    }
+}
+
+/// Writes up to `count` entries. Returns [`ResinStatus::Incomplete`] if more
+/// devices exist than `count`.
+///
+/// # Safety
+/// `infos` must point to `count` elements when `count` is nonzero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_enumerate_devices(
+    infos: *mut ResinGpuDeviceInfo,
+    count: u32,
+) -> ResinStatus {
+    if count > 0 && infos.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    let out = if count == 0 {
+        &mut []
+    } else {
+        unsafe { std::slice::from_raw_parts_mut(infos, count as usize) }
+    };
+    match ResinGpu::enumerate_devices(out) {
+        Ok(()) => ResinStatus::Success,
+        Err(status) => status,
+    }
+}
+
+/// # Safety
 /// `out_gpu` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn resin_gpu_create(out_gpu: *mut *mut ResinGpu) -> ResinStatus {
@@ -103,6 +147,26 @@ pub unsafe extern "C" fn resin_gpu_create(out_gpu: *mut *mut ResinGpu) -> ResinS
     }
     unsafe { *out_gpu = ptr::null_mut() };
     match ResinGpu::create() {
+        Ok(gpu) => {
+            unsafe { *out_gpu = Box::into_raw(Box::new(gpu)) };
+            ResinStatus::Success
+        }
+        Err(status) => status,
+    }
+}
+
+/// # Safety
+/// `out_gpu` must be a valid pointer. `index` is a Vulkan physical-device index.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_create_at(
+    index: u32,
+    out_gpu: *mut *mut ResinGpu,
+) -> ResinStatus {
+    if out_gpu.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe { *out_gpu = ptr::null_mut() };
+    match ResinGpu::create_at(index) {
         Ok(gpu) => {
             unsafe { *out_gpu = Box::into_raw(Box::new(gpu)) };
             ResinStatus::Success
@@ -519,6 +583,7 @@ pub extern "C" fn resin_status_string(status: i32) -> *const c_char {
         Some(ResinStatus::OutOfMemory) => c"out of memory".as_ptr(),
         Some(ResinStatus::VulkanError) => c"vulkan error".as_ptr(),
         Some(ResinStatus::IoError) => c"io error".as_ptr(),
+        Some(ResinStatus::Incomplete) => c"incomplete".as_ptr(),
         None => c"unknown".as_ptr(),
     }
 }
@@ -526,6 +591,7 @@ pub extern "C" fn resin_status_string(status: i32) -> *const c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::{resin_image_free, resin_image_read_png, resin_image_write_png};
     use std::io::Write;
     use std::process::{Command, Stdio};
     use std::slice;
@@ -582,6 +648,11 @@ mod tests {
                 Ok("io error")
             );
             assert_eq!(
+                std::ffi::CStr::from_ptr(resin_status_string(ResinStatus::Incomplete as i32))
+                    .to_str(),
+                Ok("incomplete")
+            );
+            assert_eq!(
                 std::ffi::CStr::from_ptr(resin_status_string(99)).to_str(),
                 Ok("unknown")
             );
@@ -594,6 +665,94 @@ mod tests {
             unsafe { resin_gpu_create(ptr::null_mut()) },
             ResinStatus::InvalidArgument
         );
+        assert_eq!(
+            unsafe { resin_gpu_create_at(0, ptr::null_mut()) },
+            ResinStatus::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { resin_gpu_device_count(ptr::null_mut()) },
+            ResinStatus::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { resin_gpu_enumerate_devices(ptr::null_mut(), 1) },
+            ResinStatus::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn device_enumeration_and_create_at() {
+        let _lock = crate::testing::lock_gpu();
+        let mut count = 0;
+        match unsafe { resin_gpu_device_count(&mut count) } {
+            ResinStatus::Success => {}
+            ResinStatus::VulkanUnavailable => {
+                eprintln!("skipping: no Vulkan");
+                return;
+            }
+            other => panic!("resin_gpu_device_count failed: {other:?}"),
+        }
+
+        let mut gpu = ptr::null_mut();
+        assert_eq!(
+            unsafe { resin_gpu_create_at(count, &mut gpu) },
+            ResinStatus::InvalidArgument
+        );
+        assert!(gpu.is_null());
+
+        if count == 0 {
+            return;
+        }
+
+        let mut infos = vec![
+            ResinGpuDeviceInfo {
+                index: 0,
+                kind: ResinGpuDeviceType::Other,
+                vendor_id: 0,
+                device_id: 0,
+                api_version: 0,
+                driver_version: 0,
+                suitable: 0,
+                reserved: 0,
+                device_local_bytes: 0,
+                host_visible_device_local_bytes: 0,
+                max_buffer_size: 0,
+                name: [0; GPU_DEVICE_NAME_MAX],
+            };
+            count as usize
+        ];
+        assert_eq!(
+            unsafe { resin_gpu_enumerate_devices(infos.as_mut_ptr(), count) },
+            ResinStatus::Success
+        );
+        assert_eq!(
+            unsafe { resin_gpu_enumerate_devices(infos.as_mut_ptr(), 0) },
+            ResinStatus::Incomplete
+        );
+
+        let mut chosen = None;
+        for (i, info) in infos.iter().enumerate() {
+            assert_eq!(info.index, i as u32);
+            let name = unsafe { std::ffi::CStr::from_ptr(info.name.as_ptr()) };
+            assert!(!name.to_bytes().is_empty(), "device {i} has empty name");
+            if info.suitable != 0 {
+                assert!(
+                    info.device_local_bytes > 0,
+                    "suitable device reports no VRAM"
+                );
+                chosen = Some(info.index);
+            }
+        }
+
+        let Some(index) = chosen else {
+            eprintln!("skipping: no suitable Vulkan device");
+            return;
+        };
+        assert_eq!(
+            unsafe { resin_gpu_create_at(index, &mut gpu) },
+            ResinStatus::Success
+        );
+        assert!(!gpu.is_null());
+        unsafe { resin_gpu_destroy(gpu) };
     }
 
     #[test]
