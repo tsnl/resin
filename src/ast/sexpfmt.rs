@@ -73,14 +73,11 @@ fn sexp_term(term: &Term) -> SExp {
                 .map(|(name, val)| list("field", vec![symbol(name.val.as_ref()), sexp_term(val)]))
                 .collect(),
         ),
-        TermKind::Block { stmts, tail } => list_sp(
-            "block",
-            term.span,
-            vec![
-                group(stmts.iter().map(sexp_stmt).collect()),
-                sexp_term(tail),
-            ],
-        ),
+        TermKind::Block { stmts, tail } => {
+            let mut items: Vec<_> = stmts.iter().map(sexp_stmt).collect();
+            items.push(sexp_term(tail));
+            list_sp("block", term.span, items)
+        }
         TermKind::Unit => list_sp("unit", term.span, vec![]),
         TermKind::Call { func, args } => list_sp(
             "call",
@@ -131,8 +128,8 @@ fn list(head: &str, items: Vec<SExp>) -> SExp {
 fn list_sp(head: &str, span: Span, items: Vec<SExp>) -> SExp {
     let mut children = Vec::with_capacity(items.len() + 2);
     children.push(symbol(head));
-    children.extend(items);
     children.push(span_str(span));
+    children.extend(items);
     SExp::List(children, SExpBookendStyle::Parentheses)
 }
 
