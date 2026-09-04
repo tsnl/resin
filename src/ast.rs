@@ -30,9 +30,9 @@ pub enum TermKind {
         then: Box<Term>,
         els: Box<Term>,
     },
-    Tuple(Vec<Term>),
     Array(Vec<Term>),
     Record(Vec<(Ident, Term)>),
+    RecordType(Vec<(Ident, Term)>),
     Block {
         stmts: Vec<Stmt>,
         tail: Box<Term>,

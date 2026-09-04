@@ -56,9 +56,6 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(cond), sexp_term(then), sexp_term(els)],
         ),
-        TermKind::Tuple(elems) => {
-            list_sp("tuple", term.span, elems.iter().map(sexp_term).collect())
-        }
         TermKind::Array(elems) => {
             list_sp("array", term.span, elems.iter().map(sexp_term).collect())
         }
@@ -68,6 +65,14 @@ fn sexp_term(term: &Term) -> SExp {
             fields
                 .iter()
                 .map(|(name, val)| list("field", vec![symbol(name.val.as_ref()), sexp_term(val)]))
+                .collect(),
+        ),
+        TermKind::RecordType(fields) => list_sp(
+            "record-type",
+            term.span,
+            fields
+                .iter()
+                .map(|(name, ann)| list("field", vec![symbol(name.val.as_ref()), sexp_term(ann)]))
                 .collect(),
         ),
         TermKind::Block { stmts, tail } => list_sp(

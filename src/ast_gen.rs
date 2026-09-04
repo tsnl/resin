@@ -111,6 +111,7 @@ impl<'a> AstGen<'a> {
             "tuple_term" => self.gen_tuple_term(child),
             "array_term" => self.gen_array_term(child),
             "record_term" => self.gen_record_term(child),
+            "record_type" => self.gen_record_type(child),
             "chain_term" => self.gen_chain_term(child),
             "unit_term" => Spanned::new(TermKind::Unit, self.span(node)),
             _ => unreachable!("unexpected closed: {}", child.kind()),
@@ -143,7 +144,16 @@ impl<'a> AstGen<'a> {
     fn gen_tuple_term(&self, node: Node) -> Term {
         assert_eq!(node.kind(), "tuple_term");
         let elems = self.field_children_terms(node, "elems");
-        Spanned::new(TermKind::Tuple(elems), self.span(node))
+        let span = self.span(node);
+        let fields = elems
+            .into_iter()
+            .enumerate()
+            .map(|(i, val)| {
+                let name = Spanned::new(format!("_{i}").into(), span);
+                (name, val)
+            })
+            .collect();
+        Spanned::new(TermKind::Record(fields), span)
     }
 
     fn gen_array_term(&self, node: Node) -> Term {
@@ -162,6 +172,18 @@ impl<'a> AstGen<'a> {
             fields.push((name, init));
         }
         Spanned::new(TermKind::Record(fields), self.span(node))
+    }
+
+    fn gen_record_type(&self, node: Node) -> Term {
+        assert_eq!(node.kind(), "record_type");
+        let mut fields = Vec::new();
+        let mut cursor = node.walk();
+        for f in node.children_by_field_name("fields", &mut cursor) {
+            let name = self.ident(f.child_by_field_name("name").unwrap());
+            let ann = self.gen_term(f.child_by_field_name("ann").unwrap());
+            fields.push((name, ann));
+        }
+        Spanned::new(TermKind::RecordType(fields), self.span(node))
     }
 
     fn gen_chain_term(&self, node: Node) -> Term {
