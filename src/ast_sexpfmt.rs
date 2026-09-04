@@ -29,18 +29,21 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
     list_sp(
         "define",
         stmt.span,
-        vec![ident(stmt.val.name.val.as_ref()), sexp_term(&stmt.val.init)],
+        vec![
+            symbol(stmt.val.name.val.as_ref()),
+            sexp_term(&stmt.val.init),
+        ],
     )
 }
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
-        TermKind::Var(v) => ident(v.val.as_ref()),
-        TermKind::Num(n) => list_sp("num", term.span, vec![ident(n.as_ref())]),
+        TermKind::Var(v) => symbol(v.val.as_ref()),
+        TermKind::Num(n) => symbol(n.as_ref()),
         TermKind::Lambda { params, body } => {
             let param_sexps: Vec<SExp> = params
                 .iter()
-                .map(|(name, ann)| list("param", vec![ident(name.val.as_ref()), sexp_term(ann)]))
+                .map(|(name, ann)| list("param", vec![symbol(name.val.as_ref()), sexp_term(ann)]))
                 .collect();
             list_sp(
                 "lambda",
@@ -64,7 +67,7 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             fields
                 .iter()
-                .map(|(name, val)| list("field", vec![ident(name.val.as_ref()), sexp_term(val)]))
+                .map(|(name, val)| list("field", vec![symbol(name.val.as_ref()), sexp_term(val)]))
                 .collect(),
         ),
         TermKind::Block { stmts, tail } => list_sp(
@@ -91,7 +94,7 @@ fn sexp_term(term: &Term) -> SExp {
 /// A non-empty list with a head atom. Use `group` for possibly-empty lists.
 fn list(head: &str, items: Vec<SExp>) -> SExp {
     let mut children = Vec::with_capacity(items.len() + 1);
-    children.push(ident(head));
+    children.push(symbol(head));
     children.extend(items);
     SExp::List(children, SExpBookendStyle::Parentheses)
 }
@@ -99,7 +102,7 @@ fn list(head: &str, items: Vec<SExp>) -> SExp {
 /// A non-empty list with a head atom and span. Use `group` for possibly-empty lists.
 fn list_sp(head: &str, span: Span, items: Vec<SExp>) -> SExp {
     let mut children = Vec::with_capacity(items.len() + 2);
-    children.push(ident(head));
+    children.push(symbol(head));
     children.extend(items);
     children.push(span_str(span));
     SExp::List(children, SExpBookendStyle::Parentheses)
@@ -114,7 +117,7 @@ fn group(items: Vec<SExp>) -> SExp {
     }
 }
 
-fn ident(s: impl Into<String>) -> SExp {
+fn symbol(s: impl Into<String>) -> SExp {
     SExp::Atom(s.into())
 }
 
