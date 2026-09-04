@@ -3,5 +3,11 @@ name = "resin"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
-rust-sitter = "0.4.5"
+clap = { version = "4", features = ["derive"] }
+sexpfmt = "2"
+tree-sitter = "0.25"
+tree-sitter-resin = { path = "tree-sitter-resin" }
