@@ -2,11 +2,13 @@
 
 pub mod instr;
 pub mod instr_verifier;
+pub mod typer;
 pub mod types;
 pub mod value;
 
 pub use instr::{BasicBlock, Function, Instr, Local, NonLocal, Terminator};
 pub use instr_verifier::{StackEffect, VerifyError, VerifyErrorKind, VerifyLocation, verify};
+pub use typer::{BuiltinCall, FieldAccess, TypeError, TypeErrorKind, Typer};
 pub use types::{RecordField, Ty, TypeDef, TypeId};
 pub use value::{
     ArrayValue, BlockId, ClosureValue, FunctionId, GlobalId, LocalId, NonLocalId, RecordFieldValue,

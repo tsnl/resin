@@ -35,6 +35,7 @@ define_id! {
 /// values can be represented by native backend handles instead.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    Type { ty: Ty },
     Unit,
     Bool { value: bool },
     Int8 { value: i8 },

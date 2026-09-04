@@ -34,6 +34,8 @@ pub struct RecordField {
 /// changing the stack-machine control-flow model.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
+    /// The type of compile-time type values.
+    Type,
     Unit,
     Bool,
     Int8,

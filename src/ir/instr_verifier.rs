@@ -420,6 +420,10 @@ fn verify_instr(
 
 fn immediate_ty(module: &Module, value: &Value, location: Location) -> Result<Ty, VerifyError> {
     let ty = match value {
+        Value::Type { ty } => {
+            validate_ty(module, ty, location)?;
+            Ty::Type
+        }
         Value::Unit => Ty::Unit,
         Value::Bool { .. } => Ty::Bool,
         Value::Int8 { .. } => Ty::Int8,
@@ -551,7 +555,8 @@ fn validate_ty(module: &Module, ty: &Ty, location: Location) -> Result<(), Verif
             }
             validate_ty(module, result, location)?;
         }
-        Ty::Unit
+        Ty::Type
+        | Ty::Unit
         | Ty::Bool
         | Ty::Int8
         | Ty::Int16
@@ -610,6 +615,7 @@ fn validate_finite_representation(
         }
         Ty::Pointer { .. }
         | Ty::Function { .. }
+        | Ty::Type
         | Ty::Unit
         | Ty::Bool
         | Ty::Int8
