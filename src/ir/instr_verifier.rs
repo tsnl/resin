@@ -23,7 +23,9 @@ impl Instr {
             | Self::LocalAddress { .. }
             | Self::GlobalAddress { .. }
             | Self::NonLocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
-            Self::AccessStatic { .. } | Self::Load => StackEffect { pops: 1, pushes: 1 },
+            Self::AccessStatic { .. } | Self::Load | Self::Ascribe { .. } => {
+                StackEffect { pops: 1, pushes: 1 }
+            }
             Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },
             Self::Discard => StackEffect { pops: 1, pushes: 0 },
             Self::MakeRecord { fields } => StackEffect {
@@ -343,6 +345,12 @@ fn verify_instr(
         Instr::Discard => {
             pop_one(stack, location)?;
         }
+        Instr::Ascribe { ty } => {
+            validate_ty(module, ty, location)?;
+            let found = pop_one(stack, location)?;
+            ascribe_one_layer(module, ty, found, location)?;
+            stack.push(ty.clone());
+        }
         Instr::MakeRecord { fields } => {
             let values = pop(stack, fields.len(), location)?;
             stack.push(Ty::Record {
@@ -543,6 +551,7 @@ fn validate_ty(module: &Module, ty: &Ty, location: Location) -> Result<(), Verif
             }
         }
         Ty::Pointer { pointee } => validate_ty(module, pointee, location)?,
+        Ty::Span { element } => validate_ty(module, element, location)?,
         Ty::Array { element, .. } => validate_ty(module, element, location)?,
         Ty::Record { fields } => {
             for field in fields {
@@ -614,6 +623,7 @@ fn validate_finite_representation(
             }
         }
         Ty::Pointer { .. }
+        | Ty::Span { .. }
         | Ty::Function { .. }
         | Ty::Type
         | Ty::Unit
@@ -698,6 +708,47 @@ fn expect_types(expected: &[Ty], found: &[Ty], location: Location) -> Result<(),
         expect_type(expected, found, location)?;
     }
     Ok(())
+}
+
+fn definition_body<'a>(
+    module: &'a Module,
+    definition: TypeId,
+    location: Location,
+) -> Result<&'a Ty, VerifyError> {
+    Ok(&module
+        .types
+        .get(definition.index())
+        .ok_or_else(|| {
+            location.error(VerifyErrorKind::InvalidTypeDefinition {
+                definition: definition.index(),
+            })
+        })?
+        .body)
+}
+
+fn ascribe_one_layer(
+    module: &Module,
+    expected: &Ty,
+    found: Ty,
+    location: Location,
+) -> Result<(), VerifyError> {
+    if expected == &found {
+        return Ok(());
+    }
+    if let Ty::Defined { definition } = expected {
+        if &found == definition_body(module, *definition, location)? {
+            return Ok(());
+        }
+    }
+    if let Ty::Defined { definition } = &found {
+        if expected == definition_body(module, *definition, location)? {
+            return Ok(());
+        }
+    }
+    Err(location.error(VerifyErrorKind::TypeMismatch {
+        expected: expected.clone(),
+        found,
+    }))
 }
 
 fn expect_type(expected: Ty, found: Ty, location: Location) -> Result<(), VerifyError> {
@@ -799,17 +850,99 @@ impl Location {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{BasicBlock, Local, LocalId, NonLocal, NonLocalId};
+    use crate::ir::{BasicBlock, Local, LocalId, NonLocal, NonLocalId, TypeDef};
+
+    #[test]
+    fn ascribe_wraps_a_representation() {
+        let meters = Ty::Defined {
+            definition: TypeId::from_index(0),
+        };
+        let function = Function {
+            name: None,
+            nonlocals: vec![],
+            params: vec![],
+            result: meters.clone(),
+            locals: vec![],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs: vec![
+                    Instr::Push {
+                        value: Value::Int32 { value: 3 },
+                    },
+                    Instr::Ascribe { ty: meters },
+                ],
+                terminator: Terminator::Return,
+            }],
+        };
+
+        verify(&Module {
+            types: vec![TypeDef {
+                name: "Meters".into(),
+                body: Ty::Int32,
+            }],
+            globals: vec![],
+            functions: vec![function],
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn ascribe_unwraps_one_nominal_layer() {
+        let meters = Ty::Defined {
+            definition: TypeId::from_index(0),
+        };
+        let function = Function {
+            name: None,
+            nonlocals: vec![],
+            params: vec![],
+            result: Ty::Int32,
+            locals: vec![],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs: vec![
+                    Instr::Push {
+                        value: Value::Int32 { value: 3 },
+                    },
+                    Instr::Ascribe { ty: meters },
+                    Instr::Ascribe { ty: Ty::Int32 },
+                ],
+                terminator: Terminator::Return,
+            }],
+        };
+
+        verify(&Module {
+            types: vec![TypeDef {
+                name: "Meters".into(),
+                body: Ty::Int32,
+            }],
+            globals: vec![],
+            functions: vec![function],
+        })
+        .unwrap();
+    }
 
     #[test]
     fn chained_assignment_preserves_the_value() {
         let function = Function {
+            name: None,
             nonlocals: vec![],
             params: vec![],
             result: Ty::Int32,
-            locals: vec![Local { ty: Ty::Int32 }, Local { ty: Ty::Int32 }],
+            locals: vec![
+                Local {
+                    name: None,
+                    ty: Ty::Int32,
+                },
+                Local {
+                    name: None,
+                    ty: Ty::Int32,
+                },
+            ],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
+                name: None,
                 instrs: vec![
                     Instr::LocalAddress {
                         local: LocalId::from_index(0),
@@ -838,6 +971,7 @@ mod tests {
     #[test]
     fn conflicting_join_stacks_are_rejected() {
         let function = Function {
+            name: None,
             nonlocals: vec![],
             params: vec![],
             result: Ty::Int32,
@@ -845,6 +979,7 @@ mod tests {
             entry: BlockId::from_index(0),
             blocks: vec![
                 BasicBlock {
+                    name: None,
                     instrs: vec![Instr::Push {
                         value: Value::Bool { value: true },
                     }],
@@ -854,6 +989,7 @@ mod tests {
                     },
                 },
                 BasicBlock {
+                    name: None,
                     instrs: vec![Instr::Push {
                         value: Value::Int32 { value: 1 },
                     }],
@@ -862,6 +998,7 @@ mod tests {
                     },
                 },
                 BasicBlock {
+                    name: None,
                     instrs: vec![Instr::Push {
                         value: Value::Float32 { value: 1.0 },
                     }],
@@ -870,6 +1007,7 @@ mod tests {
                     },
                 },
                 BasicBlock {
+                    name: None,
                     instrs: vec![],
                     terminator: Terminator::Return,
                 },
@@ -892,12 +1030,20 @@ mod tests {
     #[test]
     fn indirect_calls_use_the_callee_on_the_stack() {
         let target = Function {
-            nonlocals: vec![NonLocal { ty: Ty::Int32 }],
+            name: None,
+            nonlocals: vec![NonLocal {
+                name: None,
+                ty: Ty::Int32,
+            }],
             params: vec![LocalId::from_index(0)],
             result: Ty::Int32,
-            locals: vec![Local { ty: Ty::Int32 }],
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Int32,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
+                name: None,
                 instrs: vec![
                     Instr::NonLocalAddress {
                         nonlocal: NonLocalId::from_index(0),
@@ -908,12 +1054,14 @@ mod tests {
             }],
         };
         let caller = Function {
+            name: None,
             nonlocals: vec![],
             params: vec![],
             result: Ty::Int32,
             locals: vec![],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
+                name: None,
                 instrs: vec![
                     Instr::Push {
                         value: Value::Int32 { value: 9 },
@@ -942,6 +1090,7 @@ mod tests {
     #[test]
     fn loop_backedges_must_match_the_header_stack() {
         let function = Function {
+            name: None,
             nonlocals: vec![],
             params: vec![],
             result: Ty::Unit,
@@ -949,12 +1098,14 @@ mod tests {
             entry: BlockId::from_index(0),
             blocks: vec![
                 BasicBlock {
+                    name: None,
                     instrs: vec![],
                     terminator: Terminator::Break {
                         target: BlockId::from_index(1),
                     },
                 },
                 BasicBlock {
+                    name: None,
                     instrs: vec![Instr::Push {
                         value: Value::Bool { value: true },
                     }],
@@ -964,12 +1115,14 @@ mod tests {
                     },
                 },
                 BasicBlock {
+                    name: None,
                     instrs: vec![],
                     terminator: Terminator::Break {
                         target: BlockId::from_index(1),
                     },
                 },
                 BasicBlock {
+                    name: None,
                     instrs: vec![Instr::Push { value: Value::Unit }],
                     terminator: Terminator::Return,
                 },

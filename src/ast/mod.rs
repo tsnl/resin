@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 pub mod generate;
-pub mod sexpfmt;
+pub mod print;
+
+pub use generate::{AstError, AstErrorKind, AstGen};
 
 //
 // SourceFile

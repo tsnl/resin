@@ -1,37 +1,55 @@
-//! Emitter-independent, bottom-up type inference.
+//! Bottom-up typing rules.
 //!
-//! Each rule accepts the types already inferred for an AST node's children and
-//! returns the type of the enclosing node. This module deliberately does not
-//! walk the AST, manage lexical scopes, evaluate terms, or emit instructions.
-//! Those concerns can be composed around the same rules by an interpreter or
-//! any backend-specific emitter.
+//! This module does not walk the AST, resolve names, or emit IR. Each rule
+//! takes child types and returns the parent type, plus any conversions the
+//! operation requires.
+//!
+//! Types are nominal: `T = U` mints a new `T`. Seeing through a name is not a
+//! property of the type; it is a property of the operation:
+//!
+//! - [`Typer::same`] — arguments and assignment: types must already match
+//! - [`Typer::ascribe`] — `T (e)`: one wrap or unwrap
+//! - [`Typer::as_bool`], [`Typer::as_pointer`], [`Typer::as_function`] — `if`,
+//!   `.*`, and calling `h`: unwrap names until that constructor
+//! - [`Typer::as_record`] — `.field`: unwrap names and autoderef pointers
+//!
+//! The `type_*` rules are thin wrappers around those. The generator emits the
+//! returned steps. Conversion is always the operation's choice, never a
+//! canonical form of the type.
 
 use std::{collections::HashSet, fmt, sync::Arc};
 
 use super::{RecordField, Ty, TypeDef, TypeId};
 
-/// Stateless typing rules plus the nominal definitions needed to inspect type
-/// representations.
 #[derive(Debug, Clone, Copy)]
 pub struct Typer<'types> {
     definitions: &'types [TypeDef],
 }
 
-/// The result of typing a field access.
-///
-/// The type belongs to the AST expression; the index is auxiliary information
-/// an interpreter or emitter can use without repeating name resolution.
+/// One step toward the type an operation needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Conv {
+    Unwrap { definition: TypeId },
+    Wrap { definition: TypeId },
+    Deref,
+}
+
+/// A type reached by applying `steps` to a starting type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Converted {
+    pub ty: Ty,
+    pub steps: Vec<Conv>,
+}
+
+/// Field type, record index, and conversions that turn the base into a record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldAccess {
     pub ty: Ty,
     pub index: usize,
+    pub steps: Vec<Conv>,
 }
 
-/// The monomorphic signature selected for a privileged builtin call.
-///
-/// Type checking only enforces relationships intrinsic to the operator's
-/// polymorphic signature. Whether a backend can synthesize this particular
-/// specialization is intentionally a backend concern.
+/// Monomorphic signature of a privileged builtin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinCall {
     pub params: Vec<Ty>,
@@ -68,14 +86,141 @@ impl fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
+impl TypeError {
+    const fn new(kind: TypeErrorKind) -> Self {
+        Self { kind }
+    }
+}
+
 impl<'types> Typer<'types> {
     pub const fn new(definitions: &'types [TypeDef]) -> Self {
         Self { definitions }
     }
 
-    /// Infer the default type of a source numeric literal.
+    /// Defining RHS of a nominal type, or `ty` itself.
+    pub fn body(&self, ty: &Ty) -> Result<Ty, TypeError> {
+        match ty {
+            Ty::Defined { definition } => self
+                .definitions
+                .get(definition.index())
+                .map(|def| def.body.clone())
+                .ok_or_else(|| {
+                    TypeError::new(TypeErrorKind::InvalidTypeDefinition {
+                        definition: *definition,
+                    })
+                }),
+            other => Ok(other.clone()),
+        }
+    }
+
+    /// No conversion: the types must already be equal.
+    pub fn same(&self, expected: &Ty, found: &Ty) -> Result<(), TypeError> {
+        if expected == found {
+            Ok(())
+        } else {
+            Err(TypeError::new(TypeErrorKind::TypeMismatch {
+                expected: expected.clone(),
+                found: found.clone(),
+            }))
+        }
+    }
+
+    /// `T (e)`: identity, or exactly one wrap or unwrap.
+    pub fn ascribe(&self, from: &Ty, to: &Ty) -> Result<Vec<Conv>, TypeError> {
+        if from == to {
+            return Ok(Vec::new());
+        }
+        if let Ty::Defined { definition } = to {
+            if from == &self.body(to)? {
+                return Ok(vec![Conv::Wrap {
+                    definition: *definition,
+                }]);
+            }
+        }
+        if let Ty::Defined { definition } = from {
+            if to == &self.body(from)? {
+                return Ok(vec![Conv::Unwrap {
+                    definition: *definition,
+                }]);
+            }
+        }
+        Err(TypeError::new(TypeErrorKind::TypeMismatch {
+            expected: to.clone(),
+            found: from.clone(),
+        }))
+    }
+
+    pub fn as_bool(&self, ty: &Ty) -> Result<Converted, TypeError> {
+        self.peel(
+            ty,
+            false,
+            |ty| matches!(ty, Ty::Bool),
+            TypeErrorKind::ExpectedBoolean { found: ty.clone() },
+        )
+    }
+
+    pub fn as_pointer(&self, ty: &Ty) -> Result<Converted, TypeError> {
+        self.peel(
+            ty,
+            false,
+            |ty| matches!(ty, Ty::Pointer { .. }),
+            TypeErrorKind::ExpectedPointer { found: ty.clone() },
+        )
+    }
+
+    pub fn as_function(&self, ty: &Ty) -> Result<Converted, TypeError> {
+        self.peel(
+            ty,
+            false,
+            |ty| matches!(ty, Ty::Function { .. }),
+            TypeErrorKind::ExpectedFunction { found: ty.clone() },
+        )
+    }
+
+    pub fn as_record(&self, ty: &Ty) -> Result<Converted, TypeError> {
+        self.peel(
+            ty,
+            true,
+            |ty| matches!(ty, Ty::Record { .. }),
+            TypeErrorKind::ExpectedRecord { found: ty.clone() },
+        )
+    }
+
+    fn peel(
+        &self,
+        start: &Ty,
+        deref: bool,
+        found: impl Fn(&Ty) -> bool,
+        fail: TypeErrorKind,
+    ) -> Result<Converted, TypeError> {
+        let mut current = start.clone();
+        let mut steps = Vec::new();
+        let mut visited = HashSet::new();
+        loop {
+            if found(&current) {
+                return Ok(Converted { ty: current, steps });
+            }
+            if !visited.insert(current.clone()) {
+                return Err(TypeError::new(fail.clone()));
+            }
+            if let Ty::Defined { definition } = current {
+                steps.push(Conv::Unwrap { definition });
+                current = self.body(&Ty::Defined { definition })?;
+                continue;
+            }
+            if deref {
+                if let Ty::Pointer { pointee } = current {
+                    steps.push(Conv::Deref);
+                    current = *pointee;
+                    continue;
+                }
+            }
+            return Err(TypeError::new(fail));
+        }
+    }
+
     pub fn type_num(&self, value: &str) -> Ty {
-        if value.contains('.') || value.contains('e') || value.contains('E') {
+        if value.contains('.') || (!is_hex_literal(value) && value.contains(['e', 'E'])) {
             Ty::Float64
         } else {
             Ty::Int32
@@ -94,20 +239,11 @@ impl<'types> Typer<'types> {
     }
 
     pub fn type_if(&self, condition: &Ty, then: &Ty, els: &Ty) -> Result<Ty, TypeError> {
-        let condition_shape = self.representation(condition)?;
-        if condition_shape != Ty::Bool {
-            return Err(TypeError::new(TypeErrorKind::ExpectedBoolean {
-                found: condition.clone(),
-            }));
-        }
-        self.expect_same(then, els)?;
+        self.as_bool(condition)?;
+        self.same(then, els)?;
         Ok(then.clone())
     }
 
-    /// Infer a homogeneous array from its element types.
-    ///
-    /// Empty arrays require an element type from syntax or an expected-type
-    /// context and should use [`Self::type_array_of`].
     pub fn type_array(&self, elements: &[Ty]) -> Result<Ty, TypeError> {
         let Some(element) = elements.first() else {
             return Err(TypeError::new(TypeErrorKind::EmptyArrayNeedsElementType));
@@ -115,11 +251,9 @@ impl<'types> Typer<'types> {
         self.type_array_of(element, elements)
     }
 
-    /// Check an array against an explicitly supplied or contextually inferred
-    /// element type. This also types an empty array.
     pub fn type_array_of(&self, element: &Ty, elements: &[Ty]) -> Result<Ty, TypeError> {
         for found in elements {
-            self.expect_same(element, found)?;
+            self.same(element, found)?;
         }
         Ok(Ty::Array {
             element: Box::new(element.clone()),
@@ -154,8 +288,8 @@ impl<'types> Typer<'types> {
     }
 
     pub fn type_call(&self, callee: &Ty, args: &[Ty]) -> Result<Ty, TypeError> {
-        let callee_shape = self.representation(callee)?;
-        let Ty::Function { params, result } = callee_shape else {
+        let converted = self.as_function(callee)?;
+        let Ty::Function { params, result } = converted.ty else {
             return Err(TypeError::new(TypeErrorKind::ExpectedFunction {
                 found: callee.clone(),
             }));
@@ -167,23 +301,19 @@ impl<'types> Typer<'types> {
             }));
         }
         for (expected, found) in params.iter().zip(args) {
-            self.expect_same(expected, found)?;
+            self.same(expected, found)?;
         }
         Ok(*result)
     }
 
-    /// Type a C-like assignment expression, whose result is the assigned value.
-    ///
-    /// Addressability and mutability are properties of how the caller produced
-    /// `place`; they remain outside this purely type-level rule.
     pub fn type_assign(&self, place: &Ty, value: &Ty) -> Result<Ty, TypeError> {
-        self.expect_same(place, value)?;
+        self.same(place, value)?;
         Ok(value.clone())
     }
 
     pub fn type_deref(&self, pointer: &Ty) -> Result<Ty, TypeError> {
-        let pointer_shape = self.representation(pointer)?;
-        let Ty::Pointer { pointee } = pointer_shape else {
+        let converted = self.as_pointer(pointer)?;
+        let Ty::Pointer { pointee } = converted.ty else {
             return Err(TypeError::new(TypeErrorKind::ExpectedPointer {
                 found: pointer.clone(),
             }));
@@ -192,8 +322,8 @@ impl<'types> Typer<'types> {
     }
 
     pub fn type_field(&self, base: &Ty, name: &str) -> Result<FieldAccess, TypeError> {
-        let base_shape = self.representation(base)?;
-        let Ty::Record { fields } = base_shape else {
+        let converted = self.as_record(base)?;
+        let Ty::Record { fields } = converted.ty else {
             return Err(TypeError::new(TypeErrorKind::ExpectedRecord {
                 found: base.clone(),
             }));
@@ -205,6 +335,7 @@ impl<'types> Typer<'types> {
             .map(|(index, field)| FieldAccess {
                 ty: field.ty,
                 index,
+                steps: converted.steps,
             })
             .ok_or_else(|| {
                 TypeError::new(TypeErrorKind::UnknownField {
@@ -213,13 +344,11 @@ impl<'types> Typer<'types> {
             })
     }
 
-    /// Check a type ascription or other expression-level expected type.
     pub fn type_ascription(&self, expected: &Ty, value: &Ty) -> Result<Ty, TypeError> {
-        self.expect_same(expected, value)?;
+        self.ascribe(value, expected)?;
         Ok(expected.clone())
     }
 
-    /// Type one of Resin's privileged polymorphic operators.
     pub fn type_builtin_call(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {
         match name {
             "+" | "-" if args.len() == 1 => Ok(BuiltinCall {
@@ -231,29 +360,29 @@ impl<'types> Typer<'types> {
                 result: args[0].clone(),
             }),
             "!" if args.len() == 1 => {
-                self.expect_boolean(&args[0])?;
+                self.as_bool(&args[0])?;
                 Ok(BuiltinCall {
                     params: args.to_vec(),
                     result: Ty::Bool,
                 })
             }
             "+" | "-" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^" if args.len() == 2 => {
-                self.expect_same(&args[0], &args[1])?;
+                self.same(&args[0], &args[1])?;
                 Ok(BuiltinCall {
                     params: args.to_vec(),
                     result: args[0].clone(),
                 })
             }
             "==" | "!=" | "<" | "<=" | ">" | ">=" if args.len() == 2 => {
-                self.expect_same(&args[0], &args[1])?;
+                self.same(&args[0], &args[1])?;
                 Ok(BuiltinCall {
                     params: args.to_vec(),
                     result: Ty::Bool,
                 })
             }
             "&&" | "||" if args.len() == 2 => {
-                self.expect_boolean(&args[0])?;
-                self.expect_boolean(&args[1])?;
+                self.as_bool(&args[0])?;
+                self.as_bool(&args[1])?;
                 Ok(BuiltinCall {
                     params: args.to_vec(),
                     result: Ty::Bool,
@@ -271,54 +400,12 @@ impl<'types> Typer<'types> {
             })),
         }
     }
-
-    /// Reveal only enough nominal definitions to determine a type's outer
-    /// representation. Nominal identity is never erased for equality checks.
-    pub fn representation(&self, ty: &Ty) -> Result<Ty, TypeError> {
-        let mut current = ty.clone();
-        let mut visited = HashSet::new();
-        while let Ty::Defined { definition } = current {
-            if !visited.insert(definition) {
-                return Err(TypeError::new(
-                    TypeErrorKind::RecursiveTypeWithoutIndirection { definition },
-                ));
-            }
-            current = self
-                .definitions
-                .get(definition.index())
-                .ok_or_else(|| TypeError::new(TypeErrorKind::InvalidTypeDefinition { definition }))?
-                .body
-                .clone();
-        }
-        Ok(current)
-    }
-
-    fn expect_boolean(&self, found: &Ty) -> Result<(), TypeError> {
-        if self.representation(found)? == Ty::Bool {
-            Ok(())
-        } else {
-            Err(TypeError::new(TypeErrorKind::ExpectedBoolean {
-                found: found.clone(),
-            }))
-        }
-    }
-
-    fn expect_same(&self, expected: &Ty, found: &Ty) -> Result<(), TypeError> {
-        if expected == found {
-            Ok(())
-        } else {
-            Err(TypeError::new(TypeErrorKind::TypeMismatch {
-                expected: expected.clone(),
-                found: found.clone(),
-            }))
-        }
-    }
 }
 
-impl TypeError {
-    const fn new(kind: TypeErrorKind) -> Self {
-        Self { kind }
-    }
+fn is_hex_literal(value: &str) -> bool {
+    value.len() >= 2
+        && (value.as_bytes()[1] == b'x' || value.as_bytes()[1] == b'X')
+        && value.as_bytes()[0] == b'0'
 }
 
 #[cfg(test)]
@@ -384,6 +471,9 @@ mod tests {
             FieldAccess {
                 ty: Ty::Int32,
                 index: 0,
+                steps: vec![Conv::Unwrap {
+                    definition: TypeId::from_index(0),
+                }],
             }
         );
         assert!(matches!(
@@ -412,6 +502,56 @@ mod tests {
     }
 
     #[test]
+    fn hex_literals_are_integers() {
+        assert_eq!(typer().type_num("0x1e"), Ty::Int32);
+        assert_eq!(typer().type_num("0X10"), Ty::Int32);
+        assert_eq!(typer().type_num("1e3"), Ty::Float64);
+    }
+
+    #[test]
+    fn ascription_moves_one_nominal_layer() {
+        let definitions = [
+            TypeDef {
+                name: "Meters".into(),
+                body: Ty::Int32,
+            },
+            TypeDef {
+                name: "Distance".into(),
+                body: Ty::Defined {
+                    definition: TypeId::from_index(0),
+                },
+            },
+        ];
+        let typer = Typer::new(&definitions);
+        let meters = Ty::Defined {
+            definition: TypeId::from_index(0),
+        };
+        let distance = Ty::Defined {
+            definition: TypeId::from_index(1),
+        };
+
+        assert_eq!(typer.type_ascription(&meters, &Ty::Int32).unwrap(), meters);
+        assert_eq!(
+            typer.type_ascription(&Ty::Int32, &meters).unwrap(),
+            Ty::Int32
+        );
+        assert_eq!(typer.type_ascription(&distance, &meters).unwrap(), distance);
+        assert_eq!(typer.type_ascription(&meters, &distance).unwrap(), meters);
+        assert!(matches!(
+            typer.type_ascription(&distance, &Ty::Int32),
+            Err(TypeError {
+                kind: TypeErrorKind::TypeMismatch { .. }
+            })
+        ));
+        assert!(matches!(
+            typer.type_ascription(&Ty::Int32, &distance),
+            Err(TypeError {
+                kind: TypeErrorKind::TypeMismatch { .. }
+            })
+        ));
+    }
+
+    #[test]
     fn pointer_dereference_is_explicit() {
         let typer = typer();
         let pointer = Ty::Pointer {
@@ -423,6 +563,44 @@ mod tests {
             typer.type_field(&pointer, "value"),
             Err(TypeError {
                 kind: TypeErrorKind::ExpectedRecord { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn field_access_autoderefs_pointers() {
+        let record = Ty::Record {
+            fields: vec![RecordField {
+                name: "x".into(),
+                ty: Ty::Int32,
+            }],
+        };
+        let pointer = Ty::Pointer {
+            pointee: Box::new(record),
+        };
+        let access = typer().type_field(&pointer, "x").unwrap();
+        assert_eq!(access.ty, Ty::Int32);
+        assert_eq!(access.steps, vec![Conv::Deref]);
+    }
+
+    #[test]
+    fn convert_does_not_unwrap_function_arguments() {
+        let definitions = [TypeDef {
+            name: "Meters".into(),
+            body: Ty::Int32,
+        }];
+        let typer = Typer::new(&definitions);
+        let meters = Ty::Defined {
+            definition: TypeId::from_index(0),
+        };
+        let callee = Ty::Function {
+            params: vec![Ty::Int32],
+            result: Box::new(Ty::Int32),
+        };
+        assert!(matches!(
+            typer.type_call(&callee, &[meters]),
+            Err(TypeError {
+                kind: TypeErrorKind::TypeMismatch { .. }
             })
         ));
     }

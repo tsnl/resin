@@ -1,5 +1,5 @@
 use resin::{
-    ast::{StmtKind, TypeKind, generate::AstGen, sexpfmt},
+    ast::{StmtKind, TypeKind, generate::AstGen, print},
     ir::{
         BasicBlock, BlockId, Function, Instr, Local, LocalId, Module, RecordField, Terminator, Ty,
         TypeDef, TypeId, Value, VerifyErrorKind, verify,
@@ -13,12 +13,9 @@ fn parse(src: &str) -> resin::ast::SourceFile {
         .set_language(&tree_sitter_resin::LANGUAGE.into())
         .expect("failed to load Resin grammar");
     let tree = parser.parse(src, None).expect("parser returned no tree");
-    assert!(
-        !tree.root_node().has_error(),
-        "parse error: {}",
-        tree.root_node().to_sexp()
-    );
-    AstGen::new(src).gen_source_file(tree.root_node())
+    AstGen::new(src)
+        .gen_source_file(tree.root_node())
+        .unwrap_or_else(|err| panic!("{err}"))
 }
 
 fn linked_list_type() -> TypeDef {
@@ -52,7 +49,7 @@ fn uppercase_definitions_remain_distinct_in_the_ast() {
     };
     assert_eq!(name.val.as_ref(), "List");
     assert!(matches!(init.val, TypeKind::Record { .. }));
-    assert!(sexpfmt::format_source(&file).contains("(define-type"));
+    assert!(print::format_source(&file).contains("(define-type"));
 }
 
 #[test]
@@ -61,12 +58,17 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
         definition: TypeId::from_index(0),
     };
     let function = Function {
+        name: None,
         nonlocals: vec![],
         params: vec![LocalId::from_index(0)],
         result: Ty::Int32,
-        locals: vec![Local { ty: list }],
+        locals: vec![Local {
+            name: None,
+            ty: list,
+        }],
         entry: BlockId::from_index(0),
         blocks: vec![BasicBlock {
+            name: None,
             instrs: vec![
                 Instr::LocalAddress {
                     local: LocalId::from_index(0),
@@ -118,12 +120,14 @@ fn nominal_types_do_not_equal_their_representations() {
         definition: TypeId::from_index(0),
     };
     let function = Function {
+        name: None,
         nonlocals: vec![],
         params: vec![],
         result: meters,
         locals: vec![],
         entry: BlockId::from_index(0),
         blocks: vec![BasicBlock {
+            name: None,
             instrs: vec![Instr::Push {
                 value: Value::Int32 { value: 1 },
             }],

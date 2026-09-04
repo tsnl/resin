@@ -6,6 +6,8 @@ use super::{BlockId, FunctionId, GlobalId, LocalId, NonLocalId, Ty, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
+    pub name: Option<Arc<str>>,
+
     /// Captured values in closure-display order.
     pub nonlocals: Vec<NonLocal>,
 
@@ -20,18 +22,21 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BasicBlock {
+    pub name: Option<Arc<str>>,
     pub instrs: Vec<Instr>,
     pub terminator: Terminator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Local {
+    pub name: Option<Arc<str>>,
     pub ty: Ty,
 }
 
 /// An entry in a function's closure display.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NonLocal {
+    pub name: Option<Arc<str>>,
     pub ty: Ty,
 }
 
@@ -83,6 +88,13 @@ pub enum Instr {
     ///
     /// Stack effect: `[address, value] -> [value]`.
     Store,
+
+    /// Reinterpret the top of the stack as `ty`.
+    ///
+    /// Wraps or unwraps one nominal layer: `ty` is a nominal type whose
+    /// defining body is the popped type, or the popped type is nominal and
+    /// `ty` is its defining body. Identity ascriptions are omitted.
+    Ascribe { ty: Ty },
 
     /// Discard the value on top of the stack.
     Discard,

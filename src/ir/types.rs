@@ -55,6 +55,13 @@ pub enum Ty {
     Pointer {
         pointee: Box<Ty>,
     },
+    /// A pointer and length to a runtime-sized sequence of `element`.
+    ///
+    /// Like [`Ty::Pointer`], a span has a fixed-size representation and does
+    /// not contain its elements inline.
+    Span {
+        element: Box<Ty>,
+    },
     Array {
         element: Box<Ty>,
         length: usize,

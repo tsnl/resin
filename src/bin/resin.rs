@@ -1,4 +1,4 @@
-use resin::ast::{generate, sexpfmt};
+use resin::{ast, ir};
 
 use std::path::PathBuf;
 
@@ -12,12 +12,14 @@ struct Cli {
     file: PathBuf,
 
     /// What to print.
-    #[arg(long, value_enum, default_value_t = Output::Ast)]
+    #[arg(long, value_enum, default_value_t = Output::Ir)]
     output: Output,
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Clone, PartialEq, Eq, ValueEnum)]
 enum Output {
+    /// Print the typed stack IR.
+    Ir,
     /// Print the lowered AST.
     Ast,
     /// Print the tree-sitter parse tree (S-expressions).
@@ -37,22 +39,33 @@ fn main() {
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())
         .expect("failed to load resin language");
+    let tree = parser.parse(&src, None).expect("parser language is set");
+    if cli.output == Output::Cst {
+        println!("{}", tree.root_node().to_sexp());
+        return;
+    }
 
-    let tree = parser.parse(&src, None).unwrap();
-
-    match cli.output {
-        Output::Cst => println!("{}", tree.root_node().to_sexp()),
-        Output::Check => {
-            if tree.root_node().has_error() {
-                eprintln!("parse error");
-                std::process::exit(1);
-            }
-            println!("ok");
+    let file = match ast::generate::AstGen::new(&src).gen_source_file(tree.root_node()) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
         }
-        Output::Ast => {
-            let g = generate::AstGen::new(&src);
-            let file = g.gen_source_file(tree.root_node());
-            println!("{}", sexpfmt::format_source(&file));
+    };
+    if cli.output == Output::Check {
+        println!("ok");
+        return;
+    }
+    if cli.output == Output::Ast {
+        println!("{}", ast::print::format_source(&file));
+        return;
+    }
+
+    match ir::generate(&file) {
+        Ok(module) => println!("{}", ir::format_module(&module)),
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
         }
     }
 }

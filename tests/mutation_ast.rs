@@ -1,4 +1,4 @@
-use resin::ast::{SourceFile, StmtKind, Term, TermKind, generate::AstGen, sexpfmt};
+use resin::ast::{SourceFile, StmtKind, Term, TermKind, generate::AstGen, print};
 use tree_sitter::Parser;
 
 fn parse(src: &str) -> SourceFile {
@@ -7,12 +7,9 @@ fn parse(src: &str) -> SourceFile {
         .set_language(&tree_sitter_resin::LANGUAGE.into())
         .expect("failed to load Resin grammar");
     let tree = parser.parse(src, None).expect("parser returned no tree");
-    assert!(
-        !tree.root_node().has_error(),
-        "parse error: {}",
-        tree.root_node().to_sexp()
-    );
-    AstGen::new(src).gen_source_file(tree.root_node())
+    AstGen::new(src)
+        .gen_source_file(tree.root_node())
+        .unwrap_or_else(|err| panic!("{err}"))
 }
 
 fn expect_var(term: &Term, expected: &str) {
@@ -46,7 +43,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
     expect_deref_var(place, "q");
     assert!(matches!(value.val, TermKind::Num { .. }));
 
-    let rendered = sexpfmt::format_source(&file);
+    let rendered = print::format_source(&file);
     assert!(rendered.contains("(expr"));
     assert_eq!(rendered.matches("(assign").count(), 2);
     assert_eq!(rendered.matches("(deref").count(), 2);
@@ -86,6 +83,6 @@ fn dereference_composes_with_other_postfix_operations() {
     expect_var(base, "p");
     assert_eq!(name.val.as_ref(), "next");
 
-    let rendered = sexpfmt::format_source(&file);
+    let rendered = print::format_source(&file);
     assert!(rendered.contains("(field"));
 }

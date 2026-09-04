@@ -1,5 +1,7 @@
 //! Tree-sitter parse tree → AST generation.
 
+use std::{fmt, sync::Arc};
+
 use tree_sitter::Node;
 
 use super::*;
@@ -7,6 +9,30 @@ use super::*;
 pub struct AstGen<'a> {
     src: &'a str,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AstError {
+    pub span: Span,
+    pub kind: AstErrorKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AstErrorKind {
+    Unexpected { found: Arc<str> },
+    Missing { expected: Arc<str> },
+}
+
+impl fmt::Display for AstError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "parse error at {}..{}: {:?}",
+            self.span.start, self.span.end, self.kind
+        )
+    }
+}
+
+impl std::error::Error for AstError {}
 
 impl<'a> AstGen<'a> {
     pub fn new(src: &'a str) -> Self {
@@ -17,14 +43,36 @@ impl<'a> AstGen<'a> {
     // Source file
     //
 
-    pub fn gen_source_file(&self, node: Node) -> SourceFile {
+    pub fn gen_source_file(&self, node: Node) -> Result<SourceFile, AstError> {
+        if let Some(error) = first_error_node(node) {
+            return Err(self.parse_error(error));
+        }
         assert_eq!(node.kind(), "source_file");
         let mut stmts = Vec::new();
         let mut cursor = node.walk();
         for child in node.children_by_field_name("stmt", &mut cursor) {
             stmts.push(self.gen_stmt(child));
         }
-        SourceFile { stmts }
+        Ok(SourceFile { stmts })
+    }
+
+    fn parse_error(&self, node: Node) -> AstError {
+        let span = self.span(node);
+        if node.is_missing() {
+            AstError {
+                span,
+                kind: AstErrorKind::Missing {
+                    expected: Arc::from(node.kind()),
+                },
+            }
+        } else {
+            AstError {
+                span,
+                kind: AstErrorKind::Unexpected {
+                    found: Arc::from(self.text(node)),
+                },
+            }
+        }
     }
 
     //
@@ -431,5 +479,46 @@ impl<'a> AstGen<'a> {
             start: node.start_byte(),
             end: node.end_byte(),
         }
+    }
+}
+
+fn first_error_node(node: Node) -> Option<Node> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if let Some(error) = first_error_node(child) {
+            return Some(error);
+        }
+    }
+    if node.is_error() || node.is_missing() {
+        Some(node)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn parse_err(src: &str) -> AstError {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_resin::LANGUAGE.into())
+            .expect("failed to load Resin grammar");
+        let tree = parser.parse(src, None).expect("parser returned no tree");
+        AstGen::new(src)
+            .gen_source_file(tree.root_node())
+            .expect_err("expected a parse error")
+    }
+
+    #[test]
+    fn unexpected_syntax_is_a_parse_error() {
+        let err = parse_err("x = ;");
+        assert!(matches!(
+            err.kind,
+            AstErrorKind::Unexpected { .. } | AstErrorKind::Missing { .. }
+        ));
+        assert!(err.span.start <= err.span.end);
     }
 }
