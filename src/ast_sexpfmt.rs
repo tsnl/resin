@@ -26,14 +26,18 @@ fn sexp_source(file: &SourceFile) -> SExp {
 }
 
 fn sexp_stmt(stmt: &Stmt) -> SExp {
-    list_sp(
-        "define",
-        stmt.span,
-        vec![
-            symbol(stmt.val.name.val.as_ref()),
-            sexp_term(&stmt.val.init),
-        ],
-    )
+    match &stmt.val {
+        StmtKind::Define { name, init } => list_sp(
+            "define",
+            stmt.span,
+            vec![symbol(name.val.as_ref()), sexp_term(init)],
+        ),
+        StmtKind::Declare { name, ann } => list_sp(
+            "declare",
+            stmt.span,
+            vec![symbol(name.val.as_ref()), sexp_typespec(ann)],
+        ),
+    }
 }
 
 fn sexp_term(term: &Term) -> SExp {
@@ -43,7 +47,9 @@ fn sexp_term(term: &Term) -> SExp {
         TermKind::Lambda { params, body } => {
             let param_sexps: Vec<SExp> = params
                 .iter()
-                .map(|(name, ann)| list("param", vec![symbol(name.val.as_ref()), sexp_term(ann)]))
+                .map(|(name, ann)| {
+                    list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                })
                 .collect();
             list_sp(
                 "lambda",
@@ -67,14 +73,6 @@ fn sexp_term(term: &Term) -> SExp {
                 .map(|(name, val)| list("field", vec![symbol(name.val.as_ref()), sexp_term(val)]))
                 .collect(),
         ),
-        TermKind::RecordType(fields) => list_sp(
-            "record-type",
-            term.span,
-            fields
-                .iter()
-                .map(|(name, ann)| list("field", vec![symbol(name.val.as_ref()), sexp_term(ann)]))
-                .collect(),
-        ),
         TermKind::Block { stmts, tail } => list_sp(
             "block",
             term.span,
@@ -89,6 +87,33 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(func), group(args.iter().map(sexp_term).collect())],
         ),
+        TermKind::Type(ty) => sexp_typespec(ty),
+    }
+}
+
+fn sexp_typespec(ts: &Type) -> SExp {
+    match &ts.val {
+        TypeKind::Atom(name) => symbol(name.val.as_ref()),
+        TypeKind::App { head, arg } => list_sp(
+            "type-app",
+            ts.span,
+            vec![symbol(head.val.as_ref()), sexp_term(arg)],
+        ),
+        TypeKind::Func { from, to } => list_sp(
+            "func-type",
+            ts.span,
+            vec![sexp_typespec(from), sexp_typespec(to)],
+        ),
+        TypeKind::Record(fields) => list_sp(
+            "record-type",
+            ts.span,
+            fields
+                .iter()
+                .map(|(name, ann)| {
+                    list("field", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -96,7 +121,6 @@ fn sexp_term(term: &Term) -> SExp {
 // SExp builder helpers
 //
 
-/// A non-empty list with a head atom. Use `group` for possibly-empty lists.
 fn list(head: &str, items: Vec<SExp>) -> SExp {
     let mut children = Vec::with_capacity(items.len() + 1);
     children.push(symbol(head));
@@ -104,7 +128,6 @@ fn list(head: &str, items: Vec<SExp>) -> SExp {
     SExp::List(children, SExpBookendStyle::Parentheses)
 }
 
-/// A non-empty list with a head atom and span. Use `group` for possibly-empty lists.
 fn list_sp(head: &str, span: Span, items: Vec<SExp>) -> SExp {
     let mut children = Vec::with_capacity(items.len() + 2);
     children.push(symbol(head));
@@ -113,7 +136,6 @@ fn list_sp(head: &str, span: Span, items: Vec<SExp>) -> SExp {
     SExp::List(children, SExpBookendStyle::Parentheses)
 }
 
-/// A grouped list of children — `Null` if empty.
 fn group(items: Vec<SExp>) -> SExp {
     if items.is_empty() {
         SExp::Null(SExpBookendStyle::Parentheses)

@@ -13,6 +13,10 @@ impl<'a> AstGen<'a> {
         Self { src }
     }
 
+    //
+    // Source file
+    //
+
     pub fn gen_source_file(&self, node: Node) -> SourceFile {
         assert_eq!(node.kind(), "source_file");
         let mut stmts = Vec::new();
@@ -23,18 +27,44 @@ impl<'a> AstGen<'a> {
         SourceFile { stmts }
     }
 
+    //
+    // Statement
+    //
+
     fn gen_stmt(&self, node: Node) -> Stmt {
         assert_eq!(node.kind(), "statement");
-        let define = node.child_by_field_name("define").unwrap();
-        self.gen_define(define)
+        if let Some(define) = node.child_by_field_name("define") {
+            return self.gen_define(define, self.span(node));
+        }
+        let declare = node.child_by_field_name("declare").unwrap();
+        let name = self.ident(declare.child_by_field_name("name").unwrap());
+        let ann = self.gen_type(declare.child_by_field_name("ann").unwrap());
+        Spanned::new(StmtKind::Declare { name, ann }, self.span(node))
     }
 
-    fn gen_define(&self, node: Node) -> Stmt {
-        assert_eq!(node.kind(), "define");
+    fn gen_define(&self, node: Node, span: Span) -> Stmt {
+        if let Some(term_def) = node.child_by_field_name("term") {
+            return self.gen_term_define(term_def, span);
+        }
+        let type_def = node.child_by_field_name("type").unwrap();
+        self.gen_type_define(type_def, span)
+    }
+
+    fn gen_term_define(&self, node: Node, span: Span) -> Stmt {
         let name = self.ident(node.child_by_field_name("name").unwrap());
         let init = self.gen_term(node.child_by_field_name("init").unwrap());
-        Spanned::new(StmtKind { name, init }, self.span(node))
+        Spanned::new(StmtKind::Define { name, init }, span)
     }
+
+    fn gen_type_define(&self, node: Node, span: Span) -> Stmt {
+        let name = self.ident(node.child_by_field_name("name").unwrap());
+        let ann = self.gen_type(node.child_by_field_name("init").unwrap());
+        Spanned::new(StmtKind::Declare { name, ann }, span)
+    }
+
+    //
+    // Term
+    //
 
     fn gen_term(&self, node: Node) -> Term {
         assert_eq!(node.kind(), "term");
@@ -95,9 +125,13 @@ impl<'a> AstGen<'a> {
         let span = self.span(node);
         match child.kind() {
             "closed_term" => self.gen_closed_term(child),
-            "ident" => Spanned::new(TermKind::Var(self.ident(child)), span),
+            "lid" => Spanned::new(TermKind::Var(self.ident(child)), span),
             "number" => Spanned::new(TermKind::Num(self.text(child).into()), span),
             "if_term" => self.gen_if_term(child),
+            "unary_type" => {
+                let ty = self.gen_unary_type(child);
+                Spanned::new(TermKind::Type(ty), span)
+            }
             _ => unreachable!("unexpected primary: {}", child.kind()),
         }
     }
@@ -111,7 +145,6 @@ impl<'a> AstGen<'a> {
             "tuple_term" => self.gen_tuple_term(child),
             "array_term" => self.gen_array_term(child),
             "record_term" => self.gen_record_term(child),
-            "record_type" => self.gen_record_type(child),
             "chain_term" => self.gen_chain_term(child),
             "unit_term" => Spanned::new(TermKind::Unit, self.span(node)),
             _ => unreachable!("unexpected closed: {}", child.kind()),
@@ -124,7 +157,7 @@ impl<'a> AstGen<'a> {
         let mut cursor = node.walk();
         for p in node.children_by_field_name("params", &mut cursor) {
             let (name, ann) = self.gen_declare(p);
-            params.push((name, Box::new(ann)));
+            params.push((name, ann));
         }
         let body = self.gen_postfix_term(node.child_by_field_name("body").unwrap());
         Spanned::new(
@@ -137,7 +170,7 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_paren_term(&self, node: Node) -> Term {
-        // Parentheses are grouping only. Unwrap to the inner term.
+        assert_eq!(node.kind(), "paren_term");
         self.gen_term(node.child_by_field_name("inner").unwrap())
     }
 
@@ -167,23 +200,13 @@ impl<'a> AstGen<'a> {
         let mut fields = Vec::new();
         let mut cursor = node.walk();
         for f in node.children_by_field_name("fields", &mut cursor) {
-            let name = self.ident(f.child_by_field_name("name").unwrap());
-            let init = self.gen_term(f.child_by_field_name("init").unwrap());
+            assert_eq!(f.kind(), "define");
+            let term_def = f.child_by_field_name("term").unwrap();
+            let name = self.ident(term_def.child_by_field_name("name").unwrap());
+            let init = self.gen_term(term_def.child_by_field_name("init").unwrap());
             fields.push((name, init));
         }
         Spanned::new(TermKind::Record(fields), self.span(node))
-    }
-
-    fn gen_record_type(&self, node: Node) -> Term {
-        assert_eq!(node.kind(), "record_type");
-        let mut fields = Vec::new();
-        let mut cursor = node.walk();
-        for f in node.children_by_field_name("fields", &mut cursor) {
-            let name = self.ident(f.child_by_field_name("name").unwrap());
-            let ann = self.gen_term(f.child_by_field_name("ann").unwrap());
-            fields.push((name, ann));
-        }
-        Spanned::new(TermKind::RecordType(fields), self.span(node))
     }
 
     fn gen_chain_term(&self, node: Node) -> Term {
@@ -218,12 +241,95 @@ impl<'a> AstGen<'a> {
         )
     }
 
-    // -- helpers ----------------------------------------------------
+    //
+    // Type
+    //
 
-    fn gen_declare(&self, node: Node) -> (Ident, Term) {
+    fn gen_type(&self, node: Node) -> Type {
+        assert_eq!(node.kind(), "type");
+        self.gen_infix_type(node.child(0).unwrap())
+    }
+
+    fn gen_infix_type(&self, node: Node) -> Type {
+        assert_eq!(node.kind(), "infix_type");
+        if let Some(ret) = node.child_by_field_name("ret_ty") {
+            let from = self.gen_closed_type(node.child_by_field_name("param_ty").unwrap());
+            let to = self.gen_infix_type(ret);
+            return Spanned::new(
+                TypeKind::Func {
+                    from: Box::new(from),
+                    to: Box::new(to),
+                },
+                self.span(node),
+            );
+        }
+        self.gen_unary_type(node.child(0).unwrap())
+    }
+
+    fn gen_unary_type(&self, node: Node) -> Type {
+        assert_eq!(node.kind(), "unary_type");
+        if let Some(former) = node.child_by_field_name("former") {
+            let head = self.ident(former);
+            let arg_node = node.child_by_field_name("arg").unwrap();
+            let arg = match arg_node.kind() {
+                "closed_term" => self.gen_closed_term(arg_node),
+                "closed_type" => {
+                    let ty = self.gen_closed_type(arg_node);
+                    Spanned::new(TermKind::Type(ty), self.span(arg_node))
+                }
+                _ => unreachable!("unexpected type arg: {}", arg_node.kind()),
+            };
+            return Spanned::new(
+                TypeKind::App {
+                    head,
+                    arg: Box::new(arg),
+                },
+                self.span(node),
+            );
+        }
+        self.gen_primary_type(node.child(0).unwrap())
+    }
+
+    fn gen_primary_type(&self, node: Node) -> Type {
+        assert_eq!(node.kind(), "primary_type");
+        let child = node.child(0).unwrap();
+        match child.kind() {
+            "uid" => Spanned::new(TypeKind::Atom(self.ident(child)), self.span(node)),
+            "builtin_type" => Spanned::new(TypeKind::Atom(self.ident(child)), self.span(node)),
+            "closed_type" => self.gen_closed_type(child),
+            _ => unreachable!("unexpected primary_type: {}", child.kind()),
+        }
+    }
+
+    fn gen_closed_type(&self, node: Node) -> Type {
+        assert_eq!(node.kind(), "closed_type");
+        let child = node.child(0).unwrap();
+        match child.kind() {
+            "paren_type" => self.gen_type(child.child_by_field_name("inner").unwrap()),
+            "record_type" => self.gen_record_type(child),
+            _ => unreachable!("unexpected closed_type: {}", child.kind()),
+        }
+    }
+
+    fn gen_record_type(&self, node: Node) -> Type {
+        assert_eq!(node.kind(), "record_type");
+        let mut fields = Vec::new();
+        let mut cursor = node.walk();
+        for f in node.children_by_field_name("field", &mut cursor) {
+            let (name, ann) = self.gen_declare(f);
+            fields.push((name, ann));
+        }
+        Spanned::new(TypeKind::Record(fields), self.span(node))
+    }
+
+    //
+    // Helpers
+    //
+
+    fn gen_declare(&self, node: Node) -> (Ident, Type) {
         assert_eq!(node.kind(), "declare");
         let name = self.ident(node.child_by_field_name("name").unwrap());
-        let ann = self.gen_term(node.child_by_field_name("ann").unwrap());
+        let ann = self.gen_type(node.child_by_field_name("ann").unwrap());
         (name, ann)
     }
 
@@ -236,7 +342,6 @@ impl<'a> AstGen<'a> {
         out
     }
 
-    /// `Call(Var(op_text), args)` with the given span.
     fn call_var(&self, op_text: &str, args: Vec<Term>, span: Span) -> Term {
         let func = Spanned::new(TermKind::Var(Spanned::new(op_text.into(), span)), span);
         Spanned::new(

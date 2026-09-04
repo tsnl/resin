@@ -5,24 +5,40 @@
 use std::sync::Arc;
 
 //
-// Ident, Term, Stmt
+// SourceFile
 //
-
-pub type Ident = Spanned<Arc<str>>;
-pub type Term = Spanned<TermKind>;
-pub type Stmt = Spanned<StmtKind>;
 
 #[derive(Debug, Clone)]
 pub struct SourceFile {
     pub stmts: Vec<Stmt>,
 }
 
+//
+// Type
+//
+
+pub type Type = Spanned<TypeKind>;
+
+#[derive(Debug, Clone)]
+pub enum TypeKind {
+    Atom(Ident),
+    App { head: Ident, arg: Box<Term> },
+    Func { from: Box<Type>, to: Box<Type> },
+    Record(Vec<(Ident, Type)>),
+}
+
+//
+// Term
+//
+
+pub type Term = Spanned<TermKind>;
+
 #[derive(Debug, Clone)]
 pub enum TermKind {
     Var(Ident),
     Num(Arc<str>),
     Lambda {
-        params: Vec<(Ident, Box<Term>)>,
+        params: Vec<(Ident, Type)>,
         body: Box<Term>,
     },
     If {
@@ -32,7 +48,6 @@ pub enum TermKind {
     },
     Array(Vec<Term>),
     Record(Vec<(Ident, Term)>),
-    RecordType(Vec<(Ident, Term)>),
     Block {
         stmts: Vec<Stmt>,
         tail: Box<Term>,
@@ -42,13 +57,28 @@ pub enum TermKind {
         func: Box<Term>,
         args: Vec<Term>,
     },
+    Type(Type),
 }
 
+//
+// Statements
+//
+
+pub type Stmt = Spanned<StmtKind>;
+
 #[derive(Debug, Clone)]
-pub struct StmtKind {
-    pub name: Ident,
-    pub init: Term,
+pub enum StmtKind {
+    /// `name = init;`
+    Define { name: Ident, init: Term },
+    /// `name: ann;`
+    Declare { name: Ident, ann: Type },
 }
+
+//
+// Ident
+//
+
+pub type Ident = Spanned<Arc<str>>;
 
 //
 // Spanned<T>
