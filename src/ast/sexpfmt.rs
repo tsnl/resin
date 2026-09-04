@@ -1,8 +1,8 @@
 //! AST → S-expression formatting via `sexpfmt`.
 
-use sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
+use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
-use crate::ast::*;
+use super::*;
 
 //
 // API

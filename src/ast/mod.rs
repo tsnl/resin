@@ -4,6 +4,9 @@
 
 use std::sync::Arc;
 
+pub mod generate;
+pub mod sexpfmt;
+
 //
 // SourceFile
 //

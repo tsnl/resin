@@ -1,4 +1,4 @@
-use resin::{ast_gen, ast_sexpfmt};
+use resin::ast::{generate, sexpfmt};
 
 use std::path::PathBuf;
 
@@ -50,9 +50,9 @@ fn main() {
             println!("ok");
         }
         Output::Ast => {
-            let g = ast_gen::AstGen::new(&src);
+            let g = generate::AstGen::new(&src);
             let file = g.gen_source_file(tree.root_node());
-            println!("{}", ast_sexpfmt::format_source(&file));
+            println!("{}", sexpfmt::format_source(&file));
         }
     }
 }

@@ -2,7 +2,7 @@
 
 use tree_sitter::Node;
 
-use crate::ast::*;
+use super::*;
 
 pub struct AstGen<'a> {
     src: &'a str,
