@@ -1,0 +1,1261 @@
+//! Headless Vulkan compute and graphics backend for the Resin C ABI.
+//!
+//! Vulkan 1.3 with shader objects, dynamic rendering, maintenance5/6,
+//! map_memory2, and timeline waits.
+
+mod device;
+
+use std::ops::Range;
+use std::ptr;
+use std::slice;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use ash::{Device, Entry, Instance, ext, khr, vk};
+
+use crate::allocator::RangeAllocator;
+use crate::{ResinMemory, ResinStatus};
+
+use device::create_device;
+
+const DEFAULT_ALIGNMENT: usize = 16;
+const HEAP_BLOCK_BYTES: usize = 16 * 1024 * 1024;
+const PUSH_CONSTANT_SIZE: u32 = 8;
+const SPIRV_MAGIC: u32 = 0x0723_0203;
+
+pub struct ResinGpu {
+    _entry: Entry,
+    instance: Instance,
+    device: Device,
+    shader_object: ext::shader_object::Device,
+    map_memory2: khr::map_memory2::Device,
+    maintenance6: khr::maintenance6::Device,
+    queue: vk::Queue,
+    command_pool: vk::CommandPool,
+    timeline: vk::Semaphore,
+    timeline_value: AtomicU64,
+    memory_properties: vk::PhysicalDeviceMemoryProperties,
+    max_buffer_size: vk::DeviceSize,
+    memory_priority: bool,
+    heaps: [Vec<Option<HeapBlock>>; 3],
+}
+
+struct HeapBlock {
+    device: Device,
+    map_memory2: khr::map_memory2::Device,
+    buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    host: *mut u8,
+    device_address: u64,
+    size: u64,
+    ranges: RangeAllocator,
+}
+
+pub struct ResinAllocation {
+    memory: ResinMemory,
+    block: usize,
+    range: Range<u64>,
+    host: *mut u8,
+    device_address: u64,
+    size: usize,
+    buffer: vk::Buffer,
+    buffer_offset: vk::DeviceSize,
+}
+
+pub struct ResinImage {
+    device: Device,
+    image: vk::Image,
+    view: vk::ImageView,
+    memory: vk::DeviceMemory,
+    width: u32,
+    height: u32,
+    layout: vk::ImageLayout,
+}
+
+pub struct ResinPipeline {
+    shader_object: ext::shader_object::Device,
+    shaders: Vec<(vk::ShaderStageFlags, vk::ShaderEXT)>,
+    graphics: bool,
+}
+
+pub struct ResinCommandBuffer {
+    device: Device,
+    shader_object: ext::shader_object::Device,
+    maintenance6: khr::maintenance6::Device,
+    pool: vk::CommandPool,
+    handle: vk::CommandBuffer,
+    shader_bound: bool,
+    graphics: bool,
+    rendering: bool,
+    recording: bool,
+    dispatched: bool,
+    submitted: bool,
+}
+
+impl ResinGpu {
+    pub fn create() -> Result<Self, ResinStatus> {
+        let created = create_device()?;
+
+        let pool_info = vk::CommandPoolCreateInfo::default()
+            .queue_family_index(created.queue_family)
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
+        let command_pool = unsafe { created.device.create_command_pool(&pool_info, None) }
+            .map_err(|err| {
+                destroy_partial(
+                    &created.device,
+                    &created.instance,
+                    vk::CommandPool::null(),
+                    vk::Semaphore::null(),
+                );
+                vk_status(err)
+            })?;
+
+        let mut timeline_type = vk::SemaphoreTypeCreateInfo::default()
+            .semaphore_type(vk::SemaphoreType::TIMELINE)
+            .initial_value(0);
+        let semaphore_info = vk::SemaphoreCreateInfo::default().push_next(&mut timeline_type);
+        let timeline =
+            unsafe { created.device.create_semaphore(&semaphore_info, None) }.map_err(|err| {
+                destroy_partial(
+                    &created.device,
+                    &created.instance,
+                    command_pool,
+                    vk::Semaphore::null(),
+                );
+                vk_status(err)
+            })?;
+
+        Ok(Self {
+            _entry: created.entry,
+            instance: created.instance,
+            device: created.device,
+            shader_object: created.shader_object,
+            map_memory2: created.map_memory2,
+            maintenance6: created.maintenance6,
+            queue: created.queue,
+            command_pool,
+            timeline,
+            timeline_value: AtomicU64::new(0),
+            memory_properties: created.memory_properties,
+            max_buffer_size: created.max_buffer_size,
+            memory_priority: created.memory_priority,
+            heaps: [Vec::new(), Vec::new(), Vec::new()],
+        })
+    }
+
+    pub fn malloc(
+        &mut self,
+        bytes: usize,
+        alignment: usize,
+        memory: ResinMemory,
+    ) -> Result<ResinAllocation, ResinStatus> {
+        if bytes == 0 {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let alignment = if alignment == 0 {
+            DEFAULT_ALIGNMENT
+        } else {
+            alignment
+        };
+        if !alignment.is_power_of_two() {
+            return Err(ResinStatus::InvalidArgument);
+        }
+
+        let heap = heap_index(memory);
+        for block_index in 0..self.heaps[heap].len() {
+            let Some(block) = self.heaps[heap][block_index].as_mut() else {
+                continue;
+            };
+            if let Some(allocation) = try_suballocate(block, block_index, memory, bytes, alignment)
+            {
+                return Ok(allocation);
+            }
+        }
+
+        let tight = bytes
+            .checked_add(alignment - 1)
+            .ok_or(ResinStatus::OutOfMemory)?;
+        let slab = tight.max(HEAP_BLOCK_BYTES);
+        let mut block = match self.create_heap_block(slab, memory) {
+            Ok(block) => block,
+            Err(ResinStatus::OutOfMemory) if slab > tight => {
+                self.create_heap_block(tight, memory)?
+            }
+            Err(status) => return Err(status),
+        };
+        let block_index = self.reserve_heap_slot(heap);
+        let Some(allocation) = try_suballocate(&mut block, block_index, memory, bytes, alignment)
+        else {
+            return Err(ResinStatus::OutOfMemory);
+        };
+        self.heaps[heap][block_index] = Some(block);
+        Ok(allocation)
+    }
+
+    pub fn free(&mut self, allocation: &ResinAllocation) {
+        let heap = heap_index(allocation.memory);
+        let release = {
+            let Some(block) = self.heaps[heap]
+                .get_mut(allocation.block)
+                .and_then(|slot| slot.as_mut())
+            else {
+                return;
+            };
+            block.ranges.free(allocation.range.clone());
+            block.size as usize > HEAP_BLOCK_BYTES && block.ranges.is_fully_free()
+        };
+        if release {
+            self.heaps[heap][allocation.block] = None;
+        }
+    }
+
+    pub fn host_to_device(&self, host_pointer: *const u8) -> Result<u64, ResinStatus> {
+        if host_pointer.is_null() {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let addr = host_pointer as usize;
+        for heap in &self.heaps {
+            for block in heap.iter().flatten() {
+                if block.host.is_null() {
+                    continue;
+                }
+                let start = block.host as usize;
+                let end = start + block.size as usize;
+                if addr >= start && addr < end {
+                    return Ok(block.device_address + (addr - start) as u64);
+                }
+            }
+        }
+        Err(ResinStatus::InvalidArgument)
+    }
+
+    fn reserve_heap_slot(&mut self, heap: usize) -> usize {
+        if let Some(index) = self.heaps[heap].iter().position(|slot| slot.is_none()) {
+            index
+        } else {
+            self.heaps[heap].push(None);
+            self.heaps[heap].len() - 1
+        }
+    }
+
+    fn create_heap_block(
+        &self,
+        bytes: usize,
+        memory: ResinMemory,
+    ) -> Result<HeapBlock, ResinStatus> {
+        if self.max_buffer_size != 0 && bytes as vk::DeviceSize > self.max_buffer_size {
+            return Err(ResinStatus::OutOfMemory);
+        }
+
+        let mut usage = vk::BufferUsageFlags2CreateInfoKHR::default().usage(
+            vk::BufferUsageFlags2KHR::STORAGE_BUFFER
+                | vk::BufferUsageFlags2KHR::SHADER_DEVICE_ADDRESS
+                | vk::BufferUsageFlags2KHR::TRANSFER_SRC
+                | vk::BufferUsageFlags2KHR::TRANSFER_DST,
+        );
+        let buffer_info = vk::BufferCreateInfo::default()
+            .size(bytes as vk::DeviceSize)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .push_next(&mut usage);
+        let buffer = unsafe { self.device.create_buffer(&buffer_info, None) }.map_err(vk_status)?;
+
+        let mut dedicated = vk::MemoryDedicatedRequirements::default();
+        let mut requirements2 = vk::MemoryRequirements2::default().push_next(&mut dedicated);
+        let req_info = vk::BufferMemoryRequirementsInfo2::default().buffer(buffer);
+        unsafe {
+            self.device
+                .get_buffer_memory_requirements2(&req_info, &mut requirements2);
+        }
+        let requirements = requirements2.memory_requirements;
+
+        let request = memory_request(memory);
+        let mut candidates = memory_type_indices(
+            &self.memory_properties,
+            requirements.memory_type_bits,
+            request,
+        );
+        if candidates.is_empty() {
+            unsafe { self.device.destroy_buffer(buffer, None) };
+            return Err(ResinStatus::Unsupported);
+        }
+
+        let mut alloc_flags =
+            vk::MemoryAllocateFlagsInfo::default().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
+        let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().buffer(buffer);
+        let mut priority = vk::MemoryPriorityAllocateInfoEXT::default().priority(match memory {
+            ResinMemory::Gpu => 1.0,
+            ResinMemory::Default => 0.75,
+            ResinMemory::Readback => 0.25,
+        });
+        let use_dedicated = dedicated.requires_dedicated_allocation == vk::TRUE
+            || dedicated.prefers_dedicated_allocation == vk::TRUE;
+
+        let mut allocated = None;
+        let mut last_err = ResinStatus::OutOfMemory;
+        for memory_type_index in candidates.drain(..) {
+            let mut alloc_info = vk::MemoryAllocateInfo::default()
+                .allocation_size(requirements.size)
+                .memory_type_index(memory_type_index)
+                .push_next(&mut alloc_flags);
+            if use_dedicated {
+                alloc_info = alloc_info.push_next(&mut dedicated_info);
+            }
+            if self.memory_priority {
+                alloc_info = alloc_info.push_next(&mut priority);
+            }
+            match unsafe { self.device.allocate_memory(&alloc_info, None) } {
+                Ok(mem) => {
+                    allocated = Some(mem);
+                    break;
+                }
+                Err(err) => {
+                    last_err = vk_status(err);
+                    if last_err != ResinStatus::OutOfMemory {
+                        unsafe { self.device.destroy_buffer(buffer, None) };
+                        return Err(last_err);
+                    }
+                }
+            }
+        }
+        let Some(device_memory) = allocated else {
+            unsafe { self.device.destroy_buffer(buffer, None) };
+            return Err(last_err);
+        };
+
+        let bind = vk::BindBufferMemoryInfo::default()
+            .buffer(buffer)
+            .memory(device_memory)
+            .memory_offset(0);
+        if let Err(err) = unsafe { self.device.bind_buffer_memory2(slice::from_ref(&bind)) } {
+            unsafe {
+                self.device.free_memory(device_memory, None);
+                self.device.destroy_buffer(buffer, None);
+            }
+            return Err(vk_status(err));
+        }
+
+        let host = if request.host_visible {
+            match map_memory(&self.map_memory2, device_memory) {
+                Ok(ptr) => ptr.cast::<u8>(),
+                Err(err) => {
+                    unsafe {
+                        self.device.destroy_buffer(buffer, None);
+                        self.device.free_memory(device_memory, None);
+                    }
+                    return Err(vk_status(err));
+                }
+            }
+        } else {
+            ptr::null_mut()
+        };
+
+        let address_info = vk::BufferDeviceAddressInfo::default().buffer(buffer);
+        let device_address = unsafe { self.device.get_buffer_device_address(&address_info) };
+        let size = bytes as u64;
+
+        Ok(HeapBlock {
+            device: self.device.clone(),
+            map_memory2: self.map_memory2.clone(),
+            buffer,
+            memory: device_memory,
+            host,
+            device_address,
+            size,
+            ranges: RangeAllocator::new(device_address..device_address + size),
+        })
+    }
+
+    pub fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
+        validate_spirv(spv)?;
+        let push_range = vk::PushConstantRange {
+            stage_flags: vk::ShaderStageFlags::COMPUTE,
+            offset: 0,
+            size: PUSH_CONSTANT_SIZE,
+        };
+        let create_info = vk::ShaderCreateInfoEXT::default()
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .code_type(vk::ShaderCodeTypeEXT::SPIRV)
+            .code(spv)
+            .name(c"main")
+            .push_constant_ranges(slice::from_ref(&push_range));
+
+        match unsafe {
+            self.shader_object
+                .create_shaders(slice::from_ref(&create_info), None)
+        } {
+            Ok(shaders) => Ok(ResinPipeline {
+                shader_object: self.shader_object.clone(),
+                shaders: vec![(vk::ShaderStageFlags::COMPUTE, shaders[0])],
+                graphics: false,
+            }),
+            Err((shaders, err)) => {
+                for shader in shaders {
+                    if shader != vk::ShaderEXT::null() {
+                        unsafe { self.shader_object.destroy_shader(shader, None) };
+                    }
+                }
+                Err(vk_status(err))
+            }
+        }
+    }
+
+    pub fn create_graphics_pipeline(
+        &self,
+        vertex_spv: &[u8],
+        fragment_spv: &[u8],
+    ) -> Result<ResinPipeline, ResinStatus> {
+        validate_spirv(vertex_spv)?;
+        validate_spirv(fragment_spv)?;
+        let push_range = vk::PushConstantRange {
+            stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+            offset: 0,
+            size: PUSH_CONSTANT_SIZE,
+        };
+        let flags = vk::ShaderCreateFlagsEXT::LINK_STAGE;
+        let vertex_info = vk::ShaderCreateInfoEXT::default()
+            .flags(flags)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .next_stage(vk::ShaderStageFlags::FRAGMENT)
+            .code_type(vk::ShaderCodeTypeEXT::SPIRV)
+            .code(vertex_spv)
+            .name(c"main")
+            .push_constant_ranges(slice::from_ref(&push_range));
+        let fragment_info = vk::ShaderCreateInfoEXT::default()
+            .flags(flags)
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .code_type(vk::ShaderCodeTypeEXT::SPIRV)
+            .code(fragment_spv)
+            .name(c"main")
+            .push_constant_ranges(slice::from_ref(&push_range));
+        let infos = [vertex_info, fragment_info];
+        match unsafe { self.shader_object.create_shaders(&infos, None) } {
+            Ok(shaders) => Ok(ResinPipeline {
+                shader_object: self.shader_object.clone(),
+                shaders: vec![
+                    (vk::ShaderStageFlags::VERTEX, shaders[0]),
+                    (vk::ShaderStageFlags::FRAGMENT, shaders[1]),
+                ],
+                graphics: true,
+            }),
+            Err((shaders, err)) => {
+                for shader in shaders {
+                    if shader != vk::ShaderEXT::null() {
+                        unsafe { self.shader_object.destroy_shader(shader, None) };
+                    }
+                }
+                Err(vk_status(err))
+            }
+        }
+    }
+
+    pub fn create_image(&self, width: u32, height: u32) -> Result<ResinImage, ResinStatus> {
+        if width == 0 || height == 0 {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let (image, view, memory) = self.create_color_image(
+            width,
+            height,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+        )?;
+        Ok(ResinImage {
+            device: self.device.clone(),
+            image,
+            view,
+            memory,
+            width,
+            height,
+            layout: vk::ImageLayout::UNDEFINED,
+        })
+    }
+
+    fn create_color_image(
+        &self,
+        width: u32,
+        height: u32,
+        samples: vk::SampleCountFlags,
+        usage: vk::ImageUsageFlags,
+    ) -> Result<(vk::Image, vk::ImageView, vk::DeviceMemory), ResinStatus> {
+        let image_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .extent(vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(samples)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        let image = unsafe { self.device.create_image(&image_info, None) }.map_err(vk_status)?;
+
+        let mut dedicated = vk::MemoryDedicatedRequirements::default();
+        let mut requirements2 = vk::MemoryRequirements2::default().push_next(&mut dedicated);
+        let req_info = vk::ImageMemoryRequirementsInfo2::default().image(image);
+        unsafe {
+            self.device
+                .get_image_memory_requirements2(&req_info, &mut requirements2);
+        }
+        let requirements = requirements2.memory_requirements;
+        let request = MemoryRequest {
+            required: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            preferred: vk::MemoryPropertyFlags::empty(),
+            avoid: vk::MemoryPropertyFlags::HOST_VISIBLE,
+            host_visible: false,
+        };
+        let mut candidates = memory_type_indices(
+            &self.memory_properties,
+            requirements.memory_type_bits,
+            request,
+        );
+        if candidates.is_empty() {
+            unsafe { self.device.destroy_image(image, None) };
+            return Err(ResinStatus::Unsupported);
+        }
+
+        let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
+        let mut priority = vk::MemoryPriorityAllocateInfoEXT::default().priority(1.0);
+        let use_dedicated = dedicated.requires_dedicated_allocation == vk::TRUE
+            || dedicated.prefers_dedicated_allocation == vk::TRUE;
+
+        let mut allocated = None;
+        let mut last_err = ResinStatus::OutOfMemory;
+        for memory_type_index in candidates.drain(..) {
+            let mut alloc_info = vk::MemoryAllocateInfo::default()
+                .allocation_size(requirements.size)
+                .memory_type_index(memory_type_index);
+            if use_dedicated {
+                alloc_info = alloc_info.push_next(&mut dedicated_info);
+            }
+            if self.memory_priority {
+                alloc_info = alloc_info.push_next(&mut priority);
+            }
+            match unsafe { self.device.allocate_memory(&alloc_info, None) } {
+                Ok(mem) => {
+                    allocated = Some(mem);
+                    break;
+                }
+                Err(err) => {
+                    last_err = vk_status(err);
+                    if last_err != ResinStatus::OutOfMemory {
+                        unsafe { self.device.destroy_image(image, None) };
+                        return Err(last_err);
+                    }
+                }
+            }
+        }
+        let Some(device_memory) = allocated else {
+            unsafe { self.device.destroy_image(image, None) };
+            return Err(last_err);
+        };
+
+        let bind = vk::BindImageMemoryInfo::default()
+            .image(image)
+            .memory(device_memory)
+            .memory_offset(0);
+        if let Err(err) = unsafe { self.device.bind_image_memory2(slice::from_ref(&bind)) } {
+            unsafe {
+                self.device.free_memory(device_memory, None);
+                self.device.destroy_image(image, None);
+            }
+            return Err(vk_status(err));
+        }
+
+        let view_info = vk::ImageViewCreateInfo::default()
+            .image(image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .level_count(1)
+                    .layer_count(1),
+            );
+        let view = match unsafe { self.device.create_image_view(&view_info, None) } {
+            Ok(view) => view,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_image(image, None);
+                    self.device.free_memory(device_memory, None);
+                }
+                return Err(vk_status(err));
+            }
+        };
+        Ok((image, view, device_memory))
+    }
+
+    pub fn start_command_recording(&self) -> Result<ResinCommandBuffer, ResinStatus> {
+        let alloc_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(self.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        let allocated =
+            unsafe { self.device.allocate_command_buffers(&alloc_info) }.map_err(vk_status)?;
+        let handle = allocated[0];
+        let begin_info = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        if let Err(err) = unsafe { self.device.begin_command_buffer(handle, &begin_info) } {
+            unsafe {
+                self.device
+                    .free_command_buffers(self.command_pool, &[handle])
+            };
+            return Err(vk_status(err));
+        }
+        Ok(ResinCommandBuffer {
+            device: self.device.clone(),
+            shader_object: self.shader_object.clone(),
+            maintenance6: self.maintenance6.clone(),
+            pool: self.command_pool,
+            handle,
+            shader_bound: false,
+            graphics: false,
+            rendering: false,
+            recording: true,
+            dispatched: false,
+            submitted: false,
+        })
+    }
+
+    pub fn submit(&self, mut command_buffer: ResinCommandBuffer) -> Result<(), ResinStatus> {
+        if command_buffer.rendering {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        if command_buffer.recording {
+            let barrier = vk::MemoryBarrier2::default()
+                .src_stage_mask(
+                    vk::PipelineStageFlags2::COMPUTE_SHADER
+                        | vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
+                        | vk::PipelineStageFlags2::COPY,
+                )
+                .src_access_mask(
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE
+                        | vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
+                        | vk::AccessFlags2::TRANSFER_WRITE,
+                )
+                .dst_stage_mask(vk::PipelineStageFlags2::HOST)
+                .dst_access_mask(vk::AccessFlags2::HOST_READ);
+            let dependency =
+                vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
+            unsafe {
+                self.device
+                    .cmd_pipeline_barrier2(command_buffer.handle, &dependency);
+            }
+            unsafe { self.device.end_command_buffer(command_buffer.handle) }.map_err(vk_status)?;
+            command_buffer.recording = false;
+        }
+
+        let value = self.timeline_value.fetch_add(1, Ordering::Relaxed) + 1;
+        let command_info =
+            vk::CommandBufferSubmitInfo::default().command_buffer(command_buffer.handle);
+        let signal = vk::SemaphoreSubmitInfo::default()
+            .semaphore(self.timeline)
+            .value(value)
+            .stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS);
+        let submit = vk::SubmitInfo2::default()
+            .command_buffer_infos(slice::from_ref(&command_info))
+            .signal_semaphore_infos(slice::from_ref(&signal));
+        if let Err(err) = unsafe {
+            self.device
+                .queue_submit2(self.queue, slice::from_ref(&submit), vk::Fence::null())
+        } {
+            drop(command_buffer);
+            return Err(vk_status(err));
+        }
+        command_buffer.submitted = true;
+
+        let wait = vk::SemaphoreWaitInfo::default()
+            .semaphores(slice::from_ref(&self.timeline))
+            .values(slice::from_ref(&value));
+        match unsafe { self.device.wait_semaphores(&wait, u64::MAX) } {
+            Ok(()) => {
+                command_buffer.submitted = false;
+                drop(command_buffer);
+                Ok(())
+            }
+            Err(err) => {
+                drop(command_buffer);
+                Err(vk_status(err))
+            }
+        }
+    }
+}
+
+impl ResinAllocation {
+    pub fn host_pointer(&self) -> *mut u8 {
+        self.host
+    }
+
+    pub fn host_bytes(&self) -> Option<&[u8]> {
+        if self.host.is_null() {
+            None
+        } else {
+            Some(unsafe { slice::from_raw_parts(self.host, self.size) })
+        }
+    }
+
+    pub fn device_pointer(&self) -> u64 {
+        self.device_address
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+}
+
+impl ResinImage {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+
+impl ResinCommandBuffer {
+    pub fn set_pipeline(&mut self, pipeline: &ResinPipeline) -> Result<(), ResinStatus> {
+        if !self.recording {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        if pipeline.graphics {
+            let stages = [
+                vk::ShaderStageFlags::COMPUTE,
+                vk::ShaderStageFlags::VERTEX,
+                vk::ShaderStageFlags::FRAGMENT,
+            ];
+            let shaders = [
+                vk::ShaderEXT::null(),
+                pipeline.shaders[0].1,
+                pipeline.shaders[1].1,
+            ];
+            unsafe {
+                self.shader_object
+                    .cmd_bind_shaders(self.handle, &stages, &shaders);
+            }
+            self.graphics = true;
+        } else {
+            if self.rendering {
+                return Err(ResinStatus::InvalidArgument);
+            }
+            let stages = [
+                vk::ShaderStageFlags::VERTEX,
+                vk::ShaderStageFlags::FRAGMENT,
+                vk::ShaderStageFlags::COMPUTE,
+            ];
+            let shaders = [
+                vk::ShaderEXT::null(),
+                vk::ShaderEXT::null(),
+                pipeline.shaders[0].1,
+            ];
+            unsafe {
+                self.shader_object
+                    .cmd_bind_shaders(self.handle, &stages, &shaders);
+            }
+            self.graphics = false;
+        }
+        self.shader_bound = true;
+        Ok(())
+    }
+
+    pub fn begin_rendering(
+        &mut self,
+        image: &mut ResinImage,
+        clear: [f32; 4],
+    ) -> Result<(), ResinStatus> {
+        if !self.recording || self.rendering {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let (src_stage, src_access) = match image.layout {
+            vk::ImageLayout::UNDEFINED => (vk::PipelineStageFlags2::NONE, vk::AccessFlags2::NONE),
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (
+                vk::PipelineStageFlags2::COPY,
+                vk::AccessFlags2::TRANSFER_READ,
+            ),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            ),
+            _ => (
+                vk::PipelineStageFlags2::ALL_COMMANDS,
+                vk::AccessFlags2::MEMORY_WRITE,
+            ),
+        };
+        cmd_image_barrier(
+            &self.device,
+            self.handle,
+            image.image,
+            image.layout,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            src_stage,
+            src_access,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        );
+        image.layout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
+
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue { float32: clear },
+        };
+        let attachment = vk::RenderingAttachmentInfo::default()
+            .image_view(image.view)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(clear_value);
+        let rendering = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D {
+                    width: image.width,
+                    height: image.height,
+                },
+            })
+            .layer_count(1)
+            .color_attachments(slice::from_ref(&attachment));
+        unsafe {
+            self.device.cmd_begin_rendering(self.handle, &rendering);
+        }
+        bind_graphics_state(&self.shader_object, self.handle, image.width, image.height);
+        self.rendering = true;
+        Ok(())
+    }
+
+    pub fn end_rendering(&mut self) -> Result<(), ResinStatus> {
+        if !self.recording || !self.rendering {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        unsafe {
+            self.device.cmd_end_rendering(self.handle);
+        }
+        self.rendering = false;
+        Ok(())
+    }
+
+    pub fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
+        if !self.recording || !self.shader_bound || !self.graphics || !self.rendering {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        if vertex_count == 0 {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let constants = root_data.to_ne_bytes();
+        let push = vk::PushConstantsInfoKHR::default()
+            .layout(vk::PipelineLayout::null())
+            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+            .values(&constants);
+        unsafe {
+            self.maintenance6.cmd_push_constants2(self.handle, &push);
+            self.device.cmd_draw(self.handle, vertex_count, 1, 0, 0);
+        }
+        Ok(())
+    }
+
+    pub fn copy_image_to_buffer(
+        &mut self,
+        image: &mut ResinImage,
+        dst: &ResinAllocation,
+    ) -> Result<(), ResinStatus> {
+        if !self.recording || self.rendering {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let bytes = (image.width as usize)
+            .checked_mul(image.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(ResinStatus::InvalidArgument)?;
+        if dst.size < bytes {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        cmd_image_barrier(
+            &self.device,
+            self.handle,
+            image.image,
+            image.layout,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::COPY,
+            vk::AccessFlags2::TRANSFER_READ,
+        );
+        image.layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+        let region = vk::BufferImageCopy::default()
+            .buffer_offset(dst.buffer_offset)
+            .image_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1),
+            )
+            .image_extent(vk::Extent3D {
+                width: image.width,
+                height: image.height,
+                depth: 1,
+            });
+        unsafe {
+            self.device.cmd_copy_image_to_buffer(
+                self.handle,
+                image.image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst.buffer,
+                slice::from_ref(&region),
+            );
+        }
+        Ok(())
+    }
+
+    pub fn dispatch(
+        &mut self,
+        root_data: u64,
+        group_count_x: u32,
+        group_count_y: u32,
+        group_count_z: u32,
+    ) -> Result<(), ResinStatus> {
+        if !self.recording || !self.shader_bound || self.graphics || self.rendering {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        if self.dispatched {
+            let barrier = vk::MemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                .dst_access_mask(
+                    vk::AccessFlags2::SHADER_STORAGE_READ | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                );
+            let dependency =
+                vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
+            unsafe {
+                self.device.cmd_pipeline_barrier2(self.handle, &dependency);
+            }
+        }
+        let constants = root_data.to_ne_bytes();
+        let push = vk::PushConstantsInfoKHR::default()
+            .layout(vk::PipelineLayout::null())
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .values(&constants);
+        unsafe {
+            self.maintenance6.cmd_push_constants2(self.handle, &push);
+            self.device
+                .cmd_dispatch(self.handle, group_count_x, group_count_y, group_count_z);
+        }
+        self.dispatched = true;
+        Ok(())
+    }
+}
+
+impl Drop for ResinGpu {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = self.device.device_wait_idle();
+            for heap in &mut self.heaps {
+                heap.clear();
+            }
+            self.device.destroy_command_pool(self.command_pool, None);
+            self.device.destroy_semaphore(self.timeline, None);
+            self.device.destroy_device(None);
+            self.instance.destroy_instance(None);
+        }
+    }
+}
+
+impl Drop for HeapBlock {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.host.is_null() {
+                let _ = unmap_memory(&self.map_memory2, self.memory);
+                self.host = ptr::null_mut();
+            }
+            self.device.destroy_buffer(self.buffer, None);
+            self.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+impl Drop for ResinPipeline {
+    fn drop(&mut self) {
+        unsafe {
+            for (_, shader) in &self.shaders {
+                if *shader != vk::ShaderEXT::null() {
+                    self.shader_object.destroy_shader(*shader, None);
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ResinImage {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_image_view(self.view, None);
+            self.device.destroy_image(self.image, None);
+            self.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+impl Drop for ResinCommandBuffer {
+    fn drop(&mut self) {
+        if self.handle == vk::CommandBuffer::null() {
+            return;
+        }
+        if self.submitted && unsafe { self.device.device_wait_idle() }.is_err() {
+            self.handle = vk::CommandBuffer::null();
+            return;
+        }
+        unsafe {
+            self.device
+                .free_command_buffers(self.pool, slice::from_ref(&self.handle));
+        }
+        self.handle = vk::CommandBuffer::null();
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MemoryRequest {
+    required: vk::MemoryPropertyFlags,
+    preferred: vk::MemoryPropertyFlags,
+    avoid: vk::MemoryPropertyFlags,
+    host_visible: bool,
+}
+
+fn memory_request(memory: ResinMemory) -> MemoryRequest {
+    match memory {
+        ResinMemory::Default => MemoryRequest {
+            required: vk::MemoryPropertyFlags::HOST_VISIBLE
+                | vk::MemoryPropertyFlags::HOST_COHERENT,
+            preferred: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            avoid: vk::MemoryPropertyFlags::empty(),
+            host_visible: true,
+        },
+        ResinMemory::Gpu => MemoryRequest {
+            required: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            preferred: vk::MemoryPropertyFlags::empty(),
+            avoid: vk::MemoryPropertyFlags::HOST_VISIBLE,
+            host_visible: false,
+        },
+        ResinMemory::Readback => MemoryRequest {
+            required: vk::MemoryPropertyFlags::HOST_VISIBLE
+                | vk::MemoryPropertyFlags::HOST_COHERENT,
+            preferred: vk::MemoryPropertyFlags::HOST_CACHED,
+            avoid: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            host_visible: true,
+        },
+    }
+}
+
+fn memory_type_indices(
+    properties: &vk::PhysicalDeviceMemoryProperties,
+    type_bits: u32,
+    request: MemoryRequest,
+) -> Vec<u32> {
+    let mut scored = Vec::new();
+    for index in 0..properties.memory_type_count {
+        if type_bits & (1 << index) == 0 {
+            continue;
+        }
+        let flags = properties.memory_types[index as usize].property_flags;
+        if !flags.contains(request.required) {
+            continue;
+        }
+        let mut score = 0u32;
+        if !request.preferred.is_empty() && flags.contains(request.preferred) {
+            score += 2;
+        }
+        if request.avoid.is_empty() || !flags.intersects(request.avoid) {
+            score += 1;
+        }
+        scored.push((score, index));
+    }
+    scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    scored.into_iter().map(|(_, index)| index).collect()
+}
+
+fn validate_spirv(bytes: &[u8]) -> Result<(), ResinStatus> {
+    if bytes.len() < 4 || !bytes.len().is_multiple_of(4) {
+        return Err(ResinStatus::InvalidArgument);
+    }
+    let Some(magic_bytes) = bytes.first_chunk::<4>() else {
+        return Err(ResinStatus::InvalidArgument);
+    };
+    if u32::from_le_bytes(*magic_bytes) != SPIRV_MAGIC {
+        return Err(ResinStatus::InvalidArgument);
+    }
+    Ok(())
+}
+
+fn try_suballocate(
+    block: &mut HeapBlock,
+    block_index: usize,
+    memory: ResinMemory,
+    bytes: usize,
+    alignment: usize,
+) -> Option<ResinAllocation> {
+    let range = block.ranges.allocate(bytes as u64, alignment as u64).ok()?;
+    let offset = range.start - block.device_address;
+    let host = if block.host.is_null() {
+        ptr::null_mut()
+    } else {
+        unsafe { block.host.add(offset as usize) }
+    };
+    Some(ResinAllocation {
+        memory,
+        block: block_index,
+        range: range.clone(),
+        host,
+        device_address: range.start,
+        size: bytes,
+        buffer: block.buffer,
+        buffer_offset: offset,
+    })
+}
+
+fn heap_index(memory: ResinMemory) -> usize {
+    match memory {
+        ResinMemory::Default => 0,
+        ResinMemory::Gpu => 1,
+        ResinMemory::Readback => 2,
+    }
+}
+
+fn map_memory(
+    loader: &khr::map_memory2::Device,
+    memory: vk::DeviceMemory,
+) -> Result<*mut std::ffi::c_void, vk::Result> {
+    let info = vk::MemoryMapInfoKHR::default()
+        .memory(memory)
+        .offset(0)
+        .size(vk::WHOLE_SIZE);
+    let mut data = ptr::null_mut();
+    let result = unsafe { (loader.fp().map_memory2_khr)(loader.device(), &info, &mut data) };
+    result.result_with_success(data)
+}
+
+fn unmap_memory(
+    loader: &khr::map_memory2::Device,
+    memory: vk::DeviceMemory,
+) -> Result<(), vk::Result> {
+    let info = vk::MemoryUnmapInfoKHR::default().memory(memory);
+    unsafe { (loader.fp().unmap_memory2_khr)(loader.device(), &info) }.result()
+}
+
+fn bind_graphics_state(
+    shader_object: &ext::shader_object::Device,
+    cmd: vk::CommandBuffer,
+    width: u32,
+    height: u32,
+) {
+    let viewport = vk::Viewport {
+        x: 0.0,
+        y: 0.0,
+        width: width as f32,
+        height: height as f32,
+        min_depth: 0.0,
+        max_depth: 1.0,
+    };
+    let scissor = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: vk::Extent2D { width, height },
+    };
+    let sample_mask = [vk::SampleMask::MAX];
+    let blend_enable = [vk::FALSE];
+    let blend_eq = [vk::ColorBlendEquationEXT::default()
+        .src_color_blend_factor(vk::BlendFactor::ONE)
+        .dst_color_blend_factor(vk::BlendFactor::ZERO)
+        .color_blend_op(vk::BlendOp::ADD)
+        .src_alpha_blend_factor(vk::BlendFactor::ONE)
+        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+        .alpha_blend_op(vk::BlendOp::ADD)];
+    let write_mask = [vk::ColorComponentFlags::R
+        | vk::ColorComponentFlags::G
+        | vk::ColorComponentFlags::B
+        | vk::ColorComponentFlags::A];
+    unsafe {
+        shader_object.cmd_set_vertex_input(cmd, &[], &[]);
+        shader_object.cmd_set_primitive_topology(cmd, vk::PrimitiveTopology::TRIANGLE_LIST);
+        shader_object.cmd_set_primitive_restart_enable(cmd, false);
+        shader_object.cmd_set_rasterizer_discard_enable(cmd, false);
+        shader_object.cmd_set_cull_mode(cmd, vk::CullModeFlags::NONE);
+        shader_object.cmd_set_front_face(cmd, vk::FrontFace::COUNTER_CLOCKWISE);
+        shader_object.cmd_set_polygon_mode(cmd, vk::PolygonMode::FILL);
+        shader_object.cmd_set_depth_test_enable(cmd, false);
+        shader_object.cmd_set_depth_write_enable(cmd, false);
+        shader_object.cmd_set_depth_compare_op(cmd, vk::CompareOp::ALWAYS);
+        shader_object.cmd_set_depth_bounds_test_enable(cmd, false);
+        shader_object.cmd_set_depth_bias_enable(cmd, false);
+        shader_object.cmd_set_stencil_test_enable(cmd, false);
+        shader_object.cmd_set_logic_op_enable(cmd, false);
+        shader_object.cmd_set_rasterization_samples(cmd, vk::SampleCountFlags::TYPE_1);
+        shader_object.cmd_set_sample_mask(cmd, vk::SampleCountFlags::TYPE_1, &sample_mask);
+        shader_object.cmd_set_alpha_to_coverage_enable(cmd, false);
+        shader_object.cmd_set_color_blend_enable(cmd, 0, &blend_enable);
+        shader_object.cmd_set_color_blend_equation(cmd, 0, &blend_eq);
+        shader_object.cmd_set_color_write_mask(cmd, 0, &write_mask);
+        shader_object.cmd_set_viewport_with_count(cmd, slice::from_ref(&viewport));
+        shader_object.cmd_set_scissor_with_count(cmd, slice::from_ref(&scissor));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_image_barrier(
+    device: &Device,
+    cmd: vk::CommandBuffer,
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+    src_stage: vk::PipelineStageFlags2,
+    src_access: vk::AccessFlags2,
+    dst_stage: vk::PipelineStageFlags2,
+    dst_access: vk::AccessFlags2,
+) {
+    let barrier = vk::ImageMemoryBarrier2::default()
+        .src_stage_mask(src_stage)
+        .src_access_mask(src_access)
+        .dst_stage_mask(dst_stage)
+        .dst_access_mask(dst_access)
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .image(image)
+        .subresource_range(
+            vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .level_count(1)
+                .layer_count(1),
+        );
+    let dependency = vk::DependencyInfo::default().image_memory_barriers(slice::from_ref(&barrier));
+    unsafe {
+        device.cmd_pipeline_barrier2(cmd, &dependency);
+    }
+}
+
+fn destroy_partial(
+    device: &Device,
+    instance: &Instance,
+    command_pool: vk::CommandPool,
+    timeline: vk::Semaphore,
+) {
+    unsafe {
+        if command_pool != vk::CommandPool::null() {
+            device.destroy_command_pool(command_pool, None);
+        }
+        if timeline != vk::Semaphore::null() {
+            device.destroy_semaphore(timeline, None);
+        }
+        device.destroy_device(None);
+        instance.destroy_instance(None);
+    }
+}
+
+pub(crate) fn vk_status(err: vk::Result) -> ResinStatus {
+    match err {
+        vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+            ResinStatus::OutOfMemory
+        }
+        vk::Result::ERROR_INITIALIZATION_FAILED
+        | vk::Result::ERROR_INCOMPATIBLE_DRIVER
+        | vk::Result::ERROR_LAYER_NOT_PRESENT => ResinStatus::VulkanUnavailable,
+        vk::Result::ERROR_FEATURE_NOT_PRESENT | vk::Result::ERROR_EXTENSION_NOT_PRESENT => {
+            ResinStatus::Unsupported
+        }
+        _ => ResinStatus::VulkanError,
+    }
+}
