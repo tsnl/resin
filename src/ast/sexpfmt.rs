@@ -37,13 +37,14 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             stmt.span,
             vec![symbol(name.val.as_ref()), sexp_typespec(ann)],
         ),
+        StmtKind::Expr { term } => list_sp("expr", stmt.span, vec![sexp_term(term)]),
     }
 }
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
-        TermKind::Var(v) => symbol(v.val.as_ref()),
-        TermKind::Num(n) => symbol(n.as_ref()),
+        TermKind::Var { name } => symbol(name.val.as_ref()),
+        TermKind::Num { value } => symbol(value.as_ref()),
         TermKind::Lambda { params, body } => {
             let param_sexps: Vec<SExp> = params
                 .iter()
@@ -62,10 +63,10 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(cond), sexp_term(then), sexp_term(els)],
         ),
-        TermKind::Array(elems) => {
+        TermKind::Array { elems } => {
             list_sp("array", term.span, elems.iter().map(sexp_term).collect())
         }
-        TermKind::Record(fields) => list_sp(
+        TermKind::Record { fields } => list_sp(
             "record",
             term.span,
             fields
@@ -84,13 +85,24 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(func), group(args.iter().map(sexp_term).collect())],
         ),
-        TermKind::Type(ty) => sexp_typespec(ty),
+        TermKind::Assign { place, value } => list_sp(
+            "assign",
+            term.span,
+            vec![sexp_term(place), sexp_term(value)],
+        ),
+        TermKind::Deref { pointer } => list_sp("deref", term.span, vec![sexp_term(pointer)]),
+        TermKind::Field { base, name } => list_sp(
+            "field",
+            term.span,
+            vec![sexp_term(base), symbol(name.val.as_ref())],
+        ),
+        TermKind::Type { ty } => sexp_typespec(ty),
     }
 }
 
 fn sexp_typespec(ts: &Type) -> SExp {
     match &ts.val {
-        TypeKind::Atom(name) => symbol(name.val.as_ref()),
+        TypeKind::Atom { name } => symbol(name.val.as_ref()),
         TypeKind::App { head, arg } => list_sp(
             "type-app",
             ts.span,
@@ -101,7 +113,7 @@ fn sexp_typespec(ts: &Type) -> SExp {
             ts.span,
             vec![sexp_typespec(from), sexp_typespec(to)],
         ),
-        TypeKind::Record(fields) => list_sp(
+        TypeKind::Record { fields } => list_sp(
             "record-type",
             ts.span,
             fields

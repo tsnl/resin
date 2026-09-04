@@ -36,10 +36,13 @@ impl<'a> AstGen<'a> {
         if let Some(define) = node.child_by_field_name("define") {
             return self.gen_define(define, self.span(node));
         }
-        let declare = node.child_by_field_name("declare").unwrap();
-        let name = self.ident(declare.child_by_field_name("name").unwrap());
-        let ann = self.gen_type(declare.child_by_field_name("ann").unwrap());
-        Spanned::new(StmtKind::Declare { name, ann }, self.span(node))
+        if let Some(declare) = node.child_by_field_name("declare") {
+            let name = self.ident(declare.child_by_field_name("name").unwrap());
+            let ann = self.gen_type(declare.child_by_field_name("ann").unwrap());
+            return Spanned::new(StmtKind::Declare { name, ann }, self.span(node));
+        }
+        let expr = self.gen_term(node.child_by_field_name("expr").unwrap());
+        Spanned::new(StmtKind::Expr { term: expr }, self.span(node))
     }
 
     fn gen_define(&self, node: Node, span: Span) -> Stmt {
@@ -68,6 +71,22 @@ impl<'a> AstGen<'a> {
 
     fn gen_term(&self, node: Node) -> Term {
         assert_eq!(node.kind(), "term");
+        self.gen_assignment_term(node.child(0).unwrap())
+    }
+
+    fn gen_assignment_term(&self, node: Node) -> Term {
+        assert_eq!(node.kind(), "assignment_term");
+        if let Some(value) = node.child_by_field_name("value") {
+            let place = self.gen_binary_term(node.child_by_field_name("place").unwrap());
+            let value = self.gen_assignment_term(value);
+            return Spanned::new(
+                TermKind::Assign {
+                    place: Box::new(place),
+                    value: Box::new(value),
+                },
+                self.span(node),
+            );
+        }
         self.gen_binary_term(node.child(0).unwrap())
     }
 
@@ -99,9 +118,18 @@ impl<'a> AstGen<'a> {
         for child in node.children_by_field_name("suffix", &mut cursor) {
             match child.kind() {
                 "field_access" => {
-                    let name = self.text(child.child_by_field_name("name").unwrap());
-                    let field_op = format!(".{name}");
-                    base = self.call_var(&field_op, vec![base], self.span(child));
+                    let name = self.ident(child.child_by_field_name("name").unwrap());
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::Field {
+                            base: Box::new(base),
+                            name,
+                        },
+                        span,
+                    );
                 }
                 "closed_term" => {
                     let arg = self.gen_closed_term(child);
@@ -111,6 +139,18 @@ impl<'a> AstGen<'a> {
                             args: vec![arg],
                         },
                         self.span(node),
+                    );
+                }
+                "pointer_deref" => {
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::Deref {
+                            pointer: Box::new(base),
+                        },
+                        span,
                     );
                 }
                 _ => unreachable!("unexpected suffix: {}", child.kind()),
@@ -125,12 +165,22 @@ impl<'a> AstGen<'a> {
         let span = self.span(node);
         match child.kind() {
             "closed_term" => self.gen_closed_term(child),
-            "lid" => Spanned::new(TermKind::Var(self.ident(child)), span),
-            "number" => Spanned::new(TermKind::Num(self.text(child).into()), span),
+            "lid" => Spanned::new(
+                TermKind::Var {
+                    name: self.ident(child),
+                },
+                span,
+            ),
+            "number" => Spanned::new(
+                TermKind::Num {
+                    value: self.text(child).into(),
+                },
+                span,
+            ),
             "if_term" => self.gen_if_term(child),
             "unary_type" => {
                 let ty = self.gen_unary_type(child);
-                Spanned::new(TermKind::Type(ty), span)
+                Spanned::new(TermKind::Type { ty }, span)
             }
             _ => unreachable!("unexpected primary: {}", child.kind()),
         }
@@ -186,13 +236,13 @@ impl<'a> AstGen<'a> {
                 (name, val)
             })
             .collect();
-        Spanned::new(TermKind::Record(fields), span)
+        Spanned::new(TermKind::Record { fields }, span)
     }
 
     fn gen_array_term(&self, node: Node) -> Term {
         assert_eq!(node.kind(), "array_term");
         let elems = self.field_children_terms(node, "elems");
-        Spanned::new(TermKind::Array(elems), self.span(node))
+        Spanned::new(TermKind::Array { elems }, self.span(node))
     }
 
     fn gen_record_term(&self, node: Node) -> Term {
@@ -206,7 +256,7 @@ impl<'a> AstGen<'a> {
             let init = self.gen_term(term_def.child_by_field_name("init").unwrap());
             fields.push((name, init));
         }
-        Spanned::new(TermKind::Record(fields), self.span(node))
+        Spanned::new(TermKind::Record { fields }, self.span(node))
     }
 
     fn gen_chain_term(&self, node: Node) -> Term {
@@ -275,7 +325,7 @@ impl<'a> AstGen<'a> {
                 "closed_term" => self.gen_closed_term(arg_node),
                 "closed_type" => {
                     let ty = self.gen_closed_type(arg_node);
-                    Spanned::new(TermKind::Type(ty), self.span(arg_node))
+                    Spanned::new(TermKind::Type { ty }, self.span(arg_node))
                 }
                 _ => unreachable!("unexpected type arg: {}", arg_node.kind()),
             };
@@ -294,8 +344,18 @@ impl<'a> AstGen<'a> {
         assert_eq!(node.kind(), "primary_type");
         let child = node.child(0).unwrap();
         match child.kind() {
-            "uid" => Spanned::new(TypeKind::Atom(self.ident(child)), self.span(node)),
-            "builtin_type" => Spanned::new(TypeKind::Atom(self.ident(child)), self.span(node)),
+            "uid" => Spanned::new(
+                TypeKind::Atom {
+                    name: self.ident(child),
+                },
+                self.span(node),
+            ),
+            "builtin_type" => Spanned::new(
+                TypeKind::Atom {
+                    name: self.ident(child),
+                },
+                self.span(node),
+            ),
             "closed_type" => self.gen_closed_type(child),
             _ => unreachable!("unexpected primary_type: {}", child.kind()),
         }
@@ -319,7 +379,7 @@ impl<'a> AstGen<'a> {
             let (name, ann) = self.gen_declare(f);
             fields.push((name, ann));
         }
-        Spanned::new(TypeKind::Record(fields), self.span(node))
+        Spanned::new(TypeKind::Record { fields }, self.span(node))
     }
 
     //
@@ -343,7 +403,12 @@ impl<'a> AstGen<'a> {
     }
 
     fn call_var(&self, op_text: &str, args: Vec<Term>, span: Span) -> Term {
-        let func = Spanned::new(TermKind::Var(Spanned::new(op_text.into(), span)), span);
+        let func = Spanned::new(
+            TermKind::Var {
+                name: Spanned::new(op_text.into(), span),
+            },
+            span,
+        );
         Spanned::new(
             TermKind::Call {
                 func: Box::new(func),

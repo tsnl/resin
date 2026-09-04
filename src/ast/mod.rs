@@ -24,10 +24,10 @@ pub type Type = Spanned<TypeKind>;
 
 #[derive(Debug, Clone)]
 pub enum TypeKind {
-    Atom(Ident),
+    Atom { name: Ident },
     App { head: Ident, arg: Box<Term> },
     Func { from: Box<Type>, to: Box<Type> },
-    Record(Vec<(Ident, Type)>),
+    Record { fields: Vec<(Ident, Type)> },
 }
 
 //
@@ -38,8 +38,12 @@ pub type Term = Spanned<TermKind>;
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
-    Var(Ident),
-    Num(Arc<str>),
+    Var {
+        name: Ident,
+    },
+    Num {
+        value: Arc<str>,
+    },
     Lambda {
         params: Vec<(Ident, Type)>,
         body: Box<Term>,
@@ -49,8 +53,12 @@ pub enum TermKind {
         then: Box<Term>,
         els: Box<Term>,
     },
-    Array(Vec<Term>),
-    Record(Vec<(Ident, Term)>),
+    Array {
+        elems: Vec<Term>,
+    },
+    Record {
+        fields: Vec<(Ident, Term)>,
+    },
     Block {
         stmts: Vec<Stmt>,
         tail: Box<Term>,
@@ -60,7 +68,20 @@ pub enum TermKind {
         func: Box<Term>,
         args: Vec<Term>,
     },
-    Type(Type),
+    Assign {
+        place: Box<Term>,
+        value: Box<Term>,
+    },
+    Deref {
+        pointer: Box<Term>,
+    },
+    Field {
+        base: Box<Term>,
+        name: Ident,
+    },
+    Type {
+        ty: Type,
+    },
 }
 
 //
@@ -75,6 +96,8 @@ pub enum StmtKind {
     Define { name: Ident, init: Term },
     /// `name: ann;`
     Declare { name: Ident, ann: Type },
+    /// `term;`
+    Expr { term: Term },
 }
 
 //
