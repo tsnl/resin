@@ -4,7 +4,10 @@
 
 use std::{collections::VecDeque, fmt};
 
-use super::{BlockId, Function, FunctionId, Instr, Module, RecordField, Terminator, Ty, Value};
+use super::{
+    BlockId, Function, FunctionId, GlobalId, Instr, Module, RecordField, Terminator, Ty, TypeId,
+    Value,
+};
 
 /// The height component of an instruction's stack effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,15 +62,38 @@ impl Terminator {
 /// The location at which IR verification failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyError {
-    pub function: FunctionId,
-    pub basic_block: BlockId,
-    pub instruction: Option<usize>,
+    pub location: VerifyLocation,
     pub kind: VerifyErrorKind,
+}
+
+/// The IR entity containing a verification error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyLocation {
+    TypeDefinition {
+        definition: TypeId,
+    },
+    Global {
+        global: GlobalId,
+    },
+    Function {
+        function: FunctionId,
+    },
+    BasicBlock {
+        function: FunctionId,
+        basic_block: BlockId,
+    },
+    Instruction {
+        function: FunctionId,
+        basic_block: BlockId,
+        instruction: usize,
+    },
 }
 
 /// A violation of the typed stack or control-flow invariants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidTypeDefinition { definition: usize },
+    RecursiveTypeWithoutIndirection { definition: TypeId },
     InvalidLocal { local: usize },
     InvalidGlobal { global: usize },
     InvalidNonLocal { nonlocal: usize },
@@ -90,14 +116,34 @@ pub enum VerifyErrorKind {
 
 impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "invalid IR in function {}, basic block {}",
-            self.function.index(),
-            self.basic_block.index()
-        )?;
-        if let Some(instruction) = self.instruction {
-            write!(f, ", instruction {instruction}")?;
+        write!(f, "invalid IR in ")?;
+        match self.location {
+            VerifyLocation::TypeDefinition { definition } => {
+                write!(f, "type definition {}", definition.index())?;
+            }
+            VerifyLocation::Global { global } => write!(f, "global {}", global.index())?,
+            VerifyLocation::Function { function } => {
+                write!(f, "function {}", function.index())?;
+            }
+            VerifyLocation::BasicBlock {
+                function,
+                basic_block,
+            } => write!(
+                f,
+                "function {}, basic block {}",
+                function.index(),
+                basic_block.index()
+            )?,
+            VerifyLocation::Instruction {
+                function,
+                basic_block,
+                instruction,
+            } => write!(
+                f,
+                "function {}, basic block {}, instruction {instruction}",
+                function.index(),
+                basic_block.index()
+            )?,
         }
         write!(f, ": {:?}", self.kind)
     }
@@ -110,6 +156,16 @@ impl std::error::Error for VerifyError {}
 /// The inferred entry stack for each basic block is kept only for the duration of
 /// verification. Multiple incoming edges must infer exactly the same types.
 pub fn verify(module: &Module) -> Result<(), VerifyError> {
+    verify_module_types(module)?;
+
+    for (index, global) in module.globals.iter().enumerate() {
+        validate_ty(
+            module,
+            &global.ty,
+            Location::global(GlobalId::from_index(index)),
+        )?;
+    }
+
     for (index, function) in module.functions.iter().enumerate() {
         verify_function(module, FunctionId::from_index(index), function)?;
     }
@@ -122,7 +178,17 @@ fn verify_function(
     function: &Function,
 ) -> Result<(), VerifyError> {
     let entry = function.entry;
-    let location = Location::terminator(function_id, entry);
+    let function_location = Location::function(function_id);
+
+    validate_ty(module, &function.result, function_location)?;
+    for local in &function.locals {
+        validate_ty(module, &local.ty, function_location)?;
+    }
+    for nonlocal in &function.nonlocals {
+        validate_ty(module, &nonlocal.ty, function_location)?;
+    }
+
+    let location = Location::basic_block(function_id, entry);
 
     if function.blocks.get(entry.index()).is_none() {
         return Err(location.error(VerifyErrorKind::InvalidBasicBlock {
@@ -153,7 +219,7 @@ fn verify_function(
             verify_instr(module, function, instr, &mut stack, location)?;
         }
 
-        let location = Location::terminator(function_id, basic_block_id);
+        let location = Location::basic_block(function_id, basic_block_id);
         match basic_block.terminator {
             Terminator::Break { target } => propagate(
                 function,
@@ -167,7 +233,13 @@ fn verify_function(
                 let condition = pop(&mut stack, 1, location)?
                     .pop()
                     .expect("one stack value was requested");
-                expect_type(Ty::Bool, condition, location)?;
+                let condition_shape = resolve_shape(module, condition.clone(), location)?;
+                if condition_shape != Ty::Bool {
+                    return Err(location.error(VerifyErrorKind::TypeMismatch {
+                        expected: Ty::Bool,
+                        found: condition,
+                    }));
+                }
                 propagate(
                     function,
                     then,
@@ -191,7 +263,7 @@ fn verify_function(
 
     if let Some(basic_block) = entries.iter().position(Option::is_none) {
         return Err(
-            Location::terminator(function_id, BlockId::from_index(basic_block))
+            Location::basic_block(function_id, BlockId::from_index(basic_block))
                 .error(VerifyErrorKind::UnreachableBasicBlock),
         );
     }
@@ -207,7 +279,7 @@ fn verify_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
-        Instr::Push { value } => stack.push(immediate_ty(value, location)?),
+        Instr::Push { value } => stack.push(immediate_ty(module, value, location)?),
         Instr::LocalAddress { local } => {
             let local = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
@@ -240,19 +312,20 @@ fn verify_instr(
         }
         Instr::AccessStatic { index } => {
             let source = pop_one(stack, location)?;
-            stack.push(project_static(source, *index, location)?);
+            stack.push(project_static(module, source, *index, location)?);
         }
         Instr::AccessDynamic => {
             let index = pop_one(stack, location)?;
-            if !index.is_integer() {
+            if !is_integer(module, &index, location)? {
                 return Err(location.error(VerifyErrorKind::ExpectedInteger { found: index }));
             }
             let source = pop_one(stack, location)?;
-            stack.push(project_dynamic(source, location)?);
+            stack.push(project_dynamic(module, source, location)?);
         }
         Instr::Load => {
             let address = pop_one(stack, location)?;
-            let Ty::Pointer { pointee } = address else {
+            let shape = resolve_shape(module, address.clone(), location)?;
+            let Ty::Pointer { pointee } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             stack.push(*pointee);
@@ -260,7 +333,8 @@ fn verify_instr(
         Instr::Store => {
             let value = pop_one(stack, location)?;
             let address = pop_one(stack, location)?;
-            let Ty::Pointer { pointee } = address else {
+            let shape = resolve_shape(module, address.clone(), location)?;
+            let Ty::Pointer { pointee } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             expect_type(*pointee, value.clone(), location)?;
@@ -281,6 +355,7 @@ fn verify_instr(
             });
         }
         Instr::MakeArray { elements, element } => {
+            validate_ty(module, element, location)?;
             let values = pop(stack, *elements, location)?;
             for value in values {
                 expect_type(element.clone(), value, location)?;
@@ -317,7 +392,8 @@ fn verify_instr(
         Instr::Call { args } => {
             let values = pop(stack, *args, location)?;
             let callee = pop_one(stack, location)?;
-            let Ty::Function { params, result } = callee else {
+            let shape = resolve_shape(module, callee.clone(), location)?;
+            let Ty::Function { params, result } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedFunction { found: callee }));
             };
             if *args != params.len() {
@@ -330,6 +406,10 @@ fn verify_instr(
             stack.push(*result);
         }
         Instr::CallBuiltin { params, result, .. } => {
+            for param in params {
+                validate_ty(module, param, location)?;
+            }
+            validate_ty(module, result, location)?;
             let values = pop(stack, params.len(), location)?;
             expect_types(params, &values, location)?;
             stack.push(result.clone());
@@ -338,7 +418,7 @@ fn verify_instr(
     Ok(())
 }
 
-fn immediate_ty(value: &Value, location: Location) -> Result<Ty, VerifyError> {
+fn immediate_ty(module: &Module, value: &Value, location: Location) -> Result<Ty, VerifyError> {
     let ty = match value {
         Value::Unit => Ty::Unit,
         Value::Bool { .. } => Ty::Bool,
@@ -353,8 +433,9 @@ fn immediate_ty(value: &Value, location: Location) -> Result<Ty, VerifyError> {
         Value::Float32 { .. } => Ty::Float32,
         Value::Float64 { .. } => Ty::Float64,
         Value::Array { value } => {
+            validate_ty(module, &value.element_ty, location)?;
             for element in &value.elements {
-                let found = immediate_ty(element, location)?;
+                let found = immediate_ty(module, element, location)?;
                 expect_type(value.element_ty.clone(), found, location)?;
             }
             Ty::Array {
@@ -367,7 +448,7 @@ fn immediate_ty(value: &Value, location: Location) -> Result<Ty, VerifyError> {
                 .fields
                 .iter()
                 .map(|field| {
-                    immediate_ty(&field.value, location).map(|ty| RecordField {
+                    immediate_ty(module, &field.value, location).map(|ty| RecordField {
                         name: field.name.clone(),
                         ty,
                     })
@@ -381,11 +462,22 @@ fn immediate_ty(value: &Value, location: Location) -> Result<Ty, VerifyError> {
     Ok(ty)
 }
 
-fn project_static(source: Ty, index: usize, location: Location) -> Result<Ty, VerifyError> {
+fn project_static(
+    module: &Module,
+    source: Ty,
+    index: usize,
+    location: Location,
+) -> Result<Ty, VerifyError> {
     match source {
         Ty::Pointer { pointee } => Ok(Ty::Pointer {
-            pointee: Box::new(project_static(*pointee, index, location)?),
+            pointee: Box::new(project_static(module, *pointee, index, location)?),
         }),
+        Ty::Defined { .. } => project_static(
+            module,
+            resolve_shape(module, source, location)?,
+            index,
+            location,
+        ),
         Ty::Record { fields } => fields
             .get(index)
             .map(|field| field.ty.clone())
@@ -406,15 +498,159 @@ fn project_static(source: Ty, index: usize, location: Location) -> Result<Ty, Ve
     }
 }
 
-fn project_dynamic(source: Ty, location: Location) -> Result<Ty, VerifyError> {
+fn project_dynamic(module: &Module, source: Ty, location: Location) -> Result<Ty, VerifyError> {
     match source {
-        Ty::Pointer { pointee } => match *pointee {
+        Ty::Pointer { pointee } => match resolve_shape(module, *pointee, location)? {
             Ty::Array { element, .. } => Ok(Ty::Pointer { pointee: element }),
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
         },
+        Ty::Defined { .. } => {
+            project_dynamic(module, resolve_shape(module, source, location)?, location)
+        }
         Ty::Array { element, .. } => Ok(*element),
         found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
     }
+}
+
+fn verify_module_types(module: &Module) -> Result<(), VerifyError> {
+    for (index, definition) in module.types.iter().enumerate() {
+        let definition_id = TypeId::from_index(index);
+        let location = Location::type_definition(definition_id);
+        validate_ty(module, &definition.body, location)?;
+
+        let mut active = vec![definition_id];
+        validate_finite_representation(module, &definition.body, &mut active, location)?;
+    }
+    Ok(())
+}
+
+/// Check that every nominal reference points into this module's type table.
+///
+/// This deliberately does not expand definitions: the finite Rust `Ty` tree is
+/// the result of evaluating a source type expression in a context where all of
+/// its enclosing nominal identities have already been reserved.
+fn validate_ty(module: &Module, ty: &Ty, location: Location) -> Result<(), VerifyError> {
+    match ty {
+        Ty::Defined { definition } => {
+            if module.types.get(definition.index()).is_none() {
+                return Err(location.error(VerifyErrorKind::InvalidTypeDefinition {
+                    definition: definition.index(),
+                }));
+            }
+        }
+        Ty::Pointer { pointee } => validate_ty(module, pointee, location)?,
+        Ty::Array { element, .. } => validate_ty(module, element, location)?,
+        Ty::Record { fields } => {
+            for field in fields {
+                validate_ty(module, &field.ty, location)?;
+            }
+        }
+        Ty::Function { params, result } => {
+            for param in params {
+                validate_ty(module, param, location)?;
+            }
+            validate_ty(module, result, location)?;
+        }
+        Ty::Unit
+        | Ty::Bool
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32
+        | Ty::UInt64
+        | Ty::Float32
+        | Ty::Float64 => {}
+    }
+    Ok(())
+}
+
+/// Reject nominal cycles whose representation contains itself inline.
+///
+/// Pointer and function values have a fixed-size representation independent of
+/// their referents/signatures, so they terminate the layout walk. Records and
+/// arrays contain their children inline and therefore do not.
+fn validate_finite_representation(
+    module: &Module,
+    ty: &Ty,
+    active: &mut Vec<TypeId>,
+    location: Location,
+) -> Result<(), VerifyError> {
+    match ty {
+        Ty::Defined { definition } => {
+            if active.contains(definition) {
+                return Err(
+                    location.error(VerifyErrorKind::RecursiveTypeWithoutIndirection {
+                        definition: *definition,
+                    }),
+                );
+            }
+            let body = &module
+                .types
+                .get(definition.index())
+                .ok_or_else(|| {
+                    location.error(VerifyErrorKind::InvalidTypeDefinition {
+                        definition: definition.index(),
+                    })
+                })?
+                .body;
+            active.push(*definition);
+            validate_finite_representation(module, body, active, location)?;
+            active.pop();
+        }
+        Ty::Array { element, .. } => {
+            validate_finite_representation(module, element, active, location)?;
+        }
+        Ty::Record { fields } => {
+            for field in fields {
+                validate_finite_representation(module, &field.ty, active, location)?;
+            }
+        }
+        Ty::Pointer { .. }
+        | Ty::Function { .. }
+        | Ty::Unit
+        | Ty::Bool
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32
+        | Ty::UInt64
+        | Ty::Float32
+        | Ty::Float64 => {}
+    }
+    Ok(())
+}
+
+fn resolve_shape(module: &Module, mut ty: Ty, location: Location) -> Result<Ty, VerifyError> {
+    let mut visited = Vec::new();
+    while let Ty::Defined { definition } = ty {
+        if visited.contains(&definition) {
+            return Err(
+                location.error(VerifyErrorKind::RecursiveTypeWithoutIndirection { definition })
+            );
+        }
+        visited.push(definition);
+        ty = module
+            .types
+            .get(definition.index())
+            .ok_or_else(|| {
+                location.error(VerifyErrorKind::InvalidTypeDefinition {
+                    definition: definition.index(),
+                })
+            })?
+            .body
+            .clone();
+    }
+    Ok(ty)
+}
+
+fn is_integer(module: &Module, ty: &Ty, location: Location) -> Result<bool, VerifyError> {
+    Ok(resolve_shape(module, ty.clone(), location)?.is_integer())
 }
 
 fn function_ty(function: &Function, location: Location) -> Result<Ty, VerifyError> {
@@ -516,34 +752,39 @@ fn propagate(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Location {
-    function: FunctionId,
-    basic_block: BlockId,
-    instruction: Option<usize>,
-}
+struct Location(VerifyLocation);
 
 impl Location {
-    const fn instruction(function: FunctionId, basic_block: BlockId, instruction: usize) -> Self {
-        Self {
-            function,
-            basic_block,
-            instruction: Some(instruction),
-        }
+    const fn type_definition(definition: TypeId) -> Self {
+        Self(VerifyLocation::TypeDefinition { definition })
     }
 
-    const fn terminator(function: FunctionId, basic_block: BlockId) -> Self {
-        Self {
+    const fn global(global: GlobalId) -> Self {
+        Self(VerifyLocation::Global { global })
+    }
+
+    const fn function(function: FunctionId) -> Self {
+        Self(VerifyLocation::Function { function })
+    }
+
+    const fn instruction(function: FunctionId, basic_block: BlockId, instruction: usize) -> Self {
+        Self(VerifyLocation::Instruction {
             function,
             basic_block,
-            instruction: None,
-        }
+            instruction,
+        })
+    }
+
+    const fn basic_block(function: FunctionId, basic_block: BlockId) -> Self {
+        Self(VerifyLocation::BasicBlock {
+            function,
+            basic_block,
+        })
     }
 
     fn error(self, kind: VerifyErrorKind) -> VerifyError {
         VerifyError {
-            function: self.function,
-            basic_block: self.basic_block,
-            instruction: self.instruction,
+            location: self.0,
             kind,
         }
     }
@@ -581,6 +822,7 @@ mod tests {
         };
 
         verify(&Module {
+            types: vec![],
             globals: vec![],
             functions: vec![function],
         })
@@ -629,6 +871,7 @@ mod tests {
         };
 
         let error = verify(&Module {
+            types: vec![],
             globals: vec![],
             functions: vec![function],
         })
@@ -683,6 +926,7 @@ mod tests {
         };
 
         verify(&Module {
+            types: vec![],
             globals: vec![],
             functions: vec![target, caller],
         })
@@ -727,6 +971,7 @@ mod tests {
         };
 
         verify(&Module {
+            types: vec![],
             globals: vec![],
             functions: vec![function],
         })

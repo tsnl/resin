@@ -32,6 +32,11 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             stmt.span,
             vec![symbol(name.val.as_ref()), sexp_term(init)],
         ),
+        StmtKind::DefineType { name, init } => list_sp(
+            "define-type",
+            stmt.span,
+            vec![symbol(name.val.as_ref()), sexp_typespec(init)],
+        ),
         StmtKind::Declare { name, ann } => list_sp(
             "declare",
             stmt.span,

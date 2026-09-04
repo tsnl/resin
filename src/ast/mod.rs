@@ -93,7 +93,16 @@ pub type Stmt = Spanned<StmtKind>;
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     /// `name = init;`
+    ///
+    /// The name is in scope while `init` is evaluated. An evaluator must reject
+    /// an eager recursive read of the binding, while delayed uses such as a
+    /// recursive function body are valid.
     Define { name: Ident, init: Term },
+    /// `Name = init;`
+    ///
+    /// Unlike a value declaration, this mints a fresh nominal type whose name
+    /// is in scope while `init` is evaluated.
+    DefineType { name: Ident, init: Type },
     /// `name: ann;`
     Declare { name: Ident, ann: Type },
     /// `term;`

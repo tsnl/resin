@@ -61,8 +61,8 @@ impl<'a> AstGen<'a> {
 
     fn gen_type_define(&self, node: Node, span: Span) -> Stmt {
         let name = self.ident(node.child_by_field_name("name").unwrap());
-        let ann = self.gen_type(node.child_by_field_name("init").unwrap());
-        Spanned::new(StmtKind::Declare { name, ann }, span)
+        let init = self.gen_type(node.child_by_field_name("init").unwrap());
+        Spanned::new(StmtKind::DefineType { name, init }, span)
     }
 
     //

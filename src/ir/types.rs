@@ -2,6 +2,25 @@
 
 use std::sync::Arc;
 
+use crate::util::define_id;
+
+define_id! {
+    /// A nominal type definition in the module type table.
+    pub struct TypeId(usize);
+}
+
+/// A nominal type and the representation computed from its defining RHS.
+///
+/// IR generation reserves the [`TypeId`] and installs its source name before
+/// evaluating `body`, which permits productive recursive definitions. The
+/// completed module is still required to have a finite representation: every
+/// representation cycle must cross an indirection such as [`Ty::Pointer`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeDef {
+    pub name: Arc<str>,
+    pub body: Ty,
+}
+
 /// A named field in a structural record type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordField {
@@ -27,10 +46,24 @@ pub enum Ty {
     UInt64,
     Float32,
     Float64,
-    Pointer { pointee: Box<Ty> },
-    Array { element: Box<Ty>, length: usize },
-    Record { fields: Vec<RecordField> },
-    Function { params: Vec<Ty>, result: Box<Ty> },
+    /// A reference to a module-level nominal type definition.
+    Defined {
+        definition: TypeId,
+    },
+    Pointer {
+        pointee: Box<Ty>,
+    },
+    Array {
+        element: Box<Ty>,
+        length: usize,
+    },
+    Record {
+        fields: Vec<RecordField>,
+    },
+    Function {
+        params: Vec<Ty>,
+        result: Box<Ty>,
+    },
 }
 
 impl Ty {
