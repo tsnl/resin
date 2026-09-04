@@ -1,0 +1,6 @@
+// Nominal wrap/unwrap, one layer at a time.
+Meters = int;
+Distance = Meters;
+to_meters = (n: int) => Meters (n);
+to_distance = (m: Meters) => Distance (m);
+to_int = (d: Distance) => int (Meters (d));

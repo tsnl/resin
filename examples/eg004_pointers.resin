@@ -1,0 +1,8 @@
+// Explicit deref, assignment, and field autoderef through Ptr.
+set = (p: Ptr (int)) => {
+    p.* := 1;
+    p.*
+};
+P = Ptr ({ x: int, y: int });
+get_x = (p: P) => p.x;
+set_x = (p: P, n: int) => { p.x := n; p.x };

@@ -1,0 +1,3 @@
+// Nested lambdas; the inner function captures x.
+add = (x: int) => (y: int) => { x + y };
+inc = (n: int) => { add(n)(1) };

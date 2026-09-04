@@ -1,0 +1,6 @@
+// Recursive nominal record; field access and pointer autoderef.
+List = { value: int, next: Ptr (List) };
+cons = (value: int) => (next: Ptr (List)) => List { value = value, next = next };
+car = (node: List) => node.value;
+cdr = (node: List) => node.next;
+at = (p: Ptr (List)) => p.value;

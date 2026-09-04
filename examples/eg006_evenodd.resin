@@ -1,0 +1,16 @@
+// Mutual recursion via a forward declaration.
+odd: (int) -> int;
+even = (n: int) => int {
+    if (n == 0) {
+        1
+    } else {
+        odd(n - 1)
+    }
+};
+odd := (n: int) => int {
+    if (n == 0) {
+        0
+    } else {
+        even(n - 1)
+    }
+};

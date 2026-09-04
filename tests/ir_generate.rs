@@ -26,6 +26,24 @@ fn compile_err(src: &str) -> GenerateErrorKind {
 }
 
 #[test]
+fn examples_generate_verified_ir() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let mut found = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("resin") {
+            continue;
+        }
+        found += 1;
+        let src = std::fs::read_to_string(&path).unwrap();
+        let module =
+            generate(&parse(&src)).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+    assert!(found >= 7, "expected throwaway examples in examples/");
+}
+
+#[test]
 fn fibonacci_generates_verified_ir() {
     let src = include_str!("../examples/eg001.resin");
     let module = compile(src);
