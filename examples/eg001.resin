@@ -1,0 +1,9 @@
+fibonacci = (n: int) => int {
+    if (n <= 1) {
+        n
+    } else {
+        f0 = fibonacci(n - 1);
+        f1 = fibonacci(n - 2);
+        f0 + f1
+    }
+};
