@@ -120,6 +120,21 @@ impl Generator {
                 self.emit(Instr::Push { value: Value::Unit });
                 Ok(Ty::Unit)
             }
+            TermKind::String { value } => {
+                let bytes = value.as_bytes();
+                self.emit(Instr::Push {
+                    value: Value::Array {
+                        value: crate::ir::ArrayValue {
+                            element_ty: Ty::UInt8,
+                            elements: bytes.iter().map(|&value| Value::UInt8 { value }).collect(),
+                        },
+                    },
+                });
+                Ok(Ty::Array {
+                    element: Box::new(Ty::UInt8),
+                    length: bytes.len(),
+                })
+            }
             TermKind::Type { ty } => {
                 let value = self.evaluator().ty(ty)?;
                 self.emit(Instr::Push {

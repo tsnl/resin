@@ -9,6 +9,9 @@ use std::{
 use crate::backend::Error;
 use crate::backend::glsl::Stage;
 
+mod c;
+pub use c::{CBuild, build_c, compile_c};
+
 pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
     let temp = TempDir::new(&std::env::temp_dir()).map_err(io_error)?;
     let input = temp.path().join("shader.glsl");
@@ -41,44 +44,18 @@ pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<
     Ok(bytes)
 }
 
-pub fn compile_c(source: &str, output: &Path, compiler: &OsStr) -> Result<(), Error> {
-    let temp = TempDir::new(parent(output)).map_err(io_error)?;
-    let input = temp.path().join("program.c");
-    let binary = temp.path().join("program");
-    fs::write(&input, source).map_err(io_error)?;
-    let result = Command::new(compiler)
-        .args([
-            "-std=c11",
-            "-O2",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pedantic",
-        ])
-        .arg(&input)
-        .arg("-o")
-        .arg(&binary)
-        .output()
-        .map_err(|error| {
-            Error(format!(
-                "cannot run {}: {error}",
-                compiler.to_string_lossy()
-            ))
-        })?;
-    if !result.status.success() {
-        return Err(Error(format!(
-            "C compiler failed ({}):\n{}",
-            result.status,
-            String::from_utf8_lossy(&result.stderr)
-        )));
-    }
-    fs::rename(binary, output).map_err(io_error)
-}
-
 pub fn write_output(bytes: &[u8], output: &Path) -> Result<(), Error> {
     let temp = TempDir::new(parent(output)).map_err(io_error)?;
     let path = temp.path().join("output");
     fs::write(&path, bytes).map_err(io_error)?;
+    fs::rename(path, output).map_err(io_error)
+}
+
+pub fn copy_output(source: &Path, output: &Path) -> Result<(), Error> {
+    fs::create_dir_all(parent(output)).map_err(io_error)?;
+    let temp = TempDir::new(parent(output)).map_err(io_error)?;
+    let path = temp.path().join("output");
+    fs::copy(source, &path).map_err(io_error)?;
     fs::rename(path, output).map_err(io_error)
 }
 

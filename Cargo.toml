@@ -11,11 +11,11 @@ resolver = "3"
 path = "src/lib.rs"
 
 [features]
-gpu = ["dep:resin-runtime"]
+gpu = []
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 sexpfmt = "2"
 tree-sitter = "0.27"
 tree-sitter-resin = { path = "tree-sitter-resin" }
-resin-runtime = { path = "crates/resin-runtime", optional = true }
+resin-runtime = { path = "crates/resin-runtime" }

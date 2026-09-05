@@ -42,6 +42,7 @@ fn sexp_term(term: &Term) -> SExp {
     match &term.val {
         TermKind::Var { name } => symbol(name.val.as_ref()),
         TermKind::Num { value } => symbol(value.as_ref()),
+        TermKind::String { value } => string(value.as_ref()),
         TermKind::Lambda { params, body } => {
             let param_sexps: Vec<SExp> = params
                 .iter()

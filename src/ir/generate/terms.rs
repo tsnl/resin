@@ -104,6 +104,12 @@ impl Generator {
         if let TermKind::Type { ty } = &func.val {
             return self.gen_ascription(span, ty, arg);
         }
+        if let TermKind::Var { name } = &func.val
+            && name.val.as_ref() == "print"
+            && self.scopes.lookup_value("print").is_none()
+        {
+            return self.gen_builtin(span, "print", std::slice::from_ref(arg), None);
+        }
 
         let callee_ty = self.gen_term(func, None)?;
         let converted = self

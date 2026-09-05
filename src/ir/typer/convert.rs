@@ -90,7 +90,7 @@ impl TyperContext {
         )
     }
 
-    fn convert(
+    pub(super) fn convert(
         &self,
         start: &Ty,
         allow_deref: bool,

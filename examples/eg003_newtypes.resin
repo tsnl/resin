@@ -4,3 +4,5 @@ Distance = Meters;
 to_meters = (n: int) => Meters (n);
 to_distance = (m: Meters) => Distance (m);
 to_int = (d: Distance) => int (Meters (d));
+distance = to_distance(to_meters(42));
+print("distance = {0}, as int = {1}\n", (distance, to_int(distance)));

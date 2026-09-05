@@ -8,6 +8,9 @@ pub(super) fn builtin(
     args: &[Slot],
     result: &Ty,
 ) -> Result<String, Error> {
+    if name == "print" {
+        return super::print::emit(types, args, result);
+    }
     let unsupported = || {
         Error(format!(
             "unsupported builtin {name:?}: {:?} -> {result:?}",
@@ -53,10 +56,10 @@ pub(super) fn builtin(
         ("/" | "%", [a, b]) if ty.is_integer() => {
             let sign = if signed(ty) { "i" } else { "u" };
             let op = if name == "/" { "div" } else { "mod" };
-            integer(types, ty, format!("r_{sign}{op}({a}, {b})"))
+            integer(types, ty, format!("resin_{sign}{op}({a}, {b})"))
         }
         ("<<" | ">>", [a, b]) if ty.is_integer() => {
-            let count = format!("r_shift((uint64_t)({b}), {})", width(ty));
+            let count = format!("resin_shift((uint64_t)({b}), {})", width(ty));
             let expr = if name == ">>" && signed(ty) {
                 format!("({a}) < 0 ? ~((~(uint64_t)({a})) >> {count}) : (uint64_t)({a}) >> {count}")
             } else {
@@ -72,7 +75,7 @@ pub(super) fn builtin(
 
 fn integer(types: &Types<'_>, ty: &Ty, expr: String) -> String {
     if signed(ty) {
-        format!("r_i{}({expr})", width(ty))
+        format!("resin_i{}({expr})", width(ty))
     } else {
         format!("({})({expr})", types.name(ty))
     }

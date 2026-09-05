@@ -35,6 +35,9 @@ pub enum TermKind {
     Num {
         value: Arc<str>,
     },
+    String {
+        value: Arc<str>,
+    },
     Lambda {
         /// Surface bindings destructuring one argument: unit, a value, or a tuple.
         params: Vec<(Ident, Type)>,

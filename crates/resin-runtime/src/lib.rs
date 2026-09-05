@@ -1,4 +1,4 @@
-//! Headless Vulkan runtime, exposed through C and unsafe Rust APIs.
+//! Host support and headless Vulkan runtime, exposed through C and unsafe Rust APIs.
 //!
 //! CPU-visible allocations have mapped host pointers and GPU addresses.
 //! Shaders receive a 64-bit root address as a push constant.
@@ -9,7 +9,11 @@
 
 mod allocator;
 mod gpu;
+mod host;
 mod image;
+mod print;
+
+pub const INCLUDE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/include");
 
 use std::ffi::c_void;
 use std::os::raw::c_char;

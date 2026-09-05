@@ -7,6 +7,7 @@ use types::Types;
 
 mod function;
 mod ops;
+mod print;
 mod types;
 mod value;
 
@@ -67,7 +68,7 @@ pub fn emit(module: &Module) -> Result<String, Error> {
             }
         }
     }
-    let mut out = include_str!("runtime.h").to_string();
+    let mut out = "#include <resin_runtime.h>\n#include <stdlib.h>\n#include <math.h>\n".to_string();
     out.push_str(&types.declarations());
     for (index, global) in module.globals.iter().enumerate() {
         writeln!(out, "static {} r_g{index};", types.name(&global.ty)).unwrap();
@@ -91,7 +92,7 @@ pub fn emit(module: &Module) -> Result<String, Error> {
     for (index, flow) in analysis.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }
-    out.push_str("int main(void) {\n  atexit(r_cleanup);\n  r_fn0(NULL, 0);\n");
+    out.push_str("int main(void) {\n  atexit(resin_cleanup);\n  r_fn0(NULL, 0);\n");
     for index in 0..module.globals.len() {
         writeln!(out, "  (void)&r_g{index};").unwrap();
     }
@@ -113,7 +114,7 @@ pub fn emit(module: &Module) -> Result<String, Error> {
             let entry = types.unwrap(&global.ty, format!("r_g{index}"));
             writeln!(
                 out,
-                "  if (!({entry}).call) r_fail(\"main is not initialized\");"
+                "  if (!({entry}).call) resin_fail(\"main is not initialized\");"
             )
             .unwrap();
             if result.as_ref() == &Ty::Unit {

@@ -61,6 +61,11 @@ pub fn emit(module: &Module, entry: &str, stage: Stage) -> Result<String, Error>
     if !function.nonlocals.is_empty() {
         return Err(Error("shader entry cannot capture values".into()));
     }
+    if function.blocks.iter().flat_map(|block| &block.instrs).any(
+        |instr| matches!(instr, ir::Instr::CallBuiltin { name, .. } if name.as_ref() == "print"),
+    ) {
+        return Err(Error("print is only supported in host programs".into()));
+    }
     let param = &function.locals[function.param.index()].ty;
     let mut types = Types::new(module);
     for local in &function.locals {

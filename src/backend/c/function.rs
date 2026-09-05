@@ -187,7 +187,7 @@ fn instruction(
                 let env = format!("{name}_env");
                 writeln!(
                     out,
-                    "  r_env{target} *{env} = r_alloc(sizeof(r_env{target}));"
+                    "  r_env{target} *{env} = resin_alloc(sizeof(r_env{target}));"
                 )
                 .unwrap();
                 for (i, arg) in args.iter().enumerate() {
@@ -201,7 +201,7 @@ fn instruction(
             let callee = types.unwrap(&args[0].ty, args[0].expr.clone());
             writeln!(
                 out,
-                "  if (!({callee}).call) r_fail(\"calling an uninitialized function\");"
+                "  if (!({callee}).call) resin_fail(\"calling an uninitialized function\");"
             )
             .unwrap();
             format!("({callee}).call(({callee}).env, {})", args[1].expr)
@@ -225,7 +225,7 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
         Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
         Ty::Array { length, .. } => {
             let index = if dynamic {
-                format!("r_index((uint64_t)({index}), {length})")
+                format!("resin_index((uint64_t)({index}), {length})")
             } else {
                 index.into()
             };

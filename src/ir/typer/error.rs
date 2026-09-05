@@ -18,6 +18,8 @@ pub enum TypeErrorKind {
     ExpectedFunction { found: Ty },
     InvalidBuiltinArgumentCount { name: Arc<str>, found: usize },
     UnknownBuiltin { name: Arc<str> },
+    InvalidPrintArguments { found: Ty },
+    UnprintableType { found: Ty },
     UnknownField { name: Arc<str> },
     DuplicateField { name: Arc<str> },
     InvalidTypeDefinition { definition: TypeId },

@@ -4,3 +4,4 @@ cons = (value: int) => (next: Ptr (List)) => List { value = value, next = next }
 car = (node: List) => node.value;
 cdr = (node: List) => node.next;
 at = (p: Ptr (List)) => p.value;
+print("List helpers compiled; constructing a linked list needs pointer creation.\n", ());

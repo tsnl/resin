@@ -1,6 +1,10 @@
 use resin::{ast, backend, ir, toolchain};
 
-use std::{ffi::OsString, path::PathBuf, process::Command};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use clap::ValueEnum;
 use tree_sitter::Parser;
@@ -14,10 +18,10 @@ struct Cli {
     file: PathBuf,
 
     /// What to emit or execute.
-    #[arg(long, value_enum, default_value_t = Output::Exe)]
+    #[arg(long, value_enum, default_value_t = Output::Run)]
     output: Output,
 
-    /// Destination file; required for executable, SPIR-V, and image output.
+    /// Destination file, or directory for host executables. Run mode also keeps a copy here.
     #[arg(short = 'o', long = "out")]
     destination: Option<PathBuf>,
 
@@ -48,11 +52,11 @@ enum Output {
     Cst,
     /// Print the source with parse errors highlighted.
     Check,
-    /// Emit a standalone C11 program.
+    /// Emit C11 source using resin_runtime.h.
     C,
-    /// Compile an executable with the C compiler.
+    /// Compile an executable without running it (requires -o).
     Exe,
-    /// Compile and run in a temporary directory.
+    /// Compile under ./build and run; optionally copy the executable with -o.
     Run,
     /// Emit GLSL for one shader entry.
     Glsl,
@@ -102,11 +106,8 @@ fn run(cli: Cli) -> Result<i32> {
 }
 
 fn validate(cli: &Cli) -> Result<()> {
-    if let Some(output) = &cli.destination
-        && output.exists()
-        && std::fs::canonicalize(output)? == std::fs::canonicalize(&cli.file)?
-    {
-        return Err("output would overwrite the source file".into());
+    if let Some(output) = &cli.destination {
+        protect_source(&cli.file, output)?;
     }
     if matches!(
         cli.output,
@@ -115,8 +116,12 @@ fn validate(cli: &Cli) -> Result<()> {
     {
         return Err("binary output requires -o PATH".into());
     }
-    if cli.output == Output::Run && cli.destination.is_some() {
-        return Err("--output run does not accept -o".into());
+    Ok(())
+}
+
+fn protect_source(source: &Path, output: &Path) -> Result<()> {
+    if output.exists() && std::fs::canonicalize(output)? == std::fs::canonicalize(source)? {
+        return Err("output would overwrite the source file".into());
     }
     Ok(())
 }
@@ -126,15 +131,40 @@ fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
     if cli.output == Output::C {
         return print(cli, source);
     }
+    let name = cli.file.file_stem().ok_or("source file needs a name")?;
+    let output = host_destination(cli, name)?;
     let compiler = compiler(&cli.cc, "CC", "cc");
-    if let Some(output) = &cli.destination {
-        toolchain::compile_c(&source, output, &compiler)?;
-        return Ok(0);
+    let build = toolchain::build_c(&cli.file, &source, &compiler)?;
+    let executable = build.executable();
+    let code = if cli.output == Output::Run {
+        Command::new(executable).status()?.code().unwrap_or(1)
+    } else {
+        0
+    };
+    if let Some(output) = output {
+        toolchain::copy_output(executable, &output)?;
     }
-    let temp = toolchain::TempDir::new(&std::env::temp_dir())?;
-    let executable = temp.path().join("program");
-    toolchain::compile_c(&source, &executable, &compiler)?;
-    Ok(Command::new(executable).status()?.code().unwrap_or(1))
+    Ok(code)
+}
+
+fn host_destination(cli: &Cli, name: &std::ffi::OsStr) -> Result<Option<PathBuf>> {
+    let Some(path) = &cli.destination else {
+        return Ok(None);
+    };
+    let trailing_separator = path
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|&b| b == b'/' || b == std::path::MAIN_SEPARATOR as u8);
+    let output = if path.is_dir() || trailing_separator {
+        let mut filename = name.to_os_string();
+        filename.push(std::env::consts::EXE_SUFFIX);
+        path.join(filename)
+    } else {
+        path.clone()
+    };
+    protect_source(&cli.file, &output)?;
+    Ok(Some(output))
 }
 
 fn shader(cli: &Cli, module: &ir::Module) -> Result<i32> {

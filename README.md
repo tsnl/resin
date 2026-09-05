@@ -28,15 +28,65 @@ on NixOS, this may require adding the 64-bit `vulkan-loader` library to `LD_LIBR
 
 ```sh
 cargo run -- program.resin --output c -o program.c
-cargo run -- program.resin -o program
-cargo run -- program.resin --output run
+cargo run -- program.resin
+cargo run -- program.resin -o dist/
+cargo run -- program.resin --output exe -o program
 ```
 
-The default output is an executable, with its destination required via `-o PATH`.
+By default, Resin builds in `build/<source-name>-<path-hash>/` under the current working directory
+and immediately runs `program` from that directory. `--output run` selects
+the same behavior explicitly. Runs inherit the working directory and standard streams, and
+Resin returns the program's exit status.
+
+Each source path has a stable build directory containing the generated C, executable, and an
+input fingerprint. Unchanged programs skip C compilation and linking. Changes to generated C,
+Resin or the selected C compiler, runtime headers/archive, compiler flags, or the environment
+invalidate the cache. Failed rebuilds never run the old executable. Calls for the same source
+are serialized through building, running, and copying; different sources can run concurrently.
+This is a single-module cache, not incremental IR compilation. Delete `build/` to clean it,
+including after system SDK/library changes or changes behind a compiler wrapper.
+
+With `-o PATH`, Resin runs first, then copies the executable to PATH, preserving its executable
+permissions—even if the program returns a nonzero exit status. An existing directory or a
+path ending in `/` receives `<source-name>`; otherwise PATH names the executable. Missing
+destination directories are created. Use `--output exe -o PATH` to build and copy without running.
+Explicit text, shader, and image output modes keep their existing behavior.
+
 Use `--output ir` to print verified IR. `--cc PATH` selects a compiler without shell parsing.
 Compilation replaces the output only after success. A program first evaluates its top-level
 definitions, then calls an optional `main = () => { ... };`. Main returns `int` (the process exit
 status) or unit. Without main, only top-level initialization runs.
+
+Host executables statically link `resin-runtime`; ordinary host programs do not initialize Vulkan.
+Generated C includes `resin_runtime.h` from `crates/resin-runtime/include`, including its child
+headers. Cargo builds the runtime archive alongside the compiler. For a relocated installation,
+set `RESIN_RUNTIME_INCLUDE` to the include directory and `RESIN_RUNTIME_LIB` to the archive path.
+To compile emitted C manually on Linux after `cargo build`:
+
+```sh
+cc -std=c11 -I crates/resin-runtime/include program.c target/debug/deps/libresin_runtime.a \
+  -ldl -lpthread -lm -lrt -lutil -o program
+```
+
+`print` is a polymorphic host builtin returning unit. Like every function, it takes one argument:
+the outer tuple contains the format string and a tuple of values, not C-style variadic arguments.
+
+```resin
+n = 42;
+print("x = {0}\n", (n,));
+print("{1}, {0}; literal {{braces}}\n", (n, "hello"));
+print("done\n", ());
+```
+
+Placeholders are zero-based and may repeat. Newlines are explicit; malformed formats or
+out-of-range placeholders terminate with a diagnostic before that call writes any output.
+Values may be numbers, booleans, unit, byte strings, pointer addresses, or nominal wrappers of
+these. Other aggregates and functions are not printable yet. Arguments are evaluated once,
+left-to-right, including unused ones. The builtin must be called directly; a local `print` binding
+shadows it normally.
+
+String literals are UTF-8 byte arrays, with `\n`, `\r`, `\t`, `\0`, `\"`, and `\\` escapes.
+Their lengths exclude any implicit terminator; embedded NUL bytes are preserved.
 
 The C backend supports closures, recursion, mutation, records, arrays, pointers, nominal types,
 and typed block edges. Closure environments live until process exit; this is not yet a bounded
@@ -77,6 +127,7 @@ The shader subset supports 32-bit numbers, booleans, records, nominal types, loc
 and branches. Shader entries cannot capture or access globals, call helpers, recurse, or use
 arrays, spans, or real pointers yet. Integer division, remainder, shifts, and addresses carried
 across block edges are explicitly rejected. Top-level initialization is not executed for shaders.
+`print` is host-only; shader examples produce images instead of text.
 The runner supplies resources and dispatch/draw commands; this is not yet a general host/device
 programming API or a standalone graphics executable emitted by the C backend.
 

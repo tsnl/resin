@@ -142,6 +142,7 @@ impl TyperContext {
 
     pub fn type_builtin_call(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {
         let result = match (name, args) {
+            ("print", [arg]) => self.type_print(arg)?,
             ("+" | "-" | "~", [arg]) => arg.clone(),
             ("!", [arg]) => {
                 self.as_bool(arg)?;
@@ -162,7 +163,7 @@ impl TyperContext {
             }
             (
                 "+" | "-" | "~" | "!" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^" | "=="
-                | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||",
+                | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "print",
                 _,
             ) => {
                 return Err(TypeError::new(TypeErrorKind::InvalidBuiltinArgumentCount {
@@ -180,5 +181,45 @@ impl TyperContext {
             params: args.to_vec(),
             result,
         })
+    }
+
+    fn type_print(&self, arg: &Ty) -> Result<Ty, TypeError> {
+        let invalid =
+            || TypeError::new(TypeErrorKind::InvalidPrintArguments { found: arg.clone() });
+        let Ty::Record { fields } = arg else {
+            return Err(invalid());
+        };
+        let [format, values] = fields.as_slice() else {
+            return Err(invalid());
+        };
+        if format.name.as_ref() != "_0"
+            || values.name.as_ref() != "_1"
+            || !matches!(&format.ty, Ty::Array { element, .. } if **element == Ty::UInt8)
+        {
+            return Err(invalid());
+        }
+        let fields = match &values.ty {
+            Ty::Unit => &[][..],
+            Ty::Record { fields } => fields,
+            _ => return Err(invalid()),
+        };
+        for (i, field) in fields.iter().enumerate() {
+            if field.name.as_ref() != format!("_{i}") {
+                return Err(invalid());
+            }
+            self.convert(
+                &field.ty,
+                false,
+                |ty| {
+                    ty.is_numeric()
+                        || matches!(ty, Ty::Bool | Ty::Unit | Ty::Pointer { .. })
+                        || matches!(ty, Ty::Array { element, .. } if **element == Ty::UInt8)
+                },
+                TypeErrorKind::UnprintableType {
+                    found: field.ty.clone(),
+                },
+            )?;
+        }
+        Ok(Ty::Unit)
     }
 }

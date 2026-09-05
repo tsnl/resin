@@ -214,6 +214,12 @@ impl<'a> AstGen<'a> {
                 span,
             ),
             "if_term" => self.gen_if_term(child),
+            "string" => Spanned::new(
+                TermKind::String {
+                    value: decode_string(self.text(child)).into(),
+                },
+                span,
+            ),
             "unary_type" => {
                 let ty = self.gen_unary_type(child);
                 Spanned::new(TermKind::Type { ty }, span)
@@ -468,6 +474,27 @@ impl<'a> AstGen<'a> {
             end: node.end_byte(),
         }
     }
+}
+
+fn decode_string(text: &str) -> String {
+    let mut result = String::new();
+    let mut chars = text[1..text.len() - 1].chars();
+    while let Some(ch) = chars.next() {
+        result.push(if ch == '\\' {
+            match chars.next().expect("validated string escape") {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '0' => '\0',
+                '"' => '"',
+                '\\' => '\\',
+                _ => unreachable!("grammar rejects unknown escapes"),
+            }
+        } else {
+            ch
+        });
+    }
+    result
 }
 
 fn first_error_node(node: Node) -> Option<Node> {
