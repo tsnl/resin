@@ -1,6 +1,10 @@
-//! Headless Vulkan compute and graphics backend for the Resin C ABI.
+//! Vulkan compute, graphics, and presentation for the Resin C ABI.
 
 mod device;
+mod pipeline;
+mod present;
+
+pub use pipeline::ResinPipeline;
 
 use std::cell::Cell;
 use std::ffi::c_char;
@@ -10,10 +14,10 @@ use std::rc::Rc;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ash::{Device, Entry, Instance, ext, khr, vk};
+use ash::{Device, Entry, Instance, vk};
 
 use crate::allocator::RangeAllocator;
-use crate::{ResinMemory, ResinStatus};
+use crate::{ResinMemory, ResinStatus, ResinWindow};
 
 use device::{create_device, create_device_at};
 
@@ -49,14 +53,12 @@ pub struct ResinGpuDeviceInfo {
 const DEFAULT_ALIGNMENT: usize = 16;
 const HEAP_BLOCK_BYTES: usize = 16 * 1024 * 1024;
 const PUSH_CONSTANT_SIZE: u32 = 8;
-const SPIRV_MAGIC: u32 = 0x0723_0203;
+const COLOR_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
 pub struct ResinGpu {
     _entry: Entry,
     instance: Instance,
     device: Device,
-    shader_object: ext::shader_object::Device,
-    map_memory2: khr::map_memory2::Device,
     push_layout: vk::PipelineLayout,
     queue: vk::Queue,
     command_pool: vk::CommandPool,
@@ -65,12 +67,12 @@ pub struct ResinGpu {
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     max_buffer_size: vk::DeviceSize,
     memory_priority: bool,
+    presentation: Option<present::Presentation>,
     heaps: [Vec<Option<HeapBlock>>; 3],
 }
 
 struct HeapBlock {
     device: Device,
-    map_memory2: khr::map_memory2::Device,
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
     host: *mut u8,
@@ -100,19 +102,12 @@ pub struct ResinImage {
     layout: Rc<Cell<vk::ImageLayout>>,
 }
 
-pub struct ResinPipeline {
-    shader_object: ext::shader_object::Device,
-    shaders: Vec<(vk::ShaderStageFlags, vk::ShaderEXT)>,
-    graphics: bool,
-}
-
 pub struct ResinCommandBuffer {
     device: Device,
-    shader_object: ext::shader_object::Device,
     push_layout: vk::PipelineLayout,
     pool: vk::CommandPool,
     handle: vk::CommandBuffer,
-    shader_bound: bool,
+    pipeline_bound: bool,
     graphics: bool,
     rendering: bool,
     recording: bool,
@@ -179,6 +174,12 @@ impl ResinGpu {
         Self::from_context(create_device_at(index)?)
     }
 
+    /// # Safety
+    /// Use and destroy this GPU and window on the process main thread.
+    pub unsafe fn create_for_window(window: &ResinWindow) -> Result<Self, ResinStatus> {
+        Self::from_context(device::create_device_for_window(window)?)
+    }
+
     pub fn device_count() -> Result<u32, ResinStatus> {
         Ok(device::enumerate_devices()?.len() as u32)
     }
@@ -194,12 +195,13 @@ impl ResinGpu {
         }
     }
 
-    fn from_context(created: device::DeviceContext) -> Result<Self, ResinStatus> {
+    fn from_context(mut created: device::DeviceContext) -> Result<Self, ResinStatus> {
         let pool_info = vk::CommandPoolCreateInfo::default()
             .queue_family_index(created.queue_family)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
         let command_pool = unsafe { created.device.create_command_pool(&pool_info, None) }
             .map_err(|err| {
+                drop(created.surface.take());
                 destroy_partial(
                     &created.device,
                     &created.instance,
@@ -215,6 +217,7 @@ impl ResinGpu {
         let semaphore_info = vk::SemaphoreCreateInfo::default().push_next(&mut timeline_type);
         let timeline =
             unsafe { created.device.create_semaphore(&semaphore_info, None) }.map_err(|err| {
+                drop(created.surface.take());
                 destroy_partial(
                     &created.device,
                     &created.instance,
@@ -229,16 +232,23 @@ impl ResinGpu {
             .push_constant_ranges(slice::from_ref(&push_range));
         let push_layout = unsafe { created.device.create_pipeline_layout(&layout_info, None) }
             .map_err(|err| {
+                drop(created.surface.take());
                 destroy_partial(&created.device, &created.instance, command_pool, timeline);
                 vk_status(err)
             })?;
 
+        let presentation = created.surface.take().map(|surface| {
+            present::Presentation::new(
+                &created.instance,
+                &created.device,
+                created.physical,
+                surface,
+            )
+        });
         Ok(Self {
             _entry: created.entry,
             instance: created.instance,
             device: created.device,
-            shader_object: created.shader_object,
-            map_memory2: created.map_memory2,
             push_layout,
             queue: created.queue,
             command_pool,
@@ -247,6 +257,7 @@ impl ResinGpu {
             memory_properties: created.memory_properties,
             max_buffer_size: created.max_buffer_size,
             memory_priority: created.memory_priority,
+            presentation,
             heaps: [Vec::new(), Vec::new(), Vec::new()],
         })
     }
@@ -359,16 +370,15 @@ impl ResinGpu {
             return Err(ResinStatus::OutOfMemory);
         }
 
-        let mut usage = vk::BufferUsageFlags2CreateInfoKHR::default().usage(
-            vk::BufferUsageFlags2KHR::STORAGE_BUFFER
-                | vk::BufferUsageFlags2KHR::SHADER_DEVICE_ADDRESS
-                | vk::BufferUsageFlags2KHR::TRANSFER_SRC
-                | vk::BufferUsageFlags2KHR::TRANSFER_DST,
-        );
         let buffer_info = vk::BufferCreateInfo::default()
             .size(bytes as vk::DeviceSize)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .push_next(&mut usage);
+            .usage(
+                vk::BufferUsageFlags::STORAGE_BUFFER
+                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                    | vk::BufferUsageFlags::TRANSFER_SRC
+                    | vk::BufferUsageFlags::TRANSFER_DST,
+            );
         let buffer = unsafe { self.device.create_buffer(&buffer_info, None) }.map_err(vk_status)?;
 
         let mut dedicated = vk::MemoryDedicatedRequirements::default();
@@ -427,7 +437,14 @@ impl ResinGpu {
         }
 
         let host = if request.host_visible {
-            match map_memory(&self.map_memory2, device_memory) {
+            match unsafe {
+                self.device.map_memory(
+                    device_memory,
+                    0,
+                    vk::WHOLE_SIZE,
+                    vk::MemoryMapFlags::empty(),
+                )
+            } {
                 Ok(ptr) => ptr.cast::<u8>(),
                 Err(err) => {
                     unsafe {
@@ -447,7 +464,6 @@ impl ResinGpu {
 
         Ok(HeapBlock {
             device: self.device.clone(),
-            map_memory2: self.map_memory2.clone(),
             buffer,
             memory: device_memory,
             host,
@@ -455,85 +471,6 @@ impl ResinGpu {
             size,
             ranges: RangeAllocator::new(device_address..device_address + size),
         })
-    }
-
-    /// # Safety
-    /// The SPIR-V must be valid for this device and the runtime's entry point and push-constant interface. The GPU must outlive the pipeline.
-    pub unsafe fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
-        validate_spirv(spv)?;
-        let push_range = root_range();
-        let create_info = vk::ShaderCreateInfoEXT::default()
-            .stage(vk::ShaderStageFlags::COMPUTE)
-            .code_type(vk::ShaderCodeTypeEXT::SPIRV)
-            .code(spv)
-            .name(c"main")
-            .push_constant_ranges(slice::from_ref(&push_range));
-
-        match unsafe {
-            self.shader_object
-                .create_shaders(slice::from_ref(&create_info), None)
-        } {
-            Ok(shaders) => Ok(ResinPipeline {
-                shader_object: self.shader_object.clone(),
-                shaders: vec![(vk::ShaderStageFlags::COMPUTE, shaders[0])],
-                graphics: false,
-            }),
-            Err((shaders, err)) => {
-                for shader in shaders {
-                    if shader != vk::ShaderEXT::null() {
-                        unsafe { self.shader_object.destroy_shader(shader, None) };
-                    }
-                }
-                Err(vk_status(err))
-            }
-        }
-    }
-
-    /// # Safety
-    /// Both SPIR-V modules must be valid for this device and the runtime's shader interface. The GPU must outlive the pipeline.
-    pub unsafe fn create_graphics_pipeline(
-        &self,
-        vertex_spv: &[u8],
-        fragment_spv: &[u8],
-    ) -> Result<ResinPipeline, ResinStatus> {
-        validate_spirv(vertex_spv)?;
-        validate_spirv(fragment_spv)?;
-        let push_range = root_range();
-        let flags = vk::ShaderCreateFlagsEXT::LINK_STAGE;
-        let vertex_info = vk::ShaderCreateInfoEXT::default()
-            .flags(flags)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .next_stage(vk::ShaderStageFlags::FRAGMENT)
-            .code_type(vk::ShaderCodeTypeEXT::SPIRV)
-            .code(vertex_spv)
-            .name(c"main")
-            .push_constant_ranges(slice::from_ref(&push_range));
-        let fragment_info = vk::ShaderCreateInfoEXT::default()
-            .flags(flags)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .code_type(vk::ShaderCodeTypeEXT::SPIRV)
-            .code(fragment_spv)
-            .name(c"main")
-            .push_constant_ranges(slice::from_ref(&push_range));
-        let infos = [vertex_info, fragment_info];
-        match unsafe { self.shader_object.create_shaders(&infos, None) } {
-            Ok(shaders) => Ok(ResinPipeline {
-                shader_object: self.shader_object.clone(),
-                shaders: vec![
-                    (vk::ShaderStageFlags::VERTEX, shaders[0]),
-                    (vk::ShaderStageFlags::FRAGMENT, shaders[1]),
-                ],
-                graphics: true,
-            }),
-            Err((shaders, err)) => {
-                for shader in shaders {
-                    if shader != vk::ShaderEXT::null() {
-                        unsafe { self.shader_object.destroy_shader(shader, None) };
-                    }
-                }
-                Err(vk_status(err))
-            }
-        }
     }
 
     /// # Safety
@@ -568,7 +505,7 @@ impl ResinGpu {
     ) -> Result<(vk::Image, vk::ImageView, vk::DeviceMemory), ResinStatus> {
         let image_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(vk::Format::R8G8B8A8_UNORM)
+            .format(COLOR_FORMAT)
             .extent(vk::Extent3D {
                 width,
                 height,
@@ -641,7 +578,7 @@ impl ResinGpu {
         let view_info = vk::ImageViewCreateInfo::default()
             .image(image)
             .view_type(vk::ImageViewType::TYPE_2D)
-            .format(vk::Format::R8G8B8A8_UNORM)
+            .format(COLOR_FORMAT)
             .subresource_range(
                 vk::ImageSubresourceRange::default()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -682,11 +619,10 @@ impl ResinGpu {
         }
         Ok(ResinCommandBuffer {
             device: self.device.clone(),
-            shader_object: self.shader_object.clone(),
             push_layout: self.push_layout,
             pool: self.command_pool,
             handle,
-            shader_bound: false,
+            pipeline_bound: false,
             graphics: false,
             rendering: false,
             recording: true,
@@ -697,7 +633,15 @@ impl ResinGpu {
 
     /// # Safety
     /// All recorded resources and GPU addresses must remain valid through completion and belong to this GPU. Host accesses and queue operations must be synchronized.
-    pub unsafe fn submit(&self, mut command_buffer: ResinCommandBuffer) -> Result<(), ResinStatus> {
+    pub unsafe fn submit(&self, command_buffer: ResinCommandBuffer) -> Result<(), ResinStatus> {
+        unsafe { self.submit_signaling(command_buffer, vk::Semaphore::null()) }
+    }
+
+    unsafe fn submit_signaling(
+        &self,
+        mut command_buffer: ResinCommandBuffer,
+        ready: vk::Semaphore,
+    ) -> Result<(), ResinStatus> {
         if command_buffer.rendering || !command_buffer.layouts.is_current() {
             return Err(ResinStatus::InvalidArgument);
         }
@@ -724,9 +668,16 @@ impl ResinGpu {
             .semaphore(self.timeline)
             .value(value)
             .stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS);
+        let signals = [
+            signal,
+            vk::SemaphoreSubmitInfo::default()
+                .semaphore(ready)
+                .stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS),
+        ];
+        let signal_count = if ready == vk::Semaphore::null() { 1 } else { 2 };
         let submit = vk::SubmitInfo2::default()
             .command_buffer_infos(slice::from_ref(&command_info))
-            .signal_semaphore_infos(slice::from_ref(&signal));
+            .signal_semaphore_infos(&signals[..signal_count]);
         if let Err(err) = unsafe {
             self.device
                 .queue_submit2(self.queue, slice::from_ref(&submit), vk::Fence::null())
@@ -792,46 +743,19 @@ impl ResinCommandBuffer {
     /// # Safety
     /// The pipeline must belong to this recording's GPU and remain live through command completion.
     pub unsafe fn set_pipeline(&mut self, pipeline: &ResinPipeline) -> Result<(), ResinStatus> {
-        if !self.recording {
+        if !self.recording || self.device.handle() != pipeline.device.handle() {
             return Err(ResinStatus::InvalidArgument);
         }
-        if pipeline.graphics {
-            let stages = [
-                vk::ShaderStageFlags::COMPUTE,
-                vk::ShaderStageFlags::VERTEX,
-                vk::ShaderStageFlags::FRAGMENT,
-            ];
-            let shaders = [
-                vk::ShaderEXT::null(),
-                pipeline.shaders[0].1,
-                pipeline.shaders[1].1,
-            ];
-            unsafe {
-                self.shader_object
-                    .cmd_bind_shaders(self.handle, &stages, &shaders);
-            }
-            self.graphics = true;
-        } else {
-            if self.rendering {
-                return Err(ResinStatus::InvalidArgument);
-            }
-            let stages = [
-                vk::ShaderStageFlags::VERTEX,
-                vk::ShaderStageFlags::FRAGMENT,
-                vk::ShaderStageFlags::COMPUTE,
-            ];
-            let shaders = [
-                vk::ShaderEXT::null(),
-                vk::ShaderEXT::null(),
-                pipeline.shaders[0].1,
-            ];
-            unsafe {
-                self.shader_object
-                    .cmd_bind_shaders(self.handle, &stages, &shaders);
-            }
-            self.graphics = false;
+        let graphics = pipeline.bind_point == vk::PipelineBindPoint::GRAPHICS;
+        if self.rendering && !graphics {
+            return Err(ResinStatus::InvalidArgument);
         }
-        self.shader_bound = true;
+        unsafe {
+            self.device
+                .cmd_bind_pipeline(self.handle, pipeline.bind_point, pipeline.handle);
+        }
+        self.graphics = graphics;
+        self.pipeline_bound = true;
         Ok(())
     }
 
@@ -853,7 +777,7 @@ impl ResinCommandBuffer {
         let (src_stage, src_access) = match old_layout {
             vk::ImageLayout::UNDEFINED => (vk::PipelineStageFlags2::NONE, vk::AccessFlags2::NONE),
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (
-                vk::PipelineStageFlags2::COPY,
+                vk::PipelineStageFlags2::ALL_TRANSFER,
                 vk::AccessFlags2::TRANSFER_READ,
             ),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
@@ -899,7 +823,7 @@ impl ResinCommandBuffer {
         unsafe {
             self.device.cmd_begin_rendering(self.handle, &rendering);
         }
-        bind_graphics_state(&self.shader_object, self.handle, image.width, image.height);
+        set_viewport(&self.device, self.handle, image.width, image.height);
         self.rendering = true;
         Ok(())
     }
@@ -920,7 +844,7 @@ impl ResinCommandBuffer {
     /// # Safety
     /// The root address and every shader-accessed address must be valid for the bound shaders. All resources must remain live through completion.
     pub unsafe fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
-        if !self.recording || !self.shader_bound || !self.graphics || !self.rendering {
+        if !self.recording || !self.pipeline_bound || !self.graphics || !self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         if vertex_count == 0 {
@@ -1001,7 +925,7 @@ impl ResinCommandBuffer {
         group_count_y: u32,
         group_count_z: u32,
     ) -> Result<(), ResinStatus> {
-        if !self.recording || !self.shader_bound || self.graphics || self.rendering {
+        if !self.recording || !self.pipeline_bound || self.graphics || self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         cmd_memory_barrier(&self.device, self.handle);
@@ -1040,6 +964,7 @@ impl Drop for ResinGpu {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
+            drop(self.presentation.take());
             for heap in &mut self.heaps {
                 heap.clear();
             }
@@ -1056,23 +981,11 @@ impl Drop for HeapBlock {
     fn drop(&mut self) {
         unsafe {
             if !self.host.is_null() {
-                let _ = unmap_memory(&self.map_memory2, self.memory);
+                self.device.unmap_memory(self.memory);
                 self.host = ptr::null_mut();
             }
             self.device.destroy_buffer(self.buffer, None);
             self.device.free_memory(self.memory, None);
-        }
-    }
-}
-
-impl Drop for ResinPipeline {
-    fn drop(&mut self) {
-        unsafe {
-            for (_, shader) in &self.shaders {
-                if *shader != vk::ShaderEXT::null() {
-                    self.shader_object.destroy_shader(*shader, None);
-                }
-            }
         }
     }
 }
@@ -1215,19 +1128,6 @@ fn allocate_memory_with(
     Err(ResinStatus::OutOfMemory)
 }
 
-fn validate_spirv(bytes: &[u8]) -> Result<(), ResinStatus> {
-    if bytes.len() < 4 || !bytes.len().is_multiple_of(4) {
-        return Err(ResinStatus::InvalidArgument);
-    }
-    let Some(magic_bytes) = bytes.first_chunk::<4>() else {
-        return Err(ResinStatus::InvalidArgument);
-    };
-    if u32::from_le_bytes(*magic_bytes) != SPIRV_MAGIC {
-        return Err(ResinStatus::InvalidArgument);
-    }
-    Ok(())
-}
-
 fn try_suballocate(
     block: &mut HeapBlock,
     block_index: usize,
@@ -1262,33 +1162,7 @@ fn heap_index(memory: ResinMemory) -> usize {
     }
 }
 
-fn map_memory(
-    loader: &khr::map_memory2::Device,
-    memory: vk::DeviceMemory,
-) -> Result<*mut std::ffi::c_void, vk::Result> {
-    let info = vk::MemoryMapInfoKHR::default()
-        .memory(memory)
-        .offset(0)
-        .size(vk::WHOLE_SIZE);
-    let mut data = ptr::null_mut();
-    let result = unsafe { (loader.fp().map_memory2_khr)(loader.device(), &info, &mut data) };
-    result.result_with_success(data)
-}
-
-fn unmap_memory(
-    loader: &khr::map_memory2::Device,
-    memory: vk::DeviceMemory,
-) -> Result<(), vk::Result> {
-    let info = vk::MemoryUnmapInfoKHR::default().memory(memory);
-    unsafe { (loader.fp().unmap_memory2_khr)(loader.device(), &info) }.result()
-}
-
-fn bind_graphics_state(
-    shader_object: &ext::shader_object::Device,
-    cmd: vk::CommandBuffer,
-    width: u32,
-    height: u32,
-) {
+fn set_viewport(device: &Device, cmd: vk::CommandBuffer, width: u32, height: u32) {
     let viewport = vk::Viewport {
         x: 0.0,
         y: 0.0,
@@ -1301,42 +1175,9 @@ fn bind_graphics_state(
         offset: vk::Offset2D { x: 0, y: 0 },
         extent: vk::Extent2D { width, height },
     };
-    let sample_mask = [vk::SampleMask::MAX];
-    let blend_enable = [vk::FALSE];
-    let blend_eq = [vk::ColorBlendEquationEXT::default()
-        .src_color_blend_factor(vk::BlendFactor::ONE)
-        .dst_color_blend_factor(vk::BlendFactor::ZERO)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD)];
-    let write_mask = [vk::ColorComponentFlags::R
-        | vk::ColorComponentFlags::G
-        | vk::ColorComponentFlags::B
-        | vk::ColorComponentFlags::A];
     unsafe {
-        shader_object.cmd_set_vertex_input(cmd, &[], &[]);
-        shader_object.cmd_set_primitive_topology(cmd, vk::PrimitiveTopology::TRIANGLE_LIST);
-        shader_object.cmd_set_primitive_restart_enable(cmd, false);
-        shader_object.cmd_set_rasterizer_discard_enable(cmd, false);
-        shader_object.cmd_set_cull_mode(cmd, vk::CullModeFlags::NONE);
-        shader_object.cmd_set_front_face(cmd, vk::FrontFace::COUNTER_CLOCKWISE);
-        shader_object.cmd_set_polygon_mode(cmd, vk::PolygonMode::FILL);
-        shader_object.cmd_set_depth_test_enable(cmd, false);
-        shader_object.cmd_set_depth_write_enable(cmd, false);
-        shader_object.cmd_set_depth_compare_op(cmd, vk::CompareOp::ALWAYS);
-        shader_object.cmd_set_depth_bounds_test_enable(cmd, false);
-        shader_object.cmd_set_depth_bias_enable(cmd, false);
-        shader_object.cmd_set_stencil_test_enable(cmd, false);
-        shader_object.cmd_set_logic_op_enable(cmd, false);
-        shader_object.cmd_set_rasterization_samples(cmd, vk::SampleCountFlags::TYPE_1);
-        shader_object.cmd_set_sample_mask(cmd, vk::SampleCountFlags::TYPE_1, &sample_mask);
-        shader_object.cmd_set_alpha_to_coverage_enable(cmd, false);
-        shader_object.cmd_set_color_blend_enable(cmd, 0, &blend_enable);
-        shader_object.cmd_set_color_blend_equation(cmd, 0, &blend_eq);
-        shader_object.cmd_set_color_write_mask(cmd, 0, &write_mask);
-        shader_object.cmd_set_viewport_with_count(cmd, slice::from_ref(&viewport));
-        shader_object.cmd_set_scissor_with_count(cmd, slice::from_ref(&scissor));
+        device.cmd_set_viewport(cmd, 0, slice::from_ref(&viewport));
+        device.cmd_set_scissor(cmd, 0, slice::from_ref(&scissor));
     }
 }
 

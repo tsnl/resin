@@ -4,7 +4,7 @@ mod common;
 use resin_runtime::{ResinMemory, ResinStatus};
 
 #[test]
-fn compute_writes_are_visible_to_a_following_draw() {
+fn compute_writes_are_visible_across_pipeline_switches() {
     let Some(mut gpu) = common::require_gpu() else {
         return;
     };
@@ -24,19 +24,31 @@ fn compute_writes_are_visible_to_a_following_draw() {
         let graphics = gpu.create_graphics_pipeline(&vert, &frag).unwrap();
         let root = gpu.malloc(16, 16, ResinMemory::Default).unwrap();
         root.host_pointer().cast::<[f32; 4]>().write([0.0; 4]);
-        let mut image = gpu.create_image(16, 16).unwrap();
-        let pixels = gpu.malloc(16 * 16 * 4, 4, ResinMemory::Readback).unwrap();
         let mut commands = gpu.start_command_recording().unwrap();
-        commands.set_pipeline(&compute).unwrap();
-        commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
-        commands.begin_rendering(&mut image, [0.0; 4]).unwrap();
-        commands.set_pipeline(&graphics).unwrap();
-        commands.draw(root.device_pointer(), 3).unwrap();
-        commands.end_rendering().unwrap();
-        commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
+        let mut outputs = Vec::new();
+        for (width, height) in [(16, 16), (31, 7), (7, 31)] {
+            let mut image = gpu.create_image(width, height).unwrap();
+            let pixels = gpu
+                .malloc((width * height * 4) as usize, 4, ResinMemory::Readback)
+                .unwrap();
+            commands.set_pipeline(&compute).unwrap();
+            commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
+            commands.set_pipeline(&graphics).unwrap();
+            commands.begin_rendering(&mut image, [0.0; 4]).unwrap();
+            assert_eq!(
+                commands.set_pipeline(&compute),
+                Err(ResinStatus::InvalidArgument)
+            );
+            commands.draw(root.device_pointer(), 3).unwrap();
+            commands.end_rendering().unwrap();
+            commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
+            outputs.push((image, pixels));
+        }
         gpu.submit(commands).unwrap();
-        for pixel in pixels.host_bytes().unwrap().chunks_exact(4) {
-            assert_eq!(pixel, [255, 0, 0, 255]);
+        for (_, pixels) in &outputs {
+            for pixel in pixels.host_bytes().unwrap().chunks_exact(4) {
+                assert_eq!(pixel, [255, 0, 0, 255]);
+            }
         }
     }
 }

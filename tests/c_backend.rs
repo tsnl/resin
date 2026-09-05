@@ -44,6 +44,14 @@ fn numbered_examples_compile_as_strict_c11() {
 }
 
 #[test]
+fn discarded_branch_results_compile_and_preserve_effects() {
+    runs(
+        "main () -> int = { x = 0; if (1 == 1) { x := 1; () } else { () }; if (1 == 2) { (1, 2) } else { (3, 4) }; x };",
+        1,
+    );
+}
+
+#[test]
 fn ordinary_functions_can_be_passed_and_selected() {
     runs(
         "add (x: int, y: int) -> int = { x + y }; apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; main () -> int = { a = add; b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",

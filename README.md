@@ -24,8 +24,10 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
 Runtime GPU tests expect `glslc` on `PATH` and a working system Vulkan driver.
-The development shell supplies the Vulkan loader through `LD_LIBRARY_PATH`.
+The development shell supplies the Vulkan loader and GLFW through `LD_LIBRARY_PATH`.
 `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` enables installed validation layers.
+Window integration tests use the `gpu` feature and run on a desktop display or Xvfb. Set `RESIN_REQUIRE_WINDOW=1`
+to fail instead of skipping when windowing or presentation is unavailable.
 
 ## Functions and values
 
@@ -194,6 +196,58 @@ interfaces remain future work; resource orchestration is already ordinary Resin 
 For inspection/export, `--output glsl` or `--output spirv -o PATH` still emits one entry.
 `--stage` defaults to compute; `--entry` defaults to kernel, vertex, or fragment.
 `--glslc PATH` selects the compiler.
+
+## GPU requirements
+
+The runtime uses conventional Vulkan compute and graphics pipelines, with dynamic rendering
+and a dynamic viewport/scissor. Graphics currently target one RGBA8 UNORM color attachment,
+triangle lists, one sample, and no blending or depth/stencil testing.
+
+A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 64-bit shader
+integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
+Shader objects, map_memory2, maintenance5, and maintenance6 are not required. Additional shader
+and memory features are enabled only when supported.
+
+On macOS, the runtime enables portability enumeration and the advertised portability subset
+extension at compile-time-selected call sites (`#[cfg(target_os = "macos")]`). Install a Vulkan
+loader and a recent MoltenVK exposing the features above; windowing also needs GLFW 3.
+This setup is intended for MoltenVK, but has not yet been tested on macOS.
+
+## Windows
+
+```sh
+nix-shell --run 'cargo run -- examples/window.resin'
+```
+
+The demo presents a changing clear color for 120 frames; Escape or the close button exits
+early. It uses bounded recursion because Resin does not yet have a loop statement.
+The PNG demos remain headless.
+
+Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
+`lib/runtime.resin`:
+
+- `resin_window_create`, `resin_window_destroy`, and `resin_window_poll_events` manage
+  GLFW windows and events. Close state, framebuffer size, resizing, and GLFW key codes
+  are available through the corresponding `resin_window_*` functions.
+- `resin_gpu_create_for_window` selects a graphics/compute/present-capable GPU for a window.
+  The existing GPU constructors stay headless. There is one GPU per window; multiple
+  windows can each have their own GPU.
+- `resin_gpu_present` blits an already-submitted `ResinImage` to the window, scaling to
+  its framebuffer with FIFO presentation. Swapchains are recreated after resize.
+  `RESIN_STATUS_INCOMPLETE` means the frame was skipped (minimized, timed out, or out of date):
+  poll events and retry.
+
+Create and use windows and their GPUs on the process main thread. Destroy image/pipeline
+resources first, then the GPU, then the window. The GPU retains the native window while
+it uses its surface. Do not mix the runtime with independently managed GLFW initialization.
+
+GLFW 3 is loaded dynamically only when creating a window; headless executables need neither
+GLFW nor a display. A missing library/display returns `RESIN_STATUS_WINDOW_UNAVAILABLE`.
+Windowed executables need GLFW, a display, and a suitable Vulkan driver at runtime.
+Presentation additionally requires `VK_EXT_swapchain_maintenance1` and its instance
+dependencies, so presentation fences can safely govern resource reuse and teardown.
+This initial path is deliberately synchronous and presents offscreen images; rendering
+directly into swapchain images and multiple frames in flight are not implemented.
 
 ## Resources
 

@@ -1,11 +1,11 @@
-//! Vulkan 1.3 device bring-up with the modern extension set the runtime uses.
+//! Vulkan 1.3 device selection and feature negotiation.
 
 use std::ffi::{CStr, c_char};
 use std::slice;
 
-use ash::{Device, Entry, Instance, ext, khr, vk};
+use ash::{Device, Entry, Instance, vk};
 
-use crate::ResinStatus;
+use crate::{ResinStatus, ResinWindow, window::Surface};
 
 use super::{ResinGpuDeviceInfo, ResinGpuDeviceType, vk_status};
 
@@ -15,41 +15,61 @@ pub struct DeviceContext {
     pub device: Device,
     pub queue: vk::Queue,
     pub queue_family: u32,
+    pub physical: vk::PhysicalDevice,
+    pub surface: Option<Surface>,
     pub memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub max_buffer_size: vk::DeviceSize,
     pub memory_priority: bool,
-    pub shader_object: ext::shader_object::Device,
-    pub map_memory2: khr::map_memory2::Device,
 }
 
 pub fn create_device() -> Result<DeviceContext, ResinStatus> {
-    let (entry, instance, physical_devices) = create_instance()?;
-    if physical_devices.is_empty() {
-        unsafe { instance.destroy_instance(None) };
-        return Err(ResinStatus::VulkanUnavailable);
-    }
-    let Some(selected) = select_device(&instance, &physical_devices) else {
-        unsafe { instance.destroy_instance(None) };
-        return Err(ResinStatus::Unsupported);
-    };
-    finish_device(entry, instance, selected)
+    create(None, None)
 }
 
 pub fn create_device_at(index: u32) -> Result<DeviceContext, ResinStatus> {
-    let (entry, instance, physical_devices) = create_instance()?;
-    let Some(&physical) = physical_devices.get(index as usize) else {
-        unsafe { instance.destroy_instance(None) };
-        return Err(ResinStatus::InvalidArgument);
+    create(None, Some(index))
+}
+
+pub fn create_device_for_window(window: &ResinWindow) -> Result<DeviceContext, ResinStatus> {
+    create(Some(window), None)
+}
+
+fn create(window: Option<&ResinWindow>, index: Option<u32>) -> Result<DeviceContext, ResinStatus> {
+    let extensions = window
+        .map(ResinWindow::extensions)
+        .transpose()?
+        .unwrap_or_default();
+    let (entry, instance, devices) = create_instance(&extensions)?;
+    let surface = window
+        .map(|window| window.surface(&entry, &instance))
+        .transpose()
+        .inspect_err(|_| {
+            unsafe { instance.destroy_instance(None) };
+        })?;
+    let selected = if let Some(index) = index {
+        devices
+            .get(index as usize)
+            .ok_or(ResinStatus::InvalidArgument)
+            .and_then(|&physical| {
+                inspect_device(&instance, physical).ok_or(ResinStatus::Unsupported)
+            })
+    } else if devices.is_empty() {
+        Err(ResinStatus::VulkanUnavailable)
+    } else {
+        select_device(&instance, &devices, surface.as_ref()).ok_or(ResinStatus::Unsupported)
     };
-    let Some(selected) = inspect_device(&instance, physical) else {
-        unsafe { instance.destroy_instance(None) };
-        return Err(ResinStatus::Unsupported);
-    };
-    finish_device(entry, instance, selected)
+    match selected {
+        Ok(selected) => finish_device(entry, instance, selected, surface),
+        Err(err) => {
+            drop(surface);
+            unsafe { instance.destroy_instance(None) };
+            Err(err)
+        }
+    }
 }
 
 pub fn enumerate_devices() -> Result<Vec<ResinGpuDeviceInfo>, ResinStatus> {
-    let (_entry, instance, physical_devices) = create_instance()?;
+    let (_entry, instance, physical_devices) = create_instance(&[])?;
     let infos = physical_devices
         .iter()
         .enumerate()
@@ -59,15 +79,34 @@ pub fn enumerate_devices() -> Result<Vec<ResinGpuDeviceInfo>, ResinStatus> {
     Ok(infos)
 }
 
-fn create_instance() -> Result<(Entry, Instance, Vec<vk::PhysicalDevice>), ResinStatus> {
+fn create_instance(
+    extensions: &[*const c_char],
+) -> Result<(Entry, Instance, Vec<vk::PhysicalDevice>), ResinStatus> {
     let entry = unsafe { Entry::load() }.map_err(|_| ResinStatus::VulkanUnavailable)?;
+    #[cfg(target_os = "macos")]
+    let portability_extensions = {
+        let mut names = extensions.to_vec();
+        if !names
+            .iter()
+            .any(|&name| unsafe { CStr::from_ptr(name) } == vk::KHR_PORTABILITY_ENUMERATION_NAME)
+        {
+            names.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr());
+        }
+        names
+    };
+    #[cfg(target_os = "macos")]
+    let extensions = portability_extensions.as_slice();
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"resin")
         .application_version(0)
         .engine_name(c"resin")
         .engine_version(0)
         .api_version(vk::API_VERSION_1_3);
-    let instance_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    let instance_info = vk::InstanceCreateInfo::default()
+        .application_info(&app_info)
+        .enabled_extension_names(extensions);
+    #[cfg(target_os = "macos")]
+    let instance_info = instance_info.flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR);
     let instance = unsafe { entry.create_instance(&instance_info, None) }.map_err(vk_status)?;
     let physical_devices = unsafe { instance.enumerate_physical_devices() }.map_err(|err| {
         unsafe { instance.destroy_instance(None) };
@@ -80,26 +119,24 @@ fn finish_device(
     entry: Entry,
     instance: Instance,
     selected: SelectedDevice,
+    mut surface: Option<Surface>,
 ) -> Result<DeviceContext, ResinStatus> {
     let queue_priorities = [1.0f32];
     let queue_info = vk::DeviceQueueCreateInfo::default()
         .queue_family_index(selected.queue_family)
         .queue_priorities(&queue_priorities);
 
-    let mut enabled_extensions = vec![
-        vk::EXT_SHADER_OBJECT_NAME.as_ptr(),
-        vk::KHR_MAP_MEMORY2_NAME.as_ptr(),
-        vk::KHR_MAINTENANCE5_NAME.as_ptr(),
-        vk::KHR_MAINTENANCE6_NAME.as_ptr(),
-    ];
-    enabled_extensions.extend(selected.optional_extensions.iter().copied());
+    let mut enabled_extensions = selected.optional_extensions.clone();
+    if surface.is_some() {
+        enabled_extensions.extend([
+            vk::KHR_SWAPCHAIN_NAME.as_ptr(),
+            vk::EXT_SWAPCHAIN_MAINTENANCE1_NAME.as_ptr(),
+        ]);
+    }
 
     let mut vulkan11 = selected.vulkan11;
     let mut vulkan12 = selected.vulkan12;
     let mut vulkan13 = selected.vulkan13;
-    let mut shader_object = selected.shader_object;
-    let mut maintenance5 = selected.maintenance5;
-    let mut maintenance6 = selected.maintenance6;
     let mut memory_priority = selected.memory_priority;
     let mut pageable = selected.pageable;
     let mut reconvergence = selected.reconvergence;
@@ -110,15 +147,14 @@ fn finish_device(
     let mut workgroup_layout = selected.workgroup_layout;
     let mut shader_clock = selected.shader_clock;
     let mut atomic_float = selected.atomic_float;
+    let mut swapchain =
+        vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT::default().swapchain_maintenance1(true);
 
     let mut features2 = vk::PhysicalDeviceFeatures2::default()
         .features(selected.features10)
         .push_next(&mut vulkan11)
         .push_next(&mut vulkan12)
-        .push_next(&mut vulkan13)
-        .push_next(&mut shader_object)
-        .push_next(&mut maintenance5)
-        .push_next(&mut maintenance6);
+        .push_next(&mut vulkan13);
     if selected.memory_priority_enabled {
         features2 = features2.push_next(&mut memory_priority);
         if selected.pageable_enabled {
@@ -149,6 +185,9 @@ fn finish_device(
     if selected.atomic_float_enabled {
         features2 = features2.push_next(&mut atomic_float);
     }
+    if surface.is_some() {
+        features2 = features2.push_next(&mut swapchain);
+    }
 
     let device_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(slice::from_ref(&queue_info))
@@ -157,14 +196,13 @@ fn finish_device(
 
     let device = unsafe { instance.create_device(selected.physical, &device_info, None) }.map_err(
         |err| {
+            drop(surface.take());
             unsafe { instance.destroy_instance(None) };
             vk_status(err)
         },
     )?;
 
     let queue = unsafe { device.get_device_queue(selected.queue_family, 0) };
-    let shader_object_fn = ext::shader_object::Device::new(&instance, &device);
-    let map_memory2 = khr::map_memory2::Device::new(&instance, &device);
 
     Ok(DeviceContext {
         entry,
@@ -172,11 +210,11 @@ fn finish_device(
         device,
         queue,
         queue_family: selected.queue_family,
+        physical: selected.physical,
+        surface,
         memory_properties: selected.memory_properties,
         max_buffer_size: selected.max_buffer_size,
         memory_priority: selected.memory_priority_enabled,
-        shader_object: shader_object_fn,
-        map_memory2,
     })
 }
 
@@ -189,9 +227,6 @@ struct SelectedDevice {
     vulkan11: vk::PhysicalDeviceVulkan11Features<'static>,
     vulkan12: vk::PhysicalDeviceVulkan12Features<'static>,
     vulkan13: vk::PhysicalDeviceVulkan13Features<'static>,
-    shader_object: vk::PhysicalDeviceShaderObjectFeaturesEXT<'static>,
-    maintenance5: vk::PhysicalDeviceMaintenance5FeaturesKHR<'static>,
-    maintenance6: vk::PhysicalDeviceMaintenance6FeaturesKHR<'static>,
     memory_priority: vk::PhysicalDeviceMemoryPriorityFeaturesEXT<'static>,
     pageable: vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT<'static>,
     reconvergence: vk::PhysicalDeviceShaderMaximalReconvergenceFeaturesKHR<'static>,
@@ -273,12 +308,22 @@ fn heap_sizes(memory: &vk::PhysicalDeviceMemoryProperties) -> (u64, u64) {
     (device_local, host_visible_device_local)
 }
 
-fn select_device(instance: &Instance, devices: &[vk::PhysicalDevice]) -> Option<SelectedDevice> {
+fn select_device(
+    instance: &Instance,
+    devices: &[vk::PhysicalDevice],
+    surface: Option<&Surface>,
+) -> Option<SelectedDevice> {
     let mut best: Option<(u32, SelectedDevice)> = None;
     for &physical in devices {
-        let Some(selected) = inspect_device(instance, physical) else {
+        let Some(mut selected) = inspect_device(instance, physical) else {
             continue;
         };
+        if let Some(surface) = surface {
+            let Some(queue) = present_queue(instance, physical, surface) else {
+                continue;
+            };
+            selected.queue_family = queue;
+        }
         let properties = unsafe { instance.get_physical_device_properties(physical) };
         let score = match properties.device_type {
             vk::PhysicalDeviceType::DISCRETE_GPU => 4,
@@ -308,25 +353,12 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     }
 
     let extensions = unsafe { instance.enumerate_device_extension_properties(physical) }.ok()?;
-    for required in [
-        vk::EXT_SHADER_OBJECT_NAME,
-        vk::KHR_MAP_MEMORY2_NAME,
-        vk::KHR_MAINTENANCE5_NAME,
-        vk::KHR_MAINTENANCE6_NAME,
-    ] {
-        if !has_extension(&extensions, required) {
-            return None;
-        }
-    }
 
     let queue_family = graphics_compute_queue_family(instance, physical)?;
 
     let mut vulkan11 = vk::PhysicalDeviceVulkan11Features::default();
     let mut vulkan12 = vk::PhysicalDeviceVulkan12Features::default();
     let mut vulkan13 = vk::PhysicalDeviceVulkan13Features::default();
-    let mut shader_object = vk::PhysicalDeviceShaderObjectFeaturesEXT::default();
-    let mut maintenance5 = vk::PhysicalDeviceMaintenance5FeaturesKHR::default();
-    let mut maintenance6 = vk::PhysicalDeviceMaintenance6FeaturesKHR::default();
     let mut memory_priority = vk::PhysicalDeviceMemoryPriorityFeaturesEXT::default();
     let mut pageable = vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT::default();
     let mut reconvergence = vk::PhysicalDeviceShaderMaximalReconvergenceFeaturesKHR::default();
@@ -356,10 +388,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut vulkan11)
             .push_next(&mut vulkan12)
-            .push_next(&mut vulkan13)
-            .push_next(&mut shader_object)
-            .push_next(&mut maintenance5)
-            .push_next(&mut maintenance6);
+            .push_next(&mut vulkan13);
         if has_memory_priority {
             features2 = features2.push_next(&mut memory_priority);
             if has_pageable {
@@ -404,9 +433,6 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         || vulkan13.synchronization2 != vk::TRUE
         || vulkan13.maintenance4 != vk::TRUE
         || vulkan13.dynamic_rendering != vk::TRUE
-        || shader_object.shader_object != vk::TRUE
-        || maintenance5.maintenance5 != vk::TRUE
-        || maintenance6.maintenance6 != vk::TRUE
     {
         return None;
     }
@@ -416,6 +442,10 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     unsafe { instance.get_physical_device_properties2(physical, &mut props2) };
 
     let mut optional_extensions = Vec::new();
+    #[cfg(target_os = "macos")]
+    if has_extension(&extensions, vk::KHR_PORTABILITY_SUBSET_NAME) {
+        optional_extensions.push(vk::KHR_PORTABILITY_SUBSET_NAME.as_ptr());
+    }
     let memory_priority_enabled =
         has_memory_priority && memory_priority.memory_priority == vk::TRUE;
     if memory_priority_enabled {
@@ -511,9 +541,6 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
             ))
             .shader_demote_to_helper_invocation(on(vulkan13.shader_demote_to_helper_invocation))
             .pipeline_creation_cache_control(on(vulkan13.pipeline_creation_cache_control)),
-        shader_object: vk::PhysicalDeviceShaderObjectFeaturesEXT::default().shader_object(true),
-        maintenance5: vk::PhysicalDeviceMaintenance5FeaturesKHR::default().maintenance5(true),
-        maintenance6: vk::PhysicalDeviceMaintenance6FeaturesKHR::default().maintenance6(true),
         memory_priority: vk::PhysicalDeviceMemoryPriorityFeaturesEXT::default()
             .memory_priority(memory_priority_enabled),
         pageable: vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT::default()
@@ -568,6 +595,41 @@ fn graphics_compute_queue_family(instance: &Instance, physical: vk::PhysicalDevi
         } else {
             None
         }
+    })
+}
+
+fn present_queue(
+    instance: &Instance,
+    physical: vk::PhysicalDevice,
+    surface: &Surface,
+) -> Option<u32> {
+    let extensions = unsafe { instance.enumerate_device_extension_properties(physical) }.ok()?;
+    if ![vk::KHR_SWAPCHAIN_NAME, vk::EXT_SWAPCHAIN_MAINTENANCE1_NAME]
+        .iter()
+        .all(|name| has_extension(&extensions, name))
+    {
+        return None;
+    }
+    let mut swapchain = vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT::default();
+    let mut features = vk::PhysicalDeviceFeatures2::default().push_next(&mut swapchain);
+    unsafe { instance.get_physical_device_features2(physical, &mut features) };
+    if swapchain.swapchain_maintenance1 != vk::TRUE {
+        return None;
+    }
+    let families = unsafe { instance.get_physical_device_queue_family_properties(physical) };
+    families.iter().enumerate().find_map(|(index, family)| {
+        let graphics = family
+            .queue_flags
+            .contains(vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE);
+        let present = unsafe {
+            surface.loader.get_physical_device_surface_support(
+                physical,
+                index as u32,
+                surface.handle,
+            )
+        }
+        .unwrap_or(false);
+        (graphics && present).then_some(index as u32)
     })
 }
 

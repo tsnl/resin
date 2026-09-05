@@ -12,7 +12,8 @@ typedef enum ResinStatus {
     RESIN_STATUS_OUT_OF_MEMORY = 4,
     RESIN_STATUS_VULKAN_ERROR = 5,
     RESIN_STATUS_IO_ERROR = 6,
-    RESIN_STATUS_INCOMPLETE = 7
+    RESIN_STATUS_INCOMPLETE = 7,
+    RESIN_STATUS_WINDOW_UNAVAILABLE = 8
 } ResinStatus;
 
 const char *resin_status_string(ResinStatus status);

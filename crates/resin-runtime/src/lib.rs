@@ -1,4 +1,4 @@
-//! Host support and headless Vulkan runtime, exposed through C and unsafe Rust APIs.
+//! Host, windowing, and Vulkan runtime, exposed through C and unsafe Rust APIs.
 //!
 //! CPU-visible allocations have mapped host pointers and GPU addresses.
 //! Shaders receive a 64-bit root address as a push constant.
@@ -12,6 +12,7 @@ mod gpu;
 mod host;
 mod image;
 mod print;
+mod window;
 
 pub const INCLUDE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/include");
 
@@ -51,6 +52,7 @@ pub mod testing {
     }
 }
 pub use image::{PngImage, image_read_png, image_write_png};
+pub use window::{ResinWindow, ffi::*};
 
 pub type ResinDeviceAddress = u64;
 
@@ -65,6 +67,7 @@ pub enum ResinStatus {
     VulkanError = 5,
     IoError = 6,
     Incomplete = 7,
+    WindowUnavailable = 8,
 }
 
 #[repr(i32)]
@@ -89,6 +92,7 @@ impl ResinStatus {
             5 => Some(Self::VulkanError),
             6 => Some(Self::IoError),
             7 => Some(Self::Incomplete),
+            8 => Some(Self::WindowUnavailable),
             _ => None,
         }
     }
@@ -592,6 +596,7 @@ pub extern "C" fn resin_status_string(status: i32) -> *const c_char {
         Some(ResinStatus::VulkanError) => c"vulkan error".as_ptr(),
         Some(ResinStatus::IoError) => c"io error".as_ptr(),
         Some(ResinStatus::Incomplete) => c"incomplete".as_ptr(),
+        Some(ResinStatus::WindowUnavailable) => c"window unavailable".as_ptr(),
         None => c"unknown".as_ptr(),
     }
 }

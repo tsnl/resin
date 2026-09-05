@@ -141,7 +141,10 @@ fn instruction(
             .unwrap();
             args[1].expr.clone()
         }
-        Instr::Discard => return Ok(None),
+        Instr::Discard => {
+            writeln!(out, "  (void){};", args[0].expr).unwrap();
+            return Ok(None);
+        }
         Instr::Ascribe { ty } => {
             if ty == &args[0].ty {
                 args[0].expr.clone()

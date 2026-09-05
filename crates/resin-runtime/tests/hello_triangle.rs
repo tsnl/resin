@@ -1,6 +1,6 @@
 mod common;
 
-use resin_runtime::ResinMemory;
+use resin_runtime::{ResinMemory, ResinStatus};
 
 const GLSL: &str = include_str!("hello_triangle.glsl");
 const WIDTH: u32 = 256;
@@ -20,8 +20,14 @@ fn hello_triangle() {
             return;
         };
 
+        assert!(matches!(
+            gpu.create_graphics_pipeline(&vert, &[]),
+            Err(ResinStatus::InvalidArgument)
+        ));
+        let mut unaligned = vec![0];
+        unaligned.extend_from_slice(&vert);
         let pipeline = gpu
-            .create_graphics_pipeline(&vert, &frag)
+            .create_graphics_pipeline(&unaligned[1..], &frag)
             .expect("graphics pipeline");
         let mut image = gpu.create_image(WIDTH, HEIGHT).expect("image");
         let pixels = gpu
