@@ -29,9 +29,18 @@ fn success(output: &Output) {
 }
 
 #[test]
-fn default_output_remains_verified_ir() {
+fn default_output_compiles_an_executable() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let executable = temp.path().join("program");
+    let output = cli("main = () => 7;", &["-o", executable.to_str().unwrap()]);
+    success(&output);
+    assert_eq!(Command::new(executable).status().unwrap().code(), Some(7));
+}
+
+#[test]
+fn explicit_ir_output_prints_verified_ir() {
     let source = "main = () => 7;";
-    let output = cli(source, &[]);
+    let output = cli(source, &["--output", "ir"]);
     success(&output);
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -101,6 +110,7 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
 #[test]
 fn invalid_options_and_source_report_errors() {
     for args in [
+        vec![],
         vec!["--output", "exe"],
         vec!["--output", "spirv"],
         vec!["--output", "run", "-o", "unused"],

@@ -52,7 +52,6 @@ pub enum StaticAddressValue {
     },
 }
 
-/// The fields of a record in type-definition order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordValue {
     pub fields: Vec<RecordFieldValue>,

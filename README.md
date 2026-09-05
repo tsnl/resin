@@ -28,11 +28,12 @@ on NixOS, this may require adding the 64-bit `vulkan-loader` library to `LD_LIBR
 
 ```sh
 cargo run -- program.resin --output c -o program.c
-cargo run -- program.resin --output exe -o program
+cargo run -- program.resin -o program
 cargo run -- program.resin --output run
 ```
 
-The default output is still verified IR. `--cc PATH` selects a compiler without shell parsing.
+The default output is an executable, with its destination required via `-o PATH`.
+Use `--output ir` to print verified IR. `--cc PATH` selects a compiler without shell parsing.
 Compilation replaces the output only after success. A program first evaluates its top-level
 definitions, then calls an optional `main = () => { ... };`. Main returns `int` (the process exit
 status) or unit. Without main, only top-level initialization runs.

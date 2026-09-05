@@ -14,7 +14,7 @@ struct Cli {
     file: PathBuf,
 
     /// What to emit or execute.
-    #[arg(long, value_enum, default_value_t = Output::Ir)]
+    #[arg(long, value_enum, default_value_t = Output::Exe)]
     output: Output,
 
     /// Destination file; required for executable, SPIR-V, and image output.

@@ -23,7 +23,6 @@ impl TypeDef {
             body: Some(body),
         }
     }
-
     pub fn body(&self) -> Option<&Ty> {
         self.body.as_ref()
     }
