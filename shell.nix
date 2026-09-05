@@ -1,5 +1,16 @@
 let
   pkgs = import <nixpkgs> { };
+  lib = pkgs.lib;
+  linux = pkgs.stdenv.hostPlatform.isLinux;
+  windowLibraries = lib.optionals linux (with pkgs; [
+    libx11
+    libxcursor
+    libxi
+    libxinerama
+    libxrandr
+    libxkbcommon
+    wayland
+  ]);
 in
 pkgs.mkShell {
   packages = with pkgs; [
@@ -7,12 +18,12 @@ pkgs.mkShell {
     shaderc
     vulkan-tools
     vulkan-validation-layers
-    renderdoc
-  ];
+  ] ++ lib.optionals linux [ pkgs.renderdoc ];
 
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-    pkgs.stdenv.cc.cc.lib
-    pkgs.vulkan-loader
-    pkgs.glfw
-  ];
+  nativeBuildInputs = with pkgs; [ cmake pkg-config ] ++ lib.optionals linux [ wayland-scanner ];
+  buildInputs = windowLibraries;
+
+  ${if pkgs.stdenv.hostPlatform.isDarwin then "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH"} =
+    lib.makeLibraryPath ([ pkgs.vulkan-loader ] ++ windowLibraries
+      ++ lib.optionals linux [ pkgs.stdenv.cc.cc.lib ]);
 }

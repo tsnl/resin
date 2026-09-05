@@ -10,12 +10,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Use the development environment in `shell.nix` for builds, tests, parser generation, and
   examples. Enter it with `nix-shell` from the repository root, or run a command non-interactively
   with `nix-shell --run 'cargo test --workspace --all-features'`.
-- The shell supplies Rustup, a C compiler, `glslc`, and Vulkan tools and libraries. Rustup uses
+- The shell supplies Rustup, a C compiler, CMake, GLFW's native build dependencies, `glslc`,
+  and Vulkan tools and libraries. Cargo builds and statically links GLFW via `glfw-sys`. Rustup uses
   `rust-toolchain.toml`. Keep the shell's library paths; do not hardcode Nix store paths.
 - Use `RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1` when validating the full GPU path so missing
   dependencies do not silently skip tests. A working Vulkan driver is still required.
 - Window tests also need a display (desktop or Xvfb) and `RESIN_REQUIRE_WINDOW=1` to prevent
-  skips. `shell.nix` supplies GLFW. Test actual window operations in subprocesses so they run
+  skips. Test actual window operations in subprocesses so they run
   on the process main thread, as GLFW requires.
 - Install the matching parser CLI inside the shell with
   `cargo install --locked tree-sitter-cli --version 0.27.0`, then regenerate from

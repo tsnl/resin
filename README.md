@@ -4,10 +4,16 @@ CUDA for graphics. A simple systems programming language targeting host CPUs and
 
 ## Development
 
-Enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler, `glslc`, Vulkan tools,
-validation layers, and RenderDoc. Initialize the parser submodule with
+Enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler, CMake, GLFW's native
+build dependencies, `glslc`, Vulkan tools, validation layers, and RenderDoc on Linux.
+Initialize the parser submodule with
 `git submodule update --init`, then run `cargo test --workspace`.
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
+
+Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW installation
+or library search path is needed. Outside Nix, install CMake and a C compiler. On macOS,
+Xcode Command Line Tools and `brew install cmake` supply these. Linux additionally needs
+pkg-config and the X11, Wayland, and xkbcommon development packages, including `wayland-scanner`.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
 After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
@@ -24,7 +30,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
 Runtime GPU tests expect `glslc` on `PATH` and a working system Vulkan driver.
-The development shell supplies the Vulkan loader and GLFW through `LD_LIBRARY_PATH`.
+The development shell supplies the Vulkan loader and window-system libraries through
+`LD_LIBRARY_PATH` (`DYLD_LIBRARY_PATH` on macOS).
 `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` enables installed validation layers.
 Window integration tests use the `gpu` feature and run on a desktop display or Xvfb. Set `RESIN_REQUIRE_WINDOW=1`
 to fail instead of skipping when windowing or presentation is unavailable.
@@ -210,7 +217,7 @@ and memory features are enabled only when supported.
 
 On macOS, the runtime enables portability enumeration and the advertised portability subset
 extension at compile-time-selected call sites (`#[cfg(target_os = "macos")]`). Install a Vulkan
-loader and a recent MoltenVK exposing the features above; windowing also needs GLFW 3.
+loader and a recent MoltenVK exposing the features above. GLFW itself is bundled.
 This setup is intended for MoltenVK, but has not yet been tested on macOS.
 
 ## Windows
@@ -241,9 +248,12 @@ Create and use windows and their GPUs on the process main thread. Destroy image/
 resources first, then the GPU, then the window. The GPU retains the native window while
 it uses its surface. Do not mix the runtime with independently managed GLFW initialization.
 
-GLFW 3 is loaded dynamically only when creating a window; headless executables need neither
-GLFW nor a display. A missing library/display returns `RESIN_STATUS_WINDOW_UNAVAILABLE`.
-Windowed executables need GLFW, a display, and a suitable Vulkan driver at runtime.
+GLFW is statically linked into the runtime and generated executables, and initialized only
+when creating a window. Headless programs do not need a display. Initialization and window
+creation failures print the GLFW error to stderr and return `RESIN_STATUS_WINDOW_UNAVAILABLE`.
+Windowed executables need a display, its system libraries, and a suitable Vulkan driver at runtime,
+but no GLFW shared library. On macOS, generated executables link the system Cocoa, IOKit,
+and CoreFoundation frameworks.
 Presentation additionally requires `VK_EXT_swapchain_maintenance1` and its instance
 dependencies, so presentation fences can safely govern resource reuse and teardown.
 This initial path is deliberately synchronous and presents offscreen images; rendering

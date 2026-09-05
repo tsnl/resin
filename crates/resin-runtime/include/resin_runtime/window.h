@@ -13,7 +13,8 @@ typedef struct ResinWindow ResinWindow;
 /* All window operations, and operations on window-associated GPUs, run on the
    process main thread. The runtime owns GLFW initialization and termination;
    do not mix these calls with an independently managed GLFW context.
-   GLFW is loaded lazily. A missing library or display returns WINDOW_UNAVAILABLE. */
+   GLFW is bundled and initialized lazily. Initialization or window creation
+   failures print GLFW's error to stderr and return WINDOW_UNAVAILABLE. */
 ResinStatus resin_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out_window);
 void resin_window_destroy(ResinWindow *window);
 ResinStatus resin_window_poll_events(const ResinWindow *window);

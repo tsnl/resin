@@ -8,6 +8,6 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }
+glfw-sys = { version = "8", default-features = false, features = ["src-build", "vulkan", "x11", "wayland"] }
 libc = "0.2"
-libloading = "0.8"
 png = "0.17"

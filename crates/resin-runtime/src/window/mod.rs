@@ -3,12 +3,14 @@ mod glfw;
 
 use std::{
     cell::Cell,
-    ffi::{CStr, c_char, c_void},
+    ffi::{CStr, c_char},
     ptr,
     rc::Rc,
 };
 
+use ash::vk::Handle;
 use ash::{Entry, Instance, khr, vk};
+use glfw_sys as sys;
 
 use crate::{ResinStatus, gpu::vk_status};
 use glfw::Glfw;
@@ -19,7 +21,7 @@ pub struct ResinWindow {
 
 pub(crate) struct NativeWindow {
     glfw: Rc<Glfw>,
-    handle: *mut c_void,
+    handle: *mut sys::GLFWwindow,
     attached: Cell<bool>,
 }
 
@@ -39,9 +41,9 @@ impl ResinWindow {
         }
         let glfw = unsafe { Glfw::acquire()? };
         let handle = unsafe {
-            (glfw.default_window_hints)();
-            (glfw.window_hint)(0x00022001, 0); // GLFW_CLIENT_API = GLFW_NO_API
-            (glfw.create_window)(
+            sys::glfwDefaultWindowHints();
+            sys::glfwWindowHint(sys::GLFW_CLIENT_API, sys::GLFW_NO_API);
+            sys::glfwCreateWindow(
                 width as i32,
                 height as i32,
                 title.as_ptr(),
@@ -63,15 +65,15 @@ impl ResinWindow {
     }
 
     pub fn poll_events(&self) {
-        unsafe { (self.native.glfw.poll_events)() };
+        unsafe { sys::glfwPollEvents() };
     }
 
     pub fn should_close(&self) -> bool {
-        unsafe { (self.native.glfw.window_should_close)(self.native.handle) != 0 }
+        unsafe { sys::glfwWindowShouldClose(self.native.handle) != sys::GLFW_FALSE }
     }
 
     pub fn set_should_close(&self, close: bool) {
-        unsafe { (self.native.glfw.set_window_should_close)(self.native.handle, i32::from(close)) };
+        unsafe { sys::glfwSetWindowShouldClose(self.native.handle, i32::from(close)) };
     }
 
     pub fn framebuffer_size(&self) -> (u32, u32) {
@@ -82,20 +84,18 @@ impl ResinWindow {
         if !valid_size(width, height) {
             return Err(ResinStatus::InvalidArgument);
         }
-        unsafe {
-            (self.native.glfw.set_window_size)(self.native.handle, width as i32, height as i32)
-        };
+        unsafe { sys::glfwSetWindowSize(self.native.handle, width as i32, height as i32) };
         Ok(())
     }
 
     pub fn key_pressed(&self, key: i32) -> bool {
-        (32..=348).contains(&key)
-            && unsafe { (self.native.glfw.get_key)(self.native.handle, key) != 0 }
+        (sys::GLFW_KEY_SPACE..=sys::GLFW_KEY_LAST).contains(&key)
+            && unsafe { sys::glfwGetKey(self.native.handle, key) == sys::GLFW_PRESS }
     }
 
     pub(crate) fn extensions(&self) -> Result<Vec<*const c_char>, ResinStatus> {
         let mut count = 0;
-        let names = unsafe { (self.native.glfw.get_required_instance_extensions)(&mut count) };
+        let names = unsafe { sys::glfwGetRequiredInstanceExtensions(&mut count) };
         if names.is_null() || count == 0 {
             self.native
                 .glfw
@@ -125,22 +125,23 @@ impl ResinWindow {
         if self.native.attached.get() {
             return Err(ResinStatus::InvalidArgument);
         }
-        let mut handle = vk::SurfaceKHR::null();
-        unsafe {
-            (self.native.glfw.create_window_surface)(
-                instance.handle(),
+        let mut handle = ptr::null_mut();
+        let result = unsafe {
+            sys::glfwCreateWindowSurface(
+                instance.handle().as_raw() as sys::VkInstance,
                 self.native.handle,
                 ptr::null(),
                 &mut handle,
             )
-        }
-        .result()
-        .inspect_err(|_| self.native.glfw.print_error("glfwCreateWindowSurface"))
-        .map_err(vk_status)?;
+        };
+        vk::Result::from_raw(result)
+            .result()
+            .inspect_err(|_| self.native.glfw.print_error("glfwCreateWindowSurface"))
+            .map_err(vk_status)?;
         self.native.attached.set(true);
         Ok(Surface {
             loader: khr::surface::Instance::new(entry, instance),
-            handle,
+            handle: vk::SurfaceKHR::from_raw(handle as u64),
             window: self.native.clone(),
         })
     }
@@ -149,14 +150,14 @@ impl ResinWindow {
 impl NativeWindow {
     pub fn framebuffer_size(&self) -> (u32, u32) {
         let (mut width, mut height) = (0, 0);
-        unsafe { (self.glfw.get_framebuffer_size)(self.handle, &mut width, &mut height) };
+        unsafe { sys::glfwGetFramebufferSize(self.handle, &mut width, &mut height) };
         (width.max(0) as u32, height.max(0) as u32)
     }
 }
 
 impl Drop for NativeWindow {
     fn drop(&mut self) {
-        unsafe { (self.glfw.destroy_window)(self.handle) };
+        unsafe { sys::glfwDestroyWindow(self.handle) };
     }
 }
 

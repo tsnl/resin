@@ -22,7 +22,16 @@ const FLAGS: &[&str] = &[
 ];
 #[cfg(target_os = "linux")]
 const LIBRARIES: &[&str] = &["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"];
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+const LIBRARIES: &[&str] = &[
+    "-framework",
+    "Cocoa",
+    "-framework",
+    "IOKit",
+    "-framework",
+    "CoreFoundation",
+];
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const LIBRARIES: &[&str] = &[];
 
 /// Keeps the artifact locked through execution and copying.
