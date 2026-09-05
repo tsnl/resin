@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 pub mod generate;
+mod load;
 pub mod print;
+pub use load::{SourceError, load};
 
 pub use generate::{AstError, AstErrorKind, AstGen};
 
@@ -37,11 +39,6 @@ pub enum TermKind {
     },
     String {
         value: Arc<str>,
-    },
-    Lambda {
-        /// Surface bindings destructuring one argument: unit, a value, or a tuple.
-        params: Vec<(Ident, Type)>,
-        body: Box<Term>,
     },
     If {
         cond: Box<Term>,
@@ -75,6 +72,9 @@ pub enum TermKind {
     Deref {
         pointer: Box<Term>,
     },
+    Address {
+        place: Box<Term>,
+    },
     Field {
         base: Box<Term>,
         name: Ident,
@@ -88,14 +88,43 @@ pub type Stmt = Spanned<StmtKind>;
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
+    Include {
+        path: Arc<str>,
+    },
+    ForeignType {
+        name: Ident,
+    },
+    ForeignFunction {
+        header: Arc<str>,
+        name: Ident,
+        params: Vec<(Ident, Type)>,
+        result: Type,
+    },
+    Function {
+        name: Ident,
+        params: Vec<(Ident, Type)>,
+        result: Type,
+        body: Term,
+    },
     /// `name = init;` The name is in scope, but eager recursive reads are invalid.
-    Define { name: Ident, init: Term },
+    Define {
+        name: Ident,
+        init: Term,
+    },
     /// `Name = init;` A fresh nominal identity, in scope within its own RHS.
-    DefineType { name: Ident, init: Type },
+    DefineType {
+        name: Ident,
+        init: Type,
+    },
     /// `name: ann;`
-    Declare { name: Ident, ann: Type },
+    Declare {
+        name: Ident,
+        ann: Type,
+    },
     /// `term;`
-    Expr { term: Term },
+    Expr {
+        term: Term,
+    },
 }
 
 pub type Ident = Spanned<Arc<str>>;

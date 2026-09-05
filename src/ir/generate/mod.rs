@@ -22,7 +22,6 @@ pub use error::{GenerateError, GenerateErrorKind};
 
 use builder::FunctionBuilder;
 use eval::Evaluator;
-use functions::FunctionState;
 use scope::Scopes;
 
 /// Lower a source file to a verified IR module.
@@ -34,7 +33,7 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
 struct Generator {
     module: Module,
     typer: TyperContext,
-    functions: Vec<FunctionState>,
+    functions: Vec<FunctionBuilder>,
     scopes: Scopes,
 }
 
@@ -43,7 +42,7 @@ impl Generator {
         let mut module = Module::default();
         module.functions.push(Function {
             name: Some("init".into()),
-            nonlocals: Vec::new(),
+            foreign: None,
             param: LocalId::from_index(0),
             result: Ty::Unit,
             locals: vec![Local {
@@ -56,23 +55,69 @@ impl Generator {
         Self {
             module,
             typer: TyperContext::new(),
-            functions: vec![FunctionState::new(Some("init".into()))],
+            functions: vec![FunctionBuilder::new(Some("init".into()))],
             scopes: Scopes::new(),
         }
     }
 
     fn generate_file(mut self, file: &SourceFile) -> Result<Module, GenerateError> {
         for stmt in &file.stmts {
-            self.gen_stmt(stmt)?;
+            if let StmtKind::ForeignType { name } = &stmt.val {
+                self.scopes
+                    .define_foreign_type(name.val.clone())
+                    .map_err(|name| GenerateError {
+                        span: stmt.span,
+                        kind: GenerateErrorKind::DuplicateType { name },
+                    })?;
+            }
+        }
+        for stmt in &file.stmts {
+            if let StmtKind::DefineType { name, init } = &stmt.val {
+                self.gen_define_type(name, init)?;
+            }
+        }
+        for stmt in &file.stmts {
+            if let StmtKind::Function {
+                name,
+                params,
+                result,
+                ..
+            } = &stmt.val
+            {
+                self.declare_function(name, params, result)?;
+            }
+            if let StmtKind::ForeignFunction {
+                header,
+                name,
+                params,
+                result,
+            } = &stmt.val
+            {
+                self.declare_foreign(header, name, params, result)?;
+            }
+        }
+        for stmt in &file.stmts {
+            if !matches!(
+                stmt.val,
+                StmtKind::DefineType { .. }
+                    | StmtKind::Function { .. }
+                    | StmtKind::ForeignType { .. }
+                    | StmtKind::ForeignFunction { .. }
+            ) {
+                self.gen_stmt(stmt)?;
+            }
+        }
+        for stmt in &file.stmts {
+            if let StmtKind::Function {
+                name, params, body, ..
+            } = &stmt.val
+            {
+                self.gen_function(name, params, body)?;
+            }
         }
         self.emit(Instr::Push { value: Value::Unit });
         self.terminate(Terminator::Return);
-        let init = self
-            .functions
-            .pop()
-            .expect("module initializer")
-            .builder
-            .finish();
+        let init = self.functions.pop().expect("module initializer").finish();
         self.module.functions[0] = init;
         self.module.types = self.typer.into_definitions().map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
@@ -87,6 +132,15 @@ impl Generator {
 
     fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), GenerateError> {
         match &stmt.val {
+            StmtKind::Function { .. }
+            | StmtKind::ForeignFunction { .. }
+            | StmtKind::ForeignType { .. } => {
+                unreachable!("functions and foreign types are module items")
+            }
+            StmtKind::Include { path } => Err(GenerateError {
+                span: stmt.span,
+                kind: GenerateErrorKind::UnresolvedInclude { path: path.clone() },
+            }),
             StmtKind::Define { name, init } => self.gen_define(name, init),
             StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
             StmtKind::Declare { name, ann } => self.gen_declare(name, ann),
@@ -142,7 +196,6 @@ impl Generator {
                 });
                 Ok(Ty::Type)
             }
-            TermKind::Lambda { params, body } => self.gen_lambda(params, body, expected, None),
             TermKind::If { cond, then, els } => self.gen_if(cond, then, els, expected),
             TermKind::Array { elems } => self.gen_array(term.span, elems, expected),
             TermKind::Record { fields } => self.gen_record(term.span, fields, expected),
@@ -150,6 +203,7 @@ impl Generator {
             TermKind::Call { func, arg } => self.gen_call(term.span, func, arg),
             TermKind::Builtin { name, args } => self.gen_builtin(term.span, name, args, expected),
             TermKind::Assign { place, value } => self.gen_assign(place, value),
+            TermKind::Address { place } => self.gen_place(place),
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
                 let converted = self
@@ -199,7 +253,7 @@ impl Generator {
     }
 
     fn function(&mut self) -> &mut FunctionBuilder {
-        &mut self.functions.last_mut().expect("function").builder
+        self.functions.last_mut().expect("function")
     }
 
     fn evaluator(&self) -> Evaluator<'_> {

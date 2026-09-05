@@ -38,25 +38,25 @@ fn all_examples_compile_as_strict_c11() {
 }
 
 #[test]
-fn escaping_closures_keep_distinct_capture_environments() {
+fn ordinary_functions_can_be_passed_and_selected() {
     runs(
-        "add = (x: int) => (y: int) => { x + y }; a = add(10); b = add(20); main = () => { a(3) + b(4) };",
+        "add (x: int, y: int) -> int = { x + y }; apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; main () -> int = { a = add; b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
         37,
     );
 }
 
 #[test]
-fn local_recursion_keeps_its_captured_environment() {
+fn recursive_functions_can_read_globals() {
     runs(
-        "main = () => { offset = 2; fact = (n: int) => int { if (n == 0) { offset } else { n * fact(n - 1) } }; fact(4) };",
+        "offset = 2; fact (n: int) -> int = { if (n == 0) { offset } else { n * fact(n - 1) } }; main () -> int = { fact(4) };",
         48,
     );
 }
 
 #[test]
-fn nested_closures_can_capture_the_current_closure() {
+fn mutual_recursion_needs_no_forward_declaration() {
     runs(
-        "main = () => { f = (n: int) => int { next = (m: int) => f(m); if (n == 0) { 7 } else { next(n - 1) } }; f(3) };",
+        "f (n: int) -> int = { if (n == 0) { 7 } else { next(n - 1) } }; next (m: int) -> int = { f(m) }; main () -> int = { f(3) };",
         7,
     );
 }
@@ -64,7 +64,7 @@ fn nested_closures_can_capture_the_current_closure() {
 #[test]
 fn calls_are_unary_with_unit_and_tuple_sugar() {
     runs(
-        "zero = () => 2; sum = (a: int, b: int) => { a + b }; apply = (f: (int, int) -> int, p: (int, int)) => f(p); main = () => apply(sum, (zero(), 5));",
+        "zero () -> int = { 2 }; sum (a: int, b: int) -> int = { a + b }; apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; main () -> int = { apply(sum, (zero(), 5)) };",
         7,
     );
 }
@@ -72,20 +72,23 @@ fn calls_are_unary_with_unit_and_tuple_sugar() {
 #[test]
 fn nominal_records_preserve_source_order_and_field_layout() {
     runs(
-        "R = { a: int, b: int }; main = () => { x = 0; r = R { b = (x := 1), a = (x := 2) }; r.a * 10 + r.b + x };",
+        "R = { a: int, b: int }; main () -> int = { x = 0; r = R { b = (x := 1), a = (x := 2) }; r.a * 10 + r.b + x };",
         23,
     );
 }
 
 #[test]
 fn loaded_values_do_not_change_after_later_stores() {
-    runs("x = 1; main = () => { old = x; x := 2; old * 10 + x };", 12);
+    runs(
+        "x = 1; main () -> int = { old = x; x := 2; old * 10 + x };",
+        12,
+    );
 }
 
 #[test]
 fn short_circuiting_and_joins_preserve_effects() {
     runs(
-        "main = () => { x = 0; a = (1 == 2) && ((x := 1) == 1); b = (1 == 1) || ((x := 2) == 2); n = if (a || b) { 3 } else { 4 }; n + x };",
+        "main () -> int = { x = 0; a = (1 == 2) && ((x := 1) == 1); b = (1 == 1) || ((x := 2) == 2); n = if (a || b) { 3 } else { 4 }; n + x };",
         3,
     );
 }
@@ -93,16 +96,19 @@ fn short_circuiting_and_joins_preserve_effects() {
 #[test]
 fn nominal_function_types_and_numeric_operations_work() {
     runs(
-        "Meters = int; F = (Meters) -> Meters; f = F ((x: Meters) => { x + Meters (2) }); main = () => int (f(Meters (5)));",
+        "Meters = int; F = (Meters) -> Meters; add (x: Meters) -> Meters = { x + Meters (2) }; f = F (add); main () -> int = { int (f(Meters (5))) };",
         7,
     );
-    runs("Entry = () -> int; main = Entry (() => 23);", 23);
+    runs(
+        "Entry = () -> int; start () -> int = { 23 }; main = Entry (start);",
+        23,
+    );
 }
 
 #[test]
 fn integer_arithmetic_wraps_at_its_declared_width() {
     runs(
-        "main = () => { a = sbyte (127); b = a + sbyte (1); c = int (2147483647) + int (1); d = long (-9223372036854775808) / long (-1); if (b == sbyte (-128) && c == int (-2147483648) && d == long (-9223372036854775808)) { 0 } else { 1 } };",
+        "main () -> int = { a = sbyte (127); b = a + sbyte (1); c = int (2147483647) + int (1); d = long (-9223372036854775808) / long (-1); if (b == sbyte (-128) && c == int (-2147483648) && d == long (-9223372036854775808)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -110,7 +116,7 @@ fn integer_arithmetic_wraps_at_its_declared_width() {
 #[test]
 fn signed_right_shift_and_unsigned_multiplication_are_defined() {
     runs(
-        "main = () => { a = int (-8) >> int (2); b = uint (4294967295) * uint (4294967295); if (a == int (-2) && b == uint (1)) { 0 } else { 1 } };",
+        "main () -> int = { a = int (-8) >> int (2); b = uint (4294967295) * uint (4294967295); if (a == int (-2) && b == uint (1)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -118,7 +124,7 @@ fn signed_right_shift_and_unsigned_multiplication_are_defined() {
 #[test]
 fn invalid_integer_operations_fail_at_runtime() {
     for expression in ["1 / 0", "1 % 0", "1 << 32", "1 >> -1"] {
-        let result = run_module(&module(&format!("main = () => {{ {expression} }};")));
+        let result = run_module(&module(&format!("main () -> int = {{ {expression} }};")));
         assert_eq!(result.status.code(), Some(1));
         assert!(String::from_utf8_lossy(&result.stderr).contains("resin:"));
     }
@@ -126,7 +132,7 @@ fn invalid_integer_operations_fail_at_runtime() {
 
 #[test]
 fn unsupported_operations_report_backend_errors() {
-    let error = c::emit(&module("main = () => { r = { x = 1 }; r + r; 0 };")).unwrap_err();
+    let error = c::emit(&module("main () -> int = { r = { x = 1 }; r + r; 0 };")).unwrap_err();
     assert!(error.to_string().contains("unsupported builtin"));
     assert!(error.to_string().contains("instruction"));
 }
@@ -139,7 +145,7 @@ fn invalid_ir_is_rejected_before_emitting() {
             .to_string()
             .contains("initializer")
     );
-    let mut m = module("main = () => 0;");
+    let mut m = module("main () -> int = { 0 };");
     m.functions[0].blocks[0]
         .instrs
         .insert(0, ir::Instr::Discard);
@@ -153,8 +159,10 @@ fn invalid_ir_is_rejected_before_emitting() {
 
 #[test]
 fn unused_functions_do_not_fail_strict_compilation() {
-    let mut m = module("main = () => 0;");
-    m.functions.push(m.functions[1].clone());
+    let mut m = module("main () -> int = { 0 };");
+    let mut spare = m.functions[1].clone();
+    spare.name = Some("unused".into());
+    m.functions.push(spare);
     assert!(run_module(&m).status.success());
 }
 
@@ -171,7 +179,7 @@ fn failed_compilation_preserves_existing_output() {
 #[test]
 fn loops_carry_typed_stack_values_across_edges() {
     use ir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
-    let mut m = module("main = () => 0;");
+    let mut m = module("main () -> int = { 0 };");
     let f = m
         .functions
         .iter_mut()
@@ -247,7 +255,7 @@ fn loops_carry_typed_stack_values_across_edges() {
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
     use ir::{Instr::*, Local, LocalId, Ty, Value};
-    let mut m = module("main = () => 0;");
+    let mut m = module("main () -> int = { 0 };");
     let f = m
         .functions
         .iter_mut()

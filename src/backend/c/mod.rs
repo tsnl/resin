@@ -1,10 +1,12 @@
 use std::fmt::Write;
 
-use crate::ir::{self, Instr, Module, Ty};
+use crate::ir::{self, Module, Ty};
 
 use super::Error;
 use types::Types;
 
+mod entry;
+mod foreign;
 mod function;
 mod ops;
 mod print;
@@ -17,8 +19,18 @@ struct Slot {
     expr: String,
 }
 
+pub struct Shader {
+    pub function: ir::FunctionId,
+    pub stage: super::glsl::Stage,
+    pub words: Vec<u32>,
+}
+
 /// Emit a C11 executable. Function zero initializes the module; optional main is () -> int or ().
 pub fn emit(module: &Module) -> Result<String, Error> {
+    emit_with_shaders(module, &[])
+}
+
+pub fn emit_with_shaders(module: &Module, shaders: &[Shader]) -> Result<String, Error> {
     let analysis = ir::verify::analyze(module)?;
     let init = module
         .functions
@@ -29,61 +41,42 @@ pub fn emit(module: &Module) -> Result<String, Error> {
             param: Box::new(Ty::Unit),
             result: Box::new(Ty::Unit),
         })
-        || !init.nonlocals.is_empty()
+        || init.foreign.is_some()
     {
         return Err(Error(
-            "module initializer must be an uncaptured () -> () function".into(),
+            "module initializer must be a () -> () function".into(),
         ));
     }
-    let mut types = Types::new(module);
-    for (index, _) in module.types.iter().enumerate() {
-        types.intern(&Ty::Defined {
-            definition: ir::TypeId::from_index(index),
-        });
+    let types = Types::collect(module, shaders, &analysis);
+    let mut out =
+        "#include <resin_runtime.h>\n#include <stdlib.h>\n#include <math.h>\n".to_string();
+    out.push_str("_Static_assert(sizeof(void *) == 8 && sizeof(size_t) == 8, \"Resin currently requires a 64-bit host\");\n");
+    let headers: std::collections::BTreeSet<_> = module
+        .functions
+        .iter()
+        .filter_map(|function| function.foreign.as_ref().map(|foreign| &foreign.header))
+        .collect();
+    for header in headers {
+        writeln!(out, "#include <{header}>").unwrap();
     }
-    for global in &module.globals {
-        types.intern(&global.ty);
-    }
-    for (function, flow) in module.functions.iter().zip(&analysis) {
-        types.intern(&function.ty().unwrap());
-        for local in &function.locals {
-            types.intern(&local.ty);
-        }
-        for capture in &function.nonlocals {
-            types.intern(&capture.ty);
-        }
-        for ty in flow
-            .inputs
-            .iter()
-            .flatten()
-            .chain(flow.results.iter().flatten().flatten())
-        {
-            types.intern(ty);
-        }
-        for block in &function.blocks {
-            for instr in &block.instrs {
-                if let Instr::Push { value } = instr {
-                    types.value(value);
-                }
-            }
-        }
-    }
-    let mut out = "#include <resin_runtime.h>\n#include <stdlib.h>\n#include <math.h>\n".to_string();
     out.push_str(&types.declarations());
+    for (index, shader) in shaders.iter().enumerate() {
+        if shader.words.len() < 5 || shader.words[0] != 0x07230203 {
+            return Err(Error("invalid embedded SPIR-V".into()));
+        }
+        writeln!(out, "static uint32_t r_spv{index}[] = {{").unwrap();
+        for word in &shader.words {
+            writeln!(out, "  0x{word:08x},").unwrap();
+        }
+        out.push_str("};\n");
+    }
     for (index, global) in module.globals.iter().enumerate() {
         writeln!(out, "static {} r_g{index};", types.name(&global.ty)).unwrap();
     }
     for (index, function) in module.functions.iter().enumerate() {
-        if !function.nonlocals.is_empty() {
-            writeln!(out, "typedef struct {{").unwrap();
-            for (i, capture) in function.nonlocals.iter().enumerate() {
-                writeln!(out, "  {} c{i};", types.name(&capture.ty)).unwrap();
-            }
-            writeln!(out, "}} r_env{index};").unwrap();
-        }
         writeln!(
             out,
-            "{} r_fn{index}(void *r_env, {} r_arg);",
+            "{} r_fn{index}({} r_arg);",
             types.name(&function.result),
             types.name(&function.locals[function.param.index()].ty)
         )
@@ -92,39 +85,11 @@ pub fn emit(module: &Module) -> Result<String, Error> {
     for (index, flow) in analysis.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }
-    out.push_str("int main(void) {\n  atexit(resin_cleanup);\n  r_fn0(NULL, 0);\n");
+    out.push_str("int main(void) {\n  atexit(resin_cleanup);\n  r_fn0(0);\n");
     for index in 0..module.globals.len() {
         writeln!(out, "  (void)&r_g{index};").unwrap();
     }
-    let entries: Vec<_> = module
-        .globals
-        .iter()
-        .enumerate()
-        .filter(|(_, global)| global.name.as_ref() == "main")
-        .collect();
-    match entries.as_slice() {
-        [] => out.push_str("  return 0;\n"),
-        [(index, global)] => {
-            let Ty::Function { param, result } = types.shape(&global.ty) else {
-                return Err(Error("main must be a function".into()));
-            };
-            if param.as_ref() != &Ty::Unit || !matches!(result.as_ref(), Ty::Unit | Ty::Int32) {
-                return Err(Error("main must have type () -> int or () -> ()".into()));
-            }
-            let entry = types.unwrap(&global.ty, format!("r_g{index}"));
-            writeln!(
-                out,
-                "  if (!({entry}).call) resin_fail(\"main is not initialized\");"
-            )
-            .unwrap();
-            if result.as_ref() == &Ty::Unit {
-                writeln!(out, "  ({entry}).call(({entry}).env, 0);\n  return 0;").unwrap();
-            } else {
-                writeln!(out, "  return ({entry}).call(({entry}).env, 0);").unwrap();
-            }
-        }
-        _ => return Err(Error("multiple globals named main".into())),
-    }
+    out.push_str(&entry::emit(&types)?);
     out.push_str("}\n");
     Ok(out)
 }

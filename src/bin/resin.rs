@@ -62,10 +62,6 @@ enum Output {
     Glsl,
     /// Compile one shader entry to SPIR-V.
     Spirv,
-    /// Run the kernel shader and write a 256x256 PNG (requires --features gpu).
-    Compute,
-    /// Run vertex/fragment shaders and write a 256x256 PNG (requires --features gpu).
-    Graphics,
 }
 
 fn main() {
@@ -89,7 +85,7 @@ fn run(cli: Cli) -> Result<i32> {
     if cli.output == Output::Cst {
         return print(&cli, tree.root_node().to_sexp());
     }
-    let file = ast::generate::AstGen::new(&src).gen_source_file(tree.root_node())?;
+    let file = ast::load(&cli.file)?;
     match cli.output {
         Output::Check => return print(&cli, "ok".into()),
         Output::Ast => return print(&cli, ast::print::format_source(&file)),
@@ -100,7 +96,6 @@ fn run(cli: Cli) -> Result<i32> {
         Output::Ir => print(&cli, ir::format_module(&module)),
         Output::C | Output::Exe | Output::Run => host(&cli, &module),
         Output::Glsl | Output::Spirv => shader(&cli, &module),
-        Output::Compute | Output::Graphics => render(&cli, &module),
         _ => unreachable!(),
     }
 }
@@ -109,11 +104,7 @@ fn validate(cli: &Cli) -> Result<()> {
     if let Some(output) = &cli.destination {
         protect_source(&cli.file, output)?;
     }
-    if matches!(
-        cli.output,
-        Output::Exe | Output::Spirv | Output::Compute | Output::Graphics
-    ) && cli.destination.is_none()
-    {
+    if matches!(cli.output, Output::Exe | Output::Spirv) && cli.destination.is_none() {
         return Err("binary output requires -o PATH".into());
     }
     Ok(())
@@ -127,7 +118,8 @@ fn protect_source(source: &Path, output: &Path) -> Result<()> {
 }
 
 fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
-    let source = backend::c::emit(module)?;
+    let shaders = toolchain::build_shaders(module, &compiler(&cli.glslc, "GLSLC", "glslc"))?;
+    let source = backend::c::emit_with_shaders(module, &shaders)?;
     if cli.output == Output::C {
         return print(cli, source);
     }
@@ -177,25 +169,6 @@ fn shader(cli: &Cli, module: &ir::Module) -> Result<i32> {
     let bytes = toolchain::compile_glsl(&source, cli.stage, &compiler)?;
     toolchain::write_output(&bytes, cli.destination.as_ref().unwrap())?;
     Ok(0)
-}
-
-#[cfg(feature = "gpu")]
-fn render(cli: &Cli, module: &ir::Module) -> Result<i32> {
-    use resin::gpu::{self, Pipeline};
-    let pipeline = if cli.output == Output::Compute {
-        Pipeline::Compute
-    } else {
-        Pipeline::Graphics
-    };
-    let compiler = compiler(&cli.glslc, "GLSLC", "glslc");
-    let image = gpu::render(module, pipeline, &compiler)?;
-    gpu::write_png(&image, cli.destination.as_ref().unwrap())?;
-    Ok(0)
-}
-
-#[cfg(not(feature = "gpu"))]
-fn render(_cli: &Cli, _module: &ir::Module) -> Result<i32> {
-    Err("GPU execution requires building resin with --features gpu".into())
 }
 
 fn compiler(option: &Option<OsString>, env: &str, fallback: &str) -> OsString {

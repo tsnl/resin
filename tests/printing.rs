@@ -68,7 +68,10 @@ fn formats_are_length_delimited_and_do_not_add_newlines() {
         r#"print("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"));"#,
         "{世界}: {not a format}%\0, 世界".as_bytes(),
     );
-    prints(r#"fmt = "{0}!"; main = () => print(fmt, ("",));"#, b"!");
+    prints(
+        r#"fmt = "{0}!"; main () -> () = { print(fmt, ("",)); };"#,
+        b"!",
+    );
 }
 
 #[test]
@@ -97,11 +100,11 @@ fn arguments_evaluate_once_in_source_order_even_when_unused() {
 }
 
 #[test]
-fn closures_and_recursive_functions_can_print() {
+fn ordinary_and_recursive_functions_can_print() {
     prints(
-        r#"make = (n: int) => () => print("{0}", (n,)); f = make(4); f();
-        countdown = (n: int) => int { print("{0}", (n,)); if (n > 0) { countdown(n - 1) } else { 0 } };
-        main = () => countdown(2);"#,
+        r#"show (n: int) -> () = { print("{0}", (n,)); }; f = show; f(4);
+        countdown (n: int) -> int = { print("{0}", (n,)); if (n > 0) { countdown(n - 1) } else { 0 } };
+        main () -> int = { countdown(2) };"#,
         b"4210",
     );
 }
@@ -109,11 +112,11 @@ fn closures_and_recursive_functions_can_print() {
 #[test]
 fn print_can_be_shadowed_by_an_ordinary_function() {
     prints(
-        r#"main = () => { print = (n: int) => { n + 1 }; if (print(41) == 42) { 0 } else { 1 } };"#,
+        r#"plus (n: int) -> int = { n + 1 }; main () -> int = { print = plus; if (print(41) == 42) { 0 } else { 1 } };"#,
         b"",
     );
     prints(
-        r#"apply = (print: (int) -> int) => print(41); main = () => { apply((n: int) => { n - 41 }) };"#,
+        r#"apply (print: (int) -> int) -> int = { print(41) }; minus (n: int) -> int = { n - 41 }; main () -> int = { apply(minus) };"#,
         b"",
     );
 }
@@ -146,7 +149,10 @@ fn invalid_print_types_are_rejected() {
         (r#"print("{0}", (1,), (2,));"#, "InvalidPrintArguments"),
         (r#"print("{0}", ({ x = 1 },));"#, "UnprintableType"),
         (r#"print("{0}", ([1, 2],));"#, "UnprintableType"),
-        (r#"print("{0}", (() => 1,));"#, "UnprintableType"),
+        (
+            r#"f () -> int = { 1 }; print("{0}", (f,));"#,
+            "UnprintableType",
+        ),
     ] {
         let mut parser = tree_sitter::Parser::new();
         parser
@@ -164,7 +170,7 @@ fn invalid_print_types_are_rejected() {
 
 #[test]
 fn shader_print_has_a_host_only_diagnostic() {
-    let m = module(r#"kernel = (i: uint) => { print("{0}", (i,)); i };"#);
+    let m = module(r#"kernel (i: uint) -> uint = { print("{0}", (i,)); i };"#);
     let error = glsl::emit(&m, "kernel", glsl::Stage::Compute).unwrap_err();
     assert!(
         error

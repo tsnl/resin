@@ -9,7 +9,96 @@ use std::{
 
 use resin::toolchain::TempDir;
 
+#[path = "support/shaders.rs"]
+mod shaders;
+
 const WRAPPER: &str = "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
+
+#[test]
+fn foreign_header_changes_rebuild_including_nested_dependencies() {
+    let project = Project::new();
+    let header = project.temp.path().join("foreign.h");
+    let nested = project.temp.path().join("value.h");
+    fs::write(&nested, "#define VALUE 41\n").unwrap();
+    fs::write(
+        &header,
+        "#include \"value.h\"\nstatic inline int value(void) { return VALUE; }\n",
+    )
+    .unwrap();
+    fs::write(
+        &project.input,
+        format!(
+            "extern \"{}\" value () -> int; print(\"{{0}}\", (value(),));",
+            header.display()
+        ),
+    )
+    .unwrap();
+    printed(&project.run(), b"41");
+    printed(&project.run(), b"41");
+    assert_eq!(project.calls(), 1);
+    fs::write(&nested, "#define VALUE 42\n").unwrap();
+    printed(&project.run(), b"42");
+    assert_eq!(project.calls(), 2);
+    fs::remove_file(nested).unwrap();
+    let output = project.run();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(project.calls(), 3);
+    fs::write(&project.input, "print(\"no header\", ());").unwrap();
+    printed(&project.run(), b"no header");
+    printed(&project.run(), b"no header");
+    assert_eq!(project.calls(), 4);
+}
+
+#[test]
+fn shader_objects_are_deduplicated_cached_and_rebuilt_with_included_helpers() {
+    let Some(glslc) = shaders::compiler() else {
+        return;
+    };
+    let project = Project::new();
+    let shader_compiler = project.temp.path().join("shader-compiler");
+    let count = project.temp.path().join("shader-calls");
+    fs::write(&shader_compiler, "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_SHADER_COUNT\"\nexec \"$RESIN_TEST_SHADER_COMPILER\" \"$@\"\n").unwrap();
+    fs::set_permissions(&shader_compiler, fs::Permissions::from_mode(0o755)).unwrap();
+    let helper = project.temp.path().join("helper.resin");
+    fs::write(&helper, "pixel (i: uint) -> uint = { i + uint (1) };").unwrap();
+    fs::write(
+        &project.input,
+        r#"
+        include "helper.resin";
+        kernel (i: uint) -> uint = { pixel(i) };
+        a = shader(kernel, "compute");
+        b = shader(kernel, "compute");
+        print("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),));
+    "#,
+    )
+    .unwrap();
+    let run = || {
+        project
+            .command()
+            .arg("--glslc")
+            .arg(&shader_compiler)
+            .env("RESIN_TEST_SHADER_COUNT", &count)
+            .env("RESIN_TEST_SHADER_COMPILER", &glslc)
+            .output()
+            .unwrap()
+    };
+    let calls = || fs::read_to_string(&count).unwrap().lines().count();
+    printed(&run(), b"true");
+    printed(&run(), b"true");
+    assert_eq!(calls(), 1);
+    assert_eq!(project.calls(), 1);
+    fs::write(&helper, "pixel (i: uint) -> uint = { i + uint (2) };").unwrap();
+    printed(&run(), b"true");
+    assert_eq!(calls(), 2);
+    assert_eq!(project.calls(), 2);
+    fs::write(&helper, "pixel (i: uint) -> uint = { i / uint (2) };").unwrap();
+    let output = run();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(calls(), 2);
+    assert_eq!(project.calls(), 2);
+}
 
 struct Project {
     temp: TempDir,

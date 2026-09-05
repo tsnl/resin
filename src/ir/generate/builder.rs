@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use crate::ir::{
-    BasicBlock, BlockId, Function, Instr, Local, LocalId, NonLocal, NonLocalId, Terminator, Ty,
-};
+use crate::ir::{BasicBlock, BlockId, Function, Instr, Local, LocalId, Terminator, Ty};
 
 pub(super) struct FunctionBuilder {
     function: Function,
@@ -15,7 +13,7 @@ impl FunctionBuilder {
         Self {
             function: Function {
                 name,
-                nonlocals: Vec::new(),
+                foreign: None,
                 param: LocalId::from_index(0),
                 result: Ty::Unit,
                 locals: vec![Local {
@@ -38,10 +36,6 @@ impl FunctionBuilder {
         self.function
     }
 
-    pub(super) fn name(&self) -> Option<Arc<str>> {
-        self.function.name.clone()
-    }
-
     pub(super) fn parameter(&mut self, name: Option<Arc<str>>, ty: Ty) {
         self.function.locals[self.function.param.index()] = Local { name, ty };
     }
@@ -56,18 +50,8 @@ impl FunctionBuilder {
         id
     }
 
-    pub(super) fn local_name(&self, id: LocalId) -> Option<Arc<str>> {
-        self.function.locals[id.index()].name.clone()
-    }
-
     pub(super) fn set_local_type(&mut self, id: LocalId, ty: Ty) {
         self.function.locals[id.index()].ty = ty;
-    }
-
-    pub(super) fn nonlocal(&mut self, ty: Ty, name: Option<Arc<str>>) -> NonLocalId {
-        let id = NonLocalId::from_index(self.function.nonlocals.len());
-        self.function.nonlocals.push(NonLocal { name, ty });
-        id
     }
 
     pub(super) fn emit(&mut self, instr: Instr) {

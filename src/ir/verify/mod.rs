@@ -11,7 +11,7 @@ pub use error::{VerifyError, VerifyErrorKind, VerifyLocation};
 
 use error::Location;
 use flow::check_function;
-use types::{check_definitions, check_type};
+use types::{check_definitions, check_value};
 
 /// Check block and edge types; incoming edges must agree on the entry stack.
 pub fn verify(module: &Module) -> Result<(), VerifyError> {
@@ -25,9 +25,16 @@ pub(crate) struct FunctionTypes {
 
 pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError> {
     check_definitions(&module.types)?;
+    for (index, definition) in module.types.iter().enumerate() {
+        check_value(
+            &module.types,
+            definition.body().unwrap(),
+            Location::type_definition(crate::ir::TypeId::from_index(index)),
+        )?;
+    }
 
     for (index, global) in module.globals.iter().enumerate() {
-        check_type(
+        check_value(
             &module.types,
             &global.ty,
             Location::global(GlobalId::from_index(index)),

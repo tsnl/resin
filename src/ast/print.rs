@@ -19,6 +19,54 @@ fn sexp_source(file: &SourceFile) -> SExp {
 
 fn sexp_stmt(stmt: &Stmt) -> SExp {
     match &stmt.val {
+        StmtKind::Include { path } => list_sp("include", stmt.span, vec![string(path.as_ref())]),
+        StmtKind::ForeignType { name } => {
+            list_sp("extern-type", stmt.span, vec![symbol(name.val.as_ref())])
+        }
+        StmtKind::ForeignFunction {
+            header,
+            name,
+            params,
+            result,
+        } => list_sp(
+            "extern",
+            stmt.span,
+            vec![
+                string(header.as_ref()),
+                symbol(name.val.as_ref()),
+                group(
+                    params
+                        .iter()
+                        .map(|(name, ann)| {
+                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        })
+                        .collect(),
+                ),
+                sexp_typespec(result),
+            ],
+        ),
+        StmtKind::Function {
+            name,
+            params,
+            result,
+            body,
+        } => list_sp(
+            "def",
+            stmt.span,
+            vec![
+                symbol(name.val.as_ref()),
+                group(
+                    params
+                        .iter()
+                        .map(|(name, ann)| {
+                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        })
+                        .collect(),
+                ),
+                sexp_typespec(result),
+                sexp_term(body),
+            ],
+        ),
         StmtKind::Define { name, init } => list_sp(
             "define",
             stmt.span,
@@ -43,19 +91,6 @@ fn sexp_term(term: &Term) -> SExp {
         TermKind::Var { name } => symbol(name.val.as_ref()),
         TermKind::Num { value } => symbol(value.as_ref()),
         TermKind::String { value } => string(value.as_ref()),
-        TermKind::Lambda { params, body } => {
-            let param_sexps: Vec<SExp> = params
-                .iter()
-                .map(|(name, ann)| {
-                    list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
-                })
-                .collect();
-            list_sp(
-                "lambda",
-                term.span,
-                vec![group(param_sexps), sexp_term(body)],
-            )
-        }
         TermKind::If { cond, then, els } => list_sp(
             "if",
             term.span,
@@ -95,6 +130,7 @@ fn sexp_term(term: &Term) -> SExp {
             vec![sexp_term(place), sexp_term(value)],
         ),
         TermKind::Deref { pointer } => list_sp("deref", term.span, vec![sexp_term(pointer)]),
+        TermKind::Address { place } => list_sp("address", term.span, vec![sexp_term(place)]),
         TermKind::Field { base, name } => list_sp(
             "field",
             term.span,

@@ -16,9 +16,10 @@ pub(super) fn emit(
     types: &Types<'_>,
     function: &Function,
     flow: &FunctionTypes,
+    name: &str,
 ) -> Result<String, Error> {
     let mut out = format!(
-        "{} r_entry({} arg) {{\n",
+        "{} {name}({} arg) {{\n",
         types.name(&function.result),
         types.name(&function.locals[function.param.index()].ty)
     );
@@ -38,7 +39,7 @@ pub(super) fn emit(
         }
         for (i, ty) in flow.results[b].iter().enumerate() {
             if let Some(ty) = ty
-                && !matches!(ty, Ty::Pointer { .. })
+                && !matches!(ty, Ty::Pointer { .. } | Ty::Function { .. })
             {
                 writeln!(out, "  {} r_v{b}_{i};", types.name(ty)).unwrap();
             }
@@ -67,7 +68,7 @@ pub(super) fn emit(
                 .map_err(|error| Error(format!("shader block {b}, instruction {i}: {error}")))?;
             if let Some(ty) = result {
                 let mut expr = expr.unwrap();
-                if !matches!(ty, Ty::Pointer { .. }) {
+                if !matches!(ty, Ty::Pointer { .. } | Ty::Function { .. }) {
                     let name = format!("r_v{b}_{i}");
                     writeln!(out, "      {name} = {expr};").unwrap();
                     expr = name;
@@ -126,6 +127,8 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::Function { function } => format!("r_fn{}", function.index()),
+        Instr::Call => format!("{}({})", args[0].expr, args[1].expr),
         Instr::Push { value } => literal(types, result.unwrap(), value)?,
         Instr::LocalAddress { local } => format!("r_l{}", local.index()),
         Instr::Load => args[0].expr.clone(),

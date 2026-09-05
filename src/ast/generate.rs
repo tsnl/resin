@@ -72,6 +72,26 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
+        if matches!(node.kind(), "function_definition" | "foreign_function") {
+            return self.gen_function(node);
+        }
+        if node.kind() == "foreign_type" {
+            return Spanned::new(
+                StmtKind::ForeignType {
+                    name: self.ident(node.child_by_field_name("name").unwrap()),
+                },
+                self.span(node),
+            );
+        }
+        if node.kind() == "include" {
+            return Spanned::new(
+                StmtKind::Include {
+                    path: decode_string(self.text(node.child_by_field_name("path").unwrap()))
+                        .into(),
+                },
+                self.span(node),
+            );
+        }
         assert_eq!(node.kind(), "statement");
         if let Some(define) = node.child_by_field_name("define") {
             return self.gen_define(define, self.span(node));
@@ -142,6 +162,14 @@ impl<'a> AstGen<'a> {
         if let Some(op_node) = node.child_by_field_name("operator") {
             let op_text = self.text(op_node);
             let operand = self.gen_unary_term(node.child_by_field_name("operand").unwrap());
+            if op_text == "&" {
+                return Spanned::new(
+                    TermKind::Address {
+                        place: Box::new(operand),
+                    },
+                    self.span(node),
+                );
+            }
             return self.call_var(op_text, vec![operand], self.span(node));
         }
         self.gen_postfix_term(node.child(0).unwrap())
@@ -232,7 +260,6 @@ impl<'a> AstGen<'a> {
         assert_eq!(node.kind(), "closed_term");
         let child = node.child(0).unwrap();
         match child.kind() {
-            "lambda_term" => self.gen_lambda_term(child),
             "paren_term" => self.gen_paren_term(child),
             "tuple_term" => self.gen_tuple_term(child),
             "array_term" => self.gen_array_term(child),
@@ -243,19 +270,49 @@ impl<'a> AstGen<'a> {
         }
     }
 
-    fn gen_lambda_term(&self, node: Node) -> Term {
-        assert_eq!(node.kind(), "lambda_term");
+    fn gen_function(&self, node: Node) -> Stmt {
+        let name = self.ident(node.child_by_field_name("name").unwrap());
+        let result = self.gen_type(node.child_by_field_name("result").unwrap());
         let mut params = Vec::new();
         let mut cursor = node.walk();
         for p in node.children_by_field_name("params", &mut cursor) {
             let (name, ann) = self.gen_declare(p);
             params.push((name, ann));
         }
-        let body = self.gen_postfix_term(node.child_by_field_name("body").unwrap());
+        if let Some(header) = node.child_by_field_name("header") {
+            return Spanned::new(
+                StmtKind::ForeignFunction {
+                    header: decode_string(self.text(header)).into(),
+                    name,
+                    params,
+                    result,
+                },
+                self.span(node),
+            );
+        }
+        let block = node.child_by_field_name("body").unwrap();
+        let mut cursor = block.walk();
+        let stmts = block
+            .children_by_field_name("stmt", &mut cursor)
+            .map(|stmt| self.gen_stmt(stmt))
+            .collect();
+        let tail = block
+            .child_by_field_name("tail")
+            .map(|term| self.gen_term(term))
+            .unwrap_or_else(|| Spanned::new(TermKind::Unit, self.span(block)));
+        let body = Spanned::new(
+            TermKind::Block {
+                stmts,
+                tail: Box::new(tail),
+            },
+            self.span(block),
+        );
         Spanned::new(
-            TermKind::Lambda {
+            StmtKind::Function {
+                name,
                 params,
-                body: Box::new(body),
+                result,
+                body,
             },
             self.span(node),
         )

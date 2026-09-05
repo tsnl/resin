@@ -10,7 +10,10 @@ use crate::backend::Error;
 use crate::backend::glsl::Stage;
 
 mod c;
+mod dependencies;
+mod shaders;
 pub use c::{CBuild, build_c, compile_c};
+pub use shaders::build_shaders;
 
 pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
     let temp = TempDir::new(&std::env::temp_dir()).map_err(io_error)?;
@@ -38,10 +41,14 @@ pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<
         )));
     }
     let bytes = fs::read(output).map_err(io_error)?;
-    if bytes.len() < 20 || bytes.len() % 4 != 0 || bytes[..4] != [3, 2, 35, 7] {
+    if !valid_spirv(&bytes) {
         return Err(Error("shader compiler returned invalid SPIR-V".into()));
     }
     Ok(bytes)
+}
+
+fn valid_spirv(bytes: &[u8]) -> bool {
+    bytes.len() >= 20 && bytes.len().is_multiple_of(4) && bytes[..4] == [3, 2, 35, 7]
 }
 
 pub fn write_output(bytes: &[u8], output: &Path) -> Result<(), Error> {

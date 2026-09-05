@@ -49,14 +49,7 @@ fn fibonacci_generates_verified_ir() {
     let module = compile(src);
     verify(&module).unwrap();
 
-    assert_eq!(module.globals.len(), 1);
-    assert_eq!(
-        module.globals[0].ty,
-        Ty::Function {
-            param: Box::new(Ty::Int32),
-            result: Box::new(Ty::Int32),
-        }
-    );
+    assert!(module.globals.is_empty());
     assert_eq!(module.functions.len(), 2);
     assert_eq!(module.functions[0].result, Ty::Unit);
     assert_eq!(module.functions[1].result, Ty::Int32);
@@ -70,13 +63,11 @@ fn fibonacci_generates_verified_ir() {
 fn ir_dump_is_an_s_expression_with_names() {
     let dump = format_module(&compile(include_str!("../examples/eg001.resin")));
     assert!(dump.starts_with("(module"));
-    assert!(dump.contains("(global fibonacci (func int int))"));
     assert!(dump.contains("init"));
     assert!(dump.contains("fibonacci"));
     assert!(dump.contains("(local f0 int)"));
     assert!(dump.contains("(local-addr n)"));
-    assert!(dump.contains("(global-addr fibonacci)"));
-    assert!(dump.contains("(make-closure fibonacci 0)"));
+    assert!(dump.contains("(function-ref fibonacci)"));
     assert!(dump.contains("(block then"));
     assert!(dump.contains("(branch then else)"));
     assert!(!dump.contains("global-addr g"));
@@ -84,14 +75,14 @@ fn ir_dump_is_an_s_expression_with_names() {
 }
 
 #[test]
-fn recursive_calls_are_delayed_global_loads() {
+fn recursive_calls_reference_functions_directly() {
     let module = compile(include_str!("../examples/eg001.resin"));
     let fib = &module.functions[1];
     assert!(fib.blocks.iter().any(|block| {
         block.instrs.iter().any(|instr| {
             matches!(
                 instr,
-                Instr::GlobalAddress { global } if global.index() == 0
+                Instr::Function { function } if function.index() == 1
             )
         })
     }));
@@ -106,10 +97,10 @@ fn eager_recursion_is_rejected() {
 }
 
 #[test]
-fn recursive_function_needs_a_result_ascription() {
+fn recursive_function_result_is_checked() {
     assert!(matches!(
-        compile_err("f = (n: int) => f(n);"),
-        GenerateErrorKind::NeedsTypeAnnotation { .. }
+        compile_err("f (n: int) -> int = { if (n == 0) { () } else { f(n - 1) } };"),
+        GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
     ));
 }
 
@@ -141,28 +132,24 @@ fn inline_recursive_type_is_rejected_during_generation() {
 }
 
 #[test]
-fn nested_lambda_captures_enclosing_locals() {
-    let module = compile("add = (x: int) => (y: int) => { x + y };");
+fn function_values_do_not_capture_local_state() {
+    let module = compile(
+        "add (x: int, y: int) -> int = { x + y }; select () -> (int, int) -> int = { local = add; local };",
+    );
     verify(&module).unwrap();
-    let inner = module
-        .functions
-        .iter()
-        .find(|function| function.nonlocals.len() == 1)
-        .expect("inner lambda captures x");
-    assert_eq!(inner.nonlocals[0].ty, Ty::Int32);
-    assert!(module.functions.iter().any(|function| {
-        function.blocks.iter().any(|block| {
-            block
-                .instrs
-                .iter()
-                .any(|instr| matches!(instr, Instr::MakeClosure { captures, .. } if *captures == 1))
-        })
-    }));
+    assert!(
+        module
+            .functions
+            .iter()
+            .flat_map(|f| &f.blocks)
+            .flat_map(|b| &b.instrs)
+            .any(|i| matches!(i, Instr::Function { .. }))
+    );
 }
 
 #[test]
 fn assignment_and_deref_store_through_an_address() {
-    let module = compile("f = (p: Ptr (int)) => { p.* := 1; p.* };");
+    let module = compile("f (p: Ptr (int)) -> int = { p.* := 1; p.* };");
     verify(&module).unwrap();
     let function = &module.functions[1];
     assert!(function.blocks.iter().any(|block| {
@@ -181,7 +168,7 @@ fn assignment_and_deref_store_through_an_address() {
 
 #[test]
 fn if_joins_then_and_else_values() {
-    let module = compile("f = (c: int) => if (c == 0) { 1 } else { 2 };");
+    let module = compile("f (c: int) -> int = { if (c == 0) { 1 } else { 2 } };");
     verify(&module).unwrap();
     let function = &module.functions[1];
     assert!(
@@ -198,8 +185,8 @@ fn nominal_ascription_wraps_and_unwraps_one_layer() {
     let module = compile(
         r#"
 Meters = int;
-to_meters = (n: int) => Meters (n);
-from_meters = (m: Meters) => int (m);
+to_meters (n: int) -> Meters = { Meters (n) };
+from_meters (m: Meters) -> int = { int (m) };
 "#,
     );
     verify(&module).unwrap();
@@ -207,14 +194,14 @@ from_meters = (m: Meters) => int (m);
         definition: resin::ir::TypeId::from_index(0),
     };
     assert_eq!(
-        module.globals[0].ty,
+        module.functions[1].ty().unwrap(),
         Ty::Function {
             param: Box::new(Ty::Int32),
             result: Box::new(meters.clone()),
         }
     );
     assert_eq!(
-        module.globals[1].ty,
+        module.functions[2].ty().unwrap(),
         Ty::Function {
             param: Box::new(meters),
             result: Box::new(Ty::Int32),
@@ -227,7 +214,7 @@ fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
         r#"
 P = Ptr ({ x: int });
-f = (p: P) => p.x;
+f (p: P) -> int = { p.x };
 "#,
     );
     verify(&module).unwrap();
@@ -249,7 +236,7 @@ fn named_function_type_can_be_called() {
     let module = compile(
         r#"
 Handler = (int) -> int;
-f = (h: Handler, n: int) => h(n);
+f (h: Handler, n: int) -> int = { h(n) };
 "#,
     );
     verify(&module).unwrap();
@@ -295,7 +282,7 @@ fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
         r#"
 List = { value: int, next: Ptr (List) };
-nil = (p: Ptr (List)) => List { value = 0, next = p };
+nil (p: Ptr (List)) -> List = { List { value = 0, next = p } };
 "#,
     );
     verify(&module).unwrap();
@@ -303,7 +290,7 @@ nil = (p: Ptr (List)) => List { value = 0, next = p };
         definition: resin::ir::TypeId::from_index(0),
     };
     assert_eq!(
-        module.globals[0].ty,
+        module.functions[1].ty().unwrap(),
         Ty::Function {
             param: Box::new(Ty::Pointer {
                 pointee: Box::new(list.clone()),
@@ -355,7 +342,7 @@ x = 1;
 
 #[test]
 fn short_circuit_and_compiles() {
-    let module = compile("f = (a: int) => { (a == 0) && (a == 1) };");
+    let module = compile("f (a: int) -> bool = { (a == 0) && (a == 1) };");
     verify(&module).unwrap();
     assert_eq!(module.functions[1].result, Ty::Bool);
 }

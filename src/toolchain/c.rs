@@ -9,11 +9,12 @@ use std::{
 
 use crate::backend::Error;
 
-use super::{TempDir, io_error, parent, write_output};
+use super::{TempDir, dependencies, io_error, parent, write_output};
 
 const FLAGS: &[&str] = &[
     "-std=c11",
     "-O2",
+    "-fno-strict-aliasing",
     "-Wall",
     "-Wextra",
     "-Werror",
@@ -63,7 +64,14 @@ pub fn build_c(file: &Path, source: &str, compiler: &OsStr) -> Result<CBuild, Er
         _lock: lock,
     };
     let compiler = Compiler::new(compiler)?;
-    let fingerprint = compiler.fingerprint(source)?;
+    let dependency_file = directory.join("dependencies");
+    let dependencies: Vec<_> = fs::read_to_string(&dependency_file)
+        .unwrap_or_default()
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .collect();
+    let fingerprint = compiler.fingerprint(source, &dependencies)?;
     let stamp = directory.join("fingerprint");
     if build.executable.is_file() && fs::read_to_string(&stamp).ok().as_ref() == Some(&fingerprint)
     {
@@ -75,15 +83,28 @@ pub fn build_c(file: &Path, source: &str, compiler: &OsStr) -> Result<CBuild, Er
         Err(error) => return Err(io_error(error)),
     }
     write_output(source.as_bytes(), &directory.join("program.c"))?;
-    compiler.compile(source, &build.executable)?;
-    if compiler.fingerprint(source)? == fingerprint {
-        write_output(fingerprint.as_bytes(), &stamp)?;
+    let started = std::time::SystemTime::now();
+    let found = compiler.compile(source, &build.executable)?;
+    let paths = found
+        .iter()
+        .map(|path| path.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\0");
+    write_output(paths.as_bytes(), &dependency_file)?;
+    if compiler.fingerprint(source, &dependencies)? == fingerprint
+        && found.iter().all(|path| {
+            fs::metadata(path)
+                .and_then(|m| m.modified())
+                .is_ok_and(|time| time <= started)
+        })
+    {
+        write_output(compiler.fingerprint(source, &found)?.as_bytes(), &stamp)?;
     }
     Ok(build)
 }
 
 pub fn compile_c(source: &str, output: &Path, compiler: &OsStr) -> Result<(), Error> {
-    Compiler::new(compiler)?.compile(source, output)
+    Compiler::new(compiler)?.compile(source, output).map(|_| ())
 }
 
 struct Compiler {
@@ -103,13 +124,16 @@ impl Compiler {
         })
     }
 
-    fn compile(&self, source: &str, output: &Path) -> Result<(), Error> {
+    fn compile(&self, source: &str, output: &Path) -> Result<Vec<PathBuf>, Error> {
         let temp = TempDir::new(parent(output)).map_err(io_error)?;
         let input = temp.path().join("program.c");
         let binary = temp.path().join("program");
+        let depfile = temp.path().join("program.d");
         fs::write(&input, source).map_err(io_error)?;
         let result = Command::new(&self.executable)
             .args(FLAGS)
+            .args(["-MD", "-MT", "resin", "-MF"])
+            .arg(&depfile)
             .arg("-I")
             .arg(&self.include)
             .arg(&input)
@@ -126,10 +150,13 @@ impl Compiler {
                 String::from_utf8_lossy(&result.stderr)
             )));
         }
-        fs::rename(binary, output).map_err(io_error)
+        let dependencies =
+            dependencies::parse(&fs::read_to_string(depfile).map_err(io_error)?, &input);
+        fs::rename(binary, output).map_err(io_error)?;
+        Ok(dependencies)
     }
 
-    fn fingerprint(&self, source: &str) -> Result<String, Error> {
+    fn fingerprint(&self, source: &str, dependencies: &[PathBuf]) -> Result<String, Error> {
         let mut hash = DefaultHasher::new();
         source.hash(&mut hash);
         FLAGS.hash(&mut hash);
@@ -142,11 +169,17 @@ impl Compiler {
         metadata(&self.executable, &mut hash)?;
         contents(&self.library, &mut hash)?;
         headers(&self.include, &mut hash, &mut HashSet::new())?;
+        for path in dependencies {
+            path.hash(&mut hash);
+            if let Err(error) = contents(path, &mut hash) {
+                error.to_string().hash(&mut hash);
+            }
+        }
         Ok(format!("{:016x}", hash.finish()))
     }
 }
 
-fn resolve(compiler: &OsStr) -> Result<PathBuf, Error> {
+pub(super) fn resolve(compiler: &OsStr) -> Result<PathBuf, Error> {
     let candidates = if Path::new(compiler).components().count() > 1 {
         vec![PathBuf::from(compiler)]
     } else {
@@ -174,7 +207,7 @@ fn resolve(compiler: &OsStr) -> Result<PathBuf, Error> {
     )))
 }
 
-fn metadata(path: &Path, hash: &mut DefaultHasher) -> Result<(), Error> {
+pub(super) fn metadata(path: &Path, hash: &mut DefaultHasher) -> Result<(), Error> {
     let path = fs::canonicalize(path).map_err(io_error)?;
     let metadata = fs::metadata(&path).map_err(io_error)?;
     path.hash(hash);

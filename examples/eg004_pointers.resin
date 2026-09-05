@@ -1,9 +1,13 @@
-// Explicit deref, assignment, and field autoderef through Ptr.
-set = (p: Ptr (int)) => {
-    p.* := 1;
-    p.*
+set (p: Ptr (int)) -> int = { p.* := 1; p.* };
+
+Point = { x: int, y: int };
+get_x (p: Ptr (Point)) -> int = { p.x };
+set_x (p: Ptr (Point), n: int) -> int = { p.x := n; p.x };
+
+main () -> () = {
+    n = 0;
+    point = Point { x = 0, y = 2 };
+    set(&n);
+    set_x(&point, 42);
+    print("n = {0}, point.x = {1}\n", (n, get_x(&point)));
 };
-P = Ptr ({ x: int, y: int });
-get_x = (p: P) => p.x;
-set_x = (p: P, n: int) => { p.x := n; p.x };
-print("Pointer helpers compiled; creating pointers from source is not supported yet.\n", ());

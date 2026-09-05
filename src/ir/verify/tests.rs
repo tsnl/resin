@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::{BasicBlock, Local, LocalId, NonLocal, NonLocalId, TypeDef};
+use crate::ir::{BasicBlock, Local, LocalId, TypeDef};
 use crate::ir::{BlockId, Function, Instr, Module, Terminator, Ty, TypeId, Value};
 
 #[test]
@@ -8,8 +8,8 @@ fn ascribe_wraps_a_representation() {
         definition: TypeId::from_index(0),
     };
     let function = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![],
         param: LocalId::from_index(0),
         result: meters.clone(),
         locals: vec![Local {
@@ -43,8 +43,8 @@ fn ascribe_unwraps_one_nominal_layer() {
         definition: TypeId::from_index(0),
     };
     let function = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![],
         param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
@@ -76,8 +76,8 @@ fn ascribe_unwraps_one_nominal_layer() {
 #[test]
 fn chained_assignment_preserves_the_value() {
     let function = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![],
         param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![
@@ -121,8 +121,8 @@ fn chained_assignment_preserves_the_value() {
 #[test]
 fn conflicting_join_stacks_are_rejected() {
     let function = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![],
         param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
@@ -183,11 +183,8 @@ fn conflicting_join_stacks_are_rejected() {
 #[test]
 fn indirect_calls_use_the_callee_on_the_stack() {
     let target = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![NonLocal {
-            name: None,
-            ty: Ty::Int32,
-        }],
         param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
@@ -198,8 +195,8 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         blocks: vec![BasicBlock {
             name: None,
             instrs: vec![
-                Instr::NonLocalAddress {
-                    nonlocal: NonLocalId::from_index(0),
+                Instr::LocalAddress {
+                    local: LocalId::from_index(0),
                 },
                 Instr::Load,
             ],
@@ -207,8 +204,8 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         }],
     };
     let caller = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![],
         param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
@@ -219,12 +216,8 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         blocks: vec![BasicBlock {
             name: None,
             instrs: vec![
-                Instr::Push {
-                    value: Value::Int32 { value: 9 },
-                },
-                Instr::MakeClosure {
+                Instr::Function {
                     function: FunctionId::from_index(0),
-                    captures: 1,
                 },
                 Instr::Push {
                     value: Value::Int32 { value: 4 },
@@ -246,8 +239,8 @@ fn indirect_calls_use_the_callee_on_the_stack() {
 #[test]
 fn loop_backedges_must_match_the_header_stack() {
     let function = Function {
+        foreign: None,
         name: None,
-        nonlocals: vec![],
         param: LocalId::from_index(0),
         result: Ty::Unit,
         locals: vec![Local {

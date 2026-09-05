@@ -52,14 +52,8 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
         symbol(fn_names.locals[function.param.index()].as_ref()),
         sexp_ty(names, &function.result),
     ];
-    for (i, nonlocal) in function.nonlocals.iter().enumerate() {
-        items.push(list(
-            "nonlocal",
-            vec![
-                symbol(fn_names.nonlocals[i].as_ref()),
-                sexp_ty(names, &nonlocal.ty),
-            ],
-        ));
+    if let Some(foreign) = &function.foreign {
+        items.push(list("extern", vec![symbol(foreign.header.as_ref())]));
     }
     for (i, local) in function.locals.iter().enumerate() {
         if function.param.index() == i {
@@ -89,6 +83,14 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
+        Instr::Shader { function, stage } => list(
+            "shader",
+            vec![
+                symbol(names.functions[function.index()].as_ref()),
+                symbol(stage.as_ref()),
+            ],
+        ),
+        Instr::PointerCast { ty } => list("pointer-cast", vec![sexp_ty(names, ty)]),
         Instr::Push { value } => list("push", vec![sexp_value(names, value)]),
         Instr::LocalAddress { local } => list(
             "local-addr",
@@ -97,10 +99,6 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::GlobalAddress { global } => list(
             "global-addr",
             vec![symbol(names.globals[global.index()].as_ref())],
-        ),
-        Instr::NonLocalAddress { nonlocal } => list(
-            "nonlocal-addr",
-            vec![symbol(fn_names.nonlocals[nonlocal.index()].as_ref())],
         ),
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
         Instr::AccessDynamic => symbol("access-dynamic"),
@@ -116,15 +114,11 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             "make-array",
             vec![symbol(elements.to_string()), sexp_ty(names, element)],
         ),
-        Instr::MakeClosure { function, captures } => list(
-            "make-closure",
-            vec![
-                symbol(names.functions[function.index()].as_ref()),
-                symbol(captures.to_string()),
-            ],
+        Instr::Function { function } => list(
+            "function-ref",
+            vec![symbol(names.functions[function.index()].as_ref())],
         ),
         Instr::Call => symbol("call"),
-        Instr::CurrentClosure => symbol("current-closure"),
         Instr::CallBuiltin {
             name,
             params,
@@ -197,10 +191,6 @@ fn sexp_value(names: &Names, value: &Value) -> SExp {
         Value::DynamicAddress { address } => {
             list("dynamic-addr", vec![symbol(address.to_string())])
         }
-        Value::Closure { value } => list(
-            "closure",
-            vec![symbol(names.functions[value.function.index()].as_ref())],
-        ),
     }
 }
 
@@ -219,6 +209,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
         Ty::UInt64 => symbol("ulong"),
         Ty::Float32 => symbol("float32"),
         Ty::Float64 => symbol("float64"),
+        Ty::Foreign { name } => list("foreign", vec![symbol(name.as_ref())]),
         Ty::Defined { definition } => names
             .types
             .get(definition.index())

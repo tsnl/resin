@@ -9,8 +9,11 @@ use super::{Slot, ops, types::Types, value::literal};
 
 pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Result<String, Error> {
     let function = &types.module.functions[index];
+    if let Some(foreign) = &function.foreign {
+        return Ok(super::foreign::emit(types, index, foreign));
+    }
     let mut out = format!(
-        "{} r_fn{index}(void *r_env, {} r_arg) {{\n  (void)r_env;\n",
+        "{} r_fn{index}({} r_arg) {{\n",
         types.name(&function.result),
         types.name(&function.locals[function.param.index()].ty)
     );
@@ -43,13 +46,11 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
             let result = flow.results[block_id][i].as_ref();
             let name = format!("r_v{block_id}_{i}");
-            let expr = instruction(types, index, instr, &args, result, &name, &mut out).map_err(
-                |error| {
-                    Error(format!(
-                        "function {index}, block {block_id}, instruction {i}: {error}"
-                    ))
-                },
-            )?;
+            let expr = instruction(types, instr, &args, result, &mut out).map_err(|error| {
+                Error(format!(
+                    "function {index}, block {block_id}, instruction {i}: {error}"
+                ))
+            })?;
             if let Some(ty) = result {
                 writeln!(
                     out,
@@ -106,23 +107,29 @@ fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) {
 
 fn instruction(
     types: &Types<'_>,
-    index: usize,
     instr: &Instr,
     args: &[Slot],
     result: Option<&Ty>,
-    name: &str,
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
-        Instr::Push { value } => literal(types, result.unwrap(), value),
-        Instr::CurrentClosure => {
-            format!("({}){{ r_fn{index}, r_env }}", types.name(result.unwrap()))
+        Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
+        Instr::Shader { function, stage } => {
+            let index = types
+                .shaders
+                .iter()
+                .position(|shader| {
+                    shader.function == *function && shader.stage.name() == stage.as_ref()
+                })
+                .ok_or_else(|| Error("shader needs SPIR-V compilation before C emission".into()))?;
+            format!(
+                "({}){{ (uint8_t *)r_spv{index}, sizeof(r_spv{index}) }}",
+                types.name(result.unwrap())
+            )
         }
+        Instr::Push { value } => literal(types, result.unwrap(), value),
         Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
         Instr::GlobalAddress { global } => format!("&r_g{}", global.index()),
-        Instr::NonLocalAddress { nonlocal } => {
-            format!("&((r_env{index} *)r_env)->c{}", nonlocal.index())
-        }
         Instr::Load => format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone())),
         Instr::Store => {
             writeln!(
@@ -177,26 +184,11 @@ fn instruction(
             &types.unwrap(&args[1].ty, args[1].expr.clone()),
             true,
         )?,
-        Instr::MakeClosure {
-            function: target, ..
-        } => {
-            let target = target.index();
-            let env = if args.is_empty() {
-                "NULL".into()
-            } else {
-                let env = format!("{name}_env");
-                writeln!(
-                    out,
-                    "  r_env{target} *{env} = resin_alloc(sizeof(r_env{target}));"
-                )
-                .unwrap();
-                for (i, arg) in args.iter().enumerate() {
-                    writeln!(out, "  {env}->c{i} = {};", arg.expr).unwrap();
-                }
-                env
-            };
-            format!("({}){{ r_fn{target}, {env} }}", types.name(result.unwrap()))
-        }
+        Instr::Function { function } => format!(
+            "({}){{ r_fn{} }}",
+            types.name(result.unwrap()),
+            function.index()
+        ),
         Instr::Call => {
             let callee = types.unwrap(&args[0].ty, args[0].expr.clone());
             writeln!(
@@ -204,7 +196,7 @@ fn instruction(
                 "  if (!({callee}).call) resin_fail(\"calling an uninitialized function\");"
             )
             .unwrap();
-            format!("({callee}).call(({callee}).env, {})", args[1].expr)
+            format!("({callee}).call({})", args[1].expr)
         }
         Instr::CallBuiltin { name, result, .. } => ops::builtin(types, name, args, result)?,
     };

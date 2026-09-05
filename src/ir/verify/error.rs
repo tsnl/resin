@@ -33,12 +33,15 @@ pub enum VerifyLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidForeignSignature,
+    OpaqueValue { ty: Ty },
+    InvalidShader,
+    InvalidPointerCast { from: Ty, to: Ty },
     InvalidTypeDefinition { definition: usize },
     IncompleteTypeDefinition { definition: TypeId },
     RecursiveTypeWithoutIndirection { definition: TypeId },
     InvalidLocal { local: usize },
     InvalidGlobal { global: usize },
-    InvalidNonLocal { nonlocal: usize },
     InvalidFunction { function: usize },
     InvalidBasicBlock { basic_block: usize },
     UnreachableBasicBlock,

@@ -80,7 +80,7 @@ impl TyperContext {
         })
     }
 
-    pub fn type_lambda(&self, param: &Ty, body: &Ty) -> Ty {
+    pub fn type_function(&self, param: &Ty, body: &Ty) -> Ty {
         Ty::Function {
             param: Box::new(param.clone()),
             result: Box::new(body.clone()),

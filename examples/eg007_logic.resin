@@ -1,7 +1,6 @@
-// Short-circuit boolean ops, comparisons, and a record literal.
-clamp = (n: int, lo: int, hi: int) => if ((n < lo) || (n > hi)) { lo } else { n };
-both = (a: int, b: int) => { (a != 0) && (b != 0) };
-pair = (a: int, b: int) => { a = a, b = b };
+clamp (n: int, lo: int, hi: int) -> int = { if ((n < lo) || (n > hi)) { lo } else { n } };
+both (a: int, b: int) -> bool = { (a != 0) && (b != 0) };
+pair (a: int, b: int) -> { a: int, b: int } = { { a = a, b = b } };
 xs = [1, 2, 3];
 print("clamp(5, 0, 10) = {0}, both(1, 2) = {1}, pair(3, 4).a = {2}\n",
     (clamp(5, 0, 10), both(1, 2), pair(3, 4).a));

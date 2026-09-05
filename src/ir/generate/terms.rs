@@ -105,6 +105,12 @@ impl Generator {
             return self.gen_ascription(span, ty, arg);
         }
         if let TermKind::Var { name } = &func.val
+            && name.val.as_ref() == "shader"
+            && self.scopes.lookup_value("shader").is_none()
+        {
+            return self.gen_shader(span, arg);
+        }
+        if let TermKind::Var { name } = &func.val
             && name.val.as_ref() == "print"
             && self.scopes.lookup_value("print").is_none()
         {
@@ -141,7 +147,52 @@ impl Generator {
             .body(&ascribed)
             .map_err(|err| GenerateError::typing(span, err))?;
         let found = self.gen_term_inner(arg, Some(&context))?;
+        if found.pointer_cast(&ascribed) {
+            self.emit(Instr::PointerCast {
+                ty: ascribed.clone(),
+            });
+            return Ok(ascribed);
+        }
         self.apply_ascription(span, &ascribed, found)
+    }
+
+    fn gen_shader(&mut self, span: Span, arg: &Term) -> Result<Ty, GenerateError> {
+        let invalid = || GenerateError {
+            span,
+            kind: GenerateErrorKind::InvalidShader {
+                message: "expected shader(named_function, \"compute\" | \"vertex\" | \"fragment\")"
+                    .into(),
+            },
+        };
+        let TermKind::Record { fields } = &arg.val else {
+            return Err(invalid());
+        };
+        let [(first, function), (second, stage)] = fields.as_slice() else {
+            return Err(invalid());
+        };
+        let (TermKind::Var { name }, TermKind::String { value: stage }) =
+            (&function.val, &stage.val)
+        else {
+            return Err(invalid());
+        };
+        if first.val.as_ref() != "_0"
+            || second.val.as_ref() != "_1"
+            || !matches!(stage.as_ref(), "compute" | "vertex" | "fragment")
+        {
+            return Err(invalid());
+        }
+        let binding = self.resolve_value(name)?;
+        let super::scope::ValueBindingKind::Function(function) = binding.kind else {
+            return Err(invalid());
+        };
+        if self.module.functions[function.index()].foreign.is_some() {
+            return Err(invalid());
+        }
+        self.emit(Instr::Shader {
+            function,
+            stage: stage.clone(),
+        });
+        Ok(Ty::shader())
     }
 
     pub(super) fn gen_builtin(

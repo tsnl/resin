@@ -8,7 +8,6 @@ use super::Ty;
 
 define_id! {
     pub struct LocalId(usize);
-    pub struct NonLocalId(usize);
     pub struct GlobalId(usize);
     pub struct FunctionId(usize);
 }
@@ -32,7 +31,6 @@ pub enum Value {
     DynamicAddress { address: usize },
     Array { value: ArrayValue },
     Record { value: RecordValue },
-    Closure { value: ClosureValue },
 }
 
 /// A storage root plus type-directed child indices.
@@ -44,10 +42,6 @@ pub enum StaticAddressValue {
     },
     Global {
         global: GlobalId,
-        path: Vec<usize>,
-    },
-    NonLocal {
-        nonlocal: NonLocalId,
         path: Vec<usize>,
     },
 }
@@ -67,10 +61,4 @@ pub struct RecordFieldValue {
 pub struct ArrayValue {
     pub element_ty: Ty,
     pub elements: Vec<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClosureValue {
-    pub function: FunctionId,
-    pub display: Vec<Value>,
 }

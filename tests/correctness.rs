@@ -20,7 +20,7 @@ fn compile(src: &str) -> ir::Module {
 #[test]
 fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
     let module = compile(
-        "f = () => { 1 }; add = (a: int, b: int) => { a + b }; pair = (1, 2); x = f(); y = add(pair); z = add(3, 4);",
+        "f () -> int = { 1 }; add (a: int, b: int) -> int = { a + b }; pair = (1, 2); x = f(); y = add(pair); z = add(3, 4);",
     );
     let f = module
         .functions
@@ -54,24 +54,24 @@ fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
 
 #[test]
 fn function_types_accept_unit_tuples_and_higher_order_calls() {
-    compile("P = Ptr (()); S = Span ((int, int)); f = (p: P) => p;");
-    compile("F = () -> int; f = F (() => { 1 }); x = f();");
+    compile("P = Ptr (()); S = Span ((int, int)); f (p: P) -> P = { p };");
+    compile("F = () -> int; one () -> int = { 1 }; f = F (one); x = f();");
     compile(
-        "Add = (int, int) -> int; f = Add ((a: int, b: int) => { a + b }); p = (1, 2); x = f(p);",
+        "Add = (int, int) -> int; add (a: int, b: int) -> int = { a + b }; f = Add (add); p = (1, 2); x = f(p);",
     );
     compile(
-        "apply = (f: (int, int) -> int, p: (int, int)) => f(p); add = (a: int, b: int) => { a + b }; x = apply(add, (1, 2));",
+        "apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; add (a: int, b: int) -> int = { a + b }; x = apply(add, (1, 2));",
     );
-    compile("identity = (p: (int, int)) => p; x = identity(1, 2);");
-    compile("Unit = (); x = Unit (()); f = (u: Unit) => (); y = f(x);");
+    compile("identity (p: (int, int)) -> (int, int) = { p }; x = identity(1, 2);");
+    compile("Unit = (); x = Unit (()); f (u: Unit) -> () = { () }; y = f(x);");
 }
 
 #[test]
 fn unary_typechecking_rejects_wrong_argument_shapes() {
     for src in [
-        "f = () => { 1 }; x = f(1);",
-        "f = (a: int, b: int) => a; x = f(1);",
-        "f = (a: int) => a; x = f(1, 2);",
+        "f () -> int = { 1 }; x = f(1);",
+        "f (a: int, b: int) -> int = { a }; x = f(1);",
+        "f (a: int) -> int = { a }; x = f(1, 2);",
     ] {
         assert!(
             matches!(
@@ -86,13 +86,13 @@ fn unary_typechecking_rejects_wrong_argument_shapes() {
 #[test]
 fn nominal_conversion_requires_an_explicit_ascription() {
     for src in [
-        "Meters = int; f = (m: Meters) => int (m); x = 1; y = f(x);",
-        "Meters = int; f = (m: Meters) => int (m); y = f(1);",
-        "Meters = int; f = (x: int) => x; m = Meters (1); y = f(m);",
+        "Meters = int; f (m: Meters) -> int = { int (m) }; x = 1; y = f(x);",
+        "Meters = int; f (m: Meters) -> int = { int (m) }; y = f(1);",
+        "Meters = int; f (x: int) -> int = { x }; m = Meters (1); y = f(m);",
         "Meters = int; m = Meters (1); n = 2; m := n;",
         "Meters = int; m = Meters (1); n = 2; n := m;",
         "Meters = int; R = { value: Meters }; x = R { value = 1 };",
-        "Meters = int; f = (m: Meters, x: int) => x; y = f(1, 2);",
+        "Meters = int; f (m: Meters, x: int) -> int = { x }; y = f(1, 2);",
     ] {
         assert!(
             matches!(
@@ -103,7 +103,7 @@ fn nominal_conversion_requires_an_explicit_ascription() {
         );
     }
     compile(
-        "Meters = int; f = (m: Meters) => int (m); x = 1; y = f(Meters (x)); m = Meters (1); m := Meters (x); x := int (m);",
+        "Meters = int; f (m: Meters) -> int = { int (m) }; x = 1; y = f(Meters (x)); m = Meters (1); m := Meters (x); x := int (m);",
     );
     compile("Meters = int; R = { value: Meters }; x = R { value = Meters (1) };");
     compile("Meters = int; Distance = Meters; x = Distance (Meters (1)); y = Meters (x);");
@@ -112,7 +112,7 @@ fn nominal_conversion_requires_an_explicit_ascription() {
 #[test]
 fn record_layout_does_not_reorder_side_effects() {
     let module = compile(
-        "R = { a: int, b: int }; f = (x: int) => { r = R { b = (x := 1), a = (x := 2) }; x };",
+        "R = { a: int, b: int }; f (x: int) -> int = { r = R { b = (x := 1), a = (x := 2) }; x };",
     );
     let function = module
         .functions
@@ -143,74 +143,32 @@ fn record_layout_does_not_reorder_side_effects() {
 }
 
 #[test]
-fn local_recursion_uses_the_current_closure_without_capturing_its_destination() {
+fn recursion_uses_immutable_function_references() {
     let module = compile(
-        "outer = (x: int) => { f = (n: int) => int { if (n == 0) { x } else { f(n - 1) } }; f(2) };",
+        "f (n: int) -> int = { if (n == 0) { 7 } else { next(n - 1) } }; next (n: int) -> int = { f(n) };",
     );
-    let f = module
-        .functions
-        .iter()
-        .find(|f| f.name.as_deref() == Some("f"))
-        .unwrap();
-    assert_eq!(
-        f.nonlocals
-            .iter()
-            .map(|n| n.name.as_deref())
-            .collect::<Vec<_>>(),
-        [Some("x")]
-    );
-    assert!(
-        f.blocks
-            .iter()
-            .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, Instr::CurrentClosure))
-    );
-    let outer = module
-        .functions
-        .iter()
-        .find(|f| f.name.as_deref() == Some("outer"))
-        .unwrap();
-    let instrs = &outer.blocks[0].instrs;
-    let construction = instrs
-        .iter()
-        .position(|i| matches!(i, Instr::MakeClosure { .. }))
-        .unwrap();
-    let f_local = outer
-        .locals
-        .iter()
-        .position(|l| l.name.as_deref() == Some("f"))
-        .unwrap();
-    assert!(!instrs[..construction].windows(2).any(|pair| matches!(pair,
-        [Instr::LocalAddress { local }, Instr::Load] if local.index() == f_local)));
+    for function in &module.functions {
+        assert!(
+            !function
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instrs)
+                .any(|i| matches!(i, Instr::GlobalAddress { .. }))
+        );
+    }
+    let error = ir::generate(&parse("f () -> int = { 1 }; f := f;").unwrap()).unwrap_err();
+    assert_eq!(error.kind, GenerateErrorKind::NotAPlace);
 }
 
 #[test]
-fn nested_closures_can_capture_a_recursive_self_value() {
-    let module = compile(
-        "outer = (x: int) => { f = (n: int) => int { next = (k: int) => f(k); if (n == 0) { x } else { next(n - 1) } }; f(2) };",
-    );
-    let f = module
-        .functions
-        .iter()
-        .find(|f| f.name.as_deref() == Some("f"))
-        .unwrap();
-    assert!(
-        f.blocks
-            .iter()
-            .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, Instr::CurrentClosure))
-    );
-    let next = module
-        .functions
-        .iter()
-        .find(|f| f.name.as_deref() == Some("next"))
-        .unwrap();
-    assert!(
-        next.nonlocals
-            .iter()
-            .any(|n| n.name.as_deref() == Some("f"))
-    );
-    compile("outer = () => { f = (f: int) => f; f(1) };");
+fn lambdas_and_nested_definitions_are_parse_errors() {
+    for source in [
+        "f = (n: int) => n;",
+        "outer () -> int = { inner () -> int = { 1 }; inner() };",
+        "missing (n: int) = { n };",
+    ] {
+        assert!(parse(source).is_err(), "{source}");
+    }
 }
 
 #[test]
@@ -248,11 +206,14 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
 
 #[test]
 fn returned_pointers_support_field_assignment() {
-    compile("id = (p: Ptr ({ x: int })) => p; f = (p: Ptr ({ x: int })) => { id(p).x := 1 };");
     compile(
-        "R = { inner: { x: int } }; id = (p: Ptr (R)) => p; f = (p: Ptr (R)) => { id(p).inner.x := 1 };",
+        "id (p: Ptr ({ x: int })) -> Ptr ({ x: int }) = { p }; f (p: Ptr ({ x: int })) -> int = { id(p).x := 1 };",
     );
-    let src = "id = (r: { x: int }) => r; f = (r: { x: int }) => { id(r).x := 1 };";
+    compile(
+        "R = { inner: { x: int } }; id (p: Ptr (R)) -> Ptr (R) = { p }; f (p: Ptr (R)) -> int = { id(p).inner.x := 1 };",
+    );
+    let src =
+        "id (r: { x: int }) -> { x: int } = { r }; f (r: { x: int }) -> int = { id(r).x := 1 };";
     assert!(matches!(
         ir::generate(&parse(src).unwrap()).unwrap_err().kind,
         GenerateErrorKind::NotAPlace
@@ -262,8 +223,8 @@ fn returned_pointers_support_field_assignment() {
 #[test]
 fn nested_field_access_evaluates_its_base_once() {
     for src in [
-        "id = (r: { inner: { x: int } }) => r; f = (r: { inner: { x: int } }) => id(r).inner.x;",
-        "id = (r: { p: Ptr ({ x: int }) }) => r; f = (r: { p: Ptr ({ x: int }) }) => { id(r).p.x := 1 };",
+        "id (r: { inner: { x: int } }) -> { inner: { x: int } } = { r }; f (r: { inner: { x: int } }) -> int = { id(r).inner.x };",
+        "id (r: { p: Ptr ({ x: int }) }) -> { p: Ptr ({ x: int }) } = { r }; f (r: { p: Ptr ({ x: int }) }) -> int = { id(r).p.x := 1 };",
     ] {
         let module = compile(src);
         let f = module
@@ -284,17 +245,14 @@ fn nested_field_access_evaluates_its_base_once() {
 }
 
 #[test]
-fn uninitialized_reads_and_captures_are_rejected_on_all_paths() {
+fn uninitialized_reads_are_rejected_on_all_paths() {
     for src in [
-        "f = () => { x: int; x };",
-        "f = () => { x: int; g = () => x; x := 1; g() };",
-        "f = () => { x: int; g = () => { x := 1 }; g() };",
-        "f = () => { g: () -> int; h = () => g(); g := () => { 1 }; h() };",
-        "f = (c: int) => { x: int; if (c == 0) { x := 1 } else { 0 }; x };",
-        "f = (c: int) => { x: int; (c == 0) && ((x := 1) == 1); x };",
-        "x: int; f = () => { x := 1 }; y = x;",
-        "f = () => { r: { x: int }; r.x };",
-        "f = () => { r: { x: int }; r.x := 1; r.x };",
+        "f () -> int = { x: int; x };",
+        "f (c: int) -> int = { x: int; if (c == 0) { x := 1 } else { 0 }; x };",
+        "f (c: int) -> int = { x: int; (c == 0) && ((x := 1) == 1); x };",
+        "x: int; f () -> int = { x := 1 }; y = x;",
+        "f () -> int = { r: { x: int }; r.x };",
+        "f () -> int = { r: { x: int }; r.x := 1; r.x };",
     ] {
         assert!(
             matches!(
@@ -304,9 +262,9 @@ fn uninitialized_reads_and_captures_are_rejected_on_all_paths() {
             "{src}"
         );
     }
-    compile("f = () => { x: int; x := 1; g = () => x; g() };");
-    compile("f = (c: int) => { x: int; if (c == 0) { x := 1 } else { x := 2 }; x };");
+    compile("f () -> int = { x: int; x := 1; x };");
+    compile("f (c: int) -> int = { x: int; if (c == 0) { x := 1 } else { x := 2 }; x };");
     compile(
-        "odd: (int) -> int; even = (n: int) => int { if (n == 0) { 1 } else { odd(n - 1) } }; odd := (n: int) => int { if (n == 0) { 0 } else { even(n - 1) } };",
+        "even (n: int) -> int = { if (n == 0) { 1 } else { odd(n - 1) } }; odd (n: int) -> int = { if (n == 0) { 0 } else { even(n - 1) } };",
     );
 }

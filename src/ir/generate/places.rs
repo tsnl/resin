@@ -75,7 +75,7 @@ impl Generator {
         match &term.val {
             TermKind::Var { name } => {
                 let binding = self.resolve_binding(name, false)?;
-                if matches!(binding.kind, ValueBindingKind::CurrentClosure) {
+                if matches!(binding.kind, ValueBindingKind::Function(_)) {
                     return self.gen_var(name).map(Operand::Value);
                 }
                 let ty = self.binding_ty(name, &binding)?;

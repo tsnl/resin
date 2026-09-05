@@ -10,7 +10,6 @@ pub(super) struct Names {
 
 pub(super) struct FunctionNames {
     pub(super) locals: Vec<Arc<str>>,
-    pub(super) nonlocals: Vec<Arc<str>>,
     pub(super) blocks: Vec<Arc<str>>,
 }
 
@@ -55,14 +54,6 @@ impl FunctionNames {
                     .map(|local| local.name.clone())
                     .collect(),
                 "l",
-            ),
-            nonlocals: uniquify(
-                function
-                    .nonlocals
-                    .iter()
-                    .map(|nonlocal| nonlocal.name.clone())
-                    .collect(),
-                "n",
             ),
             blocks: uniquify(
                 function

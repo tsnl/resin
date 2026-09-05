@@ -51,7 +51,7 @@ fn default_output_builds_in_cwd_and_runs() {
     let sources = temp.path().join("sources");
     fs::create_dir(&sources).unwrap();
     let input = sources.join("hello world.resin");
-    fs::write(&input, r#"main = () => { print("hello\n", ()); 7 };"#).unwrap();
+    fs::write(&input, r#"main () -> int = { print("hello\n", ()); 7 };"#).unwrap();
     let output = invoke(temp.path(), &input, &[]);
     assert_eq!(output.status.code(), Some(7));
     assert_eq!(output.stdout, b"hello\n");
@@ -77,7 +77,7 @@ fn default_output_builds_in_cwd_and_runs() {
 fn default_output_runs_then_copies_even_on_nonzero_exit() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    fs::write(&input, r#"main = () => { print("ran\n", ()); 7 };"#).unwrap();
+    fs::write(&input, r#"main () -> int = { print("ran\n", ()); 7 };"#).unwrap();
     let output = invoke(temp.path(), &input, &["-o", "dist/custom program"]);
     assert_eq!(output.status.code(), Some(7));
     assert_eq!(output.stdout, b"ran\n");
@@ -118,7 +118,7 @@ fn output_directories_receive_the_source_name() {
 fn explicit_exe_output_does_not_run() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    fs::write(&input, r#"main = () => { print("ran\n", ()); 7 };"#).unwrap();
+    fs::write(&input, r#"main () -> int = { print("ran\n", ()); 7 };"#).unwrap();
     let output = invoke(temp.path(), &input, &["--output", "exe", "-o", "program"]);
     success(&output);
     assert!(output.stdout.is_empty());
@@ -175,7 +175,7 @@ fn directory_outputs_cannot_overwrite_the_source() {
 
 #[test]
 fn explicit_ir_output_prints_verified_ir() {
-    let source = "main = () => 7;";
+    let source = "main () -> int = { 7 };";
     let output = cli(source, &["--output", "ir"]);
     success(&output);
     assert_eq!(
@@ -186,7 +186,7 @@ fn explicit_ir_output_prints_verified_ir() {
 
 #[test]
 fn run_returns_the_program_exit_status() {
-    let output = cli("main = () => 37;", &["--output", "run"]);
+    let output = cli("main () -> int = { 37 };", &["--output", "run"]);
     assert_eq!(
         output.status.code(),
         Some(37),
@@ -207,7 +207,7 @@ fn missing_runtime_preserves_existing_output() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
     let output = temp.path().join("program");
-    fs::write(&input, "main = () => 0;").unwrap();
+    fs::write(&input, "main () -> int = { 0 };").unwrap();
     fs::write(&output, "keep me").unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
@@ -227,7 +227,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let executable = temp.path().join("program ; literal");
     let output = cli(
-        "main = () => 19;",
+        "main () -> int = { 19 };",
         &["--output", "exe", "-o", executable.to_str().unwrap()],
     );
     success(&output);
@@ -238,7 +238,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
 fn bad_destinations_and_missing_compilers_preserve_files() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
-    let source = "main = () => 0;";
+    let source = "main () -> int = { 0 };";
     fs::write(&input, source).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
@@ -278,14 +278,14 @@ fn invalid_options_and_source_report_errors() {
         vec!["--output", "spirv"],
         vec!["--stage", "nonsense"],
     ] {
-        assert!(!cli("main = () => 0;", &args).status.success());
+        assert!(!cli("main () -> int = { 0 };", &args).status.success());
     }
     assert!(!cli("main = ;", &["--output", "c"]).status.success());
 }
 
 #[test]
 fn shader_output_selects_the_stage_and_entry() {
-    let source = "paint = (i: uint) => i;";
+    let source = "paint (i: uint) -> uint = { i };";
     let output = cli(source, &["--output", "glsl", "--entry", "paint"]);
     success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("#version 460\n"));
@@ -314,16 +314,15 @@ fn shader_output_selects_the_stage_and_entry() {
     assert_eq!(&fs::read(&spirv).unwrap()[..4], &[3, 2, 35, 7]);
 }
 
-#[cfg(not(feature = "gpu"))]
 #[test]
-fn rendering_explains_the_optional_feature() {
+fn graphics_execution_is_not_a_cli_output_mode() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let png = temp.path().join("image.png");
     let output = cli(
-        "kernel = (i: uint) => i;",
+        "kernel (i: uint) -> uint = { i };",
         &["--output", "compute", "-o", png.to_str().unwrap()],
     );
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--features gpu"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
     assert!(!png.exists());
 }

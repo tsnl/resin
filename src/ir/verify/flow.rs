@@ -4,7 +4,7 @@ use crate::ir::{BlockId, Function, FunctionId, Module, Terminator, Ty};
 
 use super::error::Location;
 use super::instructions::{check_instr, pop_one};
-use super::types::{check_type, shape};
+use super::types::{check_value, shape};
 use super::{FunctionTypes, VerifyError, VerifyErrorKind};
 
 pub(super) fn check_function(
@@ -15,15 +15,30 @@ pub(super) fn check_function(
     let entry = function.entry;
     let function_location = Location::function(function_id);
 
-    check_type(&module.types, &function.result, function_location)?;
+    check_value(&module.types, &function.result, function_location)?;
     for local in &function.locals {
-        check_type(&module.types, &local.ty, function_location)?;
-    }
-    for nonlocal in &function.nonlocals {
-        check_type(&module.types, &nonlocal.ty, function_location)?;
+        check_value(&module.types, &local.ty, function_location)?;
     }
 
     let location = Location::basic_block(function_id, entry);
+
+    if let Some(foreign) = &function.foreign {
+        if function.name.is_none()
+            || !function.blocks.is_empty()
+            || !foreign.valid(&function.result)
+            || function
+                .locals
+                .get(function.param.index())
+                .map(|local| &local.ty)
+                != Some(&Ty::parameter(&foreign.params))
+        {
+            return Err(function_location.error(VerifyErrorKind::InvalidForeignSignature));
+        }
+        return Ok(FunctionTypes {
+            inputs: Vec::new(),
+            results: Vec::new(),
+        });
+    }
 
     if function.blocks.get(entry.index()).is_none() {
         return Err(location.error(VerifyErrorKind::InvalidBasicBlock {
@@ -51,6 +66,9 @@ pub(super) fn check_function(
         for (instruction, instr) in basic_block.instrs.iter().enumerate() {
             let location = Location::instruction(function_id, basic_block_id, instruction);
             check_instr(module, function, instr, &mut stack, location)?;
+            if instr.stack_effect().pushes == 1 {
+                check_value(&module.types, stack.last().unwrap(), location)?;
+            }
             results[basic_block_id.index()]
                 .push((instr.stack_effect().pushes == 1).then(|| stack.last().unwrap().clone()));
         }

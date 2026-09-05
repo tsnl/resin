@@ -23,6 +23,48 @@ pub(super) fn check_type(
     definitions::check_references(table, ty).map_err(|error| location.error(error.into()))
 }
 
+pub(super) fn check_value(
+    table: &[TypeDef],
+    ty: &Ty,
+    location: Location,
+) -> Result<(), VerifyError> {
+    fn visit(
+        table: &[TypeDef],
+        ty: &Ty,
+        location: Location,
+        seen: &mut Vec<TypeId>,
+    ) -> Result<(), VerifyError> {
+        match ty {
+            Ty::Foreign { .. } => {
+                return Err(location.error(VerifyErrorKind::OpaqueValue { ty: ty.clone() }));
+            }
+            Ty::Defined { definition } if !seen.contains(definition) => {
+                seen.push(*definition);
+                visit(
+                    table,
+                    definition_body(table, *definition, location)?,
+                    location,
+                    seen,
+                )?;
+            }
+            Ty::Array { element, .. } => visit(table, element, location, seen)?,
+            Ty::Record { fields } => {
+                for field in fields {
+                    visit(table, &field.ty, location, seen)?;
+                }
+            }
+            Ty::Function { param, result } => {
+                visit(table, param, location, seen)?;
+                visit(table, result, location, seen)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    check_type(table, ty, location)?;
+    visit(table, ty, location, &mut Vec::new())
+}
+
 pub(super) fn shape(table: &[TypeDef], mut ty: Ty, location: Location) -> Result<Ty, VerifyError> {
     let mut visited = Vec::new();
     while let Ty::Defined { definition } = ty {

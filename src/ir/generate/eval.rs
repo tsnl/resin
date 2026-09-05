@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::ast::{Ident, Span, Term, TermKind, Type, TypeKind};
-use crate::ir::{RecordField, Ty, TypeId, TyperContext, Value};
+use crate::ir::{RecordField, Ty, TyperContext, Value};
 
 use super::scope::Scopes;
 use super::{GenerateError, GenerateErrorKind};
@@ -54,7 +54,6 @@ impl Evaluator<'_> {
                     return Ok(builtin);
                 }
                 self.resolve_type(name)
-                    .map(|definition| Ty::Defined { definition })
             }
             TypeKind::App { head, arg } => {
                 let arg = self.term_as_type(arg)?;
@@ -102,32 +101,7 @@ impl Evaluator<'_> {
         }
     }
 
-    pub(super) fn lambda_type(&self, term: &Term) -> Option<Ty> {
-        let TermKind::Lambda { params, body } = &term.val else {
-            return None;
-        };
-        let mut param_tys = Vec::with_capacity(params.len());
-        for (_, ann) in params {
-            param_tys.push(self.ty(ann).ok()?);
-        }
-        let result = self.result_type(body)?;
-        Some(Ty::Function {
-            param: Box::new(Ty::parameter(&param_tys)),
-            result: Box::new(result),
-        })
-    }
-
-    pub(super) fn result_type(&self, term: &Term) -> Option<Ty> {
-        let TermKind::Call { func, .. } = &term.val else {
-            return None;
-        };
-        let TermKind::Type { ty } = &func.val else {
-            return None;
-        };
-        self.ty(ty).ok()
-    }
-
-    fn resolve_type(&self, name: &Ident) -> Result<TypeId, GenerateError> {
+    fn resolve_type(&self, name: &Ident) -> Result<Ty, GenerateError> {
         self.scopes
             .lookup_type(&name.val)
             .ok_or_else(|| GenerateError {
@@ -141,6 +115,7 @@ impl Evaluator<'_> {
 
 fn builtin_ty(name: &str) -> Option<Ty> {
     Some(match name {
+        "bool" => Ty::Bool,
         "sbyte" => Ty::Int8,
         "short" => Ty::Int16,
         "int" => Ty::Int32,

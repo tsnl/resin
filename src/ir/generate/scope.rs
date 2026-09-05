@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use crate::ir::{GlobalId, LocalId, Ty, TypeId};
+use crate::ir::{FunctionId, GlobalId, LocalId, Ty, TypeId};
 
 #[derive(Clone)]
 pub(super) struct ValueBinding {
@@ -23,14 +23,13 @@ pub(super) enum Initialization {
 pub(super) enum ValueBindingKind {
     Global(GlobalId),
     Local(LocalId),
-    /// Immutable recursive name of the function at `depth`.
-    CurrentClosure,
+    Function(FunctionId),
 }
 
 #[derive(Clone, Default)]
 struct Scope {
     values: HashMap<Arc<str>, ValueBinding>,
-    types: HashMap<Arc<str>, TypeId>,
+    types: HashMap<Arc<str>, Ty>,
 }
 
 impl Scope {
@@ -46,11 +45,11 @@ impl Scope {
         Ok(())
     }
 
-    fn define_type(&mut self, name: Arc<str>, definition: TypeId) -> Result<(), Arc<str>> {
+    fn define_type(&mut self, name: Arc<str>, ty: Ty) -> Result<(), Arc<str>> {
         if self.types.contains_key(&name) {
             return Err(name);
         }
-        self.types.insert(name, definition);
+        self.types.insert(name, ty);
         Ok(())
     }
 
@@ -58,8 +57,8 @@ impl Scope {
         self.values.get(name)
     }
 
-    fn lookup_type(&self, name: &str) -> Option<TypeId> {
-        self.types.get(name).copied()
+    fn lookup_type(&self, name: &str) -> Option<Ty> {
+        self.types.get(name).cloned()
     }
 
     fn lookup_value_mut(&mut self, name: &str) -> Option<&mut ValueBinding> {
@@ -101,7 +100,13 @@ impl Scopes {
         name: Arc<str>,
         definition: TypeId,
     ) -> Result<(), Arc<str>> {
-        self.innermost().define_type(name, definition)
+        self.innermost()
+            .define_type(name, Ty::Defined { definition })
+    }
+
+    pub(super) fn define_foreign_type(&mut self, name: Arc<str>) -> Result<(), Arc<str>> {
+        self.innermost()
+            .define_type(name.clone(), Ty::Foreign { name })
     }
 
     pub(super) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
@@ -111,7 +116,7 @@ impl Scopes {
             .find_map(|scope| scope.lookup_value(name))
     }
 
-    pub(super) fn lookup_type(&self, name: &str) -> Option<TypeId> {
+    pub(super) fn lookup_type(&self, name: &str) -> Option<Ty> {
         self.frames
             .iter()
             .rev()
@@ -157,7 +162,9 @@ mod tests {
     fn values_and_types_do_not_clash() {
         let mut scope = Scope::new();
         let list = TypeId::from_index(0);
-        scope.define_type("List".into(), list).unwrap();
+        scope
+            .define_type("List".into(), Ty::Defined { definition: list })
+            .unwrap();
         scope
             .define_value(
                 "List".into(),
@@ -169,7 +176,10 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(scope.lookup_type("List"), Some(list));
+        assert_eq!(
+            scope.lookup_type("List"),
+            Some(Ty::Defined { definition: list })
+        );
         assert!(scope.lookup_value("List").is_some());
     }
 

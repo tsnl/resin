@@ -1,7 +1,11 @@
-// Recursive nominal record; field access and pointer autoderef.
 List = { value: int, next: Ptr (List) };
-cons = (value: int) => (next: Ptr (List)) => List { value = value, next = next };
-car = (node: List) => node.value;
-cdr = (node: List) => node.next;
-at = (p: Ptr (List)) => p.value;
-print("List helpers compiled; constructing a linked list needs pointer creation.\n", ());
+cons (value: int, next: Ptr (List)) -> List = { List { value = value, next = next } };
+car (node: List) -> int = { node.value };
+cdr (node: List) -> Ptr (List) = { node.next };
+at (p: Ptr (List)) -> int = { p.value };
+
+main () -> () = {
+    tail = cons(2, Ptr (List) (ulong (0)));
+    head = cons(1, &tail);
+    print("list = {0}, {1}\n", (car(head), at(cdr(head))));
+};

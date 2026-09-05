@@ -1,20 +1,57 @@
 use std::{collections::HashMap, fmt::Write};
 
-use crate::ir::{Module, Ty, Value};
+use crate::ir::{Instr, Module, Ty, TypeId, Value, verify::FunctionTypes};
 
 pub(super) struct Types<'a> {
     pub module: &'a Module,
+    pub shaders: &'a [super::Shader],
     types: Vec<Ty>,
     ids: HashMap<Ty, usize>,
 }
 
 impl<'a> Types<'a> {
-    pub fn new(module: &'a Module) -> Self {
-        Self {
+    pub fn collect(
+        module: &'a Module,
+        shaders: &'a [super::Shader],
+        analysis: &[FunctionTypes],
+    ) -> Self {
+        let mut types = Self {
             module,
+            shaders,
             types: Vec::new(),
             ids: HashMap::new(),
+        };
+        for (index, _) in module.types.iter().enumerate() {
+            types.intern(&Ty::Defined {
+                definition: TypeId::from_index(index),
+            });
         }
+        for global in &module.globals {
+            types.intern(&global.ty);
+        }
+        for (function, flow) in module.functions.iter().zip(analysis) {
+            types.intern(&function.ty().unwrap());
+            for local in &function.locals {
+                types.intern(&local.ty);
+            }
+            for ty in flow
+                .inputs
+                .iter()
+                .flatten()
+                .chain(flow.results.iter().flatten().flatten())
+            {
+                types.intern(ty);
+            }
+            for block in &function.blocks {
+                for instr in &block.instrs {
+                    if let Instr::Push { value } = instr {
+                        types.value(value);
+                    }
+                }
+            }
+        }
+
+        types
     }
 
     pub fn intern(&mut self, ty: &Ty) -> usize {
@@ -72,6 +109,9 @@ impl<'a> Types<'a> {
     }
 
     pub fn name(&self, ty: &Ty) -> String {
+        if let Ty::Foreign { name } = ty {
+            return name.to_string();
+        }
         format!("r_t{}", self.id(ty))
     }
 
@@ -170,11 +210,9 @@ impl<'a> Types<'a> {
                 }
             }
             Ty::Span { element } => format!("{} *data; size_t len;", self.name(element)),
-            Ty::Function { param, result } => format!(
-                "{} (*call)(void *, {}); void *env;",
-                self.name(result),
-                self.name(param)
-            ),
+            Ty::Function { param, result } => {
+                format!("{} (*call)({});", self.name(result), self.name(param))
+            }
             _ => return,
         };
         writeln!(out, "struct {} {{ {body} }};", self.name(ty)).unwrap();

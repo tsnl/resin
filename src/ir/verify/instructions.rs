@@ -14,8 +14,31 @@ pub(super) fn check_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
+        Instr::Shader { function, stage } => {
+            let target = module.functions.get(function.index()).ok_or_else(|| {
+                location.error(VerifyErrorKind::InvalidFunction {
+                    function: function.index(),
+                })
+            })?;
+            if target.foreign.is_some()
+                || !matches!(stage.as_ref(), "compute" | "vertex" | "fragment")
+            {
+                return Err(location.error(VerifyErrorKind::InvalidShader));
+            }
+            stack.push(Ty::shader());
+        }
+        Instr::PointerCast { ty } => {
+            check_type(&module.types, ty, location)?;
+            let from = pop_one(stack, location)?;
+            if !from.pointer_cast(ty) {
+                return Err(location.error(VerifyErrorKind::InvalidPointerCast {
+                    from,
+                    to: ty.clone(),
+                }));
+            }
+            stack.push(ty.clone());
+        }
         Instr::Push { value } => stack.push(immediate_ty(&module.types, value, location)?),
-        Instr::CurrentClosure => stack.push(function_type(function, location)?),
         Instr::LocalAddress { local } => {
             let local = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
@@ -34,16 +57,6 @@ pub(super) fn check_instr(
             })?;
             stack.push(Ty::Pointer {
                 pointee: Box::new(global.ty.clone()),
-            });
-        }
-        Instr::NonLocalAddress { nonlocal } => {
-            let nonlocal = function.nonlocals.get(nonlocal.index()).ok_or_else(|| {
-                location.error(VerifyErrorKind::InvalidNonLocal {
-                    nonlocal: nonlocal.index(),
-                })
-            })?;
-            stack.push(Ty::Pointer {
-                pointee: Box::new(nonlocal.ty.clone()),
             });
         }
         Instr::AccessStatic { index } => {
@@ -107,29 +120,13 @@ pub(super) fn check_instr(
                 length: *elements,
             });
         }
-        Instr::MakeClosure {
-            function: target,
-            captures,
-        } => {
-            let target_function = module.functions.get(target.index()).ok_or_else(|| {
+        Instr::Function { function } => {
+            let target = module.functions.get(function.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidFunction {
-                    function: target.index(),
+                    function: function.index(),
                 })
             })?;
-            if *captures != target_function.nonlocals.len() {
-                return Err(location.error(VerifyErrorKind::ArgumentCount {
-                    expected: target_function.nonlocals.len(),
-                    found: *captures,
-                }));
-            }
-            let values = pop(stack, *captures, location)?;
-            let expected: Vec<_> = target_function
-                .nonlocals
-                .iter()
-                .map(|nonlocal| nonlocal.ty.clone())
-                .collect();
-            expect_types(&expected, &values, location)?;
-            stack.push(function_type(target_function, location)?);
+            stack.push(function_type(target, location)?);
         }
         Instr::Call => {
             let arg = pop_one(stack, location)?;
@@ -195,7 +192,7 @@ fn immediate_ty(table: &[TypeDef], value: &Value, location: Location) -> Result<
                 })
                 .collect::<Result<_, _>>()?,
         },
-        Value::StaticAddress { .. } | Value::DynamicAddress { .. } | Value::Closure { .. } => {
+        Value::StaticAddress { .. } | Value::DynamicAddress { .. } => {
             return Err(location.error(VerifyErrorKind::InvalidImmediate));
         }
     };

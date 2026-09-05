@@ -49,6 +49,7 @@ pub enum Ty {
     UInt64,
     Float32,
     Float64,
+    Foreign { name: Arc<str> },
     Defined { definition: TypeId },
     Pointer { pointee: Box<Ty> },
     Span { element: Box<Ty> },
@@ -58,6 +59,23 @@ pub enum Ty {
 }
 
 impl Ty {
+    pub fn shader() -> Self {
+        Self::Record { fields: vec![
+            RecordField { name: "data".into(), ty: Self::Pointer { pointee: Box::new(Self::UInt8) } },
+            RecordField { name: "length".into(), ty: Self::UInt64 },
+        ] }
+    }
+
+    pub fn pointer_cast(&self, to: &Self) -> bool {
+        matches!((self, to),
+            (Self::Pointer { .. }, Self::Pointer { .. } | Self::UInt64)
+            | (Self::UInt64, Self::Pointer { .. }))
+    }
+
+    pub fn foreign_value(&self) -> bool {
+        self.is_numeric() || matches!(self, Self::Bool | Self::Pointer { .. })
+    }
+
     pub const fn is_numeric(&self) -> bool {
         self.is_integer() || matches!(self, Self::Float32 | Self::Float64)
     }

@@ -1,8 +1,10 @@
+include "../../lib/runtime.resin";
+
 Position = { x: float32, y: float32, z: float32, w: float32 };
 Color = { r: float32, g: float32, b: float32, a: float32 };
 Vertex = { position: Position, color: Color };
 
-vertex = (index: int) => {
+vertex (index: int) -> Vertex = {
     if (index == 0) {
         Vertex {
             position = Position { x = float32 (0.0), y = float32 (-0.75), z = float32 (0.0), w = float32 (1.0) },
@@ -23,4 +25,37 @@ vertex = (index: int) => {
     }
 };
 
-fragment = (color: Color) => color;
+fragment (color: Color) -> Color = { color };
+
+main () -> () = {
+    gpu = Ptr (ResinGpu) (ulong (0));
+    check(resin_gpu_create(&gpu));
+
+    vertex_code = shader(vertex, "vertex");
+    fragment_code = shader(fragment, "fragment");
+    pipeline = Ptr (ResinPipeline) (ulong (0));
+    check(resin_gpu_create_graphics_pipeline(gpu, vertex_code.data, vertex_code.length, fragment_code.data, fragment_code.length, &pipeline));
+
+    image = Ptr (ResinImage) (ulong (0));
+    pixels = Ptr (ResinAllocation) (ulong (0));
+    check(resin_gpu_create_image(gpu, 256, 256, &image));
+    check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_readback, &pixels));
+
+    commands = Ptr (ResinCommandBuffer) (ulong (0));
+    check(resin_gpu_start_command_recording(gpu, &commands));
+    check(resin_gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0));
+    check(resin_gpu_set_pipeline(commands, pipeline));
+    check(resin_gpu_draw(commands, 0, 3));
+    check(resin_gpu_end_rendering(commands));
+    check(resin_gpu_copy_image_to_buffer(commands, image, pixels));
+    check(resin_gpu_submit(gpu, commands));
+
+    path = "triangle.png\0";
+    check(resin_image_write_png(Ptr (ubyte) (&path), 256, 256, 4, resin_allocation_host_pointer(pixels), 0));
+    print("wrote triangle.png\n", ());
+
+    resin_gpu_free(gpu, pixels);
+    resin_gpu_free_image(gpu, image);
+    resin_gpu_free_pipeline(gpu, pipeline);
+    resin_gpu_destroy(gpu);
+};

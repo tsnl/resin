@@ -51,12 +51,9 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
 
 #[test]
 fn assignment_can_be_sequenced_in_a_block() {
-    let file = parse("f = (p: Ptr (int)) => { p.* := 1; p.* };");
-    let StmtKind::Define { init, .. } = &file.stmts[0].val else {
-        panic!("expected definition");
-    };
-    let TermKind::Lambda { body, .. } = &init.val else {
-        panic!("expected lambda, got {:?}", init.val);
+    let file = parse("f (p: Ptr (int)) -> int = { p.* := 1; p.* };");
+    let StmtKind::Function { body, .. } = &file.stmts[0].val else {
+        panic!("expected function definition");
     };
     let TermKind::Block { stmts, tail } = &body.val else {
         panic!("expected block, got {:?}", body.val);

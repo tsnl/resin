@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::util::define_id;
 
-use super::{FunctionId, GlobalId, LocalId, NonLocalId, Ty, Value};
+use super::{FunctionId, GlobalId, LocalId, Ty, Value};
 
 define_id! {
     pub struct BlockId(usize);
@@ -13,12 +13,30 @@ define_id! {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: Option<Arc<str>>,
-    pub nonlocals: Vec<NonLocal>,
+    pub foreign: Option<Foreign>,
     pub param: LocalId,
     pub result: Ty,
     pub locals: Vec<Local>,
     pub entry: BlockId,
     pub blocks: Vec<BasicBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Foreign {
+    pub header: Arc<str>,
+    pub params: Vec<Ty>,
+}
+
+impl Foreign {
+    pub(crate) fn valid(&self, result: &Ty) -> bool {
+        self.params.iter().all(Ty::foreign_value)
+            && (*result == Ty::Unit || result.foreign_value())
+            && !self.header.is_empty()
+            && self
+                .header
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_./-".contains(&c))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,13 +52,6 @@ pub struct Local {
     pub ty: Ty,
 }
 
-/// An entry in a function's closure display.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NonLocal {
-    pub name: Option<Arc<str>>,
-    pub ty: Ty,
-}
-
 impl Function {
     pub fn ty(&self) -> Option<Ty> {
         Some(Ty::Function {
@@ -52,13 +63,16 @@ impl Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    Shader {
+        function: FunctionId,
+        stage: Arc<str>,
+    },
+    PointerCast {
+        ty: Ty,
+    },
     Push {
         value: Value,
     },
-
-    /// Push the currently executing closure, including its captured display.
-    /// A local function's recursive name refers to this value, not its uninitialized destination.
-    CurrentClosure,
 
     LocalAddress {
         local: LocalId,
@@ -66,10 +80,6 @@ pub enum Instr {
 
     GlobalAddress {
         global: GlobalId,
-    },
-
-    NonLocalAddress {
-        nonlocal: NonLocalId,
     },
 
     /// Project a type-directed child from an aggregate value or address.
@@ -103,13 +113,11 @@ pub enum Instr {
         element: Ty,
     },
 
-    /// Consume `captures` values and construct a closure.
-    MakeClosure {
+    Function {
         function: FunctionId,
-        captures: usize,
     },
 
-    /// Indirectly call the closure preceding one argument value (possibly unit or a tuple).
+    /// Indirectly call the function preceding one argument value (possibly unit or a tuple).
     Call,
 
     /// Invoke a privileged builtin with its checked monomorphic signature.
@@ -141,14 +149,15 @@ pub struct StackEffect {
 impl Instr {
     pub fn stack_effect(&self) -> StackEffect {
         match self {
-            Self::Push { .. }
-            | Self::CurrentClosure
+            Self::Shader { .. }
+            | Self::Push { .. }
+            | Self::Function { .. }
             | Self::LocalAddress { .. }
-            | Self::GlobalAddress { .. }
-            | Self::NonLocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
-            Self::AccessStatic { .. } | Self::Load | Self::Ascribe { .. } => {
-                StackEffect { pops: 1, pushes: 1 }
-            }
+            | Self::GlobalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
+            Self::AccessStatic { .. }
+            | Self::Load
+            | Self::Ascribe { .. }
+            | Self::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
             Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },
             Self::Discard => StackEffect { pops: 1, pushes: 0 },
             Self::MakeRecord { fields } => StackEffect {
@@ -157,10 +166,6 @@ impl Instr {
             },
             Self::MakeArray { elements, .. } => StackEffect {
                 pops: *elements,
-                pushes: 1,
-            },
-            Self::MakeClosure { captures, .. } => StackEffect {
-                pops: *captures,
                 pushes: 1,
             },
             Self::Call => StackEffect { pops: 2, pushes: 1 },

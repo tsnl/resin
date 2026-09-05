@@ -380,9 +380,9 @@ fn field_access_stops_at_recursive_pointers() {
 #[test]
 fn child_types_compose_into_a_function_call() {
     let typer = TyperContext::new();
-    let lambda = typer.type_lambda(&Ty::Int32, &Ty::Float64);
+    let function = typer.type_function(&Ty::Int32, &Ty::Float64);
 
-    assert_eq!(typer.type_call(&lambda, &Ty::Int32).unwrap(), Ty::Float64);
+    assert_eq!(typer.type_call(&function, &Ty::Int32).unwrap(), Ty::Float64);
 }
 
 #[test]
