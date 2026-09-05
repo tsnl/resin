@@ -10,7 +10,7 @@ use super::{Slot, ops, types::Types, value::literal};
 pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Result<String, Error> {
     let function = &types.module.functions[index];
     let mut out = format!(
-        "static {} r_fn{index}(void *r_env, {} r_arg) {{\n  (void)r_env;\n",
+        "{} r_fn{index}(void *r_env, {} r_arg) {{\n  (void)r_env;\n",
         types.name(&function.result),
         types.name(&function.locals[function.param.index()].ty)
     );

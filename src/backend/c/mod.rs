@@ -82,7 +82,7 @@ pub fn emit(module: &Module) -> Result<String, Error> {
         }
         writeln!(
             out,
-            "static {} r_fn{index}(void *r_env, {} r_arg);",
+            "{} r_fn{index}(void *r_env, {} r_arg);",
             types.name(&function.result),
             types.name(&function.locals[function.param.index()].ty)
         )
@@ -104,21 +104,22 @@ pub fn emit(module: &Module) -> Result<String, Error> {
     match entries.as_slice() {
         [] => out.push_str("  return 0;\n"),
         [(index, global)] => {
-            let Ty::Function { param, result } = &global.ty else {
+            let Ty::Function { param, result } = types.shape(&global.ty) else {
                 return Err(Error("main must be a function".into()));
             };
             if param.as_ref() != &Ty::Unit || !matches!(result.as_ref(), Ty::Unit | Ty::Int32) {
                 return Err(Error("main must have type () -> int or () -> ()".into()));
             }
+            let entry = types.unwrap(&global.ty, format!("r_g{index}"));
             writeln!(
                 out,
-                "  if (!r_g{index}.call) r_fail(\"main is not initialized\");"
+                "  if (!({entry}).call) r_fail(\"main is not initialized\");"
             )
             .unwrap();
             if result.as_ref() == &Ty::Unit {
-                writeln!(out, "  r_g{index}.call(r_g{index}.env, 0);\n  return 0;").unwrap();
+                writeln!(out, "  ({entry}).call(({entry}).env, 0);\n  return 0;").unwrap();
             } else {
-                writeln!(out, "  return r_g{index}.call(r_g{index}.env, 0);").unwrap();
+                writeln!(out, "  return ({entry}).call(({entry}).env, 0);").unwrap();
             }
         }
         _ => return Err(Error("multiple globals named main".into())),

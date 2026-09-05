@@ -1,24 +1,12 @@
 use std::{ffi::OsString, fs, process::Command};
 
 use resin::{
-    ast::AstGen,
     backend::c,
     ir,
     toolchain::{self, TempDir},
 };
-use tree_sitter::Parser;
-
-fn module(source: &str) -> ir::Module {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .unwrap();
-    let tree = parser.parse(source, None).unwrap();
-    let ast = AstGen::new(source)
-        .gen_source_file(tree.root_node())
-        .unwrap();
-    ir::generate(&ast).unwrap_or_else(|error| panic!("{source}\n{error}"))
-}
+mod support;
+use support::module;
 
 fn run_module(module: &ir::Module) -> std::process::Output {
     let source = c::emit(module).unwrap();
@@ -108,6 +96,7 @@ fn nominal_function_types_and_numeric_operations_work() {
         "Meters = int; F = (Meters) -> Meters; f = F ((x: Meters) => { x + Meters (2) }); main = () => int (f(Meters (5)));",
         7,
     );
+    runs("Entry = () -> int; main = Entry (() => 23);", 23);
 }
 
 #[test]
@@ -160,6 +149,13 @@ fn invalid_ir_is_rejected_before_emitting() {
             .to_string()
             .contains("StackUnderflow")
     );
+}
+
+#[test]
+fn unused_functions_do_not_fail_strict_compilation() {
+    let mut m = module("main = () => 0;");
+    m.functions.push(m.functions[1].clone());
+    assert!(run_module(&m).status.success());
 }
 
 #[test]
