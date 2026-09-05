@@ -86,6 +86,50 @@ fn missing_display_returns_status_and_clears_output() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let errors = String::from_utf8_lossy(&output.stderr);
+    if errors.contains("resin: could not load libglfw.so.3:") && !window_required() {
+        return;
+    }
+    let prefix = "resin: glfwInit failed: GLFW error 0x";
+    assert_eq!(errors.matches(prefix).count(), 2, "{errors}");
+    assert!(!errors.contains("no error description"), "{errors}");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn glfw_loader_errors_are_reported() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let executable = temp.path().join("load-error");
+    compile(
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        int main(void) {
+            ResinWindow *window = (ResinWindow *)(uintptr_t)1;
+            assert(resin_window_create(64, 64, "test", &window) == RESIN_STATUS_WINDOW_UNAVAILABLE);
+            assert(window == NULL);
+            return 0;
+        }
+        "#,
+        &executable,
+    );
+    std::fs::write(temp.path().join("libglfw.so.3"), b"not a shared library").unwrap();
+    let paths = std::env::join_paths(std::iter::once(temp.path().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("LD_LIBRARY_PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let output = Command::new(executable)
+        .env("LD_LIBRARY_PATH", paths)
+        .output()
+        .unwrap();
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{errors}");
+    assert!(
+        errors.contains("resin: could not load libglfw.so.3:"),
+        "{errors}"
+    );
+    assert!(errors.contains("file too short"), "{errors}");
+    assert!(!errors.contains("glfwInit failed"), "{errors}");
 }
 
 #[test]

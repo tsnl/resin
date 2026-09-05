@@ -5,6 +5,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 ## Development Practices
 
+- Commit and push completed changes directly to `main` by default, including in future
+  sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` for builds, tests, parser generation, and
   examples. Enter it with `nix-shell` from the repository root, or run a command non-interactively
   with `nix-shell --run 'cargo test --workspace --all-features'`.

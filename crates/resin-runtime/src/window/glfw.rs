@@ -1,6 +1,8 @@
 use std::{
     cell::RefCell,
-    ffi::{c_char, c_void},
+    ffi::{CStr, c_char, c_void},
+    io::Write,
+    ptr,
     rc::{Rc, Weak},
 };
 
@@ -14,6 +16,7 @@ type Handle = *mut c_void;
 pub(super) struct Glfw {
     _library: Library,
     terminate: unsafe extern "C" fn(),
+    get_error: unsafe extern "C" fn(*mut *const c_char) -> i32,
     pub default_window_hints: unsafe extern "C" fn(),
     pub window_hint: unsafe extern "C" fn(i32, i32),
     pub create_window: unsafe extern "C" fn(i32, i32, *const c_char, Handle, Handle) -> Handle,
@@ -57,33 +60,56 @@ impl Glfw {
         let name = "libglfw.3.dylib";
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         let name = "libglfw.so.3";
-        let library = unsafe { Library::new(name) }.map_err(|_| ResinStatus::WindowUnavailable)?;
+        let library = unsafe { Library::new(name) }.map_err(|error| {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "resin: could not load {name}: {error}"
+            );
+            ResinStatus::WindowUnavailable
+        })?;
         unsafe {
-            let init: unsafe extern "C" fn() -> i32 = symbol(&library, b"glfwInit\0")?;
+            let init: unsafe extern "C" fn() -> i32 = symbol(&library, c"glfwInit")?;
             let api = Self {
-                terminate: symbol(&library, b"glfwTerminate\0")?,
-                default_window_hints: symbol(&library, b"glfwDefaultWindowHints\0")?,
-                window_hint: symbol(&library, b"glfwWindowHint\0")?,
-                create_window: symbol(&library, b"glfwCreateWindow\0")?,
-                destroy_window: symbol(&library, b"glfwDestroyWindow\0")?,
-                poll_events: symbol(&library, b"glfwPollEvents\0")?,
-                window_should_close: symbol(&library, b"glfwWindowShouldClose\0")?,
-                set_window_should_close: symbol(&library, b"glfwSetWindowShouldClose\0")?,
-                get_framebuffer_size: symbol(&library, b"glfwGetFramebufferSize\0")?,
-                set_window_size: symbol(&library, b"glfwSetWindowSize\0")?,
-                get_key: symbol(&library, b"glfwGetKey\0")?,
+                terminate: symbol(&library, c"glfwTerminate")?,
+                get_error: symbol(&library, c"glfwGetError")?,
+                default_window_hints: symbol(&library, c"glfwDefaultWindowHints")?,
+                window_hint: symbol(&library, c"glfwWindowHint")?,
+                create_window: symbol(&library, c"glfwCreateWindow")?,
+                destroy_window: symbol(&library, c"glfwDestroyWindow")?,
+                poll_events: symbol(&library, c"glfwPollEvents")?,
+                window_should_close: symbol(&library, c"glfwWindowShouldClose")?,
+                set_window_should_close: symbol(&library, c"glfwSetWindowShouldClose")?,
+                get_framebuffer_size: symbol(&library, c"glfwGetFramebufferSize")?,
+                set_window_size: symbol(&library, c"glfwSetWindowSize")?,
+                get_key: symbol(&library, c"glfwGetKey")?,
                 get_required_instance_extensions: symbol(
                     &library,
-                    b"glfwGetRequiredInstanceExtensions\0",
+                    c"glfwGetRequiredInstanceExtensions",
                 )?,
-                create_window_surface: symbol(&library, b"glfwCreateWindowSurface\0")?,
+                create_window_surface: symbol(&library, c"glfwCreateWindowSurface")?,
                 _library: library,
             };
             if init() == 0 {
+                api.print_error("glfwInit");
                 return Err(ResinStatus::WindowUnavailable);
             }
             Ok(api)
         }
+    }
+
+    pub fn print_error(&self, operation: &str) {
+        let mut description = ptr::null();
+        let code = unsafe { (self.get_error)(&mut description) };
+        let description = if description.is_null() {
+            c"no error description"
+        } else {
+            unsafe { CStr::from_ptr(description) }
+        };
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "resin: {operation} failed: GLFW error {code:#010x}: {}",
+            description.to_string_lossy()
+        );
     }
 }
 
@@ -93,8 +119,15 @@ impl Drop for Glfw {
     }
 }
 
-unsafe fn symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, ResinStatus> {
-    unsafe { library.get::<T>(name) }
+unsafe fn symbol<T: Copy>(library: &Library, name: &CStr) -> Result<T, ResinStatus> {
+    unsafe { library.get::<T>(name.to_bytes_with_nul()) }
         .map(|symbol| *symbol)
-        .map_err(|_| ResinStatus::WindowUnavailable)
+        .map_err(|error| {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "resin: could not load {}: {error}",
+                name.to_string_lossy()
+            );
+            ResinStatus::WindowUnavailable
+        })
 }

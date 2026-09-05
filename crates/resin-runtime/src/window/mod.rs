@@ -50,6 +50,7 @@ impl ResinWindow {
             )
         };
         if handle.is_null() {
+            glfw.print_error("glfwCreateWindow");
             return Err(ResinStatus::WindowUnavailable);
         }
         Ok(Self {
@@ -96,6 +97,9 @@ impl ResinWindow {
         let mut count = 0;
         let names = unsafe { (self.native.glfw.get_required_instance_extensions)(&mut count) };
         if names.is_null() || count == 0 {
+            self.native
+                .glfw
+                .print_error("glfwGetRequiredInstanceExtensions");
             return Err(ResinStatus::VulkanUnavailable);
         }
         let mut names = unsafe { std::slice::from_raw_parts(names, count as usize) }.to_vec();
@@ -131,6 +135,7 @@ impl ResinWindow {
             )
         }
         .result()
+        .inspect_err(|_| self.native.glfw.print_error("glfwCreateWindowSurface"))
         .map_err(vk_status)?;
         self.native.attached.set(true);
         Ok(Surface {
