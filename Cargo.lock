@@ -332,6 +332,7 @@ name = "resin"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "resin-runtime",
  "sexpfmt",
  "tree-sitter",
  "tree-sitter-resin",

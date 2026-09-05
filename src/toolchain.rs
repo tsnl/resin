@@ -7,6 +7,39 @@ use std::{
 };
 
 use crate::backend::Error;
+use crate::backend::glsl::Stage;
+
+pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
+    let temp = TempDir::new(&std::env::temp_dir()).map_err(io_error)?;
+    let input = temp.path().join("shader.glsl");
+    let output = temp.path().join("shader.spv");
+    fs::write(&input, source).map_err(io_error)?;
+    let result = Command::new(compiler)
+        .arg(format!("-fshader-stage={}", stage.name()))
+        .args(["--target-env=vulkan1.3", "-O", "-Werror"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .map_err(|error| {
+            Error(format!(
+                "cannot run {}: {error}",
+                compiler.to_string_lossy()
+            ))
+        })?;
+    if !result.status.success() {
+        return Err(Error(format!(
+            "shader compiler failed ({}):\n{}",
+            result.status,
+            String::from_utf8_lossy(&result.stderr)
+        )));
+    }
+    let bytes = fs::read(output).map_err(io_error)?;
+    if bytes.len() < 20 || bytes.len() % 4 != 0 || bytes[..4] != [3, 2, 35, 7] {
+        return Err(Error("shader compiler returned invalid SPIR-V".into()));
+    }
+    Ok(bytes)
+}
 
 pub fn compile_c(source: &str, output: &Path, compiler: &OsStr) -> Result<(), Error> {
     let temp = TempDir::new(parent(output)).map_err(io_error)?;
