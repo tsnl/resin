@@ -56,6 +56,6 @@ fn compute_gradient() {
         gpu.submit(commands).expect("submit");
 
         let host = pixels.host_bytes().expect("mapped default allocation");
-        common::assert_reftest(file!(), WIDTH, HEIGHT, host);
+        common::assert_reftest(file!(), WIDTH, HEIGHT, host, 0);
     }
 }

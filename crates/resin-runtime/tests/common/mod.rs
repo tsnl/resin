@@ -84,7 +84,7 @@ pub fn compile_shader(src: &str, stage: &str, define: Option<&str>) -> Option<Ve
 }
 
 /// Compare `pixels` to the PNG sitting next to `test_file` (`file!()`).
-pub fn assert_reftest(test_file: &str, width: u32, height: u32, pixels: &[u8]) {
+pub fn assert_reftest(test_file: &str, width: u32, height: u32, pixels: &[u8], rgb_tolerance: u8) {
     let reference_path = sibling(test_file, "png");
     let name = reference_path
         .file_name()
@@ -108,7 +108,14 @@ pub fn assert_reftest(test_file: &str, width: u32, height: u32, pixels: &[u8]) {
     assert_eq!(reference.width, width);
     assert_eq!(reference.height, height);
     assert_eq!(reference.channels, 4);
-    if reference.pixels == pixels {
+    if reference.pixels.len() == pixels.len()
+        && reference
+            .pixels
+            .iter()
+            .zip(pixels)
+            .enumerate()
+            .all(|(i, (&a, &b))| a.abs_diff(b) <= if i % 4 == 3 { 0 } else { rgb_tolerance })
+    {
         return;
     }
 

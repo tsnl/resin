@@ -20,7 +20,6 @@ pub struct DeviceContext {
     pub memory_priority: bool,
     pub shader_object: ext::shader_object::Device,
     pub map_memory2: khr::map_memory2::Device,
-    pub maintenance6: khr::maintenance6::Device,
 }
 
 pub fn create_device() -> Result<DeviceContext, ResinStatus> {
@@ -166,7 +165,6 @@ fn finish_device(
     let queue = unsafe { device.get_device_queue(selected.queue_family, 0) };
     let shader_object_fn = ext::shader_object::Device::new(&instance, &device);
     let map_memory2 = khr::map_memory2::Device::new(&instance, &device);
-    let maintenance6_fn = khr::maintenance6::Device::new(&instance, &device);
 
     Ok(DeviceContext {
         entry,
@@ -179,7 +177,6 @@ fn finish_device(
         memory_priority: selected.memory_priority_enabled,
         shader_object: shader_object_fn,
         map_memory2,
-        maintenance6: maintenance6_fn,
     })
 }
 

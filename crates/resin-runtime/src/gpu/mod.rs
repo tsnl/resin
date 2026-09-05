@@ -57,7 +57,7 @@ pub struct ResinGpu {
     device: Device,
     shader_object: ext::shader_object::Device,
     map_memory2: khr::map_memory2::Device,
-    maintenance6: khr::maintenance6::Device,
+    push_layout: vk::PipelineLayout,
     queue: vk::Queue,
     command_pool: vk::CommandPool,
     timeline: vk::Semaphore,
@@ -109,7 +109,7 @@ pub struct ResinPipeline {
 pub struct ResinCommandBuffer {
     device: Device,
     shader_object: ext::shader_object::Device,
-    maintenance6: khr::maintenance6::Device,
+    push_layout: vk::PipelineLayout,
     pool: vk::CommandPool,
     handle: vk::CommandBuffer,
     shader_bound: bool,
@@ -224,13 +224,22 @@ impl ResinGpu {
                 vk_status(err)
             })?;
 
+        let push_range = root_range();
+        let layout_info = vk::PipelineLayoutCreateInfo::default()
+            .push_constant_ranges(slice::from_ref(&push_range));
+        let push_layout = unsafe { created.device.create_pipeline_layout(&layout_info, None) }
+            .map_err(|err| {
+                destroy_partial(&created.device, &created.instance, command_pool, timeline);
+                vk_status(err)
+            })?;
+
         Ok(Self {
             _entry: created.entry,
             instance: created.instance,
             device: created.device,
             shader_object: created.shader_object,
             map_memory2: created.map_memory2,
-            maintenance6: created.maintenance6,
+            push_layout,
             queue: created.queue,
             command_pool,
             timeline,
@@ -452,11 +461,7 @@ impl ResinGpu {
     /// The SPIR-V must be valid for this device and the runtime's entry point and push-constant interface. The GPU must outlive the pipeline.
     pub unsafe fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
         validate_spirv(spv)?;
-        let push_range = vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::COMPUTE,
-            offset: 0,
-            size: PUSH_CONSTANT_SIZE,
-        };
+        let push_range = root_range();
         let create_info = vk::ShaderCreateInfoEXT::default()
             .stage(vk::ShaderStageFlags::COMPUTE)
             .code_type(vk::ShaderCodeTypeEXT::SPIRV)
@@ -493,11 +498,7 @@ impl ResinGpu {
     ) -> Result<ResinPipeline, ResinStatus> {
         validate_spirv(vertex_spv)?;
         validate_spirv(fragment_spv)?;
-        let push_range = vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-            offset: 0,
-            size: PUSH_CONSTANT_SIZE,
-        };
+        let push_range = root_range();
         let flags = vk::ShaderCreateFlagsEXT::LINK_STAGE;
         let vertex_info = vk::ShaderCreateInfoEXT::default()
             .flags(flags)
@@ -682,7 +683,7 @@ impl ResinGpu {
         Ok(ResinCommandBuffer {
             device: self.device.clone(),
             shader_object: self.shader_object.clone(),
-            maintenance6: self.maintenance6.clone(),
+            push_layout: self.push_layout,
             pool: self.command_pool,
             handle,
             shader_bound: false,
@@ -925,13 +926,8 @@ impl ResinCommandBuffer {
         if vertex_count == 0 {
             return Err(ResinStatus::InvalidArgument);
         }
-        let constants = root_data.to_ne_bytes();
-        let push = vk::PushConstantsInfoKHR::default()
-            .layout(vk::PipelineLayout::null())
-            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
-            .values(&constants);
+        self.push_root(root_data);
         unsafe {
-            self.maintenance6.cmd_push_constants2(self.handle, &push);
             self.device.cmd_draw(self.handle, vertex_count, 1, 0, 0);
         }
         Ok(())
@@ -1009,17 +1005,34 @@ impl ResinCommandBuffer {
             return Err(ResinStatus::InvalidArgument);
         }
         cmd_memory_barrier(&self.device, self.handle);
-        let constants = root_data.to_ne_bytes();
-        let push = vk::PushConstantsInfoKHR::default()
-            .layout(vk::PipelineLayout::null())
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .values(&constants);
+        self.push_root(root_data);
         unsafe {
-            self.maintenance6.cmd_push_constants2(self.handle, &push);
             self.device
                 .cmd_dispatch(self.handle, group_count_x, group_count_y, group_count_z);
         }
         Ok(())
+    }
+
+    fn push_root(&self, root_data: u64) {
+        unsafe {
+            self.device.cmd_push_constants(
+                self.handle,
+                self.push_layout,
+                root_range().stage_flags,
+                0,
+                &root_data.to_ne_bytes(),
+            );
+        }
+    }
+}
+
+fn root_range() -> vk::PushConstantRange {
+    vk::PushConstantRange {
+        stage_flags: vk::ShaderStageFlags::COMPUTE
+            | vk::ShaderStageFlags::VERTEX
+            | vk::ShaderStageFlags::FRAGMENT,
+        offset: 0,
+        size: PUSH_CONSTANT_SIZE,
     }
 }
 
@@ -1031,6 +1044,7 @@ impl Drop for ResinGpu {
                 heap.clear();
             }
             self.device.destroy_command_pool(self.command_pool, None);
+            self.device.destroy_pipeline_layout(self.push_layout, None);
             self.device.destroy_semaphore(self.timeline, None);
             self.device.destroy_device(None);
             self.instance.destroy_instance(None);
