@@ -35,12 +35,14 @@ fn examples_generate_verified_ir() {
             continue;
         }
         found += 1;
-        let src = std::fs::read_to_string(&path).unwrap();
-        let module =
-            generate(&parse(&src)).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let ast = resin::ast::load(&path).unwrap();
+        let module = generate(&ast).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
-    assert!(found >= 7, "expected throwaway examples in examples/");
+    assert!(
+        found >= 9,
+        "expected language and GPU examples in examples/"
+    );
 }
 
 #[test]

@@ -151,8 +151,8 @@ effects from foreign calls. C strings need an explicit `\0` and a byte-pointer c
 Run either demo like any other Resin program:
 
 ```sh
-cargo run -- examples/shaders/gradient.resin
-cargo run -- examples/shaders/triangle.resin
+cargo run -- examples/gradient.resin
+cargo run -- examples/triangle.resin
 ```
 
 They write `gradient.png` and `triangle.png` in cwd. Their Resin `main` functions allocate

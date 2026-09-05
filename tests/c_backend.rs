@@ -28,10 +28,16 @@ fn runs(source: &str, code: i32) {
 }
 
 #[test]
-fn all_examples_compile_as_strict_c11() {
+fn numbered_examples_compile_as_strict_c11() {
     for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/examples")).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().is_some_and(|ext| ext == "resin") {
+        if path.extension().is_some_and(|ext| ext == "resin")
+            && path
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("eg")
+        {
             runs(&fs::read_to_string(path).unwrap(), 0);
         }
     }

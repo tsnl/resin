@@ -1,4 +1,4 @@
-include "../../lib/runtime.resin";
+include "../lib/runtime.resin";
 
 Root = { count: uint, pixels: ulong };
 

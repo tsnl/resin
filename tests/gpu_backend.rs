@@ -28,7 +28,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     for name in ["gradient", "triangle"] {
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/shaders")
+            .join("examples")
             .join(format!("{name}.resin"));
         let executable = temp.path().join(name);
         let output = Command::new(env!("CARGO_BIN_EXE_resin"))
