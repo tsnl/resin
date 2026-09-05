@@ -45,6 +45,7 @@ fn hello_triangle() {
         gpu.submit(commands).expect("submit");
 
         let host = pixels.host_bytes().expect("mapped readback");
-        common::assert_reftest(file!(), WIDTH, HEIGHT, host);
+        // Rasterization may round RGB by one UNORM step across drivers; alpha stays exact.
+        common::assert_reftest(file!(), WIDTH, HEIGHT, host, 1);
     }
 }
