@@ -11,7 +11,6 @@ define_id! {
     pub struct NonLocalId(usize);
     pub struct GlobalId(usize);
     pub struct FunctionId(usize);
-    pub struct BlockId(usize);
 }
 
 #[derive(Debug, Clone, PartialEq)]

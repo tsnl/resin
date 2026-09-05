@@ -11,18 +11,18 @@ pub mod print;
 pub mod typer;
 pub mod verify;
 
-pub use generate::{GenerateError, GenerateErrorKind, generate};
-pub use instr::{BasicBlock, Function, Instr, Local, NonLocal, StackEffect, Terminator};
+pub use generate::{generate, GenerateError, GenerateErrorKind};
+pub use instr::{BasicBlock, BlockId, Function, Instr, Local, NonLocal, StackEffect, Terminator};
 pub use print::format_module;
 pub use typer::{
     BuiltinCall, Conv, Converted, FieldAccess, TypeError, TypeErrorKind, TyperContext,
 };
 pub use types::{RecordField, Ty, TypeDef, TypeId};
 pub use value::{
-    ArrayValue, BlockId, ClosureValue, FunctionId, GlobalId, LocalId, NonLocalId, RecordFieldValue,
+    ArrayValue, ClosureValue, FunctionId, GlobalId, LocalId, NonLocalId, RecordFieldValue,
     RecordValue, StaticAddressValue, Value,
 };
-pub use verify::{VerifyError, VerifyErrorKind, VerifyLocation, verify};
+pub use verify::{verify, VerifyError, VerifyErrorKind, VerifyLocation};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Global {

@@ -2,7 +2,13 @@
 
 use std::sync::Arc;
 
-use super::{BlockId, FunctionId, GlobalId, LocalId, NonLocalId, Ty, Value};
+use crate::util::define_id;
+
+use super::{FunctionId, GlobalId, LocalId, NonLocalId, Ty, Value};
+
+define_id! {
+    pub struct BlockId(usize);
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
