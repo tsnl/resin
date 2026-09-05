@@ -5,13 +5,13 @@ use crate::ir::{BlockId, Function, FunctionId, Module, Terminator, Ty};
 use super::error::Location;
 use super::instructions::{check_instr, pop_one};
 use super::types::{check_type, shape};
-use super::{VerifyError, VerifyErrorKind};
+use super::{FunctionTypes, VerifyError, VerifyErrorKind};
 
 pub(super) fn check_function(
     module: &Module,
     function_id: FunctionId,
     function: &Function,
-) -> Result<(), VerifyError> {
+) -> Result<FunctionTypes, VerifyError> {
     let entry = function.entry;
     let function_location = Location::function(function_id);
 
@@ -40,6 +40,7 @@ pub(super) fn check_function(
     let mut entries = vec![None; function.blocks.len()];
     entries[entry.index()] = Some(Vec::new());
     let mut pending = VecDeque::from([entry]);
+    let mut results = vec![Vec::new(); function.blocks.len()];
 
     while let Some(basic_block_id) = pending.pop_front() {
         let basic_block = &function.blocks[basic_block_id.index()];
@@ -50,6 +51,8 @@ pub(super) fn check_function(
         for (instruction, instr) in basic_block.instrs.iter().enumerate() {
             let location = Location::instruction(function_id, basic_block_id, instruction);
             check_instr(module, function, instr, &mut stack, location)?;
+            results[basic_block_id.index()]
+                .push((instr.stack_effect().pushes == 1).then(|| stack.last().unwrap().clone()));
         }
 
         let location = Location::basic_block(function_id, basic_block_id);
@@ -99,7 +102,10 @@ pub(super) fn check_function(
         );
     }
 
-    Ok(())
+    Ok(FunctionTypes {
+        inputs: entries.into_iter().map(Option::unwrap).collect(),
+        results,
+    })
 }
 
 fn propagate(
