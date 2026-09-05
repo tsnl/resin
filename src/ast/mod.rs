@@ -26,6 +26,7 @@ pub type Type = Spanned<TypeKind>;
 
 #[derive(Debug, Clone)]
 pub enum TypeKind {
+    Unit,
     Atom { name: Ident },
     App { head: Ident, arg: Box<Term> },
     Func { from: Box<Type>, to: Box<Type> },
@@ -47,6 +48,7 @@ pub enum TermKind {
         value: Arc<str>,
     },
     Lambda {
+        /// Surface bindings destructuring one argument: unit, a value, or a tuple.
         params: Vec<(Ident, Type)>,
         body: Box<Term>,
     },
@@ -68,6 +70,11 @@ pub enum TermKind {
     Unit,
     Call {
         func: Box<Term>,
+        arg: Box<Term>,
+    },
+    /// Privileged operator syntax; operands are evaluated in source order.
+    Builtin {
+        name: Arc<str>,
         args: Vec<Term>,
     },
     Assign {

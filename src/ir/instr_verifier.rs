@@ -20,6 +20,7 @@ impl Instr {
     pub fn stack_effect(&self) -> StackEffect {
         match self {
             Self::Push { .. }
+            | Self::CurrentClosure
             | Self::LocalAddress { .. }
             | Self::GlobalAddress { .. }
             | Self::NonLocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
@@ -40,10 +41,7 @@ impl Instr {
                 pops: *captures,
                 pushes: 1,
             },
-            Self::Call { args } => StackEffect {
-                pops: args + 1,
-                pushes: 1,
-            },
+            Self::Call => StackEffect { pops: 2, pushes: 1 },
             Self::CallBuiltin { params, .. } => StackEffect {
                 pops: params.len(),
                 pushes: 1,
@@ -198,12 +196,10 @@ fn verify_function(
         }));
     }
 
-    for local in &function.params {
-        if function.locals.get(local.index()).is_none() {
-            return Err(location.error(VerifyErrorKind::InvalidLocal {
-                local: local.index(),
-            }));
-        }
+    if function.locals.get(function.param.index()).is_none() {
+        return Err(location.error(VerifyErrorKind::InvalidLocal {
+            local: function.param.index(),
+        }));
     }
 
     let mut entries = vec![None; function.blocks.len()];
@@ -282,6 +278,7 @@ fn verify_instr(
 ) -> Result<(), VerifyError> {
     match instr {
         Instr::Push { value } => stack.push(immediate_ty(module, value, location)?),
+        Instr::CurrentClosure => stack.push(function_ty(function, location)?),
         Instr::LocalAddress { local } => {
             let local = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
@@ -397,20 +394,14 @@ fn verify_instr(
             expect_types(&expected, &values, location)?;
             stack.push(function_ty(target_function, location)?);
         }
-        Instr::Call { args } => {
-            let values = pop(stack, *args, location)?;
+        Instr::Call => {
+            let arg = pop_one(stack, location)?;
             let callee = pop_one(stack, location)?;
             let shape = resolve_shape(module, callee.clone(), location)?;
-            let Ty::Function { params, result } = shape else {
+            let Ty::Function { param, result } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedFunction { found: callee }));
             };
-            if *args != params.len() {
-                return Err(location.error(VerifyErrorKind::ArgumentCount {
-                    expected: params.len(),
-                    found: *args,
-                }));
-            }
-            expect_types(&params, &values, location)?;
+            expect_type(*param, arg, location)?;
             stack.push(*result);
         }
         Instr::CallBuiltin { params, result, .. } => {
@@ -558,10 +549,8 @@ fn validate_ty(module: &Module, ty: &Ty, location: Location) -> Result<(), Verif
                 validate_ty(module, &field.ty, location)?;
             }
         }
-        Ty::Function { params, result } => {
-            for param in params {
-                validate_ty(module, param, location)?;
-            }
+        Ty::Function { param, result } => {
+            validate_ty(module, param, location)?;
             validate_ty(module, result, location)?;
         }
         Ty::Type
@@ -670,31 +659,11 @@ fn is_integer(module: &Module, ty: &Ty, location: Location) -> Result<bool, Veri
 }
 
 fn function_ty(function: &Function, location: Location) -> Result<Ty, VerifyError> {
-    Ok(Ty::Function {
-        params: local_types(function, &function.params, location)?,
-        result: Box::new(function.result.clone()),
-    })
-}
-
-fn local_types(
-    function: &Function,
-    locals: &[super::LocalId],
-    location: Location,
-) -> Result<Vec<Ty>, VerifyError> {
-    locals
-        .iter()
-        .map(|local| {
-            function
-                .locals
-                .get(local.index())
-                .map(|local| local.ty.clone())
-                .ok_or_else(|| {
-                    location.error(VerifyErrorKind::InvalidLocal {
-                        local: local.index(),
-                    })
-                })
+    function.ty().ok_or_else(|| {
+        location.error(VerifyErrorKind::InvalidLocal {
+            local: function.param.index(),
         })
-        .collect()
+    })
 }
 
 fn expect_types(expected: &[Ty], found: &[Ty], location: Location) -> Result<(), VerifyError> {
@@ -710,11 +679,11 @@ fn expect_types(expected: &[Ty], found: &[Ty], location: Location) -> Result<(),
     Ok(())
 }
 
-fn definition_body<'a>(
-    module: &'a Module,
+fn definition_body(
+    module: &Module,
     definition: TypeId,
     location: Location,
-) -> Result<&'a Ty, VerifyError> {
+) -> Result<&Ty, VerifyError> {
     Ok(&module
         .types
         .get(definition.index())
@@ -735,15 +704,15 @@ fn ascribe_one_layer(
     if expected == &found {
         return Ok(());
     }
-    if let Ty::Defined { definition } = expected {
-        if &found == definition_body(module, *definition, location)? {
-            return Ok(());
-        }
+    if let Ty::Defined { definition } = expected
+        && &found == definition_body(module, *definition, location)?
+    {
+        return Ok(());
     }
-    if let Ty::Defined { definition } = &found {
-        if expected == definition_body(module, *definition, location)? {
-            return Ok(());
-        }
+    if let Ty::Defined { definition } = &found
+        && expected == definition_body(module, *definition, location)?
+    {
+        return Ok(());
     }
     Err(location.error(VerifyErrorKind::TypeMismatch {
         expected: expected.clone(),
@@ -860,9 +829,12 @@ mod tests {
         let function = Function {
             name: None,
             nonlocals: vec![],
-            params: vec![],
+            param: LocalId::from_index(0),
             result: meters.clone(),
-            locals: vec![],
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
                 name: None,
@@ -895,9 +867,12 @@ mod tests {
         let function = Function {
             name: None,
             nonlocals: vec![],
-            params: vec![],
+            param: LocalId::from_index(0),
             result: Ty::Int32,
-            locals: vec![],
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
                 name: None,
@@ -928,7 +903,7 @@ mod tests {
         let function = Function {
             name: None,
             nonlocals: vec![],
-            params: vec![],
+            param: LocalId::from_index(0),
             result: Ty::Int32,
             locals: vec![
                 Local {
@@ -973,9 +948,12 @@ mod tests {
         let function = Function {
             name: None,
             nonlocals: vec![],
-            params: vec![],
+            param: LocalId::from_index(0),
             result: Ty::Int32,
-            locals: vec![],
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![
                 BasicBlock {
@@ -1035,7 +1013,7 @@ mod tests {
                 name: None,
                 ty: Ty::Int32,
             }],
-            params: vec![LocalId::from_index(0)],
+            param: LocalId::from_index(0),
             result: Ty::Int32,
             locals: vec![Local {
                 name: None,
@@ -1056,9 +1034,12 @@ mod tests {
         let caller = Function {
             name: None,
             nonlocals: vec![],
-            params: vec![],
+            param: LocalId::from_index(0),
             result: Ty::Int32,
-            locals: vec![],
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
                 name: None,
@@ -1073,7 +1054,7 @@ mod tests {
                     Instr::Push {
                         value: Value::Int32 { value: 4 },
                     },
-                    Instr::Call { args: 1 },
+                    Instr::Call,
                 ],
                 terminator: Terminator::Return,
             }],
@@ -1092,9 +1073,12 @@ mod tests {
         let function = Function {
             name: None,
             nonlocals: vec![],
-            params: vec![],
+            param: LocalId::from_index(0),
             result: Ty::Unit,
-            locals: vec![],
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![
                 BasicBlock {

@@ -31,6 +31,10 @@ pub fn require_gpu() -> Option<Gpu> {
     match ResinGpu::create() {
         Ok(inner) => Some(Gpu { inner, _lock: lock }),
         Err(ResinStatus::VulkanUnavailable | ResinStatus::Unsupported) => {
+            assert!(
+                !gpu_required(),
+                "RESIN_REQUIRE_GPU is set but no suitable Vulkan device is available"
+            );
             eprintln!("skipping: no suitable Vulkan device");
             None
         }
@@ -55,6 +59,10 @@ pub fn compile_shader(src: &str, stage: &str, define: Option<&str>) -> Option<Ve
     {
         Ok(child) => child,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            assert!(
+                !gpu_required(),
+                "RESIN_REQUIRE_GPU is set but glslc is unavailable"
+            );
             eprintln!("skipping: glslc not found");
             return None;
         }
@@ -153,6 +161,13 @@ fn pixel_diff(reference: &[u8], actual: &[u8]) -> (usize, u8) {
 fn update_refs() -> bool {
     matches!(
         std::env::var("RESIN_UPDATE_REFS").as_deref(),
+        Ok("1") | Ok("true")
+    )
+}
+
+fn gpu_required() -> bool {
+    matches!(
+        std::env::var("RESIN_REQUIRE_GPU").as_deref(),
         Ok("1") | Ok("true")
     )
 }

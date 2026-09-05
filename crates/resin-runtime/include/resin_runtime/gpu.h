@@ -57,6 +57,9 @@ ResinStatus resin_gpu_device_count(uint32_t *count);
 ResinStatus resin_gpu_enumerate_devices(ResinGpuDeviceInfo *infos, uint32_t count);
 
 /* Every object created from a GPU must be destroyed before that GPU.
+   All operations on a GPU and its children must be externally synchronized.
+   Resources referenced by a recording must remain live until it is cancelled
+   or submission completes; host accesses must not overlap device writes.
    `resin_gpu_create` picks the highest-scoring suitable device. */
 ResinStatus resin_gpu_create(ResinGpu **out_gpu);
 ResinStatus resin_gpu_create_at(uint32_t index, ResinGpu **out_gpu);
@@ -138,9 +141,11 @@ ResinStatus resin_gpu_copy_image_to_buffer(
     const ResinAllocation *dst);
 
 /* Submits, waits until this command buffer's work completes, then frees it.
+   Returns INVALID_ARGUMENT if another submitted recording has changed an
+   image layout assumed by this recording; record its commands again.
    A non-null command buffer is consumed even when the status is not success. */
 ResinStatus resin_gpu_submit(ResinGpu *gpu, ResinCommandBuffer *command_buffer);
-/* A non-null command buffer is consumed. */
+/* A non-null command buffer is consumed. Pending image layout changes are discarded. */
 void resin_gpu_cancel_command_buffer(ResinGpu *gpu, ResinCommandBuffer *command_buffer);
 
 #ifdef __cplusplus

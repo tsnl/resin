@@ -5,9 +5,11 @@
 
 mod device;
 
+use std::cell::Cell;
 use std::ffi::c_char;
 use std::ops::Range;
 use std::ptr;
+use std::rc::Rc;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -98,7 +100,7 @@ pub struct ResinImage {
     memory: vk::DeviceMemory,
     width: u32,
     height: u32,
-    layout: vk::ImageLayout,
+    layout: Rc<Cell<vk::ImageLayout>>,
 }
 
 pub struct ResinPipeline {
@@ -117,8 +119,58 @@ pub struct ResinCommandBuffer {
     graphics: bool,
     rendering: bool,
     recording: bool,
-    dispatched: bool,
     submitted: bool,
+    layouts: ImageLayouts,
+}
+
+/// Layouts predicted by this recording, separate from submitted image state.
+#[derive(Default)]
+struct ImageLayouts {
+    changes: Vec<ImageLayoutChange>,
+}
+
+struct ImageLayoutChange {
+    committed: Rc<Cell<vk::ImageLayout>>,
+    initial: vk::ImageLayout,
+    final_layout: vk::ImageLayout,
+}
+
+impl ImageLayouts {
+    fn transition(
+        &mut self,
+        committed: &Rc<Cell<vk::ImageLayout>>,
+        next: vk::ImageLayout,
+    ) -> vk::ImageLayout {
+        if let Some(change) = self
+            .changes
+            .iter_mut()
+            .find(|change| Rc::ptr_eq(&change.committed, committed))
+        {
+            let previous = change.final_layout;
+            change.final_layout = next;
+            previous
+        } else {
+            let initial = committed.get();
+            self.changes.push(ImageLayoutChange {
+                committed: committed.clone(),
+                initial,
+                final_layout: next,
+            });
+            initial
+        }
+    }
+
+    fn is_current(&self) -> bool {
+        self.changes
+            .iter()
+            .all(|change| change.committed.get() == change.initial)
+    }
+
+    fn commit(&self) {
+        for change in &self.changes {
+            change.committed.set(change.final_layout);
+        }
+    }
 }
 
 impl ResinGpu {
@@ -193,7 +245,9 @@ impl ResinGpu {
         })
     }
 
-    pub fn malloc(
+    /// # Safety
+    /// The GPU must outlive the allocation. All GPU and child-object operations must be externally synchronized.
+    pub unsafe fn malloc(
         &mut self,
         bytes: usize,
         alignment: usize,
@@ -242,7 +296,9 @@ impl ResinGpu {
         Ok(allocation)
     }
 
-    pub fn free(&mut self, allocation: &ResinAllocation) {
+    /// # Safety
+    /// The allocation must be live, belong to this GPU, and have no outstanding host borrows or GPU uses. It must not be used or freed again.
+    pub unsafe fn free(&mut self, allocation: &ResinAllocation) {
         let heap = heap_index(allocation.memory);
         let release = {
             let Some(block) = self.heaps[heap]
@@ -319,7 +375,7 @@ impl ResinGpu {
         let requirements = requirements2.memory_requirements;
 
         let request = memory_request(memory);
-        let mut candidates = memory_type_indices(
+        let candidates = memory_type_indices(
             &self.memory_properties,
             requirements.memory_type_bits,
             request,
@@ -329,48 +385,28 @@ impl ResinGpu {
             return Err(ResinStatus::Unsupported);
         }
 
-        let mut alloc_flags =
-            vk::MemoryAllocateFlagsInfo::default().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
-        let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().buffer(buffer);
-        let mut priority = vk::MemoryPriorityAllocateInfoEXT::default().priority(match memory {
-            ResinMemory::Gpu => 1.0,
-            ResinMemory::Default => 0.75,
-            ResinMemory::Readback => 0.25,
-        });
         let use_dedicated = dedicated.requires_dedicated_allocation == vk::TRUE
             || dedicated.prefers_dedicated_allocation == vk::TRUE;
 
-        let mut allocated = None;
-        let mut last_err = ResinStatus::OutOfMemory;
-        for memory_type_index in candidates.drain(..) {
-            let mut alloc_info = vk::MemoryAllocateInfo::default()
-                .allocation_size(requirements.size)
-                .memory_type_index(memory_type_index)
-                .push_next(&mut alloc_flags);
+        let device_memory = allocate_memory_with(
+            requirements,
+            &candidates,
+            true,
             if use_dedicated {
-                alloc_info = alloc_info.push_next(&mut dedicated_info);
-            }
-            if self.memory_priority {
-                alloc_info = alloc_info.push_next(&mut priority);
-            }
-            match unsafe { self.device.allocate_memory(&alloc_info, None) } {
-                Ok(mem) => {
-                    allocated = Some(mem);
-                    break;
-                }
-                Err(err) => {
-                    last_err = vk_status(err);
-                    if last_err != ResinStatus::OutOfMemory {
-                        unsafe { self.device.destroy_buffer(buffer, None) };
-                        return Err(last_err);
-                    }
-                }
-            }
-        }
-        let Some(device_memory) = allocated else {
+                DedicatedAllocation::Buffer(buffer)
+            } else {
+                DedicatedAllocation::None
+            },
+            self.memory_priority.then_some(match memory {
+                ResinMemory::Gpu => 1.0,
+                ResinMemory::Default => 0.75,
+                ResinMemory::Readback => 0.25,
+            }),
+            |info| unsafe { self.device.allocate_memory(info, None) },
+        )
+        .inspect_err(|_| {
             unsafe { self.device.destroy_buffer(buffer, None) };
-            return Err(last_err);
-        };
+        })?;
 
         let bind = vk::BindBufferMemoryInfo::default()
             .buffer(buffer)
@@ -415,7 +451,9 @@ impl ResinGpu {
         })
     }
 
-    pub fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
+    /// # Safety
+    /// The SPIR-V must be valid for this device and the runtime's entry point and push-constant interface. The GPU must outlive the pipeline.
+    pub unsafe fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
         validate_spirv(spv)?;
         let push_range = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::COMPUTE,
@@ -449,7 +487,9 @@ impl ResinGpu {
         }
     }
 
-    pub fn create_graphics_pipeline(
+    /// # Safety
+    /// Both SPIR-V modules must be valid for this device and the runtime's shader interface. The GPU must outlive the pipeline.
+    pub unsafe fn create_graphics_pipeline(
         &self,
         vertex_spv: &[u8],
         fragment_spv: &[u8],
@@ -498,7 +538,9 @@ impl ResinGpu {
         }
     }
 
-    pub fn create_image(&self, width: u32, height: u32) -> Result<ResinImage, ResinStatus> {
+    /// # Safety
+    /// The dimensions must satisfy the device limits. The GPU must outlive the image and all commands using it.
+    pub unsafe fn create_image(&self, width: u32, height: u32) -> Result<ResinImage, ResinStatus> {
         if width == 0 || height == 0 {
             return Err(ResinStatus::InvalidArgument);
         }
@@ -515,7 +557,7 @@ impl ResinGpu {
             memory,
             width,
             height,
-            layout: vk::ImageLayout::UNDEFINED,
+            layout: Rc::new(Cell::new(vk::ImageLayout::UNDEFINED)),
         })
     }
 
@@ -557,7 +599,7 @@ impl ResinGpu {
             avoid: vk::MemoryPropertyFlags::HOST_VISIBLE,
             host_visible: false,
         };
-        let mut candidates = memory_type_indices(
+        let candidates = memory_type_indices(
             &self.memory_properties,
             requirements.memory_type_bits,
             request,
@@ -567,41 +609,24 @@ impl ResinGpu {
             return Err(ResinStatus::Unsupported);
         }
 
-        let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
-        let mut priority = vk::MemoryPriorityAllocateInfoEXT::default().priority(1.0);
         let use_dedicated = dedicated.requires_dedicated_allocation == vk::TRUE
             || dedicated.prefers_dedicated_allocation == vk::TRUE;
 
-        let mut allocated = None;
-        let mut last_err = ResinStatus::OutOfMemory;
-        for memory_type_index in candidates.drain(..) {
-            let mut alloc_info = vk::MemoryAllocateInfo::default()
-                .allocation_size(requirements.size)
-                .memory_type_index(memory_type_index);
+        let device_memory = allocate_memory_with(
+            requirements,
+            &candidates,
+            false,
             if use_dedicated {
-                alloc_info = alloc_info.push_next(&mut dedicated_info);
-            }
-            if self.memory_priority {
-                alloc_info = alloc_info.push_next(&mut priority);
-            }
-            match unsafe { self.device.allocate_memory(&alloc_info, None) } {
-                Ok(mem) => {
-                    allocated = Some(mem);
-                    break;
-                }
-                Err(err) => {
-                    last_err = vk_status(err);
-                    if last_err != ResinStatus::OutOfMemory {
-                        unsafe { self.device.destroy_image(image, None) };
-                        return Err(last_err);
-                    }
-                }
-            }
-        }
-        let Some(device_memory) = allocated else {
+                DedicatedAllocation::Image(image)
+            } else {
+                DedicatedAllocation::None
+            },
+            self.memory_priority.then_some(1.0),
+            |info| unsafe { self.device.allocate_memory(info, None) },
+        )
+        .inspect_err(|_| {
             unsafe { self.device.destroy_image(image, None) };
-            return Err(last_err);
-        };
+        })?;
 
         let bind = vk::BindImageMemoryInfo::default()
             .image(image)
@@ -638,7 +663,9 @@ impl ResinGpu {
         Ok((image, view, device_memory))
     }
 
-    pub fn start_command_recording(&self) -> Result<ResinCommandBuffer, ResinStatus> {
+    /// # Safety
+    /// The GPU must outlive the recording. Operations on its command pool and queue must be externally synchronized.
+    pub unsafe fn start_command_recording(&self) -> Result<ResinCommandBuffer, ResinStatus> {
         let alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(self.command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
@@ -665,27 +692,21 @@ impl ResinGpu {
             graphics: false,
             rendering: false,
             recording: true,
-            dispatched: false,
             submitted: false,
+            layouts: ImageLayouts::default(),
         })
     }
 
-    pub fn submit(&self, mut command_buffer: ResinCommandBuffer) -> Result<(), ResinStatus> {
-        if command_buffer.rendering {
+    /// # Safety
+    /// All recorded resources and GPU addresses must remain valid through completion and belong to this GPU. Host accesses and queue operations must be synchronized.
+    pub unsafe fn submit(&self, mut command_buffer: ResinCommandBuffer) -> Result<(), ResinStatus> {
+        if command_buffer.rendering || !command_buffer.layouts.is_current() {
             return Err(ResinStatus::InvalidArgument);
         }
         if command_buffer.recording {
             let barrier = vk::MemoryBarrier2::default()
-                .src_stage_mask(
-                    vk::PipelineStageFlags2::COMPUTE_SHADER
-                        | vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
-                        | vk::PipelineStageFlags2::COPY,
-                )
-                .src_access_mask(
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE
-                        | vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
-                        | vk::AccessFlags2::TRANSFER_WRITE,
-                )
+                .src_stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
+                .src_access_mask(vk::AccessFlags2::MEMORY_WRITE)
                 .dst_stage_mask(vk::PipelineStageFlags2::HOST)
                 .dst_access_mask(vk::AccessFlags2::HOST_READ);
             let dependency =
@@ -716,6 +737,7 @@ impl ResinGpu {
             return Err(vk_status(err));
         }
         command_buffer.submitted = true;
+        command_buffer.layouts.commit();
 
         let wait = vk::SemaphoreWaitInfo::default()
             .semaphores(slice::from_ref(&self.timeline))
@@ -739,7 +761,9 @@ impl ResinAllocation {
         self.host
     }
 
-    pub fn host_bytes(&self) -> Option<&[u8]> {
+    /// # Safety
+    /// The allocation and its GPU must remain live for the returned slice's lifetime. Its bytes must be initialized, and neither the host nor device may mutate them while borrowed.
+    pub unsafe fn host_bytes(&self) -> Option<&[u8]> {
         if self.host.is_null() {
             None
         } else {
@@ -767,7 +791,9 @@ impl ResinImage {
 }
 
 impl ResinCommandBuffer {
-    pub fn set_pipeline(&mut self, pipeline: &ResinPipeline) -> Result<(), ResinStatus> {
+    /// # Safety
+    /// The pipeline must belong to this recording's GPU and remain live through command completion.
+    pub unsafe fn set_pipeline(&mut self, pipeline: &ResinPipeline) -> Result<(), ResinStatus> {
         if !self.recording {
             return Err(ResinStatus::InvalidArgument);
         }
@@ -811,7 +837,9 @@ impl ResinCommandBuffer {
         Ok(())
     }
 
-    pub fn begin_rendering(
+    /// # Safety
+    /// The image must belong to this recording's GPU and remain live through command completion.
+    pub unsafe fn begin_rendering(
         &mut self,
         image: &mut ResinImage,
         clear: [f32; 4],
@@ -819,7 +847,12 @@ impl ResinCommandBuffer {
         if !self.recording || self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
-        let (src_stage, src_access) = match image.layout {
+        // BDA resources can alias: order all earlier accesses before graphics.
+        cmd_memory_barrier(&self.device, self.handle);
+        let old_layout = self
+            .layouts
+            .transition(&image.layout, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+        let (src_stage, src_access) = match old_layout {
             vk::ImageLayout::UNDEFINED => (vk::PipelineStageFlags2::NONE, vk::AccessFlags2::NONE),
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (
                 vk::PipelineStageFlags2::COPY,
@@ -838,14 +871,13 @@ impl ResinCommandBuffer {
             &self.device,
             self.handle,
             image.image,
-            image.layout,
+            old_layout,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             src_stage,
             src_access,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
         );
-        image.layout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
 
         let clear_value = vk::ClearValue {
             color: vk::ClearColorValue { float32: clear },
@@ -874,7 +906,9 @@ impl ResinCommandBuffer {
         Ok(())
     }
 
-    pub fn end_rendering(&mut self) -> Result<(), ResinStatus> {
+    /// # Safety
+    /// The recording's GPU and resources must remain live and externally synchronized.
+    pub unsafe fn end_rendering(&mut self) -> Result<(), ResinStatus> {
         if !self.recording || !self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
@@ -885,7 +919,9 @@ impl ResinCommandBuffer {
         Ok(())
     }
 
-    pub fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
+    /// # Safety
+    /// The root address and every shader-accessed address must be valid for the bound shaders. All resources must remain live through completion.
+    pub unsafe fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
         if !self.recording || !self.shader_bound || !self.graphics || !self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
@@ -904,7 +940,9 @@ impl ResinCommandBuffer {
         Ok(())
     }
 
-    pub fn copy_image_to_buffer(
+    /// # Safety
+    /// Both resources must belong to this recording's GPU and remain live through completion. The image contents must have been initialized.
+    pub unsafe fn copy_image_to_buffer(
         &mut self,
         image: &mut ResinImage,
         dst: &ResinAllocation,
@@ -919,18 +957,24 @@ impl ResinCommandBuffer {
         if dst.size < bytes {
             return Err(ResinStatus::InvalidArgument);
         }
+        if !dst.buffer_offset.is_multiple_of(4) {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        cmd_memory_barrier(&self.device, self.handle);
+        let old_layout = self
+            .layouts
+            .transition(&image.layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
         cmd_image_barrier(
             &self.device,
             self.handle,
             image.image,
-            image.layout,
+            old_layout,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::ALL_COMMANDS,
+            vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE,
             vk::PipelineStageFlags2::COPY,
             vk::AccessFlags2::TRANSFER_READ,
         );
-        image.layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
         let region = vk::BufferImageCopy::default()
             .buffer_offset(dst.buffer_offset)
             .image_subresource(
@@ -955,7 +999,9 @@ impl ResinCommandBuffer {
         Ok(())
     }
 
-    pub fn dispatch(
+    /// # Safety
+    /// The workgroup counts must satisfy device limits. The root address and every shader-accessed address must be valid, synchronized, and live through completion.
+    pub unsafe fn dispatch(
         &mut self,
         root_data: u64,
         group_count_x: u32,
@@ -965,20 +1011,7 @@ impl ResinCommandBuffer {
         if !self.recording || !self.shader_bound || self.graphics || self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
-        if self.dispatched {
-            let barrier = vk::MemoryBarrier2::default()
-                .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
-                .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
-                .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
-                .dst_access_mask(
-                    vk::AccessFlags2::SHADER_STORAGE_READ | vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                );
-            let dependency =
-                vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
-            unsafe {
-                self.device.cmd_pipeline_barrier2(self.handle, &dependency);
-            }
-        }
+        cmd_memory_barrier(&self.device, self.handle);
         let constants = root_data.to_ne_bytes();
         let push = vk::PushConstantsInfoKHR::default()
             .layout(vk::PipelineLayout::null())
@@ -989,7 +1022,6 @@ impl ResinCommandBuffer {
             self.device
                 .cmd_dispatch(self.handle, group_count_x, group_count_y, group_count_z);
         }
-        self.dispatched = true;
         Ok(())
     }
 }
@@ -1121,6 +1153,57 @@ fn memory_type_indices(
     scored.into_iter().map(|(_, index)| index).collect()
 }
 
+#[derive(Clone, Copy)]
+enum DedicatedAllocation {
+    None,
+    Buffer(vk::Buffer),
+    Image(vk::Image),
+}
+
+fn allocate_memory_with(
+    requirements: vk::MemoryRequirements,
+    candidates: &[u32],
+    device_address: bool,
+    dedicated: DedicatedAllocation,
+    priority: Option<f32>,
+    mut allocate: impl FnMut(&vk::MemoryAllocateInfo<'_>) -> Result<vk::DeviceMemory, vk::Result>,
+) -> Result<vk::DeviceMemory, ResinStatus> {
+    for &memory_type_index in candidates {
+        // push_next mutates each node, so a retry must start with an entirely fresh chain.
+        let mut flags =
+            vk::MemoryAllocateFlagsInfo::default().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
+        let mut dedicated_info = match dedicated {
+            DedicatedAllocation::None => vk::MemoryDedicatedAllocateInfo::default(),
+            DedicatedAllocation::Buffer(buffer) => {
+                vk::MemoryDedicatedAllocateInfo::default().buffer(buffer)
+            }
+            DedicatedAllocation::Image(image) => {
+                vk::MemoryDedicatedAllocateInfo::default().image(image)
+            }
+        };
+        let mut priority_info =
+            vk::MemoryPriorityAllocateInfoEXT::default().priority(priority.unwrap_or(0.5));
+        let mut info = vk::MemoryAllocateInfo::default()
+            .allocation_size(requirements.size)
+            .memory_type_index(memory_type_index);
+        if device_address {
+            info = info.push_next(&mut flags);
+        }
+        if !matches!(dedicated, DedicatedAllocation::None) {
+            info = info.push_next(&mut dedicated_info);
+        }
+        if priority.is_some() {
+            info = info.push_next(&mut priority_info);
+        }
+        match allocate(&info) {
+            Ok(memory) => return Ok(memory),
+            Err(err) if vk_status(err) == ResinStatus::OutOfMemory => {}
+            Err(err) => return Err(vk_status(err)),
+        }
+    }
+    Err(ResinStatus::OutOfMemory)
+}
+
 fn validate_spirv(bytes: &[u8]) -> Result<(), ResinStatus> {
     if bytes.len() < 4 || !bytes.len().is_multiple_of(4) {
         return Err(ResinStatus::InvalidArgument);
@@ -1246,6 +1329,20 @@ fn bind_graphics_state(
     }
 }
 
+/// Conservative ordering for arbitrary BDA aliases across compute, rendering,
+/// copies, and submissions on the single queue. Called outside rendering only.
+fn cmd_memory_barrier(device: &Device, cmd: vk::CommandBuffer) {
+    let barrier = vk::MemoryBarrier2::default()
+        .src_stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
+        .src_access_mask(vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE)
+        .dst_stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
+        .dst_access_mask(vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE);
+    let dependency = vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
+    unsafe {
+        device.cmd_pipeline_barrier2(cmd, &dependency);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_image_barrier(
     device: &Device,
@@ -1308,5 +1405,144 @@ pub(crate) fn vk_status(err: vk::Result) -> ResinStatus {
             ResinStatus::Unsupported
         }
         _ => ResinStatus::VulkanError,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vk::Handle;
+
+    #[test]
+    fn allocation_retries_have_acyclic_complete_extension_chains() {
+        for device_address in [false, true] {
+            for dedicated in [
+                DedicatedAllocation::None,
+                DedicatedAllocation::Buffer(vk::Buffer::from_raw(1)),
+                DedicatedAllocation::Image(vk::Image::from_raw(2)),
+            ] {
+                for priority in [None, Some(0.75)] {
+                    let mut calls = 0;
+                    let memory = allocate_memory_with(
+                        vk::MemoryRequirements {
+                            size: 4096,
+                            alignment: 16,
+                            memory_type_bits: 0b10101,
+                        },
+                        &[0, 2, 4],
+                        device_address,
+                        dedicated,
+                        priority,
+                        |info| {
+                            assert_eq!(info.allocation_size, 4096);
+                            assert_eq!(info.memory_type_index, calls * 2);
+                            let mut types = Vec::new();
+                            let mut node = info.p_next.cast::<vk::BaseInStructure<'_>>();
+                            while !node.is_null() {
+                                // SAFETY: the callback borrows the live allocation-info chain.
+                                let current = unsafe { &*node };
+                                assert!(
+                                    !types.contains(&current.s_type),
+                                    "cyclic or duplicate pNext node"
+                                );
+                                types.push(current.s_type);
+                                node = current.p_next;
+                            }
+                            assert_eq!(
+                                types.contains(&vk::StructureType::MEMORY_ALLOCATE_FLAGS_INFO),
+                                device_address
+                            );
+                            assert_eq!(
+                                types.contains(&vk::StructureType::MEMORY_DEDICATED_ALLOCATE_INFO),
+                                !matches!(dedicated, DedicatedAllocation::None)
+                            );
+                            assert_eq!(
+                                types.contains(
+                                    &vk::StructureType::MEMORY_PRIORITY_ALLOCATE_INFO_EXT
+                                ),
+                                priority.is_some()
+                            );
+                            calls += 1;
+                            if calls < 3 {
+                                Err(vk::Result::ERROR_OUT_OF_DEVICE_MEMORY)
+                            } else {
+                                Ok(vk::DeviceMemory::from_raw(7))
+                            }
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(memory, vk::DeviceMemory::from_raw(7));
+                    assert_eq!(calls, 3);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn allocation_does_not_retry_a_non_memory_error() {
+        let mut calls = 0;
+        let result = allocate_memory_with(
+            vk::MemoryRequirements::default(),
+            &[0, 1],
+            true,
+            DedicatedAllocation::None,
+            None,
+            |_| {
+                calls += 1;
+                Err(vk::Result::ERROR_DEVICE_LOST)
+            },
+        );
+        assert_eq!(result, Err(ResinStatus::VulkanError));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn cancelling_a_recording_keeps_committed_layouts() {
+        let image = Rc::new(Cell::new(vk::ImageLayout::UNDEFINED));
+        let mut cancelled = ImageLayouts::default();
+        assert_eq!(
+            (cancelled.transition(&image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)).as_raw(),
+            vk::ImageLayout::UNDEFINED.as_raw()
+        );
+        assert_eq!(
+            (cancelled.transition(&image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL)).as_raw(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL.as_raw()
+        );
+        drop(cancelled);
+        assert_eq!((image.get()).as_raw(), vk::ImageLayout::UNDEFINED.as_raw());
+        let mut next = ImageLayouts::default();
+        assert_eq!(
+            (next.transition(&image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)).as_raw(),
+            vk::ImageLayout::UNDEFINED.as_raw()
+        );
+        assert!(next.is_current());
+        next.commit();
+        assert_eq!(
+            (image.get()).as_raw(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL.as_raw()
+        );
+    }
+
+    #[test]
+    fn submitting_another_recording_invalidates_stale_layout_predictions() {
+        let image = Rc::new(Cell::new(vk::ImageLayout::UNDEFINED));
+        let mut first = ImageLayouts::default();
+        let mut second = ImageLayouts::default();
+        first.transition(&image, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+        second.transition(&image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+        assert!(second.is_current());
+        first.commit();
+        assert!(!second.is_current());
+        drop(second);
+        assert_eq!(
+            (image.get()).as_raw(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL.as_raw()
+        );
+        let mut third = ImageLayouts::default();
+        assert_eq!(
+            (third.transition(&image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL)).as_raw(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL.as_raw()
+        );
+        assert!(third.is_current());
     }
 }

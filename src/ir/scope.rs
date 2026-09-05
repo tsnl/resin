@@ -12,14 +12,23 @@ use super::{GlobalId, LocalId, Ty, TypeId};
 pub struct ValueBinding {
     pub kind: ValueBindingKind,
     pub ty: Option<Ty>,
-    pub initializing: bool,
+    pub initialization: Initialization,
     pub depth: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Initialization {
+    Uninitialized,
+    Initializing,
+    Initialized,
 }
 
 #[derive(Clone, Copy)]
 pub enum ValueBindingKind {
     Global(GlobalId),
     Local(LocalId),
+    /// Immutable recursive name of the function at `depth`.
+    CurrentClosure,
 }
 
 /// One lexical frame with the language's two namespaces.
@@ -114,6 +123,19 @@ impl Scopes {
             .find_map(|scope| scope.lookup_value_mut(name))
     }
 
+    /// A binding is definitely initialized only if both control-flow paths initialize it.
+    pub fn intersect_initialization(&mut self, other: &Self) {
+        for (frame, other) in self.frames.iter_mut().zip(&other.frames) {
+            for (name, binding) in &mut frame.values {
+                if let Some(other) = other.values.get(name)
+                    && binding.initialization != other.initialization
+                {
+                    binding.initialization = Initialization::Uninitialized;
+                }
+            }
+        }
+    }
+
     fn innermost(&mut self) -> &mut Scope {
         self.frames.last_mut().expect("scope stack is never empty")
     }
@@ -140,7 +162,7 @@ mod tests {
                 ValueBinding {
                     kind: ValueBindingKind::Global(GlobalId::from_index(0)),
                     ty: None,
-                    initializing: false,
+                    initialization: Initialization::Initialized,
                     depth: 0,
                 },
             )
@@ -158,7 +180,7 @@ mod tests {
                 ValueBinding {
                     kind: ValueBindingKind::Global(GlobalId::from_index(0)),
                     ty: None,
-                    initializing: false,
+                    initialization: Initialization::Initialized,
                     depth: 0,
                 },
             )
@@ -170,7 +192,7 @@ mod tests {
                 ValueBinding {
                     kind: ValueBindingKind::Local(LocalId::from_index(0)),
                     ty: None,
-                    initializing: false,
+                    initialization: Initialization::Initialized,
                     depth: 1,
                 },
             )

@@ -69,7 +69,6 @@ pub enum TypeErrorKind {
     ExpectedPointer { found: Ty },
     ExpectedRecord { found: Ty },
     ExpectedFunction { found: Ty },
-    ArgumentCount { expected: usize, found: usize },
     InvalidBuiltinArgumentCount { name: Arc<str>, found: usize },
     UnknownBuiltin { name: Arc<str> },
     UnknownField { name: Arc<str> },
@@ -130,19 +129,19 @@ impl<'types> Typer<'types> {
         if from == to {
             return Ok(Vec::new());
         }
-        if let Ty::Defined { definition } = to {
-            if from == &self.body(to)? {
-                return Ok(vec![Conv::Wrap {
-                    definition: *definition,
-                }]);
-            }
+        if let Ty::Defined { definition } = to
+            && from == &self.body(to)?
+        {
+            return Ok(vec![Conv::Wrap {
+                definition: *definition,
+            }]);
         }
-        if let Ty::Defined { definition } = from {
-            if to == &self.body(from)? {
-                return Ok(vec![Conv::Unwrap {
-                    definition: *definition,
-                }]);
-            }
+        if let Ty::Defined { definition } = from
+            && to == &self.body(from)?
+        {
+            return Ok(vec![Conv::Unwrap {
+                definition: *definition,
+            }]);
         }
         Err(TypeError::new(TypeErrorKind::TypeMismatch {
             expected: to.clone(),
@@ -208,12 +207,10 @@ impl<'types> Typer<'types> {
                 current = self.body(&Ty::Defined { definition })?;
                 continue;
             }
-            if deref {
-                if let Ty::Pointer { pointee } = current {
-                    steps.push(Conv::Deref);
-                    current = *pointee;
-                    continue;
-                }
+            if deref && let Ty::Pointer { pointee } = current {
+                steps.push(Conv::Deref);
+                current = *pointee;
+                continue;
             }
             return Err(TypeError::new(fail));
         }
@@ -231,9 +228,9 @@ impl<'types> Typer<'types> {
         binding.clone()
     }
 
-    pub fn type_lambda(&self, params: &[Ty], body: &Ty) -> Ty {
+    pub fn type_lambda(&self, param: &Ty, body: &Ty) -> Ty {
         Ty::Function {
-            params: params.to_vec(),
+            param: Box::new(param.clone()),
             result: Box::new(body.clone()),
         }
     }
@@ -287,22 +284,14 @@ impl<'types> Typer<'types> {
         Ty::Unit
     }
 
-    pub fn type_call(&self, callee: &Ty, args: &[Ty]) -> Result<Ty, TypeError> {
+    pub fn type_call(&self, callee: &Ty, arg: &Ty) -> Result<Ty, TypeError> {
         let converted = self.as_function(callee)?;
-        let Ty::Function { params, result } = converted.ty else {
+        let Ty::Function { param, result } = converted.ty else {
             return Err(TypeError::new(TypeErrorKind::ExpectedFunction {
                 found: callee.clone(),
             }));
         };
-        if params.len() != args.len() {
-            return Err(TypeError::new(TypeErrorKind::ArgumentCount {
-                expected: params.len(),
-                found: args.len(),
-            }));
-        }
-        for (expected, found) in params.iter().zip(args) {
-            self.same(expected, found)?;
-        }
+        self.same(&param, arg)?;
         Ok(*result)
     }
 
@@ -403,6 +392,7 @@ impl<'types> Typer<'types> {
 }
 
 fn is_hex_literal(value: &str) -> bool {
+    let value = value.strip_prefix('-').unwrap_or(value);
     value.len() >= 2
         && (value.as_bytes()[1] == b'x' || value.as_bytes()[1] == b'X')
         && value.as_bytes()[0] == b'0'
@@ -419,9 +409,9 @@ mod tests {
     #[test]
     fn child_types_compose_into_a_function_call() {
         let typer = typer();
-        let lambda = typer.type_lambda(&[Ty::Int32], &Ty::Float64);
+        let lambda = typer.type_lambda(&Ty::Int32, &Ty::Float64);
 
-        assert_eq!(typer.type_call(&lambda, &[Ty::Int32]).unwrap(), Ty::Float64);
+        assert_eq!(typer.type_call(&lambda, &Ty::Int32).unwrap(), Ty::Float64);
     }
 
     #[test]
@@ -594,11 +584,11 @@ mod tests {
             definition: TypeId::from_index(0),
         };
         let callee = Ty::Function {
-            params: vec![Ty::Int32],
+            param: Box::new(Ty::Int32),
             result: Box::new(Ty::Int32),
         };
         assert!(matches!(
-            typer.type_call(&callee, &[meters]),
+            typer.type_call(&callee, &meters),
             Err(TypeError {
                 kind: TypeErrorKind::TypeMismatch { .. }
             })

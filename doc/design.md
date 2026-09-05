@@ -7,6 +7,20 @@ and `Span<T>` are the fundamental ways to share memory, and there is no implicit
 counting, or exception machinery. Separate value and type namespaces keep ordinary definitions and
 nominal type definitions simple, including productive recursive definitions through pointers.
 
+Every function takes exactly one argument. `()` supplies unit, and `(a, b)` supplies a tuple;
+`(a: A, b: B) => body` destructures that tuple into local bindings. Function types follow the
+same rule: `() -> R`, `(A) -> R`, and `(A, B) -> R`. Tuples use positional record fields in IR.
+Calls and assignments require matching nominal types; only explicit `T (value)` ascriptions
+wrap or unwrap one nominal layer. Record initializers evaluate fields in source order before
+assembling them in the type's layout order.
+
+Closures capture local values by copy. A named local function's recursive name is an immutable
+reference to the executing closure, including its display; nested closures can capture that
+value. Global function references remain delayed global loads. Declarations reserve uninitialized
+storage: direct reads and local captures require prior initialization on every control-flow path.
+An aggregate must be initialized as a whole before its fields can be accessed. Generating a
+function body does not initialize its enclosing scope.
+
 ## Host and GPU
 
 The long-term goal is CUDA-like heterogeneous programming for graphics. An ordinary Resin function
@@ -36,13 +50,21 @@ limited to literals. An IR generator can therefore interleave scope resolution, 
 and emission without coupling the reusable typing rules to a particular backend. Errors propagate
 immediately and compilation stops after the first useful diagnostic.
 
-The first IR is a typed stack machine: functions own flat lists of basic blocks, instructions make
+The first IR is a typed stack machine: each function has one parameter local and owns a flat list
+of basic blocks. Instructions make
 evaluation order explicit, and terminators provide control flow. Locals, globals, and closure
 nonlocals provide stable storage; stack values include literals, aggregates, closures, and addresses,
 with field and array access resolved from type information. A separate verifier checks stack effects
 and block edges after generation. Privileged operators retain their checked monomorphic signatures
 in IR, while the backend delays selecting or synthesizing their concrete implementations until it
 must emit the target.
+
+The Rust runtime methods are an unsafe convenience interface with the same lifetime and
+synchronization contracts as the C ABI. Command recordings keep pending image layouts separate
+from committed layouts. Submission rejects stale layout assumptions; cancellation discards pending
+changes. The single queue conservatively orders buffer-device-address accesses between compute,
+rendering, and copies with global memory barriers. This favors correctness until resource access
+information permits narrower barriers.
 
 Backends scan this IR to produce the artifacts for one program. The host path emits C which links
 against the runtime. Device paths emit SPIR-V and embed its words directly in that generated C; the

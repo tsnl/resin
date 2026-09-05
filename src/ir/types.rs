@@ -70,12 +70,30 @@ pub enum Ty {
         fields: Vec<RecordField>,
     },
     Function {
-        params: Vec<Ty>,
+        param: Box<Ty>,
         result: Box<Ty>,
     },
 }
 
 impl Ty {
+    /// Parameter syntax is sugar for one unit, scalar, or tuple argument.
+    pub fn parameter(types: &[Ty]) -> Self {
+        match types {
+            [] => Self::Unit,
+            [ty] => ty.clone(),
+            _ => Self::Record {
+                fields: types
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ty)| RecordField {
+                        name: format!("_{i}").into(),
+                        ty: ty.clone(),
+                    })
+                    .collect(),
+            },
+        }
+    }
+
     pub const fn is_integer(&self) -> bool {
         matches!(
             self,

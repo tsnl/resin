@@ -11,8 +11,8 @@ pub struct Function {
     /// Captured values in closure-display order.
     pub nonlocals: Vec<NonLocal>,
 
-    /// Parameters in call order, installed into these locals before entry.
-    pub params: Vec<LocalId>,
+    /// The single argument is installed into this local before entry.
+    pub param: LocalId,
 
     pub result: Ty,
     pub locals: Vec<Local>,
@@ -43,11 +43,7 @@ pub struct NonLocal {
 impl Function {
     pub fn ty(&self) -> Option<Ty> {
         Some(Ty::Function {
-            params: self
-                .params
-                .iter()
-                .map(|param| self.locals.get(param.index()).map(|local| local.ty.clone()))
-                .collect::<Option<_>>()?,
+            param: Box::new(self.locals.get(self.param.index())?.ty.clone()),
             result: Box::new(self.result.clone()),
         })
     }
@@ -61,6 +57,10 @@ impl Function {
 pub enum Instr {
     /// Push a literal or compile-time-evaluated value.
     Push { value: Value },
+
+    /// Push the currently executing closure, including its captured display.
+    /// A local function's recursive name refers to this value, not its uninitialized destination.
+    CurrentClosure,
 
     /// Push the address of a function-local allocation.
     LocalAddress { local: LocalId },
@@ -112,8 +112,8 @@ pub enum Instr {
         captures: usize,
     },
 
-    /// Indirectly call the closure preceding `args` argument values.
-    Call { args: usize },
+    /// Indirectly call the closure preceding one argument value (possibly unit or a tuple).
+    Call,
 
     /// Invoke a privileged polymorphic builtin with its checked signature.
     /// Backend implementation selection remains deliberately deferred.

@@ -60,7 +60,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
     let function = Function {
         name: None,
         nonlocals: vec![],
-        params: vec![LocalId::from_index(0)],
+        param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
             name: None,
@@ -122,9 +122,12 @@ fn nominal_types_do_not_equal_their_representations() {
     let function = Function {
         name: None,
         nonlocals: vec![],
-        params: vec![],
+        param: LocalId::from_index(0),
         result: meters,
-        locals: vec![],
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Unit,
+        }],
         entry: BlockId::from_index(0),
         blocks: vec![BasicBlock {
             name: None,

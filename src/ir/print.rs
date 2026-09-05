@@ -120,7 +120,7 @@ fn sexp_module(module: &Module) -> SExp {
             "type",
             vec![
                 symbol(names.types[index].as_ref()),
-                sexp_ty(module, &names, &def.body),
+                sexp_ty(&names, &def.body),
             ],
         ));
     }
@@ -129,7 +129,7 @@ fn sexp_module(module: &Module) -> SExp {
             "global",
             vec![
                 symbol(names.globals[index].as_ref()),
-                sexp_ty(module, &names, &global.ty),
+                sexp_ty(&names, &global.ty),
             ],
         ));
     }
@@ -143,33 +143,27 @@ fn sexp_function(module: &Module, names: &Names, index: usize, function: &Functi
     let fn_names = names.function(module, index);
     let mut items = vec![
         symbol(names.functions[index].as_ref()),
-        group(
-            function
-                .params
-                .iter()
-                .map(|param| symbol(fn_names.locals[param.index()].as_ref()))
-                .collect(),
-        ),
-        sexp_ty(module, names, &function.result),
+        symbol(fn_names.locals[function.param.index()].as_ref()),
+        sexp_ty(names, &function.result),
     ];
     for (i, nonlocal) in function.nonlocals.iter().enumerate() {
         items.push(list(
             "nonlocal",
             vec![
                 symbol(fn_names.nonlocals[i].as_ref()),
-                sexp_ty(module, names, &nonlocal.ty),
+                sexp_ty(names, &nonlocal.ty),
             ],
         ));
     }
     for (i, local) in function.locals.iter().enumerate() {
-        if function.params.iter().any(|param| param.index() == i) {
+        if function.param.index() == i {
             continue;
         }
         items.push(list(
             "local",
             vec![
                 symbol(fn_names.locals[i].as_ref()),
-                sexp_ty(module, names, &local.ty),
+                sexp_ty(names, &local.ty),
             ],
         ));
     }
@@ -179,7 +173,7 @@ fn sexp_function(module: &Module, names: &Names, index: usize, function: &Functi
             block
                 .instrs
                 .iter()
-                .map(|instr| sexp_instr(module, names, &fn_names, instr)),
+                .map(|instr| sexp_instr(names, &fn_names, instr)),
         );
         block_items.push(sexp_terminator(&fn_names, &block.terminator));
         items.push(list("block", block_items));
@@ -187,9 +181,9 @@ fn sexp_function(module: &Module, names: &Names, index: usize, function: &Functi
     list("function", items)
 }
 
-fn sexp_instr(module: &Module, names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
+fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
-        Instr::Push { value } => list("push", vec![sexp_value(module, names, value)]),
+        Instr::Push { value } => list("push", vec![sexp_value(names, value)]),
         Instr::LocalAddress { local } => list(
             "local-addr",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
@@ -207,17 +201,14 @@ fn sexp_instr(module: &Module, names: &Names, fn_names: &FunctionNames, instr: &
         Instr::Load => symbol("load"),
         Instr::Store => symbol("store"),
         Instr::Discard => symbol("discard"),
-        Instr::Ascribe { ty } => list("ascribe", vec![sexp_ty(module, names, ty)]),
+        Instr::Ascribe { ty } => list("ascribe", vec![sexp_ty(names, ty)]),
         Instr::MakeRecord { fields } => list(
             "make-record",
             fields.iter().map(|field| symbol(field.as_ref())).collect(),
         ),
         Instr::MakeArray { elements, element } => list(
             "make-array",
-            vec![
-                symbol(elements.to_string()),
-                sexp_ty(module, names, element),
-            ],
+            vec![symbol(elements.to_string()), sexp_ty(names, element)],
         ),
         Instr::MakeClosure { function, captures } => list(
             "make-closure",
@@ -226,7 +217,8 @@ fn sexp_instr(module: &Module, names: &Names, fn_names: &FunctionNames, instr: &
                 symbol(captures.to_string()),
             ],
         ),
-        Instr::Call { args } => list("call", vec![symbol(args.to_string())]),
+        Instr::Call => symbol("call"),
+        Instr::CurrentClosure => symbol("current-closure"),
         Instr::CallBuiltin {
             name,
             params,
@@ -235,8 +227,8 @@ fn sexp_instr(module: &Module, names: &Names, fn_names: &FunctionNames, instr: &
             "call-builtin",
             vec![
                 symbol(name.as_ref()),
-                group(params.iter().map(|ty| sexp_ty(module, names, ty)).collect()),
-                sexp_ty(module, names, result),
+                group(params.iter().map(|ty| sexp_ty(names, ty)).collect()),
+                sexp_ty(names, result),
             ],
         ),
     }
@@ -259,9 +251,9 @@ fn sexp_terminator(fn_names: &FunctionNames, terminator: &Terminator) -> SExp {
     }
 }
 
-fn sexp_value(module: &Module, names: &Names, value: &Value) -> SExp {
+fn sexp_value(names: &Names, value: &Value) -> SExp {
     match value {
-        Value::Type { ty } => list("type", vec![sexp_ty(module, names, ty)]),
+        Value::Type { ty } => list("type", vec![sexp_ty(names, ty)]),
         Value::Unit => symbol("unit"),
         Value::Bool { value } => list("bool", vec![symbol(value.to_string())]),
         Value::Int8 { value } => list("sbyte", vec![symbol(value.to_string())]),
@@ -279,7 +271,7 @@ fn sexp_value(module: &Module, names: &Names, value: &Value) -> SExp {
             value
                 .elements
                 .iter()
-                .map(|element| sexp_value(module, names, element))
+                .map(|element| sexp_value(names, element))
                 .collect(),
         ),
         Value::Record { value } => list(
@@ -290,10 +282,7 @@ fn sexp_value(module: &Module, names: &Names, value: &Value) -> SExp {
                 .map(|field| {
                     list(
                         "field",
-                        vec![
-                            symbol(field.name.as_ref()),
-                            sexp_value(module, names, &field.value),
-                        ],
+                        vec![symbol(field.name.as_ref()), sexp_value(names, &field.value)],
                     )
                 })
                 .collect(),
@@ -309,7 +298,7 @@ fn sexp_value(module: &Module, names: &Names, value: &Value) -> SExp {
     }
 }
 
-fn sexp_ty(module: &Module, names: &Names, ty: &Ty) -> SExp {
+fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
     match ty {
         Ty::Type => symbol("type"),
         Ty::Unit => symbol("unit"),
@@ -329,11 +318,11 @@ fn sexp_ty(module: &Module, names: &Names, ty: &Ty) -> SExp {
             .get(definition.index())
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
-        Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(module, names, pointee)]),
-        Ty::Span { element } => list("span", vec![sexp_ty(module, names, element)]),
+        Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
+        Ty::Span { element } => list("span", vec![sexp_ty(names, element)]),
         Ty::Array { element, length } => list(
             "array",
-            vec![sexp_ty(module, names, element), symbol(length.to_string())],
+            vec![sexp_ty(names, element), symbol(length.to_string())],
         ),
         Ty::Record { fields } => list(
             "record",
@@ -342,21 +331,14 @@ fn sexp_ty(module: &Module, names: &Names, ty: &Ty) -> SExp {
                 .map(|field| {
                     list(
                         "field",
-                        vec![
-                            symbol(field.name.as_ref()),
-                            sexp_ty(module, names, &field.ty),
-                        ],
+                        vec![symbol(field.name.as_ref()), sexp_ty(names, &field.ty)],
                     )
                 })
                 .collect(),
         ),
-        Ty::Function { params, result } => list(
-            "func",
-            vec![
-                group(params.iter().map(|ty| sexp_ty(module, names, ty)).collect()),
-                sexp_ty(module, names, result),
-            ],
-        ),
+        Ty::Function { param, result } => {
+            list("func", vec![sexp_ty(names, param), sexp_ty(names, result)])
+        }
     }
 }
 

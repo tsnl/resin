@@ -184,7 +184,7 @@ impl<'a> AstGen<'a> {
                     base = Spanned::new(
                         TermKind::Call {
                             func: Box::new(base),
-                            args: vec![arg],
+                            arg: Box::new(arg),
                         },
                         self.span(node),
                     );
@@ -298,10 +298,9 @@ impl<'a> AstGen<'a> {
         let mut fields = Vec::new();
         let mut cursor = node.walk();
         for f in node.children_by_field_name("fields", &mut cursor) {
-            assert_eq!(f.kind(), "define");
-            let term_def = f.child_by_field_name("term").unwrap();
-            let name = self.ident(term_def.child_by_field_name("name").unwrap());
-            let init = self.gen_term(term_def.child_by_field_name("init").unwrap());
+            assert_eq!(f.kind(), "term_define");
+            let name = self.ident(f.child_by_field_name("name").unwrap());
+            let init = self.gen_term(f.child_by_field_name("init").unwrap());
             fields.push((name, init));
         }
         Spanned::new(TermKind::Record { fields }, self.span(node))
@@ -414,6 +413,21 @@ impl<'a> AstGen<'a> {
         let child = node.child(0).unwrap();
         match child.kind() {
             "paren_type" => self.gen_type(child.child_by_field_name("inner").unwrap()),
+            "unit_type" => Spanned::new(TypeKind::Unit, self.span(child)),
+            "tuple_type" => {
+                let mut cursor = child.walk();
+                let fields = child
+                    .children_by_field_name("elems", &mut cursor)
+                    .enumerate()
+                    .map(|(i, elem)| {
+                        (
+                            Spanned::new(format!("_{i}").into(), self.span(elem)),
+                            self.gen_type(elem),
+                        )
+                    })
+                    .collect();
+                Spanned::new(TypeKind::Record { fields }, self.span(child))
+            }
             "record_type" => self.gen_record_type(child),
             _ => unreachable!("unexpected closed_type: {}", child.kind()),
         }
@@ -451,15 +465,9 @@ impl<'a> AstGen<'a> {
     }
 
     fn call_var(&self, op_text: &str, args: Vec<Term>, span: Span) -> Term {
-        let func = Spanned::new(
-            TermKind::Var {
-                name: Spanned::new(op_text.into(), span),
-            },
-            span,
-        );
         Spanned::new(
-            TermKind::Call {
-                func: Box::new(func),
+            TermKind::Builtin {
+                name: op_text.into(),
                 args,
             },
             span,

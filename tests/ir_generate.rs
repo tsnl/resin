@@ -53,21 +53,24 @@ fn fibonacci_generates_verified_ir() {
     assert_eq!(
         module.globals[0].ty,
         Ty::Function {
-            params: vec![Ty::Int32],
+            param: Box::new(Ty::Int32),
             result: Box::new(Ty::Int32),
         }
     );
     assert_eq!(module.functions.len(), 2);
     assert_eq!(module.functions[0].result, Ty::Unit);
     assert_eq!(module.functions[1].result, Ty::Int32);
-    assert_eq!(module.functions[1].params.len(), 1);
+    assert_eq!(
+        module.functions[1].locals[module.functions[1].param.index()].ty,
+        Ty::Int32
+    );
 }
 
 #[test]
 fn ir_dump_is_an_s_expression_with_names() {
     let dump = format_module(&compile(include_str!("../examples/eg001.resin")));
     assert!(dump.starts_with("(module"));
-    assert!(dump.contains("(global fibonacci (func (int) int))"));
+    assert!(dump.contains("(global fibonacci (func int int))"));
     assert!(dump.contains("init"));
     assert!(dump.contains("fibonacci"));
     assert!(dump.contains("(local f0 int)"));
@@ -206,14 +209,14 @@ from_meters = (m: Meters) => int (m);
     assert_eq!(
         module.globals[0].ty,
         Ty::Function {
-            params: vec![Ty::Int32],
+            param: Box::new(Ty::Int32),
             result: Box::new(meters.clone()),
         }
     );
     assert_eq!(
         module.globals[1].ty,
         Ty::Function {
-            params: vec![meters],
+            param: Box::new(meters),
             result: Box::new(Ty::Int32),
         }
     );
@@ -302,9 +305,9 @@ nil = (p: Ptr (List)) => List { value = 0, next = p };
     assert_eq!(
         module.globals[0].ty,
         Ty::Function {
-            params: vec![Ty::Pointer {
+            param: Box::new(Ty::Pointer {
                 pointee: Box::new(list.clone()),
-            }],
+            }),
             result: Box::new(list.clone()),
         }
     );

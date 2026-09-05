@@ -85,10 +85,16 @@ fn sexp_term(term: &Term) -> SExp {
             list_sp("block", term.span, items)
         }
         TermKind::Unit => list_sp("unit", term.span, vec![]),
-        TermKind::Call { func, args } => list_sp(
-            "call",
+        TermKind::Call { func, arg } => {
+            list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])
+        }
+        TermKind::Builtin { name, args } => list_sp(
+            "builtin",
             term.span,
-            vec![sexp_term(func), group(args.iter().map(sexp_term).collect())],
+            vec![
+                symbol(name.as_ref()),
+                group(args.iter().map(sexp_term).collect()),
+            ],
         ),
         TermKind::Assign { place, value } => list_sp(
             "assign",
@@ -107,6 +113,7 @@ fn sexp_term(term: &Term) -> SExp {
 
 fn sexp_typespec(ts: &Type) -> SExp {
     match &ts.val {
+        TypeKind::Unit => list_sp("unit-type", ts.span, vec![]),
         TypeKind::Atom { name } => symbol(name.val.as_ref()),
         TypeKind::App { head, arg } => list_sp(
             "type-app",

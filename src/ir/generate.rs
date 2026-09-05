@@ -7,7 +7,7 @@ use std::{collections::HashMap, fmt, sync::Arc};
 
 use crate::ast::{Ident, SourceFile, Span, Stmt, StmtKind, Term, TermKind, Type, TypeKind};
 
-use super::scope::{Scopes, ValueBinding, ValueBindingKind};
+use super::scope::{Initialization, Scopes, ValueBinding, ValueBindingKind};
 use super::{
     BasicBlock, BlockId, Conv, Function, FunctionId, Global, GlobalId, Instr, Local, LocalId,
     Module, NonLocal, NonLocalId, RecordField, Terminator, Ty, TypeDef, TypeError, TypeErrorKind,
@@ -36,6 +36,7 @@ pub enum GenerateErrorKind {
     UnboundType { name: Arc<str> },
     UnknownTypeFormer { name: Arc<str> },
     EagerRecursion { name: Arc<str> },
+    UninitializedValue { name: Arc<str> },
     DuplicateValue { name: Arc<str> },
     DuplicateType { name: Arc<str> },
     NeedsTypeAnnotation { name: Arc<str> },
@@ -66,13 +67,25 @@ struct Generator {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Remote {
     owner_depth: usize,
-    local: LocalId,
+    value: RemoteValue,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum RemoteValue {
+    Local(LocalId),
+    CurrentClosure,
+}
+
+/// The stack holds either the expression's value or an address to that value.
+enum Operand {
+    Value(Ty),
+    Place(Ty),
 }
 
 struct FunctionBuilder {
     name: Option<Arc<str>>,
     nonlocals: Vec<NonLocal>,
-    params: Vec<LocalId>,
+    param: LocalId,
     result: Option<Ty>,
     locals: Vec<Local>,
     entry: BlockId,
@@ -89,9 +102,12 @@ impl Generator {
         module.functions.push(Function {
             name: Some("init".into()),
             nonlocals: Vec::new(),
-            params: Vec::new(),
+            param: LocalId::from_index(0),
             result: Ty::Unit,
-            locals: Vec::new(),
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: Vec::new(),
         });
@@ -138,7 +154,7 @@ impl Generator {
             ValueBinding {
                 kind: ValueBindingKind::Global(global),
                 ty: peeked.clone(),
-                initializing: true,
+                initialization: Initialization::Initializing,
                 depth,
             }
         } else {
@@ -146,7 +162,7 @@ impl Generator {
             ValueBinding {
                 kind: ValueBindingKind::Local(local),
                 ty: peeked.clone(),
-                initializing: true,
+                initialization: Initialization::Initializing,
                 depth,
             }
         };
@@ -189,7 +205,7 @@ impl Generator {
             ValueBinding {
                 kind: ValueBindingKind::Global(global),
                 ty: Some(ty),
-                initializing: false,
+                initialization: Initialization::Uninitialized,
                 depth,
             }
         } else {
@@ -197,7 +213,7 @@ impl Generator {
             ValueBinding {
                 kind: ValueBindingKind::Local(local),
                 ty: Some(ty),
-                initializing: false,
+                initialization: Initialization::Uninitialized,
                 depth,
             }
         };
@@ -207,10 +223,11 @@ impl Generator {
     fn gen_term(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
         let found = self.gen_term_inner(term, expected)?;
         if let Some(expected) = expected {
-            self.apply_ascription(term.span, expected, found)
-        } else {
-            Ok(found)
+            self.typer()
+                .same(expected, &found)
+                .map_err(|err| self.type_error(term.span, err))?;
         }
+        Ok(found)
     }
 
     fn gen_term_inner(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
@@ -238,7 +255,8 @@ impl Generator {
             TermKind::Array { elems } => self.gen_array(term.span, elems, expected),
             TermKind::Record { fields } => self.gen_record(term.span, fields, expected),
             TermKind::Block { stmts, tail } => self.gen_block(stmts, tail, expected),
-            TermKind::Call { func, args } => self.gen_call(term.span, func, args, expected),
+            TermKind::Call { func, arg } => self.gen_call(term.span, func, arg),
+            TermKind::Builtin { name, args } => self.gen_builtin(term.span, name, args, expected),
             TermKind::Assign { place, value } => self.gen_assign(place, value),
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
@@ -261,6 +279,22 @@ impl Generator {
     fn gen_var(&mut self, name: &Ident) -> Result<Ty, GenerateError> {
         let binding = self.resolve_value(name)?;
         let ty = self.binding_ty(name, &binding)?;
+        if matches!(binding.kind, ValueBindingKind::CurrentClosure) {
+            if binding.depth == self.current_depth() {
+                self.emit(Instr::CurrentClosure);
+            } else {
+                let nonlocal = self.capture(
+                    Remote {
+                        owner_depth: binding.depth,
+                        value: RemoteValue::CurrentClosure,
+                    },
+                    &ty,
+                );
+                self.emit(Instr::NonLocalAddress { nonlocal });
+                self.emit(Instr::Load);
+            }
+            return Ok(ty);
+        }
         self.emit_binding_address(&binding);
         self.emit(Instr::Load);
         Ok(ty)
@@ -274,54 +308,74 @@ impl Generator {
         name: Option<&Arc<str>>,
     ) -> Result<Ty, GenerateError> {
         let expected_fn = expected.and_then(|ty| match ty {
-            Ty::Function { params, result } => Some((params.as_slice(), result.as_ref())),
+            Ty::Function { param, result } => Some((param.as_ref(), result.as_ref())),
             _ => None,
         });
 
+        let enclosing_scopes = self.scopes.clone();
+        let recursive_binding = name
+            .and_then(|name| self.scopes.lookup_value(name))
+            .filter(|binding| matches!(binding.kind, ValueBindingKind::Local(_)))
+            .cloned();
         self.functions.push(FunctionBuilder::new(name.cloned()));
+        self.scopes.push();
+        if let (Some(name), Some(binding)) = (name, recursive_binding) {
+            self.scopes
+                .define_value(
+                    name.clone(),
+                    ValueBinding {
+                        kind: ValueBindingKind::CurrentClosure,
+                        ty: binding.ty,
+                        initialization: Initialization::Initialized,
+                        depth: self.current_depth(),
+                    },
+                )
+                .expect("fresh recursive-name scope");
+        }
+        // Parameters may shadow the recursive name.
         self.scopes.push();
 
         let mut param_tys = Vec::with_capacity(params.len());
-        let mut param_ids = Vec::with_capacity(params.len());
-        for (name, ann) in params {
-            let ty = self.eval_type(ann)?;
-            let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
-            param_ids.push(local);
+        for (_, ann) in params {
+            param_tys.push(self.eval_type(ann)?);
+        }
+        let param_ty = Ty::parameter(&param_tys);
+        let parameter = LocalId::from_index(0);
+        self.functions.last_mut().expect("lambda builder").locals[0] = Local {
+            name: if params.len() == 1 {
+                Some(params[0].0.val.clone())
+            } else {
+                None
+            },
+            ty: param_ty.clone(),
+        };
+        for (index, ((name, _), ty)) in params.iter().zip(&param_tys).enumerate() {
+            let local = if params.len() == 1 {
+                parameter
+            } else {
+                let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
+                self.emit(Instr::LocalAddress { local });
+                self.emit(Instr::LocalAddress { local: parameter });
+                self.emit(Instr::AccessStatic { index });
+                self.emit(Instr::Load);
+                self.emit(Instr::Store);
+                self.emit(Instr::Discard);
+                local
+            };
             self.bind_value(
                 name,
                 ValueBinding {
                     kind: ValueBindingKind::Local(local),
                     ty: Some(ty.clone()),
-                    initializing: false,
+                    initialization: Initialization::Initialized,
                     depth: self.current_depth(),
                 },
             )?;
-            param_tys.push(ty);
         }
-        self.functions.last_mut().expect("lambda builder").params = param_ids;
-
-        if let Some((expected_params, _)) = expected_fn {
-            if expected_params != param_tys.as_slice() {
-                let span = params
-                    .first()
-                    .map(|(name, _)| name.span)
-                    .unwrap_or(body.span);
-                return Err(self.type_error(
-                    span,
-                    TypeError {
-                        kind: TypeErrorKind::TypeMismatch {
-                            expected: Ty::Function {
-                                params: expected_params.to_vec(),
-                                result: Box::new(Ty::Unit),
-                            },
-                            found: Ty::Function {
-                                params: param_tys,
-                                result: Box::new(Ty::Unit),
-                            },
-                        },
-                    },
-                ));
-            }
+        if let Some((expected_param, _)) = expected_fn {
+            self.typer()
+                .same(expected_param, &param_ty)
+                .map_err(|err| self.type_error(body.span, err))?;
         }
 
         let body_expected = self
@@ -331,8 +385,11 @@ impl Generator {
         self.functions.last_mut().expect("lambda builder").result = Some(body_ty.clone());
         self.terminate(Terminator::Return);
         self.scopes.pop();
+        self.scopes.pop();
+        // Generating a delayed body cannot initialize its enclosing bindings.
+        self.scopes = enclosing_scopes;
         self.finish_lambda()?;
-        Ok(self.typer().type_lambda(&param_tys, &body_ty))
+        Ok(self.typer().type_lambda(&param_ty, &body_ty))
     }
 
     fn gen_if(
@@ -356,13 +413,17 @@ impl Generator {
             els: else_block,
         });
 
+        let before = self.scopes.clone();
         self.switch(then_block);
         let then_ty = self.gen_term(then, expected)?;
         self.terminate(Terminator::Break { target: join_block });
+        let after_then = self.scopes.clone();
 
+        self.scopes = before;
         self.switch(else_block);
         let else_ty = self.gen_term(els, expected)?;
         self.terminate(Terminator::Break { target: join_block });
+        self.scopes.intersect_initialization(&after_then);
 
         self.switch(join_block);
         self.typer()
@@ -438,24 +499,30 @@ impl Generator {
                     });
                 }
             }
-            let mut names = Vec::with_capacity(expected_fields.len());
-            let mut tys = Vec::with_capacity(expected_fields.len());
-            for field in &expected_fields {
-                let (_, value) = source[&field.name];
-                tys.push(self.gen_term(value, Some(&field.ty))?);
-                names.push(field.name.clone());
+            // Evaluate in source order; layout order must not reorder effects.
+            let mut values = HashMap::with_capacity(fields.len());
+            for (name, value) in fields {
+                let field = expected_fields
+                    .iter()
+                    .find(|field| field.name == name.val)
+                    .unwrap();
+                let local = self.alloc_local(field.ty.clone(), None);
+                self.emit(Instr::LocalAddress { local });
+                self.gen_term(value, Some(&field.ty))?;
+                self.emit(Instr::Store);
+                self.emit(Instr::Discard);
+                values.insert(name.val.clone(), local);
             }
-            let _ = self
-                .typer()
-                .type_record(
-                    &names
-                        .iter()
-                        .cloned()
-                        .zip(tys.iter().cloned())
-                        .map(|(name, ty)| RecordField { name, ty })
-                        .collect::<Vec<_>>(),
-                )
-                .map_err(|err| self.type_error(span, err))?;
+            let names = expected_fields
+                .iter()
+                .map(|field| {
+                    self.emit(Instr::LocalAddress {
+                        local: values[&field.name],
+                    });
+                    self.emit(Instr::Load);
+                    field.name.clone()
+                })
+                .collect();
             self.emit(Instr::MakeRecord { fields: names });
             return Ok(Ty::Record {
                 fields: expected_fields,
@@ -495,20 +562,9 @@ impl Generator {
         Ok(self.typer().type_block(&ty))
     }
 
-    fn gen_call(
-        &mut self,
-        span: Span,
-        func: &Term,
-        args: &[Term],
-        expected: Option<&Ty>,
-    ) -> Result<Ty, GenerateError> {
+    fn gen_call(&mut self, span: Span, func: &Term, arg: &Term) -> Result<Ty, GenerateError> {
         if let TermKind::Type { ty } = &func.val {
-            return self.gen_ascription(span, ty, args, expected);
-        }
-        if let TermKind::Var { name } = &func.val {
-            if is_operator(&name.val) && self.scopes.lookup_value(&name.val).is_none() {
-                return self.gen_builtin(span, &name.val, args);
-            }
+            return self.gen_ascription(span, ty, arg);
         }
 
         let callee_ty = self.gen_term(func, None)?;
@@ -517,7 +573,7 @@ impl Generator {
             .as_function(&callee_ty)
             .map_err(|err| self.type_error(func.span, err))?;
         self.emit_value_conv(&converted.steps);
-        let Ty::Function { params, result: _ } = &converted.ty else {
+        let Ty::Function { param, .. } = &converted.ty else {
             return Err(self.type_error(
                 func.span,
                 TypeError {
@@ -525,64 +581,62 @@ impl Generator {
                 },
             ));
         };
-        let params = params.clone();
-        if params.len() != args.len() {
-            return Err(self.type_error(
-                span,
-                TypeError {
-                    kind: TypeErrorKind::ArgumentCount {
-                        expected: params.len(),
-                        found: args.len(),
-                    },
-                },
-            ));
-        }
-        let mut arg_tys = Vec::with_capacity(args.len());
-        for (arg, expected) in args.iter().zip(&params) {
-            arg_tys.push(self.gen_term(arg, Some(expected))?);
-        }
+        let arg_ty = self.gen_term(arg, Some(param))?;
         let result = self
             .typer()
-            .type_call(&callee_ty, &arg_tys)
+            .type_call(&callee_ty, &arg_ty)
             .map_err(|err| self.type_error(span, err))?;
-        self.emit(Instr::Call { args: args.len() });
+        self.emit(Instr::Call);
         Ok(result)
     }
 
-    fn gen_ascription(
+    fn gen_ascription(&mut self, span: Span, ty: &Type, arg: &Term) -> Result<Ty, GenerateError> {
+        let ascribed = self.eval_type(ty)?;
+        let context = self
+            .typer()
+            .body(&ascribed)
+            .map_err(|err| self.type_error(span, err))?;
+        let found = self.gen_term_inner(arg, Some(&context))?;
+        self.apply_ascription(span, &ascribed, found)
+    }
+
+    fn gen_builtin(
         &mut self,
         span: Span,
-        ty: &Type,
+        name: &str,
         args: &[Term],
         expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
-        if args.len() != 1 {
-            return Err(self.type_error(
-                span,
-                TypeError {
-                    kind: TypeErrorKind::ArgumentCount {
-                        expected: 1,
-                        found: args.len(),
-                    },
-                },
-            ));
-        }
-        let ascribed = self.eval_type(ty)?;
-        if let Some(expected) = expected {
-            self.typer()
-                .type_ascription(expected, &ascribed)
-                .map_err(|err| self.type_error(span, err))?;
-        }
-        self.gen_term(&args[0], Some(&ascribed))
-    }
-
-    fn gen_builtin(&mut self, span: Span, name: &str, args: &[Term]) -> Result<Ty, GenerateError> {
         if name == "&&" || name == "||" {
             return self.gen_short_circuit(span, name, args);
         }
+        if matches!(name, "+" | "-")
+            && let [
+                Term {
+                    val: TermKind::Num { value },
+                    ..
+                },
+            ] = args
+        {
+            let text = if name == "-" {
+                format!("-{value}")
+            } else {
+                value.to_string()
+            };
+            let value = self.evaluate_number(span, &text, expected)?;
+            let ty = immediate_ty(&value);
+            self.emit(Instr::Push { value });
+            return Ok(ty);
+        }
+        let numeric_context = expected.filter(|ty| is_numeric(ty)).filter(|_| {
+            matches!(
+                name,
+                "+" | "-" | "*" | "/" | "%" | "~" | "<<" | ">>" | "&" | "|" | "^"
+            )
+        });
         let mut arg_tys = Vec::with_capacity(args.len());
         for arg in args {
-            arg_tys.push(self.gen_term(arg, None)?);
+            arg_tys.push(self.gen_term(arg, numeric_context)?);
         }
         if name == "!" && arg_tys.len() == 1 {
             let converted = self
@@ -590,6 +644,7 @@ impl Generator {
                 .as_bool(&arg_tys[0])
                 .map_err(|err| self.type_error(span, err))?;
             self.emit_value_conv(&converted.steps);
+            arg_tys[0] = converted.ty;
         }
         let call = self
             .typer()
@@ -633,6 +688,7 @@ impl Generator {
             then: then_block,
             els: else_block,
         });
+        let before_right = self.scopes.clone();
         if name == "&&" {
             self.switch(then_block);
             self.gen_bool(&args[1])?;
@@ -653,6 +709,7 @@ impl Generator {
             self.terminate(Terminator::Break { target: join_block });
         }
         self.switch(join_block);
+        self.scopes.intersect_initialization(&before_right);
         Ok(Ty::Bool)
     }
 
@@ -687,6 +744,12 @@ impl Generator {
             .type_assign(&pointee, &value_ty)
             .map_err(|err| self.type_error(place.span, err))?;
         self.emit(Instr::Store);
+        if let TermKind::Var { name } = &place.val {
+            self.scopes
+                .lookup_value_mut(&name.val)
+                .expect("assigned binding")
+                .initialization = Initialization::Initialized;
+        }
         Ok(ty)
     }
 
@@ -696,88 +759,57 @@ impl Generator {
         base: &Term,
         name: &Ident,
     ) -> Result<Ty, GenerateError> {
-        match self.try_gen_place(base) {
-            Ok(place_ty) => {
-                let converted = self
-                    .typer()
-                    .as_pointer(&place_ty)
-                    .map_err(|err| self.type_error(span, err))?;
-                self.emit_value_conv(&converted.steps);
-                let Ty::Pointer { pointee } = converted.ty else {
-                    return Err(self.type_error(
-                        span,
-                        TypeError {
-                            kind: TypeErrorKind::ExpectedPointer { found: place_ty },
-                        },
-                    ));
-                };
-                let access = self
-                    .typer()
-                    .type_field(&pointee, &name.val)
-                    .map_err(|err| self.type_error(span, err))?;
-                self.emit_place_conv(&access.steps);
-                self.emit(Instr::AccessStatic {
-                    index: access.index,
-                });
+        self.check_place_initialized(base)?;
+        let base = self.gen_operand(base)?;
+        match self.gen_field_operand(span, base, name)? {
+            Operand::Place(ty) => {
                 self.emit(Instr::Load);
-                Ok(access.ty)
+                Ok(ty)
             }
-            Err(err) if matches!(err.kind, GenerateErrorKind::NotAPlace) => {
-                let base_ty = self.gen_term(base, None)?;
-                let access = self
-                    .typer()
-                    .type_field(&base_ty, &name.val)
-                    .map_err(|err| self.type_error(span, err))?;
-                self.emit_value_conv(&access.steps);
-                self.emit(Instr::AccessStatic {
-                    index: access.index,
-                });
-                Ok(access.ty)
-            }
-            Err(err) => Err(err),
+            Operand::Value(ty) => Ok(ty),
         }
     }
 
     fn gen_place(&mut self, term: &Term) -> Result<Ty, GenerateError> {
-        self.try_gen_place(term)
+        match self.gen_operand(term)? {
+            Operand::Place(ty) => Ok(Ty::Pointer {
+                pointee: Box::new(ty),
+            }),
+            Operand::Value(_) => Err(GenerateError {
+                span: term.span,
+                kind: GenerateErrorKind::NotAPlace,
+            }),
+        }
     }
 
-    fn try_gen_place(&mut self, term: &Term) -> Result<Ty, GenerateError> {
+    fn check_place_initialized(&self, term: &Term) -> Result<(), GenerateError> {
         match &term.val {
             TermKind::Var { name } => {
-                let binding = self.resolve_value(name)?;
+                self.resolve_value(name)?;
+            }
+            TermKind::Field { base, .. } => self.check_place_initialized(base)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // Lower once, preserving an address when available. Speculatively generating
+    // a place and then retrying as a value can evaluate side effects twice.
+    fn gen_operand(&mut self, term: &Term) -> Result<Operand, GenerateError> {
+        match &term.val {
+            TermKind::Var { name } => {
+                let binding = self.resolve_binding(name, false)?;
+                if matches!(binding.kind, ValueBindingKind::CurrentClosure) {
+                    return self.gen_var(name).map(Operand::Value);
+                }
                 let ty = self.binding_ty(name, &binding)?;
                 self.emit_binding_address(&binding);
-                Ok(Ty::Pointer {
-                    pointee: Box::new(ty),
-                })
+                Ok(Operand::Place(ty))
             }
             TermKind::Field { base, name } => {
-                let place_ty = self.gen_place(base)?;
-                let converted = self
-                    .typer()
-                    .as_pointer(&place_ty)
-                    .map_err(|err| self.type_error(term.span, err))?;
-                self.emit_value_conv(&converted.steps);
-                let Ty::Pointer { pointee } = converted.ty else {
-                    return Err(self.type_error(
-                        term.span,
-                        TypeError {
-                            kind: TypeErrorKind::ExpectedPointer { found: place_ty },
-                        },
-                    ));
-                };
-                let access = self
-                    .typer()
-                    .type_field(&pointee, &name.val)
-                    .map_err(|err| self.type_error(term.span, err))?;
-                self.emit_place_conv(&access.steps);
-                self.emit(Instr::AccessStatic {
-                    index: access.index,
-                });
-                Ok(Ty::Pointer {
-                    pointee: Box::new(access.ty),
-                })
+                self.check_place_initialized(base)?;
+                let base = self.gen_operand(base)?;
+                self.gen_field_operand(term.span, base, name)
             }
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
@@ -786,13 +818,51 @@ impl Generator {
                     .as_pointer(&pointer_ty)
                     .map_err(|err| self.type_error(term.span, err))?;
                 self.emit_value_conv(&converted.steps);
-                Ok(converted.ty)
+                let Ty::Pointer { pointee } = converted.ty else {
+                    unreachable!("as_pointer returns a pointer")
+                };
+                Ok(Operand::Place(*pointee))
             }
-            _ => Err(GenerateError {
-                span: term.span,
-                kind: GenerateErrorKind::NotAPlace,
-            }),
+            _ => self.gen_term(term, None).map(Operand::Value),
         }
+    }
+
+    fn gen_field_operand(
+        &mut self,
+        span: Span,
+        base: Operand,
+        name: &Ident,
+    ) -> Result<Operand, GenerateError> {
+        let (base_ty, mut is_place) = match base {
+            Operand::Value(ty) => (ty, false),
+            Operand::Place(ty) => (ty, true),
+        };
+        let access = self
+            .typer()
+            .type_field(&base_ty, &name.val)
+            .map_err(|err| self.type_error(span, err))?;
+        if is_place {
+            self.emit_place_conv(&access.steps);
+        } else if let Some(last_deref) = access
+            .steps
+            .iter()
+            .rposition(|step| matches!(step, Conv::Deref))
+        {
+            // A pointer-valued expression still designates writable fields:
+            // preserve its last address instead of loading the record value.
+            self.emit_value_conv(&access.steps[..last_deref]);
+            is_place = true;
+        } else {
+            self.emit_value_conv(&access.steps);
+        }
+        self.emit(Instr::AccessStatic {
+            index: access.index,
+        });
+        Ok(if is_place {
+            Operand::Place(access.ty)
+        } else {
+            Operand::Value(access.ty)
+        })
     }
 
     fn evaluate_number(
@@ -830,6 +900,7 @@ impl Generator {
 
     fn eval_type(&mut self, ty: &Type) -> Result<Ty, GenerateError> {
         match &ty.val {
+            TypeKind::Unit => Ok(Ty::Unit),
             TypeKind::Atom { name } => {
                 if let Some(builtin) = builtin_ty(&name.val) {
                     return Ok(builtin);
@@ -855,7 +926,7 @@ impl Generator {
                 }
             }
             TypeKind::Func { from, to } => Ok(Ty::Function {
-                params: vec![self.eval_type(from)?],
+                param: Box::new(self.eval_type(from)?),
                 result: Box::new(self.eval_type(to)?),
             }),
             TypeKind::Record { fields } => {
@@ -893,18 +964,15 @@ impl Generator {
         }
         let result = self.peek_result_ty(body)?;
         Some(Ty::Function {
-            params: param_tys,
+            param: Box::new(Ty::parameter(&param_tys)),
             result: Box::new(result),
         })
     }
 
     fn peek_result_ty(&mut self, term: &Term) -> Option<Ty> {
-        let TermKind::Call { func, args } = &term.val else {
+        let TermKind::Call { func, .. } = &term.val else {
             return None;
         };
-        if args.len() != 1 {
-            return None;
-        }
         let TermKind::Type { ty } = &func.val else {
             return None;
         };
@@ -972,9 +1040,13 @@ impl Generator {
     fn emit_capture_value(&mut self, remote: Remote) -> Result<(), GenerateError> {
         let current = self.current_depth();
         if remote.owner_depth == current {
-            self.emit(Instr::LocalAddress {
-                local: remote.local,
-            });
+            match remote.value {
+                RemoteValue::Local(local) => self.emit(Instr::LocalAddress { local }),
+                RemoteValue::CurrentClosure => {
+                    self.emit(Instr::CurrentClosure);
+                    return Ok(());
+                }
+            }
         } else {
             let nonlocal = self.functions[current]
                 .remote_to_nonlocal
@@ -995,16 +1067,24 @@ impl Generator {
             }
             ValueBindingKind::Local(local) => {
                 let ty = binding.ty.clone().expect("captured bindings are typed");
-                let nonlocal = self.capture(binding.depth, local, &ty);
+                let nonlocal = self.capture(
+                    Remote {
+                        owner_depth: binding.depth,
+                        value: RemoteValue::Local(local),
+                    },
+                    &ty,
+                );
                 self.emit(Instr::NonLocalAddress { nonlocal });
+            }
+            ValueBindingKind::CurrentClosure => {
+                unreachable!("recursive names are values, not places")
             }
         }
     }
 
-    fn capture(&mut self, owner_depth: usize, local: LocalId, ty: &Ty) -> NonLocalId {
+    fn capture(&mut self, remote: Remote, ty: &Ty) -> NonLocalId {
         let current = self.current_depth();
-        let remote = Remote { owner_depth, local };
-        for depth in owner_depth + 1..=current {
+        for depth in remote.owner_depth + 1..=current {
             if self.functions[depth]
                 .remote_to_nonlocal
                 .contains_key(&remote)
@@ -1012,9 +1092,11 @@ impl Generator {
                 continue;
             }
             let nonlocal = NonLocalId::from_index(self.functions[depth].nonlocals.len());
-            let name = self.functions[owner_depth].locals[local.index()]
-                .name
-                .clone();
+            let owner = &self.functions[remote.owner_depth];
+            let name = match remote.value {
+                RemoteValue::Local(local) => owner.locals[local.index()].name.clone(),
+                RemoteValue::CurrentClosure => owner.name.clone(),
+            };
             self.functions[depth].nonlocals.push(NonLocal {
                 name,
                 ty: ty.clone(),
@@ -1028,6 +1110,10 @@ impl Generator {
     }
 
     fn resolve_value(&self, name: &Ident) -> Result<ValueBinding, GenerateError> {
+        self.resolve_binding(name, true)
+    }
+
+    fn resolve_binding(&self, name: &Ident, read: bool) -> Result<ValueBinding, GenerateError> {
         let binding = self
             .scopes
             .lookup_value(&name.val)
@@ -1038,10 +1124,24 @@ impl Generator {
                     name: name.val.clone(),
                 },
             })?;
-        if binding.initializing && binding.depth == self.current_depth() {
+        if binding.initialization == Initialization::Initializing
+            && binding.depth == self.current_depth()
+        {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::EagerRecursion {
+                    name: name.val.clone(),
+                },
+            });
+        }
+        let captures_local = binding.depth != self.current_depth()
+            && matches!(binding.kind, ValueBindingKind::Local(_));
+        if binding.initialization != Initialization::Initialized
+            && (captures_local || read && binding.depth == self.current_depth())
+        {
+            return Err(GenerateError {
+                span: name.span,
+                kind: GenerateErrorKind::UninitializedValue {
                     name: name.val.clone(),
                 },
             });
@@ -1082,7 +1182,7 @@ impl Generator {
         let (kind, depth) = {
             let binding = self.scopes.lookup_value_mut(name).expect("defined binding");
             binding.ty = Some(ty.clone());
-            binding.initializing = false;
+            binding.initialization = Initialization::Initialized;
             (binding.kind, binding.depth)
         };
         match kind {
@@ -1091,6 +1191,9 @@ impl Generator {
             }
             ValueBindingKind::Local(local) => {
                 self.functions[depth].locals[local.index()].ty = ty;
+            }
+            ValueBindingKind::CurrentClosure => {
+                unreachable!("cannot define a recursive-name binding")
             }
         }
         Ok(())
@@ -1232,9 +1335,12 @@ impl FunctionBuilder {
         Self {
             name,
             nonlocals: Vec::new(),
-            params: Vec::new(),
+            param: LocalId::from_index(0),
             result: None,
-            locals: Vec::new(),
+            locals: vec![Local {
+                name: None,
+                ty: Ty::Unit,
+            }],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
                 name: Some("entry".into()),
@@ -1285,7 +1391,7 @@ impl FunctionBuilder {
         Function {
             name: self.name,
             nonlocals: self.nonlocals,
-            params: self.params,
+            param: self.param,
             result: self.result.unwrap_or(Ty::Unit),
             locals: self.locals,
             entry: self.entry,
@@ -1308,31 +1414,6 @@ fn builtin_ty(name: &str) -> Option<Ty> {
         "float64" => Ty::Float64,
         _ => return None,
     })
-}
-
-fn is_operator(name: &str) -> bool {
-    matches!(
-        name,
-        "+" | "-"
-            | "~"
-            | "!"
-            | "*"
-            | "/"
-            | "%"
-            | "<<"
-            | ">>"
-            | "&"
-            | "|"
-            | "^"
-            | "=="
-            | "!="
-            | "<"
-            | "<="
-            | ">"
-            | ">="
-            | "&&"
-            | "||"
-    )
 }
 
 fn is_numeric(ty: &Ty) -> bool {
@@ -1435,12 +1516,18 @@ fn parse_signed<T: TryFrom<i128>>(text: &str) -> Result<T, String>
 where
     T::Error: fmt::Display,
 {
-    let value = if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+    let (negative, magnitude) = text.strip_prefix('-').map_or((false, text), |s| (true, s));
+    let value = if let Some(hex) = magnitude
+        .strip_prefix("0x")
+        .or_else(|| magnitude.strip_prefix("0X"))
+    {
         i128::from_str_radix(hex, 16).map_err(|err| format!("invalid hex literal: {err}"))?
     } else {
-        text.parse()
+        magnitude
+            .parse::<i128>()
             .map_err(|err| format!("invalid integer literal: {err}"))?
     };
+    let value = if negative { -value } else { value };
     T::try_from(value).map_err(|err| format!("integer literal out of range: {err}"))
 }
 
@@ -1458,6 +1545,7 @@ where
 }
 
 fn is_hex_literal(value: &str) -> bool {
+    let value = value.strip_prefix('-').unwrap_or(value);
     value.len() >= 2
         && value.as_bytes()[0] == b'0'
         && (value.as_bytes()[1] == b'x' || value.as_bytes()[1] == b'X')
