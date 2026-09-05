@@ -11,9 +11,19 @@ Initialize the parser submodule with
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
 
 Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW installation
-or library search path is needed. Outside Nix, install CMake and a C compiler. On macOS,
-Xcode Command Line Tools and `brew install cmake` supply these. Linux additionally needs
-pkg-config and the X11, Wayland, and xkbcommon development packages, including `wayland-scanner`.
+or library search path is needed. Outside Nix, install CMake and a C compiler. Linux additionally
+needs pkg-config and the X11, Wayland, and xkbcommon development packages, including `wayland-scanner`.
+
+On macOS without Nix, install [Homebrew](https://brew.sh) and Apple's Command Line Tools
+(`xcode-select --install`), then run:
+
+```sh
+./scripts/setup-macos.sh
+```
+
+The script installs Rustup, CMake, `glslc`, MoltenVK, the Vulkan loader, and Vulkan tools.
+Run the environment exports it prints in your current shell before using Cargo; it does not
+modify your shell profile. Cargo uses `rust-toolchain.toml` to install the project's Rust toolchain.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
 After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
