@@ -7,17 +7,10 @@ use crate::util::define_id;
 use super::Ty;
 
 define_id! {
-    /// Local allocation index, relative to the containing function.
     pub struct LocalId(usize);
-
-    pub struct GlobalId(usize);
-
-    /// Closure-display index, relative to the containing function.
     pub struct NonLocalId(usize);
-
+    pub struct GlobalId(usize);
     pub struct FunctionId(usize);
-
-    /// Block index, relative to the containing function.
     pub struct BlockId(usize);
 }
 

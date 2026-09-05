@@ -37,7 +37,6 @@ pub struct RecordField {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
-    /// The type of compile-time type values.
     Type,
     Unit,
     Bool,
@@ -51,27 +50,12 @@ pub enum Ty {
     UInt64,
     Float32,
     Float64,
-    Defined {
-        definition: TypeId,
-    },
-    Pointer {
-        pointee: Box<Ty>,
-    },
-    /// A pointer-length pair; elements are not stored inline.
-    Span {
-        element: Box<Ty>,
-    },
-    Array {
-        element: Box<Ty>,
-        length: usize,
-    },
-    Record {
-        fields: Vec<RecordField>,
-    },
-    Function {
-        param: Box<Ty>,
-        result: Box<Ty>,
-    },
+    Defined { definition: TypeId },
+    Pointer { pointee: Box<Ty> },
+    Span { element: Box<Ty> },
+    Array { element: Box<Ty>, length: usize },
+    Record { fields: Vec<RecordField> },
+    Function { param: Box<Ty>, result: Box<Ty> },
 }
 
 impl Ty {
@@ -79,7 +63,6 @@ impl Ty {
         self.is_integer() || matches!(self, Self::Float32 | Self::Float64)
     }
 
-    /// Parameter syntax is sugar for one unit, scalar, or tuple argument.
     pub fn parameter(types: &[Ty]) -> Self {
         match types {
             [] => Self::Unit,
