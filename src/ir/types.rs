@@ -5,33 +5,34 @@ use std::sync::Arc;
 use crate::util::define_id;
 
 define_id! {
-    /// A nominal type definition in the module type table.
     pub struct TypeId(usize);
 }
 
-/// A nominal type and the representation computed from its defining RHS.
-///
-/// IR generation reserves the [`TypeId`] and installs its source name before
-/// evaluating `body`, which permits productive recursive definitions. The
-/// completed module is still required to have a finite representation: every
-/// representation cycle must cross an indirection such as [`Ty::Pointer`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDef {
     pub name: Arc<str>,
-    pub body: Ty,
+    pub(super) body: Option<Ty>,
 }
 
-/// A named field in a structural record type.
+impl TypeDef {
+    pub fn new(name: impl Into<Arc<str>>, body: Ty) -> Self {
+        Self {
+            name: name.into(),
+            body: Some(body),
+        }
+    }
+
+    pub fn body(&self) -> Option<&Ty> {
+        self.body.as_ref()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordField {
     pub name: Arc<str>,
     pub ty: Ty,
 }
 
-/// A target-independent value type.
-///
-/// Additional ownership, resource, and nominal forms can be added without
-/// changing the stack-machine control-flow model.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
     /// The type of compile-time type values.
@@ -48,17 +49,13 @@ pub enum Ty {
     UInt64,
     Float32,
     Float64,
-    /// A reference to a module-level nominal type definition.
     Defined {
         definition: TypeId,
     },
     Pointer {
         pointee: Box<Ty>,
     },
-    /// A pointer and length to a runtime-sized sequence of `element`.
-    ///
-    /// Like [`Ty::Pointer`], a span has a fixed-size representation and does
-    /// not contain its elements inline.
+    /// A pointer-length pair; elements are not stored inline.
     Span {
         element: Box<Ty>,
     },

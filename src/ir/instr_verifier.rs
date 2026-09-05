@@ -9,7 +9,6 @@ use super::{
     Value,
 };
 
-/// The height component of an instruction's stack effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StackEffect {
     pub pops: usize,
@@ -59,14 +58,12 @@ impl Terminator {
     }
 }
 
-/// The location at which IR verification failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyError {
     pub location: VerifyLocation,
     pub kind: VerifyErrorKind,
 }
 
-/// The IR entity containing a verification error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyLocation {
     TypeDefinition {
@@ -89,10 +86,10 @@ pub enum VerifyLocation {
     },
 }
 
-/// A violation of the typed stack or control-flow invariants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
     InvalidTypeDefinition { definition: usize },
+    IncompleteTypeDefinition { definition: TypeId },
     RecursiveTypeWithoutIndirection { definition: TypeId },
     InvalidLocal { local: usize },
     InvalidGlobal { global: usize },
@@ -151,10 +148,7 @@ impl fmt::Display for VerifyError {
 
 impl std::error::Error for VerifyError {}
 
-/// Verify every reachable basic block and every control-flow edge in a module.
-///
-/// The inferred entry stack for each basic block is kept only for the duration of
-/// verification. Multiple incoming edges must infer exactly the same types.
+/// Check block and edge types; incoming edges must agree on the entry stack.
 pub fn verify(module: &Module) -> Result<(), VerifyError> {
     verify_module_types(module)?;
 
@@ -516,22 +510,19 @@ fn project_dynamic(module: &Module, source: Ty, location: Location) -> Result<Ty
 }
 
 fn verify_module_types(module: &Module) -> Result<(), VerifyError> {
-    for (index, definition) in module.types.iter().enumerate() {
+    for index in 0..module.types.len() {
         let definition_id = TypeId::from_index(index);
         let location = Location::type_definition(definition_id);
-        validate_ty(module, &definition.body, location)?;
+        let body = definition_body(module, definition_id, location)?;
+        validate_ty(module, body, location)?;
 
         let mut active = vec![definition_id];
-        validate_finite_representation(module, &definition.body, &mut active, location)?;
+        validate_finite_representation(module, body, &mut active, location)?;
     }
     Ok(())
 }
 
-/// Check that every nominal reference points into this module's type table.
-///
-/// This deliberately does not expand definitions: the finite Rust `Ty` tree is
-/// the result of evaluating a source type expression in a context where all of
-/// its enclosing nominal identities have already been reserved.
+/// Check nominal references without expanding recursive definitions.
 fn validate_ty(module: &Module, ty: &Ty, location: Location) -> Result<(), VerifyError> {
     match ty {
         Ty::Defined { definition } => {
@@ -570,11 +561,7 @@ fn validate_ty(module: &Module, ty: &Ty, location: Location) -> Result<(), Verif
     Ok(())
 }
 
-/// Reject nominal cycles whose representation contains itself inline.
-///
-/// Pointer and function values have a fixed-size representation independent of
-/// their referents/signatures, so they terminate the layout walk. Records and
-/// arrays contain their children inline and therefore do not.
+/// Records and arrays store children inline; pointers, spans, and closures break layout cycles.
 fn validate_finite_representation(
     module: &Module,
     ty: &Ty,
@@ -590,15 +577,7 @@ fn validate_finite_representation(
                     }),
                 );
             }
-            let body = &module
-                .types
-                .get(definition.index())
-                .ok_or_else(|| {
-                    location.error(VerifyErrorKind::InvalidTypeDefinition {
-                        definition: definition.index(),
-                    })
-                })?
-                .body;
+            let body = definition_body(module, *definition, location)?;
             active.push(*definition);
             validate_finite_representation(module, body, active, location)?;
             active.pop();
@@ -640,16 +619,7 @@ fn resolve_shape(module: &Module, mut ty: Ty, location: Location) -> Result<Ty, 
             );
         }
         visited.push(definition);
-        ty = module
-            .types
-            .get(definition.index())
-            .ok_or_else(|| {
-                location.error(VerifyErrorKind::InvalidTypeDefinition {
-                    definition: definition.index(),
-                })
-            })?
-            .body
-            .clone();
+        ty = definition_body(module, definition, location)?.clone();
     }
     Ok(ty)
 }
@@ -684,7 +654,7 @@ fn definition_body(
     definition: TypeId,
     location: Location,
 ) -> Result<&Ty, VerifyError> {
-    Ok(&module
+    module
         .types
         .get(definition.index())
         .ok_or_else(|| {
@@ -692,7 +662,8 @@ fn definition_body(
                 definition: definition.index(),
             })
         })?
-        .body)
+        .body()
+        .ok_or_else(|| location.error(VerifyErrorKind::IncompleteTypeDefinition { definition }))
 }
 
 fn ascribe_one_layer(
@@ -849,10 +820,7 @@ mod tests {
         };
 
         verify(&Module {
-            types: vec![TypeDef {
-                name: "Meters".into(),
-                body: Ty::Int32,
-            }],
+            types: vec![TypeDef::new("Meters", Ty::Int32)],
             globals: vec![],
             functions: vec![function],
         })
@@ -888,10 +856,7 @@ mod tests {
         };
 
         verify(&Module {
-            types: vec![TypeDef {
-                name: "Meters".into(),
-                body: Ty::Int32,
-            }],
+            types: vec![TypeDef::new("Meters", Ty::Int32)],
             globals: vec![],
             functions: vec![function],
         })

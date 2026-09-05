@@ -1,13 +1,9 @@
-//! Lexical scopes used during IR generation.
-//!
-//! Value and type names stay in separate namespaces, but they share one
-//! [`Scope`] frame so push/pop and lookup stay in lockstep.
+//! Lexical scopes with separate value and type namespaces.
 
 use std::{collections::HashMap, sync::Arc};
 
 use super::{GlobalId, LocalId, Ty, TypeId};
 
-/// A value name resolved in the current environment.
 #[derive(Clone)]
 pub struct ValueBinding {
     pub kind: ValueBindingKind,
@@ -31,7 +27,6 @@ pub enum ValueBindingKind {
     CurrentClosure,
 }
 
-/// One lexical frame with the language's two namespaces.
 #[derive(Clone, Default)]
 pub struct Scope {
     values: HashMap<Arc<str>, ValueBinding>,
@@ -72,7 +67,6 @@ impl Scope {
     }
 }
 
-/// Nested lexical environments. Lookup walks from the innermost frame.
 #[derive(Clone)]
 pub struct Scopes {
     frames: Vec<Scope>,

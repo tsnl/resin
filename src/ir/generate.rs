@@ -1,7 +1,4 @@
 //! AST → typed stack IR.
-//!
-//! Scope resolution, typing, compile-time evaluation, and instruction emission
-//! are interleaved here. [`super::typer`] stays a pure bottom-up rule set.
 
 use std::{collections::HashMap, fmt, sync::Arc};
 
@@ -10,18 +7,14 @@ use crate::ast::{Ident, SourceFile, Span, Stmt, StmtKind, Term, TermKind, Type, 
 use super::scope::{Initialization, Scopes, ValueBinding, ValueBindingKind};
 use super::{
     BasicBlock, BlockId, Conv, Function, FunctionId, Global, GlobalId, Instr, Local, LocalId,
-    Module, NonLocal, NonLocalId, RecordField, Terminator, Ty, TypeDef, TypeError, TypeErrorKind,
-    TypeId, Typer, Value, VerifyError, verify,
+    Module, NonLocal, NonLocalId, RecordField, Terminator, Ty, TypeError, TypeErrorKind, TypeId,
+    TyperContext, Value, VerifyError, verify,
 };
 
 /// Lower a source file to a verified IR module.
-///
-/// `functions[0]` is the module initializer: it stores global initializers and
-/// evaluates top-level expression statements.
+/// `functions[0]` initializes globals and evaluates top-level expressions.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
-    let mut generator = Generator::new();
-    generator.generate_file(file)?;
-    Ok(generator.module)
+    Generator::new().generate_file(file)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +53,7 @@ impl std::error::Error for GenerateError {}
 
 struct Generator {
     module: Module,
+    typer: TyperContext,
     functions: Vec<FunctionBuilder>,
     scopes: Scopes,
 }
@@ -113,12 +107,13 @@ impl Generator {
         });
         Self {
             module,
+            typer: TyperContext::new(),
             functions: vec![FunctionBuilder::new(Some("init".into()))],
             scopes: Scopes::new(),
         }
     }
 
-    fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
+    fn generate_file(mut self, file: &SourceFile) -> Result<Module, GenerateError> {
         for stmt in &file.stmts {
             self.gen_stmt(stmt)?;
         }
@@ -126,10 +121,15 @@ impl Generator {
         self.terminate(Terminator::Return);
         let init = self.functions.pop().expect("module initializer").finish();
         self.module.functions[0] = init;
+        self.module.types = self.typer.into_definitions().map_err(|err| GenerateError {
+            span: Span { start: 0, end: 0 },
+            kind: GenerateErrorKind::Type(err.kind),
+        })?;
         verify(&self.module).map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::InvalidIr(err),
-        })
+        })?;
+        Ok(self.module)
     }
 
     fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), GenerateError> {
@@ -186,15 +186,12 @@ impl Generator {
     }
 
     fn gen_define_type(&mut self, name: &Ident, init: &Type) -> Result<(), GenerateError> {
-        let definition = TypeId::from_index(self.module.types.len());
-        self.module.types.push(TypeDef {
-            name: name.val.clone(),
-            body: Ty::Unit,
-        });
+        let definition = self.typer.reserve_type(name.val.clone());
         self.bind_type(name, definition)?;
         let body = self.eval_type(init)?;
-        self.module.types[definition.index()].body = body;
-        self.check_finite(definition, init.span)
+        self.typer
+            .define_type(definition, body)
+            .map_err(|err| self.type_error(init.span, err))
     }
 
     fn gen_declare(&mut self, name: &Ident, ann: &Type) -> Result<(), GenerateError> {
@@ -223,7 +220,7 @@ impl Generator {
     fn gen_term(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
         let found = self.gen_term_inner(term, expected)?;
         if let Some(expected) = expected {
-            self.typer()
+            self.typer
                 .same(expected, &found)
                 .map_err(|err| self.type_error(term.span, err))?;
         }
@@ -261,12 +258,12 @@ impl Generator {
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
                 let converted = self
-                    .typer()
+                    .typer
                     .as_pointer(&pointer_ty)
                     .map_err(|err| self.type_error(term.span, err))?;
                 self.emit_value_conv(&converted.steps);
                 let ty = self
-                    .typer()
+                    .typer
                     .type_deref(&pointer_ty)
                     .map_err(|err| self.type_error(term.span, err))?;
                 self.emit(Instr::Load);
@@ -373,7 +370,7 @@ impl Generator {
             )?;
         }
         if let Some((expected_param, _)) = expected_fn {
-            self.typer()
+            self.typer
                 .same(expected_param, &param_ty)
                 .map_err(|err| self.type_error(body.span, err))?;
         }
@@ -389,7 +386,7 @@ impl Generator {
         // Generating a delayed body cannot initialize its enclosing bindings.
         self.scopes = enclosing_scopes;
         self.finish_lambda()?;
-        Ok(self.typer().type_lambda(&param_ty, &body_ty))
+        Ok(self.typer.type_lambda(&param_ty, &body_ty))
     }
 
     fn gen_if(
@@ -401,7 +398,7 @@ impl Generator {
     ) -> Result<Ty, GenerateError> {
         let cond_ty = self.gen_term(cond, None)?;
         let converted = self
-            .typer()
+            .typer
             .as_bool(&cond_ty)
             .map_err(|err| self.type_error(cond.span, err))?;
         self.emit_value_conv(&converted.steps);
@@ -426,7 +423,7 @@ impl Generator {
         self.scopes.intersect_initialization(&after_then);
 
         self.switch(join_block);
-        self.typer()
+        self.typer
             .type_if(&Ty::Bool, &then_ty, &else_ty)
             .map_err(|err| self.type_error(cond.span, err))
     }
@@ -443,11 +440,11 @@ impl Generator {
             elem_tys.push(self.gen_term(elem, expected_element.as_ref())?);
         }
         let ty = if let Some(element) = expected_element {
-            self.typer()
+            self.typer
                 .type_array_of(&element, &elem_tys)
                 .map_err(|err| self.type_error(span, err))?
         } else {
-            self.typer()
+            self.typer
                 .type_array(&elem_tys)
                 .map_err(|err| self.type_error(span, err))?
         };
@@ -540,7 +537,7 @@ impl Generator {
             });
         }
         let ty = self
-            .typer()
+            .typer
             .type_record(&typed)
             .map_err(|err| self.type_error(span, err))?;
         self.emit(Instr::MakeRecord { fields: names });
@@ -559,7 +556,7 @@ impl Generator {
         }
         let ty = self.gen_term(tail, expected)?;
         self.scopes.pop();
-        Ok(self.typer().type_block(&ty))
+        Ok(self.typer.type_block(&ty))
     }
 
     fn gen_call(&mut self, span: Span, func: &Term, arg: &Term) -> Result<Ty, GenerateError> {
@@ -569,7 +566,7 @@ impl Generator {
 
         let callee_ty = self.gen_term(func, None)?;
         let converted = self
-            .typer()
+            .typer
             .as_function(&callee_ty)
             .map_err(|err| self.type_error(func.span, err))?;
         self.emit_value_conv(&converted.steps);
@@ -583,7 +580,7 @@ impl Generator {
         };
         let arg_ty = self.gen_term(arg, Some(param))?;
         let result = self
-            .typer()
+            .typer
             .type_call(&callee_ty, &arg_ty)
             .map_err(|err| self.type_error(span, err))?;
         self.emit(Instr::Call);
@@ -593,7 +590,7 @@ impl Generator {
     fn gen_ascription(&mut self, span: Span, ty: &Type, arg: &Term) -> Result<Ty, GenerateError> {
         let ascribed = self.eval_type(ty)?;
         let context = self
-            .typer()
+            .typer
             .body(&ascribed)
             .map_err(|err| self.type_error(span, err))?;
         let found = self.gen_term_inner(arg, Some(&context))?;
@@ -640,14 +637,14 @@ impl Generator {
         }
         if name == "!" && arg_tys.len() == 1 {
             let converted = self
-                .typer()
+                .typer
                 .as_bool(&arg_tys[0])
                 .map_err(|err| self.type_error(span, err))?;
             self.emit_value_conv(&converted.steps);
             arg_tys[0] = converted.ty;
         }
         let call = self
-            .typer()
+            .typer
             .type_builtin_call(name, &arg_tys)
             .map_err(|err| self.type_error(span, err))?;
         self.emit(Instr::CallBuiltin {
@@ -677,7 +674,7 @@ impl Generator {
         }
         let left_ty = self.gen_term(&args[0], None)?;
         let converted = self
-            .typer()
+            .typer
             .as_bool(&left_ty)
             .map_err(|err| self.type_error(span, err))?;
         self.emit_value_conv(&converted.steps);
@@ -716,7 +713,7 @@ impl Generator {
     fn gen_bool(&mut self, term: &Term) -> Result<Ty, GenerateError> {
         let ty = self.gen_term(term, None)?;
         let converted = self
-            .typer()
+            .typer
             .as_bool(&ty)
             .map_err(|err| self.type_error(term.span, err))?;
         self.emit_value_conv(&converted.steps);
@@ -726,7 +723,7 @@ impl Generator {
     fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, GenerateError> {
         let place_ty = self.gen_place(place)?;
         let converted = self
-            .typer()
+            .typer
             .as_pointer(&place_ty)
             .map_err(|err| self.type_error(place.span, err))?;
         self.emit_value_conv(&converted.steps);
@@ -740,7 +737,7 @@ impl Generator {
         };
         let value_ty = self.gen_term(value, Some(&pointee))?;
         let ty = self
-            .typer()
+            .typer
             .type_assign(&pointee, &value_ty)
             .map_err(|err| self.type_error(place.span, err))?;
         self.emit(Instr::Store);
@@ -814,7 +811,7 @@ impl Generator {
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
                 let converted = self
-                    .typer()
+                    .typer
                     .as_pointer(&pointer_ty)
                     .map_err(|err| self.type_error(term.span, err))?;
                 self.emit_value_conv(&converted.steps);
@@ -838,7 +835,7 @@ impl Generator {
             Operand::Place(ty) => (ty, true),
         };
         let access = self
-            .typer()
+            .typer
             .type_field(&base_ty, &name.val)
             .map_err(|err| self.type_error(span, err))?;
         if is_place {
@@ -848,8 +845,7 @@ impl Generator {
             .iter()
             .rposition(|step| matches!(step, Conv::Deref))
         {
-            // A pointer-valued expression still designates writable fields:
-            // preserve its last address instead of loading the record value.
+            // Keep the last address so pointer-valued expressions have writable fields.
             self.emit_value_conv(&access.steps[..last_deref]);
             is_place = true;
         } else {
@@ -888,14 +884,14 @@ impl Generator {
     ) -> Result<Ty, GenerateError> {
         if let Some(expected) = expected {
             let shape = self
-                .typer()
+                .typer
                 .body(expected)
                 .map_err(|err| self.type_error(span, err))?;
             if is_numeric(&shape) {
                 return Ok(shape);
             }
         }
-        Ok(self.typer().type_num(text))
+        Ok(self.typer.type_num(text))
     }
 
     fn eval_type(&mut self, ty: &Type) -> Result<Ty, GenerateError> {
@@ -937,7 +933,7 @@ impl Generator {
                         ty: self.eval_type(field_ty)?,
                     });
                 }
-                self.typer()
+                self.typer
                     .type_record(&typed)
                     .map_err(|err| self.type_error(ty.span, err))
             }
@@ -986,7 +982,7 @@ impl Generator {
         found: Ty,
     ) -> Result<Ty, GenerateError> {
         let steps = self
-            .typer()
+            .typer
             .ascribe(&found, expected)
             .map_err(|err| self.type_error(span, err))?;
         self.emit_value_conv(&steps);
@@ -997,7 +993,12 @@ impl Generator {
         for step in steps {
             match step {
                 Conv::Unwrap { definition } => {
-                    let ty = self.module.types[definition.index()].body.clone();
+                    let ty = self
+                        .typer
+                        .body(&Ty::Defined {
+                            definition: *definition,
+                        })
+                        .expect("validated type definition");
                     self.emit(Instr::Ascribe { ty });
                 }
                 Conv::Wrap { definition } => {
@@ -1208,71 +1209,15 @@ impl Generator {
         })
     }
 
-    fn check_finite(&self, definition: TypeId, span: Span) -> Result<(), GenerateError> {
-        let mut active = vec![definition];
-        self.check_finite_ty(&self.module.types[definition.index()].body, &mut active)
-            .map_err(|kind| GenerateError {
-                span,
-                kind: GenerateErrorKind::Type(kind),
-            })
-    }
-
-    fn check_finite_ty(&self, ty: &Ty, active: &mut Vec<TypeId>) -> Result<(), TypeErrorKind> {
-        match ty {
-            Ty::Defined { definition } => {
-                if active.contains(definition) {
-                    return Err(TypeErrorKind::RecursiveTypeWithoutIndirection {
-                        definition: *definition,
-                    });
-                }
-                let body = &self
-                    .module
-                    .types
-                    .get(definition.index())
-                    .ok_or(TypeErrorKind::InvalidTypeDefinition {
-                        definition: *definition,
-                    })?
-                    .body;
-                active.push(*definition);
-                self.check_finite_ty(body, active)?;
-                active.pop();
-                Ok(())
-            }
-            Ty::Array { element, .. } => self.check_finite_ty(element, active),
-            Ty::Record { fields } => {
-                for field in fields {
-                    self.check_finite_ty(&field.ty, active)?;
-                }
-                Ok(())
-            }
-            Ty::Pointer { .. }
-            | Ty::Span { .. }
-            | Ty::Function { .. }
-            | Ty::Type
-            | Ty::Unit
-            | Ty::Bool
-            | Ty::Int8
-            | Ty::Int16
-            | Ty::Int32
-            | Ty::Int64
-            | Ty::UInt8
-            | Ty::UInt16
-            | Ty::UInt32
-            | Ty::UInt64
-            | Ty::Float32
-            | Ty::Float64 => Ok(()),
-        }
-    }
-
     fn array_element(&self, ty: &Ty) -> Option<Ty> {
-        match self.typer().body(ty).ok()? {
+        match self.typer.body(ty).ok()? {
             Ty::Array { element, .. } => Some(*element),
             _ => None,
         }
     }
 
     fn record_fields(&self, ty: &Ty) -> Option<Vec<RecordField>> {
-        match self.typer().body(ty).ok()? {
+        match self.typer.body(ty).ok()? {
             Ty::Record { fields } => Some(fields),
             _ => None,
         }
@@ -1316,10 +1261,6 @@ impl Generator {
 
     fn current_depth(&self) -> usize {
         self.functions.len() - 1
-    }
-
-    fn typer(&self) -> Typer<'_> {
-        Typer::new(&self.module.types)
     }
 
     fn type_error(&self, span: Span, err: TypeError) -> GenerateError {

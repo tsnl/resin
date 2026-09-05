@@ -51,8 +51,7 @@ typedef enum ResinMemory {
     RESIN_MEMORY_READBACK = 2
 } ResinMemory;
 
-/* `count` is Vulkan physical-device order. `enumerate` writes min(count, available)
-   infos; too-small `count` returns INCOMPLETE. */
+/* Vulkan device order; writes at most count entries, returning INCOMPLETE if truncated. */
 ResinStatus resin_gpu_device_count(uint32_t *count);
 ResinStatus resin_gpu_enumerate_devices(ResinGpuDeviceInfo *infos, uint32_t count);
 
@@ -65,8 +64,7 @@ ResinStatus resin_gpu_create(ResinGpu **out_gpu);
 ResinStatus resin_gpu_create_at(uint32_t index, ResinGpu **out_gpu);
 void resin_gpu_destroy(ResinGpu *gpu);
 
-/* Suballocates a range from a persistently mapped BDA heap.
-   `alignment` applies to the device address; 0 means 16. */
+/* `alignment` applies to the device address; 0 means 16. */
 ResinStatus resin_gpu_malloc(
     ResinGpu *gpu,
     size_t bytes,
@@ -84,7 +82,7 @@ ResinStatus resin_gpu_host_to_device_pointer(
     const void *host_pointer,
     ResinDeviceAddress *out_device_pointer);
 
-/* `spv_bytes` is a SPIR-V module, not a filename; its length must be a multiple of four. */
+/* SPIR-V byte lengths must be multiples of four. */
 ResinStatus resin_gpu_create_compute_pipeline(
     ResinGpu *gpu,
     const void *spv_bytes,

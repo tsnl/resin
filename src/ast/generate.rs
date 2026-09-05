@@ -39,10 +39,6 @@ impl<'a> AstGen<'a> {
         Self { src }
     }
 
-    //
-    // Source file
-    //
-
     pub fn gen_source_file(&self, node: Node) -> Result<SourceFile, AstError> {
         if let Some(error) = first_error_node(node) {
             return Err(self.parse_error(error));
@@ -74,10 +70,6 @@ impl<'a> AstGen<'a> {
             }
         }
     }
-
-    //
-    // Statement
-    //
 
     fn gen_stmt(&self, node: Node) -> Stmt {
         assert_eq!(node.kind(), "statement");
@@ -112,10 +104,6 @@ impl<'a> AstGen<'a> {
         let init = self.gen_type(node.child_by_field_name("init").unwrap());
         Spanned::new(StmtKind::DefineType { name, init }, span)
     }
-
-    //
-    // Term
-    //
 
     fn gen_term(&self, node: Node) -> Term {
         assert_eq!(node.kind(), "term");
@@ -338,10 +326,6 @@ impl<'a> AstGen<'a> {
         )
     }
 
-    //
-    // Type
-    //
-
     fn gen_type(&self, node: Node) -> Type {
         assert_eq!(node.kind(), "type");
         self.gen_infix_type(node.child(0).unwrap())
@@ -443,10 +427,6 @@ impl<'a> AstGen<'a> {
         }
         Spanned::new(TypeKind::Record { fields }, self.span(node))
     }
-
-    //
-    // Helpers
-    //
 
     fn gen_declare(&self, node: Node) -> (Ident, Type) {
         assert_eq!(node.kind(), "declare");

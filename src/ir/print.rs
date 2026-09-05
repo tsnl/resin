@@ -120,7 +120,8 @@ fn sexp_module(module: &Module) -> SExp {
             "type",
             vec![
                 symbol(names.types[index].as_ref()),
-                sexp_ty(&names, &def.body),
+                def.body()
+                    .map_or_else(|| symbol("incomplete"), |body| sexp_ty(&names, body)),
             ],
         ));
     }

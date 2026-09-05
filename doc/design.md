@@ -42,10 +42,15 @@ language contract; other native backends can follow.
 
 ## Compiler architecture
 
-The tree-sitter AST remains an untyped source representation. Lexical scopes stored alongside the
-AST carry resolved value and type definitions. A small `typer` module contains bottom-up rules that
+The tree-sitter AST remains an untyped source representation. The generator's lexical scopes
+resolve value and type names. `TyperContext` owns a `Vec<TypeDef>` and the bottom-up rules that
 accept already-resolved child types and return the enclosing type; it does not walk syntax or emit
-code. Compile-time instantiation uses a deliberately restricted `evaluate()` operation, initially
+code. It reserves nominal identities before recursive RHS evaluation. Bodies start as `None`;
+completion validates the body before setting `Some(body)` through `&mut self`. Redefinition and
+exporting unfinished tables are errors; failed validation remains retryable. The generator reuses
+one context and moves its completed definition table into the IR module without cloning. Standalone clients can
+start with `TyperContext::new()` or take ownership of an existing table with `from_definitions`.
+Compile-time instantiation uses a deliberately restricted `evaluate()` operation, initially
 limited to literals. An IR generator can therefore interleave scope resolution, typing, evaluation,
 and emission without coupling the reusable typing rules to a particular backend. Errors propagate
 immediately and compilation stops after the first useful diagnostic.

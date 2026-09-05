@@ -126,7 +126,7 @@ fn linked_list_type_is_finite_through_its_pointer() {
     let module = compile("List = { value: int, next: Ptr (List) };");
     assert_eq!(module.types.len(), 1);
     assert_eq!(module.types[0].name.as_ref(), "List");
-    let Ty::Record { fields } = &module.types[0].body else {
+    let Ty::Record { fields } = module.types[0].body().unwrap() else {
         panic!("expected a record body");
     };
     assert!(matches!(fields[1].ty, Ty::Pointer { .. }));
@@ -347,8 +347,8 @@ x = 1;
     );
     verify(&module).unwrap();
     assert!(matches!(
-        module.types[0].body,
-        Ty::Span { ref element } if **element == Ty::Int32
+        module.types[0].body().unwrap(),
+        Ty::Span { element } if **element == Ty::Int32
     ));
     assert_eq!(module.globals[0].ty, Ty::Int32);
 }

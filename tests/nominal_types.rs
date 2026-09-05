@@ -2,7 +2,8 @@ use resin::{
     ast::{StmtKind, TypeKind, generate::AstGen, print},
     ir::{
         BasicBlock, BlockId, Function, Instr, Local, LocalId, Module, RecordField, Terminator, Ty,
-        TypeDef, TypeId, Value, VerifyErrorKind, verify,
+        TypeDef, TypeId, TyperContext, Value, VerifyErrorKind, VerifyLocation, format_module,
+        verify,
     },
 };
 use tree_sitter::Parser;
@@ -22,9 +23,9 @@ fn linked_list_type() -> TypeDef {
     let list = Ty::Defined {
         definition: TypeId::from_index(0),
     };
-    TypeDef {
-        name: "List".into(),
-        body: Ty::Record {
+    TypeDef::new(
+        "List",
+        Ty::Record {
             fields: vec![
                 RecordField {
                     name: "value".into(),
@@ -38,7 +39,7 @@ fn linked_list_type() -> TypeDef {
                 },
             ],
         },
-    }
+    )
 }
 
 #[test]
@@ -94,15 +95,15 @@ fn an_inline_recursive_type_is_rejected() {
         definition: TypeId::from_index(0),
     };
     let module = Module {
-        types: vec![TypeDef {
-            name: "Bad".into(),
-            body: Ty::Record {
+        types: vec![TypeDef::new(
+            "Bad",
+            Ty::Record {
                 fields: vec![RecordField {
                     name: "next".into(),
                     ty: recursive,
                 }],
             },
-        }],
+        )],
         globals: vec![],
         functions: vec![],
     };
@@ -112,6 +113,23 @@ fn an_inline_recursive_type_is_rejected() {
         error.kind,
         VerifyErrorKind::RecursiveTypeWithoutIndirection { .. }
     ));
+}
+
+#[test]
+fn incomplete_definitions_are_rejected_by_the_verifier_and_printed_explicitly() {
+    let mut context = TyperContext::new();
+    let definition = context.reserve_type("Pending");
+    let module = Module {
+        types: context.definitions().to_vec(),
+        ..Default::default()
+    };
+    let err = verify(&module).unwrap_err();
+    assert_eq!(
+        err.kind,
+        VerifyErrorKind::IncompleteTypeDefinition { definition }
+    );
+    assert_eq!(err.location, VerifyLocation::TypeDefinition { definition });
+    assert!(format_module(&module).contains("incomplete"));
 }
 
 #[test]
@@ -138,10 +156,7 @@ fn nominal_types_do_not_equal_their_representations() {
         }],
     };
     let module = Module {
-        types: vec![TypeDef {
-            name: "Meters".into(),
-            body: Ty::Int32,
-        }],
+        types: vec![TypeDef::new("Meters", Ty::Int32)],
         globals: vec![],
         functions: vec![function],
     };

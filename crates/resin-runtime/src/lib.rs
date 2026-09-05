@@ -1,13 +1,11 @@
-//! Resin GPU runtime: a small C ABI over headless Vulkan compute and graphics.
+//! Headless Vulkan runtime, exposed through C and unsafe Rust APIs.
 //!
-//! CPU-visible allocations expose a mapped host pointer and a GPU virtual
-//! address. Device code receives one 64-bit root pointer as a push constant.
+//! CPU-visible allocations have mapped host pointers and GPU addresses.
+//! Shaders receive a 64-bit root address as a push constant.
 //!
-//! The Rust resource methods are an unsafe convenience interface with the same
-//! contracts as the C ABI. A GPU must outlive all of its resources. Resources
-//! referenced by a recording must remain live until submission completes or the
-//! recording is cancelled. Operations on a GPU and its children must be externally
-//! synchronized; host borrows must not overlap GPU writes or deallocation.
+//! A GPU must outlive its resources; recorded resources must outlive completion
+//! or cancellation. GPU and child-object operations require external synchronization.
+//! Host borrows must not overlap GPU writes or deallocation.
 
 mod allocator;
 mod gpu;
@@ -120,8 +118,7 @@ pub unsafe extern "C" fn resin_gpu_device_count(count: *mut u32) -> ResinStatus 
     }
 }
 
-/// Writes up to `count` entries. Returns [`ResinStatus::Incomplete`] if more
-/// devices exist than `count`.
+/// Writes up to `count` entries; returns [`ResinStatus::Incomplete`] if truncated.
 ///
 /// # Safety
 /// `infos` must point to `count` elements when `count` is nonzero.

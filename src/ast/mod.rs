@@ -9,18 +9,10 @@ pub mod print;
 
 pub use generate::{AstError, AstErrorKind, AstGen};
 
-//
-// SourceFile
-//
-
 #[derive(Debug, Clone)]
 pub struct SourceFile {
     pub stmts: Vec<Stmt>,
 }
-
-//
-// Type
-//
 
 pub type Type = Spanned<TypeKind>;
 
@@ -32,10 +24,6 @@ pub enum TypeKind {
     Func { from: Box<Type>, to: Box<Type> },
     Record { fields: Vec<(Ident, Type)> },
 }
-
-//
-// Term
-//
 
 pub type Term = Spanned<TermKind>;
 
@@ -93,24 +81,13 @@ pub enum TermKind {
     },
 }
 
-//
-// Statements
-//
-
 pub type Stmt = Spanned<StmtKind>;
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    /// `name = init;`
-    ///
-    /// The name is in scope while `init` is evaluated. An evaluator must reject
-    /// an eager recursive read of the binding, while delayed uses such as a
-    /// recursive function body are valid.
+    /// `name = init;` The name is in scope, but eager recursive reads are invalid.
     Define { name: Ident, init: Term },
-    /// `Name = init;`
-    ///
-    /// Unlike a value declaration, this mints a fresh nominal type whose name
-    /// is in scope while `init` is evaluated.
+    /// `Name = init;` A fresh nominal identity, in scope within its own RHS.
     DefineType { name: Ident, init: Type },
     /// `name: ann;`
     Declare { name: Ident, ann: Type },
@@ -118,15 +95,7 @@ pub enum StmtKind {
     Expr { term: Term },
 }
 
-//
-// Ident
-//
-
 pub type Ident = Spanned<Arc<str>>;
-
-//
-// Spanned<T>
-//
 
 #[derive(Debug, Clone)]
 pub struct Spanned<T> {

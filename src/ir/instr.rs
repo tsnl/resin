@@ -7,13 +7,8 @@ use super::{BlockId, FunctionId, GlobalId, LocalId, NonLocalId, Ty, Value};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: Option<Arc<str>>,
-
-    /// Captured values in closure-display order.
     pub nonlocals: Vec<NonLocal>,
-
-    /// The single argument is installed into this local before entry.
     pub param: LocalId,
-
     pub result: Ty,
     pub locals: Vec<Local>,
     pub entry: BlockId,
@@ -49,62 +44,58 @@ impl Function {
     }
 }
 
-/// A typed stack-machine instruction.
-///
-/// Instructions are deliberately anonymous. Their results are pushed onto the
-/// operand stack and are consumed by later instructions or stored in locals.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
-    /// Push a literal or compile-time-evaluated value.
-    Push { value: Value },
+    Push {
+        value: Value,
+    },
 
     /// Push the currently executing closure, including its captured display.
     /// A local function's recursive name refers to this value, not its uninitialized destination.
     CurrentClosure,
 
-    /// Push the address of a function-local allocation.
-    LocalAddress { local: LocalId },
+    LocalAddress {
+        local: LocalId,
+    },
 
-    /// Push the address of a module-level allocation.
-    GlobalAddress { global: GlobalId },
+    GlobalAddress {
+        global: GlobalId,
+    },
 
-    /// Push the address of an entry in the current closure display.
-    NonLocalAddress { nonlocal: NonLocalId },
+    NonLocalAddress {
+        nonlocal: NonLocalId,
+    },
 
-    /// Select one compile-time-known child from an aggregate value or address.
-    /// The index is interpreted using the selected aggregate's type.
-    AccessStatic { index: usize },
+    /// Project a type-directed child from an aggregate value or address.
+    AccessStatic {
+        index: usize,
+    },
 
-    /// Select an array element using a run-time index.
-    ///
-    /// This consumes the aggregate value or address followed by the index and
-    /// pushes the selected value or address.
+    /// `[aggregate or address, index] -> [element or address]`.
     AccessDynamic,
 
-    /// Load a value through the address on top of the stack.
     Load,
 
-    /// Store a value through an address, preserving the assigned value.
-    ///
-    /// Stack effect: `[address, value] -> [value]`.
+    /// `[address, value] -> [value]`: preserves the assigned value.
     Store,
 
-    /// Reinterpret the top of the stack as `ty`.
-    ///
-    /// Wraps or unwraps one nominal layer: `ty` is a nominal type whose
-    /// defining body is the popped type, or the popped type is nominal and
-    /// `ty` is its defining body. Identity ascriptions are omitted.
-    Ascribe { ty: Ty },
+    /// `ty` must match the top value's type or differ by exactly one nominal layer.
+    Ascribe {
+        ty: Ty,
+    },
 
-    /// Discard the value on top of the stack.
     Discard,
 
     /// Consume one value per field and construct a record in declaration order.
-    MakeRecord { fields: Vec<Arc<str>> },
+    MakeRecord {
+        fields: Vec<Arc<str>>,
+    },
 
-    /// Consume `elements` values and construct an array in their original
-    /// order. The element type is explicit so empty arrays remain typed.
-    MakeArray { elements: usize, element: Ty },
+    /// Consume elements in order; the explicit element type permits empty arrays.
+    MakeArray {
+        elements: usize,
+        element: Ty,
+    },
 
     /// Consume `captures` values and construct a closure.
     MakeClosure {
@@ -115,8 +106,7 @@ pub enum Instr {
     /// Indirectly call the closure preceding one argument value (possibly unit or a tuple).
     Call,
 
-    /// Invoke a privileged polymorphic builtin with its checked signature.
-    /// Backend implementation selection remains deliberately deferred.
+    /// Invoke a privileged builtin with its checked monomorphic signature.
     CallBuiltin {
         name: Arc<str>,
         params: Vec<Ty>,
@@ -124,7 +114,6 @@ pub enum Instr {
     },
 }
 
-/// The control-flow operation ending a basic block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Terminator {
     /// Transfer the current operand stack to another block unchanged.

@@ -1,7 +1,4 @@
 //! Headless Vulkan compute and graphics backend for the Resin C ABI.
-//!
-//! Vulkan 1.3 with shader objects, dynamic rendering, maintenance5/6,
-//! map_memory2, and timeline waits.
 
 mod device;
 

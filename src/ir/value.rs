@@ -1,4 +1,4 @@
-//! Concrete values used by compile-time evaluation and the reference VM.
+//! Concrete IR values.
 
 use std::sync::Arc;
 
@@ -7,32 +7,20 @@ use crate::util::define_id;
 use super::Ty;
 
 define_id! {
-    /// A local allocation owned by one function.
-    ///
-    /// `LocalId`s are interpreted in the context of their containing function.
+    /// Local allocation index, relative to the containing function.
     pub struct LocalId(usize);
 
-    /// A module-level allocation.
     pub struct GlobalId(usize);
 
-    /// An entry in one function's closure display.
-    ///
-    /// `NonLocalId`s are interpreted in the context of their containing function.
+    /// Closure-display index, relative to the containing function.
     pub struct NonLocalId(usize);
 
-    /// A function in the module.
     pub struct FunctionId(usize);
 
-    /// A basic block owned by one function.
-    ///
-    /// `BlockId`s are interpreted in the context of their containing function.
+    /// Block index, relative to the containing function.
     pub struct BlockId(usize);
 }
 
-/// A value on the reference VM's operand stack.
-///
-/// Backend emitters use their own corresponding value type so that dynamic
-/// values can be represented by native backend handles instead.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Type { ty: Ty },
@@ -55,10 +43,7 @@ pub enum Value {
     Closure { value: ClosureValue },
 }
 
-/// An address rooted in storage known statically by the compiler.
-///
-/// The path contains type-directed child indices. It begins empty when a local
-/// or global address is pushed and grows as access instructions are evaluated.
+/// A storage root plus type-directed child indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StaticAddressValue {
     Local {
@@ -81,21 +66,18 @@ pub struct RecordValue {
     pub fields: Vec<RecordFieldValue>,
 }
 
-/// A named field in a concrete record value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordFieldValue {
     pub name: Arc<str>,
     pub value: Value,
 }
 
-/// The elements of an array in index order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayValue {
     pub element_ty: Ty,
     pub elements: Vec<Value>,
 }
 
-/// A function paired with its captured environment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosureValue {
     pub function: FunctionId,

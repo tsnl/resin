@@ -4,10 +4,6 @@ use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
 use super::*;
 
-//
-// API
-//
-
 pub fn format_source(file: &SourceFile) -> String {
     let sexp = sexp_source(file);
     let config = PrinterConfig {
@@ -16,10 +12,6 @@ pub fn format_source(file: &SourceFile) -> String {
     };
     sexp_to_string(&sexp, &config)
 }
-
-//
-// SExp builders
-//
 
 fn sexp_source(file: &SourceFile) -> SExp {
     list("source", file.stmts.iter().map(sexp_stmt).collect())
@@ -137,10 +129,6 @@ fn sexp_typespec(ts: &Type) -> SExp {
         ),
     }
 }
-
-//
-// SExp builder helpers
-//
 
 fn list(head: &str, items: Vec<SExp>) -> SExp {
     let mut children = Vec::with_capacity(items.len() + 1);

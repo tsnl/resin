@@ -2,7 +2,6 @@
 
 use std::ops::Range;
 
-/// Suballocates ranges from a larger interval. Does not own GPU resources.
 #[derive(Debug)]
 pub struct RangeAllocator {
     root: Range<u64>,
@@ -58,7 +57,6 @@ impl RangeAllocator {
         Ok(start..end)
     }
 
-    /// Return a previously allocated range.
     /// Empty, out-of-bounds, or already-free ranges are ignored.
     pub fn free(&mut self, range: Range<u64>) {
         if range.is_empty() || range.start < self.root.start || range.end > self.root.end {
