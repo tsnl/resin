@@ -1,0 +1,127 @@
+use std::sync::Arc;
+
+use crate::ast::{Span, Stmt, Term};
+use crate::ir::{Instr, Terminator, Ty, TypeError, TypeErrorKind, Value};
+
+use super::{GenerateError, Generator};
+
+impl Generator {
+    pub(super) fn gen_if(
+        &mut self,
+        cond: &Term,
+        then: &Term,
+        els: &Term,
+        expected: Option<&Ty>,
+    ) -> Result<Ty, GenerateError> {
+        let cond_ty = self.gen_term(cond, None)?;
+        let converted = self
+            .typer
+            .as_bool(&cond_ty)
+            .map_err(|err| GenerateError::typing(cond.span, err))?;
+        self.emit_value_conv(&converted.steps);
+        let then_block = self.new_block("then");
+        let else_block = self.new_block("else");
+        let join_block = self.new_block("join");
+        self.terminate(Terminator::Branch {
+            then: then_block,
+            els: else_block,
+        });
+
+        let before = self.scopes.clone();
+        self.switch(then_block);
+        let then_ty = self.gen_term(then, expected)?;
+        self.terminate(Terminator::Break { target: join_block });
+        let after_then = self.scopes.clone();
+
+        self.scopes = before;
+        self.switch(else_block);
+        let else_ty = self.gen_term(els, expected)?;
+        self.terminate(Terminator::Break { target: join_block });
+        self.scopes.intersect_initialization(&after_then);
+
+        self.switch(join_block);
+        self.typer
+            .type_if(&Ty::Bool, &then_ty, &else_ty)
+            .map_err(|err| GenerateError::typing(cond.span, err))
+    }
+
+    pub(super) fn gen_block(
+        &mut self,
+        stmts: &[Stmt],
+        tail: &Term,
+        expected: Option<&Ty>,
+    ) -> Result<Ty, GenerateError> {
+        self.scopes.push();
+        for stmt in stmts {
+            self.gen_stmt(stmt)?;
+        }
+        let ty = self.gen_term(tail, expected)?;
+        self.scopes.pop();
+        Ok(self.typer.type_block(&ty))
+    }
+
+    pub(super) fn gen_short_circuit(
+        &mut self,
+        span: Span,
+        name: &str,
+        args: &[Term],
+    ) -> Result<Ty, GenerateError> {
+        if args.len() != 2 {
+            return Err(GenerateError::typing(
+                span,
+                TypeError {
+                    kind: TypeErrorKind::InvalidBuiltinArgumentCount {
+                        name: Arc::from(name),
+                        found: args.len(),
+                    },
+                },
+            ));
+        }
+        let left_ty = self.gen_term(&args[0], None)?;
+        let converted = self
+            .typer
+            .as_bool(&left_ty)
+            .map_err(|err| GenerateError::typing(span, err))?;
+        self.emit_value_conv(&converted.steps);
+        let then_block = self.new_block("then");
+        let else_block = self.new_block("else");
+        let join_block = self.new_block("join");
+        self.terminate(Terminator::Branch {
+            then: then_block,
+            els: else_block,
+        });
+        let before_right = self.scopes.clone();
+        if name == "&&" {
+            self.switch(then_block);
+            self.gen_bool(&args[1])?;
+            self.terminate(Terminator::Break { target: join_block });
+            self.switch(else_block);
+            self.emit(Instr::Push {
+                value: Value::Bool { value: false },
+            });
+            self.terminate(Terminator::Break { target: join_block });
+        } else {
+            self.switch(then_block);
+            self.emit(Instr::Push {
+                value: Value::Bool { value: true },
+            });
+            self.terminate(Terminator::Break { target: join_block });
+            self.switch(else_block);
+            self.gen_bool(&args[1])?;
+            self.terminate(Terminator::Break { target: join_block });
+        }
+        self.switch(join_block);
+        self.scopes.intersect_initialization(&before_right);
+        Ok(Ty::Bool)
+    }
+
+    fn gen_bool(&mut self, term: &Term) -> Result<Ty, GenerateError> {
+        let ty = self.gen_term(term, None)?;
+        let converted = self
+            .typer
+            .as_bool(&ty)
+            .map_err(|err| GenerateError::typing(term.span, err))?;
+        self.emit_value_conv(&converted.steps);
+        Ok(Ty::Bool)
+    }
+}

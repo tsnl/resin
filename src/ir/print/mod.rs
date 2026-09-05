@@ -1,10 +1,12 @@
 //! IR → S-expression formatting via `sexpfmt`.
 
-use std::{collections::HashSet, sync::Arc};
-
 use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
-use super::{Function, Instr, Module, Terminator, Ty, Value};
+use crate::ir::{Function, Instr, Module, Terminator, Ty, Value};
+
+mod names;
+
+use names::{FunctionNames, Names};
 
 pub fn format_module(module: &Module) -> String {
     let sexp = sexp_module(module);
@@ -13,103 +15,6 @@ pub fn format_module(module: &Module) -> String {
         margin_width: 80,
     };
     sexp_to_string(&sexp, &config)
-}
-
-struct Names {
-    types: Vec<Arc<str>>,
-    globals: Vec<Arc<str>>,
-    functions: Vec<Arc<str>>,
-}
-
-struct FunctionNames {
-    locals: Vec<Arc<str>>,
-    nonlocals: Vec<Arc<str>>,
-    blocks: Vec<Arc<str>>,
-}
-
-impl Names {
-    fn new(module: &Module) -> Self {
-        Self {
-            types: uniquify(
-                module
-                    .types
-                    .iter()
-                    .map(|def| Some(def.name.clone()))
-                    .collect(),
-                "type",
-            ),
-            globals: uniquify(
-                module
-                    .globals
-                    .iter()
-                    .map(|global| Some(global.name.clone()))
-                    .collect(),
-                "g",
-            ),
-            functions: uniquify(
-                module
-                    .functions
-                    .iter()
-                    .map(|function| function.name.clone())
-                    .collect(),
-                "fn",
-            ),
-        }
-    }
-
-    fn function(&self, module: &Module, index: usize) -> FunctionNames {
-        let function = &module.functions[index];
-        FunctionNames {
-            locals: uniquify(
-                function
-                    .locals
-                    .iter()
-                    .map(|local| local.name.clone())
-                    .collect(),
-                "l",
-            ),
-            nonlocals: uniquify(
-                function
-                    .nonlocals
-                    .iter()
-                    .map(|nonlocal| nonlocal.name.clone())
-                    .collect(),
-                "n",
-            ),
-            blocks: uniquify(
-                function
-                    .blocks
-                    .iter()
-                    .map(|block| block.name.clone())
-                    .collect(),
-                "b",
-            ),
-        }
-    }
-}
-
-fn uniquify(preferred: Vec<Option<Arc<str>>>, fallback_prefix: &str) -> Vec<Arc<str>> {
-    let mut used = HashSet::new();
-    let mut names = Vec::with_capacity(preferred.len());
-    for (index, name) in preferred.into_iter().enumerate() {
-        let mut candidate: Arc<str> =
-            name.unwrap_or_else(|| format!("{fallback_prefix}.{index}").into());
-        if used.contains(&candidate) {
-            let base = candidate.clone();
-            let mut suffix = 1;
-            loop {
-                let next: Arc<str> = format!("{base}.{suffix}").into();
-                if !used.contains(&next) {
-                    candidate = next;
-                    break;
-                }
-                suffix += 1;
-            }
-        }
-        used.insert(candidate.clone());
-        names.push(candidate);
-    }
-    names
 }
 
 fn sexp_module(module: &Module) -> SExp {
@@ -135,13 +40,13 @@ fn sexp_module(module: &Module) -> SExp {
         ));
     }
     for (index, function) in module.functions.iter().enumerate() {
-        items.push(sexp_function(module, &names, index, function));
+        items.push(sexp_function(&names, index, function));
     }
     list("module", items)
 }
 
-fn sexp_function(module: &Module, names: &Names, index: usize, function: &Function) -> SExp {
-    let fn_names = names.function(module, index);
+fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
+    let fn_names = FunctionNames::new(function);
     let mut items = vec![
         symbol(names.functions[index].as_ref()),
         symbol(fn_names.locals[function.param.index()].as_ref()),

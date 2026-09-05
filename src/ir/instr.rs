@@ -125,3 +125,52 @@ pub enum Terminator {
     /// Return the sole value on the operand stack from the function.
     Return,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StackEffect {
+    pub pops: usize,
+    pub pushes: usize,
+}
+
+impl Instr {
+    pub fn stack_effect(&self) -> StackEffect {
+        match self {
+            Self::Push { .. }
+            | Self::CurrentClosure
+            | Self::LocalAddress { .. }
+            | Self::GlobalAddress { .. }
+            | Self::NonLocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
+            Self::AccessStatic { .. } | Self::Load | Self::Ascribe { .. } => {
+                StackEffect { pops: 1, pushes: 1 }
+            }
+            Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },
+            Self::Discard => StackEffect { pops: 1, pushes: 0 },
+            Self::MakeRecord { fields } => StackEffect {
+                pops: fields.len(),
+                pushes: 1,
+            },
+            Self::MakeArray { elements, .. } => StackEffect {
+                pops: *elements,
+                pushes: 1,
+            },
+            Self::MakeClosure { captures, .. } => StackEffect {
+                pops: *captures,
+                pushes: 1,
+            },
+            Self::Call => StackEffect { pops: 2, pushes: 1 },
+            Self::CallBuiltin { params, .. } => StackEffect {
+                pops: params.len(),
+                pushes: 1,
+            },
+        }
+    }
+}
+
+impl Terminator {
+    pub const fn stack_effect(&self) -> StackEffect {
+        match self {
+            Self::Break { .. } => StackEffect { pops: 0, pushes: 0 },
+            Self::Branch { .. } | Self::Return => StackEffect { pops: 1, pushes: 0 },
+        }
+    }
+}

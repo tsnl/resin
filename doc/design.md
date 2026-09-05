@@ -48,12 +48,20 @@ accept already-resolved child types and return the enclosing type; it does not w
 code. It reserves nominal identities before recursive RHS evaluation. Bodies start as `None`;
 completion validates the body before setting `Some(body)` through `&mut self`. Redefinition and
 exporting unfinished tables are errors; failed validation remains retryable. The generator reuses
-one context and moves its completed definition table into the IR module without cloning. Standalone clients can
-start with `TyperContext::new()` or take ownership of an existing table with `from_definitions`.
+one context and moves its completed definition table into the IR module without cloning.
+Standalone clients can start with `TyperContext::new()` or take ownership of an existing table
+with `from_definitions`.
 Compile-time instantiation uses a deliberately restricted `evaluate()` operation, initially
 limited to literals. An IR generator can therefore interleave scope resolution, typing, evaluation,
 and emission without coupling the reusable typing rules to a particular backend. Errors propagate
 immediately and compilation stops after the first useful diagnostic.
+
+The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks
+belong to `types::definitions`, shared by the typer and verifier. The typer separates definition
+ownership, typing rules, and conversions. Generation keeps syntax lowering, scopes, and closure
+captures together, but its evaluator borrows only scopes and types, and its function builder
+depends only on IR data. Verification separates control-flow traversal, instruction checks, and
+type checks; printing separates name allocation from formatting. Each pass owns its diagnostics.
 
 The first IR is a typed stack machine: each function has one parameter local and owns a flat list
 of basic blocks. Instructions make

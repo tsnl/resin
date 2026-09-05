@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use crate::util::define_id;
 
+pub(crate) mod definitions;
+
 define_id! {
     pub struct TypeId(usize);
 }
@@ -73,6 +75,10 @@ pub enum Ty {
 }
 
 impl Ty {
+    pub const fn is_numeric(&self) -> bool {
+        self.is_integer() || matches!(self, Self::Float32 | Self::Float64)
+    }
+
     /// Parameter syntax is sugar for one unit, scalar, or tuple argument.
     pub fn parameter(types: &[Ty]) -> Self {
         match types {

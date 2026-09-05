@@ -2,18 +2,17 @@
 
 use std::sync::Arc;
 
-pub mod generate;
 pub mod instr;
-pub mod instr_verifier;
-pub mod print;
-pub mod scope;
-pub mod typer;
 pub mod types;
 pub mod value;
 
+pub mod generate;
+pub mod print;
+pub mod typer;
+pub mod verify;
+
 pub use generate::{GenerateError, GenerateErrorKind, generate};
-pub use instr::{BasicBlock, Function, Instr, Local, NonLocal, Terminator};
-pub use instr_verifier::{StackEffect, VerifyError, VerifyErrorKind, VerifyLocation, verify};
+pub use instr::{BasicBlock, Function, Instr, Local, NonLocal, StackEffect, Terminator};
 pub use print::format_module;
 pub use typer::{
     BuiltinCall, Conv, Converted, FieldAccess, TypeError, TypeErrorKind, TyperContext,
@@ -23,6 +22,7 @@ pub use value::{
     ArrayValue, BlockId, ClosureValue, FunctionId, GlobalId, LocalId, NonLocalId, RecordFieldValue,
     RecordValue, StaticAddressValue, Value,
 };
+pub use verify::{VerifyError, VerifyErrorKind, VerifyLocation, verify};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Global {

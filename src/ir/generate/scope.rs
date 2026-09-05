@@ -2,25 +2,25 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use super::{GlobalId, LocalId, Ty, TypeId};
+use crate::ir::{GlobalId, LocalId, Ty, TypeId};
 
 #[derive(Clone)]
-pub struct ValueBinding {
-    pub kind: ValueBindingKind,
-    pub ty: Option<Ty>,
-    pub initialization: Initialization,
-    pub depth: usize,
+pub(super) struct ValueBinding {
+    pub(super) kind: ValueBindingKind,
+    pub(super) ty: Option<Ty>,
+    pub(super) initialization: Initialization,
+    pub(super) depth: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Initialization {
+pub(super) enum Initialization {
     Uninitialized,
     Initializing,
     Initialized,
 }
 
 #[derive(Clone, Copy)]
-pub enum ValueBindingKind {
+pub(super) enum ValueBindingKind {
     Global(GlobalId),
     Local(LocalId),
     /// Immutable recursive name of the function at `depth`.
@@ -28,17 +28,17 @@ pub enum ValueBindingKind {
 }
 
 #[derive(Clone, Default)]
-pub struct Scope {
+struct Scope {
     values: HashMap<Arc<str>, ValueBinding>,
     types: HashMap<Arc<str>, TypeId>,
 }
 
 impl Scope {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self::default()
     }
 
-    pub fn define_value(&mut self, name: Arc<str>, binding: ValueBinding) -> Result<(), Arc<str>> {
+    fn define_value(&mut self, name: Arc<str>, binding: ValueBinding) -> Result<(), Arc<str>> {
         if self.values.contains_key(&name) {
             return Err(name);
         }
@@ -46,7 +46,7 @@ impl Scope {
         Ok(())
     }
 
-    pub fn define_type(&mut self, name: Arc<str>, definition: TypeId) -> Result<(), Arc<str>> {
+    fn define_type(&mut self, name: Arc<str>, definition: TypeId) -> Result<(), Arc<str>> {
         if self.types.contains_key(&name) {
             return Err(name);
         }
@@ -54,63 +54,71 @@ impl Scope {
         Ok(())
     }
 
-    pub fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
+    fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
         self.values.get(name)
     }
 
-    pub fn lookup_type(&self, name: &str) -> Option<TypeId> {
+    fn lookup_type(&self, name: &str) -> Option<TypeId> {
         self.types.get(name).copied()
     }
 
-    pub fn lookup_value_mut(&mut self, name: &str) -> Option<&mut ValueBinding> {
+    fn lookup_value_mut(&mut self, name: &str) -> Option<&mut ValueBinding> {
         self.values.get_mut(name)
     }
 }
 
 #[derive(Clone)]
-pub struct Scopes {
+pub(super) struct Scopes {
     frames: Vec<Scope>,
 }
 
 impl Scopes {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             frames: vec![Scope::new()],
         }
     }
 
-    pub fn push(&mut self) {
+    pub(super) fn push(&mut self) {
         self.frames.push(Scope::new());
     }
 
-    pub fn pop(&mut self) {
+    pub(super) fn pop(&mut self) {
         debug_assert!(self.frames.len() > 1, "cannot pop the outermost scope");
         self.frames.pop();
     }
 
-    pub fn define_value(&mut self, name: Arc<str>, binding: ValueBinding) -> Result<(), Arc<str>> {
+    pub(super) fn define_value(
+        &mut self,
+        name: Arc<str>,
+        binding: ValueBinding,
+    ) -> Result<(), Arc<str>> {
         self.innermost().define_value(name, binding)
     }
 
-    pub fn define_type(&mut self, name: Arc<str>, definition: TypeId) -> Result<(), Arc<str>> {
+    pub(super) fn define_type(
+        &mut self,
+        name: Arc<str>,
+        definition: TypeId,
+    ) -> Result<(), Arc<str>> {
         self.innermost().define_type(name, definition)
     }
 
-    pub fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
+    pub(super) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
         self.frames
             .iter()
             .rev()
             .find_map(|scope| scope.lookup_value(name))
     }
 
-    pub fn lookup_type(&self, name: &str) -> Option<TypeId> {
+    pub(super) fn lookup_type(&self, name: &str) -> Option<TypeId> {
         self.frames
             .iter()
             .rev()
             .find_map(|scope| scope.lookup_type(name))
     }
 
-    pub fn lookup_value_mut(&mut self, name: &str) -> Option<&mut ValueBinding> {
+    pub(super) fn lookup_value_mut(&mut self, name: &str) -> Option<&mut ValueBinding> {
         self.frames
             .iter_mut()
             .rev()
@@ -118,7 +126,7 @@ impl Scopes {
     }
 
     /// A binding is definitely initialized only if both control-flow paths initialize it.
-    pub fn intersect_initialization(&mut self, other: &Self) {
+    pub(super) fn intersect_initialization(&mut self, other: &Self) {
         for (frame, other) in self.frames.iter_mut().zip(&other.frames) {
             for (name, binding) in &mut frame.values {
                 if let Some(other) = other.values.get(name)
