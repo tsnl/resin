@@ -122,6 +122,6 @@ The grammar revision at `bba45b9` added scoped `defer { ... };` statements. Pars
 cover the keyword and block syntax; compiler analysis tests cover deferred bindings,
 inferred local types, and navigation. No window or editor was opened for this change.
 
-`defer expression;` now accepts any expression and discards its value, while remaining
+The current pin at `7c92c1b` lets `defer expression;` accept any expression and discard its value, while remaining
 statement-only. Chain blocks may omit their unit tail. Parser, compiler, query, and
 recovery tests cover both forms without launching an editor.
