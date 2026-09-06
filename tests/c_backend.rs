@@ -11,8 +11,11 @@ use support::module;
 fn run_module(module: &ir::Module) -> std::process::Output {
     let source = c::emit(module, "main").unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let output = temp.path().join("program");
-    let cc = std::env::var_os("CC").unwrap_or_else(|| OsString::from("cc"));
+    let output = temp
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    let cc = std::env::var_os("CC")
+        .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
     toolchain::compile_c(&source, &output, &cc).unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(output).output().unwrap()
 }
@@ -252,7 +255,14 @@ fn failed_compilation_preserves_existing_output() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let output = temp.path().join("existing");
     fs::write(&output, b"keep me").unwrap();
-    assert!(toolchain::compile_c("not C", &output, std::ffi::OsStr::new("cc")).is_err());
+    assert!(
+        toolchain::compile_c(
+            "not C",
+            &output,
+            std::ffi::OsStr::new(resin::toolchain::DEFAULT_C_COMPILER)
+        )
+        .is_err()
+    );
     assert_eq!(fs::read(&output).unwrap(), b"keep me");
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
 }

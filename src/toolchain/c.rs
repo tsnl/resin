@@ -9,6 +9,7 @@ use std::{
 
 use crate::backend::Error;
 
+use super::platform::{C_FLAGS, LIBRARIES, RUNTIME_ARCHIVE};
 use super::{TempDir, dependencies, io_error, parent, write_output};
 
 const FLAGS: &[&str] = &[
@@ -19,7 +20,6 @@ const FLAGS: &[&str] = &[
     "-Werror",
     "-pedantic",
 ];
-const LIBRARIES: &[&str] = &["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"];
 
 #[derive(Clone, Copy)]
 pub enum CProfile {
@@ -158,11 +158,14 @@ impl Compiler {
     fn compile(&self, source: &str, output: &Path) -> Result<Vec<PathBuf>, Error> {
         let temp = TempDir::new(parent(output)).map_err(io_error)?;
         let input = temp.path().join("program.c");
-        let binary = temp.path().join("program");
+        let binary = temp
+            .path()
+            .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let depfile = temp.path().join("program.d");
         fs::write(&input, source).map_err(io_error)?;
         let result = Command::new(&self.executable)
             .args(FLAGS)
+            .args(C_FLAGS)
             .args(self.profile.flags())
             .args(["-MD", "-MT", "resin", "-MF"])
             .arg(&depfile)
@@ -192,6 +195,7 @@ impl Compiler {
         let mut hash = DefaultHasher::new();
         source.hash(&mut hash);
         FLAGS.hash(&mut hash);
+        C_FLAGS.hash(&mut hash);
         self.profile.flags().hash(&mut hash);
         LIBRARIES.hash(&mut hash);
         self.executable.hash(&mut hash);
@@ -221,6 +225,12 @@ pub(super) fn resolve(compiler: &OsStr) -> Result<PathBuf, Error> {
             .collect()
     };
     for path in candidates {
+        #[cfg(windows)]
+        let path = if !path.is_file() && path.extension().is_none() {
+            path.with_extension("exe")
+        } else {
+            path
+        };
         if !path.is_file() {
             continue;
         }
@@ -294,15 +304,32 @@ fn runtime_library() -> Result<PathBuf, Error> {
     let executable = std::env::current_exe().map_err(io_error)?;
     let directory = executable.parent().unwrap();
     for path in [
-        directory.join("deps/libresin_runtime.a"),
-        directory.join("libresin_runtime.a"),
+        directory.join("deps").join(RUNTIME_ARCHIVE),
+        directory.join(RUNTIME_ARCHIVE),
     ] {
         if path.is_file() {
             return Ok(path);
         }
     }
-    Err(Error(
-        "cannot find libresin_runtime.a beside the compiler or in deps; set RESIN_RUNTIME_LIB"
-            .into(),
-    ))
+    Err(Error(format!(
+        "cannot find {RUNTIME_ARCHIVE} beside the compiler or in deps; set RESIN_RUNTIME_LIB"
+    )))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compilers_can_be_named_with_or_without_exe() {
+        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let path = temp.path().join("compiler with spaces.exe");
+        fs::write(&path, []).unwrap();
+        let expected = std::path::absolute(&path).unwrap();
+        assert_eq!(resolve(path.as_os_str()).unwrap(), expected);
+        assert_eq!(
+            resolve(path.with_extension("").as_os_str()).unwrap(),
+            expected
+        );
+    }
 }

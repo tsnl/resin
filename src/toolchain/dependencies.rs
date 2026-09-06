@@ -1,20 +1,19 @@
 use std::path::{Path, PathBuf};
 
 pub(super) fn parse(source: &str, input: &Path) -> Vec<PathBuf> {
+    let source = source.replace("\\\r\n", "").replace("\\\n", "");
     let mut paths = Vec::new();
     let mut word = String::new();
     let mut chars = source
         .strip_prefix("resin:")
-        .unwrap_or(source)
+        .unwrap_or(&source)
         .chars()
         .peekable();
     while let Some(c) = chars.next() {
         match c {
-            '\\' => match chars.next() {
-                Some('\n') => {}
-                Some(c) => word.push(c),
-                None => word.push('\\'),
-            },
+            '\\' if matches!(chars.peek(), Some(' ' | '\t' | '#' | '\\')) => {
+                word.push(chars.next().unwrap());
+            }
             '$' if chars.peek() == Some(&'$') => {
                 chars.next();
                 word.push('$');
@@ -56,5 +55,16 @@ mod tests {
             ]
             .map(PathBuf::from)
         );
+    }
+
+    #[test]
+    fn windows_dependencies_preserve_drive_letters_and_separators() {
+        let paths = parse(
+            "resin: input.c \\\r\n C:\\sdk\\header.h C:/Program\\ Files/sdk.h\r\n",
+            Path::new("input.c"),
+        );
+        let mut expected = [r"C:\sdk\header.h", "C:/Program Files/sdk.h"].map(PathBuf::from);
+        expected.sort();
+        assert_eq!(paths, expected);
     }
 }

@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn unchanged_snapshots_are_shared_and_only_dependents_are_invalidated() {
-        let root = Path::new("/tmp/resin-compiler-session-test");
+        let root = std::env::temp_dir().join("resin-compiler-session-test");
         let mut compiler = Session::new(root.join("std"));
         let entry = root.join("main.resin");
         let library = root.join("lib.resin");
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn creating_a_missing_dependency_recovers_the_cached_error() {
-        let root = Path::new("/tmp/resin-compiler-missing-test");
+        let root = std::env::temp_dir().join("resin-compiler-missing-test");
         let mut compiler = Session::default();
         compiler
             .set_overlay(&root.join("main.resin"), "import { \"new.resin\" };".into())

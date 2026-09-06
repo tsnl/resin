@@ -83,6 +83,20 @@ fn create_instance(
     extensions: &[*const c_char],
 ) -> Result<(Entry, Instance, Vec<vk::PhysicalDevice>), ResinStatus> {
     let entry = unsafe { Entry::load() }.map_err(|_| ResinStatus::VulkanUnavailable)?;
+    let mut extensions = extensions.to_vec();
+    let mut flags = vk::InstanceCreateFlags::empty();
+    if cfg!(target_os = "macos") {
+        let available =
+            unsafe { entry.enumerate_instance_extension_properties(None) }.map_err(vk_status)?;
+        if has_extension(&available, vk::KHR_PORTABILITY_ENUMERATION_NAME) {
+            if !extensions.iter().any(
+                |&name| unsafe { CStr::from_ptr(name) } == vk::KHR_PORTABILITY_ENUMERATION_NAME,
+            ) {
+                extensions.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr());
+            }
+            flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
+        }
+    }
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"resin")
         .application_version(0)
@@ -91,7 +105,8 @@ fn create_instance(
         .api_version(vk::API_VERSION_1_3);
     let instance_info = vk::InstanceCreateInfo::default()
         .application_info(&app_info)
-        .enabled_extension_names(extensions);
+        .flags(flags)
+        .enabled_extension_names(&extensions);
     let instance = unsafe { entry.create_instance(&instance_info, None) }.map_err(vk_status)?;
     let physical_devices = unsafe { instance.enumerate_physical_devices() }.map_err(|err| {
         unsafe { instance.destroy_instance(None) };
@@ -427,6 +442,9 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     unsafe { instance.get_physical_device_properties2(physical, &mut props2) };
 
     let mut optional_extensions = Vec::new();
+    if has_extension(&extensions, vk::KHR_PORTABILITY_SUBSET_NAME) {
+        optional_extensions.push(vk::KHR_PORTABILITY_SUBSET_NAME.as_ptr());
+    }
     let memory_priority_enabled =
         has_memory_priority && memory_priority.memory_priority == vk::TRUE;
     if memory_priority_enabled {

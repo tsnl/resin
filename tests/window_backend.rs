@@ -15,7 +15,7 @@ mod shaders;
 mod support;
 
 fn compile(source: &str, path: &Path) {
-    let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    let cc = std::env::var_os("CC").unwrap_or_else(|| resin::toolchain::DEFAULT_C_COMPILER.into());
     compile_c(source, path, &cc).unwrap();
 }
 
@@ -31,9 +31,10 @@ fn display_available() -> bool {
         );
         return false;
     }
-    let available = ["DISPLAY", "WAYLAND_DISPLAY"]
-        .iter()
-        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
+    let available = !cfg!(target_os = "linux")
+        || ["DISPLAY", "WAYLAND_DISPLAY"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
     assert!(
         available || !window_required(),
         "RESIN_REQUIRE_WINDOW needs a display (or Xvfb)"
@@ -61,9 +62,12 @@ fn succeeded(output: &Output) -> bool {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn missing_display_returns_status_and_clears_output() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("unavailable");
+    let executable = temp
+        .path()
+        .join(format!("unavailable{}", std::env::consts::EXE_SUFFIX));
     compile(
         r#"
         #include <resin_runtime.h>
@@ -100,7 +104,9 @@ fn missing_display_returns_status_and_clears_output() {
 #[test]
 fn glfw_is_linked_into_c_executables() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("static-glfw");
+    let executable = temp
+        .path()
+        .join(format!("static-glfw{}", std::env::consts::EXE_SUFFIX));
     compile(
         r#"
         #include <resin_runtime.h>
@@ -132,7 +138,9 @@ fn windows_present_resize_and_release_resources() {
     }
     let _lock = lock_gpu();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("window");
+    let executable = temp
+        .path()
+        .join(format!("window{}", std::env::consts::EXE_SUFFIX));
     compile(
         r#"
         #include <resin_runtime.h>
@@ -228,7 +236,9 @@ fn run_example(name: &str) {
     };
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("examples/{name}.resin"));
-    let executable = temp.path().join(name);
+    let executable = temp
+        .path()
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     let mut ast = resin::ast::load(&source).unwrap();
     let body = ast
         .modules

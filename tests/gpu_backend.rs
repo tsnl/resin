@@ -65,8 +65,10 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     );
     let c = resin::backend::c::emit(&module, "main").unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("host-layout");
-    let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    let executable = temp
+        .path()
+        .join(format!("host-layout{}", std::env::consts::EXE_SUFFIX));
+    let cc = std::env::var_os("CC").unwrap_or_else(|| resin::toolchain::DEFAULT_C_COMPILER.into());
     resin::toolchain::compile_c(&c, &executable, &cc).unwrap();
     assert!(Command::new(executable).status().unwrap().success());
     let glsl = glsl::emit(&module, "kernel", Stage::Compute).unwrap();
@@ -366,7 +368,9 @@ fn ordinary_resin_programs_render_and_write_pngs() {
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
             .join(format!("{name}.resin"));
-        let executable = temp.path().join(name);
+        let executable = temp
+            .path()
+            .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         let output = Command::new(env!("CARGO_BIN_EXE_resin"))
             .current_dir(temp.path())
             .arg(source)

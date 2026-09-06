@@ -33,8 +33,12 @@ impl Project {
     fn run(&self) -> Output {
         let module = self.compile().unwrap();
         let source = c::emit(&module, "main").unwrap();
-        let executable = self.0.path().join("program");
-        let compiler = std::env::var_os("CC").unwrap_or_else(|| OsString::from("cc"));
+        let executable = self
+            .0
+            .path()
+            .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+        let compiler = std::env::var_os("CC")
+            .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
         toolchain::compile_c(&source, &executable, &compiler).unwrap();
         Command::new(executable).output().unwrap()
     }

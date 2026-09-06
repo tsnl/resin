@@ -141,10 +141,11 @@ fn default_output_runs_then_copies_even_on_nonzero_exit() {
         r#"export { main }; def main () -> int = { print("ran\n", ()); 7 };"#,
     )
     .unwrap();
-    let output = invoke(temp.path(), &input, &["-o", "dist/custom program"]);
+    let destination = format!("dist/custom program{}", std::env::consts::EXE_SUFFIX);
+    let output = invoke(temp.path(), &input, &["-o", &destination]);
     assert_eq!(output.status.code(), Some(7));
     assert_eq!(output.stdout, b"ran\n");
-    let executable = temp.path().join("dist/custom program");
+    let executable = temp.path().join(destination);
     assert_eq!(
         fs::read(&executable).unwrap(),
         fs::read(artifact(temp.path(), "release")).unwrap()
@@ -368,7 +369,11 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
 #[test]
 fn selectors_work_with_output_paths_and_source_protection() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let folder = temp.path().join("dir:with:colons");
+    let folder = temp.path().join(if cfg!(windows) {
+        "directory with spaces"
+    } else {
+        "dir:with:colons"
+    });
     fs::create_dir(&folder).unwrap();
     let input = folder.join("hello world.resin");
     let source = "export { demo }; def demo() -> int = { 19 };";
@@ -376,7 +381,10 @@ fn selectors_work_with_output_paths_and_source_protection() {
     let selected = selector(&input, Some("demo"));
     let output = invoke(temp.path(), &selected, &["--output", "exe", "-o", "dist/"]);
     success(&output);
-    let executable = temp.path().join("dist/hello world-demo");
+    let executable = temp.path().join(format!(
+        "dist/hello world-demo{}",
+        std::env::consts::EXE_SUFFIX
+    ));
     assert_eq!(Command::new(executable).status().unwrap().code(), Some(19));
     let output = invoke(
         temp.path(),
@@ -420,7 +428,9 @@ fn missing_runtime_preserves_existing_output() {
 #[test]
 fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("program ; literal");
+    let executable = temp
+        .path()
+        .join(format!("program ; literal{}", std::env::consts::EXE_SUFFIX));
     let output = cli(
         "export { main }; def main () -> int = { 19 };",
         &["--output", "exe", "-o", executable.to_str().unwrap()],

@@ -31,7 +31,7 @@ struct Cli {
     #[arg(short = 'o', long = "out")]
     destination: Option<PathBuf>,
 
-    /// C compiler executable (defaults to CC or cc; no shell parsing).
+    /// C compiler executable (defaults to CC, then cc on Unix or clang on Windows MSVC).
     #[arg(long)]
     cc: Option<OsString>,
 
@@ -136,7 +136,7 @@ fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
         name.push(format!("-{}", cli.source.entry));
     }
     let output = host_destination(cli, &name)?;
-    let compiler = compiler(&cli.cc, "CC", "cc");
+    let compiler = compiler(&cli.cc, "CC", toolchain::DEFAULT_C_COMPILER);
     let profile = if output.is_some() {
         toolchain::CProfile::Release
     } else {

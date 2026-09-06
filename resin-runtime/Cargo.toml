@@ -8,6 +8,9 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }
-glfw-sys = { version = "8", default-features = false, features = ["src-build", "vulkan", "x11", "wayland"] }
+glfw-sys = { version = "8", default-features = false, features = ["src-build", "vulkan"] }
 libc = "0.2"
 png = "0.17"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+glfw-sys = { version = "8", default-features = false, features = ["x11", "wayland"] }

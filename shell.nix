@@ -1,7 +1,8 @@
 let
   pkgs = import <nixpkgs> { };
   lib = pkgs.lib;
-  windowLibraries = with pkgs; [
+  linux = pkgs.stdenv.hostPlatform.isLinux;
+  windowLibraries = with pkgs; lib.optionals linux [
     libx11
     libxcursor
     libxi
@@ -11,21 +12,22 @@ let
     wayland
   ];
 in
-assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux "Resin currently supports Linux only.";
-pkgs.mkShell {
+pkgs.mkShell ({
   # Fortify requires optimization, but Resin's default C builds use -O0.
   hardeningDisable = [ "fortify" ];
 
   packages = with pkgs; [
     rustup
     shaderc
+  ] ++ lib.optionals linux (with pkgs; [
     vulkan-tools
     vulkan-validation-layers
     renderdoc
-  ];
+  ]);
 
-  nativeBuildInputs = with pkgs; [ cmake pkg-config wayland-scanner ];
+  nativeBuildInputs = with pkgs; [ cmake pkg-config ] ++ lib.optional linux wayland-scanner;
   buildInputs = windowLibraries;
 
+} // lib.optionalAttrs linux {
   LD_LIBRARY_PATH = lib.makeLibraryPath ([ pkgs.vulkan-loader pkgs.stdenv.cc.cc.lib ] ++ windowLibraries);
-}
+})

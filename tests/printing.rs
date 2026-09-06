@@ -16,8 +16,11 @@ fn run(source: &str) -> std::process::Output {
 
 fn run_c(source: &str) -> std::process::Output {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("program");
-    let cc = std::env::var_os("CC").unwrap_or_else(|| OsString::from("cc"));
+    let executable = temp
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    let cc = std::env::var_os("CC")
+        .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
     toolchain::compile_c(source, &executable, &cc)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(executable).output().unwrap()

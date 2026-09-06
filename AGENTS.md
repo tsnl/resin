@@ -5,7 +5,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 ## Development Practices
 
-- Target 64-bit Linux with native Vulkan. macOS/MoltenVK support is on hold.
+- Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
+  Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the
+  runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.
 - Keep the native C ABI in `resin-runtime/` and language-facing modules in `stdlib/`.
   Examples import standard-library functionality through `std/` paths. Each file has a private
   scope with explicit exports; do not reintroduce textual inclusion.
@@ -18,11 +20,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Keep parameter types and function types explicit; do not infer return types from bodies.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
-- Use the development environment in `shell.nix` for builds, tests, parser generation, and
+- Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and
   examples. Enter it with `nix-shell` from the repository root, or run a command non-interactively
-  with `nix-shell --run 'cargo test --workspace --all-features'`.
+  with `nix-shell --run 'cargo test --workspace --all-features'`. On Windows, use a Visual Studio
+  developer PowerShell with Rustup, LLVM Clang, and CMake on PATH, as described in `README.md`.
 - The shell supplies Rustup, a C compiler, CMake, GLFW's native build dependencies, `glslc`,
-  and Vulkan tools and libraries. Cargo builds and statically links GLFW via `glfw-sys`. Rustup uses
+  and, on Linux, Vulkan tools and libraries. On macOS, GPU execution uses the Vulkan SDK's loader
+  and MoltenVK. Cargo builds and statically links GLFW via `glfw-sys`. Rustup uses
   `rust-toolchain.toml`. Keep the shell's library paths; do not hardcode Nix store paths.
 - Use `RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1` when validating the full GPU path so missing
   dependencies do not silently skip tests. A working Vulkan driver is still required.

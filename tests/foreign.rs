@@ -12,9 +12,12 @@ use support::module;
 
 fn run(source: &str) -> std::process::Output {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp.path().join("program");
+    let executable = temp
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let source = c::emit(&module(source), "main").unwrap();
-    let cc = std::env::var_os("CC").unwrap_or_else(|| OsString::from("cc"));
+    let cc = std::env::var_os("CC")
+        .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
     toolchain::compile_c(&source, &executable, &cc)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(executable).output().unwrap()
@@ -48,7 +51,7 @@ fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
             abs(-value)
         }};
     "#,
-        header = header.display()
+        header = header.to_string_lossy().replace('\\', "/")
     );
     let output = run(&source);
     assert_eq!(

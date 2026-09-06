@@ -7,8 +7,11 @@
 //! or cancellation. GPU and child-object operations require external synchronization.
 //! Host borrows must not overlap GPU writes or deallocation.
 
-#[cfg(not(target_os = "linux"))]
-compile_error!("resin-runtime currently supports Linux only");
+#[cfg(not(all(
+    target_pointer_width = "64",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+)))]
+compile_error!("resin-runtime requires 64-bit Linux, macOS, or Windows");
 
 mod allocator;
 mod gpu;
@@ -31,27 +34,23 @@ pub use gpu::{
 #[doc(hidden)]
 pub mod testing {
     use std::fs::File;
-    use std::os::unix::io::AsRawFd;
 
     pub struct GpuLock {
-        file: File,
-    }
-
-    impl Drop for GpuLock {
-        fn drop(&mut self) {
-            unsafe {
-                libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
-            }
-        }
+        _file: File,
     }
 
     /// Exclusive lock shared by unit and integration GPU tests.
     pub fn lock_gpu() -> GpuLock {
         let path = std::env::temp_dir().join("resin-runtime-gpu.lock");
-        let file = File::create(&path).expect("create gpu lock file");
-        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-        assert_eq!(rc, 0, "flock");
-        GpuLock { file }
+        let file = File::options()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)
+            .expect("open gpu lock file");
+        file.lock().expect("lock gpu tests");
+        GpuLock { _file: file }
     }
 }
 pub use image::{PngImage, image_read_png, image_write_png};

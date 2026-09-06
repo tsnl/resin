@@ -2,28 +2,51 @@
 
 CUDA for graphics. A simple systems programming language targeting host CPUs and Vulkan GPUs.
 
-Currently supported on 64-bit Linux with native Vulkan. macOS/MoltenVK support is on hold.
+Builds target 64-bit Linux, macOS, and Windows. GPU execution requires a compatible Vulkan
+driver; host-only programs do not require Vulkan or a GPU.
 
 New to the implementation? Start with the [guided repository tour](TOUR.md).
 
 ## Development
 
-Enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler, CMake, GLFW's native
-build dependencies, `glslc`, Vulkan tools, validation layers, and RenderDoc.
+On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler,
+CMake, GLFW's native build dependencies, and `glslc`. On Linux it also supplies Vulkan tools,
+validation layers, and RenderDoc.
 The parser is included in `tree-sitter-resin/`; run `cargo test --workspace` directly.
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
 
 Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW installation
-or library search path is needed. Outside Nix, install Rustup, a C compiler, CMake, pkg-config,
-`glslc`, the Vulkan loader, and the X11, Wayland, and xkbcommon development packages, including
-`wayland-scanner`. Cargo uses `rust-toolchain.toml` to install the project's Rust toolchain.
+or library search path is needed. Cargo uses `rust-toolchain.toml` to install the project's
+Rust toolchain. Outside Nix:
+
+- Linux: install Rustup, a C compiler, CMake, pkg-config, and the X11, Wayland, and xkbcommon
+  development packages, including `wayland-scanner`. For GPU programs, add `glslc`, the Vulkan
+  loader, and a Vulkan driver.
+- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, and CMake
+  (`brew install cmake`). `cargo run -- examples/eg001.resin` then builds and runs a host program.
+  For GPU programs, install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac), which supplies
+  `glslc`, the Vulkan loader, and MoltenVK; use its `setup-env.sh` before running Resin. If Cargo
+  strips the loader's search path, run `target/debug/resin` directly from that configured shell.
+- Windows: install Rustup's **x86_64-pc-windows-msvc** toolchain, Visual Studio's **Desktop
+  development with C++** workload (including a Windows SDK), LLVM Clang, and CMake. Open a
+  **Developer PowerShell for VS** targeting x64 and put `clang.exe` and `cmake.exe` on PATH.
+  Run `cargo run -- examples/eg001.resin`. For GPU programs, install the
+  [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for `glslc` and a Vulkan-capable GPU driver.
+
+Windows emitted C uses the GNU-style `clang` driver with the MSVC ABI, not `cl` or `clang-cl`.
+MinGW and cross-compiling Resin programs are not tested. macOS enables Vulkan portability
+enumeration and the portability-subset extension when available, but does not relax the runtime's
+Vulkan 1.3 feature requirements. Some MoltenVK devices and presentation paths may still report
+`unsupported`; macOS build support is not a promise that every GPU demo works.
+Native CI builds and tests the compiler, runtime, and language server on all three systems
+without opening windows.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
 After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
 `tree-sitter generate --js-runtime native`.
 Commit grammar changes and generated files together in this repository.
 
-Backend tests compile generated C with a C11 compiler (`CC` or `cc`).
+Backend tests compile generated C with `CC`, defaulting to `cc` on Unix and `clang` on Windows MSVC.
 Shader tests use `GLSLC` or `glslc` and skip if absent.
 The `gpu` feature enables compiler-to-image integration tests, not a different execution mode:
 
@@ -115,8 +138,9 @@ The selector uses the last colon in the filename, not in its parent directories.
 that itself contains a colon, append `:main` (or another entry) explicitly.
 
 With `-o PATH`, Resin runs first, then copies the executable, even after a nonzero program exit.
-An existing directory or trailing `/` receives the source name (or `source-entry` for a
-non-main entry); otherwise PATH names the file.
+An existing directory or trailing separator receives the source name (or `source-entry` for a
+non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
+extension for Windows executable filenames.
 Use `--output exe -o PATH` to build and copy without running.
 `--output ir`, `ast`, `cst`, and `check` inspect earlier stages; `check` checks syntax only.
 
@@ -132,7 +156,8 @@ behind a compiler wrapper.
 Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
 Generated C includes `resin_runtime.h` and its hierarchy from `resin-runtime/include`.
 Cargo builds the runtime archive alongside the compiler. For relocated installations, set
-`RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB`. To compile emitted C manually on Linux:
+`RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB` (`libresin_runtime.a` on Unix,
+`resin_runtime.lib` on Windows MSVC). To compile emitted C manually on Linux:
 
 ```sh
 cc -std=c11 -fno-strict-aliasing -I resin-runtime/include fibonacci.c \

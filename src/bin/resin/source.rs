@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{ffi::OsStr, path::PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Source {
@@ -8,14 +8,19 @@ pub struct Source {
 
 pub fn parse(value: &OsStr) -> Result<Source, String> {
     let mut path = PathBuf::from(value);
-    let filename = path.file_name().ok_or("expected FILE[:ENTRY]")?.as_bytes();
+    let filename = path
+        .file_name()
+        .ok_or("expected FILE[:ENTRY]")?
+        .as_encoded_bytes();
     let entry = if let Some(colon) = filename.iter().rposition(|&byte| byte == b':') {
         let name = &filename[colon + 1..];
         if colon == 0 || !valid_name(name) {
             return Err("expected FILE[:ENTRY], with a nonempty function name after ':'".into());
         }
         let entry = String::from_utf8(name.to_vec()).unwrap();
-        let filename = OsStr::from_bytes(&filename[..colon]).to_os_string();
+        // These bytes came from this OsStr and are split immediately before ASCII ':'.
+        let filename =
+            unsafe { OsStr::from_encoded_bytes_unchecked(&filename[..colon]) }.to_os_string();
         path.set_file_name(filename);
         entry
     } else {
@@ -73,9 +78,48 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn non_utf8_paths_are_preserved() {
+        use std::os::unix::ffi::OsStrExt;
         let source = parse(OsStr::from_bytes(b"dir/file\xff.resin:demo")).unwrap();
         assert_eq!(source.path.as_os_str().as_bytes(), b"dir/file\xff.resin");
+        assert_eq!(source.entry, "demo");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_prefixes_are_not_entry_selectors() {
+        for path in [
+            r"C:\sources\file.resin",
+            r"C:file.resin",
+            r"\\server\share\file.resin",
+            r"\\?\C:\file.resin",
+        ] {
+            assert_eq!(parse(OsStr::new(path)).unwrap().entry, "main");
+            let source = parse(OsStr::new(&format!("{path}:demo"))).unwrap();
+            assert_eq!(source.path, PathBuf::from(path));
+            assert_eq!(source.entry, "demo");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn unpaired_surrogates_are_preserved() {
+        use std::{
+            ffi::OsString,
+            os::windows::ffi::{OsStrExt, OsStringExt},
+        };
+
+        let mut path: Vec<_> = r"C:\file".encode_utf16().collect();
+        path.push(0xd800);
+        path.extend(".resin".encode_utf16());
+        let mut selected = path.clone();
+        selected.extend(":demo".encode_utf16());
+        let source = parse(&OsString::from_wide(&selected)).unwrap();
+        assert_eq!(
+            source.path.as_os_str().encode_wide().collect::<Vec<_>>(),
+            path
+        );
         assert_eq!(source.entry, "demo");
     }
 }

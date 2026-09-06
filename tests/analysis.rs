@@ -1,7 +1,6 @@
 use resin::{
     analysis::{Analysis, Sources, normalize_path},
     ast::{self, SourceProvider},
-    toolchain::TempDir,
 };
 use std::path::PathBuf;
 
@@ -44,10 +43,10 @@ struct Project {
 }
 impl Project {
     fn new(files: &[(&str, &str)]) -> Self {
-        let root = PathBuf::from(format!(
-            "/tmp/resin-analysis-unsaved-{}",
-            std::process::id()
-        ));
+        let root = normalize_path(
+            &std::env::temp_dir().join(format!("resin-analysis-unsaved-{}", std::process::id())),
+        )
+        .unwrap();
         let overlays = files
             .iter()
             .map(|(path, text)| (root.join(path), text.to_string()))
@@ -266,9 +265,10 @@ fn imported_syntax_errors_stay_at_the_dependency() {
 }
 
 #[test]
+#[cfg(unix)]
 fn buffers_override_disk_and_new_paths_resolve_through_symlinks() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let root = temp.path();
+    let temp = resin::toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    let root = std::fs::canonicalize(temp.path()).unwrap();
     std::fs::create_dir(root.join("real")).unwrap();
     std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
     assert_eq!(
