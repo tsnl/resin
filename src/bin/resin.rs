@@ -8,13 +8,18 @@ use std::{
 
 use clap::{ValueEnum, builder::TypedValueParser};
 
+#[path = "resin/format.rs"]
+mod format;
 #[path = "resin/source.rs"]
 mod source;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(clap::Parser)]
-#[command(name = "resin")]
+#[command(
+    name = "resin",
+    after_help = "Formatting:\n  resin fmt PATH...          Format files/directories in place\n  resin fmt --check PATH...  Check formatting without writing\n  resin fmt --help           Show formatting options"
+)]
 struct Cli {
     /// Source file and exported entry function (defaults to main).
     #[arg(
@@ -67,8 +72,16 @@ enum Output {
 }
 
 fn main() {
-    let cli = <Cli as clap::Parser>::parse();
-    match run(cli) {
+    // Preserve FILE[:ENTRY] invocation while reserving `fmt` as a command.
+    // A source literally named fmt can still be passed as ./fmt or after --.
+    let result = if std::env::args_os().nth(1).is_some_and(|arg| arg == "fmt") {
+        format::run(<format::Options as clap::Parser>::parse_from(
+            std::env::args_os().skip(1),
+        ))
+    } else {
+        run(<Cli as clap::Parser>::parse())
+    };
+    match result {
         Ok(code) => std::process::exit(code),
         Err(error) => {
             eprintln!("{error}");

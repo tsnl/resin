@@ -83,8 +83,11 @@ var xs = [
 ];
 ```
 
-Only whole-document formatting is supported; range/on-type formatting and a CLI
-format command are not implemented.
+The CLI shares this formatter: `resin fmt examples` formats files recursively,
+and `resin fmt --check examples` checks them without writing. See the
+[CLI formatting guide](../README.md#formatting) for exit codes and file selection.
+Only whole-document LSP formatting is supported; range/on-type formatting is not
+implemented.
 
 ## Stateful compiler core
 

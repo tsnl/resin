@@ -49,6 +49,46 @@ fn captures(query: &str, source: &str) -> BTreeSet<(String, String)> {
 }
 
 #[test]
+fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
+    let source = "struct Point { x: float32, y: float32, }; type Position = Point;";
+    let outline = captures(QUERIES[3].1, source);
+    for (kind, text) in [
+        ("context", "struct"),
+        ("context", "type"),
+        ("name", "Point"),
+        ("name", "Position"),
+    ] {
+        assert!(
+            outline.contains(&(kind.into(), text.into())),
+            "{kind}: {text}"
+        );
+    }
+    let objects = captures(QUERIES[5].1, source);
+    assert!(objects.contains(&(
+        "class.around".into(),
+        "struct Point { x: float32, y: float32, };".into()
+    )));
+    for field in ["x: float32", "y: float32"] {
+        assert!(objects.contains(&("class.inside".into(), field.into())));
+    }
+}
+
+#[test]
+fn reserved_words_have_highlight_rules() {
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int }; type T = S; def f() -> Result<(), Never> = { var x: Span<Ptr<ubyte>>; defer free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ok(v) => { ok(v) }, err(e) => { err(e) } } };";
+    let highlighted = captures(QUERIES[0].1, source);
+    for word in [
+        "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while",
+        "match", "defer",
+    ] {
+        assert!(
+            highlighted.contains(&("keyword".into(), word.into())),
+            "missing {word}"
+        );
+    }
+}
+
+#[test]
 fn result_syntax_is_highlighted_and_structs_have_outlines() {
     let source = "struct Broken { code: int }; def fail() -> Result<int, Never> = { match (value) { ok(n) => { ok(n?) }, err(error) => { err(error) } } };";
     let captured = captures(QUERIES[0].1, source);

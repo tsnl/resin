@@ -73,6 +73,14 @@ fn comments_keep_contents_and_attachment() {
 }
 
 #[test]
+fn pointer_dereference_stays_attached_to_its_operand() {
+    check(
+        "def f(p:Ptr<int>)={p .* := 1;var x=p .*+1;p .*(x);};",
+        "def f(p: Ptr<int>) = {\n\tp.* := 1;\n\tvar x = p.* + 1;\n\tp.*(x);\n};\n",
+    );
+}
+
+#[test]
 fn structs_results_match_and_defer() {
     check(
         "struct Empty{};struct Item{x:int,};type Errors=Empty|Item;def run()->Result<_,_>={defer cleanup();defer (cleanup());defer {cleanup();};var value=read() ?;match(value){ok(v)=>{v},err(e)=>{0},}};",

@@ -163,13 +163,16 @@ fn trailing_comment(source: &str, tokens: &[Node<'_>], i: usize) -> bool {
 fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     let a = left.kind();
     let b = right.kind();
-    if matches!(b, "," | ";" | ")" | "]" | ":" | "." | ".*" | "try_suffix") {
+    if matches!(
+        b,
+        "," | ";" | ")" | "]" | ":" | "." | "pointer_deref" | "try_suffix"
+    ) {
         return false;
     }
     if a == "comment" || b == "comment" {
         return true;
     }
-    if matches!(a, "(" | "[" | "." | ".*") {
+    if matches!(a, "(" | "[" | ".") {
         return false;
     }
     let generic_left = left.parent().is_some_and(|p| p.kind() == "unary_type");

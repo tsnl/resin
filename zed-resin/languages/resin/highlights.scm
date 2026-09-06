@@ -4,7 +4,9 @@
 (inferred_type) @type.builtin
 ["Ptr" "Span" "Result"] @type.builtin
 
-["export" "import" "extern" "type" "struct" "def" "var" "if" "else" "while" "match" "defer"] @keyword
+; Keep declaration and control keywords in sync with the grammar's reserved words.
+["export" "import" "extern" "type" "struct" "def" "var"] @keyword
+["if" "else" "while" "match" "defer"] @keyword
 
 (function_definition name: (lid) @function)
 (foreign_function name: (lid) @function)

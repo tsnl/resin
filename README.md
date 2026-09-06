@@ -315,6 +315,37 @@ cc -std=c11 -fno-strict-aliasing -I resin-runtime/include fibonacci.c \
 Integer arithmetic wraps to its declared width; invalid division, shifts, and dynamic array
 indexes fail with a diagnostic. There is no optimizer or stable generated ABI yet.
 
+## Formatting
+
+The CLI uses the same canonical formatter as `resin-lsp`:
+
+```sh
+# Format every .resin file under examples/, including examples/lib/.
+nix-shell --run 'cargo run --quiet -- fmt examples'
+
+# CI/lint: list files needing formatting without modifying anything.
+nix-shell --run 'cargo run --quiet -- fmt --check examples'
+```
+
+With an installed binary, use `resin fmt examples` and
+`resin fmt --check examples`. Both commands accept multiple files/directories.
+Directory traversal selects `.resin` files and does not follow symlinks. Explicit
+file arguments are treated as Resin source regardless of extension. Use `--`
+before paths beginning with a dash.
+
+Normal mode writes changed files and prints their paths. Check mode prints paths
+that would change, returning 0 when all selected files are formatted and 1 on
+formatting differences or file/syntax errors. Invalid syntax is reported and left
+unchanged; other selected files are still processed. Formatting needs no imports,
+entry point, type checking, shader compiler, or GPU execution.
+
+Indentation uses hard tabs. Trailing commas are preserved and force multiline
+lists; add one to keep long calls or records readable. Comments and literal
+contents are preserved, and repeated blank lines collapse to one. Keep one blank
+line between example functions and between logical sections inside a function.
+The [full formatting rules](resin-lsp/README.md#formatting) also apply to the CLI.
+CI checks the examples with `fmt --check` on Linux, macOS, and Windows.
+
 ## Printing
 
 `print` is a polymorphic host builtin returning unit. Its one argument is a tuple containing a

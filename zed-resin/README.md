@@ -29,6 +29,9 @@ Launch Zed from `nix-shell` so it inherits the native library paths, then run
 On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'`.
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
+Restarting `resin-lsp` alone does not reload highlighting queries or the pinned
+Tree-sitter grammar. If `struct`, `match`, or `defer` still look like ordinary
+identifiers, rebuild/reinstall the dev extension from this checkout's `zed-resin/`.
 See [Zed's extension development guide](https://zed.dev/docs/extensions/developing-extensions).
 
 The adapter uses a configured binary or finds `resin-lsp` on the worktree's PATH.
@@ -149,3 +152,8 @@ inferred local types, and navigation. No window or editor was opened for this ch
 The current pin at `7c92c1b` lets `defer expression;` accept any expression and discard its value, while remaining
 statement-only. Chain blocks may omit their unit tail. Parser, compiler, query, and
 recovery tests cover both forms without launching an editor.
+
+Current queries highlight all declaration and control keywords, label top-level
+structs and aliases with `struct`/`type` in the outline, and expose struct bodies
+through Zed's class text objects. Query tests cover these captures, including
+`Result`, inference holes, `match`, and `defer`.
