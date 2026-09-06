@@ -107,7 +107,13 @@ result annotations. Compiler/LSP regressions and query captures cover this synta
 including hover/completion for omitted unit results. This revision was validated
 through automated tests and WASI builds; the editor smoke test above used `79e4a26`.
 
-The current pin also supports explicit `_` type-inference holes, including nested
+The grammar also supports explicit `_` type-inference holes, including nested
 local and return annotations. Rebuild `resin-lsp` and reinstall the dev extension
 after updating. Parser, query, and stdio regressions cover the new syntax and
 inferred hover types without launching an editor.
+
+The current pin at `847bc7a` adds nominal `struct` declarations, transparent `type`
+aliases, `A | B` unions, `Result<T, E>`, postfix `?`, and exhaustive `match` arms.
+Queries highlight the new syntax and include structs in the outline; semantic tests
+cover inferred error sets and match-payload navigation/completion. Rebuild the language
+server and reinstall the dev extension together. No new editor smoke test was run.
