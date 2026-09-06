@@ -37,8 +37,60 @@ fn first_statement(file: &SourceFile) -> &resin::ast::Stmt {
 }
 
 #[test]
+fn definition_keywords_preserve_statement_and_field_spans() {
+    let source = r#"
+        type Pair = { first: int, second: int };
+        def make(seed: int) -> Pair = {
+            var first = seed;
+            var second: int;
+            second := seed + 1;
+            Pair { first = first, second = { var next = second; next } }
+        };
+    "#;
+    let file = parse(source);
+    let text = |span: resin::ast::Span| &source[span.start..span.end];
+    let definition = &file.stmts[0];
+    assert!(matches!(definition.val, StmtKind::DefineType { .. }));
+    assert_eq!(
+        text(definition.span),
+        "type Pair = { first: int, second: int };"
+    );
+    let function = &file.stmts[1];
+    let StmtKind::Function {
+        name, params, body, ..
+    } = &function.val
+    else {
+        panic!("expected function");
+    };
+    assert!(text(function.span).starts_with("def make("));
+    assert_eq!(text(name.span), "make");
+    assert_eq!(text(params[0].0.span), "seed");
+    let TermKind::Block { stmts, tail } = &body.val else {
+        panic!("expected function body");
+    };
+    assert!(matches!(stmts[0].val, StmtKind::Define { .. }));
+    assert_eq!(text(stmts[0].span), "var first = seed;");
+    assert!(matches!(stmts[1].val, StmtKind::Declare { .. }));
+    assert_eq!(text(stmts[1].span), "var second: int;");
+    assert!(matches!(stmts[2].val, StmtKind::Expr { .. }));
+    let TermKind::Call { arg, .. } = &tail.val else {
+        panic!("expected nominal conversion");
+    };
+    let TermKind::Record { fields } = &arg.val else {
+        panic!("expected record initializer");
+    };
+    assert_eq!(text(fields[0].0.span), "first");
+    expect_var(&fields[0].1, "first");
+    let TermKind::Block { stmts, tail } = &fields[1].1.val else {
+        panic!("expected block-valued field");
+    };
+    assert_eq!(text(stmts[0].span), "var next = second;");
+    expect_var(tail, "next");
+}
+
+#[test]
 fn while_has_a_condition_and_a_scoped_body() {
-    let file = parse("main() -> () = { while (ready) { count := count + 1; }; };");
+    let file = parse("def main() -> () = { while (ready) { count := count + 1; }; };");
     let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
@@ -53,14 +105,14 @@ fn while_has_a_condition_and_a_scoped_body() {
     assert!(matches!(tail.val, TermKind::Unit));
     assert!(print::format_source(&file).contains("(while"));
 
-    parse("main() -> () = { while (ready) {}; };");
-    parse("f () -> () = { while (ready) { while (ready) {}; } };");
-    parse("main() -> () = { value = while (ready) { 42 }; };");
+    parse("def main() -> () = { while (ready) {}; };");
+    parse("def f () -> () = { while (ready) { while (ready) {}; } };");
+    parse("def main() -> () = { var value = while (ready) { 42 }; };");
 }
 
 #[test]
 fn assignment_is_right_associative_and_deref_is_explicit() {
-    let file = parse("main() -> () = { p.* := q.* := 1; };");
+    let file = parse("def main() -> () = { p.* := q.* := 1; };");
     let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
@@ -83,7 +135,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
 
 #[test]
 fn assignment_can_be_sequenced_in_a_block() {
-    let file = parse("f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
+    let file = parse("def f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("expected function definition");
     };
@@ -96,7 +148,7 @@ fn assignment_can_be_sequenced_in_a_block() {
 
 #[test]
 fn dereference_composes_with_other_postfix_operations() {
-    let file = parse("main() -> () = { p.next.* := 1; };");
+    let file = parse("def main() -> () = { p.next.* := 1; };");
     let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };

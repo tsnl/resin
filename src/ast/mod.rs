@@ -109,17 +109,17 @@ pub enum StmtKind {
         result: Type,
         body: Term,
     },
-    /// `name = init;` The name is in scope, but eager recursive reads are invalid.
+    /// `var name = init;` The name is in scope, but eager recursive reads are invalid.
     Define {
         name: Ident,
         init: Term,
     },
-    /// `Name = init;` A fresh nominal identity, in scope within its own RHS.
+    /// `type Name = init;` A fresh nominal identity, in scope within its own RHS.
     DefineType {
         name: Ident,
         init: Type,
     },
-    /// `name: ann;`
+    /// `var name: ann;`
     Declare {
         name: Ident,
         ann: Type,

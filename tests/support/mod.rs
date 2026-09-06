@@ -18,7 +18,7 @@ pub fn module(source: &str) -> ir::Module {
 
 #[allow(dead_code)]
 pub fn statements(source: &str) -> Vec<resin::ast::Stmt> {
-    let mut file = parse(&format!("main() -> () = {{ {source} }};"));
+    let mut file = parse(&format!("def main() -> () = {{ {source} }};"));
     let resin::ast::StmtKind::Function { body, .. } = file.stmts.remove(0).val else {
         unreachable!()
     };

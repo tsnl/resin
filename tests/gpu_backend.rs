@@ -36,27 +36,27 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     let module = support::module(
         r#"export { kernel, main };
 
-        Data = { marker: uint, wide: ulong, amount: float32 };
-        Payload = { tag: uint, data: Data, end: uint };
-        Params = { count: uint, values: Ptr<Payload>, tail: float32 };
-        at (values: Ptr<Payload>, index: uint) -> Ptr<Payload> = { values + index };
-        bump (p: Ptr<Payload>, index: uint) -> () = {
-            old = p.*;
+        type Data = { marker: uint, wide: ulong, amount: float32 };
+        type Payload = { tag: uint, data: Data, end: uint };
+        type Params = { count: uint, values: Ptr<Payload>, tail: float32 };
+        def at (values: Ptr<Payload>, index: uint) -> Ptr<Payload> = { values + index };
+        def bump (p: Ptr<Payload>, index: uint) -> () = {
+            var old = p.*;
             p.* := Payload {
                 tag = old.tag + uint (1),
                 data = Data { marker = index, wide = old.data.wide + ulong (4294967297), amount = old.data.amount + float32 (0.5) },
                 end = old.end + uint (2)
             };
         };
-        kernel (index: uint, root: Ptr<Params>) -> () = {
+        def kernel (index: uint, root: Ptr<Params>) -> () = {
             if (index < root.count) {
-                p = (at(root.values, index) + 1) + -1;
+                var p = (at(root.values, index) + 1) + -1;
                 bump(p - uint (0), index)
             } else { () }
         };
-        main () -> int = {
-            value = Payload { tag = uint (10), data = Data { marker = uint (99), wide = ulong (7), amount = float32 (1.25) }, end = uint (20) };
-            root = Params { count = uint (1), values = &value, tail = float32 (0.75) };
+        def main () -> int = {
+            var value = Payload { tag = uint (10), data = Data { marker = uint (99), wide = ulong (7), amount = float32 (1.25) }, end = uint (20) };
+            var root = Params { count = uint (1), values = &value, tail = float32 (0.75) };
             kernel(uint (0), &root);
             kernel(uint (1), &root);
             if (value.tag == uint (11) && value.data.marker == uint (0) && value.data.wide == ulong (4294967304) && value.data.amount == float32 (1.75) && value.end == uint (22) && root.tail == float32 (0.75)) { 0 } else { 1 }
@@ -260,7 +260,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
     file.stmts.extend(
         support::parse(
-            "export { fragment }; fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
+            "export { fragment }; def fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
         )
         .stmts,
     );
@@ -306,7 +306,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(
-        "export { kernel }; kernel (index: uint) -> uint = { total = uint (0); n = index; while (n > uint (0) && n <= index) { j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
+        "export { kernel }; def kernel (index: uint) -> uint = { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
     );
     let glsl = resin::backend::glsl::emit(&module, "kernel", resin::backend::glsl::Stage::Compute)
         .unwrap();

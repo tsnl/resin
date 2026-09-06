@@ -1,5 +1,5 @@
 export { Position, Color, Vertex };
 
-Position = { x: float32, y: float32, z: float32, w: float32 };
-Color = { r: float32, g: float32, b: float32, a: float32 };
-Vertex = { position: Position, color: Color };
+type Position = { x: float32, y: float32, z: float32, w: float32 };
+type Color = { r: float32, g: float32, b: float32, a: float32 };
+type Vertex = { position: Position, color: Color };

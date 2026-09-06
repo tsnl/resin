@@ -1,7 +1,7 @@
 ==================
 Empty while
 ==================
-main() -> () = { while (1 == 0) {}; };
+def main() -> () = { while (1 == 0) {}; };
 ---
 
 (source_file
@@ -40,8 +40,8 @@ main() -> () = { while (1 == 0) {}; };
 ==================
 Nested while and a statement-only body
 ==================
-main () -> () = {
-    n = 0;
+def main () -> () = {
+    var n = 0;
     while (n < 3) {
         while (n < 2) { n := n + 1; };
         n := n + 1;

@@ -8,18 +8,19 @@ counting, or exception machinery. Separate value and type namespaces keep ordina
 nominal type definitions simple, including productive recursive definitions through pointers.
 
 Every function takes exactly one argument. `()` supplies unit, and `(a, b)` supplies a tuple;
-`(a: A, b: B) => body` destructures that tuple into local bindings. Function types follow the
-same rule: `() -> R`, `(A) -> R`, and `(A, B) -> R`. Tuples use positional record fields in IR.
-Calls and assignments require matching nominal types; only explicit `T (value)` ascriptions
+`def f(a: A, b: B) -> R = { body };` destructures that tuple into local bindings. Function types
+follow the same rule: `() -> R`, `(A) -> R`, and `(A, B) -> R`. Tuples use positional record fields in IR.
+Calls and assignments require matching nominal types; only explicit `T(value)` ascriptions
 wrap or unwrap one nominal layer. Record initializers evaluate fields in source order before
 assembling them in the type's layout order.
 
-Closures capture local values by copy. A named local function's recursive name is an immutable
-reference to the executing closure, including its display; nested closures can capture that
-value. Global function references remain delayed global loads. Declarations reserve uninitialized
-storage: direct reads and local captures require prior initialization on every control-flow path.
-An aggregate must be initialized as a whole before its fields can be accessed. Generating a
-function body does not initialize its enclosing scope.
+Functions are top-level, immutable definitions without captured environments. Signatures are
+available before bodies are checked, so mutually recursive functions need no forward declarations.
+Value bindings use `var name = value;`, and nominal types use `type Name = Type;`. Declarations
+such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
+on every control-flow path. An aggregate must be initialized as a whole before its fields can be
+accessed. Record initializers keep bare `name = value` fields; parameters and record type fields
+keep bare `name: Type` declarations. Files have no runtime globals or initialization phase.
 
 ## Host and GPU
 
@@ -58,15 +59,15 @@ immediately and compilation stops after the first useful diagnostic.
 
 The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks
 belong to `types::definitions`, shared by the typer and verifier. The typer separates definition
-ownership, typing rules, and conversions. Generation keeps syntax lowering, scopes, and closure
-captures together, but its evaluator borrows only scopes and types, and its function builder
+ownership, typing rules, and conversions. Generation keeps syntax lowering and scopes together,
+but its evaluator borrows only scopes and types, and its function builder
 depends only on IR data. Verification separates control-flow traversal, instruction checks, and
 type checks; printing separates name allocation from formatting. Each pass owns its diagnostics.
 
 The first IR is a typed stack machine: each function has one parameter local and owns a flat list
 of basic blocks. Instructions make
-evaluation order explicit, and terminators provide control flow. Locals, globals, and closure
-nonlocals provide stable storage; stack values include literals, aggregates, closures, and addresses,
+evaluation order explicit, and terminators provide control flow. Locals provide stable storage;
+stack values include literals, aggregates, function references, and addresses,
 with field and array access resolved from type information. A separate verifier checks stack effects
 and block edges after generation. Privileged operators retain their checked monomorphic signatures
 in IR, while the backend delays selecting or synthesizing their concrete implementations until it

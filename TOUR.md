@@ -28,10 +28,12 @@ and executes a native program; there is no bytecode interpreter behind the CLI.
 
 A few language choices explain much of the implementation:
 
-- Functions are top-level declarations with explicit signatures. Their names
+- Functions use `def` and are top-level declarations with explicit signatures. Their names
   are available before their bodies are checked, allowing mutual recursion.
 - Every function is unary. An empty argument list is unit `()`; multiple
   arguments form a tuple.
+- Value binding statements use `var`, including uninitialized locals; nominal
+  types use `type`. Record fields remain `name = value`; parameters remain `name: Type`.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default

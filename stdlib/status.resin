@@ -4,13 +4,13 @@ export {
     check,
 };
 
-resin_status_incomplete() -> int = { 7 };
+def resin_status_incomplete() -> int = { 7 };
 
-extern "resin_runtime.h" resin_status_string(status: int) -> Ptr<ubyte>;
+extern "resin_runtime.h" def resin_status_string(status: int) -> Ptr<ubyte>;
 
-extern "stdlib.h" exit(status: int) -> ();
+extern "stdlib.h" def exit(status: int) -> ();
 
-check(status: int) -> () = {
+def check(status: int) -> () = {
     if (status != 0) {
         print("runtime error {0}\n", (status,));
         exit(status)

@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn unexpected_syntax_is_a_parse_error() {
-        let err = parse_err("x = ;");
+        let err = parse_err("def main() -> () = { var x = ; };");
         assert!(matches!(
             err.kind,
             AstErrorKind::Unexpected { .. } | AstErrorKind::Missing { .. }

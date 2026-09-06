@@ -1214,6 +1214,10 @@
     "extra": true
   },
   {
+    "type": "def",
+    "named": false
+  },
+  {
     "type": "else",
     "named": false
   },
@@ -1295,6 +1299,10 @@
   },
   {
     "type": "ushort",
+    "named": false
+  },
+  {
+    "type": "var",
     "named": false
   },
   {

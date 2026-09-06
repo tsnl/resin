@@ -226,6 +226,10 @@
           }
         },
         {
+          "type": "STRING",
+          "value": "def"
+        },
+        {
           "type": "FIELD",
           "name": "name",
           "content": {
@@ -329,6 +333,10 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "STRING",
+          "value": "type"
+        },
+        {
           "type": "FIELD",
           "name": "definition",
           "content": {
@@ -345,6 +353,10 @@
     "function_definition": {
       "type": "SEQ",
       "members": [
+        {
+          "type": "STRING",
+          "value": "def"
+        },
         {
           "type": "FIELD",
           "name": "name",
@@ -496,6 +508,10 @@
           "type": "SEQ",
           "members": [
             {
+              "type": "STRING",
+              "value": "var"
+            },
+            {
               "type": "FIELD",
               "name": "declare",
               "content": {
@@ -532,20 +548,38 @@
       "type": "CHOICE",
       "members": [
         {
-          "type": "FIELD",
-          "name": "term",
-          "content": {
-            "type": "SYMBOL",
-            "name": "term_define"
-          }
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "var"
+            },
+            {
+              "type": "FIELD",
+              "name": "term",
+              "content": {
+                "type": "SYMBOL",
+                "name": "term_define"
+              }
+            }
+          ]
         },
         {
-          "type": "FIELD",
-          "name": "type",
-          "content": {
-            "type": "SYMBOL",
-            "name": "type_define"
-          }
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "type"
+            },
+            {
+              "type": "FIELD",
+              "name": "type",
+              "content": {
+                "type": "SYMBOL",
+                "name": "type_define"
+              }
+            }
+          ]
         }
       ]
     },
@@ -2407,6 +2441,14 @@
       {
         "type": "STRING",
         "value": "type"
+      },
+      {
+        "type": "STRING",
+        "value": "def"
+      },
+      {
+        "type": "STRING",
+        "value": "var"
       },
       {
         "type": "STRING",

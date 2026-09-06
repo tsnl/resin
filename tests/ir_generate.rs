@@ -27,8 +27,9 @@ fn compile_err(src: &str) -> GenerateErrorKind {
 
 #[test]
 fn while_lowers_to_a_back_edge_and_returns_unit() {
-    let module =
-        compile("export { main }; main () -> () = { i = 0; while (i < 3) { i := i + 1; } };");
+    let module = compile(
+        "export { main }; def main () -> () = { var i = 0; while (i < 3) { i := i + 1; } };",
+    );
     let function = &module.functions[0];
     let condition = function
         .blocks
@@ -48,11 +49,11 @@ fn while_lowers_to_a_back_edge_and_returns_unit() {
 #[test]
 fn while_does_not_assume_its_body_ran() {
     for source in [
-        "export { main }; main () -> int = { x: int; while (1 == 0) { x := 1; }; x };",
-        "export { main }; main () -> () = { x: int; while (x < 3) { x := 1; }; };",
-        "export { main }; main () -> () = { x: int; while (1 == 0) { x := x + 1; }; };",
-        "export { main }; main () -> int = { x: int; while ((1 == 0) && ((x := 1) == 1)) {}; x };",
-        "export { main }; main () -> int = { x: int; while (1 == 1) { x := 1; }; x };",
+        "export { main }; def main () -> int = { var x: int; while (1 == 0) { x := 1; }; x };",
+        "export { main }; def main () -> () = { var x: int; while (x < 3) { x := 1; }; };",
+        "export { main }; def main () -> () = { var x: int; while (1 == 0) { x := x + 1; }; };",
+        "export { main }; def main () -> int = { var x: int; while ((1 == 0) && ((x := 1) == 1)) {}; x };",
+        "export { main }; def main () -> int = { var x: int; while (1 == 1) { x := 1; }; x };",
     ] {
         assert!(
             matches!(
@@ -62,21 +63,23 @@ fn while_does_not_assume_its_body_ran() {
             "{source}"
         );
     }
-    compile("export { main }; main () -> int = { x: int; while ((x := 1) == 0) {}; x };");
+    compile("export { main }; def main () -> int = { var x: int; while ((x := 1) == 0) {}; x };");
 }
 
 #[test]
 fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
     assert!(matches!(
-        compile_err("export { main }; main () -> () = { while (1) {} };"),
+        compile_err("export { main }; def main () -> () = { while (1) {} };"),
         GenerateErrorKind::Type(_)
     ));
     assert!(matches!(
-        compile_err("export { main }; main () -> int = { while (1 == 0) { inner = 1; }; inner };"),
+        compile_err(
+            "export { main }; def main () -> int = { while (1 == 0) { var inner = 1; }; inner };"
+        ),
         GenerateErrorKind::UnboundValue { .. }
     ));
     assert!(matches!(
-        compile_err("export { main }; main () -> int = { while (1 == 0) { 42 } };"),
+        compile_err("export { main }; def main () -> int = { while (1 == 0) { 42 } };"),
         GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
     ));
 }
@@ -149,7 +152,7 @@ fn recursive_calls_reference_functions_directly() {
 #[test]
 fn eager_recursion_is_rejected() {
     assert!(matches!(
-        compile_err("export { main }; main() -> () = { x = x + 1; };"),
+        compile_err("export { main }; def main() -> () = { var x = x + 1; };"),
         GenerateErrorKind::EagerRecursion { .. }
     ));
 }
@@ -157,7 +160,7 @@ fn eager_recursion_is_rejected() {
 #[test]
 fn recursive_function_result_is_checked() {
     assert!(matches!(
-        compile_err("f (n: int) -> int = { if (n == 0) { () } else { f(n - 1) } };"),
+        compile_err("def f (n: int) -> int = { if (n == 0) { () } else { f(n - 1) } };"),
         GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
     ));
 }
@@ -165,14 +168,14 @@ fn recursive_function_result_is_checked() {
 #[test]
 fn type_mismatch_is_a_type_error() {
     assert!(matches!(
-        compile_err("export { main }; main() -> () = { x = if (1) { 1 } else { 2 }; };"),
+        compile_err("export { main }; def main() -> () = { var x = if (1) { 1 } else { 2 }; };"),
         GenerateErrorKind::Type(TypeErrorKind::ExpectedBoolean { .. })
     ));
 }
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("List = { value: int, next: Ptr<List> };");
+    let module = compile("type List = { value: int, next: Ptr<List> };");
     assert_eq!(module.types.len(), 1);
     assert_eq!(module.types[0].name.as_ref(), "List");
     let Ty::Record { fields } = module.types[0].body().unwrap() else {
@@ -184,7 +187,7 @@ fn linked_list_type_is_finite_through_its_pointer() {
 #[test]
 fn inline_recursive_type_is_rejected_during_generation() {
     assert!(matches!(
-        compile_err("Bad = { next: Bad };"),
+        compile_err("type Bad = { next: Bad };"),
         GenerateErrorKind::Type(TypeErrorKind::RecursiveTypeWithoutIndirection { .. })
     ));
 }
@@ -192,7 +195,7 @@ fn inline_recursive_type_is_rejected_during_generation() {
 #[test]
 fn function_values_do_not_capture_local_state() {
     let module = compile(
-        "add (x: int, y: int) -> int = { x + y }; select () -> (int, int) -> int = { local = add; local };",
+        "def add (x: int, y: int) -> int = { x + y }; def select () -> (int, int) -> int = { var local = add; local };",
     );
     verify(&module).unwrap();
     assert!(
@@ -207,7 +210,7 @@ fn function_values_do_not_capture_local_state() {
 
 #[test]
 fn assignment_and_deref_store_through_an_address() {
-    let module = compile("f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
+    let module = compile("def f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(function.blocks.iter().any(|block| {
@@ -226,7 +229,7 @@ fn assignment_and_deref_store_through_an_address() {
 
 #[test]
 fn if_joins_then_and_else_values() {
-    let module = compile("f (c: int) -> int = { if (c == 0) { 1 } else { 2 } };");
+    let module = compile("def f (c: int) -> int = { if (c == 0) { 1 } else { 2 } };");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(
@@ -242,9 +245,9 @@ fn if_joins_then_and_else_values() {
 fn nominal_ascription_wraps_and_unwraps_one_layer() {
     let module = compile(
         r#"
-Meters = int;
-to_meters (n: int) -> Meters = { Meters (n) };
-from_meters (m: Meters) -> int = { int (m) };
+type Meters = int;
+def to_meters (n: int) -> Meters = { Meters (n) };
+def from_meters (m: Meters) -> int = { int (m) };
 "#,
     );
     verify(&module).unwrap();
@@ -271,8 +274,8 @@ from_meters (m: Meters) -> int = { int (m) };
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
         r#"
-P = Ptr<{ x: int }>;
-f (p: P) -> int = { p.x };
+type P = Ptr<{ x: int }>;
+def f (p: P) -> int = { p.x };
 "#,
     );
     verify(&module).unwrap();
@@ -293,8 +296,8 @@ f (p: P) -> int = { p.x };
 fn named_function_type_can_be_called() {
     let module = compile(
         r#"
-Handler = (int) -> int;
-f (h: Handler, n: int) -> int = { h(n) };
+type Handler = (int) -> int;
+def f (h: Handler, n: int) -> int = { h(n) };
 "#,
     );
     verify(&module).unwrap();
@@ -307,11 +310,11 @@ fn nested_nominal_ascription_does_not_skip_a_layer() {
         compile_err(
             r#"export { main };
 
-Meters = int;
-Distance = Meters;
+type Meters = int;
+type Distance = Meters;
 
-main() -> () = {
-    x = Distance (1);
+def main() -> () = {
+    var x = Distance (1);
 };"#
         ),
         GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
@@ -323,12 +326,12 @@ fn nested_nominal_ascription_wraps_the_defining_body() {
     let module = compile(
         r#"export { main };
 
-Meters = int;
-Distance = Meters;
+type Meters = int;
+type Distance = Meters;
 
-main() -> () = {
-    x = Distance (Meters (1));
-    y = int (Meters (x));
+def main() -> () = {
+    var x = Distance (Meters (1));
+    var y = int (Meters (x));
 };"#,
     );
     verify(&module).unwrap();
@@ -345,8 +348,8 @@ main() -> () = {
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
         r#"
-List = { value: int, next: Ptr<List> };
-nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
+type List = { value: int, next: Ptr<List> };
+def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 "#,
     );
     verify(&module).unwrap();
@@ -375,7 +378,7 @@ nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 #[test]
 fn empty_array_needs_an_element_type() {
     assert!(matches!(
-        compile_err("export { main }; main() -> () = { x = []; };"),
+        compile_err("export { main }; def main() -> () = { var x = []; };"),
         GenerateErrorKind::Type(TypeErrorKind::EmptyArrayNeedsElementType)
     ));
 }
@@ -383,7 +386,7 @@ fn empty_array_needs_an_element_type() {
 #[test]
 fn unbound_value_is_reported() {
     assert!(matches!(
-        compile_err("export { main }; main() -> () = { x = y; };"),
+        compile_err("export { main }; def main() -> () = { var x = y; };"),
         GenerateErrorKind::UnboundValue { .. }
     ));
 }
@@ -393,10 +396,10 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
-Buf = Span<int>;
+type Buf = Span<int>;
 
-main() -> () = {
-    x = 1;
+def main() -> () = {
+    var x = 1;
 };"#,
     );
     verify(&module).unwrap();
@@ -409,7 +412,7 @@ main() -> () = {
 
 #[test]
 fn short_circuit_and_compiles() {
-    let module = compile("f (a: int) -> bool = { (a == 0) && (a == 1) };");
+    let module = compile("def f (a: int) -> bool = { (a == 0) && (a == 1) };");
     verify(&module).unwrap();
     assert_eq!(module.functions[0].result, Ty::Bool);
 }

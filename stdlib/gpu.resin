@@ -44,38 +44,38 @@ extern type ResinImage;
 extern type ResinPipeline;
 extern type ResinCommandBuffer;
 
-resin_memory_default() -> int = { 0 };
-resin_memory_gpu() -> int = { 1 };
-resin_memory_readback() -> int = { 2 };
+def resin_memory_default() -> int = { 0 };
+def resin_memory_gpu() -> int = { 1 };
+def resin_memory_readback() -> int = { 2 };
 
-extern "resin_runtime.h" resin_gpu_device_count(count: Ptr<uint>) -> int;
-extern "resin_runtime.h" resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> int;
-extern "resin_runtime.h" resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
-extern "resin_runtime.h" resin_gpu_create_at(index: uint, gpu: Ptr<Ptr<ResinGpu>>) -> int;
-extern "resin_runtime.h" resin_gpu_destroy(gpu: Ptr<ResinGpu>) -> ();
+extern "resin_runtime.h" def resin_gpu_device_count(count: Ptr<uint>) -> int;
+extern "resin_runtime.h" def resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> int;
+extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
+extern "resin_runtime.h" def resin_gpu_create_at(index: uint, gpu: Ptr<Ptr<ResinGpu>>) -> int;
+extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>) -> ();
 
-extern "resin_runtime.h" resin_gpu_malloc(gpu: Ptr<ResinGpu>, bytes: ulong, alignment: ulong, memory: int, allocation: Ptr<Ptr<ResinAllocation>>) -> int;
-extern "resin_runtime.h" resin_gpu_free(gpu: Ptr<ResinGpu>, allocation: Ptr<ResinAllocation>) -> ();
-extern "resin_runtime.h" resin_allocation_host_pointer(allocation: Ptr<ResinAllocation>) -> Ptr<ubyte>;
-extern "resin_runtime.h" resin_allocation_device_pointer(allocation: Ptr<ResinAllocation>) -> ulong;
-extern "resin_runtime.h" resin_allocation_size(allocation: Ptr<ResinAllocation>) -> ulong;
-extern "resin_runtime.h" resin_gpu_host_to_device_pointer(gpu: Ptr<ResinGpu>, host: Ptr<ubyte>, device: Ptr<ulong>) -> int;
+extern "resin_runtime.h" def resin_gpu_malloc(gpu: Ptr<ResinGpu>, bytes: ulong, alignment: ulong, memory: int, allocation: Ptr<Ptr<ResinAllocation>>) -> int;
+extern "resin_runtime.h" def resin_gpu_free(gpu: Ptr<ResinGpu>, allocation: Ptr<ResinAllocation>) -> ();
+extern "resin_runtime.h" def resin_allocation_host_pointer(allocation: Ptr<ResinAllocation>) -> Ptr<ubyte>;
+extern "resin_runtime.h" def resin_allocation_device_pointer(allocation: Ptr<ResinAllocation>) -> ulong;
+extern "resin_runtime.h" def resin_allocation_size(allocation: Ptr<ResinAllocation>) -> ulong;
+extern "resin_runtime.h" def resin_gpu_host_to_device_pointer(gpu: Ptr<ResinGpu>, host: Ptr<ubyte>, device: Ptr<ulong>) -> int;
 
-extern "resin_runtime.h" resin_gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<ubyte>, length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
-extern "resin_runtime.h" resin_gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<ubyte>, vertex_length: ulong, fragment: Ptr<ubyte>, fragment_length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
-extern "resin_runtime.h" resin_gpu_free_pipeline(gpu: Ptr<ResinGpu>, pipeline: Ptr<ResinPipeline>) -> ();
+extern "resin_runtime.h" def resin_gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<ubyte>, length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
+extern "resin_runtime.h" def resin_gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<ubyte>, vertex_length: ulong, fragment: Ptr<ubyte>, fragment_length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
+extern "resin_runtime.h" def resin_gpu_free_pipeline(gpu: Ptr<ResinGpu>, pipeline: Ptr<ResinPipeline>) -> ();
 
-extern "resin_runtime.h" resin_gpu_create_image(gpu: Ptr<ResinGpu>, width: uint, height: uint, image: Ptr<Ptr<ResinImage>>) -> int;
-extern "resin_runtime.h" resin_gpu_free_image(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> ();
-extern "resin_runtime.h" resin_image_width(image: Ptr<ResinImage>) -> uint;
-extern "resin_runtime.h" resin_image_height(image: Ptr<ResinImage>) -> uint;
+extern "resin_runtime.h" def resin_gpu_create_image(gpu: Ptr<ResinGpu>, width: uint, height: uint, image: Ptr<Ptr<ResinImage>>) -> int;
+extern "resin_runtime.h" def resin_gpu_free_image(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> ();
+extern "resin_runtime.h" def resin_image_width(image: Ptr<ResinImage>) -> uint;
+extern "resin_runtime.h" def resin_image_height(image: Ptr<ResinImage>) -> uint;
 
-extern "resin_runtime.h" resin_gpu_start_command_recording(gpu: Ptr<ResinGpu>, commands: Ptr<Ptr<ResinCommandBuffer>>) -> int;
-extern "resin_runtime.h" resin_gpu_set_pipeline(commands: Ptr<ResinCommandBuffer>, pipeline: Ptr<ResinPipeline>) -> int;
-extern "resin_runtime.h" resin_gpu_dispatch(commands: Ptr<ResinCommandBuffer>, root: ulong, x: uint, y: uint, z: uint) -> int;
-extern "resin_runtime.h" resin_gpu_begin_rendering(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, r: float32, g: float32, b: float32, a: float32) -> int;
-extern "resin_runtime.h" resin_gpu_end_rendering(commands: Ptr<ResinCommandBuffer>) -> int;
-extern "resin_runtime.h" resin_gpu_draw(commands: Ptr<ResinCommandBuffer>, root: ulong, count: uint) -> int;
-extern "resin_runtime.h" resin_gpu_copy_image_to_buffer(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, buffer: Ptr<ResinAllocation>) -> int;
-extern "resin_runtime.h" resin_gpu_submit(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> int;
-extern "resin_runtime.h" resin_gpu_cancel_command_buffer(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> ();
+extern "resin_runtime.h" def resin_gpu_start_command_recording(gpu: Ptr<ResinGpu>, commands: Ptr<Ptr<ResinCommandBuffer>>) -> int;
+extern "resin_runtime.h" def resin_gpu_set_pipeline(commands: Ptr<ResinCommandBuffer>, pipeline: Ptr<ResinPipeline>) -> int;
+extern "resin_runtime.h" def resin_gpu_dispatch(commands: Ptr<ResinCommandBuffer>, root: ulong, x: uint, y: uint, z: uint) -> int;
+extern "resin_runtime.h" def resin_gpu_begin_rendering(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, r: float32, g: float32, b: float32, a: float32) -> int;
+extern "resin_runtime.h" def resin_gpu_end_rendering(commands: Ptr<ResinCommandBuffer>) -> int;
+extern "resin_runtime.h" def resin_gpu_draw(commands: Ptr<ResinCommandBuffer>, root: ulong, count: uint) -> int;
+extern "resin_runtime.h" def resin_gpu_copy_image_to_buffer(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, buffer: Ptr<ResinAllocation>) -> int;
+extern "resin_runtime.h" def resin_gpu_submit(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> int;
+extern "resin_runtime.h" def resin_gpu_cancel_command_buffer(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> ();

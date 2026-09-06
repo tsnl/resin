@@ -1,8 +1,8 @@
 export { Counter, next };
 
-Counter = { value: int };
+type Counter = { value: int };
 
-next(counter: Ptr<Counter>) -> int = {
+def next(counter: Ptr<Counter>) -> int = {
     counter.value := counter.value + 1;
     counter.value
 };

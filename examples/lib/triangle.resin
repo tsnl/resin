@@ -1,7 +1,7 @@
 export { vertex, fragment };
 import { "std/graphics.resin" };
 
-vertex(index: int) -> Vertex = {
+def vertex(index: int) -> Vertex = {
     if (index == 0) {
         Vertex {
             position = Position { x = float32(0.0), y = float32(-0.75), z = float32(0.0), w = float32(1.0) },
@@ -22,4 +22,4 @@ vertex(index: int) -> Vertex = {
     }
 };
 
-fragment(color: Color) -> Color = { color };
+def fragment(color: Color) -> Color = { color };

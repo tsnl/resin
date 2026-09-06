@@ -1,9 +1,9 @@
 export { main };
 
-add(x: int, y: int) -> int = { x + y };
-apply(f: (int, int) -> int, args: (int, int)) -> int = { f(args) };
-inc(n: int) -> int = { apply(add, (n, 1)) };
+def add(x: int, y: int) -> int = { x + y };
+def apply(f: (int, int) -> int, args: (int, int)) -> int = { f(args) };
+def inc(n: int) -> int = { apply(add, (n, 1)) };
 
-main() -> () = {
+def main() -> () = {
     print("inc(41) = {0}\n", (inc(41),));
 };

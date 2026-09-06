@@ -30,11 +30,11 @@ fn runs(source: &str, code: i32) {
 #[test]
 fn typed_pointer_offsets_use_element_sizes() {
     runs(
-        "export { main }; main () -> int = { values = [10, 20, 30]; p = Ptr<int> (&values); (p + 1).* := 7; end = p + uint (2); (end - 1).* + (end + -2).* + end.* };",
+        "export { main }; def main () -> int = { var values = [10, 20, 30]; var p = Ptr<int> (&values); (p + 1).* := 7; var end = p + uint (2); (end - 1).* + (end + -2).* + end.* };",
         47,
     );
     runs(
-        "export { main }; Payload = { marker: uint, wide: ulong, amount: float32 }; main () -> int = { values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; p = Ptr<Payload> (&values); q = p + 1; q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
+        "export { main }; type Payload = { marker: uint, wide: ulong, amount: float32 }; def main () -> int = { var values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; var p = Ptr<Payload> (&values); var q = p + 1; q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -67,7 +67,7 @@ fn numbered_examples_compile_as_strict_c11() {
 #[test]
 fn discarded_branch_results_compile_and_preserve_effects() {
     runs(
-        "export { main }; main () -> int = { x = 0; if (1 == 1) { x := 1; () } else { () }; if (1 == 2) { (1, 2) } else { (3, 4) }; x };",
+        "export { main }; def main () -> int = { var x = 0; if (1 == 1) { x := 1; () } else { () }; if (1 == 2) { (1, 2) } else { (3, 4) }; x };",
         1,
     );
 }
@@ -75,19 +75,19 @@ fn discarded_branch_results_compile_and_preserve_effects() {
 #[test]
 fn while_rechecks_conditions_and_discards_body_values() {
     runs(
-        "export { main }; main () -> int = { n = 0; sum = 0; while ((n := n + 1) <= 4) { sum := sum + n }; sum + n };",
+        "export { main }; def main () -> int = { var n = 0; var sum = 0; while ((n := n + 1) <= 4) { sum := sum + n }; sum + n };",
         15,
     );
     runs(
-        "export { main }; main () -> int = { n = 0; while (1 == 0) { n := 42; }; n };",
+        "export { main }; def main () -> int = { var n = 0; while (1 == 0) { n := 42; }; n };",
         0,
     );
     runs(
-        "export { main }; main () -> int = { n: int; while ((n := 7) == 0) {}; n };",
+        "export { main }; def main () -> int = { var n: int; while ((n := 7) == 0) {}; n };",
         7,
     );
     runs(
-        "export { main }; main () -> int = { n = 0; while (n < 1000000) { n := n + 1; }; if (n == 1000000) { 0 } else { 1 } };",
+        "export { main }; def main () -> int = { var n = 0; while (n < 1000000) { n := n + 1; }; if (n == 1000000) { 0 } else { 1 } };",
         0,
     );
 }
@@ -95,19 +95,19 @@ fn while_rechecks_conditions_and_discards_body_values() {
 #[test]
 fn while_nests_with_branches_and_preserves_outer_values() {
     runs(
-        "export { main }; main () -> int = { i = 0; total = 0; while (i < 3) { j = 0; while (j < 4) { if (j < 2) { total := total + 1 } else { total := total + 2 }; j := j + 1; }; i := i + 1; }; total };",
+        "export { main }; def main () -> int = { var i = 0; var total = 0; while (i < 3) { var j = 0; while (j < 4) { if (j < 2) { total := total + 1 } else { total := total + 2 }; j := j + 1; }; i := i + 1; }; total };",
         18,
     );
     runs(
-        "export { main }; main () -> int = { n = 0; x = 7; while (n < 3) { x = 10; n := n + 1; x := 20; }; x + n };",
+        "export { main }; def main () -> int = { var n = 0; var x = 7; while (n < 3) { var x = 10; n := n + 1; x := 20; }; x + n };",
         10,
     );
     runs(
-        "export { main }; main () -> int = { n = 0; r = { first = 9, body = while (n < 3) { n := n + 1; }, last = n }; r.first + r.last };",
+        "export { main }; def main () -> int = { var n = 0; var r = { first = 9, body = while (n < 3) { n := n + 1; }, last = n }; r.first + r.last };",
         12,
     );
     runs(
-        "export { main }; main () -> int = { n = 0; while (if (n < 3) { (1 == 1) && ((n := n + 1) < 3) } else { 1 == 0 }) {}; n };",
+        "export { main }; def main () -> int = { var n = 0; while (if (n < 3) { (1 == 1) && ((n := n + 1) < 3) } else { 1 == 0 }) {}; n };",
         3,
     );
 }
@@ -115,7 +115,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
 #[test]
 fn ordinary_functions_can_be_passed_and_selected() {
     runs(
-        "export { main }; add (x: int, y: int) -> int = { x + y }; apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; main () -> int = { a = add; b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
+        "export { main }; def add (x: int, y: int) -> int = { x + y }; def apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; def main () -> int = { var a = add; var b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
         37,
     );
 }
@@ -123,7 +123,7 @@ fn ordinary_functions_can_be_passed_and_selected() {
 #[test]
 fn recursive_functions_receive_state_explicitly() {
     runs(
-        "export { main }; fact(n: int, offset: int) -> int = { if (n == 0) { offset } else { n * fact(n - 1, offset) } }; main() -> int = { offset = 2; fact(4, offset) };",
+        "export { main }; def fact(n: int, offset: int) -> int = { if (n == 0) { offset } else { n * fact(n - 1, offset) } }; def main() -> int = { var offset = 2; fact(4, offset) };",
         48,
     );
 }
@@ -131,7 +131,7 @@ fn recursive_functions_receive_state_explicitly() {
 #[test]
 fn mutual_recursion_needs_no_forward_declaration() {
     runs(
-        "export { main }; f (n: int) -> int = { if (n == 0) { 7 } else { next(n - 1) } }; next (m: int) -> int = { f(m) }; main () -> int = { f(3) };",
+        "export { main }; def f (n: int) -> int = { if (n == 0) { 7 } else { next(n - 1) } }; def next (m: int) -> int = { f(m) }; def main () -> int = { f(3) };",
         7,
     );
 }
@@ -139,7 +139,7 @@ fn mutual_recursion_needs_no_forward_declaration() {
 #[test]
 fn calls_are_unary_with_unit_and_tuple_sugar() {
     runs(
-        "export { main }; zero () -> int = { 2 }; sum (a: int, b: int) -> int = { a + b }; apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; main () -> int = { apply(sum, (zero(), 5)) };",
+        "export { main }; def zero () -> int = { 2 }; def sum (a: int, b: int) -> int = { a + b }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; def main () -> int = { apply(sum, (zero(), 5)) };",
         7,
     );
 }
@@ -147,7 +147,7 @@ fn calls_are_unary_with_unit_and_tuple_sugar() {
 #[test]
 fn nominal_records_preserve_source_order_and_field_layout() {
     runs(
-        "export { main }; R = { a: int, b: int }; main () -> int = { x = 0; r = R { b = (x := 1), a = (x := 2) }; r.a * 10 + r.b + x };",
+        "export { main }; type R = { a: int, b: int }; def main () -> int = { var x = 0; var r = R { b = (x := 1), a = (x := 2) }; r.a * 10 + r.b + x };",
         23,
     );
 }
@@ -155,7 +155,7 @@ fn nominal_records_preserve_source_order_and_field_layout() {
 #[test]
 fn loaded_values_do_not_change_after_later_stores() {
     runs(
-        "export { main }; main () -> int = { x = 1; old = x; x := 2; old * 10 + x };",
+        "export { main }; def main () -> int = { var x = 1; var old = x; x := 2; old * 10 + x };",
         12,
     );
 }
@@ -163,7 +163,7 @@ fn loaded_values_do_not_change_after_later_stores() {
 #[test]
 fn short_circuiting_and_joins_preserve_effects() {
     runs(
-        "export { main }; main () -> int = { x = 0; a = (1 == 2) && ((x := 1) == 1); b = (1 == 1) || ((x := 2) == 2); n = if (a || b) { 3 } else { 4 }; n + x };",
+        "export { main }; def main () -> int = { var x = 0; var a = (1 == 2) && ((x := 1) == 1); var b = (1 == 1) || ((x := 2) == 2); var n = if (a || b) { 3 } else { 4 }; n + x };",
         3,
     );
 }
@@ -171,11 +171,11 @@ fn short_circuiting_and_joins_preserve_effects() {
 #[test]
 fn nominal_function_types_and_numeric_operations_work() {
     runs(
-        "export { main }; Meters = int; F = (Meters) -> Meters; add (x: Meters) -> Meters = { x + Meters (2) }; main () -> int = { f = F (add); int (f(Meters (5))) };",
+        "export { main }; type Meters = int; type F = (Meters) -> Meters; def add (x: Meters) -> Meters = { x + Meters (2) }; def main () -> int = { var f = F (add); int (f(Meters (5))) };",
         7,
     );
     runs(
-        "export { main }; Entry = () -> int; start() -> int = { 23 }; main() -> int = { entry = Entry(start); entry() };",
+        "export { main }; type Entry = () -> int; def start() -> int = { 23 }; def main() -> int = { var entry = Entry(start); entry() };",
         23,
     );
 }
@@ -183,7 +183,7 @@ fn nominal_function_types_and_numeric_operations_work() {
 #[test]
 fn integer_arithmetic_wraps_at_its_declared_width() {
     runs(
-        "export { main }; main () -> int = { a = sbyte (127); b = a + sbyte (1); c = int (2147483647) + int (1); d = long (-9223372036854775808) / long (-1); if (b == sbyte (-128) && c == int (-2147483648) && d == long (-9223372036854775808)) { 0 } else { 1 } };",
+        "export { main }; def main () -> int = { var a = sbyte (127); var b = a + sbyte (1); var c = int (2147483647) + int (1); var d = long (-9223372036854775808) / long (-1); if (b == sbyte (-128) && c == int (-2147483648) && d == long (-9223372036854775808)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -191,7 +191,7 @@ fn integer_arithmetic_wraps_at_its_declared_width() {
 #[test]
 fn signed_right_shift_and_unsigned_multiplication_are_defined() {
     runs(
-        "export { main }; main () -> int = { a = int (-8) >> int (2); b = uint (4294967295) * uint (4294967295); if (a == int (-2) && b == uint (1)) { 0 } else { 1 } };",
+        "export { main }; def main () -> int = { var a = int (-8) >> int (2); var b = uint (4294967295) * uint (4294967295); if (a == int (-2) && b == uint (1)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -200,7 +200,7 @@ fn signed_right_shift_and_unsigned_multiplication_are_defined() {
 fn invalid_integer_operations_fail_at_runtime() {
     for expression in ["1 / 0", "1 % 0", "1 << 32", "1 >> -1"] {
         let result = run_module(&module(&format!(
-            "export {{ main }}; main () -> int = {{ {expression} }};"
+            "export {{ main }}; def main () -> int = {{ {expression} }};"
         )));
         assert_eq!(result.status.code(), Some(1));
         assert!(String::from_utf8_lossy(&result.stderr).contains("resin:"));
@@ -210,7 +210,7 @@ fn invalid_integer_operations_fail_at_runtime() {
 #[test]
 fn unsupported_operations_report_backend_errors() {
     let error = c::emit(
-        &module("export { main }; main () -> int = { r = { x = 1 }; r + r; 0 };"),
+        &module("export { main }; def main () -> int = { var r = { x = 1 }; r + r; 0 };"),
         "main",
     )
     .unwrap_err();
@@ -226,7 +226,7 @@ fn invalid_ir_is_rejected_before_emitting() {
             .to_string()
             .contains("export { main }")
     );
-    let mut m = module("export { main }; main () -> int = { 0 };");
+    let mut m = module("export { main }; def main () -> int = { 0 };");
     m.functions[0].blocks[0]
         .instrs
         .insert(0, ir::Instr::Discard);
@@ -240,7 +240,7 @@ fn invalid_ir_is_rejected_before_emitting() {
 
 #[test]
 fn unused_functions_do_not_fail_strict_compilation() {
-    let mut m = module("export { main }; main () -> int = { 0 };");
+    let mut m = module("export { main }; def main () -> int = { 0 };");
     let mut spare = m.functions[0].clone();
     spare.name = Some("unused".into());
     m.functions.push(spare);
@@ -260,7 +260,7 @@ fn failed_compilation_preserves_existing_output() {
 #[test]
 fn loops_carry_typed_stack_values_across_edges() {
     use ir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
-    let mut m = module("export { main }; main () -> int = { 0 };");
+    let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
         .iter_mut()
@@ -336,7 +336,7 @@ fn loops_carry_typed_stack_values_across_edges() {
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
     use ir::{Instr::*, Local, LocalId, Ty, Value};
-    let mut m = module("export { main }; main () -> int = { 0 };");
+    let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
         .iter_mut()

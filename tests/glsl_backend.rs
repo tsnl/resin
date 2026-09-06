@@ -47,25 +47,25 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
         (example("particles.resin"), Stage::Fragment),
         (
             module(
-                "export { kernel }; kernel (i: uint) -> uint = { x = i; x := x + uint (2); if (x < uint (4)) { x } else { x * uint (2) } };",
+                "export { kernel }; def kernel (i: uint) -> uint = { var x = i; x := x + uint (2); if (x < uint (4)) { x } else { x * uint (2) } };",
             ),
             Stage::Compute,
         ),
         (
             module(
-                "export { kernel }; Pixel = uint; kernel (i: Pixel) -> Pixel = { i + Pixel (uint (1)) };",
+                "export { kernel }; type Pixel = uint; def kernel (i: Pixel) -> Pixel = { i + Pixel (uint (1)) };",
             ),
             Stage::Compute,
         ),
         (
             module(
-                "export { kernel }; kernel (i: uint) -> uint = { twice(i) }; twice (i: uint) -> uint = { add(i, i) }; add (a: uint, b: uint) -> uint = { a + b };",
+                "export { kernel }; def kernel (i: uint) -> uint = { twice(i) }; def twice (i: uint) -> uint = { add(i, i) }; def add (a: uint, b: uint) -> uint = { a + b };",
             ),
             Stage::Compute,
         ),
         (
             module(
-                "export { kernel }; kernel (i: uint) -> uint = { x = i; n = uint (0); while (n < uint (3)) { j = uint (0); while (j < n) { x := x + j; j := j + uint (1); }; n := n + uint (1); }; x };",
+                "export { kernel }; def kernel (i: uint) -> uint = { var x = i; var n = uint (0); while (n < uint (3)) { var j = uint (0); while (j < n) { x := x + j; j := j + uint (1); }; n := n + uint (1); }; x };",
             ),
             Stage::Compute,
         ),
@@ -86,15 +86,15 @@ fn device_pointers_and_shared_roots_compile() {
     };
     for (source, stage) in [
         (
-            "export { kernel }; Node = { value: uint, next: Ptr<Node> }; select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node> = { if (i == uint (0)) { a } else { b } }; kernel (i: uint, root: Ptr<Node>) -> () = { p = select(root, root.next, i); p.value := uint (7); };",
+            "export { kernel }; type Node = { value: uint, next: Ptr<Node> }; def select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node> = { if (i == uint (0)) { a } else { b } }; def kernel (i: uint, root: Ptr<Node>) -> () = { var p = select(root, root.next, i); p.value := uint (7); };",
             Stage::Compute,
         ),
         (
-            "export { kernel }; Data = { wide: ulong, values: Ptr<uint> }; kernel (i: uint, root: Ptr<Data>) -> () = { p = Ptr<uint> (ulong (root.values)); q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
+            "export { kernel }; type Data = { wide: ulong, values: Ptr<uint> }; def kernel (i: uint, root: Ptr<Data>) -> () = { var p = Ptr<uint> (ulong (root.values)); var q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (
-            "export { fragment }; Color = { r: float32, g: float32, b: float32, a: float32 }; Params = { scale: float32 }; fragment (color: Color, root: Ptr<Params>) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
+            "export { fragment }; type Color = { r: float32, g: float32, b: float32, a: float32 }; type Params = { scale: float32 }; def fragment (color: Color, root: Ptr<Params>) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
             Stage::Fragment,
         ),
     ] {
@@ -108,23 +108,23 @@ fn device_pointers_and_shared_roots_compile() {
 fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
     for (source, expected) in [
         (
-            "export { kernel }; Data = { flag: bool }; kernel (i: uint, root: Ptr<Data>) -> () = { () };",
+            "export { kernel }; type Data = { flag: bool }; def kernel (i: uint, root: Ptr<Data>) -> () = { () };",
             "no shared host/device layout",
         ),
         (
-            "export { kernel }; kernel (i: uint, root: Ptr<()>) -> () = { () };",
+            "export { kernel }; def kernel (i: uint, root: Ptr<()>) -> () = { () };",
             "no shared host/device layout",
         ),
         (
-            "export { kernel }; kernel (i: uint) -> uint = { x = i; p = &x; p.* };",
+            "export { kernel }; def kernel (i: uint) -> uint = { var x = i; var p = &x; p.* };",
             "shader-local addresses cannot escape",
         ),
         (
-            "export { kernel }; kernel (i: uint) -> uint = { x = i; ulong (&x); i };",
+            "export { kernel }; def kernel (i: uint) -> uint = { var x = i; ulong (&x); i };",
             "shader-local addresses cannot escape",
         ),
         (
-            "export { kernel }; helper (i: uint) -> Ptr<uint> = { x = i; &x }; kernel (i: uint) -> uint = { helper(i).* };",
+            "export { kernel }; def helper (i: uint) -> Ptr<uint> = { var x = i; &x }; def kernel (i: uint) -> uint = { helper(i).* };",
             "cannot return a local address",
         ),
     ] {
@@ -137,31 +137,31 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
 fn unsupported_shader_features_are_diagnosed() {
     for (source, expected) in [
         (
-            "export { kernel }; kernel (i: uint) -> uint = { helper(i) }; helper (i: uint) -> uint = { kernel(i) };",
+            "export { kernel }; def kernel (i: uint) -> uint = { helper(i) }; def helper (i: uint) -> uint = { kernel(i) };",
             "recursive shader call graph",
         ),
         (
-            "export { kernel }; kernel (i: uint) -> uint = { i / uint (2) };",
+            "export { kernel }; def kernel (i: uint) -> uint = { i / uint (2) };",
             "unsupported shader builtin",
         ),
         (
-            "export { kernel }; kernel (i: uint) -> uint = { x = i; x := if (i == uint (0)) { uint (1) } else { uint (2) }; x };",
+            "export { kernel }; def kernel (i: uint) -> uint = { var x = i; x := if (i == uint (0)) { uint (1) } else { uint (2) }; x };",
             "addresses or functions across block edges",
         ),
         (
-            "export { kernel }; kernel (i: long) -> long = { i };",
+            "export { kernel }; def kernel (i: long) -> long = { i };",
             "does not support type",
         ),
         (
-            "export { kernel }; extern \"stdlib.h\" abs (i: int) -> int; kernel (i: uint) -> uint = { abs(1); i };",
+            "export { kernel }; extern \"stdlib.h\" def abs (i: int) -> int; def kernel (i: uint) -> uint = { abs(1); i };",
             "foreign",
         ),
         (
-            "export { kernel }; helper (i: uint) -> uint = { print(\"hello\", ()); i }; kernel (i: uint) -> uint = { helper(i) };",
+            "export { kernel }; def helper (i: uint) -> uint = { print(\"hello\", ()); i }; def kernel (i: uint) -> uint = { helper(i) };",
             "host programs",
         ),
         (
-            "export { kernel }; helper (i: uint) -> uint = { i }; kernel (i: uint) -> uint = { f = helper; f(i) };",
+            "export { kernel }; def helper (i: uint) -> uint = { i }; def kernel (i: uint) -> uint = { var f = helper; f(i) };",
             "does not support type",
         ),
     ] {
@@ -180,19 +180,19 @@ fn entry_interfaces_are_checked() {
             "expected an exported shader function",
         ),
         (
-            module("export { kernel }; kernel (i: int) -> int = { i };"),
+            module("export { kernel }; def kernel (i: int) -> int = { i };"),
             "kernel",
             Stage::Compute,
             "map uint to uint",
         ),
         (
-            module("export { vertex }; vertex (i: int) -> int = { i };"),
+            module("export { vertex }; def vertex (i: int) -> int = { i };"),
             "vertex",
             Stage::Vertex,
             "position/color",
         ),
         (
-            module("export { fragment }; fragment (i: uint) -> uint = { i };"),
+            module("export { fragment }; def fragment (i: uint) -> uint = { i };"),
             "fragment",
             Stage::Fragment,
             "float32 fields",

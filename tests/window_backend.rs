@@ -245,7 +245,7 @@ fn run_example(name: &str) {
     let TermKind::Block { stmts, .. } = &mut body.val else {
         panic!("main body")
     };
-    stmts.insert(0, support::statements("test_frames = 0;").remove(0));
+    stmts.insert(0, support::statements("var test_frames = 0;").remove(0));
     let body = stmts
         .iter_mut()
         .find_map(|stmt| match &mut stmt.val {

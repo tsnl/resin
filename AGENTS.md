@@ -11,6 +11,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   scope with explicit exports; do not reintroduce textual inclusion.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
+- Functions use `def`, nominal types use `type`, and local value bindings use `var`, including
+  uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
+  `extern "header.h" def name(...) -> Type;`.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` for builds, tests, parser generation, and

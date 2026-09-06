@@ -44,7 +44,7 @@ fn linked_list_type() -> TypeDef {
 
 #[test]
 fn uppercase_definitions_remain_distinct_in_the_ast() {
-    let file = parse("List = { value: int, next: Ptr<List> };");
+    let file = parse("type List = { value: int, next: Ptr<List> };");
     let StmtKind::DefineType { name, init } = &file.stmts[0].val else {
         panic!("expected a type definition, got {:?}", file.stmts[0].val);
     };

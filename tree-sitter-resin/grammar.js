@@ -72,7 +72,7 @@ export default grammar({
   word: ($) => $.lid,
   reserved: {
     global: ($) => [
-      "export", "import", "extern", "type", "if", "else", "while",
+      "export", "import", "extern", "type", "def", "var", "if", "else", "while",
       ...BUILTIN_TYPES, ...TYPE_FORMERS,
     ],
   },
@@ -99,15 +99,15 @@ export default grammar({
     import_clause: ($) => seq("import", "{", list("path", $.string, ","), "}", ";"),
 
     foreign_function: ($) => seq(
-      "extern", field("header", $.string), field("name", $.lid),
+      "extern", field("header", $.string), "def", field("name", $.lid),
       "(", list("params", $.declare, ","), ")", "->", field("result", $.type), ";",
     ),
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
 
-    type_definition: ($) => seq(field("definition", $.type_define), ";"),
+    type_definition: ($) => seq("type", field("definition", $.type_define), ";"),
 
     function_definition: ($) => seq(
-      field("name", $.lid), "(", list("params", $.declare, ","), ")",
+      "def", field("name", $.lid), "(", list("params", $.declare, ","), ")",
       "->", field("result", $.type), "=", field("body", $.block_body), ";",
     ),
     block_body: ($) => seq("{", repeat(field("stmt", $.statement)), optional(field("tail", $.term)), "}"),
@@ -119,14 +119,14 @@ export default grammar({
     statement: ($) =>
       choice(
         seq(field("define", $.define), ";"),
-        seq(field("declare", $.declare), ";"),
+        seq("var", field("declare", $.declare), ";"),
         seq(field("expr", $.term), ";"),
       ),
 
     define: ($) =>
       choice(
-        field("term", $.term_define),
-        field("type", $.type_define),
+        seq("var", field("term", $.term_define)),
+        seq("type", field("type", $.type_define)),
       ),
     term_define: ($) =>
       seq(field("name", $.lid), "=", field("init", $.term)),

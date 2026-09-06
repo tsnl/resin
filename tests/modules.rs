@@ -48,8 +48,7 @@ impl Project {
 
 #[test]
 fn ast_preserves_exports_imports_and_their_spans() {
-    let source =
-        "export { answer, Box, }; import { \"a.resin\", \"b.resin\", }; answer() -> int = { 42 };";
+    let source = "export { answer, Box, }; import { \"a.resin\", \"b.resin\", }; def answer() -> int = { 42 };";
     let file = support::parse(source);
     assert_eq!(
         file.exports
@@ -77,7 +76,10 @@ fn ast_preserves_exports_imports_and_their_spans() {
             .to_string()
             .contains("UnresolvedImport")
     );
-    let project = Project::new(&[("main.resin", "export { value }; value() -> int = { 1 };")]);
+    let project = Project::new(&[(
+        "main.resin",
+        "export { value }; def value() -> int = { 1 };",
+    )]);
     let program = ast::load(&project.0.path().join("main.resin")).unwrap();
     let output = ast::print::format_program(&program);
     assert!(output.starts_with("(program"), "{output}");
@@ -89,15 +91,15 @@ fn private_helpers_and_types_are_resolved_in_their_own_files() {
     let project = Project::new(&[
         (
             "left.resin",
-            "export { left }; Item = int; helper(value: Item) -> int = { int(value) }; left() -> int = { helper(Item(20)) };",
+            "export { left }; type Item = int; def helper(value: Item) -> int = { int(value) }; def left() -> int = { helper(Item(20)) };",
         ),
         (
             "right.resin",
-            "export { right }; Item = int; helper(value: Item) -> int = { int(value) }; right() -> int = { helper(Item(22)) };",
+            "export { right }; type Item = int; def helper(value: Item) -> int = { int(value) }; def right() -> int = { helper(Item(22)) };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\" }; helper () -> int = { 99 }; main () -> int = { left() + right() };",
+            "export { main }; import { \"left.resin\", \"right.resin\" }; def helper () -> int = { 99 }; def main () -> int = { left() + right() };",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -108,32 +110,32 @@ fn private_names_are_not_visible_to_consumers() {
     for (exports, declaration, use_site, error) in [
         (
             "",
-            "hidden() -> int = { 1 };",
-            "main() -> () = { hidden(); };",
+            "def hidden() -> int = { 1 };",
+            "def main() -> () = { hidden(); };",
             "UnboundValue",
         ),
         (
             "export {};",
-            "hidden () -> int = { 1 };",
-            "main() -> () = { hidden(); };",
+            "def hidden () -> int = { 1 };",
+            "def main() -> () = { hidden(); };",
             "UnboundValue",
         ),
         (
             "export {};",
-            "Hidden = int;",
-            "main() -> () = { x: Hidden; };",
+            "type Hidden = int;",
+            "def main() -> () = { var x: Hidden; };",
             "UnboundType",
         ),
         (
             "export {};",
             "extern type Hidden;",
-            "main() -> () = { x = Ptr<Hidden> (ulong(0)); };",
+            "def main() -> () = { var x = Ptr<Hidden> (ulong(0)); };",
             "UnboundType",
         ),
         (
             "export {};",
-            "extern \"stdlib.h\" abs (n: int) -> int;",
-            "main() -> () = { abs(-1); };",
+            "extern \"stdlib.h\" def abs (n: int) -> int;",
+            "def main() -> () = { abs(-1); };",
             "UnboundValue",
         ),
     ] {
@@ -153,11 +155,11 @@ fn a_dependency_cannot_see_its_consumers_names() {
     let error = Project::new(&[
         (
             "library.resin",
-            "export { read }; read () -> int = { secret };",
+            "export { read }; def read () -> int = { secret };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"library.resin\" }; main() -> () = { secret = 42; read(); };",
+            "export { main }; import { \"library.resin\" }; def main() -> () = { var secret = 42; read(); };",
         ),
     ])
     .error("UnboundValue");
@@ -169,7 +171,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     let project = Project::new(&[
         (
             "base.resin",
-            "export { Number, make }; Number = int; make(counter: Ptr<int>) -> Number = { counter.* := counter.* + 1; Number(42) };",
+            "export { Number, make }; type Number = int; def make(counter: Ptr<int>) -> Number = { counter.* := counter.* + 1; Number(42) };",
         ),
         (
             "left.resin",
@@ -181,7 +183,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; main() -> int = { counter = 0; n = make(&counter); int(n) + counter - 1 };",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> int = { var counter = 0; var n = make(&counter); int(n) + counter - 1 };",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -193,14 +195,17 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
 #[test]
 fn dependencies_are_not_implicitly_reexported() {
     Project::new(&[
-        ("base.resin", "export { secret }; secret() -> int = { 42 };"),
+        (
+            "base.resin",
+            "export { secret }; def secret() -> int = { 42 };",
+        ),
         (
             "library.resin",
-            "export { read }; import { \"base.resin\" }; read() -> int = { secret() };",
+            "export { read }; import { \"base.resin\" }; def read() -> int = { secret() };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"library.resin\" }; main() -> () = { secret; };",
+            "export { main }; import { \"library.resin\" }; def main() -> () = { secret; };",
         ),
     ])
     .error("UnboundValue");
@@ -209,9 +214,9 @@ fn dependencies_are_not_implicitly_reexported() {
 #[test]
 fn conflicting_imports_report_both_definition_locations() {
     for definition in [
-        "shared () -> int = { 1 };",
-        "extern \"stdlib.h\" shared() -> int;",
-        "Shared = int;",
+        "def shared () -> int = { 1 };",
+        "extern \"stdlib.h\" def shared() -> int;",
+        "type Shared = int;",
         "extern type Shared;",
     ] {
         let name = if definition.contains("Shared") {
@@ -235,13 +240,13 @@ fn conflicting_imports_report_both_definition_locations() {
 #[test]
 fn imports_conflict_with_local_bindings_but_allow_nested_shadowing() {
     for local in [
-        "shared () -> int = { 1 };",
-        "extern \"x.h\" shared () -> int;",
+        "def shared () -> int = { 1 };",
+        "extern \"x.h\" def shared () -> int;",
     ] {
         Project::new(&[
             (
                 "library.resin",
-                "export { shared }; shared() -> int = { 42 };",
+                "export { shared }; def shared() -> int = { 42 };",
             ),
             (
                 "main.resin",
@@ -253,11 +258,11 @@ fn imports_conflict_with_local_bindings_but_allow_nested_shadowing() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { shared }; shared() -> int = { 99 };",
+            "export { shared }; def shared() -> int = { 99 };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"library.resin\" }; main () -> int = { shared = 42; shared };",
+            "export { main }; import { \"library.resin\" }; def main () -> int = { var shared = 42; shared };",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -269,12 +274,15 @@ fn invalid_exports_are_rejected_even_in_the_entry_file() {
         ("export { missing };", "UnknownExport"),
         ("export { Missing };", "UnknownExport"),
         (
-            "export { value, value }; value() -> int = { 1 };",
+            "export { value, value }; def value() -> int = { 1 };",
             "DuplicateExport",
         ),
-        ("export { Value, Value }; Value = int;", "DuplicateExport"),
         (
-            "export { value, main }; main() -> () = { value = 1; };",
+            "export { Value, Value }; type Value = int;",
+            "DuplicateExport",
+        ),
+        (
+            "export { value, main }; def main() -> () = { var value = 1; };",
             "UnknownExport",
         ),
     ] {
@@ -293,11 +301,11 @@ fn exported_functions_can_return_private_types() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { make, read }; Hidden = int; make () -> Hidden = { Hidden(42) }; read (n: Hidden) -> int = { int(n) };",
+            "export { make, read }; type Hidden = int; def make () -> Hidden = { Hidden(42) }; def read (n: Hidden) -> int = { int(n) };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"library.resin\" }; main () -> int = { read(make()) };",
+            "export { main }; import { \"library.resin\" }; def main () -> int = { read(make()) };",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -308,15 +316,15 @@ fn private_nominal_types_keep_distinct_identities() {
     Project::new(&[
         (
             "left.resin",
-            "export { make }; Hidden = int; make () -> Hidden = { Hidden(42) };",
+            "export { make }; type Hidden = int; def make () -> Hidden = { Hidden(42) };",
         ),
         (
             "right.resin",
-            "export { read }; Hidden = int; read (n: Hidden) -> int = { int(n) };",
+            "export { read }; type Hidden = int; def read (n: Hidden) -> int = { int(n) };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\" }; main() -> () = { read(make()); };",
+            "export { main }; import { \"left.resin\", \"right.resin\" }; def main() -> () = { read(make()); };",
         ),
     ])
     .error("TypeMismatch");
@@ -325,18 +333,18 @@ fn private_nominal_types_keep_distinct_identities() {
 #[test]
 fn importing_modules_does_not_execute_their_functions() {
     let project = Project::new(&[
-        ("base.resin", "main() -> () = { print(\"A\", ()); };"),
+        ("base.resin", "def main() -> () = { print(\"A\", ()); };"),
         (
             "left.resin",
-            "import { \"base.resin\" }; main() -> () = { print(\"B\", ()); };",
+            "import { \"base.resin\" }; def main() -> () = { print(\"B\", ()); };",
         ),
         (
             "right.resin",
-            "import { \"base.resin\" }; main() -> () = { print(\"C\", ()); };",
+            "import { \"base.resin\" }; def main() -> () = { print(\"C\", ()); };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; main() -> () = { print(\"D\", ()); };",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> () = { print(\"D\", ()); };",
         ),
     ]);
     let output = project.run();
@@ -349,11 +357,11 @@ fn mutually_recursive_functions_still_work_within_a_module() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { even }; even (n: int) -> int = { if (n == 0) { 42 } else { odd(n - 1) } }; odd (n: int) -> int = { if (n == 0) { 0 } else { even(n - 1) } };",
+            "export { even }; def even (n: int) -> int = { if (n == 0) { 42 } else { odd(n - 1) } }; def odd (n: int) -> int = { if (n == 0) { 0 } else { even(n - 1) } };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"library.resin\" }; main () -> int = { even(10) };",
+            "export { main }; import { \"library.resin\" }; def main () -> int = { even(10) };",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -363,10 +371,10 @@ fn mutually_recursive_functions_still_work_within_a_module() {
 fn private_main_is_not_an_entry_point() {
     for root in [
         "import { \"library.resin\" };",
-        "export { main }; import { \"library.resin\" }; main() -> () = {};",
+        "export { main }; import { \"library.resin\" }; def main() -> () = {};",
     ] {
         let project = Project::new(&[
-            ("library.resin", "main () -> int = { 42 };"),
+            ("library.resin", "def main () -> int = { 42 };"),
             ("main.resin", root),
         ]);
         if !root.starts_with("export") {
@@ -386,7 +394,10 @@ fn private_main_is_not_an_entry_point() {
 fn an_imported_main_must_be_reexported_to_be_an_entry_point() {
     for exports in ["", "export { main };"] {
         let project = Project::new(&[
-            ("library.resin", "export { main }; main() -> int = { 42 };"),
+            (
+                "library.resin",
+                "export { main }; def main() -> int = { 42 };",
+            ),
             (
                 "main.resin",
                 &format!("{exports} import {{ \"library.resin\" }};"),
@@ -410,15 +421,15 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
     let project = Project::new(&[
         (
             "left.resin",
-            "export { left }; kernel (i: uint) -> uint = { i + uint(1) }; left (i: uint) -> uint = { kernel(i) };",
+            "export { left }; def kernel (i: uint) -> uint = { i + uint(1) }; def left (i: uint) -> uint = { kernel(i) };",
         ),
         (
             "right.resin",
-            "export { right }; kernel (i: uint) -> uint = { i + uint(2) }; right (i: uint) -> uint = { kernel(i) };",
+            "export { right }; def kernel (i: uint) -> uint = { i + uint(2) }; def right (i: uint) -> uint = { kernel(i) };",
         ),
         (
             "main.resin",
-            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; kernel (i: uint) -> uint = { left(i) + right(i) }; main() -> () = { code = shader(kernel, \"compute\"); };",
+            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; def kernel (i: uint) -> uint = { left(i) + right(i) }; def main() -> () = { var code = shader(kernel, \"compute\"); };",
         ),
     ]);
     let module = project.compile().unwrap();
@@ -426,7 +437,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { kernel }; kernel (i: uint) -> uint = { i };",
+            "export { kernel }; def kernel (i: uint) -> uint = { i };",
         ),
         ("main.resin", "import { \"library.resin\" };"),
     ]);
@@ -437,17 +448,17 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
 fn standard_library_imports_work_outside_the_repository() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\", \"std/graphics.resin\", \"std/image.resin\" }; main () -> int = { check(0); resin_status_incomplete() + 35 };",
+        "export { main }; import { \"std/status.resin\", \"std/graphics.resin\", \"std/image.resin\" }; def main () -> int = { check(0); resin_status_incomplete() + 35 };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\" }; main() -> () = { exit(0); };",
+        "export { main }; import { \"std/status.resin\" }; def main() -> () = { exit(0); };",
     )])
     .error("UnboundValue");
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/window.resin\" }; main() -> () = { resin_gpu_create(0); };",
+        "export { main }; import { \"std/window.resin\" }; def main() -> () = { resin_gpu_create(0); };",
     )])
     .error("UnboundValue");
 }
@@ -457,12 +468,15 @@ fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
     let project = Project::new(&[
         (
             "custom/library.resin",
-            "export { answer }; answer() -> int = { 42 };",
+            "export { answer }; def answer() -> int = { 42 };",
         ),
-        ("library.resin", "export { local }; local() -> int = { 1 };"),
+        (
+            "library.resin",
+            "export { local }; def local() -> int = { 1 };",
+        ),
         (
             "main.resin",
-            "export { main }; import { \"std/library.resin\", \"library.resin\" }; main() -> () = { print(\"{0}\", (answer() + local(),)); };",
+            "export { main }; import { \"std/library.resin\", \"library.resin\" }; def main() -> () = { print(\"{0}\", (answer() + local(),)); };",
         ),
     ]);
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
@@ -498,12 +512,12 @@ fn invalid_import_paths_report_the_importing_file() {
 fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
     for name in ["print", "shader"] {
         for source in [
-            format!("{name} () -> () = {{}};"),
-            format!("extern \"stdlib.h\" {name} () -> int;"),
-            format!("main () -> () = {{ {name} = 1; }};"),
-            format!("main () -> () = {{ {name}: int; }};"),
-            format!("f ({name}: int) -> () = {{}};"),
-            format!("extern \"stdlib.h\" f ({name}: int) -> ();"),
+            format!("def {name} () -> () = {{}};"),
+            format!("extern \"stdlib.h\" def {name} () -> int;"),
+            format!("def main () -> () = {{ var {name} = 1; }};"),
+            format!("def main () -> () = {{ var {name}: int; }};"),
+            format!("def f ({name}: int) -> () = {{}};"),
+            format!("extern \"stdlib.h\" def f ({name}: int) -> ();"),
         ] {
             Project::new(&[("main.resin", &source)]).error("ReservedBuiltin");
             Project::new(&[
@@ -515,7 +529,7 @@ fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
         Project::new(&[
             (
                 "library.resin",
-                &format!("export {{ {name} }}; {name}() -> int = {{ 1 }};"),
+                &format!("export {{ {name} }}; def {name}() -> int = {{ 1 }};"),
             ),
             ("main.resin", "import { \"library.resin\" };"),
         ])
@@ -527,14 +541,14 @@ fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
 fn builtin_spellings_are_valid_field_names() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; Fields = { print: int, shader: int }; main () -> int = { value = Fields { print = 20, shader = 22 }; value.print + value.shader };",
+        "export { main }; type Fields = { print: int, shader: int }; def main () -> int = { var value = Fields { print = 20, shader = 22 }; value.print + value.shader };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
 }
 
 #[test]
 fn entry_bindings_are_verified() {
-    let mut module = support::module("export { main }; main () -> () = {};");
+    let mut module = support::module("export { main }; def main () -> () = {};");
     module
         .entries
         .insert("main".into(), ir::FunctionId::from_index(999));
@@ -545,14 +559,14 @@ fn entry_bindings_are_verified() {
 #[test]
 fn files_reject_runtime_bindings_and_statements() {
     for statement in [
-        "x = 1;",
-        "x: int;",
+        "var x = 1;",
+        "var x: int;",
         "x := 2;",
         "print(\"hello\", ());",
         "();",
         "while (1 == 0) {};",
     ] {
-        for declarations in ["", "Item = int; helper() -> () = {};"] {
+        for declarations in ["", "type Item = int; def helper() -> () = {};"] {
             Project::new(&[("main.resin", &format!("{declarations} {statement}"))])
                 .error("parse error");
         }
@@ -561,7 +575,7 @@ fn files_reject_runtime_bindings_and_statements() {
 
 #[test]
 fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
-    for statement in support::statements("x = 1; y: int; print(\"hello\", ());") {
+    for statement in support::statements("var x = 1; var y: int; print(\"hello\", ());") {
         let mut file = support::parse("");
         file.stmts.push(statement);
         assert_eq!(
@@ -584,10 +598,11 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
 fn declarations_do_not_create_a_module_initializer() {
     let empty = support::module("");
     assert!(empty.functions.is_empty());
-    let types = support::module("export { Item }; Item = { value: int };");
+    let types = support::module("export { Item }; type Item = { value: int };");
     assert!(types.functions.is_empty());
     assert!(types.entries.is_empty());
-    let module = support::module("export { answer, Item }; Item = int; answer() -> int = { 42 };");
+    let module =
+        support::module("export { answer, Item }; type Item = int; def answer() -> int = { 42 };");
     assert_eq!(module.functions.len(), 1);
     assert_eq!(module.functions[0].name.as_deref(), Some("answer"));
     assert_eq!(module.entries.len(), 1);
@@ -599,7 +614,7 @@ fn declarations_do_not_create_a_module_initializer() {
 fn functions_cannot_capture_another_functions_locals() {
     Project::new(&[(
         "main.resin",
-        "main() -> () = { value = 1; }; read() -> int = { value };",
+        "def main() -> () = { var value = 1; }; def read() -> int = { value };",
     )])
     .error("UnboundValue");
 }
@@ -607,7 +622,7 @@ fn functions_cannot_capture_another_functions_locals() {
 #[test]
 fn shader_objects_can_reference_private_helpers() {
     let module = support::module(
-        "export { main }; kernel(i: uint) -> uint = { i }; main() -> () = { code = shader(kernel, \"compute\"); };",
+        "export { main }; def kernel(i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel, \"compute\"); };",
     );
     assert!(!module.entries.contains_key("kernel"));
     assert!(

@@ -37,13 +37,13 @@ fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
     let source = format!(
         r#"export {{ main }};
 
-        extern "{header}" answer () -> int;
-        extern "{header}" assign (out: Ptr<int>, value: int) -> ();
-        extern "stdlib.h" abs (n: int) -> int;
-        call (f: () -> int) -> int = {{ f() }};
-        main () -> int = {{
-            value = 0;
-            set = assign;
+        extern "{header}" def answer () -> int;
+        extern "{header}" def assign (out: Ptr<int>, value: int) -> ();
+        extern "stdlib.h" def abs (n: int) -> int;
+        def call (f: () -> int) -> int = {{ f() }};
+        def main () -> int = {{
+            var value = 0;
+            var set = assign;
             set(&value, call(answer));
             abs(-value)
         }};
@@ -63,15 +63,15 @@ fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
 fn pointers_roundtrip_and_address_expressions_evaluate_once() {
     let output = run(r#"export { main };
 
-        identity(p: Ptr<{ value: int }>, calls: Ptr<int>) -> Ptr<{ value: int }> = {
+        def identity(p: Ptr<{ value: int }>, calls: Ptr<int>) -> Ptr<{ value: int }> = {
             calls.* := calls.* + 1;
             p
         };
-        main () -> int = {
-            calls = 0;
-            record = { value = 1 };
-            pointer = &identity(&record, &calls).value;
-            copy = Ptr<int> (ulong (pointer));
+        def main () -> int = {
+            var calls = 0;
+            var record = { value = 1 };
+            var pointer = &identity(&record, &calls).value;
+            var copy = Ptr<int> (ulong (pointer));
             copy.* := 41;
             record.value + calls
         };
@@ -82,11 +82,11 @@ fn pointers_roundtrip_and_address_expressions_evaluate_once() {
 #[test]
 fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
-        "extern type Native; extern \"native.h\" consume (value: Native) -> ();",
-        "extern \"native.h\" consume (value: { x: int }) -> ();",
-        "extern \"native.h\" produce () -> { x: int };",
-        "extern \"native.h\" callback (f: () -> int) -> ();",
-        "extern \"bad\\nheader\" invalid () -> int;",
+        "extern type Native; extern \"native.h\" def consume (value: Native) -> ();",
+        "extern \"native.h\" def consume (value: { x: int }) -> ();",
+        "extern \"native.h\" def produce () -> { x: int };",
+        "extern \"native.h\" def callback (f: () -> int) -> ();",
+        "extern \"bad\\nheader\" def invalid () -> int;",
     ] {
         assert!(
             error(source).contains("InvalidForeignSignature"),
@@ -94,21 +94,23 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
         );
     }
     for source in [
-        "export { main }; extern type Native; main() -> () = { value: Native; };",
-        "extern type Native; identity (n: Native) -> Native = { n };",
-        "extern type Native; Wrapped = { value: Native };",
-        "extern type Native; read (n: Ptr<Native>) -> () = { n.*; };",
+        "export { main }; extern type Native; def main() -> () = { var value: Native; };",
+        "extern type Native; def identity (n: Native) -> Native = { n };",
+        "extern type Native; type Wrapped = { value: Native };",
+        "extern type Native; def read (n: Ptr<Native>) -> () = { n.*; };",
     ] {
         assert!(error(source).contains("OpaqueValue"), "{source}");
     }
     for source in [
-        "export { main }; f (p: Ptr<int>) -> () = {}; main() -> () = { x = 0; f(ulong (0)); };",
-        "export { main }; f (p: Ptr<ubyte>) -> () = {}; main() -> () = { x = 0; f(&x); };",
-        "export { main }; main() -> () = { x = Ptr<int> (float32 (0.0)); };",
+        "export { main }; def f (p: Ptr<int>) -> () = {}; def main() -> () = { var x = 0; f(ulong (0)); };",
+        "export { main }; def f (p: Ptr<ubyte>) -> () = {}; def main() -> () = { var x = 0; f(&x); };",
+        "export { main }; def main() -> () = { var x = Ptr<int> (float32 (0.0)); };",
     ] {
         assert!(error(source).contains("TypeMismatch"), "{source}");
     }
-    assert!(error("export { main }; main() -> () = { p = &(1 + 2); };").contains("NotAPlace"));
+    assert!(
+        error("export { main }; def main() -> () = { var p = &(1 + 2); };").contains("NotAPlace")
+    );
 }
 
 #[test]
@@ -119,7 +121,7 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
     fs::create_dir(&nested).unwrap();
     fs::write(
         temp.path().join("common.resin"),
-        "export { helper }; helper () -> int = { 42 };",
+        "export { helper }; def helper () -> int = { 42 };",
     )
     .unwrap();
     fs::write(
@@ -129,7 +131,7 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
     .unwrap();
     fs::write(
         &main,
-        "export { main }; import { \"nested/library.resin\", \"common.resin\" }; main () -> int = { helper() };",
+        "export { main }; import { \"nested/library.resin\", \"common.resin\" }; def main () -> int = { helper() };",
     )
     .unwrap();
     let module = ir::generate_program(&ast::load(&main).unwrap()).unwrap();
@@ -157,16 +159,16 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
 #[test]
 fn shader_requires_a_named_function_and_a_literal_stage() {
     for source in [
-        "export { kernel, main }; kernel (i: uint) -> uint = { i }; main() -> () = { code = shader(kernel); };",
-        "export { kernel, main }; kernel (i: uint) -> uint = { i }; main() -> () = { code = shader(kernel, \"geometry\"); };",
-        "export { kernel, main }; kernel (i: uint) -> uint = { i }; main() -> () = { name = \"compute\"; code = shader(kernel, name); };",
-        "export { kernel, main }; kernel (i: uint) -> uint = { i }; main() -> () = { alias = kernel; code = shader(alias, \"compute\"); };",
-        "export { main }; extern \"stdlib.h\" abs (i: int) -> int; main() -> () = { code = shader(abs, \"compute\"); };",
+        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel); };",
+        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel, \"geometry\"); };",
+        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var name = \"compute\"; var code = shader(kernel, name); };",
+        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var alias = kernel; var code = shader(alias, \"compute\"); };",
+        "export { main }; extern \"stdlib.h\" def abs (i: int) -> int; def main() -> () = { var code = shader(abs, \"compute\"); };",
     ] {
         assert!(error(source).contains("InvalidShader"), "{source}");
     }
     let module = module(
-        "export { kernel, main }; kernel (i: uint) -> uint = { i }; main() -> () = { code = shader(kernel, \"compute\"); };",
+        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel, \"compute\"); };",
     );
     let main = &module.functions[module.entries["main"].index()];
     assert_eq!(main.locals[1].ty, ir::Ty::shader());
@@ -180,5 +182,5 @@ fn shader_requires_a_named_function_and_a_literal_stage() {
 
 #[test]
 fn shader_cannot_be_shadowed_by_a_normal_function() {
-    assert!(error("shader (n: int) -> int = { n + 1 };").contains("ReservedBuiltin"));
+    assert!(error("def shader (n: int) -> int = { n + 1 };").contains("ReservedBuiltin"));
 }

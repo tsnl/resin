@@ -44,29 +44,31 @@ to fail instead of skipping when windowing or presentation is unavailable.
 ```resin
 export { main };
 
-fibonacci(n: int) -> int = {
+def fibonacci(n: int) -> int = {
     if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
 };
 
-main() -> () = {
+def main() -> () = {
     print("fibonacci(10) = {0}\n", (fibonacci(10),));
 };
 ```
 
-Functions are top-level, explicitly typed, immutable definitions. All signatures are in scope
+Functions use `def` and are top-level, explicitly typed, immutable definitions. All signatures are in scope
 before any body is checked, so mutual recursion needs no forward declarations. There are no
 lambdas, nested function definitions, or captured environments. Ordinary function values can
 be stored, passed, and returned on the host.
 
 Every function takes one argument. Empty parameter lists mean unit `()`; multiple parameters
-destructure a tuple. Calling `add(1, 2)` is the same as calling `add(pair)` when `pair = (1, 2)`.
+destructure a tuple. Calling `add(1, 2)` is the same as calling `add(pair)` after `var pair = (1, 2);`.
 Function types use the same arrow: `(int, int) -> int`.
 
 Files contain only function, foreign, and type declarations, after their export/import clauses.
 There are no global variables or executable top-level statements. Values and mutable state
 belong inside functions and are passed explicitly to helpers, by value or pointer.
-Local value bindings use `name = value;`; assignment uses `name := value`.
-Nominal types use `Name = Type;`, with explicit wrapping and unwrapping, one layer at a time.
+Local value bindings use `var name = value;`, or `var name: Type;` to reserve uninitialized storage.
+Assignment still uses `name := value`. Nominal types use `type Name = Type;`, with explicit
+wrapping and unwrapping, one layer at a time. Record initializers keep bare `name = value`
+fields, and parameters and record type fields keep bare `name: Type` declarations.
 Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
 Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and bracket
 arguments use `Name {...}` and `Converter [...]`. These spaces are a convention, not required syntax.
@@ -134,8 +136,8 @@ format string and a tuple of values, not C-style variadic arguments.
 ```resin
 export { main };
 
-main() -> () = {
-    n = 42;
+def main() -> () = {
+    var n = 42;
     print("x = {0}\n", (n,));
     print("{1}, {0}; literal {{braces}}\n", (n, "hello"));
     print("done\n", ());
@@ -163,7 +165,7 @@ Each file has its own scope. An optional `export` clause comes first, followed b
 export { answer };
 import { "helpers.resin", "std/status.resin" };
 
-answer() -> int = { helper() };
+def answer() -> int = { helper() };
 ```
 
 Imports bring only the dependency's exported names into the file's flat namespace. Without
@@ -178,7 +180,7 @@ file is loaded once. Imports never execute code. Import cycles are errors; mutua
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `if`, `else`, and `while`), primitive
+Syntax keywords (`export`, `import`, `extern`, `type`, `def`, `var`, `if`, `else`, and `while`), primitive
 type names, and `Ptr`/`Span` are reserved, including in parameters and field names. Names such
 as `if_value` are ordinary identifiers. `print` and `shader` are unshadowable compiler builtins,
 not syntax keywords: definitions and parameters cannot use those names, but record fields can.
@@ -203,9 +205,9 @@ Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter,
 export { main };
 import { "std/gpu.resin" };
 
-main() -> () = {
-    gpu = Ptr<ResinGpu>(ulong(0));
-    status = resin_gpu_create(&gpu);
+def main() -> () = {
+    var gpu = Ptr<ResinGpu>(ulong(0));
+    var status = resin_gpu_create(&gpu);
     print("GPU creation status: {0}\n", (status,));
     if (status == 0) { resin_gpu_destroy(gpu) } else { () };
 };
@@ -220,7 +222,7 @@ directly or wrapping them in Resin functions. For example:
 export { ResinGpu, resin_gpu_create };
 
 extern type ResinGpu;
-extern "resin_runtime.h" resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
+extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 ```
 
 Foreign headers use the C compiler's include search paths (or an absolute path).
@@ -239,7 +241,7 @@ integer; pointer differences and offsets into opaque foreign types are not suppo
 Pointer arithmetic and dereferences are unchecked: keep them within the allocation and aligned.
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. String literals are NUL-terminated; pass their storage with a
-byte-pointer cast, such as `Ptr<ubyte>(&path)` for `path = "triangle.png"`.
+byte-pointer cast, such as `Ptr<ubyte>(&path)` for `var path = "triangle.png";`.
 
 ## Loops
 
@@ -248,9 +250,9 @@ byte-pointer cast, such as `Ptr<ubyte>(&path)` for `path = "triangle.png"`.
 ```resin
 export { main };
 
-main() -> () = {
-    n = 1;
-    sum = 0;
+def main() -> () = {
+    var n = 1;
+    var sum = 0;
     while (n <= 10) {
         sum := sum + n;
         n := n + 1;
@@ -283,9 +285,9 @@ The only GPU-specific compiler intrinsic is `shader`:
 ```resin
 export { main };
 
-kernel(index: uint) -> uint = { uint(0xff400000) | (index & uint(0xffff)) };
-main() -> () = {
-    code = shader(kernel, "compute");
+def kernel(index: uint) -> uint = { uint(0xff400000) | (index & uint(0xffff)) };
+def main() -> () = {
+    var code = shader(kernel, "compute");
     print("shader size: {0} bytes\n", (code.length,));
 };
 ```
@@ -304,11 +306,11 @@ Shaders receive application data through the root address passed to `resin_gpu_d
 `resin_gpu_draw`. Add a typed pointer as the second tuple element:
 
 ```resin
-Params = { count: uint, values: Ptr<float32>, scale: float32 };
+type Params = { count: uint, values: Ptr<float32>, scale: float32 };
 
-kernel(index: uint, root: Ptr<Params>) -> () = {
+def kernel(index: uint, root: Ptr<Params>) -> () = {
     if (index < root.count) {
-        p = root.values + index;
+        var p = root.values + index;
         p.* := p.* * root.scale;
         ()
     } else { () }

@@ -1,27 +1,27 @@
 export { Particle, Params, advance, kernel, vertex, fragment };
 import { "std/graphics.resin" };
 
-Particle = { x: float32, y: float32, vx: float32, vy: float32, color: Color };
-Params = { count: uint, dt: float32, radius: float32, particles: Ptr<Particle> };
+type Particle = { x: float32, y: float32, vx: float32, vy: float32, color: Color };
+type Params = { count: uint, dt: float32, radius: float32, particles: Ptr<Particle> };
 
-advance(p: Ptr<Particle>, dt: float32) -> () = {
+def advance(p: Ptr<Particle>, dt: float32) -> () = {
     p.x := p.x + p.vx * dt;
     p.y := p.y + p.vy * dt;
     if (p.x > float32(0.9) || p.x < float32(-0.9)) { p.vx := -p.vx; () } else { () };
     if (p.y > float32(0.9) || p.y < float32(-0.9)) { p.vy := -p.vy; () } else { () };
 };
 
-kernel(index: uint, root: Ptr<Params>) -> () = {
+def kernel(index: uint, root: Ptr<Params>) -> () = {
     if (index < root.count) { advance(root.particles + index, root.dt) } else { () }
 };
 
-vertex(index: int, root: Ptr<Params>) -> Vertex = {
-    particle = 0;
-    corner = index;
+def vertex(index: int, root: Ptr<Params>) -> Vertex = {
+    var particle = 0;
+    var corner = index;
     while (corner >= 3) { corner := corner - 3; particle := particle + 1; };
-    p = root.particles + particle;
-    dx = float32(0.0);
-    dy = -root.radius;
+    var p = root.particles + particle;
+    var dx = float32(0.0);
+    var dy = -root.radius;
     if (corner == 1) { dx := -root.radius; dy := root.radius; () } else {
         if (corner == 2) { dx := root.radius; dy := root.radius; () } else { () }
     };
@@ -31,4 +31,4 @@ vertex(index: int, root: Ptr<Params>) -> Vertex = {
     }
 };
 
-fragment(color: Color) -> Color = { color };
+def fragment(color: Color) -> Color = { color };
