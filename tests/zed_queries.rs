@@ -77,6 +77,12 @@ fn inference_holes_are_highlighted_as_types() {
 }
 
 #[test]
+fn defer_is_highlighted_as_a_keyword() {
+    let source = "def f() = { defer { print(\"done\", ()); }; };";
+    assert!(captures(QUERIES[0].1, source).contains(&("keyword".into(), "defer".into())));
+}
+
+#[test]
 fn queries_capture_resin_constructs() {
     let source = "export { main, Number }; import { \"std/core.resin\" };\n\
         extern type Handle; extern \"lib.h\" def native (arg: int) -> int;\n\

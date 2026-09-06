@@ -245,6 +245,29 @@ impl Scopes {
         }
     }
 
+    pub(super) fn update_initialization(&mut self, other: &Self) {
+        let states: HashMap<_, _> = other
+            .frames
+            .iter()
+            .flat_map(|frame| frame.values.values())
+            .filter_map(|binding| match binding.kind {
+                ValueBindingKind::Local(local) => Some((local, binding.initialization)),
+                ValueBindingKind::Function(_) => None,
+            })
+            .collect();
+        for binding in self
+            .frames
+            .iter_mut()
+            .flat_map(|frame| frame.values.values_mut())
+        {
+            if let ValueBindingKind::Local(local) = binding.kind
+                && let Some(&state) = states.get(&local)
+            {
+                binding.initialization = state;
+            }
+        }
+    }
+
     fn innermost(&mut self) -> &mut Scope {
         self.frames.last_mut().expect("scope stack is never empty")
     }

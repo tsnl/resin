@@ -72,7 +72,7 @@ export default grammar({
   word: ($) => $.lid,
   reserved: {
     global: ($) => [
-      "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while", "match",
+      "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while", "match", "defer",
       ...BUILTIN_TYPES, ...TYPE_FORMERS,
     ],
   },
@@ -120,6 +120,7 @@ export default grammar({
     statement: ($) =>
       choice(
         field("struct", $.struct_definition),
+        seq("defer", field("defer", $.block_body), ";"),
         seq(field("define", $.define), ";"),
         seq("var", field("declare", $.declare), ";"),
         seq(field("expr", $.term), ";"),

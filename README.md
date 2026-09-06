@@ -207,11 +207,44 @@ Helpers using Result and match also compile to GLSL. C uses a tag and a union of
 payloads; GLSL uses separate payload fields because it has no native union type.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
-`?` does not release resources or run deferred cleanup. The standard library's
-`status(code)` converts native status integers to `Result<(), RuntimeError>`;
-`RuntimeError` retains its numeric `code`. Existing `check(code)` still exits on failure.
-Resource-owning callers must handle errors and release resources explicitly before
-returning; changing `check` to `?` alone would skip their cleanup.
+The standard library's `status(code)` converts native status integers to
+`Result<(), RuntimeError>`; `RuntimeError` retains its numeric `code`.
+Register resource cleanup with `defer` before using further fallible operations.
+
+### Deferred cleanup
+
+```resin
+def work(fail: bool) -> Result<int, _> = {
+    var value = allocate()?;
+    defer { free(Ptr<ubyte>(value)); };
+    value.* := 42;
+    fail_if(fail)?;
+    ok(value.*)
+};
+```
+
+The complete [defer example](examples/defer.resin) defines `allocate`, `free`, and
+the fallible `fail_if` helper above. Run `cargo run -- examples/defer.resin` for success,
+or `cargo run -- examples/defer.resin:failure` to see cleanup before an error exits.
+
+`defer { ... };` registers a unit-valued block in the current lexical scope.
+Only registrations reached during execution run. They execute in reverse order on
+normal scope exit and early return through `?`, inner scopes before outer ones.
+A loop body's defers run at the end of each iteration, not at function exit.
+Nested defers follow the same rules.
+
+Names resolve where the defer is registered, but values are read when cleanup runs.
+Later shadowing does not change the referenced binding. Reads must be definitely
+initialized on every exit that executes the defer. The block's result or propagated
+error is saved before cleanup, so mutations do not change the value being returned.
+Returning a pointer does not copy its pointee: do not free memory that escapes.
+
+Deferred blocks cannot use `?`; handle failures locally with `match`. Cleanup is
+ordinary code, not automatic ownership management, and works in C and GLSL wherever
+the deferred operations are supported. Aborts, traps, and process termination do not
+run defers. The standard library's existing `check(code)` exits the process on failure
+and therefore bypasses cleanup; use `status(code)?` in new resource-owning callers.
+Existing graphics examples still use explicit cleanup and `check`.
 
 ## Build and run
 
@@ -321,7 +354,7 @@ file is loaded once. Imports never execute code. Import cycles are errors; mutua
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`, `else`, `while`, and `match`), primitive
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`, `else`, `while`, `match`, and `defer`), primitive
 type names, `Never`, and `Ptr`/`Span`/`Result` are reserved, including in parameters and field names. Names such
 as `if_value` are ordinary identifiers. `print`, `shader`, `ok`, and `err` are unshadowable compiler builtins,
 not syntax keywords: definitions and parameters cannot use those names, but record fields can.

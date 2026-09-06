@@ -1,0 +1,21 @@
+==================
+Deferred blocks
+==================
+
+def main() = {
+    defer {};
+    defer { defer {}; };
+};
+
+---
+
+(source_file
+  (function_definition
+    (lid)
+    (block_body
+      (statement
+        (block_body))
+      (statement
+        (block_body
+          (statement
+            (block_body)))))))

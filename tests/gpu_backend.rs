@@ -324,6 +324,48 @@ fn shader_results_propagate_and_match_union_payloads_on_device() {
     );
 }
 
+#[test]
+fn shader_defer_preserves_values_and_runs_each_iteration() {
+    compute_values(
+        "export { kernel }; def kernel(i: uint) -> uint = { var n = uint(0); var total = uint(0); var saved = { defer { total := total * uint(2); }; while (n < i) { defer { total := total + n; }; n := n + uint(1); }; total }; saved + total };",
+        |index| 3 * index * (index + 1) / 2,
+    );
+}
+
+#[test]
+fn shader_defer_unwinds_errors_on_device() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        struct Odd { index: uint };
+        def checked(i: uint) -> Result<uint, Odd> = {
+            if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) }
+        };
+        def work(i: uint, p: Ptr<uint>) -> Result<uint, _> = {
+            defer { p.* := p.* * uint(10) + uint(3); };
+            var n = {
+                defer { p.* := p.* * uint(10) + uint(2); };
+                var value = checked(i)?;
+                defer { p.* := uint(1); };
+                value
+            };
+            ok(n)
+        };
+        def kernel(i: uint, root: Ptr<Root>) = {
+            if (i < root.count) {
+                var p = root.pixels + i;
+                p.* := uint(0);
+                match (work(i, p)) {
+                    ok(n) => { p.* := p.* + n; },
+                    err(e) => { p.* := p.* + e.index; },
+                };
+                ()
+            } else { () }
+        };"#,
+        |index| index + if index % 2 == 1 { 23 } else { 123 },
+    );
+}
+
 fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let Some(compiler) = shaders::compiler() else {
         return;

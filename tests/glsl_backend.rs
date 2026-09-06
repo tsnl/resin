@@ -16,6 +16,18 @@ fn example(name: &str) -> ir::Module {
 }
 
 #[test]
+fn defer_lowers_to_shader_control_flow_including_error_exits() {
+    let m = module(
+        "export { kernel }; struct E {}; struct Root { trace: uint }; def fail() -> Result<uint, E> = { err(E {}) }; def work(i: uint, root: Ptr<Root>) -> Result<uint, _> = { defer { root.trace := root.trace + uint(1); }; var n = fail()?; ok(n + i) }; def kernel(i: uint, root: Ptr<Root>) = { match (work(i, root)) { ok(n) => { root.trace := n; }, err(e) => {} }; };",
+    );
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    if let Some(compiler) = shaders::compiler() {
+        toolchain::compile_glsl(&source, Stage::Compute, &compiler)
+            .unwrap_or_else(|error| panic!("{error}\n{source}"));
+    }
+}
+
+#[test]
 fn shader_helpers_can_propagate_and_handle_results() {
     let m = module(
         "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; def kernel(i: uint) -> uint = { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } };",

@@ -9,7 +9,11 @@ mod support;
 use support::module;
 
 fn run_module(module: &ir::Module) -> std::process::Output {
-    let source = c::emit(module, "main").unwrap();
+    run_entry(module, "main")
+}
+
+fn run_entry(module: &ir::Module, entry: &str) -> std::process::Output {
+    let source = c::emit(module, entry).unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let output = temp
         .path()
@@ -20,6 +24,32 @@ fn run_module(module: &ir::Module) -> std::process::Output {
     Command::new(output).output().unwrap()
 }
 
+#[test]
+fn defer_example_releases_memory_on_success_and_failure() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/defer.resin");
+    let m = ir::generate_program(&resin::ast::load(&path).unwrap()).unwrap();
+    let success = run_entry(&m, "main");
+    assert!(
+        success.status.success(),
+        "{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&success.stdout).replace("\r\n", "\n"),
+        "freed memory\nanswer = 42\n"
+    );
+    let failure = run_entry(&m, "failure");
+    assert_eq!(failure.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&failure.stdout).replace("\r\n", "\n"),
+        "freed memory\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&failure.stderr).replace("\r\n", "\n"),
+        "unhandled error: Failed\n"
+    );
+}
+
 fn runs(source: &str, code: i32) {
     let output = run_module(&module(source));
     assert_eq!(
@@ -27,6 +57,70 @@ fn runs(source: &str, code: i32) {
         Some(code),
         "{source}\n{}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn defer_runs_in_reverse_order_and_preserves_return_values() {
+    runs(
+        "export { main }; def work(p: Ptr<int>) -> int = { var n = 42; defer { n := 99; }; defer { p.* := p.* * 10 + 1; }; defer { p.* := p.* * 10 + 2; }; n }; def main() -> int = { var trace = 0; var result = work(&trace); if (trace == 21 && result == 42) { 0 } else { 1 } };",
+        0,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; var result = { var n = 1; defer { trace := n; }; n := 42; n }; trace + result };",
+        84,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; { defer { trace := trace * 10 + 3; }; defer { defer { trace := trace * 10 + 2; }; trace := trace * 10 + 1; }; () }; trace };",
+        123,
+    );
+}
+
+#[test]
+fn defer_keeps_lexical_bindings_through_shadowing_and_branches() {
+    runs(
+        "export { main }; def main() -> int = { var x = 1; var trace = 0; { defer { trace := x; }; var x = 100; x := 200; () }; trace };",
+        1,
+    );
+    runs(
+        "export { main }; struct E {}; def work(p: Ptr<int>) -> Result<(), E> = { var x = 42; defer { p.* := x; }; { var x = 100; var r: Result<(), E>; r := err(E {}); r?; () }; ok(()) }; def main() -> int = { var n = 0; work(&n); n };",
+        42,
+    );
+    runs(
+        "export { main }; def main() -> int = { var n: int; { defer { n := 42; }; var n: int; () }; n };",
+        42,
+    );
+}
+
+#[test]
+fn defer_registers_per_scope_and_loop_iteration() {
+    runs(
+        "export { main }; def main() -> int = { var n = 0; var trace = 0; while (n < 3) { defer { trace := trace * 10 + n; }; n := n + 1; }; trace };",
+        123,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; if (1 == 1) { defer { trace := 42; }; () } else { defer { trace := 99; }; () }; trace };",
+        42,
+    );
+    runs(
+        "export { main }; struct E {}; def main() -> int = { var trace = 0; var r: Result<int, E>; r := err(E {}); match (r) { ok(n) => { defer { trace := 99; }; }, err(e) => { defer { trace := 42; }; } }; trace };",
+        42,
+    );
+}
+
+#[test]
+fn defer_unwinds_only_registered_actions_on_question_mark() {
+    runs(
+        "export { main }; struct E { code: int }; def fail() -> Result<int, E> = { err(E { code = 7 }) }; def add(a: int, b: int) -> int = { a + b }; def work(p: Ptr<int>) -> Result<int, _> = { defer { p.* := p.* * 10 + 3; }; var n = { defer { p.* := p.* * 10 + 2; }; var a = add(p.* := 1, fail()?); defer { p.* := 99; }; a }; ok(n) }; def main() -> int = { var trace = 0; match (work(&trace)) { ok(n) => { 1 }, err(e) => { if (trace == 123 && e.code == 7) { 0 } else { 2 } } } };",
+        0,
+    );
+    runs(
+        "export { main }; struct E { code: int }; def work(p: Ptr<int>, r: Result<int, E>) -> Result<int, E> = { defer { p.* := p.* + 1; }; var x = r?; defer { p.* := p.* + 10; }; ok(x) }; def main() -> int = { var n = 0; work(&n, err(E { code = 7 })); work(&n, ok(42)); n };",
+        12,
+    );
+    runs(
+        "export { main }; struct E { code: int }; def work() -> Result<int, E> = { var e = E { code = 42 }; defer { e.code := 99; }; err(e) }; def main() -> int = { match (work()) { ok(n) => { 1 }, err(e) => { e.code } } };",
+        42,
     );
 }
 

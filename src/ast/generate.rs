@@ -216,6 +216,14 @@ impl<'a> AstGen<'a> {
             );
         }
         assert_eq!(node.kind(), "statement");
+        if let Some(body) = node.child_by_field_name("defer") {
+            return Spanned::new(
+                StmtKind::Defer {
+                    body: Arc::new(self.gen_body(body)),
+                },
+                self.span(node),
+            );
+        }
         if let Some(define) = node.child_by_field_name("define") {
             let mut stmt = self.gen_define(define, self.span(node));
             if let StmtKind::Define { init, .. } = &mut stmt.val {

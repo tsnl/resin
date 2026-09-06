@@ -17,7 +17,10 @@ Foreign bindings can be exported directly when no wrapper is useful. Native decl
 remain unchecked: callers must uphold pointer validity, lifetimes, and buffer sizes. Importing
 a module does not re-export its dependencies. `print`, `shader`, `ok`, and `err` are unshadowable compiler builtins.
 
-Use `status(native_call(...))?` in a Result-returning function when no resources need
-cleanup, or handle the error explicitly and release resources before returning it.
-Postfix `?` does not implement resource cleanup; existing resource examples retain `check`
-until their ownership and cleanup paths can be changed together.
+Use `status(native_call(...))?` in a Result-returning function. After each successful
+resource acquisition, register its release with `defer { ... };` before another fallible
+operation. Cleanup runs in reverse order on scope exit, including through `?`.
+Deferred blocks must handle errors locally; they cannot propagate with `?` themselves.
+Keep GPU resources live until pending work completes, and avoid releasing handles whose
+ownership was transferred. The existing `check` helper terminates the process on failure,
+bypassing defers; existing graphics examples still use it with explicit cleanup.

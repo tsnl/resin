@@ -129,6 +129,7 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             vec![symbol(name.val.as_ref()), sexp_typespec(ann)],
         ),
         StmtKind::Expr { term } => list_sp("expr", stmt.span, vec![sexp_term(term)]),
+        StmtKind::Defer { body } => list_sp("defer", stmt.span, vec![sexp_term(body)]),
     }
 }
 

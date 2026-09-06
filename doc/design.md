@@ -29,7 +29,14 @@ Unions are canonical sets of nominal structs, with program-local u32 tags indepe
 membership. `Result<T, E>` is first-class, including nested Results. `ok` and `err` construct its
 branches; exhaustive `match` expressions bind payloads, and postfix `?` returns errors early.
 An inferred error set is the least union of errors propagated by a dependency group, or `Never`
-when empty. Early return does not provide automatic resource cleanup.
+when empty.
+
+`defer { ... };` registers a unit-valued block for lexical scope exit, including early
+returns through `?`. Cleanup runs in reverse registration order, only for registrations
+reached on that path. Names bind at registration; local values and initialization facts
+are read at exit. Return values are saved before cleanup. Deferred blocks may nest, but
+cannot themselves propagate errors. This is explicit cleanup, not an ownership system;
+process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
@@ -67,6 +74,10 @@ node-keyed results guide lowering; inference variables never enter the IR. A gen
 interleave scope resolution, typing, evaluation, and emission without coupling the reusable typing
 rules to a particular backend. Errors propagate
 immediately and compilation stops after the first useful diagnostic.
+
+Deferred bodies retain their AST identities and lexical environments. Lowering emits them
+at normal and error exits, using current initialization facts keyed by local ID rather than
+name. This keeps shadowing correct and introduces no new IR instructions or backend machinery.
 
 The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks
 belong to `types::definitions`, shared by the typer and verifier. The typer separates definition

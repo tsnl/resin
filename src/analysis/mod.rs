@@ -531,6 +531,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "match (value) { Variant(name) => { body }, ... }",
         DefinitionKind::Keyword,
     ),
+    (
+        "defer",
+        "defer { cleanup; }; — run at scope exit, including through ?, in reverse registration order.",
+        DefinitionKind::Keyword,
+    ),
     ("bool", "bool", DefinitionKind::Type),
     (
         "sbyte",

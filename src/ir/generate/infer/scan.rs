@@ -101,6 +101,10 @@ impl Scan {
                         StmtKind::DefineType { init, .. } => self.ty(init),
                         StmtKind::Struct { body, .. } => self.ty(body),
                         StmtKind::Expr { term } => self.term(term),
+                        StmtKind::Defer { body } => {
+                            self.needed = true;
+                            self.term(body);
+                        }
                         _ => {}
                     }
                 }

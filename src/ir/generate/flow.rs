@@ -77,10 +77,13 @@ impl Generator {
         expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
         self.scopes.push();
+        self.defers.push(vec![]);
         for stmt in stmts {
             self.gen_stmt(stmt)?;
         }
         let ty = self.gen_term(tail, expected)?;
+        self.cleanup(self.defers.len() - 1, &ty)?;
+        self.defers.pop();
         self.scopes.pop();
         Ok(self.typer.type_block(&ty))
     }

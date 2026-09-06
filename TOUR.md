@@ -43,6 +43,8 @@ A few language choices explain much of the implementation:
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of nominal structs. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
+- `defer { ... };` runs registered cleanup in reverse order on scope exit, including
+  through `?`. It does not introduce automatic ownership or destruction.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default
@@ -131,7 +133,7 @@ registry. [rules.rs](src/ir/typer/rules.rs) describes operations on types, while
 
 [ir/generate/mod.rs](src/ir/generate/mod.rs) orchestrates source-to-IR lowering.
 It establishes types and function signatures before lowering function bodies.
-For functions containing explicit holes or Result operations, [infer/](src/ir/generate/infer/)
+For functions containing explicit holes, Result operations, or defers, [infer/](src/ir/generate/infer/)
 first collects constraints and resolves them in dependency groups. Start with
 [solver.rs](src/ir/generate/infer/solver.rs) for inference variables and
 unification and error-set inclusion, then [check.rs](src/ir/generate/infer/check.rs) and
@@ -152,6 +154,7 @@ The neighboring files separate the questions asked during that process:
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
 | How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |
+| How does deferred cleanup retain bindings and run at scope exits? | [cleanup.rs](src/ir/generate/cleanup.rs) |
 | How are blocks, locals, and instructions assembled? | [builder.rs](src/ir/generate/builder.rs) |
 
 The distinction between a value and a place is worth following through one
@@ -306,6 +309,7 @@ Tests are executable descriptions of the boundaries above:
 | Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
 | Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
+| Deferred cleanup, scope exits, and initialization | [defer.rs](tests/defer.rs), [defer example](examples/defer.resin), [C execution tests](tests/c_backend.rs) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
 | Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |

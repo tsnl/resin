@@ -112,8 +112,12 @@ local and return annotations. Rebuild `resin-lsp` and reinstall the dev extensio
 after updating. Parser, query, and stdio regressions cover the new syntax and
 inferred hover types without launching an editor.
 
-The current pin at `847bc7a` adds nominal `struct` declarations, transparent `type`
+The grammar revision at `847bc7a` added nominal `struct` declarations, transparent `type`
 aliases, `A | B` unions, `Result<T, E>`, postfix `?`, and exhaustive `match` arms.
 Queries highlight the new syntax and include structs in the outline; semantic tests
 cover inferred error sets and match-payload navigation/completion. Rebuild the language
 server and reinstall the dev extension together. No new editor smoke test was run.
+
+The grammar now also supports scoped `defer { ... };` statements. Parser and query tests
+cover the keyword and block syntax; compiler analysis tests cover deferred bindings,
+inferred local types, and navigation. No window or editor was opened for this change.

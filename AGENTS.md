@@ -24,8 +24,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix
   `?` returns early on error. Error holes collect the least union of propagated errors (`Never`
   if empty). Keep mutable pointers invariant; implicit widening only copies union/Result values.
-- `?` does not clean up resources. Preserve explicit cleanup when adapting runtime callers;
-  do not mechanically replace exit-on-failure `check` calls with early returns.
+- `defer { ... };` registers unit-valued cleanup in the current lexical scope, in reverse
+  order on normal exit and `?`. Bind names at registration, read values at exit, and preserve
+  the returned value before cleanup. Deferred blocks cannot propagate with `?`.
+  Register cleanup after successful acquisition when adapting runtime callers to `status(...)?`;
+  exit-on-failure `check` bypasses defers. There is no automatic resource ownership.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and

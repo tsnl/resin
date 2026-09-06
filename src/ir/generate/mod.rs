@@ -7,6 +7,7 @@ use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, V
 
 mod bindings;
 mod builder;
+mod cleanup;
 mod error;
 mod eval;
 mod flow;
@@ -50,6 +51,8 @@ struct Generator {
     function: Option<FunctionBuilder>,
     scopes: Scopes,
     inferred: infer::Inferred,
+    defers: Vec<Vec<cleanup::Deferred>>,
+    in_defer: bool,
 }
 
 impl Generator {
@@ -60,6 +63,8 @@ impl Generator {
             function: None,
             scopes: Scopes::new(),
             inferred: infer::Inferred::default(),
+            defers: vec![],
+            in_defer: false,
         }
     }
 
@@ -68,7 +73,10 @@ impl Generator {
         for stmt in &file.stmts {
             if matches!(
                 stmt.val,
-                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. }
+                StmtKind::Define { .. }
+                    | StmtKind::Declare { .. }
+                    | StmtKind::Expr { .. }
+                    | StmtKind::Defer { .. }
             ) {
                 return Err(GenerateError {
                     span: stmt.span,
@@ -156,6 +164,10 @@ impl Generator {
             StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
             StmtKind::Struct { name, body } => self.gen_struct(name, body),
             StmtKind::Declare { name, ann } => self.gen_declare(name, ann),
+            StmtKind::Defer { body } => {
+                self.defer(body.clone());
+                Ok(())
+            }
             StmtKind::Expr { term } => {
                 self.gen_term(term, None)?;
                 self.emit(Instr::Discard);
@@ -246,6 +258,17 @@ impl Generator {
 
     fn alloc_local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
         self.function().local(ty, name)
+    }
+
+    fn save_top(&mut self, ty: &Ty) -> LocalId {
+        let local = self.alloc_local(ty.clone(), None);
+        self.emit(Instr::SetLocal { local });
+        local
+    }
+
+    fn load_local(&mut self, local: LocalId) {
+        self.emit(Instr::LocalAddress { local });
+        self.emit(Instr::Load);
     }
 
     fn emit(&mut self, instr: Instr) {

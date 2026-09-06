@@ -599,6 +599,27 @@
           "type": "SEQ",
           "members": [
             {
+              "type": "STRING",
+              "value": "defer"
+            },
+            {
+              "type": "FIELD",
+              "name": "defer",
+              "content": {
+                "type": "SYMBOL",
+                "name": "block_body"
+              }
+            },
+            {
+              "type": "STRING",
+              "value": ";"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
               "type": "FIELD",
               "name": "define",
               "content": {
@@ -2834,6 +2855,10 @@
       {
         "type": "STRING",
         "value": "match"
+      },
+      {
+        "type": "STRING",
+        "value": "defer"
       },
       {
         "type": "STRING",

@@ -1,5 +1,5 @@
 use crate::ast::{MatchArm, MatchVariant, Span, Term};
-use crate::ir::{Instr, LocalId, Terminator, Ty, Value};
+use crate::ir::{Instr, Terminator, Ty, Value};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
 use super::{GenerateError, Generator, infer::error};
@@ -47,6 +47,12 @@ impl Generator {
     }
 
     pub(super) fn gen_try(&mut self, span: Span, term: &Term) -> Result<Ty, GenerateError> {
+        if self.in_defer {
+            return Err(error(
+                span,
+                "postfix ? is not allowed in a deferred block; handle the error locally",
+            ));
+        }
         let ty = self.gen_term(term, None)?;
         let Ty::Result {
             value,
@@ -89,8 +95,14 @@ impl Generator {
         self.load_local(saved);
         self.emit(Instr::VariantPayload { tag: 1 });
         self.coerce(span, *errors.clone(), target)?;
-        self.emit(Instr::MakeVariant { ty: result, tag: 1 });
+        self.emit(Instr::MakeVariant {
+            ty: result.clone(),
+            tag: 1,
+        });
+        let before_cleanup = self.scopes.clone();
+        self.cleanup(0, &result)?;
         self.terminate(Terminator::Return);
+        self.scopes = before_cleanup;
         self.switch(success);
         self.load_local(saved);
         self.emit(Instr::VariantPayload { tag: 0 });
@@ -196,16 +208,5 @@ impl Generator {
         self.scopes = after.unwrap();
         self.switch(join);
         Ok(result.unwrap())
-    }
-
-    fn save_top(&mut self, ty: &Ty) -> LocalId {
-        let local = self.alloc_local(ty.clone(), None);
-        self.emit(Instr::SetLocal { local });
-        local
-    }
-
-    fn load_local(&mut self, local: LocalId) {
-        self.emit(Instr::LocalAddress { local });
-        self.emit(Instr::Load);
     }
 }

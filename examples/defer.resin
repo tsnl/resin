@@ -1,0 +1,39 @@
+export { main, failure };
+
+extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
+extern "stdlib.h" def free(memory: Ptr<ubyte>);
+
+struct OutOfMemory {};
+struct Failed {};
+
+def allocate() -> Result<Ptr<int>, OutOfMemory> = {
+    var memory = malloc(ulong(4));
+    if (ulong(memory) == ulong(0)) { err(OutOfMemory {}) }
+    else { ok(Ptr<int>(memory)) }
+};
+
+def fail_if(fail: bool) -> Result<(), Failed> = {
+    if (fail) { err(Failed {}) } else { ok(()) }
+};
+
+def work(fail: bool) -> Result<int, _> = {
+    var value = allocate()?;
+    defer {
+        free(Ptr<ubyte>(value));
+        print("freed memory\n", ());
+    };
+    value.* := 42;
+    fail_if(fail)?;
+    ok(value.*)
+};
+
+def main() -> Result<(), _> = {
+    var answer = work(1 == 0)?;
+    print("answer = {0}\n", (answer,));
+    ok(())
+};
+
+def failure() -> Result<(), _> = {
+    work(1 == 1)?;
+    ok(())
+};

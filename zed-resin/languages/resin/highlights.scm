@@ -4,7 +4,7 @@
 (inferred_type) @type.builtin
 ["Ptr" "Span" "Result"] @type.builtin
 
-["export" "import" "extern" "type" "struct" "def" "var" "if" "else" "while" "match"] @keyword
+["export" "import" "extern" "type" "struct" "def" "var" "if" "else" "while" "match" "defer"] @keyword
 
 (function_definition name: (lid) @function)
 (foreign_function name: (lid) @function)

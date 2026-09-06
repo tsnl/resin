@@ -75,7 +75,7 @@ fn generate_program_with(
                 | StmtKind::DefineType { name, .. }
                 | StmtKind::Struct { name, .. }
                 | StmtKind::Declare { name, .. } => name,
-                StmtKind::Expr { .. } => continue,
+                StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
             };
             let origin = Origin {
                 module: index,

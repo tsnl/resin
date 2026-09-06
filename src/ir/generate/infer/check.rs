@@ -27,6 +27,7 @@ pub(super) struct Checker<'a> {
     pub definitions: HashMap<*const Ident, TypeId>,
     pub constraints: Vec<(Span, Constraint)>,
     pub result: Type,
+    in_defer: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -42,6 +43,7 @@ impl<'a> Checker<'a> {
             definitions: HashMap::new(),
             constraints: vec![],
             result: Ty::Unit.into(),
+            in_defer: false,
         }
     }
 
@@ -149,6 +151,12 @@ impl<'a> Checker<'a> {
             }
             TermKind::Unit => equate = Some(Ty::Unit.into()),
             TermKind::Try { value } => {
+                if self.in_defer {
+                    return Err(error(
+                        span,
+                        "postfix ? is not allowed in a deferred block; handle the error locally",
+                    ));
+                }
                 let input = self.term(value, None)?;
                 let (value, errors) = self.result_parts(&input, span)?;
                 let (_, target_errors) = self.result_parts(&self.result.clone(), span)?;
@@ -244,6 +252,11 @@ impl<'a> Checker<'a> {
                         }
                         StmtKind::Expr { term } => {
                             self.term(term, None)?;
+                        }
+                        StmtKind::Defer { body } => {
+                            let before = std::mem::replace(&mut self.in_defer, true);
+                            self.term(body, Some(Ty::Unit.into()))?;
+                            self.in_defer = before;
                         }
                         _ => {
                             return Err(error(

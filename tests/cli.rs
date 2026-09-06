@@ -76,6 +76,20 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 }
 
 #[test]
+fn defer_runs_when_native_status_propagates_to_the_entry() {
+    let output = cli(
+        "export { main }; import { \"std/status.resin\" }; def main() -> Result<(), _> = { status(0)?; defer { print(\"cleanup\\n\", ()); }; status(8)?; defer { print(\"not reached\\n\", ()); }; ok(()) };",
+        &[],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        "cleanup\n"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: RuntimeError"));
+}
+
+#[test]
 fn default_output_builds_in_cwd_and_runs() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let sources = temp.path().join("sources");
