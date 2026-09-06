@@ -13,7 +13,12 @@ pub(super) const RUNTIME_ARCHIVE: &str = "resin_runtime.lib";
 #[cfg(not(target_env = "msvc"))]
 pub(super) const C_FLAGS: &[&str] = &[];
 #[cfg(target_env = "msvc")]
-pub(super) const C_FLAGS: &[&str] = &["-fms-runtime-lib=dll", "-D_CRT_SECURE_NO_WARNINGS"];
+pub(super) const C_FLAGS: &[&str] = &[
+    "-fms-runtime-lib=dll",
+    // Clang's GNU driver still injects libcmt when selecting the DLL runtime.
+    "-Wl,/NODEFAULTLIB:libcmt",
+    "-D_CRT_SECURE_NO_WARNINGS",
+];
 
 #[cfg(target_os = "linux")]
 pub(super) const LIBRARIES: &[&str] = &["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"];

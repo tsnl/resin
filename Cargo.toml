@@ -20,3 +20,7 @@ sexpfmt = "2"
 tree-sitter = "0.27"
 tree-sitter-resin = { path = "tree-sitter-resin" }
 resin-runtime = { path = "resin-runtime" }
+
+# Keep GLFW on the release CRT, matching Rust even in debug builds.
+[profile.dev.package.glfw-sys]
+opt-level = 1
