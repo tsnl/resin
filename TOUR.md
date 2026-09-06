@@ -4,18 +4,22 @@ Resin is a systems language for host CPUs and Vulkan GPUs. This is a reading
 path through its implementation, not a language reference; keep the
 [README](README.md) nearby for syntax and command-line options.
 
-The workspace has three Rust crates: the compiler at the root, the native
-runtime in [resin-runtime/](resin-runtime/), and the parser in
-[tree-sitter-resin/](tree-sitter-resin/). The [standard library](stdlib/) is
-written in Resin and wraps the runtime's C API.
+The workspace has four Rust crates: the compiler at the root, the native
+runtime in [resin-runtime/](resin-runtime/), the parser in
+[tree-sitter-resin/](tree-sitter-resin/), and the language server in
+[resin-lsp/](resin-lsp/). The [Zed extension](zed-resin/) is a separate Cargo
+workspace. The [standard library](stdlib/) is written in Resin and wraps the
+runtime's C API.
 
 ## 1. Start with a program
 
-Read [examples/eg001.resin](examples/eg001.resin), then run these commands
-from the repository root:
+Read [examples/eg001.resin](examples/eg001.resin). On Linux/macOS, enter
+`nix-shell` from the repository root first; [.envrc](.envrc) also loads that
+environment if you use direnv. On Windows, use the Visual Studio developer
+PowerShell and LLVM Clang setup in [Development](README.md#development).
+Then run these commands from the repository root:
 
 ```sh
-nix-shell
 cargo run -- examples/eg001.resin
 cargo run -- examples/eg001.resin --output ast
 cargo run -- examples/eg001.resin --output ir
@@ -53,7 +57,7 @@ cargo run -- examples/eg009_imports.resin:independent
 The main path is short enough to keep in mind:
 
 ```text
-source files -> Tree-sitter -> AST -> typed stack IR -> C -> cc -> executable
+source files -> Tree-sitter -> AST -> typed stack IR -> C -> C compiler -> executable
                                           |
                                           +-> GLSL -> glslc -> SPIR-V
 ```
@@ -63,10 +67,16 @@ host executable, which uses the runtime to create Vulkan pipelines and run them.
 
 ### The CLI connects the stages
 
-Start at `run` in [src/bin/resin.rs](src/bin/resin.rs). It loads the source,
-generates IR, and selects an output path. `host` handles C generation and
-native execution; `shader` handles standalone GLSL or SPIR-V output.
+Start at `run` in [src/bin/resin.rs](src/bin/resin.rs). It creates a
+[compiler::Session](src/compiler.rs), analyzes the source, and selects an
+output path. `host` handles C generation and native execution; `shader`
+handles standalone GLSL or SPIR-V output.
 [source.rs](src/bin/resin/source.rs) parses the `FILE[:ENTRY]` selector.
+
+The session owns source overlays, cached parses, import dependencies, and
+immutable [analysis snapshots](src/analysis/mod.rs). A snapshot exposes the
+AST, verified IR when compilation succeeds, and editor queries. The CLI uses
+one session for its invocation; the language server retains one across edits.
 
 The compiler stages are library modules exposed by [src/lib.rs](src/lib.rs),
 so tests can exercise them without invoking the CLI. Note that `--output check`
@@ -152,9 +162,16 @@ calling the selected Resin entry. [function.rs](src/backend/c/function.rs)
 lowers instructions and block edges; [foreign.rs](src/backend/c/foreign.rs)
 bridges Resin's unary calls to conventional C argument lists.
 
-[toolchain/c.rs](src/toolchain/c.rs) invokes the C compiler and links
-`libresin_runtime.a`. It also owns the native build cache, dependency tracking,
-and locks that keep concurrent builds and runs from interfering.
+[toolchain/c.rs](src/toolchain/c.rs) invokes the C compiler and statically links
+the runtime. [platform.rs](src/toolchain/platform.rs) selects the default
+compiler, archive name, flags, and system libraries: `cc` and
+`libresin_runtime.a` on Unix; GNU-style LLVM `clang` and `resin_runtime.lib`
+on Windows MSVC. Windows builds must keep Rust, GLFW, and emitted C on the
+same C runtime. Host-only programs need neither a Vulkan SDK nor a GPU.
+
+The C toolchain also owns the native build cache and locks that keep concurrent
+builds and runs from interfering. [dependencies.rs](src/toolchain/dependencies.rs)
+reads C compiler dependency files to track included headers.
 
 There are two artifact directories with different owners: Cargo builds the
 compiler and runtime under `target/`; Resin builds user programs under `build/`
@@ -162,7 +179,42 @@ in the caller's working directory. Default runs reuse an unoptimized native
 build. Requesting an executable with `-o` selects the optimized cache. This
 does not change Cargo's Rust profile.
 
-## 3. Follow a shader into the runtime
+## 3. Follow an editor change through the compiler
+
+Start again at [compiler::Session](src/compiler.rs). An editor supplies unsaved
+text through `set_overlay`, removes it with `remove_overlay`, and reports disk
+changes with `file_changed`. Overlays take precedence over disk. Changes
+invalidate dependent entries; retained snapshots remain valid for their readers.
+
+Within [analysis/](src/analysis/), [source.rs](src/analysis/source.rs) handles
+source lookup and path normalization, [syntax.rs](src/analysis/syntax.rs) caches
+ASTs and incrementally reparses Tree-sitter trees, and
+[semantic.rs](src/analysis/semantic.rs) records types and resolved references.
+Parsing is incremental per file; semantic checking still reruns an affected
+entry's entire import closure. This is separate from the native artifact cache.
+
+Incomplete code gets an editor AST with expression, type, and missing-field
+holes. [ir/generate/recover.rs](src/ir/generate/recover.rs) walks it using the
+compiler's scopes and type rules, preserving useful information after errors.
+Unknown types remain unknown, displayed as `?`; this pass emits no IR. Strict
+compilation still rejects incomplete programs, and its observations take
+precedence over recovered information.
+
+The [language server](resin-lsp/README.md) adapts that compiler state to the
+Language Server Protocol over stdio. [server.rs](resin-lsp/src/server.rs)
+handles requests, document versions, and file notifications;
+[text.rs](resin-lsp/src/text.rs) converts byte offsets to UTF-16 positions.
+[worker.rs](resin-lsp/src/worker.rs) runs the session in
+the background, coalesces edits, and discards obsolete results. Editor analysis
+never compiles C/GLSL, initializes a GPU, or executes Resin programs.
+
+Finally, [zed-resin/src/lib.rs](zed-resin/src/lib.rs) locates and launches the
+native server from Zed's WASI extension. Its [language queries](zed-resin/languages/resin/)
+provide highlighting, outlines, and other syntax features. See the
+[extension README](zed-resin/README.md) for installation and configuration;
+the extension builds separately from the main Cargo workspace.
+
+## 4. Follow a shader into the runtime
 
 Read [examples/gradient.resin](examples/gradient.resin) for compute, then
 [examples/triangle.resin](examples/triangle.resin) and
@@ -221,10 +273,13 @@ the compiler does not synthesize workgroup-local storage or barriers.
 
 Finally, [examples/particles.resin](examples/particles.resin) combines compute
 and graphics over a shared buffer, and [examples/window.resin](examples/window.resin)
-adds presentation. Actual GPU runs need a supported Linux Vulkan device; window
-runs also need a display. The headless image demos write PNGs in cwd.
+adds presentation. Builds target 64-bit Linux, macOS, and Windows, but actual
+GPU runs also need the Vulkan features checked in `gpu/device.rs`. On macOS,
+portability enumeration and MoltenVK discovery do not guarantee those features
+or presentation support. Window runs need a display; the headless image demos
+write PNGs in cwd.
 
-## 4. Find the test closest to your change
+## 5. Find the test closest to your change
 
 Tests are executable descriptions of the boundaries above:
 
@@ -234,20 +289,37 @@ Tests are executable descriptions of the boundaries above:
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
 | Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
-| Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs) |
+| Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
+| Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |
+| LSP protocol, buffer versions, or watched files | [stdio.rs](resin-lsp/tests/stdio.rs) |
+| Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
 | Shader generation or execution | [glsl_backend.rs](tests/glsl_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |
 
 [resin-runtime/tests/](resin-runtime/tests/) also exercises the native runtime
 with GLSL fixtures, independently of the Resin compiler. This is useful for
 separating a Vulkan runtime bug from a language or code-generation bug.
 
-For a focused host-only starting point, inside `nix-shell`:
+For a focused host-only starting point, in your development environment:
 
 ```sh
 cargo test -p resin --test modules --test c_backend
 ```
 
-For the full path, with Vulkan and a desktop display or Xvfb available:
+For editor work, without launching an editor or opening windows:
+
+```sh
+cargo test -p resin --lib --test analysis --test zed_queries
+cargo test -p resin-lsp
+```
+
+[Native CI](.github/workflows/build.yml) builds the workspace, runs a host
+example, tests, and lints on Linux, macOS, and Windows. It explicitly excludes
+window-opening tests; optional GPU checks can skip when facilities are absent.
+Passing this matrix establishes native build and host coverage, not full GPU
+compatibility.
+
+For the full GPU path, in a POSIX shell with a compatible Vulkan device and a
+desktop display or Xvfb available:
 
 ```sh
 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_WINDOW=1 \
