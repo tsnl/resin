@@ -40,11 +40,11 @@ to fail instead of skipping when windowing or presentation is unavailable.
 ## Functions and values
 
 ```resin
-fibonacci (n: int) -> int = {
+fibonacci(n: int) -> int = {
     if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
 };
 
-main () -> () = {
+main() -> () = {
     print("fibonacci(10) = {0}\n", (fibonacci(10),));
 };
 ```
@@ -60,6 +60,9 @@ Function types use the same arrow: `(int, int) -> int`.
 
 Value bindings use `name = value;`; assignment uses `name := value`.
 Nominal types use `Name = Type;`, with explicit wrapping and unwrapping, one layer at a time.
+Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
+Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and bracket
+arguments use `Name {...}` and `Converter [...]`. These spaces are a convention, not required syntax.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
 
 ## Build and run
@@ -71,18 +74,23 @@ cargo run -- examples/eg001.resin --output exe -o fibonacci
 cargo run -- examples/eg001.resin --output c -o fibonacci.c
 ```
 
-Resin builds in `build/<source-name>-<path-hash>/` under cwd and immediately runs the executable.
+Resin builds in `build/<source-name>-<path-hash>/debug/` under cwd and immediately runs the executable.
+Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an executable with
+`-o` uses `-O3` and the sibling `release/` cache. Both variants are retained, so switching between
+them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization;
+`-o` for textual output (such as `--output c`) only saves that output.
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Top-level value initialization runs in source order, followed by an optional
-`main () -> int` or `main () -> ()`. Without main, only initialization runs.
+`main() -> int` or `main() -> ()`. Without main, only initialization runs.
 
 With `-o PATH`, Resin runs first, then copies the executable, even after a nonzero program exit.
 An existing directory or trailing `/` receives the source name; otherwise PATH names the file.
 Use `--output exe -o PATH` to build and copy without running.
 `--output ir`, `ast`, `cst`, and `check` inspect earlier stages; `check` checks syntax only.
 
-Each source path has a stable directory containing generated C, the executable, and an input
-fingerprint. Unchanged programs skip C compilation and linking. Generated C, Resin/compiler
+Each source path has a stable directory with separate debug and release artifacts. Each profile
+contains generated C, the executable, and an input fingerprint. Unchanged programs skip C compilation
+and linking. Generated C, Resin/compiler
 metadata, included C headers, the runtime archive, flags, and environment changes invalidate the cache.
 Calls for the same source are serialized through building, running, and copying.
 Failed rebuilds never run the old executable. This is a whole-program cache, not incremental IR.
@@ -121,7 +129,11 @@ pointer addresses, and nominal wrappers of those. Arguments evaluate once, left-
 including unused ones. `print` is a compiler builtin and cannot be redefined or shadowed.
 
 Strings are UTF-8 byte arrays with `\n`, `\r`, `\t`, `\0`, `\"`, and `\\` escapes.
-There is no implicit NUL terminator.
+Host byte-array storage includes an extra trailing NUL, so string literals can be passed to C
+without writing `"triangle.png\0"`. The terminator is outside the logical array length and is not
+printed. Explicit `\0` bytes remain part of the string, including at the end; Resin's length-based
+printing preserves them, while C string functions stop at the first NUL. Import paths, foreign
+headers, and shader-stage names still use the decoded literal text, without an added terminator.
 
 ## Files and the standard library
 
@@ -132,7 +144,7 @@ Each file has its own scope. An optional `export` clause comes first, followed b
 export { answer };
 import { "helpers.resin", "std/status.resin" };
 
-answer () -> int = { helper() };
+answer() -> int = { helper() };
 ```
 
 Imports bring only the dependency's exported names into the file's flat namespace. Without
@@ -169,8 +181,8 @@ Run `cargo run -- examples/eg009_imports.resin` for a small example with private
 ```resin
 import { "std/gpu.resin" };
 
-main () -> () = {
-    gpu = Ptr (ResinGpu) (ulong (0));
+main() -> () = {
+    gpu = Ptr<ResinGpu>(ulong(0));
     status = resin_gpu_create(&gpu);
     print("GPU creation status: {0}\n", (status,));
     if (status == 0) { resin_gpu_destroy(gpu) } else { () };
@@ -186,7 +198,7 @@ directly or wrapping them in Resin functions. For example:
 export { ResinGpu, resin_gpu_create };
 
 extern type ResinGpu;
-extern "resin_runtime.h" resin_gpu_create (gpu: Ptr (Ptr (ResinGpu))) -> int;
+extern "resin_runtime.h" resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 ```
 
 Foreign headers use the C compiler's include search paths (or an absolute path).
@@ -204,7 +216,8 @@ roundtrips. There is no borrow checker; addresses of locals must not outlive the
 integer; pointer differences and offsets into opaque foreign types are not supported.
 Pointer arithmetic and dereferences are unchecked: keep them within the allocation and aligned.
 Initialize output slots before passing their addresses: Resin does not infer initialization
-effects from foreign calls. C strings need an explicit `\0` and a byte-pointer cast.
+effects from foreign calls. String literals are NUL-terminated; pass their storage with a
+byte-pointer cast, such as `Ptr<ubyte>(&path)` for `path = "triangle.png"`.
 
 ## Loops
 
@@ -241,12 +254,12 @@ There are no compiler-side graphics/image execution modes.
 The only GPU-specific compiler intrinsic is `shader`:
 
 ```resin
-kernel (index: uint) -> uint = { uint (0xff400000) | (index & uint (0xffff)) };
+kernel(index: uint) -> uint = { uint(0xff400000) | (index & uint(0xffff)) };
 code = shader(kernel, "compute");
 ```
 
 It takes a named function and a literal stage (`"compute"`, `"vertex"`, or `"fragment"`).
-The result is `{ data: Ptr (ubyte), length: ulong }`: program-lifetime embedded SPIR-V bytes,
+The result is `{ data: Ptr<ubyte>, length: ulong }`: program-lifetime embedded SPIR-V bytes,
 passed directly to runtime pipeline creation. The function remains callable normally on the host.
 Runtime function aliases and dynamic stage values are not accepted by `shader`.
 
@@ -259,9 +272,9 @@ Shaders receive application data through the root address passed to `resin_gpu_d
 `resin_gpu_draw`. Add a typed pointer as the second tuple element:
 
 ```resin
-Params = { count: uint, values: Ptr (float32), scale: float32 };
+Params = { count: uint, values: Ptr<float32>, scale: float32 };
 
-kernel (index: uint, root: Ptr (Params)) -> () = {
+kernel(index: uint, root: Ptr<Params>) -> () = {
     if (index < root.count) {
         p = root.values + index;
         p.* := p.* * root.scale;
@@ -272,13 +285,13 @@ kernel (index: uint, root: Ptr (Params)) -> () = {
 
 The entry interfaces are:
 
-- Compute takes `(uint, Ptr (T))` and returns `()`. Workgroups contain 64 invocations; the
+- Compute takes `(uint, Ptr<T>)` and returns `()`. Workgroups contain 64 invocations; the
   index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard any
   excess invocations in the function, as above.
-- Vertex takes an `int` vertex index, optionally paired with `Ptr (T)`, and returns
+- Vertex takes an `int` vertex index, optionally paired with `Ptr<T>`, and returns
   `{ position: Position, color: Color }`.
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
-- Fragment takes Color, optionally paired with `Ptr (T)`, and returns Color.
+- Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 - The original `uint -> uint` compute entry still writes one packed RGBA8 pixel per invocation
   (R in bits 0–7, A in 24–31). Its implicit root is `{ count: uint, pixels: ulong }`, with
   `pixels` at byte offset 8; this wrapper bounds-checks against count.

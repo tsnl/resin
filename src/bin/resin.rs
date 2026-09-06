@@ -21,7 +21,7 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Output::Run)]
     output: Output,
 
-    /// Destination file, or directory for host executables. Run mode also keeps a copy here.
+    /// Destination file, or directory for host executables. Executable output enables -O3.
     #[arg(short = 'o', long = "out")]
     destination: Option<PathBuf>,
 
@@ -126,7 +126,12 @@ fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
     let name = cli.file.file_stem().ok_or("source file needs a name")?;
     let output = host_destination(cli, name)?;
     let compiler = compiler(&cli.cc, "CC", "cc");
-    let build = toolchain::build_c(&cli.file, &source, &compiler)?;
+    let profile = if output.is_some() {
+        toolchain::CProfile::Release
+    } else {
+        toolchain::CProfile::Debug
+    };
+    let build = toolchain::build_c(&cli.file, &source, &compiler, profile)?;
     let executable = build.executable();
     let code = if cli.output == Output::Run {
         Command::new(executable).status()?.code().unwrap_or(1)

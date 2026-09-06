@@ -84,15 +84,15 @@ fn device_pointers_and_shared_roots_compile() {
     };
     for (source, stage) in [
         (
-            "Node = { value: uint, next: Ptr (Node) }; select (a: Ptr (Node), b: Ptr (Node), i: uint) -> Ptr (Node) = { if (i == uint (0)) { a } else { b } }; kernel (i: uint, root: Ptr (Node)) -> () = { p = select(root, root.next, i); p.value := uint (7); };",
+            "Node = { value: uint, next: Ptr<Node> }; select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node> = { if (i == uint (0)) { a } else { b } }; kernel (i: uint, root: Ptr<Node>) -> () = { p = select(root, root.next, i); p.value := uint (7); };",
             Stage::Compute,
         ),
         (
-            "Data = { wide: ulong, values: Ptr (uint) }; kernel (i: uint, root: Ptr (Data)) -> () = { p = Ptr (uint) (ulong (root.values)); q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
+            "Data = { wide: ulong, values: Ptr<uint> }; kernel (i: uint, root: Ptr<Data>) -> () = { p = Ptr<uint> (ulong (root.values)); q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (
-            "Color = { r: float32, g: float32, b: float32, a: float32 }; Params = { scale: float32 }; fragment (color: Color, root: Ptr (Params)) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
+            "Color = { r: float32, g: float32, b: float32, a: float32 }; Params = { scale: float32 }; fragment (color: Color, root: Ptr<Params>) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
             Stage::Fragment,
         ),
     ] {
@@ -106,11 +106,11 @@ fn device_pointers_and_shared_roots_compile() {
 fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
     for (source, expected) in [
         (
-            "Data = { flag: bool }; kernel (i: uint, root: Ptr (Data)) -> () = { () };",
+            "Data = { flag: bool }; kernel (i: uint, root: Ptr<Data>) -> () = { () };",
             "no shared host/device layout",
         ),
         (
-            "kernel (i: uint, root: Ptr (())) -> () = { () };",
+            "kernel (i: uint, root: Ptr<()>) -> () = { () };",
             "no shared host/device layout",
         ),
         (
@@ -122,7 +122,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
             "shader-local addresses cannot escape",
         ),
         (
-            "helper (i: uint) -> Ptr (uint) = { x = i; &x }; kernel (i: uint) -> uint = { helper(i).* };",
+            "helper (i: uint) -> Ptr<uint> = { x = i; &x }; kernel (i: uint) -> uint = { helper(i).* };",
             "cannot return a local address",
         ),
     ] {

@@ -13,7 +13,6 @@ use super::{TempDir, dependencies, io_error, parent, write_output};
 
 const FLAGS: &[&str] = &[
     "-std=c11",
-    "-O2",
     "-fno-strict-aliasing",
     "-Wall",
     "-Wextra",
@@ -21,6 +20,28 @@ const FLAGS: &[&str] = &[
     "-pedantic",
 ];
 const LIBRARIES: &[&str] = &["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"];
+
+#[derive(Clone, Copy)]
+pub enum CProfile {
+    Debug,
+    Release,
+}
+
+impl CProfile {
+    fn directory(self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Release => "release",
+        }
+    }
+
+    fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Debug => &["-O0"],
+            Self::Release => &["-O3"],
+        }
+    }
+}
 
 /// Keeps the artifact locked through execution and copying.
 pub struct CBuild {
@@ -34,7 +55,12 @@ impl CBuild {
     }
 }
 
-pub fn build_c(file: &Path, source: &str, compiler: &OsStr) -> Result<CBuild, Error> {
+pub fn build_c(
+    file: &Path,
+    source: &str,
+    compiler: &OsStr,
+    profile: CProfile,
+) -> Result<CBuild, Error> {
     let file = fs::canonicalize(file).map_err(io_error)?;
     let mut hash = DefaultHasher::new();
     file.hash(&mut hash);
@@ -56,11 +82,13 @@ pub fn build_c(file: &Path, source: &str, compiler: &OsStr) -> Result<CBuild, Er
         .open(directory.join("lock"))
         .map_err(io_error)?;
     lock.lock().map_err(io_error)?;
+    let directory = directory.join(profile.directory());
+    fs::create_dir_all(&directory).map_err(io_error)?;
     let build = CBuild {
         executable: directory.join(format!("program{}", std::env::consts::EXE_SUFFIX)),
         _lock: lock,
     };
-    let compiler = Compiler::new(compiler)?;
+    let compiler = Compiler::new(compiler, profile)?;
     let dependency_file = directory.join("dependencies");
     let dependencies: Vec<_> = fs::read_to_string(&dependency_file)
         .unwrap_or_default()
@@ -101,18 +129,22 @@ pub fn build_c(file: &Path, source: &str, compiler: &OsStr) -> Result<CBuild, Er
 }
 
 pub fn compile_c(source: &str, output: &Path, compiler: &OsStr) -> Result<(), Error> {
-    Compiler::new(compiler)?.compile(source, output).map(|_| ())
+    Compiler::new(compiler, CProfile::Release)?
+        .compile(source, output)
+        .map(|_| ())
 }
 
 struct Compiler {
+    profile: CProfile,
     executable: PathBuf,
     include: PathBuf,
     library: PathBuf,
 }
 
 impl Compiler {
-    fn new(compiler: &OsStr) -> Result<Self, Error> {
+    fn new(compiler: &OsStr, profile: CProfile) -> Result<Self, Error> {
         Ok(Self {
+            profile,
             executable: resolve(compiler)?,
             include: std::env::var_os("RESIN_RUNTIME_INCLUDE")
                 .map(PathBuf::from)
@@ -129,6 +161,7 @@ impl Compiler {
         fs::write(&input, source).map_err(io_error)?;
         let result = Command::new(&self.executable)
             .args(FLAGS)
+            .args(self.profile.flags())
             .args(["-MD", "-MT", "resin", "-MF"])
             .arg(&depfile)
             .arg("-I")
@@ -157,6 +190,7 @@ impl Compiler {
         let mut hash = DefaultHasher::new();
         source.hash(&mut hash);
         FLAGS.hash(&mut hash);
+        self.profile.flags().hash(&mut hash);
         LIBRARIES.hash(&mut hash);
         self.executable.hash(&mut hash);
         let mut environment: Vec<_> = std::env::vars_os().collect();

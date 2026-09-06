@@ -24,7 +24,7 @@ pub type Type = Spanned<TypeKind>;
 pub enum TypeKind {
     Unit,
     Atom { name: Ident },
-    App { head: Ident, arg: Box<Term> },
+    App { head: Ident, arg: Box<Type> },
     Func { from: Box<Type>, to: Box<Type> },
     Record { fields: Vec<(Ident, Type)> },
 }

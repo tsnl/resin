@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::ast::{Ident, Span, Term, TermKind, Type, TypeKind};
+use crate::ast::{Ident, Span, Type, TypeKind};
 use crate::ir::{RecordField, Ty, TyperContext, Value};
 
 use super::scope::Scopes;
@@ -56,7 +56,7 @@ impl Evaluator<'_> {
                 self.resolve_type(name)
             }
             TypeKind::App { head, arg } => {
-                let arg = self.term_as_type(arg)?;
+                let arg = self.ty(arg)?;
                 match head.val.as_ref() {
                     "Ptr" => Ok(Ty::Pointer {
                         pointee: Box::new(arg),
@@ -88,16 +88,6 @@ impl Evaluator<'_> {
                     .type_record(&typed)
                     .map_err(|err| GenerateError::typing(ty.span, err))
             }
-        }
-    }
-
-    fn term_as_type(&self, term: &Term) -> Result<Ty, GenerateError> {
-        match &term.val {
-            TermKind::Type { ty } => self.ty(ty),
-            _ => Err(GenerateError {
-                span: term.span,
-                kind: GenerateErrorKind::ExpectedType,
-            }),
         }
     }
 

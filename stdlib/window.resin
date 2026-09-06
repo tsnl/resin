@@ -18,13 +18,13 @@ extern type ResinWindow;
 
 resin_key_escape = 256;
 
-extern "resin_runtime.h" resin_window_create (width: uint, height: uint, title: Ptr (ubyte), window: Ptr (Ptr (ResinWindow))) -> int;
-extern "resin_runtime.h" resin_window_destroy (window: Ptr (ResinWindow)) -> ();
-extern "resin_runtime.h" resin_window_poll_events (window: Ptr (ResinWindow)) -> int;
-extern "resin_runtime.h" resin_window_should_close (window: Ptr (ResinWindow)) -> int;
-extern "resin_runtime.h" resin_window_set_should_close (window: Ptr (ResinWindow), close: int) -> int;
-extern "resin_runtime.h" resin_window_framebuffer_size (window: Ptr (ResinWindow), width: Ptr (uint), height: Ptr (uint)) -> int;
-extern "resin_runtime.h" resin_window_set_size (window: Ptr (ResinWindow), width: uint, height: uint) -> int;
-extern "resin_runtime.h" resin_window_key_pressed (window: Ptr (ResinWindow), key: int) -> int;
-extern "resin_runtime.h" resin_gpu_create_for_window (window: Ptr (ResinWindow), gpu: Ptr (Ptr (ResinGpu))) -> int;
-extern "resin_runtime.h" resin_gpu_present (gpu: Ptr (ResinGpu), image: Ptr (ResinImage)) -> int;
+extern "resin_runtime.h" resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
+extern "resin_runtime.h" resin_window_destroy(window: Ptr<ResinWindow>) -> ();
+extern "resin_runtime.h" resin_window_poll_events(window: Ptr<ResinWindow>) -> int;
+extern "resin_runtime.h" resin_window_should_close(window: Ptr<ResinWindow>) -> int;
+extern "resin_runtime.h" resin_window_set_should_close(window: Ptr<ResinWindow>, close: int) -> int;
+extern "resin_runtime.h" resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<uint>, height: Ptr<uint>) -> int;
+extern "resin_runtime.h" resin_window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> int;
+extern "resin_runtime.h" resin_window_key_pressed(window: Ptr<ResinWindow>, key: int) -> int;
+extern "resin_runtime.h" resin_gpu_create_for_window(window: Ptr<ResinWindow>, gpu: Ptr<Ptr<ResinGpu>>) -> int;
+extern "resin_runtime.h" resin_gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> int;

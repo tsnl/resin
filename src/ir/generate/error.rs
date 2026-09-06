@@ -28,7 +28,6 @@ pub enum GenerateErrorKind {
     MissingField { name: Arc<str> },
     ExtraField { name: Arc<str> },
     NotAPlace,
-    ExpectedType,
     InvalidLiteral { message: Arc<str> },
     InvalidIr(VerifyError),
 }

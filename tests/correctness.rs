@@ -54,7 +54,7 @@ fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
 
 #[test]
 fn function_types_accept_unit_tuples_and_higher_order_calls() {
-    compile("P = Ptr (()); S = Span ((int, int)); f (p: P) -> P = { p };");
+    compile("P = Ptr<()>; S = Span<(int, int)>; f (p: P) -> P = { p };");
     compile("F = () -> int; one () -> int = { 1 }; f = F (one); x = f();");
     compile(
         "Add = (int, int) -> int; add (a: int, b: int) -> int = { a + b }; f = Add (add); p = (1, 2); x = f(p);",
@@ -64,6 +64,33 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
     );
     compile("identity (p: (int, int)) -> (int, int) = { p }; x = identity(1, 2);");
     compile("Unit = (); x = Unit (()); f (u: Unit) -> () = { () }; y = f(x);");
+}
+
+#[test]
+fn type_formers_take_types_between_angle_brackets() {
+    let m = compile(
+        "Pointer = Ptr<Ptr<int>>; View = Span<{ value: int, next: Pointer }>; Callback = Ptr<(int) -> int>; UnitPointer = Ptr<()>; p = Ptr<int>(ulong(0));",
+    );
+    assert_eq!(
+        m.types[0].body(),
+        Some(&Ty::Pointer {
+            pointee: Box::new(Ty::Pointer {
+                pointee: Box::new(Ty::Int32)
+            })
+        })
+    );
+    compile(
+        "f(x: int) -> int = { x }; a = f(1); b = f (2); Record = { value: int }; r = Record { value = 3 };",
+    );
+    for source in [
+        "P = Ptr(int);",
+        "P = Ptr int;",
+        "P = Ptr<1>;",
+        "P = Ptr<>;",
+        "P = Ptr<int, int>;",
+    ] {
+        assert!(parse(source).is_err(), "{source}");
+    }
 }
 
 #[test]
@@ -207,10 +234,10 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
 #[test]
 fn returned_pointers_support_field_assignment() {
     compile(
-        "id (p: Ptr ({ x: int })) -> Ptr ({ x: int }) = { p }; f (p: Ptr ({ x: int })) -> int = { id(p).x := 1 };",
+        "id (p: Ptr<{ x: int }>) -> Ptr<{ x: int }> = { p }; f (p: Ptr<{ x: int }>) -> int = { id(p).x := 1 };",
     );
     compile(
-        "R = { inner: { x: int } }; id (p: Ptr (R)) -> Ptr (R) = { p }; f (p: Ptr (R)) -> int = { id(p).inner.x := 1 };",
+        "R = { inner: { x: int } }; id (p: Ptr<R>) -> Ptr<R> = { p }; f (p: Ptr<R>) -> int = { id(p).inner.x := 1 };",
     );
     let src =
         "id (r: { x: int }) -> { x: int } = { r }; f (r: { x: int }) -> int = { id(r).x := 1 };";
@@ -224,7 +251,7 @@ fn returned_pointers_support_field_assignment() {
 fn nested_field_access_evaluates_its_base_once() {
     for src in [
         "id (r: { inner: { x: int } }) -> { inner: { x: int } } = { r }; f (r: { inner: { x: int } }) -> int = { id(r).inner.x };",
-        "id (r: { p: Ptr ({ x: int }) }) -> { p: Ptr ({ x: int }) } = { r }; f (r: { p: Ptr ({ x: int }) }) -> int = { id(r).p.x := 1 };",
+        "id (r: { p: Ptr<{ x: int }> }) -> { p: Ptr<{ x: int }> } = { r }; f (r: { p: Ptr<{ x: int }> }) -> int = { id(r).p.x := 1 };",
     ] {
         let module = compile(src);
         let f = module

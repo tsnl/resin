@@ -37,7 +37,7 @@ fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
     let source = format!(
         r#"
         extern "{header}" answer () -> int;
-        extern "{header}" assign (out: Ptr (int), value: int) -> ();
+        extern "{header}" assign (out: Ptr<int>, value: int) -> ();
         extern "stdlib.h" abs (n: int) -> int;
         call (f: () -> int) -> int = {{ f() }};
         main () -> int = {{
@@ -62,11 +62,11 @@ fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
 fn pointers_roundtrip_and_address_expressions_evaluate_once() {
     let output = run(r#"
         calls = 0;
-        identity (p: Ptr ({ value: int })) -> Ptr ({ value: int }) = { calls := calls + 1; p };
+        identity (p: Ptr<{ value: int }>) -> Ptr<{ value: int }> = { calls := calls + 1; p };
         main () -> int = {
             record = { value = 1 };
             pointer = &identity(&record).value;
-            copy = Ptr (int) (ulong (pointer));
+            copy = Ptr<int> (ulong (pointer));
             copy.* := 41;
             record.value + calls
         };
@@ -92,14 +92,14 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
         "extern type Native; value: Native;",
         "extern type Native; identity (n: Native) -> Native = { n };",
         "extern type Native; Wrapped = { value: Native };",
-        "extern type Native; read (n: Ptr (Native)) -> () = { n.*; };",
+        "extern type Native; read (n: Ptr<Native>) -> () = { n.*; };",
     ] {
         assert!(error(source).contains("OpaqueValue"), "{source}");
     }
     for source in [
-        "x = 0; f (p: Ptr (int)) -> () = {}; f(ulong (0));",
-        "x = 0; f (p: Ptr (ubyte)) -> () = {}; f(&x);",
-        "x = Ptr (int) (float32 (0.0));",
+        "x = 0; f (p: Ptr<int>) -> () = {}; f(ulong (0));",
+        "x = 0; f (p: Ptr<ubyte>) -> () = {}; f(&x);",
+        "x = Ptr<int> (float32 (0.0));",
     ] {
         assert!(error(source).contains("TypeMismatch"), "{source}");
     }

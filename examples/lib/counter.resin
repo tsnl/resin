@@ -2,7 +2,7 @@ export { next };
 
 value = 0;
 
-next () -> int = {
+next() -> int = {
     value := value + 1;
     value
 };

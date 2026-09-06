@@ -273,7 +273,7 @@ export default grammar({
       choice(
         seq(
           field("former", choice(...TYPE_FORMERS)),
-          field("arg", choice($.closed_term, prec.dynamic(2, $.closed_type))),
+          "<", field("arg", $.type), ">",
         ),
         $.primary_type,
       ),

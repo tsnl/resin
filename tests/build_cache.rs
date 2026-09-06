@@ -12,7 +12,7 @@ use resin::toolchain::TempDir;
 #[path = "support/shaders.rs"]
 mod shaders;
 
-const WRAPPER: &str = "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
+const WRAPPER: &str = "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nprintf '%s\\n' \"$*\" >> \"$RESIN_TEST_FLAGS\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
 
 #[test]
 fn foreign_header_changes_rebuild_including_nested_dependencies() {
@@ -141,6 +141,7 @@ impl Project {
             .arg("--cc")
             .arg(&self.compiler)
             .env("RESIN_TEST_COUNT", self.temp.path().join("calls"))
+            .env("RESIN_TEST_FLAGS", self.temp.path().join("flags"))
             .env(
                 "RESIN_TEST_COMPILER",
                 std::env::var_os("CC").unwrap_or_else(|| "cc".into()),
@@ -160,12 +161,16 @@ impl Project {
     }
 
     fn executable(&self) -> PathBuf {
+        self.profile_executable("debug")
+    }
+
+    fn profile_executable(&self, profile: &str) -> PathBuf {
         let directories: Vec<_> = fs::read_dir(self.temp.path().join("build"))
             .unwrap()
             .map(|entry| entry.unwrap().path())
             .collect();
         assert_eq!(directories.len(), 1);
-        directories[0].join("program")
+        directories[0].join(profile).join("program")
     }
 }
 
@@ -179,26 +184,93 @@ fn printed(output: &Output, text: &[u8]) {
 }
 
 #[test]
-fn unchanged_programs_reuse_the_executable_and_still_run_and_copy() {
+fn unchanged_programs_reuse_the_executable_and_still_run() {
     let project = Project::new();
     printed(&project.run(), b"first");
     let executable = project.executable();
     let modified = fs::metadata(&executable).unwrap().modified().unwrap();
-    let output = project.command().args(["-o", "dist/"]).output().unwrap();
-    printed(&output, b"first");
+    printed(&project.run(), b"first");
     assert_eq!(project.calls(), 1);
     assert_eq!(
         fs::metadata(&executable).unwrap().modified().unwrap(),
         modified
     );
-    assert_eq!(
-        fs::read(executable).unwrap(),
-        fs::read(project.temp.path().join("dist/main")).unwrap()
-    );
-
     fs::write(&project.input, "// comment only\nprint(\"first\", ());").unwrap();
     printed(&project.run(), b"first");
     assert_eq!(project.calls(), 1);
+}
+
+#[test]
+fn executable_output_optimizes_and_both_profiles_stay_cached() {
+    let project = Project::new();
+    printed(&project.run(), b"first");
+    let debug = project.executable();
+    let debug_modified = fs::metadata(&debug).unwrap().modified().unwrap();
+    printed(
+        &project.command().args(["-o", "dist/"]).output().unwrap(),
+        b"first",
+    );
+    let release = project.profile_executable("release");
+    let release_modified = fs::metadata(&release).unwrap().modified().unwrap();
+    assert_eq!(
+        fs::read(&release).unwrap(),
+        fs::read(project.temp.path().join("dist/main")).unwrap()
+    );
+    assert_eq!(project.calls(), 2);
+
+    printed(&project.run(), b"first");
+    printed(
+        &project.command().args(["--out", "copy"]).output().unwrap(),
+        b"first",
+    );
+    let output = project
+        .command()
+        .args(["--output", "exe", "-o", "exported"])
+        .output()
+        .unwrap();
+    printed(&output, b"");
+    assert_eq!(
+        fs::read(&release).unwrap(),
+        fs::read(project.temp.path().join("exported")).unwrap()
+    );
+    assert_eq!(
+        fs::metadata(debug).unwrap().modified().unwrap(),
+        debug_modified
+    );
+    assert_eq!(
+        fs::metadata(release).unwrap().modified().unwrap(),
+        release_modified
+    );
+    assert_eq!(project.calls(), 2);
+
+    let flags = fs::read_to_string(project.temp.path().join("flags")).unwrap();
+    let optimizations: Vec<_> = flags
+        .lines()
+        .map(|line| {
+            line.split_whitespace()
+                .filter(|flag| flag.starts_with("-O"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(optimizations, [vec!["-O0"], vec!["-O3"]]);
+}
+
+#[test]
+fn textual_output_does_not_compile_an_executable() {
+    let project = Project::new();
+    let output = project
+        .command()
+        .args(["--output", "c", "-o", "source.c"])
+        .output()
+        .unwrap();
+    printed(&output, b"");
+    assert!(
+        fs::read_to_string(project.temp.path().join("source.c"))
+            .unwrap()
+            .contains("int main(void)")
+    );
+    assert!(!project.temp.path().join("calls").exists());
+    assert!(!project.temp.path().join("build").exists());
 }
 
 #[test]

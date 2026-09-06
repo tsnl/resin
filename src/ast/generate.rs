@@ -437,15 +437,7 @@ impl<'a> AstGen<'a> {
         assert_eq!(node.kind(), "unary_type");
         if let Some(former) = node.child_by_field_name("former") {
             let head = self.ident(former);
-            let arg_node = node.child_by_field_name("arg").unwrap();
-            let arg = match arg_node.kind() {
-                "closed_term" => self.gen_closed_term(arg_node),
-                "closed_type" => {
-                    let ty = self.gen_closed_type(arg_node);
-                    Spanned::new(TermKind::Type { ty }, self.span(arg_node))
-                }
-                _ => unreachable!("unexpected type arg: {}", arg_node.kind()),
-            };
+            let arg = self.gen_type(node.child_by_field_name("arg").unwrap());
             return Spanned::new(
                 TypeKind::App {
                     head,

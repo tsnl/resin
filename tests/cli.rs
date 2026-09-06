@@ -34,13 +34,15 @@ fn success(output: &Output) {
     );
 }
 
-fn artifact(cwd: &Path) -> PathBuf {
+fn artifact(cwd: &Path, profile: &str) -> PathBuf {
     let files: Vec<_> = fs::read_dir(cwd.join("build"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect();
     assert_eq!(files.len(), 1, "{files:?}");
-    let executable = files[0].join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    let executable = files[0]
+        .join(profile)
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     assert!(executable.is_file());
     executable
 }
@@ -57,9 +59,11 @@ fn default_output_builds_in_cwd_and_runs() {
     assert_eq!(output.stdout, b"hello\n");
     assert!(output.stderr.is_empty());
     assert!(!sources.join("build").exists());
-    let executable = artifact(temp.path());
+    let executable = artifact(temp.path(), "debug");
     assert!(
         executable
+            .parent()
+            .unwrap()
             .parent()
             .unwrap()
             .file_name()
@@ -74,6 +78,28 @@ fn default_output_builds_in_cwd_and_runs() {
 }
 
 #[test]
+fn strings_are_c_compatible_in_both_profiles() {
+    let source = r#"
+        extern "string.h" strlen(text: Ptr<ubyte>) -> ulong;
+        path = "triangle.png";
+        text = "a\0b";
+        main() -> int = {
+            if (strlen(Ptr<ubyte>(&path)) == ulong(12)
+                && strlen(Ptr<ubyte>(&text)) == ulong(1)) {
+                print("{0}:{1}", (path, text));
+                0
+            } else { 1 }
+        };
+    "#;
+    for args in [&[][..], &["-o", "program"][..]] {
+        let output = cli(source, args);
+        success(&output);
+        assert_eq!(output.stdout, b"triangle.png:a\0b");
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn default_output_runs_then_copies_even_on_nonzero_exit() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
@@ -84,7 +110,7 @@ fn default_output_runs_then_copies_even_on_nonzero_exit() {
     let executable = temp.path().join("dist/custom program");
     assert_eq!(
         fs::read(&executable).unwrap(),
-        fs::read(artifact(temp.path())).unwrap()
+        fs::read(artifact(temp.path(), "release")).unwrap()
     );
     assert_eq!(
         Command::new(executable).output().unwrap().status.code(),
@@ -108,7 +134,7 @@ fn output_directories_receive_the_source_name() {
             .join(format!("hello{}", std::env::consts::EXE_SUFFIX));
         assert_eq!(
             fs::read(&executable).unwrap(),
-            fs::read(artifact(temp.path())).unwrap()
+            fs::read(artifact(temp.path(), "release")).unwrap()
         );
         assert!(Command::new(executable).output().unwrap().status.success());
     }
@@ -124,7 +150,7 @@ fn explicit_exe_output_does_not_run() {
     assert!(output.stdout.is_empty());
     assert_eq!(
         fs::read(temp.path().join("program")).unwrap(),
-        fs::read(artifact(temp.path())).unwrap()
+        fs::read(artifact(temp.path(), "release")).unwrap()
     );
 }
 
@@ -156,7 +182,7 @@ fn failed_copies_happen_after_execution() {
         fs::read_to_string(temp.path().join("not-a-directory")).unwrap(),
         "keep me"
     );
-    artifact(temp.path());
+    artifact(temp.path(), "release");
 }
 
 #[test]

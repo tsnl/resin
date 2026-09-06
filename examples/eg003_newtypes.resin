@@ -1,7 +1,7 @@
 Meters = int;
 Distance = Meters;
-to_meters (n: int) -> Meters = { Meters (n) };
-to_distance (m: Meters) -> Distance = { Distance (m) };
-to_int (d: Distance) -> int = { int (Meters (d)) };
+to_meters(n: int) -> Meters = { Meters(n) };
+to_distance(m: Meters) -> Distance = { Distance(m) };
+to_int(d: Distance) -> int = { int(Meters(d)) };
 distance = to_distance(to_meters(42));
 print("distance = {0}, as int = {1}\n", (distance, to_int(distance)));

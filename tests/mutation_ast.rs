@@ -73,7 +73,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
 
 #[test]
 fn assignment_can_be_sequenced_in_a_block() {
-    let file = parse("f (p: Ptr (int)) -> int = { p.* := 1; p.* };");
+    let file = parse("f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("expected function definition");
     };

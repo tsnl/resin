@@ -191,7 +191,7 @@ fn sexp_typespec(ts: &Type) -> SExp {
         TypeKind::App { head, arg } => list_sp(
             "type-app",
             ts.span,
-            vec![symbol(head.val.as_ref()), sexp_term(arg)],
+            vec![symbol(head.val.as_ref()), sexp_typespec(arg)],
         ),
         TypeKind::Func { from, to } => list_sp(
             "func-type",

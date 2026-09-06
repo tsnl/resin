@@ -75,6 +75,64 @@ fn formats_are_length_delimited_and_do_not_add_newlines() {
 }
 
 #[test]
+fn string_storage_is_terminated_without_changing_its_logical_length() {
+    let m = module("text = \"hello\"; empty = \"\";");
+    for (global, length) in m.globals.iter().zip([5, 0]) {
+        assert_eq!(
+            global.ty,
+            Ty::Array {
+                element: Box::new(Ty::UInt8),
+                length
+            }
+        );
+    }
+    let c = c::emit(&m).unwrap();
+    assert!(c.contains("items[5 + 1]"), "{c}");
+    assert!(c.contains("items[0 + 1]"), "{c}");
+    prints(
+        r#"
+        extern "string.h" strlen(text: Ptr<ubyte>) -> ulong;
+        main() -> int = {
+            text = "héllo";
+            empty = "";
+            copy = text;
+            record = { text = copy };
+            pointer = Ptr<ubyte>(&record.text);
+            if (strlen(pointer) == ulong(6) && (pointer + 6).* == ubyte(0)
+                && strlen(Ptr<ubyte>(&empty)) == ulong(0)) {
+                print("{0}{1}", (text, empty));
+                0
+            } else { 1 }
+        };
+    "#,
+        "héllo".as_bytes(),
+    );
+}
+
+#[test]
+fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
+    prints(
+        r#"
+        extern "string.h" strlen(text: Ptr<ubyte>) -> ulong;
+        main() -> int = {
+            text = "a\0b\0";
+            pointer = Ptr<ubyte>(&text);
+            if (strlen(pointer) == ulong(1) && (pointer + 2).* == ubyte(98)
+                && (pointer + 3).* == ubyte(0) && (pointer + 4).* == ubyte(0)) {
+                print("before\0{0}after", (text,));
+                0
+            } else { 1 }
+        };
+    "#,
+        b"before\0a\0b\0after",
+    );
+    prints(
+        r#"bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print("{0}", (bytes,));"#,
+        b"A\0B\0",
+    );
+}
+
+#[test]
 fn numeric_widths_and_scalar_types() {
     prints(r#"print("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
         sbyte (-128), short (-32768), int (-2147483648), long (-9223372036854775808),

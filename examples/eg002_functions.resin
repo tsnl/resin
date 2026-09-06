@@ -1,4 +1,4 @@
-add (x: int, y: int) -> int = { x + y };
-apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) };
-inc (n: int) -> int = { apply(add, (n, 1)) };
+add(x: int, y: int) -> int = { x + y };
+apply(f: (int, int) -> int, args: (int, int)) -> int = { f(args) };
+inc(n: int) -> int = { apply(add, (n, 1)) };
 print("inc(41) = {0}\n", (inc(41),));

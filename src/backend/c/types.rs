@@ -203,7 +203,13 @@ impl<'a> Types<'a> {
             }
             Ty::Array { element, length } => {
                 self.definition(element, emitted, out);
-                format!("{} items[{}];", self.name(element), (*length).max(1))
+                // Byte arrays keep a NUL beyond their logical length for C string interop.
+                let capacity = if element.as_ref() == &Ty::UInt8 {
+                    format!("{length} + 1")
+                } else {
+                    (*length).max(1).to_string()
+                };
+                format!("{} items[{capacity}];", self.name(element))
             }
             Ty::Record { fields } => {
                 if fields.is_empty() {

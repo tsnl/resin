@@ -37,9 +37,9 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         r#"
         Data = { marker: uint, wide: ulong, amount: float32 };
         Payload = { tag: uint, data: Data, end: uint };
-        Params = { count: uint, values: Ptr (Payload), tail: float32 };
-        at (values: Ptr (Payload), index: uint) -> Ptr (Payload) = { values + index };
-        bump (p: Ptr (Payload), index: uint) -> () = {
+        Params = { count: uint, values: Ptr<Payload>, tail: float32 };
+        at (values: Ptr<Payload>, index: uint) -> Ptr<Payload> = { values + index };
+        bump (p: Ptr<Payload>, index: uint) -> () = {
             old = p.*;
             p.* := Payload {
                 tag = old.tag + uint (1),
@@ -47,7 +47,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
                 end = old.end + uint (2)
             };
         };
-        kernel (index: uint, root: Ptr (Params)) -> () = {
+        kernel (index: uint, root: Ptr<Params>) -> () = {
             if (index < root.count) {
                 p = (at(root.values, index) + 1) + -1;
                 bump(p - uint (0), index)
@@ -258,7 +258,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     let file = &mut ast.modules.last_mut().unwrap().file;
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
     file.stmts.extend(
-        support::parse("fragment (color: Color, root: Ptr (Color)) -> Color = { root.* };").stmts,
+        support::parse("fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };").stmts,
     );
     let module = resin::ir::generate_program(&ast).unwrap();
     let compile = |stage: Stage| {

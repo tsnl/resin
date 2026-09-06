@@ -2,35 +2,35 @@ import { "std/gpu.resin", "std/image.resin", "std/status.resin" };
 
 Root = { count: uint, pixels: ulong };
 
-pixel (index: uint) -> uint = {
-    uint (0xff400000) | (index & uint (0xffff))
+pixel(index: uint) -> uint = {
+    uint(0xff400000) | (index & uint(0xffff))
 };
 
-kernel (index: uint) -> uint = { pixel(index) };
+kernel(index: uint) -> uint = { pixel(index) };
 
-main () -> () = {
-    gpu = Ptr (ResinGpu) (ulong (0));
+main() -> () = {
+    gpu = Ptr<ResinGpu>(ulong(0));
     check(resin_gpu_create(&gpu));
 
     code = shader(kernel, "compute");
-    pipeline = Ptr (ResinPipeline) (ulong (0));
+    pipeline = Ptr<ResinPipeline>(ulong(0));
     check(resin_gpu_create_compute_pipeline(gpu, code.data, code.length, &pipeline));
 
-    pixels = Ptr (ResinAllocation) (ulong (0));
-    root = Ptr (ResinAllocation) (ulong (0));
+    pixels = Ptr<ResinAllocation>(ulong(0));
+    root = Ptr<ResinAllocation>(ulong(0));
     check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_default, &pixels));
     check(resin_gpu_malloc(gpu, 16, 8, resin_memory_default, &root));
-    data = Ptr (Root) (resin_allocation_host_pointer(root));
-    data.* := Root { count = uint (65536), pixels = resin_allocation_device_pointer(pixels) };
+    data = Ptr<Root>(resin_allocation_host_pointer(root));
+    data.* := Root { count = uint(65536), pixels = resin_allocation_device_pointer(pixels) };
 
-    commands = Ptr (ResinCommandBuffer) (ulong (0));
+    commands = Ptr<ResinCommandBuffer>(ulong(0));
     check(resin_gpu_start_command_recording(gpu, &commands));
     check(resin_gpu_set_pipeline(commands, pipeline));
     check(resin_gpu_dispatch(commands, resin_allocation_device_pointer(root), 1024, 1, 1));
     check(resin_gpu_submit(gpu, commands));
 
-    path = "gradient.png\0";
-    check(resin_image_write_png(Ptr (ubyte) (&path), 256, 256, 4, resin_allocation_host_pointer(pixels), 0));
+    path = "gradient.png";
+    check(resin_image_write_png(Ptr<ubyte>(&path), 256, 256, 4, resin_allocation_host_pointer(pixels), 0));
     print("wrote gradient.png\n", ());
 
     resin_gpu_free(gpu, root);

@@ -12,7 +12,7 @@ use crate::backend::glsl::Stage;
 mod c;
 mod dependencies;
 mod shaders;
-pub use c::{CBuild, build_c, compile_c};
+pub use c::{CBuild, CProfile, build_c, compile_c};
 pub use shaders::build_shaders;
 
 pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {

@@ -13,6 +13,9 @@ let
 in
 assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux "Resin currently supports Linux only.";
 pkgs.mkShell {
+  # Fortify requires optimization, but Resin's default C builds use -O0.
+  hardeningDisable = [ "fortify" ];
+
   packages = with pkgs; [
     rustup
     shaderc

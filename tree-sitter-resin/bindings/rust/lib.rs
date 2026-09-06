@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn parses_module_items_and_address_of() {
         for source in [
-            "export { Gpu, create }; import { \"runtime.resin\" }; extern type Gpu; extern \"runtime.h\" create (gpu: Ptr (Ptr (Gpu))) -> int;",
+            "export { Gpu, create }; import { \"runtime.resin\" }; extern type Gpu; extern \"runtime.h\" create (gpu: Ptr<Ptr<Gpu>>) -> int;",
             "empty () -> () = {}; identity (n: int) -> int = { n };",
             "main () -> () = { n = 0; p = &n; p.* := 1; };",
         ] {
@@ -186,6 +186,31 @@ mod tests {
             "print (n: int) -> int = { n }; shader () -> () = {};",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+    }
+
+    #[test]
+    fn type_formers_use_angle_brackets_without_conflicting_with_operators() {
+        for source in [
+            "P = Ptr<int>; Pp = Ptr<Ptr<int>>; S = Span<Ptr<int>>;",
+            "P = Ptr<()>; S = Span<(int, int)>; R = Ptr<{ x: int }>; F = Ptr<(int) -> int>;",
+            "p = Ptr<int>(ulong(0)); x = ulong(p) > ulong(0); y = 8 >> 1; z = 1 < 2;",
+            "p = Ptr < Ptr < int > > (ulong (0));",
+            "fibonacci(n: int) -> int = { n }; x = fibonacci(2); y = fibonacci (3);",
+            "x = Name { value = 1 }; y = Converter [1, 2];",
+        ] {
+            assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+        for source in [
+            "P = Ptr(int);",
+            "P = Span (int);",
+            "P = Ptr int;",
+            "P = Ptr<1>;",
+            "P = Ptr<>;",
+            "P = Ptr<int, int>;",
+            "P = Ptr<Ptr<int>;",
+        ] {
+            assert!(parse(source).root_node().has_error(), "{source}");
         }
     }
 

@@ -1917,25 +1917,20 @@
               }
             },
             {
+              "type": "STRING",
+              "value": "<"
+            },
+            {
               "type": "FIELD",
               "name": "arg",
               "content": {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "SYMBOL",
-                    "name": "closed_term"
-                  },
-                  {
-                    "type": "PREC_DYNAMIC",
-                    "value": 2,
-                    "content": {
-                      "type": "SYMBOL",
-                      "name": "closed_type"
-                    }
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "type"
               }
+            },
+            {
+              "type": "STRING",
+              "value": ">"
             }
           ]
         },

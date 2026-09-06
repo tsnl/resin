@@ -172,7 +172,7 @@ fn type_mismatch_is_a_type_error() {
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("List = { value: int, next: Ptr (List) };");
+    let module = compile("List = { value: int, next: Ptr<List> };");
     assert_eq!(module.types.len(), 1);
     assert_eq!(module.types[0].name.as_ref(), "List");
     let Ty::Record { fields } = module.types[0].body().unwrap() else {
@@ -207,7 +207,7 @@ fn function_values_do_not_capture_local_state() {
 
 #[test]
 fn assignment_and_deref_store_through_an_address() {
-    let module = compile("f (p: Ptr (int)) -> int = { p.* := 1; p.* };");
+    let module = compile("f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
     verify(&module).unwrap();
     let function = &module.functions[1];
     assert!(function.blocks.iter().any(|block| {
@@ -271,7 +271,7 @@ from_meters (m: Meters) -> int = { int (m) };
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
         r#"
-P = Ptr ({ x: int });
+P = Ptr<{ x: int }>;
 f (p: P) -> int = { p.x };
 "#,
     );
@@ -339,8 +339,8 @@ y = int (Meters (x));
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
         r#"
-List = { value: int, next: Ptr (List) };
-nil (p: Ptr (List)) -> List = { List { value = 0, next = p } };
+List = { value: int, next: Ptr<List> };
+nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 "#,
     );
     verify(&module).unwrap();
@@ -386,7 +386,7 @@ fn unbound_value_is_reported() {
 fn span_and_literal_globals_are_typed() {
     let module = compile(
         r#"
-Buf = Span (int);
+Buf = Span<int>;
 x = 1;
 "#,
     );

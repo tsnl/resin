@@ -1,4 +1,4 @@
-fibonacci (n: int) -> int = {
+fibonacci(n: int) -> int = {
     if (n <= 1) {
         n
     } else {

@@ -116,7 +116,7 @@ fn private_names_are_not_visible_to_consumers() {
         (
             "export {};",
             "extern type Hidden;",
-            "x = Ptr (Hidden) (ulong(0));",
+            "x = Ptr<Hidden> (ulong(0));",
             "UnboundType",
         ),
         (

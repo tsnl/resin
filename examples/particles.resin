@@ -6,58 +6,58 @@ import {
     "lib/particles.resin",
 };
 
-initialize (particles: Ptr (Particle)) -> () = {
+initialize(particles: Ptr<Particle>) -> () = {
     index = 0;
     row = 0;
-    x = float32 (-0.75);
-    y = float32 (-0.75);
+    x = float32(-0.75);
+    y = float32(-0.75);
     while (index < 64) {
-        vx = float32 (0.35);
+        vx = float32(0.35);
         if ((index & 1) == 0) { vx := -vx; () } else { () };
         (particles + index).* := Particle {
-            x = x, y = y, vx = vx, vy = float32 (0.27),
-            color = Color { r = x + float32 (0.85), g = y + float32 (0.85), b = float32 (0.8), a = float32 (1.0) }
+            x = x, y = y, vx = vx, vy = float32(0.27),
+            color = Color { r = x + float32(0.85), g = y + float32(0.85), b = float32(0.8), a = float32(1.0) }
         };
         index := index + 1;
         row := row + 1;
-        x := x + float32 (0.2);
-        if (row == 8) { row := 0; x := float32 (-0.75); y := y + float32 (0.2); () } else { () };
+        x := x + float32(0.2);
+        if (row == 8) { row := 0; x := float32(-0.75); y := y + float32(0.2); () } else { () };
     };
 };
 
-main () -> () = {
-    title = "Resin particles\0";
-    window = Ptr (ResinWindow) (ulong (0));
-    check(resin_window_create(640, 480, Ptr (ubyte) (&title), &window));
-    gpu = Ptr (ResinGpu) (ulong (0));
+main() -> () = {
+    title = "Resin particles";
+    window = Ptr<ResinWindow>(ulong(0));
+    check(resin_window_create(640, 480, Ptr<ubyte>(&title), &window));
+    gpu = Ptr<ResinGpu>(ulong(0));
     check(resin_gpu_create_for_window(window, &gpu));
 
     compute_code = shader(kernel, "compute");
-    compute = Ptr (ResinPipeline) (ulong (0));
+    compute = Ptr<ResinPipeline>(ulong(0));
     check(resin_gpu_create_compute_pipeline(gpu, compute_code.data, compute_code.length, &compute));
     vertex_code = shader(vertex, "vertex");
     fragment_code = shader(fragment, "fragment");
-    graphics = Ptr (ResinPipeline) (ulong (0));
+    graphics = Ptr<ResinPipeline>(ulong(0));
     check(resin_gpu_create_graphics_pipeline(gpu, vertex_code.data, vertex_code.length, fragment_code.data, fragment_code.length, &graphics));
 
-    particles = Ptr (ResinAllocation) (ulong (0));
-    root = Ptr (ResinAllocation) (ulong (0));
+    particles = Ptr<ResinAllocation>(ulong(0));
+    root = Ptr<ResinAllocation>(ulong(0));
     // Particle: 32 bytes, alignment 4. Params: 24 bytes, alignment 8.
     check(resin_gpu_malloc(gpu, 64 * 32, 4, resin_memory_default, &particles));
     check(resin_gpu_malloc(gpu, 24, 8, resin_memory_default, &root));
-    initialize(Ptr (Particle) (resin_allocation_host_pointer(particles)));
-    params = Ptr (Params) (resin_allocation_host_pointer(root));
+    initialize(Ptr<Particle>(resin_allocation_host_pointer(particles)));
+    params = Ptr<Params>(resin_allocation_host_pointer(root));
     params.* := Params {
-        count = uint (64), dt = float32 (0.016667), radius = float32 (0.018),
-        particles = Ptr (Particle) (resin_allocation_device_pointer(particles))
+        count = uint(64), dt = float32(0.016667), radius = float32(0.018),
+        particles = Ptr<Particle>(resin_allocation_device_pointer(particles))
     };
     address = resin_allocation_device_pointer(root);
-    image = Ptr (ResinImage) (ulong (0));
+    image = Ptr<ResinImage>(ulong(0));
     check(resin_gpu_create_image(gpu, 640, 480, &image));
 
     check(resin_window_poll_events(window));
     while (resin_window_should_close(window) == 0 && resin_window_key_pressed(window, resin_key_escape) == 0) {
-        commands = Ptr (ResinCommandBuffer) (ulong (0));
+        commands = Ptr<ResinCommandBuffer>(ulong(0));
         check(resin_gpu_start_command_recording(gpu, &commands));
         check(resin_gpu_set_pipeline(commands, compute));
         check(resin_gpu_dispatch(commands, address, 1, 1, 1));

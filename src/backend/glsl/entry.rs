@@ -24,7 +24,7 @@ pub(super) fn emit(
             }
             if types.shape(param) != &Ty::UInt32 || types.shape(result) != &Ty::UInt32 {
                 return Err(Error(
-                    "compute entry must be (uint, Ptr(T)) -> () or map uint to uint (one RGBA8 pixel per invocation)".into(),
+                    "compute entry must be (uint, Ptr<T>) -> () or map uint to uint (one RGBA8 pixel per invocation)".into(),
                 ));
             }
             let value = types.unwrap(
@@ -47,7 +47,7 @@ void main() {{
         Stage::Vertex => {
             let (index, root) = parameters(types, param);
             if types.shape(index) != &Ty::Int32 {
-                return Err(Error("vertex entry must take int or (int, Ptr(T))".into()));
+                return Err(Error("vertex entry must take int or (int, Ptr<T>)".into()));
             }
             let Ty::Record { fields } = types.shape(result) else {
                 return Err(Error("vertex must return a position/color record".into()));

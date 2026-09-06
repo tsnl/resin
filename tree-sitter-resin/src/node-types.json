@@ -1001,11 +1001,7 @@
         "required": false,
         "types": [
           {
-            "type": "closed_term",
-            "named": true
-          },
-          {
-            "type": "closed_type",
+            "type": "type",
             "named": true
           }
         ]
