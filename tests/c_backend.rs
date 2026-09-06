@@ -57,7 +57,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
     ));
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
         "unhandled error: Broken\n"
     );
     let mut m = module(
@@ -66,7 +66,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
     m.types[0].name = "quoted\"name\\value".into();
     let output = run_module(&m);
     assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
         "unhandled error: quoted\"name\\value\n"
     );
 }
