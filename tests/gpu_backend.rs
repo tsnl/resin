@@ -333,6 +333,14 @@ fn shader_defer_preserves_values_and_runs_each_iteration() {
 }
 
 #[test]
+fn shader_defer_delays_conditions_and_discards_expression_values() {
+    compute_values(
+        "export { kernel }; def kernel(i: uint) -> uint = { var n = uint(0); var total = uint(0); var saved = { defer if (n == i) { total := total * uint(2) } else { total := uint(999) }; defer while (n < i) { defer total := total + n; n := n + uint(1); }; total }; saved + total };",
+        |index| index * (index + 1),
+    );
+}
+
+#[test]
 fn shader_defer_unwinds_errors_on_device() {
     compute_values(
         r#"export { kernel };
@@ -342,11 +350,11 @@ fn shader_defer_unwinds_errors_on_device() {
             if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) }
         };
         def work(i: uint, p: Ptr<uint>) -> Result<uint, _> = {
-            defer { p.* := p.* * uint(10) + uint(3); };
+            defer p.* := p.* * uint(10) + uint(3);
             var n = {
-                defer { p.* := p.* * uint(10) + uint(2); };
+                defer p.* := p.* * uint(10) + uint(2);
                 var value = checked(i)?;
-                defer { p.* := uint(1); };
+                defer p.* := uint(1);
                 value
             };
             ok(n)

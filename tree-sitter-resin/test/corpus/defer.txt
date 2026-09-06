@@ -14,8 +14,158 @@ def main() = {
     (lid)
     (block_body
       (statement
-        (block_body))
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (closed_term
+                      (unit_term)))))))))
       (statement
-        (block_body
-          (statement
-            (block_body)))))))
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (closed_term
+                      (chain_term
+                        (statement
+                          (term
+                            (assignment_term
+                              (binary_term
+                                (unary_term
+                                  (postfix_term
+                                    (primary_term
+                                      (closed_term
+                                        (unit_term)))))))))))))))))))))
+
+==================
+Deferred expressions and implicit unit chains
+==================
+
+def main() = {
+    var n = 0;
+    defer n := n + 1;
+    defer emit(n);
+    defer if (n == 0) { emit(n); } else {};
+    var empty = { defer 42; };
+};
+
+---
+
+(source_file
+  (function_definition
+    (lid)
+    (block_body
+      (statement
+        (define
+          (term_define
+            (lid)
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (number))))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (lid)))))
+            (assignment_term
+              (binary_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (lid)))))
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (number))))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (lid))
+                  (closed_term
+                    (paren_term
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (unary_term
+                              (postfix_term
+                                (primary_term
+                                  (lid)))))))))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (if_term
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (lid)))))
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (number))))))))
+                      (closed_term
+                        (chain_term
+                          (statement
+                            (term
+                              (assignment_term
+                                (binary_term
+                                  (unary_term
+                                    (postfix_term
+                                      (primary_term
+                                        (lid))
+                                      (closed_term
+                                        (paren_term
+                                          (term
+                                            (assignment_term
+                                              (binary_term
+                                                (unary_term
+                                                  (postfix_term
+                                                    (primary_term
+                                                      (lid)))))))))))))))))
+                      (closed_term
+                        (unit_term))))))))))
+      (statement
+        (define
+          (term_define
+            (lid)
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (closed_term
+                          (chain_term
+                            (statement
+                              (term
+                                (assignment_term
+                                  (binary_term
+                                    (unary_term
+                                      (postfix_term
+                                        (primary_term
+                                          (number))))))))))))))))))))))

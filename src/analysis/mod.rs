@@ -533,7 +533,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "defer",
-        "defer { cleanup; }; — run at scope exit, including through ?, in reverse registration order.",
+        "defer expression; — evaluate at scope exit in reverse registration order, including through ?, and discard the value.",
         DefinitionKind::Keyword,
     ),
     ("bool", "bool", DefinitionKind::Type),

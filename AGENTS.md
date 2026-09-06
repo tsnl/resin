@@ -24,9 +24,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix
   `?` returns early on error. Error holes collect the least union of propagated errors (`Never`
   if empty). Keep mutable pointers invariant; implicit widening only copies union/Result values.
-- `defer { ... };` registers unit-valued cleanup in the current lexical scope, in reverse
+- `defer expression;` is a chain-prefix statement that discards the deferred value. It runs in reverse
   order on normal exit and `?`. Bind names at registration, read values at exit, and preserve
-  the returned value before cleanup. Deferred blocks cannot propagate with `?`.
+  the returned value before cleanup. Deferred expressions cannot propagate with `?`.
+  Chain expressions with no tail yield unit; `defer { ... };` uses ordinary block syntax.
   Register cleanup after successful acquisition when adapting runtime callers to `status(...)?`;
   exit-on-failure `check` bypasses defers. There is no automatic resource ownership.
 - Commit and push completed changes directly to `main` by default, including in future

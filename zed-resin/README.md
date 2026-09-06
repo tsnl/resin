@@ -118,6 +118,10 @@ Queries highlight the new syntax and include structs in the outline; semantic te
 cover inferred error sets and match-payload navigation/completion. Rebuild the language
 server and reinstall the dev extension together. No new editor smoke test was run.
 
-The current pin at `bba45b9` also supports scoped `defer { ... };` statements. Parser and query tests
+The grammar revision at `bba45b9` added scoped `defer { ... };` statements. Parser and query tests
 cover the keyword and block syntax; compiler analysis tests cover deferred bindings,
 inferred local types, and navigation. No window or editor was opened for this change.
+
+`defer expression;` now accepts any expression and discards its value, while remaining
+statement-only. Chain blocks may omit their unit tail. Parser, compiler, query, and
+recovery tests cover both forms without launching an editor.

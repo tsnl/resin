@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
                 if self.in_defer {
                     return Err(error(
                         span,
-                        "postfix ? is not allowed in a deferred block; handle the error locally",
+                        "postfix ? is not allowed in a deferred expression; handle the error locally",
                     ));
                 }
                 let input = self.term(value, None)?;
@@ -255,7 +255,7 @@ impl<'a> Checker<'a> {
                         }
                         StmtKind::Defer { body } => {
                             let before = std::mem::replace(&mut self.in_defer, true);
-                            self.term(body, Some(Ty::Unit.into()))?;
+                            self.term(body, None)?;
                             self.in_defer = before;
                         }
                         _ => {

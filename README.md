@@ -216,7 +216,7 @@ Register resource cleanup with `defer` before using further fallible operations.
 ```resin
 def work(fail: bool) -> Result<int, _> = {
     var value = allocate()?;
-    defer { free(Ptr<ubyte>(value)); };
+    defer free(Ptr<ubyte>(value));
     value.* := 42;
     fail_if(fail)?;
     ok(value.*)
@@ -227,19 +227,30 @@ The complete [defer example](examples/defer.resin) defines `allocate`, `free`, a
 the fallible `fail_if` helper above. Run `cargo run -- examples/defer.resin` for success,
 or `cargo run -- examples/defer.resin:failure` to see cleanup before an error exits.
 
-`defer { ... };` registers a unit-valued block in the current lexical scope.
+`defer expression;` registers any expression in the current lexical scope and discards
+its result. It is a statement in a chain's prefix, never an expression itself: neither
+`var x = defer ...` nor `consume(defer ...)` is valid. For example:
+
+```resin
+defer release(resource);
+defer if (armed) { release(resource) } else { () };
+defer { release(first); release(second); };
+```
+
+Statement-only chain blocks yield unit, so the block form uses ordinary expression syntax.
 Only registrations reached during execution run. They execute in reverse order on
 normal scope exit and early return through `?`, inner scopes before outer ones.
 A loop body's defers run at the end of each iteration, not at function exit.
 Nested defers follow the same rules.
 
-Names resolve where the defer is registered, but values are read when cleanup runs.
+Names resolve where the defer is registered, but the entire expression—including the
+callee, arguments, and conditions—is evaluated when cleanup runs.
 Later shadowing does not change the referenced binding. Reads must be definitely
 initialized on every exit that executes the defer. The block's result or propagated
 error is saved before cleanup, so mutations do not change the value being returned.
 Returning a pointer does not copy its pointee: do not free memory that escapes.
 
-Deferred blocks cannot use `?`; handle failures locally with `match`. Cleanup is
+Deferred expressions cannot use `?`; handle failures locally with `match`. Cleanup is
 ordinary code, not automatic ownership management, and works in C and GLSL wherever
 the deferred operations are supported. Aborts, traps, and process termination do not
 run defers. The standard library's existing `check(code)` exits the process on failure

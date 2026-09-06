@@ -17,21 +17,29 @@ fn rejects(source: &str, message: &str) {
 }
 
 #[test]
-fn defer_is_a_block_statement() {
-    let file = parse("def main() = { defer { var n = 1; }; };");
+fn defer_is_only_a_prefix_statement() {
+    let file = parse("def main() = { defer 1 + 2; };");
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!()
     };
     let TermKind::Block { stmts, .. } = &body.val else {
         panic!()
     };
-    assert!(matches!(stmts[0].val, StmtKind::Defer { .. }));
+    let StmtKind::Defer { body } = &stmts[0].val else {
+        panic!()
+    };
+    assert!(matches!(&body.val, TermKind::Builtin { name, .. } if name.as_ref() == "+"));
     assert!(resin::ast::print::format_source(&file).contains("defer"));
     for source in [
         "defer {};",
-        "def main() = { defer print(\"done\", ()); };",
         "def main() = { defer {} };",
         "def main() = { var defer = 1; };",
+        "def main() = { var x = defer 42; };",
+        "def main() = { print(defer 42); };",
+        "def main() = { 1 + defer 42; };",
+        "def main() = { defer defer 42; };",
+        "def main() = { defer 42 };",
+        "def main() = { defer var n = 42; };",
     ] {
         let mut parser = tree_sitter::Parser::new();
         parser
@@ -48,19 +56,62 @@ fn defer_is_a_block_statement() {
 }
 
 #[test]
-fn cleanup_is_unit_and_cannot_propagate() {
-    rejects("def f() = { defer { 42 }; };", "incompatible");
+fn deferred_expressions_discard_their_values() {
+    module(
+        r#"
+        struct Pair { first: int, second: int };
+        def answer() -> int = { 42 };
+        def f() = {
+            var n = 0;
+            var p = &n;
+            defer answer();
+            defer n := n + 1;
+            defer -n + 42;
+            defer 1 == 1 && 2 == 2;
+            defer { 42 };
+            defer { var local = answer(); };
+            defer if (n == 0) { answer() } else { n };
+            defer while (n < 3) { n := n + 1; };
+            defer [1, 2];
+            defer (1, 2);
+            defer { first = 1, second = 2 };
+            defer Pair { first = 1, second = 2 };
+            defer Pair { first = 1, second = 2 }.first;
+            defer p.*;
+            defer &n;
+        };
+    "#,
+    );
+}
+
+#[test]
+fn deferred_expressions_cannot_propagate() {
+    rejects(
+        "struct E {}; def f(r: Result<(), E>) -> Result<(), E> = { defer r?; ok(()) };",
+        "not allowed in a deferred expression",
+    );
     rejects(
         "struct E {}; def f(r: Result<(), E>) -> Result<(), E> = { defer { r?; }; ok(()) };",
-        "not allowed in a deferred block",
+        "not allowed in a deferred expression",
     );
     rejects(
         "struct E {}; def f(r: Result<(), E>) -> Result<(), E> = { defer { defer { r?; }; }; ok(()) };",
-        "not allowed in a deferred block",
+        "not allowed in a deferred expression",
     );
     module(
         "struct E {}; def f(r: Result<(), E>) = { defer { match (r) { ok(n) => {}, err(e) => {} }; }; };",
     );
+    module(
+        "struct E {}; def f(r: Result<int, E>) = { defer match (r) { ok(n) => { n }, err(e) => { 42 } }; };",
+    );
+}
+
+#[test]
+fn statement_only_chain_expressions_yield_unit() {
+    module(
+        "def f() = { var result = { defer 42; }; var empty = {}; if (1 == 1) { defer 1; } else { defer 2; }; result };",
+    );
+    rejects("def f() -> int = { { defer 42; } };", "incompatible");
 }
 
 #[test]

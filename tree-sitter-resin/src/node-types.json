@@ -212,7 +212,7 @@
       },
       "tail": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "term",
@@ -895,7 +895,7 @@
         "required": false,
         "types": [
           {
-            "type": "block_body",
+            "type": "term",
             "named": true
           }
         ]

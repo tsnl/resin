@@ -43,7 +43,7 @@ impl Generator {
         deferred.scopes.update_initialization(&self.scopes);
         let mut before = std::mem::replace(&mut self.scopes, deferred.scopes);
         let in_defer = std::mem::replace(&mut self.in_defer, true);
-        let result = self.gen_term(&deferred.body, Some(&Ty::Unit));
+        let result = self.gen_term(&deferred.body, None);
         before.update_initialization(&self.scopes);
         self.scopes = before;
         self.in_defer = in_defer;

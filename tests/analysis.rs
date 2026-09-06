@@ -74,6 +74,35 @@ fn deferred_bindings_keep_navigation_types_and_local_scopes() {
 }
 
 #[test]
+fn deferred_expressions_keep_lexical_navigation_and_recover_fields() {
+    let source = "def main() = { var value = 1; { defer value + 1; var value = 2; }; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    let path = project.path("main.resin");
+    let reference = source.find("defer value").unwrap() + 6;
+    assert_eq!(
+        analysis.definition(&path, reference).unwrap().span.start,
+        source.find("value").unwrap()
+    );
+    assert_eq!(analysis.hover(&path, reference).unwrap().text, "value: int");
+
+    let source = "def main() = { var point = { count = 42 }; defer point.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let items = analysis.completions(
+        &project.path("main.resin"),
+        source.find("point.").unwrap() + 6,
+    );
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].detail, "count: int");
+}
+
+#[test]
 fn inferred_errors_and_match_payloads_have_editor_types() {
     let source = "struct Broken { code: int }; def fail() -> Result<int, _> = { err(Broken { code = 7 }) }; def main() = { var result = fail(); match (result) { ok(value) => { value; }, err(error) => { error.code; } }; };";
     let project = Project::new(&[("main.resin", source)]);
@@ -798,6 +827,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
         "def main() = { var n = 42; defer { defer {}; print(\"{0}\", (n,)); }; };",
+        "def main() = { var n = 42; defer if (n == 42) { print(\"{0}\", (n,)); } else {}; defer n := n + 1; };",
     ] {
         for end in 0..=source.len() {
             let project = Project::new(&[("main.resin", &source[..end])]);

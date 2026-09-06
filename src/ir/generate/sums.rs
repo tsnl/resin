@@ -50,7 +50,7 @@ impl Generator {
         if self.in_defer {
             return Err(error(
                 span,
-                "postfix ? is not allowed in a deferred block; handle the error locally",
+                "postfix ? is not allowed in a deferred expression; handle the error locally",
             ));
         }
         let ty = self.gen_term(term, None)?;

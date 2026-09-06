@@ -18,10 +18,8 @@ def fail_if(fail: bool) -> Result<(), Failed> = {
 
 def work(fail: bool) -> Result<int, _> = {
     var value = allocate()?;
-    defer {
-        free(Ptr<ubyte>(value));
-        print("freed memory\n", ());
-    };
+    defer print("freed memory\n", ());
+    defer free(Ptr<ubyte>(value));
     value.* := 42;
     fail_if(fail)?;
     ok(value.*)

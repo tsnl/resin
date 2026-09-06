@@ -31,10 +31,13 @@ branches; exhaustive `match` expressions bind payloads, and postfix `?` returns 
 An inferred error set is the least union of errors propagated by a dependency group, or `Never`
 when empty.
 
-`defer { ... };` registers a unit-valued block for lexical scope exit, including early
-returns through `?`. Cleanup runs in reverse registration order, only for registrations
+`defer expression;` is a chain-prefix statement, not an expression. It registers any
+expression for lexical scope exit, including early returns through `?`, and discards
+its value. Statement-only chain blocks yield unit, so `defer { ... };` needs no special
+block syntax. Cleanup runs in reverse registration order, only for registrations
 reached on that path. Names bind at registration; local values and initialization facts
-are read at exit. Return values are saved before cleanup. Deferred blocks may nest, but
+are read at exit. Callees, arguments, and conditions are also evaluated at exit, not
+registration. Return values are saved before cleanup. Defers may nest in blocks, but
 cannot themselves propagate errors. This is explicit cleanup, not an ownership system;
 process termination and traps do not unwind scopes.
 

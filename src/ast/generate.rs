@@ -219,7 +219,7 @@ impl<'a> AstGen<'a> {
         if let Some(body) = node.child_by_field_name("defer") {
             return Spanned::new(
                 StmtKind::Defer {
-                    body: Arc::new(self.gen_body(body)),
+                    body: Arc::new(self.trailing_errors(self.gen_term(body), node)),
                 },
                 self.span(node),
             );
@@ -558,9 +558,13 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_body(&self, node: Node) -> Term {
+        self.gen_block(node, "stmt")
+    }
+
+    fn gen_block(&self, node: Node, statement_field: &str) -> Term {
         let mut cursor = node.walk();
         let stmts = node
-            .children_by_field_name("stmt", &mut cursor)
+            .children_by_field_name(statement_field, &mut cursor)
             .map(|stmt| self.gen_stmt(stmt))
             .collect();
         let tail = node
@@ -638,20 +642,7 @@ impl<'a> AstGen<'a> {
             return self.hole(node);
         }
         assert_eq!(node.kind(), "chain_term");
-        let mut stmts = Vec::new();
-        let mut cursor = node.walk();
-        for s in node.children_by_field_name("prefix", &mut cursor) {
-            stmts.push(self.gen_stmt(s));
-        }
-        let tail = self.gen_term(node.child_by_field_name("tail").unwrap_or(node));
-        let tail = self.trailing_errors(tail, node);
-        Spanned::new(
-            TermKind::Block {
-                stmts,
-                tail: Box::new(tail),
-            },
-            self.span(node),
-        )
+        self.gen_block(node, "prefix")
     }
 
     fn gen_if_term(&self, node: Node) -> Term {

@@ -607,7 +607,7 @@
               "name": "defer",
               "content": {
                 "type": "SYMBOL",
-                "name": "block_body"
+                "name": "term"
               }
             },
             {
@@ -1873,23 +1873,49 @@
           "value": "{"
         },
         {
-          "type": "FIELD",
-          "name": "prefix",
-          "content": {
-            "type": "REPEAT",
-            "content": {
-              "type": "SYMBOL",
-              "name": "statement"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "prefix",
+                  "content": {
+                    "type": "REPEAT1",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "statement"
+                    }
+                  }
+                },
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "FIELD",
+                      "name": "tail",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "term"
+                      }
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "FIELD",
+              "name": "tail",
+              "content": {
+                "type": "SYMBOL",
+                "name": "term"
+              }
             }
-          }
-        },
-        {
-          "type": "FIELD",
-          "name": "tail",
-          "content": {
-            "type": "SYMBOL",
-            "name": "term"
-          }
+          ]
         },
         {
           "type": "STRING",

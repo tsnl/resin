@@ -43,8 +43,9 @@ A few language choices explain much of the implementation:
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of nominal structs. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
-- `defer { ... };` runs registered cleanup in reverse order on scope exit, including
-  through `?`. It does not introduce automatic ownership or destruction.
+- `defer expression;` is a prefix statement that runs cleanup in reverse order on scope
+  exit, including through `?`, and discards its value. It does not introduce automatic
+  ownership or destruction. Statement-only chain blocks yield unit.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default

@@ -194,7 +194,7 @@ impl Recovery<'_> {
                 self.term(term, None);
             }
             StmtKind::Defer { body } => {
-                self.term(body, Some(&Ty::Unit));
+                self.term(body, None);
             }
             StmtKind::DefineType { name, init } => {
                 if let Some(ty) = self.ty(init)

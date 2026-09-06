@@ -120,7 +120,7 @@ export default grammar({
     statement: ($) =>
       choice(
         field("struct", $.struct_definition),
-        seq("defer", field("defer", $.block_body), ";"),
+        seq("defer", field("defer", $.term), ";"),
         seq(field("define", $.define), ";"),
         seq("var", field("declare", $.declare), ";"),
         seq(field("expr", $.term), ";"),
@@ -237,8 +237,10 @@ export default grammar({
     chain_term: ($) =>
       seq(
         "{",
-        field("prefix", repeat($.statement)),
-        field("tail", $.term),
+        choice(
+          seq(field("prefix", repeat1($.statement)), optional(field("tail", $.term))),
+          field("tail", $.term),
+        ),
         "}",
       ),
     unit_term: ($) => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),

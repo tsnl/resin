@@ -77,6 +77,46 @@ fn defer_runs_in_reverse_order_and_preserves_return_values() {
 }
 
 #[test]
+fn defer_evaluates_the_entire_expression_at_exit() {
+    runs(
+        "export { main }; def first(n: int, p: Ptr<int>) -> int = { p.* := n + 1 }; def second(n: int, p: Ptr<int>) -> int = { p.* := n + 2 }; def main() -> int = { var trace = 0; var n = 1; var callback = first; var saved = { defer callback(n, &trace); callback := second; n := 40; trace }; if (saved == 0 && trace == 42) { 0 } else { 1 } };",
+        0,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; var n = 1; { defer trace := trace * 10 + n; defer (trace := 2) + (n := 3); n := 9; }; trace };",
+        23,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; var n = 0; { defer if (n == 42) { trace := 7 } else { trace := 9 }; defer while (n < 42) { n := n + 1; }; }; trace };",
+        7,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; var n = 0; { defer (n == 42) && ((trace := 7) == 7); n := 42; }; trace };",
+        7,
+    );
+    runs(
+        "export { main }; def main() -> int = { var trace = 0; var n = 1; { defer trace := n; var n = 100; n := 200; }; trace };",
+        1,
+    );
+}
+
+#[test]
+fn deferred_expression_results_and_error_paths_keep_the_same_cleanup_rules() {
+    runs(
+        "export { main }; struct E { n: int }; def fail() -> Result<int, E> = { err(E { n = 7 }) }; def work(p: Ptr<int>) -> Result<int, _> = { defer p.* := p.* * 10 + 3; var n = { defer p.* := p.* * 10 + 2; var value = fail()?; defer p.* := 99; value }; ok(n) }; def main() -> int = { var trace = 1; match (work(&trace)) { ok(n) => { 1 }, err(e) => { if (trace == 123 && e.n == 7) { 0 } else { 2 } } } };",
+        0,
+    );
+    runs(
+        "export { main }; struct E {}; def main() -> int = { var trace = 0; var r: Result<int, E>; r := ok(42); { defer match (r) { ok(n) => { trace := n }, err(e) => { trace := 7 } }; r := err(E {}); }; trace };",
+        7,
+    );
+    runs(
+        "export { main }; struct Pair { a: int, b: int }; def main() -> int = { var n = 0; { defer Pair { a = (n := n + 1), b = (n := n + 2) }; defer [n := n + 3, n := n + 4]; }; n };",
+        10,
+    );
+}
+
+#[test]
 fn defer_keeps_lexical_bindings_through_shadowing_and_branches() {
     runs(
         "export { main }; def main() -> int = { var x = 1; var trace = 0; { defer { trace := x; }; var x = 100; x := 200; () }; trace };",

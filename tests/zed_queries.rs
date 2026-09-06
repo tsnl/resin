@@ -78,7 +78,7 @@ fn inference_holes_are_highlighted_as_types() {
 
 #[test]
 fn defer_is_highlighted_as_a_keyword() {
-    let source = "def f() = { defer { print(\"done\", ()); }; };";
+    let source = "def f() = { defer print(\"done\", ()); };";
     assert!(captures(QUERIES[0].1, source).contains(&("keyword".into(), "defer".into())));
 }
 
