@@ -1,13 +1,25 @@
 export { main };
 
 struct List { value: int, next: Ptr<List> };
-def cons(value: int, next: Ptr<List>) -> List = { List { value = value, next = next } };
-def car(node: List) -> int = { node.value };
-def cdr(node: List) -> Ptr<List> = { node.next };
-def at(p: Ptr<List>) -> int = { p.value };
+
+def cons(value: int, next: Ptr<List>) -> List = {
+	List { value = value, next = next }
+};
+
+def car(node: List) -> int = {
+	node.value
+};
+
+def cdr(node: List) -> Ptr<List> = {
+	node.next
+};
+
+def at(p: Ptr<List>) -> int = {
+	p.value
+};
 
 def main() -> () = {
-    var tail = cons(2, Ptr<List>(ulong(0)));
-    var head = cons(1, &tail);
-    print("list = {0}, {1}\n", (car(head), at(cdr(head))));
+	var tail = cons(2, Ptr<List>(ulong(0)));
+	var head = cons(1, &tail);
+	print("list = {0}, {1}\n", (car(head), at(cdr(head))));
 };

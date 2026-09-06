@@ -3,13 +3,13 @@ export { main, independent };
 import { "lib/counter.resin", "std/status.resin" };
 
 def main() -> () = {
-    check(0);
-    var counter = Counter { value = 0 };
-    print("counter: {0}, {1}\n", (next(&counter), next(&counter)));
+	check(0);
+	var counter = Counter { value = 0 };
+	print("counter: {0}, {1}\n", (next(&counter), next(&counter)));
 };
 
 def independent() -> () = {
-    var first = Counter { value = 0 };
-    var second = Counter { value = 100 };
-    print("independent counters: {0}, {1}, {2}\n", (next(&first), next(&second), next(&first)));
+	var first = Counter { value = 0 };
+	var second = Counter { value = 100 };
+	print("independent counters: {0}, {1}, {2}\n", (next(&first), next(&second), next(&first)));
 };

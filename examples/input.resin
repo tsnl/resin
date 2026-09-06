@@ -1,12 +1,13 @@
 export { main };
+
 import { "std/console.resin" };
 
 def main() -> Result<(), _> = {
-    print("What is your name? ", ());
-    var name = input()?;
-    defer free_input(name);
-    print("Hello, ", ());
-    print_input(name)?;
-    print("!\n", ());
-    ok(())
+	print("What is your name? ", ());
+	var name = input()?;
+	defer free_input(name);
+	print("Hello, ", ());
+	print_input(name)?;
+	print("!\n", ());
+	ok(())
 };

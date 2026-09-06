@@ -37,6 +37,8 @@ jobs:
           "$env:ProgramFiles\LLVM\bin" >> $env:GITHUB_PATH
       - name: Build compiler, runtime, and language server
         run: cargo build --workspace --locked
+      - name: Check example formatting
+        run: cargo run --locked -- fmt --check examples
       - name: Runtime native libraries
         run: cargo rustc -p resin-runtime --lib -- --print native-static-libs
       - name: Run a host program

@@ -1,0 +1,2 @@
+# The canonical formatter emits LF, including in Windows checkouts.
+*.resin text eol=lf

@@ -1,11 +1,16 @@
 export { main };
 
 def main() = {
-    var n = 1;
-    var sum = 0;
-    while (n <= 10) {
-        sum := sum + n;
-        n := n + 1;
-    };
-    print("sum(1..10) = {0}\n", (sum,));
+	var n = 1;
+	var sum = 0;
+	while (n <= 10) {
+		sum := sum + n;
+		n := n + 1;
+	};
+	print(
+		"sum(1..10) = {0}\n",
+		(
+			sum,
+		)
+	);
 };

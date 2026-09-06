@@ -3,6 +3,6 @@ export { Counter, next };
 struct Counter { value: int };
 
 def next(counter: Ptr<Counter>) -> int = {
-    counter.value := counter.value + 1;
-    counter.value
+	counter.value := counter.value + 1;
+	counter.value
 };
