@@ -17,6 +17,13 @@ nix-shell --run 'cargo install --path resin-lsp --locked'
 nix-shell --run 'rustup target add wasm32-wasip2'
 ```
 
+The repository's `rust-toolchain.toml` declares the `wasm32-wasip2` target,
+so Rustup installs it when activating the project toolchain. If Zed reports
+`can't find crate for core`, run the target-install command above from this
+repository root, then retry installing the dev extension. Rust targets are
+installed per toolchain; adding the target outside the repository can select
+a different Rust version.
+
 Launch Zed from `nix-shell` so it inherits the native library paths, then run
 **zed: install dev extension** in the command palette and select `zed-resin/`.
 On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'`.

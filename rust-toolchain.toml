@@ -1,3 +1,4 @@
 [toolchain]
 channel = "1.96.0"
 components = ["cargo", "rustfmt", "rust-analyzer", "clippy"]
+targets = ["wasm32-wasip2"]
