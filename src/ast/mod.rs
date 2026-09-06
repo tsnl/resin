@@ -7,7 +7,10 @@ use std::sync::Arc;
 pub mod generate;
 mod load;
 pub mod print;
-pub use load::{Program, SourceError, SourceModule, load};
+pub use load::{
+    FileSystem, Program, SourceError, SourceLocation, SourceModule, SourceNote, SourceProvider,
+    load, load_with, resolve_import, stdlib_path,
+};
 
 pub use generate::{AstError, AstErrorKind, AstGen};
 
@@ -143,7 +146,7 @@ impl<T> Spanned<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

@@ -3,6 +3,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::ir::{FunctionId, LocalId, Ty, TypeId};
+use crate::{
+    analysis::semantic::Trace,
+    ast::{Ident, SourceLocation},
+    ir::TyperContext,
+};
 
 #[derive(Clone)]
 pub(super) enum Symbol {
@@ -34,6 +39,7 @@ pub(super) enum ValueBindingKind {
 struct Scope {
     values: HashMap<Arc<str>, ValueBinding>,
     types: HashMap<Arc<str>, Ty>,
+    origins: HashMap<(Arc<str>, bool), SourceLocation>,
 }
 
 impl Scope {
@@ -73,9 +79,68 @@ impl Scope {
 #[derive(Clone)]
 pub(super) struct Scopes {
     frames: Vec<Scope>,
+    trace: Option<Trace>,
 }
 
 impl Scopes {
+    pub(super) fn traced(trace: Trace) -> Self {
+        Self {
+            trace: Some(trace),
+            ..Self::new()
+        }
+    }
+
+    pub(super) fn record_import(&mut self, name: Arc<str>, is_type: bool, origin: SourceLocation) {
+        if self.trace.is_some() {
+            self.innermost().origins.insert((name, is_type), origin);
+        }
+    }
+
+    pub(super) fn record_definition(
+        &mut self,
+        name: &Ident,
+        is_type: bool,
+        ty: Option<&Ty>,
+        typer: &TyperContext,
+    ) {
+        if let Some(trace) = &self.trace {
+            let location = trace.location(name.span);
+            if let Some(ty) = ty {
+                trace.typed(location.clone(), ty, typer);
+            }
+            self.innermost()
+                .origins
+                .insert((name.val.clone(), is_type), location);
+        }
+    }
+
+    pub(super) fn record_reference(&self, name: &Ident, is_type: bool) {
+        if let Some(trace) = &self.trace
+            && let Some(origin) = self.origin(&name.val, is_type)
+        {
+            trace
+                .data
+                .borrow_mut()
+                .references
+                .insert(trace.location(name.span), origin.clone());
+        }
+    }
+
+    pub(super) fn record_binding_type(&self, name: &Arc<str>, ty: &Ty, typer: &TyperContext) {
+        if let Some(trace) = &self.trace
+            && let Some(origin) = self.origin(name, false)
+        {
+            trace.typed(origin.clone(), ty, typer);
+        }
+    }
+
+    fn origin(&self, name: &Arc<str>, is_type: bool) -> Option<&SourceLocation> {
+        self.frames
+            .iter()
+            .rev()
+            .find_map(|frame| frame.origins.get(&(name.clone(), is_type)))
+    }
+
     pub(super) fn symbol(&self, name: &str) -> Option<Symbol> {
         self.lookup_value(name)
             .cloned()
@@ -94,6 +159,7 @@ impl Scopes {
     pub(super) fn new() -> Self {
         Self {
             frames: vec![Scope::new()],
+            trace: None,
         }
     }
 
