@@ -1,11 +1,84 @@
 #![cfg(feature = "gpu")]
 
 use resin::toolchain::TempDir;
-use resin_runtime::{ResinGpu, ResinStatus, image_read_png, image_write_png, testing::lock_gpu};
+use resin_runtime::{
+    ResinGpu, ResinMemory, ResinStatus, image_read_png, image_write_png, testing::lock_gpu,
+};
 use std::{path::Path, process::Command};
 
 #[path = "support/shaders.rs"]
 mod shaders;
+mod support;
+
+fn gpu() -> Option<ResinGpu> {
+    match ResinGpu::create() {
+        Ok(gpu) => Some(gpu),
+        Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
+            assert!(
+                std::env::var("RESIN_REQUIRE_GPU").as_deref() != Ok("1"),
+                "a suitable Vulkan device is required"
+            );
+            eprintln!("skipping: no suitable Vulkan device");
+            None
+        }
+        Err(error) => panic!("GPU initialization failed: {error:?}"),
+    }
+}
+
+#[test]
+fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let _lock = lock_gpu();
+    let Some(mut gpu) = gpu() else { return };
+    let module = support::module(
+        "kernel (index: uint) -> uint = { total = uint (0); n = index; while (n > uint (0) && n <= index) { j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
+    );
+    let glsl = resin::backend::glsl::emit(&module, "kernel", resin::backend::glsl::Stage::Compute)
+        .unwrap();
+    let spv =
+        resin::toolchain::compile_glsl(&glsl, resin::backend::glsl::Stage::Compute, &compiler)
+            .unwrap();
+    #[repr(C)]
+    struct Root {
+        count: u32,
+        pixels: u64,
+    }
+    const COUNT: u32 = 67;
+    // All resources share one GPU and remain live until synchronous submission completes.
+    unsafe {
+        let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
+        let pixels = gpu
+            .malloc((COUNT as usize + 1) * 4, 4, ResinMemory::Default)
+            .unwrap();
+        let root = gpu
+            .malloc(size_of::<Root>(), align_of::<Root>(), ResinMemory::Default)
+            .unwrap();
+        std::slice::from_raw_parts_mut(pixels.host_pointer().cast::<u32>(), COUNT as usize + 1)
+            .fill(u32::MAX);
+        root.host_pointer().cast::<Root>().write(Root {
+            count: COUNT,
+            pixels: pixels.device_pointer(),
+        });
+        let mut commands = gpu.start_command_recording().unwrap();
+        commands.set_pipeline(&pipeline).unwrap();
+        commands
+            .dispatch(root.device_pointer(), COUNT.div_ceil(64), 1, 1)
+            .unwrap();
+        gpu.submit(commands).unwrap();
+        let values =
+            std::slice::from_raw_parts(pixels.host_pointer().cast::<u32>(), COUNT as usize + 1);
+        for (index, &value) in values[..COUNT as usize].iter().enumerate() {
+            assert_eq!(
+                value,
+                (index * (index + 1) / 2) as u32,
+                "invocation {index}"
+            );
+        }
+        assert_eq!(values[COUNT as usize], u32::MAX);
+    }
+}
 
 #[test]
 fn ordinary_resin_programs_render_and_write_pngs() {
@@ -13,18 +86,8 @@ fn ordinary_resin_programs_render_and_write_pngs() {
         return;
     };
     let _lock = lock_gpu();
-    match ResinGpu::create() {
-        Ok(gpu) => drop(gpu),
-        Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
-            assert!(
-                std::env::var("RESIN_REQUIRE_GPU").as_deref() != Ok("1"),
-                "a suitable Vulkan device is required"
-            );
-            eprintln!("skipping: no suitable Vulkan device");
-            return;
-        }
-        Err(error) => panic!("GPU initialization failed: {error:?}"),
-    }
+    let Some(gpu) = gpu() else { return };
+    drop(gpu);
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     for name in ["gradient", "triangle"] {
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))

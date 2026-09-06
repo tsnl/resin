@@ -6,6 +6,31 @@ use crate::ir::{Instr, Terminator, Ty, TypeError, TypeErrorKind, Value};
 use super::{GenerateError, Generator};
 
 impl Generator {
+    pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, GenerateError> {
+        let condition = self.new_block("while.cond");
+        let body_block = self.new_block("while.body");
+        let exit = self.new_block("while.exit");
+        self.terminate(Terminator::Break { target: condition });
+
+        self.switch(condition);
+        self.gen_bool(cond)?;
+        let after_condition = self.scopes.clone();
+        self.terminate(Terminator::Branch {
+            then: body_block,
+            els: exit,
+        });
+
+        self.switch(body_block);
+        self.gen_term(body, None)?;
+        self.emit(Instr::Discard);
+        self.terminate(Terminator::Break { target: condition });
+
+        self.scopes = after_condition;
+        self.switch(exit);
+        self.emit(Instr::Push { value: Value::Unit });
+        Ok(Ty::Unit)
+    }
+
     pub(super) fn gen_if(
         &mut self,
         cond: &Term,

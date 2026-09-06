@@ -45,6 +45,10 @@ pub enum TermKind {
         then: Box<Term>,
         els: Box<Term>,
     },
+    While {
+        cond: Box<Term>,
+        body: Box<Term>,
+    },
     Array {
         elems: Vec<Term>,
     },

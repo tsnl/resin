@@ -26,6 +26,61 @@ fn compile_err(src: &str) -> GenerateErrorKind {
 }
 
 #[test]
+fn while_lowers_to_a_back_edge_and_returns_unit() {
+    let module = compile("main () -> () = { i = 0; while (i < 3) { i := i + 1; } };");
+    let function = &module.functions[1];
+    let condition = function
+        .blocks
+        .iter()
+        .position(|b| b.name.as_deref() == Some("while.cond"))
+        .unwrap();
+    let body = function
+        .blocks
+        .iter()
+        .find(|b| b.name.as_deref() == Some("while.body"))
+        .unwrap();
+    assert!(matches!(body.terminator, Terminator::Break { target } if target.index() == condition));
+    assert_eq!(function.result, Ty::Unit);
+    verify(&module).unwrap();
+}
+
+#[test]
+fn while_does_not_assume_its_body_ran() {
+    for source in [
+        "main () -> int = { x: int; while (1 == 0) { x := 1; }; x };",
+        "main () -> () = { x: int; while (x < 3) { x := 1; }; };",
+        "main () -> () = { x: int; while (1 == 0) { x := x + 1; }; };",
+        "main () -> int = { x: int; while ((1 == 0) && ((x := 1) == 1)) {}; x };",
+        "main () -> int = { x: int; while (1 == 1) { x := 1; }; x };",
+    ] {
+        assert!(
+            matches!(
+                compile_err(source),
+                GenerateErrorKind::UninitializedValue { .. }
+            ),
+            "{source}"
+        );
+    }
+    compile("main () -> int = { x: int; while ((x := 1) == 0) {}; x };");
+}
+
+#[test]
+fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
+    assert!(matches!(
+        compile_err("main () -> () = { while (1) {} };"),
+        GenerateErrorKind::Type(_)
+    ));
+    assert!(matches!(
+        compile_err("main () -> int = { while (1 == 0) { inner = 1; }; inner };"),
+        GenerateErrorKind::UnboundValue { .. }
+    ));
+    assert!(matches!(
+        compile_err("main () -> int = { while (1 == 0) { 42 } };"),
+        GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+    ));
+}
+
+#[test]
 fn examples_generate_verified_ir() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let mut found = 0;

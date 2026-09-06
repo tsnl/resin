@@ -197,6 +197,7 @@ impl Generator {
                 Ok(Ty::Type)
             }
             TermKind::If { cond, then, els } => self.gen_if(cond, then, els, expected),
+            TermKind::While { cond, body } => self.gen_while(cond, body),
             TermKind::Array { elems } => self.gen_array(term.span, elems, expected),
             TermKind::Record { fields } => self.gen_record(term.span, fields, expected),
             TermKind::Block { stmts, tail } => self.gen_block(stmts, tail, expected),

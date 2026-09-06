@@ -1,11 +1,18 @@
 use std::{
     ffi::OsStr,
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
+    time::{Duration, Instant},
 };
 
+use resin::ast::{StmtKind, TermKind};
 use resin::toolchain::{TempDir, compile_c};
 use resin_runtime::testing::lock_gpu;
+
+#[path = "support/shaders.rs"]
+mod shaders;
+#[allow(dead_code)]
+mod support;
 
 fn compile(source: &str, path: &Path) {
     let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
@@ -209,29 +216,68 @@ fn windows_present_resize_and_release_resources() {
 
 #[test]
 fn resin_window_example_uses_bundled_glfw() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/window.resin");
     let executable = temp.path().join("window-example");
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
-        .current_dir(temp.path())
-        .arg(source)
-        .args(["--output", "exe", "-o"])
-        .arg(&executable)
-        .output()
+    let mut ast = resin::ast::load(&source).unwrap();
+    let body = ast
+        .stmts
+        .iter_mut()
+        .find_map(|stmt| match &mut stmt.val {
+            StmtKind::Function { name, body, .. } if name.val.as_ref() == "main" => Some(body),
+            _ => None,
+        })
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let TermKind::Block { stmts, .. } = &mut body.val else {
+        panic!("main body")
+    };
+    stmts.insert(0, support::parse("test_frames = 0;").stmts.remove(0));
+    let body = stmts
+        .iter_mut()
+        .find_map(|stmt| match &mut stmt.val {
+            StmtKind::Expr { term } => match &mut term.val {
+                TermKind::While { body, .. } => Some(body),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    let TermKind::Block { stmts, .. } = &mut body.val else {
+        panic!("loop body")
+    };
+    // Close through the runtime after three frames; leave the interactive demo unbounded.
+    stmts.extend(support::parse("test_frames := test_frames + 1; if (test_frames == 3) { check(resin_window_set_should_close(window, 1)) } else { () };").stmts);
+    let module = resin::ir::generate(&ast).unwrap();
+    let shaders = resin::toolchain::build_shaders(&module, &compiler).unwrap();
+    let c = resin::backend::c::emit_with_shaders(&module, &shaders).unwrap();
+    compile(&c, &executable);
     if !display_available() {
         return;
     }
     let _lock = lock_gpu();
-    let output = Command::new(executable)
+    let mut child = Command::new(executable)
         .env("GLSLC", OsStr::new("/missing/glslc"))
-        .output()
+        .env("CC", OsStr::new("/missing/cc"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "window example did not close: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
     if succeeded(&output) {
         assert_eq!(output.stdout, b"window demo complete\n");
     }

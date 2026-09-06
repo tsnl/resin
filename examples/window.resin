@@ -1,31 +1,37 @@
 include "../lib/runtime.resin";
-
-frames (gpu: Ptr (ResinGpu), window: Ptr (ResinWindow), image: Ptr (ResinImage), remaining: int, blue: float32) -> () = {
-    check(resin_window_poll_events(window));
-    if (remaining > 0 && resin_window_should_close(window) == 0 && resin_window_key_pressed(window, resin_key_escape) == 0) {
-        commands = Ptr (ResinCommandBuffer) (ulong (0));
-        check(resin_gpu_start_command_recording(gpu, &commands));
-        check(resin_gpu_begin_rendering(commands, image, float32 (0.1), float32 (0.3), blue, float32 (1.0)));
-        check(resin_gpu_end_rendering(commands));
-        check(resin_gpu_submit(gpu, commands));
-        status = resin_gpu_present(gpu, image);
-        if (status != resin_status_incomplete) { check(status) } else { () };
-        frames(gpu, window, image, remaining - 1, blue + float32 (0.005))
-    } else { () }
-};
+include "lib/triangle.resin";
 
 main () -> () = {
-    title = "Resin window\0";
+    title = "Resin triangle\0";
     window = Ptr (ResinWindow) (ulong (0));
     check(resin_window_create(640, 480, Ptr (ubyte) (&title), &window));
     gpu = Ptr (ResinGpu) (ulong (0));
     check(resin_gpu_create_for_window(window, &gpu));
+
+    vertex_code = shader(vertex, "vertex");
+    fragment_code = shader(fragment, "fragment");
+    pipeline = Ptr (ResinPipeline) (ulong (0));
+    check(resin_gpu_create_graphics_pipeline(gpu, vertex_code.data, vertex_code.length, fragment_code.data, fragment_code.length, &pipeline));
+
     image = Ptr (ResinImage) (ulong (0));
     check(resin_gpu_create_image(gpu, 640, 480, &image));
 
-    frames(gpu, window, image, 120, float32 (0.0));
+    check(resin_window_poll_events(window));
+    while (resin_window_should_close(window) == 0 && resin_window_key_pressed(window, resin_key_escape) == 0) {
+        commands = Ptr (ResinCommandBuffer) (ulong (0));
+        check(resin_gpu_start_command_recording(gpu, &commands));
+        check(resin_gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0));
+        check(resin_gpu_set_pipeline(commands, pipeline));
+        check(resin_gpu_draw(commands, 0, 3));
+        check(resin_gpu_end_rendering(commands));
+        check(resin_gpu_submit(gpu, commands));
+        status = resin_gpu_present(gpu, image);
+        if (status != resin_status_incomplete) { check(status) } else { () };
+        check(resin_window_poll_events(window));
+    };
 
     resin_gpu_free_image(gpu, image);
+    resin_gpu_free_pipeline(gpu, pipeline);
     resin_gpu_destroy(gpu);
     resin_window_destroy(window);
     print("window demo complete\n", ());

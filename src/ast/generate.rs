@@ -242,6 +242,13 @@ impl<'a> AstGen<'a> {
                 span,
             ),
             "if_term" => self.gen_if_term(child),
+            "while_term" => Spanned::new(
+                TermKind::While {
+                    cond: Box::new(self.gen_term(child.child_by_field_name("cond").unwrap())),
+                    body: Box::new(self.gen_body(child.child_by_field_name("body").unwrap())),
+                },
+                span,
+            ),
             "string" => Spanned::new(
                 TermKind::String {
                     value: decode_string(self.text(child)).into(),
@@ -290,29 +297,32 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
-        let block = node.child_by_field_name("body").unwrap();
-        let mut cursor = block.walk();
-        let stmts = block
-            .children_by_field_name("stmt", &mut cursor)
-            .map(|stmt| self.gen_stmt(stmt))
-            .collect();
-        let tail = block
-            .child_by_field_name("tail")
-            .map(|term| self.gen_term(term))
-            .unwrap_or_else(|| Spanned::new(TermKind::Unit, self.span(block)));
-        let body = Spanned::new(
-            TermKind::Block {
-                stmts,
-                tail: Box::new(tail),
-            },
-            self.span(block),
-        );
+        let body = self.gen_body(node.child_by_field_name("body").unwrap());
         Spanned::new(
             StmtKind::Function {
                 name,
                 params,
                 result,
                 body,
+            },
+            self.span(node),
+        )
+    }
+
+    fn gen_body(&self, node: Node) -> Term {
+        let mut cursor = node.walk();
+        let stmts = node
+            .children_by_field_name("stmt", &mut cursor)
+            .map(|stmt| self.gen_stmt(stmt))
+            .collect();
+        let tail = node
+            .child_by_field_name("tail")
+            .map(|term| self.gen_term(term))
+            .unwrap_or_else(|| Spanned::new(TermKind::Unit, self.span(node)));
+        Spanned::new(
+            TermKind::Block {
+                stmts,
+                tail: Box::new(tail),
             },
             self.span(node),
         )

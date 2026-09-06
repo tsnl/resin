@@ -27,6 +27,28 @@ fn expect_deref_var(term: &Term, expected: &str) {
 }
 
 #[test]
+fn while_has_a_condition_and_a_scoped_body() {
+    let file = parse("while (ready) { count := count + 1; };");
+    let StmtKind::Expr { term } = &file.stmts[0].val else {
+        panic!("expected expression statement");
+    };
+    let TermKind::While { cond, body } = &term.val else {
+        panic!("expected while expression");
+    };
+    expect_var(cond, "ready");
+    let TermKind::Block { stmts, tail } = &body.val else {
+        panic!("expected loop body");
+    };
+    assert_eq!(stmts.len(), 1);
+    assert!(matches!(tail.val, TermKind::Unit));
+    assert!(print::format_source(&file).contains("(while"));
+
+    parse("while (ready) {};");
+    parse("f () -> () = { while (ready) { while (ready) {}; } };");
+    parse("value = while (ready) { 42 };");
+}
+
+#[test]
 fn assignment_is_right_associative_and_deref_is_explicit() {
     let file = parse("p.* := q.* := 1;");
     let StmtKind::Expr { term } = &file.stmts[0].val else {

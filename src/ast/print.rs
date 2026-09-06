@@ -96,6 +96,9 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(cond), sexp_term(then), sexp_term(els)],
         ),
+        TermKind::While { cond, body } => {
+            list_sp("while", term.span, vec![sexp_term(cond), sexp_term(body)])
+        }
         TermKind::Array { elems } => {
             list_sp("array", term.span, elems.iter().map(sexp_term).collect())
         }

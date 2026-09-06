@@ -52,6 +52,46 @@ fn discarded_branch_results_compile_and_preserve_effects() {
 }
 
 #[test]
+fn while_rechecks_conditions_and_discards_body_values() {
+    runs(
+        "main () -> int = { n = 0; sum = 0; while ((n := n + 1) <= 4) { sum := sum + n }; sum + n };",
+        15,
+    );
+    runs(
+        "main () -> int = { n = 0; while (1 == 0) { n := 42; }; n };",
+        0,
+    );
+    runs(
+        "main () -> int = { n: int; while ((n := 7) == 0) {}; n };",
+        7,
+    );
+    runs(
+        "main () -> int = { n = 0; while (n < 1000000) { n := n + 1; }; if (n == 1000000) { 0 } else { 1 } };",
+        0,
+    );
+}
+
+#[test]
+fn while_nests_with_branches_and_preserves_outer_values() {
+    runs(
+        "main () -> int = { i = 0; total = 0; while (i < 3) { j = 0; while (j < 4) { if (j < 2) { total := total + 1 } else { total := total + 2 }; j := j + 1; }; i := i + 1; }; total };",
+        18,
+    );
+    runs(
+        "main () -> int = { n = 0; x = 7; while (n < 3) { x = 10; n := n + 1; x := 20; }; x + n };",
+        10,
+    );
+    runs(
+        "main () -> int = { n = 0; r = { first = 9, body = while (n < 3) { n := n + 1; }, last = n }; r.first + r.last };",
+        12,
+    );
+    runs(
+        "main () -> int = { n = 0; while (if (n < 3) { (1 == 1) && ((n := n + 1) < 3) } else { 1 == 0 }) {}; n };",
+        3,
+    );
+}
+
+#[test]
 fn ordinary_functions_can_be_passed_and_selected() {
     runs(
         "add (x: int, y: int) -> int = { x + y }; apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; main () -> int = { a = add; b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",

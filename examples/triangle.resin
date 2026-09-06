@@ -1,31 +1,5 @@
 include "../lib/runtime.resin";
-
-Position = { x: float32, y: float32, z: float32, w: float32 };
-Color = { r: float32, g: float32, b: float32, a: float32 };
-Vertex = { position: Position, color: Color };
-
-vertex (index: int) -> Vertex = {
-    if (index == 0) {
-        Vertex {
-            position = Position { x = float32 (0.0), y = float32 (-0.75), z = float32 (0.0), w = float32 (1.0) },
-            color = Color { r = float32 (1.0), g = float32 (0.0), b = float32 (0.0), a = float32 (1.0) }
-        }
-    } else {
-        if (index == 1) {
-            Vertex {
-                position = Position { x = float32 (-0.7), y = float32 (0.6), z = float32 (0.0), w = float32 (1.0) },
-                color = Color { r = float32 (0.0), g = float32 (1.0), b = float32 (0.0), a = float32 (1.0) }
-            }
-        } else {
-            Vertex {
-                position = Position { x = float32 (0.7), y = float32 (0.6), z = float32 (0.0), w = float32 (1.0) },
-                color = Color { r = float32 (0.0), g = float32 (0.0), b = float32 (1.0), a = float32 (1.0) }
-            }
-        }
-    }
-};
-
-fragment (color: Color) -> Color = { color };
+include "lib/triangle.resin";
 
 main () -> () = {
     gpu = Ptr (ResinGpu) (ulong (0));

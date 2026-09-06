@@ -165,6 +165,25 @@ roundtrips. There is no borrow checker; addresses of locals must not outlive the
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. C strings need an explicit `\0` and a byte-pointer cast.
 
+## Loops
+
+`while` works on both the host and GPU:
+
+```resin
+n = 1;
+sum = 0;
+while (n <= 10) {
+    sum := sum + n;
+    n := n + 1;
+};
+```
+
+The condition must be boolean and is evaluated before every iteration. The body has its own
+scope; its result is discarded, and the loop returns `()`. As with other expression statements,
+the trailing semicolon is required unless the loop is the enclosing block's final expression.
+The body may run zero times, so initializing a variable only in the body does not make it
+definitely initialized afterward. `break` and `continue` are not implemented yet.
+
 ## Shaders and graphics
 
 Run either demo like any other Resin program:
@@ -204,7 +223,7 @@ The initial entry interfaces are still intentionally narrow:
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment maps Color to Color. Nominal wrappers are supported.
 
-Shader bodies support 32-bit numbers, booleans, records, nominal types, local mutation, branches,
+Shader bodies support 32-bit numbers, booleans, records, nominal types, local mutation, branches, loops,
 and direct calls to named Resin helpers. Globals, foreign calls, recursion, indirect calls,
 arrays, spans, real pointers, integer division/remainder/shifts, and addresses carried across
 block edges are rejected. `print` is host-only. General device-pointer kernels and richer stage
@@ -236,9 +255,10 @@ This setup is intended for MoltenVK, but has not yet been tested on macOS.
 nix-shell --run 'cargo run -- examples/window.resin'
 ```
 
-The demo presents a changing clear color for 120 frames; Escape or the close button exits
-early. It uses bounded recursion because Resin does not yet have a loop statement.
-The PNG demos remain headless.
+The demo renders a triangle until Escape or the close button is pressed. It uses a `while`
+event loop and shares its shader functions with the headless PNG demo in `examples/lib/triangle.resin`.
+Resizing scales the fixed-size offscreen image. Building this demo requires `glslc`; running the
+resulting executable does not. The PNG demos remain headless.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `lib/runtime.resin`:

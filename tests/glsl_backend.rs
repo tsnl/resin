@@ -55,6 +55,12 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
             ),
             Stage::Compute,
         ),
+        (
+            module(
+                "kernel (i: uint) -> uint = { x = i; n = uint (0); while (n < uint (3)) { j = uint (0); while (j < n) { x := x + j; j := j + uint (1); }; n := n + uint (1); }; x };",
+            ),
+            Stage::Compute,
+        ),
     ];
     for (m, stage) in modules {
         let glsl = glsl::emit(&m, stage.entry(), stage).unwrap();
