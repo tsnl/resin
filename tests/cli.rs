@@ -162,8 +162,16 @@ fn strings_are_c_compatible_in_both_profiles() {
             } else { 1 }
         };
     "#;
-    for args in [&[][..], &["-o", "program"][..]] {
-        let output = cli(source, args);
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let input = temp.path().join("source.resin");
+    fs::write(&input, source).unwrap();
+    let debug = invoke(temp.path(), &input, &[]);
+    let name = format!("program{}", std::env::consts::EXE_SUFFIX);
+    let build = invoke(temp.path(), &input, &["-o", &name]);
+    success(&build);
+    assert!(build.stdout.is_empty());
+    let release = Command::new(temp.path().join(name)).output().unwrap();
+    for output in [debug, release] {
         success(&output);
         assert_eq!(output.stdout, b"triangle.png:a\0b");
         assert!(output.stderr.is_empty());
@@ -171,7 +179,7 @@ fn strings_are_c_compatible_in_both_profiles() {
 }
 
 #[test]
-fn default_output_runs_then_copies_even_on_nonzero_exit() {
+fn executable_destination_builds_without_running() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(
@@ -181,17 +189,16 @@ fn default_output_runs_then_copies_even_on_nonzero_exit() {
     .unwrap();
     let destination = format!("dist/custom program{}", std::env::consts::EXE_SUFFIX);
     let output = invoke(temp.path(), &input, &["-o", &destination]);
-    assert_eq!(output.status.code(), Some(7));
-    assert_eq!(output.stdout, b"ran\n");
+    success(&output);
+    assert!(output.stdout.is_empty());
     let executable = temp.path().join(destination);
     assert_eq!(
         fs::read(&executable).unwrap(),
         fs::read(artifact(temp.path(), "release")).unwrap()
     );
-    assert_eq!(
-        Command::new(executable).output().unwrap().status.code(),
-        Some(7)
-    );
+    let run = Command::new(executable).output().unwrap();
+    assert_eq!(run.status.code(), Some(7));
+    assert_eq!(run.stdout, b"ran\n");
 }
 
 #[test]
@@ -207,7 +214,7 @@ fn output_directories_receive_the_source_name() {
         .unwrap();
         let output = invoke(temp.path(), &input, &["--output", "run", "-o", destination]);
         success(&output);
-        assert_eq!(output.stdout, b"hello\n");
+        assert!(output.stdout.is_empty());
         let executable = temp
             .path()
             .join(destination)
@@ -216,7 +223,9 @@ fn output_directories_receive_the_source_name() {
             fs::read(&executable).unwrap(),
             fs::read(artifact(temp.path(), "release")).unwrap()
         );
-        assert!(Command::new(executable).output().unwrap().status.success());
+        let run = Command::new(executable).output().unwrap();
+        success(&run);
+        assert_eq!(run.stdout, b"hello\n");
     }
 }
 
@@ -258,7 +267,7 @@ fn sources_with_the_same_name_have_separate_caches() {
 }
 
 #[test]
-fn failed_copies_happen_after_execution() {
+fn failed_copies_do_not_run_the_program() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(
@@ -269,7 +278,7 @@ fn failed_copies_happen_after_execution() {
     fs::write(temp.path().join("not-a-directory"), "keep me").unwrap();
     let output = invoke(temp.path(), &input, &["-o", "not-a-directory/program"]);
     assert!(!output.status.success());
-    assert_eq!(output.stdout, b"ran\n");
+    assert!(output.stdout.is_empty());
     assert_eq!(
         fs::read_to_string(temp.path().join("not-a-directory")).unwrap(),
         "keep me"

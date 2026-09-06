@@ -196,8 +196,8 @@ reads C compiler dependency files to track included headers.
 There are two artifact directories with different owners: Cargo builds the
 compiler and runtime under `target/`; Resin builds user programs under `build/`
 in the caller's working directory. Default runs reuse an unoptimized native
-build. Requesting an executable with `-o` selects the optimized cache. This
-does not change Cargo's Rust profile.
+build and execute it. Requesting an executable with `-o` selects the optimized cache
+and copies the output without running it. This does not change Cargo's Rust profile.
 
 ## 3. Follow an editor change through the compiler
 

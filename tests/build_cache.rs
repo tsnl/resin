@@ -263,7 +263,7 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
     let debug_modified = fs::metadata(&debug).unwrap().modified().unwrap();
     printed(
         &project.command().args(["-o", "dist/"]).output().unwrap(),
-        b"first",
+        b"",
     );
     let release = project.profile_executable("release");
     let release_modified = fs::metadata(&release).unwrap().modified().unwrap();
@@ -276,7 +276,7 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
     printed(&project.run(), b"first");
     printed(
         &project.command().args(["--out", "copy"]).output().unwrap(),
-        b"first",
+        b"",
     );
     let output = project
         .command()

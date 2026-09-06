@@ -27,7 +27,7 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Output::Run)]
     output: Output,
 
-    /// Destination file, or directory for host executables. Executable output enables -O3.
+    /// Destination file, or directory for host executables. Executables use -O3 and are not run.
     #[arg(short = 'o', long = "out")]
     destination: Option<PathBuf>,
 
@@ -58,7 +58,7 @@ enum Output {
     C,
     /// Compile an executable without running it (requires -o).
     Exe,
-    /// Compile under ./build and run; optionally copy the executable with -o.
+    /// Compile under ./build and run, or copy without running when -o is supplied.
     Run,
     /// Emit GLSL for one shader entry.
     Glsl,
@@ -150,15 +150,12 @@ fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
         profile,
     )?;
     let executable = build.executable();
-    let code = if cli.output == Output::Run {
-        Command::new(executable).status()?.code().unwrap_or(1)
-    } else {
-        0
-    };
     if let Some(output) = output {
         toolchain::copy_output(executable, &output)?;
+        Ok(0)
+    } else {
+        Ok(Command::new(executable).status()?.code().unwrap_or(1))
     }
-    Ok(code)
 }
 
 fn host_destination(cli: &Cli, name: &std::ffi::OsStr) -> Result<Option<PathBuf>> {

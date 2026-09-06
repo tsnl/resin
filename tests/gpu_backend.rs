@@ -452,10 +452,8 @@ fn ordinary_resin_programs_render_and_write_pngs() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(
-            String::from_utf8(output.stdout).unwrap(),
-            format!("wrote {name}.png\n")
-        );
+        assert!(output.stdout.is_empty());
+        assert!(!temp.path().join(format!("{name}.png")).exists());
 
         // The copy is standalone: no compiler or source files are needed to run it.
         let output = Command::new(executable)
@@ -468,6 +466,10 @@ fn ordinary_resin_programs_render_and_write_pngs() {
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("wrote {name}.png\n")
         );
     }
     let image = image_read_png(temp.path().join("gradient.png"), 4).unwrap();

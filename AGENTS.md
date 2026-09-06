@@ -13,6 +13,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   scope with explicit exports; do not reintroduce textual inclusion.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
+- Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
+  build and copy the optimized executable without running it, even with `--output run`.
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.

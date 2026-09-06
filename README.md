@@ -267,7 +267,7 @@ cargo run -- examples/eg001.resin --output exe -o fibonacci
 cargo run -- examples/eg001.resin --output c -o fibonacci.c
 ```
 
-Resin builds in `build/<source-name>-<path-and-entry-hash>/debug/` under cwd and immediately runs the executable.
+Without `-o`, Resin builds in `build/<source-name>-<path-and-entry-hash>/debug/` under cwd and immediately runs the executable.
 Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an executable with
 `-o` uses `-O3` and the sibling `release/` cache. Both variants are retained, so switching between
 them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization;
@@ -282,11 +282,13 @@ There is no module initialization phase.
 The selector uses the last colon in the filename, not in its parent directories. For a filename
 that itself contains a colon, append `:main` (or another entry) explicitly.
 
-With `-o PATH`, Resin runs first, then copies the executable, even after a nonzero program exit.
+With `-o PATH` (or `--out PATH`), Resin builds and copies the executable without running it.
+This also applies when `--output run` is explicitly selected. A successful build and copy
+returns status 0, independently of the program's eventual exit status.
 An existing directory or trailing separator receives the source name (or `source-entry` for a
 non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
 extension for Windows executable filenames.
-Use `--output exe -o PATH` to build and copy without running.
+`--output exe -o PATH` remains an explicit spelling of the same build-only behavior.
 `--output ir`, `ast`, `cst`, and `check` inspect earlier stages; `check` checks syntax only.
 
 Each canonical source path and entry name has a stable directory with separate debug and release
