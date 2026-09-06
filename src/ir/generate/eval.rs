@@ -66,6 +66,31 @@ impl Evaluator<'_> {
                 kind: GenerateErrorKind::IncompleteSyntax,
             }),
             TypeKind::Unit => Ok(Ty::Unit),
+            TypeKind::Result { value, error } => {
+                let value = self.ty(value)?;
+                let error = self.ty(error)?;
+                if error.variants().is_none() {
+                    return Err(super::infer::error(
+                        ty.span,
+                        "Result errors must be structs or unions of structs",
+                    ));
+                }
+                Ok(Ty::Result {
+                    value: Box::new(value),
+                    error: Box::new(error),
+                })
+            }
+            TypeKind::Union { left, right } => {
+                let left = self.ty(left)?.variants();
+                let right = self.ty(right)?.variants();
+                match (left, right) {
+                    (Some(left), Some(right)) => Ok(Ty::union(left.into_iter().chain(right))),
+                    _ => Err(super::infer::error(
+                        ty.span,
+                        "union variants must be nominal structs",
+                    )),
+                }
+            }
             TypeKind::Atom { name } => {
                 if let Some(builtin) = builtin_ty(&name.val) {
                     return Ok(builtin);
@@ -123,6 +148,7 @@ impl Evaluator<'_> {
 
 fn builtin_ty(name: &str) -> Option<Ty> {
     Some(match name {
+        "Never" => Ty::union([]),
         "bool" => Ty::Bool,
         "sbyte" => Ty::Int8,
         "short" => Ty::Int16,

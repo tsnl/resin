@@ -562,10 +562,80 @@
       "required": false,
       "types": [
         {
-          "type": "unary_type",
+          "type": "union_type",
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "match_arm",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block_body",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
+            "named": true
+          }
+        ]
+      },
+      "variant": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "err",
+            "named": false
+          },
+          {
+            "type": "ok",
+            "named": false
+          },
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "match_term",
+    "named": true,
+    "fields": {
+      "arms": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "match_arm",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -629,6 +699,10 @@
           {
             "type": "pointer_deref",
             "named": true
+          },
+          {
+            "type": "try_suffix",
+            "named": true
           }
         ]
       }
@@ -652,6 +726,10 @@
         },
         {
           "type": "lid",
+          "named": true
+        },
+        {
+          "type": "match_term",
           "named": true
         },
         {
@@ -787,6 +865,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "type_definition",
             "named": true
           }
@@ -824,6 +906,42 @@
         "types": [
           {
             "type": "term",
+            "named": true
+          }
+        ]
+      },
+      "struct": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "struct_definition",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "struct_definition",
+    "named": true,
+    "fields": {
+      "fields": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "declare",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "uid",
             "named": true
           }
         ]
@@ -1026,6 +1144,16 @@
           }
         ]
       },
+      "error": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
       "former": {
         "multiple": false,
         "required": false,
@@ -1039,6 +1167,16 @@
             "named": false
           }
         ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -1047,6 +1185,42 @@
       "types": [
         {
           "type": "primary_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "union_type",
+    "named": true,
+    "fields": {
+      "left": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "union_type",
+            "named": true
+          }
+        ]
+      },
+      "right": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "unary_type",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "unary_type",
           "named": true
         }
       ]
@@ -1177,6 +1351,10 @@
     "named": false
   },
   {
+    "type": "=>",
+    "named": false
+  },
+  {
     "type": ">",
     "named": false
   },
@@ -1189,7 +1367,15 @@
     "named": false
   },
   {
+    "type": "Never",
+    "named": false
+  },
+  {
     "type": "Ptr",
+    "named": false
+  },
+  {
+    "type": "Result",
     "named": false
   },
   {
@@ -1223,6 +1409,10 @@
   },
   {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "err",
     "named": false
   },
   {
@@ -1266,8 +1456,16 @@
     "named": false
   },
   {
+    "type": "match",
+    "named": false
+  },
+  {
     "type": "number",
     "named": true
+  },
+  {
+    "type": "ok",
+    "named": false
   },
   {
     "type": "pointer_deref",
@@ -1283,6 +1481,14 @@
   },
   {
     "type": "string",
+    "named": true
+  },
+  {
+    "type": "struct",
+    "named": false
+  },
+  {
+    "type": "try_suffix",
     "named": true
   },
   {

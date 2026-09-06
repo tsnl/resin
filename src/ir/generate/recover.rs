@@ -54,7 +54,7 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
                     let _ = pass.scopes.define_foreign_type(name.val.clone());
                     pass.scopes.record_definition(name, true, None, pass.typer);
                 }
-                StmtKind::DefineType { .. } => pass.statement(stmt),
+                StmtKind::DefineType { .. } | StmtKind::Struct { .. } => pass.statement(stmt),
                 _ => {}
             }
         }
@@ -178,7 +178,7 @@ impl Recovery<'_> {
                 let ty = self.ty(ann);
                 self.bind(name, ty);
             }
-            StmtKind::DefineType { name, init } => {
+            StmtKind::Struct { name, body: init } => {
                 if name.val.is_empty() {
                     return;
                 }
@@ -193,11 +193,50 @@ impl Recovery<'_> {
             StmtKind::Expr { term } => {
                 self.term(term, None);
             }
+            StmtKind::DefineType { name, init } => {
+                if let Some(ty) = self.ty(init)
+                    && self
+                        .scopes
+                        .define_alias(name.val.clone(), ty.clone())
+                        .is_ok()
+                {
+                    self.scopes
+                        .record_definition(name, true, Some(&ty), self.typer);
+                }
+            }
             _ => {}
         }
     }
     fn term(&mut self, term: &Term, expected: Option<&Ty>) -> Option<Ty> {
         let found = match &term.val {
+            TermKind::Try { value } => match self.term(value, None) {
+                Some(Ty::Result { value, .. }) => Some(*value),
+                _ => None,
+            },
+            TermKind::Match { value, arms } => {
+                let input = self.term(value, None);
+                let mut output = expected.cloned();
+                for arm in arms {
+                    self.scopes.push();
+                    let payload = match (&input, &arm.variant) {
+                        (Some(Ty::Result { value, .. }), crate::ast::MatchVariant::Ok) => {
+                            Some(*value.clone())
+                        }
+                        (Some(Ty::Result { error, .. }), crate::ast::MatchVariant::Err) => {
+                            Some(*error.clone())
+                        }
+                        (_, crate::ast::MatchVariant::Type(ann)) => self.ty(ann),
+                        _ => None,
+                    };
+                    self.bind(&arm.name, payload);
+                    let ty = self.term(&arm.body, output.as_ref());
+                    if output.is_none() {
+                        output = ty;
+                    }
+                    self.scopes.pop();
+                }
+                output
+            }
             TermKind::Hole { children } => {
                 for child in children {
                     self.term(child, None);

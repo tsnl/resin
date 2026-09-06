@@ -49,6 +49,27 @@ fn captures(query: &str, source: &str) -> BTreeSet<(String, String)> {
 }
 
 #[test]
+fn result_syntax_is_highlighted_and_structs_have_outlines() {
+    let source = "struct Broken { code: int }; def fail() -> Result<int, Never> = { match (value) { ok(n) => { ok(n?) }, err(error) => { err(error) } } };";
+    let captured = captures(QUERIES[0].1, source);
+    for (kind, text) in [
+        ("keyword", "struct"),
+        ("keyword", "match"),
+        ("type.builtin", "Result"),
+        ("type.builtin", "Never"),
+        ("operator", "?"),
+        ("function.builtin", "ok"),
+        ("variable.parameter", "error"),
+    ] {
+        assert!(
+            captured.contains(&(kind.into(), text.into())),
+            "{kind}: {text}"
+        );
+    }
+    assert!(captures(QUERIES[3].1, source).contains(&("name".into(), "Broken".into())));
+}
+
+#[test]
 fn inference_holes_are_highlighted_as_types() {
     let source = "def f(p: Ptr<int>) -> Ptr<_> = { var value: _; value := p; value };";
     let captured = captures(QUERIES[0].1, source);
@@ -59,7 +80,7 @@ fn inference_holes_are_highlighted_as_types() {
 fn queries_capture_resin_constructs() {
     let source = "export { main, Number }; import { \"std/core.resin\" };\n\
         extern type Handle; extern \"lib.h\" def native (arg: int) -> int;\n\
-        type Number = {field: int};\n\
+        struct Number {field: int};\n\
         // a function\n\
         def main (parameter: int) -> int = {\n\
             var local = {field = 2}; var pointer: Ptr<int>; var values = [1, 2];\n\

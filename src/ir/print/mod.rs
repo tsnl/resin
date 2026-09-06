@@ -84,6 +84,17 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
+        Instr::SetLocal { local } => list(
+            "set-local",
+            vec![symbol(fn_names.locals[local.index()].as_ref())],
+        ),
+        Instr::MakeVariant { ty, tag } => list(
+            "make-variant",
+            vec![sexp_ty(names, ty), symbol(tag.to_string())],
+        ),
+        Instr::VariantTag => symbol("variant-tag"),
+        Instr::VariantPayload { tag } => list("variant-payload", vec![symbol(tag.to_string())]),
+        Instr::Widen { ty } => list("widen", vec![sexp_ty(names, ty)]),
         Instr::Shader { function, stage } => list(
             "shader",
             vec![
@@ -193,6 +204,23 @@ fn sexp_value(names: &Names, value: &Value) -> SExp {
 
 fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
     match ty {
+        Ty::Union { variants } => list(
+            "union",
+            variants
+                .iter()
+                .map(|definition| {
+                    sexp_ty(
+                        names,
+                        &Ty::Defined {
+                            definition: *definition,
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        Ty::Result { value, error } => {
+            list("result", vec![sexp_ty(names, value), sexp_ty(names, error)])
+        }
         Ty::Type => symbol("type"),
         Ty::Unit => symbol("unit"),
         Ty::Bool => symbol("bool"),

@@ -113,6 +113,29 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::SetLocal { local } => {
+            writeln!(out, "  r_l{} = {};", local.index(), args[0].expr).unwrap();
+            return Ok(None);
+        }
+        Instr::MakeVariant { ty, tag } => variant(types, ty, *tag, &args[0].expr),
+        Instr::VariantTag => match &args[0].ty {
+            Ty::Defined { definition } => format!("{}u", definition.tag()),
+            _ => format!("({}).tag", args[0].expr),
+        },
+        Instr::VariantPayload { tag } => {
+            if matches!(args[0].ty, Ty::Defined { .. }) {
+                args[0].expr.clone()
+            } else {
+                writeln!(
+                    out,
+                    "  if (({}).tag != {tag}u) resin_fail(\"invalid union tag\");",
+                    args[0].expr
+                )
+                .unwrap();
+                format!("({}).payload.v{tag}", args[0].expr)
+            }
+        }
+        Instr::Widen { ty } => widen(types, &args[0].ty, ty, &args[0].expr),
         Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
         Instr::Shader { function, stage } => {
             let index = types
@@ -203,6 +226,39 @@ fn instruction(
         Instr::CallBuiltin { name, result, .. } => ops::builtin(types, name, args, result)?,
     };
     Ok(Some(expr))
+}
+
+fn variant(types: &Types<'_>, ty: &Ty, tag: u32, value: &str) -> String {
+    if matches!(ty, Ty::Defined { .. }) {
+        value.into()
+    } else {
+        format!(
+            "({}){{ .tag = {tag}u, .payload = {{ .v{tag} = {value} }} }}",
+            types.name(ty)
+        )
+    }
+}
+
+fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
+    if from == to {
+        return value.into();
+    }
+    if let Ty::Defined { definition } = from {
+        return variant(types, to, definition.tag(), value);
+    }
+    let mut expression = format!("({}){{0}}", types.name(to));
+    for (tag, payload) in from.payloads().unwrap().into_iter().rev() {
+        let target = to.payload(tag).unwrap();
+        let payload = widen(
+            types,
+            &payload,
+            &target,
+            &format!("({value}).payload.v{tag}"),
+        );
+        let constructed = variant(types, to, tag, &payload);
+        expression = format!("(({value}).tag == {tag}u ? {constructed} : {expression})");
+    }
+    expression
 }
 
 fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Result<String, Error> {

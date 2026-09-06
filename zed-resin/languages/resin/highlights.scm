@@ -2,9 +2,9 @@
 (uid) @type
 (builtin_type) @type.builtin
 (inferred_type) @type.builtin
-["Ptr" "Span"] @type.builtin
+["Ptr" "Span" "Result"] @type.builtin
 
-["export" "import" "extern" "type" "def" "var" "if" "else" "while"] @keyword
+["export" "import" "extern" "type" "struct" "def" "var" "if" "else" "while" "match"] @keyword
 
 (function_definition name: (lid) @function)
 (foreign_function name: (lid) @function)
@@ -12,18 +12,22 @@
 (foreign_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (closed_term))
 ((primary_term (lid) @function.builtin)
-  (#any-of? @function.builtin "print" "shader"))
+  (#any-of? @function.builtin "print" "shader" "ok" "err"))
 
 (field_access name: (lid) @property)
 (record_term fields: (term_define name: (lid) @property))
 (record_type field: (declare name: (lid) @property))
+(struct_definition fields: (declare name: (lid) @property))
+(match_arm name: (lid) @variable.parameter)
+["ok" "err"] @function.builtin
 
 (pointer_deref) @operator
+(try_suffix) @operator
 (number) @number
 (string) @string
 (comment) @comment
 
-["=" ":=" "->" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
+["=" ":=" "->" "=>" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
  "<<" ">>" "+" "-" "*" "/" "%" "!" "~"] @operator
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 [";" "," ":" "."] @punctuation.delimiter

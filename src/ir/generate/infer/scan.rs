@@ -4,7 +4,7 @@ use crate::ast::{StmtKind, Term, TermKind, Type, TypeKind};
 
 #[derive(Default)]
 pub(super) struct Scan {
-    pub holes: bool,
+    pub needed: bool,
     pub references: BTreeSet<String>,
     locals: BTreeSet<String>,
 }
@@ -16,7 +16,16 @@ impl Scan {
 
     pub fn ty(&mut self, ty: &Type) {
         match &ty.val {
-            TypeKind::Infer => self.holes = true,
+            TypeKind::Infer => self.needed = true,
+            TypeKind::Result { value, error } => {
+                self.needed = true;
+                self.ty(value);
+                self.ty(error);
+            }
+            TypeKind::Union { left, right } => {
+                self.ty(left);
+                self.ty(right);
+            }
             TypeKind::App { arg, .. } => self.ty(arg),
             TypeKind::Func { from, to } => {
                 self.ty(from);
@@ -34,11 +43,28 @@ impl Scan {
     pub fn term(&mut self, term: &Term) {
         match &term.val {
             TermKind::Var { name } => {
+                if matches!(name.val.as_ref(), "ok" | "err") {
+                    self.needed = true;
+                }
                 if !self.locals.contains(name.val.as_ref()) {
                     self.references.insert(name.val.to_string());
                 }
             }
             TermKind::Type { ty } => self.ty(ty),
+            TermKind::Try { value } => {
+                self.needed = true;
+                self.term(value);
+            }
+            TermKind::Match { value, arms } => {
+                self.needed = true;
+                self.term(value);
+                for arm in arms {
+                    let before = self.locals.clone();
+                    self.bind(&arm.name.val);
+                    self.term(&arm.body);
+                    self.locals = before;
+                }
+            }
             TermKind::If { cond, then, els } => {
                 self.term(cond);
                 self.term(then);
@@ -73,6 +99,7 @@ impl Scan {
                             self.ty(ann);
                         }
                         StmtKind::DefineType { init, .. } => self.ty(init),
+                        StmtKind::Struct { body, .. } => self.ty(body),
                         StmtKind::Expr { term } => self.term(term),
                         _ => {}
                     }

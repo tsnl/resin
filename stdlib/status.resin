@@ -2,6 +2,14 @@ export {
     resin_status_incomplete,
     resin_status_string,
     check,
+    RuntimeError,
+    status,
+};
+
+struct RuntimeError { code: int };
+
+def status(code: int) -> Result<(), RuntimeError> = {
+    if (code == 0) { ok(()) } else { err(RuntimeError { code = code }) }
 };
 
 def resin_status_incomplete() -> int = { 7 };

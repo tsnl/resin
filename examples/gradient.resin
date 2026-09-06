@@ -2,7 +2,7 @@ export { kernel, main };
 
 import { "std/gpu.resin", "std/image.resin", "std/status.resin" };
 
-type Root = { count: uint, pixels: ulong };
+struct Root { count: uint, pixels: ulong };
 
 def pixel(index: uint) -> uint = {
     uint(0xff400000) | (index & uint(0xffff))

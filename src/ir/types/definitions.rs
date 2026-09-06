@@ -2,6 +2,7 @@ use super::{Ty, TypeDef, TypeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DefinitionError {
+    InvalidUnion,
     Invalid(TypeId),
     Incomplete(TypeId),
     Recursive(TypeId),
@@ -21,6 +22,25 @@ pub(crate) fn body(definitions: &[TypeDef], id: TypeId) -> Result<&Ty, Definitio
 
 pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), DefinitionError> {
     match ty {
+        Ty::Union { variants } => {
+            if variants.len() == 1
+                || variants
+                    .windows(2)
+                    .any(|pair| pair[0].index() >= pair[1].index())
+            {
+                return Err(DefinitionError::InvalidUnion);
+            }
+            for id in variants {
+                get(definitions, *id)?;
+            }
+        }
+        Ty::Result { value, error } => {
+            if error.variants().is_none() {
+                return Err(DefinitionError::InvalidUnion);
+            }
+            check_references(definitions, value)?;
+            check_references(definitions, error)?;
+        }
         Ty::Defined { definition } => {
             get(definitions, *definition)?;
         }
@@ -54,6 +74,21 @@ fn check_inline(
     active: &mut Vec<TypeId>,
 ) -> Result<(), DefinitionError> {
     match ty {
+        Ty::Union { variants } => {
+            for definition in variants {
+                check_inline(
+                    definitions,
+                    &Ty::Defined {
+                        definition: *definition,
+                    },
+                    active,
+                )?;
+            }
+        }
+        Ty::Result { value, error } => {
+            check_inline(definitions, value, active)?;
+            check_inline(definitions, error, active)?;
+        }
         Ty::Defined { definition } => {
             if active.contains(definition) {
                 return Err(DefinitionError::Recursive(*definition));

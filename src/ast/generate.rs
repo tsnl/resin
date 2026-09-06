@@ -174,6 +174,22 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
+        if node.kind() == "struct_definition" {
+            let fields = node
+                .children_by_field_name("fields", &mut node.walk())
+                .map(|field| self.gen_declare(field))
+                .collect();
+            return Spanned::new(
+                StmtKind::Struct {
+                    name: self.ident(node.child_by_field_name("name").unwrap_or(node)),
+                    body: Spanned::new(TypeKind::Record { fields }, self.span(node)),
+                },
+                self.span(node),
+            );
+        }
+        if let Some(definition) = node.child_by_field_name("struct") {
+            return self.gen_stmt(definition);
+        }
         if node.kind() == "type_definition" {
             return self.gen_type_define(
                 node.child_by_field_name("definition").unwrap_or(node),
@@ -325,6 +341,18 @@ impl<'a> AstGen<'a> {
         let mut cursor = node.walk();
         for child in node.children_by_field_name("suffix", &mut cursor) {
             match child.kind() {
+                "try_suffix" => {
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::Try {
+                            value: Box::new(base),
+                        },
+                        span,
+                    );
+                }
                 "field_access" => {
                     let field = child.child_by_field_name("name");
                     if self.recovering && field.is_none_or(|n| n.is_missing()) {
@@ -411,6 +439,32 @@ impl<'a> AstGen<'a> {
                 span,
             ),
             "if_term" => self.gen_if_term(child),
+            "match_term" => {
+                let value = self.gen_term(child.child_by_field_name("value").unwrap_or(child));
+                let arms = child
+                    .children_by_field_name("arms", &mut child.walk())
+                    .map(|arm| {
+                        let variant = arm.child_by_field_name("variant").unwrap_or(arm);
+                        let variant = match variant.kind() {
+                            "ok" => MatchVariant::Ok,
+                            "err" => MatchVariant::Err,
+                            _ => MatchVariant::Type(self.gen_type(variant)),
+                        };
+                        MatchArm {
+                            variant,
+                            name: self.ident(arm.child_by_field_name("name").unwrap_or(arm)),
+                            body: self.gen_body(arm.child_by_field_name("body").unwrap_or(arm)),
+                        }
+                    })
+                    .collect();
+                Spanned::new(
+                    TermKind::Match {
+                        value: Box::new(value),
+                        arms,
+                    },
+                    span,
+                )
+            }
             "while_term" => Spanned::new(
                 TermKind::While {
                     cond: Box::new(
@@ -632,6 +686,21 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
+        self.gen_union_type(node.child(0).unwrap_or(node))
+    }
+
+    fn gen_union_type(&self, node: Node) -> Type {
+        if let Some(left) = node.child_by_field_name("left") {
+            return Spanned::new(
+                TypeKind::Union {
+                    left: Box::new(self.gen_union_type(left)),
+                    right: Box::new(
+                        self.gen_unary_type(node.child_by_field_name("right").unwrap_or(node)),
+                    ),
+                },
+                self.span(node),
+            );
+        }
         self.gen_unary_type(node.child(0).unwrap_or(node))
     }
 
@@ -641,6 +710,17 @@ impl<'a> AstGen<'a> {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
         assert_eq!(node.kind(), "unary_type");
+        if let Some(value) = node.child_by_field_name("value") {
+            return Spanned::new(
+                TypeKind::Result {
+                    value: Box::new(self.gen_type(value)),
+                    error: Box::new(
+                        self.gen_type(node.child_by_field_name("error").unwrap_or(node)),
+                    ),
+                },
+                self.span(node),
+            );
+        }
         if let Some(former) = node.child_by_field_name("former") {
             let head = self.ident(former);
             let arg = self.gen_type(node.child_by_field_name("arg").unwrap_or(node));

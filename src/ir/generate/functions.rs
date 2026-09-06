@@ -85,6 +85,7 @@ impl Generator {
         };
         let result = self.module.functions[id.index()].result.clone();
         self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
+        self.function().result(result.clone());
         self.scopes.push();
         self.bind_params(params)?;
         self.gen_term(body, Some(&result))?;

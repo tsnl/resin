@@ -49,10 +49,10 @@ const BOP_PREC = {
 
 const BUILTIN_TYPES = [
   "bool", "sbyte", "short", "int", "long", "ubyte", "ushort", "uint", "ulong",
-  "float32", "float64",
+  "float32", "float64", "Never",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Span"];
+const TYPE_FORMERS = ["Ptr", "Span", "Result"];
 
 // Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
 function identifierExcept(initial, words, allowEmpty = false) {
@@ -72,13 +72,13 @@ export default grammar({
   word: ($) => $.lid,
   reserved: {
     global: ($) => [
-      "export", "import", "extern", "type", "def", "var", "if", "else", "while",
+      "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while", "match",
       ...BUILTIN_TYPES, ...TYPE_FORMERS,
     ],
   },
 
   conflicts: ($) => [
-    [$.primary_term, $.infix_type],
+    [$.primary_term, $.union_type],
     [$.unit_term, $.unit_type],
   ],
 
@@ -91,7 +91,7 @@ export default grammar({
       optional(field("exports", $.export_clause)),
       optional(field("imports", $.import_clause)),
       repeat(field("stmt", choice(
-        $.function_definition, $.foreign_function, $.foreign_type, $.type_definition,
+        $.function_definition, $.foreign_function, $.foreign_type, $.type_definition, $.struct_definition,
       ))),
     ),
 
@@ -105,6 +105,7 @@ export default grammar({
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
 
     type_definition: ($) => seq("type", field("definition", $.type_define), ";"),
+    struct_definition: ($) => seq("struct", field("name", $.uid), "{", list("fields", $.declare, ","), "}", ";"),
 
     function_definition: ($) => seq(
       "def", field("name", $.lid), "(", list("params", $.declare, ","), ")",
@@ -118,6 +119,7 @@ export default grammar({
 
     statement: ($) =>
       choice(
+        field("struct", $.struct_definition),
         seq(field("define", $.define), ";"),
         seq("var", field("declare", $.declare), ";"),
         seq(field("expr", $.term), ";"),
@@ -201,13 +203,14 @@ export default grammar({
           repeat(
             field(
               "suffix",
-              choice($.closed_term, $.field_access, $.pointer_deref),
+              choice($.closed_term, $.field_access, $.pointer_deref, $.try_suffix),
             ),
           ),
         ),
       ),
     field_access: ($) => seq(".", field("name", $.lid)),
     pointer_deref: ($) => ".*",
+    try_suffix: ($) => "?",
 
     closed_term: ($) =>
       choice(
@@ -240,7 +243,9 @@ export default grammar({
     unit_term: ($) => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),
 
     primary_term: ($) =>
-      choice($.closed_term, $.lid, $.number, $.string, $.if_term, $.while_term, $.unary_type),
+      choice($.closed_term, $.lid, $.number, $.string, $.if_term, $.while_term, $.match_term, $.unary_type),
+    match_term: ($) => seq("match", "(", field("value", $.term), ")", "{", list1("arms", $.match_arm, ","), "}"),
+    match_arm: ($) => seq(field("variant", choice($.type, "ok", "err")), "(", field("name", $.lid), ")", "=>", field("body", $.block_body)),
     while_term: ($) =>
       seq("while", "(", field("cond", $.term), ")", field("body", $.block_body)),
     if_term: ($) =>
@@ -267,15 +272,18 @@ export default grammar({
           "->",
           field("ret_ty", $.infix_type),
         ),
-        $.unary_type,
+        $.union_type,
       ),
+
+    union_type: ($) => choice(prec.left(seq(field("left", $.union_type), "|", field("right", $.unary_type))), $.unary_type),
 
     unary_type: ($) =>
       choice(
         seq(
-          field("former", choice(...TYPE_FORMERS)),
+          field("former", choice("Ptr", "Span")),
           "<", field("arg", $.type), ">",
         ),
+        seq("Result", "<", field("value", $.type), ",", field("error", $.type), ">"),
         $.primary_type,
       ),
 
@@ -310,7 +318,7 @@ export default grammar({
     lid: ($) => token(new RustRegex("[_]*[a-z][a-zA-Z0-9_]*")),
 
     uid: ($) => token(new RustRegex(
-      `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", TYPE_FORMERS)}`,
+      `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never"])}`,
     )),
 
     number: ($) =>

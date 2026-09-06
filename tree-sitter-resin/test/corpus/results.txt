@@ -1,0 +1,216 @@
+==================
+Structs, aliases, unions, and Results
+==================
+struct SomeInt { value: int };
+struct NoneInt {};
+type OptionInt = SomeInt | NoneInt;
+def read(value: Result<int, NoneInt>) -> Result<int, _> = {
+    var n = value?;
+    ok(n)
+};
+---
+
+(source_file
+  (struct_definition
+    (uid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type))))))))
+  (struct_definition
+    (uid))
+  (type_definition
+    (type_define
+      (uid)
+      (type
+        (infix_type
+          (union_type
+            (union_type
+              (unary_type
+                (primary_type
+                  (uid))))
+            (unary_type
+              (primary_type
+                (uid))))))))
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (builtin_type))))))
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (inferred_type))))))))))
+    (block_body
+      (statement
+        (define
+          (term_define
+            (lid)
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (lid))
+                      (try_suffix)))))))))
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid))
+                (closed_term
+                  (paren_term
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (lid)))))))))))))))))
+
+==================
+Match arms and chained propagation
+==================
+def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
+    match (value) {
+        ok(inner) => { ok(inner?) },
+        err(error) => { err(error) },
+    }
+};
+---
+
+(source_file
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))))))
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (builtin_type)))))))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (match_term
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (lid)))))))
+                    (match_arm
+                      (lid)
+                      (block_body
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (lid))
+                                  (closed_term
+                                    (paren_term
+                                      (term
+                                        (assignment_term
+                                          (binary_term
+                                            (unary_term
+                                              (postfix_term
+                                                (primary_term
+                                                  (lid))
+                                                (try_suffix)))))))))))))))
+                    (match_arm
+                      (lid)
+                      (block_body
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (lid))
+                                  (closed_term
+                                    (paren_term
+                                      (term
+                                        (assignment_term
+                                          (binary_term
+                                            (unary_term
+                                              (postfix_term
+                                                (primary_term
+                                                  (lid))))))))))))))))))))))))))

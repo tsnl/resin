@@ -9,10 +9,11 @@ def main() -> () = { while (1 == 0) {}; };
     (lid)
     (type
       (infix_type
-        (unary_type
-          (primary_type
-            (closed_type
-              (unit_type))))))
+        (union_type
+          (unary_type
+            (primary_type
+              (closed_type
+                (unit_type)))))))
     (block_body
       (statement
         (term
@@ -54,10 +55,11 @@ def main () -> () = {
     (lid)
     (type
       (infix_type
-        (unary_type
-          (primary_type
-            (closed_type
-              (unit_type))))))
+        (union_type
+          (unary_type
+            (primary_type
+              (closed_type
+                (unit_type)))))))
     (block_body
       (statement
         (define

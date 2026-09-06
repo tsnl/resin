@@ -58,7 +58,7 @@ fn omitted_function_results_lower_to_unit() {
 #[test]
 fn definition_keywords_preserve_statement_and_field_spans() {
     let source = r#"
-        type Pair = { first: int, second: int };
+        struct Pair { first: int, second: int };
         def make(seed: int) -> Pair = {
             var first = seed;
             var second: int;
@@ -69,10 +69,10 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     let file = parse(source);
     let text = |span: resin::ast::Span| &source[span.start..span.end];
     let definition = &file.stmts[0];
-    assert!(matches!(definition.val, StmtKind::DefineType { .. }));
+    assert!(matches!(definition.val, StmtKind::Struct { .. }));
     assert_eq!(
         text(definition.span),
-        "type Pair = { first: int, second: int };"
+        "struct Pair { first: int, second: int };"
     );
     let function = &file.stmts[1];
     let StmtKind::Function {

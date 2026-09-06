@@ -22,7 +22,7 @@ use types::Type;
 
 type Result<T> = std::result::Result<T, GenerateError>;
 
-fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
+pub(super) fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
     GenerateError {
         span,
         kind: GenerateErrorKind::Inference {
@@ -69,7 +69,7 @@ pub(super) fn file(
             }
         })
         .collect();
-    if !functions.iter().any(|(_, _, _, _, scan)| scan.holes) {
+    if !functions.iter().any(|(_, _, _, _, scan)| scan.needed) {
         return Ok(Inferred::default());
     }
     let mut checker = Checker::new(typer, scopes.untraced());
@@ -120,10 +120,11 @@ pub(super) fn file(
         let first_expression = checker.expressions.len();
         for &i in &group {
             let (_, params, _, body, scan) = &functions[i];
-            if !scan.holes {
+            if !scan.needed {
                 continue;
             }
             checker.push();
+            checker.result = results[i].clone();
             for (name, ann) in *params {
                 let ty = checker.annotation(ann, false)?;
                 checker.bind(name, ty)?;
@@ -131,7 +132,13 @@ pub(super) fn file(
             checker.term(body, Some(results[i].clone()))?;
             checker.pop();
         }
-        checker.solve()?;
+        let mut roots: Vec<_> = group.iter().map(|i| results[*i].clone()).collect();
+        roots.extend(
+            checker.expressions[first_expression..]
+                .iter()
+                .map(|(_, _, ty)| ty.clone()),
+        );
+        checker.solve(&roots)?;
         for &i in &group {
             checker.solver.require(&results[i], functions[i].2.span)?;
         }

@@ -2,7 +2,7 @@ export { main };
 
 def set(p: Ptr<int>) -> int = { p.* := 1; p.* };
 
-type Point = { x: int, y: int };
+struct Point { x: int, y: int };
 def get_x(p: Ptr<Point>) -> int = { p.x };
 def set_x(p: Ptr<Point>, n: int) -> int = { p.x := n; p.x };
 

@@ -207,6 +207,10 @@ impl Scopes {
             .define_type(name.clone(), Ty::Foreign { name })
     }
 
+    pub(super) fn define_alias(&mut self, name: Arc<str>, ty: Ty) -> Result<(), Arc<str>> {
+        self.innermost().define_type(name, ty)
+    }
+
     pub(super) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
         self.frames
             .iter()

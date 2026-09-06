@@ -10,6 +10,7 @@ pub struct TypeError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeErrorKind {
+    InvalidUnion,
     EmptyArrayNeedsElementType,
     TypeMismatch { expected: Ty, found: Ty },
     ExpectedBoolean { found: Ty },
@@ -45,6 +46,7 @@ impl std::error::Error for TypeError {}
 impl From<DefinitionError> for TypeError {
     fn from(error: DefinitionError) -> Self {
         let kind = match error {
+            DefinitionError::InvalidUnion => TypeErrorKind::InvalidUnion,
             DefinitionError::Invalid(definition) => {
                 TypeErrorKind::InvalidTypeDefinition { definition }
             }

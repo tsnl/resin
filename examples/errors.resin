@@ -1,0 +1,36 @@
+export { main, failure };
+import { "std/status.resin" };
+
+struct DivideByZero {};
+struct NegativeInput { value: int };
+type Number = int;
+
+def divide(n: Number, d: Number) -> Result<Number, DivideByZero> = {
+    if (d == 0) { err(DivideByZero {}) } else { ok(n / d) }
+};
+
+def calculate(n: int) -> Result<int, _> = {
+    if (n < 0) { err(NegativeInput { value = n }) }
+    else { ok(divide(n, 2)?) }
+};
+
+def main() -> Result<(), _> = {
+    status(0)?;
+    var answer = calculate(84)?;
+    print("answer = {0}\n", (answer,));
+    match (calculate(-1)) {
+        ok(value) => { print("unexpected success: {0}\n", (value,)) },
+        err(error) => {
+            match (error) {
+                DivideByZero(zero) => { print("division by zero\n", ()) },
+                NegativeInput(negative) => { print("negative input: {0}\n", (negative.value,)) },
+            }
+        },
+    };
+    ok(())
+};
+
+def failure() -> Result<(), _> = {
+    divide(1, 0)?;
+    ok(())
+};

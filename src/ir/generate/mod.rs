@@ -17,6 +17,7 @@ mod places;
 mod recover;
 pub(crate) use recover::analyze as analyze_recovering;
 mod scope;
+mod sums;
 mod terms;
 
 pub use error::{GenerateError, GenerateErrorKind};
@@ -94,8 +95,10 @@ impl Generator {
             }
         }
         for stmt in &file.stmts {
-            if let StmtKind::DefineType { name, init } = &stmt.val {
-                self.gen_define_type(name, init)?;
+            match &stmt.val {
+                StmtKind::DefineType { name, init } => self.gen_define_type(name, init)?,
+                StmtKind::Struct { name, body } => self.gen_struct(name, body)?,
+                _ => {}
             }
         }
         self.inferred = infer::file(file, &mut self.typer, &self.scopes)?;
@@ -151,6 +154,7 @@ impl Generator {
             }
             StmtKind::Define { name, init } => self.gen_define(name, init),
             StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
+            StmtKind::Struct { name, body } => self.gen_struct(name, body),
             StmtKind::Declare { name, ann } => self.gen_declare(name, ann),
             StmtKind::Expr { term } => {
                 self.gen_term(term, None)?;
@@ -168,9 +172,7 @@ impl Generator {
             .cloned();
         let found = self.gen_term_inner(term, expected.or(inferred.as_ref()))?;
         if let Some(expected) = expected {
-            self.typer
-                .same(expected, &found)
-                .map_err(|err| GenerateError::typing(term.span, err))?;
+            return self.coerce(term.span, found, expected);
         }
         Ok(found)
     }
@@ -214,11 +216,13 @@ impl Generator {
                 Ok(Ty::Type)
             }
             TermKind::If { cond, then, els } => self.gen_if(cond, then, els, expected),
+            TermKind::Try { value } => self.gen_try(term.span, value),
+            TermKind::Match { value, arms } => self.gen_match(term.span, value, arms, expected),
             TermKind::While { cond, body } => self.gen_while(cond, body),
             TermKind::Array { elems } => self.gen_array(term.span, elems, expected),
             TermKind::Record { fields } => self.gen_record(term.span, fields, expected),
             TermKind::Block { stmts, tail } => self.gen_block(stmts, tail, expected),
-            TermKind::Call { func, arg } => self.gen_call(term.span, func, arg),
+            TermKind::Call { func, arg } => self.gen_call(term.span, func, arg, expected),
             TermKind::Builtin { name, args } => self.gen_builtin(term.span, name, args, expected),
             TermKind::Assign { place, value } => self.gen_assign(place, value),
             TermKind::Address { place } => self.gen_place(place),

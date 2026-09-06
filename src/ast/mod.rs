@@ -37,6 +37,14 @@ pub enum TypeKind {
         head: Ident,
         arg: Box<Type>,
     },
+    Result {
+        value: Box<Type>,
+        error: Box<Type>,
+    },
+    Union {
+        left: Box<Type>,
+        right: Box<Type>,
+    },
     Func {
         from: Box<Type>,
         to: Box<Type>,
@@ -75,6 +83,13 @@ pub enum TermKind {
     While {
         cond: Box<Term>,
         body: Box<Term>,
+    },
+    Try {
+        value: Box<Term>,
+    },
+    Match {
+        value: Box<Term>,
+        arms: Vec<MatchArm>,
     },
     Array {
         elems: Vec<Term>,
@@ -118,6 +133,20 @@ pub enum TermKind {
 pub type Stmt = Spanned<StmtKind>;
 
 #[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub variant: MatchVariant,
+    pub name: Ident,
+    pub body: Term,
+}
+
+#[derive(Debug, Clone)]
+pub enum MatchVariant {
+    Ok,
+    Err,
+    Type(Type),
+}
+
+#[derive(Debug, Clone)]
 pub enum StmtKind {
     ForeignType {
         name: Ident,
@@ -139,10 +168,14 @@ pub enum StmtKind {
         name: Ident,
         init: Term,
     },
-    /// `type Name = init;` A fresh nominal identity, in scope within its own RHS.
+    /// `type Name = init;` A transparent alias.
     DefineType {
         name: Ident,
         init: Type,
+    },
+    Struct {
+        name: Ident,
+        body: Type,
     },
     /// `var name: ann;`
     Declare {

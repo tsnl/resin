@@ -175,7 +175,7 @@ fn type_mismatch_is_a_type_error() {
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("type List = { value: int, next: Ptr<List> };");
+    let module = compile("struct List { value: int, next: Ptr<List> };");
     assert_eq!(module.types.len(), 1);
     assert_eq!(module.types[0].name.as_ref(), "List");
     let Ty::Record { fields } = module.types[0].body().unwrap() else {
@@ -187,7 +187,7 @@ fn linked_list_type_is_finite_through_its_pointer() {
 #[test]
 fn inline_recursive_type_is_rejected_during_generation() {
     assert!(matches!(
-        compile_err("type Bad = { next: Bad };"),
+        compile_err("struct Bad { next: Bad };"),
         GenerateErrorKind::Type(TypeErrorKind::RecursiveTypeWithoutIndirection { .. })
     ));
 }
@@ -245,9 +245,9 @@ fn if_joins_then_and_else_values() {
 fn nominal_ascription_wraps_and_unwraps_one_layer() {
     let module = compile(
         r#"
-type Meters = int;
-def to_meters (n: int) -> Meters = { Meters (n) };
-def from_meters (m: Meters) -> int = { int (m) };
+struct Meters { value: int };
+def to_meters (n: int) -> Meters = { Meters { value = n } };
+def from_meters (m: Meters) -> int = { m.value };
 "#,
     );
     verify(&module).unwrap();
@@ -310,8 +310,8 @@ fn nested_nominal_ascription_does_not_skip_a_layer() {
         compile_err(
             r#"export { main };
 
-type Meters = int;
-type Distance = Meters;
+struct Meters { value: int };
+struct Distance { value: Meters };
 
 def main() -> () = {
     var x = Distance (1);
@@ -326,12 +326,12 @@ fn nested_nominal_ascription_wraps_the_defining_body() {
     let module = compile(
         r#"export { main };
 
-type Meters = int;
-type Distance = Meters;
+struct Meters { value: int };
+struct Distance { value: Meters };
 
 def main() -> () = {
-    var x = Distance (Meters (1));
-    var y = int (Meters (x));
+    var x = Distance { value = Meters { value = 1 } };
+    var y = x.value.value;
 };"#,
     );
     verify(&module).unwrap();
@@ -341,14 +341,22 @@ def main() -> () = {
             definition: resin::ir::TypeId::from_index(1),
         }
     );
-    assert_eq!(module.functions[0].locals[2].ty, Ty::Int32);
+    assert_eq!(
+        module.functions[0]
+            .locals
+            .iter()
+            .find(|local| local.name.as_deref() == Some("y"))
+            .unwrap()
+            .ty,
+        Ty::Int32
+    );
 }
 
 #[test]
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
         r#"
-type List = { value: int, next: Ptr<List> };
+struct List { value: int, next: Ptr<List> };
 def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 "#,
     );
@@ -400,11 +408,12 @@ type Buf = Span<int>;
 
 def main() -> () = {
     var x = 1;
+    var buf: Buf;
 };"#,
     );
     verify(&module).unwrap();
     assert!(matches!(
-        module.types[0].body().unwrap(),
+        &module.functions[0].locals[2].ty,
         Ty::Span { element } if **element == Ty::Int32
     ));
     assert_eq!(module.functions[0].locals[1].ty, Ty::Int32);

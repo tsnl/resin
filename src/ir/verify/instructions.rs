@@ -14,6 +14,47 @@ pub(super) fn check_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
+        Instr::SetLocal { local } => {
+            let target = function.locals.get(local.index()).ok_or_else(|| {
+                location.error(VerifyErrorKind::InvalidLocal {
+                    local: local.index(),
+                })
+            })?;
+            expect_type(target.ty.clone(), pop_one(stack, location)?, location)?;
+        }
+        Instr::Widen { ty } => {
+            check_type(&module.types, ty, location)?;
+            let from = pop_one(stack, location)?;
+            if !from.widens_to(ty) {
+                return Err(location.error(VerifyErrorKind::TypeMismatch {
+                    expected: ty.clone(),
+                    found: from,
+                }));
+            }
+            stack.push(ty.clone());
+        }
+        Instr::MakeVariant { ty, tag } => {
+            check_type(&module.types, ty, location)?;
+            let payload = ty
+                .payload(*tag)
+                .ok_or_else(|| location.error(VerifyErrorKind::InvalidVariant))?;
+            expect_type(payload, pop_one(stack, location)?, location)?;
+            stack.push(ty.clone());
+        }
+        Instr::VariantTag => {
+            let from = pop_one(stack, location)?;
+            if from.payloads().is_none() && from.variants().is_none() {
+                return Err(location.error(VerifyErrorKind::InvalidVariant));
+            }
+            stack.push(Ty::UInt32);
+        }
+        Instr::VariantPayload { tag } => {
+            let from = pop_one(stack, location)?;
+            let payload = from
+                .payload(*tag)
+                .ok_or_else(|| location.error(VerifyErrorKind::InvalidVariant))?;
+            stack.push(payload);
+        }
         Instr::Shader { function, stage } => {
             let target = module.functions.get(function.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidFunction {

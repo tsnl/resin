@@ -30,6 +30,7 @@ pub enum VerifyLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidVariant,
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },
     InvalidShader,
@@ -133,6 +134,7 @@ impl Location {
 impl From<DefinitionError> for VerifyErrorKind {
     fn from(error: DefinitionError) -> Self {
         match error {
+            DefinitionError::InvalidUnion => Self::InvalidVariant,
             DefinitionError::Invalid(definition) => Self::InvalidTypeDefinition {
                 definition: definition.index(),
             },

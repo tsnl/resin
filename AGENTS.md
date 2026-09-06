@@ -13,13 +13,19 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   scope with explicit exports; do not reintroduce textual inclusion.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
-- Functions use `def`, nominal types use `type`, and local value bindings use `var`, including
+- Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.
 - Function result annotations default to unit when omitted, including foreign functions.
   Explicit `_` holes opt into inference in local annotations and function results, including
   nested type positions. Keep parameters, type definitions, and foreign signatures fully explicit.
   Inference resolves dependency groups before IR lowering; never put inference variables in IR.
+- Unions contain nominal structs and use module-wide u32 type IDs, not variant positions.
+  `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix
+  `?` returns early on error. Error holes collect the least union of propagated errors (`Never`
+  if empty). Keep mutable pointers invariant; implicit widening only copies union/Result values.
+- `?` does not clean up resources. Preserve explicit cleanup when adapting runtime callers;
+  do not mechanically replace exit-on-failure `check` calls with early returns.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and

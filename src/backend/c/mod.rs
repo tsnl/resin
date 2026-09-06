@@ -36,10 +36,10 @@ pub fn emit_with_shaders(
     shaders: &[Shader],
 ) -> Result<String, Error> {
     let analysis = ir::verify::analyze(module)?;
-    let entry = entry::emit(module, entry)?;
     let types = Types::collect(module, shaders, &analysis);
+    let entry = entry::emit(&types, entry)?;
     let mut out =
-        "#include <resin_runtime.h>\n#include <stddef.h>\n#include <stdlib.h>\n#include <math.h>\n"
+        "#include <resin_runtime.h>\n#include <stddef.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n"
             .to_string();
     out.push_str("_Static_assert(sizeof(void *) == 8 && sizeof(size_t) == 8, \"Resin currently requires a 64-bit host\");\n");
     let headers: std::collections::BTreeSet<_> = module

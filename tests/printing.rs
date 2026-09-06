@@ -157,7 +157,7 @@ def main() -> () = {
 }
 
 #[test]
-fn nominal_scalars_are_unwrapped() {
+fn aliases_preserve_scalar_printing() {
     prints(
         r#"export { main }; type Meters = int; type Distance = Meters; def main() -> () = { print("{0}", (Distance (Meters (42)),)); };"#,
         b"42",

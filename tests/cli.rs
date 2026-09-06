@@ -362,12 +362,12 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
         (
             "export { demo }; def demo(n: int) -> int = { n };",
             Some("demo"),
-            "type () -> int or () -> ()",
+            "take (), and return int",
         ),
         (
             "export { demo }; def demo() -> uint = { uint(0) };",
             Some("demo"),
-            "type () -> int or () -> ()",
+            "take (), and return int",
         ),
         (
             "export { rand }; extern \"stdlib.h\" def rand() -> int;",

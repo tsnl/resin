@@ -2,7 +2,7 @@
 
 Resin is a deliberately small systems programming language in the spirit of C and Go. It should
 make data layout, mutation, pointers, control flow, and cost easy to see while removing incidental
-complexity from the toolchain. The MVP is monomorphic, fail-fast, and manually managed: `Ptr<T>`
+complexity from the toolchain. The language is monomorphic and manually managed: `Ptr<T>`
 and `Span<T>` are the fundamental ways to share memory, and there is no implicit tracing, reference
 counting, or exception machinery. Separate value and type namespaces keep ordinary definitions and
 nominal type definitions simple, including productive recursive definitions through pointers.
@@ -10,18 +10,26 @@ nominal type definitions simple, including productive recursive definitions thro
 Every function takes exactly one argument. `()` supplies unit, and `(a, b)` supplies a tuple;
 `def f(a: A, b: B) -> R = { body };` destructures that tuple into local bindings. Function types
 follow the same rule: `() -> R`, `(A) -> R`, and `(A, B) -> R`. Tuples use positional record fields in IR.
-Calls and assignments require matching nominal types; only explicit `T(value)` ascriptions
-wrap or unwrap one nominal layer. Record initializers evaluate fields in source order before
+Calls and assignments preserve nominal identity; explicit `T(value)` ascriptions
+wrap or unwrap one nominal record layer. Union and Result values may widen their variant sets,
+but mutable pointers remain invariant. Record initializers evaluate fields in source order before
 assembling them in the type's layout order.
 
 Functions are top-level, immutable definitions without captured environments. Signatures are
 available before bodies are checked, so mutually recursive functions need no forward declarations.
-An omitted result annotation means unit, not an inferred return type; non-unit results require `-> T`.
-Value bindings use `var name = value;`, and nominal types use `type Name = Type;`. Declarations
+An omitted result annotation means unit; explicit `_` holes enable inference in locals and function
+results, including nested positions. Value bindings use `var name = value;`, nominal records use
+`struct Name { field: Type };`, and `type Name = Type;` creates transparent aliases. Declarations
 such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be
 accessed. Record initializers keep bare `name = value` fields; parameters and record type fields
 keep bare `name: Type` declarations. Files have no runtime globals or initialization phase.
+
+Unions are canonical sets of nominal structs, with program-local u32 tags independent of union
+membership. `Result<T, E>` is first-class, including nested Results. `ok` and `err` construct its
+branches; exhaustive `match` expressions bind payloads, and postfix `?` returns errors early.
+An inferred error set is the least union of errors propagated by a dependency group, or `Never`
+when empty. Early return does not provide automatic resource cleanup.
 
 ## Host and GPU
 
@@ -53,9 +61,11 @@ exporting unfinished tables are errors; failed validation remains retryable. The
 one context and moves its completed definition table into the IR module without cloning.
 Standalone clients can start with `TyperContext::new()` or take ownership of an existing table
 with `from_definitions`.
-Compile-time instantiation uses a deliberately restricted `evaluate()` operation, initially
-limited to literals. An IR generator can therefore interleave scope resolution, typing, evaluation,
-and emission without coupling the reusable typing rules to a particular backend. Errors propagate
+The evaluator resolves type expressions and literals. Functions needing inference first collect
+constraints, unify ordinary type holes, and solve error-set inclusion to a fixed point. Concrete
+node-keyed results guide lowering; inference variables never enter the IR. A generator can then
+interleave scope resolution, typing, evaluation, and emission without coupling the reusable typing
+rules to a particular backend. Errors propagate
 immediately and compilation stops after the first useful diagnostic.
 
 The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks

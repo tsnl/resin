@@ -175,7 +175,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     let project = Project::new(&[
         (
             "base.resin",
-            "export { Number, make }; type Number = int; def make(counter: Ptr<int>) -> Number = { counter.* := counter.* + 1; Number(42) };",
+            "export { Number, make }; struct Number { value: int }; def make(counter: Ptr<int>) -> Number = { counter.* := counter.* + 1; Number { value = 42 } };",
         ),
         (
             "left.resin",
@@ -187,7 +187,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> int = { var counter = 0; var n = make(&counter); int(n) + counter - 1 };",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> int = { var counter = 0; var n = make(&counter); n.value + counter - 1 };",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -305,7 +305,7 @@ fn exported_functions_can_return_private_types() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { make, read }; type Hidden = int; def make () -> Hidden = { Hidden(42) }; def read (n: Hidden) -> int = { int(n) };",
+            "export { make, read }; struct Hidden { value: int }; def make () -> Hidden = { Hidden { value = 42 } }; def read (n: Hidden) -> int = { n.value };",
         ),
         (
             "main.resin",
@@ -320,11 +320,11 @@ fn private_nominal_types_keep_distinct_identities() {
     Project::new(&[
         (
             "left.resin",
-            "export { make }; type Hidden = int; def make () -> Hidden = { Hidden(42) };",
+            "export { make }; struct Hidden { value: int }; def make () -> Hidden = { Hidden { value = 42 } };",
         ),
         (
             "right.resin",
-            "export { read }; type Hidden = int; def read (n: Hidden) -> int = { int(n) };",
+            "export { read }; struct Hidden { value: int }; def read (n: Hidden) -> int = { n.value };",
         ),
         (
             "main.resin",
@@ -545,7 +545,7 @@ fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
 fn builtin_spellings_are_valid_field_names() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; type Fields = { print: int, shader: int }; def main () -> int = { var value = Fields { print = 20, shader = 22 }; value.print + value.shader };",
+        "export { main }; struct Fields { print: int, shader: int }; def main () -> int = { var value = Fields { print = 20, shader = 22 }; value.print + value.shader };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
 }
@@ -602,7 +602,7 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
 fn declarations_do_not_create_a_module_initializer() {
     let empty = support::module("");
     assert!(empty.functions.is_empty());
-    let types = support::module("export { Item }; type Item = { value: int };");
+    let types = support::module("export { Item }; struct Item { value: int };");
     assert!(types.functions.is_empty());
     assert!(types.entries.is_empty());
     let module =

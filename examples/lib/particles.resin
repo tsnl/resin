@@ -1,8 +1,8 @@
 export { Particle, Params, advance, kernel, vertex, fragment };
 import { "std/graphics.resin" };
 
-type Particle = { x: float32, y: float32, vx: float32, vy: float32, color: Color };
-type Params = { count: uint, dt: float32, radius: float32, particles: Ptr<Particle> };
+struct Particle { x: float32, y: float32, vx: float32, vy: float32, color: Color };
+struct Params { count: uint, dt: float32, radius: float32, particles: Ptr<Particle> };
 
 def advance(p: Ptr<Particle>, dt: float32) -> () = {
     p.x := p.x + p.vx * dt;

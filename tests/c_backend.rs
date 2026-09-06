@@ -31,6 +31,47 @@ fn runs(source: &str, code: i32) {
 }
 
 #[test]
+fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
+    runs(
+        "export { main }; struct E {}; def fail() -> Result<int, E> = { err(E {}) }; def sum(a: int, b: int, c: int) -> int = { a + b + c }; def main() -> Result<int, E> = { ok(sum(1, fail()?, 3)) };",
+        1,
+    );
+    runs(
+        "export { main }; struct Bad { code: int }; def fail(counter: Ptr<int>) -> Result<int, Bad> = { counter.* := counter.* + 1; err(Bad { code = 7 }) }; def work(counter: Ptr<int>) -> Result<int, Bad> = { ok((counter.* := counter.* + 10) + fail(counter)? + (counter.* := 1000)) }; def main() -> int = { var count = 0; var result = work(&count); match (result) { ok(n) => { 99 }, err(e) => { count + e.code } } };",
+        18,
+    );
+    runs(
+        "export { main }; struct A {}; struct B { n: int }; struct C {}; def small() -> Result<int, B> = { err(B { n = 42 }) }; def broad() -> Result<int, A | B | C> = { small() }; def main() -> int = { match (broad()) { ok(n) => { n }, err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } };",
+        42,
+    );
+    runs(
+        "export { main }; def nested() -> Result<Result<int, _>, _> = { ok(ok(42)) }; def main() -> Result<int, _> = { var inner = nested()?; ok(inner?) };",
+        42,
+    );
+    runs(
+        "export { main }; struct E {}; def main() -> Result<(), E> = { ok(()) };",
+        0,
+    );
+    let output = run_module(&module(
+        "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
+    ));
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "unhandled error: Broken\n"
+    );
+    let mut m = module(
+        "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
+    );
+    m.types[0].name = "quoted\"name\\value".into();
+    let output = run_module(&m);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "unhandled error: quoted\"name\\value\n"
+    );
+}
+
+#[test]
 fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
     runs(
         "export { main }; def main() -> _ = { var n: _; var p: Ptr<_>; n := 40; p := &n; p.* := p.* + 2; p.* };",
@@ -57,7 +98,7 @@ fn typed_pointer_offsets_use_element_sizes() {
         47,
     );
     runs(
-        "export { main }; type Payload = { marker: uint, wide: ulong, amount: float32 }; def main () -> int = { var values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; var p = Ptr<Payload> (&values); var q = p + 1; q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
+        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32 }; def main () -> int = { var values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; var p = Ptr<Payload> (&values); var q = p + 1; q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -170,7 +211,7 @@ fn calls_are_unary_with_unit_and_tuple_sugar() {
 #[test]
 fn nominal_records_preserve_source_order_and_field_layout() {
     runs(
-        "export { main }; type R = { a: int, b: int }; def main () -> int = { var x = 0; var r = R { b = (x := 1), a = (x := 2) }; r.a * 10 + r.b + x };",
+        "export { main }; struct R { a: int, b: int }; def main () -> int = { var x = 0; var r = R { b = (x := 1), a = (x := 2) }; r.a * 10 + r.b + x };",
         23,
     );
 }
@@ -192,7 +233,7 @@ fn short_circuiting_and_joins_preserve_effects() {
 }
 
 #[test]
-fn nominal_function_types_and_numeric_operations_work() {
+fn aliases_preserve_function_types_and_numeric_operations() {
     runs(
         "export { main }; type Meters = int; type F = (Meters) -> Meters; def add (x: Meters) -> Meters = { x + Meters (2) }; def main () -> int = { var f = F (add); int (f(Meters (5))) };",
         7,

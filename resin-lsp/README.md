@@ -6,12 +6,14 @@ Editor requests run parsing, resolution, typing, and IR verification; they do no
 compile C/GLSL, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
 functions, following the compiler's declarations-only module rules. Functions use
-`def`, local bindings use `var`, and nominal types use `type`. Omitted function
+`def`, local bindings use `var`, nominal records use `struct`, and aliases use `type`. Omitted function
 result annotations default to `()` and appear as unit in hover/completion.
 Explicit `_` holes in local annotations and function results are solved by the
 compiler before lowering; hover and completion use those concrete types, including
 inferred results from imported modules. Incomplete-source recovery remains
 best-effort and may show `?` when a complete program would infer a type.
+Result error sets appear in hover as nominal names joined by `|` (or `Never` when empty).
+Match-arm bindings are scoped to their arm and expose the selected payload's fields.
 
 ## Build and run
 

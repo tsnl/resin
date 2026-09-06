@@ -106,12 +106,12 @@ fn shadowed_function_names_do_not_create_inference_dependencies() {
 #[test]
 fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
     rejects(
-        "type One = int; type Two = int; def value() -> _ = { var v: _; v := One(1); v := Two(2); v };",
+        "struct One { value: int }; struct Two { value: int }; def value() -> _ = { var v: _; v := One { value = 1 }; v := Two { value = 2 }; v };",
         "incompatible",
     );
     assert_eq!(
         result(
-            "type One = int; def value() -> _ = { var v = One(1); _(v) };",
+            "struct One { value: int }; def value() -> _ = { var v = One { value = 1 }; _(v) };",
             "value"
         ),
         Ty::Defined {
@@ -180,10 +180,10 @@ fn dependency_order_does_not_depend_on_source_order() {
 
 #[test]
 fn nominal_identity_and_local_type_definitions_survive_inference() {
-    let m = module("type Meters = int; def make() -> _ = { Meters(42) };");
+    let m = module("struct Meters { value: int }; def make() -> _ = { Meters { value = 42 } };");
     assert!(matches!(m.functions[0].result, Ty::Defined { .. }));
     let m = module(
-        "def main() -> _ = { type Meters = int; var distance = Meters(42); int(distance) };",
+        "def main() -> _ = { struct Meters { value: int }; var distance = Meters { value = 42 }; distance.value };",
     );
     assert_eq!(m.types.len(), 1);
     assert_eq!(m.functions[0].result, Ty::Int32);
@@ -202,7 +202,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
         "def f(x: _) = {};",
         "def f(x: Ptr<_>) = {};",
         "type Foo = Ptr<_>;",
-        "type Foo = { value: _ };",
+        "struct Foo { value: _ };",
         "extern \"api.h\" def f() -> _;",
         "def main() -> _ = { type Foo = _; () };",
     ] {

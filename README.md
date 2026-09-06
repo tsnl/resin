@@ -104,8 +104,10 @@ Files contain only function, foreign, and type declarations, after their export/
 There are no global variables or executable top-level statements. Values and mutable state
 belong inside functions and are passed explicitly to helpers, by value or pointer.
 Local value bindings use `var name = value;`, or `var name: Type;` to reserve uninitialized storage.
-Assignment still uses `name := value`. Nominal types use `type Name = Type;`, with explicit
-wrapping and unwrapping, one layer at a time. Record initializers keep bare `name = value`
+Assignment still uses `name := value`. `struct Point { x: int, y: int };` creates a nominal type;
+`type Position = Point;` is a transparent alias for that same type. Only `struct` creates
+a new nominal identity. Construct values with `Point { x = 1, y = 2 }`.
+Record initializers keep bare `name = value`
 fields, and parameters and record type fields keep bare `name: Type` declarations.
 Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
 Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and bracket
@@ -139,14 +141,77 @@ can come from later assignments or uses; numeric literals default to `int` or
 Function results are inferred from bodies in dependency order, checking mutually
 recursive groups together. Callers outside a group cannot determine its return
 types. A recursive group without enough information is an error, not a generic
-function. Parameters, nominal type definitions (including their fields), and
+function. Parameters, aliases, struct fields, and
 foreign signatures remain fully explicit. Unresolved or infinitely recursive
 inferred types are errors; `_` is not a wildcard, unit, or a dynamic type.
 
 Omitting a function result annotation still means unit; inference is opt-in.
 Types are fully resolved before IR generation, so C and GLSL share the same
 inference behavior. Run `cargo run -- examples/inference.resin` for an example.
-Structural unions, `Result`, and error propagation are not implemented yet.
+
+## Unions and errors
+
+Unions are structural sets of nominal structs: `A | B`, `B | A`, and `A | B | A`
+are the same type. Aliases preserve the identities of their targets. A variant's u32
+tag identifies its struct throughout a compiled program; it is not its position in a
+particular union. Tags are not persistent IDs across separate builds.
+`Never` is the empty union. Structs and aliases are declared in source order;
+a struct can refer to itself through a pointer, but aliases cannot introduce cycles.
+
+```resin
+struct DivideByZero {};
+struct NegativeInput { value: int };
+type CalculationError = DivideByZero | NegativeInput;
+
+def divide(n: int, d: int) -> Result<int, DivideByZero> = {
+    if (d == 0) { err(DivideByZero {}) } else { ok(n / d) }
+};
+
+def calculate(n: int) -> Result<int, _> = {
+    if (n < 0) { err(NegativeInput { value = n }) }
+    else { ok(divide(n, 2)?) }
+};
+```
+
+`Result<T, E>` is an ordinary value type: it can be stored, passed, returned, and
+nested. `ok(value)` and `err(error)` use the surrounding Result type. Errors are
+structs or unions of structs. An inferred error slot collects the least union of
+errors that can escape, including through recursive calls. With no errors it becomes
+`Never`. Nested holes work too: `Result<Result<int, _>, _>`.
+Ambiguous success types still need an annotation; `err(Error {})` alone cannot say
+what success would contain.
+
+Postfix `?` evaluates a Result once, unwraps success, or immediately returns its
+error. The enclosing function must return a Result whose error set includes that
+error. Union values and Result errors can widen by value; pointers remain invariant.
+Handle failures with exhaustive, duplicate-free matches:
+
+```resin
+def describe(result: Result<int, CalculationError>) = {
+    match (result) {
+        ok(value) => { print("value = {0}\n", (value,)) },
+        err(error) => {
+            match (error) {
+                DivideByZero(zero) => { print("division by zero\n", ()) },
+                NegativeInput(negative) => { print("negative: {0}\n", (negative.value,)) },
+            }
+        },
+    }
+};
+```
+
+Host entry points can return `Result<(), E>` or `Result<int, E>`; an unhandled
+error prints its struct name and exits with status 1. Run `cargo run -- examples/errors.resin`
+or `cargo run -- examples/errors.resin:failure` to try both paths.
+Helpers using Result and match also compile to GLSL. C uses a tag and a union of
+payloads; GLSL uses separate payload fields because it has no native union type.
+Shared host/device buffer layouts for tagged values are not yet supported.
+
+`?` does not release resources or run deferred cleanup. The standard library's
+`status(code)` converts native status integers to `Result<(), RuntimeError>`;
+`RuntimeError` retains its numeric `code`. Existing `check(code)` still exits on failure.
+Resource-owning callers must handle errors and release resources explicitly before
+returning; changing `check` to `?` alone would skip their cleanup.
 
 ## Build and run
 
@@ -256,9 +321,9 @@ file is loaded once. Imports never execute code. Import cycles are errors; mutua
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `def`, `var`, `if`, `else`, and `while`), primitive
-type names, and `Ptr`/`Span` are reserved, including in parameters and field names. Names such
-as `if_value` are ordinary identifiers. `print` and `shader` are unshadowable compiler builtins,
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`, `else`, `while`, and `match`), primitive
+type names, `Never`, and `Ptr`/`Span`/`Result` are reserved, including in parameters and field names. Names such
+as `if_value` are ordinary identifiers. `print`, `shader`, `ok`, and `err` are unshadowable compiler builtins,
 not syntax keywords: definitions and parameters cannot use those names, but record fields can.
 
 `std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
@@ -269,7 +334,7 @@ library. Programs use the standard library's exports, which initially stay close
 - `std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
 - `std/window.resin`: windows and presentation; import `std/gpu.resin` separately for GPU operations.
 - `std/image.resin`: PNG reading and writing.
-- `std/status.resin`: `check`, status strings, and `resin_status_incomplete()`.
+- `std/status.resin`: `status`, `RuntimeError`, `check`, status strings, and `resin_status_incomplete()`.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
 
 The polymorphic `print` and compile-time `shader` operations remain compiler builtins.
@@ -383,7 +448,7 @@ Shaders receive application data through the root address passed to `resin_gpu_d
 `resin_gpu_draw`. Add a typed pointer as the second tuple element:
 
 ```resin
-type Params = { count: uint, values: Ptr<float32>, scale: float32 };
+struct Params { count: uint, values: Ptr<float32>, scale: float32 };
 
 def kernel(index: uint, root: Ptr<Params>) -> () = {
     if (index < root.count) {

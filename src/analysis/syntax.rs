@@ -288,8 +288,25 @@ impl Document {
             "foreign_type" => {
                 self.definition(path, node, DefinitionKind::Type, scope, top_level, true)
             }
-            "type_define" => {
+            "type_define" | "struct_definition" => {
                 self.definition(path, node, DefinitionKind::Type, scope, top_level, false)
+            }
+            "match_arm" => {
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.definition(
+                        path,
+                        node,
+                        DefinitionKind::Parameter,
+                        span(body),
+                        false,
+                        true,
+                    );
+                    self.visit(path, body, span(body), false);
+                }
+                if let Some(variant) = node.child_by_field_name("variant") {
+                    self.syntax_errors(variant);
+                }
+                return;
             }
             "term_define"
                 if !top_level && node.parent().is_none_or(|p| p.kind() != "record_term") =>
@@ -350,6 +367,11 @@ impl Document {
             return false;
         };
         loop {
+            if node.kind() == "struct_definition"
+                && node.parent().is_some_and(|p| p.kind() == "source_file")
+            {
+                return true;
+            }
             if node.kind() == "type_define"
                 && node
                     .parent()

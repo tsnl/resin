@@ -6,7 +6,7 @@ use std::{
 use super::super::{Evaluator, GenerateError, GenerateErrorKind, Generator, Scopes};
 use super::{
     Result,
-    constraints::Constraint,
+    constraints::{Constraint, Pattern},
     error,
     solver::Solver,
     types::{Head, Type},
@@ -26,6 +26,7 @@ pub(super) struct Checker<'a> {
     pub expressions: Vec<(*const Term, Span, Type)>,
     pub definitions: HashMap<*const Ident, TypeId>,
     pub constraints: Vec<(Span, Constraint)>,
+    pub result: Type,
 }
 
 impl<'a> Checker<'a> {
@@ -40,11 +41,18 @@ impl<'a> Checker<'a> {
             expressions: vec![],
             definitions: HashMap::new(),
             constraints: vec![],
+            result: Ty::Unit.into(),
         }
     }
 
     pub fn annotation(&mut self, ann: &ast::Type, infer: bool) -> Result<Type> {
         Ok(match &ann.val {
+            TypeKind::Result { value, error } => {
+                let value = self.annotation(value, infer)?;
+                let error = self.annotation(error, infer)?;
+                self.solver.errors(&error, ann.span)?;
+                Type::result(value, error)
+            }
             TypeKind::Infer => {
                 if !infer {
                     return Err(error(
@@ -128,6 +136,7 @@ impl<'a> Checker<'a> {
     }
 
     pub fn term(&mut self, term: &Term, expected: Option<Type>) -> Result<Type> {
+        let contextual = expected.is_some();
         let out = expected.unwrap_or_else(|| self.solver.fresh());
         let span = term.span;
         let mut equate = None;
@@ -139,6 +148,33 @@ impl<'a> Checker<'a> {
                 });
             }
             TermKind::Unit => equate = Some(Ty::Unit.into()),
+            TermKind::Try { value } => {
+                let input = self.term(value, None)?;
+                let (value, errors) = self.result_parts(&input, span)?;
+                let (_, target_errors) = self.result_parts(&self.result.clone(), span)?;
+                self.constraints
+                    .push((span, Constraint::Errors(errors, target_errors)));
+                equate = Some(value);
+            }
+            TermKind::Match { value, arms } => {
+                let input = self.term(value, None)?;
+                for arm in arms {
+                    self.push();
+                    let payload = self.solver.fresh();
+                    let variant = match &arm.variant {
+                        ast::MatchVariant::Ok => Pattern::Ok,
+                        ast::MatchVariant::Err => Pattern::Err,
+                        ast::MatchVariant::Type(ty) => Pattern::Type(self.annotation(ty, false)?),
+                    };
+                    self.constraints.push((
+                        arm.name.span,
+                        Constraint::Variant(input.clone(), variant, payload.clone()),
+                    ));
+                    self.bind(&arm.name, payload)?;
+                    self.term(&arm.body, Some(out.clone()))?;
+                    self.pop();
+                }
+            }
             TermKind::Num { value } => equate = Some(self.solver.number(value)),
             TermKind::String { value } => {
                 equate = Some(
@@ -181,7 +217,7 @@ impl<'a> Checker<'a> {
                             let ty = self.annotation(ann, true)?;
                             self.bind(name, ty)?;
                         }
-                        StmtKind::DefineType { name, init } => {
+                        StmtKind::Struct { name, body: init } => {
                             let definition = self.typer.reserve_type(name.val.clone());
                             self.scopes
                                 .define_type(name.val.clone(), definition)
@@ -196,11 +232,24 @@ impl<'a> Checker<'a> {
                                 .map_err(|e| GenerateError::typing(init.span, e))?;
                             self.definitions.insert(name, definition);
                         }
+                        StmtKind::DefineType { name, init } => {
+                            let ty = self.annotation(init, false)?;
+                            let ty = self.solver.require(&ty, init.span)?;
+                            self.scopes
+                                .define_alias(name.val.clone(), ty)
+                                .map_err(|name| GenerateError {
+                                    span,
+                                    kind: GenerateErrorKind::DuplicateType { name },
+                                })?;
+                        }
                         StmtKind::Expr { term } => {
                             self.term(term, None)?;
                         }
                         _ => {
-                            return Err(error(stmt.span, "unexpected declaration in function body"));
+                            return Err(error(
+                                stmt.span,
+                                "unexpected declaration in function body",
+                            ));
                         }
                     }
                 }
@@ -231,7 +280,18 @@ impl<'a> Checker<'a> {
                     .push((span, Constraint::Builtin(name.clone(), args, out.clone())));
             }
             TermKind::Call { func, arg } => {
-                if let TermKind::Type { ty } = &func.val {
+                if let TermKind::Var { name } = &func.val
+                    && matches!(name.val.as_ref(), "ok" | "err")
+                {
+                    let (value, errors) = self.result_parts(&out, span)?;
+                    if name.val.as_ref() == "ok" {
+                        self.term(arg, Some(value))?;
+                    } else {
+                        let payload = self.term(arg, None)?;
+                        self.constraints
+                            .push((span, Constraint::Errors(payload, errors)));
+                    }
+                } else if let TermKind::Type { ty } = &func.val {
                     let to = self.annotation(ty, true)?;
                     let from = self.term(arg, None)?;
                     self.constraints
@@ -274,9 +334,33 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(ty) = equate {
-            self.solver.unify(&out, &ty, span)?;
+            if contextual {
+                self.constraints
+                    .push((span, Constraint::Coerce(ty, out.clone())));
+            } else {
+                self.solver.unify(&ty, &out, span)?;
+            }
         }
         self.expressions.push((term, span, out.clone()));
         Ok(out)
+    }
+
+    fn result_parts(&mut self, ty: &Type, span: Span) -> Result<(Type, Type)> {
+        match self.solver.head(ty) {
+            Type::Node(Head::Result, parts) => Ok((parts[0].clone(), parts[1].clone())),
+            Type::Variable(_) => {
+                let value = self.solver.fresh();
+                let errors = self.solver.fresh();
+                self.solver.errors(&errors, span)?;
+                self.solver
+                    .unify(ty, &Type::result(value.clone(), errors.clone()), span)
+                    .map_err(|_| error(span, "ok, err, and ? require a Result type"))?;
+                Ok((value, errors))
+            }
+            _ => Err(error(
+                span,
+                "ok, err, and ? require a Result type; ? also requires a Result return type",
+            )),
+        }
     }
 }

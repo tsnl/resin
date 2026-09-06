@@ -10,6 +10,7 @@ pub(super) enum Head {
     Array(usize),
     Record(Vec<Arc<str>>),
     Function,
+    Result,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +20,9 @@ pub(super) enum Type {
 }
 
 impl Type {
+    pub fn result(value: Type, error: Type) -> Self {
+        Self::Node(Head::Result, vec![value, error])
+    }
     pub fn pointer(pointee: Type) -> Self {
         Self::Node(Head::Pointer, vec![pointee])
     }
@@ -59,6 +63,7 @@ impl From<Ty> for Type {
                 Self::record(fields.into_iter().map(|f| (f.name, f.ty.into())).collect())
             }
             Ty::Function { param, result } => Self::function((*param).into(), (*result).into()),
+            Ty::Result { value, error } => Self::result((*value).into(), (*error).into()),
             atom => Self::Node(Head::Atom(atom), vec![]),
         }
     }
@@ -90,6 +95,10 @@ impl Head {
             Self::Function => Ty::Function {
                 param: Box::new(children.next().unwrap()),
                 result: Box::new(children.next().unwrap()),
+            },
+            Self::Result => Ty::Result {
+                value: Box::new(children.next().unwrap()),
+                error: Box::new(children.next().unwrap()),
             },
         }
     }

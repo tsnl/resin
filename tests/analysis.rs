@@ -43,10 +43,53 @@ struct Project {
 }
 
 #[test]
+fn inferred_errors_and_match_payloads_have_editor_types() {
+    let source = "struct Broken { code: int }; def fail() -> Result<int, _> = { err(Broken { code = 7 }) }; def main() = { var result = fail(); match (result) { ok(value) => { value; }, err(error) => { error.code; } }; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    let path = project.path("main.resin");
+    assert_eq!(
+        analysis
+            .hover(&path, source.find("match (result").unwrap() + 7)
+            .unwrap()
+            .text,
+        "result: Result<int, Broken>"
+    );
+    assert_eq!(
+        analysis
+            .hover(&path, source.find("error.code").unwrap())
+            .unwrap()
+            .text,
+        "error: Broken"
+    );
+    let fields = analysis.completions(&path, source.find("error.code").unwrap() + 6);
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.name == "code" && field.detail == "code: int")
+    );
+    let origin = analysis
+        .definition(&path, source.find("error.code").unwrap())
+        .unwrap();
+    assert_eq!(origin.span.start, source.find("err(error)").unwrap() + 4);
+    assert!(
+        analysis
+            .completions(&path, source.find("var result").unwrap())
+            .iter()
+            .all(|item| item.name != "error")
+    );
+}
+
+#[test]
 fn inferred_imported_results_and_local_annotations_support_editor_queries() {
     let source =
         "import { \"lib.resin\" }; def main() = { var value: _; value := make(); value.count; };";
-    let library = "export { make }; type Counter = { count: int }; def make() -> _ = { Counter { count = 42 } };";
+    let library = "export { make }; struct Counter { count: int }; def make() -> _ = { Counter { count = 42 } };";
     let project = Project::new(&[("main.resin", source), ("lib.resin", library)]);
     let analysis = project.analyze();
     assert!(
@@ -144,7 +187,7 @@ fn field_completion_resolves_imported_nominal_function_results() {
         ("main.resin", source),
         (
             "lib.resin",
-            "export { make }; type Counter = { count: int }; def make () -> Counter = { Counter { count = 0 } };",
+            "export { make }; struct Counter { count: int }; def make () -> Counter = { Counter { count = 0 } };",
         ),
     ]);
     let items = project
@@ -177,7 +220,7 @@ fn field_completion_does_not_offer_unrelated_names() {
 #[test]
 fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
     for source in [
-        "type Point = { x: float32, y: float32 }; def main () = { var point: Point; point.; };",
+        "struct Point { x: float32, y: float32 }; def main () = { var point: Point; point.; };",
         "def main (point: { x: float32, y: float32 }) = { point.",
         "def main () = { var point = { x = 1, y = 2 }; point.",
     ] {
@@ -688,7 +731,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
         ("main.resin", source),
         (
             "lib.resin",
-            "export { make }; type Point = { x: float32 }; def broken() = { var hole = ; }; def make() -> Point = { Point { x = 1 } };",
+            "export { make }; struct Point { x: float32 }; def broken() = { var hole = ; }; def make() -> Point = { Point { x = 1 } };",
         ),
     ]);
     let analysis = project.analyze();
@@ -720,7 +763,7 @@ fn recovered_ast_contains_expression_type_and_field_holes() {
 #[test]
 fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
     for source in [
-        "export { main }; type Point = { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(\"{}\", value); };",
+        "export { main }; struct Point { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(\"{}\", value); };",
         "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
     ] {

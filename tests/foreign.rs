@@ -99,7 +99,7 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
         "export { main }; extern type Native; def main() -> () = { var value: Native; };",
         "extern type Native; def identity (n: Native) -> Native = { n };",
-        "extern type Native; type Wrapped = { value: Native };",
+        "extern type Native; struct Wrapped { value: Native };",
         "extern type Native; def read (n: Ptr<Native>) -> () = { n.*; };",
     ] {
         assert!(error(source).contains("OpaqueValue"), "{source}");

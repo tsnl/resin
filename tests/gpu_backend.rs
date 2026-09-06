@@ -36,9 +36,9 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     let module = support::module(
         r#"export { kernel, main };
 
-        type Data = { marker: uint, wide: ulong, amount: float32 };
-        type Payload = { tag: uint, data: Data, end: uint };
-        type Params = { count: uint, values: Ptr<Payload>, tail: float32 };
+        struct Data { marker: uint, wide: ulong, amount: float32 };
+        struct Payload { tag: uint, data: Data, end: uint };
+        struct Params { count: uint, values: Ptr<Payload>, tail: float32 };
         def at (values: Ptr<Payload>, index: uint) -> Ptr<Payload> = { values + index };
         def bump (p: Ptr<Payload>, index: uint) -> () = {
             var old = p.*;
@@ -302,14 +302,35 @@ fn fragment_shaders_read_typed_root_parameters() {
 
 #[test]
 fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
+    compute_values(
+        "export { kernel }; def kernel (index: uint) -> uint = { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
+        |index| index * (index + 1) / 2,
+    );
+}
+
+#[test]
+fn shader_results_propagate_and_match_union_payloads_on_device() {
+    compute_values(
+        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; def kernel(i: uint) -> uint = { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } };",
+        |index| {
+            if index == 0 {
+                0
+            } else if index % 2 == 1 {
+                index * 2
+            } else {
+                index + 10
+            }
+        },
+    );
+}
+
+fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
-    let module = support::module(
-        "export { kernel }; def kernel (index: uint) -> uint = { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
-    );
+    let module = support::module(source);
     let glsl = resin::backend::glsl::emit(&module, "kernel", resin::backend::glsl::Stage::Compute)
         .unwrap();
     let spv =
@@ -345,11 +366,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
         let values =
             std::slice::from_raw_parts(pixels.host_pointer().cast::<u32>(), COUNT as usize + 1);
         for (index, &value) in values[..COUNT as usize].iter().enumerate() {
-            assert_eq!(
-                value,
-                (index * (index + 1) / 2) as u32,
-                "invocation {index}"
-            );
+            assert_eq!(value, expected(index as u32), "invocation {index}");
         }
         assert_eq!(values[COUNT as usize], u32::MAX);
     }

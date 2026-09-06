@@ -161,6 +161,23 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::SetLocal { local } => {
+            writeln!(out, "      r_l{} = {};", local.index(), args[0].expr).unwrap();
+            return Ok(None);
+        }
+        Instr::MakeVariant { ty, tag } => variant(types, ty, *tag, &args[0].expr),
+        Instr::VariantTag => match &args[0].ty {
+            Ty::Defined { definition } => format!("{}u", definition.tag()),
+            _ => format!("({}).tag", args[0].expr),
+        },
+        Instr::VariantPayload { tag } => {
+            if matches!(args[0].ty, Ty::Defined { .. }) {
+                args[0].expr.clone()
+            } else {
+                format!("({}).v{tag}", args[0].expr)
+            }
+        }
+        Instr::Widen { ty } => widen(types, &args[0].ty, ty, &args[0].expr),
         Instr::Function { function } => format!("r_fn{}", function.index()),
         Instr::Call => format!("{}({})", args[0].expr, args[1].expr),
         Instr::Push { value } => literal(types, result.unwrap(), value)?,
@@ -221,6 +238,38 @@ fn instruction(
         _ => return Err(Error(format!("shader profile does not support {instr:?}"))),
     };
     Ok(Some(expr))
+}
+
+fn variant(types: &Types<'_>, ty: &Ty, tag: u32, value: &str) -> String {
+    if matches!(ty, Ty::Defined { .. }) {
+        return value.into();
+    }
+    let mut fields = vec![format!("{tag}u")];
+    fields.extend(ty.payloads().unwrap().iter().map(|(candidate, ty)| {
+        if *candidate == tag {
+            value.into()
+        } else {
+            types.zero(ty)
+        }
+    }));
+    format!("{}({})", types.name(ty), fields.join(", "))
+}
+
+fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
+    if from == to {
+        return value.into();
+    }
+    if let Ty::Defined { definition } = from {
+        return variant(types, to, definition.tag(), value);
+    }
+    let mut expression = types.zero(to);
+    for (tag, payload) in from.payloads().unwrap().into_iter().rev() {
+        let target = to.payload(tag).unwrap();
+        let payload = widen(types, &payload, &target, &format!("({value}).v{tag}"));
+        let constructed = variant(types, to, tag, &payload);
+        expression = format!("(({value}).tag == {tag}u ? {constructed} : {expression})");
+    }
+    expression
 }
 
 fn dereference(types: &mut Types<'_>, slot: &Slot) -> Result<String, Error> {

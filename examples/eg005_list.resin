@@ -1,6 +1,6 @@
 export { main };
 
-type List = { value: int, next: Ptr<List> };
+struct List { value: int, next: Ptr<List> };
 def cons(value: int, next: Ptr<List>) -> List = { List { value = value, next = next } };
 def car(node: List) -> int = { node.value };
 def cdr(node: List) -> Ptr<List> = { node.next };

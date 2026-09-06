@@ -52,6 +52,28 @@ impl Trace {
 
 pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
     match ty {
+        Ty::Union { variants } => {
+            if variants.is_empty() {
+                return "Never".into();
+            }
+            variants
+                .iter()
+                .map(|definition| {
+                    format_type(
+                        &Ty::Defined {
+                            definition: *definition,
+                        },
+                        typer,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        }
+        Ty::Result { value, error } => format!(
+            "Result<{}, {}>",
+            format_type(value, typer),
+            format_type(error, typer)
+        ),
         Ty::Type => "type".into(),
         Ty::Unit => "()".into(),
         Ty::Bool => "bool".into(),

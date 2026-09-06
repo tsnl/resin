@@ -16,6 +16,18 @@ fn example(name: &str) -> ir::Module {
 }
 
 #[test]
+fn shader_helpers_can_propagate_and_handle_results() {
+    let m = module(
+        "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; def kernel(i: uint) -> uint = { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } };",
+    );
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    if let Some(compiler) = shaders::compiler() {
+        toolchain::compile_glsl(&source, Stage::Compute, &compiler)
+            .unwrap_or_else(|error| panic!("{error}\n{source}"));
+    }
+}
+
+#[test]
 fn inferred_shader_results_lower_without_backend_inference() {
     let m = module(
         "export { kernel }; def kernel(i: uint) -> _ = { var value: _; value := i + 1; value };",
@@ -98,15 +110,15 @@ fn device_pointers_and_shared_roots_compile() {
     };
     for (source, stage) in [
         (
-            "export { kernel }; type Node = { value: uint, next: Ptr<Node> }; def select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node> = { if (i == uint (0)) { a } else { b } }; def kernel (i: uint, root: Ptr<Node>) -> () = { var p = select(root, root.next, i); p.value := uint (7); };",
+            "export { kernel }; struct Node { value: uint, next: Ptr<Node> }; def select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node> = { if (i == uint (0)) { a } else { b } }; def kernel (i: uint, root: Ptr<Node>) -> () = { var p = select(root, root.next, i); p.value := uint (7); };",
             Stage::Compute,
         ),
         (
-            "export { kernel }; type Data = { wide: ulong, values: Ptr<uint> }; def kernel (i: uint, root: Ptr<Data>) -> () = { var p = Ptr<uint> (ulong (root.values)); var q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
+            "export { kernel }; struct Data { wide: ulong, values: Ptr<uint> }; def kernel (i: uint, root: Ptr<Data>) -> () = { var p = Ptr<uint> (ulong (root.values)); var q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (
-            "export { fragment }; type Color = { r: float32, g: float32, b: float32, a: float32 }; type Params = { scale: float32 }; def fragment (color: Color, root: Ptr<Params>) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
+            "export { fragment }; struct Color { r: float32, g: float32, b: float32, a: float32 }; struct Params { scale: float32 }; def fragment (color: Color, root: Ptr<Params>) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
             Stage::Fragment,
         ),
     ] {
@@ -120,7 +132,7 @@ fn device_pointers_and_shared_roots_compile() {
 fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
     for (source, expected) in [
         (
-            "export { kernel }; type Data = { flag: bool }; def kernel (i: uint, root: Ptr<Data>) -> () = { () };",
+            "export { kernel }; struct Data { flag: bool }; def kernel (i: uint, root: Ptr<Data>) -> () = { () };",
             "no shared host/device layout",
         ),
         (

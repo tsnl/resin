@@ -56,20 +56,101 @@ pub enum Ty {
     Array { element: Box<Ty>, length: usize },
     Record { fields: Vec<RecordField> },
     Function { param: Box<Ty>, result: Box<Ty> },
+    Union { variants: Vec<TypeId> },
+    Result { value: Box<Ty>, error: Box<Ty> },
 }
 
 impl Ty {
+    pub fn payloads(&self) -> Option<Vec<(u32, Ty)>> {
+        match self {
+            Self::Result { value, error } => Some(vec![(0, *value.clone()), (1, *error.clone())]),
+            Self::Union { variants } => Some(
+                variants
+                    .iter()
+                    .map(|id| (id.tag(), Self::Defined { definition: *id }))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    pub fn payload(&self, tag: u32) -> Option<Ty> {
+        match self {
+            Self::Result { value, .. } if tag == 0 => Some(*value.clone()),
+            Self::Result { error, .. } if tag == 1 => Some(*error.clone()),
+            _ => self
+                .variants()?
+                .into_iter()
+                .find(|id| id.tag() == tag)
+                .map(|definition| Self::Defined { definition }),
+        }
+    }
+
+    pub fn variants(&self) -> Option<Vec<TypeId>> {
+        match self {
+            Self::Defined { definition } => Some(vec![*definition]),
+            Self::Union { variants } => Some(variants.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn union(variants: impl IntoIterator<Item = TypeId>) -> Self {
+        let mut variants: Vec<_> = variants.into_iter().collect();
+        variants.sort_by_key(|id| id.index());
+        variants.dedup();
+        match variants.as_slice() {
+            [definition] => Self::Defined {
+                definition: *definition,
+            },
+            _ => Self::Union { variants },
+        }
+    }
+
+    pub fn widens_to(&self, to: &Self) -> bool {
+        if self == to {
+            return true;
+        }
+        match (self, to) {
+            (
+                Self::Result {
+                    value: av,
+                    error: ae,
+                },
+                Self::Result {
+                    value: bv,
+                    error: be,
+                },
+            ) => av == bv && ae.widens_to(be),
+            _ => match (self.variants(), to.variants()) {
+                (Some(from), Some(to)) => from.iter().all(|id| to.contains(id)),
+                _ => false,
+            },
+        }
+    }
+
     pub fn shader() -> Self {
-        Self::Record { fields: vec![
-            RecordField { name: "data".into(), ty: Self::Pointer { pointee: Box::new(Self::UInt8) } },
-            RecordField { name: "length".into(), ty: Self::UInt64 },
-        ] }
+        Self::Record {
+            fields: vec![
+                RecordField {
+                    name: "data".into(),
+                    ty: Self::Pointer {
+                        pointee: Box::new(Self::UInt8),
+                    },
+                },
+                RecordField {
+                    name: "length".into(),
+                    ty: Self::UInt64,
+                },
+            ],
+        }
     }
 
     pub fn pointer_cast(&self, to: &Self) -> bool {
-        matches!((self, to),
+        matches!(
+            (self, to),
             (Self::Pointer { .. }, Self::Pointer { .. } | Self::UInt64)
-            | (Self::UInt64, Self::Pointer { .. }))
+                | (Self::UInt64, Self::Pointer { .. })
+        )
     }
 
     pub fn foreign_value(&self) -> bool {
@@ -109,5 +190,14 @@ impl Ty {
                 | Self::UInt32
                 | Self::UInt64
         )
+    }
+}
+
+impl TypeId {
+    pub fn tag(self) -> u32 {
+        u32::try_from(self.index())
+            .expect("too many nominal types")
+            .checked_add(1)
+            .expect("too many nominal types")
     }
 }

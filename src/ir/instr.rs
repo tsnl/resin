@@ -63,6 +63,20 @@ impl Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    SetLocal {
+        local: LocalId,
+    },
+    MakeVariant {
+        ty: Ty,
+        tag: u32,
+    },
+    VariantTag,
+    VariantPayload {
+        tag: u32,
+    },
+    Widen {
+        ty: Ty,
+    },
     Shader {
         function: FunctionId,
         stage: Arc<str>,
@@ -150,11 +164,15 @@ impl Instr {
             | Self::Function { .. }
             | Self::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
             Self::AccessStatic { .. }
+            | Self::MakeVariant { .. }
+            | Self::VariantTag
+            | Self::VariantPayload { .. }
+            | Self::Widen { .. }
             | Self::Load
             | Self::Ascribe { .. }
             | Self::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
             Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },
-            Self::Discard => StackEffect { pops: 1, pushes: 0 },
+            Self::Discard | Self::SetLocal { .. } => StackEffect { pops: 1, pushes: 0 },
             Self::MakeRecord { fields } => StackEffect {
                 pops: fields.len(),
                 pushes: 1,

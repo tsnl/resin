@@ -73,6 +73,7 @@ fn generate_program_with(
                 | StmtKind::Function { name, .. }
                 | StmtKind::Define { name, .. }
                 | StmtKind::DefineType { name, .. }
+                | StmtKind::Struct { name, .. }
                 | StmtKind::Declare { name, .. } => name,
                 StmtKind::Expr { .. } => continue,
             };

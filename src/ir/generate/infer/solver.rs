@@ -1,4 +1,7 @@
-use crate::{ast::Span, ir::Ty};
+use crate::{
+    ast::Span,
+    ir::{Ty, TypeId},
+};
 
 use super::{
     Result, error,
@@ -10,11 +13,13 @@ enum Class {
     Any,
     Number,
     Float,
+    Errors,
 }
 
 struct Variable {
     value: Option<Type>,
     class: Class,
+    variants: Vec<TypeId>,
 }
 
 #[derive(Default)]
@@ -36,8 +41,120 @@ impl Solver {
 
     fn variable(&mut self, class: Class) -> Type {
         let id = self.variables.len();
-        self.variables.push(Variable { value: None, class });
+        self.variables.push(Variable {
+            value: None,
+            class,
+            variants: vec![],
+        });
         Type::Variable(id)
+    }
+
+    pub fn errors(&mut self, ty: &Type, span: Span) -> Result<()> {
+        match self.head(ty) {
+            Type::Variable(id)
+                if matches!(self.variables[id].class, Class::Any | Class::Errors) =>
+            {
+                self.variables[id].class = Class::Errors;
+                Ok(())
+            }
+            Type::Node(Head::Atom(ty), _) if ty.variants().is_some() => Ok(()),
+            _ => Err(error(
+                span,
+                "Result errors must be structs or unions of structs",
+            )),
+        }
+    }
+
+    pub fn include(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
+        self.errors(to, span)?;
+        let variants = match self.head(from) {
+            Type::Variable(id) if self.variables[id].class == Class::Errors => {
+                self.variables[id].variants.clone()
+            }
+            Type::Variable(_) => return Ok(false),
+            Type::Node(Head::Atom(ty), _) => ty
+                .variants()
+                .ok_or_else(|| error(span, "error and union payloads must be nominal structs"))?,
+            _ => {
+                return Err(error(
+                    span,
+                    "error and union payloads must be nominal structs",
+                ));
+            }
+        };
+        match self.head(to) {
+            Type::Variable(id) => {
+                for variant in variants {
+                    if !self.variables[id].variants.contains(&variant) {
+                        self.variables[id].variants.push(variant);
+                        self.revision += 1;
+                    }
+                }
+                Ok(false)
+            }
+            Type::Node(Head::Atom(target), _) => {
+                if !variants
+                    .iter()
+                    .all(|id| target.variants().unwrap().contains(id))
+                {
+                    return Err(error(
+                        span,
+                        "the destination error set does not include every propagated error",
+                    ));
+                }
+                Ok(self.resolve(from).is_some())
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn coerce(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
+        match (self.head(from), self.head(to)) {
+            (Type::Node(Head::Record(a), aa), Type::Node(Head::Record(b), bb)) if a == b => {
+                let mut complete = true;
+                for (from, to) in aa.iter().zip(&bb) {
+                    complete &= self.coerce(from, to, span)?;
+                }
+                Ok(complete)
+            }
+            (Type::Node(Head::Result, a), Type::Node(Head::Result, b)) => {
+                self.unify(&a[0], &b[0], span)?;
+                self.include(&a[1], &b[1], span)
+            }
+            (_, Type::Node(Head::Atom(Ty::Union { .. }), _)) => self.include(from, to, span),
+            _ => {
+                self.unify(from, to, span)?;
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn finish_errors(&mut self, roots: &[Type]) -> bool {
+        fn collect(solver: &Solver, ty: &Type, ids: &mut Vec<usize>) {
+            match solver.head(ty) {
+                Type::Variable(id) if solver.variables[id].class == Class::Errors => {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+                Type::Node(_, args) => {
+                    for arg in args {
+                        collect(solver, &arg, ids);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut ids = vec![];
+        for root in roots {
+            collect(self, root, &mut ids);
+        }
+        for id in &ids {
+            let variable = &mut self.variables[*id];
+            variable.value = Some(Ty::union(variable.variants.clone()).into());
+            self.revision += 1;
+        }
+        !ids.is_empty()
     }
 
     pub fn head(&self, ty: &Type) -> Type {
@@ -49,6 +166,17 @@ impl Solver {
             }
         }
         ty.clone()
+    }
+
+    pub fn shape_hint(&self, ty: &Type) -> Type {
+        let head = self.head(ty);
+        if let Type::Variable(id) = head
+            && self.variables[id].class == Class::Errors
+            && !self.variables[id].variants.is_empty()
+        {
+            return Ty::union(self.variables[id].variants.clone()).into();
+        }
+        head
     }
 
     pub fn resolve(&self, ty: &Type) -> Option<Ty> {
@@ -98,11 +226,38 @@ impl Solver {
         let class = self.variables[id].class;
         if let Type::Variable(other) = ty {
             let other_class = self.variables[other].class;
+            if (class == Class::Errors && !matches!(other_class, Class::Any | Class::Errors))
+                || (other_class == Class::Errors && !matches!(class, Class::Any | Class::Errors))
+            {
+                return Err(error(span, "an error set cannot be a numeric type"));
+            }
             self.variables[other].class = match (class, other_class) {
+                (Class::Errors, _) | (_, Class::Errors) => Class::Errors,
                 (Class::Float, _) | (_, Class::Float) => Class::Float,
                 (Class::Number, _) | (_, Class::Number) => Class::Number,
                 _ => Class::Any,
             };
+            let variants = self.variables[id].variants.clone();
+            for variant in variants {
+                if !self.variables[other].variants.contains(&variant) {
+                    self.variables[other].variants.push(variant);
+                }
+            }
+        } else if class == Class::Errors {
+            self.errors(&ty, span)?;
+            let Type::Node(Head::Atom(ref concrete), _) = ty else {
+                unreachable!()
+            };
+            if !self.variables[id]
+                .variants
+                .iter()
+                .all(|v| concrete.variants().unwrap().contains(v))
+            {
+                return Err(error(
+                    span,
+                    "inferred errors are not included in the annotated error set",
+                ));
+            }
         } else if class != Class::Any {
             let numeric = matches!(&ty, Type::Node(Head::Atom(t), _) if t.is_numeric());
             let float = matches!(&ty, Type::Node(Head::Atom(Ty::Float32 | Ty::Float64), _));
@@ -130,7 +285,7 @@ impl Solver {
         for variable in &mut self.variables {
             if variable.value.is_none() {
                 let ty = match variable.class {
-                    Class::Any => continue,
+                    Class::Any | Class::Errors => continue,
                     Class::Number => Ty::Int32,
                     Class::Float => Ty::Float64,
                 };

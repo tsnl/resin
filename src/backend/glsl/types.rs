@@ -27,6 +27,12 @@ impl<'a> Types<'a> {
             return Ok(());
         }
         match ty {
+            Ty::Union { .. } | Ty::Result { .. } => {
+                for (_, payload) in ty.payloads().unwrap() {
+                    self.register(&payload)?;
+                }
+                self.records.push(ty.clone());
+            }
             Ty::Unit | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 => {}
             Ty::Pointer { pointee } => {
                 self.buffer(pointee)?;
@@ -100,6 +106,11 @@ impl<'a> Types<'a> {
 
     pub fn zero(&self, ty: &Ty) -> String {
         match ty {
+            Ty::Union { .. } | Ty::Result { .. } => {
+                let mut values = vec!["0u".into()];
+                values.extend(ty.payloads().unwrap().iter().map(|(_, ty)| self.zero(ty)));
+                format!("{}({})", self.name(ty), values.join(", "))
+            }
             Ty::Record { fields } => {
                 let fields = fields
                     .iter()
@@ -127,6 +138,13 @@ impl<'a> Types<'a> {
             .iter()
             .map(|ty| {
                 let fields = match ty {
+                    Ty::Union { .. } | Ty::Result { .. } => {
+                        let mut fields = String::from("uint tag;");
+                        for (tag, payload) in ty.payloads().unwrap() {
+                            write!(fields, " {} v{tag};", self.name(&payload)).unwrap();
+                        }
+                        fields
+                    }
                     Ty::Defined { definition } => format!(
                         "{} value;",
                         self.name(self.module.types[definition.index()].body().unwrap())

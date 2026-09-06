@@ -14,54 +14,64 @@ def choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _) = {
       (lid)
       (type
         (infix_type
-          (unary_type
-            (type
-              (infix_type
-                (unary_type
-                  (primary_type
-                    (builtin_type)))))))))
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (builtin_type)))))))))))
     (type
       (infix_type
-        (unary_type
-          (primary_type
-            (closed_type
-              (tuple_type
-                (type
-                  (infix_type
-                    (unary_type
-                      (type
-                        (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (closed_type
+                (tuple_type
+                  (type
+                    (infix_type
+                      (union_type
+                        (unary_type
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (inferred_type))))))))))
+                  (type
+                    (infix_type
+                      (closed_type
+                        (paren_type
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (builtin_type))))))))
+                      (infix_type
+                        (union_type
                           (unary_type
                             (primary_type
-                              (inferred_type))))))))
-                (type
-                  (infix_type
-                    (closed_type
-                      (paren_type
-                        (type
-                          (infix_type
-                            (unary_type
-                              (primary_type
-                                (builtin_type)))))))
-                    (infix_type
-                      (unary_type
-                        (primary_type
-                          (inferred_type))))))))))))
+                              (inferred_type))))))))))))))
     (block_body
       (statement
         (declare
           (lid)
           (type
             (infix_type
-              (unary_type
-                (type
-                  (infix_type
-                    (unary_type
-                      (type
-                        (infix_type
-                          (unary_type
-                            (primary_type
-                              (inferred_type)))))))))))))
+              (union_type
+                (unary_type
+                  (type
+                    (infix_type
+                      (union_type
+                        (unary_type
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (inferred_type))))))))))))))))
       (term
         (assignment_term
           (binary_term
@@ -98,23 +108,26 @@ def _name(_value: _Name) -> _Name = { _value };
       (uid)
       (type
         (infix_type
-          (unary_type
-            (primary_type
-              (builtin_type)))))))
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type))))))))
   (function_definition
     (lid)
     (declare
       (lid)
       (type
         (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (uid)))))))
+    (type
+      (infix_type
+        (union_type
           (unary_type
             (primary_type
               (uid))))))
-    (type
-      (infix_type
-        (unary_type
-          (primary_type
-            (uid)))))
     (block_body
       (term
         (assignment_term

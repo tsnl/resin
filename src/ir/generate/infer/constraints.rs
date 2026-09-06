@@ -10,6 +10,9 @@ use super::{
 use crate::{ast::Span, ir::Ty};
 
 pub(super) enum Constraint {
+    Coerce(Type, Type),
+    Errors(Type, Type),
+    Variant(Type, Pattern, Type),
     Boolean(Type),
     Deref(Type, Type),
     Field(Type, Arc<str>, Type),
@@ -19,8 +22,14 @@ pub(super) enum Constraint {
     Builtin(Arc<str>, Vec<Type>, Type),
 }
 
+pub(super) enum Pattern {
+    Ok,
+    Err,
+    Type(Type),
+}
+
 impl Checker<'_> {
-    pub fn solve(&mut self) -> Result<()> {
+    pub fn solve(&mut self, roots: &[Type]) -> Result<()> {
         loop {
             let before = self.solver.revision;
             let pending = std::mem::take(&mut self.constraints);
@@ -46,6 +55,9 @@ impl Checker<'_> {
             if seeded || self.solver.default_numbers() {
                 continue;
             }
+            if self.solver.finish_errors(roots) {
+                continue;
+            }
             if let Some((span, _)) = self.constraints.first() {
                 return Err(error(
                     *span,
@@ -57,7 +69,7 @@ impl Checker<'_> {
     }
 
     fn shape(&self, ty: &Type, deref: bool, span: Span) -> Result<Type> {
-        let mut ty = self.solver.head(ty);
+        let mut ty = self.solver.shape_hint(ty);
         let mut visited = HashSet::new();
         loop {
             ty = match &ty {
@@ -70,7 +82,9 @@ impl Checker<'_> {
                         .map_err(|e| GenerateError::typing(span, e))?
                         .into()
                 }
-                Type::Node(Head::Pointer, children) if deref => self.solver.head(&children[0]),
+                Type::Node(Head::Pointer, children) if deref => {
+                    self.solver.shape_hint(&children[0])
+                }
                 _ => return Ok(ty),
             };
         }
@@ -78,6 +92,19 @@ impl Checker<'_> {
 
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
+            Constraint::Coerce(from, to) => return self.solver.coerce(from, to, span),
+            Constraint::Errors(from, to) => return self.solver.include(from, to, span),
+            Constraint::Variant(input, variant, out) => match (self.solver.head(input), variant) {
+                (Type::Variable(_), _) => return Ok(false),
+                (Type::Node(Head::Result, parts), Pattern::Ok) => {
+                    self.solver.unify(out, &parts[0], span)?
+                }
+                (Type::Node(Head::Result, parts), Pattern::Err) => {
+                    self.solver.unify(out, &parts[1], span)?
+                }
+                (_, Pattern::Type(ty)) => self.solver.unify(out, ty, span)?,
+                _ => return Err(error(span, "match pattern does not belong to this type")),
+            },
             Constraint::Boolean(input) => {
                 let shape = self.shape(input, false, span)?;
                 if matches!(shape, Type::Variable(_)) {
@@ -114,8 +141,9 @@ impl Checker<'_> {
                 match shape {
                     Type::Variable(_) => return Ok(false),
                     Type::Node(Head::Function, children) => {
-                        self.solver.unify(arg, &children[0], span)?;
-                        self.solver.unify(out, &children[1], span)?;
+                        let a = self.solver.coerce(arg, &children[0], span)?;
+                        let b = self.solver.coerce(&children[1], out, span)?;
+                        return Ok(a && b);
                     }
                     _ => return Err(error(span, "call requires a function")),
                 }
@@ -131,18 +159,25 @@ impl Checker<'_> {
                 if unique.len() != fields.len() || fields.len() != names.len() {
                     return Err(error(span, "record fields do not match the expected type"));
                 }
+                let mut complete = true;
                 for (name, ty) in names.iter().zip(types) {
                     let found = fields
                         .iter()
                         .find(|(n, _)| n == name)
                         .ok_or_else(|| error(span, format!("missing field `{name}`")))?;
-                    self.solver.unify(&found.1, &ty, span)?;
+                    complete &= self.solver.coerce(&found.1, &ty, span)?;
                 }
+                return Ok(complete);
             }
             Constraint::Ascribe(from, to) => {
+                if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {
+                    return self.solver.coerce(from, to, span);
+                }
                 if let (Some(from), Some(to)) = (self.solver.resolve(from), self.solver.resolve(to))
                 {
-                    if !from.pointer_cast(&to) {
+                    let empty = from == Ty::Unit
+                        && matches!(self.typer.body(&to), Ok(Ty::Record { fields }) if fields.is_empty());
+                    if !empty && !from.pointer_cast(&to) && !from.widens_to(&to) {
                         self.typer
                             .ascribe(&from, &to)
                             .map_err(|e| GenerateError::typing(span, e))?;

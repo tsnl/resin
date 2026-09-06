@@ -100,12 +100,16 @@ impl Generator {
         span: Span,
         func: &Term,
         arg: &Term,
+        expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
         if let TermKind::Type { ty } = &func.val {
             return self.gen_ascription(span, ty, arg);
         }
         if let TermKind::Var { name } = &func.val {
             match name.val.as_ref() {
+                "ok" | "err" => {
+                    return self.gen_result(span, name.val.as_ref() == "err", arg, expected);
+                }
                 "shader" => return self.gen_shader(span, arg),
                 "print" => return self.gen_builtin(span, "print", std::slice::from_ref(arg), None),
                 _ => {}
@@ -141,7 +145,17 @@ impl Generator {
             .typer
             .body(&ascribed)
             .map_err(|err| GenerateError::typing(span, err))?;
-        let found = self.gen_term_inner(arg, Some(&context))?;
+        let found = if matches!(&context, Ty::Record { fields } if fields.is_empty())
+            && matches!(arg.val, TermKind::Unit)
+        {
+            self.emit(Instr::MakeRecord { fields: vec![] });
+            context
+        } else {
+            self.gen_term_inner(arg, Some(&context))?
+        };
+        if found != ascribed && found.widens_to(&ascribed) {
+            return self.coerce(span, found, &ascribed);
+        }
         if found.pointer_cast(&ascribed) {
             self.emit(Instr::PointerCast {
                 ty: ascribed.clone(),

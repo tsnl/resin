@@ -59,6 +59,12 @@ impl<'a> Types<'a> {
         self.types.push(ty.clone());
         self.ids.insert(ty.clone(), id);
         match ty {
+            Ty::Union { .. } | Ty::Result { .. } => {
+                for (_, payload) in ty.payloads().unwrap() {
+                    self.intern(&payload);
+                }
+                self.intern(&Ty::UInt32);
+            }
             Ty::Defined { definition } => {
                 self.intern(self.module.types[definition.index()].body().unwrap());
             }
@@ -193,6 +199,18 @@ impl<'a> Types<'a> {
         }
         emitted[self.id(ty)] = true;
         let body = match ty {
+            Ty::Union { .. } | Ty::Result { .. } => {
+                let mut fields = String::new();
+                for (tag, payload) in ty.payloads().unwrap() {
+                    self.definition(&payload, emitted, out);
+                    write!(fields, " {} v{tag};", self.name(&payload)).unwrap();
+                }
+                if fields.is_empty() {
+                    "uint32_t tag;".into()
+                } else {
+                    format!("uint32_t tag; union {{ {fields} }} payload;")
+                }
+            }
             Ty::Defined { definition } => {
                 let body = self.module.types[definition.index()].body().unwrap();
                 self.definition(body, emitted, out);

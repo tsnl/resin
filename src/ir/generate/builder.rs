@@ -6,6 +6,8 @@ pub(super) struct FunctionBuilder {
     function: Function,
     current: BlockId,
     terminated: Vec<bool>,
+    heights: Vec<Option<usize>>,
+    height: usize,
 }
 
 impl FunctionBuilder {
@@ -29,6 +31,8 @@ impl FunctionBuilder {
             },
             current: BlockId::from_index(0),
             terminated: vec![false],
+            heights: vec![Some(0)],
+            height: 0,
         }
     }
 
@@ -44,6 +48,13 @@ impl FunctionBuilder {
         self.function.result = ty;
     }
 
+    pub(super) fn result_type(&self) -> &Ty {
+        &self.function.result
+    }
+    pub(super) fn stack_len(&self) -> usize {
+        self.height
+    }
+
     pub(super) fn local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
         let id = LocalId::from_index(self.function.locals.len());
         self.function.locals.push(Local { name, ty });
@@ -57,10 +68,27 @@ impl FunctionBuilder {
     pub(super) fn emit(&mut self, instr: Instr) {
         let current = self.current.index();
         debug_assert!(!self.terminated[current]);
+        let effect = instr.stack_effect();
+        self.height = self
+            .height
+            .checked_sub(effect.pops)
+            .expect("valid generated stack")
+            + effect.pushes;
         self.function.blocks[current].instrs.push(instr);
     }
 
     pub(super) fn terminate(&mut self, terminator: Terminator) {
+        let (height, targets) = match &terminator {
+            Terminator::Return => (0, vec![]),
+            Terminator::Break { target } => (self.height, vec![*target]),
+            Terminator::Branch { then, els } => (self.height - 1, vec![*then, *els]),
+        };
+        for target in targets {
+            if let Some(old) = self.heights[target.index()] {
+                debug_assert_eq!(old, height);
+            }
+            self.heights[target.index()] = Some(height);
+        }
         let current = self.current.index();
         debug_assert!(!self.terminated[current]);
         self.function.blocks[current].terminator = terminator;
@@ -69,6 +97,7 @@ impl FunctionBuilder {
 
     pub(super) fn switch(&mut self, block: BlockId) {
         self.current = block;
+        self.height = self.heights[block.index()].expect("reachable generated block");
     }
 
     pub(super) fn new_block(&mut self, hint: &str) -> BlockId {
@@ -79,6 +108,7 @@ impl FunctionBuilder {
             terminator: Terminator::Return,
         });
         self.terminated.push(false);
+        self.heights.push(None);
         id
     }
 

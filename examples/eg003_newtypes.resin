@@ -1,12 +1,12 @@
 export { main };
 
-type Meters = int;
+struct Meters { value: int };
 type Distance = Meters;
-def to_meters(n: int) -> Meters = { Meters(n) };
-def to_distance(m: Meters) -> Distance = { Distance(m) };
-def to_int(d: Distance) -> int = { int(Meters(d)) };
+def to_meters(n: int) -> Meters = { Meters { value = n } };
+def to_distance(m: Meters) -> Distance = { m };
+def to_int(d: Distance) -> int = { d.value };
 
 def main() -> () = {
     var distance = to_distance(to_meters(42));
-    print("distance = {0}, as int = {1}\n", (distance, to_int(distance)));
+    print("distance = {0}, as int = {1}\n", (distance.value, to_int(distance)));
 };

@@ -39,11 +39,14 @@ A few language choices explain much of the implementation:
 - Every function is unary. An empty argument list is unit `()`; multiple
   arguments form a tuple.
 - Value binding statements use `var`, including uninitialized locals; nominal
-  types use `type`. Record fields remain `name = value`; parameters remain `name: Type`.
+  records use `struct`, and `type` creates transparent aliases. Record fields remain
+  `name = value`; parameters remain `name: Type`.
+- `A | B` is a structural union of nominal structs. `Result<T, E>` is first-class;
+  `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default
-  name; host entries take unit and return unit or `int`.
+  name; host entries take unit and return unit, `int`, or a Result with either success type.
 
 [examples/eg009_imports.resin](examples/eg009_imports.resin) and
 [its counter module](examples/lib/counter.resin) demonstrate modules and
@@ -128,13 +131,16 @@ registry. [rules.rs](src/ir/typer/rules.rs) describes operations on types, while
 
 [ir/generate/mod.rs](src/ir/generate/mod.rs) orchestrates source-to-IR lowering.
 It establishes types and function signatures before lowering function bodies.
-For functions containing explicit holes, [infer/](src/ir/generate/infer/)
+For functions containing explicit holes or Result operations, [infer/](src/ir/generate/infer/)
 first collects constraints and resolves them in dependency groups. Start with
 [solver.rs](src/ir/generate/infer/solver.rs) for inference variables and
-unification, then [check.rs](src/ir/generate/infer/check.rs) and
+unification and error-set inclusion, then [check.rs](src/ir/generate/infer/check.rs) and
 [constraints.rs](src/ir/generate/infer/constraints.rs) for expression constraints.
 The result is a node-keyed type table used during lowering, not an IR containing
 unknown types. These explicit holes are separate from editor recovery holes.
+Error-set variables collect their lower bounds to a fixed point before becoming
+concrete unions; this also handles mutually recursive functions. Struct tags come
+from their module-wide nominal identity, so widening a union never renumbers its variants.
 
 The neighboring files separate the questions asked during that process:
 
@@ -145,6 +151,7 @@ The neighboring files separate the questions asked during that process:
 | What value does an expression produce? | [terms.rs](src/ir/generate/terms.rs) |
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
+| How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |
 | How are blocks, locals, and instructions assembled? | [builder.rs](src/ir/generate/builder.rs) |
 
 The distinction between a value and a place is worth following through one
@@ -298,6 +305,7 @@ Tests are executable descriptions of the boundaries above:
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
 | Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
+| Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
 | Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |

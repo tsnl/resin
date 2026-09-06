@@ -354,7 +354,7 @@ impl Analysis {
         let text = document.text(token);
         if let Some((_, help, _)) = BUILTINS.iter().find(|(name, _, _)| *name == text)
             && (document.reference(token)
-                || matches!(token.kind(), "builtin_type" | "Ptr" | "Span"))
+                || matches!(token.kind(), "builtin_type" | "Ptr" | "Span" | "Result"))
         {
             return Some(Hover {
                 span: span(token),
@@ -500,6 +500,36 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "Span",
         "Span<T>\n\nA pointer and length describing elements of T.",
         DefinitionKind::Type,
+    ),
+    (
+        "Result",
+        "Result<T, E> — success or a typed error; postfix ? propagates errors.",
+        DefinitionKind::Type,
+    ),
+    (
+        "Never",
+        "Never — the empty union, with no possible values.",
+        DefinitionKind::Type,
+    ),
+    (
+        "ok",
+        "ok(value) — construct a successful Result.",
+        DefinitionKind::Function,
+    ),
+    (
+        "err",
+        "err(error) — construct a failed Result.",
+        DefinitionKind::Function,
+    ),
+    (
+        "struct",
+        "struct Name { field: Type }; — a nominal record type.",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "match",
+        "match (value) { Variant(name) => { body }, ... }",
+        DefinitionKind::Keyword,
     ),
     ("bool", "bool", DefinitionKind::Type),
     (

@@ -61,6 +61,11 @@ fn sexp_source(file: &SourceFile) -> SExp {
 
 fn sexp_stmt(stmt: &Stmt) -> SExp {
     match &stmt.val {
+        StmtKind::Struct { name, body } => list_sp(
+            "struct",
+            stmt.span,
+            vec![symbol(name.val.as_ref()), sexp_typespec(body)],
+        ),
         StmtKind::ForeignType { name } => {
             list_sp("extern-type", stmt.span, vec![symbol(name.val.as_ref())])
         }
@@ -129,6 +134,22 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
+        TermKind::Try { value } => list_sp("try", term.span, vec![sexp_term(value)]),
+        TermKind::Match { value, arms } => {
+            let mut items = vec![sexp_term(value)];
+            items.extend(arms.iter().map(|arm| {
+                let variant = match &arm.variant {
+                    MatchVariant::Ok => symbol("ok"),
+                    MatchVariant::Err => symbol("err"),
+                    MatchVariant::Type(ty) => sexp_typespec(ty),
+                };
+                list(
+                    "arm",
+                    vec![variant, symbol(arm.name.val.as_ref()), sexp_term(&arm.body)],
+                )
+            }));
+            list_sp("match", term.span, items)
+        }
         TermKind::Hole { children } => {
             list_sp("hole", term.span, children.iter().map(sexp_term).collect())
         }
@@ -190,6 +211,16 @@ fn sexp_term(term: &Term) -> SExp {
 
 fn sexp_typespec(ts: &Type) -> SExp {
     match &ts.val {
+        TypeKind::Union { left, right } => list_sp(
+            "union-type",
+            ts.span,
+            vec![sexp_typespec(left), sexp_typespec(right)],
+        ),
+        TypeKind::Result { value, error } => list_sp(
+            "result-type",
+            ts.span,
+            vec![sexp_typespec(value), sexp_typespec(error)],
+        ),
         TypeKind::Hole => list_sp("type-hole", ts.span, vec![]),
         TypeKind::Infer => list_sp("infer-type", ts.span, vec![]),
         TypeKind::Unit => list_sp("unit-type", ts.span, vec![]),

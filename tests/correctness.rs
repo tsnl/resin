@@ -75,18 +75,18 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
 #[test]
 fn type_formers_take_types_between_angle_brackets() {
     let m = compile(
-        "export { main }; type Pointer = Ptr<Ptr<int>>; type View = Span<{ value: int, next: Pointer }>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
+        "export { main }; type Pointer = Ptr<Ptr<int>>; type View = Span<{ value: int, next: Pointer }>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def identity(p: Pointer) -> Pointer = { p }; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
     );
     assert_eq!(
-        m.types[0].body(),
-        Some(&Ty::Pointer {
+        m.functions[0].result,
+        Ty::Pointer {
             pointee: Box::new(Ty::Pointer {
                 pointee: Box::new(Ty::Int32)
             })
-        })
+        }
     );
     compile(
-        "export { main }; def f(x: int) -> int = { x }; type Record = { value: int }; def main() -> () = { var a = f(1); var b = f (2); var r = Record { value = 3 }; };",
+        "export { main }; def f(x: int) -> int = { x }; struct Record { value: int }; def main() -> () = { var a = f(1); var b = f (2); var r = Record { value = 3 }; };",
     );
     for source in [
         "type P = Ptr(int);",
@@ -119,13 +119,13 @@ fn unary_typechecking_rejects_wrong_argument_shapes() {
 #[test]
 fn nominal_conversion_requires_an_explicit_ascription() {
     for src in [
-        "export { main }; type Meters = int; def f (m: Meters) -> int = { int (m) }; def main() -> () = { var x = 1; var y = f(x); };",
-        "export { main }; type Meters = int; def f (m: Meters) -> int = { int (m) }; def main() -> () = { var y = f(1); };",
-        "export { main }; type Meters = int; def f (x: int) -> int = { x }; def main() -> () = { var m = Meters (1); var y = f(m); };",
-        "export { main }; type Meters = int; def main() -> () = { var m = Meters (1); var n = 2; m := n; };",
-        "export { main }; type Meters = int; def main() -> () = { var m = Meters (1); var n = 2; n := m; };",
-        "export { main }; type Meters = int; type R = { value: Meters }; def main() -> () = { var x = R { value = 1 }; };",
-        "export { main }; type Meters = int; def f (m: Meters, x: int) -> int = { x }; def main() -> () = { var y = f(1, 2); };",
+        "export { main }; struct Meters { value: int }; def f (m: Meters) -> int = { m.value }; def main() -> () = { var x = 1; var y = f(x); };",
+        "export { main }; struct Meters { value: int }; def f (m: Meters) -> int = { m.value }; def main() -> () = { var y = f(1); };",
+        "export { main }; struct Meters { value: int }; def f (x: int) -> int = { x }; def main() -> () = { var m = Meters { value = 1 }; var y = f(m); };",
+        "export { main }; struct Meters { value: int }; def main() -> () = { var m = Meters { value = 1 }; var n = 2; m := n; };",
+        "export { main }; struct Meters { value: int }; def main() -> () = { var m = Meters { value = 1 }; var n = 2; n := m; };",
+        "export { main }; struct Meters { value: int }; struct R { value: Meters }; def main() -> () = { var x = R { value = 1 }; };",
+        "export { main }; struct Meters { value: int }; def f (m: Meters, x: int) -> int = { x }; def main() -> () = { var y = f(1, 2); };",
     ] {
         assert!(
             matches!(
@@ -136,20 +136,20 @@ fn nominal_conversion_requires_an_explicit_ascription() {
         );
     }
     compile(
-        "export { main }; type Meters = int; def f (m: Meters) -> int = { int (m) }; def main() -> () = { var x = 1; var y = f(Meters (x)); var m = Meters (1); m := Meters (x); x := int (m); };",
+        "export { main }; struct Meters { value: int }; def f (m: Meters) -> int = { m.value }; def main() -> () = { var x = 1; var y = f(Meters { value = x }); var m = Meters { value = 1 }; m := Meters { value = x }; x := m.value; };",
     );
     compile(
-        "export { main }; type Meters = int; type R = { value: Meters }; def main() -> () = { var x = R { value = Meters (1) }; };",
+        "export { main }; struct Meters { value: int }; struct R { value: Meters }; def main() -> () = { var x = R { value = Meters { value = 1 } }; };",
     );
     compile(
-        "export { main }; type Meters = int; type Distance = Meters; def main() -> () = { var x = Distance (Meters (1)); var y = Meters (x); };",
+        "export { main }; struct Meters { value: int }; type Distance = Meters; def main() -> () = { var x = Distance (Meters { value = 1 }); var y = Meters(x); };",
     );
 }
 
 #[test]
 fn record_layout_does_not_reorder_side_effects() {
     let module = compile(
-        "type R = { a: int, b: int }; def f (x: int) -> int = { var r = R { b = (x := 1), a = (x := 2) }; x };",
+        "struct R { a: int, b: int }; def f (x: int) -> int = { var r = R { b = (x := 1), a = (x := 2) }; x };",
     );
     let function = module
         .functions
@@ -233,7 +233,7 @@ fn omitted_function_results_are_unit_not_inferred() {
         "def answer() = { 42 };",
         "def identity(n: int) = { n };",
         "def answer() = { if (1 == 1) { 42 } else { 0 } };",
-        "type Unit = (); def nominal() = { Unit(()) };",
+        "struct Unit {}; def nominal() = { Unit {} };",
     ] {
         let error = ir::generate(&parse(source).unwrap()).unwrap_err();
         assert!(
@@ -280,7 +280,7 @@ fn returned_pointers_support_field_assignment() {
         "def id (p: Ptr<{ x: int }>) -> Ptr<{ x: int }> = { p }; def f (p: Ptr<{ x: int }>) -> int = { id(p).x := 1 };",
     );
     compile(
-        "type R = { inner: { x: int } }; def id (p: Ptr<R>) -> Ptr<R> = { p }; def f (p: Ptr<R>) -> int = { id(p).inner.x := 1 };",
+        "struct R { inner: { x: int } }; def id (p: Ptr<R>) -> Ptr<R> = { p }; def f (p: Ptr<R>) -> int = { id(p).inner.x := 1 };",
     );
     let src = "def id (r: { x: int }) -> { x: int } = { r }; def f (r: { x: int }) -> int = { id(r).x := 1 };";
     assert!(matches!(

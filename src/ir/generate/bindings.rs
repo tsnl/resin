@@ -15,11 +15,9 @@ impl Generator {
             initialization: Initialization::Initializing,
         };
         self.bind_value(name, binding.clone())?;
-        self.emit_binding_address(&binding);
         let ty = self.gen_term(init, None)?;
         self.complete_value(&name.val, ty);
-        self.emit(Instr::Store);
-        self.emit(Instr::Discard);
+        self.emit(Instr::SetLocal { local });
         Ok(())
     }
 
@@ -28,6 +26,19 @@ impl Generator {
         name: &Ident,
         init: &Type,
     ) -> Result<(), GenerateError> {
+        let ty = self.evaluator().ty(init)?;
+        self.scopes
+            .define_alias(name.val.clone(), ty.clone())
+            .map_err(|name| GenerateError {
+                span: init.span,
+                kind: GenerateErrorKind::DuplicateType { name },
+            })?;
+        self.scopes
+            .record_definition(name, true, Some(&ty), &self.typer);
+        Ok(())
+    }
+
+    pub(super) fn gen_struct(&mut self, name: &Ident, init: &Type) -> Result<(), GenerateError> {
         if let Some(&definition) = self.inferred.definitions.get(&std::ptr::from_ref(name)) {
             self.bind_type(name, definition)?;
             self.evaluator().ty(init)?;
@@ -129,7 +140,7 @@ impl Generator {
     }
 
     pub(super) fn check_binding_name(name: &Ident) -> Result<(), GenerateError> {
-        if matches!(name.val.as_ref(), "print" | "shader") {
+        if matches!(name.val.as_ref(), "print" | "shader" | "ok" | "err") {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::ReservedBuiltin {
