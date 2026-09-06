@@ -28,6 +28,18 @@ fn runs(source: &str, code: i32) {
 }
 
 #[test]
+fn typed_pointer_offsets_use_element_sizes() {
+    runs(
+        "main () -> int = { values = [10, 20, 30]; p = Ptr (int) (&values); (p + 1).* := 7; end = p + uint (2); (end - 1).* + (end + -2).* + end.* };",
+        47,
+    );
+    runs(
+        "Payload = { marker: uint, wide: ulong, amount: float32 }; main () -> int = { values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; p = Ptr (Payload) (&values); q = p + 1; q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
+        0,
+    );
+}
+
+#[test]
 fn numbered_examples_compile_as_strict_c11() {
     for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/examples")).unwrap() {
         let path = entry.unwrap().path();

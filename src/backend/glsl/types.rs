@@ -1,3 +1,5 @@
+use std::{collections::HashSet, fmt::Write};
+
 use crate::{
     backend::Error,
     ir::{Module, Ty},
@@ -6,6 +8,8 @@ use crate::{
 pub(super) struct Types<'a> {
     pub module: &'a Module,
     records: Vec<Ty>,
+    seen: HashSet<Ty>,
+    buffers: Vec<Ty>,
 }
 
 impl<'a> Types<'a> {
@@ -13,25 +17,27 @@ impl<'a> Types<'a> {
         Self {
             module,
             records: Vec::new(),
+            seen: HashSet::new(),
+            buffers: Vec::new(),
         }
     }
 
     pub fn register(&mut self, ty: &Ty) -> Result<(), Error> {
+        if !self.seen.insert(ty.clone()) {
+            return Ok(());
+        }
         match ty {
-            Ty::Unit | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::Float32 => {}
+            Ty::Unit | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 => {}
+            Ty::Pointer { pointee } => {
+                self.buffer(pointee)?;
+            }
             Ty::Record { fields } => {
-                if self.records.contains(ty) {
-                    return Ok(());
-                }
                 for field in fields {
                     self.register(&field.ty)?;
                 }
                 self.records.push(ty.clone());
             }
             Ty::Defined { definition } => {
-                if self.records.contains(ty) {
-                    return Ok(());
-                }
                 self.register(self.module.types[definition.index()].body().unwrap())?;
                 self.records.push(ty.clone());
             }
@@ -44,9 +50,21 @@ impl<'a> Types<'a> {
         Ok(())
     }
 
+    pub fn buffer(&mut self, ty: &Ty) -> Result<String, Error> {
+        crate::backend::layout::layout(self.module, ty)?;
+        if let Some(index) = self.buffers.iter().position(|t| t == ty) {
+            return Ok(format!("r_p{index}"));
+        }
+        let index = self.buffers.len();
+        self.buffers.push(ty.clone());
+        self.register(ty)?;
+        Ok(format!("r_p{index}"))
+    }
+
     pub fn name(&self, ty: &Ty) -> String {
         match ty {
             Ty::Unit | Ty::UInt32 => "uint".into(),
+            Ty::UInt64 | Ty::Pointer { .. } => "uint64_t".into(),
             Ty::Int32 => "int".into(),
             Ty::Bool => "bool".into(),
             Ty::Float32 => "float".into(),
@@ -104,7 +122,8 @@ impl<'a> Types<'a> {
     }
 
     pub fn declarations(&self) -> String {
-        self.records
+        let mut out: String = self
+            .records
             .iter()
             .map(|ty| {
                 let fields = match ty {
@@ -123,6 +142,11 @@ impl<'a> Types<'a> {
                 };
                 format!("struct {} {{ {fields} }};\n", self.name(ty))
             })
-            .collect()
+            .collect();
+        for (index, ty) in self.buffers.iter().enumerate() {
+            let layout = crate::backend::layout::layout(self.module, ty).unwrap();
+            writeln!(out, "layout(buffer_reference, std430, buffer_reference_align = {}) buffer r_p{index} {{ {} value; }};", layout.align, self.name(ty)).unwrap();
+        }
+        out
     }
 }

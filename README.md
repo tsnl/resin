@@ -162,6 +162,9 @@ This is an unchecked C boundary: declarations must match the header's ABI, and c
 pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address;
 `pointer.*` dereferences it. Explicit casts allow pointer-to-pointer and pointer-to-`ulong`
 roundtrips. There is no borrow checker; addresses of locals must not outlive their storage.
+`pointer + index` and `pointer - index` offset by elements, not bytes. The offset must be an
+integer; pointer differences and offsets into opaque foreign types are not supported.
+Pointer arithmetic and dereferences are unchecked: keep them within the allocation and aligned.
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. C strings need an explicit `\0` and a byte-pointer cast.
 
@@ -214,20 +217,56 @@ result in generated C. Shader objects are deduplicated and cached under `build/s
 included helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `glslc` at runtime.
 
-The initial entry interfaces are still intentionally narrow:
+Shaders receive application data through the root address passed to `resin_gpu_dispatch` or
+`resin_gpu_draw`. Add a typed pointer as the second tuple element:
 
-- Compute maps `uint -> uint`, one packed RGBA8 pixel per invocation (R in bits 0–7, A in 24–31).
-  Workgroups contain 64 invocations. The root address points to `{ count: uint, pixels: ulong }`,
-  with `pixels` at byte offset 8; the wrapper bounds-checks against count.
-- Vertex takes an `int` vertex index and returns `{ position: Position, color: Color }`.
+```resin
+Params = { count: uint, values: Ptr (float32), scale: float32 };
+
+kernel (index: uint, root: Ptr (Params)) -> () = {
+    if (index < root.count) {
+        p = root.values + index;
+        p.* := p.* * root.scale;
+        ()
+    } else { () }
+};
+```
+
+The entry interfaces are:
+
+- Compute takes `(uint, Ptr (T))` and returns `()`. Workgroups contain 64 invocations; the
+  index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard any
+  excess invocations in the function, as above.
+- Vertex takes an `int` vertex index, optionally paired with `Ptr (T)`, and returns
+  `{ position: Position, color: Color }`.
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
-- Fragment maps Color to Color. Nominal wrappers are supported.
+- Fragment takes Color, optionally paired with `Ptr (T)`, and returns Color.
+- The original `uint -> uint` compute entry still writes one packed RGBA8 pixel per invocation
+  (R in bits 0–7, A in 24–31). Its implicit root is `{ count: uint, pixels: ulong }`, with
+  `pixels` at byte offset 8; this wrapper bounds-checks against count.
 
-Shader bodies support 32-bit numbers, booleans, records, nominal types, local mutation, branches, loops,
-and direct calls to named Resin helpers. Globals, foreign calls, recursion, indirect calls,
-arrays, spans, real pointers, integer division/remainder/shifts, and addresses carried across
-block edges are rejected. `print` is host-only. General device-pointer kernels and richer stage
-interfaces remain future work; resource orchestration is already ordinary Resin code.
+Device pointers support loads, stores, record fields, element offsets, casts, and passing to
+ordinary helpers. Shared storage supports `int`, `uint`, `float32`, `ulong`, pointers, nonempty
+records, and nominal wrappers. Scalars align to their size; records align to their largest
+member, with member and trailing padding. This matches C and GLSL `std430` without requiring
+scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
+Storage containing booleans, unit, arrays, or other numeric widths is rejected for now.
+
+Use `resin_allocation_host_pointer` to initialize mapped data on the CPU. Store
+`resin_allocation_device_pointer` addresses in records consumed by shaders; these are not
+interchangeable with host addresses. Pointer types do not enforce the address space or bounds.
+Calling the same function on the CPU requires a root containing host pointers instead.
+
+Shader bodies support 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
+branches, loops, and direct calls to named Resin helpers. Globals, foreign calls, recursion,
+indirect calls, arrays, spans, and integer division/remainder/shifts are rejected. Local addresses
+may only be used directly for loads, stores, and field access; they cannot be stored, passed,
+returned, or carried across control-flow edges. Device addresses can. `print` is host-only.
+
+Invocations must avoid racing on shared buffers. Workgroup-local storage, shader barriers, and
+atomics are not exposed yet. For multi-pass algorithms, record separate dispatches: the runtime
+inserts memory barriers before dispatches and rendering, including compute-to-vertex reads.
+Submission currently waits for completion, making mapped results readable by the host.
 
 For inspection/export, `--output glsl` or `--output spirv -o PATH` still emits one entry.
 `--stage` defaults to compute; `--entry` defaults to kernel, vertex, or fragment.
@@ -253,12 +292,19 @@ This setup is intended for MoltenVK, but has not yet been tested on macOS.
 
 ```sh
 nix-shell --run 'cargo run -- examples/window.resin'
+nix-shell --run 'cargo run -- examples/particles.resin'
 ```
 
 The demo renders a triangle until Escape or the close button is pressed. It uses a `while`
 event loop and shares its shader functions with the headless PNG demo in `examples/lib/triangle.resin`.
 Resizing scales the fixed-size offscreen image. Building this demo requires `glslc`; running the
 resulting executable does not. The PNG demos remain headless.
+
+`particles.resin` initializes 64 particles on the host, updates their positions in a compute
+shader, and draws them directly from the same buffer. It reuses pipelines and allocations
+across frames, uses a fixed 1/60-second simulation step, and closes on Escape or the close button.
+It is a small synchronous demo, not a frame-rate-independent simulation. Its shader functions
+and shared data definitions live in `examples/lib/particles.resin`.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `lib/runtime.resin`:

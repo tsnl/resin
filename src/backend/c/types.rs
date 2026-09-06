@@ -165,6 +165,17 @@ impl<'a> Types<'a> {
         for ty in &self.types {
             self.definition(ty, &mut emitted, &mut out);
         }
+        for ty in &self.types {
+            if let Ok(layout) = crate::backend::layout::layout(self.module, ty) {
+                let name = self.name(ty);
+                writeln!(out, "_Static_assert(sizeof({name}) == {} && _Alignof({name}) == {}, \"host/device layout mismatch\");", layout.size, layout.align).unwrap();
+                if matches!(ty, Ty::Record { .. }) {
+                    for (i, offset) in layout.offsets.iter().enumerate() {
+                        writeln!(out, "_Static_assert(offsetof({name}, f{i}) == {offset}, \"host/device field offset mismatch\");").unwrap();
+                    }
+                }
+            }
+        }
         out
     }
 

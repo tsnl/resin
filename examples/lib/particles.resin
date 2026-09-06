@@ -1,0 +1,33 @@
+include "graphics.resin";
+
+Particle = { x: float32, y: float32, vx: float32, vy: float32, color: Color };
+Params = { count: uint, dt: float32, radius: float32, particles: Ptr (Particle) };
+
+advance (p: Ptr (Particle), dt: float32) -> () = {
+    p.x := p.x + p.vx * dt;
+    p.y := p.y + p.vy * dt;
+    if (p.x > float32 (0.9) || p.x < float32 (-0.9)) { p.vx := -p.vx; () } else { () };
+    if (p.y > float32 (0.9) || p.y < float32 (-0.9)) { p.vy := -p.vy; () } else { () };
+};
+
+kernel (index: uint, root: Ptr (Params)) -> () = {
+    if (index < root.count) { advance(root.particles + index, root.dt) } else { () }
+};
+
+vertex (index: int, root: Ptr (Params)) -> Vertex = {
+    particle = 0;
+    corner = index;
+    while (corner >= 3) { corner := corner - 3; particle := particle + 1; };
+    p = root.particles + particle;
+    dx = float32 (0.0);
+    dy = -root.radius;
+    if (corner == 1) { dx := -root.radius; dy := root.radius; () } else {
+        if (corner == 2) { dx := root.radius; dy := root.radius; () } else { () }
+    };
+    Vertex {
+        position = Position { x = p.x + dx, y = p.y + dy, z = float32 (0.0), w = float32 (1.0) },
+        color = p.color
+    }
+};
+
+fragment (color: Color) -> Color = { color };

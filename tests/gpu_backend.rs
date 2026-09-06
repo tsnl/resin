@@ -1,5 +1,6 @@
 #![cfg(feature = "gpu")]
 
+use resin::backend::glsl::{self, Stage};
 use resin::toolchain::TempDir;
 use resin_runtime::{
     ResinGpu, ResinMemory, ResinStatus, image_read_png, image_write_png, testing::lock_gpu,
@@ -22,6 +23,273 @@ fn gpu() -> Option<ResinGpu> {
             None
         }
         Err(error) => panic!("GPU initialization failed: {error:?}"),
+    }
+}
+
+#[test]
+fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let _lock = lock_gpu();
+    let Some(mut gpu) = gpu() else { return };
+    let module = support::module(
+        r#"
+        Data = { marker: uint, wide: ulong, amount: float32 };
+        Payload = { tag: uint, data: Data, end: uint };
+        Params = { count: uint, values: Ptr (Payload), tail: float32 };
+        at (values: Ptr (Payload), index: uint) -> Ptr (Payload) = { values + index };
+        bump (p: Ptr (Payload), index: uint) -> () = {
+            old = p.*;
+            p.* := Payload {
+                tag = old.tag + uint (1),
+                data = Data { marker = index, wide = old.data.wide + ulong (4294967297), amount = old.data.amount + float32 (0.5) },
+                end = old.end + uint (2)
+            };
+        };
+        kernel (index: uint, root: Ptr (Params)) -> () = {
+            if (index < root.count) {
+                p = (at(root.values, index) + 1) + -1;
+                bump(p - uint (0), index)
+            } else { () }
+        };
+        main () -> int = {
+            value = Payload { tag = uint (10), data = Data { marker = uint (99), wide = ulong (7), amount = float32 (1.25) }, end = uint (20) };
+            root = Params { count = uint (1), values = &value, tail = float32 (0.75) };
+            kernel(uint (0), &root);
+            kernel(uint (1), &root);
+            if (value.tag == uint (11) && value.data.marker == uint (0) && value.data.wide == ulong (4294967304) && value.data.amount == float32 (1.75) && value.end == uint (22) && root.tail == float32 (0.75)) { 0 } else { 1 }
+        };
+    "#,
+    );
+    let c = resin::backend::c::emit(&module).unwrap();
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let executable = temp.path().join("host-layout");
+    let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    resin::toolchain::compile_c(&c, &executable, &cc).unwrap();
+    assert!(Command::new(executable).status().unwrap().success());
+    let glsl = glsl::emit(&module, "kernel", Stage::Compute).unwrap();
+    let spv = resin::toolchain::compile_glsl(&glsl, Stage::Compute, &compiler).unwrap();
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Data {
+        marker: u32,
+        wide: u64,
+        amount: f32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Payload {
+        tag: u32,
+        data: Data,
+        end: u32,
+    }
+    #[repr(C)]
+    struct Params {
+        count: u32,
+        values: u64,
+        tail: f32,
+    }
+    const COUNT: usize = 67;
+    let initial = Payload {
+        tag: 10,
+        data: Data {
+            marker: 99,
+            wide: 7,
+            amount: 1.25,
+        },
+        end: 20,
+    };
+    assert_eq!((size_of::<Payload>(), align_of::<Payload>()), (40, 8));
+    // Both address spaces use live, aligned allocations; reads follow synchronous submission.
+    unsafe {
+        let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
+        let values = gpu
+            .malloc(
+                (COUNT + 1) * size_of::<Payload>(),
+                align_of::<Payload>(),
+                ResinMemory::Default,
+            )
+            .unwrap();
+        let root = gpu
+            .malloc(
+                size_of::<Params>(),
+                align_of::<Params>(),
+                ResinMemory::Default,
+            )
+            .unwrap();
+        std::slice::from_raw_parts_mut(values.host_pointer().cast::<Payload>(), COUNT + 1)
+            .fill(initial);
+        root.host_pointer().cast::<Params>().write(Params {
+            count: COUNT as u32,
+            values: values.device_pointer(),
+            tail: 0.75,
+        });
+        let mut commands = gpu.start_command_recording().unwrap();
+        commands.set_pipeline(&pipeline).unwrap();
+        commands
+            .dispatch(root.device_pointer(), (COUNT as u32).div_ceil(64), 1, 1)
+            .unwrap();
+        gpu.submit(commands).unwrap();
+        let values = std::slice::from_raw_parts(values.host_pointer().cast::<Payload>(), COUNT + 1);
+        for (index, value) in values[..COUNT].iter().enumerate() {
+            assert_eq!(
+                *value,
+                Payload {
+                    tag: 11,
+                    data: Data {
+                        marker: index as u32,
+                        wide: 4294967304,
+                        amount: 1.75
+                    },
+                    end: 22
+                }
+            );
+        }
+        assert_eq!(values[COUNT], initial);
+        assert_eq!((*root.host_pointer().cast::<Params>()).tail, 0.75);
+    }
+}
+
+#[test]
+fn particles_compute_then_render_from_the_same_buffer() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let _lock = lock_gpu();
+    let Some(mut gpu) = gpu() else { return };
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lib/particles.resin");
+    let module = resin::ir::generate(&resin::ast::load(&source).unwrap()).unwrap();
+    let compile = |stage: Stage| {
+        let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
+        resin::toolchain::compile_glsl(&glsl, stage, &compiler).unwrap()
+    };
+    let compute = compile(Stage::Compute);
+    let vertex = compile(Stage::Vertex);
+    let fragment = compile(Stage::Fragment);
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Particle {
+        x: f32,
+        y: f32,
+        vx: f32,
+        vy: f32,
+        color: [f32; 4],
+    }
+    #[repr(C)]
+    struct Params {
+        count: u32,
+        dt: f32,
+        radius: f32,
+        particles: u64,
+    }
+    let initial = Particle {
+        x: -0.5,
+        y: 0.0,
+        vx: 1.0,
+        vy: 0.0,
+        color: [1.0, 0.0, 0.0, 1.0],
+    };
+    // Compute, draw, and readback share a recording; every resource outlives its submission.
+    unsafe {
+        let compute = gpu.create_compute_pipeline(&compute).unwrap();
+        let graphics = gpu.create_graphics_pipeline(&vertex, &fragment).unwrap();
+        let particles = gpu
+            .malloc(
+                2 * size_of::<Particle>(),
+                align_of::<Particle>(),
+                ResinMemory::Default,
+            )
+            .unwrap();
+        let root = gpu
+            .malloc(
+                size_of::<Params>(),
+                align_of::<Params>(),
+                ResinMemory::Default,
+            )
+            .unwrap();
+        std::slice::from_raw_parts_mut(particles.host_pointer().cast::<Particle>(), 2)
+            .fill(initial);
+        root.host_pointer().cast::<Params>().write(Params {
+            count: 1,
+            dt: 0.5,
+            radius: 0.2,
+            particles: particles.device_pointer(),
+        });
+        let mut image = gpu.create_image(64, 64).unwrap();
+        let pixels = gpu.malloc(64 * 64 * 4, 4, ResinMemory::Readback).unwrap();
+        for (expected_x, expected_vx) in [(0.0, 1.0), (0.5, 1.0), (1.0, -1.0), (0.5, -1.0)] {
+            let mut commands = gpu.start_command_recording().unwrap();
+            commands.set_pipeline(&compute).unwrap();
+            commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
+            commands
+                .begin_rendering(&mut image, [0.0, 0.0, 0.0, 1.0])
+                .unwrap();
+            commands.set_pipeline(&graphics).unwrap();
+            commands.draw(root.device_pointer(), 3).unwrap();
+            commands.end_rendering().unwrap();
+            commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
+            gpu.submit(commands).unwrap();
+            let values = std::slice::from_raw_parts(particles.host_pointer().cast::<Particle>(), 2);
+            assert_eq!(values[0].x, expected_x);
+            assert_eq!(values[0].vx, expected_vx);
+            assert_eq!(values[1], initial);
+            let pixels = pixels.host_bytes().unwrap();
+            let sample_x = ((expected_x * 0.5 + 0.5) * 64.0) as usize;
+            let offset = (32 * 64 + sample_x.min(63)) * 4;
+            assert_eq!(&pixels[offset..offset + 4], &[255, 0, 0, 255]);
+            assert_eq!(
+                &pixels[(32 * 64 + 16) * 4..(32 * 64 + 16) * 4 + 4],
+                &[0, 0, 0, 255]
+            );
+        }
+    }
+}
+
+#[test]
+fn fragment_shaders_read_typed_root_parameters() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let _lock = lock_gpu();
+    let Some(mut gpu) = gpu() else { return };
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lib/triangle.resin");
+    let mut ast = resin::ast::load(&source).unwrap();
+    ast.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
+    ast.stmts.extend(
+        support::parse("fragment (color: Color, root: Ptr (Color)) -> Color = { root.* };").stmts,
+    );
+    let module = resin::ir::generate(&ast).unwrap();
+    let compile = |stage: Stage| {
+        let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
+        resin::toolchain::compile_glsl(&glsl, stage, &compiler).unwrap()
+    };
+    let vertex = compile(Stage::Vertex);
+    let fragment = compile(Stage::Fragment);
+    // The mapped root is updated only between completed submissions.
+    unsafe {
+        let pipeline = gpu.create_graphics_pipeline(&vertex, &fragment).unwrap();
+        let root = gpu.malloc(16, 4, ResinMemory::Default).unwrap();
+        let mut image = gpu.create_image(64, 64).unwrap();
+        let pixels = gpu.malloc(64 * 64 * 4, 4, ResinMemory::Readback).unwrap();
+        for color in [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]] {
+            root.host_pointer().cast::<[f32; 4]>().write(color);
+            let mut commands = gpu.start_command_recording().unwrap();
+            commands
+                .begin_rendering(&mut image, [0.0, 0.0, 0.0, 1.0])
+                .unwrap();
+            commands.set_pipeline(&pipeline).unwrap();
+            commands.draw(root.device_pointer(), 3).unwrap();
+            commands.end_rendering().unwrap();
+            commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
+            gpu.submit(commands).unwrap();
+            let pixels = pixels.host_bytes().unwrap();
+            let center = (32 * 64 + 32) * 4;
+            assert_eq!(
+                &pixels[center..center + 4],
+                color.map(|v| (v * 255.0) as u8)
+            );
+        }
     }
 }
 

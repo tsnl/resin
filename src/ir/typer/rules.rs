@@ -148,6 +148,7 @@ impl TyperContext {
                 self.as_bool(arg)?;
                 Ty::Bool
             }
+            ("+" | "-", [left @ Ty::Pointer { .. }, right]) if right.is_integer() => left.clone(),
             ("+" | "-" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^", [left, right]) => {
                 self.same(left, right)?;
                 left.clone()

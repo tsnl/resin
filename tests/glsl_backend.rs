@@ -21,6 +21,9 @@ fn all_example_stages_emit_deterministically() {
         ("gradient.resin", Stage::Compute),
         ("triangle.resin", Stage::Vertex),
         ("triangle.resin", Stage::Fragment),
+        ("particles.resin", Stage::Compute),
+        ("particles.resin", Stage::Vertex),
+        ("particles.resin", Stage::Fragment),
     ] {
         let m = example(name);
         let first = glsl::emit(&m, stage.entry(), stage).unwrap();
@@ -39,6 +42,9 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
         (example("gradient.resin"), Stage::Compute),
         (example("triangle.resin"), Stage::Vertex),
         (example("triangle.resin"), Stage::Fragment),
+        (example("particles.resin"), Stage::Compute),
+        (example("particles.resin"), Stage::Vertex),
+        (example("particles.resin"), Stage::Fragment),
         (
             module(
                 "kernel (i: uint) -> uint = { x = i; x := x + uint (2); if (x < uint (4)) { x } else { x * uint (2) } };",
@@ -68,6 +74,60 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
             .unwrap_or_else(|error| panic!("{error}\n{glsl}"));
         assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
         assert_eq!(bytes.len() % 4, 0);
+    }
+}
+
+#[test]
+fn device_pointers_and_shared_roots_compile() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    for (source, stage) in [
+        (
+            "Node = { value: uint, next: Ptr (Node) }; select (a: Ptr (Node), b: Ptr (Node), i: uint) -> Ptr (Node) = { if (i == uint (0)) { a } else { b } }; kernel (i: uint, root: Ptr (Node)) -> () = { p = select(root, root.next, i); p.value := uint (7); };",
+            Stage::Compute,
+        ),
+        (
+            "Data = { wide: ulong, values: Ptr (uint) }; kernel (i: uint, root: Ptr (Data)) -> () = { p = Ptr (uint) (ulong (root.values)); q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
+            Stage::Compute,
+        ),
+        (
+            "Color = { r: float32, g: float32, b: float32, a: float32 }; Params = { scale: float32 }; fragment (color: Color, root: Ptr (Params)) -> Color = { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } };",
+            Stage::Fragment,
+        ),
+    ] {
+        let glsl = glsl::emit(&module(source), stage.entry(), stage).unwrap();
+        toolchain::compile_glsl(&glsl, stage, &compiler)
+            .unwrap_or_else(|error| panic!("{error}\n{glsl}"));
+    }
+}
+
+#[test]
+fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
+    for (source, expected) in [
+        (
+            "Data = { flag: bool }; kernel (i: uint, root: Ptr (Data)) -> () = { () };",
+            "no shared host/device layout",
+        ),
+        (
+            "kernel (i: uint, root: Ptr (())) -> () = { () };",
+            "no shared host/device layout",
+        ),
+        (
+            "kernel (i: uint) -> uint = { x = i; p = &x; p.* };",
+            "shader-local addresses cannot escape",
+        ),
+        (
+            "kernel (i: uint) -> uint = { x = i; ulong (&x); i };",
+            "shader-local addresses cannot escape",
+        ),
+        (
+            "helper (i: uint) -> Ptr (uint) = { x = i; &x }; kernel (i: uint) -> uint = { helper(i).* };",
+            "cannot return a local address",
+        ),
+    ] {
+        let error = glsl::emit(&module(source), "kernel", Stage::Compute).unwrap_err();
+        assert!(error.to_string().contains(expected), "{source}\n{error}");
     }
 }
 

@@ -20,6 +20,15 @@ pub(super) fn builtin(
     let Some(first) = args.first() else {
         return Err(unsupported());
     };
+    if let [pointer, offset] = args
+        && matches!(name, "+" | "-")
+        && let Ty::Pointer { pointee } = &pointer.ty
+        && !matches!(types.shape(pointee), Ty::Foreign { .. })
+        && offset.ty.is_integer()
+        && result == &pointer.ty
+    {
+        return Ok(format!("({}) {name} ({})", pointer.expr, offset.expr));
+    }
     if args.iter().any(|arg| arg.ty != first.ty) {
         return Err(unsupported());
     }

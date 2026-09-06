@@ -216,12 +216,21 @@ fn windows_present_resize_and_release_resources() {
 
 #[test]
 fn resin_window_example_uses_bundled_glfw() {
+    run_example("window");
+}
+
+#[test]
+fn resin_particles_example_computes_and_presents() {
+    run_example("particles");
+}
+
+fn run_example(name: &str) {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/window.resin");
-    let executable = temp.path().join("window-example");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("examples/{name}.resin"));
+    let executable = temp.path().join(name);
     let mut ast = resin::ast::load(&source).unwrap();
     let body = ast
         .stmts
@@ -279,6 +288,6 @@ fn resin_window_example_uses_bundled_glfw() {
     }
     let output = child.wait_with_output().unwrap();
     if succeeded(&output) {
-        assert_eq!(output.stdout, b"window demo complete\n");
+        assert_eq!(output.stdout, format!("{name} demo complete\n").as_bytes());
     }
 }

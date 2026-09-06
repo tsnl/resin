@@ -10,10 +10,11 @@ use super::types::Types;
 struct Slot {
     ty: Ty,
     expr: String,
+    local: bool,
 }
 
 pub(super) fn emit(
-    types: &Types<'_>,
+    types: &mut Types<'_>,
     function: &Function,
     flow: &FunctionTypes,
     name: &str,
@@ -39,7 +40,7 @@ pub(super) fn emit(
         }
         for (i, ty) in flow.results[b].iter().enumerate() {
             if let Some(ty) = ty
-                && !matches!(ty, Ty::Pointer { .. } | Ty::Function { .. })
+                && !matches!(ty, Ty::Function { .. })
             {
                 writeln!(out, "  {} r_v{b}_{i};", types.name(ty)).unwrap();
             }
@@ -59,16 +60,34 @@ pub(super) fn emit(
             .map(|(i, ty)| Slot {
                 ty: ty.clone(),
                 expr: format!("r_b{b}_{i}"),
+                local: false,
             })
             .collect();
         for (i, instr) in block.instrs.iter().enumerate() {
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
+            for (index, arg) in args.iter().enumerate() {
+                if arg.local
+                    && !matches!(instr, Instr::Discard)
+                    && !(index == 0
+                        && matches!(
+                            instr,
+                            Instr::Load | Instr::Store | Instr::AccessStatic { .. }
+                        ))
+                {
+                    return Err(Error(
+                        "shader-local addresses cannot escape through values, casts, or calls"
+                            .into(),
+                    ));
+                }
+            }
+            let local = matches!(instr, Instr::LocalAddress { .. })
+                || matches!(instr, Instr::AccessStatic { .. }) && args[0].local;
             let result = flow.results[b][i].as_ref();
             let expr = instruction(types, instr, &args, result, &mut out)
                 .map_err(|error| Error(format!("shader block {b}, instruction {i}: {error}")))?;
             if let Some(ty) = result {
                 let mut expr = expr.unwrap();
-                if !matches!(ty, Ty::Pointer { .. } | Ty::Function { .. }) {
+                if !local && !matches!(ty, Ty::Function { .. }) {
                     let name = format!("r_v{b}_{i}");
                     writeln!(out, "      {name} = {expr};").unwrap();
                     expr = name;
@@ -76,18 +95,24 @@ pub(super) fn emit(
                 stack.push(Slot {
                     ty: ty.clone(),
                     expr,
+                    local,
                 });
             }
         }
         match block.terminator {
-            Terminator::Return => writeln!(out, "      return {};", stack[0].expr).unwrap(),
-            Terminator::Break { target } => edge(types, target.index(), &stack, &mut out),
+            Terminator::Return => {
+                if stack[0].local {
+                    return Err(Error("shader cannot return a local address".into()));
+                }
+                writeln!(out, "      return {};", stack[0].expr).unwrap();
+            }
+            Terminator::Break { target } => edge(types, target.index(), &stack, &mut out)?,
             Terminator::Branch { then, els } => {
                 let cond = stack.pop().unwrap();
                 writeln!(out, "      if ({}) {{", types.unwrap(&cond.ty, cond.expr)).unwrap();
-                edge(types, then.index(), &stack, &mut out);
+                edge(types, then.index(), &stack, &mut out)?;
                 out.push_str("      } else {\n");
-                edge(types, els.index(), &stack, &mut out);
+                edge(types, els.index(), &stack, &mut out)?;
                 out.push_str("      }\n");
             }
         }
@@ -102,7 +127,15 @@ pub(super) fn emit(
     Ok(out)
 }
 
-fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) {
+fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) -> Result<(), Error> {
+    if stack
+        .iter()
+        .any(|s| s.local || matches!(s.ty, Ty::Function { .. }))
+    {
+        return Err(Error(
+            "shader profile cannot carry local addresses or functions across block edges".into(),
+        ));
+    }
     out.push_str("      {\n");
     for (i, slot) in stack.iter().enumerate() {
         writeln!(
@@ -117,10 +150,11 @@ fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) {
         writeln!(out, "        r_b{target}_{i} = edge{i};").unwrap();
     }
     writeln!(out, "        pc = {target}; continue;\n      }}").unwrap();
+    Ok(())
 }
 
 fn instruction(
-    types: &Types<'_>,
+    types: &mut Types<'_>,
     instr: &Instr,
     args: &[Slot],
     result: Option<&Ty>,
@@ -131,11 +165,18 @@ fn instruction(
         Instr::Call => format!("{}({})", args[0].expr, args[1].expr),
         Instr::Push { value } => literal(types, result.unwrap(), value)?,
         Instr::LocalAddress { local } => format!("r_l{}", local.index()),
-        Instr::Load => args[0].expr.clone(),
+        Instr::Load => dereference(types, &args[0])?,
         Instr::Store => {
-            writeln!(out, "      {} = {};", args[0].expr, args[1].expr).unwrap();
+            writeln!(
+                out,
+                "      {} = {};",
+                dereference(types, &args[0])?,
+                args[1].expr
+            )
+            .unwrap();
             args[1].expr.clone()
         }
+        Instr::PointerCast { .. } => format!("uint64_t({})", args[0].expr),
         Instr::Discard => return Ok(None),
         Instr::Ascribe { ty } => {
             if ty == &args[0].ty {
@@ -169,7 +210,12 @@ fn instruction(
             if !matches!(types.shape(ty), Ty::Record { .. }) {
                 return Err(Error("shader projection requires a record".into()));
             }
-            format!("({}).f{index}", types.unwrap(ty, args[0].expr.clone()))
+            if matches!(args[0].ty, Ty::Pointer { .. }) && !args[0].local {
+                let layout = crate::backend::layout::layout(types.module, ty)?;
+                format!("({}) + uint64_t({})", args[0].expr, layout.offsets[*index])
+            } else {
+                format!("({}).f{index}", types.unwrap(ty, args[0].expr.clone()))
+            }
         }
         Instr::CallBuiltin { name, result, .. } => builtin(types, name, args, result)?,
         _ => return Err(Error(format!("shader profile does not support {instr:?}"))),
@@ -177,11 +223,33 @@ fn instruction(
     Ok(Some(expr))
 }
 
+fn dereference(types: &mut Types<'_>, slot: &Slot) -> Result<String, Error> {
+    if slot.local {
+        return Ok(slot.expr.clone());
+    }
+    let Ty::Pointer { pointee } = &slot.ty else {
+        unreachable!()
+    };
+    Ok(format!("{}({}).value", types.buffer(pointee)?, slot.expr))
+}
+
 fn builtin(types: &Types<'_>, name: &str, args: &[Slot], result: &Ty) -> Result<String, Error> {
     let unsupported = || Error(format!("unsupported shader builtin {name:?}"));
     let Some(first) = args.first() else {
         return Err(unsupported());
     };
+    if let [pointer, offset] = args
+        && matches!(name, "+" | "-")
+        && let Ty::Pointer { pointee } = &pointer.ty
+        && offset.ty.is_integer()
+        && result == &pointer.ty
+    {
+        let layout = crate::backend::layout::layout(types.module, pointee)?;
+        return Ok(format!(
+            "({}) {name} (uint64_t({}) * uint64_t({}))",
+            pointer.expr, offset.expr, layout.size
+        ));
+    }
     if args.iter().any(|a| a.ty != first.ty) {
         return Err(unsupported());
     }
@@ -205,7 +273,7 @@ fn builtin(types: &Types<'_>, name: &str, args: &[Slot], result: &Ty) -> Result<
         ("+" | "-" | "*", [a, b]) if ty.is_numeric() => format!("({a}) {name} ({b})"),
         ("/", [a, b]) if ty == &Ty::Float32 => format!("({a}) / ({b})"),
         ("&" | "|" | "^", [a, b]) if ty.is_integer() => format!("({a}) {name} ({b})"),
-        ("==" | "!=", [a, b]) if ty.is_numeric() || ty == &Ty::Bool => {
+        ("==" | "!=", [a, b]) if ty.is_numeric() || matches!(ty, Ty::Bool | Ty::Pointer { .. }) => {
             format!("({a}) {name} ({b})")
         }
         ("<" | "<=" | ">" | ">=", [a, b]) if ty.is_numeric() => format!("({a}) {name} ({b})"),
@@ -221,6 +289,7 @@ fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> Result<String, Error> {
         Value::Bool { value } => value.to_string(),
         Value::Int32 { value } => format!("int({}u)", *value as u32),
         Value::UInt32 { value } => format!("{value}u"),
+        Value::UInt64 { value } => format!("{value}ul"),
         Value::Float32 { value } if value.is_finite() => format!("{value:e}"),
         Value::Record { value } => {
             let Ty::Record { fields } = ty else {

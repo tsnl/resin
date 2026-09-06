@@ -49,7 +49,8 @@ pub fn emit_with_shaders(module: &Module, shaders: &[Shader]) -> Result<String, 
     }
     let types = Types::collect(module, shaders, &analysis);
     let mut out =
-        "#include <resin_runtime.h>\n#include <stdlib.h>\n#include <math.h>\n".to_string();
+        "#include <resin_runtime.h>\n#include <stddef.h>\n#include <stdlib.h>\n#include <math.h>\n"
+            .to_string();
     out.push_str("_Static_assert(sizeof(void *) == 8 && sizeof(size_t) == 8, \"Resin currently requires a 64-bit host\");\n");
     let headers: std::collections::BTreeSet<_> = module
         .functions
