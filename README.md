@@ -343,6 +343,33 @@ printed. Explicit `\0` bytes remain part of the string, including at the end; Re
 printing preserves them, while C string functions stop at the first NUL. Import paths, foreign
 headers, and shader-stage names still use the decoded literal text, without an added terminator.
 
+## Console input
+
+Import `std/console.resin` for `input()`, a line reader implemented in Resin on top of C's
+`getchar()`. It grows its buffer as needed and strips LF or CRLF. Write a prompt with `print`
+before reading:
+
+```resin
+export { main };
+import { "std/console.resin" };
+
+def main() -> Result<(), _> = {
+    print("Name: ", ());
+    var name = input()?;
+    defer free_input(name);
+    print("Hello, ", ());
+    print_input(name)?;
+    print("!\n", ());
+    ok(())
+};
+```
+
+The result owns an `InputLine { data: Ptr<ubyte>, length: ulong }`; free it exactly once.
+`print_input` prints the bytes without adding a newline. Empty lines succeed, EOF before any
+bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
+failures are also explicit errors. See [the console API](stdlib/README.md#console-input) for
+ownership and byte semantics, or run `cargo run -- examples/input.resin`.
+
 ## Files and the standard library
 
 Each file has its own scope. An optional `export` clause comes first, followed by an optional
@@ -382,6 +409,7 @@ library. Programs use the standard library's exports, which initially stay close
 - `std/image.resin`: PNG reading and writing.
 - `std/status.resin`: `status`, `RuntimeError`, `check`, status strings, and `resin_status_incomplete()`.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
+- `std/console.resin`: `getchar`, `input`, `InputLine`, `free_input`, and `print_input`.
 
 The polymorphic `print` and compile-time `shader` operations remain compiler builtins.
 Runtime flags and status constants are zero-argument functions, such as `resin_memory_default()`.
