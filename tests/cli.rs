@@ -110,6 +110,30 @@ fn default_output_builds_in_cwd_and_runs() {
 }
 
 #[test]
+fn cached_programs_track_foreign_headers() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let input = temp.path().join("source.resin");
+    let header = temp.path().join("value header.h");
+    fs::write(&header, "static inline int value(void) { return 41; }\n").unwrap();
+    fs::write(&input, format!(
+        "export {{ main }}; extern \"{}\" def value() -> int; def main() -> int = {{ value() }};",
+        header.to_string_lossy().replace('\\', "/")
+    )).unwrap();
+    assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
+    let executable = artifact(temp.path(), "debug");
+    let modified = fs::metadata(&executable).unwrap().modified().unwrap();
+    assert!(executable.parent().unwrap().join("fingerprint").is_file());
+    assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
+    assert_eq!(
+        fs::metadata(&executable).unwrap().modified().unwrap(),
+        modified
+    );
+
+    fs::write(header, "static inline int value(void) { return 42; }\n").unwrap();
+    assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(42));
+}
+
+#[test]
 fn strings_are_c_compatible_in_both_profiles() {
     let source = r#"
         export { main };
@@ -242,7 +266,9 @@ fn failed_copies_happen_after_execution() {
 #[test]
 fn directory_outputs_cannot_overwrite_the_source() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let input = temp.path().join("source");
+    let input = temp
+        .path()
+        .join(format!("source{}", std::env::consts::EXE_SUFFIX));
     let source = r#"export { main }; def main() -> () = { print("must not run", ()); };"#;
     fs::write(&input, source).unwrap();
     let output = invoke(temp.path(), &input, &["-o", "."]);

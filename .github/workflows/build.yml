@@ -39,7 +39,10 @@ jobs:
         run: cargo build --workspace --locked
       - name: Runtime native libraries
         run: cargo rustc -p resin-runtime --lib -- --print native-static-libs
+      - name: Run a host program
+        run: cargo run --locked -- examples/eg001.resin
       - name: Test without opening windows
         run: cargo test --workspace --all-features --locked --no-fail-fast -- --skip windows_present_resize_and_release_resources --skip resin_window_example_uses_bundled_glfw --skip resin_particles_example_computes_and_presents
       - name: Lint
+        if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

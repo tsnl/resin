@@ -243,7 +243,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
     .unwrap();
     let mut client = Client::start(root, Value::Null);
     let main_uri = uri(&root.join("main.resin"));
-    let lib_uri = uri(&library);
+    let lib_uri = uri(&resin::analysis::normalize_path(&library).unwrap());
     let source = "import { \"lib.resin\" }; def main () -> int = { answer() };";
     let column = source.rfind("answer").unwrap() as u32;
     client.open(&main_uri, source);

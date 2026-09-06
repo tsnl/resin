@@ -266,6 +266,7 @@ extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 ```
 
 Foreign headers use the C compiler's include search paths (or an absolute path).
+Use forward slashes in header paths, including Windows paths such as `C:/SDK/include/api.h`.
 
 The prototype targets 64-bit hosts. Foreign functions accept scalar/pointer parameters and return a scalar, pointer, or unit.
 The wrapper unpacks Resin's single tuple argument into the C call. Opaque `extern type`

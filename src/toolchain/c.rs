@@ -180,8 +180,9 @@ impl Compiler {
             .map_err(|error| Error(format!("cannot run {}: {error}", self.executable.display())))?;
         if !result.status.success() {
             return Err(Error(format!(
-                "C compiler failed ({}):\n{}",
+                "C compiler failed ({}):\n{}{}",
                 result.status,
+                String::from_utf8_lossy(&result.stdout),
                 String::from_utf8_lossy(&result.stderr)
             )));
         }
