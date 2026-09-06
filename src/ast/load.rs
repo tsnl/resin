@@ -46,7 +46,7 @@ impl SourceModule {
 
     pub fn error(&self, span: Span, message: impl fmt::Display) -> SourceError {
         let mut error = SourceError::new(self.path.clone(), Some(span), message.to_string());
-        error.message = format!("{}: {}", self.location(span), error.diagnostic);
+        error.message = format!("{}: {}", self.location(span), error.diagnostic).into();
         error
     }
 }
@@ -56,7 +56,7 @@ pub struct SourceError {
     pub path: PathBuf,
     pub span: Option<Span>,
     /// Human-readable CLI rendering, including the import chain.
-    pub message: String,
+    pub message: Box<str>,
     /// The diagnostic itself, without path prefixes or an import chain.
     pub diagnostic: String,
     pub related: Vec<SourceNote>,
@@ -65,7 +65,7 @@ pub struct SourceError {
 impl SourceError {
     pub fn new(path: PathBuf, span: Option<Span>, diagnostic: String) -> Self {
         Self {
-            message: format!("{}: {diagnostic}", path.display()),
+            message: format!("{}: {diagnostic}", path.display()).into(),
             path,
             span,
             diagnostic,
@@ -204,7 +204,7 @@ impl<S: SourceProvider> Loader<'_, S> {
                 if e.span.is_none() {
                     return module.error(import.span, e);
                 }
-                e.message = format!("{}: {}", module.location(import.span), e.message);
+                e.message = format!("{}: {}", module.location(import.span), e.message).into();
                 e.related.push(SourceNote {
                     location: SourceLocation {
                         path: canonical.clone(),
