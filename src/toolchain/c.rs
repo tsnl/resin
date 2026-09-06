@@ -162,7 +162,7 @@ impl Compiler {
             .path()
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let depfile = temp.path().join("program.d");
-        fs::write(&input, source).map_err(io_error)?;
+        fs::write(&input, format!("{source}\n")).map_err(io_error)?;
         let result = Command::new(&self.executable)
             .args(FLAGS)
             .args(C_FLAGS)

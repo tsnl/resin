@@ -266,7 +266,7 @@ fn imported_syntax_errors_stay_at_the_dependency() {
 
 #[test]
 #[cfg(unix)]
-fn buffers_override_disk_and_new_paths_resolve_through_symlinks() {
+fn new_paths_resolve_through_symlinks() {
     let temp = resin::toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
     let root = std::fs::canonicalize(temp.path()).unwrap();
     std::fs::create_dir(root.join("real")).unwrap();
@@ -275,12 +275,30 @@ fn buffers_override_disk_and_new_paths_resolve_through_symlinks() {
         normalize_path(&root.join("alias/new.resin")).unwrap(),
         root.join("real/new.resin")
     );
-    std::fs::write(root.join("real/lib.resin"), "disk").unwrap();
-    let path = normalize_path(&root.join("alias/lib.resin")).unwrap();
+}
+
+#[test]
+fn buffers_override_disk() {
+    let temp = resin::toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = temp.path().join("lib.resin");
+    std::fs::write(&path, "disk").unwrap();
+    let path = normalize_path(&path).unwrap();
     let sources = Sources {
         overlays: [(path.clone(), "buffer".into())].into(),
     };
     assert_eq!(sources.read(&path).unwrap(), "buffer");
+}
+
+#[test]
+fn normalized_paths_are_stable_for_existing_and_unsaved_files() {
+    let temp = resin::toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    std::fs::write(temp.path().join("saved.resin"), "").unwrap();
+    let root = std::fs::canonicalize(temp.path()).unwrap();
+    for name in ["saved.resin", "unsaved.resin"] {
+        let expected = root.join(name);
+        assert_eq!(normalize_path(&temp.path().join(name)).unwrap(), expected);
+        assert_eq!(normalize_path(&expected).unwrap(), expected);
+    }
 }
 
 #[test]

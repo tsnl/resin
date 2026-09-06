@@ -34,6 +34,7 @@ pub fn normalize_path(path: &Path) -> io::Result<PathBuf> {
     let mut result = PathBuf::new();
     for part in absolute.components() {
         match part {
+            Component::Prefix(_) | Component::RootDir => result.push(part.as_os_str()),
             Component::CurDir => {}
             Component::ParentDir => {
                 result.pop();

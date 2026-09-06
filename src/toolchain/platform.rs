@@ -33,7 +33,21 @@ pub(super) const LIBRARIES: &[&str] = &[
     "QuartzCore",
 ];
 
-#[cfg(windows)]
+#[cfg(all(windows, target_env = "msvc"))]
+pub(super) const LIBRARIES: &[&str] = &[
+    "-llegacy_stdio_definitions",
+    "-lgdi32",
+    "-lopengl32",
+    "-luser32",
+    "-lshell32",
+    "-lkernel32",
+    "-lntdll",
+    "-luserenv",
+    "-lws2_32",
+    "-ldbghelp",
+];
+
+#[cfg(all(windows, not(target_env = "msvc")))]
 pub(super) const LIBRARIES: &[&str] = &[
     "-ladvapi32",
     "-lbcrypt",

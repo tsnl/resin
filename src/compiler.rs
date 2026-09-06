@@ -167,7 +167,7 @@ mod tests {
             .unwrap();
         let old = compiler.analyze(&entry).unwrap();
         let other = compiler.analyze(&independent).unwrap();
-        assert!(old.module().is_ok());
+        assert!(old.module().is_ok(), "{:?}", old.diagnostics);
         assert!(Arc::ptr_eq(&old, &compiler.analyze(&entry).unwrap()));
         compiler
             .set_overlay(
@@ -202,12 +202,7 @@ mod tests {
         compiler
             .set_overlay(&root.join("new.resin"), "export {};".into())
             .unwrap();
-        assert!(
-            compiler
-                .analyze(&root.join("main.resin"))
-                .unwrap()
-                .module()
-                .is_ok()
-        );
+        let snapshot = compiler.analyze(&root.join("main.resin")).unwrap();
+        assert!(snapshot.module().is_ok(), "{:?}", snapshot.diagnostics);
     }
 }
