@@ -4,6 +4,8 @@ CUDA for graphics. A simple systems programming language targeting host CPUs and
 
 Currently supported on 64-bit Linux with native Vulkan. macOS/MoltenVK support is on hold.
 
+New to the implementation? Start with the [guided repository tour](TOUR.md).
+
 ## Development
 
 Enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler, CMake, GLFW's native
