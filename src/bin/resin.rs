@@ -1,4 +1,4 @@
-use resin::{ast, backend, ir, toolchain};
+use resin::{ast, backend, compiler::Session, ir, toolchain};
 
 use std::{
     ffi::OsString,
@@ -7,7 +7,6 @@ use std::{
 };
 
 use clap::{ValueEnum, builder::TypedValueParser};
-use tree_sitter::Parser;
 
 #[path = "resin/source.rs"]
 mod source;
@@ -80,25 +79,26 @@ fn main() {
 
 fn run(cli: Cli) -> Result<i32> {
     validate(&cli)?;
-    let src = std::fs::read_to_string(&cli.source.path)
-        .map_err(|e| format!("cannot read {}: {e}", cli.source.path.display()))?;
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_resin::LANGUAGE.into())?;
-    let tree = parser.parse(&src, None).expect("parser language is set");
+    let mut compiler = Session::default();
+    let path = resin::analysis::normalize_path(&cli.source.path)?;
+    let snapshot = compiler.analyze(&path)?;
     if cli.output == Output::Cst {
+        let tree = snapshot
+            .syntax_tree(&path)
+            .ok_or_else(|| format!("cannot read {}", cli.source.path.display()))?;
         return print(&cli, tree.root_node().to_sexp());
     }
-    let file = ast::load(&cli.source.path)?;
+    let file = snapshot.program()?;
     match cli.output {
         Output::Check => return print(&cli, "ok".into()),
-        Output::Ast => return print(&cli, ast::print::format_program(&file)),
+        Output::Ast => return print(&cli, ast::print::format_program(file)),
         _ => {}
     }
-    let module = ir::generate_program(&file)?;
+    let module = snapshot.module()?;
     match cli.output {
-        Output::Ir => print(&cli, ir::format_module(&module)),
-        Output::C | Output::Exe | Output::Run => host(&cli, &module),
-        Output::Glsl | Output::Spirv => shader(&cli, &module),
+        Output::Ir => print(&cli, ir::format_module(module)),
+        Output::C | Output::Exe | Output::Run => host(&cli, module),
+        Output::Glsl | Output::Spirv => shader(&cli, module),
         _ => unreachable!(),
     }
 }

@@ -92,6 +92,7 @@ impl Evaluator<'_> {
     }
 
     fn resolve_type(&self, name: &Ident) -> Result<Ty, GenerateError> {
+        self.scopes.record_reference(name, true);
         self.scopes
             .lookup_type(&name.val)
             .ok_or_else(|| GenerateError {
