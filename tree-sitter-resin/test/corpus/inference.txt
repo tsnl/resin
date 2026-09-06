@@ -1,0 +1,125 @@
+==================
+Nested explicit inference holes
+==================
+def choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _) = {
+    var output: Ptr<Ptr<_>>;
+    (p, f)
+};
+---
+
+(source_file
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (unary_type
+            (type
+              (infix_type
+                (unary_type
+                  (primary_type
+                    (builtin_type)))))))))
+    (type
+      (infix_type
+        (unary_type
+          (primary_type
+            (closed_type
+              (tuple_type
+                (type
+                  (infix_type
+                    (unary_type
+                      (type
+                        (infix_type
+                          (unary_type
+                            (primary_type
+                              (inferred_type))))))))
+                (type
+                  (infix_type
+                    (closed_type
+                      (paren_type
+                        (type
+                          (infix_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type)))))))
+                    (infix_type
+                      (unary_type
+                        (primary_type
+                          (inferred_type))))))))))))
+    (block_body
+      (statement
+        (declare
+          (lid)
+          (type
+            (infix_type
+              (unary_type
+                (type
+                  (infix_type
+                    (unary_type
+                      (type
+                        (infix_type
+                          (unary_type
+                            (primary_type
+                              (inferred_type)))))))))))))
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (closed_term
+                    (tuple_term
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (unary_term
+                              (postfix_term
+                                (primary_term
+                                  (lid)))))))
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (unary_term
+                              (postfix_term
+                                (primary_term
+                                  (lid))))))))))))))))))
+
+==================
+Underscores in identifiers are not holes
+==================
+type _Name = int;
+def _name(_value: _Name) -> _Name = { _value };
+---
+
+(source_file
+  (type_definition
+    (type_define
+      (uid)
+      (type
+        (infix_type
+          (unary_type
+            (primary_type
+              (builtin_type)))))))
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (unary_type
+            (primary_type
+              (uid))))))
+    (type
+      (infix_type
+        (unary_type
+          (primary_type
+            (uid)))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid))))))))))

@@ -27,6 +27,8 @@ pub type Type = Spanned<TypeKind>;
 pub enum TypeKind {
     /// Missing or malformed type syntax; never an executable type.
     Hole,
+    /// An explicit inference request, distinct from malformed editor syntax.
+    Infer,
     Unit,
     Atom {
         name: Ident,

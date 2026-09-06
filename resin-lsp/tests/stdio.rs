@@ -156,6 +156,32 @@ fn at(uri: &str, line: u32, character: u32) -> Value {
 }
 
 #[test]
+fn explicit_inference_updates_hover_after_edits() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("inference.resin"));
+    for (version, initializer, expected) in [(1, "42", "int"), (2, "1 == 1", "bool")] {
+        let source =
+            format!("def answer() -> _ = {{ var value: _; value := {initializer}; value }};");
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), false);
+        let hover = client.request(
+            "textDocument/hover",
+            at(&uri, 0, source.rfind("value").unwrap() as u32),
+        );
+        assert!(
+            hover.to_string().contains(&format!("value: {expected}")),
+            "{hover}"
+        );
+    }
+    client.stop();
+}
+
+#[test]
 fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);

@@ -83,6 +83,13 @@ pub(super) struct Scopes {
 }
 
 impl Scopes {
+    pub(super) fn untraced(&self) -> Self {
+        Self {
+            trace: None,
+            ..self.clone()
+        }
+    }
+
     pub(super) fn traced(trace: Trace) -> Self {
         Self {
             trace: Some(trace),

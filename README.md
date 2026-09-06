@@ -88,11 +88,11 @@ def main() = {
 ```
 
 Functions use `def` and are top-level, immutable definitions. Parameter types are explicit;
-omitting the result annotation means `()`. Non-unit results require `-> T`: return types are
-not inferred, and a non-unit tail expression without an annotation is a type error.
+omitting the result annotation means `()`. Non-unit results require `-> T` or explicit inference
+with `-> _`; a non-unit tail expression without an annotation is a type error.
 Foreign functions can also omit `-> ()` for C `void` results. Function types still spell out
-the result, such as `() -> ()`. All signatures are in scope
-before any body is checked, so mutual recursion needs no forward declarations. There are no
+the result, such as `() -> ()`. All function names are in scope before bodies are checked,
+so mutual recursion needs no forward declarations. There are no
 lambdas, nested function definitions, or captured environments. Ordinary function values can
 be stored, passed, and returned on the host.
 
@@ -111,6 +111,42 @@ Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>
 Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and bracket
 arguments use `Name {...}` and `Converter [...]`. These spaces are a convention, not required syntax.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
+
+## Type inference
+
+Write `_` to request a concrete type inferred from the surrounding code:
+
+```resin
+export { main };
+
+def next(n: int) -> _ = { n + 1 };
+
+def main() = {
+    var value: _;
+    var pointer: Ptr<_>;
+    value := next(41);
+    pointer := &value;
+    print("value = {0}\n", (pointer.*,));
+};
+```
+
+Holes can nest inside local annotations, local type ascriptions, and function
+return annotations: `Ptr<Ptr<_>>`, `Span<_>`, `(_, Ptr<_>)`, and `(int) -> _`
+all use the same inference mechanism. Each `_` is independent. Local constraints
+can come from later assignments or uses; numeric literals default to `int` or
+`float64` only after those constraints have been considered.
+
+Function results are inferred from bodies in dependency order, checking mutually
+recursive groups together. Callers outside a group cannot determine its return
+types. A recursive group without enough information is an error, not a generic
+function. Parameters, nominal type definitions (including their fields), and
+foreign signatures remain fully explicit. Unresolved or infinitely recursive
+inferred types are errors; `_` is not a wildcard, unit, or a dynamic type.
+
+Omitting a function result annotation still means unit; inference is opt-in.
+Types are fully resolved before IR generation, so C and GLSL share the same
+inference behavior. Run `cargo run -- examples/inference.resin` for an example.
+Structural unions, `Result`, and error propagation are not implemented yet.
 
 ## Build and run
 

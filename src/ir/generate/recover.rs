@@ -116,8 +116,7 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
         }
         exports.push(exported);
     }
-    let result = data.borrow().clone();
-    result
+    data.borrow().clone()
 }
 
 struct Recovery<'a> {
@@ -130,6 +129,7 @@ impl Recovery<'_> {
         Evaluator {
             scopes: &self.scopes,
             typer: self.typer,
+            inferred: None,
         }
         .ty(ty)
         .ok()
@@ -221,6 +221,7 @@ impl Recovery<'_> {
             TermKind::Num { value } => Evaluator {
                 scopes: &self.scopes,
                 typer: self.typer,
+                inferred: None,
             }
             .number(term.span, value, expected)
             .ok()

@@ -43,6 +43,58 @@ struct Project {
 }
 
 #[test]
+fn inferred_imported_results_and_local_annotations_support_editor_queries() {
+    let source =
+        "import { \"lib.resin\" }; def main() = { var value: _; value := make(); value.count; };";
+    let library = "export { make }; type Counter = { count: int }; def make() -> _ = { Counter { count = 42 } };";
+    let project = Project::new(&[("main.resin", source), ("lib.resin", library)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    let path = project.path("main.resin");
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("value").unwrap())
+            .unwrap()
+            .text,
+        "value: Counter"
+    );
+    let fields = analysis.completions(&path, source.rfind("count").unwrap());
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.name == "count" && field.detail == "count: int")
+    );
+    let definition = analysis
+        .definition(&path, source.find("make()").unwrap())
+        .unwrap();
+    assert_eq!(definition.path, project.path("lib.resin"));
+}
+
+#[test]
+fn inference_does_not_publish_speculative_type_references() {
+    let source = "type Value = int; def f() -> _ = { type Value = bool; type Wrapper = Value; Wrapper(Value(1 == 1)) };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    let reference = source.find("Wrapper = Value").unwrap() + "Wrapper = ".len();
+    let definition = analysis
+        .definition(&project.path("main.resin"), reference)
+        .unwrap();
+    assert_eq!(
+        definition.span.start,
+        source.rfind("type Value").unwrap() + 5
+    );
+}
+
+#[test]
 fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
     for (setup, receiver) in [
         ("var value = { count = 1, label = 2 };", "value"),

@@ -667,6 +667,7 @@ impl<'a> AstGen<'a> {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
         match child.kind() {
+            "inferred_type" => Spanned::new(TypeKind::Infer, self.span(child)),
             "uid" => Spanned::new(
                 TypeKind::Atom {
                     name: self.ident(child),

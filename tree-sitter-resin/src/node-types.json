@@ -705,6 +705,10 @@
         {
           "type": "closed_type",
           "named": true
+        },
+        {
+          "type": "inferred_type",
+          "named": true
         }
       ]
     }
@@ -1244,6 +1248,10 @@
   {
     "type": "import",
     "named": false
+  },
+  {
+    "type": "inferred_type",
+    "named": true
   },
   {
     "type": "int",

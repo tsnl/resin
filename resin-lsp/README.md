@@ -8,6 +8,10 @@ modules without an exported entry function; runtime bindings belong inside
 functions, following the compiler's declarations-only module rules. Functions use
 `def`, local bindings use `var`, and nominal types use `type`. Omitted function
 result annotations default to `()` and appear as unit in hover/completion.
+Explicit `_` holes in local annotations and function results are solved by the
+compiler before lowering; hover and completion use those concrete types, including
+inferred results from imported modules. Incomplete-source recovery remains
+best-effort and may show `?` when a complete program would infer a type.
 
 ## Build and run
 

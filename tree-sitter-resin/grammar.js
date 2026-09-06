@@ -281,11 +281,13 @@ export default grammar({
 
     primary_type: ($) =>
       choice(
+        $.inferred_type,
         field("var", $.uid),
         field("builtin", $.builtin_type),
         $.closed_type,
       ),
     builtin_type: ($) => choice(...BUILTIN_TYPES),
+    inferred_type: ($) => "_",
 
     closed_type: ($) =>
       choice($.paren_type, $.tuple_type, $.unit_type, $.record_type),

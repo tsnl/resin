@@ -49,6 +49,13 @@ fn captures(query: &str, source: &str) -> BTreeSet<(String, String)> {
 }
 
 #[test]
+fn inference_holes_are_highlighted_as_types() {
+    let source = "def f(p: Ptr<int>) -> Ptr<_> = { var value: _; value := p; value };";
+    let captured = captures(QUERIES[0].1, source);
+    assert!(captured.contains(&("type.builtin".into(), "_".into())));
+}
+
+#[test]
 fn queries_capture_resin_constructs() {
     let source = "export { main, Number }; import { \"std/core.resin\" };\n\
         extern type Handle; extern \"lib.h\" def native (arg: int) -> int;\n\

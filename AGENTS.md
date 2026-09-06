@@ -17,7 +17,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.
 - Function result annotations default to unit when omitted, including foreign functions.
-  Keep parameter types and function types explicit; do not infer return types from bodies.
+  Explicit `_` holes opt into inference in local annotations and function results, including
+  nested type positions. Keep parameters, type definitions, and foreign signatures fully explicit.
+  Inference resolves dependency groups before IR lowering; never put inference variables in IR.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and

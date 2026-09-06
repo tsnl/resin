@@ -28,6 +28,11 @@ impl Generator {
         name: &Ident,
         init: &Type,
     ) -> Result<(), GenerateError> {
+        if let Some(&definition) = self.inferred.definitions.get(&std::ptr::from_ref(name)) {
+            self.bind_type(name, definition)?;
+            self.evaluator().ty(init)?;
+            return Ok(());
+        }
         let definition = self.typer.reserve_type(name.val.clone());
         self.bind_type(name, definition)?;
         let body = self.evaluator().ty(init)?;

@@ -9,6 +9,7 @@ use super::{GenerateError, GenerateErrorKind};
 pub(super) struct Evaluator<'a> {
     pub(super) scopes: &'a Scopes,
     pub(super) typer: &'a TyperContext,
+    pub(super) inferred: Option<&'a std::collections::HashMap<*const Type, Ty>>,
 }
 
 impl Evaluator<'_> {
@@ -48,6 +49,18 @@ impl Evaluator<'_> {
 
     pub(super) fn ty(&self, ty: &Type) -> Result<Ty, GenerateError> {
         match &ty.val {
+            TypeKind::Infer => self
+                .inferred
+                .and_then(|types| types.get(&std::ptr::from_ref(ty)))
+                .cloned()
+                .ok_or_else(|| GenerateError {
+                    span: ty.span,
+                    kind: GenerateErrorKind::Inference {
+                        message:
+                            "type holes are only allowed in local annotations and function results"
+                                .into(),
+                    },
+                }),
             TypeKind::Hole => Err(GenerateError {
                 span: ty.span,
                 kind: GenerateErrorKind::IncompleteSyntax,
@@ -222,6 +235,7 @@ mod tests {
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
+            inferred: None,
         };
         let span = Span { start: 4, end: 8 };
         let named = Type::new(
@@ -251,6 +265,7 @@ mod tests {
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
+            inferred: None,
         };
         let span = Span { start: 0, end: 0 };
         for (text, expected, value, ty) in [

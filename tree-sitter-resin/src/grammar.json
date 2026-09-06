@@ -2021,6 +2021,10 @@
       "type": "CHOICE",
       "members": [
         {
+          "type": "SYMBOL",
+          "name": "inferred_type"
+        },
+        {
           "type": "FIELD",
           "name": "var",
           "content": {
@@ -2090,6 +2094,10 @@
           "value": "float64"
         }
       ]
+    },
+    "inferred_type": {
+      "type": "STRING",
+      "value": "_"
     },
     "closed_type": {
       "type": "CHOICE",

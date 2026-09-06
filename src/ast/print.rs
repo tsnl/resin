@@ -191,6 +191,7 @@ fn sexp_term(term: &Term) -> SExp {
 fn sexp_typespec(ts: &Type) -> SExp {
     match &ts.val {
         TypeKind::Hole => list_sp("type-hole", ts.span, vec![]),
+        TypeKind::Infer => list_sp("infer-type", ts.span, vec![]),
         TypeKind::Unit => list_sp("unit-type", ts.span, vec![]),
         TypeKind::Atom { name } => symbol(name.val.as_ref()),
         TypeKind::App { head, arg } => list_sp(

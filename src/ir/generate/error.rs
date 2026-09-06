@@ -11,6 +11,7 @@ pub struct GenerateError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerateErrorKind {
     IncompleteSyntax,
+    Inference { message: Arc<str> },
     InvalidModuleItem,
     InvalidForeignSignature,
     InvalidShader { message: Arc<str> },
@@ -35,6 +36,13 @@ pub enum GenerateErrorKind {
 }
 impl fmt::Display for GenerateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let GenerateErrorKind::Inference { message } = &self.kind {
+            return write!(
+                f,
+                "compile error at {}..{}: {message}",
+                self.span.start, self.span.end
+            );
+        }
         write!(
             f,
             "compile error at {}..{}: {:?}",

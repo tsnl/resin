@@ -1,0 +1,13 @@
+export { main };
+
+def fibonacci(n: int) -> _ = {
+    if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
+};
+
+def main() = {
+    var n: _;
+    var pointer: Ptr<_>;
+    n := fibonacci(10);
+    pointer := &n;
+    print("fibonacci(10) = {0}\n", (pointer.*,));
+};

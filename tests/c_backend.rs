@@ -31,6 +31,26 @@ fn runs(source: &str, code: i32) {
 }
 
 #[test]
+fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
+    runs(
+        "export { main }; def main() -> _ = { var n: _; var p: Ptr<_>; n := 40; p := &n; p.* := p.* + 2; p.* };",
+        42,
+    );
+    runs(
+        "export { main }; def wide() -> _ = { var n = 4294967297; var p: Ptr<ulong>; p := &n; p.* }; def main() -> int = { if (wide() == ulong(4294967297)) { 0 } else { 1 } };",
+        0,
+    );
+    runs(
+        "export { main }; def main() -> _ = { var n = 0; var pair: { a: _, b: _ }; pair := { b = (n := n + 1), a = (n := n + 1) }; pair.a * 10 + pair.b };",
+        21,
+    );
+    runs(
+        "export { main }; def add(n: int) -> int = { n + 1 }; def select() -> (int) -> _ = { add }; def main() -> _ = { select()(41) };",
+        42,
+    );
+}
+
+#[test]
 fn typed_pointer_offsets_use_element_sizes() {
     runs(
         "export { main }; def main () -> int = { var values = [10, 20, 30]; var p = Ptr<int> (&values); (p + 1).* := 7; var end = p + uint (2); (end - 1).* + (end + -2).* + end.* };",

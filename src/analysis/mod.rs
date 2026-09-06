@@ -437,7 +437,7 @@ impl Analysis {
         let dot = document.text[..replace.start].trim_end().len() - 1;
         let fields = self.semantics.fields.iter().find_map(|(location, fields)| {
             (location.path == path
-                && location.span.start >= dot + 1
+                && location.span.start > dot
                 && location.span.start <= replace.start)
                 .then_some(fields)
         });

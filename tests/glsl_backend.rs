@@ -16,6 +16,18 @@ fn example(name: &str) -> ir::Module {
 }
 
 #[test]
+fn inferred_shader_results_lower_without_backend_inference() {
+    let m = module(
+        "export { kernel }; def kernel(i: uint) -> _ = { var value: _; value := i + 1; value };",
+    );
+    assert_eq!(m.functions[0].result, ir::Ty::UInt32);
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    if let Some(compiler) = shaders::compiler() {
+        toolchain::compile_glsl(&source, Stage::Compute, &compiler).unwrap();
+    }
+}
+
+#[test]
 fn all_example_stages_emit_deterministically() {
     for (name, stage) in [
         ("gradient.resin", Stage::Compute),

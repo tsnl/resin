@@ -1,6 +1,7 @@
 (lid) @variable
 (uid) @type
 (builtin_type) @type.builtin
+(inferred_type) @type.builtin
 ["Ptr" "Span"] @type.builtin
 
 ["export" "import" "extern" "type" "def" "var" "if" "else" "while"] @keyword

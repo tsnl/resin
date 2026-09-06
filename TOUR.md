@@ -34,7 +34,8 @@ A few language choices explain much of the implementation:
 
 - Functions use `def` and are top-level declarations with typed parameters;
   an omitted result type means unit. Their names are available before their
-  bodies are checked, allowing mutual recursion without return-type inference.
+  bodies are checked, allowing mutual recursion. Explicit `_` holes opt into
+  inference in local annotations and function results; omission still means unit.
 - Every function is unary. An empty argument list is unit `()`; multiple
   arguments form a tuple.
 - Value binding statements use `var`, including uninitialized locals; nominal
@@ -127,6 +128,14 @@ registry. [rules.rs](src/ir/typer/rules.rs) describes operations on types, while
 
 [ir/generate/mod.rs](src/ir/generate/mod.rs) orchestrates source-to-IR lowering.
 It establishes types and function signatures before lowering function bodies.
+For functions containing explicit holes, [infer/](src/ir/generate/infer/)
+first collects constraints and resolves them in dependency groups. Start with
+[solver.rs](src/ir/generate/infer/solver.rs) for inference variables and
+unification, then [check.rs](src/ir/generate/infer/check.rs) and
+[constraints.rs](src/ir/generate/infer/constraints.rs) for expression constraints.
+The result is a node-keyed type table used during lowering, not an IR containing
+unknown types. These explicit holes are separate from editor recovery holes.
+
 The neighboring files separate the questions asked during that process:
 
 | Question | Start reading here |
@@ -288,6 +297,7 @@ Tests are executable descriptions of the boundaries above:
 | Syntax or AST shape | [parser corpus](tree-sitter-resin/test/corpus/), [mutation_ast.rs](tests/mutation_ast.rs) |
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
 | Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
+| Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
 | Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |

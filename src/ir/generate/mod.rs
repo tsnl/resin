@@ -11,6 +11,7 @@ mod error;
 mod eval;
 mod flow;
 mod functions;
+mod infer;
 mod modules;
 mod places;
 mod recover;
@@ -47,6 +48,7 @@ struct Generator {
     typer: TyperContext,
     function: Option<FunctionBuilder>,
     scopes: Scopes,
+    inferred: infer::Inferred,
 }
 
 impl Generator {
@@ -56,10 +58,12 @@ impl Generator {
             typer: TyperContext::new(),
             function: None,
             scopes: Scopes::new(),
+            inferred: infer::Inferred::default(),
         }
     }
 
     fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
+        self.inferred = infer::Inferred::default();
         for stmt in &file.stmts {
             if matches!(
                 stmt.val,
@@ -94,6 +98,7 @@ impl Generator {
                 self.gen_define_type(name, init)?;
             }
         }
+        self.inferred = infer::file(file, &mut self.typer, &self.scopes)?;
         for stmt in &file.stmts {
             if let StmtKind::Function {
                 name,
@@ -156,7 +161,12 @@ impl Generator {
     }
 
     fn gen_term(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
-        let found = self.gen_term_inner(term, expected)?;
+        let inferred = self
+            .inferred
+            .expressions
+            .get(&std::ptr::from_ref(term))
+            .cloned();
+        let found = self.gen_term_inner(term, expected.or(inferred.as_ref()))?;
         if let Some(expected) = expected {
             self.typer
                 .same(expected, &found)
@@ -258,6 +268,7 @@ impl Generator {
         Evaluator {
             scopes: &self.scopes,
             typer: &self.typer,
+            inferred: Some(&self.inferred.holes),
         }
     }
 }
