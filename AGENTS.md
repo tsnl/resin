@@ -30,8 +30,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   order on normal exit and `?`. Bind names at registration, read values at exit, and preserve
   the returned value before cleanup. Deferred expressions cannot propagate with `?`.
   Chain expressions with no tail yield unit; `defer { ... };` uses ordinary block syntax.
-  Register cleanup after successful acquisition when adapting runtime callers to `status(...)?`;
-  exit-on-failure `check` bypasses defers. There is no automatic resource ownership.
+  Standard-library wrappers return Results and keep integer-status C declarations private;
+  public operation names omit `resin_`. `RuntimeError` is a union of named status errors.
+  Register cleanup after successful acquisition. Submit/cancel take `&commands` and clear the
+  consumed handle; presentation returns `ok(false)` for skipped frames. There is no automatic resource ownership.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and

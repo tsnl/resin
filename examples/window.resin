@@ -3,55 +3,41 @@ export { main };
 import {
 	"std/gpu.resin",
 	"std/window.resin",
-	"std/status.resin",
 	"lib/triangle.resin",
 };
 
-def main() -> () = {
+def main() -> Result<(), _> = {
 	var title = "Resin triangle";
-	var window = Ptr<ResinWindow>(ulong(0));
-	check(resin_window_create(640, 480, Ptr<ubyte>(&title), &window));
-	var gpu = Ptr<ResinGpu>(ulong(0));
-	check(resin_gpu_create_for_window(window, &gpu));
+	var window = window_create(640, 480, Ptr<ubyte>(&title))?;
+	defer window_destroy(window);
+	var gpu = gpu_create_for_window(window)?;
+	defer gpu_destroy(gpu);
 
 	var vertex_code = shader(vertex, "vertex");
 	var fragment_code = shader(fragment, "fragment");
-	var pipeline = Ptr<ResinPipeline>(ulong(0));
-	check(
-		resin_gpu_create_graphics_pipeline(
-			gpu,
-			vertex_code.data,
-			vertex_code.length,
-			fragment_code.data,
-			fragment_code.length,
-			&pipeline,
-		)
-	);
+	var pipeline = gpu_create_graphics_pipeline(
+		gpu,
+		vertex_code.data,
+		vertex_code.length,
+		fragment_code.data,
+		fragment_code.length,
+	)?;
+	defer gpu_free_pipeline(gpu, pipeline);
+	var image = gpu_create_image(gpu, 640, 480)?;
+	defer gpu_free_image(gpu, image);
 
-	var image = Ptr<ResinImage>(ulong(0));
-	check(resin_gpu_create_image(gpu, 640, 480, &image));
-
-	check(resin_window_poll_events(window));
-	while (resin_window_should_close(window) == 0 && resin_window_key_pressed(window, resin_key_escape()) == 0) {
-		var commands = Ptr<ResinCommandBuffer>(ulong(0));
-		check(resin_gpu_start_command_recording(gpu, &commands));
-		check(resin_gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0));
-		check(resin_gpu_set_pipeline(commands, pipeline));
-		check(resin_gpu_draw(commands, 0, 3));
-		check(resin_gpu_end_rendering(commands));
-		check(resin_gpu_submit(gpu, commands));
-		var status = resin_gpu_present(gpu, image);
-		if (status != resin_status_incomplete()) {
-			check(status)
-		} else {
-			()
-		};
-		check(resin_window_poll_events(window));
+	window_poll_events(window)?;
+	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
+		var commands = gpu_start_command_recording(gpu)?;
+		defer gpu_cancel_command_buffer(gpu, &commands);
+		gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
+		gpu_set_pipeline(commands, pipeline)?;
+		gpu_draw(commands, 0, 3)?;
+		gpu_end_rendering(commands)?;
+		gpu_submit(gpu, &commands)?;
+		gpu_present(gpu, image)?;
+		window_poll_events(window)?;
 	};
-
-	resin_gpu_free_image(gpu, image);
-	resin_gpu_free_pipeline(gpu, pipeline);
-	resin_gpu_destroy(gpu);
-	resin_window_destroy(window);
 	print("window demo complete\n", ());
+	ok(())
 };

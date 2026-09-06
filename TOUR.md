@@ -262,8 +262,10 @@ The remaining GPU operations are ordinary standard-library calls. Follow one
 from [stdlib/gpu.resin](stdlib/gpu.resin), through
 [resin_runtime.h](resin-runtime/include/resin_runtime.h) and its included
 headers, to [the runtime](resin-runtime/src/lib.rs). The same pattern applies
-to images and windows. [stdlib/status.resin](stdlib/status.resin) is a small
-example of adding a Resin convenience wrapper over foreign declarations.
+to images and windows. Wrappers omit the native `resin_` prefix and return
+`Result<T, RuntimeError>`, with created handles in the success value.
+[stdlib/status.resin](stdlib/status.resin) translates integer status codes into
+named error structs; the C ABI remains unchanged.
 
 Inside the runtime, the useful landmarks are:
 
@@ -288,7 +290,10 @@ offset or alignment mismatch.
 
 These APIs expose resource lifetimes explicitly. The C API and its unsafe Rust
 convenience API are not ownership-safe GPU abstractions: resources must remain
-alive while commands use them. Shader bodies describe individual invocations;
+alive while commands use them. The examples register releases with `defer` after
+successful acquisition and propagate failures with `?`. `gpu_submit(gpu, &commands)`
+and cancellation clear the handle, so deferred cancellation also works after submission.
+Shader bodies describe individual invocations;
 the compiler does not synthesize workgroup-local storage or barriers.
 
 Finally, [examples/particles.resin](examples/particles.resin) combines compute
@@ -312,6 +317,7 @@ Tests are executable descriptions of the boundaries above:
 | Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
 | Deferred cleanup, scope exits, and initialization | [defer.rs](tests/defer.rs), [defer example](examples/defer.resin), [C execution tests](tests/c_backend.rs) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
+| Standard-library Results and native failure cleanup | [stdlib.rs](tests/stdlib.rs) (no GPU or windows required) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
 | Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |
 | LSP protocol, buffer versions, or watched files | [stdio.rs](resin-lsp/tests/stdio.rs) |

@@ -1,54 +1,36 @@
 export { main, vertex, fragment };
 
-import { "std/gpu.resin", "std/image.resin", "std/status.resin", "lib/triangle.resin" };
+import { "std/gpu.resin", "std/image.resin", "lib/triangle.resin" };
 
-def main() -> () = {
-	var gpu = Ptr<ResinGpu>(ulong(0));
-	check(resin_gpu_create(&gpu));
+def main() -> Result<(), _> = {
+	var gpu = gpu_create()?;
+	defer gpu_destroy(gpu);
 
 	var vertex_code = shader(vertex, "vertex");
 	var fragment_code = shader(fragment, "fragment");
-	var pipeline = Ptr<ResinPipeline>(ulong(0));
-	check(
-		resin_gpu_create_graphics_pipeline(
-			gpu,
-			vertex_code.data,
-			vertex_code.length,
-			fragment_code.data,
-			fragment_code.length,
-			&pipeline,
-		)
-	);
-
-	var image = Ptr<ResinImage>(ulong(0));
-	var pixels = Ptr<ResinAllocation>(ulong(0));
-	check(resin_gpu_create_image(gpu, 256, 256, &image));
-	check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_readback(), &pixels));
-
-	var commands = Ptr<ResinCommandBuffer>(ulong(0));
-	check(resin_gpu_start_command_recording(gpu, &commands));
-	check(resin_gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0));
-	check(resin_gpu_set_pipeline(commands, pipeline));
-	check(resin_gpu_draw(commands, 0, 3));
-	check(resin_gpu_end_rendering(commands));
-	check(resin_gpu_copy_image_to_buffer(commands, image, pixels));
-	check(resin_gpu_submit(gpu, commands));
+	var pipeline = gpu_create_graphics_pipeline(
+		gpu,
+		vertex_code.data,
+		vertex_code.length,
+		fragment_code.data,
+		fragment_code.length,
+	)?;
+	defer gpu_free_pipeline(gpu, pipeline);
+	var image = gpu_create_image(gpu, 256, 256)?;
+	defer gpu_free_image(gpu, image);
+	var pixels = gpu_malloc(gpu, 262144, 4, memory_readback())?;
+	defer gpu_free(gpu, pixels);
+	var commands = gpu_start_command_recording(gpu)?;
+	defer gpu_cancel_command_buffer(gpu, &commands);
+	gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
+	gpu_set_pipeline(commands, pipeline)?;
+	gpu_draw(commands, 0, 3)?;
+	gpu_end_rendering(commands)?;
+	gpu_copy_image_to_buffer(commands, image, pixels)?;
+	gpu_submit(gpu, &commands)?;
 
 	var path = "triangle.png";
-	check(
-		resin_image_write_png(
-			Ptr<ubyte>(&path),
-			256,
-			256,
-			4,
-			resin_allocation_host_pointer(pixels),
-			0,
-		)
-	);
+	image_write_png(Ptr<ubyte>(&path), 256, 256, 4, allocation_host_pointer(pixels), 0)?;
 	print("wrote triangle.png\n", ());
-
-	resin_gpu_free(gpu, pixels);
-	resin_gpu_free_image(gpu, image);
-	resin_gpu_free_pipeline(gpu, pipeline);
-	resin_gpu_destroy(gpu);
+	ok(())
 };

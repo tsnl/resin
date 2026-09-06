@@ -86,7 +86,7 @@ fn defer_runs_when_native_status_propagates_to_the_entry() {
         String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
         "cleanup\n"
     );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: RuntimeError"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: WindowUnavailable"));
 }
 
 #[test]

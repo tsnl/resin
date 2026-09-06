@@ -1,6 +1,6 @@
 export { kernel, main };
 
-import { "std/gpu.resin", "std/image.resin", "std/status.resin" };
+import { "std/gpu.resin", "std/image.resin" };
 
 struct Root { count: uint, pixels: ulong };
 
@@ -12,42 +12,27 @@ def kernel(index: uint) -> uint = {
 	pixel(index)
 };
 
-def main() -> () = {
-	var gpu = Ptr<ResinGpu>(ulong(0));
-	check(resin_gpu_create(&gpu));
+def main() -> Result<(), _> = {
+	var gpu = gpu_create()?;
+	defer gpu_destroy(gpu);
 
 	var code = shader(kernel, "compute");
-	var pipeline = Ptr<ResinPipeline>(ulong(0));
-	check(resin_gpu_create_compute_pipeline(gpu, code.data, code.length, &pipeline));
-
-	var pixels = Ptr<ResinAllocation>(ulong(0));
-	var root = Ptr<ResinAllocation>(ulong(0));
-	check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_default(), &pixels));
-	check(resin_gpu_malloc(gpu, 16, 8, resin_memory_default(), &root));
-	var data = Ptr<Root>(resin_allocation_host_pointer(root));
-	data.* := Root { count = uint(65536), pixels = resin_allocation_device_pointer(pixels) };
-
-	var commands = Ptr<ResinCommandBuffer>(ulong(0));
-	check(resin_gpu_start_command_recording(gpu, &commands));
-	check(resin_gpu_set_pipeline(commands, pipeline));
-	check(resin_gpu_dispatch(commands, resin_allocation_device_pointer(root), 1024, 1, 1));
-	check(resin_gpu_submit(gpu, commands));
+	var pipeline = gpu_create_compute_pipeline(gpu, code.data, code.length)?;
+	defer gpu_free_pipeline(gpu, pipeline);
+	var pixels = gpu_malloc(gpu, 262144, 4, memory_default())?;
+	defer gpu_free(gpu, pixels);
+	var root = gpu_malloc(gpu, 16, 8, memory_default())?;
+	defer gpu_free(gpu, root);
+	var data = Ptr<Root>(allocation_host_pointer(root));
+	data.* := Root { count = uint(65536), pixels = allocation_device_pointer(pixels) };
+	var commands = gpu_start_command_recording(gpu)?;
+	defer gpu_cancel_command_buffer(gpu, &commands);
+	gpu_set_pipeline(commands, pipeline)?;
+	gpu_dispatch(commands, allocation_device_pointer(root), 1024, 1, 1)?;
+	gpu_submit(gpu, &commands)?;
 
 	var path = "gradient.png";
-	check(
-		resin_image_write_png(
-			Ptr<ubyte>(&path),
-			256,
-			256,
-			4,
-			resin_allocation_host_pointer(pixels),
-			0,
-		)
-	);
+	image_write_png(Ptr<ubyte>(&path), 256, 256, 4, allocation_host_pointer(pixels), 0)?;
 	print("wrote gradient.png\n", ());
-
-	resin_gpu_free(gpu, root);
-	resin_gpu_free(gpu, pixels);
-	resin_gpu_free_pipeline(gpu, pipeline);
-	resin_gpu_destroy(gpu);
+	ok(())
 };

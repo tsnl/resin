@@ -208,7 +208,11 @@ payloads; GLSL uses separate payload fields because it has no native union type.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
 The standard library's `status(code)` converts native status integers to
-`Result<(), RuntimeError>`; `RuntimeError` retains its numeric `code`.
+`Result<(), RuntimeError>`. `RuntimeError` is a union of named errors such as
+`InvalidArgument`, `OutOfMemory`, and `IoError`; `UnknownRuntimeError { code }`
+preserves unrecognized codes. `runtime_error_code(error)` and `runtime_error_message(error)`
+recover the native code and C diagnostic string. Standard-library operations already
+return Results, so callers normally use `gpu_create()?` rather than converting statuses.
 Register resource cleanup with `defer` before using further fallible operations.
 
 ### Deferred cleanup
@@ -253,9 +257,9 @@ Returning a pointer does not copy its pointee: do not free memory that escapes.
 Deferred expressions cannot use `?`; handle failures locally with `match`. Cleanup is
 ordinary code, not automatic ownership management, and works in C and GLSL wherever
 the deferred operations are supported. Aborts, traps, and process termination do not
-run defers. The standard library's existing `check(code)` exits the process on failure
-and therefore bypasses cleanup; use `status(code)?` in new resource-owning callers.
-Existing graphics examples still use explicit cleanup and `check`.
+run defers. Standard-library wrappers propagate errors instead of terminating the process;
+the graphics examples use `?` and register releases with `defer` after each successful acquisition.
+The old exit-on-failure `check` helper has been removed.
 
 ## Build and run
 
@@ -275,7 +279,8 @@ them does not force a rebuild. This does not change Cargo's Rust build profile o
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
 A file can export several entry points. Host entries must be Resin functions of type
-`() -> int` or `() -> ()`; `main` is just the default name, not special syntax.
+`() -> int`, `() -> ()`, or a Result with either success type;
+`main` is just the default name, not special syntax.
 Execution begins at the selected function. It must be explicitly exported by the entry file,
 including when re-exporting an imported function. Missing or private entries are errors.
 There is no module initialization phase.
@@ -433,17 +438,18 @@ not syntax keywords: definitions and parameters cannot use those names, but reco
 `std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
 working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
 The native Rust crate lives separately at `resin-runtime/`; it has no dependency on the standard
-library. Programs use the standard library's exports, which initially stay close to the runtime's C API:
+library. Programs use standard-library wrappers; the integer-status C ABI stays private
+to those modules. Public operation names omit the native `resin_` prefix:
 
 - `std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
 - `std/window.resin`: windows and presentation; import `std/gpu.resin` separately for GPU operations.
 - `std/image.resin`: PNG reading and writing.
-- `std/status.resin`: `status`, `RuntimeError`, `check`, status strings, and `resin_status_incomplete()`.
+- `std/status.resin`: `status`, the `RuntimeError` union and its variants, and native code/message helpers.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `std/console.resin`: `getchar`, `input`, `InputLine`, `free_input`, and `print_input`.
+- `std/console.resin`: `read_byte`, `input`, `InputLine`, `free_input`, and `print_input`.
 
 The polymorphic `print` and compile-time `shader` operations remain compiler builtins.
-Runtime flags and status constants are zero-argument functions, such as `resin_memory_default()`.
+Runtime flags are zero-argument functions, such as `memory_default()`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
 
@@ -451,23 +457,31 @@ Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter,
 export { main };
 import { "std/gpu.resin" };
 
-def main() -> () = {
-    var gpu = Ptr<ResinGpu>(ulong(0));
-    var status = resin_gpu_create(&gpu);
-    print("GPU creation status: {0}\n", (status,));
-    if (status == 0) { resin_gpu_destroy(gpu) } else { () };
+def main() -> Result<(), _> = {
+    var gpu = gpu_create()?;
+    defer gpu_destroy(gpu);
+    print("GPU ready\n", ());
+    ok(())
 };
 ```
 
 ## Foreign functions
 
-Standard-library modules declare native operations with `extern`, exporting appropriate bindings
-directly or wrapping them in Resin functions. For example:
+Standard-library modules keep native declarations private and export Resin wrappers that
+check statuses before returning out-parameter values. For example:
 
 ```resin
-export { ResinGpu, resin_gpu_create };
+export { ResinGpu, gpu_create };
+import { "std/status.resin" };
 
 extern type ResinGpu;
+
+def gpu_create() -> Result<Ptr<ResinGpu>, RuntimeError> = {
+    var gpu = Ptr<ResinGpu>(ulong(0));
+    status(resin_gpu_create(&gpu))?;
+    ok(gpu)
+};
+
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 ```
 
@@ -549,8 +563,8 @@ result in generated C. Shader objects are deduplicated and cached under `build/s
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `glslc` at runtime.
 
-Shaders receive application data through the root address passed to `resin_gpu_dispatch` or
-`resin_gpu_draw`. Add a typed pointer as the second tuple element:
+Shaders receive application data through the root address passed to `gpu_dispatch` or
+`gpu_draw`. Add a typed pointer as the second tuple element:
 
 ```resin
 struct Params { count: uint, values: Ptr<float32>, scale: float32 };
@@ -640,16 +654,17 @@ and shared data definitions live in `examples/lib/particles.resin`.
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:
 
-- `resin_window_create`, `resin_window_destroy`, and `resin_window_poll_events` manage
+- `window_create`, `window_destroy`, and `window_poll_events` manage
   GLFW windows and events. Close state, framebuffer size, resizing, and GLFW key codes
-  are available through the corresponding `resin_window_*` functions.
-- `resin_gpu_create_for_window` selects a graphics/compute/present-capable GPU for a window.
+  are available through the corresponding `window_*` functions. Predicates return `bool`;
+  fallible operations return Results, including framebuffer size as `(width, height)`.
+- `gpu_create_for_window` selects a graphics/compute/present-capable GPU for a window.
   The existing GPU constructors stay headless. There is one GPU per window; multiple
   windows can each have their own GPU.
-- `resin_gpu_present` blits an already-submitted `ResinImage` to the window, scaling to
+- `gpu_present` blits an already-submitted `ResinImage` to the window, scaling to
   its framebuffer with FIFO presentation. Swapchains are recreated after resize.
-  `RESIN_STATUS_INCOMPLETE` means the frame was skipped (minimized, timed out, or out of date):
-  poll events and retry.
+  Its `Result<bool, RuntimeError>` is `ok(true)` when presented and `ok(false)` when
+  skipped (minimized, timed out, or out of date): poll events and retry. Other failures propagate.
 
 Create and use windows and their GPUs on the process main thread. Destroy image/pipeline
 resources first, then the GPU, then the window. The GPU retains the native window while

@@ -1,9 +1,8 @@
 export { main, independent };
 
-import { "lib/counter.resin", "std/status.resin" };
+import { "lib/counter.resin" };
 
 def main() -> () = {
-	check(0);
 	var counter = Counter { value = 0 };
 	print("counter: {0}, {1}\n", (next(&counter), next(&counter)));
 };

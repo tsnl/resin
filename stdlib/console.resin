@@ -1,14 +1,14 @@
 export {
-    getchar,
-    input,
-    InputLine,
-    InputError,
-    EndOfInput,
-    InputReadError,
-    InputOutOfMemory,
-    InputWriteError,
-    free_input,
-    print_input,
+	read_byte,
+	input,
+	InputLine,
+	InputError,
+	EndOfInput,
+	InputReadError,
+	InputOutOfMemory,
+	InputWriteError,
+	free_input,
+	print_input,
 };
 
 extern "stdio.h" def getchar() -> int;
@@ -27,65 +27,87 @@ struct InputOutOfMemory {};
 struct InputWriteError {};
 type InputError = EndOfInput | InputReadError | InputOutOfMemory;
 
+def read_byte() -> Result<ubyte, EndOfInput | InputReadError> = {
+	var byte = getchar();
+	check_input_end(byte, ulong(0))?;
+	ok(resin_console_byte(byte))
+};
+
 def resize_input(memory: Ptr<ubyte>, capacity: ulong) -> Result<Ptr<ubyte>, InputOutOfMemory> = {
-    var resized = realloc(memory, capacity);
-    if (ulong(resized) == ulong(0)) { err(InputOutOfMemory {}) }
-    else { ok(resized) }
+	var resized = realloc(memory, capacity);
+	if (ulong(resized) == ulong(0)) {
+		err(InputOutOfMemory {})
+	} else {
+		ok(resized)
+	}
 };
 
 def check_input_end(byte: int, length: ulong) -> Result<(), EndOfInput | InputReadError> = {
-    if (byte < 0 && resin_stdin_error() != 0) { err(InputReadError {}) }
-    else {
-        if (byte < 0 && length == ulong(0)) { err(EndOfInput {}) }
-        else { ok(()) }
-    }
+	if (byte < 0 && resin_stdin_error() != 0) {
+		err(InputReadError {})
+	} else {
+		if (byte < 0 && length == ulong(0)) {
+			err(EndOfInput {})
+		} else {
+			ok(())
+		}
+	}
 };
 
 // Reads bytes through LF or EOF; only CR immediately before LF is stripped.
 def input() -> Result<InputLine, InputError> = {
-    var capacity = ulong(128);
-    var memory = resize_input(Ptr<ubyte>(ulong(0)), capacity)?;
-    var transferred = 1 == 0;
-    defer if (!transferred) { free(memory); } else {};
-    var length = ulong(0);
-    var byte = getchar();
-    while (byte >= 0 && byte != 10) {
-        if (length == capacity - ulong(1)) {
-            // Reserve the terminator and reject growth that would wrap.
-            var grown: Result<ulong, InputOutOfMemory>;
-            grown := if (capacity > ulong(18446744073709551615) / ulong(2)) {
-                err(InputOutOfMemory {})
-            } else { ok(capacity * ulong(2)) };
-            capacity := grown?;
-            memory := resize_input(memory, capacity)?;
-        } else {};
-        (memory + length).* := resin_console_byte(byte);
-        length := length + ulong(1);
-        byte := getchar();
-    };
-    check_input_end(byte, length)?;
-    if (byte == 10 && length > ulong(0)) {
-        if ((memory + length - ulong(1)).* == ubyte(13)) {
-            length := length - ulong(1);
-        } else {};
-    } else {};
-    (memory + length).* := ubyte(0);
-    transferred := 1 == 1;
-    ok(InputLine { data = memory, length = length })
+	var capacity = ulong(128);
+	var memory = resize_input(Ptr<ubyte>(ulong(0)), capacity)?;
+	var transferred = 1 == 0;
+	defer if (!transferred) {
+		free(memory);
+	} else {};
+	var length = ulong(0);
+	var byte = getchar();
+	while (byte >= 0 && byte != 10) {
+		if (length == capacity - ulong(1)) {
+			// Reserve the terminator and reject growth that would wrap.
+			var grown: Result<ulong, InputOutOfMemory>;
+			grown := if (capacity > ulong(18446744073709551615) / ulong(2)) {
+				err(InputOutOfMemory {})
+			} else {
+				ok(capacity * ulong(2))
+			};
+			capacity := grown?;
+			memory := resize_input(memory, capacity)?;
+		} else {};
+		(memory + length).* := resin_console_byte(byte);
+		length := length + ulong(1);
+		byte := getchar();
+	};
+	check_input_end(byte, length)?;
+	if (byte == 10 && length > ulong(0)) {
+		if ((memory + length - ulong(1)).* == ubyte(13)) {
+			length := length - ulong(1);
+		} else {};
+	} else {};
+	(memory + length).* := ubyte(0);
+	transferred := 1 == 1;
+	ok(InputLine { data = memory, length = length })
 };
 
 // Release exactly once, after the last use of the line or any copy.
-def free_input(line: InputLine) = { free(line.data); };
+def free_input(line: InputLine) = {
+	free(line.data);
+};
 
 // Writes every byte (including embedded NULs), flushes, and adds no newline.
 def print_input(line: InputLine) -> Result<(), InputWriteError> = {
-    var index = ulong(0);
-    var written = 0;
-    while (index < line.length && written >= 0) {
-        written := resin_console_putchar((line.data + index).*);
-        index := index + ulong(1);
-    };
-    var flushed = resin_stdout_flush();
-    if (written < 0 || flushed != 0) { err(InputWriteError {}) }
-    else { ok(()) }
+	var index = ulong(0);
+	var written = 0;
+	while (index < line.length && written >= 0) {
+		written := resin_console_putchar((line.data + index).*);
+		index := index + ulong(1);
+	};
+	var flushed = resin_stdout_flush();
+	if (written < 0 || flushed != 0) {
+		err(InputWriteError {})
+	} else {
+		ok(())
+	}
 };

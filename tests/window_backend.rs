@@ -43,7 +43,18 @@ fn display_available() -> bool {
 }
 
 fn succeeded(output: &Output) -> bool {
-    if matches!(output.status.code(), Some(2 | 3 | 8 | 77)) && !window_required() {
+    let errors = String::from_utf8_lossy(&output.stderr);
+    let unavailable = matches!(output.status.code(), Some(2 | 3 | 8 | 77))
+        || (output.status.code() == Some(1)
+            && errors.lines().any(|line| {
+                matches!(
+                    line,
+                    "unhandled error: VulkanUnavailable"
+                        | "unhandled error: Unsupported"
+                        | "unhandled error: WindowUnavailable"
+                )
+            }));
+    if unavailable && !window_required() {
         eprintln!("skipping: window or presentation unavailable");
         return false;
     }
@@ -53,7 +64,6 @@ fn succeeded(output: &Output) -> bool {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let errors = String::from_utf8_lossy(&output.stderr);
     assert!(
         !errors.contains("Validation Error") && !errors.contains("VUID-"),
         "{errors}"
@@ -270,7 +280,7 @@ fn run_example(name: &str) {
         panic!("loop body")
     };
     // Close through the runtime after three frames; leave the interactive demo unbounded.
-    stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { check(resin_window_set_should_close(window, 1)) } else { () };"));
+    stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window_set_should_close(window, 1 == 1)?; } else { () };"));
     let module = resin::ir::generate_program(&ast).unwrap();
     let shaders = resin::toolchain::build_shaders(&module, &compiler).unwrap();
     let c = resin::backend::c::emit_with_shaders(&module, "main", &shaders).unwrap();

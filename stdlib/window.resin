@@ -1,22 +1,87 @@
 export {
-    ResinWindow,
-    resin_key_escape,
-    resin_window_create,
-    resin_window_destroy,
-    resin_window_poll_events,
-    resin_window_should_close,
-    resin_window_set_should_close,
-    resin_window_framebuffer_size,
-    resin_window_set_size,
-    resin_window_key_pressed,
-    resin_gpu_create_for_window,
-    resin_gpu_present,
+	ResinWindow,
+	key_escape,
+	window_create,
+	window_destroy,
+	window_poll_events,
+	window_should_close,
+	window_set_should_close,
+	window_framebuffer_size,
+	window_set_size,
+	window_key_pressed,
+	gpu_create_for_window,
+	gpu_present,
 };
-import { "gpu.resin" };
+
+import { "gpu.resin", "status.resin" };
 
 extern type ResinWindow;
 
-def resin_key_escape() -> int = { 256 };
+def key_escape() -> int = {
+	256
+};
+
+def window_create(width: uint, height: uint, title: Ptr<ubyte>) -> Result<Ptr<ResinWindow>, RuntimeError> = {
+	var window = Ptr<ResinWindow>(ulong(0));
+	status(resin_window_create(width, height, title, &window))?;
+	ok(window)
+};
+
+def window_destroy(window: Ptr<ResinWindow>) = {
+	resin_window_destroy(window)
+};
+
+def window_poll_events(window: Ptr<ResinWindow>) -> Result<(), RuntimeError> = {
+	status(resin_window_poll_events(window))
+};
+
+def window_should_close(window: Ptr<ResinWindow>) -> bool = {
+	resin_window_should_close(window) != 0
+};
+
+def window_set_should_close(window: Ptr<ResinWindow>, close: bool) -> Result<(), RuntimeError> = {
+	status(
+		resin_window_set_should_close(
+			window,
+			if (close) {
+				1
+			} else {
+				0
+			}
+		)
+	)
+};
+
+def window_framebuffer_size(window: Ptr<ResinWindow>) -> Result<(uint, uint), RuntimeError> = {
+	var width = uint(0);
+	var height = uint(0);
+	status(resin_window_framebuffer_size(window, &width, &height))?;
+	ok((width, height))
+};
+
+def window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> Result<(), RuntimeError> = {
+	status(resin_window_set_size(window, width, height))
+};
+
+def window_key_pressed(window: Ptr<ResinWindow>, key: int) -> bool = {
+	resin_window_key_pressed(window, key) != 0
+};
+
+def gpu_create_for_window(window: Ptr<ResinWindow>) -> Result<Ptr<ResinGpu>, RuntimeError> = {
+	var gpu = Ptr<ResinGpu>(ulong(0));
+	status(resin_gpu_create_for_window(window, &gpu))?;
+	ok(gpu)
+};
+
+def gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> Result<bool, RuntimeError> = {
+	var code = resin_gpu_present(gpu, image);
+	if (code == 7) {
+		ok(1 == 0)
+	} else {
+		status(code)?;
+		ok(1 == 1)
+	}
+};
 
 extern "resin_runtime.h" def resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
 extern "resin_runtime.h" def resin_window_destroy(window: Ptr<ResinWindow>) -> ();

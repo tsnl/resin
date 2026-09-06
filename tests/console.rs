@@ -126,19 +126,31 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
 }
 
 #[test]
-fn exported_getchar_returns_bytes_and_negative_eof() {
+fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
         r#"
         export { main };
         import { "std/console.resin" };
-        def main() -> int = {
-            var first = getchar();
-            var second = getchar();
-            if (first == 255 && second < 0) { 0 } else { 1 }
+        def main() -> Result<int, _> = {
+            var zero = read_byte()?;
+            var first = read_byte()?;
+            var ended = match (read_byte()) {
+                ok(byte) => { 1 == 0 },
+                err(error) => {
+                    match (error) {
+                        EndOfInput(e) => { 1 == 1 },
+                        InputReadError(e) => { 1 == 0 },
+                    }
+                },
+            };
+            ok(if (zero == ubyte(0) && first == ubyte(255) && ended) { 0 } else { 1 })
         };
     "#,
     );
-    assert!(program.run(b"\xff").status.success());
+    assert!(program.run(b"\0\xff").status.success());
+    let output = program.run(b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: EndOfInput"));
 }
 
 #[test]
