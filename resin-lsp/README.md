@@ -1,8 +1,8 @@
 # Resin language server
 
-`resin-lsp` provides diagnostics, hover, go-to-definition, and basic completion
+`resin-lsp` provides diagnostics, hover, go-to-definition, basic completion, and formatting
 over stdio. It uses the Resin compiler's persistent `compiler::Session`.
-Editor requests run parsing, resolution, typing, and IR verification; they do not
+Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
 compile C/GLSL, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
 functions, following the compiler's declarations-only module rules. Functions use
@@ -40,6 +40,51 @@ Standard-library lookup, in descending precedence:
 Relative overrides resolve against the server's working directory. Prefer an
 absolute path, especially when using the server in another checkout. Keep the
 Nix shell environment when launching Zed/the server; it supplies native libraries.
+
+## Formatting
+
+The server advertises `documentFormattingProvider` and handles
+`textDocument/formatting`. Use your editor's **Format Document** command or enable
+format-on-save. The editor synchronizes the buffer, requests formatting, and
+applies the returned text edit through its normal undo/save workflow. The server
+does not write the file. Rebuild/reinstall the server and restart it in your editor
+to pick up formatting support; see the [Zed setup](../zed-resin/README.md#formatting).
+
+Formatting uses `resin::formatting::format_source` on the latest accepted open
+buffer, independently of background semantic analysis. Unresolved names, imports,
+and type errors do not prevent formatting. Syntax errors return no edits, as does
+formatting a document that is not open. An already formatted buffer returns an
+empty edit list. A changed buffer returns one replacement trimmed to exclude its
+unchanged prefix/suffix, with UTF-16 ranges that respect Unicode and CRLF boundaries.
+
+Resin has a fixed source style:
+
+- One hard tab per indentation level, regardless of LSP `tabSize`/`insertSpaces`.
+  Your editor controls how wide tabs appear.
+- Trailing commas are preserved and force one item per line in parameter lists,
+  calls, tuples, arrays, records, struct fields, imports, and exports. Without a trailing comma,
+  lists collapse unless comments or nested multiline constructs require breaks.
+- Nonempty blocks and match arm lists use multiple lines. Operators, declarations, and separators
+  receive consistent spacing; no automatic line-length wrapping is performed.
+- Runs of blank lines collapse to at most one between items. Padding inside
+  delimiters and at file boundaries is removed. Nonempty output ends with one LF;
+  empty/whitespace-only input becomes empty. Whitespace outside comments and
+  literals is normalized to tabs, spaces, and LF.
+- Comments and literal spellings are preserved, including whitespace within block
+  comments. Same-line trailing comments stay attached to their preceding token.
+
+For example, `var xs = [1,2,3,];` becomes:
+
+```resin
+var xs = [
+	1,
+	2,
+	3,
+];
+```
+
+Only whole-document formatting is supported; range/on-type formatting and a CLI
+format command are not implemented.
 
 ## Stateful compiler core
 
@@ -114,8 +159,11 @@ runs, and exits once; a watch command can host the same session later.
 ```sh
 nix-shell --run 'cargo test -p resin-lsp'
 nix-shell --run 'cargo test -p resin --lib --test analysis --test zed_queries'
+nix-shell --run 'cargo test -p resin --test formatting'
 ```
 
 The stdio integration tests launch the real server and exercise lifecycle,
-unsaved Unicode buffers, all four features, dependency overlays, watched changes,
+unsaved Unicode buffers, semantic features and formatting, dependency overlays, watched changes,
 diagnostic clearing, out-of-order versions, and rapid edits.
+Formatter tests check expected layouts, comment/token/tree preservation, and
+idempotence, including the examples and standard-library source corpus.

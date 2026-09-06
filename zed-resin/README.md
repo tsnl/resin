@@ -2,7 +2,7 @@
 
 Language support for `.resin` files: highlighting, comments, brackets,
 indentation, outlines, and function/comment text objects. The native `resin-lsp`
-adds diagnostics, hover, go-to-definition, and basic completion.
+adds diagnostics, hover, go-to-definition, basic completion, and formatting.
 
 Both this extension and the grammar are ordinary folders in the
 [Resin repository](https://github.com/tsnl/resin). No separate repository or
@@ -59,6 +59,30 @@ rebuilding the native executable.
 
 For syntax support alone, Zed's language setting
 `"languages": { "Resin": { "enable_language_server": false } }` disables the LSP.
+
+## Formatting
+
+After rebuilding/reinstalling `resin-lsp` and restarting the language server, use
+**Format Document**. To use the language server for formatting and enable it on
+save, add these [language settings](https://zed.dev/docs/configuring-languages):
+
+```json
+{
+  "languages": {
+    "Resin": {
+      "formatter": "language_server",
+      "format_on_save": "on",
+      "hard_tabs": true
+    }
+  }
+}
+```
+
+The formatter always indents with hard tabs; `hard_tabs` also makes ordinary editor
+indentation use tabs. `tab_size` controls their display width. A trailing comma
+forces a list onto multiple lines and is preserved. Comments stay intact, and
+multiple blank lines collapse to one. See the [formatting rules](../resin-lsp/README.md#formatting)
+for details. Incomplete syntax is left unchanged until repaired.
 
 ## Check the workflow
 

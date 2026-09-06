@@ -58,6 +58,10 @@ impl Client {
         assert_eq!(initialize["capabilities"]["positionEncoding"], "utf-16");
         assert_eq!(initialize["capabilities"]["textDocumentSync"]["change"], 1);
         assert_eq!(
+            initialize["capabilities"]["documentFormattingProvider"],
+            true
+        );
+        assert_eq!(
             initialize["capabilities"]["completionProvider"]["triggerCharacters"],
             json!(["."])
         );
@@ -178,6 +182,101 @@ fn explicit_inference_updates_hover_after_edits() {
             "{hover}"
         );
     }
+    client.stop();
+}
+
+#[test]
+fn formatting_uses_current_buffers_and_returns_utf16_edits() {
+    fn apply(source: &str, edits: &Value) -> String {
+        fn offset(source: &str, position: &Value) -> usize {
+            let line = position["line"].as_u64().unwrap() as usize;
+            let column = position["character"].as_u64().unwrap() as usize;
+            let start = if line == 0 {
+                0
+            } else {
+                source.match_indices('\n').nth(line - 1).unwrap().0 + 1
+            };
+            let mut units = 0;
+            for (byte, c) in source[start..].char_indices() {
+                if units == column {
+                    return start + byte;
+                }
+                units += c.len_utf16();
+            }
+            assert_eq!(units, column);
+            source.len()
+        }
+        let mut result = source.to_owned();
+        for edit in edits.as_array().unwrap().iter().rev() {
+            let start = offset(source, &edit["range"]["start"]);
+            let end = offset(source, &edit["range"]["end"]);
+            result.replace_range(start..end, edit["newText"].as_str().unwrap());
+        }
+        result
+    }
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = temp.path().join("format.resin");
+    let file = uri(&path);
+    let disk = "def main() = {};\n";
+    std::fs::write(&path, disk).unwrap();
+    let mut client = Client::start(temp.path(), json!({}));
+    // Even clients requesting spaces receive the language's canonical hard tabs.
+    let params =
+        json!({"textDocument": {"uri": file}, "options": {"tabSize": 2, "insertSpaces": true}});
+    client.open(&file, disk);
+    let source = "/* 😀 */def main()={var xs=[1,2,];missing(xs);};\r\n";
+    client.change(&file, 2, source);
+    let edits = client.request("textDocument/formatting", params.clone());
+    let expected =
+        "/* 😀 */ def main() = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t];\n\tmissing(xs);\n};\n";
+    assert_eq!(
+        edits[0]["range"]["start"],
+        json!({"line": 0, "character": 8})
+    );
+    assert_eq!(apply(source, &edits), expected);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), disk);
+
+    client.change(&file, 3, expected);
+    client.change(&file, 2, "def stale( ="); // Older versions must not replace the buffer.
+    assert_eq!(
+        client.request("textDocument/formatting", params.clone()),
+        json!([])
+    );
+    client.change(&file, 4, "def main()={var x=;};");
+    assert_eq!(
+        client.request("textDocument/formatting", params.clone()),
+        Value::Null
+    );
+    client.change(&file, 5, "\r\n\t\r\n");
+    assert_eq!(
+        apply(
+            "\r\n\t\r\n",
+            &client.request("textDocument/formatting", params.clone())
+        ),
+        ""
+    );
+    // An edit ending immediately before LF must also replace the preceding CR.
+    client.change(&file, 6, "def main() = {};\r\n");
+    assert_eq!(
+        apply(
+            "def main() = {};\r\n",
+            &client.request("textDocument/formatting", params.clone())
+        ),
+        disk
+    );
+    let malformed = client.response(
+        "textDocument/formatting",
+        json!({"textDocument": {"uri": file}}),
+    );
+    assert_eq!(malformed.error.unwrap().code, -32602);
+    client.notify(
+        "textDocument/didClose",
+        json!({"textDocument": {"uri": file}}),
+    );
+    assert_eq!(
+        client.request("textDocument/formatting", params),
+        Value::Null
+    );
     client.stop();
 }
 
