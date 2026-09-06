@@ -102,7 +102,12 @@ grammar and loaded `examples/eg009_imports.resin`. Hover displayed
 `next(counter: Ptr<Counter>) -> int`, go-to-definition opened `lib/counter.resin`,
 and the outline included both `Counter` and `next`.
 
-The grammar pin at `70a05ac` adds `def`/`var`/`type` declarations and optional unit
+The earlier grammar pin at `70a05ac` added `def`/`var`/`type` declarations and optional unit
 result annotations. Compiler/LSP regressions and query captures cover this syntax,
 including hover/completion for omitted unit results. This revision was validated
 through automated tests and WASI builds; the editor smoke test above used `79e4a26`.
+
+The current pin also supports explicit `_` type-inference holes, including nested
+local and return annotations. Rebuild `resin-lsp` and reinstall the dev extension
+after updating. Parser, query, and stdio regressions cover the new syntax and
+inferred hover types without launching an editor.
