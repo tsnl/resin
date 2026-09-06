@@ -10,6 +10,7 @@ pub struct GenerateError {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerateErrorKind {
+    IncompleteSyntax,
     InvalidModuleItem,
     InvalidForeignSignature,
     InvalidShader { message: Arc<str> },

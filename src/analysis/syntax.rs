@@ -33,6 +33,7 @@ pub(crate) struct Document {
     pub text: String,
     pub tree: Tree,
     pub file: Result<crate::ast::SourceFile, crate::ast::AstError>,
+    pub recovered_file: crate::ast::SourceFile,
     pub definitions: Vec<Definition>,
     pub imports: Vec<Import>,
     pub exports: Vec<String>,
@@ -93,10 +94,16 @@ impl Document {
             .parse(&text, previous_tree.as_ref())
             .expect("parser language is set");
         let file = crate::ast::AstGen::new(&text).gen_source_file(tree.root_node());
+        let recovered_file = file.clone().unwrap_or_else(|_| {
+            crate::ast::AstGen::recovering(&text, text.len())
+                .gen_source_file(tree.root_node())
+                .expect("recovery always produces an AST")
+        });
         let mut result = Self {
             text,
             tree: tree.clone(),
             file,
+            recovered_file,
             definitions: Vec::new(),
             imports: Vec::new(),
             exports: Vec::new(),
@@ -107,7 +114,8 @@ impl Document {
         result.visit(path, root, span(root), true);
         // Tree-sitter can represent an unfinished function as one ERROR node.
         // Closing only unmatched delimiters in a separate syntax tree recovers
-        // its parameters/scopes. This tree is never sent to the type checker.
+        // its parameters/scopes and editor AST. Only the recovery pass sees
+        // this AST; strict parsing and code generation retain the original text.
         if root.has_error() {
             let mut closers = Vec::new();
             unmatched(root, &mut closers);
@@ -117,10 +125,15 @@ impl Document {
                 recovery.push(';');
                 let repaired = parser.parse(&recovery, None).expect("Resin grammar");
                 let file = crate::ast::AstGen::new(&recovery).gen_source_file(repaired.root_node());
+                let recovered_file = crate::ast::AstGen::recovering(&recovery, result.text.len())
+                    .gen_source_file(repaired.root_node())
+                    .expect("recovery always produces an AST");
+                result.recovered_file = recovered_file.clone();
                 let mut recovered = Self {
                     text: recovery,
                     tree: repaired.clone(),
                     file,
+                    recovered_file,
                     definitions: Vec::new(),
                     imports: Vec::new(),
                     exports: Vec::new(),

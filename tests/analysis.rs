@@ -419,10 +419,7 @@ fn completion_respects_type_context_and_ignores_strings_and_comments() {
             .collect::<Vec<_>>(),
         ["Number"]
     );
-    for source in [
-        "// val",
-        "def main () -> () = { var value = \"val\"; };",
-    ] {
+    for source in ["// val", "def main () -> () = { var value = \"val\"; };"] {
         let project = Project::new(&[("main.resin", source)]);
         let at = if source.contains('"') {
             source.rfind("val").unwrap() + 2
@@ -571,4 +568,142 @@ fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
         !project.analyze().diagnostics.is_empty(),
         "unit returns are not inferred from bodies"
     );
+}
+
+#[test]
+fn holes_preserve_later_locals_and_functions_without_producing_ir() {
+    for broken in [
+        "var broken = ;",
+        "var broken: ;",
+        "var broken = 1 + ;",
+        "unknown_name;",
+        "var broken = missing(1);",
+    ] {
+        let source = format!(
+            "def first() = {{ {broken} var point = {{ x = 1, y = 2 }}; point.; }}; def later(arg: int) -> int = {{ var result = arg; result }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert!(analysis.module().is_err(), "{source}");
+        assert!(!analysis.diagnostics.is_empty(), "{source}");
+        let items = analysis.completions(&path, source.find("point.").unwrap() + 6);
+        assert_eq!(
+            items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
+            ["x", "y"],
+            "{source}"
+        );
+        let hover = analysis
+            .hover(&path, source.rfind("result").unwrap())
+            .unwrap();
+        assert_eq!(hover.text, "result: int", "{source}");
+    }
+}
+
+#[test]
+fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
+    let source = "def main(point: { x: int }) = { var point = ; var alias = point; alias.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let path = project.path("main.resin");
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("alias").unwrap())
+            .unwrap()
+            .text,
+        "alias: ?"
+    );
+    assert!(
+        analysis
+            .completions(&path, source.find("alias.").unwrap() + 6)
+            .is_empty()
+    );
+    assert_eq!(
+        analysis
+            .definition(&path, source.rfind("point").unwrap())
+            .unwrap()
+            .span
+            .start,
+        source.find("var point").unwrap() + 4
+    );
+}
+
+#[test]
+fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
+    let source =
+        "import { \"lib.resin\" }; def main() = { var broken = ; var point = make(); point.; };";
+    let project = Project::new(&[
+        ("main.resin", source),
+        (
+            "lib.resin",
+            "export { make }; type Point = { x: float32 }; def broken() = { var hole = ; }; def make() -> Point = { Point { x = 1 } };",
+        ),
+    ]);
+    let analysis = project.analyze();
+    let items = analysis.completions(
+        &project.path("main.resin"),
+        source.find("point.").unwrap() + 6,
+    );
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].detail, "x: float32");
+    assert!(analysis.module().is_err());
+}
+
+#[test]
+fn recovered_ast_contains_expression_type_and_field_holes() {
+    let source = "def main() = { var value = ; var typed: ; var point = { x = 1 }; point.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let ast = resin::ast::print::format_source(
+        analysis
+            .recovered_file(&project.path("main.resin"))
+            .unwrap(),
+    );
+    assert!(ast.contains("(hole "), "{ast}");
+    assert!(ast.contains("(type-hole "), "{ast}");
+    assert!(ast.contains("(field-hole "), "{ast}");
+    assert!(analysis.program().is_err());
+}
+
+#[test]
+fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
+    for source in [
+        "export { main }; type Point = { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(\"{}\", value); };",
+        "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
+        "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
+    ] {
+        for end in 0..=source.len() {
+            let project = Project::new(&[("main.resin", &source[..end])]);
+            let analysis = project.analyze();
+            analysis.completions(&project.path("main.resin"), end);
+        }
+        for index in 0..source.len() {
+            let mut edited = source.to_owned();
+            edited.remove(index);
+            let project = Project::new(&[("main.resin", &edited)]);
+            project.analyze();
+        }
+    }
+}
+
+#[test]
+fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
+    for source in [
+        "def main() = { var value = ; };",
+        "def main() = { var value: ; };",
+        "def main(point: { x: int }) = { point.; };",
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let analysis = project.analyze();
+        let file = analysis
+            .recovered_file(&project.path("main.resin"))
+            .unwrap();
+        let error = resin::ir::generate(file).unwrap_err();
+        assert_eq!(
+            error.kind,
+            resin::ir::GenerateErrorKind::IncompleteSyntax,
+            "{source}: {error}"
+        );
+        assert!(error.span.start <= error.span.end && error.span.end <= source.len());
+    }
 }

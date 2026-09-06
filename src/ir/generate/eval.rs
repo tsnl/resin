@@ -48,6 +48,10 @@ impl Evaluator<'_> {
 
     pub(super) fn ty(&self, ty: &Type) -> Result<Ty, GenerateError> {
         match &ty.val {
+            TypeKind::Hole => Err(GenerateError {
+                span: ty.span,
+                kind: GenerateErrorKind::IncompleteSyntax,
+            }),
             TypeKind::Unit => Ok(Ty::Unit),
             TypeKind::Atom { name } => {
                 if let Some(builtin) = builtin_ty(&name.val) {

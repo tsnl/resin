@@ -80,15 +80,20 @@ runs, and exits once; a watch command can host the same session later.
 - Each open file is an analysis entry. Diagnostics from its dependencies are
   published at the actual source URI and aggregated across entries.
 - Multiple syntax errors; the first semantic error for each entry/import closure.
-  Types and reference origins come from the compiler. In incomplete regions,
-  syntax scopes provide partial completion/navigation without invented types.
+  Strict compiler diagnostics remain authoritative. A separate editor pass walks
+  AST expression/type holes and missing-field nodes, continuing through later
+  statements, functions, and imported buffers. It shares compiler type rules and
+  records unknown bindings as `?`; it never emits IR or treats unknown as unit.
+  Strict source loading and compilation still reject incomplete programs.
 - Navigation includes locals, parameters, nominal types, explicit exports,
   re-exports, standard-library names, and import strings.
 - Completion includes visible names, keywords, builtin types, and intrinsics,
   with identifier replacement ranges. Typing `.` offers fields from the receiver's
-  record type, including nominal records, pointers, and nested access. An isolated
-  snapshot repairs the unfinished field for type checking; earlier errors can
-  still prevent field suggestions. Automatic imports are not implemented.
+  record type, including nominal records, pointers, and nested access. Field
+  suggestions use the cached recovered AST and semantic snapshot without inserting
+  synthetic identifiers. Unrecoverable declarations, unresolved imports, and
+  unknown receiver types can still prevent suggestions. Automatic imports are
+  not implemented.
 - The client is asked to watch `**/*.resin` if it supports dynamic registration.
   A client without file notifications needs a server restart after external
   changes to closed dependencies.

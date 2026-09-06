@@ -129,6 +129,10 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
+        TermKind::Hole { children } => {
+            list_sp("hole", term.span, children.iter().map(sexp_term).collect())
+        }
+        TermKind::FieldHole { base } => list_sp("field-hole", term.span, vec![sexp_term(base)]),
         TermKind::Var { name } => symbol(name.val.as_ref()),
         TermKind::Num { value } => symbol(value.as_ref()),
         TermKind::String { value } => string(value.as_ref()),
@@ -186,6 +190,7 @@ fn sexp_term(term: &Term) -> SExp {
 
 fn sexp_typespec(ts: &Type) -> SExp {
     match &ts.val {
+        TypeKind::Hole => list_sp("type-hole", ts.span, vec![]),
         TypeKind::Unit => list_sp("unit-type", ts.span, vec![]),
         TypeKind::Atom { name } => symbol(name.val.as_ref()),
         TypeKind::App { head, arg } => list_sp(

@@ -42,7 +42,6 @@ pub struct Completion {
 
 /// An immutable analysis of one entry and its transitive dependencies.
 pub struct Analysis {
-    entry: PathBuf,
     pub(crate) documents: BTreeMap<PathBuf, Arc<Document>>,
     pub diagnostics: Vec<Diagnostic>,
     pub dependencies: BTreeSet<PathBuf>,
@@ -66,7 +65,6 @@ impl Analysis {
         parsed: &mut BTreeMap<PathBuf, Arc<Document>>,
     ) -> Self {
         let mut result = Self {
-            entry: entry.to_path_buf(),
             documents: BTreeMap::new(),
             diagnostics: Vec::new(),
             dependencies: BTreeSet::new(),
@@ -143,7 +141,35 @@ impl Analysis {
         } else if let Ok(module) = checked {
             result.module = Some(module);
         }
+        if result.module.is_none()
+            && let Ok(program) = ast::load_with(
+                entry,
+                &result.stdlib,
+                &source::RecoverySnapshot(&result.documents),
+            )
+        {
+            let recovered = ir::analyze_recovering(&program);
+            // Strict observations win wherever the compiler reached valid code.
+            for (location, ty) in recovered.types {
+                result.semantics.types.entry(location).or_insert(ty);
+            }
+            for (location, origin) in recovered.references {
+                result
+                    .semantics
+                    .references
+                    .entry(location)
+                    .or_insert(origin);
+            }
+            for (location, fields) in recovered.fields {
+                result.semantics.fields.entry(location).or_insert(fields);
+            }
+        }
         result
+    }
+
+    /// Editor AST, possibly containing holes. `program` and `module` stay strict.
+    pub fn recovered_file(&self, path: &Path) -> Option<&ast::SourceFile> {
+        self.documents.get(path).map(|d| &d.recovered_file)
     }
 
     pub fn program(&self) -> Result<&ast::Program, ast::SourceError> {
@@ -408,51 +434,12 @@ impl Analysis {
     fn field_completions(&self, path: &Path, replace: Span, offset: usize) -> Vec<Completion> {
         let document = &self.documents[path];
         let prefix = &document.text[replace.start..offset];
-        // A placeholder makes a bare dot parseable and lets the compiler observe
-        // the receiver type before it reports the unknown field. Only this
-        // private snapshot is repaired; diagnostics and editor text stay intact.
-        let placeholder = "resin_completion_field";
-        let mut sources = Sources {
-            overlays: self
-                .sources()
-                .map(|(p, text)| (p.to_path_buf(), text.to_owned()))
-                .collect(),
-        };
-        sources
-            .overlays
-            .get_mut(path)
-            .unwrap()
-            .replace_range(replace.start..replace.end, placeholder);
-        let mut closers = Vec::new();
-        syntax::unmatched(document.tree.root_node(), &mut closers);
-        if !closers.is_empty() && closers.len() <= 64 {
-            let text = sources.overlays.get_mut(path).unwrap();
-            text.extend(closers.into_iter().rev());
-            text.push(';');
-        }
-        let repaired = Self::new(&self.entry, &sources, &self.stdlib);
-        let location = SourceLocation {
-            path: path.to_path_buf(),
-            span: Span {
-                start: replace.start,
-                end: replace.start + placeholder.len(),
-            },
-        };
-        let fields = repaired.semantics.fields.get(&location).or_else(|| {
-            // Reading an uninitialized local stops checking before field access,
-            // but its declaration still provides an authoritative record type.
-            let dot = document.text[..replace.start].trim_end().len() - 1;
-            let receiver_end = document.text[..dot].trim_end().len();
-            let token = document.token(receiver_end.checked_sub(1)?)?;
-            if token.kind() != "lid" {
-                return None;
-            }
-            let receiver = SourceLocation {
-                path: path.to_path_buf(),
-                span: span(token),
-            };
-            let origin = repaired.semantics.references.get(&receiver)?;
-            repaired.semantics.fields.get(origin)
+        let dot = document.text[..replace.start].trim_end().len() - 1;
+        let fields = self.semantics.fields.iter().find_map(|(location, fields)| {
+            (location.path == path
+                && location.span.start >= dot + 1
+                && location.span.start <= replace.start)
+                .then_some(fields)
         });
         let mut items = fields
             .into_iter()

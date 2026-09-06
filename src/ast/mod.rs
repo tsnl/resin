@@ -25,17 +25,37 @@ pub type Type = Spanned<TypeKind>;
 
 #[derive(Debug, Clone)]
 pub enum TypeKind {
+    /// Missing or malformed type syntax; never an executable type.
+    Hole,
     Unit,
-    Atom { name: Ident },
-    App { head: Ident, arg: Box<Type> },
-    Func { from: Box<Type>, to: Box<Type> },
-    Record { fields: Vec<(Ident, Type)> },
+    Atom {
+        name: Ident,
+    },
+    App {
+        head: Ident,
+        arg: Box<Type>,
+    },
+    Func {
+        from: Box<Type>,
+        to: Box<Type>,
+    },
+    Record {
+        fields: Vec<(Ident, Type)>,
+    },
 }
 
 pub type Term = Spanned<TermKind>;
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    /// Unknown expression, retaining recognizable children for editor analysis.
+    Hole {
+        children: Vec<Term>,
+    },
+    /// A receiver followed by a dot with no field name.
+    FieldHole {
+        base: Box<Term>,
+    },
     Var {
         name: Ident,
     },

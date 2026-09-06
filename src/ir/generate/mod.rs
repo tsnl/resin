@@ -13,6 +13,8 @@ mod flow;
 mod functions;
 mod modules;
 mod places;
+mod recover;
+pub(crate) use recover::analyze as analyze_recovering;
 mod scope;
 mod terms;
 
@@ -165,6 +167,10 @@ impl Generator {
 
     fn gen_term_inner(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
         match &term.val {
+            TermKind::Hole { .. } | TermKind::FieldHole { .. } => Err(GenerateError {
+                span: term.span,
+                kind: GenerateErrorKind::IncompleteSyntax,
+            }),
             TermKind::Var { name } => self.gen_var(name),
             TermKind::Num { value } => {
                 let (pushed, ty) = self.evaluator().number(term.span, value, expected)?;

@@ -380,3 +380,38 @@ fn stdlib_override_and_rapid_versions_use_the_latest_snapshot() {
     );
     client.stop();
 }
+
+#[test]
+fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("holes.resin"));
+    let broken = "def main() = { var missing = ; var value = { count = 1 }; value.count; };";
+    client.open(&uri, broken);
+    client.diagnostics(&uri, Some(1), true);
+    let end = broken.rfind("count").unwrap() as u32 + 2;
+    let completion = client.request("textDocument/completion", at(&uri, 0, end));
+    assert_eq!(completion["items"][0]["label"], "count");
+    let fixed = broken.replace("missing = ;", "missing = 2;");
+    client.change(&uri, 2, &fixed);
+    client.diagnostics(&uri, Some(2), false);
+    let hover = client.request(
+        "textDocument/hover",
+        at(&uri, 0, fixed.find("missing").unwrap() as u32),
+    );
+    assert!(
+        hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("missing: int")
+    );
+    let unknown = "def main() = { var value = ; value.count; };";
+    client.change(&uri, 3, unknown);
+    client.diagnostics(&uri, Some(3), true);
+    let completion = client.request(
+        "textDocument/completion",
+        at(&uri, 0, unknown.rfind("count").unwrap() as u32 + 2),
+    );
+    assert!(completion["items"].as_array().unwrap().is_empty());
+    client.stop();
+}
