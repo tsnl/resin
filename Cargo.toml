@@ -5,6 +5,7 @@ edition = "2024"
 
 [workspace]
 members = [".", "resin-runtime", "tree-sitter-resin", "resin-lsp"]
+exclude = ["zed-resin"]
 resolver = "3"
 
 [lib]
