@@ -16,6 +16,7 @@ assembling them in the type's layout order.
 
 Functions are top-level, immutable definitions without captured environments. Signatures are
 available before bodies are checked, so mutually recursive functions need no forward declarations.
+An omitted result annotation means unit, not an inferred return type; non-unit results require `-> T`.
 Value bindings use `var name = value;`, and nominal types use `type Name = Type;`. Declarations
 such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be

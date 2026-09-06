@@ -48,12 +48,16 @@ def fibonacci(n: int) -> int = {
     if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
 };
 
-def main() -> () = {
+def main() = {
     print("fibonacci(10) = {0}\n", (fibonacci(10),));
 };
 ```
 
-Functions use `def` and are top-level, explicitly typed, immutable definitions. All signatures are in scope
+Functions use `def` and are top-level, immutable definitions. Parameter types are explicit;
+omitting the result annotation means `()`. Non-unit results require `-> T`: return types are
+not inferred, and a non-unit tail expression without an annotation is a type error.
+Foreign functions can also omit `-> ()` for C `void` results. Function types still spell out
+the result, such as `() -> ()`. All signatures are in scope
 before any body is checked, so mutual recursion needs no forward declarations. There are no
 lambdas, nested function definitions, or captured environments. Ordinary function values can
 be stored, passed, and returned on the host.

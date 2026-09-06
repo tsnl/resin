@@ -298,7 +298,10 @@ impl<'a> AstGen<'a> {
 
     fn gen_function(&self, node: Node) -> Stmt {
         let name = self.ident(node.child_by_field_name("name").unwrap());
-        let result = self.gen_type(node.child_by_field_name("result").unwrap());
+        let result = node
+            .child_by_field_name("result")
+            .map(|result| self.gen_type(result))
+            .unwrap_or_else(|| Spanned::new(TypeKind::Unit, name.span));
         let mut params = Vec::new();
         let mut cursor = node.walk();
         for p in node.children_by_field_name("params", &mut cursor) {

@@ -206,7 +206,7 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
     for source in [
         "def main() -> () = { var f = (n: int) => n; };",
         "def outer () -> int = { def inner () -> int = { 1 }; inner() };",
-        "def missing (n: int) = { n };",
+        "def missing (n) = { n };",
     ] {
         assert!(parse(source).is_err(), "{source}");
     }
@@ -217,6 +217,34 @@ fn record_type_members_are_parse_errors_instead_of_panics() {
     assert!(parse("def main() -> () = { var x = { T = int }; };").is_err());
     assert!(parse("def main() -> () = { var x = { a = 1, T = int }; };").is_err());
     compile("export { main }; def main() -> () = { var x = { type T = int; T (1) }; };");
+}
+
+#[test]
+fn omitted_function_results_are_unit_not_inferred() {
+    for source in [
+        "export { main }; def main() = {};",
+        "def discard() = { 42; }; def apply(f: () -> ()) = { f() }; def main() = { apply(discard) };",
+        "def even(n: int) = { if (n == 0) { () } else { odd(n - 1) } }; def odd(n: int) = { even(n - 1) };",
+    ] {
+        let explicit = source.replace(") =", ") -> () =");
+        assert_eq!(compile(source), compile(&explicit));
+    }
+    for source in [
+        "def answer() = { 42 };",
+        "def identity(n: int) = { n };",
+        "def answer() = { if (1 == 1) { 42 } else { 0 } };",
+        "type Unit = (); def nominal() = { Unit(()) };",
+    ] {
+        let error = ir::generate(&parse(source).unwrap()).unwrap_err();
+        assert!(
+            matches!(
+                error.kind,
+                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+            ),
+            "{source}\n{error}"
+        );
+    }
+    compile("def answer() -> int = { 42 };");
 }
 
 #[test]

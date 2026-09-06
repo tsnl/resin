@@ -408,7 +408,7 @@
       },
       "result": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "type",
@@ -470,7 +470,7 @@
       },
       "result": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "type",

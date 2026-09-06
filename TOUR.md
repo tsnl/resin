@@ -28,8 +28,9 @@ and executes a native program; there is no bytecode interpreter behind the CLI.
 
 A few language choices explain much of the implementation:
 
-- Functions use `def` and are top-level declarations with explicit signatures. Their names
-  are available before their bodies are checked, allowing mutual recursion.
+- Functions use `def` and are top-level declarations with typed parameters;
+  an omitted result type means unit. Their names are available before their
+  bodies are checked, allowing mutual recursion without return-type inference.
 - Every function is unary. An empty argument list is unit `()`; multiple
   arguments form a tuple.
 - Value binding statements use `var`, including uninitialized locals; nominal

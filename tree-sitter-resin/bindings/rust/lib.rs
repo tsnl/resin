@@ -128,7 +128,7 @@ mod tests {
         for source in [
             "def main() -> () = { var f = (n: int) => n; };",
             "def outer () -> int = { def inner () -> int = { 1 }; inner() };",
-            "def f (n: int) = { n };",
+            "def f (n) = { n };",
             "def f (n: int) -> int { n };",
             "def f (n: int): int = { n };",
             "def f (n: int) -> int = { n }",
@@ -288,6 +288,28 @@ mod tests {
             "def main() -> () = { var r = { var x = 1 }; };",
             "def main() -> () = { var r = { x = 1, var y = 2 }; };",
             "extern \"stdlib.h\" abs(n: int) -> int;",
+        ] {
+            assert!(parse(source).root_node().has_error(), "{source}");
+        }
+    }
+
+    #[test]
+    fn function_results_can_be_omitted_but_not_incomplete() {
+        for source in [
+            "def empty() = {}; def explicit() -> () = { () };",
+            "def greet(n: int) = { print(\"{0}\", (n,)); };",
+            "def f(n: int) = { n };",
+            "extern \"stdlib.h\" def free(p: Ptr<ubyte>);",
+            "def apply(f: () -> ()) = { f() };",
+        ] {
+            assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+        for source in [
+            "def empty() -> = {};",
+            "extern \"stdlib.h\" def free(p: Ptr<ubyte>) ->;",
+            "def empty() {};",
+            "def empty() = {}",
+            "type Callback = (int) ->;",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }

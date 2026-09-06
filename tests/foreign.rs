@@ -38,7 +38,7 @@ fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
         r#"export {{ main }};
 
         extern "{header}" def answer () -> int;
-        extern "{header}" def assign (out: Ptr<int>, value: int) -> ();
+        extern "{header}" def assign (out: Ptr<int>, value: int);
         extern "stdlib.h" def abs (n: int) -> int;
         def call (f: () -> int) -> int = {{ f() }};
         def main () -> int = {{

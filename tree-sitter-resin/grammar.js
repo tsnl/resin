@@ -100,7 +100,7 @@ export default grammar({
 
     foreign_function: ($) => seq(
       "extern", field("header", $.string), "def", field("name", $.lid),
-      "(", list("params", $.declare, ","), ")", "->", field("result", $.type), ";",
+      "(", list("params", $.declare, ","), ")", optional(seq("->", field("result", $.type))), ";",
     ),
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
 
@@ -108,7 +108,7 @@ export default grammar({
 
     function_definition: ($) => seq(
       "def", field("name", $.lid), "(", list("params", $.declare, ","), ")",
-      "->", field("result", $.type), "=", field("body", $.block_body), ";",
+      optional(seq("->", field("result", $.type))), "=", field("body", $.block_body), ";",
     ),
     block_body: ($) => seq("{", repeat(field("stmt", $.statement)), optional(field("tail", $.term)), "}"),
 

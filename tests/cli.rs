@@ -61,6 +61,21 @@ fn artifact(cwd: &Path, profile: &str) -> PathBuf {
 }
 
 #[test]
+fn omitted_unit_returns_run_and_reject_non_unit_tails() {
+    let output = cli(
+        r#"export { main }; def greet() = { print("hello\n", ()); }; def main() = { greet() };"#,
+        &[],
+    );
+    success(&output);
+    assert_eq!(output.stdout, b"hello\n");
+
+    let output = cli("export { main }; def main() = { 42 };", &[]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("TypeMismatch"));
+}
+
+#[test]
 fn default_output_builds_in_cwd_and_runs() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let sources = temp.path().join("sources");

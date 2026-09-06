@@ -37,6 +37,25 @@ fn first_statement(file: &SourceFile) -> &resin::ast::Stmt {
 }
 
 #[test]
+fn omitted_function_results_lower_to_unit() {
+    let source =
+        "def implicit() = {}; def explicit() -> () = {}; extern \"header.h\" def foreign();";
+    let file = parse(source);
+    for (index, statement) in file.stmts.iter().enumerate() {
+        let (name, result) = match &statement.val {
+            StmtKind::Function { name, result, .. }
+            | StmtKind::ForeignFunction { name, result, .. } => (name, result),
+            _ => panic!("expected function"),
+        };
+        assert!(matches!(result.val, resin::ast::TypeKind::Unit));
+        assert_eq!(
+            &source[result.span.start..result.span.end],
+            if index == 1 { "()" } else { name.val.as_ref() }
+        );
+    }
+}
+
+#[test]
 fn definition_keywords_preserve_statement_and_field_spans() {
     let source = r#"
         type Pair = { first: int, second: int };
