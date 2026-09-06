@@ -1,6 +1,11 @@
 export { main };
 
-import { "std/gpu.resin", "std/window.resin", "std/status.resin", "lib/triangle.resin" };
+import {
+    "std/gpu.resin",
+    "std/window.resin",
+    "std/status.resin",
+    "lib/triangle.resin",
+};
 
 def main() -> () = {
     var title = "Resin triangle";

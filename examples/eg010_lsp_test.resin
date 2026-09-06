@@ -1,0 +1,8 @@
+export { main };
+
+type Point2f = { x: float32, y: float32 };
+
+def main() = {
+    var p = Point2f { x = 42.0, y = 0.0 };
+    var a = p.x;
+};
