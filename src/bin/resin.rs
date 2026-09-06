@@ -6,7 +6,7 @@ use std::{
     process::Command,
 };
 
-use clap::{ValueEnum, builder::TypedValueParser};
+use clap::{CommandFactory, ValueEnum};
 
 #[path = "resin/format.rs"]
 mod format;
@@ -16,18 +16,26 @@ mod source;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(clap::Parser)]
-#[command(
-    name = "resin",
-    after_help = "Formatting:\n  resin fmt PATH...          Format files/directories in place\n  resin fmt --check PATH...  Check formatting without writing\n  resin fmt --help           Show formatting options"
-)]
+#[command(name = "resin")]
 struct Cli {
-    /// Source file and exported entry function (defaults to main).
-    #[arg(
-        value_name = "FILE[:ENTRY]",
-        value_parser = clap::builder::OsStringValueParser::new().try_map(|value| source::parse(&value))
-    )]
-    source: source::Source,
+    /// One FILE[:ENTRY] to run/compile, or files/directories to format with --format.
+    #[arg(required = true, value_name = "PATH")]
+    paths: Vec<PathBuf>,
 
+    /// Format files in place; search directories recursively for .resin files.
+    #[arg(short = 'f', long, conflicts_with_all = ["output", "destination", "cc", "stage", "glslc"])]
+    format: bool,
+
+    /// With --format, check without writing; exit 1 on differences or file/syntax errors.
+    #[arg(long, requires = "format")]
+    check: bool,
+
+    #[command(flatten)]
+    compile: CompileOptions,
+}
+
+#[derive(clap::Args)]
+struct CompileOptions {
     /// What to emit or execute.
     #[arg(long, value_enum, default_value_t = Output::Run)]
     output: Output,
@@ -72,14 +80,21 @@ enum Output {
 }
 
 fn main() {
-    // Preserve FILE[:ENTRY] invocation while reserving `fmt` as a command.
-    // A source literally named fmt can still be passed as ./fmt or after --.
-    let result = if std::env::args_os().nth(1).is_some_and(|arg| arg == "fmt") {
-        format::run(<format::Options as clap::Parser>::parse_from(
-            std::env::args_os().skip(1),
-        ))
+    let cli = <Cli as clap::Parser>::parse();
+    let result = if cli.format {
+        format::run(&cli.paths, cli.check)
     } else {
-        run(<Cli as clap::Parser>::parse())
+        let [path] = cli.paths.as_slice() else {
+            Cli::command()
+                .error(clap::error::ErrorKind::WrongNumberOfValues, "running or compiling requires exactly one FILE[:ENTRY]; use --format for multiple paths")
+                .exit();
+        };
+        let source = source::parse(path.as_os_str()).unwrap_or_else(|error| {
+            Cli::command()
+                .error(clap::error::ErrorKind::InvalidValue, error)
+                .exit()
+        });
+        run(cli.compile, source)
     };
     match result {
         Ok(code) => std::process::exit(code),
@@ -90,15 +105,15 @@ fn main() {
     }
 }
 
-fn run(cli: Cli) -> Result<i32> {
-    validate(&cli)?;
+fn run(cli: CompileOptions, input: source::Source) -> Result<i32> {
+    validate(&cli, &input)?;
     let mut compiler = Session::default();
-    let path = resin::analysis::normalize_path(&cli.source.path)?;
+    let path = resin::analysis::normalize_path(&input.path)?;
     let snapshot = compiler.analyze(&path)?;
     if cli.output == Output::Cst {
         let tree = snapshot
             .syntax_tree(&path)
-            .ok_or_else(|| format!("cannot read {}", cli.source.path.display()))?;
+            .ok_or_else(|| format!("cannot read {}", input.path.display()))?;
         return print(&cli, tree.root_node().to_sexp());
     }
     let file = snapshot.program()?;
@@ -110,15 +125,15 @@ fn run(cli: Cli) -> Result<i32> {
     let module = snapshot.module()?;
     match cli.output {
         Output::Ir => print(&cli, ir::format_module(module)),
-        Output::C | Output::Exe | Output::Run => host(&cli, module),
-        Output::Glsl | Output::Spirv => shader(&cli, module),
+        Output::C | Output::Exe | Output::Run => host(&cli, &input, module),
+        Output::Glsl | Output::Spirv => shader(&cli, &input, module),
         _ => unreachable!(),
     }
 }
 
-fn validate(cli: &Cli) -> Result<()> {
+fn validate(cli: &CompileOptions, input: &source::Source) -> Result<()> {
     if let Some(output) = &cli.destination {
-        protect_source(&cli.source.path, output)?;
+        protect_source(&input.path, output)?;
     }
     if matches!(cli.output, Output::Exe | Output::Spirv) && cli.destination.is_none() {
         return Err("binary output requires -o PATH".into());
@@ -133,35 +148,28 @@ fn protect_source(source: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
+fn host(cli: &CompileOptions, input: &source::Source, module: &ir::Module) -> Result<i32> {
     let shaders = toolchain::build_shaders(module, &compiler(&cli.glslc, "GLSLC", "glslc"))?;
-    let source = backend::c::emit_with_shaders(module, &cli.source.entry, &shaders)?;
+    let source = backend::c::emit_with_shaders(module, &input.entry, &shaders)?;
     if cli.output == Output::C {
         return print(cli, source);
     }
-    let mut name = cli
-        .source
+    let mut name = input
         .path
         .file_stem()
         .ok_or("source file needs a name")?
         .to_os_string();
-    if cli.source.entry != "main" {
-        name.push(format!("-{}", cli.source.entry));
+    if input.entry != "main" {
+        name.push(format!("-{}", input.entry));
     }
-    let output = host_destination(cli, &name)?;
+    let output = host_destination(cli, input, &name)?;
     let compiler = compiler(&cli.cc, "CC", toolchain::DEFAULT_C_COMPILER);
     let profile = if output.is_some() {
         toolchain::CProfile::Release
     } else {
         toolchain::CProfile::Debug
     };
-    let build = toolchain::build_c(
-        &cli.source.path,
-        &cli.source.entry,
-        &source,
-        &compiler,
-        profile,
-    )?;
+    let build = toolchain::build_c(&input.path, &input.entry, &source, &compiler, profile)?;
     let executable = build.executable();
     if let Some(output) = output {
         toolchain::copy_output(executable, &output)?;
@@ -171,7 +179,11 @@ fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
     }
 }
 
-fn host_destination(cli: &Cli, name: &std::ffi::OsStr) -> Result<Option<PathBuf>> {
+fn host_destination(
+    cli: &CompileOptions,
+    input: &source::Source,
+    name: &std::ffi::OsStr,
+) -> Result<Option<PathBuf>> {
     let Some(path) = &cli.destination else {
         return Ok(None);
     };
@@ -187,12 +199,12 @@ fn host_destination(cli: &Cli, name: &std::ffi::OsStr) -> Result<Option<PathBuf>
     } else {
         path.clone()
     };
-    protect_source(&cli.source.path, &output)?;
+    protect_source(&input.path, &output)?;
     Ok(Some(output))
 }
 
-fn shader(cli: &Cli, module: &ir::Module) -> Result<i32> {
-    let source = backend::glsl::emit(module, &cli.source.entry, cli.stage)?;
+fn shader(cli: &CompileOptions, input: &source::Source, module: &ir::Module) -> Result<i32> {
+    let source = backend::glsl::emit(module, &input.entry, cli.stage)?;
     if cli.output == Output::Glsl {
         return print(cli, source);
     }
@@ -209,7 +221,7 @@ fn compiler(option: &Option<OsString>, env: &str, fallback: &str) -> OsString {
         .unwrap_or_else(|| fallback.into())
 }
 
-fn print(cli: &Cli, text: String) -> Result<i32> {
+fn print(cli: &CompileOptions, text: String) -> Result<i32> {
     if let Some(output) = &cli.destination {
         toolchain::write_output(format!("{text}\n").as_bytes(), output)?;
     } else {

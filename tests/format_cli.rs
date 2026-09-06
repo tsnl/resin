@@ -6,9 +6,12 @@ use std::{
 };
 
 fn fmt(root: &Path, args: &[&str]) -> Output {
+    invoke(root, &[&["--format"], args].concat())
+}
+
+fn invoke(root: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(root)
-        .arg("fmt")
         .args(args)
         .output()
         .unwrap()
@@ -122,7 +125,7 @@ fn help_paths_and_legacy_invocation() {
     );
     let legacy = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(root)
-        .args(["--output", "check", "--", "fmt"])
+        .args(["fmt", "--output", "check"])
         .output()
         .unwrap();
     assert!(
@@ -130,6 +133,89 @@ fn help_paths_and_legacy_invocation() {
         "{}",
         String::from_utf8_lossy(&legacy.stderr)
     );
+}
+
+#[test]
+fn formatter_flag_aliases_work_before_and_after_paths() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let root = temp.path();
+    let raw = "def main()={};";
+    for args in [
+        vec!["--format", "first.resin", "second.resin"],
+        vec!["first.resin", "second.resin", "--format"],
+        vec!["-f", "first.resin", "second.resin"],
+        vec!["first.resin", "-f", "second.resin"],
+    ] {
+        for name in ["first.resin", "second.resin"] {
+            fs::write(root.join(name), raw).unwrap();
+        }
+        let result = invoke(root, &args);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        for name in ["first.resin", "second.resin"] {
+            assert_eq!(
+                fs::read_to_string(root.join(name)).unwrap(),
+                "def main() = {};\n"
+            );
+        }
+    }
+    fs::write(root.join("first.resin"), raw).unwrap();
+    let checked = invoke(root, &["--check", "first.resin", "-f"]);
+    assert_eq!(checked.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(root.join("first.resin")).unwrap(), raw);
+    assert!(!root.join("build").exists());
+}
+
+#[test]
+fn incompatible_modes_are_rejected_before_changing_files() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let root = temp.path();
+    let source = "def main()={};";
+    fs::write(root.join("source.resin"), source).unwrap();
+    for args in [
+        vec!["--check", "source.resin"],
+        vec!["source.resin", "second.resin"],
+        vec!["--format=true", "source.resin"],
+        vec!["-f", "source.resin", "--output", "run"],
+        vec!["-f", "source.resin", "--output", "check"],
+        vec!["-f", "source.resin", "-o", "destination"],
+        vec!["-f", "source.resin", "--out", "destination"],
+        vec!["-f", "source.resin", "--cc", "compiler"],
+        vec!["-f", "source.resin", "--stage", "compute"],
+        vec!["-f", "source.resin", "--glslc", "compiler"],
+    ] {
+        let result = invoke(root, &args);
+        assert_eq!(
+            result.status.code(),
+            Some(2),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("source.resin")).unwrap(),
+            source
+        );
+        assert!(!root.join("destination").exists());
+        assert!(!root.join("build").exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn format_mode_treats_colons_as_literal_filename_characters() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = temp.path().join("source.resin:1");
+    fs::write(&path, "def main()={};").unwrap();
+    let result = invoke(temp.path(), &["source.resin:1", "-f"]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), "def main() = {};\n");
 }
 
 #[cfg(unix)]

@@ -326,17 +326,22 @@ The CLI uses the same canonical formatter as `resin-lsp`:
 
 ```sh
 # Format every .resin file under examples/, including examples/lib/.
-nix-shell --run 'cargo run --quiet -- fmt examples'
+nix-shell --run 'cargo run --quiet -- --format examples'
 
 # CI/lint: list files needing formatting without modifying anything.
-nix-shell --run 'cargo run --quiet -- fmt --check examples'
+nix-shell --run 'cargo run --quiet -- --format --check examples'
 ```
 
-With an installed binary, use `resin fmt examples` and
-`resin fmt --check examples`. Both commands accept multiple files/directories.
+With an installed binary, use `resin --format examples` and
+`resin --format --check examples`. `-f` is the short form of `--format`, a boolean
+mode flag; `resin examples -f` also works. Formatting accepts multiple files/directories.
 Directory traversal selects `.resin` files and does not follow symlinks. Explicit
 file arguments are treated as Resin source regardless of extension. Use `--`
 before paths beginning with a dash.
+
+`--check` requires `--format`. Formatting cannot be combined with `--output`,
+`-o`/`--out`, or compiler/shader options. Running or compiling accepts exactly one
+`FILE[:ENTRY]`; formatter paths are literal filenames, including any colons.
 
 Normal mode writes changed files and prints their paths. Check mode prints paths
 that would change, returning 0 when all selected files are formatted and 1 on
@@ -349,7 +354,7 @@ lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.
 The [full formatting rules](resin-lsp/README.md#formatting) also apply to the CLI.
-CI checks the examples with `fmt --check` on Linux, macOS, and Windows.
+CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ## Printing
 

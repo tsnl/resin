@@ -6,36 +6,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(clap::Parser)]
-#[command(
-    name = "resin fmt",
-    bin_name = "resin fmt",
-    about = "Format Resin files with the canonical hard-tab style"
-)]
-pub(super) struct Options {
-    /// Report files needing formatting without modifying them; exit 1 on differences or errors.
-    #[arg(long)]
-    check: bool,
-
-    /// Files or directories; directories are searched recursively for .resin files.
-    #[arg(required = true, value_name = "PATH")]
-    paths: Vec<PathBuf>,
-}
-
-pub(super) fn run(options: Options) -> super::Result<i32> {
+pub(super) fn run(paths: &[PathBuf], check: bool) -> super::Result<i32> {
     let mut files = BTreeMap::new();
     let mut failed = false;
-    for path in &options.paths {
+    for path in paths {
         if let Err(error) = collect(path, &mut files, true) {
             eprintln!("{}: {error}", path.display());
             failed = true;
         }
     }
     for path in files.values() {
-        match format_file(path, options.check) {
+        match format_file(path, check) {
             Ok(true) => {
                 println!("{}", path.display());
-                failed |= options.check;
+                failed |= check;
             }
             Ok(false) => {}
             Err(error) => {
