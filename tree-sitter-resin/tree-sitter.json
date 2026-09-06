@@ -1,0 +1,42 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "resin",
+      "camelcase": "Resin",
+      "title": "Resin",
+      "scope": "source.resin",
+      "file-types": [
+        "resin"
+      ],
+      "injection-regex": "^resin$",
+      "class-name": "TreeSitterResin"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Resin grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Nikhil Idiculla",
+        "email": "nikhil.idiculla@gmail.com",
+        "url": "https://github.com/tsnl"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tsnl/resin",
+      "funding": ""
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "java": false,
+    "node": false,
+    "python": false,
+    "rust": true,
+    "swift": false,
+    "zig": false
+  }
+}

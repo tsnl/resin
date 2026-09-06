@@ -8,8 +8,7 @@ Currently supported on 64-bit Linux with native Vulkan. macOS/MoltenVK support i
 
 Enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler, CMake, GLFW's native
 build dependencies, `glslc`, Vulkan tools, validation layers, and RenderDoc.
-Initialize the parser submodule with
-`git submodule update --init`, then run `cargo test --workspace`.
+The parser is included in `tree-sitter-resin/`; run `cargo test --workspace` directly.
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
 
 Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW installation
@@ -20,7 +19,7 @@ or library search path is needed. Outside Nix, install Rustup, a C compiler, CMa
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
 After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
 `tree-sitter generate --js-runtime native`.
-Parser changes and generated files belong in the submodule as well as its parent gitlink.
+Commit grammar changes and generated files together in this repository.
 
 Backend tests compile generated C with a C11 compiler (`CC` or `cc`).
 Shader tests use `GLSLC` or `glslc` and skip if absent.

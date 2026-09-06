@@ -25,6 +25,5 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Install the matching parser CLI inside the shell with
   `cargo install --locked tree-sitter-cli --version 0.27.0`, then regenerate from
   `tree-sitter-resin/` with `tree-sitter generate --js-runtime native`.
-- We use `tree-sitter` to generate a parser. The repo `tree-sitter-resin` is checked out as a 
-  submodule in the root of the repo. Be careful to update both this and that repo if needed when you
-  make changes.
+- The Tree-sitter grammar, generated parser, and Rust bindings live in `tree-sitter-resin/`
+  as ordinary files in this repository. Commit grammar changes and regenerated files together.
