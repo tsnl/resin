@@ -5,6 +5,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 ## Development Practices
 
+- Target 64-bit Linux with native Vulkan. macOS/MoltenVK support is on hold.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` for builds, tests, parser generation, and

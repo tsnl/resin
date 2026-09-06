@@ -7,6 +7,9 @@
 //! or cancellation. GPU and child-object operations require external synchronization.
 //! Host borrows must not overlap GPU writes or deallocation.
 
+#[cfg(not(target_os = "linux"))]
+compile_error!("resin-runtime currently supports Linux only");
+
 mod allocator;
 mod gpu;
 mod host;

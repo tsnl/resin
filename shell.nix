@@ -1,8 +1,7 @@
 let
   pkgs = import <nixpkgs> { };
   lib = pkgs.lib;
-  linux = pkgs.stdenv.hostPlatform.isLinux;
-  windowLibraries = lib.optionals linux (with pkgs; [
+  windowLibraries = with pkgs; [
     libx11
     libxcursor
     libxi
@@ -10,20 +9,20 @@ let
     libxrandr
     libxkbcommon
     wayland
-  ]);
+  ];
 in
+assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux "Resin currently supports Linux only.";
 pkgs.mkShell {
   packages = with pkgs; [
     rustup
     shaderc
     vulkan-tools
     vulkan-validation-layers
-  ] ++ lib.optionals linux [ pkgs.renderdoc ];
+    renderdoc
+  ];
 
-  nativeBuildInputs = with pkgs; [ cmake pkg-config ] ++ lib.optionals linux [ wayland-scanner ];
+  nativeBuildInputs = with pkgs; [ cmake pkg-config wayland-scanner ];
   buildInputs = windowLibraries;
 
-  ${if pkgs.stdenv.hostPlatform.isDarwin then "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH"} =
-    lib.makeLibraryPath ([ pkgs.vulkan-loader ] ++ windowLibraries
-      ++ lib.optionals linux [ pkgs.stdenv.cc.cc.lib ]);
+  LD_LIBRARY_PATH = lib.makeLibraryPath ([ pkgs.vulkan-loader pkgs.stdenv.cc.cc.lib ] ++ windowLibraries);
 }

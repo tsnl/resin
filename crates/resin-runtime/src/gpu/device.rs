@@ -83,19 +83,6 @@ fn create_instance(
     extensions: &[*const c_char],
 ) -> Result<(Entry, Instance, Vec<vk::PhysicalDevice>), ResinStatus> {
     let entry = unsafe { Entry::load() }.map_err(|_| ResinStatus::VulkanUnavailable)?;
-    #[cfg(target_os = "macos")]
-    let portability_extensions = {
-        let mut names = extensions.to_vec();
-        if !names
-            .iter()
-            .any(|&name| unsafe { CStr::from_ptr(name) } == vk::KHR_PORTABILITY_ENUMERATION_NAME)
-        {
-            names.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr());
-        }
-        names
-    };
-    #[cfg(target_os = "macos")]
-    let extensions = portability_extensions.as_slice();
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"resin")
         .application_version(0)
@@ -105,8 +92,6 @@ fn create_instance(
     let instance_info = vk::InstanceCreateInfo::default()
         .application_info(&app_info)
         .enabled_extension_names(extensions);
-    #[cfg(target_os = "macos")]
-    let instance_info = instance_info.flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR);
     let instance = unsafe { entry.create_instance(&instance_info, None) }.map_err(vk_status)?;
     let physical_devices = unsafe { instance.enumerate_physical_devices() }.map_err(|err| {
         unsafe { instance.destroy_instance(None) };
@@ -442,10 +427,6 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     unsafe { instance.get_physical_device_properties2(physical, &mut props2) };
 
     let mut optional_extensions = Vec::new();
-    #[cfg(target_os = "macos")]
-    if has_extension(&extensions, vk::KHR_PORTABILITY_SUBSET_NAME) {
-        optional_extensions.push(vk::KHR_PORTABILITY_SUBSET_NAME.as_ptr());
-    }
     let memory_priority_enabled =
         has_memory_priority && memory_priority.memory_priority == vk::TRUE;
     if memory_priority_enabled {

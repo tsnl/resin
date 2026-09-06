@@ -31,10 +31,9 @@ fn display_available() -> bool {
         );
         return false;
     }
-    let available = cfg!(target_os = "macos")
-        || ["DISPLAY", "WAYLAND_DISPLAY"]
-            .iter()
-            .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
+    let available = ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
     assert!(
         available || !window_required(),
         "RESIN_REQUIRE_WINDOW needs a display (or Xvfb)"
@@ -62,7 +61,6 @@ fn succeeded(output: &Output) -> bool {
 }
 
 #[test]
-#[cfg(target_os = "linux")]
 fn missing_display_returns_status_and_clears_output() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let executable = temp.path().join("unavailable");
