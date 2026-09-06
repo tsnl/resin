@@ -59,40 +59,58 @@ mod tests {
     #[test]
     fn parses_unit_and_tuple_function_types() {
         for source in [
-            "F = () -> int; f () -> int = { 1 }; x = f();",
-            "F = (int, int) -> int; f (a: int, b: int) -> int = { a + b }; x = f(1, 2);",
+            "F = () -> int; f () -> int = { 1 }; main() -> () = { x = f(); };",
+            "F = (int, int) -> int; f (a: int, b: int) -> int = { a + b }; main() -> () = { x = f(1, 2); };",
             "F = ((int, int), ()) -> ();",
-            "Unit = (); x = Unit (());",
+            "Unit = (); main() -> () = { x = Unit (()); };",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
-        let tree = parse("x = (());");
-        let sexp = tree.root_node().to_sexp();
+        let tree = parse("main() -> () = { x = (()); };");
+        let root = tree.root_node();
+        let function = root.child_by_field_name("stmt").unwrap();
+        let sexp = function.child_by_field_name("body").unwrap().to_sexp();
         assert!(sexp.contains("unit_term"));
         assert!(!sexp.contains("unit_type"));
     }
 
     #[test]
     fn records_accept_only_value_members() {
-        assert!(parse("x = { T = int };").root_node().has_error());
-        assert!(parse("x = { a = 1, T = int };").root_node().has_error());
-        assert!(!parse("x = { a = 1, b = 2 };").root_node().has_error());
-        assert!(!parse("x = { T = int; T (1) };").root_node().has_error());
+        assert!(
+            parse("main() -> () = { x = { T = int }; };")
+                .root_node()
+                .has_error()
+        );
+        assert!(
+            parse("main() -> () = { x = { a = 1, T = int }; };")
+                .root_node()
+                .has_error()
+        );
+        assert!(
+            !parse("main() -> () = { x = { a = 1, b = 2 }; };")
+                .root_node()
+                .has_error()
+        );
+        assert!(
+            !parse("main() -> () = { x = { T = int; T (1) }; };")
+                .root_node()
+                .has_error()
+        );
     }
 
     #[test]
     fn parses_strings_and_single_element_tuples() {
         for source in [
-            r#"print("x = {0}\n", (n,));"#,
-            r#"x = "a\"b\\c\t\r\0";"#,
-            "x = \"héllo\";",
+            r#"main() -> () = { print("x = {0}\n", (n,)); };"#,
+            r#"main() -> () = { x = "a\"b\\c\t\r\0"; };"#,
+            "main() -> () = { x = \"héllo\"; };",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            r#"x = "\q";"#,
-            "x = \"unterminated;",
-            "x = \"line\nbreak\";",
+            r#"main() -> () = { x = "\q"; };"#,
+            "main() -> () = { x = \"unterminated; };",
+            "main() -> () = { x = \"line\nbreak\"; };",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -135,8 +153,8 @@ mod tests {
             "export {}; export {};",
             "import {}; import {};",
             "import {}; export {};",
-            "x = 1; export { x };",
-            "x = 1; import {};",
+            "x() -> int = { 1 }; export { x };",
+            "x() -> int = { 1 }; import {};",
             "export { \"f\" };",
             "import { foo };",
             "export { f f };",
@@ -152,22 +170,43 @@ mod tests {
     }
 
     #[test]
+    fn source_files_only_contain_declarations() {
+        for statement in [
+            "x = 1;",
+            "x: int;",
+            "x := 2;",
+            "f();",
+            "();",
+            "while (ready) {};",
+        ] {
+            assert!(parse(statement).root_node().has_error(), "{statement}");
+            let body = format!("main() -> () = {{ {statement} }};");
+            assert!(!parse(&body).root_node().has_error(), "{body}");
+        }
+        assert!(
+            !parse("export { main, demo }; Item = int; main() -> () = {}; demo() -> int = { 42 };")
+                .root_node()
+                .has_error()
+        );
+    }
+
+    #[test]
     fn keywords_are_reserved_but_intrinsics_remain_identifiers() {
         for keyword in [
             "export", "import", "extern", "type", "if", "else", "while", "bool", "sbyte", "short",
             "int", "long", "ubyte", "ushort", "uint", "ulong", "float32", "float64",
         ] {
             for source in [
-                format!("{keyword} = 1;"),
+                format!("main() -> () = {{ {keyword} = 1; }};"),
                 format!("{keyword} () -> () = {{}};"),
                 format!("f ({keyword}: int) -> () = {{}};"),
                 format!("R = {{ {keyword}: int }};"),
-                format!("r.{keyword};"),
+                format!("main() -> () = {{ r.{keyword}; }};"),
                 format!("export {{ {keyword} }};"),
             ] {
                 assert!(parse(&source).root_node().has_error(), "{source}");
             }
-            let source = format!("{keyword}_value = 1; _{keyword} = 2;");
+            let source = format!("main() -> () = {{ {keyword}_value = 1; _{keyword} = 2; }};");
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
         for name in ["Ptr", "Span"] {
@@ -178,11 +217,11 @@ mod tests {
             ] {
                 assert!(parse(&source).root_node().has_error(), "{source}");
             }
-            let source = format!("{name}Value = int; _{name} = int;");
+            let source = format!("{name}Value = int; main() -> () = {{ _{name} = int; }};");
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
         for source in [
-            "print = 1; shader = 2;",
+            "main() -> () = { print = 1; shader = 2; };",
             "print (n: int) -> int = { n }; shader () -> () = {};",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
@@ -194,10 +233,10 @@ mod tests {
         for source in [
             "P = Ptr<int>; Pp = Ptr<Ptr<int>>; S = Span<Ptr<int>>;",
             "P = Ptr<()>; S = Span<(int, int)>; R = Ptr<{ x: int }>; F = Ptr<(int) -> int>;",
-            "p = Ptr<int>(ulong(0)); x = ulong(p) > ulong(0); y = 8 >> 1; z = 1 < 2;",
-            "p = Ptr < Ptr < int > > (ulong (0));",
-            "fibonacci(n: int) -> int = { n }; x = fibonacci(2); y = fibonacci (3);",
-            "x = Name { value = 1 }; y = Converter [1, 2];",
+            "main() -> () = { p = Ptr<int>(ulong(0)); x = ulong(p) > ulong(0); y = 8 >> 1; z = 1 < 2; };",
+            "main() -> () = { p = Ptr < Ptr < int > > (ulong (0)); };",
+            "fibonacci(n: int) -> int = { n }; main() -> () = { x = fibonacci(2); y = fibonacci (3); };",
+            "main() -> () = { x = Name { value = 1 }; y = Converter [1, 2]; };",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }

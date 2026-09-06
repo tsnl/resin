@@ -68,7 +68,6 @@ impl Generator {
                     result: Box::new(result),
                 }),
                 initialization: Initialization::Initialized,
-                depth: 0,
             },
         )?;
         Ok(params)
@@ -85,16 +84,14 @@ impl Generator {
             unreachable!()
         };
         let result = self.module.functions[id.index()].result.clone();
-        let enclosing = self.scopes.clone();
-        self.functions
-            .push(FunctionBuilder::new(Some(name.val.clone())));
+        self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
         self.scopes.push();
         self.bind_params(params)?;
         self.gen_term(body, Some(&result))?;
         self.function().result(result);
         self.terminate(Terminator::Return);
-        self.module.functions[id.index()] = self.functions.pop().unwrap().finish();
-        self.scopes = enclosing;
+        self.module.functions[id.index()] = self.function.take().unwrap().finish();
+        self.scopes.pop();
         Ok(())
     }
 
@@ -132,7 +129,6 @@ impl Generator {
                     kind: ValueBindingKind::Local(local),
                     ty: Some(ty.clone()),
                     initialization: Initialization::Initialized,
-                    depth: self.current_depth(),
                 },
             )?;
         }

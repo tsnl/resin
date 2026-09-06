@@ -1,32 +1,41 @@
 ==================
 Empty while
 ==================
-while (1 == 0) {};
+main() -> () = { while (1 == 0) {}; };
 ---
 
 (source_file
-  (statement
-    (term
-      (assignment_term
-        (binary_term
-          (unary_term
-            (postfix_term
-              (primary_term
-                (while_term
-                  (term
-                    (assignment_term
-                      (binary_term
-                        (binary_term
-                          (unary_term
-                            (postfix_term
-                              (primary_term
-                                (number)))))
-                        (binary_term
-                          (unary_term
-                            (postfix_term
-                              (primary_term
-                                (number))))))))
-                  (block_body))))))))))
+  (function_definition
+    (lid)
+    (type
+      (infix_type
+        (unary_type
+          (primary_type
+            (closed_type
+              (unit_type))))))
+    (block_body
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (while_term
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (number)))))
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (number))))))))
+                      (block_body))))))))))))
 
 ==================
 Nested while and a statement-only body

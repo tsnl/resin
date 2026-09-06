@@ -1,11 +1,8 @@
 //! Lexical scopes with separate value and type namespaces.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use crate::ir::{Entry, FunctionId, GlobalId, LocalId, Ty, TypeId};
+use crate::ir::{FunctionId, LocalId, Ty, TypeId};
 
 #[derive(Clone)]
 pub(super) enum Symbol {
@@ -18,7 +15,6 @@ pub(super) struct ValueBinding {
     pub(super) kind: ValueBindingKind,
     pub(super) ty: Option<Ty>,
     pub(super) initialization: Initialization,
-    pub(super) depth: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,7 +26,6 @@ pub(super) enum Initialization {
 
 #[derive(Clone, Copy)]
 pub(super) enum ValueBindingKind {
-    Global(GlobalId),
     Local(LocalId),
     Function(FunctionId),
 }
@@ -94,21 +89,6 @@ impl Scopes {
             Symbol::Type(ty) => self.innermost().define_type(name, ty),
         };
         result.expect("import conflicts were checked");
-    }
-
-    pub(super) fn entries(&self) -> BTreeMap<Arc<str>, Entry> {
-        self.frames[0]
-            .values
-            .iter()
-            .map(|(name, value)| {
-                let entry = match value.kind {
-                    ValueBindingKind::Function(id) => Entry::Function(id),
-                    ValueBindingKind::Global(id) => Entry::Global(id),
-                    ValueBindingKind::Local(_) => unreachable!("module binding"),
-                };
-                (name.clone(), entry)
-            })
-            .collect()
     }
 
     pub(super) fn new() -> Self {
@@ -208,10 +188,9 @@ mod tests {
             .define_value(
                 "List".into(),
                 ValueBinding {
-                    kind: ValueBindingKind::Global(GlobalId::from_index(0)),
+                    kind: ValueBindingKind::Function(FunctionId::from_index(0)),
                     ty: None,
                     initialization: Initialization::Initialized,
-                    depth: 0,
                 },
             )
             .unwrap();
@@ -229,10 +208,9 @@ mod tests {
             .define_value(
                 "x".into(),
                 ValueBinding {
-                    kind: ValueBindingKind::Global(GlobalId::from_index(0)),
+                    kind: ValueBindingKind::Function(FunctionId::from_index(0)),
                     ty: None,
                     initialization: Initialization::Initialized,
-                    depth: 0,
                 },
             )
             .unwrap();
@@ -244,7 +222,6 @@ mod tests {
                     kind: ValueBindingKind::Local(LocalId::from_index(0)),
                     ty: None,
                     initialization: Initialization::Initialized,
-                    depth: 1,
                 },
             )
             .unwrap();
@@ -255,7 +232,7 @@ mod tests {
         scopes.pop();
         assert!(matches!(
             scopes.lookup_value("x").unwrap().kind,
-            ValueBindingKind::Global(_)
+            ValueBindingKind::Function(_)
         ));
     }
 }

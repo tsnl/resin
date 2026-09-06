@@ -57,6 +57,7 @@ impl CBuild {
 
 pub fn build_c(
     file: &Path,
+    entry: &str,
     source: &str,
     compiler: &OsStr,
     profile: CProfile,
@@ -64,6 +65,7 @@ pub fn build_c(
     let file = fs::canonicalize(file).map_err(io_error)?;
     let mut hash = DefaultHasher::new();
     file.hash(&mut hash);
+    entry.hash(&mut hash);
     let mut name = file
         .file_stem()
         .unwrap_or(OsStr::new("program"))

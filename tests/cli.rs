@@ -11,10 +11,23 @@ mod shaders;
 mod support;
 
 fn cli(source: &str, args: &[&str]) -> Output {
+    selected(source, None, args)
+}
+
+fn selected(source: &str, entry: Option<&str>, args: &[&str]) -> Output {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, source).unwrap();
+    let input = selector(&input, entry);
     invoke(temp.path(), &input, args)
+}
+
+fn selector(path: &Path, entry: Option<&str>) -> PathBuf {
+    let mut input = path.as_os_str().to_os_string();
+    if let Some(entry) = entry {
+        input.push(format!(":{entry}"));
+    }
+    input.into()
 }
 
 fn invoke(cwd: &Path, input: &Path, args: &[&str]) -> Output {
@@ -53,7 +66,11 @@ fn default_output_builds_in_cwd_and_runs() {
     let sources = temp.path().join("sources");
     fs::create_dir(&sources).unwrap();
     let input = sources.join("hello world.resin");
-    fs::write(&input, r#"main () -> int = { print("hello\n", ()); 7 };"#).unwrap();
+    fs::write(
+        &input,
+        r#"export { main }; main () -> int = { print("hello\n", ()); 7 };"#,
+    )
+    .unwrap();
     let output = invoke(temp.path(), &input, &[]);
     assert_eq!(output.status.code(), Some(7));
     assert_eq!(output.stdout, b"hello\n");
@@ -80,10 +97,11 @@ fn default_output_builds_in_cwd_and_runs() {
 #[test]
 fn strings_are_c_compatible_in_both_profiles() {
     let source = r#"
+        export { main };
         extern "string.h" strlen(text: Ptr<ubyte>) -> ulong;
-        path = "triangle.png";
-        text = "a\0b";
         main() -> int = {
+            path = "triangle.png";
+            text = "a\0b";
             if (strlen(Ptr<ubyte>(&path)) == ulong(12)
                 && strlen(Ptr<ubyte>(&text)) == ulong(1)) {
                 print("{0}:{1}", (path, text));
@@ -103,7 +121,11 @@ fn strings_are_c_compatible_in_both_profiles() {
 fn default_output_runs_then_copies_even_on_nonzero_exit() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    fs::write(&input, r#"main () -> int = { print("ran\n", ()); 7 };"#).unwrap();
+    fs::write(
+        &input,
+        r#"export { main }; main () -> int = { print("ran\n", ()); 7 };"#,
+    )
+    .unwrap();
     let output = invoke(temp.path(), &input, &["-o", "dist/custom program"]);
     assert_eq!(output.status.code(), Some(7));
     assert_eq!(output.stdout, b"ran\n");
@@ -124,7 +146,11 @@ fn output_directories_receive_the_source_name() {
         let temp = TempDir::new(&std::env::temp_dir()).unwrap();
         fs::create_dir(temp.path().join("existing")).unwrap();
         let input = temp.path().join("hello.resin");
-        fs::write(&input, r#"print("hello\n", ());"#).unwrap();
+        fs::write(
+            &input,
+            r#"export { main }; main() -> () = { print("hello\n", ()); };"#,
+        )
+        .unwrap();
         let output = invoke(temp.path(), &input, &["--output", "run", "-o", destination]);
         success(&output);
         assert_eq!(output.stdout, b"hello\n");
@@ -144,7 +170,11 @@ fn output_directories_receive_the_source_name() {
 fn explicit_exe_output_does_not_run() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    fs::write(&input, r#"main () -> int = { print("ran\n", ()); 7 };"#).unwrap();
+    fs::write(
+        &input,
+        r#"export { main }; main () -> int = { print("ran\n", ()); 7 };"#,
+    )
+    .unwrap();
     let output = invoke(temp.path(), &input, &["--output", "exe", "-o", "program"]);
     success(&output);
     assert!(output.stdout.is_empty());
@@ -161,7 +191,11 @@ fn sources_with_the_same_name_have_separate_caches() {
         let directory = temp.path().join(folder);
         fs::create_dir(&directory).unwrap();
         let input = directory.join("source.resin");
-        fs::write(&input, format!(r#"print("{folder}", ());"#)).unwrap();
+        fs::write(
+            &input,
+            format!(r#"export {{ main }}; main() -> () = {{ print("{folder}", ()); }};"#),
+        )
+        .unwrap();
         let output = invoke(temp.path(), &input, &[]);
         success(&output);
         assert_eq!(output.stdout, folder.as_bytes());
@@ -173,7 +207,11 @@ fn sources_with_the_same_name_have_separate_caches() {
 fn failed_copies_happen_after_execution() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    fs::write(&input, r#"print("ran\n", ());"#).unwrap();
+    fs::write(
+        &input,
+        r#"export { main }; main() -> () = { print("ran\n", ()); };"#,
+    )
+    .unwrap();
     fs::write(temp.path().join("not-a-directory"), "keep me").unwrap();
     let output = invoke(temp.path(), &input, &["-o", "not-a-directory/program"]);
     assert!(!output.status.success());
@@ -189,7 +227,7 @@ fn failed_copies_happen_after_execution() {
 fn directory_outputs_cannot_overwrite_the_source() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source");
-    let source = r#"print("must not run", ());"#;
+    let source = r#"export { main }; main() -> () = { print("must not run", ()); };"#;
     fs::write(&input, source).unwrap();
     let output = invoke(temp.path(), &input, &["-o", "."]);
     assert!(!output.status.success());
@@ -201,7 +239,7 @@ fn directory_outputs_cannot_overwrite_the_source() {
 
 #[test]
 fn explicit_ir_output_prints_verified_ir() {
-    let source = "main () -> int = { 7 };";
+    let source = "export { main }; main () -> int = { 7 };";
     let output = cli(source, &["--output", "ir"]);
     success(&output);
     assert_eq!(
@@ -212,7 +250,10 @@ fn explicit_ir_output_prints_verified_ir() {
 
 #[test]
 fn run_returns_the_program_exit_status() {
-    let output = cli("main () -> int = { 37 };", &["--output", "run"]);
+    let output = cli(
+        "export { main }; main () -> int = { 37 };",
+        &["--output", "run"],
+    );
     assert_eq!(
         output.status.code(),
         Some(37),
@@ -223,9 +264,122 @@ fn run_returns_the_program_exit_status() {
 
 #[test]
 fn run_prints_program_output() {
-    let output = cli(r#"n = 42; print("x = {0}\n", (n,));"#, &["--output", "run"]);
+    let output = cli(
+        r#"export { main }; main() -> () = { n = 42; print("x = {0}\n", (n,)); };"#,
+        &["--output", "run"],
+    );
     success(&output);
     assert_eq!(output.stdout, b"x = 42\n");
+}
+
+#[test]
+fn one_file_can_have_multiple_exported_entry_points() {
+    let source = r#"
+        export { main, demo, status };
+        main() -> () = { print("main", ()); };
+        demo() -> () = { print("demo", ()); };
+        status() -> int = { 23 };
+    "#;
+    for (entry, expected, code) in [
+        (None, &b"main"[..], 0),
+        (Some("main"), &b"main"[..], 0),
+        (Some("demo"), &b"demo"[..], 0),
+        (Some("status"), &b""[..], 23),
+    ] {
+        let output = selected(source, entry, &[]);
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected);
+    }
+    let output = selected(
+        "export { demo }; demo() -> int = { 42 };",
+        Some("demo"),
+        &[],
+    );
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() {
+    for (source, entry, expected) in [
+        ("main() -> () = {};", None, "not exported"),
+        (
+            "export { main }; main() -> () = {}; hidden() -> () = {};",
+            Some("hidden"),
+            "not exported",
+        ),
+        (
+            "export { main }; main() -> () = {};",
+            Some("missing"),
+            "not exported",
+        ),
+        (
+            "export { demo }; demo(n: int) -> int = { n };",
+            Some("demo"),
+            "type () -> int or () -> ()",
+        ),
+        (
+            "export { demo }; demo() -> uint = { uint(0) };",
+            Some("demo"),
+            "type () -> int or () -> ()",
+        ),
+        (
+            "export { rand }; extern \"stdlib.h\" rand() -> int;",
+            Some("rand"),
+            "Resin function",
+        ),
+    ] {
+        let output = selected(source, entry, &["--output", "c"]);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for stage in ["check", "ast", "ir"] {
+        success(&cli(
+            "Item = int; helper() -> int = { 1 };",
+            &["--output", stage],
+        ));
+    }
+}
+
+#[test]
+fn selectors_work_with_output_paths_and_source_protection() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let folder = temp.path().join("dir:with:colons");
+    fs::create_dir(&folder).unwrap();
+    let input = folder.join("hello world.resin");
+    let source = "export { demo }; demo() -> int = { 19 };";
+    fs::write(&input, source).unwrap();
+    let selected = selector(&input, Some("demo"));
+    let output = invoke(temp.path(), &selected, &["--output", "exe", "-o", "dist/"]);
+    success(&output);
+    let executable = temp.path().join("dist/hello world-demo");
+    assert_eq!(Command::new(executable).status().unwrap().code(), Some(19));
+    let output = invoke(
+        temp.path(),
+        &selected,
+        &["--output", "c", "-o", input.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("overwrite the source"));
+    assert_eq!(fs::read_to_string(input).unwrap(), source);
+}
+
+#[test]
+fn malformed_selectors_are_rejected() {
+    for entry in ["", "1", "demo-name", "two words"] {
+        let output = selected("export { main }; main() -> () = {};", Some(entry), &[]);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("FILE[:ENTRY]"));
+    }
 }
 
 #[test]
@@ -233,7 +387,7 @@ fn missing_runtime_preserves_existing_output() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
     let output = temp.path().join("program");
-    fs::write(&input, "main () -> int = { 0 };").unwrap();
+    fs::write(&input, "export { main }; main () -> int = { 0 };").unwrap();
     fs::write(&output, "keep me").unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
@@ -253,7 +407,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let executable = temp.path().join("program ; literal");
     let output = cli(
-        "main () -> int = { 19 };",
+        "export { main }; main () -> int = { 19 };",
         &["--output", "exe", "-o", executable.to_str().unwrap()],
     );
     success(&output);
@@ -264,7 +418,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
 fn bad_destinations_and_missing_compilers_preserve_files() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
-    let source = "main () -> int = { 0 };";
+    let source = "export { main }; main () -> int = { 0 };";
     fs::write(&input, source).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
@@ -304,15 +458,23 @@ fn invalid_options_and_source_report_errors() {
         vec!["--output", "spirv"],
         vec!["--stage", "nonsense"],
     ] {
-        assert!(!cli("main () -> int = { 0 };", &args).status.success());
+        assert!(
+            !cli("export { main }; main () -> int = { 0 };", &args)
+                .status
+                .success()
+        );
     }
     assert!(!cli("main = ;", &["--output", "c"]).status.success());
 }
 
 #[test]
 fn shader_output_selects_the_stage_and_entry() {
-    let source = "paint (i: uint) -> uint = { i };";
-    let output = cli(source, &["--output", "glsl", "--entry", "paint"]);
+    success(&cli(
+        "export { main }; main(i: uint) -> uint = { i };",
+        &["--output", "glsl"],
+    ));
+    let source = "export { paint }; paint (i: uint) -> uint = { i };";
+    let output = selected(source, Some("paint"), &["--output", "glsl"]);
     success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("#version 460\n"));
 
@@ -321,13 +483,12 @@ fn shader_output_selects_the_stage_and_entry() {
     };
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let spirv = temp.path().join("shader.spv");
-    let output = cli(
+    let output = selected(
         source,
+        Some("paint"),
         &[
             "--output",
             "spirv",
-            "--entry",
-            "paint",
             "--stage",
             "compute",
             "--glslc",
@@ -345,7 +506,7 @@ fn graphics_execution_is_not_a_cli_output_mode() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let png = temp.path().join("image.png");
     let output = cli(
-        "kernel (i: uint) -> uint = { i };",
+        "export { kernel }; kernel (i: uint) -> uint = { i };",
         &["--output", "compute", "-o", png.to_str().unwrap()],
     );
     assert!(!output.status.success());

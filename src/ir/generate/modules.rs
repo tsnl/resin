@@ -1,9 +1,12 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::ast::{Program, SourceError, SourceFile, Span, StmtKind};
-use crate::ir::Module;
+use crate::ir::{FunctionId, Module};
 
-use super::{GenerateError, GenerateErrorKind, Generator, Scopes, scope::Symbol};
+use super::{
+    GenerateError, GenerateErrorKind, Generator, Scopes,
+    scope::{Symbol, ValueBindingKind},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Origin {
@@ -63,6 +66,11 @@ pub fn generate_program(program: &Program) -> Result<Module, SourceError> {
                 .collect(),
         );
     }
+    if let Some(source) = program.modules.last() {
+        generator.module.entries = generator
+            .exported_functions(&source.file)
+            .map_err(|e| source.error(e.span, e))?;
+    }
     generator.finish().map_err(|e| {
         if let Some(source) = program.modules.last() {
             source.error(e.span, e)
@@ -102,6 +110,23 @@ fn bind(
 }
 
 impl Generator {
+    pub(super) fn exported_functions(
+        &self,
+        file: &SourceFile,
+    ) -> Result<BTreeMap<Arc<str>, FunctionId>, GenerateError> {
+        Ok(self
+            .exports(file)?
+            .into_iter()
+            .filter_map(|(name, symbol)| match symbol {
+                Symbol::Value(binding) => match binding.kind {
+                    ValueBindingKind::Function(id) => Some((name, id)),
+                    ValueBindingKind::Local(_) => unreachable!("module export"),
+                },
+                Symbol::Type(_) => None,
+            })
+            .collect())
+    }
+
     pub(super) fn exports(
         &self,
         file: &SourceFile,
@@ -122,9 +147,6 @@ impl Generator {
                     name: name.val.clone(),
                 },
             })?;
-            if let Symbol::Value(_) = &symbol {
-                self.resolve_value(name)?;
-            }
             exports.insert(name.val.clone(), symbol);
         }
         Ok(exports)

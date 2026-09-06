@@ -44,9 +44,9 @@ extern type ResinImage;
 extern type ResinPipeline;
 extern type ResinCommandBuffer;
 
-resin_memory_default = 0;
-resin_memory_gpu = 1;
-resin_memory_readback = 2;
+resin_memory_default() -> int = { 0 };
+resin_memory_gpu() -> int = { 1 };
+resin_memory_readback() -> int = { 2 };
 
 extern "resin_runtime.h" resin_gpu_device_count(count: Ptr<uint>) -> int;
 extern "resin_runtime.h" resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> int;

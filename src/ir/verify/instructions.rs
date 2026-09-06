@@ -49,16 +49,6 @@ pub(super) fn check_instr(
                 pointee: Box::new(local.ty.clone()),
             });
         }
-        Instr::GlobalAddress { global } => {
-            let global = module.globals.get(global.index()).ok_or_else(|| {
-                location.error(VerifyErrorKind::InvalidGlobal {
-                    global: global.index(),
-                })
-            })?;
-            stack.push(Ty::Pointer {
-                pointee: Box::new(global.ty.clone()),
-            });
-        }
         Instr::AccessStatic { index } => {
             let source = pop_one(stack, location)?;
             stack.push(project_static(&module.types, source, *index, location)?);

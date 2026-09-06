@@ -2,7 +2,7 @@
 
 use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
-use crate::ir::{Entry, Function, Instr, Module, Terminator, Ty, Value};
+use crate::ir::{Function, Instr, Module, Terminator, Ty, Value};
 
 mod names;
 
@@ -21,10 +21,7 @@ fn sexp_module(module: &Module) -> SExp {
     let names = Names::new(module);
     let mut items = Vec::new();
     for (name, entry) in &module.entries {
-        let target = match entry {
-            Entry::Function(id) => names.functions.get(id.index()),
-            Entry::Global(id) => names.globals.get(id.index()),
-        };
+        let target = names.functions.get(entry.index());
         items.push(list(
             "entry",
             vec![
@@ -40,15 +37,6 @@ fn sexp_module(module: &Module) -> SExp {
                 symbol(names.types[index].as_ref()),
                 def.body()
                     .map_or_else(|| symbol("incomplete"), |body| sexp_ty(&names, body)),
-            ],
-        ));
-    }
-    for (index, global) in module.globals.iter().enumerate() {
-        items.push(list(
-            "global",
-            vec![
-                symbol(names.globals[index].as_ref()),
-                sexp_ty(&names, &global.ty),
             ],
         ));
     }
@@ -108,10 +96,6 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::LocalAddress { local } => list(
             "local-addr",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
-        ),
-        Instr::GlobalAddress { global } => list(
-            "global-addr",
-            vec![symbol(names.globals[global.index()].as_ref())],
         ),
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
         Instr::AccessDynamic => symbol("access-dynamic"),

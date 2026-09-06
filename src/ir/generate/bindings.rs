@@ -8,29 +8,16 @@ use super::{GenerateError, GenerateErrorKind, Generator};
 
 impl Generator {
     pub(super) fn gen_define(&mut self, name: &Ident, init: &Term) -> Result<(), GenerateError> {
-        let placeholder = Ty::Unit;
-        let depth = self.current_depth();
-        let binding = if depth == 0 {
-            let global = self.alloc_global(placeholder, name.val.clone());
-            ValueBinding {
-                kind: ValueBindingKind::Global(global),
-                ty: None,
-                initialization: Initialization::Initializing,
-                depth,
-            }
-        } else {
-            let local = self.alloc_local(placeholder, Some(name.val.clone()));
-            ValueBinding {
-                kind: ValueBindingKind::Local(local),
-                ty: None,
-                initialization: Initialization::Initializing,
-                depth,
-            }
+        let local = self.alloc_local(Ty::Unit, Some(name.val.clone()));
+        let binding = ValueBinding {
+            kind: ValueBindingKind::Local(local),
+            ty: None,
+            initialization: Initialization::Initializing,
         };
         self.bind_value(name, binding.clone())?;
         self.emit_binding_address(&binding);
         let ty = self.gen_term(init, None)?;
-        self.complete_value(&name.val, ty)?;
+        self.complete_value(&name.val, ty);
         self.emit(Instr::Store);
         self.emit(Instr::Discard);
         Ok(())
@@ -51,23 +38,11 @@ impl Generator {
 
     pub(super) fn gen_declare(&mut self, name: &Ident, ann: &Type) -> Result<(), GenerateError> {
         let ty = self.evaluator().ty(ann)?;
-        let depth = self.current_depth();
-        let binding = if depth == 0 {
-            let global = self.alloc_global(ty.clone(), name.val.clone());
-            ValueBinding {
-                kind: ValueBindingKind::Global(global),
-                ty: Some(ty),
-                initialization: Initialization::Uninitialized,
-                depth,
-            }
-        } else {
-            let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
-            ValueBinding {
-                kind: ValueBindingKind::Local(local),
-                ty: Some(ty),
-                initialization: Initialization::Uninitialized,
-                depth,
-            }
+        let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
+        let binding = ValueBinding {
+            kind: ValueBindingKind::Local(local),
+            ty: Some(ty),
+            initialization: Initialization::Uninitialized,
         };
         self.bind_value(name, binding)
     }
@@ -86,7 +61,6 @@ impl Generator {
 
     pub(super) fn emit_binding_address(&mut self, binding: &ValueBinding) {
         match binding.kind {
-            ValueBindingKind::Global(global) => self.emit(Instr::GlobalAddress { global }),
             ValueBindingKind::Local(local) => self.emit(Instr::LocalAddress { local }),
             ValueBindingKind::Function(_) => unreachable!("functions are immutable values"),
         }
@@ -111,9 +85,7 @@ impl Generator {
                     name: name.val.clone(),
                 },
             })?;
-        if binding.initialization == Initialization::Initializing
-            && binding.depth == self.current_depth()
-        {
+        if binding.initialization == Initialization::Initializing {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::EagerRecursion {
@@ -121,10 +93,7 @@ impl Generator {
                 },
             });
         }
-        if binding.initialization != Initialization::Initialized
-            && read
-            && binding.depth == self.current_depth()
-        {
+        if binding.initialization != Initialization::Initialized && read {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::UninitializedValue {
@@ -170,25 +139,21 @@ impl Generator {
             })
     }
 
-    fn complete_value(&mut self, name: &Arc<str>, ty: Ty) -> Result<(), GenerateError> {
-        let (kind, depth) = {
+    fn complete_value(&mut self, name: &Arc<str>, ty: Ty) {
+        let kind = {
             let binding = self.scopes.lookup_value_mut(name).expect("defined binding");
             binding.ty = Some(ty.clone());
             binding.initialization = Initialization::Initialized;
-            (binding.kind, binding.depth)
+            binding.kind
         };
         match kind {
-            ValueBindingKind::Global(global) => {
-                self.module.globals[global.index()].ty = ty;
-            }
             ValueBindingKind::Local(local) => {
-                self.functions[depth].set_local_type(local, ty);
+                self.function().set_local_type(local, ty);
             }
             ValueBindingKind::Function(_) => {
                 unreachable!("cannot define a recursive-name binding")
             }
         }
-        Ok(())
     }
 
     pub(super) fn binding_ty(

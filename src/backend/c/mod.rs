@@ -25,28 +25,18 @@ pub struct Shader {
     pub words: Vec<u32>,
 }
 
-/// Emit a C11 executable. Function zero initializes the module; optional main is () -> int or ().
-pub fn emit(module: &Module) -> Result<String, Error> {
-    emit_with_shaders(module, &[])
+/// Emit a C11 executable calling an exported () -> int or () -> () function.
+pub fn emit(module: &Module, entry: &str) -> Result<String, Error> {
+    emit_with_shaders(module, entry, &[])
 }
 
-pub fn emit_with_shaders(module: &Module, shaders: &[Shader]) -> Result<String, Error> {
+pub fn emit_with_shaders(
+    module: &Module,
+    entry: &str,
+    shaders: &[Shader],
+) -> Result<String, Error> {
     let analysis = ir::verify::analyze(module)?;
-    let init = module
-        .functions
-        .first()
-        .ok_or_else(|| Error("missing module initializer".into()))?;
-    if init.ty()
-        != Some(Ty::Function {
-            param: Box::new(Ty::Unit),
-            result: Box::new(Ty::Unit),
-        })
-        || init.foreign.is_some()
-    {
-        return Err(Error(
-            "module initializer must be a () -> () function".into(),
-        ));
-    }
+    let entry = entry::emit(module, entry)?;
     let types = Types::collect(module, shaders, &analysis);
     let mut out =
         "#include <resin_runtime.h>\n#include <stddef.h>\n#include <stdlib.h>\n#include <math.h>\n"
@@ -71,9 +61,6 @@ pub fn emit_with_shaders(module: &Module, shaders: &[Shader]) -> Result<String, 
         }
         out.push_str("};\n");
     }
-    for (index, global) in module.globals.iter().enumerate() {
-        writeln!(out, "static {} r_g{index};", types.name(&global.ty)).unwrap();
-    }
     for (index, function) in module.functions.iter().enumerate() {
         writeln!(
             out,
@@ -86,11 +73,8 @@ pub fn emit_with_shaders(module: &Module, shaders: &[Shader]) -> Result<String, 
     for (index, flow) in analysis.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }
-    out.push_str("int main(void) {\n  atexit(resin_cleanup);\n  r_fn0(0);\n");
-    for index in 0..module.globals.len() {
-        writeln!(out, "  (void)&r_g{index};").unwrap();
-    }
-    out.push_str(&entry::emit(&types)?);
+    out.push_str("int main(void) {\n  atexit(resin_cleanup);\n");
+    out.push_str(&entry);
     out.push_str("}\n");
     Ok(out)
 }

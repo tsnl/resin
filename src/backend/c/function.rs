@@ -129,7 +129,6 @@ fn instruction(
         }
         Instr::Push { value } => literal(types, result.unwrap(), value),
         Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
-        Instr::GlobalAddress { global } => format!("&r_g{}", global.index()),
         Instr::Load => format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone())),
         Instr::Store => {
             writeln!(

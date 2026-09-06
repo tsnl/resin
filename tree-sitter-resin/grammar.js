@@ -78,7 +78,6 @@ export default grammar({
   },
 
   conflicts: ($) => [
-    [$.function_definition, $.primary_term],
     [$.primary_term, $.infix_type],
     [$.unit_term, $.unit_type],
   ],
@@ -92,7 +91,7 @@ export default grammar({
       optional(field("exports", $.export_clause)),
       optional(field("imports", $.import_clause)),
       repeat(field("stmt", choice(
-        $.function_definition, $.foreign_function, $.foreign_type, $.statement,
+        $.function_definition, $.foreign_function, $.foreign_type, $.type_definition,
       ))),
     ),
 
@@ -104,6 +103,8 @@ export default grammar({
       "(", list("params", $.declare, ","), ")", "->", field("result", $.type), ";",
     ),
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
+
+    type_definition: ($) => seq(field("definition", $.type_define), ";"),
 
     function_definition: ($) => seq(
       field("name", $.lid), "(", list("params", $.declare, ","), ")",

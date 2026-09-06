@@ -26,9 +26,6 @@ impl<'a> Types<'a> {
                 definition: TypeId::from_index(index),
             });
         }
-        for global in &module.globals {
-            types.intern(&global.ty);
-        }
         for (function, flow) in module.functions.iter().zip(analysis) {
             types.intern(&function.ty().unwrap());
             for local in &function.locals {

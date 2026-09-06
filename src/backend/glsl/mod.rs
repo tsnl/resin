@@ -47,9 +47,9 @@ impl Stage {
 }
 
 pub fn emit(module: &Module, entry: &str, stage: Stage) -> Result<String, Error> {
-    let Some(ir::Entry::Function(function)) = module.entries.get(entry) else {
+    let Some(function) = module.entries.get(entry) else {
         return Err(Error(format!(
-            "expected a visible shader function named {entry:?}"
+            "expected an exported shader function named {entry:?}"
         )));
     };
     emit_function(module, *function, stage)

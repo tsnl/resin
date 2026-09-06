@@ -20,7 +20,7 @@ fn compile(src: &str) -> ir::Module {
 #[test]
 fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
     let module = compile(
-        "f () -> int = { 1 }; add (a: int, b: int) -> int = { a + b }; pair = (1, 2); x = f(); y = add(pair); z = add(3, 4);",
+        "export { main }; f () -> int = { 1 }; add (a: int, b: int) -> int = { a + b }; main() -> () = { pair = (1, 2); x = f(); y = add(pair); z = add(3, 4); };",
     );
     let f = module
         .functions
@@ -37,7 +37,7 @@ fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
         add.locals[add.param.index()].ty,
         Ty::parameter(&[Ty::Int32, Ty::Int32])
     );
-    let instructions = &module.functions[0].blocks[0].instrs;
+    let instructions = &module.functions[module.entries["main"].index()].blocks[0].instrs;
     assert_eq!(
         instructions
             .iter()
@@ -55,21 +55,27 @@ fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
 #[test]
 fn function_types_accept_unit_tuples_and_higher_order_calls() {
     compile("P = Ptr<()>; S = Span<(int, int)>; f (p: P) -> P = { p };");
-    compile("F = () -> int; one () -> int = { 1 }; f = F (one); x = f();");
     compile(
-        "Add = (int, int) -> int; add (a: int, b: int) -> int = { a + b }; f = Add (add); p = (1, 2); x = f(p);",
+        "export { main }; F = () -> int; one () -> int = { 1 }; main() -> () = { f = F (one); x = f(); };",
     );
     compile(
-        "apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; add (a: int, b: int) -> int = { a + b }; x = apply(add, (1, 2));",
+        "export { main }; Add = (int, int) -> int; add (a: int, b: int) -> int = { a + b }; main() -> () = { f = Add (add); p = (1, 2); x = f(p); };",
     );
-    compile("identity (p: (int, int)) -> (int, int) = { p }; x = identity(1, 2);");
-    compile("Unit = (); x = Unit (()); f (u: Unit) -> () = { () }; y = f(x);");
+    compile(
+        "export { main }; apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; add (a: int, b: int) -> int = { a + b }; main() -> () = { x = apply(add, (1, 2)); };",
+    );
+    compile(
+        "export { main }; identity (p: (int, int)) -> (int, int) = { p }; main() -> () = { x = identity(1, 2); };",
+    );
+    compile(
+        "export { main }; Unit = (); f (u: Unit) -> () = { () }; main() -> () = { x = Unit (()); y = f(x); };",
+    );
 }
 
 #[test]
 fn type_formers_take_types_between_angle_brackets() {
     let m = compile(
-        "Pointer = Ptr<Ptr<int>>; View = Span<{ value: int, next: Pointer }>; Callback = Ptr<(int) -> int>; UnitPointer = Ptr<()>; p = Ptr<int>(ulong(0));",
+        "export { main }; Pointer = Ptr<Ptr<int>>; View = Span<{ value: int, next: Pointer }>; Callback = Ptr<(int) -> int>; UnitPointer = Ptr<()>; main() -> () = { p = Ptr<int>(ulong(0)); };",
     );
     assert_eq!(
         m.types[0].body(),
@@ -80,7 +86,7 @@ fn type_formers_take_types_between_angle_brackets() {
         })
     );
     compile(
-        "f(x: int) -> int = { x }; a = f(1); b = f (2); Record = { value: int }; r = Record { value = 3 };",
+        "export { main }; f(x: int) -> int = { x }; Record = { value: int }; main() -> () = { a = f(1); b = f (2); r = Record { value = 3 }; };",
     );
     for source in [
         "P = Ptr(int);",
@@ -96,9 +102,9 @@ fn type_formers_take_types_between_angle_brackets() {
 #[test]
 fn unary_typechecking_rejects_wrong_argument_shapes() {
     for src in [
-        "f () -> int = { 1 }; x = f(1);",
-        "f (a: int, b: int) -> int = { a }; x = f(1);",
-        "f (a: int) -> int = { a }; x = f(1, 2);",
+        "export { main }; f () -> int = { 1 }; main() -> () = { x = f(1); };",
+        "export { main }; f (a: int, b: int) -> int = { a }; main() -> () = { x = f(1); };",
+        "export { main }; f (a: int) -> int = { a }; main() -> () = { x = f(1, 2); };",
     ] {
         assert!(
             matches!(
@@ -113,13 +119,13 @@ fn unary_typechecking_rejects_wrong_argument_shapes() {
 #[test]
 fn nominal_conversion_requires_an_explicit_ascription() {
     for src in [
-        "Meters = int; f (m: Meters) -> int = { int (m) }; x = 1; y = f(x);",
-        "Meters = int; f (m: Meters) -> int = { int (m) }; y = f(1);",
-        "Meters = int; f (x: int) -> int = { x }; m = Meters (1); y = f(m);",
-        "Meters = int; m = Meters (1); n = 2; m := n;",
-        "Meters = int; m = Meters (1); n = 2; n := m;",
-        "Meters = int; R = { value: Meters }; x = R { value = 1 };",
-        "Meters = int; f (m: Meters, x: int) -> int = { x }; y = f(1, 2);",
+        "export { main }; Meters = int; f (m: Meters) -> int = { int (m) }; main() -> () = { x = 1; y = f(x); };",
+        "export { main }; Meters = int; f (m: Meters) -> int = { int (m) }; main() -> () = { y = f(1); };",
+        "export { main }; Meters = int; f (x: int) -> int = { x }; main() -> () = { m = Meters (1); y = f(m); };",
+        "export { main }; Meters = int; main() -> () = { m = Meters (1); n = 2; m := n; };",
+        "export { main }; Meters = int; main() -> () = { m = Meters (1); n = 2; n := m; };",
+        "export { main }; Meters = int; R = { value: Meters }; main() -> () = { x = R { value = 1 }; };",
+        "export { main }; Meters = int; f (m: Meters, x: int) -> int = { x }; main() -> () = { y = f(1, 2); };",
     ] {
         assert!(
             matches!(
@@ -130,10 +136,14 @@ fn nominal_conversion_requires_an_explicit_ascription() {
         );
     }
     compile(
-        "Meters = int; f (m: Meters) -> int = { int (m) }; x = 1; y = f(Meters (x)); m = Meters (1); m := Meters (x); x := int (m);",
+        "export { main }; Meters = int; f (m: Meters) -> int = { int (m) }; main() -> () = { x = 1; y = f(Meters (x)); m = Meters (1); m := Meters (x); x := int (m); };",
     );
-    compile("Meters = int; R = { value: Meters }; x = R { value = Meters (1) };");
-    compile("Meters = int; Distance = Meters; x = Distance (Meters (1)); y = Meters (x);");
+    compile(
+        "export { main }; Meters = int; R = { value: Meters }; main() -> () = { x = R { value = Meters (1) }; };",
+    );
+    compile(
+        "export { main }; Meters = int; Distance = Meters; main() -> () = { x = Distance (Meters (1)); y = Meters (x); };",
+    );
 }
 
 #[test]
@@ -176,14 +186,17 @@ fn recursion_uses_immutable_function_references() {
     );
     for function in &module.functions {
         assert!(
-            !function
+            function
                 .blocks
                 .iter()
                 .flat_map(|b| &b.instrs)
-                .any(|i| matches!(i, Instr::GlobalAddress { .. }))
+                .any(|i| matches!(i, Instr::Function { .. }))
         );
     }
-    let error = ir::generate(&parse("f () -> int = { 1 }; f := f;").unwrap()).unwrap_err();
+    let error = ir::generate(
+        &parse("export { main }; f () -> int = { 1 }; main() -> () = { f := f; };").unwrap(),
+    )
+    .unwrap_err();
     assert_eq!(error.kind, GenerateErrorKind::NotAPlace);
 }
 
@@ -200,20 +213,21 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
 
 #[test]
 fn record_type_members_are_parse_errors_instead_of_panics() {
-    assert!(parse("x = { T = int };").is_err());
-    assert!(parse("x = { a = 1, T = int };").is_err());
-    compile("x = { T = int; T (1) };");
+    assert!(parse("main() -> () = { x = { T = int }; };").is_err());
+    assert!(parse("main() -> () = { x = { a = 1, T = int }; };").is_err());
+    compile("export { main }; main() -> () = { x = { T = int; T (1) }; };");
 }
 
 #[test]
 fn signed_literals_respect_context_and_the_minimum_integer() {
     let module = compile(
-        "x = -2147483648; y = long (-1); z = -0x80000000; w = long (1 + 2); hex = -0xdead;",
+        "export { main }; main() -> () = { x = -2147483648; y = long (-1); z = -0x80000000; w = long (1 + 2); hex = -0xdead; };",
     );
     assert_eq!(
-        module
-            .globals
+        module.functions[0]
+            .locals
             .iter()
+            .skip(1)
             .map(|g| g.ty.clone())
             .collect::<Vec<_>>(),
         [Ty::Int32, Ty::Int64, Ty::Int32, Ty::Int64, Ty::Int32]
@@ -277,7 +291,7 @@ fn uninitialized_reads_are_rejected_on_all_paths() {
         "f () -> int = { x: int; x };",
         "f (c: int) -> int = { x: int; if (c == 0) { x := 1 } else { 0 }; x };",
         "f (c: int) -> int = { x: int; (c == 0) && ((x := 1) == 1); x };",
-        "x: int; f () -> int = { x := 1 }; y = x;",
+        "export { main }; main() -> () = { x: int; y = x; };",
         "f () -> int = { r: { x: int }; r.x };",
         "f () -> int = { r: { x: int }; r.x := 1; r.x };",
     ] {

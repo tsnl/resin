@@ -4,7 +4,6 @@ use crate::ir::{Function, Module};
 
 pub(super) struct Names {
     pub(super) types: Vec<Arc<str>>,
-    pub(super) globals: Vec<Arc<str>>,
     pub(super) functions: Vec<Arc<str>>,
 }
 
@@ -23,14 +22,6 @@ impl Names {
                     .map(|def| Some(def.name.clone()))
                     .collect(),
                 "type",
-            ),
-            globals: uniquify(
-                module
-                    .globals
-                    .iter()
-                    .map(|global| Some(global.name.clone()))
-                    .collect(),
-                "g",
             ),
             functions: uniquify(
                 module

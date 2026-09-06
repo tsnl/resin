@@ -8,7 +8,6 @@ use super::Ty;
 
 define_id! {
     pub struct LocalId(usize);
-    pub struct GlobalId(usize);
     pub struct FunctionId(usize);
 }
 
@@ -36,14 +35,7 @@ pub enum Value {
 /// A storage root plus type-directed child indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StaticAddressValue {
-    Local {
-        local: LocalId,
-        path: Vec<usize>,
-    },
-    Global {
-        global: GlobalId,
-        path: Vec<usize>,
-    },
+    Local { local: LocalId, path: Vec<usize> },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -28,7 +28,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     fs::write(
         &project.input,
         format!(
-            "extern \"{}\" value () -> int; print(\"{{0}}\", (value(),));",
+            "export {{ main }}; extern \"{}\" value () -> int; main() -> () = {{ print(\"{{0}}\", (value(),)); }};",
             header.display()
         ),
     )
@@ -44,7 +44,11 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert_eq!(project.calls(), 3);
-    fs::write(&project.input, "print(\"no header\", ());").unwrap();
+    fs::write(
+        &project.input,
+        "export { main }; main() -> () = { print(\"no header\", ()); };",
+    )
+    .unwrap();
     printed(&project.run(), b"no header");
     printed(&project.run(), b"no header");
     assert_eq!(project.calls(), 4);
@@ -69,12 +73,15 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     fs::write(
         &project.input,
         r#"
+        export { main };
         import { "helper.resin" };
         kernel (i: uint) -> uint = { pixel(i) };
-        a = shader(kernel, "compute");
-        b = shader(kernel, "compute");
-        print("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),));
-    "#,
+        main() -> () = {
+            a = shader(kernel, "compute");
+            b = shader(kernel, "compute");
+            print("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),));
+        };
+        "#,
     )
     .unwrap();
     let run = || {
@@ -123,7 +130,11 @@ impl Project {
         let temp = TempDir::new(&std::env::temp_dir()).unwrap();
         let input = temp.path().join("main.resin");
         let compiler = temp.path().join("compiler");
-        fs::write(&input, r#"print("first", ());"#).unwrap();
+        fs::write(
+            &input,
+            r#"export { main }; main() -> () = { print("first", ()); };"#,
+        )
+        .unwrap();
         fs::write(&compiler, WRAPPER).unwrap();
         fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
         Self {
@@ -195,9 +206,53 @@ fn unchanged_programs_reuse_the_executable_and_still_run() {
         fs::metadata(&executable).unwrap().modified().unwrap(),
         modified
     );
-    fs::write(&project.input, "// comment only\nprint(\"first\", ());").unwrap();
+    fs::write(
+        &project.input,
+        "export { main };\n\n// comment only\n\nmain() -> () = {\n    print(\"first\", ());\n};",
+    )
+    .unwrap();
     printed(&project.run(), b"first");
     assert_eq!(project.calls(), 1);
+}
+
+#[test]
+fn entry_points_have_separate_reusable_artifacts() {
+    let mut project = Project::new();
+    fs::write(
+        &project.input,
+        r#"
+        export { main, second };
+        main() -> () = { print("first", ()); };
+        second() -> () = { print("second", ()); };
+    "#,
+    )
+    .unwrap();
+    let original = project.input.clone();
+    printed(&project.run(), b"first");
+    for (entry, expected) in [
+        ("second", &b"second"[..]),
+        ("main", &b"first"[..]),
+        ("second", &b"second"[..]),
+    ] {
+        let mut input = original.as_os_str().to_os_string();
+        input.push(format!(":{entry}"));
+        project.input = input.into();
+        printed(&project.run(), expected);
+    }
+    assert_eq!(project.calls(), 2);
+    assert_eq!(
+        fs::read_dir(project.temp.path().join("build"))
+            .unwrap()
+            .count(),
+        2
+    );
+    let mut input = original.as_os_str().to_os_string();
+    input.push(":missing");
+    project.input = input.into();
+    let output = project.run();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(project.calls(), 2);
 }
 
 #[test]
@@ -278,7 +333,11 @@ fn changed_source_rebuilds_in_the_same_directory() {
     let project = Project::new();
     printed(&project.run(), b"first");
     let executable = project.executable();
-    fs::write(&project.input, r#"print("second", ());"#).unwrap();
+    fs::write(
+        &project.input,
+        r#"export { main }; main() -> () = { print("second", ()); };"#,
+    )
+    .unwrap();
     printed(&project.run(), b"second");
     assert_eq!(project.calls(), 2);
     assert_eq!(project.executable(), executable);

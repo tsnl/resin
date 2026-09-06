@@ -1,8 +1,8 @@
-export { next };
+export { Counter, next };
 
-value = 0;
+Counter = { value: int };
 
-next() -> int = {
-    value := value + 1;
-    value
+next(counter: Ptr<Counter>) -> int = {
+    counter.value := counter.value + 1;
+    counter.value
 };

@@ -1,3 +1,5 @@
+export { main };
+
 main() -> () = {
     n = 1;
     sum = 0;

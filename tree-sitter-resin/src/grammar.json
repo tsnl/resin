@@ -60,7 +60,7 @@
                 },
                 {
                   "type": "SYMBOL",
-                  "name": "statement"
+                  "name": "type_definition"
                 }
               ]
             }
@@ -317,6 +317,23 @@
           "content": {
             "type": "SYMBOL",
             "name": "uid"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "type_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "definition",
+          "content": {
+            "type": "SYMBOL",
+            "name": "type_define"
           }
         },
         {
@@ -2360,10 +2377,6 @@
     }
   ],
   "conflicts": [
-    [
-      "function_definition",
-      "primary_term"
-    ],
     [
       "primary_term",
       "infix_type"

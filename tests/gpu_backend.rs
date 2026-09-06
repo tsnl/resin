@@ -34,7 +34,8 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(
-        r#"
+        r#"export { kernel, main };
+
         Data = { marker: uint, wide: ulong, amount: float32 };
         Payload = { tag: uint, data: Data, end: uint };
         Params = { count: uint, values: Ptr<Payload>, tail: float32 };
@@ -62,7 +63,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         };
     "#,
     );
-    let c = resin::backend::c::emit(&module).unwrap();
+    let c = resin::backend::c::emit(&module, "main").unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let executable = temp.path().join("host-layout");
     let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
@@ -258,7 +259,10 @@ fn fragment_shaders_read_typed_root_parameters() {
     let file = &mut ast.modules.last_mut().unwrap().file;
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
     file.stmts.extend(
-        support::parse("fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };").stmts,
+        support::parse(
+            "export { fragment }; fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
+        )
+        .stmts,
     );
     let module = resin::ir::generate_program(&ast).unwrap();
     let compile = |stage: Stage| {
@@ -302,7 +306,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(
-        "kernel (index: uint) -> uint = { total = uint (0); n = index; while (n > uint (0) && n <= index) { j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
+        "export { kernel }; kernel (index: uint) -> uint = { total = uint (0); n = index; while (n > uint (0) && n <= index) { j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
     );
     let glsl = resin::backend::glsl::emit(&module, "kernel", resin::backend::glsl::Stage::Compute)
         .unwrap();

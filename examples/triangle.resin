@@ -1,3 +1,5 @@
+export { main, vertex, fragment };
+
 import { "std/gpu.resin", "std/image.resin", "std/status.resin", "lib/triangle.resin" };
 
 main() -> () = {
@@ -12,7 +14,7 @@ main() -> () = {
     image = Ptr<ResinImage>(ulong(0));
     pixels = Ptr<ResinAllocation>(ulong(0));
     check(resin_gpu_create_image(gpu, 256, 256, &image));
-    check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_readback, &pixels));
+    check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_readback(), &pixels));
 
     commands = Ptr<ResinCommandBuffer>(ulong(0));
     check(resin_gpu_start_command_recording(gpu, &commands));

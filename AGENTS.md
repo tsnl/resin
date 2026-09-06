@@ -9,6 +9,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep the native C ABI in `resin-runtime/` and language-facing modules in `stdlib/`.
   Examples import standard-library functionality through `std/` paths. Each file has a private
   scope with explicit exports; do not reintroduce textual inclusion.
+- Source files contain declarations only; keep runtime state inside functions and pass it
+  explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
 - Commit and push completed changes directly to `main` by default, including in future
   sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
 - Use the development environment in `shell.nix` for builds, tests, parser generation, and

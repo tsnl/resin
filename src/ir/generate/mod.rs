@@ -3,10 +3,7 @@
 use std::sync::Arc;
 
 use crate::ast::{SourceFile, Span, Stmt, StmtKind, Term, TermKind};
-use crate::ir::{
-    BlockId, Function, Global, GlobalId, Instr, Local, LocalId, Module, Terminator, Ty,
-    TyperContext, Value, verify,
-};
+use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, Value, verify};
 
 mod bindings;
 mod builder;
@@ -27,7 +24,6 @@ use eval::Evaluator;
 use scope::Scopes;
 
 /// Lower a source file to a verified IR module.
-/// `functions[0]` initializes globals and evaluates top-level expressions.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
     if let Some(import) = file.imports.first() {
         return Err(GenerateError {
@@ -39,41 +35,39 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
     }
     let mut generator = Generator::new();
     generator.generate_file(file)?;
-    generator.exports(file)?;
+    generator.module.entries = generator.exported_functions(file)?;
     generator.finish()
 }
 
 struct Generator {
     module: Module,
     typer: TyperContext,
-    functions: Vec<FunctionBuilder>,
+    function: Option<FunctionBuilder>,
     scopes: Scopes,
 }
 
 impl Generator {
     fn new() -> Self {
-        let mut module = Module::default();
-        module.functions.push(Function {
-            name: Some("init".into()),
-            foreign: None,
-            param: LocalId::from_index(0),
-            result: Ty::Unit,
-            locals: vec![Local {
-                name: None,
-                ty: Ty::Unit,
-            }],
-            entry: BlockId::from_index(0),
-            blocks: Vec::new(),
-        });
         Self {
-            module,
+            module: Module::default(),
             typer: TyperContext::new(),
-            functions: vec![FunctionBuilder::new(Some("init".into()))],
+            function: None,
             scopes: Scopes::new(),
         }
     }
 
     fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
+        for stmt in &file.stmts {
+            if matches!(
+                stmt.val,
+                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. }
+            ) {
+                return Err(GenerateError {
+                    span: stmt.span,
+                    kind: GenerateErrorKind::InvalidModuleItem,
+                });
+            }
+        }
         for stmt in &file.stmts {
             if let StmtKind::ForeignType { name } = &stmt.val {
                 self.scopes
@@ -110,17 +104,6 @@ impl Generator {
             }
         }
         for stmt in &file.stmts {
-            if !matches!(
-                stmt.val,
-                StmtKind::DefineType { .. }
-                    | StmtKind::Function { .. }
-                    | StmtKind::ForeignType { .. }
-                    | StmtKind::ForeignFunction { .. }
-            ) {
-                self.gen_stmt(stmt)?;
-            }
-        }
-        for stmt in &file.stmts {
             if let StmtKind::Function {
                 name, params, body, ..
             } = &stmt.val
@@ -132,11 +115,6 @@ impl Generator {
     }
 
     fn finish(mut self) -> Result<Module, GenerateError> {
-        self.module.entries = self.scopes.entries();
-        self.emit(Instr::Push { value: Value::Unit });
-        self.terminate(Terminator::Return);
-        let init = self.functions.pop().expect("module initializer").finish();
-        self.module.functions[0] = init;
         self.module.types = self.typer.into_definitions().map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::Type(err.kind),
@@ -241,12 +219,6 @@ impl Generator {
         self.function().local(ty, name)
     }
 
-    fn alloc_global(&mut self, ty: Ty, name: Arc<str>) -> GlobalId {
-        let id = GlobalId::from_index(self.module.globals.len());
-        self.module.globals.push(Global { name, ty });
-        id
-    }
-
     fn emit(&mut self, instr: Instr) {
         self.function().emit(instr);
     }
@@ -263,12 +235,8 @@ impl Generator {
         self.function().switch(block);
     }
 
-    fn current_depth(&self) -> usize {
-        self.functions.len() - 1
-    }
-
     fn function(&mut self) -> &mut FunctionBuilder {
-        self.functions.last_mut().expect("function")
+        self.function.as_mut().expect("inside a function body")
     }
 
     fn evaluator(&self) -> Evaluator<'_> {

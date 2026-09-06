@@ -783,7 +783,7 @@
             "named": true
           },
           {
-            "type": "statement",
+            "type": "type_definition",
             "named": true
           }
         ]
@@ -934,6 +934,22 @@
         "types": [
           {
             "type": "uid",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_definition",
+    "named": true,
+    "fields": {
+      "definition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_define",
             "named": true
           }
         ]

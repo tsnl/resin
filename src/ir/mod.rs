@@ -19,30 +19,15 @@ pub use typer::{
 };
 pub use types::{RecordField, Ty, TypeDef, TypeId};
 pub use value::{
-    ArrayValue, FunctionId, GlobalId, LocalId, RecordFieldValue, RecordValue, StaticAddressValue,
-    Value,
+    ArrayValue, FunctionId, LocalId, RecordFieldValue, RecordValue, StaticAddressValue, Value,
 };
 pub use verify::{VerifyError, VerifyErrorKind, VerifyLocation, verify};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Global {
-    pub name: Arc<str>,
-    pub ty: Ty,
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Module {
-    /// Value bindings visible in the entry source file.
-    pub entries: BTreeMap<Arc<str>, Entry>,
+    /// Functions exported by the entry source file.
+    pub entries: BTreeMap<Arc<str>, FunctionId>,
     /// Nominal definitions, indexed by [`TypeId`].
     pub types: Vec<TypeDef>,
-    /// Value definitions, indexed by [`GlobalId`].
-    pub globals: Vec<Global>,
     pub functions: Vec<Function>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Entry {
-    Function(FunctionId),
-    Global(GlobalId),
 }

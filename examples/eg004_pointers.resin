@@ -1,3 +1,5 @@
+export { main };
+
 set(p: Ptr<int>) -> int = { p.* := 1; p.* };
 
 Point = { x: int, y: int };

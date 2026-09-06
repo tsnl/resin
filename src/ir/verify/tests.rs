@@ -32,7 +32,6 @@ fn ascribe_wraps_a_representation() {
     verify(&Module {
         entries: Default::default(),
         types: vec![TypeDef::new("Meters", Ty::Int32)],
-        globals: vec![],
         functions: vec![function],
     })
     .unwrap();
@@ -69,7 +68,6 @@ fn ascribe_unwraps_one_nominal_layer() {
     verify(&Module {
         entries: Default::default(),
         types: vec![TypeDef::new("Meters", Ty::Int32)],
-        globals: vec![],
         functions: vec![function],
     })
     .unwrap();
@@ -115,7 +113,6 @@ fn chained_assignment_preserves_the_value() {
     verify(&Module {
         entries: Default::default(),
         types: vec![],
-        globals: vec![],
         functions: vec![function],
     })
     .unwrap();
@@ -173,7 +170,6 @@ fn conflicting_join_stacks_are_rejected() {
     let error = verify(&Module {
         entries: Default::default(),
         types: vec![],
-        globals: vec![],
         functions: vec![function],
     })
     .unwrap_err();
@@ -235,7 +231,6 @@ fn indirect_calls_use_the_callee_on_the_stack() {
     verify(&Module {
         entries: Default::default(),
         types: vec![],
-        globals: vec![],
         functions: vec![target, caller],
     })
     .unwrap();
@@ -289,7 +284,6 @@ fn loop_backedges_must_match_the_header_stack() {
     verify(&Module {
         entries: Default::default(),
         types: vec![],
-        globals: vec![],
         functions: vec![function],
     })
     .unwrap();

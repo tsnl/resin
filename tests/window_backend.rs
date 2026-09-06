@@ -245,7 +245,7 @@ fn run_example(name: &str) {
     let TermKind::Block { stmts, .. } = &mut body.val else {
         panic!("main body")
     };
-    stmts.insert(0, support::parse("test_frames = 0;").stmts.remove(0));
+    stmts.insert(0, support::statements("test_frames = 0;").remove(0));
     let body = stmts
         .iter_mut()
         .find_map(|stmt| match &mut stmt.val {
@@ -260,10 +260,10 @@ fn run_example(name: &str) {
         panic!("loop body")
     };
     // Close through the runtime after three frames; leave the interactive demo unbounded.
-    stmts.extend(support::parse("test_frames := test_frames + 1; if (test_frames == 3) { check(resin_window_set_should_close(window, 1)) } else { () };").stmts);
+    stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { check(resin_window_set_should_close(window, 1)) } else { () };"));
     let module = resin::ir::generate_program(&ast).unwrap();
     let shaders = resin::toolchain::build_shaders(&module, &compiler).unwrap();
-    let c = resin::backend::c::emit_with_shaders(&module, &shaders).unwrap();
+    let c = resin::backend::c::emit_with_shaders(&module, "main", &shaders).unwrap();
     compile(&c, &executable);
     if !display_available() {
         return;

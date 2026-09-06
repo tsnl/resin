@@ -10,6 +10,7 @@ pub struct GenerateError {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerateErrorKind {
+    InvalidModuleItem,
     InvalidForeignSignature,
     InvalidShader { message: Arc<str> },
     UnresolvedImport { path: Arc<str> },

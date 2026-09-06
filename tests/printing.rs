@@ -11,7 +11,7 @@ mod support;
 use support::module;
 
 fn run(source: &str) -> std::process::Output {
-    run_c(&c::emit(&module(source)).unwrap())
+    run_c(&c::emit(&module(source), "main").unwrap())
 }
 
 fn run_c(source: &str) -> std::process::Output {
@@ -36,7 +36,7 @@ fn prints(source: &str, expected: &[u8]) {
 
 #[test]
 fn print_is_unary_and_returns_unit() {
-    let m = module(r#"n = 42; print("x = {0}\n", (n,));"#);
+    let m = module(r#"export { main }; main() -> () = { n = 42; print("x = {0}\n", (n,)); };"#);
     let calls: Vec<_> = m
         .functions
         .iter()
@@ -55,42 +55,46 @@ fn print_is_unary_and_returns_unit() {
     let (params, result) = calls[0];
     assert!(matches!(params.as_slice(), [Ty::Record { fields }] if fields.len() == 2));
     assert_eq!(result, &Ty::Unit);
-    prints(r#"n = 42; print("x = {0}\n", (n,));"#, b"x = 42\n");
+    prints(
+        r#"export { main }; main() -> () = { n = 42; print("x = {0}\n", (n,)); };"#,
+        b"x = 42\n",
+    );
 }
 
 #[test]
 fn formats_are_length_delimited_and_do_not_add_newlines() {
     prints(
-        r#"print("", ()); print("héllo\t\"\\\r\n\0%", ());"#,
+        r#"export { main }; main() -> () = { print("", ()); print("héllo\t\"\\\r\n\0%", ()); };"#,
         "héllo\t\"\\\r\n\0%".as_bytes(),
     );
     prints(
-        r#"print("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"));"#,
+        r#"export { main }; main() -> () = { print("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界")); };"#,
         "{世界}: {not a format}%\0, 世界".as_bytes(),
     );
     prints(
-        r#"fmt = "{0}!"; main () -> () = { print(fmt, ("",)); };"#,
+        r#"export { main }; main () -> () = { fmt = "{0}!"; print(fmt, ("",)); };"#,
         b"!",
     );
 }
 
 #[test]
 fn string_storage_is_terminated_without_changing_its_logical_length() {
-    let m = module("text = \"hello\"; empty = \"\";");
-    for (global, length) in m.globals.iter().zip([5, 0]) {
+    let m = module("export { main }; main() -> () = { text = \"hello\"; empty = \"\"; };");
+    for (local, length) in m.functions[0].locals.iter().skip(1).zip([5, 0]) {
         assert_eq!(
-            global.ty,
+            local.ty,
             Ty::Array {
                 element: Box::new(Ty::UInt8),
                 length
             }
         );
     }
-    let c = c::emit(&m).unwrap();
+    let c = c::emit(&m, "main").unwrap();
     assert!(c.contains("items[5 + 1]"), "{c}");
     assert!(c.contains("items[0 + 1]"), "{c}");
     prints(
-        r#"
+        r#"export { main };
+
         extern "string.h" strlen(text: Ptr<ubyte>) -> ulong;
         main() -> int = {
             text = "héllo";
@@ -112,7 +116,8 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
 #[test]
 fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
     prints(
-        r#"
+        r#"export { main };
+
         extern "string.h" strlen(text: Ptr<ubyte>) -> ulong;
         main() -> int = {
             text = "a\0b\0";
@@ -127,24 +132,29 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print("{0}", (bytes,));"#,
+        r#"export { main }; main() -> () = { bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print("{0}", (bytes,)); };"#,
         b"A\0B\0",
     );
 }
 
 #[test]
 fn numeric_widths_and_scalar_types() {
-    prints(r#"print("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
+    prints(r#"export { main };
+
+main() -> () = {
+    print("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
         sbyte (-128), short (-32768), int (-2147483648), long (-9223372036854775808),
         ubyte (255), ushort (65535), uint (4294967295), ulong (18446744073709551615)
-    )); print("{0} {1} {2} {3} {4}", (float32 (1.2), float64 (1.25), 1 == 1, 1 == 2, ()));"#,
+    ));
+    print("{0} {1} {2} {3} {4}", (float32 (1.2), float64 (1.25), 1 == 1, 1 == 2, ()));
+};"#,
     b"-128 -32768 -2147483648 -9223372036854775808 255 65535 4294967295 18446744073709551615\n1.2 1.25 true false ()");
 }
 
 #[test]
 fn nominal_scalars_are_unwrapped() {
     prints(
-        r#"Meters = int; Distance = Meters; print("{0}", (Distance (Meters (42)),));"#,
+        r#"export { main }; Meters = int; Distance = Meters; main() -> () = { print("{0}", (Distance (Meters (42)),)); };"#,
         b"42",
     );
 }
@@ -152,7 +162,7 @@ fn nominal_scalars_are_unwrapped() {
 #[test]
 fn arguments_evaluate_once_in_source_order_even_when_unused() {
     prints(
-        r#"n = 0; print("{1} {0} {1}", ((n := n + 1), (n := n + 1), (n := n + 1))); print(" {0}", (n,));"#,
+        r#"export { main }; main() -> () = { n = 0; print("{1} {0} {1}", ((n := n + 1), (n := n + 1), (n := n + 1))); print(" {0}", (n,)); };"#,
         b"2 1 2 3",
     );
 }
@@ -160,9 +170,16 @@ fn arguments_evaluate_once_in_source_order_even_when_unused() {
 #[test]
 fn ordinary_and_recursive_functions_can_print() {
     prints(
-        r#"show (n: int) -> () = { print("{0}", (n,)); }; f = show; f(4);
+        r#"
+        export { main };
+        show (n: int) -> () = { print("{0}", (n,)); };
         countdown (n: int) -> int = { print("{0}", (n,)); if (n > 0) { countdown(n - 1) } else { 0 } };
-        main () -> int = { countdown(2) };"#,
+        main () -> int = {
+            f = show;
+            f(4);
+            countdown(2)
+        };
+        "#,
         b"4210",
     );
 }
@@ -170,7 +187,7 @@ fn ordinary_and_recursive_functions_can_print() {
 #[test]
 fn print_cannot_be_shadowed_by_a_local_or_parameter() {
     for source in [
-        "main () -> () = { print = 1; };",
+        "export { main }; main () -> () = { print = 1; };",
         "apply (print: (int) -> int) -> int = { print(41) };",
     ] {
         let error = ir::generate(&support::parse(source)).unwrap_err();
@@ -192,25 +209,50 @@ fn invalid_formats_fail_before_writing() {
         "prefix {0:02}",
         "prefix {99999999999999999999999999}",
     ] {
-        let output = run(&format!("print({format:?}, (42,));"));
+        let output = run(&format!(
+            "export {{ main }}; main() -> () = {{ print({format:?}, (42,)); }};"
+        ));
         assert_eq!(output.status.code(), Some(1), "{format}");
         assert!(output.stdout.is_empty(), "{format}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("resin:"));
     }
-    assert_eq!(run(r#"print("{0}", ());"#).status.code(), Some(1));
+    assert_eq!(
+        run(r#"export { main }; main() -> () = { print("{0}", ()); };"#)
+            .status
+            .code(),
+        Some(1)
+    );
 }
 
 #[test]
 fn invalid_print_types_are_rejected() {
     for (source, diagnostic) in [
-        (r#"print("{0}", 1);"#, "InvalidPrintArguments"),
-        (r#"print(1, (2,));"#, "InvalidPrintArguments"),
-        (r#"print("hello");"#, "InvalidPrintArguments"),
-        (r#"print("{0}", (1,), (2,));"#, "InvalidPrintArguments"),
-        (r#"print("{0}", ({ x = 1 },));"#, "UnprintableType"),
-        (r#"print("{0}", ([1, 2],));"#, "UnprintableType"),
         (
-            r#"f () -> int = { 1 }; print("{0}", (f,));"#,
+            r#"export { main }; main() -> () = { print("{0}", 1); };"#,
+            "InvalidPrintArguments",
+        ),
+        (
+            r#"export { main }; main() -> () = { print(1, (2,)); };"#,
+            "InvalidPrintArguments",
+        ),
+        (
+            r#"export { main }; main() -> () = { print("hello"); };"#,
+            "InvalidPrintArguments",
+        ),
+        (
+            r#"export { main }; main() -> () = { print("{0}", (1,), (2,)); };"#,
+            "InvalidPrintArguments",
+        ),
+        (
+            r#"export { main }; main() -> () = { print("{0}", ({ x = 1 },)); };"#,
+            "UnprintableType",
+        ),
+        (
+            r#"export { main }; main() -> () = { print("{0}", ([1, 2],)); };"#,
+            "UnprintableType",
+        ),
+        (
+            r#"export { main }; f () -> int = { 1 }; main() -> () = { print("{0}", (f,)); };"#,
             "UnprintableType",
         ),
     ] {
@@ -230,7 +272,7 @@ fn invalid_print_types_are_rejected() {
 
 #[test]
 fn shader_print_has_a_host_only_diagnostic() {
-    let m = module(r#"kernel (i: uint) -> uint = { print("{0}", (i,)); i };"#);
+    let m = module(r#"export { kernel }; kernel (i: uint) -> uint = { print("{0}", (i,)); i };"#);
     let error = glsl::emit(&m, "kernel", glsl::Stage::Compute).unwrap_err();
     assert!(
         error
@@ -241,7 +283,11 @@ fn shader_print_has_a_host_only_diagnostic() {
 
 #[test]
 fn generated_c_uses_the_shared_runtime_header() {
-    let source = c::emit(&module(r#"print("hello", ());"#)).unwrap();
+    let source = c::emit(
+        &module(r#"export { main }; main() -> () = { print("hello", ()); };"#),
+        "main",
+    )
+    .unwrap();
     assert!(source.starts_with("#include <resin_runtime.h>\n"));
     assert!(source.contains("resin_print("));
     assert!(!source.contains("static void r_cleanup"));

@@ -1,3 +1,5 @@
+export { main, kernel, vertex, fragment };
+
 import {
     "std/gpu.resin",
     "std/window.resin",
@@ -43,8 +45,8 @@ main() -> () = {
     particles = Ptr<ResinAllocation>(ulong(0));
     root = Ptr<ResinAllocation>(ulong(0));
     // Particle: 32 bytes, alignment 4. Params: 24 bytes, alignment 8.
-    check(resin_gpu_malloc(gpu, 64 * 32, 4, resin_memory_default, &particles));
-    check(resin_gpu_malloc(gpu, 24, 8, resin_memory_default, &root));
+    check(resin_gpu_malloc(gpu, 64 * 32, 4, resin_memory_default(), &particles));
+    check(resin_gpu_malloc(gpu, 24, 8, resin_memory_default(), &root));
     initialize(Ptr<Particle>(resin_allocation_host_pointer(particles)));
     params = Ptr<Params>(resin_allocation_host_pointer(root));
     params.* := Params {
@@ -56,7 +58,7 @@ main() -> () = {
     check(resin_gpu_create_image(gpu, 640, 480, &image));
 
     check(resin_window_poll_events(window));
-    while (resin_window_should_close(window) == 0 && resin_window_key_pressed(window, resin_key_escape) == 0) {
+    while (resin_window_should_close(window) == 0 && resin_window_key_pressed(window, resin_key_escape()) == 0) {
         commands = Ptr<ResinCommandBuffer>(ulong(0));
         check(resin_gpu_start_command_recording(gpu, &commands));
         check(resin_gpu_set_pipeline(commands, compute));
@@ -67,7 +69,7 @@ main() -> () = {
         check(resin_gpu_end_rendering(commands));
         check(resin_gpu_submit(gpu, commands));
         status = resin_gpu_present(gpu, image);
-        if (status != resin_status_incomplete) { check(status) } else { () };
+        if (status != resin_status_incomplete()) { check(status) } else { () };
         check(resin_window_poll_events(window));
     };
 

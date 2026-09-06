@@ -16,7 +16,7 @@ import { "gpu.resin" };
 
 extern type ResinWindow;
 
-resin_key_escape = 256;
+resin_key_escape() -> int = { 256 };
 
 extern "resin_runtime.h" resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
 extern "resin_runtime.h" resin_window_destroy(window: Ptr<ResinWindow>) -> ();

@@ -6,16 +6,23 @@ use std::{
     process::Command,
 };
 
-use clap::ValueEnum;
+use clap::{ValueEnum, builder::TypedValueParser};
 use tree_sitter::Parser;
+
+#[path = "resin/source.rs"]
+mod source;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(clap::Parser)]
 #[command(name = "resin")]
 struct Cli {
-    /// Entry-point file.
-    file: PathBuf,
+    /// Source file and exported entry function (defaults to main).
+    #[arg(
+        value_name = "FILE[:ENTRY]",
+        value_parser = clap::builder::OsStringValueParser::new().try_map(|value| source::parse(&value))
+    )]
+    source: source::Source,
 
     /// What to emit or execute.
     #[arg(long, value_enum, default_value_t = Output::Run)]
@@ -32,10 +39,6 @@ struct Cli {
     /// Shader stage for GLSL and SPIR-V output.
     #[arg(long, default_value = "compute")]
     stage: backend::glsl::Stage,
-
-    /// GLSL/SPIR-V function name (defaults to kernel, vertex, or fragment).
-    #[arg(long)]
-    entry: Option<String>,
 
     /// Shader compiler executable (defaults to GLSLC or glslc).
     #[arg(long)]
@@ -77,15 +80,15 @@ fn main() {
 
 fn run(cli: Cli) -> Result<i32> {
     validate(&cli)?;
-    let src = std::fs::read_to_string(&cli.file)
-        .map_err(|e| format!("cannot read {}: {e}", cli.file.display()))?;
+    let src = std::fs::read_to_string(&cli.source.path)
+        .map_err(|e| format!("cannot read {}: {e}", cli.source.path.display()))?;
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_resin::LANGUAGE.into())?;
     let tree = parser.parse(&src, None).expect("parser language is set");
     if cli.output == Output::Cst {
         return print(&cli, tree.root_node().to_sexp());
     }
-    let file = ast::load(&cli.file)?;
+    let file = ast::load(&cli.source.path)?;
     match cli.output {
         Output::Check => return print(&cli, "ok".into()),
         Output::Ast => return print(&cli, ast::print::format_program(&file)),
@@ -102,7 +105,7 @@ fn run(cli: Cli) -> Result<i32> {
 
 fn validate(cli: &Cli) -> Result<()> {
     if let Some(output) = &cli.destination {
-        protect_source(&cli.file, output)?;
+        protect_source(&cli.source.path, output)?;
     }
     if matches!(cli.output, Output::Exe | Output::Spirv) && cli.destination.is_none() {
         return Err("binary output requires -o PATH".into());
@@ -119,19 +122,33 @@ fn protect_source(source: &Path, output: &Path) -> Result<()> {
 
 fn host(cli: &Cli, module: &ir::Module) -> Result<i32> {
     let shaders = toolchain::build_shaders(module, &compiler(&cli.glslc, "GLSLC", "glslc"))?;
-    let source = backend::c::emit_with_shaders(module, &shaders)?;
+    let source = backend::c::emit_with_shaders(module, &cli.source.entry, &shaders)?;
     if cli.output == Output::C {
         return print(cli, source);
     }
-    let name = cli.file.file_stem().ok_or("source file needs a name")?;
-    let output = host_destination(cli, name)?;
+    let mut name = cli
+        .source
+        .path
+        .file_stem()
+        .ok_or("source file needs a name")?
+        .to_os_string();
+    if cli.source.entry != "main" {
+        name.push(format!("-{}", cli.source.entry));
+    }
+    let output = host_destination(cli, &name)?;
     let compiler = compiler(&cli.cc, "CC", "cc");
     let profile = if output.is_some() {
         toolchain::CProfile::Release
     } else {
         toolchain::CProfile::Debug
     };
-    let build = toolchain::build_c(&cli.file, &source, &compiler, profile)?;
+    let build = toolchain::build_c(
+        &cli.source.path,
+        &cli.source.entry,
+        &source,
+        &compiler,
+        profile,
+    )?;
     let executable = build.executable();
     let code = if cli.output == Output::Run {
         Command::new(executable).status()?.code().unwrap_or(1)
@@ -160,13 +177,12 @@ fn host_destination(cli: &Cli, name: &std::ffi::OsStr) -> Result<Option<PathBuf>
     } else {
         path.clone()
     };
-    protect_source(&cli.file, &output)?;
+    protect_source(&cli.source.path, &output)?;
     Ok(Some(output))
 }
 
 fn shader(cli: &Cli, module: &ir::Module) -> Result<i32> {
-    let entry = cli.entry.as_deref().unwrap_or(cli.stage.entry());
-    let source = backend::glsl::emit(module, entry, cli.stage)?;
+    let source = backend::glsl::emit(module, &cli.source.entry, cli.stage)?;
     if cli.output == Output::Glsl {
         return print(cli, source);
     }

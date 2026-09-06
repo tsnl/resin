@@ -27,8 +27,9 @@ fn compile_err(src: &str) -> GenerateErrorKind {
 
 #[test]
 fn while_lowers_to_a_back_edge_and_returns_unit() {
-    let module = compile("main () -> () = { i = 0; while (i < 3) { i := i + 1; } };");
-    let function = &module.functions[1];
+    let module =
+        compile("export { main }; main () -> () = { i = 0; while (i < 3) { i := i + 1; } };");
+    let function = &module.functions[0];
     let condition = function
         .blocks
         .iter()
@@ -47,11 +48,11 @@ fn while_lowers_to_a_back_edge_and_returns_unit() {
 #[test]
 fn while_does_not_assume_its_body_ran() {
     for source in [
-        "main () -> int = { x: int; while (1 == 0) { x := 1; }; x };",
-        "main () -> () = { x: int; while (x < 3) { x := 1; }; };",
-        "main () -> () = { x: int; while (1 == 0) { x := x + 1; }; };",
-        "main () -> int = { x: int; while ((1 == 0) && ((x := 1) == 1)) {}; x };",
-        "main () -> int = { x: int; while (1 == 1) { x := 1; }; x };",
+        "export { main }; main () -> int = { x: int; while (1 == 0) { x := 1; }; x };",
+        "export { main }; main () -> () = { x: int; while (x < 3) { x := 1; }; };",
+        "export { main }; main () -> () = { x: int; while (1 == 0) { x := x + 1; }; };",
+        "export { main }; main () -> int = { x: int; while ((1 == 0) && ((x := 1) == 1)) {}; x };",
+        "export { main }; main () -> int = { x: int; while (1 == 1) { x := 1; }; x };",
     ] {
         assert!(
             matches!(
@@ -61,21 +62,21 @@ fn while_does_not_assume_its_body_ran() {
             "{source}"
         );
     }
-    compile("main () -> int = { x: int; while ((x := 1) == 0) {}; x };");
+    compile("export { main }; main () -> int = { x: int; while ((x := 1) == 0) {}; x };");
 }
 
 #[test]
 fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
     assert!(matches!(
-        compile_err("main () -> () = { while (1) {} };"),
+        compile_err("export { main }; main () -> () = { while (1) {} };"),
         GenerateErrorKind::Type(_)
     ));
     assert!(matches!(
-        compile_err("main () -> int = { while (1 == 0) { inner = 1; }; inner };"),
+        compile_err("export { main }; main () -> int = { while (1 == 0) { inner = 1; }; inner };"),
         GenerateErrorKind::UnboundValue { .. }
     ));
     assert!(matches!(
-        compile_err("main () -> int = { while (1 == 0) { 42 } };"),
+        compile_err("export { main }; main () -> int = { while (1 == 0) { 42 } };"),
         GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
     ));
 }
@@ -107,12 +108,11 @@ fn fibonacci_generates_verified_ir() {
     let module = compile(src);
     verify(&module).unwrap();
 
-    assert!(module.globals.is_empty());
     assert_eq!(module.functions.len(), 2);
-    assert_eq!(module.functions[0].result, Ty::Unit);
-    assert_eq!(module.functions[1].result, Ty::Int32);
+    assert_eq!(module.functions[1].result, Ty::Unit);
+    assert_eq!(module.functions[0].result, Ty::Int32);
     assert_eq!(
-        module.functions[1].locals[module.functions[1].param.index()].ty,
+        module.functions[0].locals[module.functions[0].param.index()].ty,
         Ty::Int32
     );
 }
@@ -121,7 +121,7 @@ fn fibonacci_generates_verified_ir() {
 fn ir_dump_is_an_s_expression_with_names() {
     let dump = format_module(&compile(include_str!("../examples/eg001.resin")));
     assert!(dump.starts_with("(module"));
-    assert!(dump.contains("init"));
+    assert!(dump.contains("main"));
     assert!(dump.contains("fibonacci"));
     assert!(dump.contains("(local f0 int)"));
     assert!(dump.contains("(local-addr n)"));
@@ -135,12 +135,12 @@ fn ir_dump_is_an_s_expression_with_names() {
 #[test]
 fn recursive_calls_reference_functions_directly() {
     let module = compile(include_str!("../examples/eg001.resin"));
-    let fib = &module.functions[1];
+    let fib = &module.functions[0];
     assert!(fib.blocks.iter().any(|block| {
         block.instrs.iter().any(|instr| {
             matches!(
                 instr,
-                Instr::Function { function } if function.index() == 1
+                Instr::Function { function } if function.index() == 0
             )
         })
     }));
@@ -149,7 +149,7 @@ fn recursive_calls_reference_functions_directly() {
 #[test]
 fn eager_recursion_is_rejected() {
     assert!(matches!(
-        compile_err("x = x + 1;"),
+        compile_err("export { main }; main() -> () = { x = x + 1; };"),
         GenerateErrorKind::EagerRecursion { .. }
     ));
 }
@@ -165,7 +165,7 @@ fn recursive_function_result_is_checked() {
 #[test]
 fn type_mismatch_is_a_type_error() {
     assert!(matches!(
-        compile_err("x = if (1) { 1 } else { 2 };"),
+        compile_err("export { main }; main() -> () = { x = if (1) { 1 } else { 2 }; };"),
         GenerateErrorKind::Type(TypeErrorKind::ExpectedBoolean { .. })
     ));
 }
@@ -209,7 +209,7 @@ fn function_values_do_not_capture_local_state() {
 fn assignment_and_deref_store_through_an_address() {
     let module = compile("f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
     verify(&module).unwrap();
-    let function = &module.functions[1];
+    let function = &module.functions[0];
     assert!(function.blocks.iter().any(|block| {
         block
             .instrs
@@ -228,7 +228,7 @@ fn assignment_and_deref_store_through_an_address() {
 fn if_joins_then_and_else_values() {
     let module = compile("f (c: int) -> int = { if (c == 0) { 1 } else { 2 } };");
     verify(&module).unwrap();
-    let function = &module.functions[1];
+    let function = &module.functions[0];
     assert!(
         function
             .blocks
@@ -252,14 +252,14 @@ from_meters (m: Meters) -> int = { int (m) };
         definition: resin::ir::TypeId::from_index(0),
     };
     assert_eq!(
-        module.functions[1].ty().unwrap(),
+        module.functions[0].ty().unwrap(),
         Ty::Function {
             param: Box::new(Ty::Int32),
             result: Box::new(meters.clone()),
         }
     );
     assert_eq!(
-        module.functions[2].ty().unwrap(),
+        module.functions[1].ty().unwrap(),
         Ty::Function {
             param: Box::new(meters),
             result: Box::new(Ty::Int32),
@@ -276,8 +276,8 @@ f (p: P) -> int = { p.x };
 "#,
     );
     verify(&module).unwrap();
-    assert_eq!(module.functions[1].result, Ty::Int32);
-    assert!(module.functions[1].blocks.iter().any(|block| {
+    assert_eq!(module.functions[0].result, Ty::Int32);
+    assert!(module.functions[0].blocks.iter().any(|block| {
         block
             .instrs
             .iter()
@@ -298,18 +298,21 @@ f (h: Handler, n: int) -> int = { h(n) };
 "#,
     );
     verify(&module).unwrap();
-    assert_eq!(module.functions[1].result, Ty::Int32);
+    assert_eq!(module.functions[0].result, Ty::Int32);
 }
 
 #[test]
 fn nested_nominal_ascription_does_not_skip_a_layer() {
     assert!(matches!(
         compile_err(
-            r#"
+            r#"export { main };
+
 Meters = int;
 Distance = Meters;
-x = Distance (1);
-"#
+
+main() -> () = {
+    x = Distance (1);
+};"#
         ),
         GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
     ));
@@ -318,21 +321,24 @@ x = Distance (1);
 #[test]
 fn nested_nominal_ascription_wraps_the_defining_body() {
     let module = compile(
-        r#"
+        r#"export { main };
+
 Meters = int;
 Distance = Meters;
-x = Distance (Meters (1));
-y = int (Meters (x));
-"#,
+
+main() -> () = {
+    x = Distance (Meters (1));
+    y = int (Meters (x));
+};"#,
     );
     verify(&module).unwrap();
     assert_eq!(
-        module.globals[0].ty,
+        module.functions[0].locals[1].ty,
         Ty::Defined {
             definition: resin::ir::TypeId::from_index(1),
         }
     );
-    assert_eq!(module.globals[1].ty, Ty::Int32);
+    assert_eq!(module.functions[0].locals[2].ty, Ty::Int32);
 }
 
 #[test]
@@ -348,7 +354,7 @@ nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
         definition: resin::ir::TypeId::from_index(0),
     };
     assert_eq!(
-        module.functions[1].ty().unwrap(),
+        module.functions[0].ty().unwrap(),
         Ty::Function {
             param: Box::new(Ty::Pointer {
                 pointee: Box::new(list.clone()),
@@ -369,7 +375,7 @@ nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 #[test]
 fn empty_array_needs_an_element_type() {
     assert!(matches!(
-        compile_err("x = [];"),
+        compile_err("export { main }; main() -> () = { x = []; };"),
         GenerateErrorKind::Type(TypeErrorKind::EmptyArrayNeedsElementType)
     ));
 }
@@ -377,30 +383,33 @@ fn empty_array_needs_an_element_type() {
 #[test]
 fn unbound_value_is_reported() {
     assert!(matches!(
-        compile_err("x = y;"),
+        compile_err("export { main }; main() -> () = { x = y; };"),
         GenerateErrorKind::UnboundValue { .. }
     ));
 }
 
 #[test]
-fn span_and_literal_globals_are_typed() {
+fn span_and_literal_locals_are_typed() {
     let module = compile(
-        r#"
+        r#"export { main };
+
 Buf = Span<int>;
-x = 1;
-"#,
+
+main() -> () = {
+    x = 1;
+};"#,
     );
     verify(&module).unwrap();
     assert!(matches!(
         module.types[0].body().unwrap(),
         Ty::Span { element } if **element == Ty::Int32
     ));
-    assert_eq!(module.globals[0].ty, Ty::Int32);
+    assert_eq!(module.functions[0].locals[1].ty, Ty::Int32);
 }
 
 #[test]
 fn short_circuit_and_compiles() {
     let module = compile("f (a: int) -> bool = { (a == 0) && (a == 1) };");
     verify(&module).unwrap();
-    assert_eq!(module.functions[1].result, Ty::Bool);
+    assert_eq!(module.functions[0].result, Ty::Bool);
 }

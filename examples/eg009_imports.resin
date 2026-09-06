@@ -1,6 +1,15 @@
+export { main, independent };
+
 import { "lib/counter.resin", "std/status.resin" };
 
 main() -> () = {
     check(0);
-    print("counter: {0}, {1}\n", (next(), next()));
+    counter = Counter { value = 0 };
+    print("counter: {0}, {1}\n", (next(&counter), next(&counter)));
+};
+
+independent() -> () = {
+    first = Counter { value = 0 };
+    second = Counter { value = 100 };
+    print("independent counters: {0}, {1}, {2}\n", (next(&first), next(&second), next(&first)));
 };

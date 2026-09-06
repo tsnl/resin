@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::util::define_id;
 
-use super::{FunctionId, GlobalId, LocalId, Ty, Value};
+use super::{FunctionId, LocalId, Ty, Value};
 
 define_id! {
     pub struct BlockId(usize);
@@ -78,10 +78,6 @@ pub enum Instr {
         local: LocalId,
     },
 
-    GlobalAddress {
-        global: GlobalId,
-    },
-
     /// Project a type-directed child from an aggregate value or address.
     AccessStatic {
         index: usize,
@@ -152,8 +148,7 @@ impl Instr {
             Self::Shader { .. }
             | Self::Push { .. }
             | Self::Function { .. }
-            | Self::LocalAddress { .. }
-            | Self::GlobalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
+            | Self::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
             Self::AccessStatic { .. }
             | Self::Load
             | Self::Ascribe { .. }

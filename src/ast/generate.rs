@@ -94,6 +94,12 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
+        if node.kind() == "type_definition" {
+            return self.gen_type_define(
+                node.child_by_field_name("definition").unwrap(),
+                self.span(node),
+            );
+        }
         if matches!(node.kind(), "function_definition" | "foreign_function") {
             return self.gen_function(node);
         }

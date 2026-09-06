@@ -1,3 +1,5 @@
+export { main };
+
 List = { value: int, next: Ptr<List> };
 cons(value: int, next: Ptr<List>) -> List = { List { value = value, next = next } };
 car(node: List) -> int = { node.value };

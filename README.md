@@ -40,6 +40,8 @@ to fail instead of skipping when windowing or presentation is unavailable.
 ## Functions and values
 
 ```resin
+export { main };
+
 fibonacci(n: int) -> int = {
     if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
 };
@@ -58,7 +60,10 @@ Every function takes one argument. Empty parameter lists mean unit `()`; multipl
 destructure a tuple. Calling `add(1, 2)` is the same as calling `add(pair)` when `pair = (1, 2)`.
 Function types use the same arrow: `(int, int) -> int`.
 
-Value bindings use `name = value;`; assignment uses `name := value`.
+Files contain only function, foreign, and type declarations, after their export/import clauses.
+There are no global variables or executable top-level statements. Values and mutable state
+belong inside functions and are passed explicitly to helpers, by value or pointer.
+Local value bindings use `name = value;`; assignment uses `name := value`.
 Nominal types use `Name = Type;`, with explicit wrapping and unwrapping, one layer at a time.
 Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
 Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and bracket
@@ -69,30 +74,38 @@ See `examples/` for functions, recursion, records, pointers, and linked lists.
 
 ```sh
 cargo run -- examples/eg001.resin
+cargo run -- examples/eg009_imports.resin:independent
 cargo run -- examples/eg001.resin -o dist/
 cargo run -- examples/eg001.resin --output exe -o fibonacci
 cargo run -- examples/eg001.resin --output c -o fibonacci.c
 ```
 
-Resin builds in `build/<source-name>-<path-hash>/debug/` under cwd and immediately runs the executable.
+Resin builds in `build/<source-name>-<path-and-entry-hash>/debug/` under cwd and immediately runs the executable.
 Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an executable with
 `-o` uses `-O3` and the sibling `release/` cache. Both variants are retained, so switching between
 them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization;
 `-o` for textual output (such as `--output c`) only saves that output.
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
-Top-level value initialization runs in source order, followed by an optional
-`main() -> int` or `main() -> ()`. Without main, only initialization runs.
+Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
+A file can export several entry points. Host entries must be Resin functions of type
+`() -> int` or `() -> ()`; `main` is just the default name, not special syntax.
+Execution begins at the selected function. It must be explicitly exported by the entry file,
+including when re-exporting an imported function. Missing or private entries are errors.
+There is no module initialization phase.
+The selector uses the last colon in the filename, not in its parent directories. For a filename
+that itself contains a colon, append `:main` (or another entry) explicitly.
 
 With `-o PATH`, Resin runs first, then copies the executable, even after a nonzero program exit.
-An existing directory or trailing `/` receives the source name; otherwise PATH names the file.
+An existing directory or trailing `/` receives the source name (or `source-entry` for a
+non-main entry); otherwise PATH names the file.
 Use `--output exe -o PATH` to build and copy without running.
 `--output ir`, `ast`, `cst`, and `check` inspect earlier stages; `check` checks syntax only.
 
-Each source path has a stable directory with separate debug and release artifacts. Each profile
-contains generated C, the executable, and an input fingerprint. Unchanged programs skip C compilation
-and linking. Generated C, Resin/compiler
-metadata, included C headers, the runtime archive, flags, and environment changes invalidate the cache.
-Calls for the same source are serialized through building, running, and copying.
+Each canonical source path and entry name has a stable directory with separate debug and release
+artifacts. Each profile contains generated C, the executable, and an input fingerprint. Unchanged
+programs skip C compilation and linking. Generated C, Resin/compiler metadata, included C headers,
+the runtime archive, flags, and environment changes invalidate the cache.
+Calls for the same source and entry are serialized through building, running, and copying.
 Failed rebuilds never run the old executable. This is a whole-program cache, not incremental IR.
 Delete `build/` to clean it, including after linked system library changes or changes hidden
 behind a compiler wrapper.
@@ -117,10 +130,14 @@ indexes fail with a diagnostic. There is no optimizer or stable generated ABI ye
 format string and a tuple of values, not C-style variadic arguments.
 
 ```resin
-n = 42;
-print("x = {0}\n", (n,));
-print("{1}, {0}; literal {{braces}}\n", (n, "hello"));
-print("done\n", ());
+export { main };
+
+main() -> () = {
+    n = 42;
+    print("x = {0}\n", (n,));
+    print("{1}, {0}; literal {{braces}}\n", (n, "hello"));
+    print("done\n", ());
+};
 ```
 
 Placeholders are zero-based and may repeat. Newlines are explicit. Invalid formats or indices
@@ -138,7 +155,7 @@ headers, and shader-stage names still use the decoded literal text, without an a
 ## Files and the standard library
 
 Each file has its own scope. An optional `export` clause comes first, followed by an optional
-`import` clause, then ordinary definitions and statements. Each clause may appear only once:
+`import` clause, then declarations. Each clause may appear only once:
 
 ```resin
 export { answer };
@@ -150,13 +167,13 @@ answer() -> int = { helper() };
 Imports bring only the dependency's exported names into the file's flat namespace. Without
 an export clause (or with `export {}`), everything is private. An exported function can use
 its private helpers and types. Imported bindings may be explicitly re-exported; dependencies
-are not implicitly re-exported. Exported values must be initialized.
+are not implicitly re-exported. Only functions and types can be exported.
 
 Two different bindings with the same name are an error, including imports conflicting with
 local definitions. Nested scopes can still shadow names. Re-importing the same binding through
 multiple paths is harmless. Ordinary paths resolve relative to the importing file; each canonical
-file is loaded and initialized once. Dependencies initialize before consumers, following import-list
-order. Import cycles are errors; mutually recursive functions within one file remain supported.
+file is loaded once. Imports never execute code. Import cycles are errors; mutually recursive
+functions within one file remain supported.
 `include` has been replaced by `import`.
 
 Syntax keywords (`export`, `import`, `extern`, `type`, `if`, `else`, and `while`), primitive
@@ -172,13 +189,16 @@ library. Programs use the standard library's exports, which initially stay close
 - `std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
 - `std/window.resin`: windows and presentation; import `std/gpu.resin` separately for GPU operations.
 - `std/image.resin`: PNG reading and writing.
-- `std/status.resin`: `check`, status strings, and the incomplete-status constant.
+- `std/status.resin`: `check`, status strings, and `resin_status_incomplete()`.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
 
 The polymorphic `print` and compile-time `shader` operations remain compiler builtins.
-Run `cargo run -- examples/eg009_imports.resin` for a small example with private module state.
+Runtime flags and status constants are zero-argument functions, such as `resin_memory_default()`.
+Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
+`:independent` to run a second entry that uses two independent counters.
 
 ```resin
+export { main };
 import { "std/gpu.resin" };
 
 main() -> () = {
@@ -224,11 +244,16 @@ byte-pointer cast, such as `Ptr<ubyte>(&path)` for `path = "triangle.png"`.
 `while` works on both the host and GPU:
 
 ```resin
-n = 1;
-sum = 0;
-while (n <= 10) {
-    sum := sum + n;
-    n := n + 1;
+export { main };
+
+main() -> () = {
+    n = 1;
+    sum = 0;
+    while (n <= 10) {
+        sum := sum + n;
+        n := n + 1;
+    };
+    print("sum = {0}\n", (sum,));
 };
 ```
 
@@ -254,8 +279,13 @@ There are no compiler-side graphics/image execution modes.
 The only GPU-specific compiler intrinsic is `shader`:
 
 ```resin
+export { main };
+
 kernel(index: uint) -> uint = { uint(0xff400000) | (index & uint(0xffff)) };
-code = shader(kernel, "compute");
+main() -> () = {
+    code = shader(kernel, "compute");
+    print("shader size: {0} bytes\n", (code.length,));
+};
 ```
 
 It takes a named function and a literal stage (`"compute"`, `"vertex"`, or `"fragment"`).
@@ -309,7 +339,7 @@ interchangeable with host addresses. Pointer types do not enforce the address sp
 Calling the same function on the CPU requires a root containing host pointers instead.
 
 Shader bodies support 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
-branches, loops, and direct calls to named Resin helpers. Globals, foreign calls, recursion,
+branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
 indirect calls, arrays, spans, and integer division/remainder/shifts are rejected. Local addresses
 may only be used directly for loads, stores, and field access; they cannot be stored, passed,
 returned, or carried across control-flow edges. Device addresses can. `print` is host-only.
@@ -320,7 +350,11 @@ inserts memory barriers before dispatches and rendering, including compute-to-ve
 Submission currently waits for completion, making mapped results readable by the host.
 
 For inspection/export, `--output glsl` or `--output spirv -o PATH` still emits one entry.
-`--stage` defaults to compute; `--entry` defaults to kernel, vertex, or fragment.
+Use the same `FILE:ENTRY` selector, for example
+`cargo run -- examples/gradient.resin:kernel --output glsl`.
+The selected function must be exported; `shader(private_helper, "compute")` inside a function
+does not require exporting the helper. `--stage` defaults to compute, and an omitted entry
+still defaults to `main`. The old `--entry` option has been removed.
 `--glslc PATH` selects the compiler.
 
 ## GPU requirements

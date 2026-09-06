@@ -1,3 +1,5 @@
+export { main };
+
 fibonacci(n: int) -> int = {
     if (n <= 1) {
         n
@@ -7,4 +9,7 @@ fibonacci(n: int) -> int = {
         f0 + f1
     }
 };
-print("fibonacci(10) = {0}\n", (fibonacci(10),));
+
+main() -> () = {
+    print("fibonacci(10) = {0}\n", (fibonacci(10),));
+};

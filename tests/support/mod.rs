@@ -15,3 +15,15 @@ pub fn parse(source: &str) -> resin::ast::SourceFile {
 pub fn module(source: &str) -> ir::Module {
     ir::generate(&parse(source)).unwrap_or_else(|error| panic!("{source}\n{error}"))
 }
+
+#[allow(dead_code)]
+pub fn statements(source: &str) -> Vec<resin::ast::Stmt> {
+    let mut file = parse(&format!("main() -> () = {{ {source} }};"));
+    let resin::ast::StmtKind::Function { body, .. } = file.stmts.remove(0).val else {
+        unreachable!()
+    };
+    let resin::ast::TermKind::Block { stmts, .. } = body.val else {
+        unreachable!()
+    };
+    stmts
+}

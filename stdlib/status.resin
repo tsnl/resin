@@ -4,7 +4,7 @@ export {
     check,
 };
 
-resin_status_incomplete = 7;
+resin_status_incomplete() -> int = { 7 };
 
 extern "resin_runtime.h" resin_status_string(status: int) -> Ptr<ubyte>;
 

@@ -26,10 +26,20 @@ fn expect_deref_var(term: &Term, expected: &str) {
     expect_var(pointer, expected);
 }
 
+fn first_statement(file: &SourceFile) -> &resin::ast::Stmt {
+    let StmtKind::Function { body, .. } = &file.stmts[0].val else {
+        panic!("expected function");
+    };
+    let TermKind::Block { stmts, .. } = &body.val else {
+        panic!("expected function body");
+    };
+    &stmts[0]
+}
+
 #[test]
 fn while_has_a_condition_and_a_scoped_body() {
-    let file = parse("while (ready) { count := count + 1; };");
-    let StmtKind::Expr { term } = &file.stmts[0].val else {
+    let file = parse("main() -> () = { while (ready) { count := count + 1; }; };");
+    let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
     let TermKind::While { cond, body } = &term.val else {
@@ -43,15 +53,15 @@ fn while_has_a_condition_and_a_scoped_body() {
     assert!(matches!(tail.val, TermKind::Unit));
     assert!(print::format_source(&file).contains("(while"));
 
-    parse("while (ready) {};");
+    parse("main() -> () = { while (ready) {}; };");
     parse("f () -> () = { while (ready) { while (ready) {}; } };");
-    parse("value = while (ready) { 42 };");
+    parse("main() -> () = { value = while (ready) { 42 }; };");
 }
 
 #[test]
 fn assignment_is_right_associative_and_deref_is_explicit() {
-    let file = parse("p.* := q.* := 1;");
-    let StmtKind::Expr { term } = &file.stmts[0].val else {
+    let file = parse("main() -> () = { p.* := q.* := 1; };");
+    let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
     let TermKind::Assign { place, value } = &term.val else {
@@ -86,8 +96,8 @@ fn assignment_can_be_sequenced_in_a_block() {
 
 #[test]
 fn dereference_composes_with_other_postfix_operations() {
-    let file = parse("p.next.* := 1;");
-    let StmtKind::Expr { term } = &file.stmts[0].val else {
+    let file = parse("main() -> () = { p.next.* := 1; };");
+    let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
     let TermKind::Assign { place, .. } = &term.val else {

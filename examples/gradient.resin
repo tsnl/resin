@@ -1,3 +1,5 @@
+export { kernel, main };
+
 import { "std/gpu.resin", "std/image.resin", "std/status.resin" };
 
 Root = { count: uint, pixels: ulong };
@@ -18,8 +20,8 @@ main() -> () = {
 
     pixels = Ptr<ResinAllocation>(ulong(0));
     root = Ptr<ResinAllocation>(ulong(0));
-    check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_default, &pixels));
-    check(resin_gpu_malloc(gpu, 16, 8, resin_memory_default, &root));
+    check(resin_gpu_malloc(gpu, 262144, 4, resin_memory_default(), &pixels));
+    check(resin_gpu_malloc(gpu, 16, 8, resin_memory_default(), &root));
     data = Ptr<Root>(resin_allocation_host_pointer(root));
     data.* := Root { count = uint(65536), pixels = resin_allocation_device_pointer(pixels) };
 

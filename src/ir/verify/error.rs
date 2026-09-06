@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::ir::types::definitions::DefinitionError;
-use crate::ir::{BlockId, FunctionId, GlobalId, Ty, TypeId};
+use crate::ir::{BlockId, FunctionId, Ty, TypeId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyError {
@@ -13,9 +13,6 @@ pub struct VerifyError {
 pub enum VerifyLocation {
     TypeDefinition {
         definition: TypeId,
-    },
-    Global {
-        global: GlobalId,
     },
     Function {
         function: FunctionId,
@@ -41,7 +38,6 @@ pub enum VerifyErrorKind {
     IncompleteTypeDefinition { definition: TypeId },
     RecursiveTypeWithoutIndirection { definition: TypeId },
     InvalidLocal { local: usize },
-    InvalidGlobal { global: usize },
     InvalidFunction { function: usize },
     InvalidBasicBlock { basic_block: usize },
     UnreachableBasicBlock,
@@ -66,7 +62,6 @@ impl fmt::Display for VerifyError {
             VerifyLocation::TypeDefinition { definition } => {
                 write!(f, "type definition {}", definition.index())?;
             }
-            VerifyLocation::Global { global } => write!(f, "global {}", global.index())?,
             VerifyLocation::Function { function } => {
                 write!(f, "function {}", function.index())?;
             }
@@ -102,10 +97,6 @@ pub(super) struct Location(VerifyLocation);
 impl Location {
     pub(super) const fn type_definition(definition: TypeId) -> Self {
         Self(VerifyLocation::TypeDefinition { definition })
-    }
-
-    pub(super) const fn global(global: GlobalId) -> Self {
-        Self(VerifyLocation::Global { global })
     }
 
     pub(super) const fn function(function: FunctionId) -> Self {
