@@ -60,6 +60,7 @@ pub fn run(stdlib: Option<PathBuf>) -> Result<i32> {
         ),
         hover_provider: Some(lsp::HoverProviderCapability::Simple(true)),
         definition_provider: Some(lsp::OneOf::Left(true)),
+        document_formatting_provider: Some(lsp::OneOf::Left(true)),
         completion_provider: Some(lsp::CompletionOptions {
             resolve_provider: Some(false),
             trigger_characters: Some(vec![".".into()]),
@@ -112,6 +113,7 @@ struct OpenDocument {
     uri: Uri,
     path: PathBuf,
     version: i32,
+    source: String,
 }
 struct Query {
     revision: u64,
@@ -191,6 +193,27 @@ impl State {
                 )?;
             }
             return self.send(Response::new_ok(request.id, Value::Null));
+        }
+        if request.method == "textDocument/formatting" {
+            let params: lsp::DocumentFormattingParams = match serde_json::from_value(request.params)
+            {
+                Ok(params) => params,
+                Err(error) => {
+                    return self.error(
+                        request.id,
+                        ErrorCode::InvalidParams as i32,
+                        error.to_string(),
+                    );
+                }
+            };
+            let Some(document) = self.documents.get(params.text_document.uri.as_str()) else {
+                return self.send(Response::new_ok(request.id, Value::Null));
+            };
+            // Use the latest accepted buffer even while semantic analysis is busy.
+            // Resin has one canonical style, independent of editor indent settings.
+            let result = resin::formatting::format_source(&document.source)
+                .map(|formatted| formatting_edits(&document.source, &formatted));
+            return self.send(Response::new_ok(request.id, result));
         }
         if !matches!(
             request.method.as_str(),
@@ -355,6 +378,7 @@ impl State {
                         uri: doc.uri,
                         path: path.clone(),
                         version: doc.version,
+                        source: doc.text.clone(),
                     },
                 );
                 self.update(Change::Set(path, doc.text))?;
@@ -375,6 +399,7 @@ impl State {
                     return Ok(());
                 };
                 document.version = params.text_document.version;
+                document.source = change.text.clone();
                 let path = document.path.clone();
                 self.update(Change::Set(path, change.text))?;
             }
@@ -483,6 +508,47 @@ impl State {
         self.published = current;
         Ok(())
     }
+}
+
+/// Trim unchanged text around a replacement, preserving UTF-8 and CRLF boundaries.
+fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp::TextEdit> {
+    if source == formatted {
+        return Vec::new();
+    }
+    let mut start = source
+        .bytes()
+        .zip(formatted.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !source.is_char_boundary(start)
+        || !formatted.is_char_boundary(start)
+        || (start > 0
+            && source.as_bytes().get(start - 1) == Some(&b'\r')
+            && source.as_bytes().get(start) == Some(&b'\n'))
+    {
+        start -= 1;
+    }
+    let suffix = source[start..]
+        .bytes()
+        .rev()
+        .zip(formatted[start..].bytes().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut end = source.len() - suffix;
+    let mut new_end = formatted.len() - suffix;
+    while !source.is_char_boundary(end)
+        || !formatted.is_char_boundary(new_end)
+        || (end > 0
+            && source.as_bytes().get(end - 1) == Some(&b'\r')
+            && source.as_bytes().get(end) == Some(&b'\n'))
+    {
+        end += 1;
+        new_end += 1;
+    }
+    vec![lsp::TextEdit {
+        range: Text::new(source).range(resin::ast::Span { start, end }),
+        new_text: formatted[start..new_end].into(),
+    }]
 }
 
 fn uri_path(uri: &Uri) -> Result<PathBuf> {
