@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "resin-runtime", "tree-sitter-resin"]
+members = [".", "resin-runtime", "tree-sitter-resin", "resin-lsp"]
 resolver = "3"
 
 [lib]
