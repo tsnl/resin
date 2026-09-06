@@ -1,0 +1,58 @@
+export {
+    main,
+};
+import {
+    "std/status.resin",
+};
+
+def fibonacci(n: ulong) -> ulong = {
+    if (n <= ulong(1)) {
+        n
+    } else {
+        var f0 = fibonacci(n - 2);
+        var f1 = fibonacci(n - 1);
+        f0 + f1
+    }
+};
+
+def fast_fibonacci(n: ulong) -> ulong = {
+    if (n <= ulong(1)) {
+        n
+    } else {
+        var f0 = ulong(0);
+        var f1 = ulong(1);
+        var i = ulong(1);
+
+        while (i < n) {
+            // Compute new f0, f1:
+            var new_f0 = f1;
+            var new_f1 = f0 + f1;
+
+            // Update:
+            f0 := new_f0;
+            f1 := new_f1;
+            i := i + 1;
+        };
+
+        // Done:
+        f1
+    }
+};
+
+def test_fibonacci(n: ulong) = {
+    var i = ulong(0);
+    while (i < n) {
+        var slow_f = fibonacci(i);
+        var fast_f = fast_fibonacci(i);
+        print("slow_fibonacci({0}) = {1}, fast_fibonacci({1}) = {2}\n", (i, slow_f, fast_f));
+        check(if (slow_f == fast_f) { 0 } else { 1 });
+        i := i + 1;
+    }
+};
+
+def main() = {
+    test_fibonacci(30);
+
+    var n = ulong(100);
+    print("fibonacci({0}) = {1}\n", (n, fast_fibonacci(n)));
+};
