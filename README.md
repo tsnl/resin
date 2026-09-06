@@ -37,6 +37,17 @@ The development shell supplies the Vulkan loader and window-system libraries thr
 Window integration tests use the `gpu` feature and run on a desktop display or Xvfb. Set `RESIN_REQUIRE_WINDOW=1`
 to fail instead of skipping when windowing or presentation is unavailable.
 
+## Editor support
+
+The [Zed extension](zed-resin/README.md) provides Resin syntax support and uses
+[`resin-lsp`](resin-lsp/README.md) for diagnostics, hover, go-to-definition, and
+basic completion. Build the server with `nix-shell --run 'cargo build -p resin-lsp'`.
+
+Both the CLI and LSP use a persistent `resin::compiler::Session`: source overlays,
+incremental parsing, dependency invalidation, and immutable checked snapshots
+live in the compiler library. The LSP hosts that session for ongoing edits; the
+CLI uses it for one build/run invocation.
+
 ## Functions and values
 
 ```resin

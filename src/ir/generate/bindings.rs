@@ -101,6 +101,7 @@ impl Generator {
         name: &Ident,
         read: bool,
     ) -> Result<ValueBinding, GenerateError> {
+        self.scopes.record_reference(name, false);
         let binding = self
             .scopes
             .lookup_value(&name.val)
@@ -141,12 +142,16 @@ impl Generator {
         binding: ValueBinding,
     ) -> Result<(), GenerateError> {
         Self::check_binding_name(name)?;
+        let ty = binding.ty.clone();
         self.scopes
             .define_value(name.val.clone(), binding)
             .map_err(|dup| GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::DuplicateValue { name: dup },
-            })
+            })?;
+        self.scopes
+            .record_definition(name, false, ty.as_ref(), &self.typer);
+        Ok(())
     }
 
     pub(super) fn check_binding_name(name: &Ident) -> Result<(), GenerateError> {
@@ -167,10 +172,14 @@ impl Generator {
             .map_err(|dup| GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::DuplicateType { name: dup },
-            })
+            })?;
+        self.scopes
+            .record_definition(name, true, Some(&Ty::Defined { definition }), &self.typer);
+        Ok(())
     }
 
     fn complete_value(&mut self, name: &Arc<str>, ty: Ty) -> Result<(), GenerateError> {
+        self.scopes.record_binding_type(name, &ty, &self.typer);
         let (kind, depth) = {
             let binding = self.scopes.lookup_value_mut(name).expect("defined binding");
             binding.ty = Some(ty.clone());

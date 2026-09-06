@@ -1,3 +1,8 @@
+use crate::{
+    analysis::semantic::{SemanticData, Trace},
+    ast::{SourceLocation, SourceNote},
+};
+use std::{cell::RefCell, rc::Rc};
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::ast::{Program, SourceError, SourceFile, Span, StmtKind};
@@ -19,15 +24,42 @@ struct Export {
 type Exports = BTreeMap<Arc<str>, Export>;
 
 pub fn generate_program(program: &Program) -> Result<Module, SourceError> {
+    generate_program_with(program, None)
+}
+
+pub(crate) fn analyze_program(program: &Program) -> (SemanticData, Result<Module, SourceError>) {
+    let data = Rc::new(RefCell::new(SemanticData::default()));
+    let result = generate_program_with(program, Some(data.clone()));
+    let snapshot = data.borrow().clone();
+    (snapshot, result)
+}
+
+fn generate_program_with(
+    program: &Program,
+    trace: Option<Rc<RefCell<SemanticData>>>,
+) -> Result<Module, SourceError> {
     let mut generator = Generator::new();
     let mut exports = Vec::<Exports>::new();
     for (index, source) in program.modules.iter().enumerate() {
-        generator.scopes = Scopes::new();
+        generator.scopes = trace.as_ref().map_or_else(Scopes::new, |data| {
+            Scopes::traced(Trace {
+                path: source.path.clone(),
+                data: data.clone(),
+            })
+        });
         let mut names = BTreeMap::new();
         for (import, &dependency) in source.file.imports.iter().zip(&source.imports) {
             for (name, export) in &exports[dependency] {
                 if bind(program, index, &mut names, name, export.origin, import.span)? {
                     generator.scopes.import(name.clone(), export.symbol.clone());
+                    generator.scopes.record_import(
+                        name.clone(),
+                        matches!(export.symbol, Symbol::Type(_)),
+                        SourceLocation {
+                            path: program.modules[export.origin.module].path.clone(),
+                            span: export.origin.span,
+                        },
+                    );
                 }
             }
         }
@@ -67,10 +99,7 @@ pub fn generate_program(program: &Program) -> Result<Module, SourceError> {
         if let Some(source) = program.modules.last() {
             source.error(e.span, e)
         } else {
-            SourceError {
-                path: Default::default(),
-                message: e.to_string(),
-            }
+            SourceError::new(Default::default(), Some(e.span), e.to_string())
         }
     })
 }
@@ -88,14 +117,24 @@ fn bind(
             return Ok(false);
         }
         let location = |origin: &Origin| program.modules[origin.module].location(origin.span);
-        return Err(program.modules[module].error(
+        let mut error = program.modules[module].error(
             span,
             format!(
                 "conflicting binding `{name}`\n  first defined at {}\n  also defined at {}",
                 location(previous),
                 location(&origin),
             ),
-        ));
+        );
+        for origin in [previous, &origin] {
+            error.related.push(SourceNote {
+                location: SourceLocation {
+                    path: program.modules[origin.module].path.clone(),
+                    span: origin.span,
+                },
+                message: "defined here".into(),
+            });
+        }
+        return Err(error);
     }
     names.insert(name.clone(), origin);
     Ok(true)
@@ -122,6 +161,8 @@ impl Generator {
                     name: name.val.clone(),
                 },
             })?;
+            self.scopes
+                .record_reference(name, matches!(symbol, Symbol::Type(_)));
             if let Symbol::Value(_) = &symbol {
                 self.resolve_value(name)?;
             }

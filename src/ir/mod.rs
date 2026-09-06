@@ -11,6 +11,7 @@ pub mod print;
 pub mod typer;
 pub mod verify;
 
+pub(crate) use generate::analyze_program;
 pub use generate::{GenerateError, GenerateErrorKind, generate, generate_program};
 pub use instr::{BasicBlock, BlockId, Foreign, Function, Instr, Local, StackEffect, Terminator};
 pub use print::format_module;

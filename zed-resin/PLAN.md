@@ -7,7 +7,23 @@ Branch: `feature/zed-lsp`, created from `main` at `00bfa9e`.
 
 Tracking issue: [tsnl/resin#75](https://github.com/tsnl/resin/issues/75).
 
-The grammar migration is complete in commit `2a39afd`; editor implementation is pending.
+The grammar migration is complete in commit `2a39afd`. Editor implementation is
+on `feature/zed-lsp`; see the [extension setup](README.md) and
+[compiler/server architecture](../resin-lsp/README.md).
+
+The compiler is now designed around a long-lived `compiler::Session`, shared by
+the CLI and the LSP. The session owns overlays, incremental syntax trees, cached
+ASTs, dependency invalidation, and immutable checked snapshots. Hosts provide
+change events. The LSP is a protocol adapter and background-worker host. The CLI
+retains its existing build/run/exit behavior. Semantic caches are per entry and
+its import closure; per-function incremental checking is follow-up work.
+
+Validation completed on Linux with Zed 1.17.2 under Xvfb: native protocol tests,
+compiler/session tests, query capture tests, full workspace tests with GPU and
+shader checks required, Clippy in both workspaces, the WASI build, and a Zed smoke
+test for imported/standard-library navigation and unsaved editor features.
+Changed Rust files pass rustfmt; the two pre-existing formatting differences in
+`src/ir/types/mod.rs` and `src/ir/value.rs` remain outside this change.
 
 ## Repository layout
 
@@ -40,7 +56,7 @@ No separate extension repository is needed: Zed's registry supports a repository
 subdirectory through `path = "zed-resin"` in its registry entry. See the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
 Add `resin-lsp` as a native workspace member depending on the Resin library.
-Keep shared compiler analysis in that library, with no Zed or LSP protocol types.
+Keep compiler state and shared analysis in that library, with no Zed or LSP protocol types.
 
 Use the grammar in `https://github.com/tsnl/resin` with
 `path = "tree-sitter-resin"` and pin a Resin commit containing the required parser.
@@ -98,8 +114,9 @@ Use `lsp-server`, `lsp-types`, and serde-based message conversion. Run over stdi
 reserve stdout for protocol messages and send logs to stderr. Implement lifecycle,
 capability negotiation, unsupported-request responses, cancellation, and clean exit.
 
-Maintain document text, URI, version, and a line index. Start with full-document
-synchronization and reparsing; handle open/change/save/close notifications and
+Maintain document URI, version, and a line index. Let the compiler session own
+source text and cached analysis. Start with full-document synchronization and
+incremental Tree-sitter reparsing; handle open/change/save/close notifications and
 clear obsolete diagnostics. Convert byte spans to UTF-16 LSP positions, including
 non-BMP characters, CRLF, and end-of-file ranges.
 
@@ -157,8 +174,8 @@ Validation:
   formatting/lint checks; build the Zed extension separately for its WASI target.
 - Smoke-test in Zed using `examples/eg009_imports.resin`, a standard-library import,
   and nested scopes. Confirm that unsaved changes affect all four LSP features.
-  Zed is currently unavailable on PATH in this environment, so GUI verification
-  needs an available Zed installation; report that limitation if it remains.
+  Zed 1.17.2 is available as `zeditor`; use an isolated Xvfb display for validation
+  in this environment.
 
 References, rename, signature help, formatting, automatic server downloads, and
 extension-registry publication are follow-up work. Resin's current AST printer

@@ -20,6 +20,7 @@ mod scope;
 mod terms;
 
 pub use error::{GenerateError, GenerateErrorKind};
+pub(crate) use modules::analyze_program;
 pub use modules::generate_program;
 
 use builder::FunctionBuilder;
@@ -82,6 +83,14 @@ impl Generator {
                         span: stmt.span,
                         kind: GenerateErrorKind::DuplicateType { name },
                     })?;
+                self.scopes.record_definition(
+                    name,
+                    true,
+                    Some(&Ty::Foreign {
+                        name: name.val.clone(),
+                    }),
+                    &self.typer,
+                );
             }
         }
         for stmt in &file.stmts {
