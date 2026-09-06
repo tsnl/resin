@@ -231,6 +231,10 @@ fn run_example(name: &str) {
     let executable = temp.path().join(name);
     let mut ast = resin::ast::load(&source).unwrap();
     let body = ast
+        .modules
+        .last_mut()
+        .unwrap()
+        .file
         .stmts
         .iter_mut()
         .find_map(|stmt| match &mut stmt.val {
@@ -257,7 +261,7 @@ fn run_example(name: &str) {
     };
     // Close through the runtime after three frames; leave the interactive demo unbounded.
     stmts.extend(support::parse("test_frames := test_frames + 1; if (test_frames == 3) { check(resin_window_set_should_close(window, 1)) } else { () };").stmts);
-    let module = resin::ir::generate(&ast).unwrap();
+    let module = resin::ir::generate_program(&ast).unwrap();
     let shaders = resin::toolchain::build_shaders(&module, &compiler).unwrap();
     let c = resin::backend::c::emit_with_shaders(&module, &shaders).unwrap();
     compile(&c, &executable);

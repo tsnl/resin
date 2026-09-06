@@ -1,5 +1,4 @@
-include "../lib/runtime.resin";
-include "lib/triangle.resin";
+import { "std/gpu.resin", "std/image.resin", "std/status.resin", "lib/triangle.resin" };
 
 main () -> () = {
     gpu = Ptr (ResinGpu) (ulong (0));

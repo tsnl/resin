@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "crates/resin-runtime"]
+members = [".", "resin-runtime"]
 resolver = "3"
 
 [lib]
@@ -18,4 +18,4 @@ clap = { version = "4", features = ["derive"] }
 sexpfmt = "2"
 tree-sitter = "0.27"
 tree-sitter-resin = { path = "tree-sitter-resin" }
-resin-runtime = { path = "crates/resin-runtime" }
+resin-runtime = { path = "resin-runtime" }

@@ -82,6 +82,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
     };
 
     verify(&Module {
+        entries: Default::default(),
         types: vec![linked_list_type()],
         globals: vec![],
         functions: vec![function],
@@ -95,6 +96,7 @@ fn an_inline_recursive_type_is_rejected() {
         definition: TypeId::from_index(0),
     };
     let module = Module {
+        entries: Default::default(),
         types: vec![TypeDef::new(
             "Bad",
             Ty::Record {
@@ -156,6 +158,7 @@ fn nominal_types_do_not_equal_their_representations() {
         }],
     };
     let module = Module {
+        entries: Default::default(),
         types: vec![TypeDef::new("Meters", Ty::Int32)],
         globals: vec![],
         functions: vec![function],

@@ -7,12 +7,14 @@ use std::sync::Arc;
 pub mod generate;
 mod load;
 pub mod print;
-pub use load::{SourceError, load};
+pub use load::{Program, SourceError, SourceModule, load};
 
 pub use generate::{AstError, AstErrorKind, AstGen};
 
 #[derive(Debug, Clone)]
 pub struct SourceFile {
+    pub exports: Vec<Ident>,
+    pub imports: Vec<Spanned<Arc<str>>>,
     pub stmts: Vec<Stmt>,
 }
 
@@ -92,9 +94,6 @@ pub type Stmt = Spanned<StmtKind>;
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    Include {
-        path: Arc<str>,
-    },
     ForeignType {
         name: Ident,
     },

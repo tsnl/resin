@@ -1,0 +1,18 @@
+export {
+    resin_status_incomplete,
+    resin_status_string,
+    check,
+};
+
+resin_status_incomplete = 7;
+
+extern "resin_runtime.h" resin_status_string (status: int) -> Ptr (ubyte);
+
+extern "stdlib.h" exit (status: int) -> ();
+
+check (status: int) -> () = {
+    if (status != 0) {
+        print("runtime error {0}\n", (status,));
+        exit(status)
+    } else { () }
+};

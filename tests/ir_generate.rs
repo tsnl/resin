@@ -91,7 +91,8 @@ fn examples_generate_verified_ir() {
         }
         found += 1;
         let ast = resin::ast::load(&path).unwrap();
-        let module = generate(&ast).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let module = resin::ir::generate_program(&ast)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
     assert!(

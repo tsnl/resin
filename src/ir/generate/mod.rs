@@ -14,11 +14,13 @@ mod error;
 mod eval;
 mod flow;
 mod functions;
+mod modules;
 mod places;
 mod scope;
 mod terms;
 
 pub use error::{GenerateError, GenerateErrorKind};
+pub use modules::generate_program;
 
 use builder::FunctionBuilder;
 use eval::Evaluator;
@@ -27,7 +29,18 @@ use scope::Scopes;
 /// Lower a source file to a verified IR module.
 /// `functions[0]` initializes globals and evaluates top-level expressions.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
-    Generator::new().generate_file(file)
+    if let Some(import) = file.imports.first() {
+        return Err(GenerateError {
+            span: import.span,
+            kind: GenerateErrorKind::UnresolvedImport {
+                path: import.val.clone(),
+            },
+        });
+    }
+    let mut generator = Generator::new();
+    generator.generate_file(file)?;
+    generator.exports(file)?;
+    generator.finish()
 }
 
 struct Generator {
@@ -60,7 +73,7 @@ impl Generator {
         }
     }
 
-    fn generate_file(mut self, file: &SourceFile) -> Result<Module, GenerateError> {
+    fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
         for stmt in &file.stmts {
             if let StmtKind::ForeignType { name } = &stmt.val {
                 self.scopes
@@ -115,6 +128,11 @@ impl Generator {
                 self.gen_function(name, params, body)?;
             }
         }
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<Module, GenerateError> {
+        self.module.entries = self.scopes.entries();
         self.emit(Instr::Push { value: Value::Unit });
         self.terminate(Terminator::Return);
         let init = self.functions.pop().expect("module initializer").finish();
@@ -137,10 +155,6 @@ impl Generator {
             | StmtKind::ForeignType { .. } => {
                 unreachable!("functions and foreign types are module items")
             }
-            StmtKind::Include { path } => Err(GenerateError {
-                span: stmt.span,
-                kind: GenerateErrorKind::UnresolvedInclude { path: path.clone() },
-            }),
             StmtKind::Define { name, init } => self.gen_define(name, init),
             StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
             StmtKind::Declare { name, ann } => self.gen_declare(name, ann),

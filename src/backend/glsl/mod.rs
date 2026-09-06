@@ -47,18 +47,12 @@ impl Stage {
 }
 
 pub fn emit(module: &Module, entry: &str, stage: Stage) -> Result<String, Error> {
-    let candidates: Vec<_> = module
-        .functions
-        .iter()
-        .enumerate()
-        .filter(|(_, function)| function.name.as_deref() == Some(entry))
-        .collect();
-    let [(index, _)] = candidates.as_slice() else {
+    let Some(ir::Entry::Function(function)) = module.entries.get(entry) else {
         return Err(Error(format!(
-            "expected one shader function named {entry:?}"
+            "expected a visible shader function named {entry:?}"
         )));
     };
-    emit_function(module, ir::FunctionId::from_index(*index), stage)
+    emit_function(module, *function, stage)
 }
 
 pub fn emit_function(

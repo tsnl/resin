@@ -50,7 +50,16 @@ fn numbered_examples_compile_as_strict_c11() {
                 .to_string_lossy()
                 .starts_with("eg")
         {
-            runs(&fs::read_to_string(path).unwrap(), 0);
+            let program = resin::ast::load(&path).unwrap();
+            let module = ir::generate_program(&program).unwrap();
+            let output = run_module(&module);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}\n{}",
+                path.display(),
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 }

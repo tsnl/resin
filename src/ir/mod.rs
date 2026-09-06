@@ -1,6 +1,6 @@
 //! Target-independent, typed intermediate representation.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 pub mod instr;
 pub mod types;
@@ -11,7 +11,7 @@ pub mod print;
 pub mod typer;
 pub mod verify;
 
-pub use generate::{GenerateError, GenerateErrorKind, generate};
+pub use generate::{GenerateError, GenerateErrorKind, generate, generate_program};
 pub use instr::{BasicBlock, BlockId, Foreign, Function, Instr, Local, StackEffect, Terminator};
 pub use print::format_module;
 pub use typer::{
@@ -32,9 +32,17 @@ pub struct Global {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Module {
+    /// Value bindings visible in the entry source file.
+    pub entries: BTreeMap<Arc<str>, Entry>,
     /// Nominal definitions, indexed by [`TypeId`].
     pub types: Vec<TypeDef>,
     /// Value definitions, indexed by [`GlobalId`].
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entry {
+    Function(FunctionId),
+    Global(GlobalId),
 }

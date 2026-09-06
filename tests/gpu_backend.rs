@@ -159,7 +159,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lib/particles.resin");
-    let module = resin::ir::generate(&resin::ast::load(&source).unwrap()).unwrap();
+    let module = resin::ir::generate_program(&resin::ast::load(&source).unwrap()).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
         resin::toolchain::compile_glsl(&glsl, stage, &compiler).unwrap()
@@ -255,11 +255,12 @@ fn fragment_shaders_read_typed_root_parameters() {
     let Some(mut gpu) = gpu() else { return };
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lib/triangle.resin");
     let mut ast = resin::ast::load(&source).unwrap();
-    ast.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
-    ast.stmts.extend(
+    let file = &mut ast.modules.last_mut().unwrap().file;
+    file.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
+    file.stmts.extend(
         support::parse("fragment (color: Color, root: Ptr (Color)) -> Color = { root.* };").stmts,
     );
-    let module = resin::ir::generate(&ast).unwrap();
+    let module = resin::ir::generate_program(&ast).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
         resin::toolchain::compile_glsl(&glsl, stage, &compiler).unwrap()
@@ -404,7 +405,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let reference = image_read_png(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/crates/resin-runtime/tests/hello_triangle.png"
+            "/resin-runtime/tests/hello_triangle.png"
         ),
         4,
     )

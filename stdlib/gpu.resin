@@ -1,24 +1,48 @@
+export {
+    ResinGpu,
+    ResinGpuDeviceInfo,
+    ResinAllocation,
+    ResinImage,
+    ResinPipeline,
+    ResinCommandBuffer,
+    resin_memory_default,
+    resin_memory_gpu,
+    resin_memory_readback,
+    resin_gpu_device_count,
+    resin_gpu_enumerate_devices,
+    resin_gpu_create,
+    resin_gpu_create_at,
+    resin_gpu_destroy,
+    resin_gpu_malloc,
+    resin_gpu_free,
+    resin_allocation_host_pointer,
+    resin_allocation_device_pointer,
+    resin_allocation_size,
+    resin_gpu_host_to_device_pointer,
+    resin_gpu_create_compute_pipeline,
+    resin_gpu_create_graphics_pipeline,
+    resin_gpu_free_pipeline,
+    resin_gpu_create_image,
+    resin_gpu_free_image,
+    resin_image_width,
+    resin_image_height,
+    resin_gpu_start_command_recording,
+    resin_gpu_set_pipeline,
+    resin_gpu_dispatch,
+    resin_gpu_begin_rendering,
+    resin_gpu_end_rendering,
+    resin_gpu_draw,
+    resin_gpu_copy_image_to_buffer,
+    resin_gpu_submit,
+    resin_gpu_cancel_command_buffer,
+};
+
 extern type ResinGpu;
 extern type ResinGpuDeviceInfo;
 extern type ResinAllocation;
 extern type ResinImage;
 extern type ResinPipeline;
 extern type ResinCommandBuffer;
-extern type ResinWindow;
-
-resin_key_escape = 256;
-resin_status_incomplete = 7;
-
-extern "resin_runtime.h" resin_window_create (width: uint, height: uint, title: Ptr (ubyte), window: Ptr (Ptr (ResinWindow))) -> int;
-extern "resin_runtime.h" resin_window_destroy (window: Ptr (ResinWindow)) -> ();
-extern "resin_runtime.h" resin_window_poll_events (window: Ptr (ResinWindow)) -> int;
-extern "resin_runtime.h" resin_window_should_close (window: Ptr (ResinWindow)) -> int;
-extern "resin_runtime.h" resin_window_set_should_close (window: Ptr (ResinWindow), close: int) -> int;
-extern "resin_runtime.h" resin_window_framebuffer_size (window: Ptr (ResinWindow), width: Ptr (uint), height: Ptr (uint)) -> int;
-extern "resin_runtime.h" resin_window_set_size (window: Ptr (ResinWindow), width: uint, height: uint) -> int;
-extern "resin_runtime.h" resin_window_key_pressed (window: Ptr (ResinWindow), key: int) -> int;
-extern "resin_runtime.h" resin_gpu_create_for_window (window: Ptr (ResinWindow), gpu: Ptr (Ptr (ResinGpu))) -> int;
-extern "resin_runtime.h" resin_gpu_present (gpu: Ptr (ResinGpu), image: Ptr (ResinImage)) -> int;
 
 resin_memory_default = 0;
 resin_memory_gpu = 1;
@@ -55,17 +79,3 @@ extern "resin_runtime.h" resin_gpu_draw (commands: Ptr (ResinCommandBuffer), roo
 extern "resin_runtime.h" resin_gpu_copy_image_to_buffer (commands: Ptr (ResinCommandBuffer), image: Ptr (ResinImage), buffer: Ptr (ResinAllocation)) -> int;
 extern "resin_runtime.h" resin_gpu_submit (gpu: Ptr (ResinGpu), commands: Ptr (ResinCommandBuffer)) -> int;
 extern "resin_runtime.h" resin_gpu_cancel_command_buffer (gpu: Ptr (ResinGpu), commands: Ptr (ResinCommandBuffer)) -> ();
-
-extern "resin_runtime.h" resin_image_write_png (path: Ptr (ubyte), width: uint, height: uint, channels: uint, pixels: Ptr (ubyte), stride: ulong) -> int;
-extern "resin_runtime.h" resin_image_read_png (path: Ptr (ubyte), channels: uint, width: Ptr (uint), height: Ptr (uint), actual_channels: Ptr (uint), pixels: Ptr (Ptr (ubyte))) -> int;
-extern "resin_runtime.h" resin_image_free (pixels: Ptr (ubyte)) -> ();
-extern "resin_runtime.h" resin_status_string (status: int) -> Ptr (ubyte);
-
-extern "stdlib.h" exit (status: int) -> ();
-
-check (status: int) -> () = {
-    if (status != 0) {
-        print("runtime error {0}\n", (status,));
-        exit(status)
-    } else { () }
-};

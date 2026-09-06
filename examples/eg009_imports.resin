@@ -1,0 +1,6 @@
+import { "lib/counter.resin", "std/status.resin" };
+
+main () -> () = {
+    check(0);
+    print("counter: {0}, {1}\n", (next(), next()));
+};

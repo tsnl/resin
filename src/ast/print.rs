@@ -5,7 +5,29 @@ use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 use super::*;
 
 pub fn format_source(file: &SourceFile) -> String {
-    let sexp = sexp_source(file);
+    format(sexp_source(file))
+}
+
+pub fn format_program(program: &Program) -> String {
+    format(list(
+        "program",
+        program
+            .modules
+            .iter()
+            .map(|module| {
+                list(
+                    "file",
+                    vec![
+                        string(module.path.to_string_lossy()),
+                        sexp_source(&module.file),
+                    ],
+                )
+            })
+            .collect(),
+    ))
+}
+
+fn format(sexp: SExp) -> String {
     let config = PrinterConfig {
         indent_width: 2,
         margin_width: 80,
@@ -14,12 +36,31 @@ pub fn format_source(file: &SourceFile) -> String {
 }
 
 fn sexp_source(file: &SourceFile) -> SExp {
-    list("source", file.stmts.iter().map(sexp_stmt).collect())
+    let mut items = Vec::new();
+    if !file.exports.is_empty() {
+        items.push(list(
+            "export",
+            file.exports
+                .iter()
+                .map(|name| symbol(name.val.as_ref()))
+                .collect(),
+        ));
+    }
+    if !file.imports.is_empty() {
+        items.push(list(
+            "import",
+            file.imports
+                .iter()
+                .map(|path| string(path.val.as_ref()))
+                .collect(),
+        ));
+    }
+    items.extend(file.stmts.iter().map(sexp_stmt));
+    list("source", items)
 }
 
 fn sexp_stmt(stmt: &Stmt) -> SExp {
     match &stmt.val {
-        StmtKind::Include { path } => list_sp("include", stmt.span, vec![string(path.as_ref())]),
         StmtKind::ForeignType { name } => {
             list_sp("extern-type", stmt.span, vec![symbol(name.val.as_ref())])
         }

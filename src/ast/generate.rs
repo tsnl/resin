@@ -49,7 +49,29 @@ impl<'a> AstGen<'a> {
         for child in node.children_by_field_name("stmt", &mut cursor) {
             stmts.push(self.gen_stmt(child));
         }
-        Ok(SourceFile { stmts })
+        let exports = node
+            .child_by_field_name("exports")
+            .map_or_else(Vec::new, |clause| {
+                clause
+                    .children_by_field_name("name", &mut clause.walk())
+                    .map(|node| self.ident(node))
+                    .collect()
+            });
+        let imports = node
+            .child_by_field_name("imports")
+            .map_or_else(Vec::new, |clause| {
+                clause
+                    .children_by_field_name("path", &mut clause.walk())
+                    .map(|node| {
+                        Spanned::new(decode_string(self.text(node)).into(), self.span(node))
+                    })
+                    .collect()
+            });
+        Ok(SourceFile {
+            exports,
+            imports,
+            stmts,
+        })
     }
 
     fn parse_error(&self, node: Node) -> AstError {
@@ -79,15 +101,6 @@ impl<'a> AstGen<'a> {
             return Spanned::new(
                 StmtKind::ForeignType {
                     name: self.ident(node.child_by_field_name("name").unwrap()),
-                },
-                self.span(node),
-            );
-        }
-        if node.kind() == "include" {
-            return Spanned::new(
-                StmtKind::Include {
-                    path: decode_string(self.text(node.child_by_field_name("path").unwrap()))
-                        .into(),
                 },
                 self.span(node),
             );

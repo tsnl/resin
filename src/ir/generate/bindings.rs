@@ -140,12 +140,25 @@ impl Generator {
         name: &Ident,
         binding: ValueBinding,
     ) -> Result<(), GenerateError> {
+        Self::check_binding_name(name)?;
         self.scopes
             .define_value(name.val.clone(), binding)
             .map_err(|dup| GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::DuplicateValue { name: dup },
             })
+    }
+
+    pub(super) fn check_binding_name(name: &Ident) -> Result<(), GenerateError> {
+        if matches!(name.val.as_ref(), "print" | "shader") {
+            return Err(GenerateError {
+                span: name.span,
+                kind: GenerateErrorKind::ReservedBuiltin {
+                    name: name.val.clone(),
+                },
+            });
+        }
+        Ok(())
     }
 
     fn bind_type(&mut self, name: &Ident, definition: TypeId) -> Result<(), GenerateError> {

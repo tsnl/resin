@@ -2,7 +2,7 @@
 
 use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
-use crate::ir::{Function, Instr, Module, Terminator, Ty, Value};
+use crate::ir::{Entry, Function, Instr, Module, Terminator, Ty, Value};
 
 mod names;
 
@@ -20,6 +20,19 @@ pub fn format_module(module: &Module) -> String {
 fn sexp_module(module: &Module) -> SExp {
     let names = Names::new(module);
     let mut items = Vec::new();
+    for (name, entry) in &module.entries {
+        let target = match entry {
+            Entry::Function(id) => names.functions.get(id.index()),
+            Entry::Global(id) => names.globals.get(id.index()),
+        };
+        items.push(list(
+            "entry",
+            vec![
+                symbol(name.as_ref()),
+                symbol(target.map_or("invalid", AsRef::as_ref)),
+            ],
+        ));
+    }
     for (index, def) in module.types.iter().enumerate() {
         items.push(list(
             "type",

@@ -1,8 +1,17 @@
 //! Lexical scopes with separate value and type namespaces.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
-use crate::ir::{FunctionId, GlobalId, LocalId, Ty, TypeId};
+use crate::ir::{Entry, FunctionId, GlobalId, LocalId, Ty, TypeId};
+
+#[derive(Clone)]
+pub(super) enum Symbol {
+    Value(ValueBinding),
+    Type(Ty),
+}
 
 #[derive(Clone)]
 pub(super) struct ValueBinding {
@@ -72,6 +81,36 @@ pub(super) struct Scopes {
 }
 
 impl Scopes {
+    pub(super) fn symbol(&self, name: &str) -> Option<Symbol> {
+        self.lookup_value(name)
+            .cloned()
+            .map(Symbol::Value)
+            .or_else(|| self.lookup_type(name).map(Symbol::Type))
+    }
+
+    pub(super) fn import(&mut self, name: Arc<str>, symbol: Symbol) {
+        let result = match symbol {
+            Symbol::Value(binding) => self.innermost().define_value(name, binding),
+            Symbol::Type(ty) => self.innermost().define_type(name, ty),
+        };
+        result.expect("import conflicts were checked");
+    }
+
+    pub(super) fn entries(&self) -> BTreeMap<Arc<str>, Entry> {
+        self.frames[0]
+            .values
+            .iter()
+            .map(|(name, value)| {
+                let entry = match value.kind {
+                    ValueBindingKind::Function(id) => Entry::Function(id),
+                    ValueBindingKind::Global(id) => Entry::Global(id),
+                    ValueBindingKind::Local(_) => unreachable!("module binding"),
+                };
+                (name.clone(), entry)
+            })
+            .collect()
+    }
+
     pub(super) fn new() -> Self {
         Self {
             frames: vec![Scope::new()],

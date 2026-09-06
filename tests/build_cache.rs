@@ -51,7 +51,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
 }
 
 #[test]
-fn shader_objects_are_deduplicated_cached_and_rebuilt_with_included_helpers() {
+fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     let Some(glslc) = shaders::compiler() else {
         return;
     };
@@ -61,11 +61,15 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_included_helpers() {
     fs::write(&shader_compiler, "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_SHADER_COUNT\"\nexec \"$RESIN_TEST_SHADER_COMPILER\" \"$@\"\n").unwrap();
     fs::set_permissions(&shader_compiler, fs::Permissions::from_mode(0o755)).unwrap();
     let helper = project.temp.path().join("helper.resin");
-    fs::write(&helper, "pixel (i: uint) -> uint = { i + uint (1) };").unwrap();
+    fs::write(
+        &helper,
+        "export { pixel }; pixel (i: uint) -> uint = { i + uint (1) };",
+    )
+    .unwrap();
     fs::write(
         &project.input,
         r#"
-        include "helper.resin";
+        import { "helper.resin" };
         kernel (i: uint) -> uint = { pixel(i) };
         a = shader(kernel, "compute");
         b = shader(kernel, "compute");
@@ -88,11 +92,19 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_included_helpers() {
     printed(&run(), b"true");
     assert_eq!(calls(), 1);
     assert_eq!(project.calls(), 1);
-    fs::write(&helper, "pixel (i: uint) -> uint = { i + uint (2) };").unwrap();
+    fs::write(
+        &helper,
+        "export { pixel }; pixel (i: uint) -> uint = { i + uint (2) };",
+    )
+    .unwrap();
     printed(&run(), b"true");
     assert_eq!(calls(), 2);
     assert_eq!(project.calls(), 2);
-    fs::write(&helper, "pixel (i: uint) -> uint = { i / uint (2) };").unwrap();
+    fs::write(
+        &helper,
+        "export { pixel }; pixel (i: uint) -> uint = { i / uint (2) };",
+    )
+    .unwrap();
     let output = run();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());

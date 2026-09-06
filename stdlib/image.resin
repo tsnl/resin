@@ -1,0 +1,9 @@
+export {
+    resin_image_write_png,
+    resin_image_read_png,
+    resin_image_free,
+};
+
+extern "resin_runtime.h" resin_image_write_png (path: Ptr (ubyte), width: uint, height: uint, channels: uint, pixels: Ptr (ubyte), stride: ulong) -> int;
+extern "resin_runtime.h" resin_image_read_png (path: Ptr (ubyte), channels: uint, width: Ptr (uint), height: Ptr (uint), actual_channels: Ptr (uint), pixels: Ptr (Ptr (ubyte))) -> int;
+extern "resin_runtime.h" resin_image_free (pixels: Ptr (ubyte)) -> ();

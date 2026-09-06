@@ -12,7 +12,7 @@ fn example(name: &str) -> ir::Module {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(name);
-    ir::generate(&resin::ast::load(&path).unwrap()).unwrap()
+    ir::generate_program(&resin::ast::load(&path).unwrap()).unwrap()
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn entry_interfaces_are_checked() {
             example("gradient.resin"),
             "absent",
             Stage::Compute,
-            "expected one",
+            "expected a visible shader function",
         ),
         (
             module("kernel (i: int) -> int = { i };"),

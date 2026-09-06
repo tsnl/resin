@@ -38,6 +38,7 @@ impl Generator {
     ) -> Result<Vec<Ty>, GenerateError> {
         let mut names = std::collections::HashSet::new();
         for (name, _) in params {
+            Self::check_binding_name(name)?;
             if !names.insert(&name.val) {
                 return Err(GenerateError {
                     span: name.span,

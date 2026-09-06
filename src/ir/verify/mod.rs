@@ -1,6 +1,6 @@
 //! Stack and control-flow verification for typed IR.
 
-use crate::ir::{FunctionId, GlobalId, Module, Ty};
+use crate::ir::{Entry, FunctionId, GlobalId, Module, Ty};
 
 mod error;
 mod flow;
@@ -24,6 +24,25 @@ pub(crate) struct FunctionTypes {
 }
 
 pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError> {
+    for entry in module.entries.values() {
+        match *entry {
+            Entry::Function(function) if function.index() >= module.functions.len() => {
+                return Err(
+                    Location::function(function).error(VerifyErrorKind::InvalidFunction {
+                        function: function.index(),
+                    }),
+                );
+            }
+            Entry::Global(global) if global.index() >= module.globals.len() => {
+                return Err(
+                    Location::global(global).error(VerifyErrorKind::InvalidGlobal {
+                        global: global.index(),
+                    }),
+                );
+            }
+            _ => {}
+        }
+    }
     check_definitions(&module.types)?;
     for (index, definition) in module.types.iter().enumerate() {
         check_value(

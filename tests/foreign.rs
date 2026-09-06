@@ -24,7 +24,7 @@ fn error(source: &str) -> String {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let path = temp.path().join("source.resin");
     fs::write(&path, source).unwrap();
-    ir::generate(&ast::load(&path).unwrap())
+    ir::generate_program(&ast::load(&path).unwrap())
         .unwrap_err()
         .to_string()
 }
@@ -107,26 +107,38 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
 }
 
 #[test]
-fn includes_are_relative_deduplicated_and_checked_for_cycles() {
+fn imports_are_relative_deduplicated_and_checked_for_cycles() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let main = temp.path().join("main.resin");
     let nested = temp.path().join("nested");
     fs::create_dir(&nested).unwrap();
     fs::write(
         temp.path().join("common.resin"),
-        "helper () -> int = { 42 };",
+        "export { helper }; helper () -> int = { 42 };",
     )
     .unwrap();
-    fs::write(nested.join("library.resin"), "include \"../common.resin\";").unwrap();
-    fs::write(&main, "include \"nested/library.resin\"; include \"common.resin\"; main () -> int = { helper() };").unwrap();
-    let module = ir::generate(&ast::load(&main).unwrap()).unwrap();
+    fs::write(
+        nested.join("library.resin"),
+        "export { helper }; import { \"../common.resin\" };",
+    )
+    .unwrap();
+    fs::write(
+        &main,
+        "import { \"nested/library.resin\", \"common.resin\" }; main () -> int = { helper() };",
+    )
+    .unwrap();
+    let module = ir::generate_program(&ast::load(&main).unwrap()).unwrap();
     assert_eq!(module.functions.len(), 3);
-    fs::write(temp.path().join("common.resin"), "include \"main.resin\";").unwrap();
+    fs::write(
+        temp.path().join("common.resin"),
+        "import { \"main.resin\" };",
+    )
+    .unwrap();
     assert!(
         ast::load(&main)
             .unwrap_err()
             .to_string()
-            .contains("cyclic source include")
+            .contains("cyclic source import")
     );
     fs::write(temp.path().join("common.resin"), "def invalid").unwrap();
     assert!(
@@ -159,7 +171,6 @@ fn shader_requires_a_named_function_and_a_literal_stage() {
 }
 
 #[test]
-fn shader_can_be_shadowed_by_a_normal_function() {
-    let output = run("shader (n: int) -> int = { n + 1 }; main () -> int = { shader(41) };");
-    assert_eq!(output.status.code(), Some(42));
+fn shader_cannot_be_shadowed_by_a_normal_function() {
+    assert!(error("shader (n: int) -> int = { n + 1 };").contains("ReservedBuiltin"));
 }

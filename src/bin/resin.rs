@@ -88,10 +88,10 @@ fn run(cli: Cli) -> Result<i32> {
     let file = ast::load(&cli.file)?;
     match cli.output {
         Output::Check => return print(&cli, "ok".into()),
-        Output::Ast => return print(&cli, ast::print::format_source(&file)),
+        Output::Ast => return print(&cli, ast::print::format_program(&file)),
         _ => {}
     }
-    let module = ir::generate(&file)?;
+    let module = ir::generate_program(&file)?;
     match cli.output {
         Output::Ir => print(&cli, ir::format_module(&module)),
         Output::C | Output::Exe | Output::Run => host(&cli, &module),

@@ -91,12 +91,12 @@ Delete `build/` to clean it, including after linked system library changes or ch
 behind a compiler wrapper.
 
 Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
-Generated C includes `resin_runtime.h` and its hierarchy from `crates/resin-runtime/include`.
+Generated C includes `resin_runtime.h` and its hierarchy from `resin-runtime/include`.
 Cargo builds the runtime archive alongside the compiler. For relocated installations, set
 `RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB`. To compile emitted C manually on Linux:
 
 ```sh
-cc -std=c11 -fno-strict-aliasing -I crates/resin-runtime/include fibonacci.c \
+cc -std=c11 -fno-strict-aliasing -I resin-runtime/include fibonacci.c \
   target/debug/deps/libresin_runtime.a -ldl -lpthread -lm -lrt -lutil -o fibonacci
 ```
 
@@ -119,19 +119,56 @@ print("done\n", ());
 Placeholders are zero-based and may repeat. Newlines are explicit. Invalid formats or indices
 fail before the call writes output. Printable values are numbers, booleans, unit, byte strings,
 pointer addresses, and nominal wrappers of those. Arguments evaluate once, left-to-right,
-including unused ones. A local `print` binding shadows the builtin normally.
+including unused ones. `print` is a compiler builtin and cannot be redefined or shadowed.
 
 Strings are UTF-8 byte arrays with `\n`, `\r`, `\t`, `\0`, `\"`, and `\\` escapes.
 There is no implicit NUL terminator.
 
-## Runtime bindings
+## Files and the standard library
 
-`lib/runtime.resin` binds GPU, allocation, pipeline, command, and PNG operations directly:
+Each file has its own scope. An optional `export` clause comes first, followed by an optional
+`import` clause, then ordinary definitions and statements. Each clause may appear only once:
 
 ```resin
-extern type ResinGpu;
-extern "resin_runtime.h" resin_gpu_create (gpu: Ptr (Ptr (ResinGpu))) -> int;
-extern "resin_runtime.h" resin_gpu_destroy (gpu: Ptr (ResinGpu)) -> ();
+export { answer };
+import { "helpers.resin", "std/status.resin" };
+
+answer () -> int = { helper() };
+```
+
+Imports bring only the dependency's exported names into the file's flat namespace. Without
+an export clause (or with `export {}`), everything is private. An exported function can use
+its private helpers and types. Imported bindings may be explicitly re-exported; dependencies
+are not implicitly re-exported. Exported values must be initialized.
+
+Two different bindings with the same name are an error, including imports conflicting with
+local definitions. Nested scopes can still shadow names. Re-importing the same binding through
+multiple paths is harmless. Ordinary paths resolve relative to the importing file; each canonical
+file is loaded and initialized once. Dependencies initialize before consumers, following import-list
+order. Import cycles are errors; mutually recursive functions within one file remain supported.
+`include` has been replaced by `import`.
+
+Syntax keywords (`export`, `import`, `extern`, `type`, `if`, `else`, and `while`), primitive
+type names, and `Ptr`/`Span` are reserved, including in parameters and field names. Names such
+as `if_value` are ordinary identifiers. `print` and `shader` are unshadowable compiler builtins,
+not syntax keywords: definitions and parameters cannot use those names, but record fields can.
+
+`std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
+working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
+The native Rust crate lives separately at `resin-runtime/`; it has no dependency on the standard
+library. Programs use the standard library's exports, which initially stay close to the runtime's C API:
+
+- `std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
+- `std/window.resin`: windows and presentation; import `std/gpu.resin` separately for GPU operations.
+- `std/image.resin`: PNG reading and writing.
+- `std/status.resin`: `check`, status strings, and the incomplete-status constant.
+- `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
+
+The polymorphic `print` and compile-time `shader` operations remain compiler builtins.
+Run `cargo run -- examples/eg009_imports.resin` for a small example with private module state.
+
+```resin
+import { "std/gpu.resin" };
 
 main () -> () = {
     gpu = Ptr (ResinGpu) (ulong (0));
@@ -141,8 +178,18 @@ main () -> () = {
 };
 ```
 
-`include "relative/path.resin";` loads source relative to the including file, once per canonical
-path. Includes share one module namespace; cycles are errors.
+## Foreign functions
+
+Standard-library modules declare native operations with `extern`, exporting appropriate bindings
+directly or wrapping them in Resin functions. For example:
+
+```resin
+export { ResinGpu, resin_gpu_create };
+
+extern type ResinGpu;
+extern "resin_runtime.h" resin_gpu_create (gpu: Ptr (Ptr (ResinGpu))) -> int;
+```
+
 Foreign headers use the C compiler's include search paths (or an absolute path).
 
 The prototype targets 64-bit hosts. Foreign functions accept scalar/pointer parameters and return a scalar, pointer, or unit.
@@ -206,7 +253,7 @@ Runtime function aliases and dynamic stage values are not accepted by `shader`.
 
 Resin lowers the entry and its reachable named helpers to GLSL, invokes `glslc`, and embeds the
 result in generated C. Shader objects are deduplicated and cached under `build/shaders/`;
-included helper changes invalidate them. Copied executables need the Vulkan loader/device,
+imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `glslc` at runtime.
 
 Shaders receive application data through the root address passed to `resin_gpu_dispatch` or
@@ -294,7 +341,7 @@ It is a small synchronous demo, not a frame-rate-independent simulation. Its sha
 and shared data definitions live in `examples/lib/particles.resin`.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
-`lib/runtime.resin`:
+`std/window.resin`:
 
 - `resin_window_create`, `resin_window_destroy`, and `resin_window_poll_events` manage
   GLFW windows and events. Close state, framebuffer size, resizing, and GLFW key codes

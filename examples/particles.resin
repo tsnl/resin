@@ -1,5 +1,10 @@
-include "../lib/runtime.resin";
-include "lib/particles.resin";
+import {
+    "std/gpu.resin",
+    "std/window.resin",
+    "std/status.resin",
+    "std/graphics.resin",
+    "lib/particles.resin",
+};
 
 initialize (particles: Ptr (Particle)) -> () = {
     index = 0;

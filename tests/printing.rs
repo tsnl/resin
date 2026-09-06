@@ -110,15 +110,17 @@ fn ordinary_and_recursive_functions_can_print() {
 }
 
 #[test]
-fn print_can_be_shadowed_by_an_ordinary_function() {
-    prints(
-        r#"plus (n: int) -> int = { n + 1 }; main () -> int = { print = plus; if (print(41) == 42) { 0 } else { 1 } };"#,
-        b"",
-    );
-    prints(
-        r#"apply (print: (int) -> int) -> int = { print(41) }; minus (n: int) -> int = { n - 41 }; main () -> int = { apply(minus) };"#,
-        b"",
-    );
+fn print_cannot_be_shadowed_by_a_local_or_parameter() {
+    for source in [
+        "main () -> () = { print = 1; };",
+        "apply (print: (int) -> int) -> int = { print(41) };",
+    ] {
+        let error = ir::generate(&support::parse(source)).unwrap_err();
+        assert!(
+            matches!(error.kind, ir::GenerateErrorKind::ReservedBuiltin { .. }),
+            "{error}"
+        );
+    }
 }
 
 #[test]

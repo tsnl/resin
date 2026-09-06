@@ -12,7 +12,10 @@ pub struct GenerateError {
 pub enum GenerateErrorKind {
     InvalidForeignSignature,
     InvalidShader { message: Arc<str> },
-    UnresolvedInclude { path: Arc<str> },
+    UnresolvedImport { path: Arc<str> },
+    UnknownExport { name: Arc<str> },
+    DuplicateExport { name: Arc<str> },
+    ReservedBuiltin { name: Arc<str> },
     Type(TypeErrorKind),
     UnboundValue { name: Arc<str> },
     UnboundType { name: Arc<str> },

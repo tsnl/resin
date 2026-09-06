@@ -104,17 +104,12 @@ impl Generator {
         if let TermKind::Type { ty } = &func.val {
             return self.gen_ascription(span, ty, arg);
         }
-        if let TermKind::Var { name } = &func.val
-            && name.val.as_ref() == "shader"
-            && self.scopes.lookup_value("shader").is_none()
-        {
-            return self.gen_shader(span, arg);
-        }
-        if let TermKind::Var { name } = &func.val
-            && name.val.as_ref() == "print"
-            && self.scopes.lookup_value("print").is_none()
-        {
-            return self.gen_builtin(span, "print", std::slice::from_ref(arg), None);
+        if let TermKind::Var { name } = &func.val {
+            match name.val.as_ref() {
+                "shader" => return self.gen_shader(span, arg),
+                "print" => return self.gen_builtin(span, "print", std::slice::from_ref(arg), None),
+                _ => {}
+            }
         }
 
         let callee_ty = self.gen_term(func, None)?;

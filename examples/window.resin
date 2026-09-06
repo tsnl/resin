@@ -1,5 +1,4 @@
-include "../lib/runtime.resin";
-include "lib/triangle.resin";
+import { "std/gpu.resin", "std/window.resin", "std/status.resin", "lib/triangle.resin" };
 
 main () -> () = {
     title = "Resin triangle\0";
