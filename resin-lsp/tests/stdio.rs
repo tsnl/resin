@@ -57,6 +57,10 @@ impl Client {
         );
         assert_eq!(initialize["capabilities"]["positionEncoding"], "utf-16");
         assert_eq!(initialize["capabilities"]["textDocumentSync"]["change"], 1);
+        assert_eq!(
+            initialize["capabilities"]["completionProvider"]["triggerCharacters"],
+            json!(["."])
+        );
         client.notify("initialized", json!({}));
         client
     }
@@ -149,6 +153,41 @@ fn uri(path: &Path) -> String {
 }
 fn at(uri: &str, line: u32, character: u32) -> Value {
     json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": character}})
+}
+
+#[test]
+fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("fields.resin"));
+    for (version, field, typed) in [(1, "count", ""), (2, "length", "le")] {
+        let source =
+            format!("def main () = {{ var value = {{ {field} = 1 }}; /* 😀 */ value.{typed}; }};");
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), true);
+        let start = source[..source.rfind('.').unwrap() + 1]
+            .encode_utf16()
+            .count() as u32;
+        let mut params = at(&uri, 0, start + typed.len() as u32);
+        params["context"] = json!({"triggerKind": 2, "triggerCharacter": "."});
+        let completion = client.request("textDocument/completion", params);
+        let items = completion["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "{completion}");
+        assert_eq!(items[0]["label"], field);
+        assert_eq!(items[0]["kind"], 5); // CompletionItemKind::FIELD
+        assert_eq!(
+            items[0]["textEdit"],
+            json!({
+                "range": {"start": {"line": 0, "character": start}, "end": {"line": 0, "character": start + typed.len() as u32}},
+                "newText": field
+            })
+        );
+    }
+    client.stop();
 }
 
 #[test]

@@ -85,8 +85,10 @@ runs, and exits once; a watch command can host the same session later.
 - Navigation includes locals, parameters, nominal types, explicit exports,
   re-exports, standard-library names, and import strings.
 - Completion includes visible names, keywords, builtin types, and intrinsics,
-  with identifier replacement ranges. Field completion and automatic imports
-  are not implemented.
+  with identifier replacement ranges. Typing `.` offers fields from the receiver's
+  record type, including nominal records, pointers, and nested access. An isolated
+  snapshot repairs the unfinished field for type checking; earlier errors can
+  still prevent field suggestions. Automatic imports are not implemented.
 - The client is asked to watch `**/*.resin` if it supports dynamic registration.
   A client without file notifications needs a server restart after external
   changes to closed dependencies.

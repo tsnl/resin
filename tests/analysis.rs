@@ -41,6 +41,108 @@ struct Project {
     root: PathBuf,
     sources: Sources,
 }
+
+#[test]
+fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
+    for (setup, receiver) in [
+        ("var value = { count = 1, label = 2 };", "value"),
+        (
+            "var record = { count = 1, label = 2 }; var value = &record;",
+            "value",
+        ),
+        (
+            "var value = { inner = { count = 1, label = 2 } };",
+            "value.inner",
+        ),
+        ("var value = { count = 1, label = 2 };", "(value)"),
+    ] {
+        for field in ["", "co", "count"] {
+            let source = format!("def main () = {{ {setup} {receiver}.{field}; }};");
+            let project = Project::new(&[("main.resin", &source)]);
+            let start = source.rfind('.').unwrap() + 1;
+            let offset = start + field.len().min(2);
+            let items = project
+                .analyze()
+                .completions(&project.path("main.resin"), offset);
+            let names = items
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names,
+                if field.is_empty() {
+                    vec!["count", "label"]
+                } else {
+                    vec!["count"]
+                },
+                "{source}"
+            );
+            assert_eq!(items[0].detail, "count: int");
+            assert_eq!(items[0].kind, resin::analysis::DefinitionKind::Field);
+            assert_eq!(items[0].replace.start, start);
+            assert_eq!(items[0].replace.end, start + field.len());
+        }
+    }
+}
+
+#[test]
+fn field_completion_resolves_imported_nominal_function_results() {
+    let source = "import { \"lib.resin\" }; def main () = { make().; };";
+    let project = Project::new(&[
+        ("main.resin", source),
+        (
+            "lib.resin",
+            "export { make }; type Counter = { count: int }; def make () -> Counter = { Counter { count = 0 } };",
+        ),
+    ]);
+    let items = project
+        .analyze()
+        .completions(&project.path("main.resin"), source.rfind('.').unwrap() + 1);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        ["count"]
+    );
+}
+
+#[test]
+fn field_completion_does_not_offer_unrelated_names() {
+    for expression in ["1.", "missing.", "\"text.\"", "// value."] {
+        let source = format!("def main () = {{ var value = {{ count = 1 }}; {expression}\n }};");
+        let project = Project::new(&[("main.resin", &source)]);
+        assert!(
+            project
+                .analyze()
+                .completions(&project.path("main.resin"), source.rfind('.').unwrap() + 1)
+                .is_empty(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
+    for source in [
+        "type Point = { x: float32, y: float32 }; def main () = { var point: Point; point.; };",
+        "def main (point: { x: float32, y: float32 }) = { point.",
+        "def main () = { var point = { x = 1, y = 2 }; point.",
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let items = project
+            .analyze()
+            .completions(&project.path("main.resin"), source.rfind('.').unwrap() + 1);
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["x", "y"],
+            "{source}"
+        );
+    }
+}
 impl Project {
     fn new(files: &[(&str, &str)]) -> Self {
         let root = normalize_path(
@@ -302,7 +404,7 @@ fn normalized_paths_are_stable_for_existing_and_unsaved_files() {
 }
 
 #[test]
-fn completion_respects_type_context_and_ignores_fields_strings_and_comments() {
+fn completion_respects_type_context_and_ignores_strings_and_comments() {
     let source = "type Number = int; def main () -> () = { var value = 1; var other: Num; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
@@ -318,7 +420,6 @@ fn completion_respects_type_context_and_ignores_fields_strings_and_comments() {
         ["Number"]
     );
     for source in [
-        "def main () -> () = { var value = {field = 1}; value.fi",
         "// val",
         "def main () -> () = { var value = \"val\"; };",
     ] {

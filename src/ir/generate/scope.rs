@@ -126,6 +126,12 @@ impl Scopes {
         }
     }
 
+    pub(super) fn record_fields(&self, name: &Ident, ty: &Ty, typer: &TyperContext) {
+        if let Some(trace) = &self.trace {
+            trace.record_fields(trace.location(name.span), ty, typer);
+        }
+    }
+
     pub(super) fn record_binding_type(&self, name: &Arc<str>, ty: &Ty, typer: &TyperContext) {
         if let Some(trace) = &self.trace
             && let Some(origin) = self.origin(name, false)

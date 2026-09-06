@@ -10,6 +10,7 @@ use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, rc::Rc};
 pub(crate) struct SemanticData {
     pub types: BTreeMap<SourceLocation, String>,
     pub references: BTreeMap<SourceLocation, SourceLocation>,
+    pub fields: BTreeMap<SourceLocation, Vec<(String, String)>>,
 }
 
 #[derive(Clone)]
@@ -27,10 +28,25 @@ impl Trace {
     }
 
     pub fn typed(&self, location: SourceLocation, ty: &Ty, typer: &TyperContext) {
+        self.record_fields(location.clone(), ty, typer);
         self.data
             .borrow_mut()
             .types
             .insert(location, format_type(ty, typer));
+    }
+
+    pub fn record_fields(&self, location: SourceLocation, ty: &Ty, typer: &TyperContext) {
+        if let Ok(converted) = typer.as_record(ty)
+            && let Ty::Record { fields } = converted.ty
+        {
+            self.data.borrow_mut().fields.insert(
+                location,
+                fields
+                    .into_iter()
+                    .map(|field| (field.name.to_string(), format_type(&field.ty, typer)))
+                    .collect(),
+            );
+        }
     }
 }
 

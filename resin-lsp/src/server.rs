@@ -62,6 +62,7 @@ pub fn run(stdlib: Option<PathBuf>) -> Result<i32> {
         definition_provider: Some(lsp::OneOf::Left(true)),
         completion_provider: Some(lsp::CompletionOptions {
             resolve_provider: Some(false),
+            trigger_characters: Some(vec![".".into()]),
             ..Default::default()
         }),
         ..Default::default()
@@ -288,6 +289,7 @@ impl State {
                             DefinitionKind::Function => lsp::CompletionItemKind::FUNCTION,
                             DefinitionKind::Type => lsp::CompletionItemKind::CLASS,
                             DefinitionKind::Keyword => lsp::CompletionItemKind::KEYWORD,
+                            DefinitionKind::Field => lsp::CompletionItemKind::FIELD,
                             DefinitionKind::Variable | DefinitionKind::Parameter => {
                                 lsp::CompletionItemKind::VARIABLE
                             }

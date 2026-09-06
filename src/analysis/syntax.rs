@@ -9,6 +9,7 @@ pub enum DefinitionKind {
     Parameter,
     Type,
     Keyword,
+    Field,
 }
 
 #[derive(Debug, Clone)]
@@ -431,7 +432,7 @@ fn point(text: &str, offset: usize) -> Point {
     }
 }
 
-fn unmatched(node: Node<'_>, closers: &mut Vec<char>) {
+pub(super) fn unmatched(node: Node<'_>, closers: &mut Vec<char>) {
     if node.is_missing() {
         return;
     }

@@ -113,6 +113,7 @@ impl Generator {
             Operand::Value(ty) => (ty, false),
             Operand::Place(ty) => (ty, true),
         };
+        self.scopes.record_fields(name, &base_ty, &self.typer);
         let access = self
             .typer
             .type_field(&base_ty, &name.val)
