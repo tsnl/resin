@@ -183,17 +183,19 @@ fn windows_present_resize_and_release_resources() {
             assert(resin_gpu_present(gpu, image) == RESIN_STATUS_INVALID_ARGUMENT);
             assert(resin_window_set_size(window, 0, 64) == RESIN_STATUS_INVALID_ARGUMENT);
             assert(!resin_window_key_pressed(window, -1));
-            int presented = 0, resized = 0;
+            int presented = 0, enlarged = 0, restored = 0;
             uint32_t initial_width = 0, initial_height = 0;
             check(resin_window_framebuffer_size(window, &initial_width, &initial_height));
             for (int frame = 0; frame < 24; ++frame) {
+                /* Drain pending compositor configures before applying a new size.
+                   On Wayland, polling afterward can restore the previous size
+                   before it has been presented. */
+                check(resin_window_poll_events(window));
                 if (frame == 4) check(resin_window_set_size(window, 160, 120));
                 if (frame == 16) check(resin_window_set_size(window, 96, 64));
-                check(resin_window_poll_events(window));
                 uint32_t width = 0, height = 0;
                 check(resin_window_framebuffer_size(window, &width, &height));
                 assert(width > 0 && height > 0);
-                resized |= width != initial_width || height != initial_height;
                 ResinCommandBuffer *commands = NULL;
                 check(resin_gpu_start_command_recording(gpu, &commands));
                 check(resin_gpu_begin_rendering(commands, image, 0.25f, 0.5f, (float)frame / 24.0f, 1.0f));
@@ -206,13 +208,22 @@ fn windows_present_resize_and_release_resources() {
                 status = resin_gpu_present(gpu, image);
                 if (status == RESIN_STATUS_SUCCESS) {
                     ++presented;
+                    if (frame >= 4 && frame < 16)
+                        enlarged |= width > initial_width && height > initial_height;
+                    if (frame >= 16)
+                        restored |= width == initial_width && height == initial_height;
                     assert(resin_gpu_submit(gpu, stale) == RESIN_STATUS_INVALID_ARGUMENT);
                 } else {
                     assert(status == RESIN_STATUS_INCOMPLETE);
                     resin_gpu_cancel_command_buffer(gpu, stale);
                 }
             }
-            assert(presented >= 20 && resized);
+            if (presented < 20 || !enlarged || !restored)
+                fprintf(stderr, "presentation/resize failed: presented=%d/24 enlarged=%d restored=%d initial=%ux%u\n",
+                        presented, enlarged, restored, initial_width, initial_height);
+            assert(presented >= 20);
+            assert(enlarged);
+            assert(restored);
             check(resin_window_set_should_close(window, 1));
             assert(resin_window_should_close(window));
             check(resin_window_set_should_close(window, 0));

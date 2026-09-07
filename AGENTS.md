@@ -68,8 +68,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Use `RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1` when validating the full GPU path so missing
   dependencies do not silently skip tests. A working Vulkan driver is still required.
 - Window tests also need a display (desktop or Xvfb) and `RESIN_REQUIRE_WINDOW=1` to prevent
-  skips. Test actual window operations in subprocesses so they run
-  on the process main thread, as GLFW requires.
+  skips. For Xvfb, set `DISPLAY` and `XDG_SESSION_TYPE=x11`; unsetting `WAYLAND_DISPLAY`
+  alone does not prevent GLFW from finding a default Wayland socket. Test actual window
+  operations in subprocesses so they run on the process main thread, as GLFW requires.
 - Install the matching parser CLI inside the shell with
   `cargo install --locked tree-sitter-cli --version 0.27.0`, then regenerate from
   `tree-sitter-resin/` with `tree-sitter generate --js-runtime native`.

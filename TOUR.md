@@ -422,7 +422,8 @@ Passing this matrix establishes native build and host coverage, not full GPU
 compatibility.
 
 For the full GPU path, in a POSIX shell with a compatible Vulkan device and a
-desktop display or Xvfb available:
+desktop display or Xvfb available (for Xvfb, set `DISPLAY` to its display and
+`XDG_SESSION_TYPE=x11` so GLFW does not select a Wayland compositor):
 
 ```sh
 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_WINDOW=1 \

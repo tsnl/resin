@@ -61,6 +61,14 @@ The development shell supplies the Vulkan loader and window-system libraries thr
 `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` enables installed validation layers.
 Window integration tests use the `gpu` feature and run on a desktop display or Xvfb. Set `RESIN_REQUIRE_WINDOW=1`
 to fail instead of skipping when windowing or presentation is unavailable.
+When using Xvfb, set `DISPLAY` to its display and `XDG_SESSION_TYPE=x11` to select GLFW's X11
+backend. Unsetting `WAYLAND_DISPLAY` alone is insufficient: GLFW can still connect to a default
+Wayland socket. With Xvfb already running, run the full suite without excluding window tests:
+
+```sh
+XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WINDOW=1 \
+  cargo test --workspace --all-features
+```
 
 ## Editor support
 
