@@ -272,10 +272,9 @@ mod tests {
 
     #[test]
     fn evaluation_only_needs_scopes_and_types() {
-        let mut typer = TyperContext::new();
-        let definition = typer.create_type("Byte", Ty::Int8).unwrap();
+        let typer = TyperContext::new();
         let mut scopes = Scopes::new();
-        scopes.define_type("Byte".into(), definition).unwrap();
+        scopes.define_alias("Byte".into(), Ty::Int8).unwrap();
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
@@ -289,7 +288,7 @@ mod tests {
             span,
         );
         let ty = evaluator.ty(&named).unwrap();
-        assert_eq!(ty, Ty::Defined { definition });
+        assert_eq!(ty, Ty::Int8);
         assert_eq!(
             evaluator.number(span, "-128", Some(&ty)).unwrap(),
             (Value::Int8 { value: -128 }, Ty::Int8),

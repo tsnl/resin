@@ -97,13 +97,12 @@ impl TyperContext {
     }
 
     pub fn type_deref(&self, pointer: &Ty) -> Result<Ty, TypeError> {
-        let converted = self.as_pointer(pointer)?;
-        let Ty::Pointer { pointee } = converted.ty else {
+        let Ty::Pointer { pointee } = pointer else {
             return Err(TypeError::new(TypeErrorKind::ExpectedPointer {
                 found: pointer.clone(),
             }));
         };
-        Ok(*pointee)
+        Ok(*pointee.clone())
     }
 
     pub fn type_field(&self, base: &Ty, name: &str) -> Result<FieldAccess, TypeError> {
@@ -137,14 +136,13 @@ impl TyperContext {
             }
             return Ok(Ty::Pointer { pointee: element });
         }
-        let converted = self.as_function(callee)?;
-        let Ty::Function { param, result } = converted.ty else {
+        let Ty::Function { param, result } = callee else {
             return Err(TypeError::new(TypeErrorKind::ExpectedFunction {
                 found: callee.clone(),
             }));
         };
-        self.same(&param, arg)?;
-        Ok(*result)
+        self.same(param, arg)?;
+        Ok(*result.clone())
     }
 
     pub fn type_ascription(&self, expected: &Ty, value: &Ty) -> Result<Ty, TypeError> {
@@ -226,18 +224,15 @@ impl TyperContext {
             if field.name.as_ref() != format!("_{i}") {
                 return Err(invalid());
             }
-            self.convert(
-                &field.ty,
-                false,
-                |ty| {
-                    ty.is_numeric()
-                        || matches!(ty, Ty::Bool | Ty::Unit | Ty::Pointer { .. })
-                        || matches!(ty, Ty::Array { element, .. } if **element == Ty::UInt8)
-                },
-                TypeErrorKind::UnprintableType {
-                    found: field.ty.clone(),
-                },
-            )?;
+            let ty = &field.ty;
+            if !(ty.is_numeric()
+                || matches!(ty, Ty::Bool | Ty::Unit | Ty::Pointer { .. })
+                || matches!(ty, Ty::Array { element, .. } if **element == Ty::UInt8))
+            {
+                return Err(TypeError::new(TypeErrorKind::UnprintableType {
+                    found: ty.clone(),
+                }));
+            }
         }
         Ok(Ty::Unit)
     }

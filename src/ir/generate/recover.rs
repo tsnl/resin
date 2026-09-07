@@ -392,16 +392,13 @@ impl Recovery<'_> {
                         .and_then(|(t, v)| self.typer.type_ascription(&t, &v).ok())
                 } else {
                     let callee = self.term(func, None);
-                    let param = callee
-                        .as_ref()
-                        .and_then(|t| self.typer.as_function(t).ok())
-                        .and_then(|c| {
-                            if let Ty::Function { param, .. } = c.ty {
-                                Some(*param)
-                            } else {
-                                None
-                            }
-                        });
+                    let param = callee.as_ref().and_then(|c| {
+                        if let Ty::Function { param, .. } = c {
+                            Some(*param.clone())
+                        } else {
+                            None
+                        }
+                    });
                     let argument = self.term(arg, param.as_ref());
                     callee
                         .zip(argument)

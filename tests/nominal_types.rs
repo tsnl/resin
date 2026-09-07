@@ -159,7 +159,15 @@ fn nominal_types_do_not_equal_their_representations() {
     let module = Module {
         shaders: Default::default(),
         entries: Default::default(),
-        types: vec![TypeDef::new("Meters", Ty::Int32)],
+        types: vec![TypeDef::new(
+            "Meters",
+            Ty::Record {
+                fields: vec![RecordField {
+                    name: "value".into(),
+                    ty: Ty::Int32,
+                }],
+            },
+        )],
         functions: vec![function],
     };
 

@@ -11,6 +11,8 @@ define_id! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// A nominal record. Incomplete bodies exist only while resolving recursive fields.
+/// The typer and verifier reject non-record bodies, including handwritten IR.
 pub struct TypeDef {
     pub name: Arc<str>,
     pub(super) body: Option<Ty>,

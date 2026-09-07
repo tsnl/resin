@@ -22,6 +22,9 @@ fn ascribe_wraps_a_representation() {
                 Instr::Push {
                     value: Value::Int32 { value: 3 },
                 },
+                Instr::MakeRecord {
+                    fields: vec!["value".into()],
+                },
                 Instr::Ascribe { ty: meters },
             ],
             terminator: Terminator::Return,
@@ -31,7 +34,7 @@ fn ascribe_wraps_a_representation() {
     verify(&Module {
         shaders: Default::default(),
         entries: Default::default(),
-        types: vec![TypeDef::new("Meters", Ty::Int32)],
+        types: vec![TypeDef::new("Meters", record())],
         functions: vec![function],
     })
     .unwrap();
@@ -45,7 +48,7 @@ fn ascribe_unwraps_one_nominal_layer() {
     let function = Function {
         foreign: None,
         name: None,
-        result: Ty::Int32,
+        result: record(),
         locals: vec![Local {
             name: None,
             ty: Ty::Unit,
@@ -57,8 +60,11 @@ fn ascribe_unwraps_one_nominal_layer() {
                 Instr::Push {
                     value: Value::Int32 { value: 3 },
                 },
+                Instr::MakeRecord {
+                    fields: vec!["value".into()],
+                },
                 Instr::Ascribe { ty: meters },
-                Instr::Ascribe { ty: Ty::Int32 },
+                Instr::Ascribe { ty: record() },
             ],
             terminator: Terminator::Return,
         }],
@@ -67,10 +73,19 @@ fn ascribe_unwraps_one_nominal_layer() {
     verify(&Module {
         shaders: Default::default(),
         entries: Default::default(),
-        types: vec![TypeDef::new("Meters", Ty::Int32)],
+        types: vec![TypeDef::new("Meters", record())],
         functions: vec![function],
     })
     .unwrap();
+}
+
+fn record() -> Ty {
+    Ty::Record {
+        fields: vec![crate::ir::RecordField {
+            name: "value".into(),
+            ty: Ty::Int32,
+        }],
+    }
 }
 
 #[test]

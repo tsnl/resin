@@ -12,12 +12,7 @@ pub(super) enum Operand {
 impl Generator {
     pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, GenerateError> {
         let place_ty = self.gen_place(place)?;
-        let converted = self
-            .typer
-            .as_pointer(&place_ty)
-            .map_err(|err| GenerateError::typing(place.span, err))?;
-        self.emit_value_conv(&converted.steps);
-        let Ty::Pointer { pointee } = converted.ty else {
+        let Ty::Pointer { pointee } = place_ty else {
             return Err(GenerateError::typing(
                 place.span,
                 TypeError {
@@ -121,15 +116,11 @@ impl Generator {
             }
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
-                let converted = self
+                let pointee = self
                     .typer
-                    .as_pointer(&pointer_ty)
+                    .type_deref(&pointer_ty)
                     .map_err(|err| GenerateError::typing(term.span, err))?;
-                self.emit_value_conv(&converted.steps);
-                let Ty::Pointer { pointee } = converted.ty else {
-                    unreachable!("as_pointer returns a pointer")
-                };
-                Ok(Operand::Place(*pointee))
+                Ok(Operand::Place(pointee))
             }
             _ => self.gen_term(term, None).map(Operand::Value),
         }

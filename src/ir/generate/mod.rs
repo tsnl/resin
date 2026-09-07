@@ -284,11 +284,6 @@ impl Generator {
             TermKind::Address { place } => self.gen_place(place),
             TermKind::Deref { pointer } => {
                 let pointer_ty = self.gen_term(pointer, None)?;
-                let converted = self
-                    .typer
-                    .as_pointer(&pointer_ty)
-                    .map_err(|err| GenerateError::typing(term.span, err))?;
-                self.emit_value_conv(&converted.steps);
                 let ty = self
                     .typer
                     .type_deref(&pointer_ty)

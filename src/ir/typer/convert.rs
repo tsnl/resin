@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::ir::{Ty, TypeId};
 
 use super::{TypeError, TypeErrorKind, TyperContext};
@@ -62,71 +60,33 @@ impl TyperContext {
         }))
     }
 
-    pub fn as_bool(&self, ty: &Ty) -> Result<Converted, TypeError> {
-        self.convert(
-            ty,
-            false,
-            |ty| matches!(ty, Ty::Bool),
-            TypeErrorKind::ExpectedBoolean { found: ty.clone() },
-        )
-    }
-
-    pub fn as_pointer(&self, ty: &Ty) -> Result<Converted, TypeError> {
-        self.convert(
-            ty,
-            false,
-            |ty| matches!(ty, Ty::Pointer { .. }),
-            TypeErrorKind::ExpectedPointer { found: ty.clone() },
-        )
-    }
-
-    pub fn as_function(&self, ty: &Ty) -> Result<Converted, TypeError> {
-        self.convert(
-            ty,
-            false,
-            |ty| matches!(ty, Ty::Function { .. }),
-            TypeErrorKind::ExpectedFunction { found: ty.clone() },
-        )
+    pub fn as_bool(&self, ty: &Ty) -> Result<(), TypeError> {
+        if ty == &Ty::Bool {
+            Ok(())
+        } else {
+            Err(TypeError::new(TypeErrorKind::ExpectedBoolean {
+                found: ty.clone(),
+            }))
+        }
     }
 
     pub fn as_record(&self, ty: &Ty) -> Result<Converted, TypeError> {
-        self.convert(
-            ty,
-            true,
-            |ty| matches!(ty, Ty::Record { .. } | Ty::Span { .. }),
-            TypeErrorKind::ExpectedRecord { found: ty.clone() },
-        )
-    }
-
-    pub(super) fn convert(
-        &self,
-        start: &Ty,
-        allow_deref: bool,
-        matches: impl Fn(&Ty) -> bool,
-        error: TypeErrorKind,
-    ) -> Result<Converted, TypeError> {
-        let mut current = start.clone();
+        let mut current = ty.clone();
         let mut steps = Vec::new();
-        let mut visited = HashSet::new();
-        loop {
-            if matches(&current) {
-                return Ok(Converted { ty: current, steps });
-            }
-            if !visited.insert(current.clone()) {
-                break;
-            }
-            current = match current {
-                Ty::Defined { definition } => {
-                    steps.push(Conv::Unwrap { definition });
-                    self.definition_body(definition)?.clone()
-                }
-                Ty::Pointer { pointee } if allow_deref => {
-                    steps.push(Conv::Deref);
-                    *pointee
-                }
-                _ => break,
-            };
+        while let Ty::Pointer { pointee } = current {
+            steps.push(Conv::Deref);
+            current = *pointee;
         }
-        Err(TypeError::new(error))
+        if let Ty::Defined { definition } = current {
+            steps.push(Conv::Unwrap { definition });
+            current = self.definition_body(definition)?.clone();
+        }
+        if matches!(current, Ty::Record { .. } | Ty::Span { .. }) {
+            Ok(Converted { ty: current, steps })
+        } else {
+            Err(TypeError::new(TypeErrorKind::ExpectedRecord {
+                found: ty.clone(),
+            }))
+        }
     }
 }

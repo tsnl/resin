@@ -153,12 +153,7 @@ impl Generator {
             });
         }
 
-        let converted = self
-            .typer
-            .as_function(&callee_ty)
-            .map_err(|err| GenerateError::typing(func.span, err))?;
-        self.emit_value_conv(&converted.steps);
-        let Ty::Function { param, .. } = &converted.ty else {
+        let Ty::Function { param, .. } = &callee_ty else {
             return Err(GenerateError::typing(
                 func.span,
                 TypeError {
@@ -238,14 +233,6 @@ impl Generator {
         let mut arg_tys = Vec::with_capacity(args.len());
         for arg in args {
             arg_tys.push(self.gen_term(arg, numeric_context)?);
-        }
-        if name == "!" && arg_tys.len() == 1 {
-            let converted = self
-                .typer
-                .as_bool(&arg_tys[0])
-                .map_err(|err| GenerateError::typing(span, err))?;
-            self.emit_value_conv(&converted.steps);
-            arg_tys[0] = converted.ty;
         }
         let call = self
             .typer
