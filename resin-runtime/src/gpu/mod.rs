@@ -649,8 +649,7 @@ impl ResinGpu {
             .src_access_mask(vk::AccessFlags2::MEMORY_WRITE)
             .dst_stage_mask(vk::PipelineStageFlags2::HOST)
             .dst_access_mask(vk::AccessFlags2::HOST_READ);
-        let dependency =
-            vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
+        let dependency = vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
         unsafe {
             self.device
                 .cmd_pipeline_barrier2(command_buffer.handle, &dependency);
