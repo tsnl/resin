@@ -764,3 +764,22 @@ fn host_byte_arrays_have_explicit_sentinel_storage() {
 fn compound_control_flow_preserves_operand_order() {
     runs(include_str!("fixtures/compound_control.resin"), 0);
 }
+
+#[test]
+fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
+    runs(
+        r#"
+        export { main };
+        struct Inner { x: uint, y: ulong, z: float32 };
+        struct Outer { first: uint, inner: Inner, last: float32 };
+        def main() -> int = {
+            var side = 0I;
+            var values = [1I, 2I, 3I];
+            if (size_of(uint) == 4L && align_of(ulong) == 8L && size_of(Outer) == 40L &&
+                align_of(Outer) == 8L && size_of(Span<uint>) == 16L &&
+                size_of(values) == 12L && size_of(side := 1I) == 4L && side == 0I) { 0 } else { 1 }
+        };
+    "#,
+        0,
+    );
+}

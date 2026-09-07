@@ -106,10 +106,10 @@ def main() -> Result<(), _> = {
 		fragment.spirv,
 	)?;
 	defer gpu_free_pipeline(gpu, graphics);
-	// Particle: 32 bytes, alignment 4. Params: 32 bytes, alignment 8.
-	var particles = gpu_malloc(gpu, 64 * 32, 4, memory_default())?;
+	// Allocation sizes follow the shared layout of the declared types.
+	var particles = gpu_malloc(gpu, 64L * size_of(Particle), align_of(Particle), memory_default())?;
 	defer gpu_free(gpu, particles);
-	var root = gpu_malloc(gpu, 32, 8, memory_default())?;
+	var root = gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?;
 	defer gpu_free(gpu, root);
 	initialize(Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = 64L });
 	var params = Ptr<Params>(allocation_host_pointer(root));
