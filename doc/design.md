@@ -43,22 +43,43 @@ process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
-The long-term goal is CUDA-like heterogeneous programming for graphics. An ordinary Resin function
-may be compiled for the host or specialized into a compute, raster, or ray-tracing pipeline. Device
-authority is expressed with ordinary capability arguments—such as a `RayQuery`—instead of a language
-effect system. Compiling a device entry point recursively projects its parameter and result types
-from their host representations to device representations. Projection is both a type operation and
-the recipe for constructing the device value; types with no valid projection are compile-time
-errors, even if a host-only execution path happens to work.
+The initial model uses explicit addresses and shared layouts. There is no automatic
+value or allocation projection: compiling a shader preserves shared scalar/record
+representations and the numeric bits of pointers. It neither walks nor copies a
+pointer graph. A host allocation address is not translated by a cast or by calling
+a helper. Applications obtain mapped host addresses and device virtual addresses
+from the runtime and put the appropriate addresses in each representation.
+
+For example, a record uploaded for device use may contain a device address obtained
+from `gpu_host_to_device_pointer`; writing a mapped host address into that field is invalid, even
+though both have source type `Ptr<T>`. Scalar/record fields must satisfy the shared
+layout profile. Host-only types such as function values and unsupported storage
+layouts are rejected from shader code. Aliases, nulls, cycles, and interior addresses
+are preserved as bits; they do not trigger traversal, relocation, or allocation.
+Null must not be dereferenced. An interior address must remain inside live storage
+with the pointee's alignment and enough bytes for the accessed value.
+
+Address spaces initially live in backend metadata: shader-local places are distinct
+from device addresses. They may be read, written, and indexed in the shader, but may
+not escape through calls, return values, stored pointer values, or reinterpretation.
+Host and device addresses both use `Ptr<T>` in source; the compiler does not prove
+which kind an arbitrary numeric address contains. Shared helpers may accept device
+pointers when compiled for a shader and host pointers when compiled for the CPU.
+A pointer/`ulong` cast preserves bits, never changes their address space, and confers
+no ownership or lifetime guarantee. Shader-local address rejection remains explicit.
+
+The caller owns allocation lifetime, upload/readback, synchronization, and visibility.
+Host writes become device inputs only through the runtime's documented synchronization;
+device writes require completion and visibility before host access. Copying a record
+copies pointer values, not pointees, and does not extend any allocation's lifetime.
+The portable contract is deliberately limited to backends supporting this explicit
+address/shared-layout profile. A future backend must implement it or reject the
+program; recursive projection or address-space source types would be a separate
+language change, not an implicit reinterpretation of existing programs.
 
 The runtime follows the pointer-oriented direction of Sebastian Aaltonen's
-[No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api). CPU-visible GPU allocations
-have both a mapped host address and a GPU virtual address, and the runtime translates between them;
-device code uses ordinary pointers and spans rather than buffer-plus-offset bindings. Textures and
-acceleration structures remain opaque, bindless resources whose compact handles can live inside the
-same projected data structures. The runtime hides operating-system and graphics-API details behind
-a small C ABI. Vulkan and buffer device address are the first implementation, not part of the
-language contract; other native backends can follow.
+[No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), behind a small
+C ABI. Vulkan buffer device addresses implement the current device address profile.
 
 ## Compiler architecture
 
