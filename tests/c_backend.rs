@@ -653,14 +653,25 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     file.stmts.retain(|s| !matches!(&s.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     file.stmts.extend(support::parse(r#"
         def main() -> int = {
-            var particle = Particle { x = float32(0), y = float32(0), vx = float32(0), vy = float32(0), color = Color { r = float32(0), g = float32(0), b = float32(0), a = float32(1) } };
-            var particles = Span<Particle> { data = &particle, length = ulong(1) };
-            initialize(particles);
-            var params = Params { count = uint(1), dt = float32(1.0), radius = float32(0.1), particles = particles };
-            kernel(uint(0), &params);
-            var v = vertex(0, &params);
+            var particle = Particle { x = 0f, y = 0f, z = 0f, vx = 0f, vy = 0f, vz = 0f };
+            var particles = Span<Particle> { data = &particle, length = 1L };
+            initialize(particles, 12345I);
+            var first = particle;
+            initialize(particles, 12345I);
+            var valid = particle.x == first.x && particle.vz == first.vz;
+            initialize(particles, 54321I);
+            valid := valid && particle.x != first.x && particle.vx != first.vx;
+            valid := valid && particle.x >= -24f && particle.x < 24f && particle.y >= -30f && particle.y < 30f && particle.z >= 0f && particle.z < 50f && particle.vx >= -6f && particle.vx < 6f && particle.vy >= -6f && particle.vy < 6f && particle.vz >= -6f && particle.vz < 6f;
+            var params = Params { count = 1I, dt = 0.005f, yaw_cos = 1f, yaw_sin = 0f, aspect = 0.625f, radius = 0.0012f, particles = particles };
+            var steps = 0;
+            while (steps < 2000) {
+                kernel(0I, &params);
+                valid := valid && particle.x > -100f && particle.x < 100f && particle.y > -100f && particle.y < 100f && particle.z > -100f && particle.z < 100f;
+                steps := steps + 1;
+            };
+            var v = vertex(2, &params);
             var color = fragment(v.color);
-            if (particle.x < float32(-1.0) && particle.vx > float32(0.0) && color.b == float32(0.8)) { 0 } else { 1 }
+            if (valid && particle.x != first.x && color.r >= 0f && color.r <= 1f && color.b >= 0f && color.b <= 1f) { 0 } else { 1 }
         };
     "#).stmts);
     let m = ir::generate_program(&program).unwrap();
