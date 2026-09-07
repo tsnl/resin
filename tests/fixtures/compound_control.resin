@@ -11,10 +11,10 @@ def kernel(i: uint, root: Ptr<State>) = {
         var flag = 1 == 2;
         flag := i == 0I && touch(root) == 0I;
         var values = [0I, 0I];
-        values(0).* := if (flag) { 11I } else { 12I };
+        values(touch(root) - 1I).* := if (flag) { touch(root) + 9I } else { 12I };
         var pair = Pair { b = if (flag) { touch(root) } else { 99I }, a = touch(root) };
         choose(root).* := identity(if (flag) { touch(root) + 14I } else { 99I });
-        root.result := if (x == 7I && flag && values(0).* == 11I && pair.a == 2I && pair.b == 1I && root.counter == 5I && root.result == 18I) { 42I } else { 99I };
+        root.result := if (x == 7I && flag && values(0).* == 11I && pair.a == 4I && pair.b == 3I && root.counter == 7I && root.result == 20I) { 42I } else { 99I };
     };
 };
 def main() -> int = {

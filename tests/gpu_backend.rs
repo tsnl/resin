@@ -558,18 +558,20 @@ fn numeric_suffixes_and_one_armed_if_execute_on_device() {
     );
 }
 
-#[test]
-fn compound_control_flow_executes_with_host_order() {
+#[path = "support/interactions.rs"]
+mod interactions;
+
+fn execute_interaction(source: &str, expected: [u32; 2]) {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
-    let m = support::module(include_str!("fixtures/compound_control.resin"));
-    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    let m = support::module(source);
+    let glsl = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     let spv =
-        resin::toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
-    // State is two uints. The live allocation is read only after synchronous submit.
+        resin::toolchain::compile_glsl(&glsl, Stage::Compute, &config::glsl(&compiler)).unwrap();
+    // Each fixture's root fits two uints. Read only after synchronous submission.
     unsafe {
         let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
         let root = gpu.malloc(8, 4, ResinMemory::Default).unwrap();
@@ -578,54 +580,39 @@ fn compound_control_flow_executes_with_host_order() {
         commands.set_pipeline(&pipeline).unwrap();
         commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
         gpu.submit(commands).unwrap();
-        assert_eq!(root.host_pointer().cast::<[u32; 2]>().read(), [5, 42]);
+        assert_eq!(
+            root.host_pointer().cast::<[u32; 2]>().read(),
+            expected,
+            "{source}"
+        );
     }
 }
 
 #[test]
-fn numeric_conversions_execute_on_gpu() {
-    let Some(compiler) = shaders::compiler() else {
-        return;
-    };
-    let _lock = lock_gpu();
-    let Some(mut gpu) = gpu() else { return };
-    let m = support::module(include_str!("fixtures/numeric_conversions.resin"));
-    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
-    let spv =
-        resin::toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
-    // State is two uints. The live allocation is read only after synchronous submit.
-    unsafe {
-        let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
-        let root = gpu.malloc(8, 4, ResinMemory::Default).unwrap();
-        root.host_pointer().cast::<[u32; 2]>().write([0, 0]);
-        let mut commands = gpu.start_command_recording().unwrap();
-        commands.set_pipeline(&pipeline).unwrap();
-        commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
-        gpu.submit(commands).unwrap();
-        assert_eq!(root.host_pointer().cast::<[u32; 2]>().read(), [42, 0]);
+fn interacting_features_execute_equivalently_on_gpu() {
+    for (i, source) in interactions::variants().iter().enumerate() {
+        let expected = match i / interactions::MARKERS.len() {
+            0 => [7, 42],
+            1 | 2 => [42, 0],
+            3 => [921, 42],
+            _ => unreachable!(),
+        };
+        execute_interaction(source, expected);
     }
 }
 
 #[test]
-fn never_elimination_executes_on_gpu() {
-    let Some(compiler) = shaders::compiler() else {
-        return;
-    };
-    let _lock = lock_gpu();
-    let Some(mut gpu) = gpu() else { return };
-    let m = support::module(include_str!("fixtures/never_elimination.resin"));
-    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
-    let spv =
-        resin::toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
-    // State is two uints. The live allocation is read only after synchronous submit.
-    unsafe {
-        let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
-        let root = gpu.malloc(8, 4, ResinMemory::Default).unwrap();
-        root.host_pointer().cast::<[u32; 2]>().write([0, 0]);
-        let mut commands = gpu.start_command_recording().unwrap();
-        commands.set_pipeline(&pipeline).unwrap();
-        commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
-        gpu.submit(commands).unwrap();
-        assert_eq!(root.host_pointer().cast::<[u32; 2]>().read(), [42, 0]);
+fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
+    for expression in [
+        "uint(-1i)",
+        "uint(-1.0f)",
+        "uint(4294967296L)",
+        "int(0.0f / 0.0f)",
+        "int(1.0f / 0.0f)",
+    ] {
+        let source = format!(
+            "export {{ kernel }}; def invalid() = {{ {expression}; }}; def kernel(i: uint, p: Ptr<uint>) = {{ if (i == 0I) {{ invalid(); p.* := 99I; }}; }};"
+        );
+        execute_interaction(&source, [0, 0]);
     }
 }

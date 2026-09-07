@@ -47,7 +47,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc
+          sudo apt-get install -y cmake pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc mesa-vulkan-drivers
+      - name: Select the Linux software Vulkan driver
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for icd in /usr/share/vulkan/icd.d/lvp_icd*.json; do
+            test -f "$icd"
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            break
+          done
       - name: Windows C toolchain
         if: runner.os == 'Windows'
         shell: pwsh
@@ -68,6 +77,9 @@ jobs:
       - name: Run a host program
         run: cargo run --locked -- examples/eg001.resin
       - name: Test without opening windows
+        env:
+          RESIN_REQUIRE_GLSLC: ${{ runner.os == 'Linux' && '1' || '0' }}
+          RESIN_REQUIRE_GPU: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: cargo test --workspace --all-features --locked --no-fail-fast -- --skip windows_present_resize_and_release_resources --skip resin_window_example_uses_bundled_glfw --skip resin_particles_example_computes_and_presents
       - name: Lint
         if: ${{ !cancelled() }}
