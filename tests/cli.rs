@@ -8,7 +8,6 @@ use resin::toolchain::TempDir;
 
 #[path = "support/shaders.rs"]
 mod shaders;
-mod support;
 
 fn cli(source: &str, args: &[&str]) -> Output {
     selected(source, None, args)
@@ -51,6 +50,7 @@ fn artifact(cwd: &Path, profile: &str) -> PathBuf {
     let files: Vec<_> = fs::read_dir(cwd.join("build"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|path| path.file_name().unwrap() != "shaders")
         .collect();
     assert_eq!(files.len(), 1, "{files:?}");
     let executable = files[0]
@@ -212,7 +212,7 @@ fn output_directories_receive_the_source_name() {
             r#"export { main }; def main() -> () = { print("hello\n", ()); };"#,
         )
         .unwrap();
-        let output = invoke(temp.path(), &input, &["--output", "run", "-o", destination]);
+        let output = invoke(temp.path(), &input, &["-o", destination]);
         success(&output);
         assert!(output.stdout.is_empty());
         let executable = temp
@@ -227,24 +227,6 @@ fn output_directories_receive_the_source_name() {
         success(&run);
         assert_eq!(run.stdout, b"hello\n");
     }
-}
-
-#[test]
-fn explicit_exe_output_does_not_run() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let input = temp.path().join("source.resin");
-    fs::write(
-        &input,
-        r#"export { main }; def main () -> int = { print("ran\n", ()); 7 };"#,
-    )
-    .unwrap();
-    let output = invoke(temp.path(), &input, &["--output", "exe", "-o", "program"]);
-    success(&output);
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        fs::read(temp.path().join("program")).unwrap(),
-        fs::read(artifact(temp.path(), "release")).unwrap()
-    );
 }
 
 #[test]
@@ -303,22 +285,8 @@ fn directory_outputs_cannot_overwrite_the_source() {
 }
 
 #[test]
-fn explicit_ir_output_prints_verified_ir() {
-    let source = "export { main }; def main () -> int = { 7 };";
-    let output = cli(source, &["--output", "ir"]);
-    success(&output);
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        format!("{}\n", resin::ir::format_module(&support::module(source)))
-    );
-}
-
-#[test]
 fn run_returns_the_program_exit_status() {
-    let output = cli(
-        "export { main }; def main () -> int = { 37 };",
-        &["--output", "run"],
-    );
+    let output = cli("export { main }; def main () -> int = { 37 };", &[]);
     assert_eq!(
         output.status.code(),
         Some(37),
@@ -331,7 +299,7 @@ fn run_returns_the_program_exit_status() {
 fn run_prints_program_output() {
     let output = cli(
         r#"export { main }; def main() -> () = { var n = 42; print("x = {0}\n", (n,)); };"#,
-        &["--output", "run"],
+        &[],
     );
     success(&output);
     assert_eq!(output.stdout, b"x = 42\n");
@@ -398,7 +366,7 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
             "Resin function",
         ),
     ] {
-        let output = selected(source, entry, &["--output", "c"]);
+        let output = selected(source, entry, &[]);
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
         assert!(
@@ -406,12 +374,6 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-    }
-    for stage in ["check", "ast", "ir"] {
-        success(&cli(
-            "type Item = int; def helper() -> int = { 1 };",
-            &["--output", stage],
-        ));
     }
 }
 
@@ -428,18 +390,14 @@ fn selectors_work_with_output_paths_and_source_protection() {
     let source = "export { demo }; def demo() -> int = { 19 };";
     fs::write(&input, source).unwrap();
     let selected = selector(&input, Some("demo"));
-    let output = invoke(temp.path(), &selected, &["--output", "exe", "-o", "dist/"]);
+    let output = invoke(temp.path(), &selected, &["-o", "dist/"]);
     success(&output);
     let executable = temp.path().join(format!(
         "dist/hello world-demo{}",
         std::env::consts::EXE_SUFFIX
     ));
     assert_eq!(Command::new(executable).status().unwrap().code(), Some(19));
-    let output = invoke(
-        temp.path(),
-        &selected,
-        &["--output", "c", "-o", input.to_str().unwrap()],
-    );
+    let output = invoke(temp.path(), &selected, &["-o", input.to_str().unwrap()]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("overwrite the source"));
     assert_eq!(fs::read_to_string(input).unwrap(), source);
@@ -482,7 +440,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
         .join(format!("program ; literal{}", std::env::consts::EXE_SUFFIX));
     let output = cli(
         "export { main }; def main () -> int = { 19 };",
-        &["--output", "exe", "-o", executable.to_str().unwrap()],
+        &["-o", executable.to_str().unwrap()],
     );
     success(&output);
     assert_eq!(Command::new(executable).status().unwrap().code(), Some(19));
@@ -497,7 +455,7 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
         .arg(&input)
-        .args(["--output", "c", "-o"])
+        .args(["-o"])
         .arg(&input)
         .output()
         .unwrap();
@@ -511,8 +469,6 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
     let output = cli(
         source,
         &[
-            "--output",
-            "exe",
             "-o",
             destination.to_str().unwrap(),
             "--cc",
@@ -527,80 +483,18 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
 
 #[test]
 fn invalid_options_and_source_report_errors() {
-    for args in [
-        vec!["--output", "exe"],
-        vec!["--output", "spirv"],
-        vec!["--stage", "nonsense"],
-    ] {
+    for args in [vec!["-o"], vec!["--cc"], vec!["--glslc"], vec!["--unknown"]] {
         assert!(
-            !cli("export { main }; def main () -> int = { 0 };", &args)
+            !cli("export { main }; def main() = {};", &args)
                 .status
                 .success()
         );
     }
-    assert!(!cli("main = ;", &["--output", "c"]).status.success());
+    assert!(!cli("main = ;", &[]).status.success());
 }
 
 #[test]
-fn shader_output_selects_the_stage_and_entry() {
-    success(&cli(
-        "export { main }; def main(i: uint) -> uint = { i };",
-        &["--output", "glsl"],
-    ));
-    let source = "export { paint }; def paint (i: uint) -> uint = { i };";
-    let output = selected(source, Some("paint"), &["--output", "glsl"]);
-    success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("#version 460\n"));
-
-    let Some(compiler) = shaders::compiler() else {
-        return;
-    };
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let spirv = temp.path().join("shader.spv");
-    let output = selected(
-        source,
-        Some("paint"),
-        &[
-            "--output",
-            "spirv",
-            "--stage",
-            "compute",
-            "--glslc",
-            compiler.to_str().unwrap(),
-            "-o",
-            spirv.to_str().unwrap(),
-        ],
-    );
-    success(&output);
-    assert_eq!(&fs::read(&spirv).unwrap()[..4], &[3, 2, 35, 7]);
-}
-
-#[test]
-fn graphics_execution_is_not_a_cli_output_mode() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let png = temp.path().join("image.png");
-    let output = cli(
-        "export { kernel }; def kernel (i: uint) -> uint = { i };",
-        &["--output", "compute", "-o", png.to_str().unwrap()],
-    );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
-    assert!(!png.exists());
-}
-
-#[test]
-fn shader_decorators_select_cli_stage_and_host_calls_need_no_glslc() {
-    let source = "export { paint }; struct Color { r: float32, g: float32, b: float32, a: float32 }; @fragment_shader def paint(color: Color) -> Color = { color };";
-    let output = selected(source, Some("paint"), &["--output", "glsl"]);
-    success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).contains("r_output"));
-    let output = selected(
-        source,
-        Some("paint"),
-        &["--output", "glsl", "--stage", "compute"],
-    );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("conflicts"));
+fn decorated_host_calls_need_no_glslc() {
     success(&cli(
         "export { main }; @compute_shader def kernel(i: uint) -> uint = { i }; def main() -> int = { if (kernel(uint(7)) == uint(7)) { 0 } else { 1 } };",
         &["--glslc", "/does/not/exist/glslc"],
@@ -608,59 +502,99 @@ fn shader_decorators_select_cli_stage_and_host_calls_need_no_glslc() {
 }
 
 #[test]
-fn inspection_modes_preserve_frontend_boundaries_and_output_safety() {
+fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
+    let Some(glslc) = shaders::compiler() else {
+        return;
+    };
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let input = temp.path().join("stages.resin");
+    fs::write(&input, r#"
+        export { main };
+        import { "std/graphics.resin" };
+        @compute_shader def kernel(i: uint) -> uint = { i + 1I };
+        @vertex_shader def vertex(i: int) -> Vertex = {
+            Vertex {
+                position = Position { x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f },
+                color = Color { r = 1.0f, g = 0.0f, b = 0.0f, a = 1.0f },
+            }
+        };
+        @fragment_shader def fragment(color: Color) -> Color = { color };
+        def main() -> int = {
+            if (kernel.spirv.length > 0L && vertex.spirv.length > 0L && fragment.spirv.length > 0L) { 0 } else { 1 }
+        };
+    "#).unwrap();
+    let destination = temp
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+        .current_dir(temp.path())
+        .arg(&input)
+        .arg("-o")
+        .arg(&destination)
+        .arg("--glslc")
+        .arg(glslc)
+        .output()
+        .unwrap();
+    success(&output);
+    assert!(output.stdout.is_empty());
+    let executable = artifact(temp.path(), "release");
+    assert_eq!(
+        fs::read(&executable).unwrap(),
+        fs::read(&destination).unwrap()
+    );
+    let c = fs::read_to_string(executable.parent().unwrap().join("program.c")).unwrap();
+    let shaders = fs::read_dir(temp.path().join("build/shaders"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(shaders.len(), 3);
+    let mut sources = Vec::new();
+    for shader in shaders {
+        sources.push(fs::read_to_string(shader.join("shader.glsl")).unwrap());
+        let bytes = fs::read(shader.join("shader.spv")).unwrap();
+        assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
+        assert_eq!(bytes.len() % 4, 0);
+        let words = bytes
+            .chunks_exact(4)
+            .map(|word| {
+                format!(
+                    "  0x{:08x},\n",
+                    u32::from_le_bytes(word.try_into().unwrap())
+                )
+            })
+            .collect::<String>();
+        assert!(
+            c.contains(&words),
+            "generated C must embed the compiled SPIR-V exactly"
+        );
+    }
+    for marker in ["gl_GlobalInvocationID", "gl_VertexIndex", "r_output"] {
+        assert!(
+            sources.iter().any(|source| source.contains(marker)),
+            "{marker}"
+        );
+    }
+    success(&Command::new(destination).output().unwrap());
+}
+
+#[test]
+fn removed_output_modes_are_rejected_before_building() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    let source = "export { main }; def main() -> int = { unknown };";
-    fs::write(&input, source).unwrap();
-    for mode in ["cst", "ast", "check"] {
-        let output = invoke(
-            temp.path(),
-            &input,
-            &[
-                "--output",
-                mode,
-                "--cc",
-                "missing-compiler",
-                "--glslc",
-                "missing-glslc",
-            ],
-        );
-        success(&output);
-        assert!(!output.stdout.is_empty());
-        if mode == "check" {
-            assert_eq!(output.stdout, b"ok\n");
-        }
-        let saved = temp.path().join(format!("{mode}.txt"));
-        success(&invoke(
-            temp.path(),
-            &input,
-            &["--output", mode, "-o", saved.to_str().unwrap()],
-        ));
-        assert_eq!(fs::read(saved).unwrap(), output.stdout);
-        assert!(
-            !invoke(
-                temp.path(),
-                &input,
-                &["--output", mode, "-o", input.to_str().unwrap()]
-            )
-            .status
-            .success()
-        );
-        assert_eq!(fs::read_to_string(&input).unwrap(), source);
+    fs::write(&input, "export { main }; def main() = {};").unwrap();
+    for mode in [
+        "c", "glsl", "spirv", "ir", "ast", "cst", "check", "exe", "run",
+    ] {
+        let output = invoke(temp.path(), &input, &["--output", mode, "-o", "output"]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument"));
     }
-    let output = invoke(temp.path(), &input, &["--output", "ir"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown"));
-    assert!(!temp.path().join("build").exists());
-
-    fs::write(&input, "def main( = {").unwrap();
-    let tree = invoke(temp.path(), &input, &["--output", "cst"]);
-    success(&tree);
-    assert!(String::from_utf8_lossy(&tree.stdout).contains("ERROR"));
-    assert!(
-        !invoke(temp.path(), &input, &["--output", "check"])
+    assert_eq!(
+        invoke(temp.path(), &input, &["--stage", "compute"])
             .status
-            .success()
+            .code(),
+        Some(2)
     );
+    assert!(!temp.path().join("output").exists());
+    assert!(!temp.path().join("build").exists());
 }

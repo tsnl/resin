@@ -278,11 +278,7 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
         &project.command().args(["--out", "copy"]).output().unwrap(),
         b"",
     );
-    let output = project
-        .command()
-        .args(["--output", "exe", "-o", "exported"])
-        .output()
-        .unwrap();
+    let output = project.command().args(["-o", "exported"]).output().unwrap();
     printed(&output, b"");
     assert_eq!(
         fs::read(&release).unwrap(),
@@ -311,21 +307,16 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
 }
 
 #[test]
-fn textual_output_does_not_compile_an_executable() {
+fn generated_c_is_retained_alongside_the_executable() {
     let project = Project::new();
-    let output = project
-        .command()
-        .args(["--output", "c", "-o", "source.c"])
-        .output()
-        .unwrap();
-    printed(&output, b"");
+    printed(&project.run(), b"first");
+    let source = project.executable().parent().unwrap().join("program.c");
     assert!(
-        fs::read_to_string(project.temp.path().join("source.c"))
+        fs::read_to_string(source)
             .unwrap()
             .contains("int main(void)")
     );
-    assert!(!project.temp.path().join("calls").exists());
-    assert!(!project.temp.path().join("build").exists());
+    assert_eq!(project.calls(), 1);
 }
 
 #[test]
@@ -478,4 +469,32 @@ fn concurrent_runs_share_one_build() {
     printed(&second.wait_with_output().unwrap(), b"first");
     assert_eq!(project.calls(), 1);
     assert!(project.executable().is_file());
+}
+
+#[test]
+fn all_glsl_is_generated_before_shader_or_c_compilers_run() {
+    let project = Project::new();
+    fs::write(
+        &project.input,
+        r#"
+        export { main };
+        @compute_shader def good(i: uint) -> uint = { i + 1I };
+        @compute_shader def bad(i: uint) -> uint = { i / 2I };
+        def main() = { var first = good.spirv; var second = bad.spirv; };
+    "#,
+    )
+    .unwrap();
+    let output = project
+        .command()
+        .args(["--glslc", "/missing/glslc"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unsupported shader builtin"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!project.temp.path().join("build").exists());
+    assert!(!project.temp.path().join("calls").exists());
 }

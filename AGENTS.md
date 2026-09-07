@@ -16,10 +16,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep `src/bin/resin.rs` as a wrapper around `cli::main`; argument-to-`Mode` dispatch
   lives in `src/cli/`, including environment/default and build-profile resolution.
   Construct validated requests with `compiler::Request::new`; `Session::compile` owns
-  analysis and dispatches checked IR to the backend for native/C/GLSL/SPIR-V generation.
+  analysis and dispatches checked IR to the backend. Every compilation generates GLSL for
+  requested shaders, compiles SPIR-V, embeds it in C, then builds an executable. Inspect
+  cached intermediates or library snapshots; do not reintroduce artifact targets or CLI inspection modes.
   Toolchain APIs consume explicit settings; execution is separate and retains the build-cache lock.
 - Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
-  build and copy the optimized executable without running it, even with `--output run`.
+  build and copy the optimized executable without running it.
 - Every IR function reserves local zero for its parameter, including unit and tuple parameters
   and foreign declarations. The verifier rejects functions with no locals.
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including

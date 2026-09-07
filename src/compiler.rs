@@ -22,27 +22,16 @@ pub struct Input {
     pub entry: String,
 }
 
-/// The artifact produced by a compilation request.
-#[derive(Clone, Copy)]
-pub enum Target {
-    Executable,
-    C,
-    Glsl,
-    Spirv,
-}
-
 /// Explicit code-generation settings, resolved by the caller before compilation.
 pub struct Options {
     pub profile: toolchain::CProfile,
     pub tools: toolchain::Settings,
-    pub stage: Option<backend::glsl::Stage>,
 }
 
 /// A validated compilation request. Constructing one resolves executable-directory
 /// destinations and rejects destinations that would overwrite the source file.
 pub struct Request {
     input: Input,
-    target: Target,
     destination: Option<PathBuf>,
     options: Options,
 }
@@ -50,18 +39,13 @@ pub struct Request {
 impl Request {
     pub fn new(
         mut input: Input,
-        target: Target,
         destination: Option<PathBuf>,
         options: Options,
     ) -> Result<Self, backend::Error> {
         let source = normalize_path(&input.path)?;
         let destination = destination
             .map(|path| {
-                let path = if matches!(target, Target::Executable) {
-                    executable_destination(&input, path)?
-                } else {
-                    path
-                };
+                let path = executable_destination(&input, path)?;
                 if source == normalize_path(&path)? {
                     return Err(backend::Error(
                         "output would overwrite the source file".into(),
@@ -73,7 +57,6 @@ impl Request {
         input.path = source;
         Ok(Self {
             input,
-            target,
             destination,
             options,
         })
@@ -81,9 +64,6 @@ impl Request {
 
     pub fn input(&self) -> &Input {
         &self.input
-    }
-    pub fn target(&self) -> Target {
-        self.target
     }
     pub fn destination(&self) -> Option<&Path> {
         self.destination.as_deref()
@@ -142,8 +122,8 @@ impl Session {
     }
 
     /// Analyze using this session's sources and cached snapshots, then generate
-    /// the requested artifact. Execution remains a separate operation.
-    pub fn compile(&mut self, request: &Request) -> Result<backend::Artifact, backend::Error> {
+    /// the executable. Execution remains a separate operation.
+    pub fn compile(&mut self, request: &Request) -> Result<backend::Executable, backend::Error> {
         let snapshot = self.analyze(&request.input.path)?;
         backend::generate(request, snapshot.module()?)
     }

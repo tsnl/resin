@@ -1,11 +1,10 @@
 //! CLI syntax and conversion into an explicit execution mode.
-use super::{Environment, Result, inspect, source};
+use super::{Environment, Result, source};
 use crate::{
-    backend,
-    compiler::{Input, Options, Request, Target},
-    toolchain::{self, CProfile},
+    compiler::{Options, Request},
+    toolchain::CProfile,
 };
-use clap::{CommandFactory, ValueEnum};
+use clap::CommandFactory;
 use std::{ffi::OsString, path::PathBuf};
 
 pub struct Invocation {
@@ -16,15 +15,7 @@ pub struct Invocation {
 pub enum Mode {
     Interpreter(Box<Request>),
     Compiler(Box<Request>),
-    Inspector {
-        input: Input,
-        output: inspect::Output,
-        destination: Option<PathBuf>,
-    },
-    Formatter {
-        paths: Vec<PathBuf>,
-        check: bool,
-    },
+    Formatter { paths: Vec<PathBuf>, check: bool },
 }
 
 pub fn parse(
@@ -46,7 +37,7 @@ struct Cli {
     paths: Vec<PathBuf>,
 
     /// Format files in place; search directories recursively for .resin files.
-    #[arg(short = 'f', long, conflicts_with_all = ["output", "destination", "cc", "stage", "glslc"])]
+    #[arg(short = 'f', long, conflicts_with_all = ["destination", "cc", "glslc"])]
     format: bool,
 
     /// With --format, check without writing; exit 1 on differences or file/syntax errors.
@@ -59,10 +50,6 @@ struct Cli {
 
 #[derive(clap::Args)]
 struct CompileOptions {
-    /// What to emit or execute.
-    #[arg(long, value_enum, default_value_t = Output::Run)]
-    output: Output,
-
     /// Destination file, or directory for host executables. Executables use -O3 and are not run.
     #[arg(short = 'o', long = "out")]
     destination: Option<PathBuf>,
@@ -71,35 +58,9 @@ struct CompileOptions {
     #[arg(long)]
     cc: Option<OsString>,
 
-    /// Shader stage for GLSL and SPIR-V output.
-    #[arg(long)]
-    stage: Option<backend::glsl::Stage>,
-
     /// Shader compiler executable (defaults to GLSLC or glslc).
     #[arg(long)]
     glslc: Option<OsString>,
-}
-
-#[derive(Clone, PartialEq, Eq, ValueEnum)]
-enum Output {
-    /// Print the typed stack IR.
-    Ir,
-    /// Print the lowered AST.
-    Ast,
-    /// Print the tree-sitter parse tree (S-expressions).
-    Cst,
-    /// Print the source with parse errors highlighted.
-    Check,
-    /// Emit C11 source using resin_runtime.h.
-    C,
-    /// Compile an executable without running it (requires -o).
-    Exe,
-    /// Compile under ./build and run, or copy without running when -o is supplied.
-    Run,
-    /// Emit GLSL for one shader entry.
-    Glsl,
-    /// Compile one shader entry to SPIR-V.
-    Spirv,
 }
 
 impl Cli {
@@ -128,34 +89,7 @@ impl Cli {
         options.destination = options
             .destination
             .map(|path| environment.directory.join(path));
-        if matches!(options.output, Output::Exe | Output::Spirv) && options.destination.is_none() {
-            return Err("binary output requires -o PATH".into());
-        }
-        let output = match options.output {
-            Output::Cst => Some(inspect::Output::Cst),
-            Output::Ast => Some(inspect::Output::Ast),
-            Output::Ir => Some(inspect::Output::Ir),
-            Output::Check => Some(inspect::Output::Check),
-            _ => None,
-        };
-        if let Some(output) = output {
-            if let Some(path) = &options.destination {
-                toolchain::protect_source(&input.path, path)?;
-            }
-            return Ok(Mode::Inspector {
-                input,
-                output,
-                destination: options.destination,
-            });
-        }
-        let target = match options.output {
-            Output::Run | Output::Exe => Target::Executable,
-            Output::C => Target::C,
-            Output::Glsl => Target::Glsl,
-            Output::Spirv => Target::Spirv,
-            _ => unreachable!("inspection modes were handled above"),
-        };
-        let interpret = options.output == Output::Run && options.destination.is_none();
+        let interpret = options.destination.is_none();
         let profile = if interpret {
             CProfile::Debug
         } else {
@@ -163,12 +97,10 @@ impl Cli {
         };
         let request = Box::new(Request::new(
             input,
-            target,
             options.destination,
             Options {
                 profile,
                 tools: environment.toolchain(options.cc.as_deref(), options.glslc.as_deref()),
-                stage: options.stage,
             },
         )?);
         Ok(if interpret {

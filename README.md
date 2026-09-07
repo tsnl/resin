@@ -294,15 +294,13 @@ The old exit-on-failure `check` helper has been removed.
 cargo run -- examples/eg001.resin
 cargo run -- examples/eg009_imports.resin:independent
 cargo run -- examples/eg001.resin -o dist/
-cargo run -- examples/eg001.resin --output exe -o fibonacci
-cargo run -- examples/eg001.resin --output c -o fibonacci.c
+cargo run -- examples/eg001.resin -o fibonacci
 ```
 
 Without `-o`, Resin builds in `build/<source-name>-<path-and-entry-hash>/debug/` under cwd and immediately runs the executable.
 Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an executable with
 `-o` uses `-O3` and the sibling `release/` cache. Both variants are retained, so switching between
-them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization;
-`-o` for textual output (such as `--output c`) only saves that output.
+them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization.
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
 A file can export several entry points. Host entries must be Resin functions of type
@@ -315,13 +313,17 @@ The selector uses the last colon in the filename, not in its parent directories.
 that itself contains a colon, append `:main` (or another entry) explicitly.
 
 With `-o PATH` (or `--out PATH`), Resin builds and copies the executable without running it.
-This also applies when `--output run` is explicitly selected. A successful build and copy
-returns status 0, independently of the program's eventual exit status.
+A successful build and copy returns status 0, independently of the program's eventual exit status.
 An existing directory or trailing separator receives the source name (or `source-entry` for a
 non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
 extension for Windows executable filenames.
-`--output exe -o PATH` remains an explicit spelling of the same build-only behavior.
-`--output ir`, `ast`, `cst`, and `check` inspect earlier stages; `check` checks syntax only.
+
+Compilation follows one pipeline: generate the requested shaders' GLSL, compile it to SPIR-V,
+embed those bytes in generated C, then compile and link the executable. Shader stages come from
+decorators. To inspect intermediates without running the program, build with `-o PATH` and read
+`build/<source-name>-<path-and-entry-hash>/release/program.c` and
+`build/shaders/<hash>/shader.glsl` / `shader.spv`. Frontend inspection is available through
+`compiler::Session::analyze` and its AST/IR snapshots in the library.
 
 Each canonical source path and entry name has a stable directory with separate debug and release
 artifacts. Each profile contains generated C, the executable, and an input fingerprint. Unchanged
@@ -366,8 +368,8 @@ Directory traversal selects `.resin` files and does not follow symlinks. Explici
 file arguments are treated as Resin source regardless of extension. Use `--`
 before paths beginning with a dash.
 
-`--check` requires `--format`. Formatting cannot be combined with `--output`,
-`-o`/`--out`, or compiler/shader options. Running or compiling accepts exactly one
+`--check` requires `--format`. Formatting cannot be combined with
+`-o`/`--out` or compiler/shader options. Running or compiling accepts exactly one
 `FILE[:ENTRY]`; formatter paths are literal filenames, including any colons.
 
 Normal mode writes changed files and prints their paths. Check mode prints paths
@@ -682,14 +684,10 @@ atomics are not exposed yet. For multi-pass algorithms, record separate dispatch
 inserts memory barriers before dispatches and rendering, including compute-to-vertex reads.
 Submission currently waits for completion, making mapped results readable by the host.
 
-For inspection/export, `--output glsl` or `--output spirv -o PATH` still emits one entry.
-Use the same `FILE:ENTRY` selector, for example
-`cargo run -- examples/gradient.resin:kernel --output glsl`.
-The selected function must be exported; accessing `private_helper.spirv` inside its module
-does not require exporting that helper. The CLI derives the stage from the decorator; an
-explicit `--stage` must agree. Undecorated standalone entries retain the compute default, and
-an omitted entry still defaults to `main`. The old `--entry` option has been removed.
-`--glslc PATH` selects the compiler.
+Build a GPU program with `-o` to inspect its cached GLSL and SPIR-V without executing GPU work,
+for example `cargo run -- examples/gradient.resin -o dist/`. Only the host entry selected by
+`FILE:ENTRY` needs to be exported; accessing `private_helper.spirv` inside its module does not
+require exporting that helper. `--glslc PATH` selects the shader compiler.
 
 ## GPU requirements
 

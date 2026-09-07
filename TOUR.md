@@ -21,14 +21,12 @@ Then run these commands from the repository root:
 
 ```sh
 cargo run -- examples/eg001.resin
-cargo run -- examples/eg001.resin --output ast
-cargo run -- examples/eg001.resin --output ir
-cargo run -- examples/eg001.resin --output c
+cargo run -- examples/eg001.resin -o dist/
 ```
 
-These show the same Fibonacci program as source, an abstract syntax tree,
-typed intermediate representation, and generated C. Running it compiles
-and executes a native program; there is no bytecode interpreter behind the CLI.
+The first command builds and runs the Fibonacci program; the second builds an optimized
+executable without running it. Inspect the generated `program.c` beside each cached executable
+under `build/`. There is no bytecode interpreter behind the CLI.
 
 A few language choices explain much of the implementation:
 
@@ -71,23 +69,34 @@ after a successful read.
 The main path is short enough to keep in mind:
 
 ```text
-source files -> Tree-sitter -> AST -> typed stack IR -> C -> C compiler -> executable
-                                          |
-                                          +-> GLSL -> glslc -> SPIR-V
+source files -> Tree-sitter -> AST -> typed stack IR
+                                            |
+                                            v
+                                 requested shaders' GLSL
+                                            |
+                                          glslc
+                                            |
+                                          SPIR-V
+                                            |
+                              host C with embedded SPIR-V
+                                            |
+                                       C compiler
+                                            |
+                                       executable
 ```
 
-The shader branch compiles selected functions. Its SPIR-V is embedded in the
-host executable, which uses the runtime to create Vulkan pipelines and run them.
+The checked IR supplies both the shader functions and the host code. Generated SPIR-V is
+embedded in C before building the executable, which uses the runtime to create Vulkan
+pipelines and run them. Host-only programs follow the same recipe with an empty shader list.
 
 ### The CLI connects the stages
 
 [src/bin/resin.rs](src/bin/resin.rs) only calls `cli::main`.
 [cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
-parses flags and chooses `Mode::Interpreter`, `Compiler`, `Inspector`, or
-`Formatter`; [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
-Interpreter mode builds a debug native executable and runs it. Compiler mode produces
-the requested `compiler::Target`: a native executable, C, GLSL, or SPIR-V. Native outputs
-with a destination use release builds, including `--output run -o PATH`.
+parses flags and chooses `Mode::Interpreter`, `Compiler`, or `Formatter`;
+[source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
+Interpreter mode builds a debug native executable and runs it. Compiler mode builds
+an optimized executable and copies it to the destination selected with `-o`.
 
 [cli/environment.rs](src/cli/environment.rs) captures the environment, working directory,
 and executable/temp paths once. CLI arguments override `CC` and `GLSLC`, which override
@@ -100,11 +109,11 @@ same captured environment.
 [compiler::Request::new](src/compiler.rs) validates the input/output combination and
 resolves native directory destinations, rejecting outputs that would overwrite the
 source. `Session::compile(&request)` analyzes through the caller's session, then passes
-verified IR to [backend/build.rs](src/backend/build.rs) for C/GLSL/SPIR-V generation,
-shader embedding, and executable construction. It returns a backend `Artifact`: output
-bytes or an `Executable` that keeps the build-cache lock while the caller runs it.
-Execution remains a separate step. [inspect.rs](src/cli/inspect.rs) handles the
-frontend-only CST, AST, IR, and parsing-check modes.
+verified IR to [backend/build.rs](src/backend/build.rs). Every compilation follows the
+same recipe: generate GLSL for all requested shaders, compile it to SPIR-V, embed the bytes
+in generated C, then compile and link the executable. `Session::compile` returns an
+`Executable` that keeps the build-cache lock while the caller runs it. Execution remains
+a separate step. Generated C, GLSL, and SPIR-V remain in the build cache for inspection.
 
 The session owns source overlays, cached parses, import dependencies, and
 immutable [analysis snapshots](src/analysis/mod.rs). A snapshot exposes the
@@ -112,9 +121,8 @@ AST, verified IR when compilation succeeds, and editor queries. The CLI uses
 one session for its invocation; the language server retains one across edits.
 
 The compiler stages are library modules exposed by [src/lib.rs](src/lib.rs),
-so tests can exercise them without invoking the CLI. Note that `--output check`
-currently checks parsing and import loading, not typing; use `--output ir` to
-exercise the typed frontend without building an executable.
+so tests and editor adapters can inspect the AST and verified IR through
+`Session::analyze` without building an executable.
 
 Formatting takes a separate path from `main` through
 [format.rs](src/cli/format.rs) to the shared
@@ -289,11 +297,13 @@ the extension builds separately from the main Cargo workspace.
 Read [examples/gradient.resin](examples/gradient.resin) for compute, then
 [examples/triangle.resin](examples/triangle.resin) for graphics. Each example keeps
 its decorated shader entries and ordinary helpers alongside its host code. To inspect
-a shader without running a Vulkan program:
+the generated shaders without running a Vulkan program:
 
 ```sh
-cargo run -- examples/gradient.resin:kernel --output glsl
+cargo run -- examples/gradient.resin -o dist/
 ```
+
+Read `build/shaders/<hash>/shader.glsl` and `shader.spv` after the build.
 
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
 shader entry declarations. [ir/shader.rs](src/ir/shader.rs) defines their metadata

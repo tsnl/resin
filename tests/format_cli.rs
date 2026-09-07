@@ -107,7 +107,7 @@ fn errors_preserve_invalid_files_and_do_not_hide_other_inputs() {
 }
 
 #[test]
-fn help_paths_and_legacy_invocation() {
+fn help_paths_and_fmt_filename() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let root = temp.path();
     let help = fmt(root, &["--help"]);
@@ -116,7 +116,7 @@ fn help_paths_and_legacy_invocation() {
     assert_eq!(fmt(root, &[]).status.code(), Some(2));
     assert_eq!(fmt(root, &["--unknown"]).status.code(), Some(2));
     for name in ["with spaces.resin", "-dash.resin", "fmt"] {
-        fs::write(root.join(name), "def main()={};").unwrap();
+        fs::write(root.join(name), "export { main }; def main()={};").unwrap();
     }
     assert!(
         fmt(root, &["--", "with spaces.resin", "-dash.resin", "fmt"])
@@ -125,7 +125,7 @@ fn help_paths_and_legacy_invocation() {
     );
     let legacy = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(root)
-        .args(["fmt", "--output", "check"])
+        .arg("fmt")
         .output()
         .unwrap();
     assert!(
@@ -179,12 +179,9 @@ fn incompatible_modes_are_rejected_before_changing_files() {
         vec!["--check", "source.resin"],
         vec!["source.resin", "second.resin"],
         vec!["--format=true", "source.resin"],
-        vec!["-f", "source.resin", "--output", "run"],
-        vec!["-f", "source.resin", "--output", "check"],
         vec!["-f", "source.resin", "-o", "destination"],
         vec!["-f", "source.resin", "--out", "destination"],
         vec!["-f", "source.resin", "--cc", "compiler"],
-        vec!["-f", "source.resin", "--stage", "compute"],
         vec!["-f", "source.resin", "--glslc", "compiler"],
     ] {
         let result = invoke(root, &args);

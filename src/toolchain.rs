@@ -54,14 +54,6 @@ fn valid_spirv(bytes: &[u8]) -> bool {
     bytes.len() >= 20 && bytes.len().is_multiple_of(4) && bytes[..4] == [3, 2, 35, 7]
 }
 
-/// Reject an output path that resolves to the input file.
-pub fn protect_source(source: &Path, output: &Path) -> Result<(), Error> {
-    if output.exists() && fs::canonicalize(output)? == fs::canonicalize(source)? {
-        return Err(Error("output would overwrite the source file".into()));
-    }
-    Ok(())
-}
-
 pub fn write_output(bytes: &[u8], output: &Path) -> Result<(), Error> {
     let temp = TempDir::new(parent(output)).map_err(io_error)?;
     let path = temp.path().join("output");

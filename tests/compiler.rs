@@ -1,7 +1,6 @@
 use resin::{
-    backend::Artifact,
     cli::Environment,
-    compiler::{Input, Options, Request, Session, Target},
+    compiler::{Input, Options, Request, Session},
     toolchain::{CProfile, TempDir},
 };
 use std::{fs, path::Path, sync::Arc};
@@ -10,7 +9,6 @@ fn options(environment: &Environment, profile: CProfile) -> Options {
     Options {
         profile,
         tools: environment.toolchain(None, None),
-        stage: None,
     }
 }
 
@@ -30,26 +28,22 @@ fn requests_reject_source_overwrites_before_compilation() {
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     fs::write(&source, "this need not parse").unwrap();
     let alias = temp.path().join(".").join(source.file_name().unwrap());
-    for target in [Target::Executable, Target::C, Target::Glsl, Target::Spirv] {
-        for destination in [&source, &alias] {
-            let result = Request::new(
-                input(&source),
-                target,
-                Some(destination.into()),
-                options(&environment, CProfile::Debug),
-            );
-            let error = result
-                .err()
-                .expect("source overwrite must fail at construction");
-            assert!(
-                error.to_string().contains("overwrite the source"),
-                "{error}"
-            );
-        }
+    for destination in [&source, &alias] {
+        let result = Request::new(
+            input(&source),
+            Some(destination.into()),
+            options(&environment, CProfile::Debug),
+        );
+        let error = result
+            .err()
+            .expect("source overwrite must fail at construction");
+        assert!(
+            error.to_string().contains("overwrite the source"),
+            "{error}"
+        );
     }
     let result = Request::new(
         input(&source),
-        Target::Executable,
         Some(temp.path().into()),
         options(&environment, CProfile::Debug),
     );
@@ -61,7 +55,6 @@ fn requests_reject_source_overwrites_before_compilation() {
     assert!(
         Request::new(
             input(&unsaved),
-            Target::C,
             Some(unsaved.clone()),
             options(&environment, CProfile::Debug)
         )
@@ -71,7 +64,7 @@ fn requests_reject_source_overwrites_before_compilation() {
 }
 
 #[test]
-fn requests_resolve_executable_directories_and_preserve_text_destinations() {
+fn requests_resolve_executable_directories_and_preserve_file_destinations() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let environment = Environment::capture().unwrap();
     let input = Input {
@@ -81,7 +74,6 @@ fn requests_resolve_executable_directories_and_preserve_text_destinations() {
     for directory in [temp.path().to_path_buf(), temp.path().join("new/")] {
         let request = Request::new(
             input.clone(),
-            Target::Executable,
             Some(directory.clone()),
             options(&environment, CProfile::Release),
         )
@@ -95,10 +87,9 @@ fn requests_resolve_executable_directories_and_preserve_text_destinations() {
             )
         );
     }
-    let output = temp.path().join("example.c");
+    let output = temp.path().join("custom-program");
     let request = Request::new(
         input,
-        Target::C,
         Some(output.clone()),
         options(&environment, CProfile::Release),
     )
@@ -135,14 +126,11 @@ fn session_compilation_uses_overlays_and_explicit_profiles() {
         let snapshot = session.analyze(&source).unwrap();
         let request = Request::new(
             input(&source),
-            Target::Executable,
             destination.clone(),
             options(&environment, profile),
         )
         .unwrap();
-        let Artifact::Executable(artifact) = session.compile(&request).unwrap() else {
-            panic!("expected an executable")
-        };
+        let artifact = session.compile(&request).unwrap();
         assert_eq!(
             artifact.path().parent().unwrap().file_name().unwrap(),
             directory

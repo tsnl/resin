@@ -1,7 +1,7 @@
 mod build;
 mod shaders;
+pub use build::Executable;
 pub(crate) use build::generate;
-pub use build::{Artifact, Executable};
 pub use shaders::build_shaders;
 
 pub mod c;

@@ -1,12 +1,10 @@
 //! Command-line argument parsing and mode dispatch.
-use crate::{backend, compiler::Session};
+use crate::compiler::Session;
 
 mod args;
 mod environment;
 pub use environment::Environment;
 mod format;
-mod inspect;
-mod output;
 mod source;
 
 use args::{Invocation, Mode};
@@ -33,25 +31,12 @@ fn run(Invocation { mode, stdlib }: Invocation) -> Result<i32> {
     match &mode {
         Mode::Compiler(request) | Mode::Interpreter(request) => {
             let mut session = Session::new(stdlib);
-            let artifact = session.compile(request)?;
+            let executable = session.compile(request)?;
             if matches!(mode, Mode::Interpreter(_)) {
-                return Ok(artifact.run()?);
+                return Ok(executable.run()?);
             }
-            match artifact {
-                backend::Artifact::Executable(_) => Ok(0),
-                backend::Artifact::Bytes(bytes) => output::write(&bytes, request.destination()),
-            }
+            Ok(0)
         }
-        Mode::Inspector {
-            input,
-            output,
-            destination,
-        } => inspect::run(
-            &mut Session::new(stdlib),
-            input,
-            *output,
-            destination.as_deref(),
-        ),
         Mode::Formatter { paths, check } => format::run(paths, *check),
     }
 }
