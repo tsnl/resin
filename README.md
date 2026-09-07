@@ -173,6 +173,10 @@ all use the same inference mechanism. Each `_` is independent. Local constraints
 can come from later assignments or uses; numeric literals default to `int` or
 `float64` only after those constraints have been considered.
 
+Every function uses the same checker, including functions with no explicit holes.
+Later uses can constrain unsuffixed local literals; use an annotation or suffix to fix
+a local’s type independently of those uses.
+
 Function results are inferred from bodies in dependency order, checking mutually
 recursive groups together. Callers outside a group cannot determine its return
 types. A recursive group without enough information is an error, not a generic

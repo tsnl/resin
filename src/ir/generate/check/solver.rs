@@ -1,9 +1,10 @@
 use crate::{
     ast::Span,
-    ir::{Ty, TypeId},
+    ir::{Ty, TypeError, TypeErrorKind, TypeId},
 };
 
 use super::{
+    super::GenerateError,
     Result, error,
     types::{Head, Type},
 };
@@ -215,10 +216,36 @@ impl Solver {
                 }
                 Ok(())
             }
-            _ => Err(error(
-                span,
-                format!("incompatible inferred types: {left:?} and {right:?}"),
-            )),
+            _ => {
+                if let (Some(found), Some(expected)) = (self.resolve(&left), self.resolve(&right)) {
+                    Err(GenerateError::typing(
+                        span,
+                        TypeError {
+                            kind: TypeErrorKind::TypeMismatch { expected, found },
+                        },
+                    ))
+                } else {
+                    Err(error(
+                        span,
+                        format!("incompatible inferred types: {left:?} and {right:?}"),
+                    ))
+                }
+            }
+        }
+    }
+
+    // Explicit pointer casts relate holes only where their pointee shapes agree.
+    // A cast from Ptr<[T; N]> to Ptr<U> must not equate the array with U.
+    pub fn cast(&mut self, from: &Type, to: &Type, span: Span) -> Result<()> {
+        match (self.head(from), self.head(to)) {
+            (_, Type::Variable(_)) => self.unify(to, from, span),
+            (Type::Node(a, aa), Type::Node(b, bb)) if a == b => {
+                for (a, b) in aa.iter().zip(bb.iter()) {
+                    self.cast(a, b, span)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -265,6 +292,19 @@ impl Solver {
             let numeric = matches!(&ty, Type::Node(Head::Atom(t), _) if t.is_numeric());
             let float = matches!(&ty, Type::Node(Head::Atom(Ty::Float32 | Ty::Float64), _));
             if !numeric || (class == Class::Float && !float) {
+                if let Some(expected) = self.resolve(&ty) {
+                    let found = if class == Class::Float {
+                        Ty::Float64
+                    } else {
+                        Ty::Int32
+                    };
+                    return Err(GenerateError::typing(
+                        span,
+                        TypeError {
+                            kind: TypeErrorKind::TypeMismatch { expected, found },
+                        },
+                    ));
+                }
                 return Err(error(
                     span,
                     "numeric literal has an incompatible inferred type",

@@ -109,7 +109,7 @@ fn recursive_error_sets_reach_a_fixed_point() {
 fn mutable_pointers_do_not_widen_and_bad_matches_are_rejected() {
     rejects(
         "struct A {}; struct B {}; def f(p: Ptr<Result<int, A>>) -> Ptr<Result<int, A | B>> = { p };",
-        "incompatible",
+        "TypeMismatch",
     );
     rejects(
         "struct A {}; struct B {}; def f(x: A | B) -> int = { match (x) { A(a) => { 0 }, A(b) => { 1 } } };",

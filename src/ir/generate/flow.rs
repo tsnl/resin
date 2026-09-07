@@ -36,12 +36,9 @@ impl Generator {
         cond: &Term,
         then: &Term,
         els: &Term,
-        expected: Option<&Ty>,
+        expected: &Ty,
     ) -> Result<Ty, GenerateError> {
-        let cond_ty = self.gen_term(cond, None)?;
-        self.typer
-            .as_bool(&cond_ty)
-            .map_err(|err| GenerateError::typing(cond.span, err))?;
+        self.gen_term(cond, None)?;
         let then_block = self.new_block("then");
         let else_block = self.new_block("else");
         let join_block = self.new_block("join");
@@ -52,34 +49,32 @@ impl Generator {
 
         let before = self.scopes.clone();
         self.switch(then_block);
-        let then_ty = self.gen_term(then, expected)?;
+        let _ = self.gen_term(then, Some(expected))?;
         self.terminate(Terminator::Break { target: join_block });
         let after_then = self.scopes.clone();
 
         self.scopes = before;
         self.switch(else_block);
-        let else_ty = self.gen_term(els, expected)?;
+        let _ = self.gen_term(els, Some(expected))?;
         self.terminate(Terminator::Break { target: join_block });
         self.scopes.intersect_initialization(&after_then);
 
         self.switch(join_block);
-        self.typer
-            .type_if(&Ty::Bool, &then_ty, &else_ty)
-            .map_err(|err| GenerateError::typing(cond.span, err))
+        Ok(expected.clone())
     }
 
     pub(super) fn gen_block(
         &mut self,
         stmts: &[Stmt],
         tail: &Term,
-        expected: Option<&Ty>,
+        expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         self.scopes.push();
         self.defers.push(vec![]);
         for stmt in stmts {
             self.gen_stmt(stmt)?;
         }
-        let ty = self.gen_term(tail, expected)?;
+        let ty = self.gen_term(tail, Some(expected))?;
         self.cleanup(self.defers.len() - 1, &ty)?;
         self.defers.pop();
         self.scopes.pop();
@@ -103,10 +98,7 @@ impl Generator {
                 },
             ));
         }
-        let left_ty = self.gen_term(&args[0], None)?;
-        self.typer
-            .as_bool(&left_ty)
-            .map_err(|err| GenerateError::typing(span, err))?;
+        self.gen_term(&args[0], None)?;
         let then_block = self.new_block("then");
         let else_block = self.new_block("else");
         let join_block = self.new_block("join");
@@ -140,10 +132,7 @@ impl Generator {
     }
 
     fn gen_bool(&mut self, term: &Term) -> Result<Ty, GenerateError> {
-        let ty = self.gen_term(term, None)?;
-        self.typer
-            .as_bool(&ty)
-            .map_err(|err| GenerateError::typing(term.span, err))?;
+        self.gen_term(term, None)?;
         Ok(Ty::Bool)
     }
 }

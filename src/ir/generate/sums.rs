@@ -2,7 +2,7 @@ use crate::ast::{MatchArm, MatchVariant, Span, Term};
 use crate::ir::{Instr, Terminator, Ty, Value};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
-use super::{GenerateError, Generator, infer::error};
+use super::{GenerateError, Generator, check::error};
 
 impl Generator {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, GenerateError> {
@@ -24,14 +24,12 @@ impl Generator {
         span: Span,
         failure: bool,
         arg: &Term,
-        expected: Option<&Ty>,
+        expected: &Ty,
     ) -> Result<Ty, GenerateError> {
-        let Some(
-            ty @ Ty::Result {
-                value,
-                error: errors,
-            },
-        ) = expected
+        let ty @ Ty::Result {
+            value,
+            error: errors,
+        } = expected
         else {
             return Err(error(
                 span,
@@ -47,12 +45,6 @@ impl Generator {
     }
 
     pub(super) fn gen_try(&mut self, span: Span, term: &Term) -> Result<Ty, GenerateError> {
-        if self.in_defer {
-            return Err(error(
-                span,
-                "postfix ? is not allowed in a deferred expression; handle the error locally",
-            ));
-        }
         let ty = self.gen_term(term, None)?;
         let Ty::Result {
             value,
@@ -114,7 +106,7 @@ impl Generator {
         span: Span,
         term: &Term,
         arms: &[MatchArm],
-        expected: Option<&Ty>,
+        expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         let ty = self.gen_term(term, None)?;
         let tags = match &ty {
@@ -155,7 +147,7 @@ impl Generator {
         let saved = self.save_top(&ty);
         let before = self.scopes.clone();
         let mut after = None;
-        let mut result = expected.cloned();
+        let mut result = Some(expected.clone());
         let join = self.new_block("match.join");
         for (i, (arm, tag)) in arms.iter().zip(patterns).enumerate() {
             let next = if i + 1 < arms.len() {

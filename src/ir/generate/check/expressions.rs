@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
             _ => Evaluator {
                 scopes: &self.scopes,
                 typer: self.typer,
-                inferred: None,
+                checked: None,
             }
             .ty(ann)?
             .into(),
@@ -313,8 +313,11 @@ impl<'a> Checker<'a> {
                 } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "print"
                 {
-                    self.term(arg, None)?;
-                    equate = Some(Ty::Unit.into());
+                    let arg = self.term(arg, None)?;
+                    self.constraints.push((
+                        span,
+                        Constraint::Builtin("print".into(), vec![arg], out.clone()),
+                    ));
                 } else {
                     let func = self.term(func, None)?;
                     let arg = self.term(arg, None)?;

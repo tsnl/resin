@@ -7,12 +7,12 @@ use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, V
 
 mod bindings;
 mod builder;
+mod check;
 mod cleanup;
 mod error;
 mod eval;
 mod flow;
 mod functions;
-mod infer;
 mod modules;
 mod places;
 mod recover;
@@ -50,9 +50,8 @@ struct Generator {
     typer: TyperContext,
     function: Option<FunctionBuilder>,
     scopes: Scopes,
-    inferred: infer::Inferred,
+    checked: check::Checked,
     defers: Vec<Vec<cleanup::Deferred>>,
-    in_defer: bool,
 }
 
 impl Generator {
@@ -62,14 +61,13 @@ impl Generator {
             typer: TyperContext::new(),
             function: None,
             scopes: Scopes::new(),
-            inferred: infer::Inferred::default(),
+            checked: check::Checked::default(),
             defers: vec![],
-            in_defer: false,
         }
     }
 
     fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
-        self.inferred = infer::Inferred::default();
+        self.checked = check::Checked::default();
         for stmt in &file.stmts {
             if matches!(
                 stmt.val,
@@ -109,7 +107,7 @@ impl Generator {
                 _ => {}
             }
         }
-        self.inferred = infer::file(file, &mut self.typer, &self.scopes)?;
+        self.checked = check::file(file, &mut self.typer, &self.scopes)?;
         for stmt in &file.stmts {
             if let StmtKind::Function {
                 name,
@@ -220,20 +218,18 @@ impl Generator {
         }
     }
 
-    fn gen_term(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
-        let inferred = self
-            .inferred
-            .expressions
-            .get(&std::ptr::from_ref(term))
-            .cloned();
-        let found = self.gen_term_inner(term, expected.or(inferred.as_ref()))?;
-        if let Some(expected) = expected {
-            return self.coerce(term.span, found, expected);
+    // `to` requests an emitted value conversion, never a typing context.
+    fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, GenerateError> {
+        let checked = self.checked.expressions[&std::ptr::from_ref(term)].clone();
+        let found = self.gen_term_inner(term, &checked)?;
+        let found = self.coerce(term.span, found, &checked)?;
+        if let Some(to) = to {
+            return self.coerce(term.span, found, to);
         }
         Ok(found)
     }
 
-    fn gen_term_inner(&mut self, term: &Term, expected: Option<&Ty>) -> Result<Ty, GenerateError> {
+    fn gen_term_inner(&mut self, term: &Term, expected: &Ty) -> Result<Ty, GenerateError> {
         match &term.val {
             TermKind::Hole { .. } | TermKind::FieldHole { .. } => Err(GenerateError {
                 span: term.span,
@@ -241,7 +237,7 @@ impl Generator {
             }),
             TermKind::Var { name } => self.gen_var(name),
             TermKind::Num { value } => {
-                let (pushed, ty) = self.evaluator().number(term.span, value, expected)?;
+                let (pushed, ty) = self.evaluator().number(term.span, value, Some(expected))?;
                 self.emit(Instr::Push { value: pushed });
                 Ok(ty)
             }
@@ -275,8 +271,8 @@ impl Generator {
             TermKind::Try { value } => self.gen_try(term.span, value),
             TermKind::Match { value, arms } => self.gen_match(term.span, value, arms, expected),
             TermKind::While { cond, body } => self.gen_while(cond, body),
-            TermKind::Array { elems } => self.gen_array(term.span, elems, expected),
-            TermKind::Record { fields } => self.gen_record(term.span, fields, expected),
+            TermKind::Array { elems } => self.gen_array(elems, expected),
+            TermKind::Record { fields } => self.gen_record(fields, expected),
             TermKind::Block { stmts, tail } => self.gen_block(stmts, tail, expected),
             TermKind::Call { func, arg } => self.gen_call(term.span, func, arg, expected),
             TermKind::Builtin { name, args } => self.gen_builtin(term.span, name, args, expected),
@@ -334,7 +330,7 @@ impl Generator {
         Evaluator {
             scopes: &self.scopes,
             typer: &self.typer,
-            inferred: Some(&self.inferred.holes),
+            checked: Some(&self.checked.holes),
         }
     }
 }

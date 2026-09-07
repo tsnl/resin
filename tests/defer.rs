@@ -111,7 +111,7 @@ fn statement_only_chain_expressions_yield_unit() {
     module(
         "def f() = { var result = { defer 42; }; var empty = {}; if (1 == 1) { defer 1; } else { defer 2; }; result };",
     );
-    rejects("def f() -> int = { { defer 42; } };", "incompatible");
+    rejects("def f() -> int = { { defer 42; } };", "TypeMismatch");
 }
 
 #[test]
