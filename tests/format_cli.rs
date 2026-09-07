@@ -217,11 +217,8 @@ fn format_mode_treats_colons_as_literal_filename_characters() {
 
 #[cfg(unix)]
 #[test]
-fn skips_symlinks_preserves_modes_and_accepts_non_utf8_paths() {
-    use std::os::unix::{
-        ffi::OsStringExt,
-        fs::{PermissionsExt, symlink},
-    };
+fn skips_symlinks_and_preserves_modes() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let root = temp.path();
     fs::create_dir(root.join("examples")).unwrap();
@@ -229,9 +226,7 @@ fn skips_symlinks_preserves_modes_and_accepts_non_utf8_paths() {
     fs::write(root.join("outside.resin"), raw).unwrap();
     symlink("../outside.resin", root.join("examples/link.resin")).unwrap();
     symlink(".", root.join("examples/cycle")).unwrap();
-    let odd = root.join("examples").join(std::ffi::OsString::from_vec(
-        b"non-utf8-\xff.resin".to_vec(),
-    ));
+    let odd = root.join("examples/source.resin");
     fs::write(&odd, raw).unwrap();
     fs::set_permissions(&odd, fs::Permissions::from_mode(0o640)).unwrap();
     let result = fmt(root, &["examples"]);
@@ -252,4 +247,19 @@ fn skips_symlinks_preserves_modes_and_accepts_non_utf8_paths() {
     fs::set_permissions(&odd, fs::Permissions::from_mode(0o440)).unwrap();
     assert_eq!(fmt(root, &["examples"]).status.code(), Some(1));
     assert_eq!(fs::read_to_string(&odd).unwrap(), raw);
+}
+
+// Linux filesystems support arbitrary non-NUL filename bytes. macOS filesystems
+// can reject invalid UTF-8 before the formatter runs; keep their portable tests above.
+#[cfg(target_os = "linux")]
+#[test]
+fn accepts_non_utf8_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = temp.path().join(std::ffi::OsString::from_vec(
+        b"non-utf8-\xff.resin".to_vec(),
+    ));
+    fs::write(&path, "def main()={};").unwrap();
+    assert!(fmt(temp.path(), &["."]).status.success());
+    assert_eq!(fs::read_to_string(path).unwrap(), "def main() = {};\n");
 }
