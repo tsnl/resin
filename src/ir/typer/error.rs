@@ -27,6 +27,7 @@ pub enum TypeErrorKind {
     DuplicateField { name: Arc<str> },
     InvalidTypeDefinition { definition: TypeId },
     IncompleteTypeDefinition { definition: TypeId },
+    NominalTypeMustBeRecord { definition: TypeId },
     TypeAlreadyDefined { definition: TypeId },
     RecursiveTypeWithoutIndirection { definition: TypeId },
 }
@@ -51,6 +52,9 @@ impl std::error::Error for TypeError {}
 impl From<DefinitionError> for TypeError {
     fn from(error: DefinitionError) -> Self {
         let kind = match error {
+            DefinitionError::NonRecord(definition) => {
+                TypeErrorKind::NominalTypeMustBeRecord { definition }
+            }
             DefinitionError::InvalidUnion => TypeErrorKind::InvalidUnion,
             DefinitionError::Invalid(definition) => {
                 TypeErrorKind::InvalidTypeDefinition { definition }

@@ -38,6 +38,7 @@ pub enum VerifyErrorKind {
     InvalidPointerCast { from: Ty, to: Ty },
     InvalidTypeDefinition { definition: usize },
     IncompleteTypeDefinition { definition: TypeId },
+    NominalTypeMustBeRecord { definition: TypeId },
     RecursiveTypeWithoutIndirection { definition: TypeId },
     InvalidLocal { local: usize },
     InvalidFunction { function: usize },
@@ -135,6 +136,7 @@ impl Location {
 impl From<DefinitionError> for VerifyErrorKind {
     fn from(error: DefinitionError) -> Self {
         match error {
+            DefinitionError::NonRecord(definition) => Self::NominalTypeMustBeRecord { definition },
             DefinitionError::InvalidUnion => Self::InvalidVariant,
             DefinitionError::Invalid(definition) => Self::InvalidTypeDefinition {
                 definition: definition.index(),

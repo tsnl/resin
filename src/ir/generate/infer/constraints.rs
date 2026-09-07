@@ -70,24 +70,19 @@ impl Checker<'_> {
 
     fn shape(&self, ty: &Type, deref: bool, span: Span) -> Result<Type> {
         let mut ty = self.solver.shape_hint(ty);
-        let mut visited = HashSet::new();
-        loop {
-            ty = match &ty {
-                Type::Node(Head::Atom(t @ Ty::Defined { definition }), _) => {
-                    if !visited.insert(*definition) {
-                        return Err(error(span, "recursive type has no usable shape"));
-                    }
-                    self.typer
-                        .body(t)
-                        .map_err(|e| GenerateError::typing(span, e))?
-                        .into()
-                }
-                Type::Node(Head::Pointer, children) if deref => {
-                    self.solver.shape_hint(&children[0])
-                }
-                _ => return Ok(ty),
-            };
+        if deref {
+            while let Type::Node(Head::Pointer, children) = &ty {
+                ty = self.solver.shape_hint(&children[0]);
+            }
         }
+        if let Type::Node(Head::Atom(t @ Ty::Defined { .. }), _) = &ty {
+            ty = self
+                .typer
+                .body(t)
+                .map_err(|e| GenerateError::typing(span, e))?
+                .into();
+        }
+        Ok(ty)
     }
 
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {

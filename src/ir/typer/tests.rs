@@ -1,220 +1,150 @@
 use super::*;
 use crate::ir::RecordField;
 
+fn record(ty: Ty) -> Ty {
+    Ty::Record {
+        fields: vec![RecordField {
+            name: "value".into(),
+            ty,
+        }],
+    }
+}
+
 #[test]
-fn context_creates_distinct_nominal_identities_without_a_module() {
-    let mut context = TyperContext::default();
-    assert!(context.definitions().is_empty());
-    let first = context.create_type("Meters", Ty::Int32).unwrap();
-    let second = context.create_type("Meters", Ty::Int32).unwrap();
+fn nominal_records_keep_distinct_identities_across_contexts() {
+    let mut context = TyperContext::new();
+    let first = context.create_type("Meters", record(Ty::Int32)).unwrap();
+    let table = context.into_definitions().unwrap();
+    let allocation = table.as_ptr();
+    let mut context = TyperContext::from_definitions(table);
+    assert_eq!(context.definitions().as_ptr(), allocation);
+    let second = context.create_type("Meters", record(Ty::Int32)).unwrap();
     assert_ne!(first, second);
-    assert_eq!(first.index(), 0);
-    assert_eq!(second.index(), 1);
-    assert_eq!(context.definitions().len(), 2);
-    assert_eq!(context.definition(first).unwrap().body(), Some(&Ty::Int32));
     assert!(
         context
             .same(
                 &Ty::Defined { definition: first },
-                &Ty::Defined { definition: second },
+                &Ty::Defined { definition: second }
             )
             .is_err()
+    );
+    assert_eq!(
+        context.definition(first).unwrap().body(),
+        Some(&record(Ty::Int32))
+    );
+    assert_eq!(
+        context
+            .define_type(first, record(Ty::Float64))
+            .unwrap_err()
+            .kind,
+        TypeErrorKind::TypeAlreadyDefined { definition: first }
     );
 }
 
 #[test]
-fn unfinished_definitions_are_not_unit_and_cannot_be_exported() {
+fn unfinished_records_cannot_be_used_or_exported() {
     let mut context = TyperContext::new();
     let definition = context.reserve_type("Pending");
     let ty = Ty::Defined { definition };
     let incomplete = TypeErrorKind::IncompleteTypeDefinition { definition };
-    assert!(context.definition(definition).unwrap().body().is_none());
     assert_eq!(context.body(&ty).unwrap_err().kind, incomplete);
     assert_eq!(
-        context.ascribe(&Ty::Unit, &ty).unwrap_err().kind,
+        context.ascribe(&record(Ty::Int32), &ty).unwrap_err().kind,
         incomplete
     );
-    assert_eq!(context.as_bool(&ty).unwrap_err().kind, incomplete);
     assert_eq!(context.as_record(&ty).unwrap_err().kind, incomplete);
     assert_eq!(
         context.clone().into_definitions().unwrap_err().kind,
         incomplete
     );
-
-    context.define_type(definition, Ty::Unit).unwrap();
-    assert_eq!(context.body(&ty).unwrap(), Ty::Unit);
-    assert_eq!(
-        context.into_definitions().unwrap()[0].body(),
-        Some(&Ty::Unit)
-    );
+    context
+        .define_type(definition, Ty::Record { fields: vec![] })
+        .unwrap();
+    context.into_definitions().unwrap();
 }
 
 #[test]
-fn completed_definitions_cannot_be_redefined_even_after_export_and_import() {
-    let mut context = TyperContext::new();
-    let definition = context.create_type("Value", Ty::Int32).unwrap();
-    for body in [Ty::Int32, Ty::Float64] {
+fn nominal_nonrecords_are_rejected_at_creation_and_verification() {
+    for body in [
+        Ty::Unit,
+        Ty::Bool,
+        Ty::Int32,
+        Ty::Pointer {
+            pointee: Box::new(Ty::Int32),
+        },
+        Ty::Function {
+            param: Box::new(Ty::Unit),
+            result: Box::new(Ty::Unit),
+        },
+        Ty::Span {
+            element: Box::new(Ty::Int32),
+        },
+        Ty::Array {
+            element: Box::new(Ty::Int32),
+            length: 1,
+        },
+    ] {
+        let mut context = TyperContext::new();
+        let definition = TypeId::from_index(0);
         assert_eq!(
-            context.define_type(definition, body).unwrap_err().kind,
-            TypeErrorKind::TypeAlreadyDefined { definition }
+            context
+                .create_type("Invalid", body.clone())
+                .unwrap_err()
+                .kind,
+            TypeErrorKind::NominalTypeMustBeRecord { definition }
+        );
+        assert!(context.definitions().is_empty());
+        let module = crate::ir::Module {
+            types: vec![TypeDef::new("Invalid", body)],
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::ir::verify(&module).unwrap_err().kind,
+            crate::ir::VerifyErrorKind::NominalTypeMustBeRecord { definition }
         );
     }
-    let mut context = TyperContext::from_definitions(context.into_definitions().unwrap());
-    assert_eq!(
-        context.define_type(definition, Ty::Unit).unwrap_err().kind,
-        TypeErrorKind::TypeAlreadyDefined { definition }
-    );
-    assert_eq!(
-        context.definition(definition).unwrap().body(),
-        Some(&Ty::Int32)
-    );
 }
 
 #[test]
-fn inline_dependencies_must_be_complete_but_pointer_dependencies_can_be_pending() {
+fn inline_dependencies_require_completion_but_indirect_fields_can_be_pending() {
     let mut context = TyperContext::new();
     let first = context.reserve_type("First");
     let second = context.reserve_type("Second");
+    let first_ty = Ty::Defined { definition: first };
     let second_ty = Ty::Defined { definition: second };
     assert_eq!(
         context
-            .define_type(first, second_ty.clone())
+            .define_type(first, record(second_ty.clone()))
             .unwrap_err()
             .kind,
         TypeErrorKind::IncompleteTypeDefinition { definition: second }
     );
-    assert!(context.definition(first).unwrap().body().is_none());
     context
         .define_type(
             second,
-            Ty::Pointer {
-                pointee: Box::new(Ty::Defined { definition: first }),
-            },
+            record(Ty::Pointer {
+                pointee: Box::new(first_ty),
+            }),
         )
         .unwrap();
-    context.define_type(first, second_ty).unwrap();
-    let module = crate::ir::Module {
+    context.define_type(first, record(second_ty)).unwrap();
+    crate::ir::verify(&crate::ir::Module {
         types: context.into_definitions().unwrap(),
         ..Default::default()
-    };
-    crate::ir::verify(&module).unwrap();
+    })
+    .unwrap();
 }
 
 #[test]
-fn invalid_references_do_not_initialize_a_reserved_body() {
-    let mut context = TyperContext::new();
-    let definition = context.reserve_type("Value");
-    let missing = TypeId::from_index(99);
-    assert_eq!(
-        context
-            .define_type(
-                definition,
-                Ty::Pointer {
-                    pointee: Box::new(Ty::Defined {
-                        definition: missing
-                    }),
-                }
-            )
-            .unwrap_err()
-            .kind,
-        TypeErrorKind::InvalidTypeDefinition {
-            definition: missing
-        }
-    );
-    assert!(context.definition(definition).unwrap().body().is_none());
-    context.define_type(definition, Ty::Int32).unwrap();
-}
-
-#[test]
-fn recursive_definitions_can_be_reserved_and_completed_in_the_context() {
+fn invalid_references_and_layouts_leave_the_reservation_retryable() {
     let mut context = TyperContext::new();
     let definition = context.reserve_type("Node");
-    let node = Ty::Defined { definition };
-    let pointer = Ty::Pointer {
-        pointee: Box::new(node.clone()),
-    };
-    let body = Ty::Record {
-        fields: vec![
-            RecordField {
-                name: "value".into(),
-                ty: Ty::Int32,
-            },
-            RecordField {
-                name: "next".into(),
-                ty: pointer.clone(),
-            },
-        ],
-    };
-    context.define_type(definition, body.clone()).unwrap();
-    assert_eq!(context.body(&node).unwrap(), body);
-    assert_eq!(context.type_field(&node, "next").unwrap().ty, pointer);
-
-    let span_id = context.reserve_type("Span");
-    let span = Ty::Defined {
-        definition: span_id,
-    };
-    context
-        .define_type(
-            span_id,
-            Ty::Span {
-                element: Box::new(span),
-            },
-        )
-        .unwrap();
-
-    let function_id = context.reserve_type("Function");
-    let function = Ty::Defined {
-        definition: function_id,
-    };
-    context
-        .define_type(
-            function_id,
-            Ty::Function {
-                param: Box::new(function.clone()),
-                result: Box::new(function),
-            },
-        )
-        .unwrap();
-    assert_eq!(context.into_definitions().unwrap().len(), 3);
-}
-
-#[test]
-fn invalid_recursive_layouts_leave_the_reservation_retryable() {
-    let mut context = TyperContext::new();
-    let definition = context.reserve_type("Value");
-    let value = Ty::Defined { definition };
-    for body in [
-        value.clone(),
-        Ty::Array {
-            element: Box::new(value.clone()),
-            length: 1,
-        },
-        Ty::Record {
-            fields: vec![RecordField {
-                name: "self".into(),
-                ty: value.clone(),
-            }],
-        },
-    ] {
-        assert_eq!(
-            context.define_type(definition, body).unwrap_err().kind,
-            TypeErrorKind::RecursiveTypeWithoutIndirection { definition }
-        );
-        assert!(context.definition(definition).unwrap().body().is_none());
-    }
-
-    context.define_type(definition, Ty::Int32).unwrap();
-    assert_eq!(context.body(&value).unwrap(), Ty::Int32);
-}
-
-#[test]
-fn bad_references_do_not_leave_a_partially_created_definition() {
-    let mut context = TyperContext::new();
+    let named = Ty::Defined { definition };
     let missing = TypeId::from_index(99);
     let invalid = Ty::Defined {
         definition: missing,
     };
-    for body in [
+    for field in [
         invalid.clone(),
         Ty::Pointer {
             pointee: Box::new(invalid.clone()),
@@ -228,41 +158,65 @@ fn bad_references_do_not_leave_a_partially_created_definition() {
         },
     ] {
         assert_eq!(
-            context.create_type("Invalid", body).unwrap_err().kind,
+            context
+                .define_type(definition, record(field))
+                .unwrap_err()
+                .kind,
             TypeErrorKind::InvalidTypeDefinition {
                 definition: missing
             }
         );
-        assert!(context.definitions().is_empty());
     }
-    assert_eq!(
-        context.define_type(missing, Ty::Int32).unwrap_err().kind,
-        TypeErrorKind::InvalidTypeDefinition {
-            definition: missing
-        }
-    );
-    assert_eq!(context.create_type("Valid", Ty::Int32).unwrap().index(), 0);
+    for field in [
+        named.clone(),
+        Ty::Array {
+            element: Box::new(named.clone()),
+            length: 1,
+        },
+    ] {
+        assert_eq!(
+            context
+                .define_type(definition, record(field))
+                .unwrap_err()
+                .kind,
+            TypeErrorKind::RecursiveTypeWithoutIndirection { definition }
+        );
+    }
+    assert!(context.definition(definition).unwrap().body().is_none());
+    context
+        .define_type(
+            definition,
+            record(Ty::Pointer {
+                pointee: Box::new(named),
+            }),
+        )
+        .unwrap();
+    assert!(context.into_definitions().is_ok());
 }
 
 #[test]
-fn definition_tables_move_between_checking_passes_without_changing_ids() {
-    let mut context = TyperContext::new();
-    let definition = context.create_type("Meters", Ty::Int32).unwrap();
-    let table = context.into_definitions().unwrap();
-    let allocation = table.as_ptr();
-    let mut context = TyperContext::from_definitions(table);
-    assert_eq!(context.definitions().as_ptr(), allocation);
-    let next = context.create_type("Seconds", Ty::Float64).unwrap();
-    assert_eq!(next.index(), 1);
-    let meters = Ty::Defined { definition };
-    assert_eq!(
-        context.type_ascription(&meters, &Ty::Int32).unwrap(),
-        meters
-    );
-    assert_eq!(
-        context.definition(definition).unwrap().name.as_ref(),
-        "Meters"
-    );
+fn recursive_span_and_function_fields_have_finite_layouts() {
+    for indirect in [0, 1] {
+        let mut context = TyperContext::new();
+        let definition = context.reserve_type("Node");
+        let named = Ty::Defined { definition };
+        let field = if indirect == 0 {
+            Ty::Span {
+                element: Box::new(named),
+            }
+        } else {
+            Ty::Function {
+                param: Box::new(named.clone()),
+                result: Box::new(named),
+            }
+        };
+        context.define_type(definition, record(field)).unwrap();
+        crate::ir::verify(&crate::ir::Module {
+            types: context.into_definitions().unwrap(),
+            ..Default::default()
+        })
+        .unwrap();
+    }
 }
 
 #[test]
@@ -359,25 +313,6 @@ fn field_access_autoderefs_pointers() {
 }
 
 #[test]
-fn field_access_stops_at_recursive_pointers() {
-    let mut typer = TyperContext::new();
-    let definition = typer.reserve_type("Loop");
-    let recursive = Ty::Defined { definition };
-    typer
-        .define_type(
-            definition,
-            Ty::Pointer {
-                pointee: Box::new(recursive.clone()),
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        typer.type_field(&recursive, "value").unwrap_err().kind,
-        TypeErrorKind::ExpectedRecord { found: recursive }
-    );
-}
-
-#[test]
 fn child_types_compose_into_a_function_call() {
     let typer = TyperContext::new();
     let function = typer.type_function(&Ty::Int32, &Ty::Float64);
@@ -389,7 +324,7 @@ fn child_types_compose_into_a_function_call() {
 fn convert_does_not_unwrap_function_arguments() {
     let mut typer = TyperContext::new();
     let meters = Ty::Defined {
-        definition: typer.create_type("Meters", Ty::Int32).unwrap(),
+        definition: typer.create_type("Meters", record(Ty::Int32)).unwrap(),
     };
     let callee = Ty::Function {
         param: Box::new(Ty::Int32),
@@ -404,34 +339,29 @@ fn convert_does_not_unwrap_function_arguments() {
 }
 
 #[test]
-fn ascription_moves_one_nominal_layer() {
+fn ascription_wraps_records_but_does_not_flatten_nested_fields() {
     let mut typer = TyperContext::new();
+    let body = record(Ty::Int32);
     let meters = Ty::Defined {
-        definition: typer.create_type("Meters", Ty::Int32).unwrap(),
+        definition: typer.create_type("Meters", body.clone()).unwrap(),
     };
+    let distance_body = record(meters.clone());
     let distance = Ty::Defined {
-        definition: typer.create_type("Distance", meters.clone()).unwrap(),
+        definition: typer
+            .create_type("Distance", distance_body.clone())
+            .unwrap(),
     };
-
-    assert_eq!(typer.type_ascription(&meters, &Ty::Int32).unwrap(), meters);
+    assert_eq!(typer.type_ascription(&meters, &body).unwrap(), meters);
+    assert_eq!(typer.type_ascription(&body, &meters).unwrap(), body);
     assert_eq!(
-        typer.type_ascription(&Ty::Int32, &meters).unwrap(),
-        Ty::Int32
+        typer.type_ascription(&distance, &distance_body).unwrap(),
+        distance
     );
-    assert_eq!(typer.type_ascription(&distance, &meters).unwrap(), distance);
-    assert_eq!(typer.type_ascription(&meters, &distance).unwrap(), meters);
-    assert!(matches!(
-        typer.type_ascription(&distance, &Ty::Int32),
-        Err(TypeError {
-            kind: TypeErrorKind::TypeMismatch { .. }
-        })
-    ));
-    assert!(matches!(
-        typer.type_ascription(&Ty::Int32, &distance),
-        Err(TypeError {
-            kind: TypeErrorKind::TypeMismatch { .. }
-        })
-    ));
+    assert!(typer.type_ascription(&distance, &meters).is_err());
+    assert!(typer.type_ascription(&meters, &Ty::Int32).is_err());
+    assert!(typer.as_bool(&meters).is_err());
+    assert!(typer.type_deref(&meters).is_err());
+    assert!(typer.type_call(&meters, &Ty::Unit).is_err());
 }
 
 #[test]

@@ -3,6 +3,7 @@ use super::{Ty, TypeDef, TypeId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DefinitionError {
     InvalidUnion,
+    NonRecord(TypeId),
     Invalid(TypeId),
     Incomplete(TypeId),
     Recursive(TypeId),
@@ -15,9 +16,19 @@ pub(crate) fn get(definitions: &[TypeDef], id: TypeId) -> Result<&TypeDef, Defin
 }
 
 pub(crate) fn body(definitions: &[TypeDef], id: TypeId) -> Result<&Ty, DefinitionError> {
-    get(definitions, id)?
+    let body = get(definitions, id)?
         .body()
-        .ok_or(DefinitionError::Incomplete(id))
+        .ok_or(DefinitionError::Incomplete(id))?;
+    check_record(id, body)?;
+    Ok(body)
+}
+
+pub(crate) fn check_record(id: TypeId, ty: &Ty) -> Result<(), DefinitionError> {
+    if matches!(ty, Ty::Record { .. }) {
+        Ok(())
+    } else {
+        Err(DefinitionError::NonRecord(id))
+    }
 }
 
 pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), DefinitionError> {
@@ -65,6 +76,7 @@ pub(crate) fn check_layout(
     id: TypeId,
     ty: &Ty,
 ) -> Result<(), DefinitionError> {
+    check_record(id, ty)?;
     check_inline(definitions, ty, &mut vec![id])
 }
 
@@ -145,11 +157,18 @@ mod tests {
                 check_references(&[], &indirect),
                 Err(DefinitionError::Invalid(id))
             );
+            let record = |ty| Ty::Record {
+                fields: vec![super::super::RecordField {
+                    name: "value".into(),
+                    ty,
+                }],
+            };
+            let indirect = record(indirect);
             let table = [TypeDef::new("Recursive", indirect.clone())];
             check_references(&table, &indirect).unwrap();
             check_layout(&table, id, &indirect).unwrap();
             assert_eq!(
-                check_layout(&table, id, &named),
+                check_layout(&table, id, &record(named.clone())),
                 Err(DefinitionError::Recursive(id))
             );
         }

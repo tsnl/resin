@@ -39,11 +39,9 @@ impl Generator {
         expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
         let cond_ty = self.gen_term(cond, None)?;
-        let converted = self
-            .typer
+        self.typer
             .as_bool(&cond_ty)
             .map_err(|err| GenerateError::typing(cond.span, err))?;
-        self.emit_value_conv(&converted.steps);
         let then_block = self.new_block("then");
         let else_block = self.new_block("else");
         let join_block = self.new_block("join");
@@ -106,11 +104,9 @@ impl Generator {
             ));
         }
         let left_ty = self.gen_term(&args[0], None)?;
-        let converted = self
-            .typer
+        self.typer
             .as_bool(&left_ty)
             .map_err(|err| GenerateError::typing(span, err))?;
-        self.emit_value_conv(&converted.steps);
         let then_block = self.new_block("then");
         let else_block = self.new_block("else");
         let join_block = self.new_block("join");
@@ -145,11 +141,9 @@ impl Generator {
 
     fn gen_bool(&mut self, term: &Term) -> Result<Ty, GenerateError> {
         let ty = self.gen_term(term, None)?;
-        let converted = self
-            .typer
+        self.typer
             .as_bool(&ty)
             .map_err(|err| GenerateError::typing(term.span, err))?;
-        self.emit_value_conv(&converted.steps);
         Ok(Ty::Bool)
     }
 }
