@@ -742,12 +742,18 @@ event loop and defines its decorated shader functions inline, as does the headle
 Resizing scales the fixed-size offscreen image. Building this demo requires `glslc`; running the
 resulting executable does not. The PNG demos remain headless.
 
-`particles.resin` initializes 64 particles on the host, updates their positions in a compute
-shader, and draws them directly from the same buffer. It reuses pipelines and allocations
-across frames, uses a fixed 1/60-second simulation step, and closes on Escape or the close button.
-It is a small synchronous demo, not a frame-rate-independent simulation. Its decorated shader functions, ordinary helpers,
-and shared data definitions live alongside the host code in the same file. Initialization
-accepts `Span<Particle>` and uses `particles(index).*` to write each element.
+`particles.resin` seeds **1,000,000 particles** with pseudorandom 3D positions and velocities,
+then advects them through a Lorenz attractor field on the GPU. A slowly orbiting camera shows
+the two swirling lobes; tiny velocity-aligned triangles shift from blue to gold as particles
+accelerate. Compute and graphics share a 24 MB particle buffer, with constant-time vertex
+indexing and 15,625 compute workgroups per frame. Pipelines and allocations are reused.
+
+Press **Space** to pause/resume, **R** to reseed the cloud, and **Escape** to quit. The initial
+seed is reproducible; each reseed starts a different cloud. The 1280×800 offscreen image scales
+with the window. Each frame advances two fixed 0.005-second simulation steps, so playback
+speed depends on rendering throughput. Its decorated shader functions, ordinary helpers, and
+shared data definitions live alongside the host code in the same file. Initialization accepts
+a host `Span<Particle>`; the shaders use the same allocation's device address.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:
