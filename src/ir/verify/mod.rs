@@ -18,12 +18,20 @@ pub fn verify(module: &Module) -> Result<(), VerifyError> {
     analyze(module).map(|_| ())
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct Verified<'a> {
+    pub module: &'a Module,
+    pub analysis: &'a [FunctionTypes],
+}
+
 pub(crate) struct FunctionTypes {
     pub inputs: Vec<Vec<Ty>>,
     pub results: Vec<Vec<Option<Ty>>>,
 }
 
 pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError> {
+    #[cfg(test)]
+    ANALYSES.set(ANALYSES.get() + 1);
     for &function in module.entries.values() {
         if function.index() >= module.functions.len() {
             return Err(
@@ -62,3 +70,6 @@ pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+thread_local! { pub(crate) static ANALYSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }

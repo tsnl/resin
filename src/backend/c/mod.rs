@@ -36,7 +36,23 @@ pub fn emit_with_shaders(
     shaders: &[Shader],
 ) -> Result<String, Error> {
     let analysis = ir::verify::analyze(module)?;
-    let types = Types::collect(module, shaders, &analysis);
+    emit_verified(
+        ir::verify::Verified {
+            module,
+            analysis: &analysis,
+        },
+        entry,
+        shaders,
+    )
+}
+
+pub(crate) fn emit_verified(
+    checked: ir::verify::Verified<'_>,
+    entry: &str,
+    shaders: &[Shader],
+) -> Result<String, Error> {
+    let ir::verify::Verified { module, analysis } = checked;
+    let types = Types::collect(module, shaders, analysis);
     let entry = entry::emit(&types, entry)?;
     let mut out =
         "#include <resin_runtime.h>\n#include <stddef.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n"

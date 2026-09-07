@@ -165,7 +165,7 @@ impl Session {
     /// the executable. Execution remains a separate operation.
     pub fn compile(&mut self, request: &Request) -> Result<backend::Executable, backend::Error> {
         let snapshot = self.analyze(&request.input.path)?;
-        backend::generate(request, snapshot.module()?)
+        backend::generate(request, snapshot.verified()?)
     }
 
     pub fn revision(&self) -> u64 {
@@ -330,5 +330,62 @@ mod tests {
             .unwrap();
         let snapshot = compiler.analyze(&root.join("main.resin")).unwrap();
         assert!(snapshot.module().is_ok(), "{:?}", snapshot.diagnostics);
+    }
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+    use crate::{
+        backend::{c, glsl},
+        ir::verify::ANALYSES,
+    };
+
+    #[test]
+    fn snapshots_reuse_verification_for_multiple_backends_and_invalidate_on_edit() {
+        let path = std::env::temp_dir().join("resin-verification-cache.resin");
+        let source = "export { main, a, b }; def main() -> int = { 0 }; @compute_shader def a(i: uint, p: Ptr<uint>) = { p.* := i; }; @compute_shader def b(i: uint, p: Ptr<uint>) = { p.* := i + 1I; };";
+        let mut session = Session::default();
+        session.set_overlay(&path, source.into()).unwrap();
+        let snapshot = session.analyze(&path).unwrap();
+        ANALYSES.set(0);
+        let checked = snapshot.verified().unwrap();
+        assert_eq!(ANALYSES.get(), 1);
+        let mut shaders = Vec::new();
+        for name in ["a", "b"] {
+            let id = checked.module.entries[name];
+            shaders.push(glsl::emit_verified(checked, id, glsl::Stage::Compute).unwrap());
+        }
+        let host = c::emit_verified(checked, "main", &[]).unwrap();
+        assert_eq!(
+            ANALYSES.get(),
+            1,
+            "all internal emissions share one analysis"
+        );
+        assert!(std::ptr::eq(
+            checked.analysis,
+            snapshot.verified().unwrap().analysis
+        ));
+        assert_eq!(host, c::emit(checked.module, "main").unwrap());
+        for (name, expected) in ["a", "b"].into_iter().zip(shaders) {
+            assert_eq!(
+                expected,
+                glsl::emit(checked.module, name, glsl::Stage::Compute).unwrap()
+            );
+        }
+        session
+            .set_overlay(&path, source.replace("{ 0 }", "{ 1 }"))
+            .unwrap();
+        let changed = session.analyze(&path).unwrap();
+        ANALYSES.set(0);
+        let new = changed.verified().unwrap();
+        assert_eq!(ANALYSES.get(), 1);
+        assert!(!std::ptr::eq(checked.module, new.module));
+        assert_ne!(host, c::emit_verified(new, "main", &[]).unwrap());
+        assert_eq!(
+            host,
+            c::emit_verified(snapshot.verified().unwrap(), "main", &[]).unwrap()
+        );
+        assert_eq!(ANALYSES.get(), 1);
     }
 }
