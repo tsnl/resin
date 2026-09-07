@@ -146,6 +146,10 @@ fn device_pointers_and_shared_roots_compile() {
 fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
     for (source, expected) in [
         (
+            "export { kernel }; def read(p: Ptr<uint>) -> uint = { p.* }; def kernel(i: uint, output: Ptr<uint>) = { var local = i; output.* := read(&local); };",
+            "shader-local addresses cannot escape",
+        ),
+        (
             "export { kernel }; struct Data { flag: bool }; def kernel (i: uint, root: Ptr<Data>) -> () = { () };",
             "no shared host/device layout",
         ),
