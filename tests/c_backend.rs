@@ -820,3 +820,21 @@ fn numeric_conversions_check_runtime_values_and_boundaries() {
 fn never_elimination_preserves_reachable_cleanup() {
     runs(include_str!("fixtures/never_elimination.resin"), 0);
 }
+
+#[path = "support/interactions.rs"]
+mod interactions;
+
+#[test]
+fn interacting_features_execute_equivalently_on_cpu() {
+    for source in interactions::variants() {
+        runs(&source, 0);
+    }
+    for marker in interactions::MARKERS {
+        runs(
+            &format!(
+                "export {{ main }}; def main() -> int = {{ var n = 300; var bytes = Ptr<ubyte>(&n); {marker} n - 300 }};"
+            ),
+            0,
+        );
+    }
+}
