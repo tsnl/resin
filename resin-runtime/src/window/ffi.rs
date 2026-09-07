@@ -124,6 +124,90 @@ pub unsafe extern "C" fn resin_window_key_pressed(window: *const ResinWindow, ke
 }
 
 /// # Safety
+/// `window` must be null or a live window on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_key_state(window: *const ResinWindow, key: i32) -> u32 {
+    unsafe { window.as_ref() }.map_or(0, |window| window.key_state(key))
+}
+
+/// # Safety
+/// `window` must be null or a live window on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_mouse_button_state(
+    window: *const ResinWindow,
+    button: i32,
+) -> u32 {
+    unsafe { window.as_ref() }.map_or(0, |window| window.mouse_button_state(button))
+}
+
+/// # Safety
+/// `window` must be live on the main thread; x and y must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_cursor_position(
+    window: *const ResinWindow,
+    x: *mut f64,
+    y: *mut f64,
+) -> ResinStatus {
+    unsafe { coordinates(window, x, y, ResinWindow::cursor_position) }
+}
+
+/// # Safety
+/// `window` must be live on the main thread; x and y must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_scroll_delta(
+    window: *const ResinWindow,
+    x: *mut f64,
+    y: *mut f64,
+) -> ResinStatus {
+    unsafe { coordinates(window, x, y, ResinWindow::scroll_delta) }
+}
+
+unsafe fn coordinates(
+    window: *const ResinWindow,
+    x: *mut f64,
+    y: *mut f64,
+    query: fn(&ResinWindow) -> (f64, f64),
+) -> ResinStatus {
+    if x.is_null() || y.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe {
+        *x = 0.0;
+        *y = 0.0;
+    }
+    let Some(window) = (unsafe { window.as_ref() }) else {
+        return ResinStatus::InvalidArgument;
+    };
+    let value = query(window);
+    unsafe {
+        *x = value.0;
+        *y = value.1;
+    }
+    ResinStatus::Success
+}
+
+/// # Safety
+/// `window` must be null or a live window on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_focused(window: *const ResinWindow) -> i32 {
+    i32::from(unsafe { window.as_ref() }.is_some_and(ResinWindow::focused))
+}
+
+/// # Safety
+/// `window` must be live on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_capture_cursor(
+    window: *const ResinWindow,
+    capture: i32,
+) -> ResinStatus {
+    let Some(window) = (unsafe { window.as_ref() }) else {
+        return ResinStatus::InvalidArgument;
+    };
+    window.capture_cursor(capture != 0);
+    ResinStatus::Success
+}
+
+/// # Safety
 /// `window` must be live on the main thread and `out_gpu` must be writable.
 /// Use and destroy the returned GPU and its resources on the main thread.
 #[unsafe(no_mangle)]
@@ -191,6 +275,28 @@ mod tests {
             );
             assert_eq!(resin_window_should_close(ptr::null()), 1);
             assert_eq!(resin_window_key_pressed(ptr::null(), 256), 0);
+            assert_eq!(resin_window_key_state(ptr::null(), 256), 0);
+            assert_eq!(resin_window_mouse_button_state(ptr::null(), 0), 0);
+            assert_eq!(resin_window_focused(ptr::null()), 0);
+            assert_eq!(
+                resin_window_capture_cursor(ptr::null(), 1),
+                ResinStatus::InvalidArgument
+            );
+            let (mut x, mut y) = (1.0, 1.0);
+            assert_eq!(
+                resin_window_cursor_position(ptr::null(), &mut x, &mut y),
+                ResinStatus::InvalidArgument
+            );
+            assert_eq!((x, y), (0.0, 0.0));
+            assert_eq!(
+                resin_window_scroll_delta(ptr::null(), &mut x, &mut y),
+                ResinStatus::InvalidArgument
+            );
+            assert_eq!(
+                resin_window_cursor_position(ptr::null(), ptr::null_mut(), &mut y),
+                ResinStatus::InvalidArgument
+            );
+
             assert_eq!(
                 resin_window_poll_events(ptr::null()),
                 ResinStatus::InvalidArgument

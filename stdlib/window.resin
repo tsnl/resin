@@ -1,6 +1,15 @@
 export {
 	ResinWindow,
 	key_escape,
+	keys,
+	mouse_buttons,
+	ButtonState,
+	window_key_state,
+	window_mouse_button_state,
+	window_cursor_position,
+	window_scroll_delta,
+	window_focused,
+	window_capture_cursor,
 	window_create,
 	window_destroy,
 	window_poll_events,
@@ -67,6 +76,51 @@ def window_key_pressed(window: Ptr<ResinWindow>, key: int) -> bool = {
 	resin_window_key_pressed(window, key) != 0
 };
 
+struct ButtonState { down: bool, pressed: bool, released: bool };
+
+def button_state(bits: uint) -> ButtonState = {
+	ButtonState { down = (bits & 1I) != 0I, pressed = (bits & 2I) != 0I, released = (bits & 4I) != 0I }
+};
+
+def window_key_state(window: Ptr<ResinWindow>, key: int) -> ButtonState = {
+	button_state(resin_window_key_state(window, key))
+};
+
+def window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> ButtonState = {
+	button_state(resin_window_mouse_button_state(window, button))
+};
+
+def window_cursor_position(window: Ptr<ResinWindow>) -> Result<(float64, float64), RuntimeError> = {
+	var x = 0.0d;
+	var y = 0.0d;
+	status(resin_window_cursor_position(window, &x, &y))?;
+	ok((x, y))
+};
+
+def window_scroll_delta(window: Ptr<ResinWindow>) -> Result<(float64, float64), RuntimeError> = {
+	var x = 0.0d;
+	var y = 0.0d;
+	status(resin_window_scroll_delta(window, &x, &y))?;
+	ok((x, y))
+};
+
+def window_focused(window: Ptr<ResinWindow>) -> bool = {
+	resin_window_focused(window) != 0
+};
+
+def window_capture_cursor(window: Ptr<ResinWindow>, capture: bool) -> Result<(), RuntimeError> = {
+	status(
+		resin_window_capture_cursor(
+			window,
+			if (capture) {
+				1
+			} else {
+				0
+			}
+		)
+	)
+};
+
 def gpu_create_for_window(window: Ptr<ResinWindow>) -> Result<Ptr<ResinGpu>, RuntimeError> = {
 	var gpu = Ptr<ResinGpu>(ulong(0));
 	status(resin_gpu_create_for_window(window, &gpu))?;
@@ -93,3 +147,141 @@ extern "resin_runtime.h" def resin_window_set_size(window: Ptr<ResinWindow>, wid
 extern "resin_runtime.h" def resin_window_key_pressed(window: Ptr<ResinWindow>, key: int) -> int;
 extern "resin_runtime.h" def resin_gpu_create_for_window(window: Ptr<ResinWindow>, gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> int;
+
+extern "resin_runtime.h" def resin_window_key_state(window: Ptr<ResinWindow>, key: int) -> uint;
+extern "resin_runtime.h" def resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> uint;
+extern "resin_runtime.h" def resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
+extern "resin_runtime.h" def resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
+extern "resin_runtime.h" def resin_window_focused(window: Ptr<ResinWindow>) -> int;
+extern "resin_runtime.h" def resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: int) -> int;
+
+// GLFW physical key codes, independent of typed characters or keyboard layout.
+def keys() -> _ = {
+	{
+		unknown = -1,
+		space = 32,
+		apostrophe = 39,
+		comma = 44,
+		minus = 45,
+		period = 46,
+		slash = 47,
+		digit_0 = 48,
+		digit_1 = 49,
+		digit_2 = 50,
+		digit_3 = 51,
+		digit_4 = 52,
+		digit_5 = 53,
+		digit_6 = 54,
+		digit_7 = 55,
+		digit_8 = 56,
+		digit_9 = 57,
+		semicolon = 59,
+		equal = 61,
+		a = 65,
+		b = 66,
+		c = 67,
+		d = 68,
+		e = 69,
+		f = 70,
+		g = 71,
+		h = 72,
+		i = 73,
+		j = 74,
+		k = 75,
+		l = 76,
+		m = 77,
+		n = 78,
+		o = 79,
+		p = 80,
+		q = 81,
+		r = 82,
+		s = 83,
+		t = 84,
+		u = 85,
+		v = 86,
+		w = 87,
+		x = 88,
+		y = 89,
+		z = 90,
+		left_bracket = 91,
+		backslash = 92,
+		right_bracket = 93,
+		grave_accent = 96,
+		world_1 = 161,
+		world_2 = 162,
+		escape = 256,
+		enter = 257,
+		tab = 258,
+		backspace = 259,
+		insert = 260,
+		delete = 261,
+		right = 262,
+		left = 263,
+		down = 264,
+		up = 265,
+		page_up = 266,
+		page_down = 267,
+		home = 268,
+		end = 269,
+		caps_lock = 280,
+		scroll_lock = 281,
+		num_lock = 282,
+		print_screen = 283,
+		pause = 284,
+		f1 = 290,
+		f2 = 291,
+		f3 = 292,
+		f4 = 293,
+		f5 = 294,
+		f6 = 295,
+		f7 = 296,
+		f8 = 297,
+		f9 = 298,
+		f10 = 299,
+		f11 = 300,
+		f12 = 301,
+		f13 = 302,
+		f14 = 303,
+		f15 = 304,
+		f16 = 305,
+		f17 = 306,
+		f18 = 307,
+		f19 = 308,
+		f20 = 309,
+		f21 = 310,
+		f22 = 311,
+		f23 = 312,
+		f24 = 313,
+		f25 = 314,
+		keypad_0 = 320,
+		keypad_1 = 321,
+		keypad_2 = 322,
+		keypad_3 = 323,
+		keypad_4 = 324,
+		keypad_5 = 325,
+		keypad_6 = 326,
+		keypad_7 = 327,
+		keypad_8 = 328,
+		keypad_9 = 329,
+		keypad_decimal = 330,
+		keypad_divide = 331,
+		keypad_multiply = 332,
+		keypad_subtract = 333,
+		keypad_add = 334,
+		keypad_enter = 335,
+		keypad_equal = 336,
+		left_shift = 340,
+		left_control = 341,
+		left_alt = 342,
+		left_super = 343,
+		right_shift = 344,
+		right_control = 345,
+		right_alt = 346,
+		right_super = 347,
+		menu = 348,
+	}
+};
+
+def mouse_buttons() -> _ = {
+	{ left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
+};

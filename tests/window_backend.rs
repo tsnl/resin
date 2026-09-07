@@ -183,6 +183,18 @@ fn windows_present_resize_and_release_resources() {
             assert(resin_gpu_present(gpu, image) == RESIN_STATUS_INVALID_ARGUMENT);
             assert(resin_window_set_size(window, 0, 64) == RESIN_STATUS_INVALID_ARGUMENT);
             assert(!resin_window_key_pressed(window, -1));
+            assert(resin_window_key_state(window, -1) == 0);
+            assert(resin_window_mouse_button_state(window, 8) == 0);
+            double cursor_x = 0, cursor_y = 0, scroll_x = 1, scroll_y = 1;
+            check(resin_window_cursor_position(window, &cursor_x, &cursor_y));
+            check(resin_window_scroll_delta(window, &scroll_x, &scroll_y));
+            assert(scroll_x == 0 && scroll_y == 0);
+            check(resin_window_capture_cursor(window, 1));
+            check(resin_window_poll_events(window));
+            check(resin_window_cursor_position(window, &cursor_x, &cursor_y));
+            check(resin_window_capture_cursor(window, 0));
+            assert(resin_window_focused(window) == 0 || resin_window_focused(window) == 1);
+
             int presented = 0, enlarged = 0, restored = 0;
             uint32_t initial_width = 0, initial_height = 0;
             check(resin_window_framebuffer_size(window, &initial_width, &initial_height));

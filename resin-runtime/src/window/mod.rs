@@ -1,8 +1,9 @@
 pub mod ffi;
 mod glfw;
+mod input;
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     ffi::{CStr, c_char},
     ptr,
     rc::Rc,
@@ -23,6 +24,7 @@ pub(crate) struct NativeWindow {
     glfw: Rc<Glfw>,
     handle: *mut sys::GLFWwindow,
     attached: Cell<bool>,
+    input: RefCell<input::Input>,
 }
 
 pub(crate) struct Surface {
@@ -55,17 +57,26 @@ impl ResinWindow {
             glfw.print_error("glfwCreateWindow");
             return Err(ResinStatus::WindowUnavailable);
         }
-        Ok(Self {
-            native: Rc::new(NativeWindow {
-                glfw,
-                handle,
-                attached: Cell::new(false),
-            }),
-        })
+        let native = Rc::new(NativeWindow {
+            glfw,
+            handle,
+            attached: Cell::new(false),
+            input: RefCell::default(),
+        });
+        // The Rc allocation stays at a stable address until after GLFW destroys
+        // the native window, including when a GPU retains it.
+        unsafe {
+            sys::glfwSetWindowUserPointer(handle, Rc::as_ptr(&native).cast_mut().cast());
+            sys::glfwSetKeyCallback(handle, Some(key_callback));
+            sys::glfwSetMouseButtonCallback(handle, Some(mouse_button_callback));
+            sys::glfwSetScrollCallback(handle, Some(scroll_callback));
+        }
+        Ok(Self { native })
     }
 
     pub fn poll_events(&self) {
         unsafe { sys::glfwPollEvents() };
+        self.native.input.borrow_mut().commit();
     }
 
     pub fn should_close(&self) -> bool {
@@ -89,8 +100,43 @@ impl ResinWindow {
     }
 
     pub fn key_pressed(&self, key: i32) -> bool {
-        (sys::GLFW_KEY_SPACE..=sys::GLFW_KEY_LAST).contains(&key)
-            && unsafe { sys::glfwGetKey(self.native.handle, key) == sys::GLFW_PRESS }
+        self.key_state(key) & input::DOWN != 0
+    }
+
+    pub fn key_state(&self, key: i32) -> u32 {
+        self.native.input.borrow().key_state(key)
+    }
+
+    pub fn mouse_button_state(&self, button: i32) -> u32 {
+        self.native.input.borrow().mouse_button_state(button)
+    }
+
+    pub fn cursor_position(&self) -> (f64, f64) {
+        let (mut x, mut y) = (0.0, 0.0);
+        unsafe { sys::glfwGetCursorPos(self.native.handle, &mut x, &mut y) };
+        (x, y)
+    }
+
+    pub fn scroll_delta(&self) -> (f64, f64) {
+        self.native.input.borrow().scroll_delta()
+    }
+
+    pub fn focused(&self) -> bool {
+        unsafe { sys::glfwGetWindowAttrib(self.native.handle, sys::GLFW_FOCUSED) == sys::GLFW_TRUE }
+    }
+
+    pub fn capture_cursor(&self, capture: bool) {
+        unsafe {
+            sys::glfwSetInputMode(
+                self.native.handle,
+                sys::GLFW_CURSOR,
+                if capture {
+                    sys::GLFW_CURSOR_DISABLED
+                } else {
+                    sys::GLFW_CURSOR_NORMAL
+                },
+            );
+        }
     }
 
     pub(crate) fn extensions(&self) -> Result<Vec<*const c_char>, ResinStatus> {
@@ -170,4 +216,30 @@ impl Drop for Surface {
 
 fn valid_size(width: u32, height: u32) -> bool {
     (1..=i32::MAX as u32).contains(&width) && (1..=i32::MAX as u32).contains(&height)
+}
+
+unsafe extern "C" fn key_callback(
+    window: *mut sys::GLFWwindow,
+    key: i32,
+    _scancode: i32,
+    action: i32,
+    _mods: i32,
+) {
+    let native = unsafe { &*sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
+    native.input.borrow_mut().key(key, action);
+}
+
+unsafe extern "C" fn mouse_button_callback(
+    window: *mut sys::GLFWwindow,
+    button: i32,
+    action: i32,
+    _mods: i32,
+) {
+    let native = unsafe { &*sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
+    native.input.borrow_mut().mouse_button(button, action);
+}
+
+unsafe extern "C" fn scroll_callback(window: *mut sys::GLFWwindow, x: f64, y: f64) {
+    let native = unsafe { &*sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
+    native.input.borrow_mut().scroll(x, y);
 }

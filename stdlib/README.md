@@ -8,7 +8,7 @@ import { "std/gpu.resin", "std/status.resin" };
 ```
 
 - `gpu.resin`: devices, allocations, pipelines, GPU images, and commands.
-- `window.resin`: windows and presentation.
+- `window.resin`: windows, presentation, named controls, button snapshots, cursor capture, and scrolling.
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
 - `graphics.resin`: shared shader input/output types.

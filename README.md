@@ -755,6 +755,27 @@ speed depends on rendering throughput. Its decorated shader functions, ordinary 
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.
 
+Input is available through `std/window.resin`. `keys()` names GLFW key codes (`keys().w`,
+`keys().space`, `keys().left_shift`); `mouse_buttons()` names the eight mouse buttons.
+After polling, `window_key_state(window, keys().w)` and
+`window_mouse_button_state(window, mouse_buttons().left)` return `ButtonState` records
+with `down`, `pressed`, and `released` booleans. A quick tap can set both edge flags;
+key repeat does not create another press. Existing `window_key_pressed` queries `down`.
+
+Poll each window once per frame before reading its input. Polling pumps GLFW events for
+all windows, then commits that window's snapshot; other windows retain pending input
+until their own poll. Edges and scroll reset on the next poll of that window, and repeated
+queries read the same snapshot. `window_scroll_delta` returns accumulated horizontal/vertical
+scroll offsets (positive vertical scroll is up). `window_cursor_position` returns coordinates
+in window content units, with a top-left origin and positive y downward, independently of
+framebuffer scaling. Both return `Result<(float64, float64), RuntimeError>`.
+
+`window_focused` reports keyboard focus. `window_capture_cursor(window, capture)` hides and
+captures the cursor for camera controls when `capture` is true, with unbounded virtual
+coordinates; set it false to restore normal behavior.
+GLFW synthesizes button releases on focus loss. These APIs report physical controls;
+they do not decode typed text or implement text composition.
+
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:
 
