@@ -376,3 +376,37 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         ir::generate(&parse(&source)).unwrap();
     }
 }
+
+#[test]
+fn pointer_reinterpretation_does_not_narrow_source_storage() {
+    for bindings in [
+        "var n = 300; var bytes = Ptr<ubyte>(&n);",
+        "var n: _; n := 300; var bytes = Ptr<ubyte>(&n);",
+        "var n: int; n := 300; var source: Ptr<int>; source := &n; var bytes = Ptr<ubyte>(source);",
+    ] {
+        for marker in ["", "defer ();"] {
+            let source = format!("export {{ main }}; def main() = {{ {bindings} {marker} }};");
+            let m = module(&source);
+            let n = m
+                .functions
+                .iter()
+                .flat_map(|f| &f.locals)
+                .find(|l| l.name.as_deref() == Some("n"))
+                .unwrap();
+            assert_eq!(n.ty, Ty::Int32, "{source}");
+            let bytes = m
+                .functions
+                .iter()
+                .flat_map(|f| &f.locals)
+                .find(|l| l.name.as_deref() == Some("bytes"))
+                .unwrap();
+            assert_eq!(
+                bytes.ty,
+                Ty::Pointer {
+                    pointee: Box::new(Ty::UInt8)
+                },
+                "{source}"
+            );
+        }
+    }
+}
