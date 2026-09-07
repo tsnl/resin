@@ -10,6 +10,7 @@ use crate::{ast::Span, ir::Ty};
 
 pub(super) enum Constraint {
     Coerce(Type, Type),
+    Layout(Type),
     Errors(Type, Type),
     Variant(Type, Pattern, Type),
     Boolean(Type),
@@ -86,6 +87,13 @@ impl Checker<'_> {
 
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
+            Constraint::Layout(ty) => {
+                let Some(ty) = self.solver.resolve(ty) else {
+                    return Ok(false);
+                };
+                crate::ir::layout::layout(self.typer.definitions(), &ty)
+                    .map_err(|e| error(span, e.to_string()))?;
+            }
             Constraint::Coerce(from, to) => return self.solver.coerce(from, to, span),
             Constraint::Errors(from, to) => return self.solver.include(from, to, span),
             Constraint::Variant(input, variant, out) => match (self.solver.head(input), variant) {

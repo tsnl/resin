@@ -22,9 +22,9 @@ def main() -> Result<(), _> = {
 
 	var pipeline = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
 	defer gpu_free_pipeline(gpu, pipeline);
-	var pixels = gpu_malloc(gpu, 262144, 4, memory_default())?;
+	var pixels = gpu_malloc(gpu, 65536L * size_of(uint), align_of(uint), memory_default())?;
 	defer gpu_free(gpu, pixels);
-	var root = gpu_malloc(gpu, 16, 8, memory_default())?;
+	var root = gpu_malloc(gpu, size_of(Root), align_of(Root), memory_default())?;
 	defer gpu_free(gpu, root);
 	var data = Ptr<Root>(allocation_host_pointer(root));
 	data.* := Root { count = 65536I, pixels = Ptr<uint>(allocation_device_pointer(pixels)) };

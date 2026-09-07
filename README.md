@@ -798,3 +798,19 @@ copies its sentinel and is inappropriate for a packed wire format. There is no s
 string type or implicit packed conversion. Byte arrays currently have no shared
 host/device storage layout, so shared-layout queries must reject them; they must not
 silently report the host representation as a device layout.
+
+### Shared size and alignment
+
+`size_of(T)` and `align_of(T)` return `ulong` constants for the shared host/device
+layout of a concrete type. They use the same layout rules as C assertions and GLSL
+storage emission. Scalars in the shared profile, padded/nested records, pointers,
+spans, and nonempty arrays are supported; unsupported layouts produce a source error.
+For an inferred array type, `size_of(array_expression)` queries its type. Expression
+operands are checked but not executed, as with C `sizeof`; side effects do not run.
+Holes in an explicit type argument are rejected. Byte arrays, empty arrays/records,
+booleans, function values, and other types outside the shared profile are rejected.
+
+For example, allocate one record with
+`gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?`.
+For N elements, multiplication remains ordinary `ulong` arithmetic: validate a dynamic
+count before multiplying. No unchecked element-count allocation helper is introduced.

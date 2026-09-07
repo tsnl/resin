@@ -294,6 +294,16 @@ impl<'a> Checker<'a> {
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Var { name } = &func.val
+                    && matches!(name.val.as_ref(), "size_of" | "align_of")
+                {
+                    let ty = if let TermKind::Type { ty } = &arg.val {
+                        self.annotation(ty, false)?
+                    } else {
+                        self.term(arg, None)?
+                    };
+                    self.constraints.push((span, Constraint::Layout(ty)));
+                    equate = Some(Ty::UInt64.into());
+                } else if let TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "ok" | "err")
                 {
                     let (value, errors) = self.result_parts(&out, span)?;

@@ -71,6 +71,25 @@ impl Generator {
         }
         if let TermKind::Var { name } = &func.val {
             match name.val.as_ref() {
+                "size_of" | "align_of" => {
+                    let ty = if let TermKind::Type { ty } = &arg.val {
+                        self.evaluator().ty(ty)?
+                    } else {
+                        self.checked.expressions[&std::ptr::from_ref(arg)].clone()
+                    };
+                    let layout = crate::ir::layout::layout(self.typer.definitions(), &ty)
+                        .map_err(|e| super::check::error(span, e.to_string()))?;
+                    self.emit(Instr::Push {
+                        value: crate::ir::Value::UInt64 {
+                            value: if name.val.as_ref() == "size_of" {
+                                layout.size
+                            } else {
+                                layout.align
+                            } as u64,
+                        },
+                    });
+                    return Ok(Ty::UInt64);
+                }
                 "ok" | "err" => {
                     return self.gen_result(span, name.val.as_ref() == "err", arg, expected);
                 }
