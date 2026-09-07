@@ -662,7 +662,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             initialize(particles, 54321I);
             valid := valid && particle.x != first.x && particle.vx != first.vx;
             valid := valid && particle.x >= -24f && particle.x < 24f && particle.y >= -30f && particle.y < 30f && particle.z >= 0f && particle.z < 50f && particle.vx >= -6f && particle.vx < 6f && particle.vy >= -6f && particle.vy < 6f && particle.vz >= -6f && particle.vz < 6f;
-            var params = Params { count = 1I, dt = 0.005f, yaw_cos = 1f, yaw_sin = 0f, aspect = 0.625f, radius = 0.0012f, particles = particles };
+            var params = Params { count = 1I, dt = 0.005f, yaw_cos = 1f, yaw_sin = 0f, pitch_cos = 1f, pitch_sin = 0f, zoom = 1f, aspect = 0.625f, radius = 0.0012f, particles = particles };
             var steps = 0;
             while (steps < 2000) {
                 kernel(0I, &params);
@@ -683,6 +683,30 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             var far_rim = vertex(1, &params);
             valid := valid && fragment(near.color).b > fragment(far.color).b;
             valid := valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
+            // Camera controls change the projection without changing the simulation.
+            var camera = Camera { yaw = 0f, pitch = 0f, zoom = 1f };
+            apply_camera(camera, &params);
+            var before = vertex(1, &params);
+            camera.zoom := 2f;
+            apply_camera(camera, &params);
+            var zoomed = vertex(1, &params);
+            valid := valid && zoomed.position.x == before.position.x * 2f;
+            move_camera(&camera, 100d, 50d, 0d);
+            apply_camera(camera, &params);
+            var orbited = vertex(0, &params);
+            valid := valid && orbited.position.x > 0f && orbited.position.y < 0f;
+            var yaw_length = params.yaw_cos * params.yaw_cos + params.yaw_sin * params.yaw_sin;
+            var pitch_length = params.pitch_cos * params.pitch_cos + params.pitch_sin * params.pitch_sin;
+            valid := valid && yaw_length > 0.999f && yaw_length < 1.001f && pitch_length > 0.999f && pitch_length < 1.001f;
+            move_camera(&camera, 0d, 1000000d, 1000000d);
+            valid := valid && camera.pitch == 1.4f && camera.zoom == 3f;
+            move_camera(&camera, 0d, -1000000d, -1000000d);
+            valid := valid && camera.pitch == -1.4f && camera.zoom == 0.35f;
+            camera := default_camera();
+            move_camera(&camera, 0d, 0d, 0.5d);
+            valid := valid && camera.zoom > 1f && camera.zoom < 1.1f;
+            move_camera(&camera, 0d, 0d, -0.5d);
+            valid := valid && camera.zoom > 0.999f && camera.zoom < 1.001f;
             var color = fragment(far.color);
             if (valid && particle.x != first.x && color.r >= 0f && color.r <= 1f && color.b >= 0f && color.b <= 1f) { 0 } else { 1 }
         };

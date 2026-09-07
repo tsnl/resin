@@ -189,6 +189,9 @@ fn particles_compute_then_render_from_the_same_buffer() {
         dt: f32,
         yaw_cos: f32,
         yaw_sin: f32,
+        pitch_cos: f32,
+        pitch_sin: f32,
+        zoom: f32,
         aspect: f32,
         radius: f32,
         particles: u64,
@@ -204,7 +207,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
         vz: 106.0,
     };
     assert_eq!(size_of::<Particle>(), 24);
-    assert_eq!(size_of::<Params>(), 40);
+    assert_eq!(size_of::<Params>(), 56);
     // The full draw catches accidental per-vertex searches that scale quadratically.
     // An extra workgroup exercises the count guard without touching the sentinel.
     unsafe {
@@ -244,6 +247,9 @@ fn particles_compute_then_render_from_the_same_buffer() {
             dt: 0.005,
             yaw_cos: 1.0,
             yaw_sin: 0.0,
+            pitch_cos: 1.0,
+            pitch_sin: 0.0,
+            zoom: 1.0,
             aspect: 1.0,
             radius: 0.006,
             particles: particles.device_pointer(),

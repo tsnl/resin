@@ -759,9 +759,11 @@ between squared-speed anchors and clamp outside the range, keeping the palette u
 without letting rare fast particles stretch it. The scale stays fixed across frames and
 reseeds; initial random velocities fall in the blue end. Lighting and fog modify brightness.
 
-Press **Space** to pause/resume, **R** to reseed the cloud, and **Escape** to quit. The initial
-seed is reproducible; each reseed starts a different cloud. The 1280×800 offscreen image scales
-with the window. Each frame advances two fixed 0.005-second simulation steps, so playback
+**Left-drag** to orbit horizontally and vertically, and **scroll** to zoom (0.35×–3×).
+Either control stops automatic rotation; **Home** resets the view and resumes it. The camera
+remains interactive while paused. Press **Space** to pause/resume, **R** to reseed the cloud,
+and **Escape** to quit. The initial seed is reproducible; each reseed starts a different cloud.
+The 1280×800 offscreen image scales with the window. Each frame advances two fixed 0.005-second simulation steps, so playback
 speed depends on rendering throughput. Its decorated shader functions, ordinary helpers, and
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.

@@ -12,6 +12,9 @@ struct Params {
 	dt: float32,
 	yaw_cos: float32,
 	yaw_sin: float32,
+	pitch_cos: float32,
+	pitch_sin: float32,
+	zoom: float32,
 	aspect: float32,
 	radius: float32,
 	particles: Span<Particle>,
@@ -121,10 +124,12 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 	var sector = int(float32(local) / 3.0f);
 	var corner = local - sector * 3;
 	var p = root.particles(particle).*;
-	var depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
-	var perspective = 1.0f / (1.0f + depth * 0.012f);
+	var horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
+	var height = (p.z - 25.0f) * 0.9f;
+	var depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;
+	var perspective = root.zoom / (1.0f + depth * 0.012f);
 	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036f;
-	var y = ((p.z - 25.0f) * 0.9f + depth * 0.22f) * 0.036f;
+	var y = (height * root.pitch_cos + horizontal_depth * root.pitch_sin) * 0.036f;
 
 	// Eight triangles form a camera-facing octagon. Interpolated disk coordinates
 	// let the fragment shader light a smooth hemisphere without a sphere mesh.
@@ -211,9 +216,50 @@ def initialize(particles: Span<Particle>, seed: uint) -> () = {
 	};
 };
 
+// Camera math runs on the host; shaders receive only the resulting basis and zoom.
+extern "math.h" def sinf(angle: float32) -> float32;
+extern "math.h" def cosf(angle: float32) -> float32;
+extern "math.h" def expf(value: float32) -> float32;
+
+struct Camera { yaw: float32, pitch: float32, zoom: float32 };
+struct MousePosition { x: float64, y: float64 };
+def mouse_position(x: float64, y: float64) -> MousePosition = {
+	MousePosition { x = x, y = y }
+};
+def default_camera() -> Camera = {
+	Camera { yaw = 0.0f, pitch = 0.24f, zoom = 1.0f }
+};
+
+def clamp(value: float32, low: float32, high: float32) -> float32 = {
+	if (value < low) {
+		low
+	} else {
+		if (value > high) {
+			high
+		} else {
+			value
+		}
+	}
+};
+
+def move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) = {
+	camera.yaw := camera.yaw + float32(dx) * 0.006f;
+	// Stop short of the poles so dragging never flips the view upside down.
+	camera.pitch := clamp(camera.pitch + float32(dy) * 0.006f, -1.4f, 1.4f);
+	camera.zoom := clamp(camera.zoom * expf(clamp(float32(scroll), -20.0f, 20.0f) * 0.12f), 0.35f, 3.0f);
+};
+
+def apply_camera(camera: Camera, params: Ptr<Params>) = {
+	params.yaw_cos := cosf(camera.yaw);
+	params.yaw_sin := sinf(camera.yaw);
+	params.pitch_cos := cosf(camera.pitch);
+	params.pitch_sin := sinf(camera.pitch);
+	params.zoom := camera.zoom;
+};
+
 def main() -> Result<(), _> = {
 	var count = 1000000I;
-	var title = "Resin | 1,000,000 particles | Space: pause | R: reseed | Esc: quit";
+	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	var window = window_create(1280, 800, Ptr<ubyte>(&title))?;
 	defer window_destroy(window);
 	var gpu = gpu_create_for_window(window)?;
@@ -237,6 +283,9 @@ def main() -> Result<(), _> = {
 		dt = 0.005f,
 		yaw_cos = 1.0f,
 		yaw_sin = 0.0f,
+		pitch_cos = 1.0f,
+		pitch_sin = 0.0f,
+		zoom = 1.0f,
 		aspect = 0.625f,
 		radius = 0.004f,
 		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(count) },
@@ -245,6 +294,10 @@ def main() -> Result<(), _> = {
 	var image = gpu_create_image(gpu, 1280, 800)?;
 	defer gpu_free_image(gpu, image);
 	var paused = 1 == 0;
+	var camera = default_camera();
+	var automatic = 1 == 1;
+	var was_dragging = 1 == 0;
+	var previous_cursor = mouse_position(window_cursor_position(window)?);
 
 	window_poll_events(window)?;
 	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
@@ -257,6 +310,30 @@ def main() -> Result<(), _> = {
 			seed := seed * 1664525I + 1013904223I;
 			initialize(host_particles, seed);
 		};
+		var cursor = mouse_position(window_cursor_position(window)?);
+		var left = window_mouse_button_state(window, mouse_buttons().left);
+		var dragging = window_focused(window) && left.down;
+		var scroll = mouse_position(window_scroll_delta(window)?);
+		if (automatic && !paused) {
+			camera.yaw := camera.yaw + 0.0015f;
+		};
+		if (window_focused(window)) {
+			if (dragging || scroll.y != 0.0d) {
+				automatic := 1 == 0;
+			};
+			// A fresh press/focus starts a drag without jumping from the old cursor position.
+			if (dragging && was_dragging && !left.pressed) {
+				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0d);
+			};
+			move_camera(&camera, 0.0d, 0.0d, scroll.y);
+			if (window_key_state(window, keys().home).pressed) {
+				camera := default_camera();
+				automatic := 1 == 1;
+			};
+		};
+		previous_cursor := cursor;
+		was_dragging := dragging;
+		apply_camera(camera, params);
 		var commands = gpu_start_command_recording(gpu)?;
 		defer gpu_cancel_command_buffer(gpu, &commands);
 		if (!paused) {
@@ -269,14 +346,6 @@ def main() -> Result<(), _> = {
 		gpu_end_rendering(commands)?;
 		gpu_submit(gpu, &commands)?;
 		gpu_present(gpu, image)?;
-		if (!paused) {
-			// Small camera rotation, renormalized to prevent drift over long runs.
-			var c = params.yaw_cos - params.yaw_sin * 0.0015f;
-			var s = params.yaw_sin + params.yaw_cos * 0.0015f;
-			var normalize = 1.5f - 0.5f * (c * c + s * s);
-			params.yaw_cos := c * normalize;
-			params.yaw_sin := s * normalize;
-		};
 		window_poll_events(window)?;
 	};
 	print("particles demo complete\n", ());
