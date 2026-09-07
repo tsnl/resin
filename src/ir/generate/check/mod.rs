@@ -1,7 +1,7 @@
-//! Infer explicit type holes before emitting any function instructions.
+//! Check every function and resolve its types before emitting instructions.
 
-mod check;
 mod constraints;
+mod expressions;
 mod scan;
 mod solver;
 mod types;
@@ -16,7 +16,7 @@ use crate::{
     ast::{self, SourceFile, Span, StmtKind},
     ir::{Ty, TypeId, TyperContext},
 };
-use check::Checker;
+use expressions::Checker;
 use scan::Scan;
 use types::Type;
 
@@ -32,7 +32,7 @@ pub(super) fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
 }
 
 #[derive(Default)]
-pub(super) struct Inferred {
+pub(super) struct Checked {
     // Node identity, not source spans: synthesized nodes can share a span.
     // Keys are never dereferenced and live only while lowering the borrowed AST.
     pub holes: HashMap<*const ast::Type, Ty>,
@@ -44,7 +44,7 @@ pub(super) fn file(
     file: &SourceFile,
     typer: &mut TyperContext,
     scopes: &Scopes,
-) -> Result<Inferred> {
+) -> Result<Checked> {
     let functions: Vec<_> = file
         .stmts
         .iter()
@@ -58,10 +58,8 @@ pub(super) fn file(
             } = &stmt.val
             {
                 let mut scan = Scan::default();
-                scan.ty(result);
-                for (name, ann) in params {
+                for (name, _) in params {
                     scan.bind(&name.val);
-                    scan.ty(ann);
                 }
                 scan.term(body);
                 Some((name, params, result, body, scan))
@@ -70,9 +68,6 @@ pub(super) fn file(
             }
         })
         .collect();
-    if !functions.iter().any(|(_, _, _, _, scan)| scan.needed) {
-        return Ok(Inferred::default());
-    }
     let mut checker = Checker::new(typer, scopes.untraced());
     let mut results = Vec::new();
     let mut names = BTreeMap::new();
@@ -120,10 +115,7 @@ pub(super) fn file(
     for group in scan::groups(&edges) {
         let first_expression = checker.expressions.len();
         for &i in &group {
-            let (_, params, _, body, scan) = &functions[i];
-            if !scan.needed {
-                continue;
-            }
+            let (_, params, _, body, _) = &functions[i];
             checker.push();
             checker.result = results[i].clone();
             for (name, ann) in *params {
@@ -144,7 +136,21 @@ pub(super) fn file(
             checker.solver.require(&results[i], functions[i].2.span)?;
         }
         for (_, span, ty) in &checker.expressions[first_expression..] {
-            checker.solver.require(ty, *span)?;
+            if let Err(error) = checker.solver.require(ty, *span) {
+                // Empty arrays need an element annotation even when discarded.
+                if matches!(
+                    checker.solver.head(ty),
+                    Type::Node(types::Head::Array(0), _)
+                ) {
+                    return Err(GenerateError::typing(
+                        *span,
+                        crate::ir::TypeError {
+                            kind: crate::ir::TypeErrorKind::EmptyArrayNeedsElementType,
+                        },
+                    ));
+                }
+                return Err(error);
+            }
         }
     }
     let holes = checker
@@ -157,7 +163,7 @@ pub(super) fn file(
         .iter()
         .map(|(node, span, ty)| Ok((*node, checker.solver.require(ty, *span)?)))
         .collect::<Result<_>>()?;
-    Ok(Inferred {
+    Ok(Checked {
         holes,
         expressions,
         definitions: checker.definitions,

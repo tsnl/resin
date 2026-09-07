@@ -40,7 +40,7 @@ impl Generator {
     }
 
     pub(super) fn gen_struct(&mut self, name: &Ident, init: &Type) -> Result<(), GenerateError> {
-        if let Some(&definition) = self.inferred.definitions.get(&std::ptr::from_ref(name)) {
+        if let Some(&definition) = self.checked.definitions.get(&std::ptr::from_ref(name)) {
             self.bind_type(name, definition)?;
             self.evaluator().ty(init)?;
             return Ok(());

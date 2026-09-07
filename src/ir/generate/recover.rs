@@ -143,7 +143,7 @@ impl Recovery<'_> {
         Evaluator {
             scopes: &self.scopes,
             typer: self.typer,
-            inferred: None,
+            checked: None,
         }
         .ty(ty)
         .ok()
@@ -279,7 +279,7 @@ impl Recovery<'_> {
             TermKind::Num { value } => Evaluator {
                 scopes: &self.scopes,
                 typer: self.typer,
-                inferred: None,
+                checked: None,
             }
             .number(term.span, value, expected)
             .ok()

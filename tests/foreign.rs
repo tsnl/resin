@@ -108,7 +108,7 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     }
     for source in [
         "export { main }; def f (p: Ptr<int>) -> () = {}; def main() -> () = { var x = 0; f(ulong (0)); };",
-        "export { main }; def f (p: Ptr<ubyte>) -> () = {}; def main() -> () = { var x = 0; f(&x); };",
+        "export { main }; def f (p: Ptr<ubyte>) -> () = {}; def main() -> () = { var x: int; x := 0; f(&x); };",
         "export { main }; def main() -> () = { var x = Ptr<int> (float32 (0.0)); };",
     ] {
         assert!(error(source).contains("TypeMismatch"), "{source}");

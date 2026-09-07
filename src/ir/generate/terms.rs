@@ -1,98 +1,62 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::ast::{Ident, Span, Term, TermKind, Type};
-use crate::ir::{Conv, Instr, RecordField, Ty, TypeError, TypeErrorKind};
+use crate::ir::{Conv, Instr, Ty, TypeError, TypeErrorKind};
 
-use super::{GenerateError, GenerateErrorKind, Generator};
+use super::{GenerateError, Generator};
 
 impl Generator {
-    pub(super) fn gen_array(
-        &mut self,
-        span: Span,
-        elems: &[Term],
-        expected: Option<&Ty>,
-    ) -> Result<Ty, GenerateError> {
-        let expected_element = expected.and_then(|ty| self.array_element(ty));
-        let mut elem_tys = Vec::with_capacity(elems.len());
+    pub(super) fn gen_array(&mut self, elems: &[Term], ty: &Ty) -> Result<Ty, GenerateError> {
+        let Ty::Array { element, length } = ty else {
+            unreachable!("checked array")
+        };
         for elem in elems {
-            elem_tys.push(self.gen_term(elem, expected_element.as_ref())?);
+            self.gen_term(elem, Some(element))?;
         }
-        let ty = if let Some(element) = expected_element {
-            self.typer
-                .type_array_of(&element, &elem_tys)
-                .map_err(|err| GenerateError::typing(span, err))?
-        } else {
-            self.typer
-                .type_array(&elem_tys)
-                .map_err(|err| GenerateError::typing(span, err))?
-        };
-        let Ty::Array { element, length } = &ty else {
-            unreachable!("array typing produces an array");
-        };
         self.emit(Instr::MakeArray {
             elements: *length,
-            element: element.as_ref().clone(),
+            element: *element.clone(),
         });
-        Ok(ty)
+        Ok(ty.clone())
     }
 
     pub(super) fn gen_record(
         &mut self,
-        span: Span,
         fields: &[(Ident, Term)],
-        expected: Option<&Ty>,
+        ty: &Ty,
     ) -> Result<Ty, GenerateError> {
-        if let Some(expected_fields) = expected.and_then(|ty| self.record_fields(ty)) {
-            check_fields(span, fields, &expected_fields)?;
-            // Evaluate in source order; layout order must not reorder effects.
-            let mut values = HashMap::with_capacity(fields.len());
-            for (name, value) in fields {
-                let field = expected_fields
-                    .iter()
-                    .find(|field| field.name == name.val)
-                    .unwrap();
-                let local = self.alloc_local(field.ty.clone(), None);
-                self.emit(Instr::LocalAddress { local });
-                self.gen_term(value, Some(&field.ty))?;
-                self.emit(Instr::Store);
-                self.emit(Instr::Discard);
-                values.insert(name.val.clone(), local);
-            }
-            let names = expected_fields
-                .iter()
-                .map(|field| {
-                    self.emit(Instr::LocalAddress {
-                        local: values[&field.name],
-                    });
-                    self.emit(Instr::Load);
-                    field.name.clone()
-                })
-                .collect();
-            self.emit(Instr::MakeRecord { fields: names });
-            return Ok(Ty::Record {
-                fields: expected_fields,
-            });
-        }
-
-        let mut names = Vec::with_capacity(fields.len());
-        let mut typed = Vec::with_capacity(fields.len());
+        let Ty::Record {
+            fields: expected_fields,
+        } = ty
+        else {
+            unreachable!("checked record")
+        };
+        // Evaluate in source order; layout order must not reorder effects.
+        let mut values = HashMap::with_capacity(fields.len());
         for (name, value) in fields {
-            let ty = self.gen_term(value, None)?;
-            names.push(name.val.clone());
-            typed.push(RecordField {
-                name: name.val.clone(),
-                ty,
-            });
+            let field = expected_fields
+                .iter()
+                .find(|field| field.name == name.val)
+                .unwrap();
+            let local = self.alloc_local(field.ty.clone(), None);
+            self.emit(Instr::LocalAddress { local });
+            self.gen_term(value, Some(&field.ty))?;
+            self.emit(Instr::Store);
+            self.emit(Instr::Discard);
+            values.insert(name.val.clone(), local);
         }
-        let ty = self
-            .typer
-            .type_record(&typed)
-            .map_err(|err| GenerateError::typing(span, err))?;
+        let names = expected_fields
+            .iter()
+            .map(|field| {
+                self.emit(Instr::LocalAddress {
+                    local: values[&field.name],
+                });
+                self.emit(Instr::Load);
+                field.name.clone()
+            })
+            .collect();
         self.emit(Instr::MakeRecord { fields: names });
-        Ok(ty)
+        Ok(ty.clone())
     }
 
     pub(super) fn gen_call(
@@ -100,7 +64,7 @@ impl Generator {
         span: Span,
         func: &Term,
         arg: &Term,
-        expected: Option<&Ty>,
+        expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         if let TermKind::Type { ty } = &func.val {
             return self.gen_ascription(span, ty, arg);
@@ -111,7 +75,7 @@ impl Generator {
                     return self.gen_result(span, name.val.as_ref() == "err", arg, expected);
                 }
                 "print" => {
-                    return self.gen_builtin(span, "print", std::slice::from_ref(arg), None);
+                    return self.gen_builtin(span, "print", std::slice::from_ref(arg), &Ty::Unit);
                 }
                 _ => {}
             }
@@ -161,13 +125,12 @@ impl Generator {
                 },
             ));
         };
-        let arg_ty = self.gen_term(arg, Some(param))?;
-        let result = self
-            .typer
-            .type_call(&callee_ty, &arg_ty)
-            .map_err(|err| GenerateError::typing(span, err))?;
+        self.gen_term(arg, Some(param))?;
         self.emit(Instr::Call);
-        Ok(result)
+        let Ty::Function { result, .. } = callee_ty else {
+            unreachable!("checked call")
+        };
+        Ok(*result)
     }
 
     fn gen_ascription(&mut self, span: Span, ty: &Type, arg: &Term) -> Result<Ty, GenerateError> {
@@ -183,7 +146,7 @@ impl Generator {
             self.emit(Instr::MakeRecord { fields: vec![] });
             context
         } else {
-            self.gen_term_inner(arg, Some(&context))?
+            self.gen_term(arg, None)?
         };
         if found != ascribed && found.widens_to(&ascribed) {
             return self.coerce(span, found, &ascribed);
@@ -202,7 +165,7 @@ impl Generator {
         span: Span,
         name: &str,
         args: &[Term],
-        expected: Option<&Ty>,
+        expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         if name == "&&" || name == "||" {
             return self.gen_short_circuit(span, name, args);
@@ -220,30 +183,20 @@ impl Generator {
             } else {
                 value.to_string()
             };
-            let (value, ty) = self.evaluator().number(span, &text, expected)?;
+            let (value, ty) = self.evaluator().number(span, &text, Some(expected))?;
             self.emit(Instr::Push { value });
             return Ok(ty);
         }
-        let numeric_context = expected.filter(|ty| ty.is_numeric()).filter(|_| {
-            matches!(
-                name,
-                "+" | "-" | "*" | "/" | "%" | "~" | "<<" | ">>" | "&" | "|" | "^"
-            )
-        });
         let mut arg_tys = Vec::with_capacity(args.len());
         for arg in args {
-            arg_tys.push(self.gen_term(arg, numeric_context)?);
+            arg_tys.push(self.gen_term(arg, None)?);
         }
-        let call = self
-            .typer
-            .type_builtin_call(name, &arg_tys)
-            .map_err(|err| GenerateError::typing(span, err))?;
         self.emit(Instr::CallBuiltin {
             name: Arc::from(name),
-            params: call.params,
-            result: call.result.clone(),
+            params: arg_tys,
+            result: expected.clone(),
         });
-        Ok(call.result)
+        Ok(expected.clone())
     }
 
     pub(super) fn apply_ascription(
@@ -295,57 +248,4 @@ impl Generator {
             }
         }
     }
-
-    fn array_element(&self, ty: &Ty) -> Option<Ty> {
-        match self.typer.body(ty).ok()? {
-            Ty::Array { element, .. } => Some(*element),
-            _ => None,
-        }
-    }
-
-    fn record_fields(&self, ty: &Ty) -> Option<Vec<RecordField>> {
-        match self.typer.body(ty).ok()? {
-            Ty::Record { fields } => Some(fields),
-            _ => None,
-        }
-    }
-}
-
-fn check_fields(
-    span: Span,
-    fields: &[(Ident, Term)],
-    expected: &[RecordField],
-) -> Result<(), GenerateError> {
-    let mut names = HashSet::with_capacity(fields.len());
-    for (name, _) in fields {
-        if !names.insert(name.val.clone()) {
-            return Err(GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::Type(TypeErrorKind::DuplicateField {
-                    name: name.val.clone(),
-                }),
-            });
-        }
-    }
-    for field in expected {
-        if !names.contains(&field.name) {
-            return Err(GenerateError {
-                span,
-                kind: GenerateErrorKind::MissingField {
-                    name: field.name.clone(),
-                },
-            });
-        }
-    }
-    for (name, _) in fields {
-        if !expected.iter().any(|field| field.name == name.val) {
-            return Err(GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::ExtraField {
-                    name: name.val.clone(),
-                },
-            });
-        }
-    }
-    Ok(())
 }

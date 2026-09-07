@@ -187,13 +187,16 @@ describes operations on types, while
 
 [ir/generate/mod.rs](src/ir/generate/mod.rs) orchestrates source-to-IR lowering.
 It establishes types and function signatures before lowering function bodies.
-For functions containing explicit holes, Result operations, or defers, [infer/](src/ir/generate/infer/)
-first collects constraints and resolves them in dependency groups. Start with
-[solver.rs](src/ir/generate/infer/solver.rs) for inference variables and
-unification and error-set inclusion, then [check.rs](src/ir/generate/infer/check.rs) and
-[constraints.rs](src/ir/generate/infer/constraints.rs) for expression constraints.
-The result is a node-keyed type table used during lowering, not an IR containing
-unknown types. These explicit holes are separate from editor recovery holes.
+For every function, [check/](src/ir/generate/check/) first collects constraints and
+resolves them in dependency groups. There is no separate path for functions without
+inference holes. Start with
+[solver.rs](src/ir/generate/check/solver.rs) for inference variables and
+unification and error-set inclusion, then [expressions.rs](src/ir/generate/check/expressions.rs) and
+[constraints.rs](src/ir/generate/check/constraints.rs) for expression constraints.
+The result is a mandatory node-keyed type table. Lowering uses its resolved types
+for literals, arrays, records, operators, and calls; it does not infer missing types.
+It still tracks places and definite initialization and emits explicit conversions.
+The independent IR verifier checks the generated instructions. These explicit holes are separate from editor recovery holes.
 Error-set variables collect their lower bounds to a fixed point before becoming
 concrete unions; this also handles mutually recursive functions. Struct tags come
 from their module-wide nominal identity, so widening a union never renumbers its variants.

@@ -253,7 +253,12 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     if let Ty::Defined { definition } = from {
         return variant(types, to, definition.tag(), value);
     }
-    let mut expression = format!("({}){{0}}", types.name(to));
+    let initializer = if matches!(to, Ty::Defined { .. }) {
+        ".value = {0}"
+    } else {
+        ".tag = 0"
+    };
+    let mut expression = format!("({}){{ {initializer} }}", types.name(to));
     for (tag, payload) in from.payloads().unwrap().into_iter().rev() {
         let target = to.payload(tag).unwrap();
         let payload = widen(

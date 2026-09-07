@@ -129,7 +129,6 @@ fn ir_dump_is_an_s_expression_with_names() {
     assert!(dump.contains("(block then"));
     assert!(dump.contains("(branch then else)"));
     assert!(!dump.contains("global-addr g"));
-    assert!(!dump.contains("local-addr l."));
 }
 
 #[test]

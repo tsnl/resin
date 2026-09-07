@@ -92,7 +92,7 @@ fn locally_inferred_function_types_are_monomorphic() {
     );
     rejects(
         "def next(n: int) -> int = { n + 1 }; def answer() -> _ = { var f: (_) -> _; f := next; f(1 == 1) };",
-        "incompatible",
+        "TypeMismatch",
     );
 }
 
@@ -107,7 +107,7 @@ fn shadowed_function_names_do_not_create_inference_dependencies() {
 fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
     rejects(
         "struct One { value: int }; struct Two { value: int }; def value() -> _ = { var v: _; v := One { value = 1 }; v := Two { value = 2 }; v };",
-        "incompatible",
+        "TypeMismatch",
     );
     assert_eq!(
         result(
@@ -215,7 +215,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
 
 #[test]
 fn inference_preserves_unit_defaults_and_initialization_checks() {
-    rejects("def main() = { var n: _; n := 1; n };", "incompatible");
+    rejects("def main() = { var n: _; n := 1; n };", "TypeMismatch");
     rejects(
         "def main() -> _ = { var n: _; print(\"{0}\", (n,)); n := 42; n };",
         "UninitializedValue",
@@ -340,5 +340,39 @@ fn suffixed_literals_reject_overflow_and_invalid_integer_forms() {
 #[test]
 fn one_armed_if_infers_unit_and_requires_a_unit_body() {
     assert_eq!(result("def f() -> _ = { if (1 == 1) {} };", "f"), Ty::Unit);
-    rejects("def f() -> _ = { if (1 == 1) { 42 } };", "incompatible");
+    rejects("def f() -> _ = { if (1 == 1) { 42 } };", "TypeMismatch");
+}
+
+#[test]
+fn checking_does_not_depend_on_inference_trigger_syntax() {
+    for marker in ["", "defer ();", "var unused: _; unused := 1;"] {
+        let source = format!(
+            "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0; consume(&value); }};"
+        );
+        let module = ir::generate(&parse(&source)).unwrap();
+        let value = module
+            .functions
+            .iter()
+            .flat_map(|f| &f.locals)
+            .find(|l| l.name.as_deref() == Some("value"))
+            .unwrap();
+        assert_eq!(value.ty, Ty::UInt8, "{source}");
+
+        let source = format!(
+            "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0i; consume(&value); }};"
+        );
+        let error = ir::generate(&parse(&source)).unwrap_err();
+        assert!(
+            matches!(
+                error.kind,
+                ir::GenerateErrorKind::Type(ir::TypeErrorKind::TypeMismatch { .. })
+            ),
+            "{source}: {error}"
+        );
+
+        let source = format!(
+            "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2L }}; data(1).* }};"
+        );
+        ir::generate(&parse(&source)).unwrap();
+    }
 }

@@ -9,7 +9,7 @@ use super::{GenerateError, GenerateErrorKind};
 pub(super) struct Evaluator<'a> {
     pub(super) scopes: &'a Scopes,
     pub(super) typer: &'a TyperContext,
-    pub(super) inferred: Option<&'a std::collections::HashMap<*const Type, Ty>>,
+    pub(super) checked: Option<&'a std::collections::HashMap<*const Type, Ty>>,
 }
 
 impl Evaluator<'_> {
@@ -54,7 +54,7 @@ impl Evaluator<'_> {
     pub(super) fn ty(&self, ty: &Type) -> Result<Ty, GenerateError> {
         match &ty.val {
             TypeKind::Infer => self
-                .inferred
+                .checked
                 .and_then(|types| types.get(&std::ptr::from_ref(ty)))
                 .cloned()
                 .ok_or_else(|| GenerateError {
@@ -74,7 +74,7 @@ impl Evaluator<'_> {
                 let value = self.ty(value)?;
                 let error = self.ty(error)?;
                 if error.variants().is_none() {
-                    return Err(super::infer::error(
+                    return Err(super::check::error(
                         ty.span,
                         "Result errors must be structs or unions of structs",
                     ));
@@ -89,7 +89,7 @@ impl Evaluator<'_> {
                 let right = self.ty(right)?.variants();
                 match (left, right) {
                     (Some(left), Some(right)) => Ok(Ty::union(left.into_iter().chain(right))),
-                    _ => Err(super::infer::error(
+                    _ => Err(super::check::error(
                         ty.span,
                         "union variants must be nominal structs",
                     )),
@@ -278,7 +278,7 @@ mod tests {
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
-            inferred: None,
+            checked: None,
         };
         let span = Span { start: 4, end: 8 };
         let named = Type::new(
@@ -308,7 +308,7 @@ mod tests {
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
-            inferred: None,
+            checked: None,
         };
         let span = Span { start: 0, end: 0 };
         for (text, expected, value, ty) in [

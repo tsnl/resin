@@ -2,9 +2,8 @@ use std::{collections::HashSet, sync::Arc};
 
 use super::super::GenerateError;
 use super::{
-    Result,
-    check::Checker,
-    error,
+    Result, error,
+    expressions::Checker,
     types::{Head, Type},
 };
 use crate::{ast::Span, ir::Ty};
@@ -101,12 +100,14 @@ impl Checker<'_> {
                 _ => return Err(error(span, "match pattern does not belong to this type")),
             },
             Constraint::Boolean(input) => {
-                let shape = self.shape(input, false, span)?;
-                if matches!(shape, Type::Variable(_)) {
+                let Some(ty) = self.solver.resolve(input) else {
                     return Ok(false);
-                }
-                self.solver.unify(&shape, &Ty::Bool.into(), span)?;
+                };
+                self.typer
+                    .as_bool(&ty)
+                    .map_err(|e| GenerateError::typing(span, e))?;
             }
+
             Constraint::Deref(input, out) => {
                 let shape = self.shape(input, false, span)?;
                 match shape {
@@ -176,7 +177,12 @@ impl Checker<'_> {
                     if matches!(self.solver.head(out), Type::Variable(_)) {
                         return Ok(false);
                     }
-                    return Err(error(span, "record initializer requires a record type"));
+                    let record = Type::record(fields.clone());
+                    if self.solver.resolve(&record).is_none() {
+                        return Ok(false);
+                    }
+                    self.solver.unify(&record, out, span)?;
+                    unreachable!("a record cannot equal a non-record");
                 };
                 let unique: HashSet<_> = fields.iter().map(|(name, _)| name).collect();
                 if unique.len() != fields.len() || fields.len() != names.len() {
@@ -235,7 +241,7 @@ impl Checker<'_> {
                             self.solver.unify(from, &context, span)?;
                         }
                         (Type::Node(Head::Pointer, _), Type::Node(Head::Pointer, _)) => {
-                            self.solver.unify(from, to, span)?
+                            self.solver.cast(from, to, span)?
                         }
                         _ => {}
                     }
@@ -243,7 +249,9 @@ impl Checker<'_> {
                 }
             }
             Constraint::Builtin(name, args, out) => {
-                if matches!(name.as_ref(), "&&" | "||" | "!") {
+                if name.as_ref() == "print" {
+                    self.solver.unify(out, &Ty::Unit.into(), span)?;
+                } else if matches!(name.as_ref(), "&&" | "||" | "!") {
                     self.solver.unify(out, &Ty::Bool.into(), span)?;
                     for arg in args {
                         if !self.constraint(&Constraint::Boolean(arg.clone()), span)? {
