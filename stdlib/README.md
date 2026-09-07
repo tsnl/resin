@@ -21,7 +21,9 @@ Native declarations stay private. The C ABI is unchanged and remains unchecked: 
 must uphold pointer validity, lifetimes, and buffer sizes. Importing a module does not
 re-export its dependencies. Import `std/status.resin` to name or match errors; inferred
 `Result<(), _>` callers do not need that import.
-`print`, `shader`, `ok`, and `err` are unshadowable compiler builtins.
+`print`, `ok`, and `err` are unshadowable compiler builtins. Shader candidates use
+`@compute_shader`, `@vertex_shader`, or `@fragment_shader`; `function.spirv` produces a
+`Span<ubyte>` accepted directly by the compute/graphics pipeline wrappers.
 
 Constructors return the new handle, not an integer and an out-parameter:
 

@@ -502,9 +502,27 @@ This is an unchecked C boundary: declarations must match the header's ABI, and c
 pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address;
 `pointer.*` dereferences it. Explicit casts allow pointer-to-pointer and pointer-to-`ulong`
 roundtrips. There is no borrow checker; addresses of locals must not outlive their storage.
-`pointer + index` and `pointer - index` offset by elements, not bytes. The offset must be an
-integer; pointer differences and offsets into opaque foreign types are not supported.
-Pointer arithmetic and dereferences are unchecked: keep them within the allocation and aligned.
+Pointer arithmetic is forbidden. Use array or span indexing, or explicitly convert a pointer
+into `ulong`, perform **byte** arithmetic, and convert back when low-level address manipulation
+is necessary. Pointer casts and dereferences remain unchecked.
+
+Arrays and spans use function-call indexing and return `Ptr<T>`:
+
+```resin
+var values = [10, 20, 30];
+values(1).* := 42;
+var view = Span<int> { data = Ptr<int>(&values), length = ulong(3) };
+var element = view(1);
+print("{0}\n", (element.*,));
+```
+
+`Span<T>` has `data: Ptr<T>` and `length: ulong` fields. Array indexing checks the fixed array
+length; span indexing checks its runtime length. Negative and out-of-range indices fail before
+an element address is formed. On the host this terminates the program with an index diagnostic.
+On the GPU it stops the failing invocation, including its callers; earlier writes remain and
+outputs from a failing graphics invocation are unspecified. Bounds failure does not run `defer`
+cleanup. Constructing a span does not validate its pointer, allocation size, or lifetime.
+
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. String literals are NUL-terminated; pass their storage with a
 byte-pointer cast, such as `Ptr<ubyte>(&path)` for `var path = "triangle.png";`.
@@ -546,22 +564,36 @@ They write `gradient.png` and `triangle.png` in cwd. Their Resin `main` function
 resources, create pipelines, record dispatch/draw commands, submit, write PNGs, and free resources.
 There are no compiler-side graphics/image execution modes.
 
-The only GPU-specific compiler intrinsic is `shader`:
+Shader entry points are ordinary functions with declaration decorators:
 
 ```resin
 export { main };
 
+@compute_shader
 def kernel(index: uint) -> uint = { uint(0xff400000) | (index & uint(0xffff)) };
-def main() -> () = {
-    var code = shader(kernel, "compute");
+def main() = {
+    var code = kernel.spirv;
     print("shader size: {0} bytes\n", (code.length,));
 };
 ```
 
-It takes a named function and a literal stage (`"compute"`, `"vertex"`, or `"fragment"`).
-The result is `{ data: Ptr<ubyte>, length: ulong }`: program-lifetime embedded SPIR-V bytes,
-passed directly to runtime pipeline creation. The function remains callable normally on the host.
-Runtime function aliases and dynamic stage values are not accepted by `shader`.
+`@compute_shader`, `@vertex_shader`, and `@fragment_shader` register shader candidates and
+validate their stage signatures. Each function accepts one shader decorator. Helpers require
+no decorators, and decorated functions remain ordinary host-callable functions. Decorators
+currently describe compiler-defined entry points; user-defined compile-time transformers are
+not implemented yet.
+
+`kernel.spirv` requests program-lifetime embedded SPIR-V bytes as `Span<ubyte>`. It must name a
+decorated function declaration directly, including an imported declaration; runtime function
+aliases do not expose `.spirv`. The compiler records artifact requests by declaration identity,
+without following function values or analyzing runtime branches. Merely declaring or calling a
+decorated function on the host requires no shader compiler. Artifact requests anywhere in the
+loaded modules require compilation even when their containing function is not executed.
+
+The Resin pipeline wrappers accept these spans directly:
+`gpu_create_compute_pipeline(gpu, kernel.spirv)` and
+`gpu_create_graphics_pipeline(gpu, vertex.spirv, fragment.spirv)`. The private C ABI still uses
+pointer/length pairs.
 
 Resin lowers the entry and its reachable named helpers to GLSL, invokes `glslc`, and embeds the
 result in generated C. Shader objects are deduplicated and cached under `build/shaders/`;
@@ -572,11 +604,12 @@ Shaders receive application data through the root address passed to `gpu_dispatc
 `gpu_draw`. Add a typed pointer as the second tuple element:
 
 ```resin
-struct Params { count: uint, values: Ptr<float32>, scale: float32 };
+struct Params { count: uint, values: Span<float32>, scale: float32 };
 
+@compute_shader
 def kernel(index: uint, root: Ptr<Params>) -> () = {
     if (index < root.count) {
-        var p = root.values + index;
+        var p = root.values(index);
         p.* := p.* * root.scale;
         ()
     } else { () }
@@ -596,22 +629,24 @@ The entry interfaces are:
   (R in bits 0–7, A in 24–31). Its implicit root is `{ count: uint, pixels: ulong }`, with
   `pixels` at byte offset 8; this wrapper bounds-checks against count.
 
-Device pointers support loads, stores, record fields, element offsets, casts, and passing to
+Device pointers support loads, stores, record fields, explicit casts, and passing to
 ordinary helpers. Shared storage supports `int`, `uint`, `float32`, `ulong`, pointers, nonempty
-records, and nominal wrappers. Scalars align to their size; records align to their largest
+records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
 member, with member and trailing padding. This matches C and GLSL `std430` without requiring
 scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
-Storage containing booleans, unit, arrays, or other numeric widths is rejected for now.
+Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
+Storage containing booleans, unit, or other numeric widths is rejected for now.
 
-Use `resin_allocation_host_pointer` to initialize mapped data on the CPU. Store
-`resin_allocation_device_pointer` addresses in records consumed by shaders; these are not
+Use `allocation_host_pointer` to initialize mapped data on the CPU. Store
+`allocation_device_pointer` addresses in records consumed by shaders; these are not
 interchangeable with host addresses. Pointer types do not enforce the address space or bounds.
 Calling the same function on the CPU requires a root containing host pointers instead.
 
 Shader bodies support 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
-indirect calls, arrays, spans, and integer division/remainder/shifts are rejected. Local addresses
-may only be used directly for loads, stores, and field access; they cannot be stored, passed,
+indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
+checked function-call indexing. Local addresses
+may only be used directly for loads, stores, indexing, and field access; they cannot be stored, passed,
 returned, or carried across control-flow edges. Device addresses can. `print` is host-only.
 
 Invocations must avoid racing on shared buffers. Workgroup-local storage, shader barriers, and
@@ -622,9 +657,10 @@ Submission currently waits for completion, making mapped results readable by the
 For inspection/export, `--output glsl` or `--output spirv -o PATH` still emits one entry.
 Use the same `FILE:ENTRY` selector, for example
 `cargo run -- examples/gradient.resin:kernel --output glsl`.
-The selected function must be exported; `shader(private_helper, "compute")` inside a function
-does not require exporting the helper. `--stage` defaults to compute, and an omitted entry
-still defaults to `main`. The old `--entry` option has been removed.
+The selected function must be exported; accessing `private_helper.spirv` inside its module
+does not require exporting that helper. The CLI derives the stage from the decorator; an
+explicit `--stage` must agree. Undecorated standalone entries retain the compute default, and
+an omitted entry still defaults to `main`. The old `--entry` option has been removed.
 `--glslc PATH` selects the compiler.
 
 ## GPU requirements
@@ -646,15 +682,16 @@ nix-shell --run 'cargo run -- examples/particles.resin'
 ```
 
 The demo renders a triangle until Escape or the close button is pressed. It uses a `while`
-event loop and shares its shader functions with the headless PNG demo in `examples/lib/triangle.resin`.
+event loop and defines its decorated shader functions inline, as does the headless triangle demo.
 Resizing scales the fixed-size offscreen image. Building this demo requires `glslc`; running the
 resulting executable does not. The PNG demos remain headless.
 
 `particles.resin` initializes 64 particles on the host, updates their positions in a compute
 shader, and draws them directly from the same buffer. It reuses pipelines and allocations
 across frames, uses a fixed 1/60-second simulation step, and closes on Escape or the close button.
-It is a small synchronous demo, not a frame-rate-independent simulation. Its shader functions
-and shared data definitions live in `examples/lib/particles.resin`.
+It is a small synchronous demo, not a frame-rate-independent simulation. Its decorated shader functions, ordinary helpers,
+and shared data definitions live alongside the host code in the same file. Initialization
+accepts `Span<Particle>` and uses `particles(index).*` to write each element.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:

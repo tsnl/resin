@@ -56,39 +56,42 @@ def check_input_end(byte: int, length: ulong) -> Result<(), EndOfInput | InputRe
 
 // Reads bytes through LF or EOF; only CR immediately before LF is stripped.
 def input() -> Result<InputLine, InputError> = {
-	var capacity = ulong(128);
-	var memory = resize_input(Ptr<ubyte>(ulong(0)), capacity)?;
+	var buffer = Span<ubyte> {
+		data = resize_input(Ptr<ubyte>(ulong(0)), ulong(128))?,
+		length = ulong(128),
+	};
 	var transferred = 1 == 0;
 	defer if (!transferred) {
-		free(memory);
+		free(buffer.data);
 	} else {};
 	var length = ulong(0);
 	var byte = getchar();
 	while (byte >= 0 && byte != 10) {
-		if (length == capacity - ulong(1)) {
+		if (length == buffer.length - ulong(1)) {
 			// Reserve the terminator and reject growth that would wrap.
 			var grown: Result<ulong, InputOutOfMemory>;
-			grown := if (capacity > ulong(18446744073709551615) / ulong(2)) {
+			grown := if (buffer.length > ulong(18446744073709551615) / ulong(2)) {
 				err(InputOutOfMemory {})
 			} else {
-				ok(capacity * ulong(2))
+				ok(buffer.length * ulong(2))
 			};
-			capacity := grown?;
-			memory := resize_input(memory, capacity)?;
+			var capacity = grown?;
+			buffer.data := resize_input(buffer.data, capacity)?;
+			buffer.length := capacity;
 		} else {};
-		(memory + length).* := resin_console_byte(byte);
+		buffer(length).* := resin_console_byte(byte);
 		length := length + ulong(1);
 		byte := getchar();
 	};
 	check_input_end(byte, length)?;
 	if (byte == 10 && length > ulong(0)) {
-		if ((memory + length - ulong(1)).* == ubyte(13)) {
+		if (buffer(length - ulong(1)).* == ubyte(13)) {
 			length := length - ulong(1);
 		} else {};
 	} else {};
-	(memory + length).* := ubyte(0);
+	buffer(length).* := ubyte(0);
 	transferred := 1 == 1;
-	ok(InputLine { data = memory, length = length })
+	ok(InputLine { data = buffer.data, length = length })
 };
 
 // Release exactly once, after the last use of the line or any copy.
@@ -98,10 +101,11 @@ def free_input(line: InputLine) = {
 
 // Writes every byte (including embedded NULs), flushes, and adds no newline.
 def print_input(line: InputLine) -> Result<(), InputWriteError> = {
+	var bytes = Span<ubyte> { data = line.data, length = line.length };
 	var index = ulong(0);
 	var written = 0;
 	while (index < line.length && written >= 0) {
-		written := resin_console_putchar((line.data + index).*);
+		written := resin_console_putchar(bytes(index).*);
 		index := index + ulong(1);
 	};
 	var flushed = resin_stdout_flush();

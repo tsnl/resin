@@ -40,7 +40,9 @@ void main() {{
     uint index = gl_GlobalInvocationID.x;
     Root data = Root(root);
     if (index >= data.count) return;
-    Pixels(data.pixels).values[index] = {value};
+    uint pixel = {value};
+    if (r_failed) return;
+    Pixels(data.pixels).values[index] = pixel;
 }}
 "))
         }
@@ -71,6 +73,7 @@ void main() {{
 layout(location = 0) out vec4 r_color;
 void main() {{
     {} v = r_entry({});
+    if (r_failed) return;
     gl_Position = {position};
     r_color = {color};
 }}
@@ -100,6 +103,7 @@ layout(location = 0) in vec4 r_color;
 layout(location = 0) out vec4 r_output;
 void main() {{
     {} v = r_entry({input});
+    if (r_failed) return;
     r_output = {output};
 }}
 ",

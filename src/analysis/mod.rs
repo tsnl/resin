@@ -298,7 +298,7 @@ impl Analysis {
         bindings
             .into_values()
             .flatten()
-            .filter(|d| !matches!(d.name.as_str(), "print" | "shader"))
+            .filter(|d| !matches!(d.name.as_str(), "print"))
             .collect()
     }
 
@@ -487,18 +487,13 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Function,
     ),
     (
-        "shader",
-        "shader(named_function, \"compute\" | \"vertex\" | \"fragment\")\n\nCompile-time shader entry selection.",
-        DefinitionKind::Function,
-    ),
-    (
         "Ptr",
         "Ptr<T>\n\nAn unchecked pointer to T.",
         DefinitionKind::Type,
     ),
     (
         "Span",
-        "Span<T>\n\nA pointer and length describing elements of T.",
+        "Span<T>\n\nA pointer and length describing elements of T. Calling span(index) returns a bounds-checked Ptr<T>.",
         DefinitionKind::Type,
     ),
     (

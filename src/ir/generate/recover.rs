@@ -79,6 +79,11 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
                     result: Box::new(r),
                 });
                 pass.bind(name, ty);
+                if matches!(&stmt.val, StmtKind::Function { decorators, .. } if decorators.len() == 1 && matches!(decorators[0].val.as_ref(), "compute_shader" | "vertex_shader" | "fragment_shader"))
+                    && let Some(binding) = pass.scopes.lookup_value_mut(&name.val)
+                {
+                    binding.shader = true;
+                }
             }
         }
         for stmt in &source.file.stmts {
@@ -125,6 +130,15 @@ struct Recovery<'a> {
     trace: Trace,
 }
 impl Recovery<'_> {
+    fn properties(&self, base: &Term, ty: Ty) -> Ty {
+        if matches!(&base.val, TermKind::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| binding.shader))
+        {
+            Ty::shader_properties()
+        } else {
+            ty
+        }
+    }
+
     fn ty(&self, ty: &Type) -> Option<Ty> {
         Evaluator {
             scopes: &self.scopes,
@@ -139,6 +153,7 @@ impl Recovery<'_> {
             return false;
         }
         let binding = ValueBinding {
+            shader: false,
             kind: ValueBindingKind::Local(LocalId::from_index(0)),
             ty: ty.clone(),
             initialization: Initialization::Initialized,
@@ -248,6 +263,7 @@ impl Recovery<'_> {
             }
             TermKind::FieldHole { base } => {
                 if let Some(ty) = self.term(base, None) {
+                    let ty = self.properties(base, ty);
                     self.trace.record_fields(
                         self.trace.location(Span {
                             start: term.span.end,
@@ -291,6 +307,7 @@ impl Recovery<'_> {
             TermKind::Field { base, name } => {
                 let ty = self.term(base, None);
                 ty.and_then(|ty| {
+                    let ty = self.properties(base, ty);
                     self.trace
                         .record_fields(self.trace.location(name.span), &ty, self.typer);
                     self.typer.type_field(&ty, &name.val).ok().map(|f| f.ty)

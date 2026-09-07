@@ -176,8 +176,11 @@ export default grammar({
         ";",
       ),
 
+    decorator: ($) => seq("@", field("name", $.lid)),
+
     function_definition: ($) =>
       seq(
+        repeat(field("decorator", $.decorator)),
         "def",
         field("name", $.lid),
         "(",

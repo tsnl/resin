@@ -107,7 +107,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
             var copy = text;
             var record = { text = copy };
             var pointer = Ptr<ubyte>(&record.text);
-            if (strlen(pointer) == ulong(6) && (pointer + 6).* == ubyte(0)
+            if (strlen(pointer) == ulong(6) && Ptr<ubyte>(ulong(pointer) + ulong(6)).* == ubyte(0)
                 && strlen(Ptr<ubyte>(&empty)) == ulong(0)) {
                 print("{0}{1}", (text, empty));
                 0
@@ -127,8 +127,8 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         def main() -> int = {
             var text = "a\0b\0";
             var pointer = Ptr<ubyte>(&text);
-            if (strlen(pointer) == ulong(1) && (pointer + 2).* == ubyte(98)
-                && (pointer + 3).* == ubyte(0) && (pointer + 4).* == ubyte(0)) {
+            if (strlen(pointer) == ulong(1) && Ptr<ubyte>(ulong(pointer) + ulong(2)).* == ubyte(98)
+                && Ptr<ubyte>(ulong(pointer) + ulong(3)).* == ubyte(0) && Ptr<ubyte>(ulong(pointer) + ulong(4)).* == ubyte(0)) {
                 print("before\0{0}after", (text,));
                 0
             } else { 1 }

@@ -4,23 +4,86 @@ import {
 	"std/gpu.resin",
 	"std/window.resin",
 	"std/graphics.resin",
-	"lib/particles.resin",
 };
 
-def initialize(particles: Ptr<Particle>) -> () = {
-	var index = 0;
+struct Particle { x: float32, y: float32, vx: float32, vy: float32, color: Color };
+struct Params { count: uint, dt: float32, radius: float32, particles: Span<Particle> };
+
+def advance(p: Ptr<Particle>, dt: float32) -> () = {
+	p.x := p.x + p.vx * dt;
+	p.y := p.y + p.vy * dt;
+	if (p.x > float32(0.9) || p.x < float32(-0.9)) {
+		p.vx := -p.vx;
+		()
+	} else {
+		()
+	};
+	if (p.y > float32(0.9) || p.y < float32(-0.9)) {
+		p.vy := -p.vy;
+		()
+	} else {
+		()
+	};
+};
+
+@compute_shader
+def kernel(index: uint, root: Ptr<Params>) -> () = {
+	if (index < root.count) {
+		advance(root.particles(index), root.dt)
+	} else {
+		()
+	}
+};
+
+@vertex_shader
+def vertex(index: int, root: Ptr<Params>) -> Vertex = {
+	var particle = 0;
+	var corner = index;
+	while (corner >= 3) {
+		corner := corner - 3;
+		particle := particle + 1;
+	};
+	var p = root.particles(particle);
+	var dx = float32(0.0);
+	var dy = -root.radius;
+	if (corner == 1) {
+		dx := -root.radius;
+		dy := root.radius;
+		()
+	} else {
+		if (corner == 2) {
+			dx := root.radius;
+			dy := root.radius;
+			()
+		} else {
+			()
+		}
+	};
+	Vertex {
+		position = Position { x = p.x + dx, y = p.y + dy, z = float32(0.0), w = float32(1.0) },
+		color = p.color,
+	}
+};
+
+@fragment_shader
+def fragment(color: Color) -> Color = {
+	color
+};
+
+def initialize(particles: Span<Particle>) -> () = {
+	var index = ulong(0);
 	var row = 0;
 	var x = float32(-0.75);
 	var y = float32(-0.75);
-	while (index < 64) {
+	while (index < particles.length) {
 		var vx = float32(0.35);
-		if ((index & 1) == 0) {
+		if ((index & ulong(1)) == ulong(0)) {
 			vx := -vx;
 			()
 		} else {
 			()
 		};
-		(particles + index).* := Particle {
+		particles(index).* := Particle {
 			x = x,
 			y = y,
 			vx = vx,
@@ -32,7 +95,7 @@ def initialize(particles: Ptr<Particle>) -> () = {
 				a = float32(1.0),
 			},
 		};
-		index := index + 1;
+		index := index + ulong(1);
 		row := row + 1;
 		x := x + float32(0.2);
 		if (row == 8) {
@@ -53,31 +116,26 @@ def main() -> Result<(), _> = {
 	var gpu = gpu_create_for_window(window)?;
 	defer gpu_destroy(gpu);
 
-	var compute_code = shader(kernel, "compute");
-	var compute = gpu_create_compute_pipeline(gpu, compute_code.data, compute_code.length)?;
+	var compute = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
 	defer gpu_free_pipeline(gpu, compute);
-	var vertex_code = shader(vertex, "vertex");
-	var fragment_code = shader(fragment, "fragment");
 	var graphics = gpu_create_graphics_pipeline(
 		gpu,
-		vertex_code.data,
-		vertex_code.length,
-		fragment_code.data,
-		fragment_code.length,
+		vertex.spirv,
+		fragment.spirv,
 	)?;
 	defer gpu_free_pipeline(gpu, graphics);
-	// Particle: 32 bytes, alignment 4. Params: 24 bytes, alignment 8.
+	// Particle: 32 bytes, alignment 4. Params: 32 bytes, alignment 8.
 	var particles = gpu_malloc(gpu, 64 * 32, 4, memory_default())?;
 	defer gpu_free(gpu, particles);
-	var root = gpu_malloc(gpu, 24, 8, memory_default())?;
+	var root = gpu_malloc(gpu, 32, 8, memory_default())?;
 	defer gpu_free(gpu, root);
-	initialize(Ptr<Particle>(allocation_host_pointer(particles)));
+	initialize(Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = ulong(64) });
 	var params = Ptr<Params>(allocation_host_pointer(root));
 	params.* := Params {
 		count = uint(64),
 		dt = float32(0.016667),
 		radius = float32(0.018),
-		particles = Ptr<Particle>(allocation_device_pointer(particles)),
+		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(64) },
 	};
 	var address = allocation_device_pointer(root);
 	var image = gpu_create_image(gpu, 640, 480)?;

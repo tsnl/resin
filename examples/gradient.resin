@@ -8,6 +8,7 @@ def pixel(index: uint) -> uint = {
 	uint(0xff400000) | (index & uint(0xffff))
 };
 
+@compute_shader
 def kernel(index: uint) -> uint = {
 	pixel(index)
 };
@@ -16,8 +17,7 @@ def main() -> Result<(), _> = {
 	var gpu = gpu_create()?;
 	defer gpu_destroy(gpu);
 
-	var code = shader(kernel, "compute");
-	var pipeline = gpu_create_compute_pipeline(gpu, code.data, code.length)?;
+	var pipeline = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
 	defer gpu_free_pipeline(gpu, pipeline);
 	var pixels = gpu_malloc(gpu, 262144, 4, memory_default())?;
 	defer gpu_free(gpu, pixels);

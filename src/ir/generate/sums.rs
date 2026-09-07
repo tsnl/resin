@@ -189,6 +189,7 @@ impl Generator {
             self.bind_value(
                 &arm.name,
                 ValueBinding {
+                    shader: false,
                     kind: ValueBindingKind::Local(local),
                     ty: Some(payload),
                     initialization: Initialization::Initialized,

@@ -36,6 +36,17 @@ pub enum GenerateErrorKind {
 }
 impl fmt::Display for GenerateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.kind == GenerateErrorKind::Type(TypeErrorKind::PointerArithmetic) {
+            return write!(
+                f,
+                "compile error at {}..{}: {}",
+                self.span.start,
+                self.span.end,
+                TypeError {
+                    kind: TypeErrorKind::PointerArithmetic
+                }
+            );
+        }
         if let GenerateErrorKind::Inference { message } = &self.kind {
             return write!(
                 f,

@@ -311,17 +311,10 @@ impl<'a> Checker<'a> {
                         .push((span, Constraint::Ascribe(from, to.clone())));
                     equate = Some(to);
                 } else if let TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "print" | "shader")
+                    && name.val.as_ref() == "print"
                 {
                     self.term(arg, None)?;
-                    equate = Some(
-                        if name.val.as_ref() == "print" {
-                            Ty::Unit
-                        } else {
-                            Ty::shader()
-                        }
-                        .into(),
-                    );
+                    equate = Some(Ty::Unit.into());
                 } else {
                     let func = self.term(func, None)?;
                     let arg = self.term(arg, None)?;

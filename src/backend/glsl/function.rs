@@ -71,7 +71,10 @@ pub(super) fn emit(
                     && !(index == 0
                         && matches!(
                             instr,
-                            Instr::Load | Instr::Store | Instr::AccessStatic { .. }
+                            Instr::Load
+                                | Instr::Store
+                                | Instr::AccessStatic { .. }
+                                | Instr::AccessDynamic
                         ))
                 {
                     return Err(Error(
@@ -81,8 +84,30 @@ pub(super) fn emit(
                 }
             }
             let local = matches!(instr, Instr::LocalAddress { .. })
-                || matches!(instr, Instr::AccessStatic { .. }) && args[0].local;
+                || matches!(instr, Instr::AccessStatic { .. } | Instr::AccessDynamic)
+                    && args[0].local;
             let result = flow.results[b][i].as_ref();
+            if matches!(instr, Instr::AccessDynamic) {
+                let base = &args[0];
+                let (ty, expr) = match &base.ty {
+                    Ty::Pointer { pointee } => {
+                        (types.shape(pointee).clone(), dereference(types, base)?)
+                    }
+                    ty => (types.shape(ty).clone(), types.unwrap(ty, base.expr.clone())),
+                };
+                let length = match ty {
+                    Ty::Span { .. } => format!("({expr}).f1"),
+                    Ty::Array { length, .. } => format!("uint64_t({length})"),
+                    _ => return Err(Error("indexing requires an array or Span".into())),
+                };
+                writeln!(
+                    out,
+                    "      if (uint64_t({}) >= {length}) {{ r_failed = true; return {}; }}",
+                    args[1].expr,
+                    types.zero(&function.result)
+                )
+                .unwrap();
+            }
             let expr = instruction(types, instr, &args, result, &mut out)
                 .map_err(|error| Error(format!("shader block {b}, instruction {i}: {error}")))?;
             if let Some(ty) = result {
@@ -91,6 +116,14 @@ pub(super) fn emit(
                     let name = format!("r_v{b}_{i}");
                     writeln!(out, "      {name} = {expr};").unwrap();
                     expr = name;
+                }
+                if matches!(instr, Instr::Call) {
+                    writeln!(
+                        out,
+                        "      if (r_failed) return {};",
+                        types.zero(&function.result)
+                    )
+                    .unwrap();
                 }
                 stack.push(Slot {
                     ty: ty.clone(),
@@ -198,12 +231,50 @@ fn instruction(
         Instr::Ascribe { ty } => {
             if ty == &args[0].ty {
                 args[0].expr.clone()
+            } else if matches!(ty, Ty::Span { .. }) || matches!(args[0].ty, Ty::Span { .. }) {
+                format!(
+                    "{}(({}).f0, ({}).f1)",
+                    types.name(ty),
+                    args[0].expr,
+                    args[0].expr
+                )
             } else if let Ty::Defined { definition } = ty
                 && types.module.types[definition.index()].body() == Some(&args[0].ty)
             {
                 format!("{}({})", types.name(ty), args[0].expr)
             } else {
                 format!("({}).value", args[0].expr)
+            }
+        }
+        Instr::MakeArray { elements, element } => format!(
+            "{}({}[{elements}]({}))",
+            types.name(result.unwrap()),
+            types.name(element),
+            args.iter()
+                .map(|arg| arg.expr.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Instr::AccessDynamic => {
+            let base = &args[0];
+            let index = &args[1].expr;
+            match types.shape(&base.ty) {
+                Ty::Span { element } => {
+                    let size = crate::backend::layout::layout(types.module, element)?.size;
+                    format!("({}).f0 + uint64_t({index}) * uint64_t({size})", base.expr)
+                }
+                Ty::Array { .. } => format!("({}).items[{index}]", base.expr),
+                Ty::Pointer { .. } if base.local => {
+                    format!("({}).items[{index}]", base.expr)
+                }
+                Ty::Pointer { pointee } => {
+                    let Ty::Array { element, .. } = types.shape(pointee) else {
+                        return Err(Error("array pointer required".into()));
+                    };
+                    let size = crate::backend::layout::layout(types.module, element)?.size;
+                    format!("({}) + uint64_t({index}) * uint64_t({size})", base.expr)
+                }
+                _ => return Err(Error("array or Span required".into())),
             }
         }
         Instr::MakeRecord { .. } => {
@@ -224,7 +295,7 @@ fn instruction(
             } else {
                 &args[0].ty
             };
-            if !matches!(types.shape(ty), Ty::Record { .. }) {
+            if !matches!(types.shape(ty), Ty::Record { .. } | Ty::Span { .. }) {
                 return Err(Error("shader projection requires a record".into()));
             }
             if matches!(args[0].ty, Ty::Pointer { .. }) && !args[0].local {
@@ -287,18 +358,6 @@ fn builtin(types: &Types<'_>, name: &str, args: &[Slot], result: &Ty) -> Result<
     let Some(first) = args.first() else {
         return Err(unsupported());
     };
-    if let [pointer, offset] = args
-        && matches!(name, "+" | "-")
-        && let Ty::Pointer { pointee } = &pointer.ty
-        && offset.ty.is_integer()
-        && result == &pointer.ty
-    {
-        let layout = crate::backend::layout::layout(types.module, pointee)?;
-        return Ok(format!(
-            "({}) {name} (uint64_t({}) * uint64_t({}))",
-            pointer.expr, offset.expr, layout.size
-        ));
-    }
     if args.iter().any(|a| a.ty != first.ty) {
         return Err(unsupported());
     }

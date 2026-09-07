@@ -216,3 +216,11 @@ fn comparison_operators_are_not_type_brackets() {
             .any(|(_, text)| text == "<" || text == ">")
     );
 }
+
+#[test]
+fn shader_decorators_are_highlighted_as_attributes() {
+    let source = "@compute_shader def kernel(i: uint) -> uint = { i };";
+    let highlighted = captures(QUERIES[0].1, source);
+    assert!(highlighted.contains(&("attribute".into(), "@".into())));
+    assert!(highlighted.contains(&("attribute".into(), "compute_shader".into())));
+}

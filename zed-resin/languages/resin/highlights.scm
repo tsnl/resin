@@ -14,7 +14,7 @@
 (foreign_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (closed_term))
 ((primary_term (lid) @function.builtin)
-  (#any-of? @function.builtin "print" "shader" "ok" "err"))
+  (#any-of? @function.builtin "print" "ok" "err"))
 
 (field_access name: (lid) @property)
 (record_term fields: (term_define name: (lid) @property))
@@ -34,3 +34,5 @@
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 [";" "," ":" "."] @punctuation.delimiter
 (unary_type "<" @punctuation.bracket ">" @punctuation.bracket)
+
+(decorator "@" @attribute name: (lid) @attribute)

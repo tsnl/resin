@@ -62,6 +62,7 @@ impl Generator {
         self.bind_value(
             name,
             ValueBinding {
+                shader: false,
                 kind: ValueBindingKind::Function(id),
                 ty: Some(Ty::Function {
                     param: Box::new(param),
@@ -127,6 +128,7 @@ impl Generator {
             self.bind_value(
                 name,
                 ValueBinding {
+                    shader: false,
                     kind: ValueBindingKind::Local(local),
                     ty: Some(ty.clone()),
                     initialization: Initialization::Initialized,

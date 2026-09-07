@@ -70,7 +70,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                 match (input()) {
                     ok(line) => {
                         defer free_input(line);
-                        if ((line.data + line.length).* != ubyte(0)) {
+                        if (Ptr<ubyte>(ulong(line.data) + line.length).* != ubyte(0)) {
                             print("missing terminator", ());
                         } else {};
                         print("[{0}:", (line.length,));

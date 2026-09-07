@@ -2,8 +2,65 @@ export { main };
 
 import {
 	"std/gpu.resin",
+	"std/graphics.resin",
 	"std/window.resin",
-	"lib/triangle.resin",
+};
+
+@vertex_shader
+def vertex(index: int) -> Vertex = {
+	if (index == 0) {
+		Vertex {
+			position = Position {
+				x = float32(0.0),
+				y = float32(-0.75),
+				z = float32(0.0),
+				w = float32(1.0),
+			},
+			color = Color {
+				r = float32(1.0),
+				g = float32(0.0),
+				b = float32(0.0),
+				a = float32(1.0),
+			},
+		}
+	} else {
+		if (index == 1) {
+			Vertex {
+				position = Position {
+					x = float32(-0.7),
+					y = float32(0.6),
+					z = float32(0.0),
+					w = float32(1.0),
+				},
+				color = Color {
+					r = float32(0.0),
+					g = float32(1.0),
+					b = float32(0.0),
+					a = float32(1.0),
+				},
+			}
+		} else {
+			Vertex {
+				position = Position {
+					x = float32(0.7),
+					y = float32(0.6),
+					z = float32(0.0),
+					w = float32(1.0),
+				},
+				color = Color {
+					r = float32(0.0),
+					g = float32(0.0),
+					b = float32(1.0),
+					a = float32(1.0),
+				},
+			}
+		}
+	}
+};
+
+@fragment_shader
+def fragment(color: Color) -> Color = {
+	color
 };
 
 def main() -> Result<(), _> = {
@@ -13,14 +70,10 @@ def main() -> Result<(), _> = {
 	var gpu = gpu_create_for_window(window)?;
 	defer gpu_destroy(gpu);
 
-	var vertex_code = shader(vertex, "vertex");
-	var fragment_code = shader(fragment, "fragment");
 	var pipeline = gpu_create_graphics_pipeline(
 		gpu,
-		vertex_code.data,
-		vertex_code.length,
-		fragment_code.data,
-		fragment_code.length,
+		vertex.spirv,
+		fragment.spirv,
 	)?;
 	defer gpu_free_pipeline(gpu, pipeline);
 	var image = gpu_create_image(gpu, 640, 480)?;

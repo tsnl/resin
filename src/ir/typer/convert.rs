@@ -9,6 +9,8 @@ pub enum Conv {
     Unwrap { definition: TypeId },
     Wrap { definition: TypeId },
     Deref,
+    SpanRecord,
+    MakeSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,12 @@ impl TyperContext {
     pub fn ascribe(&self, from: &Ty, to: &Ty) -> Result<Vec<Conv>, TypeError> {
         if from == to {
             return Ok(Vec::new());
+        }
+        if to.span_record().as_ref() == Some(from) {
+            return Ok(vec![Conv::MakeSpan]);
+        }
+        if from.span_record().as_ref() == Some(to) {
+            return Ok(vec![Conv::SpanRecord]);
         }
         if let Ty::Defined { definition } = to
             && from == &self.body(to)?
@@ -85,7 +93,7 @@ impl TyperContext {
         self.convert(
             ty,
             true,
-            |ty| matches!(ty, Ty::Record { .. }),
+            |ty| matches!(ty, Ty::Record { .. } | Ty::Span { .. }),
             TypeErrorKind::ExpectedRecord { found: ty.clone() },
         )
     }

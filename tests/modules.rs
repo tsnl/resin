@@ -425,15 +425,15 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
     let project = Project::new(&[
         (
             "left.resin",
-            "export { left }; def kernel (i: uint) -> uint = { i + uint(1) }; def left (i: uint) -> uint = { kernel(i) };",
+            "export { left }; @compute_shader def kernel(i: uint) -> uint = { i + uint(1) }; def left (i: uint) -> uint = { kernel(i) };",
         ),
         (
             "right.resin",
-            "export { right }; def kernel (i: uint) -> uint = { i + uint(2) }; def right (i: uint) -> uint = { kernel(i) };",
+            "export { right }; @compute_shader def kernel(i: uint) -> uint = { i + uint(2) }; def right (i: uint) -> uint = { kernel(i) };",
         ),
         (
             "main.resin",
-            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; def kernel (i: uint) -> uint = { left(i) + right(i) }; def main() -> () = { var code = shader(kernel, \"compute\"); };",
+            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; @compute_shader def kernel(i: uint) -> uint = { left(i) + right(i) }; def main() -> () = { var code = kernel.spirv; };",
         ),
     ]);
     let module = project.compile().unwrap();
@@ -441,7 +441,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { kernel }; def kernel (i: uint) -> uint = { i };",
+            "export { kernel }; @compute_shader def kernel(i: uint) -> uint = { i };",
         ),
         ("main.resin", "import { \"library.resin\" };"),
     ]);
@@ -514,7 +514,7 @@ fn invalid_import_paths_report_the_importing_file() {
 
 #[test]
 fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
-    for name in ["print", "shader"] {
+    for name in ["print"] {
         for source in [
             format!("def {name} () -> () = {{}};"),
             format!("extern \"stdlib.h\" def {name} () -> int;"),
@@ -626,7 +626,7 @@ fn functions_cannot_capture_another_functions_locals() {
 #[test]
 fn shader_objects_can_reference_private_helpers() {
     let module = support::module(
-        "export { main }; def kernel(i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel, \"compute\"); };",
+        "export { main }; @compute_shader def kernel(i: uint) -> uint = { i }; def main() -> () = { var code = kernel.spirv; };",
     );
     assert!(!module.entries.contains_key("kernel"));
     assert!(

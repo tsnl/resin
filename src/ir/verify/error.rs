@@ -34,6 +34,7 @@ pub enum VerifyErrorKind {
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },
     InvalidShader,
+    PointerArithmetic,
     InvalidPointerCast { from: Ty, to: Ty },
     InvalidTypeDefinition { definition: usize },
     IncompleteTypeDefinition { definition: TypeId },

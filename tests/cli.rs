@@ -587,3 +587,22 @@ fn graphics_execution_is_not_a_cli_output_mode() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
     assert!(!png.exists());
 }
+
+#[test]
+fn shader_decorators_select_cli_stage_and_host_calls_need_no_glslc() {
+    let source = "export { paint }; struct Color { r: float32, g: float32, b: float32, a: float32 }; @fragment_shader def paint(color: Color) -> Color = { color };";
+    let output = selected(source, Some("paint"), &["--output", "glsl"]);
+    success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("r_output"));
+    let output = selected(
+        source,
+        Some("paint"),
+        &["--output", "glsl", "--stage", "compute"],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("conflicts"));
+    success(&cli(
+        "export { main }; @compute_shader def kernel(i: uint) -> uint = { i }; def main() -> int = { if (kernel(uint(7)) == uint(7)) { 0 } else { 1 } };",
+        &["--glslc", "/does/not/exist/glslc"],
+    ));
+}

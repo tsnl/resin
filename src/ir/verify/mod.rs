@@ -34,6 +34,16 @@ pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError
         }
     }
     check_definitions(&module.types)?;
+    let typer = crate::ir::TyperContext::from_definitions(module.types.clone());
+    for (&id, entry) in &module.shaders {
+        let function = module
+            .functions
+            .get(id.index())
+            .ok_or_else(|| Location::function(id).error(VerifyErrorKind::InvalidShader))?;
+        crate::ir::shader::validate(&typer, function, &entry.stage)
+            .map_err(|_| Location::function(id).error(VerifyErrorKind::InvalidShader))?;
+    }
+
     for (index, definition) in module.types.iter().enumerate() {
         check_value(
             &module.types,

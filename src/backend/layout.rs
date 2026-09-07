@@ -21,6 +21,26 @@ pub(super) fn layout(module: &Module, ty: &Ty) -> Result<Layout, Error> {
             offsets: Vec::new(),
         });
     }
+    if let Ty::Span { .. } = ty {
+        return Ok(Layout {
+            size: 16,
+            align: 8,
+            offsets: vec![0, 8],
+        });
+    }
+    if let Ty::Array { element, length } = ty {
+        if *length == 0 {
+            return Err(Error(
+                "empty arrays have no shared host/device layout".into(),
+            ));
+        }
+        let element = layout(module, element)?;
+        return Ok(Layout {
+            size: element.size.checked_mul(*length).ok_or_else(overflow)?,
+            align: element.align,
+            offsets: vec![],
+        });
+    }
     if let Ty::Defined { definition } = ty {
         return layout(module, module.types[definition.index()].body().unwrap());
     }

@@ -37,7 +37,7 @@ impl Trace {
 
     pub fn record_fields(&self, location: SourceLocation, ty: &Ty, typer: &TyperContext) {
         if let Ok(converted) = typer.as_record(ty)
-            && let Ty::Record { fields } = converted.ty
+            && let Ty::Record { fields } = converted.ty.span_record().unwrap_or(converted.ty)
         {
             self.data.borrow_mut().fields.insert(
                 location,

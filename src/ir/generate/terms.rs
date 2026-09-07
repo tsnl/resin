@@ -110,13 +110,49 @@ impl Generator {
                 "ok" | "err" => {
                     return self.gen_result(span, name.val.as_ref() == "err", arg, expected);
                 }
-                "shader" => return self.gen_shader(span, arg),
-                "print" => return self.gen_builtin(span, "print", std::slice::from_ref(arg), None),
+                "print" => {
+                    return self.gen_builtin(span, "print", std::slice::from_ref(arg), None);
+                }
                 _ => {}
             }
         }
 
-        let callee_ty = self.gen_term(func, None)?;
+        use super::places::Operand;
+        self.check_place_initialized(func)?;
+        let operand = self.gen_operand(func)?;
+        let (callee_ty, address) = match operand {
+            Operand::Value(ty) => (ty, false),
+            Operand::Place(ty) => (ty, true),
+        };
+        // Read the callee exactly once. Array places retain their storage address.
+        let shape = self
+            .typer
+            .body(&callee_ty)
+            .map_err(|e| GenerateError::typing(func.span, e))?;
+        if address && !matches!(shape, Ty::Array { .. }) {
+            self.emit(Instr::Load);
+        }
+        if let Ty::Span { element } | Ty::Array { element, .. } = &shape {
+            if !address && matches!(shape, Ty::Array { .. }) {
+                let local = self.alloc_local(callee_ty.clone(), None);
+                self.emit(Instr::SetLocal { local });
+                self.emit(Instr::LocalAddress { local });
+            }
+            let index_ty = self.gen_term(arg, None)?;
+            if !index_ty.is_integer() {
+                return Err(GenerateError::typing(
+                    arg.span,
+                    TypeError {
+                        kind: TypeErrorKind::ExpectedInteger { found: index_ty },
+                    },
+                ));
+            }
+            self.emit(Instr::AccessDynamic);
+            return Ok(Ty::Pointer {
+                pointee: element.clone(),
+            });
+        }
+
         let converted = self
             .typer
             .as_function(&callee_ty)
@@ -145,6 +181,7 @@ impl Generator {
             .typer
             .body(&ascribed)
             .map_err(|err| GenerateError::typing(span, err))?;
+        let context = context.span_record().unwrap_or(context);
         let found = if matches!(&context, Ty::Record { fields } if fields.is_empty())
             && matches!(arg.val, TermKind::Unit)
         {
@@ -163,45 +200,6 @@ impl Generator {
             return Ok(ascribed);
         }
         self.apply_ascription(span, &ascribed, found)
-    }
-
-    fn gen_shader(&mut self, span: Span, arg: &Term) -> Result<Ty, GenerateError> {
-        let invalid = || GenerateError {
-            span,
-            kind: GenerateErrorKind::InvalidShader {
-                message: "expected shader(named_function, \"compute\" | \"vertex\" | \"fragment\")"
-                    .into(),
-            },
-        };
-        let TermKind::Record { fields } = &arg.val else {
-            return Err(invalid());
-        };
-        let [(first, function), (second, stage)] = fields.as_slice() else {
-            return Err(invalid());
-        };
-        let (TermKind::Var { name }, TermKind::String { value: stage }) =
-            (&function.val, &stage.val)
-        else {
-            return Err(invalid());
-        };
-        if first.val.as_ref() != "_0"
-            || second.val.as_ref() != "_1"
-            || !matches!(stage.as_ref(), "compute" | "vertex" | "fragment")
-        {
-            return Err(invalid());
-        }
-        let binding = self.resolve_value(name)?;
-        let super::scope::ValueBindingKind::Function(function) = binding.kind else {
-            return Err(invalid());
-        };
-        if self.module.functions[function.index()].foreign.is_some() {
-            return Err(invalid());
-        }
-        self.emit(Instr::Shader {
-            function,
-            stage: stage.clone(),
-        });
-        Ok(Ty::shader())
     }
 
     pub(super) fn gen_builtin(
@@ -271,7 +269,16 @@ impl Generator {
             .typer
             .ascribe(&found, expected)
             .map_err(|err| GenerateError::typing(span, err))?;
-        self.emit_value_conv(&steps);
+        if steps
+            .iter()
+            .any(|s| matches!(s, Conv::MakeSpan | Conv::SpanRecord))
+        {
+            self.emit(Instr::Ascribe {
+                ty: expected.clone(),
+            });
+        } else {
+            self.emit_value_conv(&steps);
+        }
         Ok(expected.clone())
     }
 
@@ -295,6 +302,9 @@ impl Generator {
                     });
                 }
                 Conv::Deref => self.emit(Instr::Load),
+                Conv::MakeSpan | Conv::SpanRecord => {
+                    unreachable!("span conversions require a target type")
+                }
             }
         }
     }

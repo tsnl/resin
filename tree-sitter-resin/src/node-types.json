@@ -311,6 +311,22 @@
     }
   },
   {
+    "type": "decorator",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "define",
     "named": true,
     "fields": {
@@ -444,6 +460,16 @@
         "types": [
           {
             "type": "block_body",
+            "named": true
+          }
+        ]
+      },
+      "decorator": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "decorator",
             "named": true
           }
         ]
@@ -1374,6 +1400,10 @@
   },
   {
     "type": ">>",
+    "named": false
+  },
+  {
+    "type": "@",
     "named": false
   },
   {

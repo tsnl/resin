@@ -49,8 +49,8 @@ struct CompileOptions {
     cc: Option<OsString>,
 
     /// Shader stage for GLSL and SPIR-V output.
-    #[arg(long, default_value = "compute")]
-    stage: backend::glsl::Stage,
+    #[arg(long)]
+    stage: Option<backend::glsl::Stage>,
 
     /// Shader compiler executable (defaults to GLSLC or glslc).
     #[arg(long)]
@@ -204,12 +204,24 @@ fn host_destination(
 }
 
 fn shader(cli: &CompileOptions, input: &source::Source, module: &ir::Module) -> Result<i32> {
-    let source = backend::glsl::emit(module, &input.entry, cli.stage)?;
+    let declared = module
+        .entries
+        .get(input.entry.as_str())
+        .and_then(|id| module.shaders.get(id));
+    let stage = match (cli.stage, declared) {
+        (Some(stage), Some(entry)) if stage.name() != entry.stage.as_ref() => {
+            return Err("--stage conflicts with the function's shader decorator".into());
+        }
+        (Some(stage), _) => stage,
+        (None, Some(entry)) => entry.stage.parse()?,
+        (None, None) => backend::glsl::Stage::Compute,
+    };
+    let source = backend::glsl::emit(module, &input.entry, stage)?;
     if cli.output == Output::Glsl {
         return print(cli, source);
     }
     let compiler = compiler(&cli.glslc, "GLSLC", "glslc");
-    let bytes = toolchain::compile_glsl(&source, cli.stage, &compiler)?;
+    let bytes = toolchain::compile_glsl(&source, stage, &compiler)?;
     toolchain::write_output(&bytes, cli.destination.as_ref().unwrap())?;
     Ok(0)
 }

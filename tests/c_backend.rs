@@ -226,13 +226,13 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 }
 
 #[test]
-fn typed_pointer_offsets_use_element_sizes() {
+fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; def main () -> int = { var values = [10, 20, 30]; var p = Ptr<int> (&values); (p + 1).* := 7; var end = p + uint (2); (end - 1).* + (end + -2).* + end.* };",
+        "export { main }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p(1).* := 7; var end = p(uint(2)); p(1).* + values(0).* + end.* };",
         47,
     );
     runs(
-        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32 }; def main () -> int = { var values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; var p = Ptr<Payload> (&values); var q = p + 1; q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
+        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32 }; def main () -> int = { var values = [Payload { marker = uint (1), wide = ulong (4294967297), amount = float32 (0.5) }, Payload { marker = uint (2), wide = ulong (8589934593), amount = float32 (1.5) }]; var p = values(0); var q = values(1); q.amount := q.amount + float32 (2.0); if (q.wide == ulong (8589934593) && q.marker == uint (2) && q.amount == float32 (3.5) && p.amount == float32 (0.5)) { 0 } else { 1 } };",
         0,
     );
 }
@@ -588,4 +588,87 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
     let output = run_module(&m);
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("array index"));
+}
+
+#[test]
+fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
+    runs(
+        r#"export { main };
+        def view(p: Ptr<int>, calls: Ptr<int>) -> Span<int> = {
+            calls.* := calls.* + 1;
+            Span<int> { data = p, length = ulong(3) }
+        };
+        def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
+        def main() -> int = {
+            var values = [10, 20, 30]; var calls = 0;
+            var p: Ptr<int>; p := view(Ptr<int>(&values), &calls)(index(&calls));
+            p.* := 42;
+            var copied = values;
+            copied(0).* := 9;
+            var temporary = ([7, 8])(1).*;
+            if (calls == 2 && values(1).* == 42 && values(0).* == 10 && copied(0).* == 9 && temporary == 8) { 0 } else { 1 }
+        };"#,
+        0,
+    );
+}
+
+#[test]
+fn array_and_span_indexing_fail_before_out_of_bounds_access() {
+    for source in [
+        "export { main }; def main() -> int = { var xs = [1, 2]; xs(-1).* };",
+        "export { main }; def main() -> int = { var xs = [1, 2]; xs(2).* := 9; 0 };",
+        "export { main }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s(ulong(18446744073709551615)).* };",
+        "export { main }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s(0).* };",
+    ] {
+        let output = run_module(&module(source));
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("index out of bounds"),
+            "{:?}",
+            output
+        );
+    }
+}
+
+#[test]
+fn decorated_functions_and_their_helpers_remain_host_callable() {
+    runs(
+        r#"export { main };
+        def twice(i: uint) -> uint = { i * uint(2) };
+        @compute_shader def kernel(i: uint) -> uint = { twice(i) };
+        def main() -> int = { var f = kernel; if (f(uint(21)) == uint(42)) { 0 } else { 1 } };
+    "#,
+        0,
+    );
+}
+
+#[test]
+fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
+    let mut program = resin::ast::load(&path).unwrap();
+    let file = &mut program.modules.last_mut().unwrap().file;
+    file.stmts.retain(|s| !matches!(&s.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
+    file.stmts.extend(support::parse(r#"
+        def main() -> int = {
+            var particle = Particle { x = float32(0), y = float32(0), vx = float32(0), vy = float32(0), color = Color { r = float32(0), g = float32(0), b = float32(0), a = float32(1) } };
+            var particles = Span<Particle> { data = &particle, length = ulong(1) };
+            initialize(particles);
+            var params = Params { count = uint(1), dt = float32(1.0), radius = float32(0.1), particles = particles };
+            kernel(uint(0), &params);
+            var v = vertex(0, &params);
+            var color = fragment(v.color);
+            if (particle.x < float32(-1.0) && particle.vx > float32(0.0) && color.b == float32(0.8)) { 0 } else { 1 }
+        };
+    "#).stmts);
+    let m = ir::generate_program(&program).unwrap();
+    assert!(m.shaders.values().all(|entry| !entry.embedded));
+    assert!(run_module(&m).status.success());
+}
+
+#[test]
+fn spirv_is_only_special_on_function_declarations() {
+    runs(
+        "export { main }; def main() -> int = { var record = { spirv = 1 }; record.spirv := 2; record.spirv };",
+        2,
+    );
 }

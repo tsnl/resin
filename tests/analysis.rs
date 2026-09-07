@@ -864,3 +864,49 @@ fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
         assert!(error.span.start <= error.span.end && error.span.end <= source.len());
     }
 }
+
+#[test]
+fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
+    let source = "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var xs = [1, 2]; var p = xs(0); var code = kernel.spirv; code.length; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    let path = project.path("main.resin");
+    assert_eq!(
+        analysis
+            .hover(&path, source.find("p =").unwrap())
+            .unwrap()
+            .text,
+        "p: Ptr<int>"
+    );
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("code.length").unwrap())
+            .unwrap()
+            .text,
+        "code: Span<ubyte>"
+    );
+    let source = "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { kernel. };";
+    let project = Project::new(&[("main.resin", source)]);
+    let items = project.analyze().completions(
+        &project.path("main.resin"),
+        source.find("kernel. }").unwrap() + 7,
+    );
+    assert!(
+        items
+            .iter()
+            .any(|i| i.name == "spirv" && i.detail.contains("Span<ubyte>")),
+        "{items:?}"
+    );
+    let source = "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var alias = kernel; alias. };";
+    let project = Project::new(&[("main.resin", source)]);
+    let items = project.analyze().completions(
+        &project.path("main.resin"),
+        source.find("alias. }").unwrap() + 6,
+    );
+    assert!(items.iter().all(|i| i.name != "spirv"));
+}

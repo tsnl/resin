@@ -79,6 +79,7 @@ pub fn format_source(source: &str) -> Option<String> {
             }
         }
         let break_after = match node.kind() {
+            "lid" if node.parent().is_some_and(|p| p.kind() == "decorator") => true,
             "comment" => {
                 text.starts_with("//")
                     || tokens.get(i + 1).is_some_and(|next| {
@@ -161,6 +162,9 @@ fn trailing_comment(source: &str, tokens: &[Node<'_>], i: usize) -> bool {
 }
 
 fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
+    if left.kind() == "@" {
+        return false;
+    }
     let a = left.kind();
     let b = right.kind();
     if matches!(

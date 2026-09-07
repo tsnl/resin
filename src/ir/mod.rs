@@ -3,6 +3,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod instr;
+pub mod shader;
 pub mod types;
 pub mod value;
 
@@ -31,4 +32,6 @@ pub struct Module {
     /// Nominal definitions, indexed by [`TypeId`].
     pub types: Vec<TypeDef>,
     pub functions: Vec<Function>,
+    /// Decorated shader candidates and whether their static artifact is requested.
+    pub shaders: BTreeMap<FunctionId, shader::ShaderEntry>,
 }

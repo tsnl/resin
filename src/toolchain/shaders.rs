@@ -7,33 +7,22 @@ use std::{
 
 use crate::{
     backend::{Error, c::Shader, glsl},
-    ir::{Instr, Module},
+    ir::Module,
 };
 
 use super::{c, compile_glsl, io_error, write_output};
 
 pub fn build_shaders(module: &Module, compiler: &OsStr) -> Result<Vec<Shader>, Error> {
     let mut shaders: Vec<Shader> = Vec::new();
-    for instr in module
-        .functions
-        .iter()
-        .flat_map(|f| &f.blocks)
-        .flat_map(|b| &b.instrs)
-    {
-        let Instr::Shader { function, stage } = instr else {
-            continue;
-        };
-        if shaders
-            .iter()
-            .any(|shader| shader.function == *function && shader.stage.name() == stage.as_ref())
-        {
+    for (&function, entry) in &module.shaders {
+        if !entry.embedded {
             continue;
         }
-        let stage = stage.parse()?;
-        let source = glsl::emit_function(module, *function, stage)?;
+        let stage = entry.stage.parse()?;
+        let source = glsl::emit_function(module, function, stage)?;
         let bytes = cached(&source, stage, compiler)?;
         shaders.push(Shader {
-            function: *function,
+            function,
             stage,
             words: bytes
                 .chunks_exact(4)

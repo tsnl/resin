@@ -160,21 +160,23 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
 }
 
 #[test]
-fn shader_requires_a_named_function_and_a_literal_stage() {
+fn spirv_requires_a_decorated_function_declaration() {
     for source in [
-        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel); };",
-        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel, \"geometry\"); };",
-        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var name = \"compute\"; var code = shader(kernel, name); };",
-        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var alias = kernel; var code = shader(alias, \"compute\"); };",
-        "export { main }; extern \"stdlib.h\" def abs (i: int) -> int; def main() -> () = { var code = shader(abs, \"compute\"); };",
+        "def kernel(i: uint) -> uint = { i }; def main() = { var code = kernel.spirv; };",
+        "@geometry_shader def kernel(i: uint) -> uint = { i };",
+        "@compute_shader @vertex_shader def kernel(i: uint) -> uint = { i };",
+        "@compute_shader def kernel(i: int) -> int = { i };",
+        "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var alias = kernel; var code = alias.spirv; };",
+        "extern \"stdlib.h\" def abs(i: int) -> int; def main() = { var code = abs.spirv; };",
     ] {
-        assert!(error(source).contains("InvalidShader"), "{source}");
+        assert!(!error(source).is_empty(), "{source}");
     }
     let module = module(
-        "export { kernel, main }; def kernel (i: uint) -> uint = { i }; def main() -> () = { var code = shader(kernel, \"compute\"); };",
+        "export { main }; @compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
     assert_eq!(main.locals[1].ty, ir::Ty::shader());
+    assert_eq!(module.shaders.len(), 1);
     assert!(
         c::emit(&module, "main")
             .unwrap_err()
@@ -184,6 +186,6 @@ fn shader_requires_a_named_function_and_a_literal_stage() {
 }
 
 #[test]
-fn shader_cannot_be_shadowed_by_a_normal_function() {
-    assert!(error("def shader (n: int) -> int = { n + 1 };").contains("ReservedBuiltin"));
+fn shader_is_an_ordinary_available_function_name() {
+    module("def shader(n: int) -> int = { n + 1 };");
 }

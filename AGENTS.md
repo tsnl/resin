@@ -22,6 +22,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Explicit `_` holes opt into inference in local annotations and function results, including
   nested type positions. Keep parameters, type definitions, and foreign signatures fully explicit.
   Inference resolves dependency groups before IR lowering; never put inference variables in IR.
+- Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
+  Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
+  `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
+  from a runtime function alias. Keep shader definitions inline in examples.
+- Arrays and `Span<T>` use call syntax for checked indexing: `items(index)` returns `Ptr<T>`;
+  use `items(index).*` to read or write. Spans have `data` and `length` fields. Pointer arithmetic
+  is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic. The C ABI retains
+  pointer/length pairs; language-facing pipeline creation accepts spans.
 - Unions contain nominal structs and use module-wide u32 type IDs, not variant positions.
   `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix
   `?` returns early on error. Error holes collect the least union of propagated errors (`Never`

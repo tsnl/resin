@@ -54,6 +54,7 @@ pub(super) fn file(
                 params,
                 result,
                 body,
+                ..
             } = &stmt.val
             {
                 let mut scan = Scan::default();

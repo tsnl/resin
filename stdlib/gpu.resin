@@ -110,15 +110,15 @@ def gpu_host_to_device_pointer(gpu: Ptr<ResinGpu>, host: Ptr<ubyte>) -> Result<u
 	ok(device)
 };
 
-def gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<ubyte>, length: ulong) -> Result<Ptr<ResinPipeline>, RuntimeError> = {
+def gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Span<ubyte>) -> Result<Ptr<ResinPipeline>, RuntimeError> = {
 	var pipeline = Ptr<ResinPipeline>(ulong(0));
-	status(resin_gpu_create_compute_pipeline(gpu, code, length, &pipeline))?;
+	status(resin_gpu_create_compute_pipeline(gpu, code.data, code.length, &pipeline))?;
 	ok(pipeline)
 };
 
-def gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<ubyte>, vertex_length: ulong, fragment: Ptr<ubyte>, fragment_length: ulong) -> Result<Ptr<ResinPipeline>, RuntimeError> = {
+def gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<Ptr<ResinPipeline>, RuntimeError> = {
 	var pipeline = Ptr<ResinPipeline>(ulong(0));
-	status(resin_gpu_create_graphics_pipeline(gpu, vertex, vertex_length, fragment, fragment_length, &pipeline))?;
+	status(resin_gpu_create_graphics_pipeline(gpu, vertex.data, vertex.length, fragment.data, fragment.length, &pipeline))?;
 	ok(pipeline)
 };
 

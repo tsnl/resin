@@ -9,7 +9,7 @@ macro_rules! define_id {
     ) => {
         $(
             $(#[$attr])*
-            #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             $visibility struct $name(usize);
 
             impl $name {

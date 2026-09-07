@@ -18,6 +18,7 @@ pub(super) enum Symbol {
 #[derive(Clone)]
 pub(super) struct ValueBinding {
     pub(super) kind: ValueBindingKind,
+    pub(super) shader: bool,
     pub(super) ty: Option<Ty>,
     pub(super) initialization: Initialization,
 }
@@ -294,6 +295,7 @@ mod tests {
             .define_value(
                 "List".into(),
                 ValueBinding {
+                    shader: false,
                     kind: ValueBindingKind::Function(FunctionId::from_index(0)),
                     ty: None,
                     initialization: Initialization::Initialized,
@@ -314,6 +316,7 @@ mod tests {
             .define_value(
                 "x".into(),
                 ValueBinding {
+                    shader: false,
                     kind: ValueBindingKind::Function(FunctionId::from_index(0)),
                     ty: None,
                     initialization: Initialization::Initialized,
@@ -325,6 +328,7 @@ mod tests {
             .define_value(
                 "x".into(),
                 ValueBinding {
+                    shader: false,
                     kind: ValueBindingKind::Local(LocalId::from_index(0)),
                     ty: None,
                     initialization: Initialization::Initialized,

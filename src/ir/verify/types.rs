@@ -142,7 +142,10 @@ pub(super) fn ascribe(
     found: Ty,
     location: Location,
 ) -> Result<(), VerifyError> {
-    if expected == &found {
+    if expected == &found
+        || expected.span_record().as_ref() == Some(&found)
+        || found.span_record().as_ref() == Some(expected)
+    {
         return Ok(());
     }
     if let Ty::Defined { definition } = expected

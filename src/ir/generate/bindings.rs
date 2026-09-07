@@ -10,6 +10,7 @@ impl Generator {
     pub(super) fn gen_define(&mut self, name: &Ident, init: &Term) -> Result<(), GenerateError> {
         let local = self.alloc_local(Ty::Unit, Some(name.val.clone()));
         let binding = ValueBinding {
+            shader: false,
             kind: ValueBindingKind::Local(local),
             ty: None,
             initialization: Initialization::Initializing,
@@ -56,6 +57,7 @@ impl Generator {
         let ty = self.evaluator().ty(ann)?;
         let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
         let binding = ValueBinding {
+            shader: false,
             kind: ValueBindingKind::Local(local),
             ty: Some(ty),
             initialization: Initialization::Uninitialized,
@@ -140,7 +142,7 @@ impl Generator {
     }
 
     pub(super) fn check_binding_name(name: &Ident) -> Result<(), GenerateError> {
-        if matches!(name.val.as_ref(), "print" | "shader" | "ok" | "err") {
+        if matches!(name.val.as_ref(), "print" | "ok" | "err") {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::ReservedBuiltin {

@@ -105,7 +105,8 @@ impl TyperContext {
 
     pub fn type_field(&self, base: &Ty, name: &str) -> Result<FieldAccess, TypeError> {
         let converted = self.as_record(base)?;
-        let Ty::Record { fields } = converted.ty else {
+        let shape = converted.ty.span_record().unwrap_or(converted.ty);
+        let Ty::Record { fields } = shape else {
             return Err(TypeError::new(TypeErrorKind::ExpectedRecord {
                 found: base.clone(),
             }));
@@ -125,6 +126,14 @@ impl TyperContext {
     }
 
     pub fn type_call(&self, callee: &Ty, arg: &Ty) -> Result<Ty, TypeError> {
+        if let Ty::Span { element } | Ty::Array { element, .. } = self.body(callee)? {
+            if !arg.is_integer() {
+                return Err(TypeError::new(TypeErrorKind::ExpectedInteger {
+                    found: arg.clone(),
+                }));
+            }
+            return Ok(Ty::Pointer { pointee: element });
+        }
         let converted = self.as_function(callee)?;
         let Ty::Function { param, result } = converted.ty else {
             return Err(TypeError::new(TypeErrorKind::ExpectedFunction {
@@ -141,6 +150,13 @@ impl TyperContext {
     }
 
     pub fn type_builtin_call(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {
+        if matches!(
+            name,
+            "+" | "-" | "~" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^"
+        ) && args.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
+        {
+            return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
+        }
         let result = match (name, args) {
             ("print", [arg]) => self.type_print(arg)?,
             ("+" | "-" | "~", [arg]) => arg.clone(),
@@ -148,7 +164,6 @@ impl TyperContext {
                 self.as_bool(arg)?;
                 Ty::Bool
             }
-            ("+" | "-", [left @ Ty::Pointer { .. }, right]) if right.is_integer() => left.clone(),
             ("+" | "-" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^", [left, right]) => {
                 self.same(left, right)?;
                 left.clone()

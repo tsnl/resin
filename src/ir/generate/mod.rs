@@ -115,10 +115,54 @@ impl Generator {
                 name,
                 params,
                 result,
+                decorators,
                 ..
             } = &stmt.val
             {
                 self.declare_function(name, params, result)?;
+                for decorator in decorators {
+                    let stage = match decorator.val.as_ref() {
+                        "compute_shader" => "compute",
+                        "vertex_shader" => "vertex",
+                        "fragment_shader" => "fragment",
+                        _ => {
+                            return Err(GenerateError {
+                                span: decorator.span,
+                                kind: GenerateErrorKind::InvalidShader {
+                                    message: "unknown decorator".into(),
+                                },
+                            });
+                        }
+                    };
+                    let id = crate::ir::FunctionId::from_index(self.module.functions.len() - 1);
+                    if self.module.shaders.contains_key(&id) {
+                        return Err(GenerateError {
+                            span: decorator.span,
+                            kind: GenerateErrorKind::InvalidShader {
+                                message: "a function can have only one shader decorator".into(),
+                            },
+                        });
+                    }
+                    crate::ir::shader::validate(
+                        &self.typer,
+                        &self.module.functions[id.index()],
+                        stage,
+                    )
+                    .map_err(|message| GenerateError {
+                        span: decorator.span,
+                        kind: GenerateErrorKind::InvalidShader {
+                            message: message.into(),
+                        },
+                    })?;
+                    self.scopes.lookup_value_mut(&name.val).unwrap().shader = true;
+                    self.module.shaders.insert(
+                        id,
+                        crate::ir::shader::ShaderEntry {
+                            stage: stage.into(),
+                            embedded: false,
+                        },
+                    );
+                }
             }
             if let StmtKind::ForeignFunction {
                 header,

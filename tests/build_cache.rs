@@ -75,10 +75,10 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         r#"
         export { main };
         import { "helper.resin" };
-        def kernel (i: uint) -> uint = { pixel(i) };
+        @compute_shader def kernel(i: uint) -> uint = { pixel(i) };
         def main() -> () = {
-            var a = shader(kernel, "compute");
-            var b = shader(kernel, "compute");
+            var a = kernel.spirv;
+            var b = kernel.spirv;
             print("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),));
         };
         "#,

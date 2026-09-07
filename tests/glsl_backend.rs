@@ -126,7 +126,7 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Compute,
         ),
         (
-            "export { kernel }; struct Data { wide: ulong, values: Ptr<uint> }; def kernel (i: uint, root: Ptr<Data>) -> () = { var p = Ptr<uint> (ulong (root.values)); var q = p + i; q.* := uint (3); root.wide := ulong (4294967297); };",
+            "export { kernel }; struct Data { wide: ulong, values: Ptr<uint> }; def kernel (i: uint, root: Ptr<Data>) -> () = { var p = Ptr<uint> (ulong (root.values)); var q = (Span<uint> { data = p, length = ulong(64) })(i); q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (

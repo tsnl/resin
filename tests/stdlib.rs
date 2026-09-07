@@ -126,7 +126,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
             var image = image_read_png(Ptr<ubyte>(&path), 0)?;
             defer image_free(image.pixels);
             ok(if (image.width == uint(1) && image.height == uint(1) && image.channels == uint(4)
-                && image.pixels.* == ubyte(1) && (image.pixels + 3).* == ubyte(255)) { 0 } else { 1 })
+                && image.pixels.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
         };
         "#,
         "",
@@ -369,4 +369,41 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stdout, b"cleanup\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: InputReadError"));
+}
+
+#[test]
+fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
+    let output = run(
+        r#"
+        export { main };
+        import { "std/gpu.resin" };
+        def main() -> Result<int, _> = {
+            var a = [ubyte(1), ubyte(2)];
+            var b = [ubyte(3), ubyte(4), ubyte(5)];
+            var vertex = Span<ubyte> { data = Ptr<ubyte>(&a), length = ulong(2) };
+            var fragment = Span<ubyte> { data = Ptr<ubyte>(&b), length = ulong(3) };
+            var gpu = Ptr<ResinGpu>(ulong(0));
+            var compute = gpu_create_compute_pipeline(gpu, vertex)?;
+            var graphics = gpu_create_graphics_pipeline(gpu, vertex, fragment)?;
+            ok(if (ulong(compute) == ulong(1) && ulong(graphics) == ulong(2)) { 0 } else { 1 })
+        };
+    "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static ResinStatus mock_compute(ResinGpu *gpu, const uint8_t *data, size_t length, ResinPipeline **out) {
+            assert(!gpu && length == 2 && data[0] == 1 && data[1] == 2);
+            *out = (ResinPipeline *)(uintptr_t)1;
+            return RESIN_STATUS_SUCCESS;
+        }
+        static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
+            assert(!gpu && vertex_length == 2 && fragment_length == 3 && vertex[1] == 2 && fragment[2] == 5);
+            *out = (ResinPipeline *)(uintptr_t)2;
+            return RESIN_STATUS_SUCCESS;
+        }
+        #define resin_gpu_create_compute_pipeline mock_compute
+        #define resin_gpu_create_graphics_pipeline mock_graphics
+    "#,
+    );
+    success(&output);
 }

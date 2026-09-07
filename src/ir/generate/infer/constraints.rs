@@ -124,6 +124,22 @@ impl Checker<'_> {
             }
             Constraint::Field(input, name, out) => {
                 let shape = self.shape(input, true, span)?;
+                if let Type::Node(Head::Function, _) = &shape
+                    && name.as_ref() == "spirv"
+                {
+                    self.solver.unify(out, &Ty::shader().into(), span)?;
+                    return Ok(true);
+                }
+                if let Type::Node(Head::Span, children) = &shape {
+                    let ty = match name.as_ref() {
+                        "data" => Type::pointer(children[0].clone()),
+                        "length" => Ty::UInt64.into(),
+                        _ => return Err(error(span, "unknown Span field")),
+                    };
+                    self.solver.unify(out, &ty, span)?;
+                    return Ok(true);
+                }
+
                 match shape {
                     Type::Variable(_) => return Ok(false),
                     Type::Node(Head::Record(names), children) => {
@@ -138,6 +154,18 @@ impl Checker<'_> {
             }
             Constraint::Call(func, arg, out) => {
                 let shape = self.shape(func, false, span)?;
+                if let Type::Node(Head::Span | Head::Array(_), children) = &shape {
+                    self.solver
+                        .unify(out, &Type::pointer(children[0].clone()), span)?;
+                    let Some(index) = self.solver.resolve(arg) else {
+                        return Ok(false);
+                    };
+                    if !index.is_integer() {
+                        return Err(error(span, "index must be an integer"));
+                    }
+                    return Ok(true);
+                }
+
                 match shape {
                     Type::Variable(_) => return Ok(false),
                     Type::Node(Head::Function, children) => {
@@ -170,6 +198,17 @@ impl Checker<'_> {
                 return Ok(complete);
             }
             Constraint::Ascribe(from, to) => {
+                if let Type::Node(Head::Span, children) = self.solver.head(to) {
+                    if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
+                        return self.solver.unify(from, to, span).map(|_| true);
+                    }
+                    let repr = Type::record(vec![
+                        ("data".into(), Type::pointer(children[0].clone())),
+                        ("length".into(), Ty::UInt64.into()),
+                    ]);
+                    self.solver.unify(from, &repr, span)?;
+                    return Ok(true);
+                }
                 if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {
                     return self.solver.coerce(from, to, span);
                 }
@@ -224,14 +263,7 @@ impl Checker<'_> {
                         self.solver.unify(out, first, span)?;
                     }
                     if let [left, right] = args.as_slice() {
-                        let pointer_op = matches!(name.as_ref(), "+" | "-");
-                        let left_shape = self.solver.head(left);
-                        if pointer_op && matches!(left_shape, Type::Variable(_)) {
-                            return Ok(false);
-                        }
-                        if !(pointer_op && matches!(left_shape, Type::Node(Head::Pointer, _))) {
-                            self.solver.unify(left, right, span)?;
-                        }
+                        self.solver.unify(left, right, span)?;
                     }
                 }
                 let Some(args) = args

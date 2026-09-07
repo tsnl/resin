@@ -129,12 +129,30 @@ impl Ty {
     }
 
     pub fn shader() -> Self {
+        Self::Span {
+            element: Box::new(Self::UInt8),
+        }
+    }
+
+    pub(crate) fn shader_properties() -> Self {
         Self::Record {
+            fields: vec![RecordField {
+                name: "spirv".into(),
+                ty: Self::shader(),
+            }],
+        }
+    }
+
+    pub fn span_record(&self) -> Option<Self> {
+        let Self::Span { element } = self else {
+            return None;
+        };
+        Some(Self::Record {
             fields: vec![
                 RecordField {
                     name: "data".into(),
                     ty: Self::Pointer {
-                        pointee: Box::new(Self::UInt8),
+                        pointee: element.clone(),
                     },
                 },
                 RecordField {
@@ -142,7 +160,7 @@ impl Ty {
                     ty: Self::UInt64,
                 },
             ],
-        }
+        })
     }
 
     pub fn pointer_cast(&self, to: &Self) -> bool {

@@ -4,7 +4,7 @@ use crate::ir::{Conv, Instr, Ty, TypeError, TypeErrorKind};
 use super::scope::{Initialization, ValueBindingKind};
 use super::{GenerateError, GenerateErrorKind, Generator};
 
-enum Operand {
+pub(super) enum Operand {
     Value(Ty),
     Place(Ty),
 }
@@ -46,6 +46,32 @@ impl Generator {
         base: &Term,
         name: &Ident,
     ) -> Result<Ty, GenerateError> {
+        if name.val.as_ref() == "spirv"
+            && let TermKind::Var {
+                name: function_name,
+            } = &base.val
+        {
+            let binding = self.resolve_value(function_name)?;
+            if let ValueBindingKind::Function(function) = binding.kind {
+                let entry =
+                    self.module
+                        .shaders
+                        .get_mut(&function)
+                        .ok_or_else(|| GenerateError {
+                            span,
+                            kind: GenerateErrorKind::InvalidShader {
+                                message: "`.spirv` requires a function with a shader decorator"
+                                    .into(),
+                            },
+                        })?;
+                entry.embedded = true;
+                let stage = entry.stage.clone();
+                self.scopes
+                    .record_fields(name, &Ty::shader_properties(), &self.typer);
+                self.emit(Instr::Shader { function, stage });
+                return Ok(Ty::shader());
+            }
+        }
         self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
         match self.gen_field_operand(span, base, name)? {
@@ -71,7 +97,7 @@ impl Generator {
 
     // Lower once, preserving an address when available. Speculatively generating
     // a place and then retrying as a value can evaluate side effects twice.
-    fn gen_operand(&mut self, term: &Term) -> Result<Operand, GenerateError> {
+    pub(super) fn gen_operand(&mut self, term: &Term) -> Result<Operand, GenerateError> {
         match &term.val {
             TermKind::Var { name } => {
                 let binding = self.resolve_binding(name, false)?;
@@ -81,6 +107,12 @@ impl Generator {
                 let ty = self.binding_ty(name, &binding)?;
                 self.emit_binding_address(&binding);
                 Ok(Operand::Place(ty))
+            }
+            TermKind::Field { base, name }
+                if name.val.as_ref() == "spirv"
+                    && matches!(&base.val, TermKind::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| matches!(binding.kind, ValueBindingKind::Function(_)))) =>
+            {
+                self.gen_term(term, None).map(Operand::Value)
             }
             TermKind::Field { base, name } => {
                 self.check_place_initialized(base)?;
@@ -149,7 +181,7 @@ impl Generator {
         }
     }
 
-    fn check_place_initialized(&self, term: &Term) -> Result<(), GenerateError> {
+    pub(super) fn check_place_initialized(&self, term: &Term) -> Result<(), GenerateError> {
         match &term.val {
             TermKind::Var { name } => {
                 self.resolve_value(name)?;

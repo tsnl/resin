@@ -39,7 +39,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         struct Data { marker: uint, wide: ulong, amount: float32 };
         struct Payload { tag: uint, data: Data, end: uint };
         struct Params { count: uint, values: Ptr<Payload>, tail: float32 };
-        def at (values: Ptr<Payload>, index: uint) -> Ptr<Payload> = { values + index };
+        def at (values: Ptr<Payload>, index: uint) -> Ptr<Payload> = { (Span<Payload> { data = values, length = ulong(67) })(index) };
         def bump (p: Ptr<Payload>, index: uint) -> () = {
             var old = p.*;
             p.* := Payload {
@@ -50,8 +50,8 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         };
         def kernel (index: uint, root: Ptr<Params>) -> () = {
             if (index < root.count) {
-                var p = (at(root.values, index) + 1) + -1;
-                bump(p - uint (0), index)
+                var p = at(root.values, index);
+                bump(p, index)
             } else { () }
         };
         def main () -> int = {
@@ -161,7 +161,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lib/particles.resin");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
     let module = resin::ir::generate_program(&resin::ast::load(&source).unwrap()).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
@@ -185,6 +185,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
         dt: f32,
         radius: f32,
         particles: u64,
+        particle_length: u64,
     }
     let initial = Particle {
         x: -0.5,
@@ -218,6 +219,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
             dt: 0.5,
             radius: 0.2,
             particles: particles.device_pointer(),
+            particle_length: 1,
         });
         let mut image = gpu.create_image(64, 64).unwrap();
         let pixels = gpu.malloc(64 * 64 * 4, 4, ResinMemory::Readback).unwrap();
@@ -256,13 +258,13 @@ fn fragment_shaders_read_typed_root_parameters() {
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lib/triangle.resin");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/triangle.resin");
     let mut ast = resin::ast::load(&source).unwrap();
     let file = &mut ast.modules.last_mut().unwrap().file;
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
     file.stmts.extend(
         support::parse(
-            "export { fragment }; def fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
+            "export { fragment }; @fragment_shader def fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
         )
         .stmts,
     );
@@ -361,7 +363,7 @@ fn shader_defer_unwinds_errors_on_device() {
         };
         def kernel(i: uint, root: Ptr<Root>) = {
             if (i < root.count) {
-                var p = root.pixels + i;
+                var p = (Span<uint> { data = root.pixels, length = ulong(67) })(i);
                 p.* := uint(0);
                 match (work(i, p)) {
                     ok(n) => { p.* := p.* + n; },
@@ -509,4 +511,29 @@ fn invalid_images_do_not_replace_existing_files() {
     assert!(image_write_png(&output, 2, 2, 4, &[]).is_err());
     assert_eq!(std::fs::read(&output).unwrap(), b"keep me");
     assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn array_indexing_and_helper_bounds_failures_stop_the_invocation() {
+    compute_values(
+        r#"export { kernel };
+        def read(i: uint) -> uint = { var values = [uint(10), uint(20), uint(30)]; values(i).* };
+        @compute_shader def kernel(i: uint) -> uint = { read(i) + uint(1) };"#,
+        |i| if i < 3 { (i + 1) * 10 + 1 } else { u32::MAX },
+    );
+}
+
+#[test]
+fn span_write_bounds_failures_stop_callers_before_later_side_effects() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        def write(i: uint, pixels: Span<uint>) = { pixels(i).* := uint(42); };
+        @compute_shader def kernel(i: uint, root: Ptr<Root>) = {
+            var pixels = Span<uint> { data = root.pixels, length = ulong(3) };
+            write(i, pixels);
+            pixels(i).* := uint(43);
+        };"#,
+        |i| if i < 3 { 43 } else { u32::MAX },
+    );
 }

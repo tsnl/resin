@@ -34,6 +34,17 @@ impl<'a> Types<'a> {
                 self.records.push(ty.clone());
             }
             Ty::Unit | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 => {}
+            Ty::Span { element } => {
+                self.buffer(element)?;
+                self.records.push(ty.clone());
+            }
+            Ty::Array { element, length } => {
+                if *length == 0 {
+                    return Err(Error("shader arrays must not be empty".into()));
+                }
+                self.register(element)?;
+                self.records.push(ty.clone());
+            }
             Ty::Pointer { pointee } => {
                 self.buffer(pointee)?;
             }
@@ -111,6 +122,14 @@ impl<'a> Types<'a> {
                 values.extend(ty.payloads().unwrap().iter().map(|(_, ty)| self.zero(ty)));
                 format!("{}({})", self.name(ty), values.join(", "))
             }
+            Ty::Span { .. } => format!("{}(uint64_t(0), uint64_t(0))", self.name(ty)),
+            Ty::Array { element, length } => format!(
+                "{}({}[{}]({}))",
+                self.name(ty),
+                self.name(element),
+                length,
+                vec![self.zero(element); *length].join(", ")
+            ),
             Ty::Record { fields } => {
                 let fields = fields
                     .iter()
@@ -149,6 +168,10 @@ impl<'a> Types<'a> {
                         "{} value;",
                         self.name(self.module.types[definition.index()].body().unwrap())
                     ),
+                    Ty::Span { .. } => "uint64_t f0; uint64_t f1;".into(),
+                    Ty::Array { element, length } => {
+                        format!("{} items[{length}];", self.name(element))
+                    }
                     Ty::Record { fields } if fields.is_empty() => "uint empty;".into(),
                     Ty::Record { fields } => fields
                         .iter()

@@ -96,6 +96,7 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             params,
             result,
             body,
+            decorators,
         } => list_sp(
             "def",
             stmt.span,
@@ -111,6 +112,13 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 ),
                 sexp_typespec(result),
                 sexp_term(body),
+                list(
+                    "decorators",
+                    decorators
+                        .iter()
+                        .map(|name| symbol(name.val.as_ref()))
+                        .collect(),
+                ),
             ],
         ),
         StmtKind::Define { name, init } => list_sp(

@@ -239,3 +239,27 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
     assert_eq!(fields[0].ty, Ty::Int32);
     assert_eq!(fields[1].ty, Ty::Bool);
 }
+
+#[test]
+fn span_construction_and_indexing_infer_element_and_pointer_types() {
+    assert_eq!(
+        result(
+            "def get(p: Ptr<int>) -> _ = { var s = Span<_> { data = p, length = ulong(1) }; s(0) };",
+            "get"
+        ),
+        Ty::Pointer {
+            pointee: Box::new(Ty::Int32)
+        }
+    );
+    assert_eq!(
+        result("def get() -> _ = { var xs = [1, 2]; xs(1).* };", "get"),
+        Ty::Int32
+    );
+    assert_eq!(
+        result(
+            "@compute_shader def kernel(i: uint) -> _ = { i }; def artifact() -> _ = { kernel.spirv };",
+            "artifact"
+        ),
+        Ty::shader()
+    );
+}

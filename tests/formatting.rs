@@ -180,3 +180,11 @@ fn repository_sources_preserve_syntax_and_are_idempotent() {
         "expected coverage of the source corpus, got {count}"
     );
 }
+
+#[test]
+fn shader_decorators_stay_on_their_own_lines() {
+    check(
+        "@compute_shader def kernel(i:uint)->uint={i};",
+        "@compute_shader\ndef kernel(i: uint) -> uint = {\n\ti\n};\n",
+    );
+}

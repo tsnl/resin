@@ -11,8 +11,10 @@ pub struct TypeError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeErrorKind {
     InvalidUnion,
+    PointerArithmetic,
     EmptyArrayNeedsElementType,
     TypeMismatch { expected: Ty, found: Ty },
+    ExpectedInteger { found: Ty },
     ExpectedBoolean { found: Ty },
     ExpectedPointer { found: Ty },
     ExpectedRecord { found: Ty },
@@ -37,6 +39,9 @@ impl TypeError {
 
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.kind == TypeErrorKind::PointerArithmetic {
+            return f.write_str("pointer arithmetic is not allowed; index a Span or explicitly convert the pointer to ulong for byte arithmetic");
+        }
         write!(f, "type error: {:?}", self.kind)
     }
 }

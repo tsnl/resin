@@ -40,6 +40,20 @@ fn sexp_module(module: &Module) -> SExp {
             ],
         ));
     }
+    for (function, entry) in &module.shaders {
+        items.push(list(
+            "shader-entry",
+            vec![
+                symbol(names.functions[function.index()].as_ref()),
+                symbol(entry.stage.as_ref()),
+                symbol(if entry.embedded {
+                    "embedded"
+                } else {
+                    "candidate"
+                }),
+            ],
+        ));
+    }
     for (index, function) in module.functions.iter().enumerate() {
         items.push(sexp_function(&names, index, function));
     }

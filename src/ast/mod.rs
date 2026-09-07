@@ -158,6 +158,7 @@ pub enum StmtKind {
         result: Type,
     },
     Function {
+        decorators: Vec<Ident>,
         name: Ident,
         params: Vec<(Ident, Type)>,
         result: Type,

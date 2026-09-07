@@ -548,6 +548,11 @@ impl<'a> AstGen<'a> {
             .unwrap_or_else(|| self.hole(node));
         Spanned::new(
             StmtKind::Function {
+                decorators: node
+                    .children_by_field_name("decorator", &mut node.walk())
+                    .filter_map(|n| n.child_by_field_name("name"))
+                    .map(|n| self.ident(n))
+                    .collect(),
                 name,
                 params,
                 result,

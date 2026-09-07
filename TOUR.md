@@ -264,19 +264,22 @@ the extension builds separately from the main Cargo workspace.
 ## 4. Follow a shader into the runtime
 
 Read [examples/gradient.resin](examples/gradient.resin) for compute, then
-[examples/triangle.resin](examples/triangle.resin) and
-[its shader functions](examples/lib/triangle.resin) for graphics. To inspect
+[examples/triangle.resin](examples/triangle.resin) for graphics. Each example keeps
+its decorated shader entries and ordinary helpers alongside its host code. To inspect
 a shader without running a Vulkan program:
 
 ```sh
 cargo run -- examples/gradient.resin:kernel --output glsl
 ```
 
-`shader(function, "stage")` is the compiler-mediated step. It becomes an IR
-instruction that [toolchain/shaders.rs](src/toolchain/shaders.rs) discovers.
-That code emits GLSL, invokes `glslc`, caches the result, and supplies SPIR-V
-for embedding in the generated C. The runtime receives bytes, not a host
-function pointer or a source-file path.
+`@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
+shader entry declarations. [ir/shader.rs](src/ir/shader.rs) defines their metadata
+and signature contracts. Decorated functions and their unannotated helpers remain
+host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
+[toolchain/shaders.rs](src/toolchain/shaders.rs) enumerates those declaration
+requests, emits GLSL, invokes `glslc`, and supplies cached SPIR-V for embedding in C.
+No runtime function-value analysis is involved. The runtime receives bytes, not a
+host function pointer or source-file path.
 
 [backend/glsl/mod.rs](src/backend/glsl/mod.rs) collects reachable shader
 functions. [entry.rs](src/backend/glsl/entry.rs) adapts regular Resin function
@@ -308,7 +311,10 @@ Inside the runtime, the useful landmarks are:
 - [allocator/range.rs](resin-runtime/src/allocator/range.rs): aligned
   suballocation using a sorted list of free ranges.
 
-Buffers make the host/device boundary concrete. The host allocates memory,
+Buffers make the host/device boundary concrete. `Span<T>` pairs an address with
+a length; both spans and arrays return a checked element pointer through `buffer(index)`.
+Use `buffer(index).*` to read or write it. Raw pointer arithmetic requires an explicit
+conversion to `ulong` and operates on byte addresses. The host allocates memory,
 writes root data, and passes its device address when dispatching or drawing.
 Shader entry wrappers interpret that root according to their supported
 interface. [backend/layout.rs](src/backend/layout.rs) keeps supported buffer

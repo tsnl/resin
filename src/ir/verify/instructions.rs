@@ -62,7 +62,10 @@ pub(super) fn check_instr(
                 })
             })?;
             if target.foreign.is_some()
-                || !matches!(stage.as_ref(), "compute" | "vertex" | "fragment")
+                || module
+                    .shaders
+                    .get(function)
+                    .is_none_or(|entry| entry.stage.as_ref() != stage.as_ref() || !entry.embedded)
             {
                 return Err(location.error(VerifyErrorKind::InvalidShader));
             }
@@ -169,7 +172,18 @@ pub(super) fn check_instr(
             expect_type(*param, arg, location)?;
             stack.push(*result);
         }
-        Instr::CallBuiltin { params, result, .. } => {
+        Instr::CallBuiltin {
+            name,
+            params,
+            result,
+        } => {
+            if matches!(
+                name.as_ref(),
+                "+" | "-" | "~" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^"
+            ) && params.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
+            {
+                return Err(location.error(VerifyErrorKind::PointerArithmetic));
+            }
             for param in params {
                 check_type(&module.types, param, location)?;
             }
@@ -243,6 +257,9 @@ fn project_static(
         Ty::Defined { .. } => {
             project_static(table, shape(table, source, location)?, index, location)
         }
+        span @ Ty::Span { .. } => {
+            project_static(table, span.span_record().unwrap(), index, location)
+        }
         Ty::Record { fields } => fields
             .get(index)
             .map(|field| field.ty.clone())
@@ -270,6 +287,7 @@ fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
         },
         Ty::Defined { .. } => project_dynamic(table, shape(table, source, location)?, location),
+        Ty::Span { element } => Ok(Ty::Pointer { pointee: element }),
         Ty::Array { element, .. } => Ok(*element),
         found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
     }

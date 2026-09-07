@@ -1,0 +1,53 @@
+==================
+Shader decorator and static artifact
+==================
+
+@compute_shader
+def kernel(i: uint) -> uint = { i };
+def main() = { var code = kernel.spirv; };
+
+---
+
+(source_file
+  (function_definition
+    (decorator
+      (lid))
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (block_body
+      (statement
+        (define
+          (term_define
+            (lid)
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (lid))
+                      (field_access
+                        (lid)))))))))))))
