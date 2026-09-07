@@ -59,6 +59,61 @@ def positive(value: float32) -> float32 = {
 	}
 };
 
+// Approximate settled speed percentiles: 5/25/50/75/95% at 20/45/65/115/220
+// units per simulation second. Fixed anchors keep colors stable across frames
+// and reseeds. Interpolate squared speeds to avoid a square root per vertex.
+def speed_heat(squared_speed: float32) -> float32 = {
+	var heat = if (squared_speed < 2025.0f) {
+		0.25f * (squared_speed - 400.0f) / 1625.0f
+	} else {
+		if (squared_speed < 4225.0f) {
+			0.25f + 0.25f * (squared_speed - 2025.0f) / 2200.0f
+		} else {
+			if (squared_speed < 13225.0f) {
+				0.5f + 0.25f * (squared_speed - 4225.0f) / 9000.0f
+			} else {
+				0.75f + 0.25f * (squared_speed - 13225.0f) / 35175.0f
+			}
+		}
+	};
+	if (heat < 0.0f) {
+		0.0f
+	} else {
+		if (heat > 1.0f) {
+			1.0f
+		} else {
+			heat
+		}
+	}
+};
+
+def heat_color(heat: float32) -> Color = {
+	// Blue, cyan, warm yellow, orange, coral red. These are albedo colors;
+	// the fragment shader applies lighting and distance fog afterwards.
+	var colors = [
+		Color { r = 0.16f, g = 0.30f, b = 0.90f, a = 1.0f },
+		Color { r = 0.08f, g = 0.75f, b = 0.82f, a = 1.0f },
+		Color { r = 0.95f, g = 0.88f, b = 0.38f, a = 1.0f },
+		Color { r = 0.98f, g = 0.46f, b = 0.12f, a = 1.0f },
+		Color { r = 0.88f, g = 0.10f, b = 0.16f, a = 1.0f },
+	];
+	var scaled = heat * 4.0f;
+	var segment = if (scaled < 3.0f) {
+		int(scaled)
+	} else {
+		3
+	};
+	var blend = scaled - float32(segment);
+	var low = colors(segment).*;
+	var high = colors(segment + 1).*;
+	Color {
+		r = low.r + (high.r - low.r) * blend,
+		g = low.g + (high.g - low.g) * blend,
+		b = low.b + (high.b - low.b) * blend,
+		a = 1.0f,
+	}
+};
+
 @vertex_shader
 def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 	var particle = particle_index(index);
@@ -82,8 +137,8 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 		nx := xs(rim).*;
 		ny := ys(rim).*;
 	};
-	var speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
-	var heat = speed / (speed + 4000.0f);
+	var squared_speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
+	var heat = speed_heat(squared_speed);
 	var distance = positive(1.0f + depth * 0.025f);
 	var visibility = 1.0f / (1.0f + 0.4f * distance * distance);
 	Vertex {
@@ -120,12 +175,12 @@ def fragment(color: Color) -> Color = {
 	specular := specular * specular;
 	var light = 0.16f + 0.64f * diffuse;
 	var shine = 0.2f * specular;
-	var heat = color.b;
+	var albedo = heat_color(color.b);
 	var fog = color.a;
 	Color {
-		r = 0.004f * (1.0f - fog) + ((0.12f + 0.88f * heat) * light + shine) * fog,
-		g = 0.008f * (1.0f - fog) + ((0.4f + 0.5f * heat) * light + shine) * fog,
-		b = 0.02f * (1.0f - fog) + ((1.0f - 0.7f * heat) * light + shine) * fog,
+		r = 0.004f * (1.0f - fog) + (albedo.r * light + shine) * fog,
+		g = 0.008f * (1.0f - fog) + (albedo.g * light + shine) * fog,
+		b = 0.02f * (1.0f - fog) + (albedo.b * light + shine) * fog,
 		a = 1.0f,
 	}
 };

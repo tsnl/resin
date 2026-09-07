@@ -744,13 +744,20 @@ resulting executable does not. The PNG demos remain headless.
 
 `particles.resin` seeds **1,000,000 particles** with pseudorandom 3D positions and velocities,
 then advects them through a Lorenz attractor field on the GPU. A slowly orbiting camera shows
-the two swirling lobes. Small sphere billboards shift from blue to gold as particles accelerate,
+the two swirling lobes. Small sphere billboards use a blue → cyan → yellow → orange → red speed heatmap,
 with smooth per-pixel normals, an upper-left light, and specular highlights. Perspective size
 and distance fog distinguish near and far particles. Each sphere uses an eight-triangle octagon
 (24 million vertices per frame); the silhouette is approximate, and overlaps still follow draw
 order because the renderer has no depth buffer. Compute and graphics share a 24 MB particle
 buffer, with constant-time vertex indexing and 15,625 compute workgroups per frame. Pipelines
 and allocations are reused.
+
+The heatmap anchors are **20, 45, 65, 115, and 220 units per simulation second**. These
+approximate the settled cloud's 5th, 25th, 50th, 75th, and 95th speed percentiles, sampled
+with 50,000 particles across three seeds at frames 400, 1,000, and 2,000. Colors interpolate
+between squared-speed anchors and clamp outside the range, keeping the palette useful
+without letting rare fast particles stretch it. The scale stays fixed across frames and
+reseeds; initial random velocities fall in the blue end. Lighting and fog modify brightness.
 
 Press **Space** to pause/resume, **R** to reseed the cloud, and **Escape** to quit. The initial
 seed is reproducible; each reseed starts a different cloud. The 1280×800 offscreen image scales
