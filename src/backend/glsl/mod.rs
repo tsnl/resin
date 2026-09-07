@@ -94,9 +94,7 @@ pub(crate) fn emit_verified(
         types.register(&function.result)?;
         for ty in analysis[index].inputs.iter().flatten() {
             if matches!(ty, Ty::Function { .. }) {
-                return Err(Error(
-                    "shader profile cannot carry addresses or functions across block edges".into(),
-                ));
+                continue; // Direct functions are carried symbolically by the emitter.
             }
             if let Ty::Pointer { pointee } = ty {
                 types.register(pointee)?;

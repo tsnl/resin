@@ -1,0 +1,24 @@
+export { kernel, main };
+struct State { counter: uint, result: uint };
+struct Pair { a: uint, b: uint };
+def touch(p: Ptr<State>) -> uint = { var old = p.counter; p.counter := old + 1I; old };
+def choose(p: Ptr<State>) -> Ptr<uint> = { touch(p); &p.result };
+def identity(n: uint) -> uint = { n };
+def kernel(i: uint, root: Ptr<State>) = {
+    if (i == 0I) {
+        var x = 0I;
+        x := if (i == 0I) { 7I } else { 8I };
+        var flag = 1 == 2;
+        flag := i == 0I && touch(root) == 0I;
+        var values = [0I, 0I];
+        values(0).* := if (flag) { 11I } else { 12I };
+        var pair = Pair { b = if (flag) { touch(root) } else { 99I }, a = touch(root) };
+        choose(root).* := identity(if (flag) { touch(root) + 14I } else { 99I });
+        root.result := if (x == 7I && flag && values(0).* == 11I && pair.a == 2I && pair.b == 1I && root.counter == 5I && root.result == 18I) { 42I } else { 99I };
+    };
+};
+def main() -> int = {
+    var root = State { counter = 0I, result = 0I };
+    kernel(0I, &root);
+    if (root.result == 42I) { 0 } else { 1 }
+};
