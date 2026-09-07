@@ -6,50 +6,82 @@ import {
 	"std/graphics.resin",
 };
 
-struct Particle { x: float32, y: float32, vx: float32, vy: float32, color: Color };
-struct Params { count: uint, dt: float32, radius: float32, particles: Span<Particle> };
+struct Particle { x: float32, y: float32, z: float32, vx: float32, vy: float32, vz: float32 };
+struct Params {
+	count: uint,
+	dt: float32,
+	yaw_cos: float32,
+	yaw_sin: float32,
+	aspect: float32,
+	radius: float32,
+	particles: Span<Particle>,
+};
 
-def advance(p: Ptr<Particle>, dt: float32) -> () = {
-	p.x := p.x + p.vx * dt;
-	p.y := p.y + p.vy * dt;
-	if (p.x > 0.9f || p.x < -0.9f) {
-		p.vx := -p.vx;
-	};
-	if (p.y > 0.9f || p.y < -0.9f) {
-		p.vy := -p.vy;
-	};
+// Relax the initial random velocities toward the Lorenz attractor's flow.
+// Two small, fixed substeps keep the simulation stable, independently of camera motion.
+def advance(p: Particle, dt: float32) -> Particle = {
+	var vx = 0.15f * p.vx + 0.85f * (10.0f * (p.y - p.x));
+	var vy = 0.15f * p.vy + 0.85f * (p.x * (28.0f - p.z) - p.y);
+	var vz = 0.15f * p.vz + 0.85f * (p.x * p.y - 2.666667f * p.z);
+	Particle {
+		x = p.x + vx * dt,
+		y = p.y + vy * dt,
+		z = p.z + vz * dt,
+		vx = vx,
+		vy = vy,
+		vz = vz,
+	}
 };
 
 @compute_shader
 def kernel(index: uint, root: Ptr<Params>) -> () = {
 	if (index < root.count) {
-		advance(root.particles(index), root.dt)
+		var p = root.particles(index);
+		p.* := advance(advance(p.*, root.dt), root.dt);
 	}
 };
 
 @vertex_shader
 def vertex(index: int, root: Ptr<Params>) -> Vertex = {
-	var particle = 0;
-	var corner = index;
-	while (corner >= 3) {
-		corner := corner - 3;
-		particle := particle + 1;
+	// Every index in this three-million-vertex draw is exactly representable as float32.
+	// Truncation divides by three in constant time; no per-particle search loop.
+	var particle = int(float32(index) / 3.0f);
+	var corner = index - particle * 3;
+	var p = root.particles(particle).*;
+	var depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
+	var perspective = 1.0f / (1.0f + depth * 0.012f);
+	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036f;
+	var y = ((p.z - 25.0f) * 0.9f + depth * 0.22f) * 0.036f;
+	var dx = (p.vx * root.yaw_cos + p.vy * root.yaw_sin) * 0.000025f;
+	var dy = (p.vz * 0.9f + (-p.vx * root.yaw_sin + p.vy * root.yaw_cos) * 0.22f) * 0.000025f;
+	// A tiny triangle stretched along the projected velocity makes a moving point readable.
+	var ax = if (dx < 0.0f) {
+		-dx
+	} else {
+		dx
 	};
-	var p = root.particles(particle);
-	var dx = 0.0f;
-	var dy = -root.radius;
+	var ay = if (dy < 0.0f) {
+		-dy
+	} else {
+		dy
+	};
+	var width = root.radius / (ax + ay + 0.0001f);
+	var side_x = -dy * width;
+	var side_y = dx * width + root.radius * 0.25f;
 	if (corner == 1) {
-		dx := -root.radius;
-		dy := root.radius;
+		x := x - dx + side_x;
+		y := y - dy + side_y;
 	} else {
 		if (corner == 2) {
-			dx := root.radius;
-			dy := root.radius;
+			x := x - dx - side_x;
+			y := y - dy - side_y;
 		}
 	};
+	var speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
+	var heat = speed / (speed + 4000.0f);
 	Vertex {
-		position = Position { x = p.x + dx, y = p.y + dy, z = 0.0f, w = 1.0f },
-		color = p.color,
+		position = Position { x = x * perspective * root.aspect, y = -y * perspective, z = 0.0f, w = 1.0f },
+		color = Color { r = 0.12f + 0.88f * heat, g = 0.4f + 0.5f * heat, b = 1.0f - 0.7f * heat, a = 1.0f },
 	}
 };
 
@@ -58,83 +90,102 @@ def fragment(color: Color) -> Color = {
 	color
 };
 
-def initialize(particles: Span<Particle>) -> () = {
+// Host-only xorshift32: reproducible random positions and independent velocities.
+def random(state: Ptr<uint>) -> float32 = {
+	var x = state.*;
+	x := x ^ (x << 13I);
+	x := x ^ (x >> 17I);
+	x := x ^ (x << 5I);
+	state.* := x;
+	float32(x & 0xffffffI) / 16777216.0f
+};
+
+def initialize(particles: Span<Particle>, seed: uint) -> () = {
+	var state = seed | 1I;
 	var index = 0L;
-	var row = 0;
-	var x = -0.75f;
-	var y = -0.75f;
 	while (index < particles.length) {
-		var vx = 0.35f;
-		if ((index & 1L) == 0L) {
-			vx := -vx;
-		};
 		particles(index).* := Particle {
-			x = x,
-			y = y,
-			vx = vx,
-			vy = 0.27f,
-			color = Color {
-				r = x + 0.85f,
-				g = y + 0.85f,
-				b = 0.8f,
-				a = 1.0f,
-			},
+			x = random(&state) * 48.0f - 24.0f,
+			y = random(&state) * 60.0f - 30.0f,
+			z = random(&state) * 50.0f,
+			vx = random(&state) * 12.0f - 6.0f,
+			vy = random(&state) * 12.0f - 6.0f,
+			vz = random(&state) * 12.0f - 6.0f,
 		};
 		index := index + 1L;
-		row := row + 1;
-		x := x + 0.2f;
-		if (row == 8) {
-			row := 0;
-			x := -0.75f;
-			y := y + 0.2f;
-		};
 	};
 };
 
 def main() -> Result<(), _> = {
-	var title = "Resin particles";
-	var window = window_create(640, 480, Ptr<ubyte>(&title))?;
+	var count = 1000000I;
+	var title = "Resin | 1,000,000 particles | Space: pause | R: reseed | Esc: quit";
+	var window = window_create(1280, 800, Ptr<ubyte>(&title))?;
 	defer window_destroy(window);
 	var gpu = gpu_create_for_window(window)?;
 	defer gpu_destroy(gpu);
 
 	var compute = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
 	defer gpu_free_pipeline(gpu, compute);
-	var graphics = gpu_create_graphics_pipeline(
-		gpu,
-		vertex.spirv,
-		fragment.spirv,
-	)?;
+	var graphics = gpu_create_graphics_pipeline(gpu, vertex.spirv, fragment.spirv)?;
 	defer gpu_free_pipeline(gpu, graphics);
-	// Allocation sizes follow the shared layout of the declared types.
-	var particles = gpu_malloc(gpu, 64L * size_of(Particle), align_of(Particle), memory_default())?;
+	// One shared 24 MB buffer: initialization writes host memory; compute and graphics use its device address.
+	var particles = gpu_malloc(gpu, ulong(count) * size_of(Particle), align_of(Particle), memory_default())?;
 	defer gpu_free(gpu, particles);
 	var root = gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?;
 	defer gpu_free(gpu, root);
-	initialize(Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = 64L });
+	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = ulong(count) };
+	var seed = 0x9e3779b9I;
+	initialize(host_particles, seed);
 	var params = Ptr<Params>(allocation_host_pointer(root));
 	params.* := Params {
-		count = 64I,
-		dt = 0.016667f,
-		radius = 0.018f,
-		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = 64L },
+		count = count,
+		dt = 0.005f,
+		yaw_cos = 1.0f,
+		yaw_sin = 0.0f,
+		aspect = 0.625f,
+		radius = 0.0012f,
+		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(count) },
 	};
 	var address = allocation_device_pointer(root);
-	var image = gpu_create_image(gpu, 640, 480)?;
+	var image = gpu_create_image(gpu, 1280, 800)?;
 	defer gpu_free_image(gpu, image);
+	var paused = 1 == 0;
+	var was_space = 1 == 0;
+	var was_reset = 1 == 0;
 
 	window_poll_events(window)?;
 	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
+		var space = window_key_pressed(window, 32);
+		var reset = window_key_pressed(window, 82);
+		if (space && !was_space) {
+			paused := !paused;
+		};
+		if (reset && !was_reset) {
+			seed := seed * 1664525I + 1013904223I;
+			initialize(host_particles, seed);
+		};
+		was_space := space;
+		was_reset := reset;
 		var commands = gpu_start_command_recording(gpu)?;
 		defer gpu_cancel_command_buffer(gpu, &commands);
-		gpu_set_pipeline(commands, compute)?;
-		gpu_dispatch(commands, address, 1, 1, 1)?;
-		gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
+		if (!paused) {
+			gpu_set_pipeline(commands, compute)?;
+			gpu_dispatch(commands, address, (count + 63I) / 64I, 1, 1)?;
+		};
+		gpu_begin_rendering(commands, image, 0.004f, 0.008f, 0.02f, 1.0f)?;
 		gpu_set_pipeline(commands, graphics)?;
-		gpu_draw(commands, address, 192)?;
+		gpu_draw(commands, address, count * 3I)?;
 		gpu_end_rendering(commands)?;
 		gpu_submit(gpu, &commands)?;
 		gpu_present(gpu, image)?;
+		if (!paused) {
+			// Small camera rotation, renormalized to prevent drift over long runs.
+			var c = params.yaw_cos - params.yaw_sin * 0.0015f;
+			var s = params.yaw_sin + params.yaw_cos * 0.0015f;
+			var normalize = 1.5f - 0.5f * (c * c + s * s);
+			params.yaw_cos := c * normalize;
+			params.yaw_sin := s * normalize;
+		};
 		window_poll_events(window)?;
 	};
 	print("particles demo complete\n", ());

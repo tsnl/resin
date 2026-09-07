@@ -178,32 +178,41 @@ fn particles_compute_then_render_from_the_same_buffer() {
     struct Particle {
         x: f32,
         y: f32,
+        z: f32,
         vx: f32,
         vy: f32,
-        color: [f32; 4],
+        vz: f32,
     }
     #[repr(C)]
     struct Params {
         count: u32,
         dt: f32,
+        yaw_cos: f32,
+        yaw_sin: f32,
+        aspect: f32,
         radius: f32,
         particles: u64,
         particle_length: u64,
     }
-    let initial = Particle {
-        x: -0.5,
-        y: 0.0,
-        vx: 1.0,
-        vy: 0.0,
-        color: [1.0, 0.0, 0.0, 1.0],
+    const COUNT: usize = 1_000_000;
+    let sentinel = Particle {
+        x: 101.0,
+        y: 102.0,
+        z: 103.0,
+        vx: 104.0,
+        vy: 105.0,
+        vz: 106.0,
     };
-    // Compute, draw, and readback share a recording; every resource outlives its submission.
+    assert_eq!(size_of::<Particle>(), 24);
+    assert_eq!(size_of::<Params>(), 40);
+    // The full draw catches accidental per-vertex searches that scale quadratically.
+    // An extra workgroup exercises the count guard without touching the sentinel.
     unsafe {
         let compute = gpu.create_compute_pipeline(&compute).unwrap();
         let graphics = gpu.create_graphics_pipeline(&vertex, &fragment).unwrap();
         let particles = gpu
             .malloc(
-                2 * size_of::<Particle>(),
+                (COUNT + 1) * size_of::<Particle>(),
                 align_of::<Particle>(),
                 ResinMemory::Default,
             )
@@ -215,42 +224,73 @@ fn particles_compute_then_render_from_the_same_buffer() {
                 ResinMemory::Default,
             )
             .unwrap();
-        std::slice::from_raw_parts_mut(particles.host_pointer().cast::<Particle>(), 2)
-            .fill(initial);
+        let values =
+            std::slice::from_raw_parts_mut(particles.host_pointer().cast::<Particle>(), COUNT + 1);
+        for (index, p) in values[..COUNT].iter_mut().enumerate() {
+            *p = Particle {
+                x: (index % 1000) as f32 * 0.048 - 24.0,
+                y: (index / 1000) as f32 * 0.060 - 30.0,
+                z: (index % 97) as f32 * 0.5,
+                vx: 1.0,
+                vy: -2.0,
+                vz: 3.0,
+            };
+        }
+        values[COUNT] = sentinel;
+        let first = values[0];
+        let last = values[COUNT - 1];
         root.host_pointer().cast::<Params>().write(Params {
-            count: 1,
-            dt: 0.5,
-            radius: 0.2,
+            count: COUNT as u32,
+            dt: 0.005,
+            yaw_cos: 1.0,
+            yaw_sin: 0.0,
+            aspect: 1.0,
+            radius: 0.006,
             particles: particles.device_pointer(),
-            particle_length: 1,
+            particle_length: COUNT as u64,
         });
-        let mut image = gpu.create_image(64, 64).unwrap();
-        let pixels = gpu.malloc(64 * 64 * 4, 4, ResinMemory::Readback).unwrap();
-        for (expected_x, expected_vx) in [(0.0, 1.0), (0.5, 1.0), (1.0, -1.0), (0.5, -1.0)] {
+        let mut image = gpu.create_image(256, 256).unwrap();
+        let pixels = gpu.malloc(256 * 256 * 4, 4, ResinMemory::Readback).unwrap();
+        for _ in 0..3 {
             let mut commands = gpu.start_command_recording().unwrap();
             commands.set_pipeline(&compute).unwrap();
-            commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
+            commands
+                .dispatch(root.device_pointer(), (COUNT as u32).div_ceil(64) + 1, 1, 1)
+                .unwrap();
             commands
                 .begin_rendering(&mut image, [0.0, 0.0, 0.0, 1.0])
                 .unwrap();
             commands.set_pipeline(&graphics).unwrap();
-            commands.draw(root.device_pointer(), 3).unwrap();
+            commands
+                .draw(root.device_pointer(), (COUNT * 3) as u32)
+                .unwrap();
             commands.end_rendering().unwrap();
             commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
             gpu.submit(commands).unwrap();
-            let values = std::slice::from_raw_parts(particles.host_pointer().cast::<Particle>(), 2);
-            assert_eq!(values[0].x, expected_x);
-            assert_eq!(values[0].vx, expected_vx);
-            assert_eq!(values[1], initial);
-            let pixels = pixels.host_bytes().unwrap();
-            let sample_x = ((expected_x * 0.5 + 0.5) * 64.0) as usize;
-            let offset = (32 * 64 + sample_x.min(63)) * 4;
-            assert_eq!(&pixels[offset..offset + 4], &[255, 0, 0, 255]);
-            assert_eq!(
-                &pixels[(32 * 64 + 16) * 4..(32 * 64 + 16) * 4 + 4],
-                &[0, 0, 0, 255]
-            );
         }
+        let values =
+            std::slice::from_raw_parts(particles.host_pointer().cast::<Particle>(), COUNT + 1);
+        assert_eq!(values[COUNT], sentinel);
+        assert_ne!(values[0], first);
+        assert_ne!(values[COUNT - 1], last);
+        for p in &values[..COUNT] {
+            assert!(
+                [p.x, p.y, p.z, p.vx, p.vy, p.vz]
+                    .iter()
+                    .all(|v| v.is_finite())
+            );
+            assert!(p.x.abs() < 100.0 && p.y.abs() < 100.0 && p.z.abs() < 100.0);
+        }
+        let lit = pixels
+            .host_bytes()
+            .unwrap()
+            .chunks_exact(4)
+            .filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0)
+            .count();
+        assert!(
+            lit > 1000,
+            "expected a visible particle cloud, got {lit} lit pixels"
+        );
     }
 }
 
