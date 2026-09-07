@@ -1,4 +1,5 @@
 mod build;
+mod numeric;
 mod shaders;
 pub use build::Executable;
 pub(crate) use build::generate;

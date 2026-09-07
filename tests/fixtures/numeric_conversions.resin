@@ -1,0 +1,12 @@
+export { kernel, main };
+def convert(i: uint) -> uint = {
+    var f = float32(i);
+    var wide = ulong(i);
+    var round = 16777217I;
+    var negative = -1.9f;
+    if (int(negative) == -1i && float32(round) == 16777216.0f && uint(wide) == i) {
+        uint(f + 42.75f)
+    } else { 99I }
+};
+def kernel(i: uint, p: Ptr<uint>) = { if (i == 0I) { p.* := convert(i); }; };
+def main() -> int = { var result = 0I; kernel(0I, &result); if (result == 42I) { 0 } else { 1 } };

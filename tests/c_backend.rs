@@ -783,3 +783,35 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
         0,
     );
 }
+
+#[test]
+fn numeric_conversions_check_runtime_values_and_boundaries() {
+    runs(include_str!("fixtures/numeric_conversions.resin"), 0);
+    runs(
+        r#"export { main }; def main() -> int = {
+        var n = 255I; var negative = -128i; var wide = 18446744073709551615L;
+        var nan = float32(0.0d / 0.0d); var large = 1.0e100d; var tiny = -1.0e-100d;
+        if (ubyte(n) == 255B && sbyte(negative) == -128b && ulong(wide) == wide &&
+            float64(n) == 255.0d && float32(large) > 1.0e30f && float32(tiny) == 0.0f && nan != nan) { 0 } else { 1 }
+    };"#,
+        0,
+    );
+    for expr in [
+        "ubyte(256I)",
+        "uint(-1i)",
+        "int(2147483648I)",
+        "uint(4294967296.0d)",
+        "long(9223372036854775808.0d)",
+        "ulong(18446744073709551616.0d)",
+        "int(0.0d / 0.0d)",
+        "int(1.0d / 0.0d)",
+    ] {
+        let source = format!("export {{ main }}; def main() = {{ {expr}; }};");
+        let output = run_module(&module(&source));
+        assert!(!output.status.success(), "{source}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("numeric conversion out of range"),
+            "{source}"
+        );
+    }
+}

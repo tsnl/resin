@@ -318,7 +318,7 @@ impl<'a> Checker<'a> {
                     let to = self.annotation(ty, true)?;
                     let from = self.term(arg, None)?;
                     self.constraints
-                        .push((span, Constraint::Ascribe(from, to.clone())));
+                        .push((span, Constraint::Ascribe(from, to.clone(), matches!(arg.val, TermKind::Num { .. }) || matches!(&arg.val, TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [Term { val: TermKind::Num { .. }, .. }])))));
                     equate = Some(to);
                 } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "print"
