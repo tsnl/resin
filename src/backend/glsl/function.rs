@@ -19,6 +19,7 @@ pub(super) fn emit(
     function: &Function,
     flow: &FunctionTypes,
     name: &str,
+    index: usize,
 ) -> Result<String, Error> {
     let inputs = symbolic_inputs(types, function, flow)?;
     let mut out = format!(
@@ -62,10 +63,10 @@ pub(super) fn emit(
         let mut stack = inputs[b].clone();
         for (i, instr) in block.instrs.iter().enumerate() {
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
-            for (index, arg) in args.iter().enumerate() {
+            for (operand, arg) in args.iter().enumerate() {
                 if arg.local
                     && !matches!(instr, Instr::Discard)
-                    && !(index == 0
+                    && !(operand == 0
                         && matches!(
                             instr,
                             Instr::Load
@@ -74,9 +75,14 @@ pub(super) fn emit(
                                 | Instr::AccessDynamic
                         ))
                 {
-                    return Err(Error(
-                        "shader-local addresses cannot escape through values, casts, or calls"
-                            .into(),
+                    return Err(Error::at(
+                        types.module,
+                        index,
+                        Some((b, i)),
+                        Error(
+                            "shader-local addresses cannot escape through values, casts, or calls"
+                                .into(),
+                        ),
                     ));
                 }
             }
@@ -106,7 +112,7 @@ pub(super) fn emit(
                 .unwrap();
             }
             let expr = instruction(types, instr, &args, result, &mut out)
-                .map_err(|error| Error(format!("shader block {b}, instruction {i}: {error}")))?;
+                .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;
             if let Some(ty) = result {
                 let mut expr = expr.unwrap();
                 if !local && !matches!(ty, Ty::Function { .. }) {
@@ -132,7 +138,12 @@ pub(super) fn emit(
         match block.terminator {
             Terminator::Return => {
                 if stack[0].local {
-                    return Err(Error("shader cannot return a local address".into()));
+                    return Err(Error::at(
+                        types.module,
+                        index,
+                        Some((b, block.instrs.len())),
+                        Error("shader cannot return a local address".into()),
+                    ));
                 }
                 writeln!(out, "      return {};", stack[0].expr).unwrap();
             }

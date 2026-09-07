@@ -261,3 +261,51 @@ fn compound_control_flow_compiles_to_spirv() {
     toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler))
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
 }
+
+#[test]
+fn imported_deferred_backend_errors_retain_expression_origins() {
+    let temp = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    let helper = temp.path().join("helper.resin");
+    let entry = temp.path().join("main.resin");
+    let mut session = resin::compiler::Session::default();
+    session.set_overlay(&helper, "export { helper }; struct E {}; def helper(n: uint) -> Result<uint, E> = { defer n / 2I; var r: Result<(), E>; r := if (n == 0I) { err(E {}) } else { ok(()) }; r?; ok(n) };".into()).unwrap();
+    session.set_overlay(&entry, "export { kernel }; import { \"helper.resin\" }; def kernel(i: uint, p: Ptr<uint>) = { match (helper(i)) { ok(n) => { p.* := n; }, err(e) => {} }; };".into()).unwrap();
+    let snapshot = session.analyze(&entry).unwrap();
+    let m = snapshot.module().unwrap();
+    // Origins use canonical paths, including macOS temp aliases and Windows prefixes.
+    let helper = resin::analysis::normalize_path(&helper).unwrap();
+    let origins: Vec<_> = m
+        .origins
+        .instructions
+        .values()
+        .filter(|o| {
+            o.path == helper
+                && m.origins.sources[&o.path].get(o.span.start..o.span.end) == Some("n / 2I")
+        })
+        .collect();
+    assert!(
+        origins.len() >= 2,
+        "both cleanup exits retain their original expression"
+    );
+    let error = glsl::emit(m, "kernel", Stage::Compute)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains(&format!("{}:1:", helper.display())),
+        "{error}"
+    );
+    assert!(
+        error.contains("n / 2I") && error.contains("function helper"),
+        "{error}"
+    );
+    assert!(error.contains("unsupported shader builtin"), "{error}");
+    let mut without = m.clone();
+    without.origins = Default::default();
+    let error = glsl::emit(&without, "kernel", Stage::Compute)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("block") && error.contains("instruction"),
+        "{error}"
+    );
+}

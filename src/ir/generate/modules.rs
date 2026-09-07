@@ -44,6 +44,12 @@ fn generate_program_with(
     let mut generator = Generator::new();
     let mut exports = Vec::<Exports>::new();
     for (index, source) in program.modules.iter().enumerate() {
+        generator.source_path = source.path.clone();
+        generator
+            .module
+            .origins
+            .sources
+            .insert(source.path.clone(), source.source.as_str().into());
         generator.scopes = trace.as_ref().map_or_else(Scopes::new, |data| {
             Scopes::traced(Trace {
                 path: source.path.clone(),

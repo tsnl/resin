@@ -82,6 +82,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
 
     verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![linked_list_type()],
         functions: vec![function],
@@ -96,6 +97,7 @@ fn an_inline_recursive_type_is_rejected() {
     };
     let module = Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![TypeDef::new(
             "Bad",
@@ -122,6 +124,7 @@ fn incomplete_definitions_are_rejected_by_the_verifier_and_printed_explicitly() 
     let definition = context.reserve_type("Pending");
     let module = Module {
         shaders: Default::default(),
+        origins: Default::default(),
         types: context.definitions().to_vec(),
         ..Default::default()
     };
@@ -158,6 +161,7 @@ fn nominal_types_do_not_equal_their_representations() {
     };
     let module = Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![TypeDef::new(
             "Meters",

@@ -33,6 +33,7 @@ fn ascribe_wraps_a_representation() {
 
     verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![TypeDef::new("Meters", record())],
         functions: vec![function],
@@ -72,6 +73,7 @@ fn ascribe_unwraps_one_nominal_layer() {
 
     verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![TypeDef::new("Meters", record())],
         functions: vec![function],
@@ -126,6 +128,7 @@ fn chained_assignment_preserves_the_value() {
 
     verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![],
         functions: vec![function],
@@ -183,6 +186,7 @@ fn conflicting_join_stacks_are_rejected() {
 
     let error = verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![],
         functions: vec![function],
@@ -243,6 +247,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
 
     verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![],
         functions: vec![target, caller],
@@ -296,6 +301,7 @@ fn loop_backedges_must_match_the_header_stack() {
 
     verify(&Module {
         shaders: Default::default(),
+        origins: Default::default(),
         entries: Default::default(),
         types: vec![],
         functions: vec![function],

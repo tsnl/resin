@@ -46,11 +46,8 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
             let result = flow.results[block_id][i].as_ref();
             let name = format!("r_v{block_id}_{i}");
-            let expr = instruction(types, instr, &args, result, &mut out).map_err(|error| {
-                Error(format!(
-                    "function {index}, block {block_id}, instruction {i}: {error}"
-                ))
-            })?;
+            let expr = instruction(types, instr, &args, result, &mut out)
+                .map_err(|error| Error::at(types.module, index, Some((block_id, i)), error))?;
             if let Some(ty) = result {
                 writeln!(
                     out,
