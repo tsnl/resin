@@ -13,10 +13,5 @@ def main() = {
 	var pointer: Ptr<_>;
 	n := fibonacci(10);
 	pointer := &n;
-	print(
-		"fibonacci(10) = {0}\n",
-		(
-			pointer.*,
-		)
-	);
+	print("fibonacci(10) = {0}\n", (pointer.*,));
 };

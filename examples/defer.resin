@@ -34,12 +34,7 @@ def work(fail: bool) -> Result<int, _> = {
 
 def main() -> Result<(), _> = {
 	var answer = work(1 == 0)?;
-	print(
-		"answer = {0}\n",
-		(
-			answer,
-		)
-	);
+	print("answer = {0}\n", (answer,));
 	ok(())
 };
 

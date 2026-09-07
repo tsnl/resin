@@ -13,10 +13,5 @@ def inc(n: int) -> int = {
 };
 
 def main() -> () = {
-	print(
-		"inc(41) = {0}\n",
-		(
-			inc(41),
-		)
-	);
+	print("inc(41) = {0}\n", (inc(41),));
 };

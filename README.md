@@ -376,7 +376,8 @@ formatting differences or file/syntax errors. Invalid syntax is reported and lef
 unchanged; other selected files are still processed. Formatting needs no imports,
 entry point, type checking, shader compiler, or GPU execution.
 
-Indentation uses hard tabs. Trailing commas are preserved and force multiline
+Indentation uses hard tabs. Trailing commas are preserved and, except in singleton tuples
+such as `(x,)` and `(int,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.

@@ -11,10 +11,5 @@ def fibonacci(n: int) -> int = {
 };
 
 def main() -> () = {
-	print(
-		"fibonacci(10) = {0}\n",
-		(
-			fibonacci(10),
-		)
-	);
+	print("fibonacci(10) = {0}\n", (fibonacci(10),));
 };

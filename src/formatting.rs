@@ -1,7 +1,8 @@
 //! Canonical source formatting. Only whitespace outside comments and literals changes.
 //!
 //! Indentation uses hard tabs. A trailing comma forces a delimiter group onto
-//! multiple lines. Invalid syntax is left alone; semantic analysis is unnecessary.
+//! multiple lines, except for singleton tuples. Invalid syntax is left alone;
+//! semantic analysis is unnecessary.
 
 use tree_sitter::{Node, Parser};
 
@@ -136,11 +137,20 @@ fn finish_group(
         && tokens[start]
             .parent()
             .is_some_and(|p| matches!(p.kind(), "block_body" | "chain_term" | "match_term"));
-    let trailing_comma = body
-        .iter()
-        .rev()
-        .find(|n| n.kind() != "comment")
-        .is_some_and(|n| n.kind() == ",");
+    let singleton_tuple = tokens[start].parent().is_some_and(|parent| {
+        matches!(parent.kind(), "tuple_term" | "tuple_type")
+            && parent
+                .children_by_field_name("elems", &mut parent.walk())
+                .take(2)
+                .count()
+                == 1
+    });
+    let trailing_comma = !singleton_tuple
+        && body
+            .iter()
+            .rev()
+            .find(|n| n.kind() != "comment")
+            .is_some_and(|n| n.kind() == ",");
     let comments = body.iter().enumerate().any(|(i, n)| {
         n.kind() == "comment"
             && (source[n.byte_range()].starts_with("//")

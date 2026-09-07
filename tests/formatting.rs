@@ -48,7 +48,7 @@ fn trailing_commas_and_nested_lists() {
     );
     check(
         "type Pair={x:int,y:float32,}; extern \"x.h\" def call(x:(int,),); def main()={f([1,2,],3);};",
-        "type Pair = {\n\tx: int,\n\ty: float32,\n};\nextern \"x.h\" def call(\n\tx: (\n\t\tint,\n\t),\n);\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
+        "type Pair = {\n\tx: int,\n\ty: float32,\n};\nextern \"x.h\" def call(\n\tx: (int,),\n);\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
     );
 }
 
@@ -194,5 +194,17 @@ fn numeric_suffixes_and_one_armed_if_keep_their_spelling() {
     check(
         "def main()={var a=42L;var b=-42l;if(a>0L){var c=1.5f;};};",
         "def main() = {\n\tvar a = 42L;\n\tvar b = -42l;\n\tif (a > 0L) {\n\t\tvar c = 1.5f;\n\t};\n};\n",
+    );
+}
+
+#[test]
+fn singleton_tuples_do_not_expand_for_their_trailing_comma() {
+    check(
+        "type Single=(int,);def main(x:(int,))={var a=(\n1,\n);var b=((1,2),);var c=((1,),);f(x,);};",
+        "type Single = (int,);\ndef main(x: (int,)) = {\n\tvar a = (1,);\n\tvar b = ((1, 2),);\n\tvar c = ((1,),);\n\tf(x,);\n};\n",
+    );
+    check(
+        "def main()={var a=(1,/* note */);var b=(1,// note\n);var c=([1,],);var d=(1,2,);};",
+        "def main() = {\n\tvar a = (1, /* note */);\n\tvar b = (\n\t\t1, // note\n\t);\n\tvar c = (\n\t\t[\n\t\t\t1,\n\t\t],\n\t);\n\tvar d = (\n\t\t1,\n\t\t2,\n\t);\n};\n",
     );
 }
