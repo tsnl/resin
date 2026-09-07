@@ -704,3 +704,35 @@ fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
         0,
     );
 }
+
+#[test]
+fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
+    for fail in ["1 == 1", "1 == 2"] {
+        runs(
+            &format!(
+                r#"
+            export {{ main }};
+            struct E {{}};
+            def release(resource: int, trace: Ptr<int>) = {{ trace.* := trace.* * 10 + resource; }};
+            def work(trace: Ptr<int>, fail: bool) -> Result<(), E> = {{
+                var resource = 1;
+                var captured = resource;
+                defer release(captured, trace);
+                defer release(resource, trace);
+                resource := 2;
+                {{ var captured = 9; }};
+                var result: Result<(), E>; result := if (fail) {{ err(E {{}}) }} else {{ ok(()) }};
+                result?;
+                ok(())
+            }};
+            def main() -> int = {{
+                var trace = 0;
+                match (work(&trace, {fail})) {{ ok(v) => {{}}, err(e) => {{}} }};
+                if (trace == 21) {{ 0 }} else {{ 1 }}
+            }};
+        "#
+            ),
+            0,
+        );
+    }
+}

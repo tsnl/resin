@@ -293,6 +293,25 @@ initialized on every exit that executes the defer. The block's result or propaga
 error is saved before cleanup, so mutations do not change the value being returned.
 Returning a pointer does not copy its pointee: do not free memory that escapes.
 
+To retain a particular acquisition, give it a dedicated binding and never reassign
+that binding. Copying a handle copies its value, not the resource:
+
+```resin
+var acquired = acquire()?;
+var cleanup_resource = acquired;
+defer release(cleanup_resource);
+var current = acquired;
+current := another_resource;
+```
+
+Cleanup releases `acquired` on normal exit and `?`, even after `current` changes.
+Register separate cleanup for any separately acquired replacement. In contrast,
+`defer release(current);` would read the replacement at exit. Do not also release
+`acquired` through an alias. A dedicated binding is sufficient for the current
+manual resource model; no new capture syntax or ownership feature is introduced.
+For consumable commands, deliberately retain late evaluation:
+`defer cancel(&commands);` observes the cleared handle after `submit(&commands)`.
+
 Deferred expressions cannot use `?`; handle failures locally with `match`. Cleanup is
 ordinary code, not automatic ownership management, and works in C and GLSL wherever
 the deferred operations are supported. Aborts, traps, and process termination do not
