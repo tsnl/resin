@@ -32,7 +32,7 @@ fn defer_lowers_to_shader_control_flow_including_error_exits() {
 #[test]
 fn shader_helpers_can_propagate_and_handle_results() {
     let m = module(
-        "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; def kernel(i: uint) -> uint = { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } };",
+        "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } }; };",
     );
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
@@ -44,9 +44,9 @@ fn shader_helpers_can_propagate_and_handle_results() {
 #[test]
 fn inferred_shader_results_lower_without_backend_inference() {
     let m = module(
-        "export { kernel }; def kernel(i: uint) -> _ = { var value: _; value := i + 1; value };",
+        "export { kernel }; def kernel(i: uint, output: Ptr<uint>) -> _ = { output.* := { var value: _; value := i + 1; value }; };",
     );
-    assert_eq!(m.functions[0].result, ir::Ty::UInt32);
+    assert_eq!(m.functions[0].result, ir::Ty::Unit);
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
         toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
@@ -85,25 +85,25 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
         (example("particles.resin"), Stage::Fragment),
         (
             module(
-                "export { kernel }; def kernel (i: uint) -> uint = { var x = i; x := x + uint (2); if (x < uint (4)) { x } else { x * uint (2) } };",
+                "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var x = i; x := x + uint (2); if (x < uint (4)) { x } else { x * uint (2) } }; };",
             ),
             Stage::Compute,
         ),
         (
             module(
-                "export { kernel }; type Pixel = uint; def kernel (i: Pixel) -> Pixel = { i + Pixel (uint (1)) };",
+                "export { kernel }; type Pixel = uint; def kernel(i: Pixel, output: Ptr<uint>) = { output.* := { i + Pixel (uint (1)) }; };",
             ),
             Stage::Compute,
         ),
         (
             module(
-                "export { kernel }; def kernel (i: uint) -> uint = { twice(i) }; def twice (i: uint) -> uint = { add(i, i) }; def add (a: uint, b: uint) -> uint = { a + b };",
+                "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { twice(i) }; }; def twice (i: uint) -> uint = { add(i, i) }; def add (a: uint, b: uint) -> uint = { a + b };",
             ),
             Stage::Compute,
         ),
         (
             module(
-                "export { kernel }; def kernel (i: uint) -> uint = { var x = i; var n = uint (0); while (n < uint (3)) { var j = uint (0); while (j < n) { x := x + j; j := j + uint (1); }; n := n + uint (1); }; x };",
+                "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var x = i; var n = uint (0); while (n < uint (3)) { var j = uint (0); while (j < n) { x := x + j; j := j + uint (1); }; n := n + uint (1); }; x }; };",
             ),
             Stage::Compute,
         ),
@@ -154,15 +154,15 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
             "no shared host/device layout",
         ),
         (
-            "export { kernel }; def kernel (i: uint) -> uint = { var x = i; var p = &x; p.* };",
+            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var x = i; var p = &x; p.* }; };",
             "shader-local addresses cannot escape",
         ),
         (
-            "export { kernel }; def kernel (i: uint) -> uint = { var x = i; ulong (&x); i };",
+            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var x = i; ulong (&x); i }; };",
             "shader-local addresses cannot escape",
         ),
         (
-            "export { kernel }; def helper (i: uint) -> Ptr<uint> = { var x = i; &x }; def kernel (i: uint) -> uint = { helper(i).* };",
+            "export { kernel }; def helper (i: uint) -> Ptr<uint> = { var x = i; &x }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i).* }; };",
             "cannot return a local address",
         ),
     ] {
@@ -175,15 +175,15 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
 fn unsupported_shader_features_are_diagnosed() {
     for (source, expected) in [
         (
-            "export { kernel }; def kernel (i: uint) -> uint = { helper(i) }; def helper (i: uint) -> uint = { kernel(i) };",
+            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i) }; }; def helper (i: uint) -> uint = { var output = 0I; kernel(i, &output); output };",
             "recursive shader call graph",
         ),
         (
-            "export { kernel }; def kernel (i: uint) -> uint = { i / uint (2) };",
+            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { i / uint (2) }; };",
             "unsupported shader builtin",
         ),
         (
-            "export { kernel }; def kernel (i: uint) -> uint = { var x = i; x := if (i == uint (0)) { uint (1) } else { uint (2) }; x };",
+            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var x = i; x := if (i == uint (0)) { uint (1) } else { uint (2) }; x }; };",
             "addresses or functions across block edges",
         ),
         (
@@ -191,15 +191,15 @@ fn unsupported_shader_features_are_diagnosed() {
             "does not support type",
         ),
         (
-            "export { kernel }; extern \"stdlib.h\" def abs (i: int) -> int; def kernel (i: uint) -> uint = { abs(1); i };",
+            "export { kernel }; extern \"stdlib.h\" def abs (i: int) -> int; def kernel(i: uint, output: Ptr<uint>) = { output.* := { abs(1); i }; };",
             "foreign",
         ),
         (
-            "export { kernel }; def helper (i: uint) -> uint = { print(\"hello\", ()); i }; def kernel (i: uint) -> uint = { helper(i) };",
+            "export { kernel }; def helper (i: uint) -> uint = { print(\"hello\", ()); i }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i) }; };",
             "host programs",
         ),
         (
-            "export { kernel }; def helper (i: uint) -> uint = { i }; def kernel (i: uint) -> uint = { var f = helper; f(i) };",
+            "export { kernel }; def helper (i: uint) -> uint = { i }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var f = helper; f(i) }; };",
             "does not support type",
         ),
     ] {

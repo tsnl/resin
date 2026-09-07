@@ -2,15 +2,18 @@ export { kernel, main };
 
 import { "std/gpu.resin", "std/image.resin" };
 
-struct Root { count: uint, pixels: ulong };
+struct Root { count: uint, pixels: Ptr<uint> };
 
 def pixel(index: uint) -> uint = {
 	0xff400000I | (index & 0xffffI)
 };
 
 @compute_shader
-def kernel(index: uint) -> uint = {
-	pixel(index)
+def kernel(index: uint, root: Ptr<Root>) = {
+	if (index < root.count) {
+		var pixels = Span<uint> { data = root.pixels, length = 65536L };
+		pixels(index).* := pixel(index);
+	};
 };
 
 def main() -> Result<(), _> = {
@@ -24,7 +27,7 @@ def main() -> Result<(), _> = {
 	var root = gpu_malloc(gpu, 16, 8, memory_default())?;
 	defer gpu_free(gpu, root);
 	var data = Ptr<Root>(allocation_host_pointer(root));
-	data.* := Root { count = 65536I, pixels = allocation_device_pointer(pixels) };
+	data.* := Root { count = 65536I, pixels = Ptr<uint>(allocation_device_pointer(pixels)) };
 	var commands = gpu_start_command_recording(gpu)?;
 	defer gpu_cancel_command_buffer(gpu, &commands);
 	gpu_set_pipeline(commands, pipeline)?;

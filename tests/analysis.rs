@@ -867,7 +867,7 @@ fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
 
 #[test]
 fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
-    let source = "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var xs = [1, 2]; var p = xs(0); var code = kernel.spirv; code.length; };";
+    let source = "@compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var xs = [1, 2]; var p = xs(0); var code = kernel.spirv; code.length; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     assert!(
@@ -890,7 +890,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
             .text,
         "code: Span<ubyte>"
     );
-    let source = "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { kernel. };";
+    let source = "@compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { kernel. };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
         &project.path("main.resin"),
@@ -902,7 +902,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
             .any(|i| i.name == "spirv" && i.detail.contains("Span<ubyte>")),
         "{items:?}"
     );
-    let source = "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var alias = kernel; alias. };";
+    let source = "@compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var alias = kernel; alias. };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
         &project.path("main.resin"),

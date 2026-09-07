@@ -13,7 +13,6 @@ pub struct ShaderEntry {
 pub enum Interface {
     Compute {
         index: Ty,
-        root: bool,
     },
     Vertex {
         index: Ty,
@@ -62,12 +61,9 @@ pub fn validate(
     let input_shape = shape(typer, input)?;
     let result = shape(typer, &function.result)?;
     let interface = match stage {
-        "compute"
-            if input_shape == Ty::UInt32 && result == if root { Ty::Unit } else { Ty::UInt32 } =>
-        {
+        "compute" if root && input_shape == Ty::UInt32 && result == Ty::Unit => {
             Some(Interface::Compute {
                 index: input.clone(),
-                root,
             })
         }
         "vertex" if input_shape == Ty::Int32 => match &result {
@@ -104,7 +100,7 @@ pub fn validate(
         Err(format!(
             "invalid @{stage}_shader signature: {}",
             match stage {
-                "compute" => "expected (uint, Ptr<T>) -> () or (uint) -> uint",
+                "compute" => "expected (uint, Ptr<T>) -> ()",
                 "vertex" => "expected int or (int, Ptr<T>) returning a position/color record",
                 "fragment" =>
                     "expected Color or (Color, Ptr<T>) returning Color with float32 r/g/b/a fields",

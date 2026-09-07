@@ -279,8 +279,9 @@ fn invalid_print_types_are_rejected() {
 
 #[test]
 fn shader_print_has_a_host_only_diagnostic() {
-    let m =
-        module(r#"export { kernel }; def kernel (i: uint) -> uint = { print("{0}", (i,)); i };"#);
+    let m = module(
+        r#"export { kernel }; def kernel (i: uint, output: Ptr<uint>) = { print("{0}", (i,)); output.* := i; };"#,
+    );
     let error = glsl::emit(&m, "kernel", glsl::Stage::Compute).unwrap_err();
     assert!(
         error
