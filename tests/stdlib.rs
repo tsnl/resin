@@ -409,3 +409,52 @@ fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
     );
     success(&output);
 }
+
+#[test]
+fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
+    let output = run(
+        r#"
+        export { main };
+        import { "std/window.resin" };
+        def coordinates(x: float64, y: float64) -> bool = { x == 12.5d && y == -3.25d };
+        def main() -> Result<int, _> = {
+            var window = Ptr<ResinWindow>(0L);
+            var key = window_key_state(window, keys().w);
+            var mouse = window_mouse_button_state(window, mouse_buttons().left);
+            var valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
+            valid := valid && coordinates(window_cursor_position(window)?);
+            valid := valid && coordinates(window_scroll_delta(window)?);
+            valid := valid && window_focused(window) && keys().escape == key_escape() && keys().f25 == 314;
+            window_capture_cursor(window, 1 == 1)?;
+            window_capture_cursor(window, 1 == 0)?;
+            ok(if (valid) { 0 } else { 1 })
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static uint32_t mock_key_state(const ResinWindow *window, int key) {
+            assert(window == NULL && key == 87);
+            return RESIN_INPUT_PRESSED | RESIN_INPUT_RELEASED;
+        }
+        static uint32_t mock_mouse_state(const ResinWindow *window, int button) {
+            assert(window == NULL && button == 0);
+            return RESIN_INPUT_DOWN | RESIN_INPUT_PRESSED;
+        }
+        static ResinStatus mock_coordinates(const ResinWindow *window, double *x, double *y) {
+            assert(window == NULL); *x = 12.5; *y = -3.25; return RESIN_STATUS_SUCCESS;
+        }
+        static int mock_focus(const ResinWindow *window) { assert(window == NULL); return 1; }
+        static ResinStatus mock_capture(const ResinWindow *window, int capture) {
+            static int call; assert(window == NULL && capture == (call++ == 0)); return RESIN_STATUS_SUCCESS;
+        }
+        #define resin_window_key_state mock_key_state
+        #define resin_window_mouse_button_state mock_mouse_state
+        #define resin_window_cursor_position mock_coordinates
+        #define resin_window_scroll_delta mock_coordinates
+        #define resin_window_focused mock_focus
+        #define resin_window_capture_cursor mock_capture
+        "#,
+    );
+    success(&output);
+}

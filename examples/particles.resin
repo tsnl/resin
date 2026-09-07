@@ -150,22 +150,18 @@ def main() -> Result<(), _> = {
 	var image = gpu_create_image(gpu, 1280, 800)?;
 	defer gpu_free_image(gpu, image);
 	var paused = 1 == 0;
-	var was_space = 1 == 0;
-	var was_reset = 1 == 0;
 
 	window_poll_events(window)?;
 	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
-		var space = window_key_pressed(window, 32);
-		var reset = window_key_pressed(window, 82);
-		if (space && !was_space) {
+		var space = window_key_state(window, keys().space);
+		var reset = window_key_state(window, keys().r);
+		if (space.pressed) {
 			paused := !paused;
 		};
-		if (reset && !was_reset) {
+		if (reset.pressed) {
 			seed := seed * 1664525I + 1013904223I;
 			initialize(host_particles, seed);
 		};
-		was_space := space;
-		was_reset := reset;
 		var commands = gpu_start_command_recording(gpu)?;
 		defer gpu_cancel_command_buffer(gpu, &commands);
 		if (!paused) {
