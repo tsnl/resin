@@ -10,7 +10,31 @@ permissions:
   contents: read
 
 jobs:
+  grammar:
+    name: Grammar checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: tree-sitter-resin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tree-sitter-resin/package-lock.json
+      - name: Install grammar check dependencies
+        run: npm ci --ignore-scripts
+      - name: Check grammar types
+        run: npm run typecheck
+      - name: Lint grammar
+        run: npm run lint
+      - name: Check grammar formatting
+        run: npm run format:check
+
   native:
+    needs: grammar
     strategy:
       fail-fast: false
       matrix:

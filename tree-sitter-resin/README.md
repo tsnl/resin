@@ -12,7 +12,27 @@ Install the matching CLI inside the shell:
 cargo install --locked tree-sitter-cli --version 0.27.0
 ```
 
-After editing `grammar.js`, run these commands from this directory inside the shell:
+From this directory inside the shell, install the locked JavaScript tooling and
+check `grammar.js`:
+
+```sh
+npm ci --ignore-scripts
+npm run check
+```
+
+`check` runs strict TypeScript checking of the grammar's JSDoc and Tree-sitter DSL
+types, ESLint, and Prettier's formatting check. The individual commands are
+`npm run typecheck`, `npm run lint`, and `npm run format:check`; use `npm run format`
+to apply formatting. Rule callbacks receive their parameter and result types from
+the DSL; standalone helpers declare their parameters and results with JSDoc.
+Unknown rule references and implicit `any` types fail the type check.
+
+CI runs all three checks in the **Grammar checks** job before the native build
+matrix. Any failure blocks those builds. Installation skips lifecycle scripts
+because these checks need only JavaScript tooling and the DSL declarations, not
+the native Node bindings or the npm CLI binary.
+
+After editing `grammar.js`, also regenerate and test the parser using the Cargo-installed CLI:
 
 ```sh
 tree-sitter generate --js-runtime native

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "types": ["tree-sitter-cli/dsl"]
+  },
+  "files": ["grammar.js"]
+}

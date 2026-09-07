@@ -338,6 +338,7 @@ Tests are executable descriptions of the boundaries above:
 | Change | Useful tests |
 | --- | --- |
 | Syntax or AST shape | [parser corpus](tree-sitter-resin/test/corpus/), [mutation_ast.rs](tests/mutation_ast.rs) |
+| Grammar JavaScript types, lint, or formatting | Run `npm run check` in [tree-sitter-resin/](tree-sitter-resin/README.md) |
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
 | Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
@@ -371,9 +372,11 @@ cargo test -p resin --test formatting --test format_cli
 cargo test -p resin-lsp
 ```
 
-[Native CI](.github/workflows/build.yml) builds the workspace, runs a host
-example, checks example formatting with `--format --check examples`, tests, and
-lints on Linux, macOS, and Windows. It explicitly excludes
+[CI](.github/workflows/build.yml) first checks the grammar's JavaScript types,
+lint, and formatting. The native jobs depend on these checks passing, then build
+the workspace, run a host example, check example formatting with
+`--format --check examples`, test, and lint on Linux, macOS, and Windows.
+They explicitly exclude
 window-opening tests; optional GPU checks can skip when facilities are absent.
 Passing this matrix establishes native build and host coverage, not full GPU
 compatibility.
