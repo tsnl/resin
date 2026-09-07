@@ -17,7 +17,7 @@ pub(super) enum Constraint {
     Deref(Type, Type),
     Field(Type, Arc<str>, Type),
     Call(Type, Type, Type),
-    Ascribe(Type, Type),
+    Ascribe(Type, Type, bool),
     Record(Vec<(Arc<str>, Type)>, Type),
     Builtin(Arc<str>, Vec<Type>, Type),
 }
@@ -206,7 +206,7 @@ impl Checker<'_> {
                 }
                 return Ok(complete);
             }
-            Constraint::Ascribe(from, to) => {
+            Constraint::Ascribe(from, to, literal) => {
                 if let Type::Node(Head::Span, children) = self.solver.head(to) {
                     if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
                         return self.solver.unify(from, to, span).map(|_| true);
@@ -225,7 +225,11 @@ impl Checker<'_> {
                 {
                     let empty = from == Ty::Unit
                         && matches!(self.typer.body(&to), Ok(Ty::Record { fields }) if fields.is_empty());
-                    if !empty && !from.pointer_cast(&to) && !from.widens_to(&to) {
+                    if !(empty
+                        || from.pointer_cast(&to)
+                        || from.widens_to(&to)
+                        || from.is_numeric() && to.is_numeric())
+                    {
                         self.typer
                             .ascribe(&from, &to)
                             .map_err(|e| GenerateError::typing(span, e))?;
@@ -236,6 +240,10 @@ impl Checker<'_> {
                     match (&source, &target) {
                         (_, Type::Variable(_)) => self.solver.unify(to, from, span)?,
                         (Type::Variable(_), _) => {
+                            if !literal && self.solver.resolve(to).is_some_and(|ty| ty.is_numeric())
+                            {
+                                return Ok(false); // A runtime cast must not choose source storage.
+                            }
                             let context = if let Type::Node(Head::Atom(t @ Ty::Defined { .. }), _) =
                                 &target
                             {

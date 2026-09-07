@@ -814,3 +814,26 @@ For example, allocate one record with
 `gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?`.
 For N elements, multiplication remains ordinary `ulong` arithmetic: validate a dynamic
 count before multiplying. No unchecked element-count allocation helper is introduced.
+
+### Explicit numeric conversions
+
+`T(value)` converts an already typed numeric value to numeric type T. Integer-to-integer
+conversions preserve the mathematical value and trap if it is outside the destination
+range, including narrowing and signedness changes. Float-to-integer conversions truncate
+toward zero, then range-check; NaNs, infinities, and out-of-range results trap. Checks use
+exclusive power-of-two upper bounds, including for 64-bit integer destinations.
+
+Integer-to-float and float narrowing use round-to-nearest, ties-to-even in the normal
+floating-point environment. Float32-to-float64 is exact. Float64-to-float32 overflow
+produces signed infinity; results below the smallest normal float32 magnitude become
+signed zero. NaNs remain NaNs without a payload guarantee. Signed zero is preserved.
+C traps abort the process; shader traps stop that invocation and propagate failure
+through helper calls, like checked-index failures. Traps do not run deferred cleanup.
+A shader trap is not a host-visible Result error, and earlier writes remain visible.
+
+The shared shader profile supports `int`, `uint`, `ulong`, and `float32` conversions.
+Other numeric types remain available on the host and are diagnosed when reached by a
+shader. There are no implicit numeric conversions. `float32(1)` still contextually types
+a direct unsuffixed literal; suffixes fix source literal types. A conversion of a local
+value does not narrow that local's storage merely because of the destination type.
+Pointer reinterpretation and nominal record ascription remain separate IR operations.

@@ -71,6 +71,16 @@ pub(super) fn check_instr(
             }
             stack.push(Ty::shader());
         }
+        Instr::NumericCast { ty } => {
+            let from = pop_one(stack, location)?;
+            if !from.is_numeric() || !ty.is_numeric() {
+                return Err(location.error(VerifyErrorKind::TypeMismatch {
+                    expected: ty.clone(),
+                    found: from,
+                }));
+            }
+            stack.push(ty.clone());
+        }
         Instr::PointerCast { ty } => {
             check_type(&module.types, ty, location)?;
             let from = pop_one(stack, location)?;

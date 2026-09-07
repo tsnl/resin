@@ -133,6 +133,29 @@ fn instruction(
             }
         }
         Instr::Widen { ty } => widen(types, &args[0].ty, ty, &args[0].expr),
+        Instr::NumericCast { ty } => {
+            if let Some(invalid) = crate::backend::numeric::invalid(
+                &args[0].ty,
+                ty,
+                &args[0].expr,
+                |from, value| format!("({})({value})", types.name(from)),
+                if args[0].ty == Ty::Float32 {
+                    "truncf"
+                } else {
+                    "trunc"
+                },
+            ) {
+                writeln!(out, "  if ({invalid}) {{ fputs(\"numeric conversion out of range\\n\", stderr); abort(); }}").unwrap();
+            }
+            if args[0].ty == Ty::Float64 && *ty == Ty::Float32 {
+                let x = &args[0].expr;
+                format!(
+                    "(({x}) > FLT_MAX ? INFINITY : ({x}) < -FLT_MAX ? -INFINITY : fabs({x}) < FLT_MIN ? copysignf(0.0f, (float)copysign(1.0, {x})) : (float)({x}))"
+                )
+            } else {
+                format!("({})({})", types.name(ty), args[0].expr)
+            }
+        }
         Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
         Instr::Shader { function, stage } => {
             let index = types

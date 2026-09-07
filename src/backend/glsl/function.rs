@@ -111,6 +111,22 @@ pub(super) fn emit(
                 )
                 .unwrap();
             }
+            if let Instr::NumericCast { ty } = instr
+                && let Some(invalid) = crate::backend::numeric::invalid(
+                    &args[0].ty,
+                    ty,
+                    &args[0].expr,
+                    |from, value| format!("{}({value})", types.name(from)),
+                    "trunc",
+                )
+            {
+                writeln!(
+                    out,
+                    "      if ({invalid}) {{ r_failed = true; return {}; }}",
+                    types.zero(&function.result)
+                )
+                .unwrap();
+            }
             let expr = instruction(types, instr, &args, result, &mut out)
                 .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;
             if let Some(ty) = result {
@@ -307,6 +323,7 @@ fn instruction(
             .unwrap();
             args[1].expr.clone()
         }
+        Instr::NumericCast { ty } => format!("{}({})", types.name(ty), args[0].expr),
         Instr::PointerCast { .. } => format!("uint64_t({})", args[0].expr),
         Instr::Discard => return Ok(None),
         Instr::Ascribe { ty } => {

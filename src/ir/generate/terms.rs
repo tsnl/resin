@@ -170,6 +170,12 @@ impl Generator {
         if found != ascribed && found.widens_to(&ascribed) {
             return self.coerce(span, found, &ascribed);
         }
+        if found != ascribed && found.is_numeric() && ascribed.is_numeric() {
+            self.emit(Instr::NumericCast {
+                ty: ascribed.clone(),
+            });
+            return Ok(ascribed);
+        }
         if found.pointer_cast(&ascribed) {
             self.emit(Instr::PointerCast {
                 ty: ascribed.clone(),

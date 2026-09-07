@@ -111,6 +111,11 @@ pub enum Instr {
         ty: Ty,
     },
 
+    /// Explicit numeric conversion, trapping if an integer result is out of range.
+    NumericCast {
+        ty: Ty,
+    },
+
     Discard,
 
     /// Consume one value per field and construct a record in declaration order.
@@ -171,6 +176,7 @@ impl Instr {
             | Self::Widen { .. }
             | Self::Load
             | Self::Ascribe { .. }
+            | Self::NumericCast { .. }
             | Self::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
             Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },
             Self::Discard | Self::SetLocal { .. } => StackEffect { pops: 1, pushes: 0 },

@@ -424,3 +424,24 @@ fn shared_layout_queries_reject_unsupported_or_unresolved_types() {
         "holes are only allowed",
     );
 }
+
+#[test]
+fn numeric_conversions_do_not_choose_source_storage_types() {
+    let m = module("def main() = { var n = 300; var byte = ubyte(n); };");
+    assert_eq!(
+        m.functions[0]
+            .locals
+            .iter()
+            .find(|l| l.name.as_deref() == Some("n"))
+            .unwrap()
+            .ty,
+        Ty::Int32
+    );
+    assert!(
+        m.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instrs)
+            .any(|i| matches!(i, ir::Instr::NumericCast { ty: Ty::UInt8 }))
+    );
+}
