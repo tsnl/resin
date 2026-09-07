@@ -1,4 +1,4 @@
-//! A long-lived compiler session shared by command-line tools and editor adapters.
+//! Compilation requests and long-lived sessions shared by command-line tools and editor adapters.
 //!
 //! Hosts supply buffer/disk changes; the session owns parsed trees, dependencies,
 //! and checked snapshots. Queries without intervening changes reuse the same
@@ -10,6 +10,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ffi::OsString,
     io,
     path::{Path, PathBuf},
     sync::Arc,
@@ -20,6 +21,15 @@ use std::{
 pub struct Input {
     pub path: PathBuf,
     pub entry: String,
+}
+
+/// Input, output, and tool choices shared by the frontend and backend.
+pub struct Request {
+    pub input: Input,
+    pub destination: Option<PathBuf>,
+    pub cc: Option<OsString>,
+    pub glslc: Option<OsString>,
+    pub stage: Option<crate::backend::glsl::Stage>,
 }
 
 pub struct Session {

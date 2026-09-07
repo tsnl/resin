@@ -88,7 +88,9 @@ parses flags and chooses `Mode::Interpreter`, `Compiler`, `Codegen`, `Inspector`
 Interpreter mode builds a debug native executable and runs it. Compiler mode builds
 and copies a release executable without running it, including `--output run -o PATH`.
 
-[backend/build.rs](src/backend/build.rs) owns source analysis, C/GLSL/SPIR-V generation,
+[compiler::Request](src/compiler.rs) holds the shared input, destination, and tool
+choices. [backend/build.rs](src/backend/build.rs) consumes that request and owns
+source analysis, C/GLSL/SPIR-V generation,
 shader embedding, compiler selection, and executable construction. Its `compile` API
 returns an `Executable` that keeps the build-cache lock while the caller runs it.
 `generate` returns output bytes. [inspect.rs](src/cli/inspect.rs) handles the

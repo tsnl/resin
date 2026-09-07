@@ -1,18 +1,21 @@
 //! CLI syntax and conversion into an explicit execution mode.
 use super::{Result, inspect, source};
-use crate::backend;
+use crate::{
+    backend,
+    compiler::{Input, Request},
+};
 use clap::{CommandFactory, ValueEnum};
 use std::{ffi::OsString, path::PathBuf};
 
 pub enum Mode {
-    Interpreter(backend::Request),
-    Compiler(backend::Request),
+    Interpreter(Request),
+    Compiler(Request),
     Codegen {
-        request: backend::Request,
+        request: Request,
         target: backend::Target,
     },
     Inspector {
-        input: crate::compiler::Input,
+        input: Input,
         output: inspect::Output,
         destination: Option<PathBuf>,
     },
@@ -125,7 +128,7 @@ impl Cli {
                 destination: options.destination,
             });
         }
-        let request = backend::Request {
+        let request = Request {
             input,
             destination: options.destination,
             cc: options.cc,

@@ -1,6 +1,6 @@
 mod build;
 mod shaders;
-pub use build::{Executable, Request, Target, compile, generate};
+pub use build::{Executable, Target, compile, generate};
 pub use shaders::build_shaders;
 
 pub mod c;
