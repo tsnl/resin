@@ -71,8 +71,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   public operation names omit `resin_`. `RuntimeError` is a union of named status errors.
   Register cleanup after successful acquisition. Submit/cancel take `&commands` and clear the
   consumed handle; presentation returns `ok(false)` for skipped frames. There is no automatic resource ownership.
-- Commit and push completed changes directly to `main` by default, including in future
-  sessions. Do not open a pull request unless asked. Preserve unrelated local changes.
+- Always commit and push completed changes to a task branch and open a pull request,
+  including in future sessions. Do not push changes directly to `main`.
+  Preserve unrelated local changes.
 - Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and
   examples. Enter it with `nix-shell` from the repository root, or run a command non-interactively
   with `nix-shell --run 'cargo test --workspace --all-features'`. On Windows, use a Visual Studio
