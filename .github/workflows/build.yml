@@ -35,14 +35,30 @@ jobs:
 
   native:
     needs: grammar
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc
+      - name: Windows C toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Import-Module "$installation\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          foreach ($name in 'PATH', 'INCLUDE', 'LIB', 'LIBPATH') {
+            "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
+          }
+          "$env:ProgramFiles\LLVM\bin" >> $env:GITHUB_PATH
       - name: Build compiler, runtime, and language server
         run: cargo build --workspace --locked
       - name: Check example formatting
