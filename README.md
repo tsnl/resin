@@ -326,14 +326,49 @@ Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an e
 them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization.
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
-A file can export several entry points. Host entries must be Resin functions of type
-`() -> int`, `() -> ()`, or a Result with either success type;
+A file can export several entry points. Host entries take either `()` or
+`(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for `argc`, `argv`, and `envp`, and return
+`int`, `()`, or a Result with either success type;
 `main` is just the default name, not special syntax.
 Execution begins at the selected function. It must be explicitly exported by the entry file,
 including when re-exporting an imported function. Missing or private entries are errors.
 There is no module initialization phase.
 The selector uses the last colon in the filename, not in its parent directories. For a filename
 that itself contains a colon, append `:main` (or another entry) explicitly.
+
+Pass program arguments after `--`: `resin examples/process.resin -- "hello world" --flag`.
+Arguments are forwarded literally, including empty strings and leading dashes, without a shell.
+The exported entry may use the conventional three-argument form:
+
+```resin
+export { main };
+import { "std/process.resin" };
+
+def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () = {
+    var args = arguments(argc, argv);
+    var index = 1_ul;
+    while (index < args.length) {
+        print(fmt("{0}\n", (argument(args, index),)));
+        index := index + 1_ul;
+    };
+};
+```
+
+The runtime deep-copies the argument and environment arrays and strings before entering Resin.
+`argv[0]` is the executable invocation name (the cached executable when using `resin FILE`),
+`argv[argc]` is null, and `envp` is a null-terminated array of `NAME=value` strings.
+`envp` is frozen at startup: later environment mutations do not change its values or lookups.
+These process-lifetime views are borrowed and must be treated as read-only; Resin's current
+pointer types do not enforce immutability. Unix preserves native bytes, including non-UTF-8;
+Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surrogates.
+
+`std/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
+`argument(args, index)` as a checked byte-span view, and `c_string(pointer)` for a valid
+NUL-terminated string. `environment_get(envp, name)` takes a NUL-terminated name and returns
+`Result<Span<ubyte>, EnvironmentVariableNotFound>`. Lookup is exact and case-sensitive on
+all platforms; an empty value succeeds with length zero. It never reads live OS state.
+See `examples/process.resin` for looking up a selected variable without dumping the environment.
+Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
 
 With `-o PATH` (or `--out PATH`), Resin builds and copies the executable without running it.
 A successful build and copy returns status 0, independently of the program's eventual exit status.

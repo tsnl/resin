@@ -13,9 +13,15 @@ pub struct Invocation {
 }
 
 pub enum Mode {
-    Interpreter(Box<Request>),
+    Interpreter {
+        request: Box<Request>,
+        args: Vec<OsString>,
+    },
     Compiler(Box<Request>),
-    Formatter { paths: Vec<PathBuf>, check: bool },
+    Formatter {
+        paths: Vec<PathBuf>,
+        check: bool,
+    },
 }
 
 pub fn parse(
@@ -33,8 +39,12 @@ pub fn parse(
 #[command(name = "resin")]
 struct Cli {
     /// One FILE[:ENTRY] to run/compile, or files/directories to format with --format.
-    #[arg(required = true, value_name = "PATH")]
+    #[arg(required_unless_present = "format", value_name = "PATH")]
     paths: Vec<PathBuf>,
+
+    /// Arguments passed literally after --, or additional formatter paths.
+    #[arg(last = true, value_name = "ARG", conflicts_with = "destination")]
+    program_args: Vec<OsString>,
 
     /// Format files in place; search directories recursively for .resin files.
     #[arg(short = 'f', long, conflicts_with_all = ["destination", "cc", "glslc"])]
@@ -66,10 +76,19 @@ struct CompileOptions {
 impl Cli {
     fn mode(self, environment: &Environment) -> Result<Mode> {
         if self.format {
+            if self.paths.is_empty() && self.program_args.is_empty() {
+                Self::command()
+                    .error(
+                        clap::error::ErrorKind::MissingRequiredArgument,
+                        "formatting requires at least one path",
+                    )
+                    .exit();
+            }
             return Ok(Mode::Formatter {
                 paths: self
                     .paths
                     .into_iter()
+                    .chain(self.program_args.into_iter().map(PathBuf::from))
                     .map(|path| environment.directory.join(path))
                     .collect(),
                 check: self.check,
@@ -104,7 +123,10 @@ impl Cli {
             },
         )?);
         Ok(if interpret {
-            Mode::Interpreter(request)
+            Mode::Interpreter {
+                request,
+                args: self.program_args,
+            }
         } else {
             Mode::Compiler(request)
         })

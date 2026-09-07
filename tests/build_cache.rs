@@ -314,7 +314,7 @@ fn generated_c_is_retained_alongside_the_executable() {
     assert!(
         fs::read_to_string(source)
             .unwrap()
-            .contains("int main(void)")
+            .contains("int main(int r_argc, char **r_argv)")
     );
     assert_eq!(project.calls(), 1);
 }

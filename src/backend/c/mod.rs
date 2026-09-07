@@ -28,7 +28,7 @@ pub struct Shader {
     pub words: Vec<u32>,
 }
 
-/// Emit a C11 executable calling an exported () -> int or () -> () function.
+/// Emit a C11 executable calling an exported unit or process-input entry point.
 pub fn emit(module: &Module, entry: &str) -> Result<String, Error> {
     emit_with_shaders(module, entry, &[])
 }
@@ -86,7 +86,7 @@ pub(crate) fn emit_verified(
     for (index, flow) in analysis.functions.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }
-    out.push_str("int main(void) {\n  atexit(resin_cleanup);\n");
+    out.push_str("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n");
     out.push_str(&entry);
     out.push_str("}\n");
     Ok(out)

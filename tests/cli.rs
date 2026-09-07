@@ -353,12 +353,12 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
         (
             "export { demo }; def demo(n: int) -> int = { n };",
             Some("demo"),
-            "take (), and return int",
+            "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
         ),
         (
             "export { demo }; def demo() -> uint = { uint(0) };",
             Some("demo"),
-            "take (), and return int",
+            "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
         ),
         (
             "export { rand }; extern \"stdlib.h\" def rand() -> int;",
@@ -597,4 +597,184 @@ fn removed_output_modes_are_rejected_before_building() {
     );
     assert!(!temp.path().join("output").exists());
     assert!(!temp.path().join("build").exists());
+}
+
+#[test]
+fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let input = temp.path().join("args.resin");
+    fs::write(&input, r#"
+        export { main };
+        import { "std/process.resin" };
+        def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int = {
+            var args = arguments(argc, argv);
+            var with_sentinel = arguments(argc + 1, argv);
+            var index = 1_ul;
+            while (index < args.length) {
+                print(fmt("[{0}]\n", (argument(args, index),)));
+                index := index + 1_ul;
+            };
+            if (argc == 6 && ulong(with_sentinel(ulong(argc)).*) == 0_ul && argument(args, 0_ul).length > 0_ul) { 0 } else { 1 }
+        };
+    "#).unwrap();
+    let args = ["hello world", "", "--flag", "semi;$(literal)", "λ"];
+    let expected = "[hello world]\n[]\n[--flag]\n[semi;$(literal)]\n[λ]\n";
+    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+        .current_dir(temp.path())
+        .arg(&input)
+        .arg("--")
+        .args(args)
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+    let executable = temp
+        .path()
+        .join(format!("args{}", std::env::consts::EXE_SUFFIX));
+    success(&invoke(
+        temp.path(),
+        &input,
+        &["-o", executable.to_str().unwrap()],
+    ));
+    let output = Command::new(&executable).args(args).output().unwrap();
+    success(&output);
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+    let rejected = invoke(temp.path(), &input, &["-o", "unused", "--", "argument"]);
+    assert!(!rejected.status.success());
+    assert!(!temp.path().join("unused").exists());
+}
+
+#[test]
+fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let header = temp.path().join("mutate_environment.h");
+    fs::write(
+        &header,
+        r#"
+        #include <stdlib.h>
+        #ifndef _WIN32
+        extern int setenv(const char *, const char *, int);
+        #endif
+        static inline int mutate_environment(void) {
+        #ifdef _WIN32
+            return _putenv_s("RESIN_SNAPSHOT_TEST", "after");
+        #else
+            return setenv("RESIN_SNAPSHOT_TEST", "after", 1);
+        #endif
+        }
+    "#,
+    )
+    .unwrap();
+    let input = temp.path().join("environment.resin");
+    let header_path = header.to_string_lossy().replace('\\', "/");
+    fs::write(&input, format!(r#"
+        export {{ main }};
+        import {{ "std/process.resin" }};
+        extern "{header_path}" def mutate_environment() -> int;
+        extern "stdlib.h" def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
+        def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<int, _> = {{
+            var name = "RESIN_SNAPSHOT_TEST";
+            var empty = "RESIN_SNAPSHOT_EMPTY";
+            var missing = "RESIN_SNAPSHOT_MISSING";
+            var before = environment_get(envp, name.data)?;
+            var status = mutate_environment();
+            var after = environment_get(envp, name.data)?;
+            var live = c_string(getenv(name.data));
+            var absent = match (environment_get(envp, missing.data)) {{ ok(value) => {{ 1 == 0 }}, err(error) => {{ 1 == 1 }} }};
+            var env = environment(envp);
+            var with_sentinel = Span<Ptr<ubyte>> {{ data = envp, length = env.length + 1_ul }};
+            print(fmt("{{0}}/{{1}}/{{2}}\n", (before, after, live)));
+            ok(if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
+                && env.length >= 2_ul && ulong(with_sentinel(env.length).*) == 0_ul) {{ 0 }} else {{ 1 }})
+        }};
+    "#)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+        .current_dir(temp.path())
+        .arg(&input)
+        .env("RESIN_SNAPSHOT_TEST", "before")
+        .env("RESIN_SNAPSHOT_EMPTY", "")
+        .env_remove("RESIN_SNAPSHOT_MISSING")
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "before/before/after\n"
+    );
+    // Reusing the executable captures this invocation's environment, not build-time values.
+    let output = Command::new(artifact(temp.path(), "debug"))
+        .env("RESIN_SNAPSHOT_TEST", "fresh")
+        .env("RESIN_SNAPSHOT_EMPTY", "")
+        .env_remove("RESIN_SNAPSHOT_MISSING")
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "fresh/fresh/after\n"
+    );
+}
+
+#[test]
+fn process_entry_signatures_results_and_argument_bounds_are_checked() {
+    for signature in [
+        "argc: uint, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>",
+        "argc: int, argv: Ptr<ubyte>, envp: Ptr<Ptr<ubyte>>",
+        "argc: int, argv: Ptr<Ptr<ubyte>>",
+    ] {
+        let output = cli(
+            &format!("export {{ main }}; def main({signature}) = {{}};"),
+            &[],
+        );
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("take () or"));
+    }
+    for (result, body, code) in [
+        ("()", "{}", 0),
+        ("Result<int, E>", "ok(7)", 7),
+        ("Result<(), E>", "err(E {})", 1),
+    ] {
+        let source = format!(
+            "export {{ main }}; struct E {{}}; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> {result} = {{ {body} }};"
+        );
+        assert_eq!(cli(&source, &[]).status.code(), Some(code));
+    }
+    let output = cli(
+        r#"export { main }; import { "std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { argument(arguments(argc, argv), ulong(argc)); };"#,
+        &[],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("array index out of bounds"));
+}
+
+#[test]
+#[cfg(unix)]
+fn process_arguments_preserve_non_utf8_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let input = temp.path().join("bytes.resin");
+    fs::write(&input, r#"export { main }; import { "std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul),))); };"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+        .current_dir(temp.path())
+        .arg(input)
+        .arg("--")
+        .arg(std::ffi::OsString::from_vec(vec![0xff, b'x']))
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(output.stdout, [0xff, b'x']);
 }
