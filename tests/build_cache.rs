@@ -75,7 +75,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         r#"
         export { main };
         import { "helper.resin" };
-        @compute_shader def kernel(i: uint) -> uint = { pixel(i) };
+        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { pixel(i) }; };
         def main() -> () = {
             var a = kernel.spirv;
             var b = kernel.spirv;
@@ -478,8 +478,8 @@ fn all_glsl_is_generated_before_shader_or_c_compilers_run() {
         &project.input,
         r#"
         export { main };
-        @compute_shader def good(i: uint) -> uint = { i + 1I };
-        @compute_shader def bad(i: uint) -> uint = { i / 2I };
+        @compute_shader def good(i: uint, output: Ptr<uint>) = { output.* := { i + 1I }; };
+        @compute_shader def bad(i: uint, output: Ptr<uint>) = { output.* := { i / 2I }; };
         def main() = { var first = good.spirv; var second = bad.spirv; };
     "#,
     )

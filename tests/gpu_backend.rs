@@ -308,7 +308,7 @@ fn fragment_shaders_read_typed_root_parameters() {
 #[test]
 fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     compute_values(
-        "export { kernel }; def kernel (index: uint) -> uint = { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total };",
+        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(index: uint, root: Ptr<PixelRoot>) = { if (index < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(index).* := { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total }; }; };",
         |index| index * (index + 1) / 2,
     );
 }
@@ -316,7 +316,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
 #[test]
 fn shader_results_propagate_and_match_union_payloads_on_device() {
     compute_values(
-        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; def kernel(i: uint) -> uint = { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } };",
+        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; };",
         |index| {
             if index == 0 {
                 0
@@ -332,7 +332,7 @@ fn shader_results_propagate_and_match_union_payloads_on_device() {
 #[test]
 fn shader_defer_preserves_values_and_runs_each_iteration() {
     compute_values(
-        "export { kernel }; def kernel(i: uint) -> uint = { var n = uint(0); var total = uint(0); var saved = { defer { total := total * uint(2); }; while (n < i) { defer { total := total + n; }; n := n + uint(1); }; total }; saved + total };",
+        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { var n = uint(0); var total = uint(0); var saved = { defer { total := total * uint(2); }; while (n < i) { defer { total := total + n; }; n := n + uint(1); }; total }; saved + total }; }; };",
         |index| 3 * index * (index + 1) / 2,
     );
 }
@@ -340,7 +340,7 @@ fn shader_defer_preserves_values_and_runs_each_iteration() {
 #[test]
 fn shader_defer_delays_conditions_and_discards_expression_values() {
     compute_values(
-        "export { kernel }; def kernel(i: uint) -> uint = { var n = uint(0); var total = uint(0); var saved = { defer if (n == i) { total := total * uint(2) } else { total := uint(999) }; defer while (n < i) { defer total := total + n; n := n + uint(1); }; total }; saved + total };",
+        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { var n = uint(0); var total = uint(0); var saved = { defer if (n == i) { total := total * uint(2) } else { total := uint(999) }; defer while (n < i) { defer total := total + n; n := n + uint(1); }; total }; saved + total }; }; };",
         |index| index * (index + 1),
     );
 }
@@ -524,7 +524,7 @@ fn array_indexing_and_helper_bounds_failures_stop_the_invocation() {
     compute_values(
         r#"export { kernel };
         def read(i: uint) -> uint = { var values = [uint(10), uint(20), uint(30)]; values(i).* };
-        @compute_shader def kernel(i: uint) -> uint = { read(i) + uint(1) };"#,
+        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { read(i) + uint(1) }; }; };"#,
         |i| if i < 3 { (i + 1) * 10 + 1 } else { u32::MAX },
     );
 }
@@ -548,12 +548,12 @@ fn span_write_bounds_failures_stop_callers_before_later_side_effects() {
 fn numeric_suffixes_and_one_armed_if_execute_on_device() {
     compute_values(
         r#"export { kernel };
-        @compute_shader def kernel(i: uint) -> uint = {
+        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := {
             var result = 0I;
             if ((i & 1I) == 0I) { result := i + 10I; };
             if (1.5f + 2.5f == 4f && 42L > 0L) { result := result + 1I; };
             result
-        };"#,
+        }; }; };"#,
         |i| if i & 1 == 0 { i + 11 } else { 1 },
     );
 }

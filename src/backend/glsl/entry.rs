@@ -4,37 +4,17 @@ use super::types::Types;
 
 pub(super) fn emit(types: &Types<'_>, param: &Ty, result: &Ty, interface: &Interface) -> String {
     match interface {
-        Interface::Compute { index, root } => {
-            if *root {
-                let arg = argument(
-                    types,
-                    param,
-                    *root,
-                    types.wrap(index, "gl_GlobalInvocationID.x".into()),
-                );
-                return format!(
-                    "layout(local_size_x = 64) in;\n{}\nvoid main() {{ r_entry({arg}); }}\n",
-                    root_declaration(*root)
-                );
-            }
-            let value = types.unwrap(
-                result,
-                format!("r_entry({})", types.wrap(param, "index".into())),
+        Interface::Compute { index } => {
+            let arg = argument(
+                types,
+                param,
+                true,
+                types.wrap(index, "gl_GlobalInvocationID.x".into()),
             );
-            format!("
-layout(local_size_x = 64) in;
-layout(buffer_reference, std430, buffer_reference_align = 8) buffer Root {{ uint count; uint64_t pixels; }};
-layout(buffer_reference, std430, buffer_reference_align = 4) buffer Pixels {{ uint values[]; }};
-layout(push_constant) uniform Push {{ uint64_t root; }};
-void main() {{
-    uint index = gl_GlobalInvocationID.x;
-    Root data = Root(root);
-    if (index >= data.count) return;
-    uint pixel = {value};
-    if (r_failed) return;
-    Pixels(data.pixels).values[index] = pixel;
-}}
-")
+            format!(
+                "layout(local_size_x = 64) in;\n{}\nvoid main() {{ r_entry({arg}); }}\n",
+                root_declaration(true)
+            )
         }
         Interface::Vertex {
             index,

@@ -496,7 +496,7 @@ fn invalid_options_and_source_report_errors() {
 #[test]
 fn decorated_host_calls_need_no_glslc() {
     success(&cli(
-        "export { main }; @compute_shader def kernel(i: uint) -> uint = { i }; def main() -> int = { if (kernel(uint(7)) == uint(7)) { 0 } else { 1 } };",
+        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() -> int = { var output = 0I; kernel(7I, &output); if (output == 7I) { 0 } else { 1 } };",
         &["--glslc", "/does/not/exist/glslc"],
     ));
 }
@@ -511,7 +511,7 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     fs::write(&input, r#"
         export { main };
         import { "std/graphics.resin" };
-        @compute_shader def kernel(i: uint) -> uint = { i + 1I };
+        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i + 1I }; };
         @vertex_shader def vertex(i: int) -> Vertex = {
             Vertex {
                 position = Position { x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f },

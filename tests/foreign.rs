@@ -168,13 +168,14 @@ fn spirv_requires_a_decorated_function_declaration() {
         "@geometry_shader def kernel(i: uint) -> uint = { i };",
         "@compute_shader @vertex_shader def kernel(i: uint) -> uint = { i };",
         "@compute_shader def kernel(i: int) -> int = { i };",
-        "@compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var alias = kernel; var code = alias.spirv; };",
+        "@compute_shader def kernel(i: uint) -> uint = { i };",
+        "@compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var alias = kernel; var code = alias.spirv; };",
         "extern \"stdlib.h\" def abs(i: int) -> int; def main() = { var code = abs.spirv; };",
     ] {
         assert!(!error(source).is_empty(), "{source}");
     }
     let module = module(
-        "export { main }; @compute_shader def kernel(i: uint) -> uint = { i }; def main() = { var code = kernel.spirv; };",
+        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
     assert_eq!(main.locals[1].ty, ir::Ty::shader());

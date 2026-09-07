@@ -638,8 +638,8 @@ fn decorated_functions_and_their_helpers_remain_host_callable() {
     runs(
         r#"export { main };
         def twice(i: uint) -> uint = { i * uint(2) };
-        @compute_shader def kernel(i: uint) -> uint = { twice(i) };
-        def main() -> int = { var f = kernel; if (f(uint(21)) == uint(42)) { 0 } else { 1 } };
+        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { twice(i) }; };
+        def main() -> int = { var f = kernel; var output = 0I; f(21I, &output); if (output == 42I) { 0 } else { 1 } };
     "#,
         0,
     );

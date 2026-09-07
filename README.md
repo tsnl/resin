@@ -612,7 +612,7 @@ Shader entry points are ordinary functions with declaration decorators:
 export { main };
 
 @compute_shader
-def kernel(index: uint) -> uint = { uint(0xff400000) | (index & uint(0xffff)) };
+def kernel(index: uint, output: Ptr<uint>) = { output.* := index; };
 def main() = {
     var code = kernel.spirv;
     print("shader size: {0} bytes\n", (code.length,));
@@ -667,9 +667,7 @@ The entry interfaces are:
   `{ position: Position, color: Color }`.
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
-- The original `uint -> uint` compute entry still writes one packed RGBA8 pixel per invocation
-  (R in bits 0–7, A in 24–31). Its implicit root is `{ count: uint, pixels: ulong }`, with
-  `pixels` at byte offset 8; this wrapper bounds-checks against count.
+
 
 Device pointers support loads, stores, record fields, explicit casts, and passing to
 ordinary helpers. Shared storage supports `int`, `uint`, `float32`, `ulong`, pointers, nonempty
