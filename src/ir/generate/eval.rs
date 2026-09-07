@@ -20,6 +20,7 @@ impl Evaluator<'_> {
         expected: Option<&Ty>,
     ) -> Result<(Value, Ty), GenerateError> {
         let ty = self.numeric_type(span, text, expected)?;
+        let (text, _) = crate::ir::literal::split(text);
         let value = parse_number(text, &ty).map_err(|message| GenerateError {
             span,
             kind: GenerateErrorKind::InvalidLiteral {
@@ -35,6 +36,9 @@ impl Evaluator<'_> {
         text: &str,
         expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
+        if let (_, Some(ty)) = crate::ir::literal::split(text) {
+            return Ok(ty);
+        }
         if let Some(expected) = expected {
             let shape = self
                 .typer
@@ -167,9 +171,18 @@ fn builtin_ty(name: &str) -> Option<Ty> {
 fn parse_number(text: &str, ty: &Ty) -> Result<Value, String> {
     let compact: String = text.chars().filter(|c| *c != '_').collect();
     match ty {
-        Ty::Float32 => Ok(Value::Float32 {
-            value: parse_float(&compact)? as f32,
-        }),
+        Ty::Float32 => {
+            if is_hex_literal(&compact) {
+                return Err("hexadecimal float literals are not supported".into());
+            }
+            let value: f32 = compact
+                .parse()
+                .map_err(|err| format!("invalid float literal: {err}"))?;
+            if !value.is_finite() {
+                return Err("float literal out of range for float32".into());
+            }
+            Ok(Value::Float32 { value })
+        }
         Ty::Float64 => Ok(Value::Float64 {
             value: parse_float(&compact)?,
         }),
@@ -205,8 +218,13 @@ fn parse_float(text: &str) -> Result<f64, String> {
     if is_hex_literal(text) {
         return Err("hexadecimal float literals are not supported".into());
     }
-    text.parse()
-        .map_err(|err| format!("invalid float literal: {err}"))
+    let value: f64 = text
+        .parse()
+        .map_err(|err| format!("invalid float literal: {err}"))?;
+    if !value.is_finite() {
+        return Err("float literal out of range for float64".into());
+    }
+    Ok(value)
 }
 
 fn parse_signed<T: TryFrom<i128>>(text: &str) -> Result<T, String>

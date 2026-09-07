@@ -114,6 +114,33 @@ Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and b
 arguments use `Name {...}` and `Converter [...]`. These spaces are a convention, not required syntax.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
 
+Numeric literals accept case-sensitive suffixes that fix their primitive type:
+
+| Suffix | Type | Example |
+| --- | --- | --- |
+| `b` / `B` | `sbyte` / `ubyte` (8 bits) | `-128b`, `255B` |
+| `h` / `H` | `short` / `ushort` (16 bits) | `-32768h`, `65535H` |
+| `i` / `I` | `int` / `uint` (32 bits) | `42i`, `42I` |
+| `l` / `L` | `long` / `ulong` (64 bits) | `42l`, `42L` |
+| `f` / `d` | `float32` / `float64` | `1.5f`, `1e3d` |
+
+These widths are the same on every target. Unsuffixed literals retain contextual typing;
+a suffixed literal cannot be retyped by an annotation or ascription. Out-of-range literals
+are errors, including negative unsigned literals and floating-point overflow. Integer suffixes
+require integer notation. Hexadecimal literals accept `h/H`, `i/I`, and `l/L` suffixes,
+for example `0xffff_ffffI`. Hex digits `b/B/d/f` remain digits; use `ubyte(0xff)` for a byte.
+
+An `if` without `else` has an implicit unit branch, so its body must also yield unit:
+
+```resin
+if (count > 0L) {
+    count := count - 1L;
+};
+```
+
+It behaves like `if (...) { ... } else {}`. Bindings inside its body remain local, and
+assignments made only inside that body do not establish definite initialization afterward.
+
 ## Type inference
 
 Write `_` to request a concrete type inferred from the surrounding code:

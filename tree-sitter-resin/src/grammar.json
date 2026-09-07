@@ -2246,16 +2246,29 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "else"
-        },
-        {
-          "type": "FIELD",
-          "name": "else",
-          "content": {
-            "type": "SYMBOL",
-            "name": "closed_term"
-          }
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "else"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "else",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "closed_term"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },
@@ -2726,11 +2739,11 @@
         "members": [
           {
             "type": "PATTERN",
-            "value": "(?i)[0-9][0-9_]*(\\.[0-9_]+)?(e[+-]?[0-9_]+)?"
+            "value": "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?[bBhHiIlLfd]?"
           },
           {
             "type": "PATTERN",
-            "value": "(?i)0x[0-9a-f_]+"
+            "value": "0[xX][0-9a-fA-F_]+[hHiIlL]?"
           }
         ]
       }

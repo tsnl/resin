@@ -910,3 +910,31 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     );
     assert!(items.iter().all(|i| i.name != "spirv"));
 }
+
+#[test]
+fn suffixes_and_one_armed_if_have_editor_types() {
+    let source =
+        "def main() = { var count = 42L; if (count > 0L) { var speed = 1.5f; speed; }; count; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    let path = project.path("main.resin");
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("count").unwrap())
+            .unwrap()
+            .text,
+        "count: ulong"
+    );
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("speed").unwrap())
+            .unwrap()
+            .text,
+        "speed: float32"
+    );
+}

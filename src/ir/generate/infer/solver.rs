@@ -34,6 +34,9 @@ impl Solver {
     }
 
     pub fn number(&mut self, text: &str) -> Type {
+        if let (_, Some(ty)) = crate::ir::literal::split(text) {
+            return ty.into();
+        }
         let hex = text.starts_with("0x") || text.starts_with("0X");
         let float = !hex && (text.contains('.') || text.contains(['e', 'E']));
         self.variable(if float { Class::Float } else { Class::Number })

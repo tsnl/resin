@@ -382,8 +382,7 @@ export default grammar({
         field("cond", $.term),
         ")",
         field("then", $.closed_term),
-        "else",
-        field("else", $.closed_term),
+        optional(seq("else", field("else", $.closed_term))),
       ),
 
     //
@@ -469,8 +468,10 @@ export default grammar({
     number: () =>
       token(
         choice(
-          new RustRegex("(?i)[0-9][0-9_]*(\\.[0-9_]+)?(e[+-]?[0-9_]+)?"),
-          new RustRegex("(?i)0x[0-9a-f_]+"),
+          new RustRegex(
+            "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?[bBhHiIlLfd]?",
+          ),
+          new RustRegex("0[xX][0-9a-fA-F_]+[hHiIlL]?"),
         ),
       ),
 

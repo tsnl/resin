@@ -188,3 +188,11 @@ fn shader_decorators_stay_on_their_own_lines() {
         "@compute_shader\ndef kernel(i: uint) -> uint = {\n\ti\n};\n",
     );
 }
+
+#[test]
+fn numeric_suffixes_and_one_armed_if_keep_their_spelling() {
+    check(
+        "def main()={var a=42L;var b=-42l;if(a>0L){var c=1.5f;};};",
+        "def main() = {\n\tvar a = 42L;\n\tvar b = -42l;\n\tif (a > 0L) {\n\t\tvar c = 1.5f;\n\t};\n};\n",
+    );
+}

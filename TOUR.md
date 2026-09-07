@@ -120,7 +120,7 @@ syntax. Skip the generated `src/parser.c` on a first read.
 [src/ast/mod.rs](src/ast/mod.rs) defines the small set of source constructs:
 files, statements, terms, and types, annotated with byte spans for diagnostics.
 [generate.rs](src/ast/generate.rs) translates Tree-sitter nodes into these
-structures, decodes literals, and lowers syntax such as operators into builtin
+structures, decodes literals, inserts the unit branch for one-armed `if`, and lowers operators into builtin
 applications.
 
 [load.rs](src/ast/load.rs) builds a `Program` of source modules in dependency
@@ -151,7 +151,9 @@ variables and control flow; they do not execute the IR.
 [TyperContext](src/ir/typer/mod.rs) owns the nominal type-definition table.
 A type's identity can be reserved before its body is defined; the completed
 table moves into the IR module. Type IDs belong to that table, not to a global
-registry. [rules.rs](src/ir/typer/rules.rs) describes operations on types, while
+registry. [literal.rs](src/ir/literal.rs) shares the case-sensitive numeric suffix
+mapping between inference and literal evaluation. [rules.rs](src/ir/typer/rules.rs)
+describes operations on types, while
 [convert.rs](src/ir/typer/convert.rs) describes allowed conversions.
 
 [ir/generate/mod.rs](src/ir/generate/mod.rs) orchestrates source-to-IR lowering.

@@ -654,7 +654,18 @@ impl<'a> AstGen<'a> {
         assert_eq!(node.kind(), "if_term");
         let cond = self.gen_term(node.child_by_field_name("cond").unwrap_or(node));
         let then = self.gen_closed_term(node.child_by_field_name("then").unwrap_or(node));
-        let els = self.gen_closed_term(node.child_by_field_name("else").unwrap_or(node));
+        let els = node.child_by_field_name("else").map_or_else(
+            || {
+                Spanned::new(
+                    TermKind::Unit,
+                    Span {
+                        start: node.end_byte(),
+                        end: node.end_byte(),
+                    },
+                )
+            },
+            |node| self.gen_closed_term(node),
+        );
         Spanned::new(
             TermKind::If {
                 cond: Box::new(cond),

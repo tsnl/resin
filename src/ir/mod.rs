@@ -3,6 +3,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod instr;
+pub(crate) mod literal;
 pub mod shader;
 pub mod types;
 pub mod value;

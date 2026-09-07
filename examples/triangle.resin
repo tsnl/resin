@@ -7,47 +7,47 @@ def vertex(index: int) -> Vertex = {
 	if (index == 0) {
 		Vertex {
 			position = Position {
-				x = float32(0.0),
-				y = float32(-0.75),
-				z = float32(0.0),
-				w = float32(1.0),
+				x = 0.0f,
+				y = -0.75f,
+				z = 0.0f,
+				w = 1.0f,
 			},
 			color = Color {
-				r = float32(1.0),
-				g = float32(0.0),
-				b = float32(0.0),
-				a = float32(1.0),
+				r = 1.0f,
+				g = 0.0f,
+				b = 0.0f,
+				a = 1.0f,
 			},
 		}
 	} else {
 		if (index == 1) {
 			Vertex {
 				position = Position {
-					x = float32(-0.7),
-					y = float32(0.6),
-					z = float32(0.0),
-					w = float32(1.0),
+					x = -0.7f,
+					y = 0.6f,
+					z = 0.0f,
+					w = 1.0f,
 				},
 				color = Color {
-					r = float32(0.0),
-					g = float32(1.0),
-					b = float32(0.0),
-					a = float32(1.0),
+					r = 0.0f,
+					g = 1.0f,
+					b = 0.0f,
+					a = 1.0f,
 				},
 			}
 		} else {
 			Vertex {
 				position = Position {
-					x = float32(0.7),
-					y = float32(0.6),
-					z = float32(0.0),
-					w = float32(1.0),
+					x = 0.7f,
+					y = 0.6f,
+					z = 0.0f,
+					w = 1.0f,
 				},
 				color = Color {
-					r = float32(0.0),
-					g = float32(0.0),
-					b = float32(1.0),
-					a = float32(1.0),
+					r = 0.0f,
+					g = 0.0f,
+					b = 1.0f,
+					a = 1.0f,
 				},
 			}
 		}

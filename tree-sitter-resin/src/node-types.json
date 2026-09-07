@@ -522,7 +522,7 @@
       },
       "else": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "closed_term",

@@ -537,3 +537,17 @@ fn span_write_bounds_failures_stop_callers_before_later_side_effects() {
         |i| if i < 3 { 43 } else { u32::MAX },
     );
 }
+
+#[test]
+fn numeric_suffixes_and_one_armed_if_execute_on_device() {
+    compute_values(
+        r#"export { kernel };
+        @compute_shader def kernel(i: uint) -> uint = {
+            var result = 0I;
+            if ((i & 1I) == 0I) { result := i + 10I; };
+            if (1.5f + 2.5f == 4f && 42L > 0L) { result := result + 1I; };
+            result
+        };"#,
+        |i| if i & 1 == 0 { i + 11 } else { 1 },
+    );
+}

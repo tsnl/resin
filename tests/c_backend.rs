@@ -672,3 +672,32 @@ fn spirv_is_only_special_on_function_declarations() {
         2,
     );
 }
+
+#[test]
+fn suffixed_literals_execute_with_their_selected_widths() {
+    runs(
+        r#"export { main }; def main() -> int = {
+        var a = -128b; var b = 255B; var c = -32768h; var d = 65535H;
+        var e = -2147483648i; var f = 4294967295I;
+        var g = -9223372036854775808l; var h = 18446744073709551615L;
+        if (a < 0b && b > 0B && c < 0h && d > 0H && e < 0i && f > 0I && g < 0l && h == 0xffffffffffffffffL && 1.5f + 2.5f == 4f && 1e2d == 100d && 1.0000000596046448f > 1f) { 0 } else { 1 }
+    };"#,
+        0,
+    );
+}
+
+#[test]
+fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
+    runs(
+        r#"export { main };
+    def condition(calls: Ptr<int>) -> bool = { calls.* := calls.* + 1; 1 == 1 };
+    def main() -> int = {
+        var calls = 0; var value = 0;
+        if (condition(&calls)) { defer { value := value + 10; }; value := value + 1; };
+        if (1 == 0) { value := 100; };
+        if (1 == 1) { if (1 == 0) { value := 100; } else { value := value + 1; }; };
+        if (calls == 1 && value == 12) { 0 } else { 1 }
+    };"#,
+        0,
+    );
+}

@@ -438,3 +438,16 @@ fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
     }
     compile("def explicit(p: Ptr<int>) -> Ptr<int> = { Ptr<int>(ulong(p) + ulong(4)) };");
 }
+
+#[test]
+fn one_armed_if_preserves_conditional_initialization_and_scope() {
+    for source in [
+        "def main() -> int = { var x: int; if (1 == 1) { x := 1; }; x };",
+        "def main() -> int = { if (1 == 1) { var x = 1; }; x };",
+        "def main() = { if (1) {} };",
+        "def main() = { if (1 == 1) { 42 } };",
+    ] {
+        assert!(generate(&parse(source)).is_err(), "{source}");
+    }
+    compile("def main() -> int = { var x: int; if ((x := 2) == 2) {}; x };");
+}

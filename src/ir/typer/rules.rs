@@ -23,6 +23,9 @@ impl TyperContext {
     }
 
     pub fn type_num(&self, value: &str) -> Ty {
+        if let (_, Some(ty)) = crate::ir::literal::split(value) {
+            return ty;
+        }
         let value = value.strip_prefix('-').unwrap_or(value);
         let is_hex = value.starts_with("0x") || value.starts_with("0X");
         if value.contains('.') || (!is_hex && value.contains(['e', 'E'])) {

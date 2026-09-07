@@ -263,3 +263,82 @@ fn span_construction_and_indexing_infer_element_and_pointer_types() {
         Ty::shader()
     );
 }
+
+#[test]
+fn numeric_suffixes_select_exact_types_with_or_without_inference() {
+    for (literal, ty) in [
+        ("-128b", Ty::Int8),
+        ("255B", Ty::UInt8),
+        ("-32768h", Ty::Int16),
+        ("65535H", Ty::UInt16),
+        ("-2147483648i", Ty::Int32),
+        ("4294967295I", Ty::UInt32),
+        ("-9223372036854775808l", Ty::Int64),
+        ("18446744073709551615L", Ty::UInt64),
+        ("1.25f", Ty::Float32),
+        ("1e2d", Ty::Float64),
+        ("42f", Ty::Float32),
+        ("42d", Ty::Float64),
+        ("0xFFFF_FFFFL", Ty::UInt64),
+        ("0x7fffl", Ty::Int64),
+        ("0xff", Ty::Int32),
+        ("0xAB", Ty::Int32),
+        ("0xdead", Ty::Int32),
+    ] {
+        assert_eq!(
+            result(&format!("def value() -> _ = {{ {literal} }};"), "value"),
+            ty
+        );
+        let m = module(&format!("def main() = {{ var n = {literal}; }};"));
+        assert!(
+            m.functions[0]
+                .locals
+                .iter()
+                .any(|local| local.name.as_deref() == Some("n") && local.ty == ty),
+            "{literal}"
+        );
+    }
+    for source in [
+        "def value() -> long = { 42L };",
+        "def value() -> _ = { var n: long; n := 42L; n };",
+        "def value() -> _ = { 42L + 1l };",
+        "def value() -> float64 = { 1.5f };",
+    ] {
+        assert!(ir::generate(&parse(source)).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn suffixed_literals_reject_overflow_and_invalid_integer_forms() {
+    for literal in [
+        "128b",
+        "256B",
+        "32768h",
+        "65536H",
+        "2147483648i",
+        "4294967296I",
+        "9223372036854775808l",
+        "18446744073709551616L",
+        "-1L",
+        "-129b",
+        "1.5L",
+        "1e3I",
+        "1e50f",
+        "1e400d",
+    ] {
+        for annotation in ["", " -> _"] {
+            let source = if annotation.is_empty() {
+                format!("def main() = {{ var n = {literal}; }};")
+            } else {
+                format!("def main(){annotation} = {{ {literal} }};")
+            };
+            rejects(&source, "literal");
+        }
+    }
+}
+
+#[test]
+fn one_armed_if_infers_unit_and_requires_a_unit_body() {
+    assert_eq!(result("def f() -> _ = { if (1 == 1) {} };", "f"), Ty::Unit);
+    rejects("def f() -> _ = { if (1 == 1) { 42 } };", "incompatible");
+}
