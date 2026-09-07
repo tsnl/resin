@@ -47,7 +47,7 @@ fn holes_compose_inside_pointers_spans_records_and_functions() {
         };",
     );
     for f in &m.functions[..2] {
-        assert_eq!(f.result, f.locals[f.param.index()].ty);
+        assert_eq!(f.result, f.locals[0].ty);
     }
     assert_eq!(
         m.functions[3].result,

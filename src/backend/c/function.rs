@@ -15,7 +15,7 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
     let mut out = format!(
         "{} r_fn{index}({} r_arg) {{\n",
         types.name(&function.result),
-        types.name(&function.locals[function.param.index()].ty)
+        types.name(&function.locals[0].ty)
     );
     for (i, local) in function.locals.iter().enumerate() {
         writeln!(
@@ -25,7 +25,7 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
         )
         .unwrap();
     }
-    writeln!(out, "  r_l{} = r_arg;", function.param.index()).unwrap();
+    writeln!(out, "  r_l0 = r_arg;").unwrap();
     for (block, inputs) in flow.inputs.iter().enumerate() {
         for (i, ty) in inputs.iter().enumerate() {
             writeln!(out, "  {} r_b{block}_{i};", types.name(ty)).unwrap();

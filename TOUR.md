@@ -142,7 +142,9 @@ Read these small definitions first:
 
 This is a typed operand-stack IR, not SSA. Instructions consume and produce
 stack values; terminators connect blocks or return from a function. Local
-storage is explicit, with separate address, load, and store instructions.
+storage is explicit, with separate address, load, and store instructions. Local zero
+is always the function parameter, including unit and tuple parameters and foreign
+declarations; there is no configurable parameter index.
 The C and GLSL backends translate this stack model into target-language
 variables and control flow; they do not execute the IR.
 

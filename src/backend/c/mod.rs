@@ -66,7 +66,7 @@ pub fn emit_with_shaders(
             out,
             "{} r_fn{index}({} r_arg);",
             types.name(&function.result),
-            types.name(&function.locals[function.param.index()].ty)
+            types.name(&function.locals[0].ty)
         )
         .unwrap();
     }

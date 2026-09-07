@@ -114,10 +114,7 @@ fn fibonacci_generates_verified_ir() {
     assert_eq!(module.functions.len(), 2);
     assert_eq!(module.functions[1].result, Ty::Unit);
     assert_eq!(module.functions[0].result, Ty::Int32);
-    assert_eq!(
-        module.functions[0].locals[module.functions[0].param.index()].ty,
-        Ty::Int32
-    );
+    assert_eq!(module.functions[0].locals[0].ty, Ty::Int32);
 }
 
 #[test]

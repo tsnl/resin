@@ -15,6 +15,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
 - Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
   build and copy the optimized executable without running it, even with `--output run`.
+- Every IR function reserves local zero for its parameter, including unit and tuple parameters
+  and foreign declarations. The verifier rejects functions with no locals.
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.

@@ -64,16 +64,13 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
     let fn_names = FunctionNames::new(function);
     let mut items = vec![
         symbol(names.functions[index].as_ref()),
-        symbol(fn_names.locals[function.param.index()].as_ref()),
+        symbol(fn_names.locals[0].as_ref()),
         sexp_ty(names, &function.result),
     ];
     if let Some(foreign) = &function.foreign {
         items.push(list("extern", vec![symbol(foreign.header.as_ref())]));
     }
-    for (i, local) in function.locals.iter().enumerate() {
-        if function.param.index() == i {
-            continue;
-        }
+    for (i, local) in function.locals.iter().enumerate().skip(1) {
         items.push(list(
             "local",
             vec![

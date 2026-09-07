@@ -10,7 +10,6 @@ fn ascribe_wraps_a_representation() {
     let function = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: meters.clone(),
         locals: vec![Local {
             name: None,
@@ -46,7 +45,6 @@ fn ascribe_unwraps_one_nominal_layer() {
     let function = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
             name: None,
@@ -80,7 +78,6 @@ fn chained_assignment_preserves_the_value() {
     let function = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![
             Local {
@@ -126,7 +123,6 @@ fn conflicting_join_stacks_are_rejected() {
     let function = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
             name: None,
@@ -189,7 +185,6 @@ fn indirect_calls_use_the_callee_on_the_stack() {
     let target = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
             name: None,
@@ -210,7 +205,6 @@ fn indirect_calls_use_the_callee_on_the_stack() {
     let caller = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: Ty::Int32,
         locals: vec![Local {
             name: None,
@@ -246,7 +240,6 @@ fn loop_backedges_must_match_the_header_stack() {
     let function = Function {
         foreign: None,
         name: None,
-        param: LocalId::from_index(0),
         result: Ty::Unit,
         locals: vec![Local {
             name: None,
@@ -293,4 +286,52 @@ fn loop_backedges_must_match_the_header_stack() {
         functions: vec![function],
     })
     .unwrap();
+}
+
+#[test]
+fn all_functions_require_parameter_local_zero() {
+    for foreign in [
+        None,
+        Some(crate::ir::Foreign {
+            header: "test.h".into(),
+            params: vec![],
+        }),
+    ] {
+        let mut function = Function {
+            name: Some("f".into()),
+            foreign,
+            result: Ty::Unit,
+            locals: vec![],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push { value: Value::Unit }],
+                terminator: Terminator::Return,
+            }],
+        };
+        if function.foreign.is_some() {
+            function.blocks.clear();
+        }
+        assert_eq!(function.ty(), None);
+        let mut module = Module {
+            functions: vec![function],
+            ..Default::default()
+        };
+        assert!(matches!(
+            verify(&module).unwrap_err().kind,
+            VerifyErrorKind::InvalidLocal { local: 0 }
+        ));
+        module.functions[0].locals.push(Local {
+            name: None,
+            ty: Ty::Unit,
+        });
+        verify(&module).unwrap();
+        assert_eq!(
+            module.functions[0].ty(),
+            Some(Ty::Function {
+                param: Box::new(Ty::Unit),
+                result: Box::new(Ty::Unit)
+            })
+        );
+    }
 }

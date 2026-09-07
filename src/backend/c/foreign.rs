@@ -27,7 +27,7 @@ pub(super) fn emit(types: &Types<'_>, index: usize, foreign: &Foreign) -> String
     let mut out = format!(
         "{} r_fn{index}({} r_arg) {{\n  (void)r_arg;\n",
         types.name(&function.result),
-        types.name(&function.locals[function.param.index()].ty)
+        types.name(&function.locals[0].ty)
     );
     let call = format!("{}({args})", function.name.as_deref().unwrap());
     if function.result == Ty::Unit {

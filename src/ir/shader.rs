@@ -23,10 +23,7 @@ pub fn validate(typer: &TyperContext, function: &Function, stage: &str) -> Resul
     if function.foreign.is_some() {
         return Err("foreign functions cannot be shader entries".into());
     }
-    let param = function
-        .locals
-        .get(function.param.index())
-        .ok_or("invalid shader parameter")?;
+    let param = function.locals.first().ok_or("invalid shader parameter")?;
     let param = shape(typer, &param.ty)?;
     let (input, root) = match &param {
         Ty::Record { fields }

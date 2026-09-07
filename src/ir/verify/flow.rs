@@ -14,6 +14,9 @@ pub(super) fn check_function(
 ) -> Result<FunctionTypes, VerifyError> {
     let entry = function.entry;
     let function_location = Location::function(function_id);
+    if function.locals.is_empty() {
+        return Err(function_location.error(VerifyErrorKind::InvalidLocal { local: 0 }));
+    }
 
     check_value(&module.types, &function.result, function_location)?;
     for local in &function.locals {
@@ -26,11 +29,7 @@ pub(super) fn check_function(
         if function.name.is_none()
             || !function.blocks.is_empty()
             || !foreign.valid(&function.result)
-            || function
-                .locals
-                .get(function.param.index())
-                .map(|local| &local.ty)
-                != Some(&Ty::parameter(&foreign.params))
+            || function.locals[0].ty != Ty::parameter(&foreign.params)
         {
             return Err(function_location.error(VerifyErrorKind::InvalidForeignSignature));
         }
@@ -43,12 +42,6 @@ pub(super) fn check_function(
     if function.blocks.get(entry.index()).is_none() {
         return Err(location.error(VerifyErrorKind::InvalidBasicBlock {
             basic_block: entry.index(),
-        }));
-    }
-
-    if function.locals.get(function.param.index()).is_none() {
-        return Err(location.error(VerifyErrorKind::InvalidLocal {
-            local: function.param.index(),
         }));
     }
 

@@ -96,13 +96,8 @@ pub fn emit_function(
             }
         }
     }
-    let wrapper = entry::emit(
-        &types,
-        &function.locals[function.param.index()].ty,
-        &function.result,
-        stage,
-    )?
-    .replace("r_entry", &format!("r_fn{}", entry.index()));
+    let wrapper = entry::emit(&types, &function.locals[0].ty, &function.result, stage)?
+        .replace("r_entry", &format!("r_fn{}", entry.index()));
     let mut functions = String::new();
     for index in reachable {
         functions.push_str(&function::emit(

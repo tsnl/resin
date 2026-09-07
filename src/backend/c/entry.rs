@@ -7,7 +7,7 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         .ok_or_else(|| Error(format!("entry function `{entry}` is not exported; add `export {{ {entry} }};` to the entry file")))?;
     let function = &module.functions[id.index()];
     if function.foreign.is_some()
-        || function.locals[function.param.index()].ty != Ty::Unit
+        || function.locals[0].ty != Ty::Unit
         || !matches!(function.result, Ty::Unit | Ty::Int32 | Ty::Result { .. })
     {
         return Err(Error(format!(

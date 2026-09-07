@@ -14,8 +14,9 @@ define_id! {
 pub struct Function {
     pub name: Option<Arc<str>>,
     pub foreign: Option<Foreign>,
-    pub param: LocalId,
     pub result: Ty,
+    /// Local zero is always the parameter (unit, a single value, or a tuple).
+    /// Every function, including a foreign declaration, must have this slot.
     pub locals: Vec<Local>,
     pub entry: BlockId,
     pub blocks: Vec<BasicBlock>,
@@ -55,7 +56,7 @@ pub struct Local {
 impl Function {
     pub fn ty(&self) -> Option<Ty> {
         Some(Ty::Function {
-            param: Box::new(self.locals.get(self.param.index())?.ty.clone()),
+            param: Box::new(self.locals.first()?.ty.clone()),
             result: Box::new(self.result.clone()),
         })
     }

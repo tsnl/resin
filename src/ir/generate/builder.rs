@@ -16,7 +16,6 @@ impl FunctionBuilder {
             function: Function {
                 name,
                 foreign: None,
-                param: LocalId::from_index(0),
                 result: Ty::Unit,
                 locals: vec![Local {
                     name: None,
@@ -41,7 +40,7 @@ impl FunctionBuilder {
     }
 
     pub(super) fn parameter(&mut self, name: Option<Arc<str>>, ty: Ty) {
-        self.function.locals[self.function.param.index()] = Local { name, ty };
+        self.function.locals[0] = Local { name, ty };
     }
 
     pub(super) fn result(&mut self, ty: Ty) {
@@ -147,6 +146,7 @@ mod tests {
         let mut builder = FunctionBuilder::new(Some("identity".into()));
         builder.parameter(Some("value".into()), Ty::Int32);
         builder.result(Ty::Int32);
+        assert_eq!(builder.local(Ty::Bool, Some("temporary".into())).index(), 1);
         let body = builder.new_block("body");
         builder.terminate(Terminator::Break { target: body });
         builder.switch(body);

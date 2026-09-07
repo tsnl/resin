@@ -104,11 +104,9 @@ pub(super) fn is_integer(
 }
 
 pub(super) fn function_type(function: &Function, location: Location) -> Result<Ty, VerifyError> {
-    function.ty().ok_or_else(|| {
-        location.error(VerifyErrorKind::InvalidLocal {
-            local: function.param.index(),
-        })
-    })
+    function
+        .ty()
+        .ok_or_else(|| location.error(VerifyErrorKind::InvalidLocal { local: 0 }))
 }
 
 pub(super) fn expect_types(

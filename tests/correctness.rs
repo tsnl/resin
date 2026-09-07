@@ -27,16 +27,13 @@ fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
         .iter()
         .find(|f| f.name.as_deref() == Some("f"))
         .unwrap();
-    assert_eq!(f.locals[f.param.index()].ty, Ty::Unit);
+    assert_eq!(f.locals[0].ty, Ty::Unit);
     let add = module
         .functions
         .iter()
         .find(|f| f.name.as_deref() == Some("add"))
         .unwrap();
-    assert_eq!(
-        add.locals[add.param.index()].ty,
-        Ty::parameter(&[Ty::Int32, Ty::Int32])
-    );
+    assert_eq!(add.locals[0].ty, Ty::parameter(&[Ty::Int32, Ty::Int32]));
     let instructions = &module.functions[module.entries["main"].index()].blocks[0].instrs;
     assert_eq!(
         instructions
