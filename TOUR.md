@@ -59,6 +59,13 @@ explicitly passed mutable state. Try its other entry point:
 cargo run -- examples/eg009_imports.resin:independent
 ```
 
+For a host-only standard-library example, read
+[examples/input.resin](examples/input.resin) alongside
+[stdlib/console.resin](stdlib/console.resin). The module builds a growing line
+buffer on top of C's `getchar`, returns typed errors, and exposes explicit
+cleanup through `free_input`. The example registers that cleanup with `defer`
+after a successful read.
+
 ## 2. Follow the host compilation path
 
 The main path is short enough to keep in mind:
@@ -89,6 +96,21 @@ The compiler stages are library modules exposed by [src/lib.rs](src/lib.rs),
 so tests can exercise them without invoking the CLI. Note that `--output check`
 currently checks parsing and import loading, not typing; use `--output ir` to
 exercise the typed frontend without building an executable.
+
+Formatting takes a separate path from `main` through
+[format.rs](src/bin/resin/format.rs) to the shared
+[formatting.rs](src/formatting.rs) library module. `--format` (or `-f`) formats
+files in place and searches directories recursively for `.resin` files;
+`--format --check` reports differences without writing and exits with status 1
+on differences or file/syntax errors. In the development environment, try:
+
+```sh
+cargo run -- --format --check examples
+```
+
+The formatter uses Tree-sitter syntax, changes only whitespace outside comments
+and literals, and indents with hard tabs. It rejects invalid syntax without
+modifying the file and needs no semantic analysis or entry point.
 
 ### The grammar and AST describe source, not execution
 
@@ -228,6 +250,11 @@ handles requests, document versions, and file notifications;
 the background, coalesces edits, and discards obsolete results. Editor analysis
 never compiles C/GLSL, initializes a GPU, or executes Resin programs.
 
+`textDocument/formatting` uses the same [formatter](src/formatting.rs) as the
+CLI. The server formats the open document's current text and returns a text edit
+for the changed region. See the [formatting rules](resin-lsp/README.md#formatting)
+for layout conventions.
+
 Finally, [zed-resin/src/lib.rs](zed-resin/src/lib.rs) locates and launches the
 native server from Zed's WASI extension. Its [language queries](zed-resin/languages/resin/)
 provide highlighting, outlines, and other syntax features. See the
@@ -318,7 +345,9 @@ Tests are executable descriptions of the boundaries above:
 | Deferred cleanup, scope exits, and initialization | [defer.rs](tests/defer.rs), [defer example](examples/defer.resin), [C execution tests](tests/c_backend.rs) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
 | Standard-library Results and native failure cleanup | [stdlib.rs](tests/stdlib.rs) (no GPU or windows required) |
+| Console input, byte handling, and allocation failures | [console.rs](tests/console.rs), [input example](examples/input.resin) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
+| Source formatting, file traversal, or format checks | [formatting.rs](tests/formatting.rs), [format_cli.rs](tests/format_cli.rs), [LSP formatting tests](resin-lsp/tests/stdio.rs) |
 | Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |
 | LSP protocol, buffer versions, or watched files | [stdio.rs](resin-lsp/tests/stdio.rs) |
 | Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
@@ -338,11 +367,13 @@ For editor work, without launching an editor or opening windows:
 
 ```sh
 cargo test -p resin --lib --test analysis --test zed_queries
+cargo test -p resin --test formatting --test format_cli
 cargo test -p resin-lsp
 ```
 
 [Native CI](.github/workflows/build.yml) builds the workspace, runs a host
-example, tests, and lints on Linux, macOS, and Windows. It explicitly excludes
+example, checks example formatting with `--format --check examples`, tests, and
+lints on Linux, macOS, and Windows. It explicitly excludes
 window-opening tests; optional GPU checks can skip when facilities are absent.
 Passing this matrix establishes native build and host coverage, not full GPU
 compatibility.
