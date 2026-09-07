@@ -3,6 +3,22 @@
 Resin is a simple systems programming language targeting both host (CPU) and device (GPU). 
 Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functionality.
 
+## Cost control
+
+- Run automatic CI for pull requests and pushes on Linux only. Keep Windows and macOS
+  support and tests; reserve their hosted runners for manually requested checks.
+- Before publishing a release, manually run the `Build` workflow against the release
+  candidate ref and require Linux, Windows, and macOS jobs to pass. Use Actions > Build >
+  Run workflow, or `gh workflow run build.yml --ref <release-candidate-ref>`.
+- GitHub Free includes 2,000 Actions minutes per month for private repositories, shared
+  across the repository owner's account. At the September 2026 standard Linux x64 rate
+  of $0.006/minute, 2,000 Linux minutes have about $12 of compute value.
+- Budget roughly 1x for Linux, 2x for Windows, and 10x for macOS. These are rounded cost
+  comparisons: current standard rates are $0.006, $0.010, and $0.062/minute respectively
+  (about 1x, 1.67x, and 10.33x), not exact billing multipliers. Recheck
+  [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+  when changing CI coverage or budgets.
+
 ## Development Practices
 
 - Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).

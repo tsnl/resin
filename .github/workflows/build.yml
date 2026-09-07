@@ -38,7 +38,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        # Reserve the full platform matrix for manually requested release checks.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["ubuntu-24.04", "windows-2022", "macos-14"]' || '["ubuntu-24.04"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
