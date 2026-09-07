@@ -49,6 +49,7 @@ pub struct Analysis {
     stdlib: PathBuf,
     program: Option<ast::Program>,
     module: Option<ir::Module>,
+    verification: std::sync::OnceLock<Result<Vec<ir::verify::FunctionTypes>, ir::VerifyError>>,
     load_error: Option<ast::SourceError>,
     compile_error: Option<ast::SourceError>,
 }
@@ -72,6 +73,7 @@ impl Analysis {
             stdlib: stdlib.to_path_buf(),
             program: None,
             module: None,
+            verification: std::sync::OnceLock::new(),
             load_error: None,
             compile_error: None,
         };
@@ -186,6 +188,16 @@ impl Analysis {
                 .clone()
                 .expect("failed compilation has a diagnostic")
         })
+    }
+
+    pub(crate) fn verified(&self) -> Result<ir::verify::Verified<'_>, crate::backend::Error> {
+        let module = self.module()?;
+        let analysis = self
+            .verification
+            .get_or_init(|| ir::verify::analyze(module))
+            .as_ref()
+            .map_err(|error| crate::backend::Error(error.to_string()))?;
+        Ok(ir::verify::Verified { module, analysis })
     }
 
     pub fn syntax_tree(&self, path: &Path) -> Option<&tree_sitter::Tree> {

@@ -6,13 +6,28 @@ use crate::{
 };
 
 pub fn build_shaders(module: &Module, settings: &Settings) -> Result<Vec<Shader>, Error> {
+    let analysis = crate::ir::verify::analyze(module)?;
+    build_verified(
+        crate::ir::verify::Verified {
+            module,
+            analysis: &analysis,
+        },
+        settings,
+    )
+}
+
+pub(crate) fn build_verified(
+    checked: crate::ir::verify::Verified<'_>,
+    settings: &Settings,
+) -> Result<Vec<Shader>, Error> {
+    let module = checked.module;
     let sources = module
         .shaders
         .iter()
         .filter(|(_, entry)| entry.embedded)
         .map(|(&function, entry)| {
             let stage = entry.stage.parse()?;
-            let source = glsl::emit_function(module, function, stage)?;
+            let source = glsl::emit_verified(checked, function, stage)?;
             Ok((function, stage, source))
         })
         .collect::<Result<Vec<_>, Error>>()?;

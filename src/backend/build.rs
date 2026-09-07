@@ -19,9 +19,12 @@ impl Executable {
     }
 }
 
-pub(crate) fn generate(request: &Request, module: &ir::Module) -> Result<Executable, Error> {
-    let shaders = super::build_shaders(module, &request.options().tools)?;
-    let source = c::emit_with_shaders(module, &request.input().entry, &shaders)?;
+pub(crate) fn generate(
+    request: &Request,
+    checked: ir::verify::Verified<'_>,
+) -> Result<Executable, Error> {
+    let shaders = super::shaders::build_verified(checked, &request.options().tools)?;
+    let source = c::emit_verified(checked, &request.input().entry, &shaders)?;
     let build = toolchain::build_c(
         &request.input().path,
         &request.input().entry,
