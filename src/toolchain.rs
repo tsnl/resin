@@ -15,7 +15,7 @@ mod platform;
 mod shaders;
 pub use c::{CBuild, CProfile, build_c, compile_c};
 pub use platform::DEFAULT_C_COMPILER;
-pub use shaders::build_shaders;
+pub use shaders::build_glsl;
 
 pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
     let temp = TempDir::new(&std::env::temp_dir()).map_err(io_error)?;
@@ -51,6 +51,14 @@ pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<
 
 fn valid_spirv(bytes: &[u8]) -> bool {
     bytes.len() >= 20 && bytes.len().is_multiple_of(4) && bytes[..4] == [3, 2, 35, 7]
+}
+
+/// Reject an output path that resolves to the input file.
+pub fn protect_source(source: &Path, output: &Path) -> Result<(), Error> {
+    if output.exists() && fs::canonicalize(output)? == fs::canonicalize(source)? {
+        return Err(Error("output would overwrite the source file".into()));
+    }
+    Ok(())
 }
 
 pub fn write_output(bytes: &[u8], output: &Path) -> Result<(), Error> {

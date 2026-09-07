@@ -606,3 +606,61 @@ fn shader_decorators_select_cli_stage_and_host_calls_need_no_glslc() {
         &["--glslc", "/does/not/exist/glslc"],
     ));
 }
+
+#[test]
+fn inspection_modes_preserve_frontend_boundaries_and_output_safety() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let input = temp.path().join("source.resin");
+    let source = "export { main }; def main() -> int = { unknown };";
+    fs::write(&input, source).unwrap();
+    for mode in ["cst", "ast", "check"] {
+        let output = invoke(
+            temp.path(),
+            &input,
+            &[
+                "--output",
+                mode,
+                "--cc",
+                "missing-compiler",
+                "--glslc",
+                "missing-glslc",
+            ],
+        );
+        success(&output);
+        assert!(!output.stdout.is_empty());
+        if mode == "check" {
+            assert_eq!(output.stdout, b"ok\n");
+        }
+        let saved = temp.path().join(format!("{mode}.txt"));
+        success(&invoke(
+            temp.path(),
+            &input,
+            &["--output", mode, "-o", saved.to_str().unwrap()],
+        ));
+        assert_eq!(fs::read(saved).unwrap(), output.stdout);
+        assert!(
+            !invoke(
+                temp.path(),
+                &input,
+                &["--output", mode, "-o", input.to_str().unwrap()]
+            )
+            .status
+            .success()
+        );
+        assert_eq!(fs::read_to_string(&input).unwrap(), source);
+    }
+    let output = invoke(temp.path(), &input, &["--output", "ir"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown"));
+    assert!(!temp.path().join("build").exists());
+
+    fs::write(&input, "def main( = {").unwrap();
+    let tree = invoke(temp.path(), &input, &["--output", "cst"]);
+    success(&tree);
+    assert!(String::from_utf8_lossy(&tree.stdout).contains("ERROR"));
+    assert!(
+        !invoke(temp.path(), &input, &["--output", "check"])
+            .status
+            .success()
+    );
+}

@@ -15,6 +15,13 @@ use std::{
     sync::Arc,
 };
 
+/// A source file and its selected exported entry, independent of CLI selector syntax.
+#[derive(Clone, Debug)]
+pub struct Input {
+    pub path: PathBuf,
+    pub entry: String,
+}
+
 pub struct Session {
     sources: Sources,
     stdlib: PathBuf,

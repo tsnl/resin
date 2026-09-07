@@ -5,35 +5,12 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::{
-    backend::{Error, c::Shader, glsl},
-    ir::Module,
-};
+use crate::backend::{Error, glsl};
 
 use super::{c, compile_glsl, io_error, write_output};
 
-pub fn build_shaders(module: &Module, compiler: &OsStr) -> Result<Vec<Shader>, Error> {
-    let mut shaders: Vec<Shader> = Vec::new();
-    for (&function, entry) in &module.shaders {
-        if !entry.embedded {
-            continue;
-        }
-        let stage = entry.stage.parse()?;
-        let source = glsl::emit_function(module, function, stage)?;
-        let bytes = cached(&source, stage, compiler)?;
-        shaders.push(Shader {
-            function,
-            stage,
-            words: bytes
-                .chunks_exact(4)
-                .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
-                .collect(),
-        });
-    }
-    Ok(shaders)
-}
-
-fn cached(source: &str, stage: glsl::Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
+/// Compile GLSL with an environment-sensitive, locked SPIR-V cache.
+pub fn build_glsl(source: &str, stage: glsl::Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
     let compiler = c::resolve(compiler)?;
     let fingerprint = || {
         let mut hash = DefaultHasher::new();

@@ -81,11 +81,17 @@ host executable, which uses the runtime to create Vulkan pipelines and run them.
 
 ### The CLI connects the stages
 
-Start at `run` in [src/bin/resin.rs](src/bin/resin.rs). It creates a
-[compiler::Session](src/compiler.rs), analyzes the source, and selects an
-output path. `host` handles C generation and native execution; `shader`
-handles standalone GLSL or SPIR-V output.
-[source.rs](src/bin/resin/source.rs) parses the `FILE[:ENTRY]` selector.
+[src/bin/resin.rs](src/bin/resin.rs) is a small dispatcher. [args.rs](src/bin/resin/args.rs)
+parses flags and chooses `Mode::Interpreter`, `Compiler`, `Codegen`, `Inspector`, or
+`Formatter`; [source.rs](src/bin/resin/source.rs) parses the `FILE[:ENTRY]` selector.
+Interpreter mode builds a debug native executable and runs it. Compiler mode builds
+and copies a release executable without running it, including `--output run -o PATH`.
+
+[backend/build.rs](src/backend/build.rs) owns source analysis, C/GLSL/SPIR-V generation,
+shader embedding, compiler selection, and executable construction. Its `compile` API
+returns an `Executable` that keeps the build-cache lock while the caller runs it.
+`generate` returns output bytes. [inspect.rs](src/bin/resin/inspect.rs) handles the
+frontend-only CST, AST, IR, and parsing-check modes.
 
 The session owns source overlays, cached parses, import dependencies, and
 immutable [analysis snapshots](src/analysis/mod.rs). A snapshot exposes the
@@ -280,8 +286,9 @@ cargo run -- examples/gradient.resin:kernel --output glsl
 shader entry declarations. [ir/shader.rs](src/ir/shader.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
 host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
-[toolchain/shaders.rs](src/toolchain/shaders.rs) enumerates those declaration
-requests, emits GLSL, invokes `glslc`, and supplies cached SPIR-V for embedding in C.
+[backend/shaders.rs](src/backend/shaders.rs) enumerates those declaration
+requests and emits GLSL. [toolchain/shaders.rs](src/toolchain/shaders.rs) caches the
+external compiler output, supplying SPIR-V for embedding in C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path.
 

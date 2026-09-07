@@ -1,12 +1,8 @@
 use std::{ffi::OsStr, path::PathBuf};
 
-#[derive(Clone, Debug)]
-pub struct Source {
-    pub path: PathBuf,
-    pub entry: String,
-}
+use resin::compiler::Input;
 
-pub fn parse(value: &OsStr) -> Result<Source, String> {
+pub fn parse(value: &OsStr) -> Result<Input, String> {
     let mut path = PathBuf::from(value);
     let filename = path
         .file_name()
@@ -26,7 +22,7 @@ pub fn parse(value: &OsStr) -> Result<Source, String> {
     } else {
         "main".into()
     };
-    Ok(Source { path, entry })
+    Ok(Input { path, entry })
 }
 
 fn valid_name(name: &[u8]) -> bool {
