@@ -71,6 +71,13 @@ impl Generator {
         }
         if let TermKind::Var { name } = &func.val {
             match name.val.as_ref() {
+                "absurd" => {
+                    self.gen_term(arg, Some(&Ty::union([])))?;
+                    self.emit(Instr::Eliminate {
+                        result: expected.clone(),
+                    });
+                    return Ok(expected.clone());
+                }
                 "size_of" | "align_of" => {
                     let ty = if let TermKind::Type { ty } = &arg.val {
                         self.evaluator().ty(ty)?

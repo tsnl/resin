@@ -61,7 +61,18 @@ pub(super) fn emit(
     for (b, block) in function.blocks.iter().enumerate() {
         writeln!(out, "    case {b}: {{").unwrap();
         let mut stack = inputs[b].clone();
+        let mut diverged = false;
         for (i, instr) in block.instrs.iter().enumerate() {
+            if matches!(instr, Instr::Eliminate { .. }) {
+                writeln!(
+                    out,
+                    "      r_failed = true; return {};",
+                    types.zero(&function.result)
+                )
+                .unwrap();
+                diverged = true;
+                break;
+            }
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
             for (operand, arg) in args.iter().enumerate() {
                 if arg.local
@@ -150,6 +161,10 @@ pub(super) fn emit(
                     local,
                 });
             }
+        }
+        if diverged {
+            out.push_str("    }\n");
+            continue;
         }
         match block.terminator {
             Terminator::Return => {

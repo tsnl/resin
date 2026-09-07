@@ -42,7 +42,13 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
                 expr: format!("r_b{block_id}_{i}"),
             })
             .collect();
+        let mut diverged = false;
         for (i, instr) in block.instrs.iter().enumerate() {
+            if matches!(instr, Instr::Eliminate { .. }) {
+                out.push_str("  abort();\n");
+                diverged = true;
+                break;
+            }
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
             let result = flow.results[block_id][i].as_ref();
             let name = format!("r_v{block_id}_{i}");
@@ -61,6 +67,10 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
                     expr: name,
                 });
             }
+        }
+        if diverged {
+            out.push_str("}\n");
+            continue;
         }
         match block.terminator {
             Terminator::Return => writeln!(out, "  return {};", stack[0].expr).unwrap(),
@@ -133,6 +143,7 @@ fn instruction(
             }
         }
         Instr::Widen { ty } => widen(types, &args[0].ty, ty, &args[0].expr),
+        Instr::Eliminate { .. } => unreachable!("diverging instruction ends the block"),
         Instr::NumericCast { ty } => {
             if let Some(invalid) = crate::backend::numeric::invalid(
                 &args[0].ty,
