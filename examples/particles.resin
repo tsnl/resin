@@ -41,53 +41,93 @@ def kernel(index: uint, root: Ptr<Params>) -> () = {
 	}
 };
 
+// Float division is available in shaders. Correct rounding at the upper end of
+// the 24-million-vertex draw, where adjacent integers no longer fit in float32.
+def particle_index(index: int) -> int = {
+	var particle = int(float32(index) / 24.0f);
+	if (particle * 24 > index) {
+		particle := particle - 1;
+	};
+	particle
+};
+
+def positive(value: float32) -> float32 = {
+	if (value > 0.0f) {
+		value
+	} else {
+		0.0f
+	}
+};
+
 @vertex_shader
 def vertex(index: int, root: Ptr<Params>) -> Vertex = {
-	// Every index in this three-million-vertex draw is exactly representable as float32.
-	// Truncation divides by three in constant time; no per-particle search loop.
-	var particle = int(float32(index) / 3.0f);
-	var corner = index - particle * 3;
+	var particle = particle_index(index);
+	var local = index - particle * 24;
+	var sector = int(float32(local) / 3.0f);
+	var corner = local - sector * 3;
 	var p = root.particles(particle).*;
 	var depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
 	var perspective = 1.0f / (1.0f + depth * 0.012f);
 	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036f;
 	var y = ((p.z - 25.0f) * 0.9f + depth * 0.22f) * 0.036f;
-	var dx = (p.vx * root.yaw_cos + p.vy * root.yaw_sin) * 0.000025f;
-	var dy = (p.vz * 0.9f + (-p.vx * root.yaw_sin + p.vy * root.yaw_cos) * 0.22f) * 0.000025f;
-	// A tiny triangle stretched along the projected velocity makes a moving point readable.
-	var ax = if (dx < 0.0f) {
-		-dx
-	} else {
-		dx
-	};
-	var ay = if (dy < 0.0f) {
-		-dy
-	} else {
-		dy
-	};
-	var width = root.radius / (ax + ay + 0.0001f);
-	var side_x = -dy * width;
-	var side_y = dx * width + root.radius * 0.25f;
-	if (corner == 1) {
-		x := x - dx + side_x;
-		y := y - dy + side_y;
-	} else {
-		if (corner == 2) {
-			x := x - dx - side_x;
-			y := y - dy - side_y;
-		}
+
+	// Eight triangles form a camera-facing octagon. Interpolated disk coordinates
+	// let the fragment shader light a smooth hemisphere without a sphere mesh.
+	var nx = 0.0f;
+	var ny = 0.0f;
+	if (corner != 0) {
+		var rim = (sector + corner - 1) & 7;
+		var xs = [1.0f, 0.707107f, 0.0f, -0.707107f, -1.0f, -0.707107f, 0.0f, 0.707107f];
+		var ys = [0.0f, 0.707107f, 1.0f, 0.707107f, 0.0f, -0.707107f, -1.0f, -0.707107f];
+		nx := xs(rim).*;
+		ny := ys(rim).*;
 	};
 	var speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
 	var heat = speed / (speed + 4000.0f);
+	var distance = positive(1.0f + depth * 0.025f);
+	var visibility = 1.0f / (1.0f + 0.4f * distance * distance);
 	Vertex {
-		position = Position { x = x * perspective * root.aspect, y = -y * perspective, z = 0.0f, w = 1.0f },
-		color = Color { r = 0.12f + 0.88f * heat, g = 0.4f + 0.5f * heat, b = 1.0f - 0.7f * heat, a = 1.0f },
+		position = Position {
+			x = (x + nx * root.radius) * perspective * root.aspect,
+			y = -(y + ny * root.radius) * perspective,
+			z = 0.0f,
+			w = 1.0f,
+		},
+		// The fixed Color varying carries disk coordinates, speed, and fog to fragment.
+		color = Color { r = nx, g = ny, b = heat, a = visibility },
 	}
 };
 
 @fragment_shader
 def fragment(color: Color) -> Color = {
-	color
+	var nx = color.r;
+	var ny = color.g;
+	var squared_z = positive(1.0f - nx * nx - ny * ny);
+	// Five bounded Newton steps approximate sqrt on [0, 1], including the rim.
+	var nz = 1.0f;
+	var step = 0;
+	while (step < 5) {
+		nz := 0.5f * (nz + squared_z / nz);
+		step := step + 1;
+	};
+	// Camera-space light from the upper left; a tight, pale specular highlight.
+	var diffuse = positive(-0.4f * nx + 0.55f * ny + 0.733f * nz);
+	var specular = positive(-0.215f * nx + 0.295f * ny + 0.931f * nz);
+	specular := specular * specular;
+	specular := specular * specular;
+	specular := specular * specular;
+	specular := specular * specular;
+	specular := specular * specular;
+	var light = 0.16f + 0.64f * diffuse;
+	var shine = 0.2f * specular;
+	var heat = color.b;
+	var fog = color.a;
+	Color {
+		r = 0.004f * (1.0f - fog) + ((0.12f + 0.88f * heat) * light + shine) * fog,
+		g = 0.008f * (1.0f - fog) + ((0.4f + 0.5f * heat) * light + shine) * fog,
+		b = 0.02f * (1.0f - fog) + ((1.0f - 0.7f * heat) * light + shine) * fog,
+		a = 1.0f,
+	}
 };
 
 // Host-only xorshift32: reproducible random positions and independent velocities.
@@ -143,7 +183,7 @@ def main() -> Result<(), _> = {
 		yaw_cos = 1.0f,
 		yaw_sin = 0.0f,
 		aspect = 0.625f,
-		radius = 0.0012f,
+		radius = 0.004f,
 		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(count) },
 	};
 	var address = allocation_device_pointer(root);
@@ -170,7 +210,7 @@ def main() -> Result<(), _> = {
 		};
 		gpu_begin_rendering(commands, image, 0.004f, 0.008f, 0.02f, 1.0f)?;
 		gpu_set_pipeline(commands, graphics)?;
-		gpu_draw(commands, address, count * 3I)?;
+		gpu_draw(commands, address, count * 24I)?;
 		gpu_end_rendering(commands)?;
 		gpu_submit(gpu, &commands)?;
 		gpu_present(gpu, image)?;

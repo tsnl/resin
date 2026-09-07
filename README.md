@@ -744,9 +744,13 @@ resulting executable does not. The PNG demos remain headless.
 
 `particles.resin` seeds **1,000,000 particles** with pseudorandom 3D positions and velocities,
 then advects them through a Lorenz attractor field on the GPU. A slowly orbiting camera shows
-the two swirling lobes; tiny velocity-aligned triangles shift from blue to gold as particles
-accelerate. Compute and graphics share a 24 MB particle buffer, with constant-time vertex
-indexing and 15,625 compute workgroups per frame. Pipelines and allocations are reused.
+the two swirling lobes. Small sphere billboards shift from blue to gold as particles accelerate,
+with smooth per-pixel normals, an upper-left light, and specular highlights. Perspective size
+and distance fog distinguish near and far particles. Each sphere uses an eight-triangle octagon
+(24 million vertices per frame); the silhouette is approximate, and overlaps still follow draw
+order because the renderer has no depth buffer. Compute and graphics share a 24 MB particle
+buffer, with constant-time vertex indexing and 15,625 compute workgroups per frame. Pipelines
+and allocations are reused.
 
 Press **Space** to pause/resume, **R** to reseed the cloud, and **Escape** to quit. The initial
 seed is reproducible; each reseed starts a different cloud. The 1280×800 offscreen image scales

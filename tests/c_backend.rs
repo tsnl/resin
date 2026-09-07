@@ -669,8 +669,21 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
                 valid := valid && particle.x > -100f && particle.x < 100f && particle.y > -100f && particle.y < 100f && particle.z > -100f && particle.z < 100f;
                 steps := steps + 1;
             };
-            var v = vertex(2, &params);
-            var color = fragment(v.color);
+            // Check every particle boundary, including float32 rounding above 2^24.
+            var index = 0;
+            while (index < 1000000) {
+                valid := valid && particle_index(index * 24) == index && particle_index(index * 24 + 23) == index;
+                index := index + 1;
+            };
+            particle := Particle { x = 0f, y = -20f, z = 25f, vx = 0f, vy = 0f, vz = 0f };
+            var near = vertex(0, &params);
+            var near_rim = vertex(1, &params);
+            particle.y := 20f;
+            var far = vertex(0, &params);
+            var far_rim = vertex(1, &params);
+            valid := valid && fragment(near.color).b > fragment(far.color).b;
+            valid := valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
+            var color = fragment(far.color);
             if (valid && particle.x != first.x && color.r >= 0f && color.r <= 1f && color.b >= 0f && color.b <= 1f) { 0 } else { 1 }
         };
     "#).stmts);
