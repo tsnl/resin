@@ -96,7 +96,9 @@ pub fn emit_function(
             }
         }
     }
-    let wrapper = entry::emit(&types, &function.locals[0].ty, &function.result, stage)?
+    let typer = ir::TyperContext::from_definitions(module.types.clone());
+    let interface = ir::shader::validate(&typer, function, stage.name()).map_err(Error)?;
+    let wrapper = entry::emit(&types, &function.locals[0].ty, &function.result, &interface)
         .replace("r_entry", &format!("r_fn{}", entry.index()));
     let mut functions = String::new();
     for index in reachable {

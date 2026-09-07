@@ -221,7 +221,7 @@ fn entry_interfaces_are_checked() {
             module("export { kernel }; def kernel (i: int) -> int = { i };"),
             "kernel",
             Stage::Compute,
-            "map uint to uint",
+            "expected (uint, Ptr<T>)",
         ),
         (
             module("export { vertex }; def vertex (i: int) -> int = { i };"),
@@ -233,7 +233,7 @@ fn entry_interfaces_are_checked() {
             module("export { fragment }; def fragment (i: uint) -> uint = { i };"),
             "fragment",
             Stage::Fragment,
-            "float32 fields",
+            "float32 r/g/b/a fields",
         ),
     ] {
         let error = glsl::emit(&m, entry, stage).unwrap_err();

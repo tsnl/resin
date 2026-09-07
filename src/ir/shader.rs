@@ -8,7 +8,30 @@ pub struct ShaderEntry {
     pub embedded: bool,
 }
 
-pub fn validate(typer: &TyperContext, function: &Function, stage: &str) -> Result<(), String> {
+/// A checked stage interface, shared by declaration checking and GLSL emission.
+#[derive(Debug, Clone)]
+pub enum Interface {
+    Compute {
+        index: Ty,
+        root: bool,
+    },
+    Vertex {
+        index: Ty,
+        root: bool,
+        position: Ty,
+        color: Ty,
+    },
+    Fragment {
+        color: Ty,
+        root: bool,
+    },
+}
+
+pub fn validate(
+    typer: &TyperContext,
+    function: &Function,
+    stage: &str,
+) -> Result<Interface, String> {
     fn shape(typer: &TyperContext, ty: &Ty) -> Result<Ty, String> {
         let mut ty = ty.clone();
         while matches!(ty, Ty::Defined { .. }) {
@@ -23,8 +46,8 @@ pub fn validate(typer: &TyperContext, function: &Function, stage: &str) -> Resul
     if function.foreign.is_some() {
         return Err("foreign functions cannot be shader entries".into());
     }
-    let param = function.locals.first().ok_or("invalid shader parameter")?;
-    let param = shape(typer, &param.ty)?;
+    let parameter = function.locals.first().ok_or("invalid shader parameter")?;
+    let param = shape(typer, &parameter.ty)?;
     let (input, root) = match &param {
         Ty::Record { fields }
             if fields.len() == 2
@@ -34,27 +57,49 @@ pub fn validate(typer: &TyperContext, function: &Function, stage: &str) -> Resul
         {
             (&fields[0].ty, true)
         }
-        _ => (&param, false),
+        _ => (&parameter.ty, false),
     };
-    let input = shape(typer, input)?;
+    let input_shape = shape(typer, input)?;
     let result = shape(typer, &function.result)?;
-    let valid = match stage {
-        "compute" => input == Ty::UInt32 && result == if root { Ty::Unit } else { Ty::UInt32 },
-        "vertex" => {
-            input == Ty::Int32
-                && matches!(&result, Ty::Record { fields }
-            if fields.len() == 2 && fields[0].name.as_ref() == "position" && fields[1].name.as_ref() == "color"
-                && vector(typer, &fields[0].ty, &["x", "y", "z", "w"])
-                && vector(typer, &fields[1].ty, &["r", "g", "b", "a"]))
+    let interface = match stage {
+        "compute"
+            if input_shape == Ty::UInt32 && result == if root { Ty::Unit } else { Ty::UInt32 } =>
+        {
+            Some(Interface::Compute {
+                index: input.clone(),
+                root,
+            })
         }
-        "fragment" => {
-            vector(typer, &input, &["r", "g", "b", "a"])
-                && vector(typer, &result, &["r", "g", "b", "a"])
+        "vertex" if input_shape == Ty::Int32 => match &result {
+            Ty::Record { fields }
+                if fields.len() == 2
+                    && fields[0].name.as_ref() == "position"
+                    && fields[1].name.as_ref() == "color"
+                    && vector(typer, &fields[0].ty, &["x", "y", "z", "w"])
+                    && vector(typer, &fields[1].ty, &["r", "g", "b", "a"]) =>
+            {
+                Some(Interface::Vertex {
+                    index: input.clone(),
+                    root,
+                    position: fields[0].ty.clone(),
+                    color: fields[1].ty.clone(),
+                })
+            }
+            _ => None,
+        },
+        "fragment"
+            if vector(typer, input, &["r", "g", "b", "a"])
+                && vector(typer, &result, &["r", "g", "b", "a"]) =>
+        {
+            Some(Interface::Fragment {
+                color: input.clone(),
+                root,
+            })
         }
-        _ => false,
+        _ => None,
     };
-    if valid {
-        Ok(())
+    if let Some(interface) = interface {
+        Ok(interface)
     } else {
         Err(format!(
             "invalid @{stage}_shader signature: {}",
