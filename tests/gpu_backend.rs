@@ -1,4 +1,6 @@
 #![cfg(feature = "gpu")]
+#[path = "support/toolchain.rs"]
+mod config;
 
 use resin::backend::glsl::{self, Stage};
 use resin::toolchain::TempDir;
@@ -69,10 +71,11 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         .path()
         .join(format!("host-layout{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC").unwrap_or_else(|| resin::toolchain::DEFAULT_C_COMPILER.into());
-    resin::toolchain::compile_c(&c, &executable, &cc).unwrap();
+    resin::toolchain::compile_c(&c, &executable, &config::c(&cc)).unwrap();
     assert!(Command::new(executable).status().unwrap().success());
     let glsl = glsl::emit(&module, "kernel", Stage::Compute).unwrap();
-    let spv = resin::toolchain::compile_glsl(&glsl, Stage::Compute, &compiler).unwrap();
+    let spv =
+        resin::toolchain::compile_glsl(&glsl, Stage::Compute, &config::glsl(&compiler)).unwrap();
     #[repr(C)]
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Data {
@@ -165,7 +168,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let module = resin::ir::generate_program(&resin::ast::load(&source).unwrap()).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
-        resin::toolchain::compile_glsl(&glsl, stage, &compiler).unwrap()
+        resin::toolchain::compile_glsl(&glsl, stage, &config::glsl(&compiler)).unwrap()
     };
     let compute = compile(Stage::Compute);
     let vertex = compile(Stage::Vertex);
@@ -271,7 +274,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     let module = resin::ir::generate_program(&ast).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
-        resin::toolchain::compile_glsl(&glsl, stage, &compiler).unwrap()
+        resin::toolchain::compile_glsl(&glsl, stage, &config::glsl(&compiler)).unwrap()
     };
     let vertex = compile(Stage::Vertex);
     let fragment = compile(Stage::Fragment);
@@ -385,9 +388,12 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let module = support::module(source);
     let glsl = resin::backend::glsl::emit(&module, "kernel", resin::backend::glsl::Stage::Compute)
         .unwrap();
-    let spv =
-        resin::toolchain::compile_glsl(&glsl, resin::backend::glsl::Stage::Compute, &compiler)
-            .unwrap();
+    let spv = resin::toolchain::compile_glsl(
+        &glsl,
+        resin::backend::glsl::Stage::Compute,
+        &config::glsl(&compiler),
+    )
+    .unwrap();
     #[repr(C)]
     struct Root {
         count: u32,

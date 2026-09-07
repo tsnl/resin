@@ -1,15 +1,21 @@
 //! CLI syntax and conversion into an explicit execution mode.
-use super::{Result, inspect, source};
+use super::{Environment, Result, inspect, source};
 use crate::{
     backend,
-    compiler::{Input, Request, Target},
+    compiler::{Input, Options, Request, Target},
+    toolchain::{self, CProfile},
 };
 use clap::{CommandFactory, ValueEnum};
 use std::{ffi::OsString, path::PathBuf};
 
+pub struct Invocation {
+    pub mode: Mode,
+    pub stdlib: PathBuf,
+}
+
 pub enum Mode {
-    Interpreter(Request),
-    Compiler(Request),
+    Interpreter(Box<Request>),
+    Compiler(Box<Request>),
     Inspector {
         input: Input,
         output: inspect::Output,
@@ -21,8 +27,15 @@ pub enum Mode {
     },
 }
 
-pub fn parse() -> Result<Mode> {
-    <Cli as clap::Parser>::parse().mode()
+pub fn parse(
+    args: impl IntoIterator<Item = OsString>,
+    environment: &Environment,
+) -> Result<Invocation> {
+    let mode = <Cli as clap::Parser>::parse_from(args).mode(environment)?;
+    Ok(Invocation {
+        mode,
+        stdlib: environment.stdlib(),
+    })
 }
 
 #[derive(clap::Parser)]
@@ -90,10 +103,14 @@ enum Output {
 }
 
 impl Cli {
-    fn mode(self) -> Result<Mode> {
+    fn mode(self, environment: &Environment) -> Result<Mode> {
         if self.format {
             return Ok(Mode::Formatter {
-                paths: self.paths,
+                paths: self
+                    .paths
+                    .into_iter()
+                    .map(|path| environment.directory.join(path))
+                    .collect(),
                 check: self.check,
             });
         }
@@ -101,12 +118,16 @@ impl Cli {
             Self::command().error(clap::error::ErrorKind::WrongNumberOfValues,
                 "running or compiling requires exactly one FILE[:ENTRY]; use --format for multiple paths").exit();
         };
-        let input = source::parse(path.as_os_str()).unwrap_or_else(|error| {
+        let mut input = source::parse(path.as_os_str()).unwrap_or_else(|error| {
             Self::command()
                 .error(clap::error::ErrorKind::InvalidValue, error)
                 .exit()
         });
-        let options = self.compile;
+        input.path = environment.directory.join(input.path);
+        let mut options = self.compile;
+        options.destination = options
+            .destination
+            .map(|path| environment.directory.join(path));
         if matches!(options.output, Output::Exe | Output::Spirv) && options.destination.is_none() {
             return Err("binary output requires -o PATH".into());
         }
@@ -118,6 +139,9 @@ impl Cli {
             _ => None,
         };
         if let Some(output) = output {
+            if let Some(path) = &options.destination {
+                toolchain::protect_source(&input.path, path)?;
+            }
             return Ok(Mode::Inspector {
                 input,
                 output,
@@ -132,14 +156,21 @@ impl Cli {
             _ => unreachable!("inspection modes were handled above"),
         };
         let interpret = options.output == Output::Run && options.destination.is_none();
-        let request = Request {
+        let profile = if interpret {
+            CProfile::Debug
+        } else {
+            CProfile::Release
+        };
+        let request = Box::new(Request::new(
             input,
             target,
-            destination: options.destination,
-            cc: options.cc,
-            stage: options.stage,
-            glslc: options.glslc,
-        };
+            options.destination,
+            Options {
+                profile,
+                tools: environment.toolchain(options.cc.as_deref(), options.glslc.as_deref()),
+                stage: options.stage,
+            },
+        )?);
         Ok(if interpret {
             Mode::Interpreter(request)
         } else {

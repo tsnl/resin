@@ -89,12 +89,21 @@ Interpreter mode builds a debug native executable and runs it. Compiler mode pro
 the requested `compiler::Target`: a native executable, C, GLSL, or SPIR-V. Native outputs
 with a destination use release builds, including `--output run -o PATH`.
 
-[compiler::Request](src/compiler.rs) holds the shared input, target, destination, and tool
-choices. [backend/build.rs](src/backend/build.rs) consumes that request and owns
-source analysis, C/GLSL/SPIR-V generation,
-shader embedding, compiler selection, and executable construction. Its `compile` API
-returns an `Artifact`: output bytes or an `Executable` that keeps the build-cache lock
-while the caller runs it. Execution remains a separate step. [inspect.rs](src/cli/inspect.rs) handles the
+[cli/environment.rs](src/cli/environment.rs) captures the environment, working directory,
+and executable/temp paths once. CLI arguments override `CC` and `GLSLC`, which override
+platform defaults. It resolves compiler paths, `RESIN_STDLIB`, runtime headers/archive,
+and cache settings before compilation. The CLI also chooses the explicit `CProfile`.
+Tool discovery errors are reported only if that tool is needed, so host-only programs
+remain independent of `glslc`. Compiler subprocesses and cache fingerprints use the
+same captured environment.
+
+[compiler::Request::new](src/compiler.rs) validates the input/output combination and
+resolves native directory destinations, rejecting outputs that would overwrite the
+source. `Session::compile(&request)` analyzes through the caller's session, then passes
+verified IR to [backend/build.rs](src/backend/build.rs) for C/GLSL/SPIR-V generation,
+shader embedding, and executable construction. It returns a backend `Artifact`: output
+bytes or an `Executable` that keeps the build-cache lock while the caller runs it.
+Execution remains a separate step. [inspect.rs](src/cli/inspect.rs) handles the
 frontend-only CST, AST, IR, and parsing-check modes.
 
 The session owns source overlays, cached parses, import dependencies, and

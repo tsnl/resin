@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use std::{ffi::OsString, fs, process::Command};
 
 use resin::{
@@ -18,7 +20,7 @@ fn run(source: &str) -> std::process::Output {
     let source = c::emit(&module(source), "main").unwrap();
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
-    toolchain::compile_c(&source, &executable, &cc)
+    toolchain::compile_c(&source, &executable, &config::c(&cc))
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(executable).output().unwrap()
 }

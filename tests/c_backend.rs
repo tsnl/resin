@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use std::{ffi::OsString, fs, process::Command};
 
 use resin::{
@@ -20,7 +22,8 @@ fn run_entry(module: &ir::Module, entry: &str) -> std::process::Output {
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
-    toolchain::compile_c(&source, &output, &cc).unwrap_or_else(|error| panic!("{error}\n{source}"));
+    toolchain::compile_c(&source, &output, &config::c(&cc))
+        .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(output).output().unwrap()
 }
 
@@ -454,7 +457,7 @@ fn failed_compilation_preserves_existing_output() {
         toolchain::compile_c(
             "not C",
             &output,
-            std::ffi::OsStr::new(resin::toolchain::DEFAULT_C_COMPILER)
+            &config::c(std::ffi::OsStr::new(resin::toolchain::DEFAULT_C_COMPILER))
         )
         .is_err()
     );

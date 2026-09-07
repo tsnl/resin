@@ -36,5 +36,8 @@ fn start() -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
             _ => return Err(format!("unknown argument: {}", arg.to_string_lossy()).into()),
         }
     }
-    server::run(stdlib)
+    let default_stdlib = std::env::var_os("RESIN_STDLIB")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(resin::ast::stdlib_path);
+    server::run(stdlib, default_stdlib)
 }

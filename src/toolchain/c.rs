@@ -9,8 +9,8 @@ use std::{
 
 use crate::backend::Error;
 
-use super::platform::{C_FLAGS, LIBRARIES, RUNTIME_ARCHIVE};
-use super::{TempDir, dependencies, io_error, parent, write_output};
+use super::platform::{C_FLAGS, LIBRARIES};
+use super::{Settings, TempDir, dependencies, io_error, parent, write_output};
 
 const FLAGS: &[&str] = &[
     "-std=c11",
@@ -21,7 +21,7 @@ const FLAGS: &[&str] = &[
     "-pedantic",
 ];
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CProfile {
     Debug,
     Release,
@@ -59,10 +59,11 @@ pub fn build_c(
     file: &Path,
     entry: &str,
     source: &str,
-    compiler: &OsStr,
+    settings: &Settings,
     profile: CProfile,
 ) -> Result<CBuild, Error> {
-    let file = fs::canonicalize(file).map_err(io_error)?;
+    // The caller supplies the source identity, which may exist only in a session overlay.
+    let file = settings.directory.join(file);
     let mut hash = DefaultHasher::new();
     file.hash(&mut hash);
     entry.hash(&mut hash);
@@ -71,10 +72,7 @@ pub fn build_c(
         .unwrap_or(OsStr::new("program"))
         .to_os_string();
     name.push(format!("-{:016x}", hash.finish()));
-    let directory = std::env::current_dir()
-        .map_err(io_error)?
-        .join("build")
-        .join(name);
+    let directory = settings.cache.join(name);
     fs::create_dir_all(&directory).map_err(io_error)?;
     let lock = fs::File::options()
         .create(true)
@@ -90,7 +88,7 @@ pub fn build_c(
         executable: directory.join(format!("program{}", std::env::consts::EXE_SUFFIX)),
         _lock: lock,
     };
-    let compiler = Compiler::new(compiler, profile)?;
+    let compiler = Compiler::new(settings, profile)?;
     let dependency_file = directory.join("dependencies");
     let dependencies: Vec<_> = fs::read_to_string(&dependency_file)
         .unwrap_or_default()
@@ -130,28 +128,28 @@ pub fn build_c(
     Ok(build)
 }
 
-pub fn compile_c(source: &str, output: &Path, compiler: &OsStr) -> Result<(), Error> {
-    Compiler::new(compiler, CProfile::Release)?
-        .compile(source, output)
+pub fn compile_c(source: &str, output: &Path, settings: &Settings) -> Result<(), Error> {
+    Compiler::new(settings, CProfile::Release)?
+        .compile(source, &settings.directory.join(output))
         .map(|_| ())
 }
 
-struct Compiler {
+struct Compiler<'a> {
     profile: CProfile,
-    executable: PathBuf,
-    include: PathBuf,
-    library: PathBuf,
+    executable: &'a Path,
+    include: &'a Path,
+    library: &'a Path,
+    settings: &'a Settings,
 }
 
-impl Compiler {
-    fn new(compiler: &OsStr, profile: CProfile) -> Result<Self, Error> {
+impl<'a> Compiler<'a> {
+    fn new(settings: &'a Settings, profile: CProfile) -> Result<Self, Error> {
         Ok(Self {
             profile,
-            executable: resolve(compiler)?,
-            include: std::env::var_os("RESIN_RUNTIME_INCLUDE")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(resin_runtime::INCLUDE_DIR)),
-            library: runtime_library()?,
+            executable: settings.cc()?,
+            include: &settings.runtime_include,
+            library: settings.runtime_library()?,
+            settings,
         })
     }
 
@@ -163,16 +161,19 @@ impl Compiler {
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let depfile = temp.path().join("program.d");
         fs::write(&input, format!("{source}\n")).map_err(io_error)?;
-        let result = Command::new(&self.executable)
+        let result = Command::new(self.executable)
+            .current_dir(&self.settings.directory)
+            .env_clear()
+            .envs(&self.settings.environment)
             .args(FLAGS)
             .args(C_FLAGS)
             .args(self.profile.flags())
             .args(["-MD", "-MT", "resin", "-MF"])
             .arg(&depfile)
             .arg("-I")
-            .arg(&self.include)
+            .arg(self.include)
             .arg(&input)
-            .arg(&self.library)
+            .arg(self.library)
             .arg("-o")
             .arg(&binary)
             .args(LIBRARIES)
@@ -200,13 +201,12 @@ impl Compiler {
         self.profile.flags().hash(&mut hash);
         LIBRARIES.hash(&mut hash);
         self.executable.hash(&mut hash);
-        let mut environment: Vec<_> = std::env::vars_os().collect();
-        environment.sort();
-        environment.hash(&mut hash);
-        metadata(&std::env::current_exe().map_err(io_error)?, &mut hash)?;
-        metadata(&self.executable, &mut hash)?;
-        contents(&self.library, &mut hash)?;
-        headers(&self.include, &mut hash, &mut HashSet::new())?;
+        self.settings.environment.hash(&mut hash);
+        self.settings.directory.hash(&mut hash);
+        metadata(&self.settings.executable, &mut hash)?;
+        metadata(self.executable, &mut hash)?;
+        contents(self.library, &mut hash)?;
+        headers(self.include, &mut hash, &mut HashSet::new())?;
         for path in dependencies {
             path.hash(&mut hash);
             if let Err(error) = contents(path, &mut hash) {
@@ -215,40 +215,6 @@ impl Compiler {
         }
         Ok(format!("{:016x}", hash.finish()))
     }
-}
-
-pub(super) fn resolve(compiler: &OsStr) -> Result<PathBuf, Error> {
-    let candidates = if Path::new(compiler).components().count() > 1 {
-        vec![PathBuf::from(compiler)]
-    } else {
-        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-            .map(|path| path.join(compiler))
-            .collect()
-    };
-    for path in candidates {
-        #[cfg(windows)]
-        let path = if !path.is_file() && path.extension().is_none() {
-            path.with_extension("exe")
-        } else {
-            path
-        };
-        if !path.is_file() {
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if fs::metadata(&path).map_err(io_error)?.permissions().mode() & 0o111 == 0 {
-                continue;
-            }
-        }
-        // Preserve the invocation name: compiler drivers may inspect argv[0].
-        return std::path::absolute(path).map_err(io_error);
-    }
-    Err(Error(format!(
-        "cannot run {}: executable not found",
-        compiler.to_string_lossy()
-    )))
 }
 
 pub(super) fn metadata(path: &Path, hash: &mut DefaultHasher) -> Result<(), Error> {
@@ -289,48 +255,4 @@ fn headers(
         contents(path, hash)?;
     }
     Ok(())
-}
-
-fn runtime_library() -> Result<PathBuf, Error> {
-    if let Some(path) = std::env::var_os("RESIN_RUNTIME_LIB") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(Error(format!(
-            "runtime library not found: {}",
-            path.display()
-        )));
-    }
-    let executable = std::env::current_exe().map_err(io_error)?;
-    let directory = executable.parent().unwrap();
-    for path in [
-        directory.join("deps").join(RUNTIME_ARCHIVE),
-        directory.join(RUNTIME_ARCHIVE),
-    ] {
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
-    Err(Error(format!(
-        "cannot find {RUNTIME_ARCHIVE} beside the compiler or in deps; set RESIN_RUNTIME_LIB"
-    )))
-}
-
-#[cfg(all(test, windows))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compilers_can_be_named_with_or_without_exe() {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-        let path = temp.path().join("compiler with spaces.exe");
-        fs::write(&path, []).unwrap();
-        let expected = std::path::absolute(&path).unwrap();
-        assert_eq!(resolve(path.as_os_str()).unwrap(), expected);
-        assert_eq!(
-            resolve(path.with_extension("").as_os_str()).unwrap(),
-            expected
-        );
-    }
 }

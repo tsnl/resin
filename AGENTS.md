@@ -14,8 +14,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
 - Keep `src/bin/resin.rs` as a wrapper around `cli::main`; argument-to-`Mode` dispatch
-  lives in `src/cli/`. Backend APIs own native compilation and C/GLSL/SPIR-V generation;
-  execution is separate and retains the build-cache lock.
+  lives in `src/cli/`, including environment/default and build-profile resolution.
+  Construct validated requests with `compiler::Request::new`; `Session::compile` owns
+  analysis and dispatches checked IR to the backend for native/C/GLSL/SPIR-V generation.
+  Toolchain APIs consume explicit settings; execution is separate and retains the build-cache lock.
 - Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
   build and copy the optimized executable without running it, even with `--output run`.
 - Every IR function reserves local zero for its parameter, including unit and tuple parameters

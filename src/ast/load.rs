@@ -102,10 +102,9 @@ impl SourceProvider for FileSystem {
     }
 }
 
+/// The bundled standard library. Executable frontends resolve environment overrides.
 pub fn stdlib_path() -> PathBuf {
-    std::env::var_os("RESIN_STDLIB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib")))
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib"))
 }
 
 pub fn resolve_import(source: &Path, import: &str, stdlib: &Path) -> Result<PathBuf, &'static str> {

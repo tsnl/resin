@@ -28,7 +28,7 @@ struct Options {
     stdlib_path: Option<PathBuf>,
 }
 
-pub fn run(stdlib: Option<PathBuf>) -> Result<i32> {
+pub fn run(stdlib: Option<PathBuf>, default_stdlib: PathBuf) -> Result<i32> {
     let (connection, io) = Connection::stdio();
     let (id, params) = connection.initialize_start()?;
     let params: lsp::InitializeParams = serde_json::from_value(params)?;
@@ -39,9 +39,7 @@ pub fn run(stdlib: Option<PathBuf>) -> Result<i32> {
         .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
-    let stdlib = stdlib
-        .or(options.stdlib_path)
-        .unwrap_or_else(resin::ast::stdlib_path);
+    let stdlib = stdlib.or(options.stdlib_path).unwrap_or(default_stdlib);
     let capabilities = lsp::ServerCapabilities {
         position_encoding: Some(lsp::PositionEncodingKind::UTF16),
         text_document_sync: Some(

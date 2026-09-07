@@ -6,9 +6,9 @@ pub const DEFAULT_C_COMPILER: &str = "clang";
 pub const DEFAULT_C_COMPILER: &str = "gcc";
 
 #[cfg(not(target_env = "msvc"))]
-pub(super) const RUNTIME_ARCHIVE: &str = "libresin_runtime.a";
+pub(crate) const RUNTIME_ARCHIVE: &str = "libresin_runtime.a";
 #[cfg(target_env = "msvc")]
-pub(super) const RUNTIME_ARCHIVE: &str = "resin_runtime.lib";
+pub(crate) const RUNTIME_ARCHIVE: &str = "resin_runtime.lib";
 
 #[cfg(not(target_env = "msvc"))]
 pub(super) const C_FLAGS: &[&str] = &[];

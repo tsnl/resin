@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use std::{
     ffi::OsString,
     fs,
@@ -33,7 +35,7 @@ impl Program {
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let cc =
             std::env::var_os("CC").unwrap_or_else(|| OsString::from(toolchain::DEFAULT_C_COMPILER));
-        toolchain::compile_c(source, &executable, &cc)
+        toolchain::compile_c(source, &executable, &config::c(&cc))
             .unwrap_or_else(|error| panic!("{error}\n{source}"));
         Self {
             _temp: temp,

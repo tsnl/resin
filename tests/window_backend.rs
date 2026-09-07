@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use std::{
     ffi::OsStr,
     path::Path,
@@ -16,7 +18,7 @@ mod support;
 
 fn compile(source: &str, path: &Path) {
     let cc = std::env::var_os("CC").unwrap_or_else(|| resin::toolchain::DEFAULT_C_COMPILER.into());
-    compile_c(source, path, &cc).unwrap();
+    compile_c(source, path, &config::c(&cc)).unwrap();
 }
 
 fn window_required() -> bool {
@@ -282,7 +284,7 @@ fn run_example(name: &str) {
     // Close through the runtime after three frames; leave the interactive demo unbounded.
     stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window_set_should_close(window, 1 == 1)?; } else { () };"));
     let module = resin::ir::generate_program(&ast).unwrap();
-    let shaders = resin::backend::build_shaders(&module, &compiler).unwrap();
+    let shaders = resin::backend::build_shaders(&module, &config::glsl(&compiler)).unwrap();
     let c = resin::backend::c::emit_with_shaders(&module, "main", &shaders).unwrap();
     compile(&c, &executable);
     if !display_available() {

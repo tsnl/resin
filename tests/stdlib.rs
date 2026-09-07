@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use resin::{ast, backend::c, ir, toolchain};
 use std::{fs, path::Path, process::Command};
 
@@ -12,7 +14,7 @@ fn run(source: &str, native: &str) -> std::process::Output {
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC").unwrap_or_else(|| toolchain::DEFAULT_C_COMPILER.into());
-    toolchain::compile_c(&c, &executable, &cc).unwrap();
+    toolchain::compile_c(&c, &executable, &config::c(&cc)).unwrap();
     Command::new(executable)
         .current_dir(temp.path())
         .output()

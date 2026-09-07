@@ -6,11 +6,10 @@
 
 use crate::{
     analysis::{Analysis, Sources, normalize_path, syntax::Document},
-    ast,
+    ast, backend, toolchain,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ffi::OsString,
     io,
     path::{Path, PathBuf},
     sync::Arc,
@@ -32,14 +31,87 @@ pub enum Target {
     Spirv,
 }
 
-/// Input, output, and tool choices shared by the frontend and backend.
+/// Explicit code-generation settings, resolved by the caller before compilation.
+pub struct Options {
+    pub profile: toolchain::CProfile,
+    pub tools: toolchain::Settings,
+    pub stage: Option<backend::glsl::Stage>,
+}
+
+/// A validated compilation request. Constructing one resolves executable-directory
+/// destinations and rejects destinations that would overwrite the source file.
 pub struct Request {
-    pub input: Input,
-    pub target: Target,
-    pub destination: Option<PathBuf>,
-    pub cc: Option<OsString>,
-    pub glslc: Option<OsString>,
-    pub stage: Option<crate::backend::glsl::Stage>,
+    input: Input,
+    target: Target,
+    destination: Option<PathBuf>,
+    options: Options,
+}
+
+impl Request {
+    pub fn new(
+        mut input: Input,
+        target: Target,
+        destination: Option<PathBuf>,
+        options: Options,
+    ) -> Result<Self, backend::Error> {
+        let source = normalize_path(&input.path)?;
+        let destination = destination
+            .map(|path| {
+                let path = if matches!(target, Target::Executable) {
+                    executable_destination(&input, path)?
+                } else {
+                    path
+                };
+                if source == normalize_path(&path)? {
+                    return Err(backend::Error(
+                        "output would overwrite the source file".into(),
+                    ));
+                }
+                Ok::<_, backend::Error>(std::path::absolute(path)?)
+            })
+            .transpose()?;
+        input.path = source;
+        Ok(Self {
+            input,
+            target,
+            destination,
+            options,
+        })
+    }
+
+    pub fn input(&self) -> &Input {
+        &self.input
+    }
+    pub fn target(&self) -> Target {
+        self.target
+    }
+    pub fn destination(&self) -> Option<&Path> {
+        self.destination.as_deref()
+    }
+    pub fn options(&self) -> &Options {
+        &self.options
+    }
+}
+
+fn executable_destination(input: &Input, path: PathBuf) -> Result<PathBuf, backend::Error> {
+    let trailing_separator = path
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|&b| b == b'/' || b == std::path::MAIN_SEPARATOR as u8);
+    if !path.is_dir() && !trailing_separator {
+        return Ok(path);
+    }
+    let mut name = input
+        .path
+        .file_stem()
+        .ok_or_else(|| backend::Error("source file needs a name".into()))?
+        .to_os_string();
+    if input.entry != "main" {
+        name.push(format!("-{}", input.entry));
+    }
+    name.push(std::env::consts::EXE_SUFFIX);
+    Ok(path.join(name))
 }
 
 pub struct Session {
@@ -67,6 +139,13 @@ impl Session {
             dependents: BTreeMap::new(),
             revision: 0,
         }
+    }
+
+    /// Analyze using this session's sources and cached snapshots, then generate
+    /// the requested artifact. Execution remains a separate operation.
+    pub fn compile(&mut self, request: &Request) -> Result<backend::Artifact, backend::Error> {
+        let snapshot = self.analyze(&request.input.path)?;
+        backend::generate(request, snapshot.module()?)
     }
 
     pub fn revision(&self) -> u64 {

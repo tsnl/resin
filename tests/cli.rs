@@ -267,7 +267,7 @@ fn sources_with_the_same_name_have_separate_caches() {
 }
 
 #[test]
-fn failed_copies_do_not_run_the_program() {
+fn invalid_destination_parents_fail_before_building_or_running() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(
@@ -283,7 +283,7 @@ fn failed_copies_do_not_run_the_program() {
         fs::read_to_string(temp.path().join("not-a-directory")).unwrap(),
         "keep me"
     );
-    artifact(temp.path(), "release");
+    assert!(!temp.path().join("build").exists());
 }
 
 #[test]

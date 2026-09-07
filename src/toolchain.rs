@@ -1,5 +1,4 @@
 use std::{
-    ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
     process::Command,
@@ -12,29 +11,31 @@ use crate::backend::glsl::Stage;
 mod c;
 mod dependencies;
 mod platform;
+mod settings;
 mod shaders;
 pub use c::{CBuild, CProfile, build_c, compile_c};
 pub use platform::DEFAULT_C_COMPILER;
+pub(crate) use platform::RUNTIME_ARCHIVE;
+pub use settings::Settings;
 pub use shaders::build_glsl;
 
-pub fn compile_glsl(source: &str, stage: Stage, compiler: &OsStr) -> Result<Vec<u8>, Error> {
-    let temp = TempDir::new(&std::env::temp_dir()).map_err(io_error)?;
+pub fn compile_glsl(source: &str, stage: Stage, settings: &Settings) -> Result<Vec<u8>, Error> {
+    let compiler = settings.glslc()?;
+    let temp = TempDir::new(&settings.temporary).map_err(io_error)?;
     let input = temp.path().join("shader.glsl");
     let output = temp.path().join("shader.spv");
     fs::write(&input, source).map_err(io_error)?;
     let result = Command::new(compiler)
+        .current_dir(&settings.directory)
+        .env_clear()
+        .envs(&settings.environment)
         .arg(format!("-fshader-stage={}", stage.name()))
         .args(["--target-env=vulkan1.3", "-O", "-Werror"])
         .arg(&input)
         .arg("-o")
         .arg(&output)
         .output()
-        .map_err(|error| {
-            Error(format!(
-                "cannot run {}: {error}",
-                compiler.to_string_lossy()
-            ))
-        })?;
+        .map_err(|error| Error(format!("cannot run {}: {error}", compiler.display())))?;
     if !result.status.success() {
         return Err(Error(format!(
             "shader compiler failed ({}):\n{}",

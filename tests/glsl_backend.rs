@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use resin::{
     backend::glsl::{self, Stage},
     ir, toolchain,
@@ -22,7 +24,7 @@ fn defer_lowers_to_shader_control_flow_including_error_exits() {
     );
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        toolchain::compile_glsl(&source, Stage::Compute, &compiler)
+        toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler))
             .unwrap_or_else(|error| panic!("{error}\n{source}"));
     }
 }
@@ -34,7 +36,7 @@ fn shader_helpers_can_propagate_and_handle_results() {
     );
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        toolchain::compile_glsl(&source, Stage::Compute, &compiler)
+        toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler))
             .unwrap_or_else(|error| panic!("{error}\n{source}"));
     }
 }
@@ -47,7 +49,7 @@ fn inferred_shader_results_lower_without_backend_inference() {
     assert_eq!(m.functions[0].result, ir::Ty::UInt32);
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        toolchain::compile_glsl(&source, Stage::Compute, &compiler).unwrap();
+        toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
     }
 }
 
@@ -108,7 +110,7 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
     ];
     for (m, stage) in modules {
         let glsl = glsl::emit(&m, stage.entry(), stage).unwrap();
-        let bytes = toolchain::compile_glsl(&glsl, stage, &compiler)
+        let bytes = toolchain::compile_glsl(&glsl, stage, &config::glsl(&compiler))
             .unwrap_or_else(|error| panic!("{error}\n{glsl}"));
         assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
         assert_eq!(bytes.len() % 4, 0);
@@ -135,7 +137,7 @@ fn device_pointers_and_shared_roots_compile() {
         ),
     ] {
         let glsl = glsl::emit(&module(source), stage.entry(), stage).unwrap();
-        toolchain::compile_glsl(&glsl, stage, &compiler)
+        toolchain::compile_glsl(&glsl, stage, &config::glsl(&compiler))
             .unwrap_or_else(|error| panic!("{error}\n{glsl}"));
     }
 }
@@ -244,6 +246,7 @@ fn compiler_errors_are_reported() {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
-    let error = toolchain::compile_glsl("not GLSL", Stage::Compute, &compiler).unwrap_err();
+    let error =
+        toolchain::compile_glsl("not GLSL", Stage::Compute, &config::glsl(&compiler)).unwrap_err();
     assert!(error.to_string().contains("shader compiler failed"));
 }

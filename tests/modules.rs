@@ -1,3 +1,5 @@
+#[path = "support/toolchain.rs"]
+mod config;
 use std::{
     ffi::OsString,
     fs,
@@ -39,7 +41,7 @@ impl Project {
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let compiler = std::env::var_os("CC")
             .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
-        toolchain::compile_c(&source, &executable, &compiler).unwrap();
+        toolchain::compile_c(&source, &executable, &config::c(&compiler)).unwrap();
         Command::new(executable).output().unwrap()
     }
 

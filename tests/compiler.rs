@@ -1,0 +1,195 @@
+use resin::{
+    backend::Artifact,
+    cli::Environment,
+    compiler::{Input, Options, Request, Session, Target},
+    toolchain::{CProfile, TempDir},
+};
+use std::{fs, path::Path, sync::Arc};
+
+fn options(environment: &Environment, profile: CProfile) -> Options {
+    Options {
+        profile,
+        tools: environment.toolchain(None, None),
+        stage: None,
+    }
+}
+
+fn input(path: &Path) -> Input {
+    Input {
+        path: path.into(),
+        entry: "main".into(),
+    }
+}
+
+#[test]
+fn requests_reject_source_overwrites_before_compilation() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let environment = Environment::capture().unwrap();
+    let source = temp
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&source, "this need not parse").unwrap();
+    let alias = temp.path().join(".").join(source.file_name().unwrap());
+    for target in [Target::Executable, Target::C, Target::Glsl, Target::Spirv] {
+        for destination in [&source, &alias] {
+            let result = Request::new(
+                input(&source),
+                target,
+                Some(destination.into()),
+                options(&environment, CProfile::Debug),
+            );
+            let error = result
+                .err()
+                .expect("source overwrite must fail at construction");
+            assert!(
+                error.to_string().contains("overwrite the source"),
+                "{error}"
+            );
+        }
+    }
+    let result = Request::new(
+        input(&source),
+        Target::Executable,
+        Some(temp.path().into()),
+        options(&environment, CProfile::Debug),
+    );
+    assert!(
+        result.is_err(),
+        "the generated filename also needs validation"
+    );
+    let unsaved = temp.path().join("unsaved.resin");
+    assert!(
+        Request::new(
+            input(&unsaved),
+            Target::C,
+            Some(unsaved.clone()),
+            options(&environment, CProfile::Debug)
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read_to_string(source).unwrap(), "this need not parse");
+}
+
+#[test]
+fn requests_resolve_executable_directories_and_preserve_text_destinations() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let environment = Environment::capture().unwrap();
+    let input = Input {
+        path: temp.path().join("example.resin"),
+        entry: "demo".into(),
+    };
+    for directory in [temp.path().to_path_buf(), temp.path().join("new/")] {
+        let request = Request::new(
+            input.clone(),
+            Target::Executable,
+            Some(directory.clone()),
+            options(&environment, CProfile::Release),
+        )
+        .unwrap();
+        assert_eq!(
+            request.destination(),
+            Some(
+                directory
+                    .join(format!("example-demo{}", std::env::consts::EXE_SUFFIX))
+                    .as_path()
+            )
+        );
+    }
+    let output = temp.path().join("example.c");
+    let request = Request::new(
+        input,
+        Target::C,
+        Some(output.clone()),
+        options(&environment, CProfile::Release),
+    )
+    .unwrap();
+    assert_eq!(request.destination(), Some(output.as_path()));
+    assert!(
+        !temp.path().join("new").exists(),
+        "construction must not build anything"
+    );
+}
+
+#[test]
+fn session_compilation_uses_overlays_and_explicit_profiles() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let mut environment = Environment::capture().unwrap();
+    environment.directory = temp.path().into();
+    // An unused shader compiler is optional, even for annotated host functions.
+    environment
+        .variables
+        .insert("GLSLC".into(), "/missing/glslc".into());
+    let source = temp.path().join("main.resin");
+    fs::write(&source, "export { main }; def main() -> int = { 1 };").unwrap();
+    let mut session = Session::new(environment.stdlib());
+    for (profile, destination, code, directory) in [
+        (
+            CProfile::Debug,
+            Some(temp.path().join("copied")),
+            42,
+            "debug",
+        ),
+        (CProfile::Release, None, 43, "release"),
+    ] {
+        session.set_overlay(&source, format!("export {{ main }}; @compute_shader def kernel(i: uint) -> uint = {{ i }}; def main() -> int = {{ if (kernel({code}I) == {code}I) {{ {code} }} else {{ 0 }} }};")).unwrap();
+        let snapshot = session.analyze(&source).unwrap();
+        let request = Request::new(
+            input(&source),
+            Target::Executable,
+            destination.clone(),
+            options(&environment, profile),
+        )
+        .unwrap();
+        let Artifact::Executable(artifact) = session.compile(&request).unwrap() else {
+            panic!("expected an executable")
+        };
+        assert_eq!(
+            artifact.path().parent().unwrap().file_name().unwrap(),
+            directory
+        );
+        assert_eq!(artifact.run().unwrap(), code);
+        assert!(
+            Arc::ptr_eq(&snapshot, &session.analyze(&source).unwrap()),
+            "compilation should reuse the session snapshot"
+        );
+        if let Some(path) = destination {
+            assert!(path.is_file());
+            fs::remove_file(&source).unwrap();
+        }
+    }
+    assert!(!environment.directory.join("build/shaders").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn compiler_processes_use_the_supplied_environment_and_working_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let wrapper = temp.path().join("compiler");
+    fs::write(
+        &wrapper,
+        "#!/bin/sh\nprintf '%s:%s' \"$RESIN_TOOL_SETTING\" \"$PWD\" >&2\nexit 47\n",
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut environment = Environment::capture().unwrap();
+    environment.directory = temp.path().into();
+    environment
+        .variables
+        .insert("RESIN_TOOL_SETTING".into(), "chosen".into());
+    let settings = environment.toolchain(Some(wrapper.as_os_str()), Some(wrapper.as_os_str()));
+    environment
+        .variables
+        .insert("RESIN_TOOL_SETTING".into(), "later".into());
+    let expected = format!(
+        "chosen:{}",
+        fs::canonicalize(temp.path()).unwrap().display()
+    );
+    let c = resin::toolchain::compile_c("", &temp.path().join("output"), &settings).unwrap_err();
+    let shader =
+        resin::toolchain::compile_glsl("", resin::backend::glsl::Stage::Compute, &settings)
+            .unwrap_err();
+    for error in [c, shader] {
+        assert!(error.to_string().contains(&expected), "{error}");
+    }
+}

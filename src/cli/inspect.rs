@@ -2,7 +2,7 @@
 use crate::{
     ast,
     compiler::{Input, Session},
-    ir, toolchain,
+    ir,
 };
 use std::path::Path;
 
@@ -14,11 +14,12 @@ pub(super) enum Output {
     Check,
 }
 
-pub(super) fn run(input: &Input, output: Output, destination: Option<&Path>) -> super::Result<i32> {
-    if let Some(path) = destination {
-        toolchain::protect_source(&input.path, path)?;
-    }
-    let mut compiler = Session::default();
+pub(super) fn run(
+    compiler: &mut Session,
+    input: &Input,
+    output: Output,
+    destination: Option<&Path>,
+) -> super::Result<i32> {
     let path = crate::analysis::normalize_path(&input.path)?;
     let snapshot = compiler.analyze(&path)?;
     let text = match output {
