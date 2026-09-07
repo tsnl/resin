@@ -81,16 +81,17 @@ host executable, which uses the runtime to create Vulkan pipelines and run them.
 
 ### The CLI connects the stages
 
-[src/bin/resin.rs](src/bin/resin.rs) is a small dispatcher. [args.rs](src/bin/resin/args.rs)
+[src/bin/resin.rs](src/bin/resin.rs) only calls `cli::main`.
+[cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
 parses flags and chooses `Mode::Interpreter`, `Compiler`, `Codegen`, `Inspector`, or
-`Formatter`; [source.rs](src/bin/resin/source.rs) parses the `FILE[:ENTRY]` selector.
+`Formatter`; [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
 Interpreter mode builds a debug native executable and runs it. Compiler mode builds
 and copies a release executable without running it, including `--output run -o PATH`.
 
 [backend/build.rs](src/backend/build.rs) owns source analysis, C/GLSL/SPIR-V generation,
 shader embedding, compiler selection, and executable construction. Its `compile` API
 returns an `Executable` that keeps the build-cache lock while the caller runs it.
-`generate` returns output bytes. [inspect.rs](src/bin/resin/inspect.rs) handles the
+`generate` returns output bytes. [inspect.rs](src/cli/inspect.rs) handles the
 frontend-only CST, AST, IR, and parsing-check modes.
 
 The session owns source overlays, cached parses, import dependencies, and
@@ -104,7 +105,7 @@ currently checks parsing and import loading, not typing; use `--output ir` to
 exercise the typed frontend without building an executable.
 
 Formatting takes a separate path from `main` through
-[format.rs](src/bin/resin/format.rs) to the shared
+[format.rs](src/cli/format.rs) to the shared
 [formatting.rs](src/formatting.rs) library module. `--format` (or `-f`) formats
 files in place and searches directories recursively for `.resin` files;
 `--format --check` reports differences without writing and exits with status 1

@@ -5,7 +5,7 @@ use std::{
 
 pub(super) fn write(bytes: &[u8], destination: Option<&Path>) -> super::Result<i32> {
     if let Some(path) = destination {
-        resin::toolchain::write_output(bytes, path)?;
+        crate::toolchain::write_output(bytes, path)?;
     } else {
         io::stdout().lock().write_all(bytes)?;
     }

@@ -1,7 +1,7 @@
 //! CLI syntax and conversion into an explicit execution mode.
 use super::{Result, inspect, source};
+use crate::backend;
 use clap::{CommandFactory, ValueEnum};
-use resin::backend;
 use std::{ffi::OsString, path::PathBuf};
 
 pub enum Mode {
@@ -12,7 +12,7 @@ pub enum Mode {
         target: backend::Target,
     },
     Inspector {
-        input: resin::compiler::Input,
+        input: crate::compiler::Input,
         output: inspect::Output,
         destination: Option<PathBuf>,
     },

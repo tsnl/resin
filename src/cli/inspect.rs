@@ -1,5 +1,5 @@
 //! Frontend inspection does not generate or execute target code.
-use resin::{
+use crate::{
     ast,
     compiler::{Input, Session},
     ir, toolchain,
@@ -19,7 +19,7 @@ pub(super) fn run(input: &Input, output: Output, destination: Option<&Path>) -> 
         toolchain::protect_source(&input.path, path)?;
     }
     let mut compiler = Session::default();
-    let path = resin::analysis::normalize_path(&input.path)?;
+    let path = crate::analysis::normalize_path(&input.path)?;
     let snapshot = compiler.analyze(&path)?;
     let text = match output {
         Output::Cst => snapshot
