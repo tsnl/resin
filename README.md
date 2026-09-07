@@ -781,3 +781,20 @@ directly into swapchain images and multiple frames in flight are not implemented
 ## Resources
 
 [No Graphics API — Sebastian Aaltonen](https://www.sebastianaaltonen.com/blog/no-graphics-api)
+
+### Host byte-array storage
+
+On the host, every `ubyte` array is intentionally a sentinel array, including binary
+array literals. Its logical length is N; its physical storage is N+1 bytes with a
+trailing zero, alignment 1, and stride N+1 when nested in another array. The sentinel
+is outside checked indexing and is preserved by whole-array copies. Empty byte arrays
+occupy one zero byte. Embedded zero bytes count toward logical length; C string
+functions stop at the first zero. This contract supports passing a string or byte
+array's storage to a C function through an explicit `Ptr<ubyte>` cast.
+
+For packed binary data, use a `Span<ubyte>` over an explicitly allocated N-byte region
+and copy only the N logical elements. Copying the entire array representation also
+copies its sentinel and is inappropriate for a packed wire format. There is no separate
+string type or implicit packed conversion. Byte arrays currently have no shared
+host/device storage layout, so shared-layout queries must reject them; they must not
+silently report the host representation as a device layout.

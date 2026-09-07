@@ -736,3 +736,26 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
         );
     }
 }
+
+#[test]
+fn host_byte_arrays_have_explicit_sentinel_storage() {
+    runs(
+        r#"
+        export { main };
+        extern "string.h" def strlen(p: Ptr<ubyte>) -> ulong;
+        def main() -> int = {
+            var binary = [65B, 66B];
+            var copied = binary;
+            var nested = [[1B, 2B], [3B, 4B]];
+            var empty = "";
+            var embedded = [65B, 0B, 66B];
+            if (strlen(Ptr<ubyte>(&copied)) == 2L &&
+                strlen(Ptr<ubyte>(&empty)) == 0L &&
+                strlen(Ptr<ubyte>(&embedded)) == 1L &&
+                ulong(nested(1)) - ulong(nested(0)) == 3L &&
+                copied(1).* == 66B) { 0 } else { 1 }
+        };
+    "#,
+        0,
+    );
+}
