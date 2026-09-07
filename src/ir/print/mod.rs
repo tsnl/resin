@@ -113,6 +113,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
                 symbol(stage.as_ref()),
             ],
         ),
+        Instr::Eliminate { result } => list("eliminate-never", vec![sexp_ty(names, result)]),
         Instr::NumericCast { ty } => list("numeric-cast", vec![sexp_ty(names, ty)]),
         Instr::PointerCast { ty } => list("pointer-cast", vec![sexp_ty(names, ty)]),
         Instr::Push { value } => list("push", vec![sexp_value(names, value)]),

@@ -445,3 +445,16 @@ fn numeric_conversions_do_not_choose_source_storage_types() {
             .any(|i| matches!(i, ir::Instr::NumericCast { ty: Ty::UInt8 }))
     );
 }
+
+#[test]
+fn never_elimination_requires_an_empty_input_and_resolved_context() {
+    assert_eq!(
+        result(
+            "def impossible(n: Never) -> int = { absurd(n) };",
+            "impossible"
+        ),
+        Ty::Int32
+    );
+    rejects("def bad(n: int) -> int = { absurd(n) };", "nominal structs");
+    rejects("def ambiguous(n: Never) -> _ = { absurd(n) };", "infer");
+}

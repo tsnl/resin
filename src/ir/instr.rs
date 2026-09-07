@@ -116,6 +116,12 @@ pub enum Instr {
         ty: Ty,
     },
 
+    /// Consume Never and never return. `result` checks the unreachable continuation;
+    /// it is not a runtime value. Backends terminate the block at this instruction.
+    Eliminate {
+        result: Ty,
+    },
+
     Discard,
 
     /// Consume one value per field and construct a record in declaration order.
@@ -176,6 +182,7 @@ impl Instr {
             | Self::Widen { .. }
             | Self::Load
             | Self::Ascribe { .. }
+            | Self::Eliminate { .. }
             | Self::NumericCast { .. }
             | Self::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
             Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },

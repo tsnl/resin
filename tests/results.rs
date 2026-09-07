@@ -245,3 +245,17 @@ fn propagation_rejects_wrong_types_and_narrower_errors() {
     );
     rejects("def f() -> Result<int, bool> = { ok(1) };", "structs");
 }
+
+#[test]
+fn ir_never_elimination_cannot_consume_an_inhabited_value() {
+    let mut m = support::module("def impossible(n: Never) -> int = { absurd(n) };");
+    assert!(
+        m.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instrs)
+            .any(|i| matches!(i, resin::ir::Instr::Eliminate { .. }))
+    );
+    m.functions[0].locals[0].ty = resin::ir::Ty::Int32;
+    assert!(resin::ir::verify(&m).is_err());
+}

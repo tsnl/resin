@@ -605,3 +605,27 @@ fn numeric_conversions_execute_on_gpu() {
         assert_eq!(root.host_pointer().cast::<[u32; 2]>().read(), [42, 0]);
     }
 }
+
+#[test]
+fn never_elimination_executes_on_gpu() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let _lock = lock_gpu();
+    let Some(mut gpu) = gpu() else { return };
+    let m = support::module(include_str!("fixtures/never_elimination.resin"));
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    let spv =
+        resin::toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
+    // State is two uints. The live allocation is read only after synchronous submit.
+    unsafe {
+        let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
+        let root = gpu.malloc(8, 4, ResinMemory::Default).unwrap();
+        root.host_pointer().cast::<[u32; 2]>().write([0, 0]);
+        let mut commands = gpu.start_command_recording().unwrap();
+        commands.set_pipeline(&pipeline).unwrap();
+        commands.dispatch(root.device_pointer(), 1, 1, 1).unwrap();
+        gpu.submit(commands).unwrap();
+        assert_eq!(root.host_pointer().cast::<[u32; 2]>().read(), [42, 0]);
+    }
+}

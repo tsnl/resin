@@ -837,3 +837,22 @@ shader. There are no implicit numeric conversions. `float32(1)` still contextual
 a direct unsuffixed literal; suffixes fix source literal types. A conversion of a local
 value does not narrow that local's storage merely because of the destination type.
 Pointer reinterpretation and nominal record ascription remain separate IR operations.
+
+### Eliminating Never
+
+`absurd(value)` consumes a value of `Never` and has no returning execution path.
+Its result type comes from its context; annotate the enclosing result or binding
+if that type cannot otherwise be inferred. An inhabited struct or union is rejected.
+For example, an infallible Result can be unwrapped without inventing an error value:
+
+```resin
+def unwrap(r: Result<int, Never>) -> int = {
+    match (r) { ok(n) => { n }, err(impossible) => { absurd(impossible) } }
+};
+```
+
+The IR explicitly marks elimination as divergent. Its continuation type is only for
+checking unreachable code; neither backend constructs a value of that type. C aborts
+and shaders stop the invocation if invalid external memory somehow supplies a `Never`.
+This defensive trap does not unwind cleanup. Reachable `ok` and `?` paths retain normal
+defer behavior. Matches over inhabited variants still require exhaustive, unique arms.

@@ -815,3 +815,8 @@ fn numeric_conversions_check_runtime_values_and_boundaries() {
         );
     }
 }
+
+#[test]
+fn never_elimination_preserves_reachable_cleanup() {
+    runs(include_str!("fixtures/never_elimination.resin"), 0);
+}

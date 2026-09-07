@@ -71,6 +71,12 @@ pub(super) fn check_instr(
             }
             stack.push(Ty::shader());
         }
+        Instr::Eliminate { result } => {
+            expect_type(Ty::union([]), pop_one(stack, location)?, location)?;
+            check_type(&module.types, result, location)?;
+            // Check the dead continuation without constructing a runtime value.
+            stack.push(result.clone());
+        }
         Instr::NumericCast { ty } => {
             let from = pop_one(stack, location)?;
             if !from.is_numeric() || !ty.is_numeric() {

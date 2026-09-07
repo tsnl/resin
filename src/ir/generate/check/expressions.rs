@@ -294,6 +294,12 @@ impl<'a> Checker<'a> {
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Var { name } = &func.val
+                    && name.val.as_ref() == "absurd"
+                {
+                    self.term(arg, Some(Ty::union([]).into()))?;
+                    // The enclosing expected type constrains `out`; an unconstrained
+                    // elimination is ambiguous, never a value of an arbitrary type.
+                } else if let TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "size_of" | "align_of")
                 {
                     let ty = if let TermKind::Type { ty } = &arg.val {
