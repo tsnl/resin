@@ -7,6 +7,7 @@ use crate::{
 
 use super::types::Types;
 
+#[derive(Clone, PartialEq)]
 struct Slot {
     ty: Ty,
     expr: String,
@@ -19,6 +20,7 @@ pub(super) fn emit(
     flow: &FunctionTypes,
     name: &str,
 ) -> Result<String, Error> {
+    let inputs = symbolic_inputs(types, function, flow)?;
     let mut out = format!(
         "{} {name}({} arg) {{\n",
         types.name(&function.result),
@@ -36,6 +38,9 @@ pub(super) fn emit(
     writeln!(out, "  r_l0 = arg;").unwrap();
     for (b, inputs) in flow.inputs.iter().enumerate() {
         for (i, ty) in inputs.iter().enumerate() {
+            if matches!(ty, Ty::Function { .. }) {
+                continue;
+            }
             writeln!(out, "  {} r_b{b}_{i};", types.name(ty)).unwrap();
         }
         for (i, ty) in flow.results[b].iter().enumerate() {
@@ -54,15 +59,7 @@ pub(super) fn emit(
     .unwrap();
     for (b, block) in function.blocks.iter().enumerate() {
         writeln!(out, "    case {b}: {{").unwrap();
-        let mut stack: Vec<_> = flow.inputs[b]
-            .iter()
-            .enumerate()
-            .map(|(i, ty)| Slot {
-                ty: ty.clone(),
-                expr: format!("r_b{b}_{i}"),
-                local: false,
-            })
-            .collect();
+        let mut stack = inputs[b].clone();
         for (i, instr) in block.instrs.iter().enumerate() {
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
             for (index, arg) in args.iter().enumerate() {
@@ -161,16 +158,11 @@ pub(super) fn emit(
 }
 
 fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) -> Result<(), Error> {
-    if stack
-        .iter()
-        .any(|s| s.local || matches!(s.ty, Ty::Function { .. }))
-    {
-        return Err(Error(
-            "shader profile cannot carry local addresses or functions across block edges".into(),
-        ));
-    }
     out.push_str("      {\n");
     for (i, slot) in stack.iter().enumerate() {
+        if symbolic(slot) {
+            continue;
+        }
         writeln!(
             out,
             "        {} edge{i} = {};",
@@ -179,11 +171,89 @@ fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) -> R
         )
         .unwrap();
     }
-    for i in 0..stack.len() {
+    for (i, slot) in stack.iter().enumerate() {
+        if symbolic(slot) {
+            continue;
+        }
         writeln!(out, "        r_b{target}_{i} = edge{i};").unwrap();
     }
     writeln!(out, "        pc = {target}; continue;\n      }}").unwrap();
     Ok(())
+}
+
+// A local place or direct function is a compiler expression, not a device
+// pointer. Retain it across edges only when all predecessors agree. Runtime
+// operands (including dynamic indices) were already evaluated into temporaries.
+fn symbolic(slot: &Slot) -> bool {
+    slot.local || matches!(slot.ty, Ty::Function { .. })
+}
+
+fn symbolic_inputs(
+    types: &mut Types<'_>,
+    function: &Function,
+    flow: &FunctionTypes,
+) -> Result<Vec<Vec<Slot>>, Error> {
+    let mut inputs: Vec<Option<Vec<Slot>>> = vec![None; function.blocks.len()];
+    inputs[function.entry.index()] = Some(Vec::new());
+    let mut pending = vec![function.entry.index()];
+    while let Some(b) = pending.pop() {
+        let mut stack = inputs[b].clone().unwrap();
+        for (i, instr) in function.blocks[b].instrs.iter().enumerate() {
+            let args = stack.split_off(stack.len() - instr.stack_effect().pops);
+            if let Some(ty) = &flow.results[b][i] {
+                let local = matches!(instr, Instr::LocalAddress { .. })
+                    || matches!(instr, Instr::AccessStatic { .. } | Instr::AccessDynamic)
+                        && args[0].local;
+                let expr = if local || matches!(instr, Instr::Function { .. }) {
+                    instruction(types, instr, &args, Some(ty), &mut String::new())?.unwrap()
+                } else {
+                    format!("r_v{b}_{i}")
+                };
+                stack.push(Slot {
+                    ty: ty.clone(),
+                    expr,
+                    local,
+                });
+            }
+        }
+        let targets = match function.blocks[b].terminator {
+            Terminator::Return => vec![],
+            Terminator::Break { target } => vec![target],
+            Terminator::Branch { then, els } => {
+                stack.pop();
+                vec![then, els]
+            }
+        };
+        for target in targets {
+            let t = target.index();
+            let incoming: Vec<_> = stack
+                .iter()
+                .enumerate()
+                .map(|(i, slot)| {
+                    if symbolic(slot) {
+                        slot.clone()
+                    } else {
+                        Slot {
+                            ty: slot.ty.clone(),
+                            expr: format!("r_b{t}_{i}"),
+                            local: false,
+                        }
+                    }
+                })
+                .collect();
+            if let Some(previous) = &inputs[t] {
+                if previous != &incoming {
+                    return Err(Error(
+                        "shader cannot merge distinct local addresses or function values".into(),
+                    ));
+                }
+            } else {
+                inputs[t] = Some(incoming);
+                pending.push(t);
+            }
+        }
+    }
+    Ok(inputs.into_iter().map(Option::unwrap_or_default).collect())
 }
 
 fn instruction(

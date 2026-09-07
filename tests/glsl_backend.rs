@@ -187,10 +187,6 @@ fn unsupported_shader_features_are_diagnosed() {
             "unsupported shader builtin",
         ),
         (
-            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { var x = i; x := if (i == uint (0)) { uint (1) } else { uint (2) }; x }; };",
-            "addresses or functions across block edges",
-        ),
-        (
             "export { kernel }; def kernel (i: long) -> long = { i };",
             "does not support type",
         ),
@@ -253,4 +249,15 @@ fn compiler_errors_are_reported() {
     let error =
         toolchain::compile_glsl("not GLSL", Stage::Compute, &config::glsl(&compiler)).unwrap_err();
     assert!(error.to_string().contains("shader compiler failed"));
+}
+
+#[test]
+fn compound_control_flow_compiles_to_spirv() {
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let m = module(include_str!("fixtures/compound_control.resin"));
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler))
+        .unwrap_or_else(|error| panic!("{error}\n{source}"));
 }

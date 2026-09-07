@@ -759,3 +759,8 @@ fn host_byte_arrays_have_explicit_sentinel_storage() {
         0,
     );
 }
+
+#[test]
+fn compound_control_flow_preserves_operand_order() {
+    runs(include_str!("fixtures/compound_control.resin"), 0);
+}
