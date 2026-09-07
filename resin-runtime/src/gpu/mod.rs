@@ -110,7 +110,6 @@ pub struct ResinCommandBuffer {
     pipeline_bound: bool,
     graphics: bool,
     rendering: bool,
-    recording: bool,
     submitted: bool,
     layouts: ImageLayouts,
 }
@@ -625,7 +624,6 @@ impl ResinGpu {
             pipeline_bound: false,
             graphics: false,
             rendering: false,
-            recording: true,
             submitted: false,
             layouts: ImageLayouts::default(),
         })
@@ -645,21 +643,19 @@ impl ResinGpu {
         if command_buffer.rendering || !command_buffer.layouts.is_current() {
             return Err(ResinStatus::InvalidArgument);
         }
-        if command_buffer.recording {
-            let barrier = vk::MemoryBarrier2::default()
-                .src_stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
-                .src_access_mask(vk::AccessFlags2::MEMORY_WRITE)
-                .dst_stage_mask(vk::PipelineStageFlags2::HOST)
-                .dst_access_mask(vk::AccessFlags2::HOST_READ);
-            let dependency =
-                vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
-            unsafe {
-                self.device
-                    .cmd_pipeline_barrier2(command_buffer.handle, &dependency);
-            }
-            unsafe { self.device.end_command_buffer(command_buffer.handle) }.map_err(vk_status)?;
-            command_buffer.recording = false;
+        // Submission consumes the recording; no ended buffer returns to callers.
+        let barrier = vk::MemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
+            .src_access_mask(vk::AccessFlags2::MEMORY_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags2::HOST)
+            .dst_access_mask(vk::AccessFlags2::HOST_READ);
+        let dependency =
+            vk::DependencyInfo::default().memory_barriers(slice::from_ref(&barrier));
+        unsafe {
+            self.device
+                .cmd_pipeline_barrier2(command_buffer.handle, &dependency);
         }
+        unsafe { self.device.end_command_buffer(command_buffer.handle) }.map_err(vk_status)?;
 
         let value = self.timeline_value.fetch_add(1, Ordering::Relaxed) + 1;
         let command_info =
@@ -743,7 +739,7 @@ impl ResinCommandBuffer {
     /// # Safety
     /// The pipeline must belong to this recording's GPU and remain live through command completion.
     pub unsafe fn set_pipeline(&mut self, pipeline: &ResinPipeline) -> Result<(), ResinStatus> {
-        if !self.recording || self.device.handle() != pipeline.device.handle() {
+        if self.device.handle() != pipeline.device.handle() {
             return Err(ResinStatus::InvalidArgument);
         }
         let graphics = pipeline.bind_point == vk::PipelineBindPoint::GRAPHICS;
@@ -766,7 +762,7 @@ impl ResinCommandBuffer {
         image: &mut ResinImage,
         clear: [f32; 4],
     ) -> Result<(), ResinStatus> {
-        if !self.recording || self.rendering {
+        if self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         // BDA resources can alias: order all earlier accesses before graphics.
@@ -831,7 +827,7 @@ impl ResinCommandBuffer {
     /// # Safety
     /// The recording's GPU and resources must remain live and externally synchronized.
     pub unsafe fn end_rendering(&mut self) -> Result<(), ResinStatus> {
-        if !self.recording || !self.rendering {
+        if !self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         unsafe {
@@ -844,7 +840,7 @@ impl ResinCommandBuffer {
     /// # Safety
     /// The root address and every shader-accessed address must be valid for the bound shaders. All resources must remain live through completion.
     pub unsafe fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
-        if !self.recording || !self.pipeline_bound || !self.graphics || !self.rendering {
+        if !self.pipeline_bound || !self.graphics || !self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         if vertex_count == 0 {
@@ -864,7 +860,7 @@ impl ResinCommandBuffer {
         image: &mut ResinImage,
         dst: &ResinAllocation,
     ) -> Result<(), ResinStatus> {
-        if !self.recording || self.rendering {
+        if self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         let bytes = (image.width as usize)
@@ -925,7 +921,7 @@ impl ResinCommandBuffer {
         group_count_y: u32,
         group_count_z: u32,
     ) -> Result<(), ResinStatus> {
-        if !self.recording || !self.pipeline_bound || self.graphics || self.rendering {
+        if !self.pipeline_bound || self.graphics || self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
         cmd_memory_barrier(&self.device, self.handle);
