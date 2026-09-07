@@ -89,9 +89,13 @@ pub(crate) fn emit_verified(
     for &index in &reachable {
         let function = &module.functions[index];
         for local in &function.locals {
-            types.register(&local.ty)?;
+            types
+                .register(&local.ty)
+                .map_err(|e| Error::at(module, index, None, e))?;
         }
-        types.register(&function.result)?;
+        types
+            .register(&function.result)
+            .map_err(|e| Error::at(module, index, None, e))?;
         for ty in analysis[index].inputs.iter().flatten() {
             if matches!(ty, Ty::Function { .. }) {
                 continue; // Direct functions are carried symbolically by the emitter.
@@ -121,6 +125,7 @@ pub(crate) fn emit_verified(
             &module.functions[index],
             &analysis[index],
             &format!("r_fn{index}"),
+            index,
         )?);
     }
     let mut out = "#version 460\n#extension GL_EXT_buffer_reference : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n".to_string();
@@ -146,19 +151,37 @@ fn visit(
     }
     let name = function.name.as_deref().unwrap_or("<unnamed>");
     if active[index] {
-        return Err(Error(format!("recursive shader call graph at {name}")));
+        return Err(Error::at(
+            module,
+            index,
+            None,
+            Error(format!("recursive shader call graph at {name}")),
+        ));
     }
     if function.foreign.is_some() {
-        return Err(Error(format!("shader cannot call foreign function {name}")));
+        return Err(Error::at(
+            module,
+            index,
+            None,
+            Error(format!("shader cannot call foreign function {name}")),
+        ));
     }
     active[index] = true;
-    for instr in function.blocks.iter().flat_map(|block| &block.instrs) {
-        match instr {
-            ir::Instr::Function { function } => visit(module, function.index(), active, result)?,
-            ir::Instr::CallBuiltin { name, .. } if name.as_ref() == "print" => {
-                return Err(Error("print is only supported in host programs".into()));
+    for (b, block) in function.blocks.iter().enumerate() {
+        for (i, instr) in block.instrs.iter().enumerate() {
+            match instr {
+                ir::Instr::Function { function } => visit(module, function.index(), active, result)
+                    .map_err(|error| Error::at(module, index, Some((b, i)), error))?,
+                ir::Instr::CallBuiltin { name, .. } if name.as_ref() == "print" => {
+                    return Err(Error::at(
+                        module,
+                        index,
+                        Some((b, i)),
+                        Error("print is only supported in host programs".into()),
+                    ));
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
     active[index] = false;

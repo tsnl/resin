@@ -224,7 +224,12 @@ fn omitted_function_results_are_unit_not_inferred() {
         "def even(n: int) = { if (n == 0) { () } else { odd(n - 1) } }; def odd(n: int) = { even(n - 1) };",
     ] {
         let explicit = source.replace(") =", ") -> () =");
-        assert_eq!(compile(source), compile(&explicit));
+        let mut implicit = compile(source);
+        let mut explicit = compile(&explicit);
+        // Source positions differ when the annotation is spelled out.
+        implicit.origins = Default::default();
+        explicit.origins = Default::default();
+        assert_eq!(implicit, explicit);
     }
     for source in [
         "def answer() = { 42 };",

@@ -55,6 +55,13 @@ impl Generator {
         let param = Ty::parameter(&params);
         let result = self.evaluator().ty(result)?;
         let id = FunctionId::from_index(self.module.functions.len());
+        self.module.origins.functions.insert(
+            id,
+            crate::ast::SourceLocation {
+                path: self.source_path.clone(),
+                span: name.span,
+            },
+        );
         let mut builder = FunctionBuilder::new(Some(name.val.clone()));
         builder.parameter(None, param.clone());
         builder.result(result.clone());
@@ -84,6 +91,15 @@ impl Generator {
         let ValueBindingKind::Function(id) = binding.kind else {
             unreachable!()
         };
+        self.function_id = Some(id);
+        self.source_span = name.span;
+        self.module.origins.functions.insert(
+            id,
+            crate::ast::SourceLocation {
+                path: self.source_path.clone(),
+                span: name.span,
+            },
+        );
         let result = self.module.functions[id.index()].result.clone();
         self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
         self.function().result(result.clone());
@@ -93,6 +109,7 @@ impl Generator {
         self.function().result(result);
         self.terminate(Terminator::Return);
         self.module.functions[id.index()] = self.function.take().unwrap().finish();
+        self.function_id = None;
         self.scopes.pop();
         Ok(())
     }

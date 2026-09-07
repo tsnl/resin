@@ -47,6 +47,9 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
 
 struct Generator {
     module: Module,
+    source_path: std::path::PathBuf,
+    source_span: Span,
+    function_id: Option<crate::ir::FunctionId>,
     typer: TyperContext,
     function: Option<FunctionBuilder>,
     scopes: Scopes,
@@ -58,6 +61,9 @@ impl Generator {
     fn new() -> Self {
         Self {
             module: Module::default(),
+            source_path: "<source>".into(),
+            source_span: Span { start: 0, end: 0 },
+            function_id: None,
             typer: TyperContext::new(),
             function: None,
             scopes: Scopes::new(),
@@ -220,13 +226,19 @@ impl Generator {
 
     // `to` requests an emitted value conversion, never a typing context.
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, GenerateError> {
-        let checked = self.checked.expressions[&std::ptr::from_ref(term)].clone();
-        let found = self.gen_term_inner(term, &checked)?;
-        let found = self.coerce(term.span, found, &checked)?;
-        if let Some(to) = to {
-            return self.coerce(term.span, found, to);
-        }
-        Ok(found)
+        let before = std::mem::replace(&mut self.source_span, term.span);
+        let result = (|| {
+            let checked = self.checked.expressions[&std::ptr::from_ref(term)].clone();
+            let found = self.gen_term_inner(term, &checked)?;
+            let found = self.coerce(term.span, found, &checked)?;
+            if let Some(to) = to {
+                self.coerce(term.span, found, to)
+            } else {
+                Ok(found)
+            }
+        })();
+        self.source_span = before;
+        result
     }
 
     fn gen_term_inner(&mut self, term: &Term, expected: &Ty) -> Result<Ty, GenerateError> {
@@ -306,11 +318,26 @@ impl Generator {
         self.emit(Instr::Load);
     }
 
+    fn record_origin(&mut self) {
+        if let Some(function) = self.function_id {
+            let (block, instruction) = self.function().position();
+            self.module.origins.instructions.insert(
+                (function, block, instruction),
+                crate::ast::SourceLocation {
+                    path: self.source_path.clone(),
+                    span: self.source_span,
+                },
+            );
+        }
+    }
+
     fn emit(&mut self, instr: Instr) {
+        self.record_origin();
         self.function().emit(instr);
     }
 
     fn terminate(&mut self, terminator: Terminator) {
+        self.record_origin();
         self.function().terminate(terminator);
     }
 

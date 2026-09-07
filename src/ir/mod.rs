@@ -35,4 +35,13 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// Decorated shader candidates and whether their static artifact is requested.
     pub shaders: BTreeMap<FunctionId, shader::ShaderEntry>,
+    /// Optional source origins; direct IR clients may leave this empty.
+    pub origins: SourceMap,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SourceMap {
+    pub sources: BTreeMap<std::path::PathBuf, Arc<str>>,
+    pub functions: BTreeMap<FunctionId, crate::ast::SourceLocation>,
+    pub instructions: BTreeMap<(FunctionId, BlockId, usize), crate::ast::SourceLocation>,
 }

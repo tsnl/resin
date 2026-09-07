@@ -64,6 +64,13 @@ impl FunctionBuilder {
         self.function.locals[id.index()].ty = ty;
     }
 
+    pub(super) fn position(&self) -> (BlockId, usize) {
+        (
+            self.current,
+            self.function.blocks[self.current.index()].instrs.len(),
+        )
+    }
+
     pub(super) fn emit(&mut self, instr: Instr) {
         let current = self.current.index();
         debug_assert!(!self.terminated[current]);
