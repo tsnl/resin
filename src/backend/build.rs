@@ -7,15 +7,23 @@ use std::{
 
 use super::{Error, c, glsl};
 use crate::{
-    compiler::{Request, Session},
+    compiler::{Request, Session, Target},
     ir, toolchain,
 };
 
-#[derive(Clone, Copy)]
-pub enum Target {
-    C,
-    Glsl,
-    Spirv,
+/// A completed compilation, retaining executable locks through execution.
+pub enum Artifact {
+    Executable(Executable),
+    Bytes(Vec<u8>),
+}
+
+impl Artifact {
+    pub fn run(&self) -> Result<i32, Error> {
+        match self {
+            Self::Executable(executable) => executable.run(),
+            Self::Bytes(_) => Err(Error("only a native executable can be run".into())),
+        }
+    }
 }
 
 /// Retains the build-cache lock until the caller has finished using the executable.
@@ -33,12 +41,8 @@ impl Executable {
     }
 }
 
-/// Build native code and optionally copy a release executable to the destination.
-/// Without a destination, use the debug cache. Execution is an explicit separate step.
-pub fn compile(request: &Request) -> Result<Executable, Error> {
-    validate(request)?;
-    let snapshot = Session::default().analyze(&request.input.path)?;
-    let source = host_source(request, snapshot.module()?)?;
+fn native(request: &Request, module: &ir::Module) -> Result<Executable, Error> {
+    let source = host_source(request, module)?;
     let output = host_destination(request)?;
     let profile = if output.is_some() {
         toolchain::CProfile::Release
@@ -59,27 +63,31 @@ pub fn compile(request: &Request) -> Result<Executable, Error> {
     Ok(Executable { build })
 }
 
-/// Generate target output. Text targets include a trailing newline; SPIR-V is binary.
-pub fn generate(request: &Request, target: Target) -> Result<Vec<u8>, Error> {
+/// Compile the requested artifact without executing it.
+/// Native outputs are copied when a destination is supplied; otherwise they remain
+/// in the debug cache. Text artifacts include a trailing newline; SPIR-V is binary.
+pub fn compile(request: &Request) -> Result<Artifact, Error> {
     validate(request)?;
     let snapshot = Session::default().analyze(&request.input.path)?;
     let module = snapshot.module()?;
-    let source = match target {
+    let source = match request.target {
+        Target::Executable => return native(request, module).map(Artifact::Executable),
         Target::C => host_source(request, module)?,
         Target::Glsl | Target::Spirv => {
             let stage = shader_stage(request, module)?;
             let source = glsl::emit(module, &request.input.entry, stage)?;
-            if matches!(target, Target::Spirv) {
+            if matches!(request.target, Target::Spirv) {
                 return toolchain::compile_glsl(
                     &source,
                     stage,
                     &compiler(&request.glslc, "GLSLC", "glslc"),
-                );
+                )
+                .map(Artifact::Bytes);
             }
             source
         }
     };
-    Ok(format!("{source}\n").into_bytes())
+    Ok(Artifact::Bytes(format!("{source}\n").into_bytes()))
 }
 
 fn host_source(request: &Request, module: &ir::Module) -> Result<String, Error> {

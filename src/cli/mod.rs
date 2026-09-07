@@ -24,15 +24,16 @@ pub fn main() -> ! {
 fn run(mode: Mode) -> Result<i32> {
     match &mode {
         Mode::Compiler(request) | Mode::Interpreter(request) => {
-            let executable = backend::compile(request)?;
+            let artifact = backend::compile(request)?;
             if matches!(mode, Mode::Interpreter(_)) {
-                return Ok(executable.run()?);
+                return Ok(artifact.run()?);
             }
-            Ok(0)
-        }
-        Mode::Codegen { request, target } => {
-            let bytes = backend::generate(request, *target)?;
-            output::write(&bytes, request.destination.as_deref())
+            match artifact {
+                backend::Artifact::Executable(_) => Ok(0),
+                backend::Artifact::Bytes(bytes) => {
+                    output::write(&bytes, request.destination.as_deref())
+                }
+            }
         }
         Mode::Inspector {
             input,

@@ -23,9 +23,19 @@ pub struct Input {
     pub entry: String,
 }
 
+/// The artifact produced by a compilation request.
+#[derive(Clone, Copy)]
+pub enum Target {
+    Executable,
+    C,
+    Glsl,
+    Spirv,
+}
+
 /// Input, output, and tool choices shared by the frontend and backend.
 pub struct Request {
     pub input: Input,
+    pub target: Target,
     pub destination: Option<PathBuf>,
     pub cc: Option<OsString>,
     pub glslc: Option<OsString>,

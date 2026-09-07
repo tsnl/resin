@@ -2,7 +2,7 @@
 use super::{Result, inspect, source};
 use crate::{
     backend,
-    compiler::{Input, Request},
+    compiler::{Input, Request, Target},
 };
 use clap::{CommandFactory, ValueEnum};
 use std::{ffi::OsString, path::PathBuf};
@@ -10,10 +10,6 @@ use std::{ffi::OsString, path::PathBuf};
 pub enum Mode {
     Interpreter(Request),
     Compiler(Request),
-    Codegen {
-        request: Request,
-        target: backend::Target,
-    },
     Inspector {
         input: Input,
         output: inspect::Output,
@@ -128,29 +124,26 @@ impl Cli {
                 destination: options.destination,
             });
         }
+        let target = match options.output {
+            Output::Run | Output::Exe => Target::Executable,
+            Output::C => Target::C,
+            Output::Glsl => Target::Glsl,
+            Output::Spirv => Target::Spirv,
+            _ => unreachable!("inspection modes were handled above"),
+        };
+        let interpret = options.output == Output::Run && options.destination.is_none();
         let request = Request {
             input,
+            target,
             destination: options.destination,
             cc: options.cc,
             stage: options.stage,
             glslc: options.glslc,
         };
-        Ok(match options.output {
-            Output::Run if request.destination.is_none() => Mode::Interpreter(request),
-            Output::Run | Output::Exe => Mode::Compiler(request),
-            Output::C => Mode::Codegen {
-                request,
-                target: backend::Target::C,
-            },
-            Output::Glsl => Mode::Codegen {
-                request,
-                target: backend::Target::Glsl,
-            },
-            Output::Spirv => Mode::Codegen {
-                request,
-                target: backend::Target::Spirv,
-            },
-            _ => unreachable!("inspection modes were handled above"),
+        Ok(if interpret {
+            Mode::Interpreter(request)
+        } else {
+            Mode::Compiler(request)
         })
     }
 }

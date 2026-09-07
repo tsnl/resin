@@ -83,17 +83,18 @@ host executable, which uses the runtime to create Vulkan pipelines and run them.
 
 [src/bin/resin.rs](src/bin/resin.rs) only calls `cli::main`.
 [cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
-parses flags and chooses `Mode::Interpreter`, `Compiler`, `Codegen`, `Inspector`, or
+parses flags and chooses `Mode::Interpreter`, `Compiler`, `Inspector`, or
 `Formatter`; [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
-Interpreter mode builds a debug native executable and runs it. Compiler mode builds
-and copies a release executable without running it, including `--output run -o PATH`.
+Interpreter mode builds a debug native executable and runs it. Compiler mode produces
+the requested `compiler::Target`: a native executable, C, GLSL, or SPIR-V. Native outputs
+with a destination use release builds, including `--output run -o PATH`.
 
-[compiler::Request](src/compiler.rs) holds the shared input, destination, and tool
+[compiler::Request](src/compiler.rs) holds the shared input, target, destination, and tool
 choices. [backend/build.rs](src/backend/build.rs) consumes that request and owns
 source analysis, C/GLSL/SPIR-V generation,
 shader embedding, compiler selection, and executable construction. Its `compile` API
-returns an `Executable` that keeps the build-cache lock while the caller runs it.
-`generate` returns output bytes. [inspect.rs](src/cli/inspect.rs) handles the
+returns an `Artifact`: output bytes or an `Executable` that keeps the build-cache lock
+while the caller runs it. Execution remains a separate step. [inspect.rs](src/cli/inspect.rs) handles the
 frontend-only CST, AST, IR, and parsing-check modes.
 
 The session owns source overlays, cached parses, import dependencies, and
