@@ -181,3 +181,72 @@ fn compiler_processes_use_the_supplied_environment_and_working_directory() {
         assert!(error.to_string().contains(&expected), "{error}");
     }
 }
+
+#[test]
+fn requests_validate_existing_output_ancestors() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let environment = Environment::capture().unwrap();
+    let file = temp.path().join("file");
+    fs::write(&file, "preserve").unwrap();
+    for suffix in ["program", "missing/program", "../program"] {
+        assert!(
+            Request::new(
+                input(&temp.path().join("source.resin")),
+                Some(file.join(suffix)),
+                options(&environment, CProfile::Debug)
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(fs::read_to_string(file).unwrap(), "preserve");
+    assert!(
+        Request::new(
+            input(&temp.path().join("source.resin")),
+            Some(temp.path().join("missing/nested/program")),
+            options(&environment, CProfile::Debug)
+        )
+        .is_ok()
+    );
+    assert!(!temp.path().join("missing").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn output_ancestor_validation_follows_symlinks() {
+    use std::os::unix::fs::symlink;
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let environment = Environment::capture().unwrap();
+    fs::write(temp.path().join("file"), "preserve").unwrap();
+    symlink("file", temp.path().join("file-link")).unwrap();
+    symlink("missing", temp.path().join("dangling-link")).unwrap();
+    assert!(
+        Request::new(
+            input(&temp.path().join("source.resin")),
+            Some(temp.path().join("dangling-link/program")),
+            options(&environment, CProfile::Debug)
+        )
+        .is_err()
+    );
+    symlink(".", temp.path().join("directory-link")).unwrap();
+    assert!(
+        Request::new(
+            input(&temp.path().join("source.resin")),
+            Some(temp.path().join("file-link/program")),
+            options(&environment, CProfile::Debug)
+        )
+        .is_err()
+    );
+    assert!(
+        Request::new(
+            input(&temp.path().join("source.resin")),
+            Some(temp.path().join("directory-link/missing/program")),
+            options(&environment, CProfile::Debug)
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        fs::read_to_string(temp.path().join("file")).unwrap(),
+        "preserve"
+    );
+    assert!(!temp.path().join("missing").exists());
+}

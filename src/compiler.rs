@@ -46,6 +46,7 @@ impl Request {
         let destination = destination
             .map(|path| {
                 let path = executable_destination(&input, path)?;
+                validate_destination_ancestors(&path)?;
                 if source == normalize_path(&path)? {
                     return Err(backend::Error(
                         "output would overwrite the source file".into(),
@@ -71,6 +72,45 @@ impl Request {
     pub fn options(&self) -> &Options {
         &self.options
     }
+}
+
+// Check each prefix before normalization: Windows may report NotFound for a
+// child of a regular file. Checking only the final parent misses that case.
+fn validate_destination_ancestors(path: &Path) -> io::Result<()> {
+    // Preserve raw components until they have been checked. In particular,
+    // Windows absolute-path resolution can collapse `file/..` prematurely.
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut prefix = PathBuf::new();
+    let components: Vec<_> = absolute.components().collect();
+    for part in &components[..components.len().saturating_sub(1)] {
+        prefix.push(part.as_os_str());
+        match std::fs::metadata(&prefix) {
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotADirectory,
+                    format!("output ancestor is not a directory: {}", prefix.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if std::fs::symlink_metadata(&prefix).is_ok_and(|metadata| metadata.is_symlink()) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!(
+                            "output ancestor is a dangling symlink: {}",
+                            prefix.display()
+                        ),
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn executable_destination(input: &Input, path: PathBuf) -> Result<PathBuf, backend::Error> {
