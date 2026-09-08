@@ -51,37 +51,3 @@ pub fn normalize_path(path: &Path) -> io::Result<PathBuf> {
     }
     Ok(result)
 }
-
-pub(crate) struct Snapshot<'a>(pub &'a BTreeMap<PathBuf, std::sync::Arc<super::syntax::Document>>);
-impl SourceProvider for Snapshot<'_> {
-    fn parsed(&self, path: &Path) -> Option<Result<crate::ast::SourceFile, crate::ast::AstError>> {
-        self.0.get(path).map(|d| d.file.clone())
-    }
-    fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
-        normalize_path(path)
-    }
-    fn read(&self, path: &Path) -> io::Result<String> {
-        self.0.get(path).map(|d| d.text.clone()).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("cannot read {}", path.display()),
-            )
-        })
-    }
-}
-
-/// The editor's tolerant ASTs, with the exact original text and source paths.
-pub(crate) struct RecoverySnapshot<'a>(
-    pub &'a BTreeMap<PathBuf, std::sync::Arc<super::syntax::Document>>,
-);
-impl SourceProvider for RecoverySnapshot<'_> {
-    fn parsed(&self, path: &Path) -> Option<Result<crate::ast::SourceFile, crate::ast::AstError>> {
-        self.0.get(path).map(|d| Ok(d.recovered_file.clone()))
-    }
-    fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
-        normalize_path(path)
-    }
-    fn read(&self, path: &Path) -> io::Result<String> {
-        Snapshot(self.0).read(path)
-    }
-}

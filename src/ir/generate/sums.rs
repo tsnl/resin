@@ -166,7 +166,7 @@ impl Generator {
                 None
             };
             self.scopes = before.clone();
-            self.scopes.push();
+            self.scopes.push_at(arm.body.span);
             self.owned.push(vec![]);
             self.emit(Instr::TakeLocal { local: saved });
             self.emit(Instr::VariantPayload { tag: tag.clone() });

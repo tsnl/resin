@@ -28,7 +28,12 @@ impl Generator {
         name: &Ident,
         init: &Type,
     ) -> Result<(), GenerateError> {
-        let ty = self.evaluator().ty(init)?;
+        self.scopes.push_at(init.span);
+        let ty = self.evaluator().ty(init);
+        self.scopes.pop();
+        let ty = ty.inspect_err(|_| {
+            self.scopes.define_invalid_type(name);
+        })?;
         self.bind_alias(name, init.span, ty)
     }
 
@@ -58,7 +63,10 @@ impl Generator {
             },
         );
         self.bind_type(name, definition)?;
-        let body = self.evaluator().ty(init)?;
+        self.scopes.push_at(init.span);
+        let body = self.evaluator().ty(init);
+        self.scopes.pop();
+        let body = body?;
         self.typer
             .define_type(definition, body)
             .map_err(|err| GenerateError::typing(init.span, err))
@@ -103,7 +111,6 @@ impl Generator {
         name: &Ident,
         read: bool,
     ) -> Result<ValueBinding, GenerateError> {
-        self.scopes.record_reference(name, false);
         let binding = self
             .scopes
             .lookup_value(&name.val)

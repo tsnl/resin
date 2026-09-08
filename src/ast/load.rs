@@ -1,10 +1,10 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fmt, fs, io,
     path::{Component, Path, PathBuf},
 };
 
-use super::{AstError, AstGen, SourceFile, Span};
+use super::{AstGen, SourceFile, Span};
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -17,7 +17,7 @@ pub struct SourceModule {
     pub path: PathBuf,
     pub source: String,
     pub file: SourceFile,
-    pub imports: Vec<usize>,
+    pub imports: Vec<(Span, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -86,10 +86,6 @@ impl std::error::Error for SourceError {}
 pub trait SourceProvider {
     fn resolve(&self, path: &Path) -> io::Result<PathBuf>;
     fn read(&self, path: &Path) -> io::Result<String>;
-    /// A cached parse of the exact text returned by `read`, when available.
-    fn parsed(&self, _path: &Path) -> Option<Result<SourceFile, AstError>> {
-        None
-    }
 }
 
 pub struct FileSystem;
@@ -132,34 +128,82 @@ pub fn load_with(
     stdlib: &Path,
     sources: &impl SourceProvider,
 ) -> Result<Program, SourceError> {
+    let loaded = load_parsed(path, stdlib, sources, &mut |_, source| {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_resin::LANGUAGE.into())
+            .expect("Resin parser");
+        let tree = parser.parse(source, None).expect("parser language is set");
+        let generator = AstGen::new(source);
+        (
+            generator.source_file(tree.root_node()),
+            generator
+                .errors(tree.root_node())
+                .into_iter()
+                .map(|error| (error.span, error.to_string()))
+                .collect(),
+        )
+    });
+    match loaded.errors.into_iter().next() {
+        Some(error) => Err(error),
+        None => Ok(loaded.program),
+    }
+}
+
+pub(crate) struct Loaded {
+    pub program: Program,
+    pub errors: Vec<SourceError>,
+    pub dependencies: BTreeSet<PathBuf>,
+}
+
+/// Loading retains accessible modules and failed dependencies for the next edit.
+/// The compiler supplies its parse cache; strict callers use the same traversal.
+pub(crate) fn load_parsed(
+    path: &Path,
+    stdlib: &Path,
+    sources: &impl SourceProvider,
+    parse: &mut impl FnMut(&Path, &str) -> (SourceFile, Vec<(Span, String)>),
+) -> Loaded {
     let mut loader = Loader {
         stdlib,
         sources,
-        modules: Vec::new(),
+        parse,
+        result: Loaded {
+            program: Program {
+                modules: Vec::new(),
+            },
+            errors: Vec::new(),
+            dependencies: BTreeSet::new(),
+        },
         loaded: HashMap::new(),
         active: Vec::new(),
     };
-    loader.visit(path)?;
-    Ok(Program {
-        modules: loader.modules,
-    })
+    if let Err(error) = loader.visit(path) {
+        loader.result.errors.push(error);
+    }
+    loader.result
 }
 
-struct Loader<'a, S> {
+struct Loader<'a, S, P> {
     stdlib: &'a Path,
     sources: &'a S,
-    modules: Vec<SourceModule>,
+    parse: &'a mut P,
+    result: Loaded,
     loaded: HashMap<PathBuf, usize>,
     active: Vec<PathBuf>,
 }
 
-impl<S: SourceProvider> Loader<'_, S> {
+impl<S: SourceProvider, P: FnMut(&Path, &str) -> (SourceFile, Vec<(Span, String)>)>
+    Loader<'_, S, P>
+{
     fn visit(&mut self, path: &Path) -> Result<usize, SourceError> {
         let error = |message: String| SourceError::new(path.to_path_buf(), None, message);
+        self.result.dependencies.insert(path.to_path_buf());
         let canonical = self
             .sources
             .resolve(path)
             .map_err(|e| error(e.to_string()))?;
+        self.result.dependencies.insert(canonical.clone());
         if self.active.contains(&canonical) {
             let chain = self
                 .active
@@ -177,47 +221,47 @@ impl<S: SourceProvider> Loader<'_, S> {
             .sources
             .read(&canonical)
             .map_err(|e| error(e.to_string()))?;
-        let file = self
-            .sources
-            .parsed(&canonical)
-            .unwrap_or_else(|| {
-                let mut parser = tree_sitter::Parser::new();
-                parser
-                    .set_language(&tree_sitter_resin::LANGUAGE.into())
-                    .expect("Resin parser");
-                let tree = parser.parse(&source, None).expect("parser language is set");
-                AstGen::new(&source).gen_source_file(tree.root_node())
-            })
-            .map_err(|e| SourceError::new(canonical.clone(), Some(e.span), e.to_string()))?;
+        let (file, errors) = (self.parse)(&canonical, &source);
         let mut module = SourceModule {
             path: canonical.clone(),
             source,
             file,
             imports: Vec::new(),
         };
+        self.result.errors.extend(
+            errors
+                .into_iter()
+                .map(|(span, error)| module.error(span, error)),
+        );
         self.active.push(canonical.clone());
         for import in &module.file.imports {
-            let path = resolve_import(&canonical, &import.val, self.stdlib)
-                .map_err(|e| module.error(import.span, e))?;
-            let id = self.visit(&path).map_err(|mut e| {
-                if e.span.is_none() {
-                    return module.error(import.span, e);
+            let start = self.result.errors.len();
+            let imported = resolve_import(&canonical, &import.val, self.stdlib)
+                .map_err(|e| module.error(import.span, e))
+                .and_then(|path| self.visit(&path));
+            match imported {
+                Ok(id) => module.imports.push((import.span, id)),
+                Err(error) => self.result.errors.push(error),
+            }
+            for error in &mut self.result.errors[start..] {
+                if error.span.is_none() {
+                    *error = module.error(import.span, &*error);
+                } else if error.path != canonical {
+                    error.message =
+                        format!("{}: {}", module.location(import.span), error.message).into();
+                    error.related.push(SourceNote {
+                        location: SourceLocation {
+                            path: canonical.clone(),
+                            span: import.span,
+                        },
+                        message: "imported here".into(),
+                    });
                 }
-                e.message = format!("{}: {}", module.location(import.span), e.message).into();
-                e.related.push(SourceNote {
-                    location: SourceLocation {
-                        path: canonical.clone(),
-                        span: import.span,
-                    },
-                    message: "imported here".into(),
-                });
-                e
-            })?;
-            module.imports.push(id);
+            }
         }
         self.active.pop();
-        let id = self.modules.len();
-        self.modules.push(module);
+        let id = self.result.program.modules.len();
+        self.result.program.modules.push(module);
         self.loaded.insert(canonical, id);
         Ok(id)
     }

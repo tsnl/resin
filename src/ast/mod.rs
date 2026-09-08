@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub mod generate;
 mod load;
 pub mod print;
+pub(crate) use load::load_parsed;
 pub use load::{
     FileSystem, Program, SourceError, SourceLocation, SourceModule, SourceNote, SourceProvider,
     load, load_with, resolve_import, stdlib_path,

@@ -8,7 +8,6 @@ use super::*;
 
 pub struct AstGen<'a> {
     src: &'a str,
-    recovering: bool,
     source_len: usize,
 }
 
@@ -40,18 +39,13 @@ impl<'a> AstGen<'a> {
     pub fn new(src: &'a str) -> Self {
         Self {
             src,
-            recovering: false,
             source_len: src.len(),
         }
     }
 
-    /// Editor-only AST generation. Strict parsing remains the default.
-    pub(crate) fn recovering(src: &'a str, source_len: usize) -> Self {
-        Self {
-            src,
-            recovering: true,
-            source_len,
-        }
+    /// Clamp source locations when unmatched delimiters have been repaired.
+    pub(crate) fn bounded(src: &'a str, source_len: usize) -> Self {
+        Self { src, source_len }
     }
 
     fn hole(&self, node: Node) -> Term {
@@ -66,9 +60,6 @@ impl<'a> AstGen<'a> {
     // Tree-sitter sometimes places an unfinished postfix/operator next to the
     // recognized expression instead of inside it. Preserve that receiver/operand.
     fn trailing_errors(&self, term: Term, parent: Node) -> Term {
-        if !self.recovering {
-            return term;
-        }
         let errors: Vec<_> = parent
             .children(&mut parent.walk())
             .filter(|n| n.is_error() && n.start_byte() >= term.span.end)
@@ -92,40 +83,38 @@ impl<'a> AstGen<'a> {
         Spanned::new(val, span)
     }
 
+    /// Strict callers validate the same AST construction used by the compiler.
     pub fn gen_source_file(&self, node: Node) -> Result<SourceFile, AstError> {
-        if !self.recovering
-            && let Some(error) = first_error_node(node)
-        {
-            return Err(self.parse_error(error));
+        if let Some(error) = self.errors(node).into_iter().next() {
+            return Err(error);
         }
-        if !self.recovering {
-            assert_eq!(node.kind(), "source_file");
-        }
+        Ok(self.source_file(node))
+    }
+
+    pub(crate) fn source_file(&self, node: Node) -> SourceFile {
         let mut stmts = Vec::new();
         let mut cursor = node.walk();
         for child in node.children_by_field_name("stmt", &mut cursor) {
             stmts.push(self.gen_stmt(child));
         }
-        if self.recovering {
-            for child in node
-                .named_children(&mut node.walk())
-                .filter(|n| n.is_error())
-            {
-                stmts.push(Spanned::new(
-                    StmtKind::Expr {
-                        term: self.hole(child),
-                    },
-                    self.span(child),
-                ));
-            }
-            if node.is_error() && stmts.is_empty() {
-                stmts.push(Spanned::new(
-                    StmtKind::Expr {
-                        term: self.hole(node),
-                    },
-                    self.span(node),
-                ));
-            }
+        for child in node
+            .named_children(&mut node.walk())
+            .filter(|n| n.is_error())
+        {
+            stmts.push(Spanned::new(
+                StmtKind::Expr {
+                    term: self.hole(child),
+                },
+                self.span(child),
+            ));
+        }
+        if node.is_error() && stmts.is_empty() {
+            stmts.push(Spanned::new(
+                StmtKind::Expr {
+                    term: self.hole(node),
+                },
+                self.span(node),
+            ));
         }
         let exports = node
             .child_by_field_name("exports")
@@ -147,11 +136,11 @@ impl<'a> AstGen<'a> {
                     })
                     .collect()
             });
-        Ok(SourceFile {
+        SourceFile {
             exports,
             imports,
             stmts,
-        })
+        }
     }
 
     fn parse_error(&self, node: Node) -> AstError {
@@ -173,10 +162,23 @@ impl<'a> AstGen<'a> {
         }
     }
 
+    pub(crate) fn errors(&self, node: Node) -> Vec<AstError> {
+        fn collect(generator: &AstGen<'_>, node: Node<'_>, errors: &mut Vec<AstError>) {
+            for child in node.children(&mut node.walk()) {
+                collect(generator, child, errors);
+            }
+            if node.is_error() || node.is_missing() {
+                errors.push(generator.parse_error(node));
+            }
+        }
+        let mut errors = Vec::new();
+        collect(self, node, &mut errors);
+        errors
+    }
+
     fn gen_stmt(&self, node: Node) -> Stmt {
         if node.kind() == "impl_definition" {
             let Some(receiver) = node.child_by_field_name("receiver") else {
-                assert!(self.recovering, "impl requires a receiver node");
                 return Spanned::new(
                     StmtKind::Expr {
                         term: self.hole(node),
@@ -236,7 +238,7 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
-        if self.recovering && node.kind() != "statement" {
+        if node.kind() != "statement" {
             return Spanned::new(
                 StmtKind::Expr {
                     term: self.hole(node),
@@ -244,7 +246,6 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
-        assert_eq!(node.kind(), "statement");
         if let Some(define) = node.child_by_field_name("define") {
             let mut stmt = self.gen_define(define, self.span(node));
             if let StmtKind::Define { init, .. } = &mut stmt.val {
@@ -285,20 +286,16 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "term" || node.is_missing() || node.is_error()) {
+        if node.kind() != "term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "term");
         self.gen_assignment_term(node.child(0).unwrap_or(node))
     }
 
     fn gen_assignment_term(&self, node: Node) -> Term {
-        if self.recovering
-            && (node.kind() != "assignment_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "assignment_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "assignment_term");
         if let Some(value) = node.child_by_field_name("value") {
             let place = self.gen_binary_term(node.child_by_field_name("place").unwrap_or(node));
             let value = self.gen_assignment_term(value);
@@ -314,11 +311,9 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_binary_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "binary_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "binary_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "binary_term");
         if let Some(op_node) = node.child_by_field_name("operator") {
             let op_text = self.text(op_node);
             let left = node
@@ -335,11 +330,9 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_unary_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "unary_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "unary_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "unary_term");
         if let Some(op_node) = node.child_by_field_name("operator") {
             let op_text = self.text(op_node);
             let operand = node
@@ -360,12 +353,9 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_postfix_term(&self, node: Node) -> Term {
-        if self.recovering
-            && (node.kind() != "postfix_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "postfix_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "postfix_term");
         let mut base = self.gen_primary_term(node.child_by_field_name("prefix").unwrap_or(node));
         let mut cursor = node.walk();
         for child in node.children_by_field_name("suffix", &mut cursor) {
@@ -395,13 +385,13 @@ impl<'a> AstGen<'a> {
                     );
                 }
                 "method_call" => {
-                    let name = self.ident(child.child_by_field_name("name").unwrap());
-                    let args = child.child_by_field_name("args").unwrap();
+                    let name = self.ident(child.child_by_field_name("name").unwrap_or(child));
+                    let args = child.child_by_field_name("args").unwrap_or(child);
                     let arg = match args.kind() {
                         "paren_term" => self.gen_paren_term(args),
                         "tuple_term" => self.gen_tuple_term(args),
                         "unit_term" => Spanned::new(TermKind::Unit, self.span(args)),
-                        _ => unreachable!("method arguments"),
+                        _ => self.hole(args),
                     };
                     let span = Span {
                         start: base.span.start,
@@ -418,7 +408,7 @@ impl<'a> AstGen<'a> {
                 }
                 "field_access" => {
                     let field = child.child_by_field_name("name");
-                    if self.recovering && field.is_none_or(|n| n.is_missing()) {
+                    if field.is_none_or(|n| n.is_missing()) {
                         let span = Span {
                             start: base.span.start,
                             end: child.end_byte().min(self.source_len),
@@ -473,17 +463,11 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_primary_term(&self, node: Node) -> Term {
-        if self.recovering
-            && (node.kind() != "primary_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "primary_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "primary_term");
         let child = node.child(0).unwrap_or(node);
-        if self.recovering
-            && child.has_error()
-            && matches!(child.kind(), "lid" | "number" | "string")
-        {
+        if child.has_error() && matches!(child.kind(), "lid" | "number" | "string") {
             return self.hole(node);
         }
         let span = self.span(node);
@@ -556,17 +540,14 @@ impl<'a> AstGen<'a> {
                 let ty = self.gen_unary_type(child);
                 Spanned::new(TermKind::Type { ty }, span)
             }
-            _ if self.recovering => self.hole(node),
-            _ => unreachable!("unexpected primary: {}", child.kind()),
+            _ => self.hole(node),
         }
     }
 
     fn gen_closed_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "closed_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "closed_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "closed_term");
         let child = node.child(0).unwrap_or(node);
         match child.kind() {
             "paren_term" => self.gen_paren_term(child),
@@ -574,14 +555,27 @@ impl<'a> AstGen<'a> {
             "array_term" => self.gen_array_term(child),
             "record_term" => self.gen_record_term(child),
             "chain_term" => self.gen_chain_term(child),
-            "unit_term" if self.recovering && child.has_error() => self.hole(child),
+            "unit_term" if child.has_error() => self.hole(child),
             "unit_term" => Spanned::new(TermKind::Unit, self.span(node)),
-            _ if self.recovering => self.hole(node),
-            _ => unreachable!("unexpected closed: {}", child.kind()),
+            _ => self.hole(node),
         }
     }
 
     fn gen_function(&self, node: Node) -> Stmt {
+        let mut next = node
+            .child_by_field_name("name")
+            .and_then(|name| name.next_sibling());
+        while next.is_some_and(|node| node.kind() == "comment") {
+            next = next.and_then(|node| node.next_sibling());
+        }
+        if !next.is_some_and(|node| node.kind() == "(" && !node.is_missing()) {
+            return Spanned::new(
+                StmtKind::Expr {
+                    term: self.hole(node),
+                },
+                self.span(node),
+            );
+        }
         let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
         let result = node
             .child_by_field_name("result")
@@ -596,7 +590,11 @@ impl<'a> AstGen<'a> {
         if let Some(header) = node.child_by_field_name("header") {
             return Spanned::new(
                 StmtKind::ForeignFunction {
-                    header: decode_string(self.text(header)).into(),
+                    header: if header.has_error() {
+                        "".into()
+                    } else {
+                        decode_string(self.text(header)).into()
+                    },
                     name,
                     params,
                     result,
@@ -650,20 +648,16 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_paren_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "paren_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "paren_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "paren_term");
         self.gen_term(node.child_by_field_name("inner").unwrap_or(node))
     }
 
     fn gen_tuple_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "tuple_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "tuple_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "tuple_term");
         let elems = self.field_children_terms(node, "elems");
         let span = self.span(node);
         let fields = elems
@@ -678,21 +672,17 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_array_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "array_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "array_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "array_term");
         let elems = self.field_children_terms(node, "elems");
         Spanned::new(TermKind::Array { elems }, self.span(node))
     }
 
     fn gen_record_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "record_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "record_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "record_term");
         let mut fields = Vec::new();
         let mut cursor = node.walk();
         for f in node.children_by_field_name("fields", &mut cursor) {
@@ -705,11 +695,9 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_chain_term(&self, node: Node) -> Term {
-        if self.recovering && (node.kind() != "chain_term" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "chain_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        assert_eq!(node.kind(), "chain_term");
         self.gen_block(node, "prefix")
     }
 
@@ -743,19 +731,16 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_type(&self, node: Node) -> Type {
-        if self.recovering && (node.kind() != "type" || node.is_missing() || node.is_error()) {
+        if node.kind() != "type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
-        assert_eq!(node.kind(), "type");
         self.gen_infix_type(node.child(0).unwrap_or(node))
     }
 
     fn gen_infix_type(&self, node: Node) -> Type {
-        if self.recovering && (node.kind() != "infix_type" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "infix_type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
-        assert_eq!(node.kind(), "infix_type");
         if let Some(ret) = node.child_by_field_name("ret_ty") {
             let from = self.gen_closed_type(node.child_by_field_name("param_ty").unwrap_or(node));
             let to = self.gen_infix_type(ret);
@@ -786,11 +771,9 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_unary_type(&self, node: Node) -> Type {
-        if self.recovering && (node.kind() != "unary_type" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "unary_type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
-        assert_eq!(node.kind(), "unary_type");
         if let Some(value) = node.child_by_field_name("value") {
             return Spanned::new(
                 TypeKind::Result {
@@ -817,14 +800,11 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_primary_type(&self, node: Node) -> Type {
-        if self.recovering
-            && (node.kind() != "primary_type" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "primary_type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
-        assert_eq!(node.kind(), "primary_type");
         let child = node.child(0).unwrap_or(node);
-        if self.recovering && child.has_error() {
+        if child.has_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
         match child.kind() {
@@ -842,17 +822,14 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             ),
             "closed_type" => self.gen_closed_type(child),
-            _ if self.recovering => Spanned::new(TypeKind::Hole, self.span(node)),
-            _ => unreachable!("unexpected primary_type: {}", child.kind()),
+            _ => Spanned::new(TypeKind::Hole, self.span(node)),
         }
     }
 
     fn gen_closed_type(&self, node: Node) -> Type {
-        if self.recovering && (node.kind() != "closed_type" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "closed_type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
-        assert_eq!(node.kind(), "closed_type");
         let child = node.child(0).unwrap_or(node);
         match child.kind() {
             "paren_type" => self.gen_type(child.child_by_field_name("inner").unwrap_or(node)),
@@ -872,17 +849,14 @@ impl<'a> AstGen<'a> {
                 Spanned::new(TypeKind::Record { fields }, self.span(child))
             }
             "record_type" => self.gen_record_type(child),
-            _ if self.recovering => Spanned::new(TypeKind::Hole, self.span(node)),
-            _ => unreachable!("unexpected closed_type: {}", child.kind()),
+            _ => Spanned::new(TypeKind::Hole, self.span(node)),
         }
     }
 
     fn gen_record_type(&self, node: Node) -> Type {
-        if self.recovering && (node.kind() != "record_type" || node.is_missing() || node.is_error())
-        {
+        if node.kind() != "record_type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
-        assert_eq!(node.kind(), "record_type");
         let mut fields = Vec::new();
         let mut cursor = node.walk();
         for f in node.children_by_field_name("field", &mut cursor) {
@@ -919,12 +893,11 @@ impl<'a> AstGen<'a> {
     }
 
     fn ident(&self, node: Node) -> Ident {
-        let text = if self.recovering
-            && (node.is_missing()
-                || !matches!(
-                    node.kind(),
-                    "lid" | "uid" | "builtin_type" | "Ptr" | "Span" | "Arc" | "Weak"
-                )) {
+        let text = if node.is_missing()
+            || !matches!(
+                node.kind(),
+                "lid" | "uid" | "builtin_type" | "Ptr" | "Span" | "Arc" | "Weak"
+            ) {
             ""
         } else {
             self.text(node)
@@ -963,20 +936,6 @@ fn decode_string(text: &str) -> String {
         });
     }
     result
-}
-
-fn first_error_node(node: Node) -> Option<Node> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if let Some(error) = first_error_node(child) {
-            return Some(error);
-        }
-    }
-    if node.is_error() || node.is_missing() {
-        Some(node)
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]

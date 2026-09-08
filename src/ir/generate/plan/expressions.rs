@@ -8,22 +8,73 @@ use crate::{
 use std::rc::Rc;
 
 impl Planner<'_> {
-    pub fn term(&mut self, term: &ast::Term, expected: Option<Type>) -> Result<Term> {
+    pub fn term(&mut self, term: &ast::Term, expected: Option<Type>) -> Term {
+        let out = self.solver.fresh();
+        let previous = std::mem::replace(&mut self.output, out.clone());
+        let scopes = self.scopes.clone();
+        let planned = self.term_inner(term, expected, out.clone());
+        self.output = previous.clone();
+        if previous != Type::Invalid {
+            self.constrain((term.span, Constraint::Depends(out.clone())));
+        }
+        let planned = match planned {
+            Ok(planned) => planned,
+            Err(error) => {
+                self.scopes = scopes;
+                self.errors.push(error.clone());
+                self.solver.invalidate(&out);
+                Term {
+                    span: term.span,
+                    ty: out.clone(),
+                    form: Form::Other,
+                    emit: Rc::new(move |_, _| Err(error.clone())),
+                }
+            }
+        };
+        self.expressions.push((term.span, out.clone()));
+        self.scopes.record_inferred(term.span, out);
+        planned
+    }
+
+    fn term_inner(&mut self, term: &ast::Term, expected: Option<Type>, out: Type) -> Result<Term> {
         let propagate = matches!(
             term.val,
             TermKind::If { .. } | TermKind::Match { .. } | TermKind::Block { .. }
         ) || matches!(&term.val, TermKind::Call { func, .. } if matches!(&func.val, TermKind::Var { name } if matches!(name.val.as_ref(), "ok" | "err" | "absurd")));
         let contextual = propagate && expected.is_some();
-        let out = if propagate {
-            expected.clone().unwrap_or_else(|| self.solver.fresh())
-        } else {
-            self.solver.fresh()
-        };
+        if propagate && let Some(expected) = &expected {
+            self.constrain((term.span, Constraint::Equal(expected.clone(), out.clone())));
+        }
         let span = term.span;
         let mut equate = None;
         let mut form = Form::Other;
         let emit: Emit = match &term.val {
-            TermKind::Hole { .. } | TermKind::FieldHole { .. } => {
+            TermKind::Hole { children } => {
+                for child in children {
+                    self.term(child, None);
+                }
+                return Err(GenerateError {
+                    span,
+                    kind: GenerateErrorKind::IncompleteSyntax,
+                });
+            }
+            TermKind::FieldHole { base } => {
+                let base = self.term(base, None);
+                let (ty, associated) = match &base.form {
+                    Form::Type { ty } => (ty.clone(), true),
+                    Form::Var { name } if self.scopes.is_shader(&name.val) => {
+                        (Ty::shader_properties().into(), false)
+                    }
+                    _ => (base.ty.clone(), false),
+                };
+                self.scopes.record_members(
+                    ast::Span {
+                        start: span.end,
+                        end: span.end,
+                    },
+                    ty,
+                    associated,
+                );
                 return Err(GenerateError {
                     span,
                     kind: GenerateErrorKind::IncompleteSyntax,
@@ -45,9 +96,8 @@ impl Planner<'_> {
                 })
             }
             TermKind::Unwrap { value } => {
-                let input = self.term(value, None)?;
-                self.constraints
-                    .push((span, Constraint::ExcludeNone(input.ty.clone(), out.clone())));
+                let input = self.term(value, None);
+                self.constrain((span, Constraint::ExcludeNone(input.ty.clone(), out.clone())));
                 Rc::new(move |g, expected| {
                     g.gen_term(&input, None)?;
                     g.emit(Instr::ExcludeNone);
@@ -85,7 +135,8 @@ impl Planner<'_> {
                 Rc::new(move |g, _| g.gen_var(&name))
             }
             TermKind::Type { ty } => {
-                let ann = self.ann(ty, true)?;
+                let ann = self.ann(ty, true);
+                form = Form::Type { ty: ann.ty.clone() };
                 equate = Some(Ty::Type.into());
                 Rc::new(move |g, _| {
                     let ty = ann.resolve(g)?;
@@ -96,81 +147,80 @@ impl Planner<'_> {
                 })
             }
             TermKind::Try { value } => {
-                let input = self.term(value, None)?;
+                let input = self.term(value, None);
                 let (value, errors) = self.result_parts(&input.ty, span)?;
                 let result = self.result.clone();
                 let (_, target_errors) = self.result_parts(&result, span)?;
-                self.constraints
-                    .push((span, Constraint::Errors(errors, target_errors)));
+                self.constrain((span, Constraint::Errors(errors, target_errors)));
                 equate = Some(value);
                 Rc::new(move |g, _| g.gen_try(span, &input))
             }
             TermKind::Match { value, arms } => {
-                let input = self.term(value, None)?;
+                let input = self.term(value, None);
                 let mut planned = vec![];
                 for arm in arms {
-                    self.push();
+                    self.scopes.push_at(arm.body.span);
                     let payload = self.solver.fresh();
                     let (variant, pattern) = match &arm.variant {
                         ast::MatchVariant::Ok => (None, Pattern::Ok),
                         ast::MatchVariant::Err => (None, Pattern::Err),
                         ast::MatchVariant::Type(ty) => {
-                            let ann = self.ann(ty, false)?;
+                            let ann = self.ann(ty, false);
                             let ty = ann.ty.clone();
                             (Some(ann), Pattern::Type(ty))
                         }
                     };
-                    self.constraints.push((
+                    self.constrain((
                         arm.body.span,
                         Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
                     ));
-                    if let Some(name) = &arm.name {
-                        self.bind(name, payload)?;
+                    if let Some(name) = &arm.name
+                        && let Err(error) = self.bind(name, payload)
+                    {
+                        self.errors.push(error);
                     }
-                    let body = self.term(&arm.body, Some(out.clone()))?;
+                    let body = self.term(&arm.body, Some(out.clone()));
                     planned.push(MatchArm {
                         variant,
                         failure: matches!(arm.variant, ast::MatchVariant::Err),
                         name: arm.name.clone(),
                         body,
                     });
-                    self.pop();
+                    self.scopes.pop();
                 }
                 Rc::new(move |g, expected| g.gen_match(span, &input, &planned, expected))
             }
             TermKind::If { cond, then, els } => {
-                let cond = self.term(cond, None)?;
-                self.constraints
-                    .push((cond.span, Constraint::Boolean(cond.ty.clone())));
-                let then = self.term(then, Some(out.clone()))?;
-                let els = self.term(els, Some(out.clone()))?;
+                let cond = self.term(cond, None);
+                self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));
+                let then = self.term(then, Some(out.clone()));
+                let els = self.term(els, Some(out.clone()));
                 Rc::new(move |g, expected| g.gen_if(&cond, &then, &els, expected))
             }
             TermKind::While { cond, body } => {
-                let cond = self.term(cond, None)?;
-                self.constraints
-                    .push((cond.span, Constraint::Boolean(cond.ty.clone())));
-                let body = self.term(body, None)?;
+                let cond = self.term(cond, None);
+                self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));
+                let body = self.term(body, None);
                 equate = Some(Ty::Unit.into());
                 Rc::new(move |g, _| g.gen_while(&cond, &body))
             }
             TermKind::Block { stmts, tail } => {
-                self.push();
+                self.scopes.push_at(term.span);
                 let stmts = stmts
                     .iter()
                     .map(|stmt| self.statement(stmt))
-                    .collect::<Result<Vec<_>>>()?;
-                let tail = self.term(tail, Some(out.clone()))?;
-                self.pop();
+                    .collect::<Vec<_>>();
+                let tail = self.term(tail, Some(out.clone()));
+                self.scopes.pop();
                 Rc::new(move |g, expected| g.gen_block(&stmts, &tail, expected))
             }
             TermKind::Record { fields } => {
                 form = Form::Record;
                 let fields = fields
                     .iter()
-                    .map(|(name, term)| Ok((name.clone(), self.term(term, None)?)))
-                    .collect::<Result<Vec<_>>>()?;
-                self.constraints.push((
+                    .map(|(name, term)| (name.clone(), self.term(term, None)))
+                    .collect::<Vec<_>>();
+                self.constrain((
                     span,
                     Constraint::Record(
                         fields
@@ -187,7 +237,7 @@ impl Planner<'_> {
                 let elems = elems
                     .iter()
                     .map(|elem| self.term(elem, Some(element.clone())))
-                    .collect::<Result<Vec<_>>>()?;
+                    .collect::<Vec<_>>();
                 equate = Some(Type::Node(Head::Array(elems.len()), vec![element]));
                 Rc::new(move |g, expected| g.gen_array(&elems, expected))
             }
@@ -195,8 +245,8 @@ impl Planner<'_> {
                 let args = args
                     .iter()
                     .map(|arg| self.term(arg, None))
-                    .collect::<Result<Vec<_>>>()?;
-                self.constraints.push((
+                    .collect::<Vec<_>>();
+                self.constrain((
                     span,
                     Constraint::Builtin(
                         name.clone(),
@@ -214,16 +264,18 @@ impl Planner<'_> {
             } => {
                 let (receiver, annotation, receiver_type, associated) =
                     if let TermKind::Type { ty } = &receiver.val {
-                        let annotation = self.ann(ty, false)?;
+                        let annotation = self.ann(ty, false);
                         let ty = annotation.ty.clone();
                         (None, Some(annotation), ty, true)
                     } else {
-                        let receiver = self.term(receiver, None)?;
+                        let receiver = self.term(receiver, None);
                         let ty = receiver.ty.clone();
                         (Some(receiver), None, ty, false)
                     };
-                let arg = self.term(arg, None)?;
-                self.constraints.push((
+                self.scopes
+                    .record_members(name.span, receiver_type.clone(), associated);
+                let arg = self.term(arg, None);
+                self.constrain((
                     span,
                     Constraint::Method(
                         receiver_type.clone(),
@@ -247,7 +299,7 @@ impl Planner<'_> {
                 if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
-                    let arg = self.term(arg, Some(Ty::union([]).into()))?;
+                    let arg = self.term(arg, Some(Ty::union([]).into()));
                     Rc::new(move |g, expected| {
                         g.gen_term(&arg, Some(&Ty::union([])))?;
                         g.emit(Instr::Eliminate {
@@ -260,17 +312,15 @@ impl Planner<'_> {
                 {
                     // Plan the operand for typing only. Never execute its effects or read its locals.
                     let ann = if let TermKind::Type { ty } = &arg.val {
-                        self.ann(ty, false)?
+                        self.ann(ty, false)
                     } else {
-                        let term = self.term(arg, None)?;
+                        let term = self.term(arg, None);
                         Annotation {
                             ty: term.ty,
                             span: term.span,
-                            references: vec![],
                         }
                     };
-                    self.constraints
-                        .push((span, Constraint::Layout(ann.ty.clone())));
+                    self.constrain((span, Constraint::Layout(ann.ty.clone())));
                     equate = Some(Ty::UInt64.into());
                     let size = name.val.as_ref() == "size_of";
                     Rc::new(move |g, _| {
@@ -289,14 +339,13 @@ impl Planner<'_> {
                 {
                     let (value, errors) = self.result_parts(&out, span)?;
                     let failure = name.val.as_ref() == "err";
-                    let arg = self.term(arg, if failure { None } else { Some(value) })?;
+                    let arg = self.term(arg, if failure { None } else { Some(value) });
                     if failure {
-                        self.constraints
-                            .push((span, Constraint::Errors(arg.ty.clone(), errors)));
+                        self.constrain((span, Constraint::Errors(arg.ty.clone(), errors)));
                     }
                     Rc::new(move |g, expected| g.gen_result(span, failure, &arg, expected))
                 } else if let TermKind::Type { ty } = &func.val {
-                    let ann = self.ann(ty, true)?;
+                    let ann = self.ann(ty, true);
                     let arg = if let Type::Node(Head::Arc, parts) = &ann.ty {
                         let context = if matches!(arg.val, TermKind::Record { .. } | TermKind::Unit)
                         {
@@ -315,12 +364,12 @@ impl Planner<'_> {
                         } else {
                             parts[0].clone()
                         };
-                        self.term(arg, Some(context))?
+                        self.term(arg, Some(context))
                     } else {
                         let literal = matches!(arg.val, TermKind::Num { .. })
                             || matches!(&arg.val, TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [ast::Term { val: TermKind::Num { .. }, .. }]));
-                        let arg = self.term(arg, None)?;
-                        self.constraints.push((
+                        let arg = self.term(arg, None);
+                        self.constrain((
                             span,
                             Constraint::Ascribe(arg.ty.clone(), ann.ty.clone(), literal),
                         ));
@@ -334,8 +383,8 @@ impl Planner<'_> {
                 } else if let TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "print" | "fmt")
                 {
-                    let arg = self.term(arg, None)?;
-                    self.constraints.push((
+                    let arg = self.term(arg, None);
+                    self.constrain((
                         span,
                         Constraint::Builtin(name.val.clone(), vec![arg.ty.clone()], out.clone()),
                     ));
@@ -344,9 +393,9 @@ impl Planner<'_> {
                         g.gen_builtin(span, &name, std::slice::from_ref(&arg), expected)
                     })
                 } else {
-                    let func = self.term(func, None)?;
-                    let arg = self.term(arg, None)?;
-                    self.constraints.push((
+                    let func = self.term(func, None);
+                    let arg = self.term(arg, None);
+                    self.constrain((
                         span,
                         Constraint::Call(func.ty.clone(), arg.ty.clone(), out.clone()),
                     ));
@@ -354,20 +403,19 @@ impl Planner<'_> {
                 }
             }
             TermKind::Assign { place, value } => {
-                let place = self.term(place, None)?;
-                let value = self.term(value, Some(place.ty.clone()))?;
+                let place = self.term(place, None);
+                let value = self.term(value, Some(place.ty.clone()));
                 equate = Some(place.ty.clone());
                 Rc::new(move |g, _| g.gen_assign(&place, &value))
             }
             TermKind::Address { place } => {
-                let place = self.term(place, None)?;
+                let place = self.term(place, None);
                 equate = Some(Type::pointer(place.ty.clone()));
                 Rc::new(move |g, _| g.gen_place(&place))
             }
             TermKind::Deref { pointer } => {
-                let pointer = self.term(pointer, None)?;
-                self.constraints
-                    .push((span, Constraint::Deref(pointer.ty.clone(), out.clone())));
+                let pointer = self.term(pointer, None);
+                self.constrain((span, Constraint::Deref(pointer.ty.clone(), out.clone())));
                 form = Form::Deref {
                     pointer: Rc::new(pointer.clone()),
                 };
@@ -382,8 +430,16 @@ impl Planner<'_> {
                 })
             }
             TermKind::Field { base, name } => {
-                let base = self.term(base, None)?;
-                self.constraints.push((
+                let base = self.term(base, None);
+                let (receiver, associated) = match &base.form {
+                    Form::Type { ty } => (ty.clone(), true),
+                    Form::Var { name } if self.scopes.is_shader(&name.val) => {
+                        (Ty::shader_properties().into(), false)
+                    }
+                    _ => (base.ty.clone(), false),
+                };
+                self.scopes.record_members(name.span, receiver, associated);
+                self.constrain((
                     span,
                     Constraint::Field(base.ty.clone(), name.val.clone(), out.clone()),
                 ));
@@ -397,17 +453,14 @@ impl Planner<'_> {
         };
         if let Some(ty) = equate {
             if contextual {
-                self.constraints
-                    .push((span, Constraint::Coerce(ty, out.clone())));
+                self.constrain((span, Constraint::Coerce(ty, out.clone())));
             } else {
-                self.solver.unify(&ty, &out, span)?;
+                self.constrain((span, Constraint::Equal(ty, out.clone())));
             }
         }
         if !propagate && let Some(expected) = expected {
-            self.constraints
-                .push((span, Constraint::Coerce(out.clone(), expected)));
+            self.constrain((span, Constraint::Coerce(out.clone(), expected)));
         }
-        self.expressions.push((span, out.clone()));
         Ok(Term {
             span,
             ty: out,
@@ -416,18 +469,41 @@ impl Planner<'_> {
         })
     }
 
-    fn statement(&mut self, stmt: &ast::Stmt) -> Result<Statement> {
+    fn statement(&mut self, stmt: &ast::Stmt) -> Statement {
+        let result = self.statement_inner(stmt);
+        match result {
+            Ok(statement) => statement,
+            Err(error) => {
+                match &stmt.val {
+                    StmtKind::Declare { name, .. } => {
+                        let _ = self.bind(name, Type::Invalid);
+                    }
+                    StmtKind::DefineType { name, .. } => {
+                        self.scopes.define_invalid_type(name);
+                    }
+                    _ => {}
+                }
+                self.errors.push(error.clone());
+                Rc::new(move |_| Err(error.clone()))
+            }
+        }
+    }
+
+    fn statement_inner(&mut self, stmt: &ast::Stmt) -> Result<Statement> {
         let span = stmt.span;
         Ok(match &stmt.val {
             StmtKind::Define { name, init } => {
                 let ty = self.solver.fresh();
-                self.bind(name, ty.clone())?;
-                let init = self.term(init, Some(ty))?;
+                if let Err(error) = self.bind(name, ty.clone()) {
+                    self.errors.push(error);
+                }
+                let init = self.term(init, Some(ty.clone()));
+                self.scopes.set_inferred(name, init.ty.clone());
                 let name = name.clone();
                 Rc::new(move |g| g.gen_define(&name, &init))
             }
             StmtKind::Declare { name, ann } => {
-                let ann = self.ann(ann, true)?;
+                let ann = self.ann(ann, true);
                 self.bind(name, ann.ty.clone())?;
                 let name = name.clone();
                 Rc::new(move |g| {
@@ -449,11 +525,19 @@ impl Planner<'_> {
                         span,
                         kind: GenerateErrorKind::DuplicateType { name },
                     })?;
-                let ann = self.ann(body, false)?;
+                self.scopes
+                    .record_definition(name, true, None, self.typing.typer);
+                let ann = self.ann(body, false);
                 let ty = self.solver.require(&ann.ty, ann.span)?;
                 self.typer
                     .define_type(definition, ty)
                     .map_err(|e| GenerateError::typing(ann.span, e))?;
+                self.scopes.record_definition(
+                    name,
+                    true,
+                    Some(&Ty::Defined { definition }),
+                    self.typing.typer,
+                );
                 let name = name.clone();
                 Rc::new(move |g| {
                     g.bind_type(&name, definition)?;
@@ -462,14 +546,16 @@ impl Planner<'_> {
                 })
             }
             StmtKind::DefineType { name, init } => {
-                let ann = self.ann(init, false)?;
+                let ann = self.ann(init, false);
                 let ty = self.solver.require(&ann.ty, ann.span)?;
                 self.scopes
-                    .define_alias(name.val.clone(), ty)
+                    .define_alias(name.val.clone(), ty.clone())
                     .map_err(|name| GenerateError {
                         span,
                         kind: GenerateErrorKind::DuplicateType { name },
                     })?;
+                self.scopes
+                    .record_definition(name, true, Some(&ty), self.typing.typer);
                 let name = name.clone();
                 Rc::new(move |g| {
                     let ty = ann.resolve(g)?;
@@ -477,7 +563,7 @@ impl Planner<'_> {
                 })
             }
             StmtKind::Expr { term } => {
-                let term = self.term(term, None)?;
+                let term = self.term(term, None);
                 Rc::new(move |g| {
                     g.gen_term(&term, None)?;
                     g.emit(Instr::Discard);

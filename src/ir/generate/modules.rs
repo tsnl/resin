@@ -1,6 +1,6 @@
 use crate::{
-    analysis::semantic::{SemanticData, Trace},
     ast::{SourceLocation, SourceNote},
+    ir::generate::semantic::SemanticData,
 };
 use std::{cell::RefCell, rc::Rc};
 use std::{collections::BTreeMap, sync::Arc};
@@ -23,21 +23,25 @@ struct Export {
 
 type Exports = BTreeMap<Arc<str>, Export>;
 
+pub(crate) struct Compilation {
+    pub module: Option<Module>,
+    pub verification: crate::ir::verify::ModuleTypes,
+    pub diagnostics: Vec<SourceError>,
+    pub semantics: SemanticData,
+}
+
 pub fn generate_program(program: &Program) -> Result<Module, SourceError> {
-    generate_program_with(program, None)
+    let mut compilation = analyze_program(program);
+    if !compilation.diagnostics.is_empty() {
+        Err(compilation.diagnostics.remove(0))
+    } else {
+        Ok(compilation.module.expect("successful compilation"))
+    }
 }
 
-pub(crate) fn analyze_program(program: &Program) -> (SemanticData, Result<Module, SourceError>) {
+pub(crate) fn analyze_program(program: &Program) -> Compilation {
     let data = Rc::new(RefCell::new(SemanticData::default()));
-    let result = generate_program_with(program, Some(data.clone()));
-    let snapshot = data.borrow().clone();
-    (snapshot, result)
-}
-
-fn generate_program_with(
-    program: &Program,
-    trace: Option<Rc<RefCell<SemanticData>>>,
-) -> Result<Module, SourceError> {
+    let mut diagnostics = Vec::new();
     let mut generator = Generator::new();
     let mut exports = Vec::<Exports>::new();
     for (index, source) in program.modules.iter().enumerate() {
@@ -48,26 +52,23 @@ fn generate_program_with(
             .origins
             .sources
             .insert(source.path.clone(), source.source.as_str().into());
-        generator.scopes = trace.as_ref().map_or_else(Scopes::new, |data| {
-            Scopes::traced(Trace {
-                path: source.path.clone(),
-                data: data.clone(),
-            })
-        });
+        generator.scopes = Scopes::for_source(source.path.clone(), data.clone());
         let mut names = BTreeMap::new();
-        for (import, &dependency) in source.file.imports.iter().zip(&source.imports) {
+        for &(span, dependency) in &source.imports {
+            data.borrow_mut().imports.insert(
+                SourceLocation {
+                    path: source.path.clone(),
+                    span,
+                },
+                program.modules[dependency].path.clone(),
+            );
             for (name, export) in &exports[dependency] {
-                if bind(program, index, &mut names, name, export.origin, import.span)? {
-                    generator.scopes.import(name.clone(), export.symbol.clone());
-                    generator.scopes.record_import(
-                        name.clone(),
-                        matches!(export.symbol, Symbol::Type(_)),
-                        SourceLocation {
-                            path: program.modules[export.origin.module.index()].path.clone(),
-                            span: export.origin.span,
-                        },
-                    );
+                match bind(program, index, &mut names, name, export.origin, span) {
+                    Ok(false) => continue,
+                    Err(error) => diagnostics.push(error),
+                    Ok(true) => {}
                 }
+                generator.scopes.import(name.clone(), export.symbol.clone());
             }
         }
         for stmt in source.file.declarations() {
@@ -79,42 +80,69 @@ fn generate_program_with(
                 | StmtKind::DefineType { name, .. }
                 | StmtKind::Struct { name, .. }
                 | StmtKind::Declare { name, .. } => name,
-                StmtKind::Impl { .. } | StmtKind::Expr { .. } => continue,
+                _ => continue,
             };
-            let origin = SourceOrigin {
-                module: generator.source_module,
-                span: name.span,
-            };
-            bind(program, index, &mut names, &name.val, origin, name.span)?;
+            if let Err(error) = bind(
+                program,
+                index,
+                &mut names,
+                &name.val,
+                SourceOrigin {
+                    module: generator.source_module,
+                    span: name.span,
+                },
+                name.span,
+            ) {
+                diagnostics.push(error);
+            }
         }
-        generator
-            .generate_file(&source.file)
-            .map_err(|e| source.error(e.span, e))?;
-        let symbols = generator
-            .exports(&source.file)
-            .map_err(|e| source.error(e.span, e))?;
+        generator.generate_file(&source.file);
+        diagnostics.extend(
+            std::mem::take(&mut generator.errors)
+                .into_iter()
+                .map(|e| source.error(e.span, e)),
+        );
+        let (symbols, errors) = generator.exports(&source.file);
+        diagnostics.extend(errors.into_iter().map(|e| source.error(e.span, e)));
         exports.push(
             symbols
                 .into_iter()
-                .map(|(name, symbol)| {
-                    let origin = names[&name];
-                    (name, Export { origin, symbol })
+                .filter_map(|(name, symbol)| {
+                    names
+                        .get(&name)
+                        .copied()
+                        .map(|origin| (name, Export { origin, symbol }))
                 })
                 .collect(),
         );
     }
     if let Some(source) = program.modules.last() {
-        generator.module.entries = generator
-            .exported_functions(&source.file)
-            .map_err(|e| source.error(e.span, e))?;
-    }
-    generator.finish().map_err(|e| {
-        if let Some(source) = program.modules.last() {
-            source.error(e.span, e)
-        } else {
-            SourceError::new(Default::default(), Some(e.span), e.to_string())
+        match generator.exported_functions(&source.file) {
+            Ok(entries) => generator.module.entries = entries,
+            Err(e) => diagnostics.push(source.error(e.span, e)),
         }
-    })
+    }
+    let mut module = None;
+    let mut verification = crate::ir::verify::ModuleTypes::default();
+    if diagnostics.is_empty() {
+        match generator.finish() {
+            Ok((ir, checked)) => {
+                module = Some(ir);
+                verification = checked;
+            }
+            Err(e) => diagnostics.push(if let Some(source) = program.modules.last() {
+                source.error(e.span, e)
+            } else {
+                SourceError::new(Default::default(), Some(e.span), e.to_string())
+            }),
+        }
+    }
+    Compilation {
+        module,
+        verification,
+        diagnostics,
+        semantics: data.borrow().clone(),
+    }
 }
 
 fn bind(
@@ -159,43 +187,43 @@ impl Generator {
         &self,
         file: &SourceFile,
     ) -> Result<BTreeMap<Arc<str>, FunctionId>, GenerateError> {
-        Ok(self
-            .exports(file)?
+        let (symbols, errors) = self.exports(file);
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error);
+        }
+        Ok(symbols
             .into_iter()
-            .filter_map(|(name, symbol)| match symbol {
-                Symbol::Value(binding) => match binding.kind {
-                    ValueBindingKind::Function(id) => Some((name, id)),
-                    ValueBindingKind::Local(_) => unreachable!("module export"),
-                },
-                Symbol::Type(_) => None,
+            .filter_map(|(name, symbol)| match symbol.binding?.kind {
+                ValueBindingKind::Function(id) => Some((name, id)),
+                ValueBindingKind::Local(_) => None,
             })
             .collect())
     }
-
     pub(super) fn exports(
         &self,
         file: &SourceFile,
-    ) -> Result<BTreeMap<Arc<str>, Symbol>, GenerateError> {
+    ) -> (BTreeMap<Arc<str>, Symbol>, Vec<GenerateError>) {
         let mut exports = BTreeMap::new();
+        let mut errors = Vec::new();
         for name in &file.exports {
             if exports.contains_key(&name.val) {
-                return Err(GenerateError {
+                errors.push(GenerateError {
                     span: name.span,
                     kind: GenerateErrorKind::DuplicateExport {
                         name: name.val.clone(),
                     },
                 });
+            } else if let Some(symbol) = self.scopes.symbol(&name.val) {
+                exports.insert(name.val.clone(), symbol);
+            } else {
+                errors.push(GenerateError {
+                    span: name.span,
+                    kind: GenerateErrorKind::UnknownExport {
+                        name: name.val.clone(),
+                    },
+                });
             }
-            let symbol = self.scopes.symbol(&name.val).ok_or_else(|| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::UnknownExport {
-                    name: name.val.clone(),
-                },
-            })?;
-            self.scopes
-                .record_reference(name, matches!(symbol, Symbol::Type(_)));
-            exports.insert(name.val.clone(), symbol);
         }
-        Ok(exports)
+        (exports, errors)
     }
 }
