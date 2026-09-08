@@ -35,6 +35,52 @@ fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
 }
 
 #[test]
+fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
+    for tail in ["ok(()) };", "buffer."] {
+        let source = format!(
+            r#"import {{ "std/gpu.resin" }};
+            def f() -> Result<(), _> = {{
+                var gpu = Gpu.new()?;
+                var buffer = gpu.malloc(4L, 4L, Memory.default())?;
+                buffer.host_pointer();
+                {tail}"#
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = Analysis::new(
+            &project.path("main.resin"),
+            &project.sources,
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib"),
+        );
+        let path = project.path("main.resin");
+        let call = source.find("host_pointer").unwrap();
+        let definition = analysis
+            .definition(&path, call)
+            .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics));
+        assert!(definition.path.ends_with("stdlib/gpu.resin"));
+        assert!(
+            analysis
+                .hover(&path, call)
+                .unwrap()
+                .text
+                .starts_with("def host_pointer(")
+        );
+        let offset = if tail == "buffer." {
+            source.len()
+        } else {
+            call
+        };
+        let items = analysis.completions(&path, offset);
+        for name in ["host_pointer", "device_pointer", "size"] {
+            assert!(
+                items.iter().any(|item| item.name == name),
+                "missing {name}: {items:?}"
+            );
+        }
+        assert!(items.iter().any(|item| item.name == "drop"));
+    }
+}
+
+#[test]
 fn pointer_hover_and_completion_use_angle_bracket_types() {
     let source = "def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
     let project = Project::new(&[("main.resin", source)]);

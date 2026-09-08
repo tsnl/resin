@@ -457,7 +457,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
 fn standard_library_imports_work_outside_the_repository() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\", \"std/graphics.resin\", \"std/image.resin\" }; def main() -> Result<int, _> = { status(0)?; ok(runtime_error_code(Incomplete {}) + 35) };",
+        "export { main }; import { \"std/status.resin\", \"std/graphics.resin\", \"std/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
     Project::new(&[(
@@ -467,9 +467,9 @@ fn standard_library_imports_work_outside_the_repository() {
     .error("UnboundValue");
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/window.resin\" }; def main() = { gpu_create(); };",
+        "export { main }; import { \"std/window.resin\" }; def main() = { Gpu.new(); };",
     )])
-    .error("UnboundValue");
+    .error("UnboundType");
 }
 
 #[test]

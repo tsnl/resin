@@ -1,8 +1,4 @@
-export {
-	ImageData,
-	image_write_png,
-	image_read_png,
-};
+export { ImageData };
 
 import { "status.resin" };
 
@@ -13,20 +9,23 @@ impl ImageDataOwner {
 	def drop(self: Ptr<ImageDataOwner>) = {
 		resin_image_free(self.pixels);
 	};
+
+	def read_png(path: Ptr<ubyte>, channels: uint) -> Result<ImageData, RuntimeError> = {
+		var width = uint(0);
+		var height = uint(0);
+		var actual_channels = uint(0);
+		var pixels = Ptr<ubyte>(ulong(0));
+		RuntimeStatus.from_code(resin_image_read_png(path, channels, &width, &height, &actual_channels, &pixels))?;
+		ok(ImageData { width = width, height = height, channels = actual_channels, pixels = pixels })
+	};
+	def write_pixels(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(resin_image_write_png(path, width, height, channels, pixels, stride))
+	};
+
+	def write_png(self: Ptr<ImageDataOwner>, path: Ptr<ubyte>) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(resin_image_write_png(path, self.width, self.height, self.channels, self.pixels, 0L))
+	};
 }
-
-def image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> Result<(), RuntimeError> = {
-	status(resin_image_write_png(path, width, height, channels, pixels, stride))
-};
-
-def image_read_png(path: Ptr<ubyte>, channels: uint) -> Result<ImageData, RuntimeError> = {
-	var width = uint(0);
-	var height = uint(0);
-	var actual_channels = uint(0);
-	var pixels = Ptr<ubyte>(ulong(0));
-	status(resin_image_read_png(path, channels, &width, &height, &actual_channels, &pixels))?;
-	ok(ImageData { width = width, height = height, channels = actual_channels, pixels = pixels })
-};
 
 extern "resin_runtime.h" def resin_image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> int;
 extern "resin_runtime.h" def resin_image_read_png(path: Ptr<ubyte>, channels: uint, width: Ptr<uint>, height: Ptr<uint>, actual_channels: Ptr<uint>, pixels: Ptr<Ptr<ubyte>>) -> int;

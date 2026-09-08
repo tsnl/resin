@@ -65,29 +65,25 @@ def fragment(color: Color) -> Color = {
 
 def main() -> Result<(), _> = {
 	var title = "Resin triangle";
-	var window = window_create(640, 480, Ptr<ubyte>(&title))?;
+	var window = Window.new(640, 480, Ptr<ubyte>(&title))?;
 
-	var gpu = gpu_create_for_window(window)?;
+	var gpu = Gpu.new_for_window(window)?;
 
-	var pipeline = gpu_create_graphics_pipeline(
-		gpu,
-		vertex.spirv,
-		fragment.spirv,
-	)?;
+	var pipeline = gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)?;
 
-	var image = gpu_create_image(gpu, 640, 480)?;
+	var image = gpu.create_image(640, 480)?;
 
-	window_poll_events(window)?;
-	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
-		var commands = gpu_start_command_recording(gpu)?;
+	window.poll_events()?;
+	while (!window.should_close() && !window.key_pressed(Window.key_escape())) {
+		var commands = gpu.start_command_recording()?;
 
-		gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
-		gpu_set_pipeline(commands, pipeline)?;
-		gpu_draw(commands, 0, 3)?;
-		gpu_end_rendering(commands)?;
-		gpu_submit(gpu, &commands)?;
-		gpu_present(gpu, image)?;
-		window_poll_events(window)?;
+		commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
+		commands.set_pipeline(pipeline)?;
+		commands.draw(0, 3)?;
+		commands.end_rendering()?;
+		commands.submit()?;
+		gpu.present(image)?;
+		window.poll_events()?;
 	};
 	print("window demo complete\n", ());
 	ok(())

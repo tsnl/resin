@@ -90,10 +90,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Initialized owners are destroyed in reverse scope order on normal exit and `?`;
   preserve returned values before cleanup. Chain expressions with no tail yield unit.
   Standard-library wrappers return Results and keep integer-status C declarations private;
-  public operation names omit `resin_`. `RuntimeError` is a union of named status errors.
+  public operations use static and instance methods on resource types. `RuntimeError` is a union of named status errors.
   Standard-library resource handles now retain shared owners and clean up automatically;
-  do not register manual native destruction for them. Submit/cancel take `&commands`
-  and clear the shared native handle; presentation returns `ok(false)` for skipped frames.
+  do not register manual native destruction for them. `commands.submit()` and `commands.cancel()`
+  clear the shared native handle; presentation returns `ok(false)` for skipped frames.
   Reference counting and custom destruction are host-only; shader consumption of
   managed values is rejected.
 - Always commit and push completed changes to a task branch and open a pull request,

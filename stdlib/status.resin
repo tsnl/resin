@@ -9,9 +9,7 @@ export {
 	Incomplete,
 	WindowUnavailable,
 	UnknownRuntimeError,
-	status,
-	runtime_error_code,
-	runtime_error_message,
+	RuntimeStatus,
 };
 
 struct InvalidArgument {};
@@ -25,88 +23,90 @@ struct WindowUnavailable {};
 struct UnknownRuntimeError { code: int };
 type RuntimeError = InvalidArgument | VulkanUnavailable | Unsupported | OutOfMemory | VulkanError | IoError | Incomplete | WindowUnavailable | UnknownRuntimeError;
 
-def status(code: int) -> Result<(), RuntimeError> = {
-	if (code == 1) {
-		err(InvalidArgument {})
-	} else {
-		ok(())
-	}?;
-	if (code == 2) {
-		err(VulkanUnavailable {})
-	} else {
-		ok(())
-	}?;
-	if (code == 3) {
-		err(Unsupported {})
-	} else {
-		ok(())
-	}?;
-	if (code == 4) {
-		err(OutOfMemory {})
-	} else {
-		ok(())
-	}?;
-	if (code == 5) {
-		err(VulkanError {})
-	} else {
-		ok(())
-	}?;
-	if (code == 6) {
-		err(IoError {})
-	} else {
-		ok(())
-	}?;
-	if (code == 7) {
-		err(Incomplete {})
-	} else {
-		ok(())
-	}?;
-	if (code == 8) {
-		err(WindowUnavailable {})
-	} else {
-		ok(())
-	}?;
-	if (code == 0) {
-		ok(())
-	} else {
-		err(UnknownRuntimeError { code = code })
-	}
-};
+struct RuntimeStatus {};
 
-def runtime_error_code(error: RuntimeError) -> int = {
-	match (error) {
-		InvalidArgument(error) => {
-			1
-		},
-		VulkanUnavailable(error) => {
-			2
-		},
-		Unsupported(error) => {
-			3
-		},
-		OutOfMemory(error) => {
-			4
-		},
-		VulkanError(error) => {
-			5
-		},
-		IoError(error) => {
-			6
-		},
-		Incomplete(error) => {
-			7
-		},
-		WindowUnavailable(error) => {
-			8
-		},
-		UnknownRuntimeError(error) => {
-			error.code
-		},
-	}
-};
-
-def runtime_error_message(error: RuntimeError) -> Ptr<ubyte> = {
-	resin_status_string(runtime_error_code(error))
-};
+impl RuntimeStatus {
+	def from_code(code: int) -> Result<(), RuntimeError> = {
+		if (code == 1) {
+			err(InvalidArgument {})
+		} else {
+			ok(())
+		}?;
+		if (code == 2) {
+			err(VulkanUnavailable {})
+		} else {
+			ok(())
+		}?;
+		if (code == 3) {
+			err(Unsupported {})
+		} else {
+			ok(())
+		}?;
+		if (code == 4) {
+			err(OutOfMemory {})
+		} else {
+			ok(())
+		}?;
+		if (code == 5) {
+			err(VulkanError {})
+		} else {
+			ok(())
+		}?;
+		if (code == 6) {
+			err(IoError {})
+		} else {
+			ok(())
+		}?;
+		if (code == 7) {
+			err(Incomplete {})
+		} else {
+			ok(())
+		}?;
+		if (code == 8) {
+			err(WindowUnavailable {})
+		} else {
+			ok(())
+		}?;
+		if (code == 0) {
+			ok(())
+		} else {
+			err(UnknownRuntimeError { code = code })
+		}
+	};
+	def code(error: RuntimeError) -> int = {
+		match (error) {
+			InvalidArgument(error) => {
+				1
+			},
+			VulkanUnavailable(error) => {
+				2
+			},
+			Unsupported(error) => {
+				3
+			},
+			OutOfMemory(error) => {
+				4
+			},
+			VulkanError(error) => {
+				5
+			},
+			IoError(error) => {
+				6
+			},
+			Incomplete(error) => {
+				7
+			},
+			WindowUnavailable(error) => {
+				8
+			},
+			UnknownRuntimeError(error) => {
+				error.code
+			},
+		}
+	};
+	def message(error: RuntimeError) -> Ptr<ubyte> = {
+		resin_status_string(RuntimeStatus.code(error))
+	};
+}
 
 extern "resin_runtime.h" def resin_status_string(status: int) -> Ptr<ubyte>;

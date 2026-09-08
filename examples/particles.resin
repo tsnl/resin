@@ -260,23 +260,23 @@ def apply_camera(camera: Camera, params: Ptr<Params>) = {
 def main() -> Result<(), _> = {
 	var count = 1000000I;
 	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
-	var window = window_create(1280, 800, Ptr<ubyte>(&title))?;
+	var window = Window.new(1280, 800, Ptr<ubyte>(&title))?;
 
-	var gpu = gpu_create_for_window(window)?;
+	var gpu = Gpu.new_for_window(window)?;
 
-	var compute = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
+	var compute = gpu.create_compute_pipeline(kernel.spirv)?;
 
-	var graphics = gpu_create_graphics_pipeline(gpu, vertex.spirv, fragment.spirv)?;
+	var graphics = gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)?;
 
 	// One shared 24 MB buffer: initialization writes host memory; compute and graphics use its device address.
-	var particles = gpu_malloc(gpu, ulong(count) * size_of(Particle), align_of(Particle), memory_default())?;
+	var particles = gpu.malloc(ulong(count) * size_of(Particle), align_of(Particle), Memory.default())?;
 
-	var root = gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?;
+	var root = gpu.malloc(size_of(Params), align_of(Params), Memory.default())?;
 
-	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(&particles)), length = ulong(count) };
+	var host_particles = Span<Particle> { data = Ptr<Particle>(particles.host_pointer()), length = ulong(count) };
 	var seed = 0x9e3779b9I;
 	initialize(host_particles, seed);
-	var params = Ptr<Params>(allocation_host_pointer(&root));
+	var params = Ptr<Params>(root.host_pointer());
 	params.* := Params {
 		count = count,
 		dt = 0.005f,
@@ -287,21 +287,21 @@ def main() -> Result<(), _> = {
 		zoom = 1.0f,
 		aspect = 0.625f,
 		radius = 0.004f,
-		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(&particles)), length = ulong(count) },
+		particles = Span<Particle> { data = Ptr<Particle>(particles.device_pointer()), length = ulong(count) },
 	};
-	var address = allocation_device_pointer(&root);
-	var image = gpu_create_image(gpu, 1280, 800)?;
+	var address = root.device_pointer();
+	var image = gpu.create_image(1280, 800)?;
 
 	var paused = 1 == 0;
 	var camera = default_camera();
 	var automatic = 1 == 1;
 	var was_dragging = 1 == 0;
-	var previous_cursor = mouse_position(window_cursor_position(window)?);
+	var previous_cursor = mouse_position(window.cursor_position()?);
 
-	window_poll_events(window)?;
-	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
-		var space = window_key_state(window, keys().space);
-		var reset = window_key_state(window, keys().r);
+	window.poll_events()?;
+	while (!window.should_close() && !window.key_pressed(Window.key_escape())) {
+		var space = window.key_state(Window.keys().space);
+		var reset = window.key_state(Window.keys().r);
 		if (space.pressed) {
 			paused := !paused;
 		};
@@ -309,14 +309,14 @@ def main() -> Result<(), _> = {
 			seed := seed * 1664525I + 1013904223I;
 			initialize(host_particles, seed);
 		};
-		var cursor = mouse_position(window_cursor_position(window)?);
-		var left = window_mouse_button_state(window, mouse_buttons().left);
-		var dragging = window_focused(window) && left.down;
-		var scroll = mouse_position(window_scroll_delta(window)?);
+		var cursor = mouse_position(window.cursor_position()?);
+		var left = window.mouse_button_state(Window.mouse_buttons().left);
+		var dragging = window.focused() && left.down;
+		var scroll = mouse_position(window.scroll_delta()?);
 		if (automatic && !paused) {
 			camera.yaw := camera.yaw + 0.0015f;
 		};
-		if (window_focused(window)) {
+		if (window.focused()) {
 			if (dragging || scroll.y != 0.0d) {
 				automatic := 1 == 0;
 			};
@@ -325,7 +325,7 @@ def main() -> Result<(), _> = {
 				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0d);
 			};
 			move_camera(&camera, 0.0d, 0.0d, scroll.y);
-			if (window_key_state(window, keys().home).pressed) {
+			if (window.key_state(Window.keys().home).pressed) {
 				camera := default_camera();
 				automatic := 1 == 1;
 			};
@@ -333,19 +333,19 @@ def main() -> Result<(), _> = {
 		previous_cursor := cursor;
 		was_dragging := dragging;
 		apply_camera(camera, params);
-		var commands = gpu_start_command_recording(gpu)?;
+		var commands = gpu.start_command_recording()?;
 
 		if (!paused) {
-			gpu_set_pipeline(commands, compute)?;
-			gpu_dispatch(commands, address, (count + 63I) / 64I, 1, 1)?;
+			commands.set_pipeline(compute)?;
+			commands.dispatch(address, (count + 63I) / 64I, 1, 1)?;
 		};
-		gpu_begin_rendering(commands, image, 0.004f, 0.008f, 0.02f, 1.0f)?;
-		gpu_set_pipeline(commands, graphics)?;
-		gpu_draw(commands, address, count * 24I)?;
-		gpu_end_rendering(commands)?;
-		gpu_submit(gpu, &commands)?;
-		gpu_present(gpu, image)?;
-		window_poll_events(window)?;
+		commands.begin_rendering(image, 0.004f, 0.008f, 0.02f, 1.0f)?;
+		commands.set_pipeline(graphics)?;
+		commands.draw(address, count * 24I)?;
+		commands.end_rendering()?;
+		commands.submit()?;
+		gpu.present(image)?;
+		window.poll_events()?;
 	};
 	print("particles demo complete\n", ());
 	ok(())

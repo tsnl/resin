@@ -69,14 +69,14 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
         def main() -> Result<(), _> = {
             var reading = 1 == 1;
             while (reading) {
-                match (input()) {
+                match (Console.read_line()) {
                     ok(line) => {
 
                         if (Ptr<ubyte>(ulong(line.data) + line.length).* != ubyte(0)) {
                             print("missing terminator", ());
                         } else {};
                         print("[{0}:", (line.length,));
-                        print_input(line)?;
+                        Console.print(line)?;
                         print("]", ());
                     },
                     err(error) => {
@@ -134,9 +134,9 @@ fn byte_input_distinguishes_bytes_from_eof() {
         export { main };
         import { "std/console.resin" };
         def main() -> Result<int, _> = {
-            var zero = read_byte()?;
-            var first = read_byte()?;
-            var ended = match (read_byte()) {
+            var zero = Console.read_byte()?;
+            var first = Console.read_byte()?;
+            var ended = match (Console.read_byte()) {
                 ok(byte) => { 1 == 0 },
                 err(error) => {
                     match (error) {
@@ -188,10 +188,10 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
             extern "{header}" def console_test_frees() -> int;
             def exercise() -> int = {{
                 var mode = console_test_mode();
-                match (input()) {{
+                match (Console.read_line()) {{
                     ok(line) => {{
 
-                        match (print_input(line)) {{
+                        match (Console.print(line)) {{
                             ok(unit) => {{ if (mode == 6 && line.length == ulong(300)) {{ 0 }} else {{ 1 }} }},
                             err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
                         }}

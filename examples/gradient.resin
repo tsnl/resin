@@ -17,24 +17,24 @@ def kernel(index: uint, root: Ptr<Root>) = {
 };
 
 def main() -> Result<(), _> = {
-	var gpu = gpu_create()?;
+	var gpu = Gpu.new()?;
 
-	var pipeline = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
+	var pipeline = gpu.create_compute_pipeline(kernel.spirv)?;
 
-	var pixels = gpu_malloc(gpu, 65536L * size_of(uint), align_of(uint), memory_default())?;
+	var pixels = gpu.malloc(65536L * size_of(uint), align_of(uint), Memory.default())?;
 
-	var root = gpu_malloc(gpu, size_of(Root), align_of(Root), memory_default())?;
+	var root = gpu.malloc(size_of(Root), align_of(Root), Memory.default())?;
 
-	var data = Ptr<Root>(allocation_host_pointer(&root));
-	data.* := Root { count = 65536I, pixels = Ptr<uint>(allocation_device_pointer(&pixels)) };
-	var commands = gpu_start_command_recording(gpu)?;
+	var data = Ptr<Root>(root.host_pointer());
+	data.* := Root { count = 65536I, pixels = Ptr<uint>(pixels.device_pointer()) };
+	var commands = gpu.start_command_recording()?;
 
-	gpu_set_pipeline(commands, pipeline)?;
-	gpu_dispatch(commands, allocation_device_pointer(&root), 1024, 1, 1)?;
-	gpu_submit(gpu, &commands)?;
+	commands.set_pipeline(pipeline)?;
+	commands.dispatch(root.device_pointer(), 1024, 1, 1)?;
+	commands.submit()?;
 
 	var path = "gradient.png";
-	image_write_png(Ptr<ubyte>(&path), 256, 256, 4, allocation_host_pointer(&pixels), 0)?;
+	ImageData.write_pixels(Ptr<ubyte>(&path), 256, 256, 4, pixels.host_pointer(), 0)?;
 	print("wrote gradient.png\n", ());
 	ok(())
 };

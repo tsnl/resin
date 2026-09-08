@@ -361,7 +361,7 @@ offset or alignment mismatch.
 These APIs expose resource lifetimes explicitly. The C API and its unsafe Rust
 convenience API are not ownership-safe GPU abstractions: resources must remain
 alive while commands use them. Standard-library wrappers retain shared owners and
-propagate failures with `?`. `gpu_submit(gpu, &commands)` and cancellation clear the
+propagate failures with `?`. `commands.submit()` and cancellation clear the
 shared native handle; automatic destruction cancels unfinished recordings.
 Raw shader root addresses do not retain their backing allocations.
 Shader bodies describe individual invocations;

@@ -60,29 +60,25 @@ def fragment(color: Color) -> Color = {
 };
 
 def main() -> Result<(), _> = {
-	var gpu = gpu_create()?;
+	var gpu = Gpu.new()?;
 
-	var pipeline = gpu_create_graphics_pipeline(
-		gpu,
-		vertex.spirv,
-		fragment.spirv,
-	)?;
+	var pipeline = gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)?;
 
-	var image = gpu_create_image(gpu, 256, 256)?;
+	var image = gpu.create_image(256, 256)?;
 
-	var pixels = gpu_malloc(gpu, 262144, 4, memory_readback())?;
+	var pixels = gpu.malloc(262144, 4, Memory.readback())?;
 
-	var commands = gpu_start_command_recording(gpu)?;
+	var commands = gpu.start_command_recording()?;
 
-	gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
-	gpu_set_pipeline(commands, pipeline)?;
-	gpu_draw(commands, 0, 3)?;
-	gpu_end_rendering(commands)?;
-	gpu_copy_image_to_buffer(commands, image, pixels)?;
-	gpu_submit(gpu, &commands)?;
+	commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
+	commands.set_pipeline(pipeline)?;
+	commands.draw(0, 3)?;
+	commands.end_rendering()?;
+	commands.copy_image_to_buffer(image, pixels)?;
+	commands.submit()?;
 
 	var path = "triangle.png";
-	image_write_png(Ptr<ubyte>(&path), 256, 256, 4, allocation_host_pointer(&pixels), 0)?;
+	ImageData.write_pixels(Ptr<ubyte>(&path), 256, 256, 4, pixels.host_pointer(), 0)?;
 	print("wrote triangle.png\n", ());
 	ok(())
 };
