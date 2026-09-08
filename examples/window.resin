@@ -63,7 +63,7 @@ def fragment(color: Color) -> Color = {
 
 def main() -> Result<(), _> = {
 	var title = "Resin triangle";
-	var window = Window.new(640, 480, title.data)?;
+	var window = Window.new(640, 480, String.from_str(title))?;
 
 	var gpu = Gpu.new_for_window(window)?;
 

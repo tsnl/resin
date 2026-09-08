@@ -1178,3 +1178,22 @@ fn formatted_string_and_literal_span_types_survive_editor_recovery() {
         assert!(items.iter().any(|item| item.name == "length"), "{items:?}");
     }
 }
+
+#[test]
+fn string_constructor_is_an_ordinary_discoverable_static_method() {
+    for source in [
+        "def main() = { var text = String.from_str(\"title\"); text.bytes.; };",
+        "def main() = { String.; };",
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let analysis = project.analyze();
+        let offset = source.rfind(".;").unwrap() + 1;
+        let items = analysis.completions(&project.path("main.resin"), offset);
+        let member = if source.contains("from_str") {
+            "length"
+        } else {
+            "from_str"
+        };
+        assert!(items.iter().any(|item| item.name == member), "{items:?}");
+    }
+}

@@ -34,7 +34,7 @@ pub(crate) enum FunctionBody {
     Generated(Vec<crate::ir::Instr>),
 }
 
-pub(crate) type MethodDefinitions = fn(&Ty) -> Vec<(Arc<str>, FunctionDecl)>;
+pub(crate) type MethodDefinitions = fn(&Ty, &TyperContext) -> Vec<(Arc<str>, FunctionDecl)>;
 
 #[derive(Debug, Clone)]
 pub(super) struct Namespace {
@@ -161,9 +161,9 @@ impl TyperContext {
         }
         for definitions in &self.method_definitions {
             if let Ty::Pointer { pointee } = ty {
-                methods.extend(definitions(pointee));
+                methods.extend(definitions(pointee, self));
             }
-            methods.extend(definitions(ty));
+            methods.extend(definitions(ty, self));
         }
         methods.into_iter().collect()
     }
