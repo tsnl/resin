@@ -49,5 +49,10 @@ union removes only `None`, leaving the Result intact. Use `?` or `match` to hand
 the Result. Postfix `!` on a bare Result is not supported in this change.
 
 Ordinary unions use module-wide u32 tags for member type identity, rather than
-positions in a particular union. Widening preserves those identities. Results
-have a separate tag domain for success and failure.
+positions in a particular union. For example, `int` has the same tag in
+`int | None` and `int | bool | None`, on both the host and the GPU. Widening
+preserves that tag. A union itself is never a member and has no payload tag:
+`(int | None) | bool` is flattened to `int | None | bool` before lowering.
+Numeric tag values are local to the compiled program; they are not a stable
+serialization format or ABI between separate builds. Results have a separate
+tag domain for success and failure.

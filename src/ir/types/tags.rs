@@ -1,4 +1,9 @@
-//! Stable module-wide union tags, shared by the host and shader emitters.
+//! Payload type identities shared by every union in a compiled module.
+//!
+//! Nominal records already have a `TypeId`; primitives and structural types do
+//! not. This table extends that ID space for both host and shader emission, so
+//! a member's tag never depends on its position in a particular union. Numeric
+//! IDs are compilation-local, not an ABI across separately compiled programs.
 use crate::ir::{Case, Module, Ty, verify::FunctionTypes};
 use std::collections::{BTreeSet, HashMap};
 
@@ -59,7 +64,10 @@ impl VariantTags {
         let mut next = u32::try_from(module.types.len()).expect("too many types");
         Self(
             seen.into_iter()
-                .filter(|ty| !matches!(ty, Ty::Defined { .. }))
+                // Nominal IDs are already assigned. Unions only contribute
+                // their members: normalization and verification forbid a
+                // union from being another union's payload.
+                .filter(|ty| !matches!(ty, Ty::Defined { .. } | Ty::Union { .. }))
                 .map(|ty| {
                     next = next.checked_add(1).expect("too many union member types");
                     (ty, next)
