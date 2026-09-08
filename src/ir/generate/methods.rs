@@ -1,8 +1,8 @@
 use super::{
     GenerateError, Generator,
-    plan::{Annotation, Signature, Term, error},
     scope::{DeclarationId, Scopes},
     semantic::DefinitionKind,
+    typed::{Annotation, Signature, Term},
 };
 use crate::{
     ast::{Ident, SourceFile, StmtKind},
@@ -53,14 +53,18 @@ impl Generator {
                     }
                 };
             declarations.insert(name.val.clone(), declaration);
-            let receiver_type = scopes
-                .resolve_type(receiver)
-                .and_then(|ty| self.solver.require(&ty, receiver.span));
+            let receiver_type = super::eval::Evaluator {
+                scopes: scopes.view(),
+                typer: &self.typer,
+            }
+            .type_name(receiver);
             let definition = match receiver_type {
                 Ok(Ty::Defined { definition }) => definition,
                 Ok(_) => {
-                    self.errors
-                        .push(error(receiver.span, "impl requires a nominal struct type"));
+                    self.errors.push(GenerateError::inference(
+                        receiver.span,
+                        "impl requires a nominal struct type",
+                    ));
                     continue;
                 }
                 Err(error) => {
@@ -74,7 +78,7 @@ impl Generator {
                 .map(|origin| origin.module)
                 != Some(self.source_module)
             {
-                self.errors.push(error(
+                self.errors.push(GenerateError::inference(
                     receiver.span,
                     "impl requires a type defined in this module",
                 ));
@@ -83,7 +87,10 @@ impl Generator {
             scopes.record_method_definition(definition, declaration);
             let checked = (|| {
                 if !decorators.is_empty() {
-                    return Err(error(name.span, "methods cannot be shader entries"));
+                    return Err(GenerateError::inference(
+                        name.span,
+                        "methods cannot be shader entries",
+                    ));
                 }
                 let evaluator = super::eval::Evaluator {
                     scopes: scopes.view(),
@@ -97,16 +104,22 @@ impl Generator {
                         .map(|(name, ann)| {
                             Ok((
                                 name.clone(),
-                                Annotation::concrete(evaluator.ty(ann)?, ann.span),
+                                Annotation {
+                                    ty: evaluator.ty(ann)?,
+                                    span: ann.span,
+                                },
                             ))
                         })
                         .collect::<Result<_, GenerateError>>()?,
-                    result: Annotation::concrete(evaluator.ty(result)?, result.span),
+                    result: Annotation {
+                        ty: evaluator.ty(result)?,
+                        span: result.span,
+                    },
                 };
                 let function = self.declare_function(name, &signature)?;
                 let short = name.val.rsplit('.').next().unwrap();
                 if !self.typer.define_method(definition, short.into(), function) {
-                    return Err(error(name.span, "duplicate method"));
+                    return Err(GenerateError::inference(name.span, "duplicate method"));
                 }
                 if short == "drop" {
                     let declaration = self.typer.declared_function(function);
@@ -116,7 +129,7 @@ impl Generator {
                         }]
                         || declaration.result != Ty::Unit
                     {
-                        return Err(error(
+                        return Err(GenerateError::inference(
                             name.span,
                             "drop must have signature drop(receiver: Ptr<T>) -> ()",
                         ));
@@ -135,7 +148,7 @@ impl Generator {
     pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, GenerateError> {
         let ty = self.gen_term(term, None)?;
         let Ty::Arc { pointee } = &ty else {
-            return Err(error(term.span, "expected Arc<T>"));
+            return Err(GenerateError::inference(term.span, "expected Arc<T>"));
         };
         let pointee = *pointee.clone();
         let owner = self.save_top(&ty);
@@ -157,7 +170,7 @@ impl Generator {
         let function = self
             .typer
             .method(receiver_type, &name.val)
-            .ok_or_else(|| error(name.span, "unknown method"))?;
+            .ok_or_else(|| GenerateError::inference(name.span, "unknown method"))?;
         if let FunctionBody::Defined(function) = &function.body {
             self.emit(Instr::Function {
                 function: *function,

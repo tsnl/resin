@@ -10,16 +10,18 @@ mod bindings;
 mod builder;
 mod builtin_methods;
 mod builtins;
+mod check;
 mod cleanup;
 mod error;
 pub(super) mod eval;
 mod flow;
 mod functions;
+mod lower;
 mod methods;
 mod modules;
 mod places;
-mod plan;
-use plan::Term;
+mod typed;
+use typed::Term;
 pub(crate) mod scope;
 pub(crate) mod semantic;
 mod sums;
@@ -64,7 +66,6 @@ struct Generator {
     typer: TyperContext,
     function: Option<FunctionBuilder>,
     environment: Environment,
-    solver: crate::ir::typecheck::infer::solver::Solver,
     owned: Vec<Vec<LocalId>>,
     errors: Vec<GenerateError>,
 }
@@ -80,7 +81,6 @@ impl Generator {
             typer: builtins::typer(),
             function: None,
             environment: Environment::new(),
-            solver: Default::default(),
             owned: vec![],
             errors: vec![],
         }
@@ -90,10 +90,9 @@ impl Generator {
         self.errors
             .extend(scopes.prepare(file, &mut self.typer, self.source_module));
         let methods = self.declare_methods(file, &mut scopes);
-        let planned = plan::file(file, &mut self.typer, scopes, self.source_module, methods);
-        self.solver = planned.solver;
-        self.errors.extend(planned.errors);
-        self.environment.context = planned.context;
+        let checked = check::file(file, &mut self.typer, scopes, self.source_module, methods);
+        self.errors.extend(checked.errors);
+        self.environment.context = checked.context;
         let mut declared = std::collections::BTreeSet::new();
         for stmt in file.declarations() {
             let result = (|| {
@@ -101,7 +100,7 @@ impl Generator {
                     StmtKind::Function {
                         name, decorators, ..
                     } => {
-                        let Some(signature) = planned.signatures.get(&name.val) else {
+                        let Some(signature) = checked.signatures.get(&name.val) else {
                             return Ok(());
                         };
                         if !declared.insert(name.val.clone()) {
@@ -166,7 +165,7 @@ impl Generator {
                         }
                     }
                     StmtKind::ForeignFunction { header, name, .. } => {
-                        if let Some(signature) = planned.signatures.get(&name.val)
+                        if let Some(signature) = checked.signatures.get(&name.val)
                             && declared.insert(name.val.clone())
                         {
                             self.declare_foreign(header, name, signature)?;
@@ -182,12 +181,12 @@ impl Generator {
         }
         for stmt in file.declarations() {
             if let StmtKind::Function { name, .. } = &stmt.val
-                && let Some(body) = planned.bodies.get(&name.val)
+                && let Some(body) = checked.bodies.get(&name.val)
                 && self.environment.lookup_value(&name.val).is_some()
-                && !self.solver.invalid(&body.ty)
+                && checked.signatures.contains_key(&name.val)
             {
                 let environment = self.environment.clone();
-                let result = self.gen_function(name, &planned.signatures[&name.val], body);
+                let result = self.gen_function(name, &checked.signatures[&name.val], body);
                 self.environment = environment;
                 if let Err(error) = result {
                     if !self.errors.contains(&error) {
@@ -217,9 +216,8 @@ impl Generator {
         let before = std::mem::replace(&mut self.source_span, term.span);
         let context = self.environment.context.select(term.context);
         let result = (|| {
-            let checked = self.solver.require(&term.ty, term.span)?;
-            let found = (term.emit)(self, &checked)?;
-            let found = self.coerce(term.span, found, &checked)?;
+            let found = self.lower_term(term)?;
+            let found = self.coerce(term.span, found, &term.ty)?;
             if let Some(to) = to {
                 self.coerce(term.span, found, to)
             } else {

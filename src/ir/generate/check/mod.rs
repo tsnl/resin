@@ -1,17 +1,21 @@
-//! Walk expressions once, selecting emission operations and adding typing constraints together.
-//! Operations are replayable for cleanup, and run after their dependency group's types resolve.
+//! First expression pass: resolve declarations and types, producing a typed tree.
+//! No IR instructions or deferred code-generation operations are created here.
 mod context;
 mod expressions;
 mod groups;
+mod resolve;
+#[cfg(test)]
+mod tests;
 use super::semantic::DefinitionKind;
+use super::typed;
 use super::{
-    GenerateError, Generator,
-    scope::{ContextView, Cursor, DeclarationId, Scopes},
+    GenerateError,
+    scope::{ContextView, DeclarationId, Scopes},
 };
 use crate::ir::typecheck::SourceModuleId;
 use crate::ir::typecheck::infer::{
-    Inference, Rule,
-    solver::{Solver, VariableId},
+    Inference,
+    solver::VariableId,
     types::{Head, Type},
 };
 use crate::{
@@ -20,57 +24,23 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    rc::Rc,
     sync::Arc,
 };
-pub(super) fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
-    GenerateError::inference(span, message)
-}
 type Result<T> = std::result::Result<T, GenerateError>;
-type Emit = Rc<dyn Fn(&mut Generator, &Ty) -> Result<Ty>>;
-pub(super) type Statement = Rc<dyn Fn(&mut Generator) -> Result<()>>;
-#[derive(Clone)]
-pub(super) struct Term {
-    rule: Rule,
-    pub span: Span,
-    pub context: Cursor,
-    pub ty: Type,
-    pub form: Form,
-    pub emit: Emit,
-}
-// Only addressability and literal syntax survive planning; there is no second AST dispatcher.
-#[derive(Clone)]
-pub(super) enum Form {
-    Var { name: Ident },
-    Field { base: Rc<Term>, name: Ident },
-    Deref { pointer: Rc<Term> },
-    Num { value: Arc<str> },
-    Unit,
-    Record,
-    Type { ty: Type },
-    Other,
-}
-pub(super) struct MatchArm {
-    pub variant: Option<Annotation>,
-    pub failure: bool,
-    pub binding: Option<DeclarationId>,
-    pub body: Term,
-}
+type Term = typed::Term<Type>;
+type Statement = typed::Statement<Type>;
+type MatchArm = typed::MatchArm<Type>;
 pub(super) struct Annotation {
     holes: Vec<(Span, VariableId)>,
     pub ty: Type,
     pub span: Span,
 }
 impl Annotation {
-    pub(super) fn concrete(ty: Ty, span: Span) -> Self {
-        Self {
-            ty: ty.into(),
-            span,
-            holes: vec![],
+    fn into_tree(self) -> typed::Annotation<Type> {
+        typed::Annotation {
+            ty: self.ty,
+            span: self.span,
         }
-    }
-    pub(super) fn resolve(&self, g: &Generator) -> Result<Ty> {
-        g.solver.require(&self.ty, self.span)
     }
 }
 pub(super) struct Signature {
@@ -79,7 +49,7 @@ pub(super) struct Signature {
     pub params: Vec<(Ident, Annotation)>,
     pub result: Annotation,
 }
-impl Planner<'_> {
+impl Checker<'_> {
     fn ann(&mut self, ann: &ast::Type, infer: bool) -> Annotation {
         let scoped = !matches!(ann.val, ast::TypeKind::Unit);
         if scoped {
@@ -142,14 +112,13 @@ impl Planner<'_> {
     }
 }
 
-pub(super) struct PlannedFile {
+pub(super) struct CheckedFile {
     pub context: ContextView,
-    pub signatures: BTreeMap<Arc<str>, Signature>,
-    pub bodies: BTreeMap<Arc<str>, Term>,
-    pub solver: Solver,
+    pub signatures: BTreeMap<Arc<str>, typed::Signature>,
+    pub bodies: BTreeMap<Arc<str>, typed::Term>,
     pub errors: Vec<GenerateError>,
 }
-struct Planner<'a> {
+struct Checker<'a> {
     typing: Inference<'a>,
     scopes: Scopes,
     errors: Vec<GenerateError>,
@@ -159,7 +128,7 @@ struct Planner<'a> {
     result: Type,
     source_module: SourceModuleId,
 }
-impl<'a> Planner<'a> {
+impl<'a> Checker<'a> {
     fn new(typer: &'a mut TyperContext, scopes: Scopes, source_module: SourceModuleId) -> Self {
         Self {
             typing: Inference::new(typer),
@@ -179,8 +148,8 @@ pub(super) fn file(
     scopes: Scopes,
     source_module: SourceModuleId,
     mut methods: BTreeMap<Arc<str>, DeclarationId>,
-) -> PlannedFile {
-    let mut planner = Planner::new(typer, scopes, source_module);
+) -> CheckedFile {
+    let mut checker = Checker::new(typer, scopes, source_module);
     let mut signatures = BTreeMap::new();
     let mut functions = vec![];
     for stmt in file.declarations() {
@@ -200,7 +169,7 @@ pub(super) fn file(
             } => (name, params, result, None),
             _ => continue,
         };
-        let mut signature = planner.signature(params, result, body.is_some());
+        let mut signature = checker.signature(params, result, body.is_some());
         let ty = Type::function(
             Type::parameter(
                 signature
@@ -212,11 +181,11 @@ pub(super) fn file(
             signature.result.ty.clone(),
         );
         let declared = if let Some(id) = methods.remove(&name.val) {
-            planner.scopes.set_inferred(id, ty);
+            checker.scopes.set_inferred(id, ty);
             Ok(id)
         } else {
             crate::ir::typecheck::check_binding_name(name).and_then(|()| {
-                planner
+                checker
                     .scopes
                     .define_inferred(name, ty, DefinitionKind::Function)
                     .map_err(|duplicate| GenerateError {
@@ -228,7 +197,7 @@ pub(super) fn file(
         match declared {
             Ok(id) => signature.declaration = Some(id),
             Err(error) => {
-                planner.errors.push(error);
+                checker.errors.push(error);
                 continue;
             }
         }
@@ -236,7 +205,7 @@ pub(super) fn file(
             if decorators.len() == 1 && matches!(decorators[0].val.as_ref(),
                 "compute_shader" | "vertex_shader" | "fragment_shader"))
         {
-            planner.scopes.mark_shader(name);
+            checker.scopes.mark_shader(name);
         }
         if let Some(body) = body {
             functions.push((name, body));
@@ -254,56 +223,56 @@ pub(super) fn file(
     let mut expressions = vec![];
     for (name, body) in &functions {
         let signature = signatures.get_mut(&name.val).unwrap();
-        let errors_before = planner.errors.len();
-        planner.scopes.push_at(body.span);
-        planner.result = signature.result.ty.clone();
+        let errors_before = checker.errors.len();
+        checker.scopes.push_at(body.span);
+        checker.result = signature.result.ty.clone();
         for (name, ann) in &signature.params {
-            let binding = planner
+            let binding = checker
                 .bind(name, ann.ty.clone(), DefinitionKind::Parameter)
-                .map_err(|error| planner.errors.push(error))
+                .map_err(|error| checker.errors.push(error))
                 .ok();
             signature.parameters.push(binding);
         }
-        let term = planner.term(body, Some(signature.result.ty.clone()));
-        planner.scopes.pop();
-        if planner.errors.len() != errors_before {
-            planner.typing.fail(term.rule);
+        let (rule, term) = checker.term(body, Some(signature.result.ty.clone()));
+        checker.scopes.pop();
+        if checker.errors.len() != errors_before {
+            checker.typing.fail(rule);
         }
-        planner.typing.infer_from(
+        checker.typing.infer_from(
             &signature.result.holes,
             signature.result.span,
             term.ty.clone(),
         );
         bodies.insert(name.val.clone(), term);
         edges.push(
-            std::mem::take(&mut planner.dependencies)
+            std::mem::take(&mut checker.dependencies)
                 .iter()
                 .filter_map(|name| names.get(name).copied())
                 .collect(),
         );
-        constraints.push(std::mem::take(&mut planner.typing.constraints));
-        expressions.push(std::mem::take(&mut planner.expressions));
+        constraints.push(std::mem::take(&mut checker.typing.constraints));
+        expressions.push(std::mem::take(&mut checker.expressions));
     }
     for group in groups::groups(&edges) {
         let mut roots = vec![];
         for &i in &group {
-            planner.typing.constraints.append(&mut constraints[i]);
+            checker.typing.constraints.append(&mut constraints[i]);
             roots.extend(expressions[i].iter().map(|(_, ty)| ty.clone()));
             roots.push(signatures[&functions[i].0.val].result.ty.clone());
         }
-        let errors = planner.typing.solve(&roots);
-        planner.errors.extend(errors);
+        let errors = checker.typing.solve(&roots);
+        checker.errors.extend(errors);
         for &i in &group {
             let result = &signatures[&functions[i].0.val].result;
             for (span, ty) in
                 std::iter::once(&(result.span, result.ty.clone())).chain(expressions[i].iter())
             {
-                if planner.typing.solver.invalid(ty) {
+                if checker.typing.solver.invalid(ty) {
                     continue;
                 }
-                if let Err(mut error) = planner.typing.solver.require(ty, *span) {
+                if let Err(mut error) = checker.typing.solver.require(ty, *span) {
                     if matches!(
-                        planner.typing.solver.head(ty),
+                        checker.typing.solver.head(ty),
                         Type::Node(Head::Array(0), _)
                     ) {
                         error = GenerateError::typing(
@@ -313,32 +282,75 @@ pub(super) fn file(
                             },
                         );
                     }
-                    planner.errors.push(error);
+                    checker.errors.push(error);
                     if ty == &result.ty {
                         for (_, variable) in &result.holes {
-                            planner.typing.solver.invalidate(*variable);
+                            checker.typing.solver.invalidate(*variable);
                         }
                     }
                 }
             }
         }
     }
-    for (span, variable) in &planner.holes {
+    for (span, variable) in &checker.holes {
         let ty = variable.ty();
-        if !planner.typing.solver.invalid(&ty)
-            && let Err(error) = planner.typing.solver.require(&ty, *span)
+        if !checker.typing.solver.invalid(&ty)
+            && let Err(error) = checker.typing.solver.require(&ty, *span)
         {
-            planner.errors.push(error);
+            checker.errors.push(error);
         }
     }
-    planner
+    checker
         .scopes
-        .resolve_inferred(&planner.typing.solver, planner.typing.typer);
-    PlannedFile {
-        context: planner.scopes.finish(),
-        signatures,
-        bodies,
-        solver: planner.typing.solver,
-        errors: planner.errors,
+        .resolve_inferred(&checker.typing.solver, checker.typing.typer);
+    let mut checked_signatures = BTreeMap::new();
+    for (name, signature) in signatures {
+        let resolved = (|| {
+            Ok(typed::Signature {
+                declaration: signature.declaration,
+                parameters: signature.parameters,
+                params: signature
+                    .params
+                    .into_iter()
+                    .map(|(name, ann)| Ok((name, ann.into_tree().resolve(&checker.typing.solver)?)))
+                    .collect::<Result<_>>()?,
+                result: signature
+                    .result
+                    .into_tree()
+                    .resolve(&checker.typing.solver)?,
+            })
+        })();
+        match resolved {
+            Ok(signature) => {
+                checked_signatures.insert(name, signature);
+            }
+            Err(error) => {
+                if !checker.errors.contains(&error) {
+                    checker.errors.push(error);
+                }
+            }
+        }
+    }
+    let mut checked_bodies = BTreeMap::new();
+    for (name, body) in bodies {
+        if checker.typing.solver.invalid(&body.ty) {
+            continue;
+        }
+        match body.resolve(&checker.typing.solver) {
+            Ok(body) => {
+                checked_bodies.insert(name, body);
+            }
+            Err(error) => {
+                if !checker.errors.contains(&error) {
+                    checker.errors.push(error);
+                }
+            }
+        }
+    }
+    CheckedFile {
+        context: checker.scopes.finish(),
+        signatures: checked_signatures,
+        bodies: checked_bodies,
+        errors: checker.errors,
     }
 }

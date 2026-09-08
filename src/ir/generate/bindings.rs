@@ -1,4 +1,4 @@
-use super::plan::Term;
+use super::typed::Term;
 use crate::ast::{Ident, SourceFile, StmtKind, Type};
 use crate::ir::{Instr, Ty, TyperContext};
 

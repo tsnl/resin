@@ -75,8 +75,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Function result annotations default to unit when omitted, including foreign functions.
   Explicit `_` holes opt into inference in local annotations and function results, including
   nested type positions. Keep parameters, type definitions, and foreign signatures fully explicit.
-  Interleave typing and generation in one expression traversal, injecting shared typing rules.
-  Resolve dependency groups before finalizing concrete IR; never put inference variables in IR.
+  Check source expressions into a typed tree, then lower that tree to IR in a separate pass.
+  Resolve dependency groups and all inference variables before handing the tree to lowering;
+  keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
   Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never

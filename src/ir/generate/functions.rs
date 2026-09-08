@@ -1,4 +1,4 @@
-use super::plan::{Signature, Term};
+use super::typed::{Signature, Term};
 use crate::ast::Ident;
 use crate::ir::{
     Foreign, FunctionId, Instr, LocalId, Terminator, Ty, typecheck::check_binding_name,
@@ -53,10 +53,10 @@ impl Generator {
         }
         let params = params
             .iter()
-            .map(|(_, ann)| ann.resolve(self))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|(_, ann)| ann.ty.clone())
+            .collect::<Vec<_>>();
         let param = Ty::parameter(&params);
-        let result = signature.result.resolve(self)?;
+        let result = signature.result.ty.clone();
         let id = FunctionId::from_index(self.module.functions.len());
         self.typer.register_function(id, params, result.clone());
         self.module.origins.functions.insert(
@@ -118,7 +118,7 @@ impl Generator {
         let params = &signature.params;
         let mut param_tys = Vec::with_capacity(params.len());
         for (_, ann) in params {
-            param_tys.push(ann.resolve(self)?);
+            param_tys.push(ann.ty.clone());
         }
         let param_ty = Ty::parameter(&param_tys);
         let parameter = LocalId::from_index(0);
