@@ -140,6 +140,27 @@ impl Scopes {
         }
     }
 
+    pub(super) fn record_method_definition(&self, receiver: TypeId, name: &Ident) {
+        if let Some(trace) = &self.trace {
+            trace.data.borrow_mut().method_origins.insert(
+                (receiver, name.val.rsplit('.').next().unwrap().to_string()),
+                trace.location(name.span),
+            );
+        }
+    }
+
+    pub(super) fn record_method(
+        &self,
+        name: &Ident,
+        ty: &Ty,
+        associated: bool,
+        typer: &TyperContext,
+    ) {
+        if let Some(trace) = &self.trace {
+            trace.record_method(name, ty, associated, typer);
+        }
+    }
+
     pub(super) fn record_binding_type(&self, name: &Arc<str>, ty: &Ty, typer: &TyperContext) {
         if let Some(trace) = &self.trace
             && let Some(origin) = self.origin(name, false)

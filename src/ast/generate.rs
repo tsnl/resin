@@ -174,6 +174,35 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
+        if node.kind() == "impl_definition" {
+            let Some(receiver) = node.child_by_field_name("receiver") else {
+                assert!(self.recovering, "impl requires a receiver node");
+                return Spanned::new(
+                    StmtKind::Expr {
+                        term: self.hole(node),
+                    },
+                    self.span(node),
+                );
+            };
+            let receiver = self.ident(receiver);
+            let methods = node
+                .children_by_field_name("method", &mut node.walk())
+                .map(|method| {
+                    let mut stmt = self.gen_function(method);
+                    if let StmtKind::Function {
+                        receiver: target,
+                        name,
+                        ..
+                    } = &mut stmt.val
+                    {
+                        name.val = format!("{}.{}", receiver.val, name.val).into();
+                        *target = Some(receiver.clone());
+                    }
+                    stmt
+                })
+                .collect();
+            return Spanned::new(StmtKind::Impl { receiver, methods }, self.span(node));
+        }
         if node.kind() == "struct_definition" {
             let fields = node
                 .children_by_field_name("fields", &mut node.walk())
@@ -373,6 +402,28 @@ impl<'a> AstGen<'a> {
                         span,
                     );
                 }
+                "method_call" => {
+                    let name = self.ident(child.child_by_field_name("name").unwrap());
+                    let args = child.child_by_field_name("args").unwrap();
+                    let arg = match args.kind() {
+                        "paren_term" => self.gen_paren_term(args),
+                        "tuple_term" => self.gen_tuple_term(args),
+                        "unit_term" => Spanned::new(TermKind::Unit, self.span(args)),
+                        _ => unreachable!("method arguments"),
+                    };
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::MethodCall {
+                            receiver: Box::new(base),
+                            name,
+                            arg: Box::new(arg),
+                        },
+                        span,
+                    );
+                }
                 "field_access" => {
                     let field = child.child_by_field_name("name");
                     if self.recovering && field.is_none_or(|n| n.is_missing()) {
@@ -567,6 +618,7 @@ impl<'a> AstGen<'a> {
             .unwrap_or_else(|| self.hole(node));
         Spanned::new(
             StmtKind::Function {
+                receiver: None,
                 decorators: node
                     .children_by_field_name("decorator", &mut node.walk())
                     .filter_map(|n| n.child_by_field_name("name"))

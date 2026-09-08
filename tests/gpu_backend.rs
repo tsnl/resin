@@ -502,6 +502,52 @@ fn none_elimination_preserves_shader_union_members() {
     );
 }
 
+#[test]
+fn inherent_methods_execute_in_shader_helpers() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        struct Counter { value: uint };
+        impl Counter {
+            def new(value: uint) -> Counter = { Counter { value = value } };
+            def add(self: Counter, n: uint) -> Counter = { Counter { value = self.value + n } };
+            def read(self: Counter) -> uint = { self.value };
+        }
+        def kernel(id: uint, root: Ptr<Root>) = {
+            if (id < root.count) {
+                var counter = Counter.new(id);
+                var incremented = counter.add(1I);
+                var output = Span<uint> { data = root.pixels, length = 67L };
+                output(id).* := incremented.read();
+            };
+        };
+        "#,
+        |index| index + 1,
+    );
+}
+
+#[test]
+fn at_indexing_mutates_shader_arrays_and_span_fields() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        def read(i: uint) -> uint = {
+            var values = [10I, 20I];
+            values.at(0I).* := i;
+            values.at(i & 1I).* + values.at(i & 1I).*
+        };
+        def kernel(i: uint, root: Ptr<Root>) = {
+            if (i < root.count) {
+                var holder = { values = Span<uint> { data = root.pixels, length = 67L } };
+                holder.values.at(i).* := 7I;
+                var value = read(i);
+                holder.values.at(i).* := value;
+            };
+        };"#,
+        |i| if i % 2 == 0 { 2 * i } else { 40 },
+    );
+}
+
 fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let Some(compiler) = shaders::compiler() else {
         return;
@@ -643,25 +689,27 @@ fn invalid_images_do_not_replace_existing_files() {
 }
 
 #[test]
-fn array_indexing_and_helper_bounds_failures_stop_the_invocation() {
+fn shader_array_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel };
         def read(i: uint) -> uint = { var values = [uint(10), uint(20), uint(30)]; values(i).* };
-        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { read(i) + uint(1) }; }; };"#,
+        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < 3I) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { read(i) + uint(1) }; }; };"#,
         |i| if i < 3 { (i + 1) * 10 + 1 } else { u32::MAX },
     );
 }
 
 #[test]
-fn span_write_bounds_failures_stop_callers_before_later_side_effects() {
+fn shader_span_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
         def write(i: uint, pixels: Span<uint>) = { pixels(i).* := uint(42); };
         @compute_shader def kernel(i: uint, root: Ptr<Root>) = {
             var pixels = Span<uint> { data = root.pixels, length = ulong(3) };
-            write(i, pixels);
-            pixels(i).* := uint(43);
+            if (ulong(i) < pixels.length) {
+                write(i, pixels);
+                pixels(i).* := uint(43);
+            };
         };"#,
         |i| if i < 3 { 43 } else { u32::MAX },
     );

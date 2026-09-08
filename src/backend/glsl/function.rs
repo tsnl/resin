@@ -101,27 +101,6 @@ pub(super) fn emit(
                 || matches!(instr, Instr::AccessStatic { .. } | Instr::AccessDynamic)
                     && args[0].local;
             let result = flow.results[b][i].as_ref();
-            if matches!(instr, Instr::AccessDynamic) {
-                let base = &args[0];
-                let (ty, expr) = match &base.ty {
-                    Ty::Pointer { pointee } => {
-                        (types.shape(pointee).clone(), dereference(types, base)?)
-                    }
-                    ty => (types.shape(ty).clone(), types.unwrap(ty, base.expr.clone())),
-                };
-                let length = match ty {
-                    Ty::Span { .. } => format!("({expr}).f1"),
-                    Ty::Array { length, .. } => format!("uint64_t({length})"),
-                    _ => return Err(Error("indexing requires an array or Span".into())),
-                };
-                writeln!(
-                    out,
-                    "      if (uint64_t({}) >= {length}) {{ r_failed = true; return {}; }}",
-                    args[1].expr,
-                    types.zero(&function.result)
-                )
-                .unwrap();
-            }
             if matches!(instr, Instr::ExcludeNone) {
                 let condition =
                     is_variant(types, &args[0].ty, &Case::Type(Ty::None), &args[0].expr);

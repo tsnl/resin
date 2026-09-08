@@ -5,7 +5,7 @@
 ["Ptr" "Span" "Result" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
-["export" "import" "extern" "type" "struct" "def" "var"] @keyword
+["export" "import" "extern" "type" "struct" "impl" "def" "var"] @keyword
 ["if" "else" "while" "match" "defer"] @keyword
 
 (function_definition name: (lid) @function)
@@ -17,6 +17,7 @@
   (#any-of? @function.builtin "print" "ok" "err"))
 
 (field_access name: (lid) @property)
+(method_call name: (lid) @function)
 (record_term fields: (term_define name: (lid) @property))
 (record_type field: (declare name: (lid) @property))
 (struct_definition fields: (declare name: (lid) @property))

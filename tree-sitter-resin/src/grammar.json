@@ -52,6 +52,10 @@
                 },
                 {
                   "type": "SYMBOL",
+                  "name": "impl_definition"
+                },
+                {
+                  "type": "SYMBOL",
                   "name": "foreign_function"
                 },
                 {
@@ -434,6 +438,42 @@
         {
           "type": "STRING",
           "value": ";"
+        }
+      ]
+    },
+    "impl_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "impl"
+        },
+        {
+          "type": "FIELD",
+          "name": "receiver",
+          "content": {
+            "type": "SYMBOL",
+            "name": "uid"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "FIELD",
+            "name": "method",
+            "content": {
+              "type": "SYMBOL",
+              "name": "function_definition"
+            }
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
         }
       ]
     },
@@ -1606,6 +1646,10 @@
                   },
                   {
                     "type": "SYMBOL",
+                    "name": "method_call"
+                  },
+                  {
+                    "type": "SYMBOL",
                     "name": "pointer_deref"
                   },
                   {
@@ -1640,6 +1684,53 @@
         }
       ]
     },
+    "method_call": {
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "."
+          },
+          {
+            "type": "FIELD",
+            "name": "name",
+            "content": {
+              "type": "SYMBOL",
+              "name": "lid"
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "args",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "paren_term"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "tuple_term"
+                },
+                {
+                  "type": "ALIAS",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_method_unit"
+                  },
+                  "named": true,
+                  "value": "unit_term"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
     "pointer_deref": {
       "type": "STRING",
       "value": ".*"
@@ -1651,6 +1742,19 @@
     "unwrap_suffix": {
       "type": "STRING",
       "value": "!"
+    },
+    "_method_unit": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
     },
     "closed_term": {
       "type": "CHOICE",
@@ -2928,6 +3032,10 @@
       {
         "type": "STRING",
         "value": "struct"
+      },
+      {
+        "type": "STRING",
+        "value": "impl"
       },
       {
         "type": "STRING",

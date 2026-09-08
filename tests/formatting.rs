@@ -216,3 +216,11 @@ fn optional_unwrap_suffix_stays_attached_and_preserves_operators() {
         "def f(x: int | None) -> bool = {\n\tx! != 0\n};\n",
     );
 }
+
+#[test]
+fn impl_blocks_format_methods_as_declarations() {
+    check(
+        "struct N{v:int};impl N{def new(v:int)->N={N{v=v}};def read(self:N)->int={self.v};}def main()->int={N.new(42).read()};",
+        "struct N { v: int };\nimpl N {\n\tdef new(v: int) -> N = {\n\t\tN { v = v }\n\t};\n\tdef read(self: N) -> int = {\n\t\tself.v\n\t};\n}\ndef main() -> int = {\n\tN.new(42).read()\n};\n",
+    );
+}

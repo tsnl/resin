@@ -14,7 +14,7 @@ use std::{
 use super::{GenerateError, GenerateErrorKind, scope::Scopes};
 use crate::{
     ast::{self, SourceFile, Span, StmtKind},
-    ir::{Ty, TypeId, TyperContext},
+    ir::{Ty, TypeId, TyperContext, typer::SourceModuleId},
 };
 use expressions::Checker;
 use scan::Scan;
@@ -44,10 +44,10 @@ pub(super) fn file(
     file: &SourceFile,
     typer: &mut TyperContext,
     scopes: &Scopes,
+    source_module: SourceModuleId,
 ) -> Result<Checked> {
     let functions: Vec<_> = file
-        .stmts
-        .iter()
+        .declarations()
         .filter_map(|stmt| {
             if let StmtKind::Function {
                 name,
@@ -68,7 +68,7 @@ pub(super) fn file(
             }
         })
         .collect();
-    let mut checker = Checker::new(typer, scopes.untraced());
+    let mut checker = Checker::new(typer, scopes.untraced(), source_module);
     let mut results = Vec::new();
     let mut names = BTreeMap::new();
     for (i, (name, params, result, _, _)) in functions.iter().enumerate() {
@@ -84,7 +84,7 @@ pub(super) fn file(
         names.insert(name.val.to_string(), i);
         results.push(result);
     }
-    for stmt in &file.stmts {
+    for stmt in file.declarations() {
         if let StmtKind::ForeignFunction {
             name,
             params,

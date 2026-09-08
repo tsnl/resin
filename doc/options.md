@@ -34,7 +34,7 @@ then widen into a larger union at its consumer. Mutable pointer and Span element
 types remain invariant: `Ptr<int> | None` does not become `Ptr<int | None>`.
 
 In a shader, failure stops the invocation and propagates through shader callers,
-preserving prior writes, as for bounds and numeric-conversion traps. This does not
+preserving prior writes, as for numeric-conversion traps. This does not
 report a panic to the host or roll back a dispatch. Traps do not unwind cleanup.
 Prefer `match` when absence is expected. Shader-local unions support only payloads
 supported by the shader backend; union buffer layouts are not part of this change.

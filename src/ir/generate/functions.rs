@@ -12,9 +12,10 @@ impl Generator {
         name: &Ident,
         params: &[(Ident, Type)],
         result: &Type,
-    ) -> Result<(), GenerateError> {
-        let params = self.declare_function(name, params, result)?;
-        let function = self.module.functions.last_mut().unwrap();
+    ) -> Result<FunctionId, GenerateError> {
+        let id = self.declare_function(name, params, result)?;
+        let params = self.typer.declared_function(id).params.clone();
+        let function = &mut self.module.functions[id.index()];
         let foreign = Foreign {
             header: header.into(),
             params,
@@ -27,7 +28,7 @@ impl Generator {
         }
         function.foreign = Some(foreign);
         function.blocks.clear();
-        Ok(())
+        Ok(id)
     }
 
     pub(super) fn declare_function(
@@ -35,7 +36,7 @@ impl Generator {
         name: &Ident,
         params: &[(Ident, Type)],
         result: &Type,
-    ) -> Result<Vec<Ty>, GenerateError> {
+    ) -> Result<FunctionId, GenerateError> {
         let mut names = std::collections::HashSet::new();
         for (name, _) in params {
             Self::check_binding_name(name)?;
@@ -55,6 +56,7 @@ impl Generator {
         let param = Ty::parameter(&params);
         let result = self.evaluator().ty(result)?;
         let id = FunctionId::from_index(self.module.functions.len());
+        self.typer.register_function(id, params, result.clone());
         self.module.origins.functions.insert(
             id,
             crate::ast::SourceLocation {
@@ -78,7 +80,7 @@ impl Generator {
                 initialization: Initialization::Initialized,
             },
         )?;
-        Ok(params)
+        Ok(id)
     }
 
     pub(super) fn gen_function(

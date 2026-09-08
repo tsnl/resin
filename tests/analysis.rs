@@ -55,6 +55,118 @@ struct Project {
 }
 
 #[test]
+fn inherent_methods_have_navigation_hover_and_member_completion() {
+    let library = "export { Counter }; struct Counter { count: int }; impl Counter { def new() -> Counter = { Counter { count = 7 } }; def read(self: Ptr<Counter>) -> int = { self.count }; }";
+    for incomplete in [None, Some("c"), Some("Counter")] {
+        let tail = incomplete
+            .map(|base| format!("{base}.;"))
+            .unwrap_or_default();
+        let source = format!(
+            "import {{ \"lib.resin\" }}; def main() = {{ var c = Counter.new(); c.read(); {tail} }};"
+        );
+        let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert_eq!(
+            analysis.diagnostics.is_empty(),
+            incomplete.is_none(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        for method in ["new", "read"] {
+            let call = source.find(&format!(".{method}()")).unwrap() + 1;
+            let definition = analysis.definition(&path, call).unwrap();
+            assert_eq!(definition.path, project.path("lib.resin"));
+            assert_eq!(
+                definition.span.start,
+                library.find(&format!("{method}(")).unwrap()
+            );
+            assert!(
+                analysis
+                    .hover(&path, call)
+                    .unwrap()
+                    .text
+                    .starts_with(&format!("def {method}("))
+            );
+            let items = analysis.completions(&path, call);
+            assert!(items.iter().any(|item| item.name == method
+                && item.kind == resin::analysis::DefinitionKind::Function));
+        }
+        let global = analysis.completions(&path, source.find("var c").unwrap());
+        assert!(
+            global
+                .iter()
+                .all(|item| item.name != "read" && item.name != "new")
+        );
+        if let Some(base) = incomplete {
+            let items = analysis.completions(
+                &path,
+                source.rfind(&format!("{base}.;")).unwrap() + base.len() + 1,
+            );
+            assert_eq!(
+                items
+                    .iter()
+                    .map(|item| item.name.as_str())
+                    .collect::<Vec<_>>(),
+                if base == "c" {
+                    vec!["count", "read"]
+                } else {
+                    vec!["new", "read"]
+                }
+            );
+        }
+    }
+    let project = Project::new(&[("main.resin", library)]);
+    let items = project.analyze().completions(
+        &project.path("main.resin"),
+        library.find("self.count").unwrap(),
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| item.name != "read" && item.name != "new")
+    );
+}
+
+#[test]
+fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
+    for receiver in ["values", "holder.values"] {
+        for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
+            let source = format!(
+                "def main() = {{ var values = [1, 2]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2L }} }}; {receiver}.at(0).* := 3;{tail} }};"
+            );
+            let project = Project::new(&[("main.resin", &source)]);
+            let analysis = project.analyze();
+            let path = project.path("main.resin");
+            assert_eq!(
+                analysis.diagnostics.is_empty(),
+                tail.is_empty(),
+                "{:?}",
+                analysis.diagnostics
+            );
+            let offset = source.find(".at(0)").unwrap() + 1;
+            assert_eq!(
+                analysis.hover(&path, offset).unwrap().text,
+                "at: (integer) -> Ptr<int>"
+            );
+            let items = analysis.completions(&path, offset);
+            assert!(
+                items.iter().any(|item| item.name == "at"
+                    && item.kind == resin::analysis::DefinitionKind::Function)
+            );
+            if !tail.is_empty() {
+                let offset = source.rfind(".;").or_else(|| source.rfind(".at(")).unwrap() + 1;
+                let items = analysis.completions(&path, offset);
+                assert!(
+                    items.iter().any(|item| item.name == "at"),
+                    "{source}\n{items:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn deferred_bindings_keep_navigation_types_and_local_scopes() {
     let source = "def main() = { var value = 1; { defer { var inner: _; inner := value; print(\"{0}\", (inner,)); }; var value = 2; () }; };";
     let project = Project::new(&[("main.resin", source)]);
@@ -948,5 +1060,27 @@ fn suffixes_and_one_armed_if_have_editor_types() {
             .unwrap()
             .text,
         "speed: float32"
+    );
+}
+
+#[test]
+fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
+    let source = "struct Counter { count: int }; impl Counter { def add(counter: Counter, amount: int) -> int = { counter.count + amount }; } def f(c: Counter) -> int = { c.add(1) };";
+    for end in source
+        .char_indices()
+        .map(|(index, _)| index)
+        .chain([source.len()])
+    {
+        let project = Project::new(&[("main.resin", &source[..end])]);
+        project.analyze();
+    }
+    let source = "struct Counter { count: int }; impl Counter { def read(counter: Counter) -> int = { counter.count }; } def f(c: Counter) = { c.read(; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let offset = source.rfind("read").unwrap();
+    assert!(
+        analysis
+            .definition(&project.path("main.resin"), offset)
+            .is_some()
     );
 }

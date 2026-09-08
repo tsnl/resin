@@ -30,6 +30,20 @@ fn defer_lowers_to_shader_control_flow_including_error_exits() {
 }
 
 #[test]
+fn shader_indexing_emits_no_bounds_checks() {
+    for indexing in ["values(i)", "values.at(i)", "view(i)", "view.at(i)"] {
+        let m = module(&format!(
+            "export {{ kernel }}; def kernel(i: uint, output: Ptr<uint>) = {{ var values = [1I, 2I]; var view = Span<uint> {{ data = output, length = 2L }}; output.* := {indexing}.*; }};"
+        ));
+        let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+        assert!(!source.contains("r_failed = true"), "{source}");
+        if let Some(compiler) = shaders::compiler() {
+            toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
+        }
+    }
+}
+
+#[test]
 fn shader_helpers_can_propagate_and_handle_results() {
     let m = module(
         "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } }; };",

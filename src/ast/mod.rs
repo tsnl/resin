@@ -21,6 +21,16 @@ pub struct SourceFile {
     pub stmts: Vec<Stmt>,
 }
 
+impl SourceFile {
+    /// Visit declarations inside impl blocks without erasing their AST structure.
+    pub fn declarations(&self) -> impl Iterator<Item = &Stmt> {
+        self.stmts.iter().flat_map(|stmt| match &stmt.val {
+            StmtKind::Impl { methods, .. } => methods.as_slice(),
+            _ => std::slice::from_ref(stmt),
+        })
+    }
+}
+
 pub type Type = Spanned<TypeKind>;
 
 #[derive(Debug, Clone)]
@@ -106,6 +116,11 @@ pub enum TermKind {
     },
     Unit,
     None,
+    MethodCall {
+        receiver: Box<Term>,
+        name: Ident,
+        arg: Box<Term>,
+    },
     Call {
         func: Box<Term>,
         arg: Box<Term>,
@@ -161,7 +176,12 @@ pub enum StmtKind {
         params: Vec<(Ident, Type)>,
         result: Type,
     },
+    Impl {
+        receiver: Ident,
+        methods: Vec<Stmt>,
+    },
     Function {
+        receiver: Option<Ident>,
         decorators: Vec<Ident>,
         name: Ident,
         params: Vec<(Ident, Type)>,

@@ -6,21 +6,18 @@ use std::{cell::RefCell, rc::Rc};
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::ast::{Program, SourceError, SourceFile, Span, StmtKind};
-use crate::ir::{FunctionId, Module};
+use crate::ir::{
+    FunctionId, Module,
+    typer::{SourceModuleId, SourceOrigin},
+};
 
 use super::{
     GenerateError, GenerateErrorKind, Generator, Scopes,
     scope::{Symbol, ValueBindingKind},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Origin {
-    module: usize,
-    span: Span,
-}
-
 struct Export {
-    origin: Origin,
+    origin: SourceOrigin,
     symbol: Symbol,
 }
 
@@ -45,6 +42,7 @@ fn generate_program_with(
     let mut exports = Vec::<Exports>::new();
     for (index, source) in program.modules.iter().enumerate() {
         generator.source_path = source.path.clone();
+        generator.source_module = SourceModuleId::from_index(index);
         generator
             .module
             .origins
@@ -65,14 +63,14 @@ fn generate_program_with(
                         name.clone(),
                         matches!(export.symbol, Symbol::Type(_)),
                         SourceLocation {
-                            path: program.modules[export.origin.module].path.clone(),
+                            path: program.modules[export.origin.module.index()].path.clone(),
                             span: export.origin.span,
                         },
                     );
                 }
             }
         }
-        for stmt in &source.file.stmts {
+        for stmt in source.file.declarations() {
             let name = match &stmt.val {
                 StmtKind::ForeignType { name }
                 | StmtKind::ForeignFunction { name, .. }
@@ -81,10 +79,10 @@ fn generate_program_with(
                 | StmtKind::DefineType { name, .. }
                 | StmtKind::Struct { name, .. }
                 | StmtKind::Declare { name, .. } => name,
-                StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
+                StmtKind::Impl { .. } | StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
             };
-            let origin = Origin {
-                module: index,
+            let origin = SourceOrigin {
+                module: generator.source_module,
                 span: name.span,
             };
             bind(program, index, &mut names, &name.val, origin, name.span)?;
@@ -122,16 +120,17 @@ fn generate_program_with(
 fn bind(
     program: &Program,
     module: usize,
-    names: &mut BTreeMap<Arc<str>, Origin>,
+    names: &mut BTreeMap<Arc<str>, SourceOrigin>,
     name: &Arc<str>,
-    origin: Origin,
+    origin: SourceOrigin,
     span: Span,
 ) -> Result<bool, SourceError> {
     if let Some(previous) = names.get(name) {
         if *previous == origin {
             return Ok(false);
         }
-        let location = |origin: &Origin| program.modules[origin.module].location(origin.span);
+        let location =
+            |origin: &SourceOrigin| program.modules[origin.module.index()].location(origin.span);
         let mut error = program.modules[module].error(
             span,
             format!(
@@ -143,7 +142,7 @@ fn bind(
         for origin in [previous, &origin] {
             error.related.push(SourceNote {
                 location: SourceLocation {
-                    path: program.modules[origin.module].path.clone(),
+                    path: program.modules[origin.module.index()].path.clone(),
                     span: origin.span,
                 },
                 message: "defined here".into(),

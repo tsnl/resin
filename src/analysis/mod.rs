@@ -244,7 +244,11 @@ impl Analysis {
                     }
                 }
             }
-            for definition in document.definitions.iter().filter(|d| d.top_level) {
+            for definition in document
+                .definitions
+                .iter()
+                .filter(|d| d.top_level && !d.member)
+            {
                 merge_binding(
                     &mut bindings,
                     definition.name.clone(),
@@ -275,7 +279,9 @@ impl Analysis {
         let mut locals = document
             .definitions
             .iter()
-            .filter(|d| !d.top_level && contains(d.scope, offset) && d.visible_after <= offset)
+            .filter(|d| {
+                !d.top_level && !d.member && contains(d.scope, offset) && d.visible_after <= offset
+            })
             .collect::<Vec<_>>();
         // Apply outer scopes before inner scopes. Same-scope duplicates remain
         // ambiguous instead of selecting an arbitrary declaration.
@@ -329,9 +335,6 @@ impl Analysis {
                     });
             }
         }
-        if !document.reference(token) {
-            return None;
-        }
         let location = SourceLocation {
             path: path.to_path_buf(),
             span: span(token),
@@ -341,6 +344,9 @@ impl Analysis {
         }
         if let Some(origin) = self.semantics.references.get(&location) {
             return Some(origin.clone());
+        }
+        if !document.reference(token) {
+            return None;
         }
         let exports = token.parent().is_some_and(|p| p.kind() == "export_clause");
         self.visible(path, offset, exports)
@@ -373,7 +379,22 @@ impl Analysis {
                 text: help.to_string(),
             });
         }
-        let origin = self.definition(path, offset)?;
+        let Some(origin) = self.definition(path, offset) else {
+            let location = SourceLocation {
+                path: path.to_path_buf(),
+                span: span(token),
+            };
+            let member = self
+                .semantics
+                .fields
+                .get(&location)?
+                .iter()
+                .find(|member| member.name == text)?;
+            return Some(Hover {
+                span: span(token),
+                text: format!("{}: {}", member.name, member.ty),
+            });
+        };
         let definition = self
             .documents
             .get(&origin.path)?
@@ -456,11 +477,11 @@ impl Analysis {
         let mut items = fields
             .into_iter()
             .flatten()
-            .filter(|(name, _)| name.starts_with(prefix))
-            .map(|(name, ty)| Completion {
-                name: name.clone(),
-                detail: format!("{name}: {ty}"),
-                kind: DefinitionKind::Field,
+            .filter(|member| member.name.starts_with(prefix))
+            .map(|member| Completion {
+                name: member.name.clone(),
+                detail: format!("{}: {}", member.name, member.ty),
+                kind: member.kind,
                 replace,
             })
             .collect::<Vec<_>>();
@@ -494,6 +515,11 @@ fn merge_binding(
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
+        "impl",
+        "impl T { def method(self: Ptr<T>) = {}; } — inherent methods.",
+        DefinitionKind::Keyword,
+    ),
+    (
         "print",
         "print(format, arguments)\n\nPrint formatted values on the host. Numbered placeholders use {0}, {1}, ….",
         DefinitionKind::Function,
@@ -505,7 +531,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "Span",
-        "Span<T>\n\nA pointer and length describing elements of T. Calling span(index) returns a bounds-checked Ptr<T>.",
+        "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index) returns Ptr<T>; shader indexing is unchecked.",
         DefinitionKind::Type,
     ),
     (

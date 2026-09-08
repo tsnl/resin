@@ -643,3 +643,161 @@ fn shader_objects_can_reference_private_helpers() {
             .any(|i| matches!(i, ir::Instr::Shader { .. }))
     );
 }
+
+#[test]
+fn inherent_methods_keep_impl_nodes_and_follow_exported_types() {
+    let source = r#"
+        export { Counter };
+        struct Counter { value: int };
+        impl Counter {
+            def new(value: int) -> Counter = { Counter { value = value } };
+            def add(self: Ptr<Counter>, a: int, b: int) = { self.value := self.value + a + b; };
+            def read(self: Counter) -> int = { self.value };
+        }
+    "#;
+    let file = support::parse(source);
+    assert_eq!(file.stmts.len(), 2);
+    let ast::StmtKind::Impl { receiver, methods } = &file.stmts[1].val else {
+        panic!("expected an impl declaration");
+    };
+    assert_eq!(receiver.val.as_ref(), "Counter");
+    assert_eq!(methods.len(), 3);
+    assert!(ast::print::format_source(&file).contains("(impl"));
+    let project = Project::new(&[
+        ("counter.resin", source),
+        (
+            "main.resin",
+            r#"
+            export { main }; import { "counter.resin" };
+            def main() -> int = {
+                var c = Counter.new(30);
+                c.add(5, 7);
+                var p = &c;
+                if (p.read() == 42 && c.read() == 42) { 0 } else { 1 }
+            };
+        "#,
+        ),
+    ]);
+    let output = project.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn methods_validate_declarations_and_call_receivers() {
+    for (source, message) in [
+        (
+            "struct A {}; impl A { def f(self: int) = {}; } def g(a: A) = { a.f(); };",
+            "method receiver does not match",
+        ),
+        (
+            "struct A {}; impl A { def f() = {}; def f() = {}; }",
+            "DuplicateValue",
+        ),
+        (
+            "struct A {}; impl A { def f(self: A) = {}; } def g() = { A.f(); };",
+            "TypeMismatch",
+        ),
+        (
+            "struct A {}; impl A { def f() = {}; } def g(a: A) = { a.f(); };",
+            "method receiver does not match",
+        ),
+    ] {
+        let error = ir::generate(&support::parse(source))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(message), "{error}");
+    }
+    let project = Project::new(&[
+        ("a.resin", "export { A }; struct A {};"),
+        (
+            "main.resin",
+            "import { \"a.resin\" }; impl A { def f() = {}; }",
+        ),
+    ]);
+    project.error("impl requires a type defined in this module");
+}
+
+#[test]
+fn method_syntax_and_field_calls_have_distinct_meanings() {
+    let source = r#"
+        export { main };
+        struct Counter { read: (int) -> int };
+        def field(n: int) -> int = { n + 1 };
+        impl Counter {
+            def read(counter: Counter, n: int) -> int = { (counter.read)(n) + 40 };
+            def other(self: int) -> int = { self };
+        }
+        def main() -> int = {
+            var c = Counter { read = field };
+            if (c.read(1) == 42 && (c.read)(1) == 2 && Counter.read(c, 1) == 42 && Counter.other(42) == 42) { 0 } else { 1 }
+        };
+    "#;
+    let project = Project::new(&[("main.resin", source)]);
+    let output = project.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let error = ir::generate(&support::parse(
+        "struct Record { call: (int) -> int }; def f(r: Record) -> int = { r.call(1) };",
+    ))
+    .unwrap_err();
+    assert!(error.to_string().contains("unknown method"));
+}
+
+#[test]
+fn indexing_methods_require_one_integer_and_do_not_replace_nominal_methods() {
+    for arg in ["1f", "1 == 1", "", "0, 1"] {
+        let source = format!("def f() = {{ var values = [1, 2]; values.at({arg}); }};");
+        assert!(ir::generate(&support::parse(&source)).is_err(), "{source}");
+    }
+    let project = Project::new(&[(
+        "main.resin",
+        "export { main }; struct Item { value: int }; impl Item { def at(item: Item, flag: bool) -> int = { if (flag) { item.value } else { 0 } }; } def main() -> int = { var item = Item { value = 42 }; item.at(1 == 1) };",
+    )]);
+    assert_eq!(project.run().status.code(), Some(42));
+}
+
+#[test]
+fn aliases_share_the_nominal_namespace_and_origin() {
+    let project = Project::new(&[
+        (
+            "library.resin",
+            "export { Alias, Item }; struct Item { value: int }; type Alias = Item; impl Alias { def read(value: Item) -> int = { value.value }; }",
+        ),
+        (
+            "main.resin",
+            "export { main }; import { \"library.resin\" }; def main() -> int = { var value = Item { value = 42 }; if (value.read() == Alias.read(value)) { 0 } else { 1 } };",
+        ),
+    ]);
+    assert_eq!(project.run().status.code(), Some(0));
+    let project = Project::new(&[
+        ("library.resin", "export { Item }; struct Item {};"),
+        (
+            "main.resin",
+            "import { \"library.resin\" }; type Alias = Item; impl Alias { def f() = {}; }",
+        ),
+    ]);
+    project.error("defined in this module");
+    let source = "struct Item {}; type Alias = Item; impl Item { def f() = {}; } impl Alias { def f() = {}; }";
+    assert!(
+        ir::generate(&support::parse(source))
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate method")
+    );
+    let source = "type Number = int; impl Number { def f() = {}; }";
+    assert!(
+        ir::generate(&support::parse(source))
+            .unwrap_err()
+            .to_string()
+            .contains("nominal struct")
+    );
+}

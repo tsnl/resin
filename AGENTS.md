@@ -43,6 +43,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.
+- `impl` adds functions to the defining module's nominal type namespace; aliases retain
+  that origin. `value.method(args)` supplies the receiver as the first argument,
+  while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
+  identifiers. Desugar method calls into ordinary functions before IR; method namespaces
+  and module origins belong to frontend metadata.
 - Numeric suffixes are case-sensitive: `b/B`, `h/H`, `i/I`, and `l/L` select signed/unsigned
   8/16/32/64-bit integers; `f/d` select float32/float64. Suffixes fix literal types and retain
   range checking. Hex literals only accept suffixes that are not hex digits (`h/H`, `i/I`, `l/L`).
@@ -55,8 +60,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
-- Arrays and `Span<T>` use call syntax for checked indexing: `items(index)` returns `Ptr<T>`;
-  use `items(index).*` to read or write. Spans have `data` and `length` fields. Pointer arithmetic
+- Arrays and `Span<T>` provide indexing with `items.at(index)`, returning `Ptr<T>`;
+  use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
+  Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
+  shader indexing is unchecked, and callers must stay within valid storage.
+  Spans have `data` and `length` fields. Pointer arithmetic
   is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic. The C ABI retains
   pointer/length pairs; language-facing pipeline creation accepts spans.
 - Unions contain value types and use module-wide u32 type IDs, not variant positions.

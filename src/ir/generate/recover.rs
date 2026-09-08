@@ -7,8 +7,11 @@ use super::{
 };
 use crate::{
     analysis::semantic::{SemanticData, Trace},
-    ast::{Ident, Program, SourceLocation, Span, Stmt, StmtKind, Term, TermKind, Type},
-    ir::{LocalId, RecordField, Ty, TyperContext},
+    ast::{Ident, Program, SourceFile, SourceLocation, Span, Stmt, StmtKind, Term, TermKind, Type},
+    ir::{
+        FunctionId, LocalId, RecordField, Ty, TyperContext,
+        typer::{FunctionDecl, SourceModuleId, SourceOrigin},
+    },
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
@@ -16,7 +19,8 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
     let data = Rc::new(RefCell::new(SemanticData::default()));
     let mut typer = TyperContext::new();
     let mut exports: Vec<BTreeMap<Arc<str>, (Symbol, SourceLocation)>> = Vec::new();
-    for source in &program.modules {
+    let mut next_function = 0;
+    for (index, source) in program.modules.iter().enumerate() {
         let trace = Trace {
             path: source.path.clone(),
             data: data.clone(),
@@ -25,6 +29,8 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
             scopes: Scopes::traced(trace.clone()),
             typer: &mut typer,
             trace,
+            source_module: SourceModuleId::from_index(index),
+            next_function: &mut next_function,
         };
         let mut imports = BTreeMap::new();
         for &dependency in &source.imports {
@@ -48,62 +54,9 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
             pass.scopes
                 .record_import(name, matches!(symbol, Symbol::Type(_)), origin);
         }
-        for stmt in &source.file.stmts {
-            match &stmt.val {
-                StmtKind::ForeignType { name } => {
-                    let _ = pass.scopes.define_foreign_type(name.val.clone());
-                    pass.scopes.record_definition(name, true, None, pass.typer);
-                }
-                StmtKind::DefineType { .. } | StmtKind::Struct { .. } => pass.statement(stmt),
-                _ => {}
-            }
-        }
-        for stmt in &source.file.stmts {
-            if let StmtKind::Function {
-                name,
-                params,
-                result,
-                ..
-            }
-            | StmtKind::ForeignFunction {
-                name,
-                params,
-                result,
-                ..
-            } = &stmt.val
-            {
-                let params: Option<Vec<_>> = params.iter().map(|(_, ann)| pass.ty(ann)).collect();
-                let result = pass.ty(result);
-                let ty = params.zip(result).map(|(p, r)| Ty::Function {
-                    param: Box::new(Ty::parameter(&p)),
-                    result: Box::new(r),
-                });
-                pass.bind(name, ty);
-                if matches!(&stmt.val, StmtKind::Function { decorators, .. } if decorators.len() == 1 && matches!(decorators[0].val.as_ref(), "compute_shader" | "vertex_shader" | "fragment_shader"))
-                    && let Some(binding) = pass.scopes.lookup_value_mut(&name.val)
-                {
-                    binding.shader = true;
-                }
-            }
-        }
-        for stmt in &source.file.stmts {
-            if let StmtKind::Function {
-                params,
-                result,
-                body,
-                ..
-            } = &stmt.val
-            {
-                pass.scopes.push();
-                for (name, ann) in params {
-                    let ty = pass.ty(ann);
-                    pass.bind(name, ty);
-                }
-                let expected = pass.ty(result);
-                pass.term(body, expected.as_ref());
-                pass.scopes.pop();
-            }
-        }
+        pass.declare_types(&source.file);
+        pass.declare_functions(&source.file);
+        pass.function_bodies(&source.file);
         let mut exported = BTreeMap::new();
         for name in &source.file.exports {
             if let Some(symbol) = pass.scopes.symbol(&name.val) {
@@ -128,8 +81,151 @@ struct Recovery<'a> {
     scopes: Scopes,
     typer: &'a mut TyperContext,
     trace: Trace,
+    source_module: SourceModuleId,
+    next_function: &'a mut usize,
 }
 impl Recovery<'_> {
+    fn declare_types(&mut self, file: &SourceFile) {
+        for stmt in file.declarations() {
+            match &stmt.val {
+                StmtKind::ForeignType { name } => {
+                    let _ = self.scopes.define_foreign_type(name.val.clone());
+                    self.scopes.record_definition(name, true, None, self.typer);
+                }
+                StmtKind::DefineType { .. } | StmtKind::Struct { .. } => self.statement(stmt),
+                _ => {}
+            }
+        }
+    }
+
+    fn declare_functions(&mut self, file: &SourceFile) {
+        for stmt in file.declarations() {
+            match &stmt.val {
+                StmtKind::Function { .. } => self.declare_function(stmt),
+                StmtKind::ForeignFunction {
+                    name,
+                    params,
+                    result,
+                    ..
+                } => {
+                    self.signature(name, params, result);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn signature(
+        &mut self,
+        name: &Ident,
+        params: &[(Ident, Type)],
+        result: &Type,
+    ) -> Option<FunctionDecl> {
+        let function = FunctionId::from_index(*self.next_function);
+        *self.next_function += 1;
+        let params = params
+            .iter()
+            .map(|(_, ann)| self.ty(ann))
+            .collect::<Option<Vec<_>>>();
+        let signature = params
+            .zip(self.ty(result))
+            .map(|(params, result)| FunctionDecl {
+                function,
+                params,
+                result,
+            });
+        // Keep the binding even when its signature is incomplete, so recovery
+        // never substitutes a shadowed declaration with the same name.
+        self.bind(name, signature.as_ref().map(FunctionDecl::ty));
+        signature
+    }
+
+    fn declare_function(&mut self, stmt: &Stmt) {
+        let StmtKind::Function {
+            receiver,
+            name,
+            params,
+            result,
+            decorators,
+            ..
+        } = &stmt.val
+        else {
+            unreachable!()
+        };
+        let signature = self.signature(name, params, result);
+        if let Some(receiver) = receiver
+            && let Some(signature) = signature
+        {
+            self.declare_method(receiver, name, signature);
+        }
+        self.shader_declaration(name, decorators);
+    }
+
+    fn declare_method(&mut self, receiver: &Ident, name: &Ident, signature: FunctionDecl) {
+        let Some(Ty::Defined { definition }) = self.scopes.lookup_type(&receiver.val) else {
+            return;
+        };
+        if self
+            .typer
+            .type_origin(definition)
+            .map(|origin| origin.module)
+            != Some(self.source_module)
+        {
+            return;
+        }
+        self.typer
+            .register_function(signature.function, signature.params, signature.result);
+        if self.typer.define_method(
+            definition,
+            name.val.rsplit('.').next().unwrap().into(),
+            signature.function,
+        ) {
+            self.scopes.record_method_definition(definition, name);
+        }
+    }
+
+    fn shader_declaration(&mut self, name: &Ident, decorators: &[Ident]) {
+        if let [decorator] = decorators
+            && matches!(
+                decorator.val.as_ref(),
+                "compute_shader" | "vertex_shader" | "fragment_shader"
+            )
+            && let Some(binding) = self.scopes.lookup_value_mut(&name.val)
+        {
+            binding.shader = true;
+        }
+    }
+
+    fn function_bodies(&mut self, file: &SourceFile) {
+        for stmt in file.declarations() {
+            if let StmtKind::Function {
+                params,
+                result,
+                body,
+                ..
+            } = &stmt.val
+            {
+                self.scopes.push();
+                for (name, ann) in params {
+                    let ty = self.ty(ann);
+                    self.bind(name, ty);
+                }
+                let expected = self.ty(result);
+                self.term(body, expected.as_ref());
+                self.scopes.pop();
+            }
+        }
+    }
+
+    fn member_base(&mut self, base: &Term) -> Option<(Ty, bool)> {
+        if let TermKind::Type { ty } = &base.val {
+            self.ty(ty).map(|ty| (ty, true))
+        } else {
+            self.term(base, None)
+                .map(|ty| (self.properties(base, ty), false))
+        }
+    }
+
     fn properties(&self, base: &Term, ty: Ty) -> Ty {
         if matches!(&base.val, TermKind::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| binding.shader))
         {
@@ -197,7 +293,13 @@ impl Recovery<'_> {
                 if name.val.is_empty() {
                     return;
                 }
-                let id = self.typer.reserve_type(name.val.clone());
+                let id = self.typer.declare_type(
+                    name.val.clone(),
+                    SourceOrigin {
+                        module: self.source_module,
+                        span: name.span,
+                    },
+                );
                 if self.scopes.define_type(name.val.clone(), id).is_ok() {
                     self.scopes.record_definition(name, true, None, self.typer);
                     if let Some(body) = self.ty(init) {
@@ -265,14 +367,14 @@ impl Recovery<'_> {
                 None
             }
             TermKind::FieldHole { base } => {
-                if let Some(ty) = self.term(base, None) {
-                    let ty = self.properties(base, ty);
-                    self.trace.record_fields(
+                if let Some((ty, associated)) = self.member_base(base) {
+                    self.trace.record_members(
                         self.trace.location(Span {
                             start: term.span.end,
                             end: term.span.end,
                         }),
                         &ty,
+                        associated,
                         self.typer,
                     );
                 }
@@ -309,12 +411,23 @@ impl Recovery<'_> {
                 ty
             }
             TermKind::Field { base, name } => {
-                let ty = self.term(base, None);
-                ty.and_then(|ty| {
-                    let ty = self.properties(base, ty);
-                    self.trace
-                        .record_fields(self.trace.location(name.span), &ty, self.typer);
-                    self.typer.type_field(&ty, &name.val).ok().map(|f| f.ty)
+                self.member_base(base).and_then(|(ty, associated)| {
+                    self.trace.record_members(
+                        self.trace.location(name.span),
+                        &ty,
+                        associated,
+                        self.typer,
+                    );
+                    if !associated && let Ok(field) = self.typer.type_field(&ty, &name.val) {
+                        Some(field.ty)
+                    } else {
+                        // An unfinished `value.method(` may recover as a field.
+                        // Keep navigation without inventing a bound function value.
+                        if self.typer.method(&ty, &name.val).is_some() {
+                            self.trace.record_method(name, &ty, associated, self.typer);
+                        }
+                        None
+                    }
                 })
             }
             TermKind::Address { place } => self.term(place, None).map(|ty| Ty::Pointer {
@@ -386,14 +499,41 @@ impl Recovery<'_> {
                             .map(|b| b.result)
                     })
             }
+            TermKind::MethodCall {
+                receiver,
+                name,
+                arg,
+            } => {
+                let (ty, associated) = self.member_base(receiver)?;
+                self.trace.record_method(name, &ty, associated, self.typer);
+                if let Some(result) = self.typer.index_method(&ty, &name.val, associated) {
+                    self.term(arg, None).filter(Ty::is_integer).map(|_| result)
+                } else {
+                    let method = self.typer.method(&ty, &name.val)?.clone();
+                    let params = method.arguments(&ty, associated)?;
+                    self.term(arg, Some(&Ty::parameter(params)))?;
+                    Some(method.result)
+                }
+            }
             TermKind::Call { func, arg } => {
                 if let TermKind::Type { ty } = &func.val {
                     let target = self.ty(ty);
-                    let shape = target.as_ref().and_then(|t| self.typer.body(t).ok());
+                    let shape = target
+                        .as_ref()
+                        .and_then(|t| self.typer.body(t).ok())
+                        .and_then(|t| {
+                            let t = t.span_record().unwrap_or(t);
+                            matches!(t, Ty::Record { .. } | Ty::Array { .. }).then_some(t)
+                        });
                     let value = self.term(arg, shape.as_ref());
-                    target
-                        .zip(value)
-                        .and_then(|(t, v)| self.typer.type_ascription(&t, &v).ok())
+                    target.zip(value).and_then(|(t, v)| {
+                        if v.pointer_cast(&t) || v.is_numeric() && t.is_numeric() || v.widens_to(&t)
+                        {
+                            Some(t)
+                        } else {
+                            self.typer.type_ascription(&t, &v).ok()
+                        }
+                    })
                 } else {
                     let callee = self.term(func, None);
                     let param = callee.as_ref().and_then(|c| {

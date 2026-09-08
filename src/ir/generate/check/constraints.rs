@@ -18,6 +18,7 @@ pub(super) enum Constraint {
     Deref(Type, Type),
     Field(Type, Arc<str>, Type),
     Call(Type, Type, Type),
+    Method(Type, Arc<str>, Type, Type, bool),
     Ascribe(Type, Type, bool),
     Record(Vec<(Arc<str>, Type)>, Type),
     Builtin(Arc<str>, Vec<Type>, Type),
@@ -88,6 +89,39 @@ impl Checker<'_> {
 
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
+            Constraint::Method(receiver_type, name, arg, out, associated) => {
+                if !associated
+                    && name.as_ref() == "at"
+                    && matches!(
+                        self.shape(receiver_type, false, span)?,
+                        Type::Node(Head::Span | Head::Array(_), _)
+                    )
+                {
+                    return self.constraint(
+                        &Constraint::Call(receiver_type.clone(), arg.clone(), out.clone()),
+                        span,
+                    );
+                }
+                let Some(receiver_type) = self.solver.resolve(receiver_type) else {
+                    return Ok(false);
+                };
+                let method = self
+                    .typer
+                    .method(&receiver_type, name)
+                    .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
+                let params = method
+                    .arguments(&receiver_type, *associated)
+                    .ok_or_else(|| {
+                        error(span, "method receiver does not match the first parameter")
+                    })?;
+                let a = self
+                    .solver
+                    .coerce(arg, &Ty::parameter(params).into(), span)?;
+                let b = self
+                    .solver
+                    .coerce(&method.result.clone().into(), out, span)?;
+                return Ok(a && b);
+            }
             Constraint::Layout(ty) => {
                 let Some(ty) = self.solver.resolve(ty) else {
                     return Ok(false);

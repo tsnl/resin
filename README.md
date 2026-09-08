@@ -383,8 +383,8 @@ cc -std=c11 -fno-strict-aliasing -I resin-runtime/include fibonacci.c \
 ```
 
 `--cc PATH` selects the C compiler without shell parsing.
-Integer arithmetic wraps to its declared width; invalid division, shifts, and dynamic array
-indexes fail with a diagnostic. There is no optimizer or stable generated ABI yet.
+Integer arithmetic wraps to its declared width; on the host, invalid division, shifts, and
+dynamic array indexes fail with a diagnostic. There is no optimizer or stable generated ABI yet.
 
 ## Formatting
 
@@ -573,22 +573,23 @@ Pointer arithmetic is forbidden. Use array or span indexing, or explicitly conve
 into `ulong`, perform **byte** arithmetic, and convert back when low-level address manipulation
 is necessary. Pointer casts and dereferences remain unchecked.
 
-Arrays and spans use function-call indexing and return `Ptr<T>`:
+Arrays and spans use `.at(index)` for indexing and return `Ptr<T>`:
 
 ```resin
 var values = [10, 20, 30];
-values(1).* := 42;
+values.at(1).* := 42;
 var view = Span<int> { data = Ptr<int>(&values), length = ulong(3) };
-var element = view(1);
+var element = view.at(1);
 print("{0}\n", (element.*,));
 ```
 
-`Span<T>` has `data: Ptr<T>` and `length: ulong` fields. Array indexing checks the fixed array
-length; span indexing checks its runtime length. Negative and out-of-range indices fail before
-an element address is formed. On the host this terminates the program with an index diagnostic.
-On the GPU it stops the failing invocation, including its callers; earlier writes remain and
-outputs from a failing graphics invocation are unspecified. Bounds failure does not run `defer`
-cleanup. Constructing a span does not validate its pointer, allocation size, or lifetime.
+The original `values(index)` spelling also remains available. `Span<T>` has `data: Ptr<T>`
+and `length: ulong` fields. Neither spelling guarantees bounds checking. Host indexing checks
+the array or span length and terminates with a diagnostic for negative or out-of-range indices,
+before forming an element address. This failure does not run `defer` cleanup.
+Shader array and span indexing is unchecked: callers must keep indices within valid storage;
+out-of-range access has undefined behavior. Constructing a span does not validate its pointer,
+allocation size, or lifetime.
 
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. String literals are NUL-terminated; pass their storage with a
@@ -710,7 +711,7 @@ Calling the same function on the CPU requires a root containing host pointers in
 Shader bodies support 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
 indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
-checked function-call indexing. Local addresses
+unchecked `.at()` indexing. Local addresses
 may only be used directly for loads, stores, indexing, and field access; they cannot be stored, passed,
 returned, or carried across control-flow edges. Device addresses can. `print` is host-only.
 
@@ -874,7 +875,7 @@ floating-point environment. Float32-to-float64 is exact. Float64-to-float32 over
 produces signed infinity; results below the smallest normal float32 magnitude become
 signed zero. NaNs remain NaNs without a payload guarantee. Signed zero is preserved.
 C traps abort the process; shader traps stop that invocation and propagate failure
-through helper calls, like checked-index failures. Traps do not run deferred cleanup.
+through helper calls. Traps do not run deferred cleanup.
 A shader trap is not a host-visible Result error, and earlier writes remain visible.
 
 The shared shader profile supports `int`, `uint`, `ulong`, and `float32` conversions.
@@ -902,3 +903,5 @@ checking unreachable code; neither backend constructs a value of that type. C ab
 and shaders stop the invocation if invalid external memory somehow supplies a `Never`.
 This defensive trap does not unwind cleanup. Reachable `ok` and `?` paths retain normal
 defer behavior. Matches over inhabited variants still require exhaustive, unique arms.
+
+Inherent methods and associated functions use [`impl` blocks](doc/methods.md).
