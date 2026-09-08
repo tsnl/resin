@@ -82,7 +82,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Interleave typing and generation in one expression traversal, injecting shared typing rules.
   Resolve dependency groups before finalizing concrete IR; never put inference variables in IR.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
-  Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
+  Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation
+  index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
 - Arrays and `Span<T>` provide indexing with `items.at(index)`, returning `Ptr<T>`;

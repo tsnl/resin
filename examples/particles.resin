@@ -8,7 +8,6 @@ import {
 
 struct Particle { x: float32, y: float32, z: float32, vx: float32, vy: float32, vz: float32 };
 struct Params {
-	count: uint,
 	dt: float32,
 	yaw_cos: float32,
 	yaw_sin: float32,
@@ -37,9 +36,9 @@ def advance(p: Particle, dt: float32) -> Particle = {
 };
 
 @compute_shader
-def kernel(index: uint, root: Ptr<Params>) -> () = {
-	if (index < root.count) {
-		var p = root.particles.at(ulong(index));
+def kernel(index: ulong, root: Ptr<Params>) -> () = {
+	if (index < root.particles.length) {
+		var p = root.particles.at(index);
 		p.* := advance(advance(p.*, root.dt), root.dt);
 	}
 };
@@ -270,7 +269,6 @@ def main() -> Result<(), _> = {
 	initialize(host_particles, seed);
 	var params = Ptr<Params>(root.host_pointer());
 	params.* := Params {
-		count = count,
 		dt = 0.005_f,
 		yaw_cos = 1.0_f,
 		yaw_sin = 0.0_f,

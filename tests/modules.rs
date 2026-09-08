@@ -433,15 +433,15 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
     let project = Project::new(&[
         (
             "left.resin",
-            "export { left }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i + uint(1) }; }; def left (i: uint, output: Ptr<uint>) = { kernel(i, output); };",
+            "export { left }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + uint(1) }; }; def left (i: uint, output: Ptr<uint>) = { kernel(ulong(i), output); };",
         ),
         (
             "right.resin",
-            "export { right }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i + uint(2) }; }; def right (i: uint, output: Ptr<uint>) = { kernel(i, output); };",
+            "export { right }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + uint(2) }; }; def right (i: uint, output: Ptr<uint>) = { kernel(ulong(i), output); };",
         ),
         (
             "main.resin",
-            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { left(i, output); right(i, output); }; def main() -> () = { var code = kernel.spirv; };",
+            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); left(i, output); right(i, output); }; def main() -> () = { var code = kernel.spirv; };",
         ),
     ]);
     let module = project.compile().unwrap();
@@ -449,7 +449,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { kernel }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; };",
+            "export { kernel }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; };",
         ),
         ("main.resin", "import { \"library.resin\" };"),
     ]);
@@ -634,7 +634,7 @@ fn functions_cannot_capture_another_functions_locals() {
 #[test]
 fn shader_objects_can_reference_private_helpers() {
     let module = support::module(
-        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() -> () = { var code = kernel.spirv; };",
+        "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> () = { var code = kernel.spirv; };",
     );
     assert!(!module.entries.contains_key("kernel"));
     assert!(

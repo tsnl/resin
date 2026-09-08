@@ -5,11 +5,15 @@ use super::types::Types;
 pub(super) fn emit(types: &Types<'_>, param: &Ty, result: &Ty, interface: &Interface) -> String {
     match interface {
         Interface::Compute { index } => {
+            // Widen before multiplication: gl_GlobalInvocationID is only 32-bit.
             let arg = argument(
                 types,
                 param,
                 true,
-                types.wrap(index, "gl_GlobalInvocationID.x".into()),
+                types.wrap(
+                    index,
+                    "uint64_t(gl_WorkGroupID.x) * uint64_t(gl_WorkGroupSize.x) + uint64_t(gl_LocalInvocationID.x)".into(),
+                ),
             );
             format!(
                 "layout(local_size_x = 64) in;\n{}\nvoid main() {{ r_entry({arg}); }}\n",

@@ -696,7 +696,7 @@ Shader entry points are ordinary functions with declaration decorators:
 export { main };
 
 @compute_shader
-def kernel(index: uint, output: Ptr<uint>) = { output.* := index; };
+def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };
 def main() = {
     var code = kernel.spirv;
     print(fmt("shader size: {0} bytes\n", (code.length,)));
@@ -730,12 +730,12 @@ Shaders receive application data through the root address passed to `gpu_dispatc
 `gpu_draw`. Add a typed pointer as the second tuple element:
 
 ```resin
-struct Params { count: uint, values: Span<float32>, scale: float32 };
+struct Params { values: Span<float32>, scale: float32 };
 
 @compute_shader
-def kernel(index: uint, root: Ptr<Params>) -> () = {
-    if (index < root.count) {
-        var p = root.values(index);
+def kernel(index: ulong, root: Ptr<Params>) -> () = {
+    if (index < root.values.length) {
+        var p = root.values.at(index);
         p.* := p.* * root.scale;
         ()
     } else { () }
@@ -744,7 +744,7 @@ def kernel(index: uint, root: Ptr<Params>) -> () = {
 
 The entry interfaces are:
 
-- Compute takes `(uint, Ptr<T>)` and returns `()`. Workgroups contain 64 invocations; the
+- Compute takes `(ulong, Ptr<T>)` and returns `()`. Workgroups contain 64 invocations; the
   index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard any
   excess invocations in the function, as above.
 - Vertex takes an `int` vertex index, optionally paired with `Ptr<T>`, and returns

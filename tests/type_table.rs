@@ -60,7 +60,7 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         struct HostOnly { unrelated: float64 };
         def choose(i: uint) -> uint | None = { if (i == 0_ui) { None } else { i } };
         def main() -> int = { int(choose(42_ui)!) };
-        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := choose(i)!; };
+        @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := choose(i)!; };
         "#,
     );
     let optional = module.functions[0].result.clone();
