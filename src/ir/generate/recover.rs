@@ -10,7 +10,7 @@ use crate::{
     ast::{Ident, Program, SourceFile, SourceLocation, Span, Stmt, StmtKind, Term, TermKind, Type},
     ir::{
         FunctionId, LocalId, RecordField, Ty, TyperContext,
-        typer::{FunctionBody, FunctionDecl, SourceModuleId, SourceOrigin},
+        typecheck::{FunctionBody, FunctionDecl, SourceModuleId, SourceOrigin},
     },
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
@@ -242,7 +242,6 @@ impl Recovery<'_> {
         Evaluator {
             scopes: &self.scopes,
             typer: self.typer,
-            checked: None,
         }
         .ty(ty)
         .ok()
@@ -385,7 +384,6 @@ impl Recovery<'_> {
             TermKind::Num { value } => Evaluator {
                 scopes: &self.scopes,
                 typer: self.typer,
-                checked: None,
             }
             .number(term.span, value, expected)
             .ok()

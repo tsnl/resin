@@ -220,22 +220,6 @@ fn recursive_span_and_function_fields_have_finite_layouts() {
 }
 
 #[test]
-fn numeric_literals_keep_their_default_types() {
-    let typer = TyperContext::new();
-    for literal in ["0", "123", "-123", "0x1e", "0X10", "-0x1e", "-0XFE"] {
-        assert_eq!(typer.type_num(literal), Ty::Int32, "{literal}");
-    }
-    for literal in ["1.5", "-1.5", "1e3", "-1E3", "1e-3"] {
-        assert_eq!(typer.type_num(literal), Ty::Float64, "{literal}");
-    }
-}
-
-#[test]
-fn type_terms_inhabit_the_type_universe() {
-    assert_eq!(TyperContext::new().type_type(&Ty::Int32), Ty::Type);
-}
-
-#[test]
 fn empty_arrays_need_an_injected_element_type() {
     let typer = TyperContext::new();
 
@@ -253,40 +237,36 @@ fn empty_arrays_need_an_injected_element_type() {
 }
 
 #[test]
-fn nominal_records_expose_fields_without_losing_identity() {
+fn field_access_preserves_nominal_identity_and_autoderefs_pointers() {
     let mut typer = TyperContext::new();
-    let body = Ty::Record {
-        fields: vec![RecordField {
-            name: "value".into(),
-            ty: Ty::Int32,
-        }],
-    };
+    let body = record(Ty::Int32);
     let definition = typer.create_type("Node", body.clone()).unwrap();
     let node = Ty::Defined { definition };
-
-    assert_eq!(
-        typer.type_field(&node, "value").unwrap(),
-        FieldAccess {
-            ty: Ty::Int32,
-            index: 0,
-            steps: vec![Conv::Unwrap { definition }],
-        }
-    );
+    let pointer = Ty::Pointer {
+        pointee: Box::new(body.clone()),
+    };
+    for (base, steps) in [
+        (node.clone(), vec![Conv::Unwrap { definition }]),
+        (pointer, vec![Conv::Deref]),
+    ] {
+        assert_eq!(
+            typer.type_field(&base, "value").unwrap(),
+            FieldAccess {
+                ty: Ty::Int32,
+                index: 0,
+                steps
+            }
+        );
+    }
     assert!(matches!(
         typer.type_assign(&node, &body),
         Err(TypeError {
             kind: TypeErrorKind::TypeMismatch { .. }
         })
     ));
-}
-
-#[test]
-fn pointer_dereference_is_explicit() {
-    let typer = TyperContext::new();
     let pointer = Ty::Pointer {
         pointee: Box::new(Ty::Int64),
     };
-
     assert_eq!(typer.type_deref(&pointer).unwrap(), Ty::Int64);
     assert!(matches!(
         typer.type_field(&pointer, "value"),
@@ -294,30 +274,6 @@ fn pointer_dereference_is_explicit() {
             kind: TypeErrorKind::ExpectedRecord { .. }
         })
     ));
-}
-
-#[test]
-fn field_access_autoderefs_pointers() {
-    let record = Ty::Record {
-        fields: vec![RecordField {
-            name: "x".into(),
-            ty: Ty::Int32,
-        }],
-    };
-    let pointer = Ty::Pointer {
-        pointee: Box::new(record),
-    };
-    let access = TyperContext::new().type_field(&pointer, "x").unwrap();
-    assert_eq!(access.ty, Ty::Int32);
-    assert_eq!(access.steps, vec![Conv::Deref]);
-}
-
-#[test]
-fn child_types_compose_into_a_function_call() {
-    let typer = TyperContext::new();
-    let function = typer.type_function(&Ty::Int32, &Ty::Float64);
-
-    assert_eq!(typer.type_call(&function, &Ty::Int32).unwrap(), Ty::Float64);
 }
 
 #[test]
@@ -351,8 +307,6 @@ fn ascription_wraps_records_but_does_not_flatten_nested_fields() {
             .create_type("Distance", distance_body.clone())
             .unwrap(),
     };
-    assert_eq!(typer.type_ascription(&meters, &body).unwrap(), meters);
-    assert_eq!(typer.type_ascription(&body, &meters).unwrap(), body);
     assert_eq!(
         typer.type_ascription(&distance, &distance_body).unwrap(),
         distance
@@ -393,27 +347,6 @@ fn builtin_signatures_follow_the_operator() {
             );
         }
     }
-}
-
-#[test]
-fn builtin_arithmetic_has_no_type_trait_constraint() {
-    let typer = TyperContext::new();
-    let unusual_operand = Ty::Record {
-        fields: vec![RecordField {
-            name: "value".into(),
-            ty: Ty::Int32,
-        }],
-    };
-
-    let call = typer
-        .type_builtin_call("+", &[unusual_operand.clone(), unusual_operand.clone()])
-        .unwrap();
-
-    assert_eq!(
-        call.params,
-        vec![unusual_operand.clone(), unusual_operand.clone()]
-    );
-    assert_eq!(call.result, unusual_operand);
 }
 
 #[test]
@@ -458,5 +391,82 @@ fn builtin_errors_distinguish_arity_names_and_types() {
             typer.type_builtin_call(name, &args).unwrap_err().kind,
             TypeErrorKind::ExpectedBoolean { found: Ty::Int32 }
         );
+    }
+}
+
+#[test]
+fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
+    let mut context = TyperContext::new();
+    let first = context.create_type("First", record(Ty::Int32)).unwrap();
+    let second = context.create_type("Second", record(Ty::Int32)).unwrap();
+    let nominal = Ty::Defined { definition: first };
+    let other = Ty::Defined { definition: second };
+    let union = Ty::union([first, second]);
+    let pointer = |ty| Ty::Pointer {
+        pointee: Box::new(ty),
+    };
+    let span = Ty::Span {
+        element: Box::new(Ty::Int32),
+    };
+    let span_record = span.span_record().unwrap();
+    for (from, to, expected) in [
+        (Ty::Int32, Ty::Int32, ExplicitConversion::Ascribe(vec![])),
+        (
+            pointer(Ty::Int32),
+            pointer(Ty::Int32),
+            ExplicitConversion::Ascribe(vec![]),
+        ),
+        (
+            record(Ty::Int32),
+            nominal.clone(),
+            ExplicitConversion::Ascribe(vec![Conv::Wrap { definition: first }]),
+        ),
+        (
+            nominal.clone(),
+            record(Ty::Int32),
+            ExplicitConversion::Ascribe(vec![Conv::Unwrap { definition: first }]),
+        ),
+        (
+            span.clone(),
+            span_record.clone(),
+            ExplicitConversion::Ascribe(vec![Conv::SpanRecord]),
+        ),
+        (
+            span_record,
+            span,
+            ExplicitConversion::Ascribe(vec![Conv::MakeSpan]),
+        ),
+        (Ty::Int32, Ty::Float64, ExplicitConversion::NumericCast),
+        (nominal.clone(), union.clone(), ExplicitConversion::Widen),
+        (
+            pointer(nominal.clone()),
+            pointer(union.clone()),
+            ExplicitConversion::PointerCast,
+        ),
+        (
+            pointer(Ty::Int32),
+            Ty::UInt64,
+            ExplicitConversion::PointerCast,
+        ),
+        (
+            Ty::UInt64,
+            pointer(Ty::Int32),
+            ExplicitConversion::PointerCast,
+        ),
+    ] {
+        assert_eq!(context.explicit_conversion(&from, &to).unwrap(), expected);
+        if !matches!(expected, ExplicitConversion::Ascribe(_)) {
+            assert!(context.ascribe(&from, &to).is_err());
+        }
+    }
+    assert!(!pointer(nominal.clone()).widens_to(&pointer(union.clone())));
+    for (from, to) in [
+        (nominal, other),
+        (union, Ty::Defined { definition: first }),
+        (pointer(Ty::Int32), Ty::Int64),
+        (Ty::Int32, pointer(Ty::Int32)),
+        (Ty::Unit, Ty::Record { fields: vec![] }),
+    ] {
+        assert!(context.explicit_conversion(&from, &to).is_err());
     }
 }

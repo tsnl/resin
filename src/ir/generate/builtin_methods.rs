@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::ir::{
     Instr, Ty, TyperContext,
-    typer::{FunctionBody, FunctionDecl},
+    typecheck::{FunctionBody, FunctionDecl},
 };
 
 pub(super) fn register(typer: &mut TyperContext) {

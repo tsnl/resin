@@ -1,5 +1,8 @@
-use crate::ast::{Ident, Term, Type};
-use crate::ir::{Foreign, FunctionId, Instr, LocalId, Terminator, Ty};
+use super::plan::{Signature, Term};
+use crate::ast::Ident;
+use crate::ir::{
+    Foreign, FunctionId, Instr, LocalId, Terminator, Ty, typecheck::check_binding_name,
+};
 
 use super::builder::FunctionBuilder;
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
@@ -10,10 +13,9 @@ impl Generator {
         &mut self,
         header: &str,
         name: &Ident,
-        params: &[(Ident, Type)],
-        result: &Type,
+        signature: &Signature,
     ) -> Result<FunctionId, GenerateError> {
-        let id = self.declare_function(name, params, result)?;
+        let id = self.declare_function(name, signature)?;
         let params = self.typer.declared_function(id).params.clone();
         let function = &mut self.module.functions[id.index()];
         let foreign = Foreign {
@@ -34,12 +36,12 @@ impl Generator {
     pub(super) fn declare_function(
         &mut self,
         name: &Ident,
-        params: &[(Ident, Type)],
-        result: &Type,
+        signature: &Signature,
     ) -> Result<FunctionId, GenerateError> {
+        let params = &signature.params;
         let mut names = std::collections::HashSet::new();
         for (name, _) in params {
-            Self::check_binding_name(name)?;
+            check_binding_name(name)?;
             if !names.insert(&name.val) {
                 return Err(GenerateError {
                     span: name.span,
@@ -51,10 +53,10 @@ impl Generator {
         }
         let params = params
             .iter()
-            .map(|(_, ann)| self.evaluator().ty(ann))
+            .map(|(_, ann)| ann.resolve(self))
             .collect::<Result<Vec<_>, _>>()?;
         let param = Ty::parameter(&params);
-        let result = self.evaluator().ty(result)?;
+        let result = signature.result.resolve(self)?;
         let id = FunctionId::from_index(self.module.functions.len());
         self.typer.register_function(id, params, result.clone());
         self.module.origins.functions.insert(
@@ -86,7 +88,7 @@ impl Generator {
     pub(super) fn gen_function(
         &mut self,
         name: &Ident,
-        params: &[(Ident, Type)],
+        signature: &Signature,
         body: &Term,
     ) -> Result<(), GenerateError> {
         let binding = self.resolve_value(name)?;
@@ -95,23 +97,15 @@ impl Generator {
         };
         self.function_id = Some(id);
         self.source_span = name.span;
-        self.module.origins.functions.insert(
-            id,
-            crate::ast::SourceLocation {
-                path: self.source_path.clone(),
-                span: name.span,
-            },
-        );
         let result = self.module.functions[id.index()].result.clone();
         self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
         self.function().result(result.clone());
         self.scopes.push();
         self.owned.push(vec![LocalId::from_index(0)]);
-        self.bind_params(params)?;
+        self.bind_params(signature)?;
         self.gen_term(body, Some(&result))?;
         self.cleanup(0, &result);
         self.owned.pop();
-        self.function().result(result);
         self.terminate(Terminator::Return);
         self.module.functions[id.index()] = self.function.take().unwrap().finish();
         self.function_id = None;
@@ -119,10 +113,11 @@ impl Generator {
         Ok(())
     }
 
-    fn bind_params(&mut self, params: &[(Ident, Type)]) -> Result<Ty, GenerateError> {
+    fn bind_params(&mut self, signature: &Signature) -> Result<Ty, GenerateError> {
+        let params = &signature.params;
         let mut param_tys = Vec::with_capacity(params.len());
         for (_, ann) in params {
-            param_tys.push(self.evaluator().ty(ann)?);
+            param_tys.push(ann.resolve(self)?);
         }
         let param_ty = Ty::parameter(&param_tys);
         let parameter = LocalId::from_index(0);

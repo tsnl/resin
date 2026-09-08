@@ -1,7 +1,7 @@
-use std::sync::Arc;
+//! Emit blocks and branches for source-level control-flow expressions.
 
-use crate::ast::{Span, Stmt, Term};
-use crate::ir::{Instr, Terminator, Ty, TypeError, TypeErrorKind, Value};
+use super::plan::{Statement, Term};
+use crate::ir::{Instr, Terminator, Ty, Value};
 
 use super::{GenerateError, Generator};
 
@@ -13,7 +13,7 @@ impl Generator {
         self.terminate(Terminator::Break { target: condition });
 
         self.switch(condition);
-        self.gen_bool(cond)?;
+        self.gen_term(cond, None)?;
         let after_condition = self.scopes.clone();
         self.terminate(Terminator::Branch {
             then: body_block,
@@ -65,39 +65,27 @@ impl Generator {
 
     pub(super) fn gen_block(
         &mut self,
-        stmts: &[Stmt],
+        stmts: &[Statement],
         tail: &Term,
         expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         self.scopes.push();
         self.owned.push(vec![]);
         for stmt in stmts {
-            self.gen_stmt(stmt)?;
+            stmt(self)?;
         }
         let ty = self.gen_term(tail, Some(expected))?;
         self.cleanup(self.owned.len() - 1, &ty);
         self.owned.pop();
         self.scopes.pop();
-        Ok(self.typer.type_block(&ty))
+        Ok(ty)
     }
 
     pub(super) fn gen_short_circuit(
         &mut self,
-        span: Span,
         name: &str,
         args: &[Term],
     ) -> Result<Ty, GenerateError> {
-        if args.len() != 2 {
-            return Err(GenerateError::typing(
-                span,
-                TypeError {
-                    kind: TypeErrorKind::InvalidBuiltinArgumentCount {
-                        name: Arc::from(name),
-                        found: args.len(),
-                    },
-                },
-            ));
-        }
         self.gen_term(&args[0], None)?;
         let then_block = self.new_block("then");
         let else_block = self.new_block("else");
@@ -109,7 +97,7 @@ impl Generator {
         let before_right = self.scopes.clone();
         if name == "&&" {
             self.switch(then_block);
-            self.gen_bool(&args[1])?;
+            self.gen_term(&args[1], None)?;
             self.terminate(Terminator::Break { target: join_block });
             self.switch(else_block);
             self.emit(Instr::Push {
@@ -123,16 +111,11 @@ impl Generator {
             });
             self.terminate(Terminator::Break { target: join_block });
             self.switch(else_block);
-            self.gen_bool(&args[1])?;
+            self.gen_term(&args[1], None)?;
             self.terminate(Terminator::Break { target: join_block });
         }
         self.switch(join_block);
         self.scopes.intersect_initialization(&before_right);
-        Ok(Ty::Bool)
-    }
-
-    fn gen_bool(&mut self, term: &Term) -> Result<Ty, GenerateError> {
-        self.gen_term(term, None)?;
         Ok(Ty::Bool)
     }
 }

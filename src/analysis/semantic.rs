@@ -92,7 +92,7 @@ impl Trace {
     ) {
         self.record_members(self.location(name.span), ty, associated, typer);
         if let Some(method) = typer.method(ty, &name.val)
-            && matches!(method.body, crate::ir::typer::FunctionBody::Defined(_))
+            && matches!(method.body, crate::ir::typecheck::FunctionBody::Defined(_))
             && let Some(receiver) = typer.receiver_definition(ty)
         {
             let mut data = self.data.borrow_mut();

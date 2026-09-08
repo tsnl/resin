@@ -64,7 +64,16 @@ impl fmt::Display for GenerateError {
 impl std::error::Error for GenerateError {}
 
 impl GenerateError {
-    pub(super) fn typing(span: Span, error: TypeError) -> Self {
+    pub(in crate::ir) fn inference(span: Span, message: impl Into<Arc<str>>) -> Self {
+        Self {
+            span,
+            kind: GenerateErrorKind::Inference {
+                message: message.into(),
+            },
+        }
+    }
+
+    pub(in crate::ir) fn typing(span: Span, error: TypeError) -> Self {
         Self {
             span,
             kind: GenerateErrorKind::Type(error.kind),

@@ -1,15 +1,14 @@
 use std::fmt;
 
-use crate::ast::{Ident, Span, Type, TypeKind};
-use crate::ir::{RecordField, Ty, TyperContext, Value};
+use crate::ast::{Span, Type};
+use crate::ir::{Ty, TyperContext, Value};
 
 use super::scope::Scopes;
 use super::{GenerateError, GenerateErrorKind};
 
-pub(super) struct Evaluator<'a> {
-    pub(super) scopes: &'a Scopes,
-    pub(super) typer: &'a TyperContext,
-    pub(super) checked: Option<&'a std::collections::HashMap<*const Type, Ty>>,
+pub(in crate::ir) struct Evaluator<'a> {
+    pub(in crate::ir) scopes: &'a Scopes,
+    pub(in crate::ir) typer: &'a TyperContext,
 }
 
 impl Evaluator<'_> {
@@ -51,124 +50,29 @@ impl Evaluator<'_> {
         Ok(self.typer.type_num(text))
     }
 
-    pub(super) fn ty(&self, ty: &Type) -> Result<Ty, GenerateError> {
-        match &ty.val {
-            TypeKind::Infer => self
-                .checked
-                .and_then(|types| types.get(&std::ptr::from_ref(ty)))
-                .cloned()
-                .ok_or_else(|| GenerateError {
-                    span: ty.span,
-                    kind: GenerateErrorKind::Inference {
-                        message:
-                            "type holes are only allowed in local annotations and function results"
-                                .into(),
-                    },
-                }),
-            TypeKind::Hole => Err(GenerateError {
-                span: ty.span,
-                kind: GenerateErrorKind::IncompleteSyntax,
-            }),
-            TypeKind::Unit => Ok(Ty::Unit),
-            TypeKind::Result { value, error } => {
-                let value = self.ty(value)?;
-                let error = self.ty(error)?;
-                if error.variants().is_none() {
-                    return Err(super::check::error(
-                        ty.span,
-                        "Result errors must be structs or unions of structs",
-                    ));
-                }
-                Ok(Ty::Result {
-                    value: Box::new(value),
-                    error: Box::new(error),
-                })
-            }
-            TypeKind::Union { left, right } => Ok(Ty::union_of([self.ty(left)?, self.ty(right)?])),
-            TypeKind::Atom { name } => {
+    pub(in crate::ir) fn ty(&self, ty: &Type) -> Result<Ty, GenerateError> {
+        let mut solver = crate::ir::typecheck::infer::solver::Solver::default();
+        let inferred = super::annotation::Decoder {
+            solver: &mut solver,
+            holes: &mut Vec::new(),
+            resolve: &mut |name| {
                 if name.val.as_ref() == "String" {
-                    return self.typer.string_type.clone().ok_or(GenerateError {
+                    return Ok(self.typer.string_type.clone().expect("builtin String"));
+                }
+                self.scopes.record_reference(name, true);
+                self.scopes
+                    .lookup_type(&name.val)
+                    .ok_or_else(|| GenerateError {
                         span: name.span,
-                        kind: GenerateErrorKind::IncompleteSyntax,
-                    });
-                }
-                if let Some(builtin) = builtin_ty(&name.val) {
-                    return Ok(builtin);
-                }
-                self.resolve_type(name)
-            }
-            TypeKind::App { head, arg } => {
-                let arg = self.ty(arg)?;
-                match head.val.as_ref() {
-                    "Arc" => Ok(Ty::Arc {
-                        pointee: Box::new(arg),
-                    }),
-                    "Weak" => Ok(Ty::Weak {
-                        pointee: Box::new(arg),
-                    }),
-                    "Ptr" => Ok(Ty::Pointer {
-                        pointee: Box::new(arg),
-                    }),
-                    "Span" => Ok(Ty::Span {
-                        element: Box::new(arg),
-                    }),
-                    _ => Err(GenerateError {
-                        span: head.span,
-                        kind: GenerateErrorKind::UnknownTypeFormer {
-                            name: head.val.clone(),
+                        kind: GenerateErrorKind::UnboundType {
+                            name: name.val.clone(),
                         },
-                    }),
-                }
-            }
-            TypeKind::Func { from, to } => Ok(Ty::Function {
-                param: Box::new(self.ty(from)?),
-                result: Box::new(self.ty(to)?),
-            }),
-            TypeKind::Record { fields } => {
-                let mut typed = Vec::with_capacity(fields.len());
-                for (name, field_ty) in fields {
-                    typed.push(RecordField {
-                        name: name.val.clone(),
-                        ty: self.ty(field_ty)?,
-                    });
-                }
-                self.typer
-                    .type_record(&typed)
-                    .map_err(|err| GenerateError::typing(ty.span, err))
-            }
+                    })
+            },
         }
+        .decode(ty, false)?;
+        solver.require(&inferred, ty.span)
     }
-
-    fn resolve_type(&self, name: &Ident) -> Result<Ty, GenerateError> {
-        self.scopes.record_reference(name, true);
-        self.scopes
-            .lookup_type(&name.val)
-            .ok_or_else(|| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::UnboundType {
-                    name: name.val.clone(),
-                },
-            })
-    }
-}
-
-fn builtin_ty(name: &str) -> Option<Ty> {
-    Some(match name {
-        "Never" => Ty::union([]),
-        "None" => Ty::None,
-        "bool" => Ty::Bool,
-        "sbyte" => Ty::Int8,
-        "short" => Ty::Int16,
-        "int" => Ty::Int32,
-        "long" => Ty::Int64,
-        "ubyte" => Ty::UInt8,
-        "ushort" => Ty::UInt16,
-        "uint" => Ty::UInt32,
-        "ulong" => Ty::UInt64,
-        "float32" => Ty::Float32,
-        "float64" => Ty::Float64,
-        _ => return None,
-    })
 }
 
 fn parse_number(text: &str, ty: &Ty) -> Result<Value, String> {
@@ -272,6 +176,7 @@ fn is_hex_literal(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{Ident, TypeKind};
 
     #[test]
     fn evaluation_only_needs_scopes_and_types() {
@@ -281,7 +186,6 @@ mod tests {
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
-            checked: None,
         };
         let span = Span { start: 4, end: 8 };
         let named = Type::new(
@@ -311,7 +215,6 @@ mod tests {
         let evaluator = Evaluator {
             scopes: &scopes,
             typer: &typer,
-            checked: None,
         };
         let span = Span { start: 0, end: 0 };
         for (text, expected, value, ty) in [

@@ -148,19 +148,9 @@ pub(super) fn ascribe(
     found: Ty,
     location: Location,
 ) -> Result<(), VerifyError> {
-    if expected == &found
-        || expected.span_record().as_ref() == Some(&found)
-        || found.span_record().as_ref() == Some(expected)
-    {
-        return Ok(());
-    }
-    if let Ty::Defined { definition } = expected
-        && &found == definition_body(table, *definition, location)?
-    {
-        return Ok(());
-    }
-    if let Ty::Defined { definition } = &found
-        && expected == definition_body(table, *definition, location)?
+    if crate::ir::typecheck::ascription(table, &found, expected)
+        .map_err(|error| location.error(error.into()))?
+        .is_some()
     {
         return Ok(());
     }

@@ -1,20 +1,29 @@
-//! Bottom-up typing rules over an owned nominal type table.
+//! Type checking: concrete typing rules and source-level inference.
+//!
+//! `TyperContext` owns nominal definitions and the rules shared by inference,
+//! generation, and IR verification. Generation injects the private inference
+//! services while planning expressions; type checking does not traverse the AST.
 
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::ir::types::definitions;
 use crate::ir::{Ty, TypeDef, TypeId, TypeTable};
 
+mod builtin;
 mod convert;
 mod error;
 mod methods;
 pub(crate) use methods::{
     FunctionBody, FunctionDecl, ReceiverConversion, SourceModuleId, SourceOrigin,
 };
+pub(in crate::ir) mod infer;
 mod rules;
 
-pub use convert::{Conv, Converted};
+pub(crate) use builtin::BuiltinRule;
+pub(crate) use convert::ascription;
+pub use convert::{Conv, Converted, ExplicitConversion};
 pub use error::{TypeError, TypeErrorKind};
+pub(super) use infer::check_binding_name;
 pub use rules::{BuiltinCall, FieldAccess};
 
 /// Type IDs are local to this context's definition table.

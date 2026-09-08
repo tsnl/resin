@@ -16,10 +16,10 @@ pub(super) enum Symbol {
 }
 
 #[derive(Clone)]
-pub(super) struct ValueBinding {
+pub(in crate::ir) struct ValueBinding {
     pub(super) kind: ValueBindingKind,
     pub(super) shader: bool,
-    pub(super) ty: Option<Ty>,
+    pub(in crate::ir) ty: Option<Ty>,
     pub(super) initialization: Initialization,
 }
 
@@ -78,13 +78,13 @@ impl Scope {
 }
 
 #[derive(Clone)]
-pub(super) struct Scopes {
+pub(in crate::ir) struct Scopes {
     frames: Vec<Scope>,
     trace: Option<Trace>,
 }
 
 impl Scopes {
-    pub(super) fn untraced(&self) -> Self {
+    pub(in crate::ir) fn untraced(&self) -> Self {
         Self {
             trace: None,
             ..self.clone()
@@ -198,11 +198,11 @@ impl Scopes {
         }
     }
 
-    pub(super) fn push(&mut self) {
+    pub(in crate::ir) fn push(&mut self) {
         self.frames.push(Scope::new());
     }
 
-    pub(super) fn pop(&mut self) {
+    pub(in crate::ir) fn pop(&mut self) {
         debug_assert!(self.frames.len() > 1, "cannot pop the outermost scope");
         self.frames.pop();
     }
@@ -215,7 +215,7 @@ impl Scopes {
         self.innermost().define_value(name, binding)
     }
 
-    pub(super) fn define_type(
+    pub(in crate::ir) fn define_type(
         &mut self,
         name: Arc<str>,
         definition: TypeId,
@@ -229,11 +229,11 @@ impl Scopes {
             .define_type(name.clone(), Ty::Foreign { name })
     }
 
-    pub(super) fn define_alias(&mut self, name: Arc<str>, ty: Ty) -> Result<(), Arc<str>> {
+    pub(in crate::ir) fn define_alias(&mut self, name: Arc<str>, ty: Ty) -> Result<(), Arc<str>> {
         self.innermost().define_type(name, ty)
     }
 
-    pub(super) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
+    pub(in crate::ir) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
         self.frames
             .iter()
             .rev()

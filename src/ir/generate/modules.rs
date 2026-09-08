@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::ast::{Program, SourceError, SourceFile, Span, StmtKind};
 use crate::ir::{
     FunctionId, Module,
-    typer::{SourceModuleId, SourceOrigin},
+    typecheck::{SourceModuleId, SourceOrigin},
 };
 
 use super::{
