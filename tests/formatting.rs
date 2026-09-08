@@ -200,8 +200,8 @@ fn else_if_chains_keep_else_and_if_together() {
 #[test]
 fn numeric_suffixes_and_one_armed_if_keep_their_spelling() {
     check(
-        "def main()={var a=42L;var b=-42l;if(a>0L){var c=1.5f;};};",
-        "def main() = {\n\tvar a = 42L;\n\tvar b = -42l;\n\tif (a > 0L) {\n\t\tvar c = 1.5f;\n\t};\n};\n",
+        "def main()={var a=42_ul;var b=-42_l;if(a>0_ul){var c=1.5_f;};};",
+        "def main() = {\n\tvar a = 42_ul;\n\tvar b = -42_l;\n\tif (a > 0_ul) {\n\t\tvar c = 1.5_f;\n\t};\n};\n",
     );
 }
 
@@ -230,5 +230,52 @@ fn impl_blocks_format_methods_as_declarations() {
     check(
         "struct N{v:int};impl N{def new(v:int)->N={N{v=v}};def read(self:N)->int={self.v};}def main()->int={N.new(42).read()};",
         "struct N { v: int };\nimpl N {\n\tdef new(v: int) -> N = {\n\t\tN { v = v }\n\t};\n\tdef read(self: N) -> int = {\n\t\tself.v\n\t};\n}\ndef main() -> int = {\n\tN.new(42).read()\n};\n",
+    );
+}
+
+#[test]
+fn numeric_suffixes_format_with_lowercase_and_one_separator() {
+    for (input, output) in [
+        ("42B", "42_b"),
+        ("42uB", "42_ub"),
+        ("42_UB", "42_ub"),
+        ("42H", "42_h"),
+        ("42Uh", "42_uh"),
+        ("42I", "42_i"),
+        ("42UI", "42_ui"),
+        ("42L", "42_l"),
+        ("42uL", "42_ul"),
+        ("1.5F", "1.5_f"),
+        ("1E3D", "1E3_d"),
+        ("1_000__UL", "1_000_ul"),
+        ("0xFFuB", "0xFF_ub"),
+        ("0x7F_B", "0x7F_b"),
+        ("0xAB", "0xAB"),
+        ("0x1_F", "0x1_F"),
+        ("0xdead", "0xdead"),
+        ("-128B", "-128_b"),
+        ("123", "123"),
+        ("1.5", "1.5"),
+    ] {
+        let source = format!("def main()={{var n={input};}};");
+        let expected = format!("def main() = {{\n\tvar n = {output};\n}};\n");
+        let formatted = format_source(&source).unwrap();
+        assert_eq!(formatted, expected, "{input}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        // Suffix normalization must preserve the parsed tree structure.
+        assert_eq!(
+            syntax(&source)
+                .iter()
+                .map(|(kind, _)| kind)
+                .collect::<Vec<_>>(),
+            syntax(&formatted)
+                .iter()
+                .map(|(kind, _)| kind)
+                .collect::<Vec<_>>()
+        );
+    }
+    check(
+        "// 42UL\ndef main()={var text=\"42UL 1.5F\";};",
+        "// 42UL\ndef main() = {\n\tvar text = \"42UL 1.5F\";\n};\n",
     );
 }

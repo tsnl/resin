@@ -261,7 +261,7 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
             .skip(1)
             .map(|g| g.ty.clone())
             .collect::<Vec<_>>(),
-        [Ty::Int32, Ty::Int64, Ty::Int32, Ty::Int64, Ty::Int32]
+        [Ty::Int64, Ty::Int64, Ty::Int64, Ty::Int64, Ty::Int64]
     );
     assert!(
         module.functions[0].blocks[0]
@@ -270,7 +270,7 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
             .any(|i| matches!(
                 i,
                 Instr::Push {
-                    value: Value::Int32 { value: i32::MIN }
+                    value: Value::Int64 { value: -2147483648 }
                 }
             ))
     );

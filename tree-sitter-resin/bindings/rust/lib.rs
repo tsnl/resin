@@ -57,6 +57,22 @@ mod tests {
     }
 
     #[test]
+    fn numeric_suffixes_require_valid_widths_and_unsigned_qualifiers() {
+        for literal in [
+            "1u", "1_u", "1uf", "1_UD", "1_u_i", "1lu", "1_uuL", "0xffuf",
+        ] {
+            let source = format!("def main() = {{ var n = {literal}; }};");
+            assert!(parse(&source).root_node().has_error(), "{literal}");
+        }
+        for literal in [
+            "1B", "1uB", "1_UB", "1Uh", "1_UI", "1_uL", "1F", "1_D", "0x7f_b", "0xff_UB",
+        ] {
+            let source = format!("def main() = {{ var n = {literal}; }};");
+            assert!(!parse(&source).root_node().has_error(), "{literal}");
+        }
+    }
+
+    #[test]
     fn parses_unit_and_tuple_function_types() {
         for source in [
             "type F = () -> int; def f () -> int = { 1 }; def main() -> () = { var x = f(); };",

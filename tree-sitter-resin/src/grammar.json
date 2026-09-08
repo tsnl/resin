@@ -2869,11 +2869,11 @@
         "members": [
           {
             "type": "PATTERN",
-            "value": "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?[bBhHiIlLfd]?"
+            "value": "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?([uU]?[bBhHiIlL]|[fFdD])?"
           },
           {
             "type": "PATTERN",
-            "value": "0[xX][0-9a-fA-F_]+[hHiIlL]?"
+            "value": "0[xX][0-9a-fA-F_]+([hHiIlL]|[uU][bBhHiIlL])?"
           }
         ]
       }

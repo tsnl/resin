@@ -30,7 +30,7 @@ fn explicit_holes_are_not_editor_recovery_holes() {
     assert!(ast::print::format_source(&file).contains("infer-type"));
     assert_eq!(
         self::result("def answer() -> _ = { 42 };", "answer"),
-        Ty::Int32
+        Ty::Int64
     );
 }
 
@@ -59,7 +59,7 @@ fn holes_compose_inside_pointers_spans_records_and_functions() {
     let Ty::Record { fields } = &m.functions[4].result else {
         panic!()
     };
-    assert_eq!(fields[1].ty, Ty::Int32);
+    assert_eq!(fields[1].ty, Ty::Int64);
     assert_eq!(fields[2].ty, Ty::Bool);
 }
 
@@ -70,14 +70,14 @@ fn later_assignments_resolve_local_holes() {
             "def answer() -> _ = { var n: _; var p: Ptr<_>; p := &n; n := 42; p.* };",
             "answer"
         ),
-        Ty::Int32
+        Ty::Int64
     );
     assert_eq!(
         result(
             "def answer() -> _ = { var n = 42; var p = Ptr<_>(&n); p.* };",
             "answer"
         ),
-        Ty::Int32
+        Ty::Int64
     );
 }
 
@@ -99,8 +99,8 @@ fn locally_inferred_function_types_are_monomorphic() {
 #[test]
 fn shadowed_function_names_do_not_create_inference_dependencies() {
     let source = "def first() -> _ = { var second = 42; second }; def second() -> _ = { first() };";
-    assert_eq!(result(source, "first"), Ty::Int32);
-    assert_eq!(result(source, "second"), Ty::Int32);
+    assert_eq!(result(source, "first"), Ty::Int64);
+    assert_eq!(result(source, "second"), Ty::Int64);
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn numeric_choices_are_delayed_until_context_is_known() {
         Ty::Int64
     );
     rejects(
-        "def value() -> _ = { 1 }; def use() -> long = { value() };",
+        "def value() -> _ = { 1 }; def use() -> int = { value() };",
         "TypeMismatch",
     );
 }
@@ -156,8 +156,8 @@ fn numeric_choices_are_delayed_until_context_is_known() {
 #[test]
 fn recursive_groups_infer_from_bodies_not_callers() {
     let source = "def odd(n: int) -> _ = { if (n == 0) { 0 } else { even(n - 1) } }; def even(n: int) -> _ = { odd(n) };";
-    assert_eq!(result(source, "odd"), Ty::Int32);
-    assert_eq!(result(source, "even"), Ty::Int32);
+    assert_eq!(result(source, "odd"), Ty::Int64);
+    assert_eq!(result(source, "even"), Ty::Int64);
     rejects(
         "def looped() -> _ = { looped() }; def main() -> int = { looped() };",
         "cannot infer",
@@ -226,7 +226,7 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
     let Ty::Record { fields } = &m.functions[0].result else {
         panic!()
     };
-    assert_eq!(fields[0].ty, Ty::Int32);
+    assert_eq!(fields[0].ty, Ty::Int64);
     assert_eq!(fields[1].ty, Ty::Bool);
 }
 
@@ -243,7 +243,7 @@ fn span_construction_and_indexing_infer_element_and_pointer_types() {
     );
     assert_eq!(
         result("def get() -> _ = { var xs = [1, 2]; xs(1).* };", "get"),
-        Ty::Int32
+        Ty::Int64
     );
     assert_eq!(
         result(
@@ -257,23 +257,23 @@ fn span_construction_and_indexing_infer_element_and_pointer_types() {
 #[test]
 fn numeric_suffixes_select_exact_types() {
     for (literal, ty) in [
-        ("-128b", Ty::Int8),
-        ("255B", Ty::UInt8),
-        ("-32768h", Ty::Int16),
-        ("65535H", Ty::UInt16),
-        ("-2147483648i", Ty::Int32),
-        ("4294967295I", Ty::UInt32),
-        ("-9223372036854775808l", Ty::Int64),
-        ("18446744073709551615L", Ty::UInt64),
-        ("1.25f", Ty::Float32),
-        ("1e2d", Ty::Float64),
-        ("42f", Ty::Float32),
-        ("42d", Ty::Float64),
-        ("0xFFFF_FFFFL", Ty::UInt64),
-        ("0x7fffl", Ty::Int64),
-        ("0xff", Ty::Int32),
-        ("0xAB", Ty::Int32),
-        ("0xdead", Ty::Int32),
+        ("-128_b", Ty::Int8),
+        ("255_ub", Ty::UInt8),
+        ("-32768_h", Ty::Int16),
+        ("65535_uh", Ty::UInt16),
+        ("-2147483648_i", Ty::Int32),
+        ("4294967295_ui", Ty::UInt32),
+        ("-9223372036854775808_l", Ty::Int64),
+        ("18446744073709551615_ul", Ty::UInt64),
+        ("1.25_f", Ty::Float32),
+        ("1e2_d", Ty::Float64),
+        ("42_f", Ty::Float32),
+        ("42_d", Ty::Float64),
+        ("0xFFFF_FFFF_ul", Ty::UInt64),
+        ("0x7fff_l", Ty::Int64),
+        ("0xff", Ty::Int64),
+        ("0xAB", Ty::Int64),
+        ("0xdead", Ty::Int64),
     ] {
         assert_eq!(
             result(&format!("def value() -> _ = {{ {literal} }};"), "value"),
@@ -281,10 +281,10 @@ fn numeric_suffixes_select_exact_types() {
         );
     }
     for source in [
-        "def value() -> long = { 42L };",
-        "def value() -> _ = { var n: long; n := 42L; n };",
-        "def value() -> _ = { 42L + 1l };",
-        "def value() -> float64 = { 1.5f };",
+        "def value() -> long = { 42_ul };",
+        "def value() -> _ = { var n: long; n := 42_ul; n };",
+        "def value() -> _ = { 42_ul + 1_l };",
+        "def value() -> float64 = { 1.5_f };",
     ] {
         assert!(ir::generate(&parse(source)).is_err(), "{source}");
     }
@@ -293,20 +293,20 @@ fn numeric_suffixes_select_exact_types() {
 #[test]
 fn suffixed_literals_reject_overflow_and_invalid_integer_forms() {
     for literal in [
-        "128b",
-        "256B",
-        "32768h",
-        "65536H",
-        "2147483648i",
-        "4294967296I",
-        "9223372036854775808l",
-        "18446744073709551616L",
-        "-1L",
-        "-129b",
-        "1.5L",
-        "1e3I",
-        "1e50f",
-        "1e400d",
+        "128_b",
+        "256_ub",
+        "32768_h",
+        "65536_uh",
+        "2147483648_i",
+        "4294967296_ui",
+        "9223372036854775808_l",
+        "18446744073709551616_ul",
+        "-1_ul",
+        "-129_b",
+        "1.5_ul",
+        "1e3_ui",
+        "1e50_f",
+        "1e400_d",
     ] {
         rejects(&format!("def value() -> _ = {{ {literal} }};"), "literal");
     }
@@ -319,7 +319,7 @@ fn else_if_chains_infer_results_and_require_unit_without_a_final_else() {
             "def f() -> _ = { if (1 == 0) { 1 } else if (1 == 1) { 2 } else { 3 } };",
             "f"
         ),
-        Ty::Int32,
+        Ty::Int64,
     );
     assert_eq!(
         result(
@@ -356,7 +356,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         assert_eq!(value.ty, Ty::UInt8, "{source}");
 
         let source = format!(
-            "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0i; consume(&value); }};"
+            "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0_i; consume(&value); }};"
         );
         let error = ir::generate(&parse(&source)).unwrap_err();
         assert!(
@@ -368,7 +368,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         );
 
         let source = format!(
-            "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2L }}; data.at(1).* }};"
+            "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data.at(1).* }};"
         );
         ir::generate(&parse(&source)).unwrap();
     }
@@ -390,7 +390,15 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
                 .flat_map(|f| &f.locals)
                 .find(|l| l.name.as_deref() == Some("n"))
                 .unwrap();
-            assert_eq!(n.ty, Ty::Int32, "{source}");
+            assert_eq!(
+                n.ty,
+                if bindings.contains("var n: int") {
+                    Ty::Int32
+                } else {
+                    Ty::Int64
+                },
+                "{source}"
+            );
             let bytes = m
                 .functions
                 .iter()
@@ -410,7 +418,7 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
 
 #[test]
 fn shared_layout_queries_reject_unsupported_or_unresolved_types() {
-    for operand in ["bool", "()", "[1B, 2B]"] {
+    for operand in ["bool", "()", "[1_ub, 2_ub]"] {
         rejects(
             &format!("def main() = {{ size_of({operand}); }};"),
             "no shared host/device layout",
@@ -432,7 +440,7 @@ fn numeric_conversions_do_not_choose_source_storage_types() {
             .find(|l| l.name.as_deref() == Some("n"))
             .unwrap()
             .ty,
-        Ty::Int32
+        Ty::Int64
     );
     assert!(
         m.functions[0]
@@ -532,7 +540,7 @@ fn numeric_defaults_stay_with_their_dependency_group() {
         let source = declarations.join(" ");
         let m = module(&source);
         for (name, expected) in [
-            ("plain", Ty::Int32),
+            ("plain", Ty::Int64),
             ("wide", Ty::UInt64),
             ("fraction", Ty::Float32),
             ("caller", Ty::UInt64),
@@ -548,4 +556,124 @@ fn numeric_defaults_stay_with_their_dependency_group() {
             );
         }
     }
+}
+
+#[test]
+fn numeric_suffixes_ignore_case_and_accept_optional_separators() {
+    for (digits, suffix, ty) in [
+        ("127", "b", Ty::Int8),
+        ("255", "ub", Ty::UInt8),
+        ("32767", "h", Ty::Int16),
+        ("65535", "uh", Ty::UInt16),
+        ("2147483647", "i", Ty::Int32),
+        ("4294967295", "ui", Ty::UInt32),
+        ("9223372036854775807", "l", Ty::Int64),
+        ("18446744073709551615", "ul", Ty::UInt64),
+        ("1.25", "f", Ty::Float32),
+        ("1e2", "d", Ty::Float64),
+        ("0xFF", "ub", Ty::UInt8),
+        ("0x7FFF", "h", Ty::Int16),
+        ("0xFFFF", "uh", Ty::UInt16),
+        ("0x7FFF_FFFF", "i", Ty::Int32),
+        ("0xFFFF_FFFF", "ui", Ty::UInt32),
+        ("0x7FFF_FFFF_FFFF_FFFF", "l", Ty::Int64),
+        ("0xFFFF_FFFF_FFFF_FFFF", "ul", Ty::UInt64),
+    ] {
+        for mask in 0..(1 << suffix.len()) {
+            let suffix: String = suffix
+                .chars()
+                .enumerate()
+                .map(|(i, c)| {
+                    if mask & (1 << i) != 0 {
+                        c.to_ascii_uppercase()
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            for separator in ["", "_"] {
+                let literal = format!("{digits}{separator}{suffix}");
+                assert_eq!(
+                    result(&format!("def value() -> _ = {{ {literal} }};"), "value"),
+                    ty,
+                    "{literal}"
+                );
+            }
+        }
+    }
+    for (literal, ty) in [
+        ("0x7f_b", Ty::Int8),
+        ("0X7F_B", Ty::Int8),
+        ("-0x80_b", Ty::Int8),
+        ("0xAB", Ty::Int64),
+        ("0x1_d", Ty::Int64),
+        ("0x1_F", Ty::Int64),
+        ("-0xdead", Ty::Int64),
+        ("-0XFE", Ty::Int64),
+    ] {
+        assert_eq!(
+            result(&format!("def value() -> _ = {{ {literal} }};"), "value"),
+            ty,
+            "{literal}"
+        );
+    }
+}
+
+#[test]
+fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
+    for (expression, ty) in [
+        ("42", Ty::Int64),
+        ("2147483648", Ty::Int64),
+        ("9223372036854775807", Ty::Int64),
+        ("-9223372036854775808", Ty::Int64),
+        ("1.25", Ty::Float64),
+        ("1e3", Ty::Float64),
+        ("1 + 2", Ty::Int64),
+        ("1 + 2.5", Ty::Float64),
+        ("1.5 + 2", Ty::Float64),
+    ] {
+        for body in [expression.to_owned(), format!("var n = {expression}; n")] {
+            assert_eq!(
+                result(&format!("def value() -> _ = {{ {body} }};"), "value"),
+                ty,
+                "{body}"
+            );
+        }
+    }
+    for (name, ty) in [
+        ("sbyte", Ty::Int8),
+        ("ubyte", Ty::UInt8),
+        ("short", Ty::Int16),
+        ("ushort", Ty::UInt16),
+        ("int", Ty::Int32),
+        ("uint", Ty::UInt32),
+        ("long", Ty::Int64),
+        ("ulong", Ty::UInt64),
+        ("float32", Ty::Float32),
+        ("float64", Ty::Float64),
+    ] {
+        let mut literals = vec!["42"];
+        if ty == Ty::Float32 || ty == Ty::Float64 {
+            literals.extend(["1.5", "1e2"]);
+        }
+        for literal in literals {
+            for body in [
+                format!("var n = {literal}; var p: Ptr<{name}>; p := &n; n"),
+                format!("var n = {literal}; take(n)"),
+                format!("var n = {literal}; n + take(1)"),
+                format!("var n = {literal}; take(1) + n"),
+            ] {
+                let source = format!(
+                    "def take(n: {name}) -> {name} = {{ n }}; def value() -> _ = {{ {body} }};"
+                );
+                assert_eq!(result(&source, "value"), ty, "{source}");
+            }
+        }
+    }
+    for literal in ["9223372036854775808", "-9223372036854775809", "1e400"] {
+        rejects(&format!("def value() -> _ = {{ {literal} }};"), "literal");
+    }
+    rejects("def value() -> ubyte = { 256 };", "literal");
+    rejects("def value() -> float32 = { 1e50 };", "literal");
+    rejects("def value() -> int = { 1.5 };", "TypeMismatch");
 }

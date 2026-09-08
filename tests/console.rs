@@ -263,7 +263,7 @@ fn stream_write_failure_propagates_as_a_library_error() {
         export { main };
         import { "std/io.resin" };
         def main() -> Result<(), _> = {
-            Output { stream = 99I }.write("unwritten")?;
+            Output { stream = 99_ui }.write("unwritten")?;
             print("not reached");
             ok(())
         };

@@ -144,15 +144,15 @@ fn structural_members_keep_their_identity_across_union_widening() {
 fn all_value_producers_widen_at_the_consumer() {
     let output = run(r#"
         type Record = { number: uint };
-        def record() -> Record | None = { { number = 42I } };
+        def record() -> Record | None = { { number = 42_ui } };
         def field(r: Record) -> uint | None = { r.number };
         def load(p: Ptr<uint>) -> uint | None = { p.* };
         def literal() -> uint | None = { 42 };
-        def operator(n: uint) -> uint | None = { n + 1I };
-        def compare(n: uint) -> bool | None = { n == 42I };
+        def operator(n: uint) -> uint | None = { n + 1_ui };
+        def compare(n: uint) -> bool | None = { n == 42_ui };
         def main() -> int = {
             var n = record()!.number;
-            if (field(record()!)! == literal()! && load(&n)! == operator(41I)! && compare(n)!) { 0 } else { 1 }
+            if (field(record()!)! == literal()! && load(&n)! == operator(41_ui)! && compare(n)!) { 0 } else { 1 }
         };
     "#);
     assert_eq!(

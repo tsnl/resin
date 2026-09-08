@@ -41,9 +41,9 @@ pointer. Indexing returns a pointer so user-defined wrappers have the same inter
 ```resin
 def at(items: Span<int>, index: ulong) -> Ptr<int> = { items(index) };
 // Inside a function:
-at(items, 0L).* := 42;
-var copied = at(items, 0L).*;
-var address = &at(items, 0L).*;
+at(items, 0_ul).* := 42;
+var copied = at(items, 0_ul).*;
+var address = &at(items, 0_ul).*;
 ```
 
 A function or type application consumes the resulting argument value. Infix operators are builtin function
@@ -150,7 +150,7 @@ wrapper whose destructor tolerates a null handle can define an ordinary function
 
 ```resin
 def move(source: Ptr<Resource>) -> Resource = {
-    Resource { handle = (&source.handle).replace(Ptr<ubyte>(0L)) }
+    Resource { handle = (&source.handle).replace(Ptr<ubyte>(0_ul)) }
 };
 ```
 

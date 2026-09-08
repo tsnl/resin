@@ -23,7 +23,7 @@ impl ImageDataOwner {
 	};
 
 	def write_png(self: Ptr<ImageDataOwner>, path: Ptr<ubyte>) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_image_write_png(path, self.width, self.height, self.channels, self.pixels, 0L))
+		RuntimeStatus.from_code(resin_image_write_png(path, self.width, self.height, self.channels, self.pixels, 0_ul))
 	};
 }
 

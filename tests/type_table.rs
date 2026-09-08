@@ -58,8 +58,8 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         r#"
         export { main, kernel };
         struct HostOnly { unrelated: float64 };
-        def choose(i: uint) -> uint | None = { if (i == 0I) { None } else { i } };
-        def main() -> int = { int(choose(42I)!) };
+        def choose(i: uint) -> uint | None = { if (i == 0_ui) { None } else { i } };
+        def main() -> int = { int(choose(42_ui)!) };
         @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := choose(i)!; };
         "#,
     );

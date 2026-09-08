@@ -6,10 +6,10 @@ struct Io {};
 
 impl Io {
 	def stdout() -> Output = {
-		Output { stream = 0I }
+		Output { stream = 0_ui }
 	};
 	def stderr() -> Output = {
-		Output { stream = 1I }
+		Output { stream = 1_ui }
 	};
 }
 

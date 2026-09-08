@@ -505,9 +505,9 @@ export default grammar({
       token(
         choice(
           new RustRegex(
-            "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?[bBhHiIlLfd]?",
+            "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?([uU]?[bBhHiIlL]|[fFdD])?",
           ),
-          new RustRegex("0[xX][0-9a-fA-F_]+[hHiIlL]?"),
+          new RustRegex("0[xX][0-9a-fA-F_]+([hHiIlL]|[uU][bBhHiIlL])?"),
         ),
       ),
 

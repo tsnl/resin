@@ -141,7 +141,7 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; def main() -> () = { var bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&bytes), length = 4L },))); };"#,
+        r#"export { main }; def main() -> () = { var bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&bytes), length = 4_ul },))); };"#,
         b"A\0B\0",
     );
 }
@@ -364,7 +364,7 @@ fn literal_spans_survive_returns_and_keep_explicit_nuls() {
             var text = literal();
             var copy = text;
             print(copy);
-            if (text.length == 3L && strlen(text.data) == 1L && text(2L).* == 98B) { 0 } else { 1 }
+            if (text.length == 3_ul && strlen(text.data) == 1_ul && text(2_ul).* == 98_ub) { 0 } else { 1 }
         };
     "#,
         b"a\0b",

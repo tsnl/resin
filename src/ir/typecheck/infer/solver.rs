@@ -373,7 +373,7 @@ impl Solver {
                     let found = if class == Class::Float {
                         Ty::Float64
                     } else {
-                        Ty::Int32
+                        Ty::Int64
                     };
                     return Err(GenerateError::typing(
                         span,
@@ -414,7 +414,7 @@ impl Solver {
         if variable.value.is_none() {
             let ty = match variable.class {
                 Class::Any | Class::Errors => return,
-                Class::Number => Ty::Int32,
+                Class::Number => Ty::Int64,
                 Class::Float => Ty::Float64,
             };
             variable.value = Some(ty.into());
@@ -463,6 +463,6 @@ mod tests {
         solver.default_numbers(&[literal.clone(), other.clone(), hex.clone()]);
         assert_eq!(solver.resolve(&literal), Some(Ty::UInt64));
         assert_eq!(solver.resolve(&other), Some(Ty::Float64));
-        assert_eq!(solver.resolve(&hex), Some(Ty::Int32));
+        assert_eq!(solver.resolve(&hex), Some(Ty::Int64));
     }
 }

@@ -164,7 +164,7 @@ fn explicit_inference_updates_hover_after_edits() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("inference.resin"));
-    for (version, initializer, expected) in [(1, "42", "int"), (2, "1 == 1", "bool")] {
+    for (version, initializer, expected) in [(1, "42", "long"), (2, "1 == 1", "bool")] {
         let source =
             format!("def answer() -> _ = {{ var value: _; value := {initializer}; value }};");
         if version == 1 {
@@ -568,7 +568,7 @@ fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
         hover["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("missing: int")
+            .contains("missing: long")
     );
     let unknown = "def main() = { var value = ; value.count; };";
     client.change(&uri, 3, unknown);

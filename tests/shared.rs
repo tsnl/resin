@@ -337,11 +337,11 @@ fn pointer_returning_index_wrappers_preserve_nested_places() {
     def at(items: Span<Entry>, index: ulong) -> Ptr<Entry> = { items(index) };
     def main() -> int = {
         var items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
-        var span = Span<Entry> { data = Ptr<Entry>(&items), length = 2L };
-        at(span, 1L).nested.value := 42;
-        var p = &at(span, 1L).*.nested.value;
+        var span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
+        at(span, 1_ul).nested.value := 42;
+        var p = &at(span, 1_ul).*.nested.value;
         p.* := p.* + 1;
-        var copied = at(span, 1L).*.nested;
+        var copied = at(span, 1_ul).*.nested;
         copied.value := 99;
         if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
     };

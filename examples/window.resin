@@ -11,46 +11,46 @@ def vertex(index: int) -> Vertex = {
 	if (index == 0) {
 		Vertex {
 			position = Position {
-				x = 0.0f,
-				y = -0.75f,
-				z = 0.0f,
-				w = 1.0f,
+				x = 0.0_f,
+				y = -0.75_f,
+				z = 0.0_f,
+				w = 1.0_f,
 			},
 			color = Color {
-				r = 1.0f,
-				g = 0.0f,
-				b = 0.0f,
-				a = 1.0f,
+				r = 1.0_f,
+				g = 0.0_f,
+				b = 0.0_f,
+				a = 1.0_f,
 			},
 		}
 	} else if (index == 1) {
 		Vertex {
 			position = Position {
-				x = -0.7f,
-				y = 0.6f,
-				z = 0.0f,
-				w = 1.0f,
+				x = -0.7_f,
+				y = 0.6_f,
+				z = 0.0_f,
+				w = 1.0_f,
 			},
 			color = Color {
-				r = 0.0f,
-				g = 1.0f,
-				b = 0.0f,
-				a = 1.0f,
+				r = 0.0_f,
+				g = 1.0_f,
+				b = 0.0_f,
+				a = 1.0_f,
 			},
 		}
 	} else {
 		Vertex {
 			position = Position {
-				x = 0.7f,
-				y = 0.6f,
-				z = 0.0f,
-				w = 1.0f,
+				x = 0.7_f,
+				y = 0.6_f,
+				z = 0.0_f,
+				w = 1.0_f,
 			},
 			color = Color {
-				r = 0.0f,
-				g = 0.0f,
-				b = 1.0f,
-				a = 1.0f,
+				r = 0.0_f,
+				g = 0.0_f,
+				b = 1.0_f,
+				a = 1.0_f,
 			},
 		}
 	}

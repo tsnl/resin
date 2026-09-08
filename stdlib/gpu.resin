@@ -177,13 +177,13 @@ impl CommandsOwner {
 		ok(())
 	};
 	def submit(self: Ptr<CommandsOwner>) -> Result<(), RuntimeError> = {
-		var recording = (&self.handle).replace(Ptr<ResinCommandBuffer>(0L));
+		var recording = (&self.handle).replace(Ptr<ResinCommandBuffer>(0_ul));
 		var code = resin_gpu_submit(self.gpu.handle, recording);
 		self.retained := None;
 		RuntimeStatus.from_code(code)
 	};
 	def cancel(self: Ptr<CommandsOwner>) = {
-		var recording = (&self.handle).replace(Ptr<ResinCommandBuffer>(0L));
+		var recording = (&self.handle).replace(Ptr<ResinCommandBuffer>(0_ul));
 		resin_gpu_cancel_command_buffer(self.gpu.handle, recording);
 		self.retained := None;
 	};

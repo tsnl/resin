@@ -1,7 +1,7 @@
 ==================
 Numeric suffixes and one-armed if
 ==================
-def main() = { var a = 42L; var b = -42l; var c = 1.5f; var d = 0xffI; if (a > 0L) { if (b < 0l) {} else {}; }; };
+def main() = { var a = 42_ul; var b = -42_l; var c = 1.5_f; var d = 0xff_ui; if (a > 0_ul) { if (b < 0_l) {} else {}; }; };
 ---
 
 (source_file
