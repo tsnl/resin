@@ -53,6 +53,24 @@ fn rejects(source: &str, message: &str) {
 }
 
 #[test]
+fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
+    run(r#"
+    def main() -> int = {
+        var trace = 0; var weak = Weak<Resource>();
+        {
+            var holder = { values = [Arc<Resource> { trace = &trace, digit = 1 }] };
+            weak := holder.values.at(0).*.downgrade();
+            var saved = holder.values.at(0).*;
+            holder.values.at(0).* := Arc<Resource> { trace = &trace, digit = 2 };
+            if (saved.read() != 1 || holder.values.at(0).*.read() != 2 || trace != 0) { trace := 9; };
+        };
+        var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
+        if (expired && trace == 12) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
 fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
     run(r#"
     struct Tracked { drops: Ptr<int>, value: int };

@@ -364,7 +364,7 @@ fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
         *drop = Some(FunctionId::from_index(0));
     }
     let mut module = Module {
-        types: vec![definition],
+        types: vec![definition].into(),
         ..Default::default()
     };
     assert_eq!(
