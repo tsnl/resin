@@ -189,6 +189,9 @@ fn particles_compute_then_render_from_the_same_buffer() {
         dt: f32,
         yaw_cos: f32,
         yaw_sin: f32,
+        pitch_cos: f32,
+        pitch_sin: f32,
+        zoom: f32,
         aspect: f32,
         radius: f32,
         particles: u64,
@@ -204,7 +207,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
         vz: 106.0,
     };
     assert_eq!(size_of::<Particle>(), 24);
-    assert_eq!(size_of::<Params>(), 40);
+    assert_eq!(size_of::<Params>(), 56);
     // The full draw catches accidental per-vertex searches that scale quadratically.
     // An extra workgroup exercises the count guard without touching the sentinel.
     unsafe {
@@ -244,6 +247,9 @@ fn particles_compute_then_render_from_the_same_buffer() {
             dt: 0.005,
             yaw_cos: 1.0,
             yaw_sin: 0.0,
+            pitch_cos: 1.0,
+            pitch_sin: 0.0,
+            zoom: 1.0,
             aspect: 1.0,
             radius: 0.006,
             particles: particles.device_pointer(),
@@ -262,7 +268,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
                 .unwrap();
             commands.set_pipeline(&graphics).unwrap();
             commands
-                .draw(root.device_pointer(), (COUNT * 3) as u32)
+                .draw(root.device_pointer(), (COUNT * 24) as u32)
                 .unwrap();
             commands.end_rendering().unwrap();
             commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
@@ -290,6 +296,39 @@ fn particles_compute_then_render_from_the_same_buffer() {
         assert!(
             lit > 1000,
             "expected a visible particle cloud, got {lit} lit pixels"
+        );
+
+        // Magnify one sphere to verify the silhouette and per-fragment normal lighting.
+        particles.host_pointer().cast::<Particle>().write(Particle {
+            x: 0.0,
+            y: 0.0,
+            z: 25.0,
+            vx: 0.0,
+            vy: 0.0,
+            vz: 0.0,
+        });
+        (*root.host_pointer().cast::<Params>()).count = 1;
+        (*root.host_pointer().cast::<Params>()).radius = 0.5;
+        let mut commands = gpu.start_command_recording().unwrap();
+        commands
+            .begin_rendering(&mut image, [0.0, 0.0, 0.0, 1.0])
+            .unwrap();
+        commands.set_pipeline(&graphics).unwrap();
+        commands.draw(root.device_pointer(), 24).unwrap();
+        commands.end_rendering().unwrap();
+        commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
+        gpu.submit(commands).unwrap();
+        let bytes = pixels.host_bytes().unwrap();
+        let blue = |x: usize, y: usize| bytes[(y * 256 + x) * 4 + 2];
+        assert!(blue(128, 128) > 40, "sphere center should be lit");
+        assert!(
+            blue(110, 100) > blue(146, 156) + 15,
+            "upper-left lighting should shade the curved surface"
+        );
+        assert_eq!(
+            blue(185, 185),
+            0,
+            "sphere should not fill its bounding square"
         );
     }
 }

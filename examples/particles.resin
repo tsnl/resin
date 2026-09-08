@@ -12,6 +12,9 @@ struct Params {
 	dt: float32,
 	yaw_cos: float32,
 	yaw_sin: float32,
+	pitch_cos: float32,
+	pitch_sin: float32,
+	zoom: float32,
 	aspect: float32,
 	radius: float32,
 	particles: Span<Particle>,
@@ -41,53 +44,150 @@ def kernel(index: uint, root: Ptr<Params>) -> () = {
 	}
 };
 
-@vertex_shader
-def vertex(index: int, root: Ptr<Params>) -> Vertex = {
-	// Every index in this three-million-vertex draw is exactly representable as float32.
-	// Truncation divides by three in constant time; no per-particle search loop.
-	var particle = int(float32(index) / 3.0f);
-	var corner = index - particle * 3;
-	var p = root.particles(particle).*;
-	var depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
-	var perspective = 1.0f / (1.0f + depth * 0.012f);
-	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036f;
-	var y = ((p.z - 25.0f) * 0.9f + depth * 0.22f) * 0.036f;
-	var dx = (p.vx * root.yaw_cos + p.vy * root.yaw_sin) * 0.000025f;
-	var dy = (p.vz * 0.9f + (-p.vx * root.yaw_sin + p.vy * root.yaw_cos) * 0.22f) * 0.000025f;
-	// A tiny triangle stretched along the projected velocity makes a moving point readable.
-	var ax = if (dx < 0.0f) {
-		-dx
-	} else {
-		dx
+// Float division is available in shaders. Correct rounding at the upper end of
+// the 24-million-vertex draw, where adjacent integers no longer fit in float32.
+def particle_index(index: int) -> int = {
+	var particle = int(float32(index) / 24.0f);
+	if (particle * 24 > index) {
+		particle := particle - 1;
 	};
-	var ay = if (dy < 0.0f) {
-		-dy
+	particle
+};
+
+def positive(value: float32) -> float32 = {
+	if (value > 0.0f) {
+		value
 	} else {
-		dy
-	};
-	var width = root.radius / (ax + ay + 0.0001f);
-	var side_x = -dy * width;
-	var side_y = dx * width + root.radius * 0.25f;
-	if (corner == 1) {
-		x := x - dx + side_x;
-		y := y - dy + side_y;
+		0.0f
+	}
+};
+
+// Approximate settled speed percentiles: 5/25/50/75/95% at 20/45/65/115/220
+// units per simulation second. Fixed anchors keep colors stable across frames
+// and reseeds. Interpolate squared speeds to avoid a square root per vertex.
+def speed_heat(squared_speed: float32) -> float32 = {
+	var heat = if (squared_speed < 2025.0f) {
+		0.25f * (squared_speed - 400.0f) / 1625.0f
 	} else {
-		if (corner == 2) {
-			x := x - dx - side_x;
-			y := y - dy - side_y;
+		if (squared_speed < 4225.0f) {
+			0.25f + 0.25f * (squared_speed - 2025.0f) / 2200.0f
+		} else {
+			if (squared_speed < 13225.0f) {
+				0.5f + 0.25f * (squared_speed - 4225.0f) / 9000.0f
+			} else {
+				0.75f + 0.25f * (squared_speed - 13225.0f) / 35175.0f
+			}
 		}
 	};
-	var speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
-	var heat = speed / (speed + 4000.0f);
+	if (heat < 0.0f) {
+		0.0f
+	} else {
+		if (heat > 1.0f) {
+			1.0f
+		} else {
+			heat
+		}
+	}
+};
+
+def heat_color(heat: float32) -> Color = {
+	// Blue, cyan, warm yellow, orange, coral red. These are albedo colors;
+	// the fragment shader applies lighting and distance fog afterwards.
+	var colors = [
+		Color { r = 0.16f, g = 0.30f, b = 0.90f, a = 1.0f },
+		Color { r = 0.08f, g = 0.75f, b = 0.82f, a = 1.0f },
+		Color { r = 0.95f, g = 0.88f, b = 0.38f, a = 1.0f },
+		Color { r = 0.98f, g = 0.46f, b = 0.12f, a = 1.0f },
+		Color { r = 0.88f, g = 0.10f, b = 0.16f, a = 1.0f },
+	];
+	var scaled = heat * 4.0f;
+	var segment = if (scaled < 3.0f) {
+		int(scaled)
+	} else {
+		3
+	};
+	var blend = scaled - float32(segment);
+	var low = colors(segment).*;
+	var high = colors(segment + 1).*;
+	Color {
+		r = low.r + (high.r - low.r) * blend,
+		g = low.g + (high.g - low.g) * blend,
+		b = low.b + (high.b - low.b) * blend,
+		a = 1.0f,
+	}
+};
+
+@vertex_shader
+def vertex(index: int, root: Ptr<Params>) -> Vertex = {
+	var particle = particle_index(index);
+	var local = index - particle * 24;
+	var sector = int(float32(local) / 3.0f);
+	var corner = local - sector * 3;
+	var p = root.particles(particle).*;
+	var horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
+	var height = (p.z - 25.0f) * 0.9f;
+	var depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;
+	var perspective = root.zoom / (1.0f + depth * 0.012f);
+	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036f;
+	var y = (height * root.pitch_cos + horizontal_depth * root.pitch_sin) * 0.036f;
+
+	// Eight triangles form a camera-facing octagon. Interpolated disk coordinates
+	// let the fragment shader light a smooth hemisphere without a sphere mesh.
+	var nx = 0.0f;
+	var ny = 0.0f;
+	if (corner != 0) {
+		var rim = (sector + corner - 1) & 7;
+		var xs = [1.0f, 0.707107f, 0.0f, -0.707107f, -1.0f, -0.707107f, 0.0f, 0.707107f];
+		var ys = [0.0f, 0.707107f, 1.0f, 0.707107f, 0.0f, -0.707107f, -1.0f, -0.707107f];
+		nx := xs(rim).*;
+		ny := ys(rim).*;
+	};
+	var squared_speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
+	var heat = speed_heat(squared_speed);
+	var distance = positive(1.0f + depth * 0.025f);
+	var visibility = 1.0f / (1.0f + 0.4f * distance * distance);
 	Vertex {
-		position = Position { x = x * perspective * root.aspect, y = -y * perspective, z = 0.0f, w = 1.0f },
-		color = Color { r = 0.12f + 0.88f * heat, g = 0.4f + 0.5f * heat, b = 1.0f - 0.7f * heat, a = 1.0f },
+		position = Position {
+			x = (x + nx * root.radius) * perspective * root.aspect,
+			y = -(y + ny * root.radius) * perspective,
+			z = 0.0f,
+			w = 1.0f,
+		},
+		// The fixed Color varying carries disk coordinates, speed, and fog to fragment.
+		color = Color { r = nx, g = ny, b = heat, a = visibility },
 	}
 };
 
 @fragment_shader
 def fragment(color: Color) -> Color = {
-	color
+	var nx = color.r;
+	var ny = color.g;
+	var squared_z = positive(1.0f - nx * nx - ny * ny);
+	// Five bounded Newton steps approximate sqrt on [0, 1], including the rim.
+	var nz = 1.0f;
+	var step = 0;
+	while (step < 5) {
+		nz := 0.5f * (nz + squared_z / nz);
+		step := step + 1;
+	};
+	// Camera-space light from the upper left; a tight, pale specular highlight.
+	var diffuse = positive(-0.4f * nx + 0.55f * ny + 0.733f * nz);
+	var specular = positive(-0.215f * nx + 0.295f * ny + 0.931f * nz);
+	specular := specular * specular;
+	specular := specular * specular;
+	specular := specular * specular;
+	specular := specular * specular;
+	specular := specular * specular;
+	var light = 0.16f + 0.64f * diffuse;
+	var shine = 0.2f * specular;
+	var albedo = heat_color(color.b);
+	var fog = color.a;
+	Color {
+		r = 0.004f * (1.0f - fog) + (albedo.r * light + shine) * fog,
+		g = 0.008f * (1.0f - fog) + (albedo.g * light + shine) * fog,
+		b = 0.02f * (1.0f - fog) + (albedo.b * light + shine) * fog,
+		a = 1.0f,
+	}
 };
 
 // Host-only xorshift32: reproducible random positions and independent velocities.
@@ -116,9 +216,50 @@ def initialize(particles: Span<Particle>, seed: uint) -> () = {
 	};
 };
 
+// Camera math runs on the host; shaders receive only the resulting basis and zoom.
+extern "math.h" def sinf(angle: float32) -> float32;
+extern "math.h" def cosf(angle: float32) -> float32;
+extern "math.h" def expf(value: float32) -> float32;
+
+struct Camera { yaw: float32, pitch: float32, zoom: float32 };
+struct MousePosition { x: float64, y: float64 };
+def mouse_position(x: float64, y: float64) -> MousePosition = {
+	MousePosition { x = x, y = y }
+};
+def default_camera() -> Camera = {
+	Camera { yaw = 0.0f, pitch = 0.24f, zoom = 1.0f }
+};
+
+def clamp(value: float32, low: float32, high: float32) -> float32 = {
+	if (value < low) {
+		low
+	} else {
+		if (value > high) {
+			high
+		} else {
+			value
+		}
+	}
+};
+
+def move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) = {
+	camera.yaw := camera.yaw + float32(dx) * 0.006f;
+	// Stop short of the poles so dragging never flips the view upside down.
+	camera.pitch := clamp(camera.pitch + float32(dy) * 0.006f, -1.4f, 1.4f);
+	camera.zoom := clamp(camera.zoom * expf(clamp(float32(scroll), -20.0f, 20.0f) * 0.12f), 0.35f, 3.0f);
+};
+
+def apply_camera(camera: Camera, params: Ptr<Params>) = {
+	params.yaw_cos := cosf(camera.yaw);
+	params.yaw_sin := sinf(camera.yaw);
+	params.pitch_cos := cosf(camera.pitch);
+	params.pitch_sin := sinf(camera.pitch);
+	params.zoom := camera.zoom;
+};
+
 def main() -> Result<(), _> = {
 	var count = 1000000I;
-	var title = "Resin | 1,000,000 particles | Space: pause | R: reseed | Esc: quit";
+	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	var window = window_create(1280, 800, Ptr<ubyte>(&title))?;
 	defer window_destroy(window);
 	var gpu = gpu_create_for_window(window)?;
@@ -142,14 +283,21 @@ def main() -> Result<(), _> = {
 		dt = 0.005f,
 		yaw_cos = 1.0f,
 		yaw_sin = 0.0f,
+		pitch_cos = 1.0f,
+		pitch_sin = 0.0f,
+		zoom = 1.0f,
 		aspect = 0.625f,
-		radius = 0.0012f,
+		radius = 0.004f,
 		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(count) },
 	};
 	var address = allocation_device_pointer(root);
 	var image = gpu_create_image(gpu, 1280, 800)?;
 	defer gpu_free_image(gpu, image);
 	var paused = 1 == 0;
+	var camera = default_camera();
+	var automatic = 1 == 1;
+	var was_dragging = 1 == 0;
+	var previous_cursor = mouse_position(window_cursor_position(window)?);
 
 	window_poll_events(window)?;
 	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
@@ -162,6 +310,30 @@ def main() -> Result<(), _> = {
 			seed := seed * 1664525I + 1013904223I;
 			initialize(host_particles, seed);
 		};
+		var cursor = mouse_position(window_cursor_position(window)?);
+		var left = window_mouse_button_state(window, mouse_buttons().left);
+		var dragging = window_focused(window) && left.down;
+		var scroll = mouse_position(window_scroll_delta(window)?);
+		if (automatic && !paused) {
+			camera.yaw := camera.yaw + 0.0015f;
+		};
+		if (window_focused(window)) {
+			if (dragging || scroll.y != 0.0d) {
+				automatic := 1 == 0;
+			};
+			// A fresh press/focus starts a drag without jumping from the old cursor position.
+			if (dragging && was_dragging && !left.pressed) {
+				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0d);
+			};
+			move_camera(&camera, 0.0d, 0.0d, scroll.y);
+			if (window_key_state(window, keys().home).pressed) {
+				camera := default_camera();
+				automatic := 1 == 1;
+			};
+		};
+		previous_cursor := cursor;
+		was_dragging := dragging;
+		apply_camera(camera, params);
 		var commands = gpu_start_command_recording(gpu)?;
 		defer gpu_cancel_command_buffer(gpu, &commands);
 		if (!paused) {
@@ -170,18 +342,10 @@ def main() -> Result<(), _> = {
 		};
 		gpu_begin_rendering(commands, image, 0.004f, 0.008f, 0.02f, 1.0f)?;
 		gpu_set_pipeline(commands, graphics)?;
-		gpu_draw(commands, address, count * 3I)?;
+		gpu_draw(commands, address, count * 24I)?;
 		gpu_end_rendering(commands)?;
 		gpu_submit(gpu, &commands)?;
 		gpu_present(gpu, image)?;
-		if (!paused) {
-			// Small camera rotation, renormalized to prevent drift over long runs.
-			var c = params.yaw_cos - params.yaw_sin * 0.0015f;
-			var s = params.yaw_sin + params.yaw_cos * 0.0015f;
-			var normalize = 1.5f - 0.5f * (c * c + s * s);
-			params.yaw_cos := c * normalize;
-			params.yaw_sin := s * normalize;
-		};
 		window_poll_events(window)?;
 	};
 	print("particles demo complete\n", ());
