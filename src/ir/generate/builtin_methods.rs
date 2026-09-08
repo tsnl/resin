@@ -24,6 +24,12 @@ fn pointer(ty: Ty) -> Ty {
 
 fn definitions(receiver: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
     match receiver {
+        Ty::Pointer { pointee } => vec![method(
+            "replace",
+            vec![receiver.clone(), *pointee.clone()],
+            *pointee.clone(),
+            vec![Instr::Replace],
+        )],
         Ty::Array { element, .. } => vec![method(
             "at",
             vec![pointer(receiver.clone()), Ty::UInt64],

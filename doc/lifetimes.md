@@ -115,7 +115,7 @@ use the receiver's address. Associated functions have no `self`. Method signatur
 currently require explicit types; omitted results mean unit. There are no traits,
 interfaces, inheritance, or dynamically dispatched methods.
 
-Builtin array/span `at`, `Arc.get`, `Arc.downgrade`, and `Weak.upgrade` have ordinary
+Builtin array/span `at`, `Arc.get`, `Arc.downgrade`, `Weak.upgrade`, and `Ptr.replace` have ordinary
 method signatures and compiler-generated IR bodies. These small bodies expand at
 the call site, allowing shader-local array addresses to stay local. `get` borrows
 `Ptr<Arc<T>>`;
@@ -143,14 +143,14 @@ Arc and expose shared handles to ordinary callers. Constructing
 `Arc<Resource>(named_resource)` copies that actual resource value; the named original
 still receives destruction. This differs from copying an `Arc<Resource>` handle.
 
-`replace(pointer, replacement)` supports deliberate native ownership transfer: it
+`pointer.replace(replacement)` supports deliberate native ownership transfer: it
 returns the old pointee and installs the replacement without destroying the old
 pointee. Its pointer must address initialized writable storage. For example, a
 wrapper whose destructor tolerates a null handle can define an ordinary function:
 
 ```resin
 def move(source: Ptr<Resource>) -> Resource = {
-    Resource { handle = replace(&source.handle, Ptr<ubyte>(0L)) }
+    Resource { handle = (&source.handle).replace(Ptr<ubyte>(0L)) }
 };
 ```
 

@@ -160,14 +160,14 @@ def gpu_copy_image_to_buffer(commands: GpuCommands, image: GpuImage, buffer: Gpu
 };
 
 def gpu_submit(gpu: Gpu, commands: Ptr<GpuCommands>) -> Result<(), RuntimeError> = {
-	var recording = replace(&commands.handle, Ptr<ResinCommandBuffer>(0L));
+	var recording = (&commands.handle).replace(Ptr<ResinCommandBuffer>(0L));
 	var code = resin_gpu_submit(commands.gpu.handle, recording);
 	commands.retained := None;
 	status(code)
 };
 
 def gpu_cancel_command_buffer(gpu: Gpu, commands: Ptr<GpuCommands>) = {
-	var recording = replace(&commands.handle, Ptr<ResinCommandBuffer>(0L));
+	var recording = (&commands.handle).replace(Ptr<ResinCommandBuffer>(0L));
 	resin_gpu_cancel_command_buffer(commands.gpu.handle, recording);
 	commands.retained := None;
 };

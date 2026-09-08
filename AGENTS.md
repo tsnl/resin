@@ -56,7 +56,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   constructors consume their field initializers. `impl` defines inherent methods and
   `drop(self: Ptr<T>)` hooks. There is no static move checking or borrow checker.
   Native wrappers must make their copying safe or expose Arc-based ownership;
-  `replace(pointer, replacement)` can disarm a native owner during deliberate transfer.
+  `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.
   See `doc/lifetimes.md` for lifecycle rules.
 - Numeric suffixes are case-sensitive: `b/B`, `h/H`, `i/I`, and `l/L` select signed/unsigned
   8/16/32/64-bit integers; `f/d` select float32/float64. Suffixes fix literal types and retain

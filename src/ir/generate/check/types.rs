@@ -22,6 +22,14 @@ pub(super) enum Type {
 }
 
 impl Type {
+    /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
+    pub fn deref_target(&self) -> Option<&Type> {
+        match self {
+            Self::Node(Head::Pointer | Head::Arc, children) => children.first(),
+            _ => None,
+        }
+    }
+
     pub fn result(value: Type, error: Type) -> Self {
         Self::Node(Head::Result, vec![value, error])
     }

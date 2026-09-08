@@ -288,7 +288,7 @@ The example assumes native acquire/release declarations for the wrapped library.
 A copied struct receives its own `drop()`. Native-library authors must therefore
 make copies safe or expose an Arc-based interface that avoids copying the inner
 owner. There is no static move checking or borrow checking. A wrapper-specific
-transfer function can extract its native handle using `replace(pointer, replacement)`
+transfer function can extract its native handle using `pointer.replace(replacement)`
 and return a fresh owner while leaving the source disarmed. Raw pointers and spans
 still require the programmer to maintain their lifetimes.
 
@@ -479,8 +479,8 @@ functions within one file remain supported.
 Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `impl`, `def`, `var`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
 `Ptr`/`Span`/`Arc`/`Weak`/`Result`/`None` are reserved, including in parameters and field names.
-Names such as `if_value` are ordinary identifiers. `print`, `ok`, `err`, `some`, `none`,
-`replace`, `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
+Names such as `if_value` are ordinary identifiers. `print`, `ok`, `err`,
+`size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
 `std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or

@@ -101,18 +101,6 @@ impl Generator {
         }
         if let TermKind::Var { name } = &func.val {
             match name.val.as_ref() {
-                "replace" => {
-                    let pair = self.gen_term(arg, None)?;
-                    let saved = self.save_top(&pair);
-                    for index in 0..2 {
-                        self.emit(Instr::LocalAddress { local: saved });
-                        self.emit(Instr::AccessStatic { index });
-                        self.emit(Instr::TransferLoad);
-                    }
-                    self.emit(Instr::ForgetLocal { local: saved });
-                    self.emit(Instr::Replace);
-                    return Ok(expected.clone());
-                }
                 "absurd" => {
                     self.gen_term(arg, Some(&Ty::union([])))?;
                     self.emit(Instr::Eliminate {
@@ -301,7 +289,7 @@ impl Generator {
             .ascribe(&found, expected)
             .map_err(|err| GenerateError::typing(span, err))?;
         if steps.iter().any(|step| matches!(step, Conv::Unwrap { definition } if self.typer.definition(*definition).unwrap().drop_hook().is_some())) {
-            return Err(super::check::error(span, "cannot unwrap a type with drop; access its fields through a pointer or use replace"));
+            return Err(super::check::error(span, "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace"));
         }
         if steps
             .iter()

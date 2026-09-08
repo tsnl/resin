@@ -227,7 +227,7 @@ fn shared_copies_reassignment_weak_upgrade_and_expiration() {
 fn native_wrapper_can_transfer_a_handle_by_disarming_the_source() {
     run(r#"
     def move(value: Ptr<Resource>) -> Resource = {
-        Resource { trace = value.trace, digit = replace(&value.digit, 0) }
+        Resource { trace = value.trace, digit = (&value.digit).replace(0) }
     };
     def main() -> int = {
         var trace = 0;
@@ -472,6 +472,47 @@ fn generated_methods_use_ordinary_calls_and_borrow_fresh_receivers() {
             if (trace != 0 || number != 3) { trace := 9; };
         };
         if (trace == 321) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn weak_payloads_require_upgrade_before_dereference_or_field_access() {
+    for source in [
+        "def f(value: Weak<Resource>) = { value.*; };",
+        "def f(value: Weak<Resource>) = { value.digit; };",
+        "def f(value: Ptr<Weak<Resource>>) = { value.digit; };",
+        "def f(value: Weak<Resource>) = { value.read(); };",
+    ] {
+        assert!(
+            ir::generate(&support::parse(&format!("{RESOURCE} {source}"))).is_err(),
+            "{source}"
+        );
+    }
+    run(r#"
+        def read(value: Weak<Resource>) -> int = { value.upgrade()!.digit };
+        def main() -> int = {
+            var trace = 0;
+            var value = Arc<Resource> { trace = &trace, digit = 1 };
+            if (read(value.downgrade()) == 1) { 0 } else { 1 }
+        };
+    "#);
+}
+
+#[test]
+fn pointer_replace_transfers_managed_values_and_leaves_ordinary_names_available() {
+    run(r#"
+    def replace(value: int) -> int = { value + 1 };
+    def main() -> int = {
+        var trace = 0;
+        {
+            var value = Resource.make(&trace, 1);
+            { var old = (&value).replace(Resource.make(&trace, 2)); };
+            if (trace != 1 || value.digit != 2) { trace := 9; };
+            { var old = Ptr<Resource>.replace(&value, Resource.make(&trace, 3)); };
+            if (trace != 12 || value.digit != 3) { trace := 9; };
+        };
+        if (trace == 123 && replace(1) == 2) { 0 } else { 1 }
     };
     "#);
 }

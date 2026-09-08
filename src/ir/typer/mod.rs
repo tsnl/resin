@@ -34,7 +34,7 @@ impl TyperContext {
 
     pub(crate) fn receiver_definition(&self, ty: &Ty) -> Option<TypeId> {
         let mut ty = ty;
-        while let Ty::Pointer { pointee } | Ty::Arc { pointee } = ty {
+        while let Some(pointee) = ty.deref_target() {
             ty = pointee;
         }
         let Ty::Defined { definition } = ty else {

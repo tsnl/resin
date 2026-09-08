@@ -342,6 +342,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
                 .completions(&project.path("main.resin"), offset);
             let names = items
                 .iter()
+                .filter(|item| item.kind == resin::analysis::DefinitionKind::Field)
                 .map(|item| item.name.as_str())
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -1080,4 +1081,38 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
             .definition(&project.path("main.resin"), offset)
             .is_some()
     );
+}
+
+#[test]
+fn pointer_replace_has_ordinary_method_hover_and_recovery() {
+    for tail in ["", "p.;"] {
+        let source = format!("def f(p: Ptr<int>) = {{ p.replace(3); {tail} }};");
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert_eq!(
+            analysis.diagnostics.is_empty(),
+            tail.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        let offset = source.find("replace").unwrap();
+        assert_eq!(
+            analysis.hover(&path, offset).unwrap().text,
+            "replace: (int) -> int"
+        );
+        let items = analysis.completions(
+            &path,
+            if tail.is_empty() {
+                offset
+            } else {
+                source.rfind("p.;").unwrap() + 2
+            },
+        );
+        assert!(
+            items.iter().any(|item| item.name == "replace"
+                && item.kind == resin::analysis::DefinitionKind::Function),
+            "{items:?}"
+        );
+    }
 }

@@ -114,6 +114,15 @@ impl Case {
 }
 
 impl Ty {
+    /// Types that permit direct pointee access. Weak handles must first upgrade
+    /// successfully; their payload may already have been destroyed.
+    pub fn deref_target(&self) -> Option<&Ty> {
+        match self {
+            Self::Pointer { pointee } | Self::Arc { pointee } => Some(pointee),
+            _ => None,
+        }
+    }
+
     pub fn needs_drop(&self, definitions: &[TypeDef]) -> bool {
         match self {
             Self::Arc { .. } | Self::Weak { .. } => true,

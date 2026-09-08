@@ -97,12 +97,12 @@ impl TyperContext {
     }
 
     pub fn type_deref(&self, pointer: &Ty) -> Result<Ty, TypeError> {
-        let (Ty::Pointer { pointee } | Ty::Arc { pointee }) = pointer else {
+        let Some(pointee) = pointer.deref_target() else {
             return Err(TypeError::new(TypeErrorKind::ExpectedPointer {
                 found: pointer.clone(),
             }));
         };
-        Ok(*pointee.clone())
+        Ok(pointee.clone())
     }
 
     pub fn type_field(&self, base: &Ty, name: &str) -> Result<FieldAccess, TypeError> {

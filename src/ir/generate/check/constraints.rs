@@ -83,8 +83,8 @@ impl Checker<'_> {
     fn shape(&self, ty: &Type, deref: bool, span: Span) -> Result<Type> {
         let mut ty = self.solver.shape_hint(ty);
         if deref {
-            while let Type::Node(Head::Pointer | Head::Arc, children) = &ty {
-                ty = self.solver.shape_hint(&children[0]);
+            while let Some(pointee) = ty.deref_target() {
+                ty = self.solver.shape_hint(pointee);
             }
         }
         if let Type::Node(Head::Atom(t @ Ty::Defined { .. }), _) = &ty {
@@ -160,13 +160,13 @@ impl Checker<'_> {
 
             Constraint::Deref(input, out) => {
                 let shape = self.shape(input, false, span)?;
-                match shape {
-                    Type::Variable(_) => return Ok(false),
-                    Type::Node(Head::Pointer | Head::Arc, children) => {
-                        self.solver.unify(out, &children[0], span)?
-                    }
-                    _ => return Err(error(span, "dereference requires a pointer")),
+                if matches!(shape, Type::Variable(_)) {
+                    return Ok(false);
                 }
+                let pointee = shape
+                    .deref_target()
+                    .ok_or_else(|| error(span, "dereference requires a pointer"))?;
+                self.solver.unify(out, pointee, span)?;
             }
             Constraint::Field(input, name, out) => {
                 let shape = self.shape(input, true, span)?;

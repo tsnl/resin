@@ -579,11 +579,6 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "Weak<T> — a weak handle; upgrade() returns Arc<T> | None.",
         DefinitionKind::Type,
     ),
-    (
-        "replace",
-        "replace(pointer, replacement) — return the old pointee and install the replacement.",
-        DefinitionKind::Function,
-    ),
     ("bool", "bool", DefinitionKind::Type),
     (
         "sbyte",

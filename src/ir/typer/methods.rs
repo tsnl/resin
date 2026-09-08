@@ -160,12 +160,10 @@ impl TyperContext {
             }
         }
         for definitions in &self.method_definitions {
-            let receiver = if let Ty::Pointer { pointee } = ty {
-                pointee.as_ref()
-            } else {
-                ty
-            };
-            methods.extend(definitions(receiver));
+            if let Ty::Pointer { pointee } = ty {
+                methods.extend(definitions(pointee));
+            }
+            methods.extend(definitions(ty));
         }
         methods.into_iter().collect()
     }

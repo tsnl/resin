@@ -336,16 +336,6 @@ impl<'a> Checker<'a> {
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Var { name } = &func.val
-                    && name.val.as_ref() == "replace"
-                {
-                    self.term(
-                        arg,
-                        Some(Type::record(vec![
-                            ("_0".into(), Type::pointer(out.clone())),
-                            ("_1".into(), out.clone()),
-                        ])),
-                    )?;
-                } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
                     self.term(arg, Some(Ty::union([]).into()))?;
