@@ -25,6 +25,16 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
         )
         .unwrap();
     }
+    for (i, local) in function.locals.iter().enumerate() {
+        if local.ty.needs_drop(&types.module.types) {
+            writeln!(
+                out,
+                "  bool r_live{i} = {};",
+                if i == 0 { "true" } else { "false" }
+            )
+            .unwrap();
+        }
+    }
     writeln!(out, "  r_l0 = r_arg;").unwrap();
     for (block, inputs) in flow.inputs.iter().enumerate() {
         for (i, ty) in inputs.iter().enumerate() {
@@ -40,6 +50,7 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
             .map(|(i, ty)| Slot {
                 ty: ty.clone(),
                 expr: format!("r_b{block_id}_{i}"),
+                local: None,
             })
             .collect();
         let mut diverged = false;
@@ -52,20 +63,44 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
             let args = stack.split_off(stack.len() - instr.stack_effect().pops);
             let result = flow.results[block_id][i].as_ref();
             let name = format!("r_v{block_id}_{i}");
-            let expr = instruction(types, instr, &args, result, &mut out)
+            let expr = instruction(types, function, &name, instr, &args, result, &mut out)
                 .map_err(|error| Error::at(types.module, index, Some((block_id, i)), error))?;
             if let Some(ty) = result {
-                writeln!(
-                    out,
-                    "  {} {name} = {}; (void){name};",
-                    types.name(ty),
-                    expr.unwrap()
-                )
+                writeln!(out, "  {} {name} = {}; (void){name};", types.name(ty), {
+                    let expr = expr.unwrap();
+                    if matches!(instr, Instr::Load)
+                        || matches!(instr, Instr::AccessStatic { .. })
+                            && !matches!(args[0].ty, Ty::Pointer { .. })
+                    {
+                        types.copy(ty, &expr)
+                    } else {
+                        expr
+                    }
+                })
                 .unwrap();
                 stack.push(Slot {
                     ty: ty.clone(),
                     expr: name,
+                    local: if let Instr::LocalAddress { local } = instr {
+                        Some(local.index())
+                    } else {
+                        None
+                    },
                 });
+            }
+            let consume = matches!(
+                instr,
+                Instr::IsVariant { .. }
+                    | Instr::CallBuiltin { .. }
+                    | Instr::ArcData
+                    | Instr::Downgrade
+                    | Instr::Upgrade
+            ) || matches!(instr, Instr::AccessStatic { .. })
+                && !matches!(args[0].ty, Ty::Pointer { .. });
+            if consume {
+                for arg in &args {
+                    types.drop_value(&arg.ty, &arg.expr, &mut out);
+                }
             }
         }
         if diverged {
@@ -114,13 +149,106 @@ fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) {
 
 fn instruction(
     types: &Types<'_>,
+    function: &crate::ir::Function,
+    temp: &str,
     instr: &Instr,
     args: &[Slot],
     result: Option<&Ty>,
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::ForgetLocal { local } => {
+            if function.locals[local.index()]
+                .ty
+                .needs_drop(&types.module.types)
+            {
+                writeln!(out, "  r_live{} = false;", local.index()).unwrap();
+            }
+            return Ok(None);
+        }
+        Instr::ArcNew => {
+            let ty = &args[0].ty;
+            writeln!(
+                out,
+                "  ResinArc *{temp}_allocated = resin_arc_new(sizeof({}), _Alignof({}), r_drop{});",
+                types.name(ty),
+                types.name(ty),
+                types.id(ty)
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "  *({} *)resin_arc_data({temp}_allocated) = {};",
+                types.name(ty),
+                args[0].expr
+            )
+            .unwrap();
+            format!("{temp}_allocated")
+        }
+        Instr::ArcData => format!(
+            "({})resin_arc_data({})",
+            types.name(result.unwrap()),
+            args[0].expr
+        ),
+        Instr::Downgrade => {
+            writeln!(out, "  resin_weak_retain({});", args[0].expr).unwrap();
+            args[0].expr.clone()
+        }
+        Instr::Upgrade => {
+            writeln!(
+                out,
+                "  ResinArc *{temp}_upgraded = resin_weak_upgrade({});",
+                args[0].expr
+            )
+            .unwrap();
+            let ty = result.unwrap();
+            let present = variant(
+                types,
+                ty,
+                &Case::Type(ty.without_none().unwrap()),
+                &format!("{temp}_upgraded"),
+            );
+            let absent = variant(types, ty, &Case::Type(Ty::None), "0");
+            format!("({temp}_upgraded ? {present} : {absent})")
+        }
+        Instr::WeakEmpty { .. } => "NULL".into(),
+        Instr::TakeLocal { local } => {
+            if function.locals[local.index()]
+                .ty
+                .needs_drop(&types.module.types)
+            {
+                writeln!(out, "  r_live{} = false;", local.index()).unwrap();
+            }
+            format!("r_l{}", local.index())
+        }
+        Instr::DropLocal { local } => {
+            if !function.locals[local.index()]
+                .ty
+                .needs_drop(&types.module.types)
+            {
+                return Ok(None);
+            }
+            writeln!(out, "  if (r_live{}) {{", local.index()).unwrap();
+            types.drop_value(
+                &function.locals[local.index()].ty,
+                &format!("r_l{}", local.index()),
+                out,
+            );
+            writeln!(out, "    r_live{} = false; }}", local.index()).unwrap();
+            return Ok(None);
+        }
         Instr::SetLocal { local } => {
+            if args[0].ty.needs_drop(&types.module.types) {
+                writeln!(
+                    out,
+                    "  if (r_live{}) r_drop{}(&r_l{});",
+                    local.index(),
+                    types.id(&args[0].ty),
+                    local.index()
+                )
+                .unwrap();
+                writeln!(out, "  r_live{} = true;", local.index()).unwrap();
+            }
             writeln!(out, "  r_l{} = {};", local.index(), args[0].expr).unwrap();
             return Ok(None);
         }
@@ -134,7 +262,14 @@ fn instruction(
             .unwrap();
             widen(types, &args[0].ty, result.unwrap(), &args[0].expr)
         }
-        Instr::IsVariant { tag } => is_variant(types, &args[0].ty, tag, &args[0].expr),
+        Instr::IsVariant { tag } => {
+            let (ty, expr) = if let Ty::Pointer { pointee } = &args[0].ty {
+                (pointee.as_ref(), format!("*({})", args[0].expr))
+            } else {
+                (&args[0].ty, args[0].expr.clone())
+            };
+            is_variant(types, ty, tag, &expr)
+        }
         Instr::VariantPayload { tag } => {
             if matches!(tag, Case::Type(member) if member == &args[0].ty) {
                 args[0].expr.clone()
@@ -190,18 +325,42 @@ fn instruction(
         }
         Instr::Push { value } => literal(types, result.unwrap(), value),
         Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
-        Instr::Load => format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone())),
+        Instr::Load | Instr::TransferLoad => {
+            format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()))
+        }
+        Instr::Replace => {
+            let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
+            let old = format!("{temp}_old");
+            writeln!(out, "  {} {old} = {target};", types.name(&args[1].ty)).unwrap();
+            writeln!(out, "  {target} = {};", args[1].expr).unwrap();
+            old
+        }
         Instr::Store => {
+            let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
+            if args[1].ty.needs_drop(&types.module.types) {
+                if let Some(local) = args[0].local {
+                    writeln!(
+                        out,
+                        "  if (r_live{local}) r_drop{}(&({target}));",
+                        types.id(&args[1].ty)
+                    )
+                    .unwrap();
+                    writeln!(out, "  r_live{local} = true;").unwrap();
+                } else {
+                    types.drop_value(&args[1].ty, &target, out);
+                }
+            }
             writeln!(
                 out,
                 "  *({}) = {};",
                 types.unwrap(&args[0].ty, args[0].expr.clone()),
-                args[1].expr
+                types.copy(&args[1].ty, &args[1].expr)
             )
             .unwrap();
             args[1].expr.clone()
         }
         Instr::Discard => {
+            types.drop_value(&args[0].ty, &args[0].expr, out);
             writeln!(out, "  (void){};", args[0].expr).unwrap();
             return Ok(None);
         }

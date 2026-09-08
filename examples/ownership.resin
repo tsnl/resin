@@ -6,12 +6,20 @@ extern "stdlib.h" def free(memory: Ptr<ubyte>);
 struct OutOfMemory {};
 struct Failed {};
 
-def allocate() -> Result<Ptr<int>, OutOfMemory> = {
+struct Allocation { data: Ptr<int> };
+impl Allocation {
+	def drop(self: Ptr<Allocation>) = {
+		free(Ptr<ubyte>(self.data));
+		print("freed memory\n", ());
+	};
+}
+
+def allocate() -> Result<Arc<Allocation>, OutOfMemory> = {
 	var memory = malloc(ulong(4));
 	if (ulong(memory) == ulong(0)) {
 		err(OutOfMemory {})
 	} else {
-		ok(Ptr<int>(memory))
+		ok(Arc<Allocation> { data = Ptr<int>(memory) })
 	}
 };
 
@@ -25,11 +33,9 @@ def fail_if(fail: bool) -> Result<(), Failed> = {
 
 def work(fail: bool) -> Result<int, _> = {
 	var value = allocate()?;
-	defer print("freed memory\n", ());
-	defer free(Ptr<ubyte>(value));
-	value.* := 42;
+	value.data.* := 42;
 	fail_if(fail)?;
-	ok(value.*)
+	ok(value.data.*)
 };
 
 def main() -> Result<(), _> = {

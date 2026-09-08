@@ -310,9 +310,6 @@ impl Recovery<'_> {
             StmtKind::Expr { term } => {
                 self.term(term, None);
             }
-            StmtKind::Defer { body } => {
-                self.term(body, None);
-            }
             StmtKind::DefineType { name, init } => {
                 if let Some(ty) = self.ty(init)
                     && self

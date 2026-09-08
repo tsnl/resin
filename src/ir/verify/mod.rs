@@ -67,6 +67,24 @@ pub(crate) fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
         }
     }
 
+    for (index, definition) in module.types.iter().enumerate() {
+        if let Some(hook) = definition.drop_hook() {
+            let ty = crate::ir::TypeId::from_index(index);
+            let location = Location::type_definition(ty);
+            let Some(function) = module.functions.get(hook.index()) else {
+                return Err(location.error(VerifyErrorKind::InvalidDropHook));
+            };
+            if function.locals.first().map(|local| &local.ty)
+                != Some(&Ty::Pointer {
+                    pointee: Box::new(Ty::Defined { definition: ty }),
+                })
+                || function.result != Ty::Unit
+            {
+                return Err(location.error(VerifyErrorKind::InvalidDropHook));
+            }
+        }
+    }
+
     let functions = module
         .functions
         .iter()

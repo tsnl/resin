@@ -1,11 +1,14 @@
 # Resin design
 
-Resin is a deliberately small systems programming language in the spirit of C and Go. It should
-make data layout, mutation, pointers, control flow, and cost easy to see while removing incidental
-complexity from the toolchain. The language is monomorphic and manually managed: `Ptr<T>`
-and `Span<T>` are the fundamental ways to share memory, and there is no implicit tracing, reference
-counting, or exception machinery. Separate value and type namespaces keep ordinary definitions and
-nominal type definitions simple, including productive recursive definitions through pointers.
+The [ownership specification](lifetimes.md) describes `Arc<T>`, `Weak<T>`,
+automatic destruction, and inherent methods through `impl`.
+
+Resin is a deliberately small systems programming language in the spirit of C and Go.
+Data layout, mutation, pointers, control flow, and cost stay visible. Reading existing values performs compiler-defined copying; function and type
+applications consume the resulting arguments. Constructors consume field initializers.
+Shared handles make everyday resource copying safe. Raw `Ptr<T>` and `Span<T>` values remain
+non-owning and there is no borrow checker or tracing collector. Separate value and
+type namespaces keep definitions simple, including recursion through pointers.
 
 Every function takes exactly one argument. `()` supplies unit, and `(a, b)` supplies a tuple;
 `def f(a: A, b: B) -> R = { body };` destructures that tuple into local bindings. Function types
@@ -31,15 +34,11 @@ branches; exhaustive `match` expressions bind payloads, and postfix `?` returns 
 An inferred error set is the least union of errors propagated by a dependency group, or `Never`
 when empty.
 
-`defer expression;` is a chain-prefix statement, not an expression. It registers any
-expression for lexical scope exit, including early returns through `?`, and discards
-its value. Statement-only chain blocks yield unit, so `defer { ... };` needs no special
-block syntax. Cleanup runs in reverse registration order, only for registrations
-reached on that path. Names bind at registration; local values and initialization facts
-are read at exit. Callees, arguments, and conditions are also evaluated at exit, not
-registration. Return values are saved before cleanup. Defers may nest in blocks, but
-cannot themselves propagate errors. This is explicit cleanup, not an ownership system;
-process termination and traps do not unwind scopes.
+Initialized locals receive automatic destruction in reverse scope order, including
+loop iterations and early returns through `?`. Return values are preserved before
+cleanup. `impl` defines inherent methods and `drop(self: Ptr<T>)` hooks; the compiler
+runs the hook before releasing fields. Statement-only chain blocks yield unit.
+Process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
@@ -70,8 +69,9 @@ no ownership or lifetime guarantee. Shader-local address rejection remains expli
 
 The caller owns allocation lifetime, upload/readback, synchronization, and visibility.
 Host writes become device inputs only through the runtime's documented synchronization;
-device writes require completion and visibility before host access. Copying a record
-copies pointer values, not pointees, and does not extend any allocation's lifetime.
+device writes require completion and visibility before host access. Copying a raw pointer
+copies its address without retaining its allocation. Host copies of Arc fields retain
+shared ownership; shader consumption of those managed fields is rejected.
 The portable contract is deliberately limited to backends supporting this explicit
 address/shared-layout profile. A future backend must implement it or reject the
 program; recursive projection or address-space source types would be a separate
@@ -99,9 +99,10 @@ interleave scope resolution, typing, evaluation, and emission without coupling t
 rules to a particular backend. Errors propagate
 immediately and compilation stops after the first useful diagnostic.
 
-Deferred bodies retain their AST identities and lexical environments. Lowering emits them
-at normal and error exits, using current initialization facts keyed by local ID rather than
-name. This keeps shadowing correct and introduces no new IR instructions or backend machinery.
+Lowering records owned locals per lexical scope and emits conditional destruction at
+normal and error exits. Copy operations retain shared fields; compiler-owned temporary
+transfers disarm the source's cleanup. These instructions do not impose source-level
+move checking: named values remain usable after reads.
 
 The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks
 belong to `types::definitions`, shared by the typer and verifier. The typer separates definition

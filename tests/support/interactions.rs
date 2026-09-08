@@ -1,6 +1,6 @@
 pub const MARKERS: [&str; 4] = [
     "",
-    "defer ();",
+    "{ var unused = (); };",
     "var unused: _; unused := 1;",
     "var unused: Result<(), Never>; unused := ok(()); match (unused) { ok(v) => {}, err(e) => { absurd(e) } };",
 ];
@@ -11,7 +11,6 @@ pub fn variants() -> Vec<String> {
         include_str!("../fixtures/compound_control.resin"),
         include_str!("../fixtures/numeric_conversions.resin"),
         include_str!("../fixtures/never_elimination.resin"),
-        include_str!("../fixtures/nested_cleanup.resin"),
     ] {
         for marker in MARKERS {
             let start = source.find("def kernel(").unwrap();

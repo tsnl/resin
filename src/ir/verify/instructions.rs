@@ -14,6 +14,55 @@ pub(super) fn check_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
+        Instr::ForgetLocal { local } | Instr::DropLocal { local } | Instr::TakeLocal { local } => {
+            let target = function.locals.get(local.index()).ok_or_else(|| {
+                location.error(VerifyErrorKind::InvalidLocal {
+                    local: local.index(),
+                })
+            })?;
+            if matches!(instr, Instr::TakeLocal { .. }) {
+                stack.push(target.ty.clone());
+            }
+        }
+        Instr::WeakEmpty { pointee } => {
+            check_type(&module.types, pointee, location)?;
+            stack.push(Ty::Weak {
+                pointee: Box::new(pointee.clone()),
+            });
+        }
+        Instr::ArcNew => {
+            let ty = pop_one(stack, location)?;
+            super::types::check_value(&module.types, &ty, location)?;
+            stack.push(Ty::Arc {
+                pointee: Box::new(ty),
+            });
+        }
+        Instr::ArcData | Instr::Downgrade | Instr::Upgrade => {
+            let source = pop_one(stack, location)?;
+            let result = match (instr, &source) {
+                (Instr::ArcData, Ty::Arc { pointee }) => Ty::Pointer {
+                    pointee: pointee.clone(),
+                },
+                (Instr::Downgrade, Ty::Arc { pointee }) => Ty::Weak {
+                    pointee: pointee.clone(),
+                },
+                (Instr::Upgrade, Ty::Weak { pointee }) => Ty::union_of([
+                    Ty::Arc {
+                        pointee: pointee.clone(),
+                    },
+                    Ty::None,
+                ]),
+                _ => {
+                    return Err(location.error(VerifyErrorKind::TypeMismatch {
+                        expected: Ty::Arc {
+                            pointee: Box::new(Ty::Unit),
+                        },
+                        found: source,
+                    }));
+                }
+            };
+            stack.push(result);
+        }
         Instr::SetLocal { local } => {
             let target = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
@@ -50,6 +99,11 @@ pub(super) fn check_instr(
         }
         Instr::IsVariant { tag } => {
             let from = pop_one(stack, location)?;
+            let from = if let Ty::Pointer { pointee } = from {
+                *pointee
+            } else {
+                from
+            };
             if from.payload(tag).is_none() {
                 return Err(location.error(VerifyErrorKind::InvalidVariant));
             }
@@ -128,7 +182,7 @@ pub(super) fn check_instr(
             let source = pop_one(stack, location)?;
             stack.push(project_dynamic(&module.types, source, location)?);
         }
-        Instr::Load => {
+        Instr::Load | Instr::TransferLoad => {
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
             let Ty::Pointer { pointee } = shape else {
@@ -136,7 +190,7 @@ pub(super) fn check_instr(
             };
             stack.push(*pointee);
         }
-        Instr::Store => {
+        Instr::Store | Instr::Replace => {
             let value = pop_one(stack, location)?;
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;

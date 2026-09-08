@@ -252,78 +252,53 @@ The standard library's `status(code)` converts native status integers to
 preserves unrecognized codes. `runtime_error_code(error)` and `runtime_error_message(error)`
 recover the native code and C diagnostic string. Standard-library operations already
 return Results, so callers normally use `gpu_create()?` rather than converting statuses.
-Register resource cleanup with `defer` before using further fallible operations.
+Standard-library resources release themselves on scope exit, including early returns
+through `?`. Copies retain shared ownership.
 
-### Optional values
+### Ownership and methods
 
 `T | None` is an ordinary union containing the builtin singleton `None`. Values of
 `T` widen into it directly. Exhaustive `match` handles absence; postfix `optional!`
 removes `None` or traps. See [optional values](doc/options.md).
 
-### Deferred cleanup
+All values use compiler-defined copying. Reading a named value copies it; applying
+a function or type consumes the resulting argument value. Infix operators follow
+the same rule, and tuple, record, and array constructors consume their initializers
+directly into fields or elements. Fresh expression results do not incur an extra
+copy or destruction simply because they cross an application boundary.
 
 ```resin
-def work(fail: bool) -> Result<int, _> = {
-    var value = allocate()?;
-    defer free(Ptr<ubyte>(value));
-    value.* := 42;
-    fail_if(fail)?;
-    ok(value.*)
-};
+struct Resource { handle: Ptr<ubyte> };
+impl Resource {
+    def drop(self: Ptr<Resource>) = { release_native_handle(self.handle); };
+}
+
+// Inside a function:
+var shared = Arc<Resource> { handle = acquire_native_handle() };
+var alias = shared; // Retains the same allocation; does not copy Resource.
+var weak = shared.downgrade();
 ```
 
-The complete [defer example](examples/defer.resin) defines `allocate`, `free`, and
-the fallible `fail_if` helper above. Run `cargo run -- examples/defer.resin` for success,
-or `cargo run -- examples/defer.resin:failure` to see cleanup before an error exits.
+The example assumes native acquire/release declarations for the wrapped library.
+`Arc<Resource>(make_resource())` consumes a fresh function result in the same way.
+`Ptr<Arc<T>>` points to the handle; `arc.get()` returns a pointer to the pointee.
+`weak.upgrade()` returns `Arc<T> | None`, matched with `Arc<T>(owner)` and
+`None` arms. See [the shared ownership example](examples/shared.resin).
 
-`defer expression;` registers any expression in the current lexical scope and discards
-its result. It is a statement in a chain's prefix, never an expression itself: neither
-`var x = defer ...` nor `consume(defer ...)` is valid. For example:
+A copied struct receives its own `drop()`. Native-library authors must therefore
+make copies safe or expose an Arc-based interface that avoids copying the inner
+owner. There is no static move checking or borrow checking. A wrapper-specific
+transfer function can extract its native handle using `replace(pointer, replacement)`
+and return a fresh owner while leaving the source disarmed. Raw pointers and spans
+still require the programmer to maintain their lifetimes.
 
-```resin
-defer release(resource);
-defer if (armed) { release(resource) } else { () };
-defer { release(first); release(second); };
-```
-
-Statement-only chain blocks yield unit, so the block form uses ordinary expression syntax.
-Only registrations reached during execution run. They execute in reverse order on
-normal scope exit and early return through `?`, inner scopes before outer ones.
-A loop body's defers run at the end of each iteration, not at function exit.
-Nested defers follow the same rules.
-
-Names resolve where the defer is registered, but the entire expression—including the
-callee, arguments, and conditions—is evaluated when cleanup runs.
-Later shadowing does not change the referenced binding. Reads must be definitely
-initialized on every exit that executes the defer. The block's result or propagated
-error is saved before cleanup, so mutations do not change the value being returned.
-Returning a pointer does not copy its pointee: do not free memory that escapes.
-
-To retain a particular acquisition, give it a dedicated binding and never reassign
-that binding. Copying a handle copies its value, not the resource:
-
-```resin
-var acquired = acquire()?;
-var cleanup_resource = acquired;
-defer release(cleanup_resource);
-var current = acquired;
-current := another_resource;
-```
-
-Cleanup releases `acquired` on normal exit and `?`, even after `current` changes.
-Register separate cleanup for any separately acquired replacement. In contrast,
-`defer release(current);` would read the replacement at exit. Do not also release
-`acquired` through an alias. A dedicated binding is sufficient for the current
-manual resource model; no new capture syntax or ownership feature is introduced.
-For consumable commands, deliberately retain late evaluation:
-`defer cancel(&commands);` observes the cleared handle after `submit(&commands)`.
-
-Deferred expressions cannot use `?`; handle failures locally with `match`. Cleanup is
-ordinary code, not automatic ownership management, and works in C and GLSL wherever
-the deferred operations are supported. Aborts, traps, and process termination do not
-run defers. Standard-library wrappers propagate errors instead of terminating the process;
-the graphics examples use `?` and register releases with `defer` after each successful acquisition.
-The old exit-on-failure `check` helper has been removed.
+Destructors run before fields are released, and scopes clean up in reverse order.
+Reference counting and custom destructors are host-only; shaders reject consumption
+of managed values while allowing ordinary fields alongside opaque managed slots.
+See the [ownership specification](doc/lifetimes.md) for exact rules and
+current limitations. The [ownership example](examples/ownership.resin) demonstrates
+cleanup on success and early error returns. Do not manually free resources already
+owned by a standard-library wrapper.
 
 ## Build and run
 
@@ -464,7 +439,6 @@ import { "std/console.resin" };
 def main() -> Result<(), _> = {
     print("Name: ", ());
     var name = input()?;
-    defer free_input(name);
     print("Hello, ", ());
     print_input(name)?;
     print("!\n", ());
@@ -502,10 +476,12 @@ file is loaded once. Imports never execute code. Import cycles are errors; mutua
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`, `else`, `while`, `match`, and `defer`), primitive
-type names, `Never`, and `Ptr`/`Span`/`Result` are reserved, including in parameters and field names. Names such
-as `if_value` are ordinary identifiers. `print`, `shader`, `ok`, and `err` are unshadowable compiler builtins,
-not syntax keywords: definitions and parameters cannot use those names, but record fields can.
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `impl`, `def`, `var`, `if`,
+`else`, `while`, and `match`), primitive type names, `Never`, and
+`Ptr`/`Span`/`Arc`/`Weak`/`Option`/`Result` are reserved, including in parameters and field names.
+Names such as `if_value` are ordinary identifiers. `print`, `ok`, `err`, `some`, `none`,
+`replace`, `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
+keywords: definitions and parameters cannot use those names, but record fields can.
 
 `std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
 working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
@@ -518,9 +494,9 @@ to those modules. Public operation names omit the native `resin_` prefix:
 - `std/image.resin`: PNG reading and writing.
 - `std/status.resin`: `status`, the `RuntimeError` union and its variants, and native code/message helpers.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `std/console.resin`: `read_byte`, `input`, `InputLine`, `free_input`, and `print_input`.
+- `std/console.resin`: `read_byte`, `input`, shared `InputLine` ownership, and `print_input`.
 
-The polymorphic `print` and compile-time `shader` operations remain compiler builtins.
+The polymorphic `print` operation is a compiler builtin; decorated shaders expose `.spirv`.
 Runtime flags are zero-argument functions, such as `memory_default()`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
@@ -531,7 +507,6 @@ import { "std/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = gpu_create()?;
-    defer gpu_destroy(gpu);
     print("GPU ready\n", ());
     ok(())
 };
@@ -586,7 +561,7 @@ print("{0}\n", (element.*,));
 The original `values(index)` spelling also remains available. `Span<T>` has `data: Ptr<T>`
 and `length: ulong` fields. Neither spelling guarantees bounds checking. Host indexing checks
 the array or span length and terminates with a diagnostic for negative or out-of-range indices,
-before forming an element address. This failure does not run `defer` cleanup.
+before forming an element address. This failure does not unwind automatic cleanup.
 Shader array and span indexing is unchecked: callers must keep indices within valid storage;
 out-of-range access has undefined behavior. Constructing a span does not validate its pointer,
 allocation size, or lifetime.
@@ -799,21 +774,22 @@ they do not decode typed text or implement text composition.
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:
 
-- `window_create`, `window_destroy`, and `window_poll_events` manage
-  GLFW windows and events. Close state, framebuffer size, resizing, and GLFW key codes
+- `window_create` returns a shared window owner; `window_poll_events` processes
+  GLFW events. Close state, framebuffer size, resizing, and GLFW key codes
   are available through the corresponding `window_*` functions. Predicates return `bool`;
   fallible operations return Results, including framebuffer size as `(width, height)`.
 - `gpu_create_for_window` selects a graphics/compute/present-capable GPU for a window.
   The existing GPU constructors stay headless. There is one GPU per window; multiple
   windows can each have their own GPU.
-- `gpu_present` blits an already-submitted `ResinImage` to the window, scaling to
+- `gpu_present` blits an already-submitted `GpuImage` to the window, scaling to
   its framebuffer with FIFO presentation. Swapchains are recreated after resize.
   Its `Result<bool, RuntimeError>` is `ok(true)` when presented and `ok(false)` when
   skipped (minimized, timed out, or out of date): poll events and retry. Other failures propagate.
 
-Create and use windows and their GPUs on the process main thread. Destroy image/pipeline
-resources first, then the GPU, then the window. The GPU retains the native window while
-it uses its surface. Do not mix the runtime with independently managed GLFW initialization.
+Create, use, and release windows and their GPUs on the process main thread. Shared
+image/pipeline owners retain their GPU, which retains the window while using its surface.
+The final owners release native resources in dependency order. Do not mix the runtime
+with independently managed GLFW initialization.
 
 GLFW is statically linked into the runtime and generated executables, and initialized only
 when creating a window. Headless programs do not need a display. Initialization and window
@@ -875,7 +851,7 @@ floating-point environment. Float32-to-float64 is exact. Float64-to-float32 over
 produces signed infinity; results below the smallest normal float32 magnitude become
 signed zero. NaNs remain NaNs without a payload guarantee. Signed zero is preserved.
 C traps abort the process; shader traps stop that invocation and propagate failure
-through helper calls. Traps do not run deferred cleanup.
+through helper calls. Traps do not unwind automatic cleanup.
 A shader trap is not a host-visible Result error, and earlier writes remain visible.
 
 The shared shader profile supports `int`, `uint`, `ulong`, and `float32` conversions.
@@ -902,6 +878,9 @@ The IR explicitly marks elimination as divergent. Its continuation type is only 
 checking unreachable code; neither backend constructs a value of that type. C aborts
 and shaders stop the invocation if invalid external memory somehow supplies a `Never`.
 This defensive trap does not unwind cleanup. Reachable `ok` and `?` paths retain normal
-defer behavior. Matches over inhabited variants still require exhaustive, unique arms.
+scope destruction. Matches over inhabited variants still require exhaustive, unique arms.
+
+[`T | None`](doc/options.md) supports direct widening, exhaustive matching,
+and postfix `!` to exclude `None` or trap.
 
 Inherent methods and associated functions use [`impl` blocks](doc/methods.md).

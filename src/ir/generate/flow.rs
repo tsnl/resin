@@ -70,13 +70,13 @@ impl Generator {
         expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         self.scopes.push();
-        self.defers.push(vec![]);
+        self.owned.push(vec![]);
         for stmt in stmts {
             self.gen_stmt(stmt)?;
         }
         let ty = self.gen_term(tail, Some(expected))?;
-        self.cleanup(self.defers.len() - 1, &ty)?;
-        self.defers.pop();
+        self.cleanup(self.owned.len() - 1, &ty);
+        self.owned.pop();
         self.scopes.pop();
         Ok(self.typer.type_block(&ty))
     }

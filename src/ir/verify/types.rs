@@ -68,6 +68,9 @@ pub(super) fn check_value(
                     seen,
                 )?;
             }
+            Ty::Arc { pointee: value } | Ty::Weak { pointee: value } => {
+                visit(table, value, location, seen)?
+            }
             Ty::Array { element, .. } => visit(table, element, location, seen)?,
             Ty::Record { fields } => {
                 for field in fields {

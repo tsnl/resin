@@ -36,6 +36,8 @@ pub(crate) enum ReceiverConversion {
     Value,
     Address,
     Load,
+    ArcAddress,
+    ArcLoad,
 }
 
 impl ReceiverConversion {
@@ -46,6 +48,11 @@ impl ReceiverConversion {
             Some(Self::Address)
         } else if matches!(from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
             Some(Self::Load)
+        } else if matches!(from, Ty::Arc { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
+        {
+            Some(Self::ArcAddress)
+        } else if matches!(from, Ty::Arc { pointee } if pointee.as_ref() == to) {
+            Some(Self::ArcLoad)
         } else {
             None
         }
@@ -70,6 +77,10 @@ impl FunctionDecl {
 }
 
 impl TyperContext {
+    pub(crate) fn define_drop(&mut self, ty: TypeId, function: FunctionId) {
+        self.definitions.set_drop(ty, function);
+    }
+
     /// Indexing uses the ordinary integer-index and pointer-result
     /// rules. It is a builtin method so a field receiver needs no parentheses.
     pub(crate) fn index_method(&self, receiver: &Ty, name: &str, associated: bool) -> Option<Ty> {
@@ -141,6 +152,35 @@ impl TyperContext {
             .into_iter()
             .flat_map(|scope| scope.functions.iter())
             .map(|(name, id)| (name, &self.functions[id]))
+    }
+}
+
+/// Builtin operations on shared handles; these have no user method declaration.
+pub(crate) fn shared_method(ty: &Ty, name: &str) -> Option<(crate::ir::Instr, Ty)> {
+    use crate::ir::Instr;
+    match (ty, name) {
+        (Ty::Arc { pointee }, "get") => Some((
+            Instr::ArcData,
+            Ty::Pointer {
+                pointee: pointee.clone(),
+            },
+        )),
+        (Ty::Arc { pointee }, "downgrade") => Some((
+            Instr::Downgrade,
+            Ty::Weak {
+                pointee: pointee.clone(),
+            },
+        )),
+        (Ty::Weak { pointee }, "upgrade") => Some((
+            Instr::Upgrade,
+            Ty::union_of([
+                Ty::Arc {
+                    pointee: pointee.clone(),
+                },
+                Ty::None,
+            ]),
+        )),
+        _ => None,
     }
 }
 

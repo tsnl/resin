@@ -46,7 +46,11 @@ impl TypeTable {
 
     pub(crate) fn reserve(&mut self, name: Arc<str>) -> TypeId {
         let id = TypeId::from_index(self.len());
-        self.definitions.push(TypeDef::Nominal { name, body: None });
+        self.definitions.push(TypeDef::Nominal {
+            name,
+            body: None,
+            drop: None,
+        });
         self.ids.insert(Ty::Defined { definition: id }, id);
         id
     }
@@ -56,6 +60,13 @@ impl TypeTable {
             unreachable!("only nominal definitions have pending bodies")
         };
         *slot = Some(body);
+    }
+
+    pub(crate) fn set_drop(&mut self, id: TypeId, function: crate::ir::FunctionId) {
+        let TypeDef::Nominal { drop, .. } = &mut self.definitions[id.index()] else {
+            unreachable!("only nominal definitions have destruction hooks")
+        };
+        *drop = Some(function);
     }
 
     pub(crate) fn pop_nominal(&mut self) {
@@ -94,7 +105,7 @@ impl TypeTable {
                 self.intern(error);
                 self.intern(&Ty::UInt32);
             }
-            Ty::Pointer { pointee } => {
+            Ty::Pointer { pointee } | Ty::Arc { pointee } | Ty::Weak { pointee } => {
                 self.intern(pointee);
             }
             Ty::Span { element } | Ty::Array { element, .. } => {

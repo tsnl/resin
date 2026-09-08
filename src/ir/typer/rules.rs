@@ -97,7 +97,7 @@ impl TyperContext {
     }
 
     pub fn type_deref(&self, pointer: &Ty) -> Result<Ty, TypeError> {
-        let Ty::Pointer { pointee } = pointer else {
+        let (Ty::Pointer { pointee } | Ty::Arc { pointee }) = pointer else {
             return Err(TypeError::new(TypeErrorKind::ExpectedPointer {
                 found: pointer.clone(),
             }));

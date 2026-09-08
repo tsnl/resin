@@ -17,6 +17,7 @@ mod value;
 struct Slot {
     ty: Ty,
     expr: String,
+    local: Option<usize>,
 }
 
 pub struct Shader {
@@ -86,6 +87,7 @@ pub(crate) fn emit_verified(
         )
         .unwrap();
     }
+    out.push_str(&types.lifecycle());
     for (index, flow) in analysis.functions.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }

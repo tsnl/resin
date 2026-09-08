@@ -28,8 +28,8 @@ fn run_entry(module: &ir::Module, entry: &str) -> std::process::Output {
 }
 
 #[test]
-fn defer_example_releases_memory_on_success_and_failure() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/defer.resin");
+fn ownership_example_releases_memory_on_success_and_failure() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ownership.resin");
     let m = ir::generate_program(&resin::ast::load(&path).unwrap()).unwrap();
     let success = run_entry(&m, "main");
     assert!(
@@ -60,110 +60,6 @@ fn runs(source: &str, code: i32) {
         Some(code),
         "{source}\n{}",
         String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
-fn defer_runs_in_reverse_order_and_preserves_return_values() {
-    runs(
-        "export { main }; def work(p: Ptr<int>) -> int = { var n = 42; defer { n := 99; }; defer { p.* := p.* * 10 + 1; }; defer { p.* := p.* * 10 + 2; }; n }; def main() -> int = { var trace = 0; var result = work(&trace); if (trace == 21 && result == 42) { 0 } else { 1 } };",
-        0,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; var result = { var n = 1; defer { trace := n; }; n := 42; n }; trace + result };",
-        84,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; { defer { trace := trace * 10 + 3; }; defer { defer { trace := trace * 10 + 2; }; trace := trace * 10 + 1; }; () }; trace };",
-        123,
-    );
-}
-
-#[test]
-fn defer_evaluates_the_entire_expression_at_exit() {
-    runs(
-        "export { main }; def first(n: int, p: Ptr<int>) -> int = { p.* := n + 1 }; def second(n: int, p: Ptr<int>) -> int = { p.* := n + 2 }; def main() -> int = { var trace = 0; var n = 1; var callback = first; var saved = { defer callback(n, &trace); callback := second; n := 40; trace }; if (saved == 0 && trace == 42) { 0 } else { 1 } };",
-        0,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; var n = 1; { defer trace := trace * 10 + n; defer (trace := 2) + (n := 3); n := 9; }; trace };",
-        23,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; var n = 0; { defer if (n == 42) { trace := 7 } else { trace := 9 }; defer while (n < 42) { n := n + 1; }; }; trace };",
-        7,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; var n = 0; { defer (n == 42) && ((trace := 7) == 7); n := 42; }; trace };",
-        7,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; var n = 1; { defer trace := n; var n = 100; n := 200; }; trace };",
-        1,
-    );
-}
-
-#[test]
-fn deferred_expression_results_and_error_paths_keep_the_same_cleanup_rules() {
-    runs(
-        "export { main }; struct E { n: int }; def fail() -> Result<int, E> = { err(E { n = 7 }) }; def work(p: Ptr<int>) -> Result<int, _> = { defer p.* := p.* * 10 + 3; var n = { defer p.* := p.* * 10 + 2; var value = fail()?; defer p.* := 99; value }; ok(n) }; def main() -> int = { var trace = 1; match (work(&trace)) { ok(n) => { 1 }, err(e) => { if (trace == 123 && e.n == 7) { 0 } else { 2 } } } };",
-        0,
-    );
-    runs(
-        "export { main }; struct E {}; def main() -> int = { var trace = 0; var r: Result<int, E>; r := ok(42); { defer match (r) { ok(n) => { trace := n }, err(e) => { trace := 7 } }; r := err(E {}); }; trace };",
-        7,
-    );
-    runs(
-        "export { main }; struct Pair { a: int, b: int }; def main() -> int = { var n = 0; { defer Pair { a = (n := n + 1), b = (n := n + 2) }; defer [n := n + 3, n := n + 4]; }; n };",
-        10,
-    );
-}
-
-#[test]
-fn defer_keeps_lexical_bindings_through_shadowing_and_branches() {
-    runs(
-        "export { main }; def main() -> int = { var x = 1; var trace = 0; { defer { trace := x; }; var x = 100; x := 200; () }; trace };",
-        1,
-    );
-    runs(
-        "export { main }; struct E {}; def work(p: Ptr<int>) -> Result<(), E> = { var x = 42; defer { p.* := x; }; { var x = 100; var r: Result<(), E>; r := err(E {}); r?; () }; ok(()) }; def main() -> int = { var n = 0; work(&n); n };",
-        42,
-    );
-    runs(
-        "export { main }; def main() -> int = { var n: int; { defer { n := 42; }; var n: int; () }; n };",
-        42,
-    );
-}
-
-#[test]
-fn defer_registers_per_scope_and_loop_iteration() {
-    runs(
-        "export { main }; def main() -> int = { var n = 0; var trace = 0; while (n < 3) { defer { trace := trace * 10 + n; }; n := n + 1; }; trace };",
-        123,
-    );
-    runs(
-        "export { main }; def main() -> int = { var trace = 0; if (1 == 1) { defer { trace := 42; }; () } else { defer { trace := 99; }; () }; trace };",
-        42,
-    );
-    runs(
-        "export { main }; struct E {}; def main() -> int = { var trace = 0; var r: Result<int, E>; r := err(E {}); match (r) { ok(n) => { defer { trace := 99; }; }, err(e) => { defer { trace := 42; }; } }; trace };",
-        42,
-    );
-}
-
-#[test]
-fn defer_unwinds_only_registered_actions_on_question_mark() {
-    runs(
-        "export { main }; struct E { code: int }; def fail() -> Result<int, E> = { err(E { code = 7 }) }; def add(a: int, b: int) -> int = { a + b }; def work(p: Ptr<int>) -> Result<int, _> = { defer { p.* := p.* * 10 + 3; }; var n = { defer { p.* := p.* * 10 + 2; }; var a = add(p.* := 1, fail()?); defer { p.* := 99; }; a }; ok(n) }; def main() -> int = { var trace = 0; match (work(&trace)) { ok(n) => { 1 }, err(e) => { if (trace == 123 && e.code == 7) { 0 } else { 2 } } } };",
-        0,
-    );
-    runs(
-        "export { main }; struct E { code: int }; def work(p: Ptr<int>, r: Result<int, E>) -> Result<int, E> = { defer { p.* := p.* + 1; }; var x = r?; defer { p.* := p.* + 10; }; ok(x) }; def main() -> int = { var n = 0; work(&n, err(E { code = 7 })); work(&n, ok(42)); n };",
-        12,
-    );
-    runs(
-        "export { main }; struct E { code: int }; def work() -> Result<int, E> = { var e = E { code = 42 }; defer { e.code := 99; }; err(e) }; def main() -> int = { match (work()) { ok(n) => { 1 }, err(e) => { e.code } } };",
-        42,
     );
 }
 
@@ -791,10 +687,12 @@ fn suffixed_literals_execute_with_their_selected_widths() {
 fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
     runs(
         r#"export { main };
+    struct Add { value: Ptr<int> };
+    impl Add { def drop(self: Ptr<Add>) = { self.value.* := self.value.* + 10; }; }
     def condition(calls: Ptr<int>) -> bool = { calls.* := calls.* + 1; 1 == 1 };
     def main() -> int = {
         var calls = 0; var value = 0;
-        if (condition(&calls)) { defer { value := value + 10; }; value := value + 1; };
+        if (condition(&calls)) { var cleanup = Add { value = &value }; value := value + 1; };
         if (1 == 0) { value := 100; };
         if (1 == 1) { if (1 == 0) { value := 100; } else { value := value + 1; }; };
         if (calls == 1 && value == 12) { 0 } else { 1 }
@@ -811,12 +709,13 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
                 r#"
             export {{ main }};
             struct E {{}};
-            def release(resource: int, trace: Ptr<int>) = {{ trace.* := trace.* * 10 + resource; }};
+            struct Capture {{ resource: Ptr<int>, trace: Ptr<int> }};
+            impl Capture {{ def drop(self: Ptr<Capture>) = {{ self.trace.* := self.trace.* * 10 + self.resource.*; }}; }}
             def work(trace: Ptr<int>, fail: bool) -> Result<(), E> = {{
                 var resource = 1;
                 var captured = resource;
-                defer release(captured, trace);
-                defer release(resource, trace);
+                var first = Capture {{ resource = &captured, trace = trace }};
+                var second = Capture {{ resource = &resource, trace = trace }};
                 resource := 2;
                 {{ var captured = 9; }};
                 var result: Result<(), E>; result := if (fail) {{ err(E {{}}) }} else {{ ok(()) }};

@@ -152,6 +152,8 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
             .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, typer)),
+        Ty::Arc { pointee } => format!("Arc<{}>", format_type(pointee, typer)),
+        Ty::Weak { pointee } => format!("Weak<{}>", format_type(pointee, typer)),
         Ty::Span { element } => format!("Span<{}>", format_type(element, typer)),
         Ty::Array { element, length } => format!("[{}; {length}]", format_type(element, typer)),
         Ty::Record { fields } => format!(

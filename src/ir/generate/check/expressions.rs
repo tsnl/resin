@@ -31,7 +31,6 @@ pub(super) struct Checker<'a> {
     pub definitions: HashMap<*const Ident, TypeId>,
     pub constraints: Vec<(Span, Constraint)>,
     pub result: Type,
-    in_defer: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -48,7 +47,6 @@ impl<'a> Checker<'a> {
             definitions: HashMap::new(),
             constraints: vec![],
             result: Ty::Unit.into(),
-            in_defer: false,
         }
     }
 
@@ -74,6 +72,8 @@ impl<'a> Checker<'a> {
             TypeKind::App { head, arg } => {
                 let head = match head.val.as_ref() {
                     "Ptr" => Head::Pointer,
+                    "Arc" => Head::Arc,
+                    "Weak" => Head::Weak,
                     "Span" => Head::Span,
                     _ => return Err(error(head.span, "unknown type former")),
                 };
@@ -174,12 +174,6 @@ impl<'a> Checker<'a> {
                 equate = Some(payload);
             }
             TermKind::Try { value } => {
-                if self.in_defer {
-                    return Err(error(
-                        span,
-                        "postfix ? is not allowed in a deferred expression; handle the error locally",
-                    ));
-                }
                 let input = self.term(value, None)?;
                 let (value, errors) = self.result_parts(&input, span)?;
                 let (_, target_errors) = self.result_parts(&self.result.clone(), span)?;
@@ -284,11 +278,6 @@ impl<'a> Checker<'a> {
                         StmtKind::Expr { term } => {
                             self.term(term, None)?;
                         }
-                        StmtKind::Defer { body } => {
-                            let before = std::mem::replace(&mut self.in_defer, true);
-                            self.term(body, None)?;
-                            self.in_defer = before;
-                        }
                         _ => {
                             return Err(error(
                                 stmt.span,
@@ -347,6 +336,16 @@ impl<'a> Checker<'a> {
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Var { name } = &func.val
+                    && name.val.as_ref() == "replace"
+                {
+                    self.term(
+                        arg,
+                        Some(Type::record(vec![
+                            ("_0".into(), Type::pointer(out.clone())),
+                            ("_1".into(), out.clone()),
+                        ])),
+                    )?;
+                } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
                     self.term(arg, Some(Ty::union([]).into()))?;
@@ -375,9 +374,30 @@ impl<'a> Checker<'a> {
                     }
                 } else if let TermKind::Type { ty } = &func.val {
                     let to = self.annotation(ty, true)?;
-                    let from = self.term(arg, None)?;
-                    self.constraints
+                    if let Type::Node(Head::Arc, parts) = &to {
+                        let context = if matches!(arg.val, TermKind::Record { .. } | TermKind::Unit)
+                        {
+                            let payload = self.solver.require(&parts[0], span)?;
+                            let body = self
+                                .typer
+                                .body(&payload)
+                                .map_err(|e| GenerateError::typing(span, e))?;
+                            if matches!(arg.val, TermKind::Unit)
+                                && matches!(&body, Ty::Record { fields } if fields.is_empty())
+                            {
+                                Ty::Unit.into()
+                            } else {
+                                body.into()
+                            }
+                        } else {
+                            parts[0].clone()
+                        };
+                        self.term(arg, Some(context))?;
+                    } else {
+                        let from = self.term(arg, None)?;
+                        self.constraints
                         .push((span, Constraint::Ascribe(from, to.clone(), matches!(arg.val, TermKind::Num { .. }) || matches!(&arg.val, TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [Term { val: TermKind::Num { .. }, .. }])))));
+                    }
                     equate = Some(to);
                 } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "print"

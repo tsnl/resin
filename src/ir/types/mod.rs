@@ -16,7 +16,12 @@ define_id! {
 /// An entry in the module's canonical type table. Only nominal records can have
 /// incomplete bodies while resolving recursive fields.
 pub enum TypeDef {
-    Nominal { name: Arc<str>, body: Option<Ty> },
+    Nominal {
+        name: Arc<str>,
+        body: Option<Ty>,
+        /// Builtin destruction hook; ordinary method namespaces remain in the frontend.
+        drop: Option<crate::ir::FunctionId>,
+    },
     Structural(Ty),
 }
 
@@ -25,11 +30,18 @@ impl TypeDef {
         Self::Nominal {
             name: name.into(),
             body: Some(body),
+            drop: None,
         }
     }
     pub fn name(&self) -> Option<&Arc<str>> {
         match self {
             Self::Nominal { name, .. } => Some(name),
+            Self::Structural(_) => None,
+        }
+    }
+    pub fn drop_hook(&self) -> Option<crate::ir::FunctionId> {
+        match self {
+            Self::Nominal { drop, .. } => *drop,
             Self::Structural(_) => None,
         }
     }
@@ -73,6 +85,8 @@ pub enum Ty {
     Defined { definition: TypeId },
     Pointer { pointee: Box<Ty> },
     Span { element: Box<Ty> },
+    Arc { pointee: Box<Ty> },
+    Weak { pointee: Box<Ty> },
     Array { element: Box<Ty>, length: usize },
     Record { fields: Vec<RecordField> },
     Function { param: Box<Ty>, result: Box<Ty> },
@@ -100,6 +114,25 @@ impl Case {
 }
 
 impl Ty {
+    pub fn needs_drop(&self, definitions: &[TypeDef]) -> bool {
+        match self {
+            Self::Arc { .. } | Self::Weak { .. } => true,
+            Self::Defined { definition } => {
+                let d = &definitions[definition.index()];
+                d.drop_hook().is_some() || d.body().is_some_and(|t| t.needs_drop(definitions))
+            }
+            Self::Record { fields } => fields.iter().any(|f| f.ty.needs_drop(definitions)),
+            Self::Array { element, .. } => element.needs_drop(definitions),
+            Self::Result { value, error } => {
+                value.needs_drop(definitions) || error.needs_drop(definitions)
+            }
+            Self::Union { variants } => {
+                variants.iter().any(|member| member.needs_drop(definitions))
+            }
+            _ => false,
+        }
+    }
+
     pub fn payloads(&self) -> Option<Vec<(Case, Ty)>> {
         match self {
             Self::Result { value, error } => Some(vec![

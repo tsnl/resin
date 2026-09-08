@@ -73,7 +73,7 @@ impl Checker<'_> {
     fn shape(&self, ty: &Type, deref: bool, span: Span) -> Result<Type> {
         let mut ty = self.solver.shape_hint(ty);
         if deref {
-            while let Type::Node(Head::Pointer, children) = &ty {
+            while let Type::Node(Head::Pointer | Head::Arc, children) = &ty {
                 ty = self.solver.shape_hint(&children[0]);
             }
         }
@@ -105,10 +105,20 @@ impl Checker<'_> {
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     return Ok(false);
                 };
+                if !associated
+                    && let Some((_, result)) = crate::ir::typer::shared_method(&receiver_type, name)
+                {
+                    self.solver.unify(arg, &Ty::Unit.into(), span)?;
+                    self.solver.unify(out, &result.into(), span)?;
+                    return Ok(true);
+                }
                 let method = self
                     .typer
                     .method(&receiver_type, name)
                     .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
+                if name.as_ref() == "drop" {
+                    return Err(error(span, "drop is a compiler-invoked destruction hook"));
+                }
                 let params = method
                     .arguments(&receiver_type, *associated)
                     .ok_or_else(|| {
@@ -164,7 +174,7 @@ impl Checker<'_> {
                 let shape = self.shape(input, false, span)?;
                 match shape {
                     Type::Variable(_) => return Ok(false),
-                    Type::Node(Head::Pointer, children) => {
+                    Type::Node(Head::Pointer | Head::Arc, children) => {
                         self.solver.unify(out, &children[0], span)?
                     }
                     _ => return Err(error(span, "dereference requires a pointer")),
@@ -251,6 +261,11 @@ impl Checker<'_> {
                 return Ok(complete);
             }
             Constraint::Ascribe(from, to, literal) => {
+                if matches!(self.solver.head(to), Type::Node(Head::Weak, _))
+                    && self.solver.resolve(from) == Some(Ty::Unit)
+                {
+                    return Ok(true);
+                }
                 if let Type::Node(Head::Span, children) = self.solver.head(to) {
                     if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
                         return self.solver.unify(from, to, span).map(|_| true);

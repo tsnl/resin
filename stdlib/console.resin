@@ -7,7 +7,6 @@ export {
 	InputReadError,
 	InputOutOfMemory,
 	InputWriteError,
-	free_input,
 	print_input,
 };
 
@@ -19,8 +18,14 @@ extern "resin_runtime/console.h" def resin_stdout_flush() -> int;
 extern "stdlib.h" def realloc(memory: Ptr<ubyte>, bytes: ulong) -> Ptr<ubyte>;
 extern "stdlib.h" def free(memory: Ptr<ubyte>);
 
-// Owns length bytes followed by a NUL. Copies share the same allocation.
-struct InputLine { data: Ptr<ubyte>, length: ulong };
+// Owns length bytes followed by a NUL. Copies retain the allocation.
+struct InputLineOwner { data: Ptr<ubyte>, length: ulong };
+type InputLine = Arc<InputLineOwner>;
+impl InputLineOwner {
+	def drop(self: Ptr<InputLineOwner>) = {
+		free(self.data);
+	};
+}
 struct EndOfInput {};
 struct InputReadError {};
 struct InputOutOfMemory {};
@@ -56,13 +61,9 @@ def check_input_end(byte: int, length: ulong) -> Result<(), EndOfInput | InputRe
 
 // Reads bytes through LF or EOF; only CR immediately before LF is stripped.
 def input() -> Result<InputLine, InputError> = {
-	var buffer = Span<ubyte> {
+	var buffer = InputLine {
 		data = resize_input(Ptr<ubyte>(0L), 128L)?,
 		length = 128L,
-	};
-	var transferred = 1 == 0;
-	defer if (!transferred) {
-		free(buffer.data);
 	};
 	var length = 0L;
 	var byte = getchar();
@@ -79,24 +80,19 @@ def input() -> Result<InputLine, InputError> = {
 			buffer.data := resize_input(buffer.data, capacity)?;
 			buffer.length := capacity;
 		};
-		buffer(length).* := resin_console_byte(byte);
+		Span<ubyte> { data = buffer.data, length = buffer.length }(length).* := resin_console_byte(byte);
 		length := length + 1L;
 		byte := getchar();
 	};
 	check_input_end(byte, length)?;
 	if (byte == 10 && length > 0L) {
-		if (buffer(length - 1L).* == 13B) {
+		if (Span<ubyte> { data = buffer.data, length = buffer.length }(length - 1L).* == 13B) {
 			length := length - 1L;
 		};
 	};
-	buffer(length).* := 0B;
-	transferred := 1 == 1;
-	ok(InputLine { data = buffer.data, length = length })
-};
-
-// Release exactly once, after the last use of the line or any copy.
-def free_input(line: InputLine) = {
-	free(line.data);
+	Span<ubyte> { data = buffer.data, length = buffer.length }(length).* := 0B;
+	buffer.length := length;
+	ok(buffer)
 };
 
 // Writes every byte (including embedded NULs), flushes, and adds no newline.

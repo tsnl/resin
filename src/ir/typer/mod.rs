@@ -8,7 +8,9 @@ use crate::ir::{Ty, TypeDef, TypeId, TypeTable};
 mod convert;
 mod error;
 mod methods;
-pub(crate) use methods::{FunctionDecl, ReceiverConversion, SourceModuleId, SourceOrigin};
+pub(crate) use methods::{
+    FunctionDecl, ReceiverConversion, SourceModuleId, SourceOrigin, shared_method,
+};
 mod rules;
 
 pub use convert::{Conv, Converted};
@@ -31,7 +33,7 @@ impl TyperContext {
 
     pub(crate) fn receiver_definition(&self, ty: &Ty) -> Option<TypeId> {
         let mut ty = ty;
-        while let Ty::Pointer { pointee } = ty {
+        while let Ty::Pointer { pointee } | Ty::Arc { pointee } = ty {
             ty = pointee;
         }
         let Ty::Defined { definition } = ty else {

@@ -211,7 +211,7 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     if b == "(" || b == "[" {
         return matches!(
             a,
-            "if" | "while" | "match" | "defer" | "else" | "=" | ":=" | "->" | "," | ":"
+            "if" | "while" | "match" | "else" | "=" | ":=" | "->" | "," | ":"
         ) || (a == ")" && left.parent().is_some_and(|p| p.kind() == "if_term"))
             || (is_operator(left) && !(a == ">" && generic_left));
     }

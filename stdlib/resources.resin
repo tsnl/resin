@@ -1,0 +1,70 @@
+// Shared host owners. Native handles and addresses remain unsafe interoperability values.
+export { ResinGpu, ResinGpuDeviceInfo, ResinAllocation, ResinImage, ResinPipeline, ResinCommandBuffer, ResinWindow, Gpu, GpuBuffer, GpuImage, GpuPipeline, GpuCommands, Window };
+
+extern type ResinGpu;
+extern type ResinGpuDeviceInfo;
+extern type ResinAllocation;
+extern type ResinImage;
+extern type ResinPipeline;
+extern type ResinCommandBuffer;
+extern type ResinWindow;
+
+struct WindowOwner { handle: Ptr<ResinWindow> };
+type Window = Arc<WindowOwner>;
+impl WindowOwner {
+	def drop(self: Ptr<WindowOwner>) = {
+		resin_window_destroy(self.handle);
+	};
+}
+
+struct GpuOwner { handle: Ptr<ResinGpu>, window: Window | None };
+type Gpu = Arc<GpuOwner>;
+impl GpuOwner {
+	def drop(self: Ptr<GpuOwner>) = {
+		resin_gpu_destroy(self.handle);
+	};
+}
+
+struct BufferOwner { handle: Ptr<ResinAllocation>, gpu: Gpu };
+type GpuBuffer = Arc<BufferOwner>;
+impl BufferOwner {
+	def drop(self: Ptr<BufferOwner>) = {
+		resin_gpu_free(self.gpu.handle, self.handle);
+	};
+}
+
+struct ImageOwner { handle: Ptr<ResinImage>, gpu: Gpu };
+type GpuImage = Arc<ImageOwner>;
+impl ImageOwner {
+	def drop(self: Ptr<ImageOwner>) = {
+		resin_gpu_free_image(self.gpu.handle, self.handle);
+	};
+}
+
+struct PipelineOwner { handle: Ptr<ResinPipeline>, gpu: Gpu };
+type GpuPipeline = Arc<PipelineOwner>;
+impl PipelineOwner {
+	def drop(self: Ptr<PipelineOwner>) = {
+		resin_gpu_free_pipeline(self.gpu.handle, self.handle);
+	};
+}
+
+// Retain resources mentioned by recorded commands until synchronous submit or cancellation.
+struct RecordedResources { pipeline: GpuPipeline | None, image: GpuImage | None, buffer: GpuBuffer | None, previous: Arc<RecordedResources> | None };
+struct CommandsOwner { handle: Ptr<ResinCommandBuffer>, gpu: Gpu, retained: Arc<RecordedResources> | None };
+type GpuCommands = Arc<CommandsOwner>;
+impl CommandsOwner {
+	def drop(self: Ptr<CommandsOwner>) = {
+		resin_gpu_cancel_command_buffer(self.gpu.handle, self.handle);
+	};
+	def retain(self: Ptr<CommandsOwner>, pipeline: GpuPipeline | None, image: GpuImage | None, buffer: GpuBuffer | None) = {
+		self.retained := Arc<RecordedResources> { pipeline = pipeline, image = image, buffer = buffer, previous = self.retained };
+	};
+}
+
+extern "resin_runtime.h" def resin_window_destroy(window: Ptr<ResinWindow>);
+extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
+extern "resin_runtime.h" def resin_gpu_free(gpu: Ptr<ResinGpu>, allocation: Ptr<ResinAllocation>);
+extern "resin_runtime.h" def resin_gpu_free_image(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>);
+extern "resin_runtime.h" def resin_gpu_free_pipeline(gpu: Ptr<ResinGpu>, pipeline: Ptr<ResinPipeline>);
+extern "resin_runtime.h" def resin_gpu_cancel_command_buffer(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>);

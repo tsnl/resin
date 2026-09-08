@@ -992,16 +992,6 @@
           }
         ]
       },
-      "defer": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "term",
-            "named": true
-          }
-        ]
-      },
       "define": {
         "multiple": false,
         "required": false,
@@ -1271,11 +1261,19 @@
         "required": false,
         "types": [
           {
+            "type": "Arc",
+            "named": false
+          },
+          {
             "type": "Ptr",
             "named": false
           },
           {
             "type": "Span",
+            "named": false
+          },
+          {
+            "type": "Weak",
             "named": false
           }
         ]
@@ -1488,6 +1486,10 @@
     "named": false
   },
   {
+    "type": "Arc",
+    "named": false
+  },
+  {
     "type": "Never",
     "named": false
   },
@@ -1505,6 +1507,10 @@
   },
   {
     "type": "Span",
+    "named": false
+  },
+  {
+    "type": "Weak",
     "named": false
   },
   {
@@ -1530,10 +1536,6 @@
   },
   {
     "type": "def",
-    "named": false
-  },
-  {
-    "type": "defer",
     "named": false
   },
   {

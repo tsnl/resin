@@ -48,6 +48,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
   identifiers. Desugar method calls into ordinary functions before IR; method namespaces
   and module origins belong to frontend metadata.
+- Reading existing values performs compiler-defined copying. Function and type
+  applications consume their argument results; operators do the same, and aggregate
+  constructors consume their field initializers. `impl` defines inherent methods and
+  `drop(self: Ptr<T>)` hooks. There is no static move checking or borrow checker.
+  Native wrappers must make their copying safe or expose Arc-based ownership;
+  `replace(pointer, replacement)` can disarm a native owner during deliberate transfer.
+  See `doc/lifetimes.md` for lifecycle rules.
 - Numeric suffixes are case-sensitive: `b/B`, `h/H`, `i/I`, and `l/L` select signed/unsigned
   8/16/32/64-bit integers; `f/d` select float32/float64. Suffixes fix literal types and retain
   range checking. Hex literals only accept suffixes that are not hex digits (`h/H`, `i/I`, `l/L`).
@@ -64,7 +71,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
   shader indexing is unchecked, and callers must stay within valid storage.
-  Spans have `data` and `length` fields. Pointer arithmetic
+  `Place<T>` is a compiler expression category, not a source type; pointer-returning user
+  functions support the same access rules. Spans have `data` and `length` fields. Pointer arithmetic
   is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic. The C ABI retains
   pointer/length pairs; language-facing pipeline creation accepts spans.
 - Unions contain value types and use module-wide u32 type IDs, not variant positions.
@@ -75,14 +83,15 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix
   `?` returns early on error. Error holes collect the least union of propagated errors (`Never`
   if empty). Keep mutable pointers invariant; implicit widening only copies union/Result values.
-- `defer expression;` is a chain-prefix statement that discards the deferred value. It runs in reverse
-  order on normal exit and `?`. Bind names at registration, read values at exit, and preserve
-  the returned value before cleanup. Deferred expressions cannot propagate with `?`.
-  Chain expressions with no tail yield unit; `defer { ... };` uses ordinary block syntax.
+- Initialized owners are destroyed in reverse scope order on normal exit and `?`;
+  preserve returned values before cleanup. Chain expressions with no tail yield unit.
   Standard-library wrappers return Results and keep integer-status C declarations private;
   public operation names omit `resin_`. `RuntimeError` is a union of named status errors.
-  Register cleanup after successful acquisition. Submit/cancel take `&commands` and clear the
-  consumed handle; presentation returns `ok(false)` for skipped frames. There is no automatic resource ownership.
+  Standard-library resource handles now retain shared owners and clean up automatically;
+  do not register manual native destruction for them. Submit/cancel take `&commands`
+  and clear the shared native handle; presentation returns `ok(false)` for skipped frames.
+  Reference counting and custom destruction are host-only; shader consumption of
+  managed values is rejected.
 - Always commit and push completed changes to a task branch and open a pull request,
   including in future sessions. Do not push changes directly to `main`.
   Preserve unrelated local changes.

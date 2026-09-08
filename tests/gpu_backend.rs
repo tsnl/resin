@@ -409,56 +409,6 @@ fn shader_results_propagate_and_match_union_payloads_on_device() {
 }
 
 #[test]
-fn shader_defer_preserves_values_and_runs_each_iteration() {
-    compute_values(
-        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { var n = uint(0); var total = uint(0); var saved = { defer { total := total * uint(2); }; while (n < i) { defer { total := total + n; }; n := n + uint(1); }; total }; saved + total }; }; };",
-        |index| 3 * index * (index + 1) / 2,
-    );
-}
-
-#[test]
-fn shader_defer_delays_conditions_and_discards_expression_values() {
-    compute_values(
-        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { var n = uint(0); var total = uint(0); var saved = { defer if (n == i) { total := total * uint(2) } else { total := uint(999) }; defer while (n < i) { defer total := total + n; n := n + uint(1); }; total }; saved + total }; }; };",
-        |index| index * (index + 1),
-    );
-}
-
-#[test]
-fn shader_defer_unwinds_errors_on_device() {
-    compute_values(
-        r#"export { kernel };
-        struct Root { count: uint, pixels: Ptr<uint> };
-        struct Odd { index: uint };
-        def checked(i: uint) -> Result<uint, Odd> = {
-            if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) }
-        };
-        def work(i: uint, p: Ptr<uint>) -> Result<uint, _> = {
-            defer p.* := p.* * uint(10) + uint(3);
-            var n = {
-                defer p.* := p.* * uint(10) + uint(2);
-                var value = checked(i)?;
-                defer p.* := uint(1);
-                value
-            };
-            ok(n)
-        };
-        def kernel(i: uint, root: Ptr<Root>) = {
-            if (i < root.count) {
-                var p = (Span<uint> { data = root.pixels, length = ulong(67) })(i);
-                p.* := uint(0);
-                match (work(i, p)) {
-                    ok(n) => { p.* := p.* + n; },
-                    err(e) => { p.* := p.* + e.index; },
-                };
-                ()
-            } else { () }
-        };"#,
-        |index| index + if index % 2 == 1 { 23 } else { 123 },
-    );
-}
-
-#[test]
 fn optional_unwrap_stops_shader_callers_on_none() {
     compute_values(
         r#"export { kernel };

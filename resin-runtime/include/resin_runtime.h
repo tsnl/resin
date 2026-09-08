@@ -1,6 +1,7 @@
 #pragma once
 
 #include "resin_runtime/host.h"
+#include "resin_runtime/shared.h"
 #include "resin_runtime/print.h"
 #include "resin_runtime/console.h"
 #include "resin_runtime/gpu.h"

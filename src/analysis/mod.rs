@@ -515,11 +515,6 @@ fn merge_binding(
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
-        "impl",
-        "impl T { def method(self: Ptr<T>) = {}; } — inherent methods.",
-        DefinitionKind::Keyword,
-    ),
-    (
         "print",
         "print(format, arguments)\n\nPrint formatted values on the host. Numbered placeholders use {0}, {1}, ….",
         DefinitionKind::Function,
@@ -565,14 +560,29 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Keyword,
     ),
     (
-        "defer",
-        "defer expression; — evaluate at scope exit in reverse registration order, including through ?, and discard the value.",
+        "impl",
+        "impl T { def method(self: Ptr<T>) = {}; } — inherent methods.",
         DefinitionKind::Keyword,
     ),
     (
         "None",
         "None — singleton value and type; T | None permits absence, postfix ! excludes it or traps.",
         DefinitionKind::Type,
+    ),
+    (
+        "Arc",
+        "Arc<T> — a copyable shared owner; copying retains the allocation.",
+        DefinitionKind::Type,
+    ),
+    (
+        "Weak",
+        "Weak<T> — a weak handle; upgrade() returns Arc<T> | None.",
+        DefinitionKind::Type,
+    ),
+    (
+        "replace",
+        "replace(pointer, replacement) — return the old pointee and install the replacement.",
+        DefinitionKind::Function,
     ),
     ("bool", "bool", DefinitionKind::Type),
     (

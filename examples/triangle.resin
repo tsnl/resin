@@ -61,20 +61,19 @@ def fragment(color: Color) -> Color = {
 
 def main() -> Result<(), _> = {
 	var gpu = gpu_create()?;
-	defer gpu_destroy(gpu);
 
 	var pipeline = gpu_create_graphics_pipeline(
 		gpu,
 		vertex.spirv,
 		fragment.spirv,
 	)?;
-	defer gpu_free_pipeline(gpu, pipeline);
+
 	var image = gpu_create_image(gpu, 256, 256)?;
-	defer gpu_free_image(gpu, image);
+
 	var pixels = gpu_malloc(gpu, 262144, 4, memory_readback())?;
-	defer gpu_free(gpu, pixels);
+
 	var commands = gpu_start_command_recording(gpu)?;
-	defer gpu_cancel_command_buffer(gpu, &commands);
+
 	gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
 	gpu_set_pipeline(commands, pipeline)?;
 	gpu_draw(commands, 0, 3)?;

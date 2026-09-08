@@ -68,9 +68,6 @@ impl Scan {
                             self.bind(&name.val);
                         }
                         StmtKind::Expr { term } => self.term(term),
-                        StmtKind::Defer { body } => {
-                            self.term(body);
-                        }
                         _ => {}
                     }
                 }

@@ -57,7 +57,7 @@ struct Generator {
     function: Option<FunctionBuilder>,
     scopes: Scopes,
     checked: check::Checked,
-    defers: Vec<Vec<cleanup::Deferred>>,
+    owned: Vec<Vec<LocalId>>,
 }
 
 impl Generator {
@@ -72,7 +72,7 @@ impl Generator {
             function: None,
             scopes: Scopes::new(),
             checked: check::Checked::default(),
-            defers: vec![],
+            owned: vec![],
         }
     }
 
@@ -81,10 +81,7 @@ impl Generator {
         for stmt in file.declarations() {
             if matches!(
                 stmt.val,
-                StmtKind::Define { .. }
-                    | StmtKind::Declare { .. }
-                    | StmtKind::Expr { .. }
-                    | StmtKind::Defer { .. }
+                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. }
             ) {
                 return Err(GenerateError {
                     span: stmt.span,
@@ -225,10 +222,6 @@ impl Generator {
             StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
             StmtKind::Struct { name, body } => self.gen_struct(name, body),
             StmtKind::Declare { name, ann } => self.gen_declare(name, ann),
-            StmtKind::Defer { body } => {
-                self.defer(body.clone());
-                Ok(())
-            }
             StmtKind::Expr { term } => {
                 self.gen_term(term, None)?;
                 self.emit(Instr::Discard);
@@ -318,7 +311,13 @@ impl Generator {
             TermKind::Assign { place, value } => self.gen_assign(place, value),
             TermKind::Address { place } => self.gen_place(place),
             TermKind::Deref { pointer } => {
-                let pointer_ty = self.gen_term(pointer, None)?;
+                let checked =
+                    self.checked.expressions[&std::ptr::from_ref(pointer.as_ref())].clone();
+                let pointer_ty = if matches!(checked, Ty::Arc { .. }) {
+                    self.hold_arc_address(pointer)?
+                } else {
+                    self.gen_term(pointer, None)?
+                };
                 let ty = self
                     .typer
                     .type_deref(&pointer_ty)
@@ -331,7 +330,11 @@ impl Generator {
     }
 
     fn alloc_local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
-        self.function().local(ty, name)
+        let local = self.function().local(ty, name);
+        if let Some(owned) = self.owned.last_mut() {
+            owned.push(local);
+        }
+        local
     }
 
     fn save_top(&mut self, ty: &Ty) -> LocalId {

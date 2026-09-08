@@ -261,19 +261,18 @@ def main() -> Result<(), _> = {
 	var count = 1000000I;
 	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	var window = window_create(1280, 800, Ptr<ubyte>(&title))?;
-	defer window_destroy(window);
+
 	var gpu = gpu_create_for_window(window)?;
-	defer gpu_destroy(gpu);
 
 	var compute = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
-	defer gpu_free_pipeline(gpu, compute);
+
 	var graphics = gpu_create_graphics_pipeline(gpu, vertex.spirv, fragment.spirv)?;
-	defer gpu_free_pipeline(gpu, graphics);
+
 	// One shared 24 MB buffer: initialization writes host memory; compute and graphics use its device address.
 	var particles = gpu_malloc(gpu, ulong(count) * size_of(Particle), align_of(Particle), memory_default())?;
-	defer gpu_free(gpu, particles);
+
 	var root = gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?;
-	defer gpu_free(gpu, root);
+
 	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = ulong(count) };
 	var seed = 0x9e3779b9I;
 	initialize(host_particles, seed);
@@ -292,7 +291,7 @@ def main() -> Result<(), _> = {
 	};
 	var address = allocation_device_pointer(root);
 	var image = gpu_create_image(gpu, 1280, 800)?;
-	defer gpu_free_image(gpu, image);
+
 	var paused = 1 == 0;
 	var camera = default_camera();
 	var automatic = 1 == 1;
@@ -335,7 +334,7 @@ def main() -> Result<(), _> = {
 		was_dragging := dragging;
 		apply_camera(camera, params);
 		var commands = gpu_start_command_recording(gpu)?;
-		defer gpu_cancel_command_buffer(gpu, &commands);
+
 		if (!paused) {
 			gpu_set_pipeline(commands, compute)?;
 			gpu_dispatch(commands, address, (count + 63I) / 64I, 1, 1)?;
