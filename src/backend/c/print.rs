@@ -46,19 +46,39 @@ pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<St
     } else {
         format!("(ResinPrintArg[]){{ {} }}", values.join(", "))
     };
+    string(
+        types,
+        result,
+        format!("resin_format({data}, {length}, {values}, {count})"),
+    )
+}
+
+pub(super) fn from_str(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
+    let [arg] = args else {
+        return Err(Error("String.from_str expects one byte span".into()));
+    };
+    if arg.ty != Ty::byte_span() {
+        return Err(Error("String.from_str expects Span<ubyte>".into()));
+    }
+    let (data, length) = bytes(types, &arg.ty, &arg.expr)?;
+    string(
+        types,
+        result,
+        format!("resin_string_from_str({data}, {length})"),
+    )
+}
+
+fn string(types: &Types<'_>, result: &Ty, allocation: String) -> Result<String, Error> {
     let body = types.shape(result);
     let Ty::Record { fields } = body else {
-        return Err(Error("fmt must return String".into()));
+        return Err(Error("expected String result".into()));
     };
     if fields.len() != 1 || fields[0].ty != Ty::formatted_bytes() {
         return Err(Error("invalid String representation".into()));
     }
     Ok(types.wrap(
         result,
-        format!(
-            "({}){{ .f0 = resin_format({data}, {length}, {values}, {count}) }}",
-            types.name(body)
-        ),
+        format!("({}){{ .f0 = {allocation} }}", types.name(body)),
     ))
 }
 

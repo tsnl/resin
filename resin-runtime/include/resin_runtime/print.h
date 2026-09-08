@@ -42,8 +42,11 @@ void resin_print(const uint8_t *data, size_t length);
 // Writes and flushes stdout (0) or stderr (1). Returns zero on success, -1 on failure.
 int32_t resin_stream_write(uint32_t stream, const uint8_t *data, size_t length);
 
-// Returns an owned Arc<Span<ubyte>> with byte storage in the same allocation.
-// The logical length excludes a trailing NUL. Invalid formats terminate the program.
+// Return an owned Arc<Span<ubyte>> with byte storage in the same allocation.
+// The logical length excludes a trailing NUL.
+// Copies bytes verbatim; the source need not be NUL-terminated.
+ResinArc *resin_string_from_str(const uint8_t *data, size_t length);
+// Formats arguments; invalid formats terminate the program.
 ResinArc *resin_format(const uint8_t *format, size_t length, const ResinPrintArg *args, size_t count);
 
 #ifdef __cplusplus

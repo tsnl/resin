@@ -564,3 +564,50 @@ fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
         success(&output);
     }
 }
+
+#[test]
+fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
+    let output = run(
+        r#"
+        export { main };
+        import { "std/window.resin" };
+        extern "resin_runtime.h" def window_counts() -> int;
+        def main() -> Result<int, _> = {
+            var weak = Weak<Span<ubyte>>();
+            {
+                var title = String.from_str("named {0}");
+                weak := title.bytes.downgrade();
+                var a = Window.new(32I, 24I, title)?;
+                var b = Window.new(32I, 24I, String.from_str("temporary"))?;
+                print(title);
+            };
+            var released = match (weak.upgrade()) {
+                None => { 1 == 1 },
+                Arc<Span<ubyte>>(live) => { 1 == 0 },
+            };
+            ok(if (released && window_counts() == 22) { 0 } else { 1 })
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        #include <string.h>
+        static int created, destroyed;
+        static ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
+            assert(width == 32 && height == 24);
+            assert(strcmp(title, created == 0 ? "named {0}" : "temporary") == 0);
+            *out = (ResinWindow *)(uintptr_t)++created;
+            return RESIN_STATUS_SUCCESS;
+        }
+        static void mock_window_destroy(ResinWindow *window) {
+            assert(window != NULL);
+            ++destroyed;
+        }
+        static int window_counts(void) { return created * 10 + destroyed; }
+        #define resin_window_create mock_window_create
+        #define resin_window_destroy mock_window_destroy
+        "#,
+    );
+    success(&output);
+    assert_eq!(output.stdout, b"named {0}");
+}

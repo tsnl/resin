@@ -20,7 +20,19 @@ fn pointer(ty: Ty) -> Ty {
     }
 }
 
-fn definitions(receiver: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
+fn definitions(receiver: &Ty, typer: &TyperContext) -> Vec<(Arc<str>, FunctionDecl)> {
+    if typer.string_type.as_ref() == Some(receiver) {
+        return vec![method(
+            "from_str",
+            vec![Ty::byte_span()],
+            receiver.clone(),
+            vec![Instr::CallBuiltin {
+                name: "string_from_str".into(),
+                params: vec![Ty::byte_span()],
+                result: receiver.clone(),
+            }],
+        )];
+    }
     match receiver {
         Ty::Pointer { pointee } => vec![method(
             "replace",

@@ -60,7 +60,7 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(code)`, `gpu.create_image(...)` |
 | `GpuBuffer` | `buffer.host_pointer()`, `buffer.device_pointer()`, `buffer.size()` |
 | `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(...)`, `commands.submit()`, `commands.cancel()` |
-| `Window` | `Window.new(...)`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
+| `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
 | `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
 | `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
 | `Memory` | `Memory.default()`, `Memory.gpu()`, `Memory.readback()` |
@@ -140,3 +140,6 @@ Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storin
 Literals are spans over static bytes; formatting results own an Arc allocation. InputLine
 can be passed as an explicit `Span<ubyte> { data = line.data, length = line.length }` while
 its owner remains live.
+
+`String.from_str(span)` copies bytes without formatting and appends a NUL outside the logical
+length. `Window.new(width, height, title)` takes this owned String, or a String returned by `fmt`.

@@ -1540,3 +1540,22 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
         assert!(members.iter().any(|member| member.detail == "count: int"));
     }
 }
+
+#[test]
+fn string_constructor_is_an_ordinary_discoverable_static_method() {
+    for source in [
+        "def main() = { var text = String.from_str(\"title\"); text.bytes.; };",
+        "def main() = { String.; };",
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let analysis = project.analyze();
+        let offset = source.rfind(".;").unwrap() + 1;
+        let items = analysis.completions(&project.path("main.resin"), offset);
+        let member = if source.contains("from_str") {
+            "length"
+        } else {
+            "from_str"
+        };
+        assert!(items.iter().any(|item| item.name == member), "{items:?}");
+    }
+}
