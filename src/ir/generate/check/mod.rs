@@ -46,8 +46,7 @@ pub(super) fn file(
     scopes: &Scopes,
 ) -> Result<Checked> {
     let functions: Vec<_> = file
-        .stmts
-        .iter()
+        .declarations()
         .filter_map(|stmt| {
             if let StmtKind::Function {
                 name,
@@ -84,7 +83,7 @@ pub(super) fn file(
         names.insert(name.val.to_string(), i);
         results.push(result);
     }
-    for stmt in &file.stmts {
+    for stmt in file.declarations() {
         if let StmtKind::ForeignFunction {
             name,
             params,

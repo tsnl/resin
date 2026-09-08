@@ -502,6 +502,30 @@ fn none_elimination_preserves_shader_union_members() {
     );
 }
 
+#[test]
+fn inherent_methods_execute_in_shader_helpers() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        struct Counter { value: uint };
+        impl Counter {
+            def new(value: uint) -> Counter = { Counter { value = value } };
+            def add(self: Counter, n: uint) -> Counter = { Counter { value = self.value + n } };
+            def read(self: Counter) -> uint = { self.value };
+        }
+        def kernel(id: uint, root: Ptr<Root>) = {
+            if (id < root.count) {
+                var counter = Counter.new(id);
+                var incremented = counter.add(1I);
+                var output = Span<uint> { data = root.pixels, length = 67L };
+                output(id).* := incremented.read();
+            };
+        };
+        "#,
+        |index| index + 1,
+    );
+}
+
 fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let Some(compiler) = shaders::compiler() else {
         return;

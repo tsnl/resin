@@ -13,6 +13,7 @@ mod error;
 mod eval;
 mod flow;
 mod functions;
+mod methods;
 mod modules;
 mod places;
 mod recover;
@@ -74,7 +75,7 @@ impl Generator {
 
     fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
         self.checked = check::Checked::default();
-        for stmt in &file.stmts {
+        for stmt in file.declarations() {
             if matches!(
                 stmt.val,
                 StmtKind::Define { .. }
@@ -88,7 +89,7 @@ impl Generator {
                 });
             }
         }
-        for stmt in &file.stmts {
+        for stmt in file.declarations() {
             if let StmtKind::ForeignType { name } = &stmt.val {
                 self.scopes
                     .define_foreign_type(name.val.clone())
@@ -106,15 +107,16 @@ impl Generator {
                 );
             }
         }
-        for stmt in &file.stmts {
+        for stmt in file.declarations() {
             match &stmt.val {
                 StmtKind::DefineType { name, init } => self.gen_define_type(name, init)?,
                 StmtKind::Struct { name, body } => self.gen_struct(name, body)?,
                 _ => {}
             }
         }
+        self.declare_methods(file)?;
         self.checked = check::file(file, &mut self.typer, &self.scopes)?;
-        for stmt in &file.stmts {
+        for stmt in file.declarations() {
             if let StmtKind::Function {
                 name,
                 params,
@@ -123,7 +125,9 @@ impl Generator {
                 ..
             } = &stmt.val
             {
-                self.declare_function(name, params, result)?;
+                if !name.val.contains('.') {
+                    self.declare_function(name, params, result)?;
+                }
                 for decorator in decorators {
                     let stage = match decorator.val.as_ref() {
                         "compute_shader" => "compute",
@@ -178,7 +182,7 @@ impl Generator {
                 self.declare_foreign(header, name, params, result)?;
             }
         }
-        for stmt in &file.stmts {
+        for stmt in file.declarations() {
             if let StmtKind::Function {
                 name, params, body, ..
             } = &stmt.val
@@ -204,7 +208,8 @@ impl Generator {
 
     fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), GenerateError> {
         match &stmt.val {
-            StmtKind::Function { .. }
+            StmtKind::Impl { .. }
+            | StmtKind::Function { .. }
             | StmtKind::ForeignFunction { .. }
             | StmtKind::ForeignType { .. } => {
                 unreachable!("functions and foreign types are module items")

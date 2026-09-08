@@ -643,3 +643,81 @@ fn shader_objects_can_reference_private_helpers() {
             .any(|i| matches!(i, ir::Instr::Shader { .. }))
     );
 }
+
+#[test]
+fn inherent_methods_keep_impl_nodes_and_follow_exported_types() {
+    let source = r#"
+        export { Counter };
+        struct Counter { value: int };
+        impl Counter {
+            def new(value: int) -> Counter = { Counter { value = value } };
+            def add(self: Ptr<Counter>, a: int, b: int) = { self.value := self.value + a + b; };
+            def read(self: Counter) -> int = { self.value };
+        }
+    "#;
+    let file = support::parse(source);
+    assert_eq!(file.stmts.len(), 2);
+    let ast::StmtKind::Impl { owner, methods } = &file.stmts[1].val else {
+        panic!("expected an impl declaration");
+    };
+    assert_eq!(owner.val.as_ref(), "Counter");
+    assert_eq!(methods.len(), 3);
+    assert!(ast::print::format_source(&file).contains("(impl"));
+    let project = Project::new(&[
+        ("counter.resin", source),
+        (
+            "main.resin",
+            r#"
+            export { main }; import { "counter.resin" };
+            def main() -> int = {
+                var c = Counter.new(30);
+                c.add(5, 7);
+                var p = &c;
+                if (p.read() == 42 && c.read() == 42) { 0 } else { 1 }
+            };
+        "#,
+        ),
+    ]);
+    let output = project.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn methods_validate_declarations_and_call_receivers() {
+    for (source, message) in [
+        (
+            "struct A {}; impl A { def f(self: int) = {}; }",
+            "self must have type",
+        ),
+        (
+            "struct A {}; impl A { def f() = {}; def f() = {}; }",
+            "duplicate method",
+        ),
+        (
+            "struct A {}; impl A { def f(self: A) = {}; } def g() = { A.f(); };",
+            "method receiver does not match",
+        ),
+        (
+            "struct A {}; impl A { def f() = {}; } def g(a: A) = { a.f(); };",
+            "method receiver does not match",
+        ),
+    ] {
+        let error = ir::generate(&support::parse(source))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(message), "{error}");
+    }
+    let project = Project::new(&[
+        ("a.resin", "export { A }; struct A {};"),
+        (
+            "main.resin",
+            "import { \"a.resin\" }; impl A { def f() = {}; }",
+        ),
+    ]);
+    project.error("impl requires a struct defined in this module");
+}

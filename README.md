@@ -902,3 +902,5 @@ checking unreachable code; neither backend constructs a value of that type. C ab
 and shaders stop the invocation if invalid external memory somehow supplies a `Never`.
 This defensive trap does not unwind cleanup. Reachable `ok` and `?` paths retain normal
 defer behavior. Matches over inhabited variants still require exhaustive, unique arms.
+
+Inherent methods and associated functions use [`impl` blocks](doc/methods.md).

@@ -66,6 +66,11 @@ impl Generator {
         arg: &Term,
         expected: &Ty,
     ) -> Result<Ty, GenerateError> {
+        if let TermKind::Field { base, name } = &func.val
+            && let Some(result) = self.gen_method_call(span, base, name, arg)?
+        {
+            return Ok(result);
+        }
         if let TermKind::Type { ty } = &func.val {
             return self.gen_ascription(span, ty, arg);
         }

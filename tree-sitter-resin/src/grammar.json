@@ -52,6 +52,10 @@
                 },
                 {
                   "type": "SYMBOL",
+                  "name": "impl_definition"
+                },
+                {
+                  "type": "SYMBOL",
                   "name": "foreign_function"
                 },
                 {
@@ -434,6 +438,42 @@
         {
           "type": "STRING",
           "value": ";"
+        }
+      ]
+    },
+    "impl_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "impl"
+        },
+        {
+          "type": "FIELD",
+          "name": "owner",
+          "content": {
+            "type": "SYMBOL",
+            "name": "uid"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "FIELD",
+            "name": "method",
+            "content": {
+              "type": "SYMBOL",
+              "name": "function_definition"
+            }
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
         }
       ]
     },
@@ -2928,6 +2968,10 @@
       {
         "type": "STRING",
         "value": "struct"
+      },
+      {
+        "type": "STRING",
+        "value": "impl"
       },
       {
         "type": "STRING",

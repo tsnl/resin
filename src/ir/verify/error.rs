@@ -30,6 +30,7 @@ pub enum VerifyLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidMethod,
     InvalidVariant,
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },

@@ -174,6 +174,26 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
+        if node.kind() == "impl_definition" {
+            let owner = self.ident(node.child_by_field_name("owner").unwrap_or(node));
+            let methods = node
+                .children_by_field_name("method", &mut node.walk())
+                .map(|method| {
+                    let mut stmt = self.gen_function(method);
+                    if let StmtKind::Function {
+                        owner: target,
+                        name,
+                        ..
+                    } = &mut stmt.val
+                    {
+                        name.val = format!("{}.{}", owner.val, name.val).into();
+                        *target = Some(owner.clone());
+                    }
+                    stmt
+                })
+                .collect();
+            return Spanned::new(StmtKind::Impl { owner, methods }, self.span(node));
+        }
         if node.kind() == "struct_definition" {
             let fields = node
                 .children_by_field_name("fields", &mut node.walk())
@@ -567,6 +587,7 @@ impl<'a> AstGen<'a> {
             .unwrap_or_else(|| self.hole(node));
         Spanned::new(
             StmtKind::Function {
+                owner: None,
                 decorators: node
                     .children_by_field_name("decorator", &mut node.walk())
                     .filter_map(|n| n.child_by_field_name("name"))

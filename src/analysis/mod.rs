@@ -494,6 +494,11 @@ fn merge_binding(
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
+        "impl",
+        "impl T { def method(self: Ptr<T>) = {}; } — inherent methods.",
+        DefinitionKind::Keyword,
+    ),
+    (
         "print",
         "print(format, arguments)\n\nPrint formatted values on the host. Numbered placeholders use {0}, {1}, ….",
         DefinitionKind::Function,

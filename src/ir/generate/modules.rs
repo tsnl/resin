@@ -72,7 +72,7 @@ fn generate_program_with(
                 }
             }
         }
-        for stmt in &source.file.stmts {
+        for stmt in source.file.declarations() {
             let name = match &stmt.val {
                 StmtKind::ForeignType { name }
                 | StmtKind::ForeignFunction { name, .. }
@@ -81,7 +81,7 @@ fn generate_program_with(
                 | StmtKind::DefineType { name, .. }
                 | StmtKind::Struct { name, .. }
                 | StmtKind::Declare { name, .. } => name,
-                StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
+                StmtKind::Impl { .. } | StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
             };
             let origin = Origin {
                 module: index,

@@ -88,6 +88,7 @@ pub fn format_source(source: &str) -> Option<String> {
                     })
             }
             ";" => true,
+            "}" if node.parent().is_some_and(|p| p.kind() == "impl_definition") => true,
             "," => active.last().is_some_and(|g| g.multiline),
             _ => false,
         };
@@ -134,9 +135,12 @@ fn finish_group(
     let start = stack.pop().expect("balanced syntax");
     let body = &tokens[start + 1..end];
     let block = tokens[start].kind() == "{"
-        && tokens[start]
-            .parent()
-            .is_some_and(|p| matches!(p.kind(), "block_body" | "chain_term" | "match_term"));
+        && tokens[start].parent().is_some_and(|p| {
+            matches!(
+                p.kind(),
+                "block_body" | "chain_term" | "match_term" | "impl_definition"
+            )
+        });
     let singleton_tuple = tokens[start].parent().is_some_and(|parent| {
         matches!(parent.kind(), "tuple_term" | "tuple_type")
             && parent

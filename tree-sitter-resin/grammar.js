@@ -106,6 +106,7 @@ export default grammar({
       "extern",
       "type",
       "struct",
+      "impl",
       "def",
       "var",
       "if",
@@ -137,6 +138,7 @@ export default grammar({
             "stmt",
             choice(
               $.function_definition,
+              $.impl_definition,
               $.foreign_function,
               $.foreign_type,
               $.type_definition,
@@ -175,6 +177,15 @@ export default grammar({
         list("fields", $.declare, ","),
         "}",
         ";",
+      ),
+
+    impl_definition: ($) =>
+      seq(
+        "impl",
+        field("owner", $.uid),
+        "{",
+        repeat(field("method", $.function_definition)),
+        "}",
       ),
 
     decorator: ($) => seq("@", field("name", $.lid)),

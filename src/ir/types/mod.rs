@@ -25,6 +25,7 @@ impl TypeDef {
         Self::Nominal {
             name: name.into(),
             body: Some(body),
+            methods: Default::default(),
         }
     }
     pub fn name(&self) -> Option<&Arc<str>> {
@@ -45,6 +46,14 @@ impl TypeDef {
             Self::Structural(ty) => ty.clone(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Method {
+    pub function: super::FunctionId,
+    pub params: Vec<Ty>,
+    pub result: Ty,
+    pub receiver: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

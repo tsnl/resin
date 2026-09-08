@@ -48,7 +48,7 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
             pass.scopes
                 .record_import(name, matches!(symbol, Symbol::Type(_)), origin);
         }
-        for stmt in &source.file.stmts {
+        for stmt in source.file.declarations() {
             match &stmt.val {
                 StmtKind::ForeignType { name } => {
                     let _ = pass.scopes.define_foreign_type(name.val.clone());
@@ -58,7 +58,7 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
                 _ => {}
             }
         }
-        for stmt in &source.file.stmts {
+        for stmt in source.file.declarations() {
             if let StmtKind::Function {
                 name,
                 params,
@@ -86,7 +86,7 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
                 }
             }
         }
-        for stmt in &source.file.stmts {
+        for stmt in source.file.declarations() {
             if let StmtKind::Function {
                 params,
                 result,

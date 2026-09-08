@@ -91,12 +91,20 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 sexp_typespec(result),
             ],
         ),
+        StmtKind::Impl { owner, methods } => list_sp(
+            "impl",
+            stmt.span,
+            std::iter::once(symbol(owner.val.as_ref()))
+                .chain(methods.iter().map(sexp_stmt))
+                .collect(),
+        ),
         StmtKind::Function {
             name,
             params,
             result,
             body,
             decorators,
+            ..
         } => list_sp(
             "def",
             stmt.span,
