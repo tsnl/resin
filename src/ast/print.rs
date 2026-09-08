@@ -143,11 +143,14 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
+        TermKind::Unwrap { value } => list_sp("unwrap", term.span, vec![sexp_term(value)]),
         TermKind::Try { value } => list_sp("try", term.span, vec![sexp_term(value)]),
         TermKind::Match { value, arms } => {
             let mut items = vec![sexp_term(value)];
             items.extend(arms.iter().map(|arm| {
                 let variant = match &arm.variant {
+                    MatchVariant::Some => symbol("some"),
+                    MatchVariant::None => symbol("none"),
                     MatchVariant::Ok => symbol("ok"),
                     MatchVariant::Err => symbol("err"),
                     MatchVariant::Type(ty) => sexp_typespec(ty),

@@ -59,7 +59,7 @@ impl<'a> Types<'a> {
         self.types.push(ty.clone());
         self.ids.insert(ty.clone(), id);
         match ty {
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
                 for (_, payload) in ty.payloads().unwrap() {
                     self.intern(&payload);
                 }
@@ -199,7 +199,7 @@ impl<'a> Types<'a> {
         }
         emitted[self.id(ty)] = true;
         let body = match ty {
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
                 let mut fields = String::new();
                 for (tag, payload) in ty.payloads().unwrap() {
                     self.definition(&payload, emitted, out);

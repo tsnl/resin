@@ -2,7 +2,7 @@
 (uid) @type
 (builtin_type) @type.builtin
 (inferred_type) @type.builtin
-["Ptr" "Span" "Result"] @type.builtin
+["Ptr" "Span" "Option" "Result"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
 ["export" "import" "extern" "type" "struct" "def" "var"] @keyword
@@ -14,14 +14,14 @@
 (foreign_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (closed_term))
 ((primary_term (lid) @function.builtin)
-  (#any-of? @function.builtin "print" "ok" "err"))
+  (#any-of? @function.builtin "print" "ok" "err" "some" "none"))
 
 (field_access name: (lid) @property)
 (record_term fields: (term_define name: (lid) @property))
 (record_type field: (declare name: (lid) @property))
 (struct_definition fields: (declare name: (lid) @property))
 (match_arm name: (lid) @variable.parameter)
-["ok" "err"] @function.builtin
+["ok" "err" "some" "none"] @function.builtin
 
 (pointer_deref) @operator
 (try_suffix) @operator

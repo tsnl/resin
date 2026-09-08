@@ -55,6 +55,7 @@ pub enum Ty {
     Defined { definition: TypeId },
     Pointer { pointee: Box<Ty> },
     Span { element: Box<Ty> },
+    Option { value: Box<Ty> },
     Array { element: Box<Ty>, length: usize },
     Record { fields: Vec<RecordField> },
     Function { param: Box<Ty>, result: Box<Ty> },
@@ -65,6 +66,7 @@ pub enum Ty {
 impl Ty {
     pub fn payloads(&self) -> Option<Vec<(u32, Ty)>> {
         match self {
+            Self::Option { value } => Some(vec![(0, Ty::Unit), (1, *value.clone())]),
             Self::Result { value, error } => Some(vec![(0, *value.clone()), (1, *error.clone())]),
             Self::Union { variants } => Some(
                 variants
@@ -78,6 +80,8 @@ impl Ty {
 
     pub fn payload(&self, tag: u32) -> Option<Ty> {
         match self {
+            Self::Option { .. } if tag == 0 => Some(Ty::Unit),
+            Self::Option { value } if tag == 1 => Some(*value.clone()),
             Self::Result { value, .. } if tag == 0 => Some(*value.clone()),
             Self::Result { error, .. } if tag == 1 => Some(*error.clone()),
             _ => self

@@ -254,6 +254,11 @@ recover the native code and C diagnostic string. Standard-library operations alr
 return Results, so callers normally use `gpu_create()?` rather than converting statuses.
 Register resource cleanup with `defer` before using further fallible operations.
 
+### Optional values
+
+`Option<T>` holds `some(value)` or `none()`. Exhaustive `match` handles both cases;
+postfix `optional!` returns the payload or traps on `none`. See [optional values](doc/options.md).
+
 ### Deferred cleanup
 
 ```resin

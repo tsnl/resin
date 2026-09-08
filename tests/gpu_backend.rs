@@ -458,6 +458,24 @@ fn shader_defer_unwinds_errors_on_device() {
     );
 }
 
+#[test]
+fn optional_unwrap_stops_shader_callers_on_none() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        def choose(i: uint) -> uint = { var value: Option<uint>; value := if ((i & 1I) == 0I) { some(i) } else { none() }; value! };
+        def kernel(i: uint, root: Ptr<Root>) = {
+            if (i < root.count) {
+                var output = Span<uint> { data = root.pixels, length = 67L };
+                output(i).* := 7I;
+                var value = choose(i);
+                output(i).* := value + 1I;
+            };
+        };"#,
+        |index| if index % 2 == 0 { index + 1 } else { 7 },
+    );
+}
+
 fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let Some(compiler) = shaders::compiler() else {
         return;

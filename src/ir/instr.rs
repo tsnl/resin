@@ -72,6 +72,8 @@ pub enum Instr {
         tag: u32,
     },
     VariantTag,
+    /// Consume Some and transfer its payload; trap on None.
+    UnwrapOption,
     VariantPayload {
         tag: u32,
     },
@@ -177,6 +179,7 @@ impl Instr {
             | Self::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
             Self::AccessStatic { .. }
             | Self::MakeVariant { .. }
+            | Self::UnwrapOption
             | Self::VariantTag
             | Self::VariantPayload { .. }
             | Self::Widen { .. }

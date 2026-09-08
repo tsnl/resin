@@ -84,6 +84,9 @@ pub enum TermKind {
         cond: Box<Term>,
         body: Box<Term>,
     },
+    Unwrap {
+        value: Box<Term>,
+    },
     Try {
         value: Box<Term>,
     },
@@ -141,6 +144,8 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone)]
 pub enum MatchVariant {
+    Some,
+    None,
     Ok,
     Err,
     Type(Type),

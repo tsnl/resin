@@ -110,10 +110,15 @@ impl Generator {
     ) -> Result<Ty, GenerateError> {
         let ty = self.gen_term(term, None)?;
         let tags = match &ty {
-            Ty::Result { .. } => vec![0, 1],
+            Ty::Result { .. } | Ty::Option { .. } => vec![0, 1],
             _ => ty
                 .variants()
-                .ok_or_else(|| error(span, "match requires a Result or a union of structs"))?
+                .ok_or_else(|| {
+                    error(
+                        span,
+                        "match requires an Option, Result, or union of structs",
+                    )
+                })?
                 .into_iter()
                 .map(|id| id.tag())
                 .collect(),
@@ -121,9 +126,11 @@ impl Generator {
         let mut patterns = vec![];
         for arm in arms {
             let tag = match &arm.variant {
+                MatchVariant::Some if matches!(ty, Ty::Option { .. }) => 1,
+                MatchVariant::None if matches!(ty, Ty::Option { .. }) => 0,
                 MatchVariant::Ok if matches!(ty, Ty::Result { .. }) => 0,
                 MatchVariant::Err if matches!(ty, Ty::Result { .. }) => 1,
-                MatchVariant::Type(ann) if !matches!(ty, Ty::Result { .. }) => {
+                MatchVariant::Type(ann) if !matches!(ty, Ty::Result { .. } | Ty::Option { .. }) => {
                     let Ty::Defined { definition } = self.evaluator().ty(ann)? else {
                         return Err(error(ann.span, "union patterns must name a single struct"));
                     };

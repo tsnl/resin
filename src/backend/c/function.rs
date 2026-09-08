@@ -125,6 +125,15 @@ fn instruction(
             return Ok(None);
         }
         Instr::MakeVariant { ty, tag } => variant(types, ty, *tag, &args[0].expr),
+        Instr::UnwrapOption => {
+            writeln!(
+                out,
+                "  if (({}).tag != 1u) resin_fail(\"cannot unwrap none\");",
+                args[0].expr
+            )
+            .unwrap();
+            format!("({}).payload.v1", args[0].expr)
+        }
         Instr::VariantTag => match &args[0].ty {
             Ty::Defined { definition } => format!("{}u", definition.tag()),
             _ => format!("({}).tag", args[0].expr),

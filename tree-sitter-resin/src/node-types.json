@@ -627,7 +627,15 @@
             "named": false
           },
           {
+            "type": "none",
+            "named": false
+          },
+          {
             "type": "ok",
+            "named": false
+          },
+          {
+            "type": "some",
             "named": false
           },
           {
@@ -728,6 +736,10 @@
           },
           {
             "type": "try_suffix",
+            "named": true
+          },
+          {
+            "type": "unwrap_suffix",
             "named": true
           }
         ]
@@ -1195,6 +1207,10 @@
         "required": false,
         "types": [
           {
+            "type": "Option",
+            "named": false
+          },
+          {
             "type": "Ptr",
             "named": false
           },
@@ -1269,6 +1285,11 @@
   },
   {
     "type": "unit_type",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "unwrap_suffix",
     "named": true,
     "fields": {}
   },
@@ -1411,6 +1432,10 @@
     "named": false
   },
   {
+    "type": "Option",
+    "named": false
+  },
+  {
     "type": "Ptr",
     "named": false
   },
@@ -1504,6 +1529,10 @@
     "named": false
   },
   {
+    "type": "none",
+    "named": false
+  },
+  {
     "type": "number",
     "named": true
   },
@@ -1521,6 +1550,10 @@
   },
   {
     "type": "short",
+    "named": false
+  },
+  {
+    "type": "some",
     "named": false
   },
   {

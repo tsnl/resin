@@ -280,6 +280,11 @@ impl Generator {
                 Ok(Ty::Type)
             }
             TermKind::If { cond, then, els } => self.gen_if(cond, then, els, expected),
+            TermKind::Unwrap { value } => {
+                self.gen_term(value, None)?;
+                self.emit(Instr::UnwrapOption);
+                Ok(expected.clone())
+            }
             TermKind::Try { value } => self.gen_try(term.span, value),
             TermKind::Match { value, arms } => self.gen_match(term.span, value, arms, expected),
             TermKind::While { cond, body } => self.gen_while(cond, body),

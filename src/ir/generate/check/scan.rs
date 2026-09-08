@@ -21,7 +21,7 @@ impl Scan {
                 }
             }
             TermKind::Type { .. } => {}
-            TermKind::Try { value } => {
+            TermKind::Try { value } | TermKind::Unwrap { value } => {
                 self.term(value);
             }
             TermKind::Match { value, arms } => {

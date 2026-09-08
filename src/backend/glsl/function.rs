@@ -122,6 +122,15 @@ pub(super) fn emit(
                 )
                 .unwrap();
             }
+            if matches!(instr, Instr::UnwrapOption) {
+                writeln!(
+                    out,
+                    "      if (({}).tag != 1u) {{ r_failed = true; return {}; }}",
+                    args[0].expr,
+                    types.zero(&function.result)
+                )
+                .unwrap();
+            }
             if let Instr::NumericCast { ty } = instr
                 && let Some(invalid) = crate::backend::numeric::invalid(
                     &args[0].ty,
@@ -311,6 +320,7 @@ fn instruction(
             return Ok(None);
         }
         Instr::MakeVariant { ty, tag } => variant(types, ty, *tag, &args[0].expr),
+        Instr::UnwrapOption => format!("({}).v1", args[0].expr),
         Instr::VariantTag => match &args[0].ty {
             Ty::Defined { definition } => format!("{}u", definition.tag()),
             _ => format!("({}).tag", args[0].expr),

@@ -349,6 +349,18 @@ impl<'a> AstGen<'a> {
         let mut cursor = node.walk();
         for child in node.children_by_field_name("suffix", &mut cursor) {
             match child.kind() {
+                "unwrap_suffix" => {
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::Unwrap {
+                            value: Box::new(base),
+                        },
+                        span,
+                    );
+                }
                 "try_suffix" => {
                     let span = Span {
                         start: base.span.start,
@@ -454,6 +466,8 @@ impl<'a> AstGen<'a> {
                     .map(|arm| {
                         let variant = arm.child_by_field_name("variant").unwrap_or(arm);
                         let variant = match variant.kind() {
+                            "some" => MatchVariant::Some,
+                            "none" => MatchVariant::None,
                             "ok" => MatchVariant::Ok,
                             "err" => MatchVariant::Err,
                             _ => MatchVariant::Type(self.gen_type(variant)),

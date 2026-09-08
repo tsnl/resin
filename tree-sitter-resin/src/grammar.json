@@ -1611,6 +1611,10 @@
                   {
                     "type": "SYMBOL",
                     "name": "try_suffix"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "unwrap_suffix"
                   }
                 ]
               }
@@ -1643,6 +1647,10 @@
     "try_suffix": {
       "type": "STRING",
       "value": "?"
+    },
+    "unwrap_suffix": {
+      "type": "STRING",
+      "value": "!"
     },
     "closed_term": {
       "type": "CHOICE",
@@ -2147,6 +2155,14 @@
               {
                 "type": "STRING",
                 "value": "err"
+              },
+              {
+                "type": "STRING",
+                "value": "some"
+              },
+              {
+                "type": "STRING",
+                "value": "none"
               }
             ]
           }
@@ -2367,6 +2383,10 @@
                   {
                     "type": "STRING",
                     "value": "Span"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "Option"
                   }
                 ]
               }
@@ -2729,7 +2749,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": "[_]+[A-Z][a-zA-Z0-9_]*|(?:P(?:t(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|S(?:p(?:a(?:n(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|R(?:e(?:s(?:u(?:l(?:t(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^l]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^u]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^s]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|N(?:e(?:v(?:e(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^v]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[A-Z&&[^PSRN]][a-zA-Z0-9_]*)"
+        "value": "[_]+[A-Z][a-zA-Z0-9_]*|(?:P(?:t(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|S(?:p(?:a(?:n(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|R(?:e(?:s(?:u(?:l(?:t(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^l]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^u]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^s]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|O(?:p(?:t(?:i(?:o(?:n(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^o]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^i]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|N(?:e(?:v(?:e(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^v]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[A-Z&&[^PSRON]][a-zA-Z0-9_]*)"
       }
     },
     "number": {
@@ -2986,6 +3006,10 @@
       {
         "type": "STRING",
         "value": "Result"
+      },
+      {
+        "type": "STRING",
+        "value": "Option"
       }
     ]
   }

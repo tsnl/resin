@@ -103,6 +103,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             "make-variant",
             vec![sexp_ty(names, ty), symbol(tag.to_string())],
         ),
+        Instr::UnwrapOption => symbol("unwrap-option"),
         Instr::VariantTag => symbol("variant-tag"),
         Instr::VariantPayload { tag } => list("variant-payload", vec![symbol(tag.to_string())]),
         Instr::Widen { ty } => list("widen", vec![sexp_ty(names, ty)]),
@@ -231,6 +232,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
                 })
                 .collect(),
         ),
+        Ty::Option { value } => list("option", vec![sexp_ty(names, value)]),
         Ty::Result { value, error } => {
             list("result", vec![sexp_ty(names, value), sexp_ty(names, error)])
         }

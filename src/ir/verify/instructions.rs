@@ -41,6 +41,13 @@ pub(super) fn check_instr(
             expect_type(payload, pop_one(stack, location)?, location)?;
             stack.push(ty.clone());
         }
+        Instr::UnwrapOption => {
+            let from = pop_one(stack, location)?;
+            let Ty::Option { value } = from else {
+                return Err(location.error(VerifyErrorKind::InvalidVariant));
+            };
+            stack.push(*value);
+        }
         Instr::VariantTag => {
             let from = pop_one(stack, location)?;
             if from.payloads().is_none() && from.variants().is_none() {

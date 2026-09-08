@@ -62,7 +62,7 @@ const BUILTIN_TYPES = [
   "Never",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Span", "Result"];
+const TYPE_FORMERS = ["Ptr", "Span", "Result", "Option"];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -293,6 +293,7 @@ export default grammar({
                 $.field_access,
                 $.pointer_deref,
                 $.try_suffix,
+                $.unwrap_suffix,
               ),
             ),
           ),
@@ -301,6 +302,7 @@ export default grammar({
     field_access: ($) => seq(".", field("name", $.lid)),
     pointer_deref: () => ".*",
     try_suffix: () => "?",
+    unwrap_suffix: () => "!",
 
     closed_term: ($) =>
       choice(
@@ -360,7 +362,7 @@ export default grammar({
       ),
     match_arm: ($) =>
       seq(
-        field("variant", choice($.type, "ok", "err")),
+        field("variant", choice($.type, "ok", "err", "some", "none")),
         "(",
         field("name", $.lid),
         ")",
@@ -412,7 +414,7 @@ export default grammar({
     unary_type: ($) =>
       choice(
         seq(
-          field("former", choice("Ptr", "Span")),
+          field("former", choice("Ptr", "Span", "Option")),
           "<",
           field("arg", $.type),
           ">",

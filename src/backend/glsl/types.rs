@@ -27,7 +27,7 @@ impl<'a> Types<'a> {
             return Ok(());
         }
         match ty {
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
                 for (_, payload) in ty.payloads().unwrap() {
                     self.register(&payload)?;
                 }
@@ -117,7 +117,7 @@ impl<'a> Types<'a> {
 
     pub fn zero(&self, ty: &Ty) -> String {
         match ty {
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
                 let mut values = vec!["0u".into()];
                 values.extend(ty.payloads().unwrap().iter().map(|(_, ty)| self.zero(ty)));
                 format!("{}({})", self.name(ty), values.join(", "))
@@ -157,7 +157,7 @@ impl<'a> Types<'a> {
             .iter()
             .map(|ty| {
                 let fields = match ty {
-                    Ty::Union { .. } | Ty::Result { .. } => {
+                    Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
                         let mut fields = String::from("uint tag;");
                         for (tag, payload) in ty.payloads().unwrap() {
                             write!(fields, " {} v{tag};", self.name(&payload)).unwrap();

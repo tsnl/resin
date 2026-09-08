@@ -70,6 +70,7 @@ impl<'a> Checker<'a> {
                 let head = match head.val.as_ref() {
                     "Ptr" => Head::Pointer,
                     "Span" => Head::Span,
+                    "Option" => Head::Option,
                     _ => return Err(error(head.span, "unknown type former")),
                 };
                 Type::Node(head, vec![self.annotation(arg, infer)?])
@@ -150,6 +151,9 @@ impl<'a> Checker<'a> {
                 });
             }
             TermKind::Unit => equate = Some(Ty::Unit.into()),
+            TermKind::Unwrap { value } => {
+                self.term(value, Some(Type::Node(Head::Option, vec![out.clone()])))?;
+            }
             TermKind::Try { value } => {
                 if self.in_defer {
                     return Err(error(
@@ -170,6 +174,8 @@ impl<'a> Checker<'a> {
                     self.push();
                     let payload = self.solver.fresh();
                     let variant = match &arm.variant {
+                        ast::MatchVariant::Some => Pattern::Some,
+                        ast::MatchVariant::None => Pattern::None,
                         ast::MatchVariant::Ok => Pattern::Ok,
                         ast::MatchVariant::Err => Pattern::Err,
                         ast::MatchVariant::Type(ty) => Pattern::Type(self.annotation(ty, false)?),
@@ -294,6 +300,23 @@ impl<'a> Checker<'a> {
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Var { name } = &func.val
+                    && matches!(name.val.as_ref(), "some" | "none")
+                {
+                    let value = self.solver.fresh();
+                    self.solver.unify(
+                        &out,
+                        &Type::Node(Head::Option, vec![value.clone()]),
+                        span,
+                    )?;
+                    self.term(
+                        arg,
+                        Some(if name.val.as_ref() == "some" {
+                            value
+                        } else {
+                            Ty::Unit.into()
+                        }),
+                    )?;
+                } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
                     self.term(arg, Some(Ty::union([]).into()))?;

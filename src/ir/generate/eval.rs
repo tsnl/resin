@@ -107,6 +107,9 @@ impl Evaluator<'_> {
                     "Ptr" => Ok(Ty::Pointer {
                         pointee: Box::new(arg),
                     }),
+                    "Option" => Ok(Ty::Option {
+                        value: Box::new(arg),
+                    }),
                     "Span" => Ok(Ty::Span {
                         element: Box::new(arg),
                     }),

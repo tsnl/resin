@@ -23,6 +23,8 @@ pub(super) enum Constraint {
 }
 
 pub(super) enum Pattern {
+    Some,
+    None,
     Ok,
     Err,
     Type(Type),
@@ -98,6 +100,12 @@ impl Checker<'_> {
             Constraint::Errors(from, to) => return self.solver.include(from, to, span),
             Constraint::Variant(input, variant, out) => match (self.solver.head(input), variant) {
                 (Type::Variable(_), _) => return Ok(false),
+                (Type::Node(Head::Option, parts), Pattern::Some) => {
+                    self.solver.unify(out, &parts[0], span)?
+                }
+                (Type::Node(Head::Option, _), Pattern::None) => {
+                    self.solver.unify(out, &Ty::Unit.into(), span)?
+                }
                 (Type::Node(Head::Result, parts), Pattern::Ok) => {
                     self.solver.unify(out, &parts[0], span)?
                 }

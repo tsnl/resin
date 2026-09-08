@@ -69,6 +69,7 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
                 .collect::<Vec<_>>()
                 .join(" | ")
         }
+        Ty::Option { value } => format!("Option<{}>", format_type(value, typer)),
         Ty::Result { value, error } => format!(
             "Result<{}, {}>",
             format_type(value, typer),

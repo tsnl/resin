@@ -56,6 +56,7 @@ pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             get(definitions, *definition)?;
         }
         Ty::Pointer { pointee } => check_references(definitions, pointee)?,
+        Ty::Option { value } => check_references(definitions, value)?,
         Ty::Span { element } | Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
@@ -110,6 +111,7 @@ fn check_inline(
             check_inline(definitions, body, active)?;
             active.pop();
         }
+        Ty::Option { value } => check_inline(definitions, value, active)?,
         Ty::Array { element, .. } => check_inline(definitions, element, active)?,
         Ty::Record { fields } => {
             for field in fields {

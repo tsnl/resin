@@ -177,9 +177,12 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     }
     let a = left.kind();
     let b = right.kind();
+    if right.parent().is_some_and(|p| p.kind() == "unwrap_suffix") {
+        return false;
+    }
     if matches!(
         b,
-        "," | ";" | ")" | "]" | ":" | "." | "pointer_deref" | "try_suffix"
+        "," | ";" | ")" | "]" | ":" | "." | "pointer_deref" | "try_suffix" | "unwrap_suffix"
     ) {
         return false;
     }

@@ -227,6 +227,10 @@ impl Recovery<'_> {
     }
     fn term(&mut self, term: &Term, expected: Option<&Ty>) -> Option<Ty> {
         let found = match &term.val {
+            TermKind::Unwrap { value } => match self.term(value, None) {
+                Some(Ty::Option { value }) => Some(*value),
+                _ => None,
+            },
             TermKind::Try { value } => match self.term(value, None) {
                 Some(Ty::Result { value, .. }) => Some(*value),
                 _ => None,
@@ -237,6 +241,10 @@ impl Recovery<'_> {
                 for arm in arms {
                     self.scopes.push();
                     let payload = match (&input, &arm.variant) {
+                        (Some(Ty::Option { value }), crate::ast::MatchVariant::Some) => {
+                            Some(*value.clone())
+                        }
+                        (Some(Ty::Option { .. }), crate::ast::MatchVariant::None) => Some(Ty::Unit),
                         (Some(Ty::Result { value, .. }), crate::ast::MatchVariant::Ok) => {
                             Some(*value.clone())
                         }
