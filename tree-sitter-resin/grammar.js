@@ -182,7 +182,7 @@ export default grammar({
     impl_definition: ($) =>
       seq(
         "impl",
-        field("owner", $.uid),
+        field("receiver", $.uid),
         "{",
         repeat(field("method", $.function_definition)),
         "}",
@@ -303,6 +303,7 @@ export default grammar({
               choice(
                 $.closed_term,
                 $.field_access,
+                $.method_call,
                 $.pointer_deref,
                 $.try_suffix,
                 $.unwrap_suffix,
@@ -312,9 +313,27 @@ export default grammar({
         ),
       ),
     field_access: ($) => seq(".", field("name", $.lid)),
+    method_call: ($) =>
+      prec(
+        1,
+        seq(
+          ".",
+          field("name", $.lid),
+          field(
+            "args",
+            choice(
+              $.paren_term,
+              $.tuple_term,
+              alias($._method_unit, $.unit_term),
+            ),
+          ),
+        ),
+      ),
     pointer_deref: () => ".*",
     try_suffix: () => "?",
     unwrap_suffix: () => "!",
+
+    _method_unit: () => seq("(", ")"),
 
     closed_term: ($) =>
       choice(

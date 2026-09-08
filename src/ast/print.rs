@@ -91,10 +91,10 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 sexp_typespec(result),
             ],
         ),
-        StmtKind::Impl { owner, methods } => list_sp(
+        StmtKind::Impl { receiver, methods } => list_sp(
             "impl",
             stmt.span,
-            std::iter::once(symbol(owner.val.as_ref()))
+            std::iter::once(symbol(receiver.val.as_ref()))
                 .chain(methods.iter().map(sexp_stmt))
                 .collect(),
         ),
@@ -205,6 +205,10 @@ fn sexp_term(term: &Term) -> SExp {
         }
         TermKind::None => symbol("None"),
         TermKind::Unit => list_sp("unit", term.span, vec![]),
+        TermKind::MethodCall { base, name, arg } => list(
+            "method-call",
+            vec![sexp_term(base), symbol(name.val.as_ref()), sexp_term(arg)],
+        ),
         TermKind::Call { func, arg } => {
             list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])
         }

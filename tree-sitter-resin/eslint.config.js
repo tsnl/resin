@@ -13,6 +13,7 @@ export default [
         repeat: "readonly",
         repeat1: "readonly",
         field: "readonly",
+        alias: "readonly",
         optional: "readonly",
         choice: "readonly",
         prec: "readonly",

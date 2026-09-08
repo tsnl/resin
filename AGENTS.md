@@ -43,6 +43,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.
+- `impl` adds functions to the defining module's nominal type namespace; aliases retain
+  that origin. `value.method(args)` supplies the receiver as the first argument,
+  while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
+  identifiers. Desugar method calls into ordinary functions before IR; method namespaces
+  and module origins belong to frontend metadata.
 - Numeric suffixes are case-sensitive: `b/B`, `h/H`, `i/I`, and `l/L` select signed/unsigned
   8/16/32/64-bit integers; `f/d` select float32/float64. Suffixes fix literal types and retain
   range checking. Hex literals only accept suffixes that are not hex digits (`h/H`, `i/I`, `l/L`).

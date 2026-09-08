@@ -93,34 +93,20 @@ impl Checker<'_> {
                 let Some(base) = self.solver.resolve(base) else {
                     return Ok(false);
                 };
-                if let Some(method) = self.typer.method(&base, name) {
-                    if method.receiver == *associated {
-                        return Err(error(span, "method receiver does not match this call"));
-                    }
-                    let params = if method.receiver {
-                        &method.params[1..]
-                    } else {
-                        &method.params[..]
-                    };
-                    let a = self
-                        .solver
-                        .coerce(arg, &Ty::parameter(params).into(), span)?;
-                    let b = self
-                        .solver
-                        .coerce(&method.result.clone().into(), out, span)?;
-                    return Ok(a && b);
-                }
-                if *associated {
-                    return Err(error(span, format!("unknown associated function `{name}`")));
-                }
-                let field = self
+                let method = self
                     .typer
-                    .type_field(&base, name)
-                    .map_err(|e| GenerateError::typing(span, e))?;
-                return self.constraint(
-                    &Constraint::Call(field.ty.into(), arg.clone(), out.clone()),
-                    span,
-                );
+                    .method(&base, name)
+                    .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
+                let params = method.arguments(&base, *associated).ok_or_else(|| {
+                    error(span, "method receiver does not match the first parameter")
+                })?;
+                let a = self
+                    .solver
+                    .coerce(arg, &Ty::parameter(params).into(), span)?;
+                let b = self
+                    .solver
+                    .coerce(&method.result.clone().into(), out, span)?;
+                return Ok(a && b);
             }
             Constraint::Layout(ty) => {
                 let Some(ty) = self.solver.resolve(ty) else {

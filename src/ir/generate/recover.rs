@@ -16,7 +16,8 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
     let data = Rc::new(RefCell::new(SemanticData::default()));
     let mut typer = TyperContext::new();
     let mut exports: Vec<BTreeMap<Arc<str>, (Symbol, SourceLocation)>> = Vec::new();
-    for source in &program.modules {
+    let mut next_function = 0;
+    for (index, source) in program.modules.iter().enumerate() {
         let trace = Trace {
             path: source.path.clone(),
             data: data.clone(),
@@ -25,6 +26,7 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
             scopes: Scopes::traced(trace.clone()),
             typer: &mut typer,
             trace,
+            source_module: crate::ir::typer::SourceModuleId::from_index(index),
         };
         let mut imports = BTreeMap::new();
         for &dependency in &source.imports {
@@ -83,25 +85,19 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
                     });
                 pass.bind(name, ty);
                 if let StmtKind::Function {
-                    owner: Some(owner),
-                    params: declarations,
+                    receiver: Some(receiver),
                     ..
                 } = &stmt.val
-                    && let Some(Ty::Defined { definition }) = pass.scopes.lookup_type(&owner.val)
+                    && let Some(Ty::Defined { definition }) = pass.scopes.lookup_type(&receiver.val)
                     && let Some((params, result)) = params.zip(result)
                 {
+                    let function = crate::ir::FunctionId::from_index(next_function);
+                    next_function += 1;
+                    pass.typer.register_function(function, params, result);
                     pass.typer.define_method(
                         definition,
                         name.val.rsplit('.').next().unwrap().into(),
-                        crate::ir::types::Method {
-                            // Recovery emits no IR; only the signature is used.
-                            function: crate::ir::FunctionId::from_index(0),
-                            params,
-                            result,
-                            receiver: declarations
-                                .first()
-                                .is_some_and(|(n, _)| n.val.as_ref() == "self"),
-                        },
+                        function,
                     );
                     pass.scopes.record_method_definition(definition, name);
                 }
@@ -154,6 +150,7 @@ struct Recovery<'a> {
     scopes: Scopes,
     typer: &'a mut TyperContext,
     trace: Trace,
+    source_module: crate::ir::typer::SourceModuleId,
 }
 impl Recovery<'_> {
     fn member_base(&mut self, base: &Term) -> Option<(Ty, bool)> {
@@ -233,6 +230,7 @@ impl Recovery<'_> {
                     return;
                 }
                 let id = self.typer.reserve_type(name.val.clone());
+                self.typer.record_type_origin(id, self.source_module);
                 if self.scopes.define_type(name.val.clone(), id).is_ok() {
                     self.scopes.record_definition(name, true, None, self.typer);
                     if let Some(body) = self.ty(init) {
@@ -351,19 +349,14 @@ impl Recovery<'_> {
                         associated,
                         self.typer,
                     );
-                    if let Some(method) = self.typer.method(&ty, &name.val)
-                        && method.receiver != associated
-                    {
-                        self.trace.record_method(name, &ty, associated, self.typer);
-                        Some(Ty::Function {
-                            param: Box::new(Ty::parameter(
-                                &method.params[usize::from(method.receiver)..],
-                            )),
-                            result: Box::new(method.result.clone()),
-                        })
-                    } else if !associated {
-                        self.typer.type_field(&ty, &name.val).ok().map(|f| f.ty)
+                    if !associated && let Ok(field) = self.typer.type_field(&ty, &name.val) {
+                        Some(field.ty)
                     } else {
+                        // An unfinished `value.method(` may recover as a field.
+                        // Keep navigation without inventing a bound function value.
+                        if self.typer.method(&ty, &name.val).is_some() {
+                            self.trace.record_method(name, &ty, associated, self.typer);
+                        }
                         None
                     }
                 })
@@ -436,6 +429,14 @@ impl Recovery<'_> {
                             .ok()
                             .map(|b| b.result)
                     })
+            }
+            TermKind::MethodCall { base, name, arg } => {
+                let (ty, associated) = self.member_base(base)?;
+                self.trace.record_method(name, &ty, associated, self.typer);
+                let method = self.typer.method(&ty, &name.val)?.clone();
+                let params = method.arguments(&ty, associated)?;
+                self.term(arg, Some(&Ty::parameter(params)))?;
+                Some(method.result)
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Type { ty } = &func.val {

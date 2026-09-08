@@ -65,15 +65,13 @@ impl Trace {
                 kind: super::DefinitionKind::Field,
             }));
         }
-        if let Some(owner) = typer.method_owner(ty) {
-            for (name, method) in &typer.definitions()[owner.index()].methods {
-                if method.receiver == associated {
+        if let Some(receiver) = typer.receiver_definition(ty) {
+            for (name, method) in typer.methods(receiver) {
+                let Some(params) = method.arguments(ty, associated) else {
                     continue;
-                }
+                };
                 let ty = Ty::Function {
-                    param: Box::new(Ty::parameter(
-                        &method.params[usize::from(method.receiver)..],
-                    )),
+                    param: Box::new(Ty::parameter(params)),
                     result: Box::new(method.result.clone()),
                 };
                 members.retain(|member| member.name != name.as_ref());
@@ -95,11 +93,11 @@ impl Trace {
         typer: &TyperContext,
     ) {
         self.record_members(self.location(name.span), ty, associated, typer);
-        if let Some(owner) = typer.method_owner(ty) {
+        if let Some(receiver) = typer.receiver_definition(ty) {
             let mut data = self.data.borrow_mut();
             if let Some(origin) = data
                 .method_origins
-                .get(&(owner, name.val.to_string()))
+                .get(&(receiver, name.val.to_string()))
                 .cloned()
             {
                 data.references.insert(self.location(name.span), origin);

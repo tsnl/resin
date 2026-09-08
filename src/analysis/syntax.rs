@@ -414,7 +414,7 @@ impl Document {
             return false;
         }
         if let Some(parent) = node.parent() {
-            if parent.kind() == "field_access" {
+            if matches!(parent.kind(), "field_access" | "method_call") {
                 return false;
             }
             if parent

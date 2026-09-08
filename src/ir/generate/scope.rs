@@ -140,10 +140,10 @@ impl Scopes {
         }
     }
 
-    pub(super) fn record_method_definition(&self, owner: TypeId, name: &Ident) {
+    pub(super) fn record_method_definition(&self, receiver: TypeId, name: &Ident) {
         if let Some(trace) = &self.trace {
             trace.data.borrow_mut().method_origins.insert(
-                (owner, name.val.rsplit('.').next().unwrap().to_string()),
+                (receiver, name.val.rsplit('.').next().unwrap().to_string()),
                 trace.location(name.span),
             );
         }

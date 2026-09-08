@@ -39,7 +39,7 @@ def advance(p: Particle, dt: float32) -> Particle = {
 @compute_shader
 def kernel(index: uint, root: Ptr<Params>) -> () = {
 	if (index < root.count) {
-		var p = root.particles(index);
+		var p = (root.particles)(index);
 		p.* := advance(advance(p.*, root.dt), root.dt);
 	}
 };
@@ -123,7 +123,7 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 	var local = index - particle * 24;
 	var sector = int(float32(local) / 3.0f);
 	var corner = local - sector * 3;
-	var p = root.particles(particle).*;
+	var p = (root.particles)(particle).*;
 	var horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
 	var height = (p.z - 25.0f) * 0.9f;
 	var depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;

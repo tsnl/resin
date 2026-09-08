@@ -28,7 +28,7 @@ pub use modules::generate_program;
 
 use builder::FunctionBuilder;
 use eval::Evaluator;
-use scope::Scopes;
+use scope::{Scopes, ValueBindingKind};
 
 /// Lower a source file to a verified IR module.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
@@ -49,6 +49,7 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
 struct Generator {
     module: Module,
     source_path: std::path::PathBuf,
+    source_module: crate::ir::typer::SourceModuleId,
     source_span: Span,
     function_id: Option<crate::ir::FunctionId>,
     typer: TyperContext,
@@ -63,6 +64,7 @@ impl Generator {
         Self {
             module: Module::default(),
             source_path: "<source>".into(),
+            source_module: crate::ir::typer::SourceModuleId::from_index(0),
             source_span: Span { start: 0, end: 0 },
             function_id: None,
             typer: TyperContext::new(),
@@ -125,9 +127,14 @@ impl Generator {
                 ..
             } = &stmt.val
             {
-                if !name.val.contains('.') {
-                    self.declare_function(name, params, result)?;
-                }
+                let id = if !name.val.contains('.') {
+                    self.declare_function(name, params, result)?
+                } else {
+                    let ValueBindingKind::Function(id) = self.resolve_value(name)?.kind else {
+                        unreachable!()
+                    };
+                    id
+                };
                 for decorator in decorators {
                     let stage = match decorator.val.as_ref() {
                         "compute_shader" => "compute",
@@ -142,7 +149,6 @@ impl Generator {
                             });
                         }
                     };
-                    let id = crate::ir::FunctionId::from_index(self.module.functions.len() - 1);
                     if self.module.shaders.contains_key(&id) {
                         return Err(GenerateError {
                             span: decorator.span,
@@ -301,6 +307,7 @@ impl Generator {
             TermKind::Array { elems } => self.gen_array(elems, expected),
             TermKind::Record { fields } => self.gen_record(fields, expected),
             TermKind::Block { stmts, tail } => self.gen_block(stmts, tail, expected),
+            TermKind::MethodCall { base, name, arg } => self.gen_method_call(base, name, arg),
             TermKind::Call { func, arg } => self.gen_call(term.span, func, arg, expected),
             TermKind::Builtin { name, args } => self.gen_builtin(term.span, name, args, expected),
             TermKind::Assign { place, value } => self.gen_assign(place, value),

@@ -46,6 +46,8 @@ impl Generator {
             return Ok(());
         }
         let definition = self.typer.reserve_type(name.val.clone());
+        self.typer
+            .record_type_origin(definition, self.source_module);
         self.bind_type(name, definition)?;
         let body = self.evaluator().ty(init)?;
         self.typer

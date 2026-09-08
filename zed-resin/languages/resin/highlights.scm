@@ -17,6 +17,7 @@
   (#any-of? @function.builtin "print" "ok" "err"))
 
 (field_access name: (lid) @property)
+(method_call name: (lid) @function)
 (record_term fields: (term_define name: (lid) @property))
 (record_type field: (declare name: (lid) @property))
 (struct_definition fields: (declare name: (lid) @property))

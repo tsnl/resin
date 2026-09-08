@@ -116,6 +116,11 @@ pub enum TermKind {
     },
     Unit,
     None,
+    MethodCall {
+        base: Box<Term>,
+        name: Ident,
+        arg: Box<Term>,
+    },
     Call {
         func: Box<Term>,
         arg: Box<Term>,
@@ -172,11 +177,11 @@ pub enum StmtKind {
         result: Type,
     },
     Impl {
-        owner: Ident,
+        receiver: Ident,
         methods: Vec<Stmt>,
     },
     Function {
-        owner: Option<Ident>,
+        receiver: Option<Ident>,
         decorators: Vec<Ident>,
         name: Ident,
         params: Vec<(Ident, Type)>,

@@ -129,7 +129,6 @@ mod tests {
         let table = [TypeDef::Nominal {
             name: "Pending".into(),
             body: None,
-            methods: Default::default(),
         }];
         assert!(get(&table, id).is_ok());
         assert_eq!(body(&table, id), Err(DefinitionError::Incomplete(id)));

@@ -312,25 +312,20 @@ impl<'a> Checker<'a> {
                 self.constraints
                     .push((span, Constraint::Builtin(name.clone(), args, out.clone())));
             }
+            TermKind::MethodCall { base, name, arg } => {
+                let (receiver, associated) = if let TermKind::Type { ty } = &base.val {
+                    (self.annotation(ty, false)?, true)
+                } else {
+                    (self.term(base, None)?, false)
+                };
+                let arg = self.term(arg, None)?;
+                self.constraints.push((
+                    span,
+                    Constraint::Method(receiver, name.val.clone(), arg, out.clone(), associated),
+                ));
+            }
             TermKind::Call { func, arg } => {
-                if let TermKind::Field { base, name } = &func.val {
-                    let (receiver, associated) = if let TermKind::Type { ty } = &base.val {
-                        (self.annotation(ty, false)?, true)
-                    } else {
-                        (self.term(base, None)?, false)
-                    };
-                    let arg = self.term(arg, None)?;
-                    self.constraints.push((
-                        span,
-                        Constraint::Method(
-                            receiver,
-                            name.val.clone(),
-                            arg,
-                            out.clone(),
-                            associated,
-                        ),
-                    ));
-                } else if let TermKind::Var { name } = &func.val
+                if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
                     self.term(arg, Some(Ty::union([]).into()))?;

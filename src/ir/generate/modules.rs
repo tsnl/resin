@@ -15,7 +15,7 @@ use super::{
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Origin {
-    module: usize,
+    module: crate::ir::typer::SourceModuleId,
     span: Span,
 }
 
@@ -45,6 +45,7 @@ fn generate_program_with(
     let mut exports = Vec::<Exports>::new();
     for (index, source) in program.modules.iter().enumerate() {
         generator.source_path = source.path.clone();
+        generator.source_module = crate::ir::typer::SourceModuleId::from_index(index);
         generator
             .module
             .origins
@@ -65,7 +66,7 @@ fn generate_program_with(
                         name.clone(),
                         matches!(export.symbol, Symbol::Type(_)),
                         SourceLocation {
-                            path: program.modules[export.origin.module].path.clone(),
+                            path: program.modules[export.origin.module.index()].path.clone(),
                             span: export.origin.span,
                         },
                     );
@@ -84,7 +85,7 @@ fn generate_program_with(
                 StmtKind::Impl { .. } | StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
             };
             let origin = Origin {
-                module: index,
+                module: generator.source_module,
                 span: name.span,
             };
             bind(program, index, &mut names, &name.val, origin, name.span)?;
@@ -131,7 +132,8 @@ fn bind(
         if *previous == origin {
             return Ok(false);
         }
-        let location = |origin: &Origin| program.modules[origin.module].location(origin.span);
+        let location =
+            |origin: &Origin| program.modules[origin.module.index()].location(origin.span);
         let mut error = program.modules[module].error(
             span,
             format!(
@@ -143,7 +145,7 @@ fn bind(
         for origin in [previous, &origin] {
             error.related.push(SourceNote {
                 location: SourceLocation {
-                    path: program.modules[origin.module].path.clone(),
+                    path: program.modules[origin.module.index()].path.clone(),
                     span: origin.span,
                 },
                 message: "defined here".into(),

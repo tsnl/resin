@@ -1,12 +1,14 @@
 //! Bottom-up typing rules over an owned nominal type table.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::ir::types::definitions;
 use crate::ir::{Ty, TypeDef, TypeId, TypeTable};
 
 mod convert;
 mod error;
+mod methods;
+pub(crate) use methods::{FunctionDecl, ReceiverConversion, SourceModuleId};
 mod rules;
 
 pub use convert::{Conv, Converted};
@@ -17,6 +19,9 @@ pub use rules::{BuiltinCall, FieldAccess};
 #[derive(Debug, Clone, Default)]
 pub struct TyperContext {
     definitions: TypeTable,
+    // Frontend namespaces and signatures are discarded when producing IR.
+    namespaces: BTreeMap<TypeId, methods::Namespace>,
+    functions: BTreeMap<crate::ir::FunctionId, FunctionDecl>,
 }
 
 impl TyperContext {
@@ -24,9 +29,21 @@ impl TyperContext {
         Self::default()
     }
 
+    pub(crate) fn receiver_definition(&self, ty: &Ty) -> Option<TypeId> {
+        let mut ty = ty;
+        while let Ty::Pointer { pointee } = ty {
+            ty = pointee;
+        }
+        let Ty::Defined { definition } = ty else {
+            return None;
+        };
+        Some(*definition)
+    }
+
     pub fn from_definitions(definitions: impl Into<TypeTable>) -> Self {
         Self {
             definitions: definitions.into(),
+            ..Self::new()
         }
     }
 

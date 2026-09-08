@@ -1,14 +1,14 @@
 use super::{GenerateError, Generator, check::error};
 use crate::{
-    ast::{Ident, SourceFile, Span, StmtKind, Term, TermKind},
-    ir::{FunctionId, Instr, Ty, types::Method},
+    ast::{Ident, SourceFile, StmtKind, Term, TermKind},
+    ir::{Instr, Ty, typer::ReceiverConversion},
 };
 
 impl Generator {
     pub(super) fn declare_methods(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
         for stmt in file.declarations() {
             let StmtKind::Function {
-                owner: Some(owner),
+                receiver: Some(receiver),
                 name,
                 params,
                 result,
@@ -18,56 +18,23 @@ impl Generator {
             else {
                 continue;
             };
-            if !file
-                .declarations()
-                .any(|s| matches!(&s.val, StmtKind::Struct { name, .. } if name.val == owner.val))
-            {
+            let Some(Ty::Defined { definition }) = self.scopes.lookup_type(&receiver.val) else {
+                return Err(error(receiver.span, "impl requires a nominal struct type"));
+            };
+            if self.typer.type_origin(definition) != Some(self.source_module) {
                 return Err(error(
-                    owner.span,
-                    "impl requires a struct defined in this module",
+                    receiver.span,
+                    "impl requires a type defined in this module",
                 ));
             }
             if !decorators.is_empty() {
                 return Err(error(name.span, "methods cannot be shader entries"));
             }
-            let Ty::Defined { definition } = self.scopes.lookup_type(&owner.val).unwrap() else {
-                unreachable!()
-            };
+            let function = self.declare_function(name, params, result)?;
             let short = name.val.rsplit('.').next().unwrap();
-            if self
-                .typer
-                .definition(definition)
-                .unwrap()
-                .methods
-                .contains_key(short)
-            {
+            if !self.typer.define_method(definition, short.into(), function) {
                 return Err(error(name.span, "duplicate method"));
             }
-            let function = FunctionId::from_index(self.module.functions.len());
-            let typed = self.declare_function(name, params, result)?;
-            let result = self.module.functions[function.index()].result.clone();
-            let receiver = params
-                .first()
-                .is_some_and(|(n, _)| n.val.as_ref() == "self");
-            let owner_ty = Ty::Defined { definition };
-            if receiver
-                && !matches!(&typed[0], t if t == &owner_ty || t == &Ty::Pointer { pointee: Box::new(owner_ty.clone()) })
-            {
-                return Err(error(
-                    name.span,
-                    "self must have type T or Ptr<T> for the impl type",
-                ));
-            }
-            self.typer.define_method(
-                definition,
-                short.into(),
-                Method {
-                    function,
-                    params: typed,
-                    result,
-                    receiver,
-                },
-            );
             self.scopes.record_method_definition(definition, name);
         }
         Ok(())
@@ -75,12 +42,11 @@ impl Generator {
 
     pub(super) fn gen_method_call(
         &mut self,
-        span: Span,
         base: &Term,
         name: &Ident,
         arg: &Term,
-    ) -> Result<Option<Ty>, GenerateError> {
-        let (base_ty, associated) = if let TermKind::Type { ty } = &base.val {
+    ) -> Result<Ty, GenerateError> {
+        let (receiver, associated) = if let TermKind::Type { ty } = &base.val {
             (self.evaluator().ty(ty)?, true)
         } else {
             (
@@ -88,71 +54,68 @@ impl Generator {
                 false,
             )
         };
-        let Some(method) = self.typer.method(&base_ty, &name.val).cloned() else {
-            return Ok(None);
-        };
+        let function = self
+            .typer
+            .method(&receiver, &name.val)
+            .cloned()
+            .ok_or_else(|| error(name.span, "unknown method"))?;
         self.scopes
-            .record_method(name, &base_ty, associated, &self.typer);
-        if method.receiver {
-            let receiver = &method.params[0];
-            let owner = match receiver {
-                Ty::Pointer { pointee } => pointee.as_ref(),
-                ty => ty,
-            };
-            let pointer = Ty::Pointer {
-                pointee: Box::new(owner.clone()),
-            };
-            let compatible = receiver == &base_ty
-                || receiver == &pointer && (&base_ty == owner)
-                || receiver == owner && (base_ty == pointer);
-            if !compatible {
-                return Err(error(
-                    span,
-                    "method receiver requires T or Ptr<T> matching its declared self type",
-                ));
-            }
-        }
+            .record_method(name, &receiver, associated, &self.typer);
         self.emit(Instr::Function {
-            function: method.function,
+            function: function.function,
         });
-        if method.receiver {
-            let expected = &method.params[0];
-            if expected == &base_ty {
-                self.gen_term(base, Some(expected))?;
-            } else if matches!(expected, Ty::Pointer { .. }) {
-                self.check_place_initialized(base)?;
-                self.gen_place(base)?;
-            } else {
-                self.gen_term(base, None)?;
-                self.emit(Instr::Load);
-            }
-            let remaining = &method.params[1..];
-            if remaining.is_empty() {
-                self.gen_term(arg, Some(&Ty::Unit))?;
-                self.emit(Instr::Discard);
-            } else if remaining.len() == 1 {
-                self.gen_term(arg, Some(&remaining[0]))?;
-            } else {
-                let arg_ty = Ty::parameter(remaining);
-                self.gen_term(arg, Some(&arg_ty))?;
-                let saved = self.save_top(&arg_ty);
-                for i in 0..remaining.len() {
-                    self.emit(Instr::LocalAddress { local: saved });
-                    self.emit(Instr::AccessStatic { index: i });
-                    self.emit(Instr::Load);
-                }
-            }
-            if method.params.len() > 1 {
+        if associated {
+            self.gen_term(arg, Some(&Ty::parameter(&function.params)))?;
+        } else {
+            let (first, remaining) = function
+                .params
+                .split_first()
+                .expect("checked receiver parameter");
+            self.gen_receiver(base, &receiver, first)?;
+            self.gen_method_arguments(arg, remaining)?;
+            if !remaining.is_empty() {
                 self.emit(Instr::MakeRecord {
-                    fields: (0..method.params.len())
+                    fields: (0..function.params.len())
                         .map(|i| format!("_{i}").into())
                         .collect(),
                 });
             }
-        } else {
-            self.gen_term(arg, Some(&Ty::parameter(&method.params)))?;
         }
         self.emit(Instr::Call);
-        Ok(Some(method.result))
+        Ok(function.result)
+    }
+
+    fn gen_receiver(&mut self, base: &Term, from: &Ty, to: &Ty) -> Result<(), GenerateError> {
+        match ReceiverConversion::between(from, to).expect("checked receiver conversion") {
+            ReceiverConversion::Value => {
+                self.gen_term(base, Some(to))?;
+            }
+            ReceiverConversion::Address => {
+                self.check_place_initialized(base)?;
+                self.gen_place(base)?;
+            }
+            ReceiverConversion::Load => {
+                self.gen_term(base, None)?;
+                self.emit(Instr::Load);
+            }
+        }
+        Ok(())
+    }
+
+    fn gen_method_arguments(&mut self, arg: &Term, params: &[Ty]) -> Result<(), GenerateError> {
+        self.gen_term(arg, Some(&Ty::parameter(params)))?;
+        match params.len() {
+            0 => self.emit(Instr::Discard),
+            1 => {}
+            count => {
+                let saved = self.save_top(&Ty::parameter(params));
+                for index in 0..count {
+                    self.emit(Instr::LocalAddress { local: saved });
+                    self.emit(Instr::AccessStatic { index });
+                    self.emit(Instr::Load);
+                }
+            }
+        }
+        Ok(())
     }
 }

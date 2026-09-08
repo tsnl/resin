@@ -111,7 +111,7 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
                 if base == "c" {
                     vec!["count", "read"]
                 } else {
-                    vec!["new"]
+                    vec!["new", "read"]
                 }
             );
         }
@@ -1022,5 +1022,27 @@ fn suffixes_and_one_armed_if_have_editor_types() {
             .unwrap()
             .text,
         "speed: float32"
+    );
+}
+
+#[test]
+fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
+    let source = "struct Counter { count: int }; impl Counter { def add(counter: Counter, amount: int) -> int = { counter.count + amount }; } def f(c: Counter) -> int = { c.add(1) };";
+    for end in source
+        .char_indices()
+        .map(|(index, _)| index)
+        .chain([source.len()])
+    {
+        let project = Project::new(&[("main.resin", &source[..end])]);
+        project.analyze();
+    }
+    let source = "struct Counter { count: int }; impl Counter { def read(counter: Counter) -> int = { counter.count }; } def f(c: Counter) = { c.read(; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let offset = source.rfind("read").unwrap();
+    assert!(
+        analysis
+            .definition(&project.path("main.resin"), offset)
+            .is_some()
     );
 }

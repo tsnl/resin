@@ -556,7 +556,7 @@
           }
         ]
       },
-      "owner": {
+      "receiver": {
         "multiple": false,
         "required": true,
         "types": [
@@ -695,6 +695,40 @@
     }
   },
   {
+    "type": "method_call",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "paren_term",
+            "named": true
+          },
+          {
+            "type": "tuple_term",
+            "named": true
+          },
+          {
+            "type": "unit_term",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "paren_term",
     "named": true,
     "fields": {
@@ -750,6 +784,10 @@
           },
           {
             "type": "field_access",
+            "named": true
+          },
+          {
+            "type": "method_call",
             "named": true
           },
           {
