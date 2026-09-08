@@ -485,7 +485,10 @@ impl Analysis {
                 replace,
             })
             .collect::<Vec<_>>();
-        items.sort_by(|a, b| a.name.cmp(&b.name));
+        items.sort_by(|a, b| {
+            (a.kind != DefinitionKind::Field, &a.name)
+                .cmp(&(b.kind != DefinitionKind::Field, &b.name))
+        });
         items
     }
 }

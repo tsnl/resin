@@ -316,6 +316,46 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
 }
 
 #[test]
+fn dot_completion_sorts_fields_before_methods() {
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("members.resin"));
+    let source = "struct Record { zebra: int, middle: int };\n\
+        impl Record {\n\
+            def beta(self: Ptr<Record>) = {};\n\
+            def alpha(self: Ptr<Record>) = {};\n\
+        }\n\
+        def main() = { var value = Record { zebra = 1, middle = 2 }; value.; };";
+    client.open(&uri, source);
+    client.diagnostics(&uri, Some(1), true);
+    let column = source.lines().last().unwrap().rfind('.').unwrap() as u32 + 1;
+    let completion = client.request("textDocument/completion", at(&uri, 5, column));
+    let items = completion["items"].as_array().unwrap();
+    let labels = |items: &[Value]| {
+        items
+            .iter()
+            .map(|item| item["label"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let expected = ["middle", "zebra", "alpha", "beta"];
+    assert_eq!(labels(items), expected);
+    assert!(items[..2].iter().all(|item| item["kind"] == 5)); // FIELD
+    assert!(items[2..].iter().all(|item| item["kind"] == 3)); // FUNCTION
+
+    // Clients use sortText instead of the response's array order or labels.
+    let mut sorted = items.clone();
+    sorted.reverse();
+    sorted.sort_by(|a, b| {
+        a["sortText"]
+            .as_str()
+            .unwrap()
+            .cmp(b["sortText"].as_str().unwrap())
+    });
+    assert_eq!(labels(&sorted), expected);
+    client.stop();
+}
+
+#[test]
 fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
