@@ -246,12 +246,12 @@ Helpers using Result and match also compile to GLSL. C uses a tag and a union of
 payloads; GLSL uses separate payload fields because it has no native union type.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
-The standard library's `status(code)` converts native status integers to
+The standard library's `RuntimeStatus.from_code(code)` converts native status integers to
 `Result<(), RuntimeError>`. `RuntimeError` is a union of named errors such as
 `InvalidArgument`, `OutOfMemory`, and `IoError`; `UnknownRuntimeError { code }`
-preserves unrecognized codes. `runtime_error_code(error)` and `runtime_error_message(error)`
+preserves unrecognized codes. `RuntimeStatus.code(error)` and `RuntimeStatus.message(error)`
 recover the native code and C diagnostic string. Standard-library operations already
-return Results, so callers normally use `gpu_create()?` rather than converting statuses.
+return Results, so callers normally use `Gpu.new()?` rather than converting statuses.
 Standard-library resources release themselves on scope exit, including early returns
 through `?`. Copies retain shared ownership.
 
@@ -428,7 +428,7 @@ headers, and shader-stage names still use the decoded literal text, without an a
 
 ## Console input
 
-Import `std/console.resin` for `input()`, a line reader implemented in Resin on top of C's
+Import `std/console.resin` for `Console.read_line()`, a line reader implemented in Resin on top of C's
 `getchar()`. It grows its buffer as needed and strips LF or CRLF. Write a prompt with `print`
 before reading:
 
@@ -438,16 +438,16 @@ import { "std/console.resin" };
 
 def main() -> Result<(), _> = {
     print("Name: ", ());
-    var name = input()?;
+    var name = Console.read_line()?;
     print("Hello, ", ());
-    print_input(name)?;
+    name.print()?;
     print("!\n", ());
     ok(())
 };
 ```
 
-The result owns an `InputLine { data: Ptr<ubyte>, length: ulong }`; free it exactly once.
-`print_input` prints the bytes without adding a newline. Empty lines succeed, EOF before any
+The result is a shared `InputLine` owner exposing `data: Ptr<ubyte>` and `length: ulong`.
+Copies retain its allocation; the final owner frees it. `line.print()` prints the bytes without adding a newline. Empty lines succeed, EOF before any
 bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
 failures are also explicit errors. See [the console API](stdlib/README.md#console-input) for
 ownership and byte semantics, or run `cargo run -- examples/input.resin`.
@@ -487,17 +487,17 @@ keywords: definitions and parameters cannot use those names, but record fields c
 working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
 The native Rust crate lives separately at `resin-runtime/`; it has no dependency on the standard
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
-to those modules. Public operation names omit the native `resin_` prefix:
+to those modules. Public operations are static constructors and instance methods:
 
 - `std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
-- `std/window.resin`: windows and presentation; import `std/gpu.resin` separately for GPU operations.
+- `std/window.resin`: windows and input; `Gpu.new_for_window(window)` and `gpu.present(image)` live in `std/gpu.resin`.
 - `std/image.resin`: PNG reading and writing.
-- `std/status.resin`: `status`, the `RuntimeError` union and its variants, and native code/message helpers.
+- `std/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `std/console.resin`: `read_byte`, `input`, shared `InputLine` ownership, and `print_input`.
+- `std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `line.print()`.
 
 The polymorphic `print` operation is a compiler builtin; decorated shaders expose `.spirv`.
-Runtime flags are zero-argument functions, such as `memory_default()`.
+Runtime flags are static methods, such as `Memory.default()`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
 
@@ -506,7 +506,7 @@ export { main };
 import { "std/gpu.resin" };
 
 def main() -> Result<(), _> = {
-    var gpu = gpu_create()?;
+    var gpu = Gpu.new()?;
     print("GPU ready\n", ());
     ok(())
 };
@@ -518,18 +518,23 @@ Standard-library modules keep native declarations private and export Resin wrapp
 check statuses before returning out-parameter values. For example:
 
 ```resin
-export { ResinGpu, gpu_create };
+export { Gpu };
 import { "std/status.resin" };
 
 extern type ResinGpu;
-
-def gpu_create() -> Result<Ptr<ResinGpu>, RuntimeError> = {
-    var gpu = Ptr<ResinGpu>(ulong(0));
-    status(resin_gpu_create(&gpu))?;
-    ok(gpu)
-};
+struct GpuOwner { handle: Ptr<ResinGpu> };
+type Gpu = Arc<GpuOwner>;
+impl GpuOwner {
+    def new() -> Result<Gpu, RuntimeError> = {
+        var handle = Ptr<ResinGpu>(0L);
+        RuntimeStatus.from_code(resin_gpu_create(&handle))?;
+        ok(Gpu { handle = handle })
+    };
+    def drop(self: Ptr<GpuOwner>) = { resin_gpu_destroy(self.handle); };
+}
 
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
+extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
 ```
 
 Foreign headers use the C compiler's include search paths (or an absolute path).
@@ -636,8 +641,8 @@ decorated function on the host requires no shader compiler. Artifact requests an
 loaded modules require compilation even when their containing function is not executed.
 
 The Resin pipeline wrappers accept these spans directly:
-`gpu_create_compute_pipeline(gpu, kernel.spirv)` and
-`gpu_create_graphics_pipeline(gpu, vertex.spirv, fragment.spirv)`. The private C ABI still uses
+`gpu.create_compute_pipeline(kernel.spirv)` and
+`gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)`. The private C ABI still uses
 pointer/length pairs.
 
 Resin lowers the entry and its reachable named helpers to GLSL, invokes `glslc`, and embeds the
@@ -680,8 +685,8 @@ scalar-block-layout support. Generated C asserts sizes, alignments, and member o
 Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
 Storage containing booleans, unit, or other numeric widths is rejected for now.
 
-Use `allocation_host_pointer` to initialize mapped data on the CPU. Store
-`allocation_device_pointer` addresses in records consumed by shaders; these are not
+Use `buffer.host_pointer()` to initialize mapped data on the CPU. Store
+`buffer.device_pointer()` addresses in records consumed by shaders; these are not
 interchangeable with host addresses. Pointer types do not enforce the address space or bounds.
 Calling the same function on the CPU requires a root containing host pointers instead.
 
@@ -752,22 +757,22 @@ speed depends on rendering throughput. Its decorated shader functions, ordinary 
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.
 
-Input is available through `std/window.resin`. `keys()` names GLFW key codes (`keys().w`,
-`keys().space`, `keys().left_shift`); `mouse_buttons()` names the eight mouse buttons.
-After polling, `window_key_state(window, keys().w)` and
-`window_mouse_button_state(window, mouse_buttons().left)` return `ButtonState` records
+Input is available through `std/window.resin`. `Window.keys()` names GLFW key codes (`Window.keys().w`,
+`Window.keys().space`, `Window.keys().left_shift`); `Window.mouse_buttons()` names the eight mouse buttons.
+After polling, `window.key_state(Window.keys().w)` and
+`window.mouse_button_state(Window.mouse_buttons().left)` return `ButtonState` records
 with `down`, `pressed`, and `released` booleans. A quick tap can set both edge flags;
-key repeat does not create another press. Existing `window_key_pressed` queries `down`.
+key repeat does not create another press. `window.key_pressed(key)` queries `down`.
 
 Poll each window once per frame before reading its input. Polling pumps GLFW events for
 all windows, then commits that window's snapshot; other windows retain pending input
 until their own poll. Edges and scroll reset on the next poll of that window, and repeated
-queries read the same snapshot. `window_scroll_delta` returns accumulated horizontal/vertical
-scroll offsets (positive vertical scroll is up). `window_cursor_position` returns coordinates
+queries read the same snapshot. `window.scroll_delta()` returns accumulated horizontal/vertical
+scroll offsets (positive vertical scroll is up). `window.cursor_position()` returns coordinates
 in window content units, with a top-left origin and positive y downward, independently of
 framebuffer scaling. Both return `Result<(float64, float64), RuntimeError>`.
 
-`window_focused` reports keyboard focus. `window_capture_cursor(window, capture)` hides and
+`window.focused()` reports keyboard focus. `window.capture_cursor(capture)` hides and
 captures the cursor for camera controls when `capture` is true, with unbounded virtual
 coordinates; set it false to restore normal behavior.
 GLFW synthesizes button releases on focus loss. These APIs report physical controls;
@@ -776,14 +781,14 @@ they do not decode typed text or implement text composition.
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:
 
-- `window_create` returns a shared window owner; `window_poll_events` processes
+- `Window.new(...)` returns a shared window owner; `window.poll_events()` processes
   GLFW events. Close state, framebuffer size, resizing, and GLFW key codes
-  are available through the corresponding `window_*` functions. Predicates return `bool`;
+  are available through the corresponding window methods. Predicates return `bool`;
   fallible operations return Results, including framebuffer size as `(width, height)`.
-- `gpu_create_for_window` selects a graphics/compute/present-capable GPU for a window.
+- `Gpu.new_for_window(window)` selects a graphics/compute/present-capable GPU for a window.
   The existing GPU constructors stay headless. There is one GPU per window; multiple
   windows can each have their own GPU.
-- `gpu_present` blits an already-submitted `GpuImage` to the window, scaling to
+- `gpu.present(image)` blits an already-submitted `GpuImage` to the window, scaling to
   its framebuffer with FIFO presentation. Swapchains are recreated after resize.
   Its `Result<bool, RuntimeError>` is `ok(true)` when presented and `ok(false)` when
   skipped (minimized, timed out, or out of date): poll events and retry. Other failures propagate.
@@ -836,7 +841,7 @@ Holes in an explicit type argument are rejected. Byte arrays, empty arrays/recor
 booleans, function values, and other types outside the shared profile are rejected.
 
 For example, allocate one record with
-`gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?`.
+`gpu.malloc(size_of(Params), align_of(Params), Memory.default())?`.
 For N elements, multiplication remains ordinary `ulong` arithmetic: validate a dynamic
 count before multiplying. No unchecked element-count allocation helper is introduced.
 

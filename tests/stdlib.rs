@@ -31,39 +31,20 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
-fn buffer_address_accessors_require_a_borrowed_owner() {
-    let temp = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
-    let path = temp.path().join("main.resin");
-    for accessor in ["allocation_host_pointer", "allocation_device_pointer"] {
-        fs::write(
-            &path,
-            format!(
-                r#"
-            import {{ "std/gpu.resin" }};
-            def bad(gpu: Gpu) -> Result<(), _> = {{
-                {accessor}(gpu_malloc(gpu, 4L, 4L, memory_default())?);
-                ok(())
-            }};
-        "#
-            ),
-        )
-        .unwrap();
-        let program = ast::load(&path).unwrap();
-        let error = ir::generate_program(&program).unwrap_err().to_string();
-        assert!(error.contains("TypeMismatch"), "{error}");
-    }
-}
-
-#[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = source.path().join("main.resin");
+    fs::write(&path, "import { \"std/gpu.resin\", \"std/window.resin\", \"std/image.resin\", \"std/console.resin\" };").unwrap();
+    let module = ir::generate_program(&ast::load(&path).unwrap()).unwrap();
     for name in ["gpu", "window", "image", "console"] {
-        let program = ast::load(&root.join(format!("stdlib/{name}.resin"))).unwrap();
-        let module = ir::generate_program(&program).unwrap();
-        for (name, id) in &module.entries {
-            assert!(!name.starts_with("resin_"), "raw native export: {name}");
-            assert!(module.functions[id.index()].foreign.is_none(), "{name}");
-        }
+        let public =
+            ir::generate_program(&ast::load(&root.join(format!("stdlib/{name}.resin"))).unwrap())
+                .unwrap();
+        assert!(
+            public.entries.is_empty(),
+            "operations are methods, not free function exports"
+        );
         let header =
             fs::read_to_string(root.join(format!("resin-runtime/include/resin_runtime/{name}.h")))
                 .unwrap();
@@ -73,14 +54,53 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 continue;
             };
             let name = declaration.split('(').next().unwrap();
-            let id = module
-                .entries
-                .get(name)
-                .unwrap_or_else(|| panic!("missing wrapper: {name}"));
-            assert!(
-                matches!(module.functions[id.index()].result, ir::Ty::Result { .. }),
-                "{name}"
-            );
+            let (owner, method) = match name {
+                "gpu_create" => ("GpuOwner", "new"),
+                "gpu_create_at" => ("GpuOwner", "new_at"),
+                "gpu_device_count" => ("GpuOwner", "device_count"),
+                "gpu_enumerate_devices" => ("GpuOwner", "enumerate_devices"),
+                "gpu_create_for_window" => ("GpuOwner", "new_for_window"),
+                "window_create" => ("WindowOwner", "new"),
+                "image_read_png" => ("ImageDataOwner", "read_png"),
+                "image_write_png" => ("ImageDataOwner", "write_pixels"),
+                "gpu_malloc" => ("GpuOwner", "malloc"),
+                "gpu_host_to_device_pointer" => ("GpuOwner", "host_to_device_pointer"),
+                "gpu_create_compute_pipeline" => ("GpuOwner", "create_compute_pipeline"),
+                "gpu_create_graphics_pipeline" => ("GpuOwner", "create_graphics_pipeline"),
+                "gpu_create_image" => ("GpuOwner", "create_image"),
+                "gpu_start_command_recording" => ("GpuOwner", "start_command_recording"),
+                "gpu_set_pipeline" => ("CommandsOwner", "set_pipeline"),
+                "gpu_dispatch" => ("CommandsOwner", "dispatch"),
+                "gpu_begin_rendering" => ("CommandsOwner", "begin_rendering"),
+                "gpu_end_rendering" => ("CommandsOwner", "end_rendering"),
+                "gpu_draw" => ("CommandsOwner", "draw"),
+                "gpu_copy_image_to_buffer" => ("CommandsOwner", "copy_image_to_buffer"),
+                "gpu_submit" => ("CommandsOwner", "submit"),
+                "gpu_cancel_command_buffer" => ("CommandsOwner", "cancel"),
+                "window_poll_events" => ("WindowOwner", "poll_events"),
+                "window_should_close" => ("WindowOwner", "should_close"),
+                "window_set_should_close" => ("WindowOwner", "set_should_close"),
+                "window_framebuffer_size" => ("WindowOwner", "framebuffer_size"),
+                "window_set_size" => ("WindowOwner", "set_size"),
+                "window_key_pressed" => ("WindowOwner", "key_pressed"),
+                "window_key_state" => ("WindowOwner", "key_state"),
+                "window_mouse_button_state" => ("WindowOwner", "mouse_button_state"),
+                "window_cursor_position" => ("WindowOwner", "cursor_position"),
+                "window_scroll_delta" => ("WindowOwner", "scroll_delta"),
+                "window_focused" => ("WindowOwner", "focused"),
+                "window_capture_cursor" => ("WindowOwner", "capture_cursor"),
+                "gpu_present" => ("GpuOwner", "present"),
+                _ => panic!("missing method mapping for native operation: {name}"),
+            };
+            let definition = module
+                .types
+                .iter()
+                .find(|t| t.name.as_ref() == owner)
+                .unwrap();
+            let method = &definition.methods[method];
+            let function = &module.functions[method.function.index()];
+            assert!(function.foreign.is_none(), "{name}");
+            assert!(matches!(function.result, ir::Ty::Result { .. }), "{name}");
             checked += 1;
         }
         assert!(checked > 0 || name == "console");
@@ -95,19 +115,19 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
         import { "std/status.resin" };
         extern "string.h" def strcmp(a: Ptr<ubyte>, b: Ptr<ubyte>) -> int;
         def main() -> Result<int, _> = {
-            status(0)?;
+            RuntimeStatus.from_code(0)?;
             var code = -1;
             var valid = 1 == 1;
             while (code <= 9) {
-                var actual = match (status(code)) {
+                var actual = match (RuntimeStatus.from_code(code)) {
                     ok(value) => { 0 },
-                    err(error) => { runtime_error_code(error) },
+                    err(error) => { RuntimeStatus.code(error) },
                 };
                 valid := valid && actual == code;
                 code := code + 1;
             };
             var message = "io error";
-            valid := valid && strcmp(runtime_error_message(IoError {}), Ptr<ubyte>(&message)) == 0;
+            valid := valid && strcmp(RuntimeStatus.message(IoError {}), Ptr<ubyte>(&message)) == 0;
             ok(if (valid) { 0 } else { 1 })
         };
         "#,
@@ -128,7 +148,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"std/status.resin\" }}; def main() -> Result<(), _> = {{ status({code}) }};"
+                "export {{ main }}; import {{ \"std/status.resin\" }}; def main() -> Result<(), _> = {{ RuntimeStatus.from_code({code}) }};"
             ),
             "",
         );
@@ -144,14 +164,18 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     let output = run(
         r#"
         export { main };
-        import { "std/image.resin" };
+        import { "std/image.resin", "std/status.resin" };
         def main() -> Result<int, _> = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
-            image_write_png(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?;
-            var image = image_read_png(Ptr<ubyte>(&path), 0)?;
-
-            ok(if (image.width == uint(1) && image.height == uint(1) && image.channels == uint(4)
+            ImageData.write_pixels(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?;
+            var image = ImageData.read_png(Ptr<ubyte>(&path), 0)?;
+            var alias = image;
+            var copy_path = "copy.png";
+            alias.write_png(Ptr<ubyte>(&copy_path))?;
+            var copied = ImageData.read_png(Ptr<ubyte>(&copy_path), 0)?;
+            ok(if (copied.width == image.width && copied.height == image.height && copied.pixels.* == image.pixels.*
+                && image.width == uint(1) && image.height == uint(1) && image.channels == uint(4)
                 && image.pixels.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
         };
         "#,
@@ -159,8 +183,8 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     );
     success(&output);
     for call in [
-        "image_read_png(Ptr<ubyte>(&path), 4)?",
-        "image_write_png(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?",
+        "ImageData.read_png(Ptr<ubyte>(&path), 4)?",
+        "ImageData.write_pixels(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?",
     ] {
         let output = run(
             &format!(
@@ -183,14 +207,14 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         extern "resin_runtime.h" def test_mode(mode: int);
         extern "resin_runtime.h" def test_verify(code: int);
         def work() -> Result<(), _> = {
-            var gpu = gpu_create()?;
+            var gpu = Gpu.new()?;
 
-            var allocation = gpu_malloc(gpu, 16, 8, memory_default())?;
+            var allocation = gpu.malloc(16, 8, Memory.default())?;
 
-            var commands = gpu_start_command_recording(gpu)?;
+            var commands = gpu.start_command_recording()?;
 
-            gpu_set_pipeline(commands, GpuPipeline { handle = Ptr<ResinPipeline>(0L), gpu = gpu })?;
-            gpu_submit(gpu, &commands)?;
+            commands.set_pipeline(GpuPipeline { handle = Ptr<ResinPipeline>(0L), gpu = gpu })?;
+            commands.submit()?;
             ok(())
         };
         def main() = {
@@ -199,7 +223,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
                 test_mode(mode);
                 var result = match (work()) {
                     ok(value) => { 0 },
-                    err(error) => { runtime_error_code(error) },
+                    err(error) => { RuntimeStatus.code(error) },
                 };
                 test_verify(result);
                 mode := mode + 1;
@@ -280,10 +304,10 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
         def main() -> int = {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
             var image = GpuImage { handle = Ptr<ResinImage>(0L), gpu = gpu };
-            var first = match (gpu_present(gpu, image)) { ok(shown) => { shown }, err(e) => { 1 == 0 } };
-            var second = match (gpu_present(gpu, image)) { ok(shown) => { !shown }, err(e) => { 1 == 0 } };
-            var third = match (gpu_present(gpu, image)) { ok(shown) => { 0 }, err(e) => { runtime_error_code(e) } };
-            var fourth = match (gpu_present(gpu, image)) { ok(shown) => { 0 }, err(e) => { runtime_error_code(e) } };
+            var first = match (gpu.present(image)) { ok(shown) => { shown }, err(e) => { 1 == 0 } };
+            var second = match (gpu.present(image)) { ok(shown) => { !shown }, err(e) => { 1 == 0 } };
+            var third = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
+            var fourth = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
             if (first && second && third == 5 && fourth == 99) { 0 } else { 1 }
         };
         "#,
@@ -314,18 +338,18 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
         def main() -> Result<int, _> = {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
             var window = Window { handle = Ptr<ResinWindow>(0L) };
-            var count = gpu_device_count()?;
-            var address = gpu_host_to_device_pointer(gpu, Ptr<ubyte>(ulong(0)))?;
-            var size = window_framebuffer_size(window)?;
-            var incomplete = match (gpu_enumerate_devices(Ptr<ResinGpuDeviceInfo>(ulong(0)), 0)) {
+            var count = Gpu.device_count()?;
+            var address = gpu.host_to_device_pointer(Ptr<ubyte>(ulong(0)))?;
+            var size = window.framebuffer_size()?;
+            var incomplete = match (Gpu.enumerate_devices(Ptr<ResinGpuDeviceInfo>(ulong(0)), 0)) {
                 ok(value) => { 0 },
-                err(error) => { runtime_error_code(error) },
+                err(error) => { RuntimeStatus.code(error) },
             };
-            var valid = !window_should_close(window) && window_key_pressed(window, key_escape());
-            window_set_should_close(window, 1 == 1)?;
-            valid := valid && window_should_close(window);
-            window_set_should_close(window, 1 == 0)?;
-            valid := valid && !window_should_close(window);
+            var valid = !window.should_close() && window.key_pressed(Window.key_escape());
+            window.set_should_close(1 == 1)?;
+            valid := valid && window.should_close();
+            window.set_should_close(1 == 0)?;
+            valid := valid && !window.should_close();
             ok(if (valid && count == uint(2) && address == ulong(4294967303)
                 && valid_size(size) && incomplete == 7) { 0 } else { 1 })
         };
@@ -382,7 +406,7 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         impl Cleanup { def drop(self: Ptr<Cleanup>) = { print("cleanup\n", ()); }; }
         def main() -> Result<(), _> = {
             var cleanup = Cleanup {};
-            read_byte()?;
+            Console.read_byte()?;
             ok(())
         };
         "#,
@@ -411,8 +435,8 @@ fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
             var vertex = Span<ubyte> { data = Ptr<ubyte>(&a), length = ulong(2) };
             var fragment = Span<ubyte> { data = Ptr<ubyte>(&b), length = ulong(3) };
             var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
-            var compute = gpu_create_compute_pipeline(gpu, vertex)?;
-            var graphics = gpu_create_graphics_pipeline(gpu, vertex, fragment)?;
+            var compute = gpu.create_compute_pipeline(vertex)?;
+            var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
             ok(if (ulong(compute.handle) == ulong(1) && ulong(graphics.handle) == ulong(2)) { 0 } else { 1 })
         };
     "#,
@@ -449,14 +473,14 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         def coordinates(x: float64, y: float64) -> bool = { x == 12.5d && y == -3.25d };
         def main() -> Result<int, _> = {
             var window = Window { handle = Ptr<ResinWindow>(0L) };
-            var key = window_key_state(window, keys().w);
-            var mouse = window_mouse_button_state(window, mouse_buttons().left);
+            var key = window.key_state(Window.keys().w);
+            var mouse = window.mouse_button_state(Window.mouse_buttons().left);
             var valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
-            valid := valid && coordinates(window_cursor_position(window)?);
-            valid := valid && coordinates(window_scroll_delta(window)?);
-            valid := valid && window_focused(window) && keys().escape == key_escape() && keys().f25 == 314;
-            window_capture_cursor(window, 1 == 1)?;
-            window_capture_cursor(window, 1 == 0)?;
+            valid := valid && coordinates(window.cursor_position()?);
+            valid := valid && coordinates(window.scroll_delta()?);
+            valid := valid && window.focused() && Window.keys().escape == Window.key_escape() && Window.keys().f25 == 314;
+            window.capture_cursor(1 == 1)?;
+            window.capture_cursor(1 == 0)?;
             ok(if (valid) { 0 } else { 1 })
         };
         "#,
@@ -490,25 +514,32 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
 }
 
 #[test]
-fn buffer_address_accessors_borrow_the_callers_owners() {
-    let output = run(
-        r#"
+fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
+    for setup in [
+        r#"var host = (GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu }).host_pointer();
+            var device = (GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu }).device_pointer();"#,
+        r#"var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu };
+            var host = host_buffer.host_pointer();
+            var device_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu };
+            var device = device_buffer.device_pointer();"#,
+    ] {
+        let source = r#"
         export { main };
         import { "std/gpu.resin" };
         extern "resin_runtime.h" def test_frees() -> int;
         def main() -> int = {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
             var valid = {
-                var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu };
-                var host = allocation_host_pointer(&host_buffer);
-                var device_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu };
-                var device = allocation_device_pointer(&device_buffer);
+                BUFFER_ADDRESSES
                 test_frees() == 0 && host.* == 42B && device == 101L
             };
             if (valid && test_frees() == 2) { 0 } else { 1 }
         };
-        "#,
-        r#"
+        "#
+        .replace("BUFFER_ADDRESSES", setup);
+        let output = run(
+            &source,
+            r#"
         #include <resin_runtime.h>
         #include <assert.h>
         static int freed;
@@ -530,6 +561,7 @@ fn buffer_address_accessors_borrow_the_callers_owners() {
         #define resin_allocation_device_pointer mock_device
         #define resin_gpu_free mock_free
         "#,
-    );
-    success(&output);
+        );
+        success(&output);
+    }
 }

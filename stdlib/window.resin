@@ -1,74 +1,6 @@
-export {
-	Window,
-	ResinWindow,
-	key_escape,
-	keys,
-	mouse_buttons,
-	ButtonState,
-	window_key_state,
-	window_mouse_button_state,
-	window_cursor_position,
-	window_scroll_delta,
-	window_focused,
-	window_capture_cursor,
-	window_create,
-	window_poll_events,
-	window_should_close,
-	window_set_should_close,
-	window_framebuffer_size,
-	window_set_size,
-	window_key_pressed,
-	gpu_create_for_window,
-	gpu_present,
-};
+export { Window, ResinWindow, ButtonState, KeyCodes, MouseButtons };
 
-import { "gpu.resin", "status.resin", "resources.resin" };
-
-def key_escape() -> int = {
-	256
-};
-
-def window_create(width: uint, height: uint, title: Ptr<ubyte>) -> Result<Window, RuntimeError> = {
-	var window = Ptr<ResinWindow>(ulong(0));
-	status(resin_window_create(width, height, title, &window))?;
-	ok(Window { handle = window })
-};
-
-def window_poll_events(window: Window) -> Result<(), RuntimeError> = {
-	status(resin_window_poll_events(window.handle))
-};
-
-def window_should_close(window: Window) -> bool = {
-	resin_window_should_close(window.handle) != 0
-};
-
-def window_set_should_close(window: Window, close: bool) -> Result<(), RuntimeError> = {
-	status(
-		resin_window_set_should_close(
-			window.handle,
-			if (close) {
-				1
-			} else {
-				0
-			}
-		)
-	)
-};
-
-def window_framebuffer_size(window: Window) -> Result<(uint, uint), RuntimeError> = {
-	var width = uint(0);
-	var height = uint(0);
-	status(resin_window_framebuffer_size(window.handle, &width, &height))?;
-	ok((width, height))
-};
-
-def window_set_size(window: Window, width: uint, height: uint) -> Result<(), RuntimeError> = {
-	status(resin_window_set_size(window.handle, width, height))
-};
-
-def window_key_pressed(window: Window, key: int) -> bool = {
-	resin_window_key_pressed(window.handle, key) != 0
-};
+import { "status.resin" };
 
 struct ButtonState { down: bool, pressed: bool, released: bool };
 
@@ -76,59 +8,349 @@ def button_state(bits: uint) -> ButtonState = {
 	ButtonState { down = (bits & 1I) != 0I, pressed = (bits & 2I) != 0I, released = (bits & 4I) != 0I }
 };
 
-def window_key_state(window: Window, key: int) -> ButtonState = {
-	button_state(resin_window_key_state(window.handle, key))
-};
+extern type ResinWindow;
+struct WindowOwner { handle: Ptr<ResinWindow> };
+type Window = Arc<WindowOwner>;
+impl WindowOwner {
+	def drop(self: Ptr<WindowOwner>) = {
+		resin_window_destroy(self.handle);
+	};
 
-def window_mouse_button_state(window: Window, button: int) -> ButtonState = {
-	button_state(resin_window_mouse_button_state(window.handle, button))
-};
-
-def window_cursor_position(window: Window) -> Result<(float64, float64), RuntimeError> = {
-	var x = 0.0d;
-	var y = 0.0d;
-	status(resin_window_cursor_position(window.handle, &x, &y))?;
-	ok((x, y))
-};
-
-def window_scroll_delta(window: Window) -> Result<(float64, float64), RuntimeError> = {
-	var x = 0.0d;
-	var y = 0.0d;
-	status(resin_window_scroll_delta(window.handle, &x, &y))?;
-	ok((x, y))
-};
-
-def window_focused(window: Window) -> bool = {
-	resin_window_focused(window.handle) != 0
-};
-
-def window_capture_cursor(window: Window, capture: bool) -> Result<(), RuntimeError> = {
-	status(
-		resin_window_capture_cursor(
-			window.handle,
-			if (capture) {
-				1
-			} else {
-				0
-			}
+	def key_escape() -> int = {
+		256
+	};
+	def new(width: uint, height: uint, title: Ptr<ubyte>) -> Result<Window, RuntimeError> = {
+		var window = Ptr<ResinWindow>(ulong(0));
+		RuntimeStatus.from_code(resin_window_create(width, height, title, &window))?;
+		ok(Window { handle = window })
+	};
+	def poll_events(self: Window) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(resin_window_poll_events(self.handle))
+	};
+	def should_close(self: Window) -> bool = {
+		resin_window_should_close(self.handle) != 0
+	};
+	def set_should_close(self: Window, close: bool) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(
+			resin_window_set_should_close(
+				self.handle,
+				if (close) {
+					1
+				} else {
+					0
+				}
+			)
 		)
-	)
+	};
+	def framebuffer_size(self: Window) -> Result<(uint, uint), RuntimeError> = {
+		var width = uint(0);
+		var height = uint(0);
+		RuntimeStatus.from_code(resin_window_framebuffer_size(self.handle, &width, &height))?;
+		ok((width, height))
+	};
+	def set_size(self: Window, width: uint, height: uint) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(resin_window_set_size(self.handle, width, height))
+	};
+	def key_pressed(self: Window, key: int) -> bool = {
+		resin_window_key_pressed(self.handle, key) != 0
+	};
+	def key_state(self: Window, key: int) -> ButtonState = {
+		button_state(resin_window_key_state(self.handle, key))
+	};
+	def mouse_button_state(self: Window, button: int) -> ButtonState = {
+		button_state(resin_window_mouse_button_state(self.handle, button))
+	};
+	def cursor_position(self: Window) -> Result<(float64, float64), RuntimeError> = {
+		var x = 0.0d;
+		var y = 0.0d;
+		RuntimeStatus.from_code(resin_window_cursor_position(self.handle, &x, &y))?;
+		ok((x, y))
+	};
+	def scroll_delta(self: Window) -> Result<(float64, float64), RuntimeError> = {
+		var x = 0.0d;
+		var y = 0.0d;
+		RuntimeStatus.from_code(resin_window_scroll_delta(self.handle, &x, &y))?;
+		ok((x, y))
+	};
+	def focused(self: Window) -> bool = {
+		resin_window_focused(self.handle) != 0
+	};
+	def capture_cursor(self: Window, capture: bool) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(
+			resin_window_capture_cursor(
+				self.handle,
+				if (capture) {
+					1
+				} else {
+					0
+				}
+			)
+		)
+	};
+	def keys() -> KeyCodes = {
+		KeyCodes {
+			unknown = -1,
+			space = 32,
+			apostrophe = 39,
+			comma = 44,
+			minus = 45,
+			period = 46,
+			slash = 47,
+			digit_0 = 48,
+			digit_1 = 49,
+			digit_2 = 50,
+			digit_3 = 51,
+			digit_4 = 52,
+			digit_5 = 53,
+			digit_6 = 54,
+			digit_7 = 55,
+			digit_8 = 56,
+			digit_9 = 57,
+			semicolon = 59,
+			equal = 61,
+			a = 65,
+			b = 66,
+			c = 67,
+			d = 68,
+			e = 69,
+			f = 70,
+			g = 71,
+			h = 72,
+			i = 73,
+			j = 74,
+			k = 75,
+			l = 76,
+			m = 77,
+			n = 78,
+			o = 79,
+			p = 80,
+			q = 81,
+			r = 82,
+			s = 83,
+			t = 84,
+			u = 85,
+			v = 86,
+			w = 87,
+			x = 88,
+			y = 89,
+			z = 90,
+			left_bracket = 91,
+			backslash = 92,
+			right_bracket = 93,
+			grave_accent = 96,
+			world_1 = 161,
+			world_2 = 162,
+			escape = 256,
+			enter = 257,
+			tab = 258,
+			backspace = 259,
+			insert = 260,
+			delete = 261,
+			right = 262,
+			left = 263,
+			down = 264,
+			up = 265,
+			page_up = 266,
+			page_down = 267,
+			home = 268,
+			end = 269,
+			caps_lock = 280,
+			scroll_lock = 281,
+			num_lock = 282,
+			print_screen = 283,
+			pause = 284,
+			f1 = 290,
+			f2 = 291,
+			f3 = 292,
+			f4 = 293,
+			f5 = 294,
+			f6 = 295,
+			f7 = 296,
+			f8 = 297,
+			f9 = 298,
+			f10 = 299,
+			f11 = 300,
+			f12 = 301,
+			f13 = 302,
+			f14 = 303,
+			f15 = 304,
+			f16 = 305,
+			f17 = 306,
+			f18 = 307,
+			f19 = 308,
+			f20 = 309,
+			f21 = 310,
+			f22 = 311,
+			f23 = 312,
+			f24 = 313,
+			f25 = 314,
+			keypad_0 = 320,
+			keypad_1 = 321,
+			keypad_2 = 322,
+			keypad_3 = 323,
+			keypad_4 = 324,
+			keypad_5 = 325,
+			keypad_6 = 326,
+			keypad_7 = 327,
+			keypad_8 = 328,
+			keypad_9 = 329,
+			keypad_decimal = 330,
+			keypad_divide = 331,
+			keypad_multiply = 332,
+			keypad_subtract = 333,
+			keypad_add = 334,
+			keypad_enter = 335,
+			keypad_equal = 336,
+			left_shift = 340,
+			left_control = 341,
+			left_alt = 342,
+			left_super = 343,
+			right_shift = 344,
+			right_control = 345,
+			right_alt = 346,
+			right_super = 347,
+			menu = 348,
+		}
+	};
+	def mouse_buttons() -> MouseButtons = {
+		MouseButtons { left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
+	};
+}
+
+// GLFW physical key codes, independent of typed characters or keyboard layout.
+struct KeyCodes {
+	unknown: int,
+	space: int,
+	apostrophe: int,
+	comma: int,
+	minus: int,
+	period: int,
+	slash: int,
+	digit_0: int,
+	digit_1: int,
+	digit_2: int,
+	digit_3: int,
+	digit_4: int,
+	digit_5: int,
+	digit_6: int,
+	digit_7: int,
+	digit_8: int,
+	digit_9: int,
+	semicolon: int,
+	equal: int,
+	a: int,
+	b: int,
+	c: int,
+	d: int,
+	e: int,
+	f: int,
+	g: int,
+	h: int,
+	i: int,
+	j: int,
+	k: int,
+	l: int,
+	m: int,
+	n: int,
+	o: int,
+	p: int,
+	q: int,
+	r: int,
+	s: int,
+	t: int,
+	u: int,
+	v: int,
+	w: int,
+	x: int,
+	y: int,
+	z: int,
+	left_bracket: int,
+	backslash: int,
+	right_bracket: int,
+	grave_accent: int,
+	world_1: int,
+	world_2: int,
+	escape: int,
+	enter: int,
+	tab: int,
+	backspace: int,
+	insert: int,
+	delete: int,
+	right: int,
+	left: int,
+	down: int,
+	up: int,
+	page_up: int,
+	page_down: int,
+	home: int,
+	end: int,
+	caps_lock: int,
+	scroll_lock: int,
+	num_lock: int,
+	print_screen: int,
+	pause: int,
+	f1: int,
+	f2: int,
+	f3: int,
+	f4: int,
+	f5: int,
+	f6: int,
+	f7: int,
+	f8: int,
+	f9: int,
+	f10: int,
+	f11: int,
+	f12: int,
+	f13: int,
+	f14: int,
+	f15: int,
+	f16: int,
+	f17: int,
+	f18: int,
+	f19: int,
+	f20: int,
+	f21: int,
+	f22: int,
+	f23: int,
+	f24: int,
+	f25: int,
+	keypad_0: int,
+	keypad_1: int,
+	keypad_2: int,
+	keypad_3: int,
+	keypad_4: int,
+	keypad_5: int,
+	keypad_6: int,
+	keypad_7: int,
+	keypad_8: int,
+	keypad_9: int,
+	keypad_decimal: int,
+	keypad_divide: int,
+	keypad_multiply: int,
+	keypad_subtract: int,
+	keypad_add: int,
+	keypad_enter: int,
+	keypad_equal: int,
+	left_shift: int,
+	left_control: int,
+	left_alt: int,
+	left_super: int,
+	right_shift: int,
+	right_control: int,
+	right_alt: int,
+	right_super: int,
+	menu: int,
 };
 
-def gpu_create_for_window(window: Window) -> Result<Gpu, RuntimeError> = {
-	var gpu = Ptr<ResinGpu>(ulong(0));
-	status(resin_gpu_create_for_window(window.handle, &gpu))?;
-	ok(Gpu { handle = gpu, window = window })
-};
-
-def gpu_present(gpu: Gpu, image: GpuImage) -> Result<bool, RuntimeError> = {
-	var code = resin_gpu_present(gpu.handle, image.handle);
-	if (code == 7) {
-		ok(1 == 0)
-	} else {
-		status(code)?;
-		ok(1 == 1)
-	}
+struct MouseButtons {
+	left: int,
+	right: int,
+	middle: int,
+	button_4: int,
+	button_5: int,
+	button_6: int,
+	button_7: int,
+	button_8: int,
 };
 
 extern "resin_runtime.h" def resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
@@ -139,143 +361,9 @@ extern "resin_runtime.h" def resin_window_set_should_close(window: Ptr<ResinWind
 extern "resin_runtime.h" def resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<uint>, height: Ptr<uint>) -> int;
 extern "resin_runtime.h" def resin_window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> int;
 extern "resin_runtime.h" def resin_window_key_pressed(window: Ptr<ResinWindow>, key: int) -> int;
-extern "resin_runtime.h" def resin_gpu_create_for_window(window: Ptr<ResinWindow>, gpu: Ptr<Ptr<ResinGpu>>) -> int;
-extern "resin_runtime.h" def resin_gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> int;
-
 extern "resin_runtime.h" def resin_window_key_state(window: Ptr<ResinWindow>, key: int) -> uint;
 extern "resin_runtime.h" def resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> uint;
 extern "resin_runtime.h" def resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
 extern "resin_runtime.h" def resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
 extern "resin_runtime.h" def resin_window_focused(window: Ptr<ResinWindow>) -> int;
 extern "resin_runtime.h" def resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: int) -> int;
-
-// GLFW physical key codes, independent of typed characters or keyboard layout.
-def keys() -> _ = {
-	{
-		unknown = -1,
-		space = 32,
-		apostrophe = 39,
-		comma = 44,
-		minus = 45,
-		period = 46,
-		slash = 47,
-		digit_0 = 48,
-		digit_1 = 49,
-		digit_2 = 50,
-		digit_3 = 51,
-		digit_4 = 52,
-		digit_5 = 53,
-		digit_6 = 54,
-		digit_7 = 55,
-		digit_8 = 56,
-		digit_9 = 57,
-		semicolon = 59,
-		equal = 61,
-		a = 65,
-		b = 66,
-		c = 67,
-		d = 68,
-		e = 69,
-		f = 70,
-		g = 71,
-		h = 72,
-		i = 73,
-		j = 74,
-		k = 75,
-		l = 76,
-		m = 77,
-		n = 78,
-		o = 79,
-		p = 80,
-		q = 81,
-		r = 82,
-		s = 83,
-		t = 84,
-		u = 85,
-		v = 86,
-		w = 87,
-		x = 88,
-		y = 89,
-		z = 90,
-		left_bracket = 91,
-		backslash = 92,
-		right_bracket = 93,
-		grave_accent = 96,
-		world_1 = 161,
-		world_2 = 162,
-		escape = 256,
-		enter = 257,
-		tab = 258,
-		backspace = 259,
-		insert = 260,
-		delete = 261,
-		right = 262,
-		left = 263,
-		down = 264,
-		up = 265,
-		page_up = 266,
-		page_down = 267,
-		home = 268,
-		end = 269,
-		caps_lock = 280,
-		scroll_lock = 281,
-		num_lock = 282,
-		print_screen = 283,
-		pause = 284,
-		f1 = 290,
-		f2 = 291,
-		f3 = 292,
-		f4 = 293,
-		f5 = 294,
-		f6 = 295,
-		f7 = 296,
-		f8 = 297,
-		f9 = 298,
-		f10 = 299,
-		f11 = 300,
-		f12 = 301,
-		f13 = 302,
-		f14 = 303,
-		f15 = 304,
-		f16 = 305,
-		f17 = 306,
-		f18 = 307,
-		f19 = 308,
-		f20 = 309,
-		f21 = 310,
-		f22 = 311,
-		f23 = 312,
-		f24 = 313,
-		f25 = 314,
-		keypad_0 = 320,
-		keypad_1 = 321,
-		keypad_2 = 322,
-		keypad_3 = 323,
-		keypad_4 = 324,
-		keypad_5 = 325,
-		keypad_6 = 326,
-		keypad_7 = 327,
-		keypad_8 = 328,
-		keypad_9 = 329,
-		keypad_decimal = 330,
-		keypad_divide = 331,
-		keypad_multiply = 332,
-		keypad_subtract = 333,
-		keypad_add = 334,
-		keypad_enter = 335,
-		keypad_equal = 336,
-		left_shift = 340,
-		left_control = 341,
-		left_alt = 342,
-		left_super = 343,
-		right_shift = 344,
-		right_control = 345,
-		right_alt = 346,
-		right_super = 347,
-		menu = 348,
-	}
-};
-
-def mouse_buttons() -> _ = {
-	{ left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
-};

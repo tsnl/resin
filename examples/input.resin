@@ -4,10 +4,10 @@ import { "std/console.resin" };
 
 def main() -> Result<(), _> = {
 	print("What is your name? ", ());
-	var name = input()?;
+	var name = Console.read_line()?;
 
 	print("Hello, ", ());
-	print_input(name)?;
+	name.print()?;
 	print("!\n", ());
 	ok(())
 };
