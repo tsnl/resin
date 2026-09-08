@@ -196,7 +196,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     let module = project.compile().unwrap();
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
-        1
+        2
     );
     assert_eq!(module.functions.len(), 2);
 }
@@ -342,18 +342,21 @@ fn private_nominal_types_keep_distinct_identities() {
 #[test]
 fn importing_modules_does_not_execute_their_functions() {
     let project = Project::new(&[
-        ("base.resin", "def main() -> () = { print(\"A\", ()); };"),
+        (
+            "base.resin",
+            "def main() -> () = { print(fmt(\"A\", ())); };",
+        ),
         (
             "left.resin",
-            "import { \"base.resin\" }; def main() -> () = { print(\"B\", ()); };",
+            "import { \"base.resin\" }; def main() -> () = { print(fmt(\"B\", ())); };",
         ),
         (
             "right.resin",
-            "import { \"base.resin\" }; def main() -> () = { print(\"C\", ()); };",
+            "import { \"base.resin\" }; def main() -> () = { print(fmt(\"C\", ())); };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> () = { print(\"D\", ()); };",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> () = { print(fmt(\"D\", ())); };",
         ),
     ]);
     let output = project.run();
@@ -485,7 +488,7 @@ fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"std/library.resin\", \"library.resin\" }; def main() -> () = { print(\"{0}\", (answer() + local(),)); };",
+            "export { main }; import { \"std/library.resin\", \"library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (answer() + local(),))); };",
         ),
     ]);
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
@@ -571,7 +574,7 @@ fn files_reject_runtime_bindings_and_statements() {
         "var x = 1;",
         "var x: int;",
         "x := 2;",
-        "print(\"hello\", ());",
+        "print(fmt(\"hello\", ()));",
         "();",
         "while (1 == 0) {};",
     ] {
@@ -584,7 +587,7 @@ fn files_reject_runtime_bindings_and_statements() {
 
 #[test]
 fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
-    for statement in support::statements("var x = 1; var y: int; print(\"hello\", ());") {
+    for statement in support::statements("var x = 1; var y: int; print(fmt(\"hello\", ()));") {
         let mut file = support::parse("");
         file.stmts.push(statement);
         assert_eq!(

@@ -129,6 +129,7 @@ pub(crate) fn emit_verified(
         )?);
     }
     let mut out = "#version 460\n#extension GL_EXT_buffer_reference : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n".to_string();
+    out.push_str(types.extensions());
     out.push_str(&types.declarations());
     out.push_str("bool r_failed = false;\n");
     out.push_str(&functions);
@@ -172,12 +173,12 @@ fn visit(
             match instr {
                 ir::Instr::Function { function } => visit(module, function.index(), active, result)
                     .map_err(|error| Error::at(module, index, Some((b, i)), error))?,
-                ir::Instr::CallBuiltin { name, .. } if name.as_ref() == "print" => {
+                ir::Instr::CallBuiltin { name, .. } if matches!(name.as_ref(), "print" | "fmt") => {
                     return Err(Error::at(
                         module,
                         index,
                         Some((b, i)),
-                        Error("print is only supported in host programs".into()),
+                        Error(format!("{name} is only supported in host programs")),
                     ));
                 }
                 _ => {}

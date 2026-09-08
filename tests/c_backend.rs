@@ -97,7 +97,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let ir::TypeDef::Nominal { name, .. } = &mut definitions[0] else {
+    let ir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -551,7 +551,7 @@ fn at_indexing_checks_bounds_before_later_effects() {
                     var values = [1, 2];
                     var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2L }} }};
                     {receiver}.at({index}).* := 9;
-                    print("after", ()); 0
+                    print("after"); 0
                 }};"#
             )));
             assert!(!output.status.success());
@@ -776,7 +776,7 @@ fn host_byte_arrays_have_explicit_sentinel_storage() {
             var empty = "";
             var embedded = [65B, 0B, 66B];
             if (strlen(Ptr<ubyte>(&copied)) == 2L &&
-                strlen(Ptr<ubyte>(&empty)) == 0L &&
+                strlen(empty.data) == 0L &&
                 strlen(Ptr<ubyte>(&embedded)) == 1L &&
                 ulong(nested(1)) - ulong(nested(0)) == 3L &&
                 copied(1).* == 66B) { 0 } else { 1 }

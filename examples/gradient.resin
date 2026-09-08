@@ -34,7 +34,7 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "gradient.png";
-	ImageData.write_pixels(Ptr<ubyte>(&path), 256, 256, 4, pixels.host_pointer(), 0)?;
-	print("wrote gradient.png\n", ());
+	ImageData.write_pixels(path.data, 256, 256, 4, pixels.host_pointer(), 0)?;
+	print("wrote gradient.png\n");
 	ok(())
 };

@@ -3,25 +3,32 @@ use crate::{backend::Error, ir::Ty};
 use super::{Slot, types::Types};
 
 pub(super) fn emit(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
-    let invalid =
-        || Error("print expects a byte-string format and a tuple of values; returns ()".into());
-    let [arg] = args else { return Err(invalid()) };
+    let [arg] = args else {
+        return Err(Error("print expects one string".into()));
+    };
+    if result != &Ty::Unit {
+        return Err(Error("print returns ()".into()));
+    }
+    let (data, length) = bytes(types, &arg.ty, &arg.expr)?;
+    Ok(format!("(resin_print({data}, {length}), 0)"))
+}
+
+pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
+    let invalid = || Error("fmt expects a string and a tuple of arguments".into());
+    let [arg] = args else {
+        return Err(invalid());
+    };
     let Ty::Record { fields } = &arg.ty else {
         return Err(invalid());
     };
-    let [format, values] = fields.as_slice() else {
+    let [format, arguments] = fields.as_slice() else {
         return Err(invalid());
     };
-    if result != &Ty::Unit || format.name.as_ref() != "_0" || values.name.as_ref() != "_1" {
+    if format.name.as_ref() != "_0" || arguments.name.as_ref() != "_1" {
         return Err(invalid());
     }
-    let Ty::Array { element, length } = &format.ty else {
-        return Err(invalid());
-    };
-    if element.as_ref() != &Ty::UInt8 {
-        return Err(invalid());
-    }
-    let fields = match &values.ty {
+    let (data, length) = bytes(types, &format.ty, &format!("({}).f0", arg.expr))?;
+    let fields = match &arguments.ty {
         Ty::Unit => &[][..],
         Ty::Record { fields } => fields.as_slice(),
         _ => return Err(invalid()),
@@ -39,10 +46,37 @@ pub(super) fn emit(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<Stri
     } else {
         format!("(ResinPrintArg[]){{ {} }}", values.join(", "))
     };
-    Ok(format!(
-        "(resin_print(({}).f0.items, {length}, {values}, {count}), 0)",
-        arg.expr
+    let body = types.shape(result);
+    let Ty::Record { fields } = body else {
+        return Err(Error("fmt must return String".into()));
+    };
+    if fields.len() != 1 || fields[0].ty != Ty::formatted_bytes() {
+        return Err(Error("invalid String representation".into()));
+    }
+    Ok(types.wrap(
+        result,
+        format!(
+            "({}){{ .f0 = resin_format({data}, {length}, {values}, {count}) }}",
+            types.name(body)
+        ),
     ))
+}
+
+fn bytes(types: &Types<'_>, ty: &Ty, expr: &str) -> Result<(String, String), Error> {
+    let expr = types.unwrap(ty, expr.into());
+    match types.shape(ty) {
+        Ty::Span { element } if **element == Ty::UInt8 => {
+            Ok((format!("({expr}).f0"), format!("({expr}).f1")))
+        }
+        Ty::Record { fields } if fields.len() == 1 && fields[0].ty == Ty::formatted_bytes() => {
+            let Ty::Arc { pointee } = &fields[0].ty else {
+                unreachable!()
+            };
+            let span = format!("(({} *)resin_arc_data(({expr}).f0))", types.name(pointee));
+            Ok((format!("{span}->f0"), format!("{span}->f1")))
+        }
+        _ => Err(Error("expected Span<ubyte> or String".into())),
+    }
 }
 
 fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
@@ -63,12 +97,15 @@ fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
             "unsigned_value",
             format!("(uint64_t)(uintptr_t)({expr})"),
         ),
-        Ty::Array { element, length } if element.as_ref() == &Ty::UInt8 => (
-            "BYTES",
-            "bytes",
-            format!("{{ .data = ({expr}).items, .length = {length} }}"),
-        ),
-        _ => return Err(Error(format!("cannot print {ty:?}"))),
+        ty @ (Ty::Span { .. } | Ty::Record { .. }) => {
+            let (data, length) = bytes(types, ty, &expr)?;
+            (
+                "BYTES",
+                "bytes",
+                format!("{{ .data = {data}, .length = {length} }}"),
+            )
+        }
+        _ => return Err(Error(format!("cannot format {ty:?}"))),
     };
     Ok(format!(
         "{{ .kind = RESIN_PRINT_{kind}, .value = {{ .{member} = {value} }} }}"

@@ -28,7 +28,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     fs::write(
         &project.input,
         format!(
-            "export {{ main }}; extern \"{}\" def value () -> int; def main() -> () = {{ print(\"{{0}}\", (value(),)); }};",
+            "export {{ main }}; extern \"{}\" def value () -> int; def main() -> () = {{ print(fmt(\"{{0}}\", (value(),))); }};",
             header.display()
         ),
     )
@@ -46,7 +46,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     assert_eq!(project.calls(), 3);
     fs::write(
         &project.input,
-        "export { main }; def main() -> () = { print(\"no header\", ()); };",
+        "export { main }; def main() -> () = { print(\"no header\"); };",
     )
     .unwrap();
     printed(&project.run(), b"no header");
@@ -79,7 +79,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         def main() -> () = {
             var a = kernel.spirv;
             var b = kernel.spirv;
-            print("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),));
+            print(fmt("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),)));
         };
         "#,
     )
@@ -132,7 +132,7 @@ impl Project {
         let compiler = temp.path().join("compiler");
         fs::write(
             &input,
-            r#"export { main }; def main() -> () = { print("first", ()); };"#,
+            r#"export { main }; def main() -> () = { print("first"); };"#,
         )
         .unwrap();
         fs::write(&compiler, WRAPPER).unwrap();
@@ -208,7 +208,7 @@ fn unchanged_programs_reuse_the_executable_and_still_run() {
     );
     fs::write(
         &project.input,
-        "export { main };\n\n// comment only\n\ndef main() -> () = {\n    print(\"first\", ());\n};",
+        "export { main };\n\n// comment only\n\ndef main() -> () = {\n    print(\"first\");\n};",
     )
     .unwrap();
     printed(&project.run(), b"first");
@@ -222,8 +222,8 @@ fn entry_points_have_separate_reusable_artifacts() {
         &project.input,
         r#"
         export { main, second };
-        def main() -> () = { print("first", ()); };
-        def second() -> () = { print("second", ()); };
+        def main() -> () = { print("first"); };
+        def second() -> () = { print("second"); };
     "#,
     )
     .unwrap();
@@ -326,7 +326,7 @@ fn changed_source_rebuilds_in_the_same_directory() {
     let executable = project.executable();
     fs::write(
         &project.input,
-        r#"export { main }; def main() -> () = { print("second", ()); };"#,
+        r#"export { main }; def main() -> () = { print("second"); };"#,
     )
     .unwrap();
     printed(&project.run(), b"second");

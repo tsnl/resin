@@ -279,6 +279,7 @@ fn immediate_ty(table: &[TypeDef], value: &Value, location: Location) -> Result<
             check_type(table, ty, location)?;
             Ty::Type
         }
+        Value::Bytes { .. } => Ty::byte_span(),
         Value::Unit => Ty::Unit,
         Value::None => Ty::None,
         Value::Bool { .. } => Ty::Bool,

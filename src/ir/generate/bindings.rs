@@ -150,7 +150,7 @@ impl Generator {
     pub(super) fn check_binding_name(name: &Ident) -> Result<(), GenerateError> {
         if matches!(
             name.val.as_ref(),
-            "print" | "ok" | "err" | "size_of" | "align_of" | "absurd"
+            "fmt" | "print" | "ok" | "err" | "size_of" | "align_of" | "absurd"
         ) {
             return Err(GenerateError {
                 span: name.span,

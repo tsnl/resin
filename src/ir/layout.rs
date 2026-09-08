@@ -17,6 +17,7 @@ pub struct Layout {
 
 pub fn layout(definitions: &[TypeDef], ty: &Ty) -> Result<Layout, Error> {
     let scalar = match ty {
+        Ty::UInt8 => Some(1),
         Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
         Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => Some(8),
         _ => None,
@@ -36,6 +37,9 @@ pub fn layout(definitions: &[TypeDef], ty: &Ty) -> Result<Layout, Error> {
         });
     }
     if let Ty::Array { element, length } = ty {
+        if **element == Ty::UInt8 {
+            return Err(Error("byte arrays have a host sentinel and no shared host/device layout; use Span<ubyte> for packed storage".into()));
+        }
         if *length == 0 {
             return Err(Error(
                 "empty arrays have no shared host/device layout".into(),
@@ -139,7 +143,6 @@ mod tests {
         for ty in [
             Ty::Bool,
             Ty::Unit,
-            Ty::UInt8,
             Ty::Int64,
             record(vec![]),
             record(vec![Ty::Bool]),

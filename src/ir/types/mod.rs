@@ -317,3 +317,20 @@ impl TypeId {
         u32::try_from(self.index()).expect("too many types")
     }
 }
+
+impl Ty {
+    /// An owned span whose byte storage lives in the same Arc allocation.
+    pub fn formatted_bytes() -> Self {
+        Self::Arc {
+            pointee: Box::new(Self::Span {
+                element: Box::new(Self::UInt8),
+            }),
+        }
+    }
+
+    pub fn byte_span() -> Self {
+        Self::Span {
+            element: Box::new(Self::UInt8),
+        }
+    }
+}

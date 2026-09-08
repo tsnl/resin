@@ -159,7 +159,13 @@ impl TyperContext {
             return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
         }
         let result = match (name, args) {
-            ("print", [arg]) => self.type_print(arg)?,
+            ("print", [arg]) if self.is_string(arg) => Ty::Unit,
+            ("print", [arg]) => {
+                return Err(TypeError::new(TypeErrorKind::InvalidPrintArguments {
+                    found: arg.clone(),
+                }));
+            }
+            ("fmt", [arg]) => self.type_format(arg)?,
             ("+" | "-" | "~", [arg]) => arg.clone(),
             ("!", [arg]) => {
                 self.as_bool(arg)?;
@@ -180,7 +186,7 @@ impl TyperContext {
             }
             (
                 "+" | "-" | "~" | "!" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^" | "=="
-                | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "print",
+                | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "print" | "fmt",
                 _,
             ) => {
                 return Err(TypeError::new(TypeErrorKind::InvalidBuiltinArgumentCount {
@@ -200,9 +206,13 @@ impl TyperContext {
         })
     }
 
-    fn type_print(&self, arg: &Ty) -> Result<Ty, TypeError> {
+    pub(crate) fn is_string(&self, ty: &Ty) -> bool {
+        ty == &Ty::byte_span() || self.string_type.as_ref() == Some(ty)
+    }
+
+    fn type_format(&self, arg: &Ty) -> Result<Ty, TypeError> {
         let invalid =
-            || TypeError::new(TypeErrorKind::InvalidPrintArguments { found: arg.clone() });
+            || TypeError::new(TypeErrorKind::InvalidFormatArguments { found: arg.clone() });
         let Ty::Record { fields } = arg else {
             return Err(invalid());
         };
@@ -211,7 +221,7 @@ impl TyperContext {
         };
         if format.name.as_ref() != "_0"
             || values.name.as_ref() != "_1"
-            || !matches!(&format.ty, Ty::Array { element, .. } if **element == Ty::UInt8)
+            || !self.is_string(&format.ty)
         {
             return Err(invalid());
         }
@@ -227,13 +237,13 @@ impl TyperContext {
             let ty = &field.ty;
             if !(ty.is_numeric()
                 || matches!(ty, Ty::Bool | Ty::Unit | Ty::Pointer { .. })
-                || matches!(ty, Ty::Array { element, .. } if **element == Ty::UInt8))
+                || self.is_string(ty))
             {
-                return Err(TypeError::new(TypeErrorKind::UnprintableType {
+                return Err(TypeError::new(TypeErrorKind::UnformattableType {
                     found: ty.clone(),
                 }));
             }
         }
-        Ok(Ty::Unit)
+        self.string_type.clone().ok_or_else(invalid)
     }
 }

@@ -115,7 +115,7 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
             "value"
         ),
         Ty::Defined {
-            definition: ir::TypeId::from_index(0)
+            definition: ir::TypeId::from_index(1)
         }
     );
 }
@@ -185,7 +185,7 @@ fn nominal_identity_and_local_type_definitions_survive_inference() {
     let m = module(
         "def main() -> _ = { struct Meters { value: int }; var distance = Meters { value = 42 }; distance.value };",
     );
-    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 2);
     assert_eq!(m.functions[0].result, Ty::Int32);
 }
 
@@ -217,7 +217,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
 fn inference_preserves_unit_defaults_and_initialization_checks() {
     rejects("def main() = { var n: _; n := 1; n };", "TypeMismatch");
     rejects(
-        "def main() -> _ = { var n: _; print(\"{0}\", (n,)); n := 42; n };",
+        "def main() -> _ = { var n: _; print(fmt(\"{0}\", (n,))); n := 42; n };",
         "UninitializedValue",
     );
 }
@@ -435,7 +435,7 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
 
 #[test]
 fn shared_layout_queries_reject_unsupported_or_unresolved_types() {
-    for operand in ["bool", "ubyte", "()", "[1B, 2B]"] {
+    for operand in ["bool", "()", "[1B, 2B]"] {
         rejects(
             &format!("def main() = {{ size_of({operand}); }};"),
             "no shared host/device layout",

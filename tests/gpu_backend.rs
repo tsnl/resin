@@ -737,3 +737,23 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
         execute_interaction(&source, [0, 0]);
     }
 }
+
+#[test]
+fn byte_spans_read_and_write_device_storage() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        def read(bytes: Span<ubyte>, index: ulong) -> ubyte = { bytes.at(index).* };
+        @compute_shader def kernel(i: uint, root: Ptr<Root>) = {
+            if (i < root.count) {
+                var bytes = Span<ubyte> { data = Ptr<ubyte>(root.pixels), length = ulong(root.count) * 4L };
+                var offset = ulong(i) * 4L;
+                bytes.at(offset).* := 65B;
+                bytes.at(offset + 1L).* := read(bytes, offset) + 1B;
+                bytes.at(offset + 2L).* := 0B;
+                bytes.at(offset + 3L).* := 255B;
+            };
+        };"#,
+        |_| u32::from_le_bytes([65, 66, 0, 255]),
+    );
+}

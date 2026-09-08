@@ -5,5 +5,5 @@ type Point2f = { x: float32, y: float32 };
 def main() = {
 	var p = Point2f { x = 42.5, y = 0.012 };
 	var a = p.x;
-	print("Hello, {0}, {1}\n", (p.x, p.y));
+	print(fmt("Hello, {0}, {1}\n", (p.x, p.y)));
 };

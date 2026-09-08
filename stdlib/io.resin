@@ -1,0 +1,35 @@
+export { Io, Output, WriteError };
+
+struct WriteError {};
+struct Output { stream: uint };
+struct Io {};
+
+impl Io {
+	def stdout() -> Output = {
+		Output { stream = 0I }
+	};
+	def stderr() -> Output = {
+		Output { stream = 1I }
+	};
+}
+
+impl Output {
+	// Writes bytes verbatim and flushes. No formatting or newline is added.
+	def write(self: Output, text: Span<ubyte> | String) -> Result<(), WriteError> = {
+		var status = match (text) {
+			Span<ubyte>(bytes) => {
+				resin_stream_write(self.stream, bytes.data, bytes.length)
+			},
+			String(string) => {
+				resin_stream_write(self.stream, string.bytes.data, string.bytes.length)
+			},
+		};
+		if (status == 0) {
+			ok(())
+		} else {
+			err(WriteError {})
+		}
+	};
+}
+
+extern "resin_runtime/print.h" def resin_stream_write(stream: uint, data: Ptr<ubyte>, length: ulong) -> int;

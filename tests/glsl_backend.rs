@@ -202,7 +202,7 @@ fn unsupported_shader_features_are_diagnosed() {
             "foreign",
         ),
         (
-            "export { kernel }; def helper (i: uint) -> uint = { print(\"hello\", ()); i }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i) }; };",
+            "export { kernel }; def helper (i: uint) -> uint = { print(fmt(\"hello\", ())); i }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i) }; };",
             "host programs",
         ),
         (
@@ -354,4 +354,18 @@ fn options_of_plain_values_work_in_shaders() {
     if let Some(compiler) = shaders::compiler() {
         toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
     }
+}
+
+#[test]
+fn literal_spans_report_the_missing_shader_storage_support() {
+    let m = module(
+        r#"export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { var text = "abc"; output.* := uint(text.length); };"#,
+    );
+    let error = glsl::emit(&m, "kernel", Stage::Compute).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("shader string literals need device-backed storage"),
+        "{error}"
+    );
 }

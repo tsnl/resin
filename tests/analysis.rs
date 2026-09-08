@@ -991,7 +991,7 @@ fn recovered_ast_contains_expression_type_and_field_holes() {
 #[test]
 fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
     for source in [
-        "export { main }; struct Point { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(\"{}\", value); };",
+        "export { main }; struct Point { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(fmt(\"{}\", value)); };",
         "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
         "struct Cleanup { value: Ptr<int> }; impl Cleanup { def drop(self: Ptr<Cleanup>) = { self.value.* := 42; }; } def main() = { var n = 0; var cleanup = Cleanup { value = &n }; };",
@@ -1160,5 +1160,21 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
                 && item.kind == resin::analysis::DefinitionKind::Function),
             "{items:?}"
         );
+    }
+}
+
+#[test]
+fn formatted_string_and_literal_span_types_survive_editor_recovery() {
+    for source in [
+        "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.; };",
+        "def main() = { var text = \"literal\"; text.; };",
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let offset = source.rfind(".;").unwrap() + 1;
+        let items = project
+            .analyze()
+            .completions(&project.path("main.resin"), offset);
+        assert!(items.iter().any(|item| item.name == "data"), "{items:?}");
+        assert!(items.iter().any(|item| item.name == "length"), "{items:?}");
     }
 }

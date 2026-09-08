@@ -9,6 +9,7 @@ use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, V
 mod bindings;
 mod builder;
 mod builtin_methods;
+mod builtins;
 mod check;
 mod cleanup;
 mod error;
@@ -69,7 +70,7 @@ impl Generator {
             source_module: SourceModuleId::from_index(0),
             source_span: Span { start: 0, end: 0 },
             function_id: None,
-            typer: builtin_methods::typer(),
+            typer: builtins::typer(),
             function: None,
             scopes: Scopes::new(),
             checked: check::Checked::default(),
@@ -269,19 +270,12 @@ impl Generator {
                 Ok(Ty::None)
             }
             TermKind::String { value } => {
-                let bytes = value.as_bytes();
                 self.emit(Instr::Push {
-                    value: Value::Array {
-                        value: crate::ir::ArrayValue {
-                            element_ty: Ty::UInt8,
-                            elements: bytes.iter().map(|&value| Value::UInt8 { value }).collect(),
-                        },
+                    value: Value::Bytes {
+                        value: value.as_bytes().into(),
                     },
                 });
-                Ok(Ty::Array {
-                    element: Box::new(Ty::UInt8),
-                    length: bytes.len(),
-                })
+                Ok(Ty::byte_span())
             }
             TermKind::Type { ty } => {
                 let value = self.evaluator().ty(ty)?;

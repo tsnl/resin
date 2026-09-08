@@ -174,7 +174,7 @@ reference. `weak.upgrade()` returns `Arc<T> | None`:
 var weak = shared.downgrade();
 match (weak.upgrade()) {
     Arc<T>(owner) => { use_resource(owner); },
-    None => { print("resource expired\n", ()); },
+    None => { print(fmt("resource expired\n", ())); },
 };
 ```
 

@@ -12,16 +12,17 @@ import { "std/gpu.resin", "std/status.resin" };
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
 - `graphics.resin`: shared shader input/output types.
+- `io.resin`: stdout and stderr streams with string-only `write` methods.
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
 
 Public operations use static and instance methods on the corresponding types. Fallible runtime operations return
 `Result<T, RuntimeError>`; console operations use their own error sets. Infallible queries
 return values. Resource owners release their native handles automatically.
-Native declarations stay private. The C ABI is unchanged and remains unchecked: callers
+Native declarations stay private. The C ABI remains unchecked: callers
 must uphold pointer validity, lifetimes, and buffer sizes. Importing a module does not
 re-export its dependencies. Import `std/status.resin` to name or match errors; inferred
 `Result<(), _>` callers do not need that import.
-`print`, `ok`, and `err` are unshadowable compiler builtins. Shader candidates use
+`fmt`, `print`, `ok`, and `err` are unshadowable compiler builtins. Shader candidates use
 `@compute_shader`, `@vertex_shader`, or `@fragment_shader`; `function.spirv` produces a
 `Span<ubyte>` accepted directly by the compute/graphics pipeline wrappers.
 
@@ -102,11 +103,11 @@ export { main };
 import { "std/console.resin" };
 
 def main() -> Result<(), _> = {
-    print("Name: ", ());
+    print("Name: ");
     var name = Console.read_line()?;
-    print("Hello, ", ());
+    print("Hello, ");
     Console.print(name)?;
-    print("!\n", ());
+    print("!\n");
     ok(())
 };
 ```
@@ -131,3 +132,11 @@ not accept `InputLine` values.
 `Console.read_byte() -> Result<ubyte, EndOfInput | InputReadError>` reads a single byte, including
 NUL and 255, and distinguishes EOF from stream failure. The raw `getchar` binding is private;
 callers never need to interpret its negative sentinel. These console APIs are for host execution.
+
+
+`Io.stdout().write(text)` and `Io.stderr().write(text)` accept `Span<ubyte> | String`, write
+bytes verbatim, flush, and return `Result<(), WriteError>`. Import `std/io.resin` to use them.
+Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
+Literals are spans over static bytes; formatting results own an Arc allocation. InputLine
+can be passed as an explicit `Span<ubyte> { data = line.data, length = line.length }` while
+its owner remains live.

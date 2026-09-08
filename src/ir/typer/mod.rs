@@ -21,6 +21,7 @@ pub use rules::{BuiltinCall, FieldAccess};
 #[derive(Debug, Clone, Default)]
 pub struct TyperContext {
     definitions: TypeTable,
+    pub(crate) string_type: Option<Ty>,
     // Frontend namespaces and signatures are discarded when producing IR.
     namespaces: BTreeMap<TypeId, methods::Namespace>,
     functions: BTreeMap<crate::ir::FunctionId, FunctionDecl>,
@@ -44,8 +45,21 @@ impl TyperContext {
     }
 
     pub fn from_definitions(definitions: impl Into<TypeTable>) -> Self {
+        let definitions = definitions.into();
+        let string_type = definitions
+            .iter()
+            .enumerate()
+            .find_map(|(index, definition)| {
+                (definition
+                    .name()
+                    .is_some_and(|name| name.as_ref() == "String"))
+                .then_some(Ty::Defined {
+                    definition: TypeId::from_index(index),
+                })
+            });
         Self {
-            definitions: definitions.into(),
+            definitions,
+            string_type,
             ..Self::new()
         }
     }

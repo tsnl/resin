@@ -86,6 +86,12 @@ impl Evaluator<'_> {
             }
             TypeKind::Union { left, right } => Ok(Ty::union_of([self.ty(left)?, self.ty(right)?])),
             TypeKind::Atom { name } => {
+                if name.val.as_ref() == "String" {
+                    return self.typer.string_type.clone().ok_or(GenerateError {
+                        span: name.span,
+                        kind: GenerateErrorKind::IncompleteSyntax,
+                    });
+                }
                 if let Some(builtin) = builtin_ty(&name.val) {
                     return Ok(builtin);
                 }

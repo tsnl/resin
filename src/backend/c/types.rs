@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::ir::{Case, Module, Ty, TypeTable};
+use crate::ir::{Case, Instr, Module, Ty, TypeTable, Value};
 
 mod lifecycle;
 
@@ -8,15 +8,42 @@ pub(super) struct Types<'a> {
     pub table: &'a TypeTable,
     pub module: &'a Module,
     pub shaders: &'a [super::Shader],
+    literals: Vec<&'a [u8]>,
 }
 
 impl<'a> Types<'a> {
     pub fn new(module: &'a Module, table: &'a TypeTable, shaders: &'a [super::Shader]) -> Self {
+        let mut literals = Vec::new();
+        for instruction in module
+            .functions
+            .iter()
+            .flat_map(|f| &f.blocks)
+            .flat_map(|b| {
+                b.instrs
+                    .iter()
+                    .take_while(|instruction| !matches!(instruction, Instr::Eliminate { .. }))
+            })
+        {
+            if let Instr::Push { value } = instruction {
+                collect_literals(value, &mut literals);
+            }
+        }
         Self {
+            literals,
             module,
             table,
             shaders,
         }
+    }
+
+    pub fn literal(&self, bytes: &[u8]) -> String {
+        format!(
+            "r_literal_{}",
+            self.literals
+                .iter()
+                .position(|value| *value == bytes)
+                .expect("collected literal")
+        )
     }
 
     pub fn id(&self, ty: &Ty) -> usize {
@@ -63,6 +90,15 @@ impl<'a> Types<'a> {
 
     pub fn declarations(&self) -> String {
         let mut out = String::new();
+        for (index, literal) in self.literals.iter().enumerate() {
+            let bytes = literal
+                .iter()
+                .map(u8::to_string)
+                .chain(std::iter::once("0".into()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(out, "static uint8_t r_literal_{index}[] = {{ {bytes} }};").unwrap();
+        }
         for ty in self.table.types() {
             let ty = &ty;
             let name = self.name(ty);
@@ -190,4 +226,25 @@ fn scalar(ty: &Ty) -> Option<&'static str> {
         Ty::Float64 => "double",
         _ => return None,
     })
+}
+
+fn collect_literals<'a>(value: &'a Value, literals: &mut Vec<&'a [u8]>) {
+    match value {
+        Value::Bytes { value } => {
+            if !literals.contains(&value.as_ref()) {
+                literals.push(value);
+            }
+        }
+        Value::Array { value } => {
+            for value in &value.elements {
+                collect_literals(value, literals);
+            }
+        }
+        Value::Record { value } => {
+            for field in &value.fields {
+                collect_literals(&field.value, literals);
+            }
+        }
+        _ => {}
+    }
 }

@@ -17,7 +17,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 pub(crate) fn analyze(program: &Program) -> SemanticData {
     let data = Rc::new(RefCell::new(SemanticData::default()));
-    let mut typer = super::builtin_methods::typer();
+    let mut typer = super::builtins::typer();
     let mut exports: Vec<BTreeMap<Arc<str>, (Symbol, SourceLocation)>> = Vec::new();
     let mut next_function = 0;
     for (index, source) in program.modules.iter().enumerate() {
@@ -390,10 +390,7 @@ impl Recovery<'_> {
             .number(term.span, value, expected)
             .ok()
             .map(|(_, ty)| ty),
-            TermKind::String { value } => Some(Ty::Array {
-                element: Box::new(Ty::UInt8),
-                length: value.len(),
-            }),
+            TermKind::String { .. } => Some(Ty::byte_span()),
             TermKind::Var { name } => {
                 self.scopes.record_reference(name, false);
                 self.scopes
@@ -512,7 +509,15 @@ impl Recovery<'_> {
                 Some(method.result)
             }
             TermKind::Call { func, arg } => {
-                if let TermKind::Type { ty } = &func.val {
+                if let TermKind::Var { name } = &func.val
+                    && matches!(name.val.as_ref(), "fmt" | "print")
+                {
+                    let arg = self.term(arg, None)?;
+                    self.typer
+                        .type_builtin_call(&name.val, &[arg])
+                        .ok()
+                        .map(|call| call.result)
+                } else if let TermKind::Type { ty } = &func.val {
                     let target = self.ty(ty);
                     let shape = target
                         .as_ref()

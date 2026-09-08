@@ -130,8 +130,8 @@ impl Generator {
                 "ok" | "err" => {
                     return self.gen_result(span, name.val.as_ref() == "err", arg, expected);
                 }
-                "print" => {
-                    return self.gen_builtin(span, "print", std::slice::from_ref(arg), &Ty::Unit);
+                "print" | "fmt" => {
+                    return self.gen_builtin(span, &name.val, std::slice::from_ref(arg), expected);
                 }
                 _ => {}
             }
