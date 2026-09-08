@@ -17,7 +17,9 @@ mod value;
 struct Slot {
     ty: Ty,
     expr: String,
-    local: Option<usize>,
+    // Optional C pointer to the initialization flag of the addressed local.
+    // A null pointer at a control-flow join denotes ordinary initialized storage.
+    live: Option<String>,
 }
 
 pub struct Shader {

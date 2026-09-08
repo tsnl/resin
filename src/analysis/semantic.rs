@@ -74,6 +74,7 @@ impl Trace {
         }
         if let Some(receiver) = typer.receiver_definition(ty) {
             for (name, method) in typer.methods(receiver) {
+                if name.as_ref() == "drop" { continue; }
                 let Some(params) = method.arguments(ty, associated) else {
                     continue;
                 };

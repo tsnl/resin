@@ -31,6 +31,30 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
+fn buffer_address_accessors_require_a_borrowed_owner() {
+    let temp = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = temp.path().join("main.resin");
+    for accessor in ["allocation_host_pointer", "allocation_device_pointer"] {
+        fs::write(
+            &path,
+            format!(
+                r#"
+            import {{ "std/gpu.resin" }};
+            def bad(gpu: Gpu) -> Result<(), _> = {{
+                {accessor}(gpu_malloc(gpu, 4L, 4L, memory_default())?);
+                ok(())
+            }};
+        "#
+            ),
+        )
+        .unwrap();
+        let program = ast::load(&path).unwrap();
+        let error = ir::generate_program(&program).unwrap_err().to_string();
+        assert!(error.contains("TypeMismatch"), "{error}");
+    }
+}
+
+#[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for name in ["gpu", "window", "image", "console"] {
@@ -460,6 +484,51 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         #define resin_window_scroll_delta mock_coordinates
         #define resin_window_focused mock_focus
         #define resin_window_capture_cursor mock_capture
+        "#,
+    );
+    success(&output);
+}
+
+#[test]
+fn buffer_address_accessors_borrow_the_callers_owners() {
+    let output = run(
+        r#"
+        export { main };
+        import { "std/gpu.resin" };
+        extern "resin_runtime.h" def test_frees() -> int;
+        def main() -> int = {
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = none() };
+            var valid = {
+                var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu };
+                var host = allocation_host_pointer(&host_buffer);
+                var device_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu };
+                var device = allocation_device_pointer(&device_buffer);
+                test_frees() == 0 && host.* == 42B && device == 101L
+            };
+            if (valid && test_frees() == 2) { 0 } else { 1 }
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static int freed;
+        static int test_frees(void) { return freed; }
+        static void *mock_host(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 1 && freed == 0);
+            static uint8_t byte = 42;
+            return &byte;
+        }
+        static ResinDeviceAddress mock_device(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 2 && freed == 0);
+            return 101;
+        }
+        static void mock_free(ResinGpu *gpu, ResinAllocation *allocation) {
+            assert(!gpu && ((uintptr_t)allocation == 1 || (uintptr_t)allocation == 2));
+            ++freed;
+        }
+        #define resin_allocation_host_pointer mock_host
+        #define resin_allocation_device_pointer mock_device
+        #define resin_gpu_free mock_free
         "#,
     );
     success(&output);

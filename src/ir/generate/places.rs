@@ -180,9 +180,9 @@ impl Generator {
             // Keep the last address so pointer-valued expressions have writable fields.
             self.emit_value_conv(&access.steps[..last_deref]);
             is_place = true;
-        } else {
-            self.emit_value_conv(&access.steps);
         }
+        // AccessStatic projects nominal layouts itself. Preserve the value's
+        // nominal type so consuming a temporary invokes its destruction hook.
         self.emit(Instr::AccessStatic {
             index: access.index,
         });

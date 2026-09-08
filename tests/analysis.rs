@@ -167,6 +167,45 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 }
 
 #[test]
+fn shared_receiver_completion_and_navigation_exclude_destruction_hooks() {
+    let library = "export { Counter }; struct Counter { count: int }; impl Counter { def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }";
+    for tail in ["", "c.;"] {
+        let source =
+            format!("import {{ \"lib.resin\" }}; def f(c: Arc<Counter>) = {{ c.read(); {tail} }};");
+        let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        let call = source.find("c.read").unwrap() + 2;
+        assert_eq!(
+            analysis
+                .definition(&path, call)
+                .unwrap_or_else(|| panic!(
+                    "{:?}\n{:?}",
+                    analysis.diagnostics,
+                    analysis.recovered_file(&path)
+                ))
+                .path,
+            project.path("lib.resin")
+        );
+        assert!(
+            analysis
+                .hover(&path, call)
+                .unwrap()
+                .text
+                .starts_with("def read(")
+        );
+        let offset = if tail.is_empty() {
+            call
+        } else {
+            source.rfind("c.;").unwrap() + 2
+        };
+        let items = analysis.completions(&path, offset);
+        assert!(items.iter().any(|item| item.name == "read"));
+        assert!(items.iter().all(|item| item.name != "drop"));
+    }
+}
+
+#[test]
 fn inferred_errors_and_match_payloads_have_editor_types() {
     let source = "struct Broken { code: int }; def fail() -> Result<int, _> = { err(Broken { code = 7 }) }; def main() = { var result = fail(); match (result) { ok(value) => { value; }, err(error) => { error.code; } }; };";
     let project = Project::new(&[("main.resin", source)]);

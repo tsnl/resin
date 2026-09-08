@@ -47,6 +47,10 @@ pipelines, images, and explicit copy buffers stay alive through submission or ca
 Raw shader root addresses carry no owner information, so callers must keep their backing
 allocations alive until work completes.
 
+`allocation_host_pointer(&buffer)` and `allocation_device_pointer(&buffer)` borrow
+the caller's `GpuBuffer`. Keep that owner alive for every use of the returned address;
+these accessors do not accept a fresh buffer value that would be destroyed on return.
+
 Submission consumes a recording even on failure. `gpu_submit(gpu, &commands)` and
 `gpu_cancel_command_buffer(gpu, &commands)` clear the shared native handle before entering C.
 Aliases observe that cleared state. Dropping an unfinished recording cancels it;

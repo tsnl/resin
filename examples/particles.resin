@@ -273,10 +273,10 @@ def main() -> Result<(), _> = {
 
 	var root = gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?;
 
-	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = ulong(count) };
+	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(&particles)), length = ulong(count) };
 	var seed = 0x9e3779b9I;
 	initialize(host_particles, seed);
-	var params = Ptr<Params>(allocation_host_pointer(root));
+	var params = Ptr<Params>(allocation_host_pointer(&root));
 	params.* := Params {
 		count = count,
 		dt = 0.005f,
@@ -287,9 +287,9 @@ def main() -> Result<(), _> = {
 		zoom = 1.0f,
 		aspect = 0.625f,
 		radius = 0.004f,
-		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(count) },
+		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(&particles)), length = ulong(count) },
 	};
-	var address = allocation_device_pointer(root);
+	var address = allocation_device_pointer(&root);
 	var image = gpu_create_image(gpu, 1280, 800)?;
 
 	var paused = 1 == 0;

@@ -39,6 +39,13 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
     for (block, inputs) in flow.inputs.iter().enumerate() {
         for (i, ty) in inputs.iter().enumerate() {
             writeln!(out, "  {} r_b{block}_{i};", types.name(ty)).unwrap();
+            if tracks_initialization(types, ty) {
+                writeln!(
+                    out,
+                    "  bool *r_b{block}_{i}_live = NULL; (void)r_b{block}_{i}_live;"
+                )
+                .unwrap();
+            }
         }
     }
     writeln!(out, "  goto r_b{};", function.entry.index()).unwrap();
@@ -50,7 +57,7 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
             .map(|(i, ty)| Slot {
                 ty: ty.clone(),
                 expr: format!("r_b{block_id}_{i}"),
-                local: None,
+                live: tracks_initialization(types, ty).then(|| format!("r_b{block_id}_{i}_live")),
             })
             .collect();
         let mut diverged = false;
@@ -81,8 +88,10 @@ pub(super) fn emit(types: &Types<'_>, index: usize, flow: &FunctionTypes) -> Res
                 stack.push(Slot {
                     ty: ty.clone(),
                     expr: name,
-                    local: if let Instr::LocalAddress { local } = instr {
-                        Some(local.index())
+                    live: if let Instr::LocalAddress { local } = instr
+                        && tracks_initialization(types, ty)
+                    {
+                        Some(format!("&r_live{}", local.index()))
                     } else {
                         None
                     },
@@ -140,11 +149,26 @@ fn edge(types: &Types<'_>, target: usize, stack: &[Slot], out: &mut String) {
             slot.expr
         )
         .unwrap();
+        if tracks_initialization(types, &slot.ty) {
+            writeln!(
+                out,
+                "    bool *r_edge{i}_live = {};",
+                slot.live.as_deref().unwrap_or("NULL")
+            )
+            .unwrap();
+        }
     }
-    for i in 0..stack.len() {
+    for (i, slot) in stack.iter().enumerate() {
         writeln!(out, "    r_b{target}_{i} = r_edge{i};").unwrap();
+        if tracks_initialization(types, &slot.ty) {
+            writeln!(out, "    r_b{target}_{i}_live = r_edge{i}_live;").unwrap();
+        }
     }
     writeln!(out, "    goto r_b{target};\n  }}").unwrap();
+}
+
+fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {
+    matches!(ty, Ty::Pointer { pointee } if pointee.needs_drop(&types.module.types))
 }
 
 fn instruction(
@@ -338,14 +362,15 @@ fn instruction(
         Instr::Store => {
             let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
             if args[1].ty.needs_drop(&types.module.types) {
-                if let Some(local) = args[0].local {
+                if let Some(live) = &args[0].live {
+                    writeln!(out, "  bool *{temp}_live = {live};").unwrap();
                     writeln!(
                         out,
-                        "  if (r_live{local}) r_drop{}(&({target}));",
+                        "  if (!{temp}_live || *{temp}_live) r_drop{}(&({target}));",
                         types.id(&args[1].ty)
                     )
                     .unwrap();
-                    writeln!(out, "  r_live{local} = true;").unwrap();
+                    writeln!(out, "  if ({temp}_live) *{temp}_live = true;").unwrap();
                 } else {
                     types.drop_value(&args[1].ty, &target, out);
                 }

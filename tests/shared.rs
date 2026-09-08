@@ -53,6 +53,102 @@ fn rejects(source: &str, message: &str) {
 }
 
 #[test]
+fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
+    run(r#"
+    struct Tracked { drops: Ptr<int>, value: int };
+    impl Tracked { def drop(self: Ptr<Tracked>) = { self.drops.* := self.drops.* + 1; }; }
+    def main() -> int = {
+        var drops = 0; var index = 0; var valid = 1 == 1;
+        while (index < 2) {
+            var value: Tracked;
+            value := if (index == 0) { Tracked { drops = &drops, value = 1 } } else { Tracked { drops = &drops, value = 1 } };
+            value := match (some(index)) {
+                some(n) => { Tracked { drops = &drops, value = 2 } },
+                none(n) => { Tracked { drops = &drops, value = 3 } }
+            };
+            valid := valid && value.value == 2;
+            index := index + 1;
+        };
+        if (valid && drops == 8) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn shared_assignment_branches_release_every_owner() {
+    run(r#"
+    def main() -> int = {
+        var trace = 0; var weak = Weak<Resource>();
+        {
+            var value: Arc<Resource>;
+            value := if (trace == 0) { Arc<Resource> { trace = &trace, digit = 1 } } else { Arc<Resource> { trace = &trace, digit = 9 } };
+            value := match (some(2)) {
+                some(n) => { Arc<Resource> { trace = &trace, digit = n } },
+                none(n) => { Arc<Resource> { trace = &trace, digit = 9 } }
+            };
+            weak := value.downgrade();
+        };
+        var expired = match (weak.upgrade()) { some(owner) => { 1 == 0 }, none(n) => { 1 == 1 } };
+        if (expired && trace == 12) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn assignment_propagation_tracks_success_and_error_cleanup() {
+    run(r#"
+    struct Failed {};
+    def acquire(trace: Ptr<int>, fail: bool) -> Result<Arc<Resource>, Failed> = {
+        if (fail) { err(Failed {}) } else { ok(Arc<Resource> { trace = trace, digit = 2 }) }
+    };
+    def work(trace: Ptr<int>, fail: bool) -> Result<(), Failed> = {
+        var first = Arc<Resource> { trace = trace, digit = 1 };
+        var pending: Arc<Resource>;
+        pending := acquire(trace, fail)?;
+        ok(())
+    };
+    def main() -> int = {
+        var trace = 0;
+        var succeeded = match (work(&trace, 1 == 0)) { ok(n) => { 1 == 1 }, err(e) => { 1 == 0 } };
+        var failed = match (work(&trace, 1 == 1)) { ok(n) => { 1 == 0 }, err(e) => { 1 == 1 } };
+        if (succeeded && failed && trace == 211) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn temporary_projection_keeps_nominal_and_nested_destructors() {
+    run(r#"
+    struct Outer { trace: Ptr<int>, inner: Arc<Resource> };
+    impl Outer { def drop(self: Ptr<Outer>) = { self.trace.* := self.trace.* * 10 + 2; }; }
+    def make(trace: Ptr<int>) -> Outer = { Outer { trace = trace, inner = Arc<Resource> { trace = trace, digit = 3 } } };
+    def main() -> int = {
+        var trace = 0;
+        var number = Resource.make(&trace, 1).digit;
+        var valid = number == 1 && trace == 1;
+        {
+            var inner = make(&trace).inner;
+            valid := valid && trace == 12 && inner.digit == 3;
+        };
+        if (valid && trace == 123) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn function_fields_named_drop_remain_callable() {
+    run(r#"
+    def increment(value: int) -> int = { value + 1 };
+    struct Callback { drop: (int) -> int };
+    def main() -> int = {
+        var record = { drop = increment };
+        var nominal = Callback { drop = increment };
+        if (record.drop(20) + nominal.drop(20) == 42) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
 fn all_applications_consume_fresh_arguments_without_an_extra_drop() {
     run(r#"
     def consume(value: Resource) -> int = { value.digit };

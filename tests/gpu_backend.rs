@@ -460,19 +460,19 @@ fn inherent_methods_execute_in_shader_helpers() {
         struct Counter { value: uint };
         impl Counter {
             def new(value: uint) -> Counter = { Counter { value = value } };
-            def add(self: Counter, n: uint) -> Counter = { Counter { value = self.value + n } };
+            def add(self: Counter, n: uint, m: uint) -> Counter = { Counter { value = self.value + n + m } };
             def read(self: Counter) -> uint = { self.value };
         }
         def kernel(id: uint, root: Ptr<Root>) = {
             if (id < root.count) {
                 var counter = Counter.new(id);
-                var incremented = counter.add(1I);
+                var incremented = counter.add(1I, 2I);
                 var output = Span<uint> { data = root.pixels, length = 67L };
                 output(id).* := incremented.read();
             };
         };
         "#,
-        |index| index + 1,
+        |index| index + 3,
     );
 }
 

@@ -82,7 +82,7 @@ def main() -> Result<(), _> = {
 	gpu_submit(gpu, &commands)?;
 
 	var path = "triangle.png";
-	image_write_png(Ptr<ubyte>(&path), 256, 256, 4, allocation_host_pointer(pixels), 0)?;
+	image_write_png(Ptr<ubyte>(&path), 256, 256, 4, allocation_host_pointer(&pixels), 0)?;
 	print("wrote triangle.png\n", ());
 	ok(())
 };

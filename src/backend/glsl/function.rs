@@ -81,6 +81,7 @@ pub(super) fn emit(
                         && matches!(
                             instr,
                             Instr::Load
+                                | Instr::TransferLoad
                                 | Instr::IsVariant { .. }
                                 | Instr::Store
                                 | Instr::Replace

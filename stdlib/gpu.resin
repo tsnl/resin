@@ -78,11 +78,12 @@ def gpu_malloc(gpu: Gpu, bytes: ulong, alignment: ulong, memory: int) -> Result<
 	ok(GpuBuffer { handle = allocation, gpu = gpu })
 };
 
-def allocation_host_pointer(allocation: GpuBuffer) -> Ptr<ubyte> = {
+// Returned addresses borrow the allocation. Keep the caller's buffer alive while using them.
+def allocation_host_pointer(allocation: Ptr<GpuBuffer>) -> Ptr<ubyte> = {
 	resin_allocation_host_pointer(allocation.handle)
 };
 
-def allocation_device_pointer(allocation: GpuBuffer) -> ulong = {
+def allocation_device_pointer(allocation: Ptr<GpuBuffer>) -> ulong = {
 	resin_allocation_device_pointer(allocation.handle)
 };
 
