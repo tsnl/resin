@@ -2,7 +2,7 @@
 
 use crate::{
     ast::{SourceLocation, Span},
-    ir::{Ty, TyperContext},
+    ir::{Ty, TypeId, TyperContext},
 };
 use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, rc::Rc};
 
@@ -10,7 +10,15 @@ use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, rc::Rc};
 pub(crate) struct SemanticData {
     pub types: BTreeMap<SourceLocation, String>,
     pub references: BTreeMap<SourceLocation, SourceLocation>,
-    pub fields: BTreeMap<SourceLocation, Vec<(String, String)>>,
+    pub fields: BTreeMap<SourceLocation, Vec<Member>>,
+    pub method_origins: BTreeMap<(TypeId, String), SourceLocation>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Member {
+    pub name: String,
+    pub ty: String,
+    pub kind: super::DefinitionKind,
 }
 
 #[derive(Clone)]
@@ -36,16 +44,66 @@ impl Trace {
     }
 
     pub fn record_fields(&self, location: SourceLocation, ty: &Ty, typer: &TyperContext) {
-        if let Ok(converted) = typer.as_record(ty)
+        self.record_members(location, ty, false, typer);
+    }
+
+    pub fn record_members(
+        &self,
+        location: SourceLocation,
+        ty: &Ty,
+        associated: bool,
+        typer: &TyperContext,
+    ) {
+        let mut members = Vec::new();
+        if !associated
+            && let Ok(converted) = typer.as_record(ty)
             && let Ty::Record { fields } = converted.ty.span_record().unwrap_or(converted.ty)
         {
-            self.data.borrow_mut().fields.insert(
-                location,
-                fields
-                    .into_iter()
-                    .map(|field| (field.name.to_string(), format_type(&field.ty, typer)))
-                    .collect(),
-            );
+            members.extend(fields.into_iter().map(|field| Member {
+                name: field.name.to_string(),
+                ty: format_type(&field.ty, typer),
+                kind: super::DefinitionKind::Field,
+            }));
+        }
+        if let Some(owner) = typer.method_owner(ty) {
+            for (name, method) in &typer.definitions()[owner.index()].methods {
+                if method.receiver == associated {
+                    continue;
+                }
+                let ty = Ty::Function {
+                    param: Box::new(Ty::parameter(
+                        &method.params[usize::from(method.receiver)..],
+                    )),
+                    result: Box::new(method.result.clone()),
+                };
+                members.retain(|member| member.name != name.as_ref());
+                members.push(Member {
+                    name: name.to_string(),
+                    ty: format_type(&ty, typer),
+                    kind: super::DefinitionKind::Function,
+                });
+            }
+        }
+        self.data.borrow_mut().fields.insert(location, members);
+    }
+
+    pub fn record_method(
+        &self,
+        name: &crate::ast::Ident,
+        ty: &Ty,
+        associated: bool,
+        typer: &TyperContext,
+    ) {
+        self.record_members(self.location(name.span), ty, associated, typer);
+        if let Some(owner) = typer.method_owner(ty) {
+            let mut data = self.data.borrow_mut();
+            if let Some(origin) = data
+                .method_origins
+                .get(&(owner, name.val.to_string()))
+                .cloned()
+            {
+                data.references.insert(self.location(name.span), origin);
+            }
         }
     }
 }

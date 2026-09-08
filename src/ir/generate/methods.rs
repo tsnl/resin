@@ -68,6 +68,7 @@ impl Generator {
                     receiver,
                 },
             );
+            self.scopes.record_method_definition(definition, name);
         }
         Ok(())
     }
@@ -79,7 +80,7 @@ impl Generator {
         name: &Ident,
         arg: &Term,
     ) -> Result<Option<Ty>, GenerateError> {
-        let (base_ty, _associated) = if let TermKind::Type { ty } = &base.val {
+        let (base_ty, associated) = if let TermKind::Type { ty } = &base.val {
             (self.evaluator().ty(ty)?, true)
         } else {
             (
@@ -90,6 +91,8 @@ impl Generator {
         let Some(method) = self.typer.method(&base_ty, &name.val).cloned() else {
             return Ok(None);
         };
+        self.scopes
+            .record_method(name, &base_ty, associated, &self.typer);
         if method.receiver {
             let receiver = &method.params[0];
             let owner = match receiver {

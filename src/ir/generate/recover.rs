@@ -74,11 +74,37 @@ pub(crate) fn analyze(program: &Program) -> SemanticData {
             {
                 let params: Option<Vec<_>> = params.iter().map(|(_, ann)| pass.ty(ann)).collect();
                 let result = pass.ty(result);
-                let ty = params.zip(result).map(|(p, r)| Ty::Function {
-                    param: Box::new(Ty::parameter(&p)),
-                    result: Box::new(r),
-                });
+                let ty = params
+                    .clone()
+                    .zip(result.clone())
+                    .map(|(p, r)| Ty::Function {
+                        param: Box::new(Ty::parameter(&p)),
+                        result: Box::new(r),
+                    });
                 pass.bind(name, ty);
+                if let StmtKind::Function {
+                    owner: Some(owner),
+                    params: declarations,
+                    ..
+                } = &stmt.val
+                    && let Some(Ty::Defined { definition }) = pass.scopes.lookup_type(&owner.val)
+                    && let Some((params, result)) = params.zip(result)
+                {
+                    pass.typer.define_method(
+                        definition,
+                        name.val.rsplit('.').next().unwrap().into(),
+                        crate::ir::types::Method {
+                            // Recovery emits no IR; only the signature is used.
+                            function: crate::ir::FunctionId::from_index(0),
+                            params,
+                            result,
+                            receiver: declarations
+                                .first()
+                                .is_some_and(|(n, _)| n.val.as_ref() == "self"),
+                        },
+                    );
+                    pass.scopes.record_method_definition(definition, name);
+                }
                 if matches!(&stmt.val, StmtKind::Function { decorators, .. } if decorators.len() == 1 && matches!(decorators[0].val.as_ref(), "compute_shader" | "vertex_shader" | "fragment_shader"))
                     && let Some(binding) = pass.scopes.lookup_value_mut(&name.val)
                 {
@@ -130,6 +156,15 @@ struct Recovery<'a> {
     trace: Trace,
 }
 impl Recovery<'_> {
+    fn member_base(&mut self, base: &Term) -> Option<(Ty, bool)> {
+        if let TermKind::Type { ty } = &base.val {
+            self.ty(ty).map(|ty| (ty, true))
+        } else {
+            self.term(base, None)
+                .map(|ty| (self.properties(base, ty), false))
+        }
+    }
+
     fn properties(&self, base: &Term, ty: Ty) -> Ty {
         if matches!(&base.val, TermKind::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| binding.shader))
         {
@@ -265,14 +300,14 @@ impl Recovery<'_> {
                 None
             }
             TermKind::FieldHole { base } => {
-                if let Some(ty) = self.term(base, None) {
-                    let ty = self.properties(base, ty);
-                    self.trace.record_fields(
+                if let Some((ty, associated)) = self.member_base(base) {
+                    self.trace.record_members(
                         self.trace.location(Span {
                             start: term.span.end,
                             end: term.span.end,
                         }),
                         &ty,
+                        associated,
                         self.typer,
                     );
                 }
@@ -309,12 +344,28 @@ impl Recovery<'_> {
                 ty
             }
             TermKind::Field { base, name } => {
-                let ty = self.term(base, None);
-                ty.and_then(|ty| {
-                    let ty = self.properties(base, ty);
-                    self.trace
-                        .record_fields(self.trace.location(name.span), &ty, self.typer);
-                    self.typer.type_field(&ty, &name.val).ok().map(|f| f.ty)
+                self.member_base(base).and_then(|(ty, associated)| {
+                    self.trace.record_members(
+                        self.trace.location(name.span),
+                        &ty,
+                        associated,
+                        self.typer,
+                    );
+                    if let Some(method) = self.typer.method(&ty, &name.val)
+                        && method.receiver != associated
+                    {
+                        self.trace.record_method(name, &ty, associated, self.typer);
+                        Some(Ty::Function {
+                            param: Box::new(Ty::parameter(
+                                &method.params[usize::from(method.receiver)..],
+                            )),
+                            result: Box::new(method.result.clone()),
+                        })
+                    } else if !associated {
+                        self.typer.type_field(&ty, &name.val).ok().map(|f| f.ty)
+                    } else {
+                        None
+                    }
                 })
             }
             TermKind::Address { place } => self.term(place, None).map(|ty| Ty::Pointer {

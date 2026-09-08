@@ -21,6 +21,7 @@ pub struct Definition {
     pub(crate) scope: Span,
     pub(crate) visible_after: usize,
     pub(crate) top_level: bool,
+    pub(crate) member: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +213,8 @@ impl Document {
                 name.end_byte()
             },
             top_level,
+            member: kind == DefinitionKind::Function
+                && node.parent().is_some_and(|p| p.kind() == "impl_definition"),
         });
     }
 
