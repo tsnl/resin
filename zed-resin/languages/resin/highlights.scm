@@ -2,7 +2,7 @@
 (uid) @type
 (builtin_type) @type.builtin
 (inferred_type) @type.builtin
-["Ptr" "Span" "Result"] @type.builtin
+["Ptr" "Span" "Result" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
 ["export" "import" "extern" "type" "struct" "def" "var"] @keyword

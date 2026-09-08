@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::{
     backend::Error,
-    ir::{Function, Instr, Terminator, Ty, Value, verify::FunctionTypes},
+    ir::{Case, Function, Instr, Terminator, Ty, Value, verify::FunctionTypes},
 };
 
 use super::types::Types;
@@ -118,6 +118,16 @@ pub(super) fn emit(
                     out,
                     "      if (uint64_t({}) >= {length}) {{ r_failed = true; return {}; }}",
                     args[1].expr,
+                    types.zero(&function.result)
+                )
+                .unwrap();
+            }
+            if matches!(instr, Instr::ExcludeNone) {
+                let condition =
+                    is_variant(types, &args[0].ty, &Case::Type(Ty::None), &args[0].expr);
+                writeln!(
+                    out,
+                    "      if ({condition}) {{ r_failed = true; return {}; }}",
                     types.zero(&function.result)
                 )
                 .unwrap();
@@ -310,16 +320,14 @@ fn instruction(
             writeln!(out, "      r_l{} = {};", local.index(), args[0].expr).unwrap();
             return Ok(None);
         }
-        Instr::MakeVariant { ty, tag } => variant(types, ty, *tag, &args[0].expr),
-        Instr::VariantTag => match &args[0].ty {
-            Ty::Defined { definition } => format!("{}u", definition.tag()),
-            _ => format!("({}).tag", args[0].expr),
-        },
+        Instr::MakeVariant { ty, tag } => variant(types, ty, tag, &args[0].expr),
+        Instr::ExcludeNone => widen(types, &args[0].ty, result.unwrap(), &args[0].expr),
+        Instr::IsVariant { tag } => is_variant(types, &args[0].ty, tag, &args[0].expr),
         Instr::VariantPayload { tag } => {
-            if matches!(args[0].ty, Ty::Defined { .. }) {
+            if matches!(tag, Case::Type(member) if member == &args[0].ty) {
                 args[0].expr.clone()
             } else {
-                format!("({}).v{tag}", args[0].expr)
+                format!("({}).v{}", args[0].expr, types.tag(tag))
             }
         }
         Instr::Widen { ty } => widen(types, &args[0].ty, ty, &args[0].expr),
@@ -424,13 +432,20 @@ fn instruction(
     Ok(Some(expr))
 }
 
-fn variant(types: &Types<'_>, ty: &Ty, tag: u32, value: &str) -> String {
-    if matches!(ty, Ty::Defined { .. }) {
+fn is_variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
+    if matches!(case, Case::Type(member) if member == ty) {
+        return "true".into();
+    }
+    format!("(({value}).tag == {}u)", types.tag(case))
+}
+
+fn variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
+    if matches!(case, Case::Type(member) if member == ty) {
         return value.into();
     }
-    let mut fields = vec![format!("{tag}u")];
+    let mut fields = vec![format!("{}u", types.tag(case))];
     fields.extend(ty.payloads().unwrap().iter().map(|(candidate, ty)| {
-        if *candidate == tag {
+        if candidate == case {
             value.into()
         } else {
             types.zero(ty)
@@ -443,14 +458,17 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     if from == to {
         return value.into();
     }
-    if let Ty::Defined { definition } = from {
-        return variant(types, to, definition.tag(), value);
+    if matches!(to, Ty::Union { variants } if variants.contains(from)) {
+        return variant(types, to, &Case::Type(from.clone()), value);
     }
     let mut expression = types.zero(to);
-    for (tag, payload) in from.payloads().unwrap().into_iter().rev() {
-        let target = to.payload(tag).unwrap();
+    for (case, payload) in from.payloads().unwrap_or_default().into_iter().rev() {
+        let Some(target) = to.payload(&case) else {
+            continue;
+        };
+        let tag = types.tag(&case);
         let payload = widen(types, &payload, &target, &format!("({value}).v{tag}"));
-        let constructed = variant(types, to, tag, &payload);
+        let constructed = variant(types, to, &case, &payload);
         expression = format!("(({value}).tag == {tag}u ? {constructed} : {expression})");
     }
     expression
@@ -506,7 +524,7 @@ fn builtin(types: &Types<'_>, name: &str, args: &[Slot], result: &Ty) -> Result<
 
 fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> Result<String, Error> {
     Ok(match value {
-        Value::Unit => "0u".into(),
+        Value::None | Value::Unit => "0u".into(),
         Value::Bool { value } => value.to_string(),
         Value::Int32 { value } => format!("int({}u)", *value as u32),
         Value::UInt32 { value } => format!("{value}u"),

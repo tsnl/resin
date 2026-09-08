@@ -208,3 +208,11 @@ fn singleton_tuples_do_not_expand_for_their_trailing_comma() {
         "def main() = {\n\tvar a = (1, /* note */);\n\tvar b = (\n\t\t1, // note\n\t);\n\tvar c = (\n\t\t[\n\t\t\t1,\n\t\t],\n\t);\n\tvar d = (\n\t\t1,\n\t\t2,\n\t);\n};\n",
     );
 }
+
+#[test]
+fn optional_unwrap_suffix_stays_attached_and_preserves_operators() {
+    check(
+        "def f(x: int | None) -> bool = { x ! != 0 };",
+        "def f(x: int | None) -> bool = {\n\tx! != 0\n};\n",
+    );
+}

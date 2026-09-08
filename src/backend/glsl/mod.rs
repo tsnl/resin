@@ -85,7 +85,7 @@ pub(crate) fn emit_verified(
         &mut reachable,
     )?;
     let function = &module.functions[entry.index()];
-    let mut types = Types::new(module);
+    let mut types = Types::new(module, &analysis.types);
     for &index in &reachable {
         let function = &module.functions[index];
         for local in &function.locals {
@@ -96,7 +96,7 @@ pub(crate) fn emit_verified(
         types
             .register(&function.result)
             .map_err(|e| Error::at(module, index, None, e))?;
-        for ty in analysis[index].inputs.iter().flatten() {
+        for ty in analysis.functions[index].inputs.iter().flatten() {
             if matches!(ty, Ty::Function { .. }) {
                 continue; // Direct functions are carried symbolically by the emitter.
             }
@@ -106,7 +106,7 @@ pub(crate) fn emit_verified(
                 types.register(ty)?;
             }
         }
-        for ty in analysis[index].results.iter().flatten().flatten() {
+        for ty in analysis.functions[index].results.iter().flatten().flatten() {
             match ty {
                 Ty::Pointer { pointee } => types.register(pointee)?,
                 Ty::Function { .. } => {}
@@ -123,7 +123,7 @@ pub(crate) fn emit_verified(
         functions.push_str(&function::emit(
             &mut types,
             &module.functions[index],
-            &analysis[index],
+            &analysis.functions[index],
             &format!("r_fn{index}"),
             index,
         )?);

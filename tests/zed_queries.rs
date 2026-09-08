@@ -110,6 +110,18 @@ fn result_syntax_is_highlighted_and_structs_have_outlines() {
 }
 
 #[test]
+fn none_and_postfix_unwrapping_are_highlighted() {
+    let source = "def f(o: int | None) -> int = { var empty: int | None; empty := None; o! };";
+    let captured = captures(QUERIES[0].1, source);
+    for (kind, text) in [("type.builtin", "None"), ("operator", "!")] {
+        assert!(
+            captured.contains(&(kind.into(), text.into())),
+            "{kind}: {text}"
+        );
+    }
+}
+
+#[test]
 fn inference_holes_are_highlighted_as_types() {
     let source = "def f(p: Ptr<int>) -> Ptr<_> = { var value: _; value := p; value };";
     let captured = captures(QUERIES[0].1, source);

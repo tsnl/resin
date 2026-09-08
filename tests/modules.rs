@@ -194,7 +194,10 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     ]);
     assert_eq!(project.run().status.code(), Some(42));
     let module = project.compile().unwrap();
-    assert_eq!(module.types.len(), 1);
+    assert_eq!(
+        module.types.iter().filter(|d| d.name().is_some()).count(),
+        1
+    );
     assert_eq!(module.functions.len(), 2);
 }
 

@@ -32,7 +32,11 @@ fn sexp_module(module: &Module) -> SExp {
     }
     for (index, def) in module.types.iter().enumerate() {
         items.push(list(
-            "type",
+            if def.name().is_some() {
+                "type"
+            } else {
+                "structural-type"
+            },
             vec![
                 symbol(names.types[index].as_ref()),
                 def.body()
@@ -101,10 +105,11 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         ),
         Instr::MakeVariant { ty, tag } => list(
             "make-variant",
-            vec![sexp_ty(names, ty), symbol(tag.to_string())],
+            vec![sexp_ty(names, ty), sexp_case(names, tag)],
         ),
-        Instr::VariantTag => symbol("variant-tag"),
-        Instr::VariantPayload { tag } => list("variant-payload", vec![symbol(tag.to_string())]),
+        Instr::ExcludeNone => symbol("exclude-none"),
+        Instr::IsVariant { tag } => list("is-variant", vec![sexp_case(names, tag)]),
+        Instr::VariantPayload { tag } => list("variant-payload", vec![sexp_case(names, tag)]),
         Instr::Widen { ty } => list("widen", vec![sexp_ty(names, ty)]),
         Instr::Shader { function, stage } => list(
             "shader",
@@ -175,6 +180,7 @@ fn sexp_terminator(fn_names: &FunctionNames, terminator: &Terminator) -> SExp {
 fn sexp_value(names: &Names, value: &Value) -> SExp {
     match value {
         Value::Type { ty } => list("type", vec![sexp_ty(names, ty)]),
+        Value::None => symbol("None"),
         Value::Unit => symbol("unit"),
         Value::Bool { value } => list("bool", vec![symbol(value.to_string())]),
         Value::Int8 { value } => list("sbyte", vec![symbol(value.to_string())]),
@@ -221,14 +227,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             "union",
             variants
                 .iter()
-                .map(|definition| {
-                    sexp_ty(
-                        names,
-                        &Ty::Defined {
-                            definition: *definition,
-                        },
-                    )
-                })
+                .map(|member| sexp_ty(names, member))
                 .collect(),
         ),
         Ty::Result { value, error } => {
@@ -236,6 +235,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
         }
         Ty::Type => symbol("type"),
         Ty::Unit => symbol("unit"),
+        Ty::None => symbol("None"),
         Ty::Bool => symbol("bool"),
         Ty::Int8 => symbol("sbyte"),
         Ty::Int16 => symbol("short"),
@@ -294,4 +294,12 @@ fn group(items: Vec<SExp>) -> SExp {
 
 fn symbol(s: impl Into<String>) -> SExp {
     SExp::Atom(s.into())
+}
+
+fn sexp_case(names: &Names, case: &crate::ir::Case) -> SExp {
+    match case {
+        crate::ir::Case::Ok => symbol("ok"),
+        crate::ir::Case::Err => symbol("err"),
+        crate::ir::Case::Type(ty) => sexp_ty(names, ty),
+    }
 }

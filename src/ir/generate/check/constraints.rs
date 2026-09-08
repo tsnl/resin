@@ -10,6 +10,7 @@ use crate::{ast::Span, ir::Ty};
 
 pub(super) enum Constraint {
     Coerce(Type, Type),
+    ExcludeNone(Type, Type),
     Layout(Type),
     Errors(Type, Type),
     Variant(Type, Pattern, Type),
@@ -93,6 +94,15 @@ impl Checker<'_> {
                 };
                 crate::ir::layout::layout(self.typer.definitions(), &ty)
                     .map_err(|e| error(span, e.to_string()))?;
+            }
+            Constraint::ExcludeNone(input, out) => {
+                let Some(input) = self.solver.resolve(input) else {
+                    return Ok(false);
+                };
+                let remaining = input
+                    .without_none()
+                    .ok_or_else(|| error(span, "postfix ! requires a type containing None"))?;
+                self.solver.unify(out, &remaining.into(), span)?;
             }
             Constraint::Coerce(from, to) => return self.solver.coerce(from, to, span),
             Constraint::Errors(from, to) => return self.solver.include(from, to, span),

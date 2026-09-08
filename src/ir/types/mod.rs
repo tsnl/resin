@@ -5,41 +5,59 @@ use std::sync::Arc;
 use crate::util::define_id;
 
 pub(crate) mod definitions;
+mod table;
+pub use table::TypeTable;
 
 define_id! {
     pub struct TypeId(usize);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// A nominal record. Incomplete bodies exist only while resolving recursive fields.
-/// The typer and verifier reject non-record bodies, including handwritten IR.
-pub struct TypeDef {
-    pub name: Arc<str>,
-    pub(super) body: Option<Ty>,
+/// An entry in the module's canonical type table. Only nominal records can have
+/// incomplete bodies while resolving recursive fields.
+pub enum TypeDef {
+    Nominal { name: Arc<str>, body: Option<Ty> },
+    Structural(Ty),
 }
 
 impl TypeDef {
     pub fn new(name: impl Into<Arc<str>>, body: Ty) -> Self {
-        Self {
+        Self::Nominal {
             name: name.into(),
             body: Some(body),
         }
     }
+    pub fn name(&self) -> Option<&Arc<str>> {
+        match self {
+            Self::Nominal { name, .. } => Some(name),
+            Self::Structural(_) => None,
+        }
+    }
     pub fn body(&self) -> Option<&Ty> {
-        self.body.as_ref()
+        match self {
+            Self::Nominal { body, .. } => body.as_ref(),
+            Self::Structural(ty) => Some(ty),
+        }
+    }
+    pub fn ty(&self, id: TypeId) -> Ty {
+        match self {
+            Self::Nominal { .. } => Ty::Defined { definition: id },
+            Self::Structural(ty) => ty.clone(),
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecordField {
     pub name: Arc<str>,
     pub ty: Ty,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ty {
     Type,
     Unit,
+    None,
     Bool,
     Int8,
     Int16,
@@ -58,54 +76,96 @@ pub enum Ty {
     Array { element: Box<Ty>, length: usize },
     Record { fields: Vec<RecordField> },
     Function { param: Box<Ty>, result: Box<Ty> },
-    Union { variants: Vec<TypeId> },
+    Union { variants: Vec<Ty> },
     Result { value: Box<Ty>, error: Box<Ty> },
 }
 
-impl Ty {
-    pub fn payloads(&self) -> Option<Vec<(u32, Ty)>> {
+/// Result cases are tagged independently of their payload type. Ordinary union
+/// cases use the index of their payload type in the module's type table.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Case {
+    Ok,
+    Err,
+    Type(Ty),
+}
+
+impl Case {
+    pub(crate) fn tag(&self, types: &TypeTable) -> u32 {
         match self {
-            Self::Result { value, error } => Some(vec![(0, *value.clone()), (1, *error.clone())]),
+            Self::Ok => 0,
+            Self::Err => 1,
+            Self::Type(ty) => types.id(ty).expect("verified union member").tag(),
+        }
+    }
+}
+
+impl Ty {
+    pub fn payloads(&self) -> Option<Vec<(Case, Ty)>> {
+        match self {
+            Self::Result { value, error } => Some(vec![
+                (Case::Ok, *value.clone()),
+                (Case::Err, *error.clone()),
+            ]),
             Self::Union { variants } => Some(
                 variants
                     .iter()
-                    .map(|id| (id.tag(), Self::Defined { definition: *id }))
+                    .map(|ty| (Case::Type(ty.clone()), ty.clone()))
                     .collect(),
             ),
             _ => None,
         }
     }
 
-    pub fn payload(&self, tag: u32) -> Option<Ty> {
-        match self {
-            Self::Result { value, .. } if tag == 0 => Some(*value.clone()),
-            Self::Result { error, .. } if tag == 1 => Some(*error.clone()),
-            _ => self
-                .variants()?
-                .into_iter()
-                .find(|id| id.tag() == tag)
-                .map(|definition| Self::Defined { definition }),
-        }
-    }
-
-    pub fn variants(&self) -> Option<Vec<TypeId>> {
-        match self {
-            Self::Defined { definition } => Some(vec![*definition]),
-            Self::Union { variants } => Some(variants.clone()),
+    pub fn payload(&self, case: &Case) -> Option<Ty> {
+        match (self, case) {
+            (Self::Result { value, .. }, Case::Ok) => Some(*value.clone()),
+            (Self::Result { error, .. }, Case::Err) => Some(*error.clone()),
+            (_, Case::Type(ty)) if self.members().contains(ty) => Some(ty.clone()),
             _ => None,
         }
     }
 
+    /// Nominal variants used by Result error-set inference.
+    pub fn variants(&self) -> Option<Vec<TypeId>> {
+        self.members()
+            .into_iter()
+            .map(|ty| match ty {
+                Self::Defined { definition } => Some(definition),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn members(&self) -> Vec<Ty> {
+        match self {
+            Self::Union { variants } => variants.clone(),
+            _ => vec![self.clone()],
+        }
+    }
+
     pub fn union(variants: impl IntoIterator<Item = TypeId>) -> Self {
-        let mut variants: Vec<_> = variants.into_iter().collect();
-        variants.sort_by_key(|id| id.index());
+        Self::union_of(
+            variants
+                .into_iter()
+                .map(|definition| Self::Defined { definition }),
+        )
+    }
+
+    pub fn union_of(variants: impl IntoIterator<Item = Ty>) -> Self {
+        let mut variants: Vec<_> = variants.into_iter().flat_map(|ty| ty.members()).collect();
+        variants.sort();
         variants.dedup();
         match variants.as_slice() {
-            [definition] => Self::Defined {
-                definition: *definition,
-            },
+            [ty] => ty.clone(),
             _ => Self::Union { variants },
         }
+    }
+
+    pub fn without_none(&self) -> Option<Self> {
+        let members = self.members();
+        members
+            .contains(&Self::None)
+            .then(|| Self::union_of(members.into_iter().filter(|ty| ty != &Self::None)))
     }
 
     pub fn widens_to(&self, to: &Self) -> bool {
@@ -123,10 +183,7 @@ impl Ty {
                     error: be,
                 },
             ) => av == bv && ae.widens_to(be),
-            _ => match (self.variants(), to.variants()) {
-                (Some(from), Some(to)) => from.iter().all(|id| to.contains(id)),
-                _ => false,
-            },
+            _ => self.members().iter().all(|ty| to.members().contains(ty)),
         }
     }
 
@@ -215,9 +272,6 @@ impl Ty {
 
 impl TypeId {
     pub fn tag(self) -> u32 {
-        u32::try_from(self.index())
-            .expect("too many nominal types")
-            .checked_add(1)
-            .expect("too many nominal types")
+        u32::try_from(self.index()).expect("too many types")
     }
 }

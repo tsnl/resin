@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::ir::types::definitions;
-use crate::ir::{Ty, TypeDef, TypeId};
+use crate::ir::{Ty, TypeDef, TypeId, TypeTable};
 
 mod convert;
 mod error;
@@ -16,27 +16,29 @@ pub use rules::{BuiltinCall, FieldAccess};
 /// Type IDs are local to this context's definition table.
 #[derive(Debug, Clone, Default)]
 pub struct TyperContext {
-    definitions: Vec<TypeDef>,
+    definitions: TypeTable,
 }
 
 impl TyperContext {
-    pub const fn new() -> Self {
-        Self {
-            definitions: Vec::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn from_definitions(definitions: Vec<TypeDef>) -> Self {
-        Self { definitions }
+    pub fn from_definitions(definitions: impl Into<TypeTable>) -> Self {
+        Self {
+            definitions: definitions.into(),
+        }
     }
 
     pub fn definitions(&self) -> &[TypeDef] {
         &self.definitions
     }
 
-    pub fn into_definitions(self) -> Result<Vec<TypeDef>, TypeError> {
+    pub fn into_definitions(self) -> Result<TypeTable, TypeError> {
         for index in 0..self.definitions.len() {
-            self.definition_body(TypeId::from_index(index))?;
+            if self.definitions[index].name().is_some() {
+                self.definition_body(TypeId::from_index(index))?;
+            }
         }
         Ok(self.definitions)
     }
@@ -48,19 +50,14 @@ impl TyperContext {
     ) -> Result<TypeId, TypeError> {
         let definition = self.reserve_type(name);
         if let Err(err) = self.define_type(definition, body) {
-            self.definitions.pop();
+            self.definitions.pop_nominal();
             return Err(err);
         }
         Ok(definition)
     }
 
     pub fn reserve_type(&mut self, name: impl Into<Arc<str>>) -> TypeId {
-        let definition = TypeId::from_index(self.definitions.len());
-        self.definitions.push(TypeDef {
-            name: name.into(),
-            body: None,
-        });
-        definition
+        self.definitions.reserve(name.into())
     }
 
     pub fn define_type(&mut self, definition: TypeId, body: Ty) -> Result<(), TypeError> {
@@ -71,7 +68,7 @@ impl TyperContext {
         }
         definitions::check_references(&self.definitions, &body)?;
         definitions::check_layout(&self.definitions, definition, &body)?;
-        self.definitions[definition.index()].body = Some(body);
+        self.definitions.define(definition, body);
         Ok(())
     }
 

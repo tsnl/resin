@@ -254,6 +254,12 @@ recover the native code and C diagnostic string. Standard-library operations alr
 return Results, so callers normally use `gpu_create()?` rather than converting statuses.
 Register resource cleanup with `defer` before using further fallible operations.
 
+### Optional values
+
+`T | None` is an ordinary union containing the builtin singleton `None`. Values of
+`T` widen into it directly. Exhaustive `match` handles absence; postfix `optional!`
+removes `None` or traps. See [optional values](doc/options.md).
+
 ### Deferred cleanup
 
 ```resin

@@ -95,7 +95,7 @@ fn nominal_nonrecords_are_rejected_at_creation_and_verification() {
         );
         assert!(context.definitions().is_empty());
         let module = crate::ir::Module {
-            types: vec![TypeDef::new("Invalid", body)],
+            types: vec![TypeDef::new("Invalid", body)].into(),
             ..Default::default()
         };
         assert_eq!(

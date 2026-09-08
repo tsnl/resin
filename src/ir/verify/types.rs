@@ -1,16 +1,28 @@
 use crate::ir::types::definitions;
-use crate::ir::{Function, Ty, TypeDef, TypeId};
+use crate::ir::{Function, Ty, TypeDef, TypeId, TypeTable};
 
 use super::error::Location;
 use super::{VerifyError, VerifyErrorKind};
 
-pub(super) fn check_definitions(table: &[TypeDef]) -> Result<(), VerifyError> {
+pub(super) fn check_definitions(table: &TypeTable) -> Result<(), VerifyError> {
     for index in 0..table.len() {
         let id = TypeId::from_index(index);
         let location = Location::type_definition(id);
-        let body = definition_body(table, id, location)?;
-        check_type(table, body, location)?;
-        definitions::check_layout(table, id, body).map_err(|error| location.error(error.into()))?;
+        if table.id(&table[index].ty(id)) != Some(id)
+            || matches!(&table[index], TypeDef::Structural(Ty::Defined { .. }))
+        {
+            return Err(
+                location.error(VerifyErrorKind::InvalidTypeDefinition { definition: index })
+            );
+        }
+        if let TypeDef::Structural(ty) = &table[index] {
+            check_type(table, ty, location)?;
+        } else {
+            let body = definition_body(table, id, location)?;
+            check_type(table, body, location)?;
+            definitions::check_layout(table, id, body)
+                .map_err(|error| location.error(error.into()))?;
+        }
     }
     Ok(())
 }
@@ -36,15 +48,8 @@ pub(super) fn check_value(
     ) -> Result<(), VerifyError> {
         match ty {
             Ty::Union { variants } => {
-                for definition in variants {
-                    visit(
-                        table,
-                        &Ty::Defined {
-                            definition: *definition,
-                        },
-                        location,
-                        seen,
-                    )?;
+                for member in variants {
+                    visit(table, member, location, seen)?;
                 }
             }
             Ty::Result { value, error } => {

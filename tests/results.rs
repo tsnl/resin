@@ -13,7 +13,7 @@ fn structs_mint_identities_and_aliases_do_not() {
     let m = module(
         "struct Point { x: int }; type Position = Point; type Number = int; def copy(p: Position) -> Point = { p }; def number(n: Number) -> int = { n };",
     );
-    assert_eq!(m.types.len(), 1);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(
         m.functions[0].result,
         Ty::Defined {
@@ -35,11 +35,18 @@ fn unions_are_canonical_and_tags_belong_to_structs() {
     assert_eq!(
         m.functions[0].result,
         Ty::Union {
-            variants: vec![TypeId::from_index(0), TypeId::from_index(1)]
+            variants: vec![
+                Ty::Defined {
+                    definition: TypeId::from_index(0)
+                },
+                Ty::Defined {
+                    definition: TypeId::from_index(1)
+                }
+            ]
         }
     );
-    assert_eq!(TypeId::from_index(0).tag(), 1);
-    rejects("type Bad = int | bool;", "nominal structs");
+    assert_eq!(TypeId::from_index(0).tag(), 0);
+    module("type Choice = int | bool;");
 }
 
 #[test]
@@ -157,7 +164,7 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     let ir::Instr::MakeVariant { tag, .. } = instruction else {
         unreachable!()
     };
-    *tag = 99;
+    *tag = ir::Case::Type(Ty::Bool);
     assert!(matches!(
         ir::verify(&m).unwrap_err().kind,
         ir::VerifyErrorKind::InvalidVariant
@@ -175,7 +182,14 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
 
     let mut m = module(source);
     m.functions[0].result = Ty::Union {
-        variants: vec![TypeId::from_index(0), TypeId::from_index(0)],
+        variants: vec![
+            Ty::Defined {
+                definition: TypeId::from_index(0),
+            },
+            Ty::Defined {
+                definition: TypeId::from_index(0),
+            },
+        ],
     };
     assert!(matches!(
         ir::verify(&m).unwrap_err().kind,

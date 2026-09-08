@@ -1,5 +1,5 @@
 use crate::ast::{MatchArm, MatchVariant, Span, Term};
-use crate::ir::{Instr, Terminator, Ty, Value};
+use crate::ir::{Case, Instr, Terminator, Ty};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
 use super::{GenerateError, Generator, check::error};
@@ -14,7 +14,11 @@ impl Generator {
                     .map(|()| to.clone())
                     .map_err(|e| GenerateError::typing(span, e));
             }
-            self.emit(Instr::Widen { ty: to.clone() });
+            self.emit(if from == Ty::union([]) {
+                Instr::Eliminate { result: to.clone() }
+            } else {
+                Instr::Widen { ty: to.clone() }
+            });
         }
         Ok(to.clone())
     }
@@ -39,7 +43,7 @@ impl Generator {
         self.gen_term(arg, Some(if failure { errors } else { value }))?;
         self.emit(Instr::MakeVariant {
             ty: ty.clone(),
-            tag: u32::from(failure),
+            tag: if failure { Case::Err } else { Case::Ok },
         });
         Ok(ty.clone())
     }
@@ -65,15 +69,7 @@ impl Generator {
         }
         let saved = self.save_top(&ty);
         self.load_local(saved);
-        self.emit(Instr::VariantTag);
-        self.emit(Instr::Push {
-            value: Value::UInt32 { value: 0 },
-        });
-        self.emit(Instr::CallBuiltin {
-            name: "==".into(),
-            params: vec![Ty::UInt32, Ty::UInt32],
-            result: Ty::Bool,
-        });
+        self.emit(Instr::IsVariant { tag: Case::Ok });
         let success = self.new_block("try.ok");
         let failure = self.new_block("try.err");
         self.terminate(Terminator::Branch {
@@ -85,11 +81,11 @@ impl Generator {
             self.emit(Instr::Discard);
         }
         self.load_local(saved);
-        self.emit(Instr::VariantPayload { tag: 1 });
+        self.emit(Instr::VariantPayload { tag: Case::Err });
         self.coerce(span, *errors.clone(), target)?;
         self.emit(Instr::MakeVariant {
             ty: result.clone(),
-            tag: 1,
+            tag: Case::Err,
         });
         let before_cleanup = self.scopes.clone();
         self.cleanup(0, &result)?;
@@ -97,7 +93,7 @@ impl Generator {
         self.scopes = before_cleanup;
         self.switch(success);
         self.load_local(saved);
-        self.emit(Instr::VariantPayload { tag: 0 });
+        self.emit(Instr::VariantPayload { tag: Case::Ok });
         Ok(*value.clone())
     }
 
@@ -110,34 +106,33 @@ impl Generator {
     ) -> Result<Ty, GenerateError> {
         let ty = self.gen_term(term, None)?;
         let tags = match &ty {
-            Ty::Result { .. } => vec![0, 1],
-            _ => ty
-                .variants()
-                .ok_or_else(|| error(span, "match requires a Result or a union of structs"))?
-                .into_iter()
-                .map(|id| id.tag())
-                .collect(),
+            Ty::Result { .. } => vec![Case::Ok, Case::Err],
+            _ => ty.members().into_iter().map(Case::Type).collect(),
         };
         let mut patterns = vec![];
         for arm in arms {
             let tag = match &arm.variant {
-                MatchVariant::Ok if matches!(ty, Ty::Result { .. }) => 0,
-                MatchVariant::Err if matches!(ty, Ty::Result { .. }) => 1,
+                MatchVariant::Ok if matches!(ty, Ty::Result { .. }) => Case::Ok,
+                MatchVariant::Err if matches!(ty, Ty::Result { .. }) => Case::Err,
                 MatchVariant::Type(ann) if !matches!(ty, Ty::Result { .. }) => {
-                    let Ty::Defined { definition } = self.evaluator().ty(ann)? else {
-                        return Err(error(ann.span, "union patterns must name a single struct"));
-                    };
-                    definition.tag()
+                    let member = self.evaluator().ty(ann)?;
+                    if matches!(member, Ty::Union { .. }) {
+                        return Err(error(
+                            ann.span,
+                            "union patterns must name a single member type",
+                        ));
+                    }
+                    Case::Type(member)
                 }
                 _ => {
                     return Err(error(
-                        arm.name.span,
+                        arm.body.span,
                         "pattern does not belong to this match type",
                     ));
                 }
             };
             if !tags.contains(&tag) || patterns.contains(&tag) {
-                return Err(error(arm.name.span, "unknown or duplicate match variant"));
+                return Err(error(arm.body.span, "unknown or duplicate match variant"));
             }
             patterns.push(tag);
         }
@@ -152,15 +147,7 @@ impl Generator {
         for (i, (arm, tag)) in arms.iter().zip(patterns).enumerate() {
             let next = if i + 1 < arms.len() {
                 self.load_local(saved);
-                self.emit(Instr::VariantTag);
-                self.emit(Instr::Push {
-                    value: Value::UInt32 { value: tag },
-                });
-                self.emit(Instr::CallBuiltin {
-                    name: "==".into(),
-                    params: vec![Ty::UInt32, Ty::UInt32],
-                    result: Ty::Bool,
-                });
+                self.emit(Instr::IsVariant { tag: tag.clone() });
                 let body = self.new_block("match.arm");
                 let next = self.new_block("match.next");
                 self.terminate(Terminator::Branch {
@@ -175,18 +162,20 @@ impl Generator {
             self.scopes = before.clone();
             self.scopes.push();
             self.load_local(saved);
-            self.emit(Instr::VariantPayload { tag });
-            let payload = ty.payload(tag).unwrap();
+            self.emit(Instr::VariantPayload { tag: tag.clone() });
+            let payload = ty.payload(&tag).unwrap();
             let local = self.save_top(&payload);
-            self.bind_value(
-                &arm.name,
-                ValueBinding {
-                    shader: false,
-                    kind: ValueBindingKind::Local(local),
-                    ty: Some(payload),
-                    initialization: Initialization::Initialized,
-                },
-            )?;
+            if let Some(name) = &arm.name {
+                self.bind_value(
+                    name,
+                    ValueBinding {
+                        shader: false,
+                        kind: ValueBindingKind::Local(local),
+                        ty: Some(payload),
+                        initialization: Initialization::Initialized,
+                    },
+                )?;
+            }
             result = Some(self.gen_term(&arm.body, result.as_ref())?);
             self.scopes.pop();
             if let Some(previous) = &after {

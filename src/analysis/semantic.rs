@@ -58,14 +58,7 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
             }
             variants
                 .iter()
-                .map(|definition| {
-                    format_type(
-                        &Ty::Defined {
-                            definition: *definition,
-                        },
-                        typer,
-                    )
-                })
+                .map(|member| format_type(member, typer))
                 .collect::<Vec<_>>()
                 .join(" | ")
         }
@@ -76,6 +69,7 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
         ),
         Ty::Type => "type".into(),
         Ty::Unit => "()".into(),
+        Ty::None => "None".into(),
         Ty::Bool => "bool".into(),
         Ty::Int8 => "sbyte".into(),
         Ty::Int16 => "short".into(),
@@ -91,7 +85,8 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
         Ty::Defined { definition } => typer
             .definitions()
             .get(definition.index())
-            .map(|d| d.name.to_string())
+            .and_then(|d| d.name())
+            .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, typer)),
         Ty::Span { element } => format!("Span<{}>", format_type(element, typer)),

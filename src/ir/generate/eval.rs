@@ -84,17 +84,7 @@ impl Evaluator<'_> {
                     error: Box::new(error),
                 })
             }
-            TypeKind::Union { left, right } => {
-                let left = self.ty(left)?.variants();
-                let right = self.ty(right)?.variants();
-                match (left, right) {
-                    (Some(left), Some(right)) => Ok(Ty::union(left.into_iter().chain(right))),
-                    _ => Err(super::check::error(
-                        ty.span,
-                        "union variants must be nominal structs",
-                    )),
-                }
-            }
+            TypeKind::Union { left, right } => Ok(Ty::union_of([self.ty(left)?, self.ty(right)?])),
             TypeKind::Atom { name } => {
                 if let Some(builtin) = builtin_ty(&name.val) {
                     return Ok(builtin);
@@ -153,6 +143,7 @@ impl Evaluator<'_> {
 fn builtin_ty(name: &str) -> Option<Ty> {
     Some(match name {
         "Never" => Ty::union([]),
+        "None" => Ty::None,
         "bool" => Ty::Bool,
         "sbyte" => Ty::Int8,
         "short" => Ty::Int16,

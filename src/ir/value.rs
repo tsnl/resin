@@ -15,6 +15,7 @@ define_id! {
 pub enum Value {
     Type { ty: Ty },
     Unit,
+    None,
     Bool { value: bool },
     Int8 { value: i8 },
     Int16 { value: i16 },

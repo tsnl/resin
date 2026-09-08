@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::ast::{SourceFile, Span, Stmt, StmtKind, Term, TermKind};
-use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, Value, verify};
+use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, Value};
 
 mod bindings;
 mod builder;
@@ -194,10 +194,11 @@ impl Generator {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::Type(err.kind),
         })?;
-        verify(&self.module).map_err(|err| GenerateError {
+        let analysis = crate::ir::verify::analyze(&self.module).map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::InvalidIr(err),
         })?;
+        self.module.types = analysis.types;
         Ok(self.module)
     }
 
@@ -257,6 +258,10 @@ impl Generator {
                 self.emit(Instr::Push { value: Value::Unit });
                 Ok(Ty::Unit)
             }
+            TermKind::None => {
+                self.emit(Instr::Push { value: Value::None });
+                Ok(Ty::None)
+            }
             TermKind::String { value } => {
                 let bytes = value.as_bytes();
                 self.emit(Instr::Push {
@@ -280,6 +285,11 @@ impl Generator {
                 Ok(Ty::Type)
             }
             TermKind::If { cond, then, els } => self.gen_if(cond, then, els, expected),
+            TermKind::Unwrap { value } => {
+                let input = self.gen_term(value, None)?;
+                self.emit(Instr::ExcludeNone);
+                Ok(input.without_none().expect("checked None exclusion"))
+            }
             TermKind::Try { value } => self.gen_try(term.span, value),
             TermKind::Match { value, arms } => self.gen_match(term.span, value, arms, expected),
             TermKind::While { cond, body } => self.gen_while(cond, body),

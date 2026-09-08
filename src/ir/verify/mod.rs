@@ -21,7 +21,12 @@ pub fn verify(module: &Module) -> Result<(), VerifyError> {
 #[derive(Clone, Copy)]
 pub(crate) struct Verified<'a> {
     pub module: &'a Module,
-    pub analysis: &'a [FunctionTypes],
+    pub analysis: &'a ModuleTypes,
+}
+
+pub(crate) struct ModuleTypes {
+    pub functions: Vec<FunctionTypes>,
+    pub types: crate::ir::TypeTable,
 }
 
 pub(crate) struct FunctionTypes {
@@ -29,7 +34,7 @@ pub(crate) struct FunctionTypes {
     pub results: Vec<Vec<Option<Ty>>>,
 }
 
-pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError> {
+pub(crate) fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
     #[cfg(test)]
     ANALYSES.set(ANALYSES.get() + 1);
     for &function in module.entries.values() {
@@ -53,19 +58,23 @@ pub(crate) fn analyze(module: &Module) -> Result<Vec<FunctionTypes>, VerifyError
     }
 
     for (index, definition) in module.types.iter().enumerate() {
-        check_value(
-            &module.types,
-            definition.body().unwrap(),
-            Location::type_definition(crate::ir::TypeId::from_index(index)),
-        )?;
+        if definition.name().is_some() {
+            check_value(
+                &module.types,
+                definition.body().unwrap(),
+                Location::type_definition(crate::ir::TypeId::from_index(index)),
+            )?;
+        }
     }
 
-    module
+    let functions = module
         .functions
         .iter()
         .enumerate()
         .map(|(index, function)| check_function(module, FunctionId::from_index(index), function))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    let types = crate::ir::TypeTable::collect(module, &functions);
+    Ok(ModuleTypes { functions, types })
 }
 
 #[cfg(test)]

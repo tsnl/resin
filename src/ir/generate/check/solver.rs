@@ -125,7 +125,48 @@ impl Solver {
                 self.unify(&a[0], &b[0], span)?;
                 self.include(&a[1], &b[1], span)
             }
-            (_, Type::Node(Head::Atom(Ty::Union { .. }), _)) => self.include(from, to, span),
+            (_, Type::Node(Head::Atom(target @ Ty::Union { .. }), _)) => {
+                // Literal context may select one numeric member, but pointers and
+                // other mutable storage remain invariant inside union members.
+                if let Type::Variable(id) = self.head(from) {
+                    let class = self.variables[id].class;
+                    if matches!(class, Class::Number | Class::Float) {
+                        let candidates: Vec<_> = target
+                            .members()
+                            .into_iter()
+                            .filter(|ty| {
+                                if class == Class::Float {
+                                    matches!(ty, Ty::Float32 | Ty::Float64)
+                                } else {
+                                    ty.is_numeric()
+                                }
+                            })
+                            .collect();
+                        if let [ty] = candidates.as_slice() {
+                            self.unify(from, &ty.clone().into(), span)?;
+                        }
+                    }
+                }
+                let Some(source) = self.resolve(from) else {
+                    return Ok(false);
+                };
+                if source.widens_to(&target) {
+                    Ok(true)
+                } else {
+                    Err(GenerateError::typing(
+                        span,
+                        TypeError {
+                            kind: TypeErrorKind::TypeMismatch {
+                                expected: target,
+                                found: source,
+                            },
+                        },
+                    ))
+                }
+            }
+            (Type::Node(Head::Atom(Ty::Union { variants }), _), _) if variants.is_empty() => {
+                Ok(true)
+            }
             _ => {
                 self.unify(from, to, span)?;
                 Ok(true)

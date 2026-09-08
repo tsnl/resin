@@ -84,6 +84,9 @@ pub enum TermKind {
         cond: Box<Term>,
         body: Box<Term>,
     },
+    Unwrap {
+        value: Box<Term>,
+    },
     Try {
         value: Box<Term>,
     },
@@ -102,6 +105,7 @@ pub enum TermKind {
         tail: Box<Term>,
     },
     Unit,
+    None,
     Call {
         func: Box<Term>,
         arg: Box<Term>,
@@ -135,7 +139,7 @@ pub type Stmt = Spanned<StmtKind>;
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     pub variant: MatchVariant,
-    pub name: Ident,
+    pub name: Option<Ident>,
     pub body: Term,
 }
 

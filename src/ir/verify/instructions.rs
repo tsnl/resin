@@ -36,22 +36,29 @@ pub(super) fn check_instr(
         Instr::MakeVariant { ty, tag } => {
             check_type(&module.types, ty, location)?;
             let payload = ty
-                .payload(*tag)
+                .payload(tag)
                 .ok_or_else(|| location.error(VerifyErrorKind::InvalidVariant))?;
             expect_type(payload, pop_one(stack, location)?, location)?;
             stack.push(ty.clone());
         }
-        Instr::VariantTag => {
+        Instr::ExcludeNone => {
             let from = pop_one(stack, location)?;
-            if from.payloads().is_none() && from.variants().is_none() {
+            let remaining = from
+                .without_none()
+                .ok_or_else(|| location.error(VerifyErrorKind::InvalidVariant))?;
+            stack.push(remaining);
+        }
+        Instr::IsVariant { tag } => {
+            let from = pop_one(stack, location)?;
+            if from.payload(tag).is_none() {
                 return Err(location.error(VerifyErrorKind::InvalidVariant));
             }
-            stack.push(Ty::UInt32);
+            stack.push(Ty::Bool);
         }
         Instr::VariantPayload { tag } => {
             let from = pop_one(stack, location)?;
             let payload = from
-                .payload(*tag)
+                .payload(tag)
                 .ok_or_else(|| location.error(VerifyErrorKind::InvalidVariant))?;
             stack.push(payload);
         }
@@ -219,6 +226,7 @@ fn immediate_ty(table: &[TypeDef], value: &Value, location: Location) -> Result<
             Ty::Type
         }
         Value::Unit => Ty::Unit,
+        Value::None => Ty::None,
         Value::Bool { .. } => Ty::Bool,
         Value::Int8 { .. } => Ty::Int8,
         Value::Int16 { .. } => Ty::Int16,

@@ -60,6 +60,7 @@ const BUILTIN_TYPES = [
   "float32",
   "float64",
   "Never",
+  "None",
 ];
 
 const TYPE_FORMERS = ["Ptr", "Span", "Result"];
@@ -293,6 +294,7 @@ export default grammar({
                 $.field_access,
                 $.pointer_deref,
                 $.try_suffix,
+                $.unwrap_suffix,
               ),
             ),
           ),
@@ -301,6 +303,7 @@ export default grammar({
     field_access: ($) => seq(".", field("name", $.lid)),
     pointer_deref: () => ".*",
     try_suffix: () => "?",
+    unwrap_suffix: () => "!",
 
     closed_term: ($) =>
       choice(
@@ -360,10 +363,15 @@ export default grammar({
       ),
     match_arm: ($) =>
       seq(
-        field("variant", choice($.type, "ok", "err")),
-        "(",
-        field("name", $.lid),
-        ")",
+        choice(
+          seq(
+            field("variant", choice($.type, "ok", "err")),
+            "(",
+            field("name", $.lid),
+            ")",
+          ),
+          field("variant", "None"),
+        ),
         "=>",
         field("body", $.block_body),
       ),
@@ -461,7 +469,7 @@ export default grammar({
     uid: () =>
       token(
         new RustRegex(
-          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never"])}`,
+          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never", "None"])}`,
         ),
       ),
 

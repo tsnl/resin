@@ -16,11 +16,7 @@ impl Names {
     pub(super) fn new(module: &Module) -> Self {
         Self {
             types: uniquify(
-                module
-                    .types
-                    .iter()
-                    .map(|def| Some(def.name.clone()))
-                    .collect(),
+                module.types.iter().map(|def| def.name().cloned()).collect(),
                 "type",
             ),
             functions: uniquify(

@@ -49,7 +49,7 @@ pub struct Analysis {
     stdlib: PathBuf,
     program: Option<ast::Program>,
     module: Option<ir::Module>,
-    verification: std::sync::OnceLock<Result<Vec<ir::verify::FunctionTypes>, ir::VerifyError>>,
+    verification: std::sync::OnceLock<Result<ir::verify::ModuleTypes, ir::VerifyError>>,
     load_error: Option<ast::SourceError>,
     compile_error: Option<ast::SourceError>,
 }
@@ -542,6 +542,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "defer",
         "defer expression; — evaluate at scope exit in reverse registration order, including through ?, and discard the value.",
         DefinitionKind::Keyword,
+    ),
+    (
+        "None",
+        "None — singleton value and type; T | None permits absence, postfix ! excludes it or traps.",
+        DefinitionKind::Type,
     ),
     ("bool", "bool", DefinitionKind::Type),
     (

@@ -22,7 +22,7 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         }
         let mut error_name = "\"invalid error tag\"".to_string();
         for definition in error.variants().unwrap() {
-            let name = quoted(&module.types[definition.index()].name);
+            let name = quoted(module.types[definition.index()].name().unwrap());
             error_name = if matches!(error.as_ref(), Ty::Defined { .. }) {
                 name
             } else {

@@ -16,9 +16,11 @@ pub(crate) fn get(definitions: &[TypeDef], id: TypeId) -> Result<&TypeDef, Defin
 }
 
 pub(crate) fn body(definitions: &[TypeDef], id: TypeId) -> Result<&Ty, DefinitionError> {
-    let body = get(definitions, id)?
-        .body()
-        .ok_or(DefinitionError::Incomplete(id))?;
+    let definition = get(definitions, id)?;
+    if definition.name().is_none() {
+        return Err(DefinitionError::NonRecord(id));
+    }
+    let body = definition.body().ok_or(DefinitionError::Incomplete(id))?;
     check_record(id, body)?;
     Ok(body)
 }
@@ -34,15 +36,14 @@ pub(crate) fn check_record(id: TypeId, ty: &Ty) -> Result<(), DefinitionError> {
 pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), DefinitionError> {
     match ty {
         Ty::Union { variants } => {
-            if variants.len() == 1
-                || variants
-                    .windows(2)
-                    .any(|pair| pair[0].index() >= pair[1].index())
-            {
+            if variants.len() == 1 || variants.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(DefinitionError::InvalidUnion);
             }
-            for id in variants {
-                get(definitions, *id)?;
+            for variant in variants {
+                if matches!(variant, Ty::Union { .. }) {
+                    return Err(DefinitionError::InvalidUnion);
+                }
+                check_references(definitions, variant)?;
             }
         }
         Ty::Result { value, error } => {
@@ -53,7 +54,9 @@ pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             check_references(definitions, error)?;
         }
         Ty::Defined { definition } => {
-            get(definitions, *definition)?;
+            if get(definitions, *definition)?.name().is_none() {
+                return Err(DefinitionError::NonRecord(*definition));
+            }
         }
         Ty::Pointer { pointee } => check_references(definitions, pointee)?,
         Ty::Span { element } | Ty::Array { element, .. } => check_references(definitions, element)?,
@@ -87,14 +90,8 @@ fn check_inline(
 ) -> Result<(), DefinitionError> {
     match ty {
         Ty::Union { variants } => {
-            for definition in variants {
-                check_inline(
-                    definitions,
-                    &Ty::Defined {
-                        definition: *definition,
-                    },
-                    active,
-                )?;
+            for variant in variants {
+                check_inline(definitions, variant, active)?;
             }
         }
         Ty::Result { value, error } => {
@@ -129,7 +126,7 @@ mod tests {
     fn invalid_and_unfinished_definitions_are_distinct() {
         let id = TypeId::from_index(0);
         assert_eq!(body(&[], id), Err(DefinitionError::Invalid(id)));
-        let table = [TypeDef {
+        let table = [TypeDef::Nominal {
             name: "Pending".into(),
             body: None,
         }];

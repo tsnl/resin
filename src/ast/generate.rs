@@ -349,6 +349,18 @@ impl<'a> AstGen<'a> {
         let mut cursor = node.walk();
         for child in node.children_by_field_name("suffix", &mut cursor) {
             match child.kind() {
+                "unwrap_suffix" => {
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::Unwrap {
+                            value: Box::new(base),
+                        },
+                        span,
+                    );
+                }
                 "try_suffix" => {
                     let span = Span {
                         start: base.span.start,
@@ -440,6 +452,7 @@ impl<'a> AstGen<'a> {
                 },
                 span,
             ),
+            "unary_type" if self.text(child) == "None" => Spanned::new(TermKind::None, span),
             "number" => Spanned::new(
                 TermKind::Num {
                     value: self.text(child).into(),
@@ -454,13 +467,19 @@ impl<'a> AstGen<'a> {
                     .map(|arm| {
                         let variant = arm.child_by_field_name("variant").unwrap_or(arm);
                         let variant = match variant.kind() {
+                            "None" => MatchVariant::Type(Spanned::new(
+                                TypeKind::Atom {
+                                    name: Ident::new("None".into(), self.span(variant)),
+                                },
+                                self.span(variant),
+                            )),
                             "ok" => MatchVariant::Ok,
                             "err" => MatchVariant::Err,
                             _ => MatchVariant::Type(self.gen_type(variant)),
                         };
                         MatchArm {
                             variant,
-                            name: self.ident(arm.child_by_field_name("name").unwrap_or(arm)),
+                            name: arm.child_by_field_name("name").map(|node| self.ident(node)),
                             body: self.gen_body(arm.child_by_field_name("body").unwrap_or(arm)),
                         }
                     })

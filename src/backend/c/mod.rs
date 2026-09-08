@@ -52,7 +52,7 @@ pub(crate) fn emit_verified(
     shaders: &[Shader],
 ) -> Result<String, Error> {
     let ir::verify::Verified { module, analysis } = checked;
-    let types = Types::collect(module, shaders, analysis);
+    let types = Types::new(module, &analysis.types, shaders);
     let entry = entry::emit(&types, entry)?;
     let mut out =
         "#include <resin_runtime.h>\n#include <stddef.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n#include <float.h>\n"
@@ -86,7 +86,7 @@ pub(crate) fn emit_verified(
         )
         .unwrap();
     }
-    for (index, flow) in analysis.iter().enumerate() {
+    for (index, flow) in analysis.functions.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }
     out.push_str("int main(void) {\n  atexit(resin_cleanup);\n");

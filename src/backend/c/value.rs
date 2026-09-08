@@ -4,7 +4,7 @@ use super::types::Types;
 
 pub(super) fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> String {
     match value {
-        Value::Unit => "0".into(),
+        Value::None | Value::Unit => "0".into(),
         Value::Type { ty } => types.id(ty).to_string(),
         Value::Bool { value } => value.to_string(),
         Value::Int8 { value } => signed(i64::from(*value)),

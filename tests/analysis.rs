@@ -5,6 +5,18 @@ use resin::{
 use std::path::PathBuf;
 
 #[test]
+fn option_payload_fields_remain_available_in_incomplete_code() {
+    let source = "struct Item { count: int }; def f(value: Item | None) = { value!.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let items = project.analyze().completions(
+        &project.path("main.resin"),
+        source.find("value!.").unwrap() + 7,
+    );
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].detail, "count: int");
+}
+
+#[test]
 fn pointer_hover_and_completion_use_angle_bracket_types() {
     let source = "def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
     let project = Project::new(&[("main.resin", source)]);

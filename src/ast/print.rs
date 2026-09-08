@@ -143,6 +143,7 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
+        TermKind::Unwrap { value } => list_sp("unwrap", term.span, vec![sexp_term(value)]),
         TermKind::Try { value } => list_sp("try", term.span, vec![sexp_term(value)]),
         TermKind::Match { value, arms } => {
             let mut items = vec![sexp_term(value)];
@@ -154,7 +155,11 @@ fn sexp_term(term: &Term) -> SExp {
                 };
                 list(
                     "arm",
-                    vec![variant, symbol(arm.name.val.as_ref()), sexp_term(&arm.body)],
+                    vec![
+                        variant,
+                        symbol(arm.name.as_ref().map_or("_", |name| name.val.as_ref())),
+                        sexp_term(&arm.body),
+                    ],
                 )
             }));
             list_sp("match", term.span, items)
@@ -190,6 +195,7 @@ fn sexp_term(term: &Term) -> SExp {
             items.push(sexp_term(tail));
             list_sp("block", term.span, items)
         }
+        TermKind::None => symbol("None"),
         TermKind::Unit => list_sp("unit", term.span, vec![]),
         TermKind::Call { func, arg } => {
             list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])
