@@ -116,7 +116,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
-  Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
+  Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation
+  index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
 - Arrays and `Span<T>` provide indexing with `items.at(index)`, returning `Ptr<T>`;

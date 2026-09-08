@@ -583,8 +583,8 @@ fn decorated_functions_and_their_helpers_remain_host_callable() {
     runs(
         r#"export { main };
         def twice(i: uint) -> uint = { i * uint(2) };
-        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { twice(i) }; };
-        def main() -> int = { var f = kernel; var output = 0_ui; f(21_ui, &output); if (output == 42_ui) { 0 } else { 1 } };
+        @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { twice(i) }; };
+        def main() -> int = { var f = kernel; var output = 0_ui; f(21_ul, &output); if (output == 42_ui) { 0 } else { 1 } };
     "#,
         0,
     );
@@ -607,10 +607,10 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             initialize(particles, 54321_ui);
             valid := valid && particle.x != first.x && particle.vx != first.vx;
             valid := valid && particle.x >= -24_f && particle.x < 24_f && particle.y >= -30_f && particle.y < 30_f && particle.z >= 0_f && particle.z < 50_f && particle.vx >= -6_f && particle.vx < 6_f && particle.vy >= -6_f && particle.vy < 6_f && particle.vz >= -6_f && particle.vz < 6_f;
-            var params = Params { count = 1_ui, dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };
+            var params = Params { dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };
             var steps = 0;
             while (steps < 2000) {
-                kernel(0_ui, &params);
+                kernel(0_ul, &params);
                 valid := valid && particle.x > -100_f && particle.x < 100_f && particle.y > -100_f && particle.y < 100_f && particle.z > -100_f && particle.z < 100_f;
                 steps := steps + 1;
             };
@@ -862,4 +862,12 @@ fn interacting_features_execute_equivalently_on_cpu() {
             0,
         );
     }
+}
+
+#[test]
+fn compute_entry_preserves_ulong_indices_on_the_host() {
+    runs(
+        "export { main }; @compute_shader def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; }; def main() -> int = { var output = 0_ul; kernel(4294967297_ul, &output); if (output == 4294967297_ul) { 0 } else { 1 } };",
+        0,
+    );
 }

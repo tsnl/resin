@@ -50,7 +50,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
                 end = old.end + uint (2)
             };
         };
-        def kernel (index: uint, root: Ptr<Params>) -> () = {
+        def kernel (invocation: ulong, root: Ptr<Params>) -> () = { var index = uint(invocation);
             if (index < root.count) {
                 var p = at(root.values, index);
                 bump(p, index)
@@ -59,8 +59,8 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         def main () -> int = {
             var value = Payload { tag = uint (10), data = Data { marker = uint (99), wide = ulong (7), amount = float32 (1.25) }, end = uint (20) };
             var root = Params { count = uint (1), values = &value, tail = float32 (0.75) };
-            kernel(uint (0), &root);
-            kernel(uint (1), &root);
+            kernel(0_ul, &root);
+            kernel(1_ul, &root);
             if (value.tag == uint (11) && value.data.marker == uint (0) && value.data.wide == ulong (4294967304) && value.data.amount == float32 (1.75) && value.end == uint (22) && root.tail == float32 (0.75)) { 0 } else { 1 }
         };
     "#,
@@ -185,7 +185,6 @@ fn particles_compute_then_render_from_the_same_buffer() {
     }
     #[repr(C)]
     struct Params {
-        count: u32,
         dt: f32,
         yaw_cos: f32,
         yaw_sin: f32,
@@ -213,10 +212,10 @@ fn particles_compute_then_render_from_the_same_buffer() {
         vz: 106.0,
     };
     assert_eq!(size_of::<Particle>(), 24);
-    assert_eq!(size_of::<Params>(), 56);
+    assert_eq!(size_of::<Params>(), 48);
     // The default million-particle draw catches quadratic per-vertex searches.
     // CI uses fewer particles while retaining compute/render synchronization checks.
-    // An extra workgroup exercises the count guard without touching the sentinel.
+    // An extra workgroup exercises the span length guard without touching the sentinel.
     unsafe {
         let compute = gpu.create_compute_pipeline(&compute).unwrap();
         let graphics = gpu.create_graphics_pipeline(&vertex, &fragment).unwrap();
@@ -250,7 +249,6 @@ fn particles_compute_then_render_from_the_same_buffer() {
         let first = values[0];
         let last = values[count - 1];
         root.host_pointer().cast::<Params>().write(Params {
-            count: count as u32,
             dt: 0.005,
             yaw_cos: 1.0,
             yaw_sin: 0.0,
@@ -314,7 +312,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
             vy: 0.0,
             vz: 0.0,
         });
-        (*root.host_pointer().cast::<Params>()).count = 1;
+        (*root.host_pointer().cast::<Params>()).particle_length = 1;
         (*root.host_pointer().cast::<Params>()).radius = 0.5;
         let mut commands = gpu.start_command_recording().unwrap();
         commands
@@ -394,7 +392,7 @@ fn fragment_shaders_read_typed_root_parameters() {
 #[test]
 fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     compute_values(
-        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(index: uint, root: Ptr<PixelRoot>) = { if (index < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(index).* := { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total }; }; };",
+        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var index = uint(invocation); if (index < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(index).* := { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total }; }; };",
         |index| index * (index + 1) / 2,
     );
 }
@@ -402,7 +400,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
 #[test]
 fn shader_results_propagate_and_match_union_payloads_on_device() {
     compute_values(
-        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; };",
+        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var i = uint(invocation); if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; };",
         |index| {
             if index == 0 {
                 0
@@ -421,7 +419,7 @@ fn optional_unwrap_stops_shader_callers_on_none() {
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
         def choose(i: uint) -> uint = { var value: uint | None; value := if ((i & 1_ui) == 0_ui) { i } else { None }; value! };
-        def kernel(i: uint, root: Ptr<Root>) = {
+        def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var output = Span<uint> { data = root.pixels, length = 67_ul };
                 output(i).* := 7_ui;
@@ -444,7 +442,7 @@ fn none_elimination_preserves_shader_union_members() {
         def read(i: uint) -> uint = {
             match (choose(i)!) { uint(n) => { n + 1_ui }, bool(b) => { if (b) { 42_ui } else { 0_ui } } }
         };
-        def kernel(i: uint, root: Ptr<Root>) = {
+        def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var output = Span<uint> { data = root.pixels, length = 67_ul };
                 output(i).* := 7_ui;
@@ -470,7 +468,7 @@ fn inherent_methods_execute_in_shader_helpers() {
             def add(self: Counter, n: uint, m: uint) -> Counter = { Counter { value = self.value + n + m } };
             def read(self: Counter) -> uint = { self.value };
         }
-        def kernel(id: uint, root: Ptr<Root>) = {
+        def kernel(invocation: ulong, root: Ptr<Root>) = { var id = uint(invocation);
             if (id < root.count) {
                 var counter = Counter.new(id);
                 var incremented = counter.add(1_ui, 2_ui);
@@ -493,7 +491,7 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
             var previous = values.at(0_ul).replace(i);
             values.at(ulong(i & 1_ui)).* + values.at(ulong(i & 1_ui)).* + previous - 10_ui
         };
-        def kernel(i: uint, root: Ptr<Root>) = {
+        def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var holder = { values = Span<uint> { data = root.pixels, length = 67_ul } };
                 holder.values.at(ulong(i)).* := 7_ui;
@@ -564,10 +562,25 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let Some(gpu) = gpu() else { return };
     drop(gpu);
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    for name in ["gradient", "triangle"] {
+    for (name, dimensions) in [
+        ("gradient", Some((256, 256))),
+        ("gradient", Some((17, 9))),
+        ("triangle", None),
+    ] {
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
             .join(format!("{name}.resin"));
+        let source = if let Some((width, height)) = dimensions {
+            let text = std::fs::read_to_string(source)
+                .unwrap()
+                .replace("width = 256_ui", &format!("width = {width}_ui"))
+                .replace("height = 256_ui", &format!("height = {height}_ui"));
+            let source = temp.path().join("gradient.resin");
+            std::fs::write(&source, text).unwrap();
+            source
+        } else {
+            source
+        };
         let executable = temp
             .path()
             .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
@@ -604,12 +617,20 @@ fn ordinary_resin_programs_render_and_write_pngs() {
             String::from_utf8(output.stdout).unwrap(),
             format!("wrote {name}.png\n")
         );
-    }
-    let image = image_read_png(temp.path().join("gradient.png"), 4).unwrap();
-    assert_eq!((image.width, image.height), (256, 256));
-    assert_eq!(image.pixels.len(), 256 * 256 * 4);
-    for (i, pixel) in image.pixels.chunks_exact(4).enumerate() {
-        assert_eq!(pixel, &[i as u8, (i >> 8) as u8, 64, 255], "pixel {i}");
+        if let Some((width, height)) = dimensions {
+            let path = temp.path().join("gradient.png");
+            let image = image_read_png(&path, 4).unwrap();
+            assert_eq!((image.width, image.height), (width, height));
+            assert_eq!(image.pixels.len(), (width * height * 4) as usize);
+            for (i, pixel) in image.pixels.chunks_exact(4).enumerate() {
+                assert_eq!(
+                    pixel,
+                    &[i as u8, (i >> 8) as u8, 64, 255],
+                    "{width}x{height} pixel {i}"
+                );
+            }
+            std::fs::remove_file(path).unwrap();
+        }
     }
     let image = image_read_png(temp.path().join("triangle.png"), 4).unwrap();
     let reference = image_read_png(
@@ -649,7 +670,7 @@ fn shader_array_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel };
         def read(i: uint) -> uint = { var values = [uint(10), uint(20), uint(30)]; values(i).* };
-        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < 3_ui) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := { read(i) + uint(1) }; }; };"#,
+        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var i = uint(invocation); if (i < 3_ui) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := { read(i) + uint(1) }; }; };"#,
         |i| if i < 3 { (i + 1) * 10 + 1 } else { u32::MAX },
     );
 }
@@ -660,7 +681,7 @@ fn shader_span_indexing_with_an_explicit_bounds_guard() {
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
         def write(i: uint, pixels: Span<uint>) = { pixels(i).* := uint(42); };
-        @compute_shader def kernel(i: uint, root: Ptr<Root>) = {
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             var pixels = Span<uint> { data = root.pixels, length = ulong(3) };
             if (ulong(i) < pixels.length) {
                 write(i, pixels);
@@ -675,7 +696,7 @@ fn shader_span_indexing_with_an_explicit_bounds_guard() {
 fn numeric_suffixes_and_one_armed_if_execute_on_device() {
     compute_values(
         r#"export { kernel };
-        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := {
+        struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var i = uint(invocation); if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := {
             var result = 0_ui;
             if ((i & 1_ui) == 0_ui) { result := i + 10_ui; };
             if (1.5_f + 2.5_f == 4_f && 42_ul > 0_ul) { result := result + 1_ui; };
@@ -738,7 +759,7 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
         "int(1.0_f / 0.0_f)",
     ] {
         let source = format!(
-            "export {{ kernel }}; def invalid() = {{ {expression}; }}; def kernel(i: uint, p: Ptr<uint>) = {{ if (i == 0_ui) {{ invalid(); p.* := 99_ui; }}; }};"
+            "export {{ kernel }}; def invalid() = {{ {expression}; }}; def kernel(invocation: ulong, p: Ptr<uint>) = {{ var i = uint(invocation); if (i == 0_ui) {{ invalid(); p.* := 99_ui; }}; }};"
         );
         execute_interaction(&source, [0, 0]);
     }
@@ -750,7 +771,7 @@ fn byte_spans_read_and_write_device_storage() {
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
         def read(bytes: Span<ubyte>, index: ulong) -> ubyte = { bytes.at(index).* };
-        @compute_shader def kernel(i: uint, root: Ptr<Root>) = {
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var bytes = Span<ubyte> { data = Ptr<ubyte>(root.pixels), length = ulong(root.count) * 4_ul };
                 var offset = ulong(i) * 4_ul;

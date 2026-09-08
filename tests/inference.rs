@@ -249,7 +249,7 @@ fn span_construction_and_indexing_infer_element_and_pointer_types() {
     );
     assert_eq!(
         result(
-            "@compute_shader def kernel(i: uint, output: Ptr<uint>) -> _ = { output.* := { i }; }; def artifact() -> _ = { kernel.spirv };",
+            "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) -> _ = { var i = uint(invocation); output.* := { i }; }; def artifact() -> _ = { kernel.spirv };",
             "artifact"
         ),
         Ty::shader()
