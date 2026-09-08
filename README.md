@@ -38,8 +38,12 @@ MinGW and cross-compiling Resin programs are not tested. macOS enables Vulkan po
 enumeration and the portability-subset extension when available, but does not relax the runtime's
 Vulkan 1.3 feature requirements. Some MoltenVK devices and presentation paths may still report
 `unsupported`; macOS build support is not a promise that every GPU demo works.
-Native CI builds and tests the compiler, runtime, and language server on all three systems
-without opening windows.
+Native CI builds and tests the compiler, runtime, and language server without opening windows.
+Pull requests and pushes to `main` run on Linux; manually dispatching the `Build` workflow
+also checks Windows and macOS. CI caches Rust dependencies and uses `cargo nextest` to run
+tests across suites concurrently, followed by `cargo test --doc` for documentation tests.
+CI omits Rust debug symbols to reduce compile and native-link work while retaining debug
+assertions and overflow checks. Local Cargo profile defaults are unchanged.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
 After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
