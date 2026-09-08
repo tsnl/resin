@@ -418,7 +418,7 @@ export default grammar({
         field("cond", $.term),
         ")",
         field("then", $.closed_term),
-        optional(seq("else", field("else", $.closed_term))),
+        optional(seq("else", field("else", choice($.closed_term, $.if_term)))),
       ),
 
     //

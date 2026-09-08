@@ -727,7 +727,10 @@ impl<'a> AstGen<'a> {
                     },
                 )
             },
-            |node| self.gen_closed_term(node),
+            |node| match node.kind() {
+                "if_term" => self.gen_if_term(node),
+                _ => self.gen_closed_term(node),
+            },
         );
         Spanned::new(
             TermKind::If {

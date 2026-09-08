@@ -190,6 +190,14 @@ fn shader_decorators_stay_on_their_own_lines() {
 }
 
 #[test]
+fn else_if_chains_keep_else_and_if_together() {
+    check(
+        "def f(x:int)->int={if(x==0){1}else if(x==1){2}else{3}};",
+        "def f(x: int) -> int = {\n\tif (x == 0) {\n\t\t1\n\t} else if (x == 1) {\n\t\t2\n\t} else {\n\t\t3\n\t}\n};\n",
+    );
+}
+
+#[test]
 fn numeric_suffixes_and_one_armed_if_keep_their_spelling() {
     check(
         "def main()={var a=42L;var b=-42l;if(a>0L){var c=1.5f;};};",

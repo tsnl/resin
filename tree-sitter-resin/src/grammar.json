@@ -2368,8 +2368,17 @@
                   "type": "FIELD",
                   "name": "else",
                   "content": {
-                    "type": "SYMBOL",
-                    "name": "closed_term"
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "closed_term"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "if_term"
+                      }
+                    ]
                   }
                 }
               ]

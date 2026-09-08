@@ -68,25 +68,19 @@ def positive(value: float32) -> float32 = {
 def speed_heat(squared_speed: float32) -> float32 = {
 	var heat = if (squared_speed < 2025.0f) {
 		0.25f * (squared_speed - 400.0f) / 1625.0f
+	} else if (squared_speed < 4225.0f) {
+		0.25f + 0.25f * (squared_speed - 2025.0f) / 2200.0f
+	} else if (squared_speed < 13225.0f) {
+		0.5f + 0.25f * (squared_speed - 4225.0f) / 9000.0f
 	} else {
-		if (squared_speed < 4225.0f) {
-			0.25f + 0.25f * (squared_speed - 2025.0f) / 2200.0f
-		} else {
-			if (squared_speed < 13225.0f) {
-				0.5f + 0.25f * (squared_speed - 4225.0f) / 9000.0f
-			} else {
-				0.75f + 0.25f * (squared_speed - 13225.0f) / 35175.0f
-			}
-		}
+		0.75f + 0.25f * (squared_speed - 13225.0f) / 35175.0f
 	};
 	if (heat < 0.0f) {
 		0.0f
+	} else if (heat > 1.0f) {
+		1.0f
 	} else {
-		if (heat > 1.0f) {
-			1.0f
-		} else {
-			heat
-		}
+		heat
 	}
 };
 
@@ -233,12 +227,10 @@ def default_camera() -> Camera = {
 def clamp(value: float32, low: float32, high: float32) -> float32 = {
 	if (value < low) {
 		low
+	} else if (value > high) {
+		high
 	} else {
-		if (value > high) {
-			high
-		} else {
-			value
-		}
+		value
 	}
 };
 
