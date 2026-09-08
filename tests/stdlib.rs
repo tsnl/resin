@@ -54,7 +54,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 continue;
             };
             let name = declaration.split('(').next().unwrap();
-            let (owner, method) = match name {
+            let (receiver, method) = match name {
                 "gpu_create" => ("GpuOwner", "new"),
                 "gpu_create_at" => ("GpuOwner", "new_at"),
                 "gpu_device_count" => ("GpuOwner", "device_count"),
@@ -92,13 +92,12 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "gpu_present" => ("GpuOwner", "present"),
                 _ => panic!("missing method mapping for native operation: {name}"),
             };
-            let definition = module
-                .types
+            let qualified = format!("{receiver}.{method}");
+            let function = module
+                .functions
                 .iter()
-                .find(|t| t.name.as_ref() == owner)
-                .unwrap();
-            let method = &definition.methods[method];
-            let function = &module.functions[method.function.index()];
+                .find(|function| function.name.as_deref() == Some(qualified.as_str()))
+                .unwrap_or_else(|| panic!("missing lowered function {qualified}"));
             assert!(function.foreign.is_none(), "{name}");
             assert!(matches!(function.result, ir::Ty::Result { .. }), "{name}");
             checked += 1;
