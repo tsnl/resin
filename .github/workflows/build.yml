@@ -30,12 +30,12 @@ jobs:
           cache-dependency-path: tree-sitter-resin/package-lock.json
       - name: Install grammar check dependencies
         run: npm ci --ignore-scripts
-      - name: Check grammar types
-        run: npm run typecheck
-      - name: Lint grammar
-        run: npm run lint
       - name: Check grammar formatting
         run: npm run format:check
+      - name: Lint grammar
+        run: npm run lint
+      - name: Check grammar types
+        run: npm run typecheck
 
   native:
     env:
@@ -87,29 +87,32 @@ jobs:
         with:
           key: ${{ matrix.os }}
           cache-bin: false
-      - name: Install test runner
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
-        with:
-          tool: cargo-nextest@0.9.143
+      # Fail on lint before paying for executable builds and test execution.
+      # Keep the default success() condition so earlier failures stop this job.
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Build compiler, runtime, and language server
         run: cargo build --workspace --all-features --locked
       - name: Check example formatting
         shell: bash
         run: ./target/debug/resin --format --check examples
+      # Nextest does not run rustdoc tests. Check these before integration tests.
+      - name: Test documentation
+        run: cargo test --workspace --all-features --locked --doc
       - name: Run a host program
         shell: bash
         run: ./target/debug/resin examples/eg001.resin
+      - name: Install test runner
+        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
+        with:
+          tool: cargo-nextest@0.9.143
       - name: Test without opening windows
         env:
           RESIN_TEST_PARTICLE_COUNT: 10000
           RESIN_REQUIRE_GLSLC: ${{ runner.os == 'Linux' && '1' || '0' }}
           RESIN_REQUIRE_GPU: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: cargo nextest run --workspace --all-features --locked --no-fail-fast -- --skip windows_present_resize_and_release_resources --skip resin_window_example_uses_bundled_glfw --skip resin_particles_example_computes_and_presents
-      # Nextest does not run rustdoc tests.
-      - name: Test documentation
-        run: cargo test --workspace --all-features --locked --doc
-      - name: Lint
-        if: ${{ !cancelled() }}
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      # This diagnostic changes Cargo's runtime build flags; keep it last to
+      # avoid forcing a second runtime build before tests.
       - name: Runtime native libraries
         run: cargo rustc -p resin-runtime --lib --locked -- --print native-static-libs
