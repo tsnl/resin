@@ -684,6 +684,35 @@ fn suffixed_literals_execute_with_their_selected_widths() {
 }
 
 #[test]
+fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
+    runs(
+        r#"export { main };
+    def condition(calls: Ptr<int>, value: int, expected: int) -> bool = {
+        calls.* := calls.* + 1;
+        value == expected
+    };
+    def classify(value: int, calls: Ptr<int>) -> int = {
+        if (condition(calls, value, 0)) { 10 }
+        else if (condition(calls, value, 1)) { 20 }
+        else if (condition(calls, value, 2)) { 30 }
+        else { 40 }
+    };
+    def main() -> int = {
+        var calls = 0;
+        var a = classify(0, &calls);
+        var b = classify(1, &calls);
+        var c = classify(2, &calls);
+        var d = classify(3, &calls);
+        var value = 0;
+        if (1 == 0) { value := 100; } else if (1 == 1) { value := value + 1; };
+        if (1 == 0) { value := 100; } else if (1 == 0) { value := 100; };
+        if (a == 10 && b == 20 && c == 30 && d == 40 && calls == 9 && value == 1) { 0 } else { 1 }
+    };"#,
+        0,
+    );
+}
+
+#[test]
 fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
     runs(
         r#"export { main };

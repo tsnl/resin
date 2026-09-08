@@ -338,6 +338,28 @@ fn suffixed_literals_reject_overflow_and_invalid_integer_forms() {
 }
 
 #[test]
+fn else_if_chains_infer_results_and_require_unit_without_a_final_else() {
+    assert_eq!(
+        result(
+            "def f() -> _ = { if (1 == 0) { 1 } else if (1 == 1) { 2 } else { 3 } };",
+            "f"
+        ),
+        Ty::Int32,
+    );
+    assert_eq!(
+        result(
+            "def f() -> _ = { if (1 == 0) {} else if (1 == 1) {} };",
+            "f"
+        ),
+        Ty::Unit,
+    );
+    rejects(
+        "def f() -> _ = { if (1 == 0) { 1 } else if (1 == 1) { 2 } };",
+        "TypeMismatch",
+    );
+}
+
+#[test]
 fn one_armed_if_infers_unit_and_requires_a_unit_body() {
     assert_eq!(result("def f() -> _ = { if (1 == 1) {} };", "f"), Ty::Unit);
     rejects("def f() -> _ = { if (1 == 1) { 42 } };", "TypeMismatch");
