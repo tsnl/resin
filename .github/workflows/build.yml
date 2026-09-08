@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   grammar:
     name: Grammar checks
@@ -34,7 +38,11 @@ jobs:
         run: npm run format:check
 
   native:
-    needs: grammar
+    env:
+      # Keep assertions and overflow checks, but avoid generating and repeatedly
+      # linking debug symbols into the test programs' static runtime archive.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_INCREMENTAL: 0
     strategy:
       fail-fast: false
       matrix:
@@ -44,11 +52,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - name: Linux dependencies
+      - name: Linux dependencies and Rust toolchain
         if: runner.os == 'Linux'
         run: |
+          # Rustup installs the pinned toolchain on first use. Overlap that
+          # download with apt instead of waiting for the Rust cache step.
+          rustc --version &
+          toolchain_pid=$!
           sudo apt-get update
           sudo apt-get install -y cmake pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc mesa-vulkan-drivers
+          wait "$toolchain_pid"
       - name: Select the Linux software Vulkan driver
         if: runner.os == 'Linux'
         shell: bash
@@ -69,19 +82,34 @@ jobs:
             "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
           }
           "$env:ProgramFiles\LLVM\bin" >> $env:GITHUB_PATH
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ${{ matrix.os }}
+          cache-bin: false
+      - name: Install test runner
+        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
+        with:
+          tool: cargo-nextest@0.9.143
       - name: Build compiler, runtime, and language server
-        run: cargo build --workspace --locked
+        run: cargo build --workspace --all-features --locked
       - name: Check example formatting
-        run: cargo run --locked -- --format --check examples
-      - name: Runtime native libraries
-        run: cargo rustc -p resin-runtime --lib -- --print native-static-libs
+        shell: bash
+        run: ./target/debug/resin --format --check examples
       - name: Run a host program
-        run: cargo run --locked -- examples/eg001.resin
+        shell: bash
+        run: ./target/debug/resin examples/eg001.resin
       - name: Test without opening windows
         env:
+          RESIN_TEST_PARTICLE_COUNT: 10000
           RESIN_REQUIRE_GLSLC: ${{ runner.os == 'Linux' && '1' || '0' }}
           RESIN_REQUIRE_GPU: ${{ runner.os == 'Linux' && '1' || '0' }}
-        run: cargo test --workspace --all-features --locked --no-fail-fast -- --skip windows_present_resize_and_release_resources --skip resin_window_example_uses_bundled_glfw --skip resin_particles_example_computes_and_presents
+        run: cargo nextest run --workspace --all-features --locked --no-fail-fast -- --skip windows_present_resize_and_release_resources --skip resin_window_example_uses_bundled_glfw --skip resin_particles_example_computes_and_presents
+      # Nextest does not run rustdoc tests.
+      - name: Test documentation
+        run: cargo test --workspace --all-features --locked --doc
       - name: Lint
         if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Runtime native libraries
+        run: cargo rustc -p resin-runtime --lib --locked -- --print native-static-libs
