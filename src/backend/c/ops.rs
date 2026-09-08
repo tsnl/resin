@@ -8,6 +8,9 @@ pub(super) fn builtin(
     args: &[Slot],
     result: &Ty,
 ) -> Result<String, Error> {
+    if name == "string_from_str" {
+        return super::print::from_str(types, args, result);
+    }
     if name == "fmt" {
         return super::print::format(types, args, result);
     }

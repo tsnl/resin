@@ -8,6 +8,7 @@ pub(crate) enum BuiltinRule {
     Boolean,
     Print,
     Format,
+    StringFromStr,
 }
 
 impl BuiltinRule {
@@ -21,6 +22,7 @@ impl BuiltinRule {
             "&&" | "||" => (Self::Boolean, arity == 2),
             "print" => (Self::Print, arity == 1),
             "fmt" => (Self::Format, arity == 1),
+            "string_from_str" => (Self::StringFromStr, arity == 1),
             _ => {
                 return Err(TypeError::new(TypeErrorKind::UnknownBuiltin {
                     name: name.into(),

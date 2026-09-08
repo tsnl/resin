@@ -19,9 +19,9 @@ impl WindowOwner {
 	def key_escape() -> int = {
 		256
 	};
-	def new(width: uint, height: uint, title: Ptr<ubyte>) -> Result<Window, RuntimeError> = {
+	def new(width: uint, height: uint, title: String) -> Result<Window, RuntimeError> = {
 		var window = Ptr<ResinWindow>(ulong(0));
-		RuntimeStatus.from_code(resin_window_create(width, height, title, &window))?;
+		RuntimeStatus.from_code(resin_window_create(width, height, title.bytes.data, &window))?;
 		ok(Window { handle = window })
 	};
 	def poll_events(self: Window) -> Result<(), RuntimeError> = {

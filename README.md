@@ -410,6 +410,8 @@ Literal storage may be shared; treat it as read-only.
 wrapper with a `bytes: Arc<Span<ubyte>>` field. Its allocation contains both the span and its bytes,
 plus a trailing NUL. Copying a String retains the allocation; the final owner releases it.
 Extracting a raw span or pointer does not retain that owner.
+`String.from_str(span)` copies a byte span verbatim into an owned String; braces are ordinary
+bytes, and the source need not have a NUL terminator.
 
 ```resin
 export { main };
@@ -799,7 +801,7 @@ they do not decode typed text or implement text composition.
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `std/window.resin`:
 
-- `Window.new(...)` returns a shared window owner; `window.poll_events()` processes
+- `Window.new(width, height, title: String)` returns a shared window owner; use `String.from_str("Resin")` for a literal title. `window.poll_events()` processes
   GLFW events. Close state, framebuffer size, resizing, and GLFW key codes
   are available through the corresponding window methods. Predicates return `bool`;
   fallible operations return Results, including framebuffer size as `(width, height)`.

@@ -370,3 +370,39 @@ fn literal_spans_survive_returns_and_keep_explicit_nuls() {
         b"a\0b",
     );
 }
+
+#[test]
+fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
+    prints(
+        r#"
+        export { main };
+        type Caption = String;
+        def copied() -> String = {
+            var source = [65B, 0B, 66B, 99B];
+            var result = Caption.from_str(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3L });
+            source(0L).* := 90B;
+            result
+        };
+        def main() -> int = {
+            var weak = Weak<Span<ubyte>>();
+            {
+                var text = copied();
+                var alias = text;
+                weak := text.bytes.downgrade();
+                text := String.from_str("{0}} braces");
+                print(alias);
+                print(text);
+                var end = Ptr<ubyte>(ulong(alias.bytes.data) + 3L);
+                if (alias.bytes.length != 3L || end.* != 0B) { print("bad terminator"); };
+                var empty = String.from_str(Span<ubyte> { data = Ptr<ubyte>(0L), length = 0L });
+                if (empty.bytes.length != 0L || empty.bytes.data.* != 0B) { print("bad empty string"); };
+            };
+            match (weak.upgrade()) {
+                None => { 0 },
+                Arc<Span<ubyte>>(live) => { 1 },
+            }
+        };
+    "#,
+        b"A\0B{0}} braces",
+    );
+}

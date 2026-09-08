@@ -56,6 +56,12 @@ impl TyperContext {
                 }));
             }
             BuiltinRule::Format => self.type_format(&args[0])?,
+            BuiltinRule::StringFromStr => {
+                self.same(&Ty::byte_span(), &args[0])?;
+                self.string_type.clone().ok_or_else(|| {
+                    TypeError::new(TypeErrorKind::UnknownBuiltin { name: name.into() })
+                })?
+            }
             BuiltinRule::Boolean => {
                 for arg in args {
                     self.as_bool(arg)?;

@@ -376,7 +376,7 @@ impl Inference<'_> {
                     .map_err(|e| GenerateError::typing(span, e))?;
                 match rule {
                     BuiltinRule::Print => self.solver.unify(out, &Ty::Unit.into(), span)?,
-                    BuiltinRule::Format => self.solver.unify(
+                    BuiltinRule::Format | BuiltinRule::StringFromStr => self.solver.unify(
                         out,
                         &self
                             .typer

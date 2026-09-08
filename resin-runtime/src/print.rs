@@ -81,10 +81,25 @@ pub unsafe extern "C" fn resin_format(
     let mut bytes = Vec::new();
     unsafe { render(&mut bytes, &parts, args) }
         .unwrap_or_else(|error| fail(&format!("format: {error}")));
+    owned_bytes(&bytes)
+}
+
+/// Copy a byte span verbatim into an owned, NUL-terminated Arc<Span<ubyte>>.
+/// # Safety
+/// `data` must be readable for `length` bytes; NULL is allowed for an empty span.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_string_from_str(
+    data: *const u8,
+    length: usize,
+) -> *mut crate::shared::ResinArc {
+    owned_bytes(unsafe { slice(data, length) })
+}
+
+fn owned_bytes(bytes: &[u8]) -> *mut crate::shared::ResinArc {
     let size = size_of::<ResinPrintBytes>()
         .checked_add(bytes.len())
         .and_then(|n| n.checked_add(1))
-        .unwrap_or_else(|| fail("formatted string is too large"));
+        .unwrap_or_else(|| fail("string is too large"));
     unsafe extern "C" fn destroy(_: *mut std::ffi::c_void) {}
     let owner = crate::shared::resin_arc_new(size, align_of::<ResinPrintBytes>(), destroy);
     unsafe {
