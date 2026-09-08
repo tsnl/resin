@@ -54,12 +54,12 @@ pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<St
     )
 }
 
-pub(super) fn from_str(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
+pub(super) fn from_bytes(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
     let [arg] = args else {
-        return Err(Error("String.from_str expects one byte span".into()));
+        return Err(Error("string copy expects one str or byte span".into()));
     };
-    if arg.ty != Ty::byte_span() {
-        return Err(Error("String.from_str expects Span<ubyte>".into()));
+    if arg.ty != Ty::Str && arg.ty != Ty::byte_span() {
+        return Err(Error("string copy expects str or Span<ubyte>".into()));
     }
     let (data, length) = bytes(types, &arg.ty, &arg.expr)?;
     string(
@@ -86,7 +86,7 @@ fn string(types: &Types<'_>, result: &Ty, allocation: String) -> Result<String, 
 fn bytes(types: &Types<'_>, ty: &Ty, expr: &str) -> Result<(String, String), Error> {
     let expr = types.unwrap(ty, expr.into());
     match types.shape(ty) {
-        Ty::Span { element } if **element == Ty::UInt8 => {
+        ty if ty == &Ty::Str || ty == &Ty::byte_span() => {
             Ok((format!("({expr}).f0"), format!("({expr}).f1")))
         }
         Ty::Record { fields } if fields.len() == 1 && fields[0].ty == Ty::formatted_bytes() => {
@@ -96,7 +96,7 @@ fn bytes(types: &Types<'_>, ty: &Ty, expr: &str) -> Result<(String, String), Err
             let span = format!("(({} *)resin_arc_data(({expr}).f0))", types.name(pointee));
             Ok((format!("{span}->f0"), format!("{span}->f1")))
         }
-        _ => Err(Error("expected Span<ubyte> or String".into())),
+        _ => Err(Error("expected str, Span<ubyte>, or String".into())),
     }
 }
 
@@ -118,7 +118,7 @@ fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
             "unsigned_value",
             format!("(uint64_t)(uintptr_t)({expr})"),
         ),
-        ty @ (Ty::Span { .. } | Ty::Record { .. }) => {
+        ty @ (Ty::Str | Ty::Span { .. } | Ty::Record { .. }) => {
             let (data, length) = bytes(types, ty, &expr)?;
             (
                 "BYTES",

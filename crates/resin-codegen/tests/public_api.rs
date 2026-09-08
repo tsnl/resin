@@ -139,7 +139,7 @@ fn host_generation_does_not_lower_unrequested_shader_bodies() {
         0..0,
         [
             Instr::Push {
-                value: Value::Bytes {
+                value: Value::Str {
                     value: "host only".as_bytes().to_vec().into(),
                 },
             },
@@ -170,7 +170,7 @@ fn lowering_failure_leaves_existing_outputs_untouched() {
         0..0,
         [
             Instr::Push {
-                value: Value::Bytes {
+                value: Value::Str {
                     value: "host only".as_bytes().to_vec().into(),
                 },
             },

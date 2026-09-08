@@ -118,3 +118,10 @@ fn shader_wrapper(
             .replace("r_entry", &format!("r_fn{index}")),
     )
 }
+
+fn str_storage_error() -> Error {
+    Error(
+        "shader string literals need device-backed storage; pass a Span<ubyte> in the shader root"
+            .into(),
+    )
+}

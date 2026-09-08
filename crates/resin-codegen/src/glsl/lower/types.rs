@@ -32,6 +32,7 @@ impl<'a> Types<'a> {
             return Ok(());
         }
         match ty {
+            Ty::Str => return Err(super::str_storage_error()),
             Ty::Union { .. } | Ty::Result { .. } => {
                 for (_, payload) in ty.payloads().unwrap() {
                     self.register(&payload)?;

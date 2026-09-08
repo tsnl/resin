@@ -135,12 +135,15 @@ NUL and 255, and distinguishes EOF from stream failure. The raw `getchar` bindin
 callers never need to interpret its negative sentinel. These console APIs are for host execution.
 
 
-`Io.stdout().write(text)` and `Io.stderr().write(text)` accept `Span<ubyte> | String`, write
+`Io.stdout().write(text)` and `Io.stderr().write(text)` accept `str | Span<ubyte> | String`, write
 bytes verbatim, flush, and return `Result<(), WriteError>`. Import `std/io.resin` to use them.
 Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
-Literals are spans over static bytes; formatting results own an Arc allocation. InputLine
+Literals have type `str` over static bytes; formatting results own an Arc allocation. Use
+`Span<ubyte>(literal)` when a raw byte view is needed. InputLine
 can be passed as an explicit `Span<ubyte> { data = line.data, length = line.length }` while
 its owner remains live.
 
-`String.from_str(span)` copies bytes without formatting and appends a NUL outside the logical
-length. `Window.new(width, height, title)` takes this owned String, or a String returned by `fmt`.
+`String.from_str(text)` copies a `str` without formatting. `String.from_bytes(span)` copies
+arbitrary raw bytes, including non-UTF-8 data and embedded NULs. Both append a NUL outside the
+logical length. `Window.new(width, height, title)` takes an owned String from either constructor
+or from `fmt`.

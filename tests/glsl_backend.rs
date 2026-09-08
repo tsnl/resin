@@ -377,7 +377,7 @@ fn options_of_plain_values_work_in_shaders() {
 }
 
 #[test]
-fn literal_spans_report_the_missing_shader_storage_support() {
+fn literal_strings_report_the_missing_shader_storage_support() {
     let m = module(
         r#"export { kernel }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); var text = "abc"; output.* := uint(text.length); };"#,
     );

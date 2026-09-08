@@ -632,7 +632,7 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::String { value } => {
-                equate = Some(Ty::byte_span().into());
+                equate = Some(Ty::Str.into());
                 TermKind::String {
                     value: value.clone(),
                 }

@@ -35,7 +35,7 @@ impl Generator {
             typed::TermKind::None => TermKind::Constant { value: Value::None },
             typed::TermKind::Num { value } => self.number(source, value)?,
             typed::TermKind::String { value } => TermKind::Constant {
-                value: Value::Bytes {
+                value: Value::Str {
                     value: value.as_bytes().into(),
                 },
             },
@@ -307,7 +307,7 @@ impl Generator {
             Ty::Array { .. } => Some(Ty::Pointer {
                 pointee: Box::new(func.ty.clone()),
             }),
-            Ty::Span { .. } => Some(func.ty.clone()),
+            Ty::Str | Ty::Span { .. } => Some(func.ty.clone()),
             _ => None,
         };
         if let Some(to) = to {
@@ -438,7 +438,7 @@ impl Generator {
             .typer
             .body(to)
             .map_err(|e| GenerateError::typing(source.span, e))?;
-        let body = body.span_record().unwrap_or(body);
+        let body = body.view_record().unwrap_or(body);
         if matches!(&body, Ty::Record { fields } if fields.is_empty())
             && matches!(source.kind, typed::TermKind::Unit)
         {

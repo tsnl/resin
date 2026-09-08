@@ -139,8 +139,8 @@ impl Generator {
                     });
                 }
                 Conv::Deref => self.emit(Instr::Load),
-                Conv::MakeSpan | Conv::SpanRecord => {
-                    unreachable!("span conversions require a target type")
+                Conv::MakeSpan | Conv::ViewRecord | Conv::StrSpan => {
+                    unreachable!("view conversions require a target type")
                 }
             }
         }

@@ -15,8 +15,11 @@ impl Io {
 
 impl Output {
 	// Writes bytes verbatim and flushes. No formatting or newline is added.
-	def write(self: Output, text: Span<ubyte> | String) -> Result<(), WriteError> = {
+	def write(self: Output, text: str | Span<ubyte> | String) -> Result<(), WriteError> = {
 		var status = match (text) {
+			str(literal) => {
+				resin_stream_write(self.stream, literal.data, literal.length)
+			},
 			Span<ubyte>(bytes) => {
 				resin_stream_write(self.stream, bytes.data, bytes.length)
 			},

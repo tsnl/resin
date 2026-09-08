@@ -3,7 +3,7 @@ use resin_types::prelude::*;
 
 pub(super) fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> String {
     match value {
-        Value::Bytes { value } => format!(
+        Value::Str { value } => format!(
             "({}){{ .f0 = {}, .f1 = {} }}",
             types.name(ty),
             types.literal(value),

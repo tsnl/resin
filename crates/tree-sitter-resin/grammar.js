@@ -48,6 +48,7 @@ const BOP_PREC = {
 };
 
 const BUILTIN_TYPES = [
+  "str",
   "bool",
   "sbyte",
   "short",

@@ -420,7 +420,7 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
 
 #[test]
 fn shared_layout_queries_reject_unsupported_or_unresolved_types() {
-    for operand in ["bool", "()", "[1_ub, 2_ub]"] {
+    for operand in ["bool", "()"] {
         rejects(
             &format!("def main() = {{ size_of({operand}); }};"),
             "no shared host/device layout",

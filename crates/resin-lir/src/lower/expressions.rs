@@ -120,8 +120,8 @@ impl Generator {
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
-            Intrinsic::StringFromStr => self.emit(Instr::CallBuiltin {
-                name: "string_from_str".into(),
+            Intrinsic::StringFromBytes => self.emit(Instr::CallBuiltin {
+                name: "string_from_bytes".into(),
                 params: args.params.clone(),
                 result: result.clone(),
             }),

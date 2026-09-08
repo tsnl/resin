@@ -473,18 +473,24 @@ CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ## Strings, formatting, and output
 
-String literals have type `Span<ubyte>`. They refer to static UTF-8 bytes, so copying or returning
-one does not allocate or introduce an owner. The span's length excludes a trailing NUL; embedded
-and explicitly trailing `\0` bytes count toward its length. The escapes are `\n`, `\r`, `\t`,
+String literals have primitive type `str`, distinct from raw `Span<ubyte>` views and owned
+`String` values. They expose `data: Ptr<ubyte>` and `length: ulong` over static UTF-8 bytes,
+so copying or returning one does not allocate or introduce an owner. The length excludes a
+trailing NUL; embedded and explicitly trailing `\0` bytes count toward its length. The escapes are `\n`, `\r`, `\t`,
 `\0`, `\"`, and `\\`. Pass `text.data` to C functions that take a NUL-terminated string.
 Literal storage may be shared; treat it as read-only.
+
+Use `Span<ubyte>(text)` to explicitly borrow the bytes of a `str`; this preserves its pointer
+and length without copying. There is no implicit conversion, and arbitrary byte spans cannot
+be converted to `str`. `text.at(index)` returns a byte pointer and uses a `ulong` index.
 
 `fmt(format, arguments)` is a polymorphic host builtin returning `String`, an ordinary nominal
 wrapper with a `bytes: Arc<Span<ubyte>>` field. Its allocation contains both the span and its bytes,
 plus a trailing NUL. Copying a String retains the allocation; the final owner releases it.
 Extracting a raw span or pointer does not retain that owner.
-`String.from_str(span)` copies a byte span verbatim into an owned String; braces are ordinary
-bytes, and the source need not have a NUL terminator.
+`String.from_str(text)` copies a `str` verbatim into an owned String. For raw bytes, use
+`String.from_bytes(span)`; the span need not be UTF-8 or have a NUL terminator. Both constructors
+preserve embedded NULs and treat braces as ordinary bytes.
 
 ```resin
 export { main };
@@ -500,7 +506,7 @@ def main() -> Result<(), _> = {
 };
 ```
 
-Formats and string arguments accept `Span<ubyte>` or `String`. Other supported arguments are
+Formats and string arguments accept `str`, `Span<ubyte>`, or `String`. Other supported arguments are
 numbers, booleans, unit, and pointer addresses. The argument tuple is explicit, including the
 trailing comma for a single argument. `{0}`, `{1}`, etc. are zero-based and may repeat;
 `{{` and `}}` escape braces. Arguments evaluate once in source order, including unused arguments.
@@ -508,14 +514,14 @@ Malformed formats and invalid indices terminate with a diagnostic before any for
 is written. Formatting itself performs no output.
 
 `Io.stdout()` and `Io.stderr()` return ordinary library `Output` values. Their `write` method
-accepts `Span<ubyte> | String`, writes bytes verbatim, flushes, adds no newline, and returns
+accepts `str | Span<ubyte> | String`, writes bytes verbatim, flushes, adds no newline, and returns
 `Result<(), WriteError>`. The builtin `print(text)` is a stdout shorthand returning unit;
 it terminates on an output error. Neither writer interprets braces. Both `fmt` and `print`
-are reserved builtins and host-only. No formatting operator or string method is introduced.
+are reserved builtins and host-only.
 
-Device-backed `Span<ubyte>` values support shader reads and writes using 8-bit storage and
-arithmetic extensions. The runtime enables the corresponding Vulkan features when available.
-Shader literal spans remain unsupported: GLSL constant arrays cannot supply the device-buffer
+Byte arrays and device-backed `Span<ubyte>` values support shader reads and writes using
+8-bit storage and arithmetic extensions. The runtime enables the corresponding Vulkan features when available.
+Shader `str` literals remain unsupported: GLSL constant arrays cannot supply the device-buffer
 addresses used by Resin spans. Pass a span of uploaded bytes in the shader root instead.
 
 ## Console input
@@ -646,8 +652,8 @@ Pointer arithmetic is forbidden. Use array or span indexing, or explicitly conve
 into `ulong`, perform **byte** arithmetic, and convert back when low-level address manipulation
 is necessary. Pointer casts and dereferences remain unchecked.
 
-Arrays and spans use `.at(index)` for indexing and return `Ptr<T>`. The index
-parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
+Arrays, spans, and `str` use `.at(index)` for indexing and return `Ptr<T>` (`Ptr<ubyte>` for `str`).
+The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
 other integer values need an explicit conversion, such as `.at(ulong(i))`:
 
 ```resin
@@ -771,7 +777,7 @@ The entry interfaces are:
 
 
 Device pointers support loads, stores, record fields, explicit casts, and passing to
-ordinary helpers. Shared storage supports `int`, `uint`, `float32`, `ulong`, pointers, nonempty
+ordinary helpers. Shared storage supports `ubyte`, `int`, `uint`, `float32`, `ulong`, pointers, nonempty
 records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
 member, with member and trailing padding. This matches C and GLSL `std430` without requiring
 scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
@@ -905,23 +911,19 @@ directly into swapchain images and multiple frames in flight are not implemented
 
 [No Graphics API — Sebastian Aaltonen](https://www.sebastianaaltonen.com/blog/no-graphics-api)
 
-### Host byte-array storage
+### Byte-array storage
 
-On the host, every `ubyte` array is intentionally a sentinel array, including binary
-array literals. Its logical length is N; its physical storage is N+1 bytes with a
-trailing zero, alignment 1, and stride N+1 when nested in another array. The sentinel
-is outside checked indexing and is preserved by whole-array copies. Empty byte arrays
-occupy one zero byte. Embedded zero bytes count toward logical length; C string
-functions stop at the first zero. Byte-array storage can be passed to C through an explicit `Ptr<ubyte>` cast;
-string literals instead expose their storage as the span's `.data` field.
+An ordinary `ubyte` array contains exactly its N declared bytes, with alignment 1 and
+stride N when nested in another array. Host and device layouts agree. Whole-array copies
+copy those elements without an extra sentinel; embedded zeros remain ordinary data.
+`size_of([1_ub, 2_ub])` is 2, and `size_of([[1_ub, 2_ub], [3_ub, 4_ub]])` is 4.
+Empty arrays reserve a C storage placeholder for portability; it is not an accessible
+array element, and empty arrays have no shared host/device layout.
 
-For packed binary data, use a `Span<ubyte>` over an explicitly allocated N-byte region
-and copy only the N logical elements. Copying the entire array representation also
-copies its sentinel and is inappropriate for a packed wire format. There is no implicit packed
-conversion. `String` uses packed owned bytes rather than the sentinel-array representation.
-Byte arrays currently have no shared
-host/device storage layout, so shared-layout queries must reject them; they must not
-silently report the host representation as a device layout.
+For C calls, explicitly cast byte-array storage to `Ptr<ubyte>` and pass its logical
+length. Raw arrays and spans do not promise NUL termination. Use a `str` literal's `.data`
+or an owned `String`'s `.bytes.data` when a C function requires a terminator. `String.from_bytes(span)`
+copies raw bytes and appends that terminator outside the logical length.
 
 ### Shared size and alignment
 
@@ -931,7 +933,7 @@ storage emission. Scalars in the shared profile, padded/nested records, pointers
 spans, and nonempty arrays are supported; unsupported layouts produce a source error.
 For an inferred array type, `size_of(array_expression)` queries its type. Expression
 operands are checked but not executed, as with C `sizeof`; side effects do not run.
-Holes in an explicit type argument are rejected. Byte arrays, empty arrays/records,
+Holes in an explicit type argument are rejected. Empty arrays/records,
 booleans, function values, and other types outside the shared profile are rejected.
 
 For example, allocate one record with

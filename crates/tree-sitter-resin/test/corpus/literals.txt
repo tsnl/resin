@@ -101,3 +101,71 @@ def main() = { var a = 42_ul; var b = -42_l; var c = 1.5_f; var d = 0xff_ui; if 
                                             (unit_term))
                                           (closed_term
                                             (unit_term)))))))))))))))))))))))
+
+==================
+String literal type and explicit byte view
+==================
+def text(value: str) -> str = { value };
+def bytes() -> Span<ubyte> = { Span<ubyte>("hello") };
+---
+
+(source_file
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (unary_type
+                    (type
+                      (infix_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (builtin_type))))))))
+                (closed_term
+                  (paren_term
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (string)))))))))))))))))

@@ -107,17 +107,44 @@ pub enum Ty {
     UInt64,
     Float32,
     Float64,
-    Foreign { name: Arc<str> },
-    Defined { definition: TypeId },
-    Pointer { pointee: Box<Ty> },
-    Span { element: Box<Ty> },
-    Arc { pointee: Box<Ty> },
-    Weak { pointee: Box<Ty> },
-    Array { element: Box<Ty>, length: usize },
-    Record { fields: Vec<RecordField> },
-    Function { param: Box<Ty>, result: Box<Ty> },
-    Union { variants: Vec<Ty> },
-    Result { value: Box<Ty>, error: Box<Ty> },
+    /// A non-owning string view. Literal storage has a NUL beyond its byte length.
+    Str,
+    Foreign {
+        name: Arc<str>,
+    },
+    Defined {
+        definition: TypeId,
+    },
+    Pointer {
+        pointee: Box<Ty>,
+    },
+    Span {
+        element: Box<Ty>,
+    },
+    Arc {
+        pointee: Box<Ty>,
+    },
+    Weak {
+        pointee: Box<Ty>,
+    },
+    Array {
+        element: Box<Ty>,
+        length: usize,
+    },
+    Record {
+        fields: Vec<RecordField>,
+    },
+    Function {
+        param: Box<Ty>,
+        result: Box<Ty>,
+    },
+    Union {
+        variants: Vec<Ty>,
+    },
+    Result {
+        value: Box<Ty>,
+        error: Box<Ty>,
+    },
 }
 
 /// Result cases are tagged independently of their payload type. Ordinary union
@@ -207,8 +234,8 @@ impl Ty {
         }
     }
 
-    pub fn span_record(&self) -> Option<Self> {
-        types::span_record(self)
+    pub fn view_record(&self) -> Option<Self> {
+        types::view_record(self)
     }
 
     pub fn pointer_cast(&self, to: &Self) -> bool {
@@ -272,7 +299,7 @@ impl Ty {
 /// Primitive operations exposed through compiler-provided methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
-    StringFromStr,
+    StringFromBytes,
     Replace,
     Index,
     ArcGet,
@@ -303,8 +330,8 @@ pub enum Value {
     Type {
         ty: Ty,
     },
-    /// A non-owning byte span backed by static literal storage.
-    Bytes {
+    /// Literal bytes, excluding the trailing NUL added to their static storage.
+    Str {
         value: Arc<[u8]>,
     },
     Unit,
@@ -525,7 +552,7 @@ pub enum BuiltinRule {
     Boolean,
     Print,
     Format,
-    StringFromStr,
+    StringFromBytes,
 }
 
 impl BuiltinRule {
@@ -539,8 +566,9 @@ pub enum Conv {
     Unwrap { definition: TypeId },
     Wrap { definition: TypeId },
     Deref,
-    SpanRecord,
+    ViewRecord,
     MakeSpan,
+    StrSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -562,7 +590,7 @@ impl TyperContext {
         typer::same(expected, found)
     }
 
-    /// Identity, a Span representation change, or exactly one nominal wrap or unwrap.
+    /// Identity, a view representation change, or exactly one nominal wrap or unwrap.
     pub fn ascribe(&self, from: &Ty, to: &Ty) -> Result<Vec<Conv>, TypeError> {
         typer::ascribe(self, from, to)
     }

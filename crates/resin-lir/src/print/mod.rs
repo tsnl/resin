@@ -201,10 +201,7 @@ fn sexp_value(names: &Names, value: &Value) -> SExp {
     match value {
         Value::Type { ty } => list("type", vec![sexp_ty(names, ty)]),
         Value::None => symbol("None"),
-        Value::Bytes { value } => list(
-            "bytes",
-            value.iter().map(|v| symbol(v.to_string())).collect(),
-        ),
+        Value::Str { value } => list("str", value.iter().map(|v| symbol(v.to_string())).collect()),
         Value::Unit => symbol("unit"),
         Value::Bool { value } => list("bool", vec![symbol(value.to_string())]),
         Value::Int8 { value } => list("sbyte", vec![symbol(value.to_string())]),
@@ -271,6 +268,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
         Ty::UInt64 => symbol("ulong"),
         Ty::Float32 => symbol("float32"),
         Ty::Float64 => symbol("float64"),
+        Ty::Str => symbol("str"),
         Ty::Foreign { name } => list("foreign", vec![symbol(name.as_ref())]),
         Ty::Defined { definition } => names
             .types

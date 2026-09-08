@@ -1516,7 +1516,7 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
 }
 
 #[test]
-fn formatted_string_and_literal_span_types_survive_editor_recovery() {
+fn formatted_string_and_literal_string_types_survive_editor_recovery() {
     for source in [
         "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.; };",
         "def main() = { var text = \"literal\"; text.; };",
@@ -1580,5 +1580,22 @@ fn string_constructor_is_an_ordinary_discoverable_static_method() {
             "from_str"
         };
         assert!(items.iter().any(|item| item.name == member), "{items:?}");
+        if member == "from_str" {
+            assert!(
+                items.iter().any(|item| item.name == "from_bytes"),
+                "{items:?}"
+            );
+        }
     }
+}
+
+#[test]
+fn literal_string_hover_preserves_its_distinct_primitive_type() {
+    let source = "def main() = { var text = \"literal\"; text; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let hover = analysis
+        .hover(&project.source("main.resin"), source.rfind("text").unwrap())
+        .unwrap();
+    assert_eq!(hover.text, "text: str");
 }

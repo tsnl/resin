@@ -258,17 +258,17 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
     }
 }
 
-pub(super) fn span_record(ty: &Ty) -> Option<Ty> {
-    let Ty::Span { element } = ty else {
-        return None;
+pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
+    let element = match ty {
+        Ty::Span { element } => element.clone(),
+        Ty::Str => Box::new(Ty::UInt8),
+        _ => return None,
     };
     Some(Ty::Record {
         fields: vec![
             RecordField {
                 name: "data".into(),
-                ty: Ty::Pointer {
-                    pointee: element.clone(),
-                },
+                ty: Ty::Pointer { pointee: element },
             },
             RecordField {
                 name: "length".into(),
@@ -353,6 +353,12 @@ impl TypeTable {
 impl TypeTable {
     fn components(&mut self, ty: &Ty) {
         match ty {
+            Ty::Str => {
+                self.intern(&Ty::Pointer {
+                    pointee: Box::new(Ty::UInt8),
+                });
+                self.intern(&Ty::UInt64);
+            }
             Ty::Union { variants } => {
                 for member in variants {
                     self.intern(member);
@@ -419,6 +425,7 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::UInt64 => "ulong".into(),
         Ty::Float32 => "float32".into(),
         Ty::Float64 => "float64".into(),
+        Ty::Str => "str".into(),
         Ty::Foreign { name } => name.to_string(),
         Ty::Defined { definition } => definitions
             .get(definition.index())
@@ -477,9 +484,6 @@ pub(super) fn storage_layout(
         });
     }
     if let Ty::Array { element, length } = ty {
-        if **element == Ty::UInt8 {
-            return Err(layout::Error("byte arrays have a host sentinel and no shared host/device layout; use Span<ubyte> for packed storage".into()));
-        }
         if *length == 0 {
             return Err(layout::Error(
                 "empty arrays have no shared host/device layout".into(),
@@ -578,6 +582,7 @@ mod layout_tests {
     #[test]
     fn incompatible_storage_types_are_rejected() {
         for ty in [
+            Ty::Str,
             Ty::Bool,
             Ty::Unit,
             Ty::Int64,
@@ -586,6 +591,42 @@ mod layout_tests {
         ] {
             assert!(layout(&[], &ty).is_err());
         }
+    }
+
+    #[test]
+    fn byte_arrays_pack_with_exact_nested_strides() {
+        let bytes = Ty::Array {
+            element: Box::new(Ty::UInt8),
+            length: 3,
+        };
+        let rows = Ty::Array {
+            element: Box::new(bytes.clone()),
+            length: 2,
+        };
+        let l = layout(&[], &bytes).unwrap();
+        assert_eq!((l.size, l.align), (3, 1));
+        let l = layout(&[], &rows).unwrap();
+        assert_eq!((l.size, l.align), (6, 1));
+        let l = layout(&[], &record(vec![Ty::UInt8, rows, Ty::UInt32])).unwrap();
+        assert_eq!((l.size, l.align, l.offsets), (12, 4, vec![0, 1, 8]));
+    }
+
+    #[test]
+    fn packed_byte_arrays_reject_empty_or_overflowing_shared_storage() {
+        let empty = Ty::Array {
+            element: Box::new(Ty::UInt8),
+            length: 0,
+        };
+        let huge = Ty::Array {
+            element: Box::new(Ty::UInt8),
+            length: usize::MAX,
+        };
+        let overflow = Ty::Array {
+            element: Box::new(huge),
+            length: 2,
+        };
+        assert!(layout(&[], &empty).is_err());
+        assert!(layout(&[], &overflow).is_err());
     }
 }
 

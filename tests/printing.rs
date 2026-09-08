@@ -98,7 +98,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
     let m =
         module("export { main }; def main() -> () = { var text = \"hello\"; var empty = \"\"; };");
     for local in m.functions[0].locals.iter().skip(1) {
-        assert_eq!(local.ty, Ty::byte_span());
+        assert_eq!(local.ty, Ty::Str);
     }
     let project = support::project::Project::new(&m, Some("main")).unwrap();
     let c = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
@@ -351,12 +351,12 @@ fn formatted_strings_retain_storage_and_release_the_last_owner() {
 }
 
 #[test]
-fn literal_spans_survive_returns_and_keep_explicit_nuls() {
+fn literal_strings_survive_returns_and_keep_explicit_nuls() {
     prints(
         r#"
         export { main };
         extern "string.h" def strlen(p: Ptr<ubyte>) -> ulong;
-        def literal() -> Span<ubyte> = { "a\0b" };
+        def literal() -> str = { "a\0b" };
         def main() -> int = {
             var text = literal();
             var copy = text;
@@ -369,14 +369,14 @@ fn literal_spans_survive_returns_and_keep_explicit_nuls() {
 }
 
 #[test]
-fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
+fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
     prints(
         r#"
         export { main };
         type Caption = String;
         def copied() -> String = {
-            var source = [65_ub, 0_ub, 66_ub, 99_ub];
-            var result = Caption.from_str(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
+            var source = [65_ub, 0_ub, 66_ub];
+            var result = Caption.from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
             source(0_ul).* := 90_ub;
             result
         };
@@ -391,7 +391,7 @@ fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
                 print(text);
                 var end = Ptr<ubyte>(ulong(alias.bytes.data) + 3_ul);
                 if (alias.bytes.length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
-                var empty = String.from_str(Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul });
+                var empty = String.from_bytes(Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul });
                 if (empty.bytes.length != 0_ul || empty.bytes.data.* != 0_ub) { print("bad empty string"); };
             };
             match (weak.upgrade()) {
@@ -414,5 +414,66 @@ fn byte_spans_print_their_length_including_nuls_and_empty_views() {
             print(fmt("[{0}][{1}]", (view, empty)));
         };"#,
         b"[A\0B][]",
+    );
+}
+
+#[test]
+fn literal_strings_have_a_distinct_type_and_require_explicit_byte_views() {
+    let m = module(
+        r#"def literal() -> str = { "bytes" }; def bytes() -> Span<ubyte> = { Span<ubyte>("bytes") };"#,
+    );
+    assert_eq!(m.functions[0].result, Ty::Str);
+    assert_eq!(m.functions[1].result, Ty::byte_span());
+    assert_ne!(m.types.id(&Ty::Str), m.types.id(&Ty::byte_span()));
+    for source in [
+        r#"def bad() -> Span<ubyte> = { "bytes" };"#,
+        r#"def bad(bytes: Span<ubyte>) -> str = { str(bytes) };"#,
+        r#"def bad() -> str = { str() };"#,
+        r#"def bad() -> str = { str { data = "bytes".data, length = 5_ul } };"#,
+        r#"def bad() = { String.from_str(Span<ubyte>("bytes")); };"#,
+        r#"def bad() = { String.from_bytes("bytes"); };"#,
+    ] {
+        assert!(
+            pipeline::generate(&support::parse(source)).is_err(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
+    prints(
+        r#"export { main };
+        def view(text: str) -> Span<ubyte> = { Span<ubyte>(text) };
+        def main() -> int = {
+            var text = "hé\0";
+            var bytes = view(text);
+            var owned = String.from_str(text);
+            var empty = String.from_str("");
+            if (text.length == 4_ul && bytes.length == text.length &&
+                ulong(bytes.data) == ulong(text.data) && text.at(1_ul).* == 195_ub &&
+                ulong(owned.bytes.data) != ulong(text.data) && owned.bytes.length == 4_ul &&
+                Ptr<ubyte>(ulong(owned.bytes.data) + 4_ul).* == 0_ub &&
+                empty.bytes.length == 0_ul && empty.bytes.data.* == 0_ub) {
+                print(fmt(Span<ubyte>("{0}{1}{2}"), (text, bytes, owned)));
+                0
+            } else { 1 }
+        };"#,
+        "hé\0hé\0hé\0".as_bytes(),
+    );
+}
+
+#[test]
+fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
+    prints(
+        r#"export { main }; def main() = {
+            var data = [255_ub, 0_ub, 254_ub];
+            var bytes = Span<ubyte> { data = data.at(0_ul), length = 3_ul };
+            var owned = String.from_bytes(bytes);
+            data.at(0_ul).* := 65_ub;
+            print(bytes);
+            print(fmt("{0}", (owned,)));
+        };"#,
+        b"A\0\xfe\xff\0\xfe",
     );
 }

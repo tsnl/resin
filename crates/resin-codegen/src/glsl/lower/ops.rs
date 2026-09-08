@@ -247,7 +247,7 @@ fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> Result<String, Error> {
         Value::Bool { value } => value.to_string(),
         Value::Int32 { value } => format!("int({}u)", *value as u32),
         Value::UInt8 { value } => format!("uint8_t({value})"),
-        Value::Bytes { .. } => return Err(Error("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into())),
+        Value::Str { .. } => return Err(super::str_storage_error()),
         Value::UInt32 { value } => format!("{value}u"),
         Value::UInt64 { value } => format!("{value}ul"),
         Value::Float32 { value } if value.is_finite() => format!("{value:e}"),
