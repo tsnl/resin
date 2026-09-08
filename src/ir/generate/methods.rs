@@ -1,7 +1,10 @@
 use super::{GenerateError, Generator, check::error};
 use crate::{
     ast::{Ident, SourceFile, StmtKind, Term, TermKind},
-    ir::{Instr, Ty, typer::ReceiverConversion},
+    ir::{
+        Instr, Ty,
+        typer::{FunctionBody, ReceiverConversion},
+    },
 };
 
 impl Generator {
@@ -88,46 +91,23 @@ impl Generator {
                 false,
             )
         };
-        if let Some(result) = self
-            .typer
-            .index_method(&receiver_type, &name.val, associated)
-        {
-            self.scopes
-                .record_method(name, &receiver_type, associated, &self.typer);
-            return self.gen_call(name.span, receiver, arg, &result);
-        }
-        if !associated
-            && let Some((instruction, result)) =
-                crate::ir::typer::shared_method(&receiver_type, &name.val)
-        {
-            if matches!(instruction, Instr::ArcData) {
-                self.hold_arc_address(receiver)?;
-            } else {
-                self.gen_term(receiver, None)?;
-                self.emit(instruction);
-            }
-            self.gen_term(arg, Some(&Ty::Unit))?;
-            self.emit(Instr::Discard);
-            return Ok(result);
-        }
         let function = self
             .typer
             .method(&receiver_type, &name.val)
-            .cloned()
             .ok_or_else(|| error(name.span, "unknown method"))?;
-        if name.val.as_ref() == "drop" {
-            return Err(error(
-                name.span,
-                "drop is a compiler-invoked destruction hook",
-            ));
-        }
         self.scopes
             .record_method(name, &receiver_type, associated, &self.typer);
-        self.emit(Instr::Function {
-            function: function.function,
-        });
+        if let FunctionBody::Defined(function) = &function.body {
+            self.emit(Instr::Function {
+                function: *function,
+            });
+        }
         if associated {
-            self.gen_term(arg, Some(&Ty::parameter(&function.params)))?;
+            if matches!(function.body, FunctionBody::Generated(_)) {
+                self.gen_method_arguments(arg, &function.params)?;
+            } else {
+                self.gen_term(arg, Some(&Ty::parameter(&function.params)))?;
+            }
         } else {
             let (first, remaining) = function
                 .params
@@ -135,7 +115,7 @@ impl Generator {
                 .expect("checked receiver parameter");
             self.gen_receiver(receiver, &receiver_type, first)?;
             self.gen_method_arguments(arg, remaining)?;
-            if !remaining.is_empty() {
+            if !remaining.is_empty() && matches!(function.body, FunctionBody::Defined(_)) {
                 self.emit(Instr::MakeRecord {
                     fields: (0..function.params.len())
                         .map(|i| format!("_{i}").into())
@@ -143,7 +123,14 @@ impl Generator {
                 });
             }
         }
-        self.emit(Instr::Call);
+        match function.body {
+            FunctionBody::Defined(_) => self.emit(Instr::Call),
+            FunctionBody::Generated(instructions) => {
+                for instruction in instructions {
+                    self.emit(instruction);
+                }
+            }
+        }
         Ok(function.result)
     }
 
@@ -160,7 +147,13 @@ impl Generator {
             }
             ReceiverConversion::Address => {
                 self.check_place_initialized(receiver)?;
-                self.gen_place(receiver)?;
+                match self.gen_operand(receiver)? {
+                    super::places::Operand::Place(_) => {}
+                    super::places::Operand::Value(ty) => {
+                        let local = self.save_top(&ty);
+                        self.emit(Instr::LocalAddress { local });
+                    }
+                }
             }
             ReceiverConversion::Load => {
                 self.gen_term(receiver, None)?;

@@ -20,10 +20,21 @@ pub(crate) struct SourceOrigin {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionDecl {
-    pub function: FunctionId,
+    pub body: FunctionBody,
     pub params: Vec<Ty>,
     pub result: Ty,
 }
+
+/// Ordinary signatures can have a source body or a compiler-provided definition.
+#[derive(Debug, Clone)]
+pub(crate) enum FunctionBody {
+    Defined(FunctionId),
+    /// IR body with one stack input per parameter and one result. Expanded at
+    /// the call site, preserving addresses that cannot cross shader calls.
+    Generated(Vec<crate::ir::Instr>),
+}
+
+pub(crate) type MethodDefinitions = fn(&Ty) -> Vec<(Arc<str>, FunctionDecl)>;
 
 #[derive(Debug, Clone)]
 pub(super) struct Namespace {
@@ -81,20 +92,6 @@ impl TyperContext {
         self.definitions.set_drop(ty, function);
     }
 
-    /// Indexing uses the ordinary integer-index and pointer-result
-    /// rules. It is a builtin method so a field receiver needs no parentheses.
-    pub(crate) fn index_method(&self, receiver: &Ty, name: &str, associated: bool) -> Option<Ty> {
-        if associated || name != "at" {
-            return None;
-        }
-        match self.body(receiver).ok()? {
-            Ty::Array { element, .. } | Ty::Span { element } => {
-                Some(Ty::Pointer { pointee: element })
-            }
-            _ => None,
-        }
-    }
-
     pub(crate) fn declare_type(&mut self, name: Arc<str>, origin: SourceOrigin) -> TypeId {
         let ty = self.definitions.reserve(name);
         self.namespaces.insert(
@@ -113,7 +110,7 @@ impl TyperContext {
         self.functions.insert(
             function,
             FunctionDecl {
-                function,
+                body: FunctionBody::Defined(function),
                 params,
                 result,
             },
@@ -142,45 +139,35 @@ impl TyperContext {
             Entry::Occupied(_) => false,
         }
     }
-    pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<&FunctionDecl> {
-        let namespace = self.namespaces.get(&self.receiver_definition(ty)?)?;
-        self.functions.get(namespace.functions.get(name)?)
+    pub(crate) fn register_method_definitions(&mut self, definitions: MethodDefinitions) {
+        self.method_definitions.push(definitions);
     }
-    pub(crate) fn methods(&self, ty: TypeId) -> impl Iterator<Item = (&Arc<str>, &FunctionDecl)> {
-        self.namespaces
-            .get(&ty)
-            .into_iter()
-            .flat_map(|scope| scope.functions.iter())
-            .map(|(name, id)| (name, &self.functions[id]))
-    }
-}
 
-/// Builtin operations on shared handles; these have no user method declaration.
-pub(crate) fn shared_method(ty: &Ty, name: &str) -> Option<(crate::ir::Instr, Ty)> {
-    use crate::ir::Instr;
-    match (ty, name) {
-        (Ty::Arc { pointee }, "get") => Some((
-            Instr::ArcData,
-            Ty::Pointer {
-                pointee: pointee.clone(),
-            },
-        )),
-        (Ty::Arc { pointee }, "downgrade") => Some((
-            Instr::Downgrade,
-            Ty::Weak {
-                pointee: pointee.clone(),
-            },
-        )),
-        (Ty::Weak { pointee }, "upgrade") => Some((
-            Instr::Upgrade,
-            Ty::union_of([
-                Ty::Arc {
-                    pointee: pointee.clone(),
-                },
-                Ty::None,
-            ]),
-        )),
-        _ => None,
+    pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<FunctionDecl> {
+        self.methods(ty)
+            .into_iter()
+            .find_map(|(n, method)| (n.as_ref() == name).then_some(method))
+    }
+
+    pub(crate) fn methods(&self, ty: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
+        let mut methods = BTreeMap::new();
+        if let Some(namespace) = self
+            .receiver_definition(ty)
+            .and_then(|id| self.namespaces.get(&id))
+        {
+            for (name, id) in &namespace.functions {
+                methods.insert(name.clone(), self.functions[id].clone());
+            }
+        }
+        for definitions in &self.method_definitions {
+            let receiver = if let Ty::Pointer { pointee } = ty {
+                pointee.as_ref()
+            } else {
+                ty
+            };
+            methods.extend(definitions(receiver));
+        }
+        methods.into_iter().collect()
     }
 }
 

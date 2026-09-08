@@ -54,6 +54,16 @@ impl Checker<'_> {
                     seeded = true;
                 }
             }
+            if seeded {
+                continue;
+            }
+            // Resolve receiver literals before defaulting call arguments: the
+            // selected declaration supplies those arguments' expected types.
+            for (_, constraint) in &self.constraints {
+                if let Constraint::Method(receiver, ..) = constraint {
+                    seeded |= self.solver.default_numbers_in(receiver);
+                }
+            }
             if seeded || self.solver.default_numbers() {
                 continue;
             }
@@ -90,35 +100,13 @@ impl Checker<'_> {
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method(receiver_type, name, arg, out, associated) => {
-                if !associated
-                    && name.as_ref() == "at"
-                    && matches!(
-                        self.shape(receiver_type, false, span)?,
-                        Type::Node(Head::Span | Head::Array(_), _)
-                    )
-                {
-                    return self.constraint(
-                        &Constraint::Call(receiver_type.clone(), arg.clone(), out.clone()),
-                        span,
-                    );
-                }
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     return Ok(false);
                 };
-                if !associated
-                    && let Some((_, result)) = crate::ir::typer::shared_method(&receiver_type, name)
-                {
-                    self.solver.unify(arg, &Ty::Unit.into(), span)?;
-                    self.solver.unify(out, &result.into(), span)?;
-                    return Ok(true);
-                }
                 let method = self
                     .typer
                     .method(&receiver_type, name)
                     .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
-                if name.as_ref() == "drop" {
-                    return Err(error(span, "drop is a compiler-invoked destruction hook"));
-                }
                 let params = method
                     .arguments(&receiver_type, *associated)
                     .ok_or_else(|| {

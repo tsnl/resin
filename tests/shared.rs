@@ -406,10 +406,6 @@ fn methods_require_a_compatible_receiver_and_valid_destructor() {
         "struct Item {}; impl Item { def drop(self: Item) = {}; }",
         "drop must have signature",
     );
-    rejects(
-        "def f(a: Resource) = { a.drop(); };",
-        "compiler-invoked destruction hook",
-    );
 }
 
 #[test]
@@ -431,6 +427,51 @@ fn option_unwrap_transfers_fresh_payloads_and_copies_named_options() {
         };
         var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
         if (trace == 1223 && expired) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn destruction_hooks_are_ordinary_calls_and_remain_automatic() {
+    run(r#"
+    struct Manual { trace: Ptr<int>, digit: int };
+    impl Manual {
+        def drop(self: Ptr<Manual>) = {
+            if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
+            self.digit := 0;
+        };
+    }
+    def main() -> int = {
+        var trace = 0;
+        {
+            var a = Manual { trace = &trace, digit = 1 };
+            var b = Manual { trace = &trace, digit = 2 };
+            var c = Manual { trace = &trace, digit = 3 };
+            a.drop();
+            Manual.drop(&b);
+        };
+        if (trace == 123) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn generated_methods_use_ordinary_calls_and_borrow_fresh_receivers() {
+    run(r#"
+    def main() -> int = {
+        var trace = 0;
+        {
+            var pointer = Arc<Resource> { trace = &trace, digit = 1 }.get();
+            if (trace != 0 || pointer.digit != 1) { trace := 9; };
+            var second = Arc<Resource> { trace = &trace, digit = 2 };
+            var other = Arc<Resource>.get(&second);
+            var weak = Arc<Resource>.downgrade(second);
+            { var upgraded = Weak<Resource>.upgrade(weak)!; };
+            if (trace != 0 || other.digit != 2) { trace := 9; };
+            var number = Resource.make(&trace, 3).read();
+            if (trace != 0 || number != 3) { trace := 9; };
+        };
+        if (trace == 321) { 0 } else { 1 }
     };
     "#);
 }

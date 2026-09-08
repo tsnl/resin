@@ -55,30 +55,6 @@ impl Trace {
         typer: &TyperContext,
     ) {
         let mut members = Vec::new();
-        if let Some(result) = typer.index_method(ty, "at", associated) {
-            members.push(Member {
-                name: "at".into(),
-                ty: format!("(integer) -> {}", format_type(&result, typer)),
-                kind: super::DefinitionKind::Function,
-            });
-        }
-        if !associated {
-            for name in ["get", "downgrade", "upgrade"] {
-                if let Some((_, result)) = crate::ir::typer::shared_method(ty, name) {
-                    members.push(Member {
-                        name: name.into(),
-                        ty: format_type(
-                            &Ty::Function {
-                                param: Box::new(Ty::Unit),
-                                result: Box::new(result),
-                            },
-                            typer,
-                        ),
-                        kind: super::DefinitionKind::Function,
-                    });
-                }
-            }
-        }
         if !associated
             && let Ok(converted) = typer.as_record(ty)
             && let Ty::Record { fields } = converted.ty.span_record().unwrap_or(converted.ty)
@@ -89,25 +65,20 @@ impl Trace {
                 kind: super::DefinitionKind::Field,
             }));
         }
-        if let Some(receiver) = typer.receiver_definition(ty) {
-            for (name, method) in typer.methods(receiver) {
-                if name.as_ref() == "drop" {
-                    continue;
-                }
-                let Some(params) = method.arguments(ty, associated) else {
-                    continue;
-                };
-                let ty = Ty::Function {
-                    param: Box::new(Ty::parameter(params)),
-                    result: Box::new(method.result.clone()),
-                };
-                members.retain(|member| member.name != name.as_ref());
-                members.push(Member {
-                    name: name.to_string(),
-                    ty: format_type(&ty, typer),
-                    kind: super::DefinitionKind::Function,
-                });
-            }
+        for (name, method) in typer.methods(ty) {
+            let Some(params) = method.arguments(ty, associated) else {
+                continue;
+            };
+            let ty = Ty::Function {
+                param: Box::new(Ty::parameter(params)),
+                result: Box::new(method.result.clone()),
+            };
+            members.retain(|member| member.name != name.as_ref());
+            members.push(Member {
+                name: name.to_string(),
+                ty: format_type(&ty, typer),
+                kind: super::DefinitionKind::Function,
+            });
         }
         self.data.borrow_mut().fields.insert(location, members);
     }
@@ -120,7 +91,10 @@ impl Trace {
         typer: &TyperContext,
     ) {
         self.record_members(self.location(name.span), ty, associated, typer);
-        if let Some(receiver) = typer.receiver_definition(ty) {
+        if let Some(method) = typer.method(ty, &name.val)
+            && matches!(method.body, crate::ir::typer::FunctionBody::Defined(_))
+            && let Some(receiver) = typer.receiver_definition(ty)
+        {
             let mut data = self.data.borrow_mut();
             if let Some(origin) = data
                 .method_origins

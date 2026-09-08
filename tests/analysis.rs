@@ -165,7 +165,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             let offset = source.find(".at(0)").unwrap() + 1;
             assert_eq!(
                 analysis.hover(&path, offset).unwrap().text,
-                "at: (integer) -> Ptr<int>"
+                "at: (ulong) -> Ptr<int>"
             );
             let items = analysis.completions(&path, offset);
             assert!(
@@ -185,7 +185,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 }
 
 #[test]
-fn shared_receiver_completion_and_navigation_exclude_destruction_hooks() {
+fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
     let library = "export { Counter }; struct Counter { count: int }; impl Counter { def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }";
     for tail in ["", "c.;"] {
         let source =
@@ -219,7 +219,7 @@ fn shared_receiver_completion_and_navigation_exclude_destruction_hooks() {
         };
         let items = analysis.completions(&path, offset);
         assert!(items.iter().any(|item| item.name == "read"));
-        assert!(items.iter().all(|item| item.name != "drop"));
+        assert!(items.iter().any(|item| item.name == "drop"));
     }
 }
 

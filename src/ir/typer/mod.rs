@@ -9,7 +9,7 @@ mod convert;
 mod error;
 mod methods;
 pub(crate) use methods::{
-    FunctionDecl, ReceiverConversion, SourceModuleId, SourceOrigin, shared_method,
+    FunctionBody, FunctionDecl, ReceiverConversion, SourceModuleId, SourceOrigin,
 };
 mod rules;
 
@@ -24,6 +24,7 @@ pub struct TyperContext {
     // Frontend namespaces and signatures are discarded when producing IR.
     namespaces: BTreeMap<TypeId, methods::Namespace>,
     functions: BTreeMap<crate::ir::FunctionId, FunctionDecl>,
+    method_definitions: Vec<methods::MethodDefinitions>,
 }
 
 impl TyperContext {

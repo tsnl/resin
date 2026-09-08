@@ -47,7 +47,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   that origin. `value.method(args)` supplies the receiver as the first argument,
   while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
   identifiers. Desugar method calls into ordinary functions before IR; method namespaces
-  and module origins belong to frontend metadata.
+  and module origins belong to frontend metadata. Compiler-provided methods use the
+  same declaration lookup, argument checking, and editor analysis as source methods;
+  register their signatures and generated IR bodies in `generate/builtin_methods.rs`.
+  Only IR generation recognizes `drop` as a hook; direct calls remain ordinary calls.
 - Reading existing values performs compiler-defined copying. Function and type
   applications consume their argument results; operators do the same, and aggregate
   constructors consume their field initializers. `impl` defines inherent methods and
@@ -68,7 +71,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
 - Arrays and `Span<T>` provide indexing with `items.at(index)`, returning `Ptr<T>`;
-  use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
+  its index parameter is `ulong`, with explicit conversions for other integer types.
+  Use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
   shader indexing is unchecked, and callers must stay within valid storage.
   `Place<T>` is a compiler expression category, not a source type; pointer-returning user

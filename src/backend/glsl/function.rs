@@ -405,9 +405,9 @@ fn instruction(
                     let size = crate::backend::layout::layout(types.module, element)?.size;
                     format!("({}).f0 + uint64_t({index}) * uint64_t({size})", base.expr)
                 }
-                Ty::Array { .. } => format!("({}).items[{index}]", base.expr),
+                Ty::Array { .. } => format!("({}).items[uint({index})]", base.expr),
                 Ty::Pointer { .. } if base.local => {
-                    format!("({}).items[{index}]", base.expr)
+                    format!("({}).items[uint({index})]", base.expr)
                 }
                 Ty::Pointer { pointee } => {
                     let Ty::Array { element, .. } = types.shape(pointee) else {

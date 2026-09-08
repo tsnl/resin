@@ -10,14 +10,14 @@ use crate::{
     ast::{Ident, Program, SourceFile, SourceLocation, Span, Stmt, StmtKind, Term, TermKind, Type},
     ir::{
         FunctionId, LocalId, RecordField, Ty, TyperContext,
-        typer::{FunctionDecl, SourceModuleId, SourceOrigin},
+        typer::{FunctionBody, FunctionDecl, SourceModuleId, SourceOrigin},
     },
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 pub(crate) fn analyze(program: &Program) -> SemanticData {
     let data = Rc::new(RefCell::new(SemanticData::default()));
-    let mut typer = TyperContext::new();
+    let mut typer = super::builtin_methods::typer();
     let mut exports: Vec<BTreeMap<Arc<str>, (Symbol, SourceLocation)>> = Vec::new();
     let mut next_function = 0;
     for (index, source) in program.modules.iter().enumerate() {
@@ -130,7 +130,7 @@ impl Recovery<'_> {
         let signature = params
             .zip(self.ty(result))
             .map(|(params, result)| FunctionDecl {
-                function,
+                body: FunctionBody::Defined(function),
                 params,
                 result,
             });
@@ -173,12 +173,15 @@ impl Recovery<'_> {
         {
             return;
         }
+        let FunctionBody::Defined(function) = signature.body else {
+            unreachable!()
+        };
         self.typer
-            .register_function(signature.function, signature.params, signature.result);
+            .register_function(function, signature.params, signature.result);
         if self.typer.define_method(
             definition,
             name.val.rsplit('.').next().unwrap().into(),
-            signature.function,
+            function,
         ) {
             self.scopes.record_method_definition(definition, name);
         }
@@ -503,19 +506,10 @@ impl Recovery<'_> {
             } => {
                 let (ty, associated) = self.member_base(receiver)?;
                 self.trace.record_method(name, &ty, associated, self.typer);
-                if let Some(result) = self.typer.index_method(&ty, &name.val, associated) {
-                    self.term(arg, None).filter(Ty::is_integer).map(|_| result)
-                } else if !associated
-                    && let Some((_, result)) = crate::ir::typer::shared_method(&ty, &name.val)
-                {
-                    self.term(arg, Some(&Ty::Unit))?;
-                    Some(result)
-                } else {
-                    let method = self.typer.method(&ty, &name.val)?.clone();
-                    let params = method.arguments(&ty, associated)?;
-                    self.term(arg, Some(&Ty::parameter(params)))?;
-                    Some(method.result)
-                }
+                let method = self.typer.method(&ty, &name.val)?;
+                let params = method.arguments(&ty, associated)?;
+                self.term(arg, Some(&Ty::parameter(params)))?;
+                Some(method.result)
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Type { ty } = &func.val {

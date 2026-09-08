@@ -526,7 +526,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "Span",
-        "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index) returns Ptr<T>; shader indexing is unchecked.",
+        "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index: ulong) returns Ptr<T>; shader indexing is unchecked.",
         DefinitionKind::Type,
     ),
     (

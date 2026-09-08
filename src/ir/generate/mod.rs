@@ -8,6 +8,7 @@ use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, V
 
 mod bindings;
 mod builder;
+mod builtin_methods;
 mod check;
 mod cleanup;
 mod error;
@@ -68,7 +69,7 @@ impl Generator {
             source_module: SourceModuleId::from_index(0),
             source_span: Span { start: 0, end: 0 },
             function_id: None,
-            typer: TyperContext::new(),
+            typer: builtin_methods::typer(),
             function: None,
             scopes: Scopes::new(),
             checked: check::Checked::default(),

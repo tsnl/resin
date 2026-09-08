@@ -548,7 +548,9 @@ Pointer arithmetic is forbidden. Use array or span indexing, or explicitly conve
 into `ulong`, perform **byte** arithmetic, and convert back when low-level address manipulation
 is necessary. Pointer casts and dereferences remain unchecked.
 
-Arrays and spans use `.at(index)` for indexing and return `Ptr<T>`:
+Arrays and spans use `.at(index)` for indexing and return `Ptr<T>`. The index
+parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
+other integer values need an explicit conversion, such as `.at(ulong(i))`:
 
 ```resin
 var values = [10, 20, 30];

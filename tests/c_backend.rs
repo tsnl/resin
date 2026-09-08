@@ -526,10 +526,10 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
             Holder { values = Span<int> { data = p, length = 3L } }
         };
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
-        def element(s: Span<int>, i: int) -> Ptr<int> = { s.at(i) };
+        def element(s: Span<int>, i: ulong) -> Ptr<int> = { s.at(i) };
         def main() -> int = {
             var values = [10, 20, 30]; var calls = 0;
-            var p = view(Ptr<int>(&values), &calls).values.at(index(&calls));
+            var p = view(Ptr<int>(&values), &calls).values.at(ulong(index(&calls)));
             p.* := 42;
             var record = { values = [3, 4] };
             record.values.at(0).* := 8;
@@ -545,7 +545,7 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
 #[test]
 fn at_indexing_checks_bounds_before_later_effects() {
     for receiver in ["values", "holder.values"] {
-        for index in ["-1", "2", "18446744073709551615L"] {
+        for index in ["2", "18446744073709551615L"] {
             let output = run_module(&module(&format!(
                 r#"export {{ main }}; def main() -> int = {{
                     var values = [1, 2];

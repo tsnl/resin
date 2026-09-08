@@ -19,7 +19,12 @@ fn example(name: &str) -> ir::Module {
 
 #[test]
 fn shader_indexing_emits_no_bounds_checks() {
-    for indexing in ["values(i)", "values.at(i)", "view(i)", "view.at(i)"] {
+    for indexing in [
+        "values(i)",
+        "values.at(ulong(i))",
+        "view(i)",
+        "view.at(ulong(i))",
+    ] {
         let m = module(&format!(
             "export {{ kernel }}; def kernel(i: uint, output: Ptr<uint>) = {{ var values = [1I, 2I]; var view = Span<uint> {{ data = output, length = 2L }}; output.* := {indexing}.*; }};"
         ));

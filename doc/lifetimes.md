@@ -14,7 +14,8 @@ flowchart LR
 
 Variables, pointer dereferences, and fields projected from places follow this
 model. Array and span indexing returns `Ptr<T>`, so user-defined indexing wrappers
-can expose the same interface. `items(i).*` is the element's place.
+can expose the same interface. `items.at(i).*` is the element's place. The `.at()`
+index parameter is `ulong`; other integer values require an explicit conversion.
 Shared ownership builds on these rules by retaining on copy and releasing on drop.
 
 Resin keeps ownership explicit in its types. `struct` declares an ordinary value;
@@ -114,7 +115,22 @@ use the receiver's address. Associated functions have no `self`. Method signatur
 currently require explicit types; omitted results mean unit. There are no traits,
 interfaces, inheritance, or dynamically dispatched methods.
 
-`drop(self: Ptr<T>) -> ()` is a compiler-invoked hook. Calling it directly is rejected.
+Builtin array/span `at`, `Arc.get`, `Arc.downgrade`, and `Weak.upgrade` have ordinary
+method signatures and compiler-generated IR bodies. These small bodies expand at
+the call site, allowing shader-local array addresses to stay local. `get` borrows
+`Ptr<Arc<T>>`;
+`downgrade` and `upgrade` consume their argument values like other by-value calls.
+Method syntax supplies the receiver, and associated syntax can supply it explicitly
+(e.g. `Arc<T>.get(&owner)`). A fresh value borrowed by a pointer receiver is saved
+in the caller's scope, including for user-defined methods. `get` borrows the
+existing handle when given a named receiver; the returned raw pointer does not
+retain a separate owner if that handle is subsequently overwritten.
+
+`drop(self: Ptr<T>) -> ()` is an ordinary method that IR generation also registers
+as a destruction hook. Direct calls use normal method lookup and receiver conversion.
+They do not mark the value destroyed or suppress automatic cleanup: a native wrapper
+that releases a resource explicitly must disarm its stored handle to make later
+destruction safe.
 The hook runs before automatic destruction of fields in reverse declaration order.
 It must handle fallible cleanup locally. A wrapper releases its native handle in the
 hook and lets generated cleanup release its managed fields. Explicitly unwrapping a

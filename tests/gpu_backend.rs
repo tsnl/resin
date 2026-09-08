@@ -483,15 +483,15 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
         struct Root { count: uint, pixels: Ptr<uint> };
         def read(i: uint) -> uint = {
             var values = [10I, 20I];
-            values.at(0I).* := i;
-            values.at(i & 1I).* + values.at(i & 1I).*
+            values.at(0L).* := i;
+            values.at(ulong(i & 1I)).* + values.at(ulong(i & 1I)).*
         };
         def kernel(i: uint, root: Ptr<Root>) = {
             if (i < root.count) {
                 var holder = { values = Span<uint> { data = root.pixels, length = 67L } };
-                holder.values.at(i).* := 7I;
+                holder.values.at(ulong(i)).* := 7I;
                 var value = read(i);
-                holder.values.at(i).* := value;
+                holder.values.at(ulong(i)).* := value;
             };
         };"#,
         |i| if i % 2 == 0 { 2 * i } else { 40 },
