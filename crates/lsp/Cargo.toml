@@ -2,11 +2,12 @@
 name = "resin-lsp"
 version = "0.1.0"
 edition = "2024"
+publish = false
 description = "Language server for Resin"
 repository = "https://github.com/tsnl/resin"
 
 [dependencies]
-resin = { path = ".." }
+resin = { workspace = true }
 lsp-server = "0.7.9"
 lsp-types = "0.97"
 crossbeam-channel = "0.5"

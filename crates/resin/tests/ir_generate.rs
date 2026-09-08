@@ -78,7 +78,7 @@ fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
 
 #[test]
 fn examples_generate_verified_ir() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let mut found = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
@@ -99,7 +99,7 @@ fn examples_generate_verified_ir() {
 
 #[test]
 fn fibonacci_generates_verified_ir() {
-    let src = include_str!("../examples/eg001.resin");
+    let src = include_str!("../../../examples/eg001.resin");
     let module = compile(src);
     verify(&module).unwrap();
 
@@ -111,7 +111,7 @@ fn fibonacci_generates_verified_ir() {
 
 #[test]
 fn ir_dump_is_an_s_expression_with_names() {
-    let dump = format_module(&compile(include_str!("../examples/eg001.resin")));
+    let dump = format_module(&compile(include_str!("../../../examples/eg001.resin")));
     assert!(dump.starts_with("(module"));
     assert!(dump.contains("main"));
     assert!(dump.contains("fibonacci"));
@@ -125,7 +125,7 @@ fn ir_dump_is_an_s_expression_with_names() {
 
 #[test]
 fn recursive_calls_reference_functions_directly() {
-    let module = compile(include_str!("../examples/eg001.resin"));
+    let module = compile(include_str!("../../../examples/eg001.resin"));
     let fib = &module.functions[0];
     assert!(fib.blocks.iter().any(|block| {
         block.instrs.iter().any(|instr| {

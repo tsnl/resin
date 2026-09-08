@@ -40,7 +40,7 @@ tree-sitter test
 ```
 
 Commit the grammar and generated files together in Resin. Zed extensions can load
-this grammar from `https://github.com/tsnl/resin` with `path = "tree-sitter-resin"`
+this grammar from `https://github.com/tsnl/resin` with `path = "crates/tree-sitter-resin"`
 and a pinned Resin commit containing the parser.
 
 The initial contents were imported from `tsnl/tree-sitter-resin` at commit

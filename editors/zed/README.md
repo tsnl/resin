@@ -13,7 +13,7 @@ submodule checkout is required.
 From the Resin repository root:
 
 ```sh
-nix-shell --run 'cargo install --path resin-lsp --locked'
+nix-shell --run 'cargo install --path crates/lsp --locked'
 nix-shell --run 'rustup target add wasm32-wasip2'
 ```
 
@@ -25,13 +25,13 @@ installed per toolchain; adding the target outside the repository can select
 a different Rust version.
 
 Launch Zed from `nix-shell` so it inherits the native library paths, then run
-**zed: install dev extension** in the command palette and select `zed-resin/`.
+**zed: install dev extension** in the command palette and select `editors/zed/`.
 On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'`.
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
 Restarting `resin-lsp` alone does not reload highlighting queries or the pinned
 Tree-sitter grammar. If `struct`, `match`, or `impl` still look like ordinary
-identifiers, rebuild/reinstall the dev extension from this checkout's `zed-resin/`.
+identifiers, rebuild/reinstall the dev extension from this checkout's `editors/zed/`.
 See [Zed's extension development guide](https://zed.dev/docs/extensions/developing-extensions).
 
 The adapter uses a configured binary or finds `resin-lsp` on the worktree's PATH.
@@ -85,7 +85,7 @@ The formatter always indents with hard tabs; `hard_tabs` also makes ordinary edi
 indentation use tabs. `tab_size` controls their display width. A trailing comma
 forces a list onto multiple lines and is preserved, except for singleton tuples such as
 `(x,)` and `(int,)`. Comments and nested multiline content can still force breaks. Comments stay intact, and
-multiple blank lines collapse to one. See the [formatting rules](../resin-lsp/README.md#formatting)
+multiple blank lines collapse to one. See the [formatting rules](../../crates/lsp/README.md#formatting)
 for details. Incomplete syntax is left unchanged until repaired.
 
 ## Check the workflow
@@ -104,21 +104,21 @@ load a native library, restart Zed from the repository's `nix-shell`.
 ## Build and maintain
 
 ```sh
-nix-shell --run 'cargo build --manifest-path zed-resin/Cargo.toml --release --target wasm32-wasip2'
+nix-shell --run 'cargo build --manifest-path editors/zed/Cargo.toml --release --target wasm32-wasip2'
 nix-shell --run 'cargo test -p resin --test zed_queries'
 ```
 
 The extension is an independent Cargo workspace depending only on
 `zed_extension_api` 0.7. Its grammar pin points to a Resin commit with
-`path = "tree-sitter-resin"`. After a grammar change, commit the regenerated
+`path = "crates/tree-sitter-resin"`. After a grammar change, commit the regenerated
 parser in Resin and update that pin. Query tests compile every query and check
 captures against representative syntax, examples, and standard-library files.
 
 The extension is not published in Zed's registry yet. A future registry entry
-can point to this repository with `path = "zed-resin"`; see the
+can point to this repository with `path = "editors/zed"`; see the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
 Current limitations and compiler architecture are documented in
-[resin-lsp/README.md](../resin-lsp/README.md).
+[crates/lsp/README.md](../../crates/lsp/README.md).
 
 Validated with Zed 1.17.2 on Linux under Xvfb: Zed's own builder compiled and
 loaded the extension and pinned grammar; highlighting, imported/standard-library

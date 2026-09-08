@@ -21,12 +21,12 @@ From the Resin repository root:
 
 ```sh
 nix-shell --run 'cargo build -p resin-lsp'
-nix-shell --run 'cargo install --path resin-lsp --locked'
+nix-shell --run 'cargo install --path crates/lsp --locked'
 ```
 
 Configure your editor to launch `resin-lsp` (or `resin-lsp --stdio`). The server
 uses stdout exclusively for the protocol and stderr for logs. See
-[the Zed extension](../zed-resin/README.md) for a complete editor setup.
+[the Zed extension](../../editors/zed/README.md) for a complete editor setup.
 
 Standard-library lookup, in descending precedence:
 
@@ -46,7 +46,7 @@ The server advertises `documentFormattingProvider` and handles
 format-on-save. The editor synchronizes the buffer, requests formatting, and
 applies the returned text edit through its normal undo/save workflow. The server
 does not write the file. Rebuild/reinstall the server and restart it in your editor
-to pick up formatting support; see the [Zed setup](../zed-resin/README.md#formatting).
+to pick up formatting support; see the [Zed setup](../../editors/zed/README.md#formatting).
 
 Formatting uses `resin::formatting::format_source` on the latest accepted open
 buffer, independently of background semantic analysis. Unresolved names, imports,
@@ -84,7 +84,7 @@ var xs = [
 
 The CLI shares this formatter: `resin --format examples` formats files recursively,
 and `resin --format --check examples` checks them without writing. See the
-[CLI formatting guide](../README.md#formatting) for exit codes and file selection.
+[CLI formatting guide](../../README.md#formatting) for exit codes and file selection.
 Only whole-document LSP formatting is supported; range/on-type formatting is not
 implemented.
 

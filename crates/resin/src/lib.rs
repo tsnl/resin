@@ -1,5 +1,5 @@
 //! Compiler driver, tooling, and public access to the phase crates.
-#![doc = include_str!("../doc/architecture.md")]
+#![doc = include_str!("../../../doc/architecture.md")]
 pub use resin_ast as ast;
 pub use resin_codegen as codegen;
 pub use resin_codegen::{c, glsl};

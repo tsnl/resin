@@ -4,27 +4,27 @@ use tree_sitter::{Query, QueryCursor, StreamingIterator};
 const QUERIES: &[(&str, &str)] = &[
     (
         "highlights",
-        include_str!("../zed-resin/languages/resin/highlights.scm"),
+        include_str!("../../../editors/zed/languages/resin/highlights.scm"),
     ),
     (
         "brackets",
-        include_str!("../zed-resin/languages/resin/brackets.scm"),
+        include_str!("../../../editors/zed/languages/resin/brackets.scm"),
     ),
     (
         "indents",
-        include_str!("../zed-resin/languages/resin/indents.scm"),
+        include_str!("../../../editors/zed/languages/resin/indents.scm"),
     ),
     (
         "outline",
-        include_str!("../zed-resin/languages/resin/outline.scm"),
+        include_str!("../../../editors/zed/languages/resin/outline.scm"),
     ),
     (
         "overrides",
-        include_str!("../zed-resin/languages/resin/overrides.scm"),
+        include_str!("../../../editors/zed/languages/resin/overrides.scm"),
     ),
     (
         "textobjects",
-        include_str!("../zed-resin/languages/resin/textobjects.scm"),
+        include_str!("../../../editors/zed/languages/resin/textobjects.scm"),
     ),
 ];
 
@@ -201,7 +201,7 @@ fn queries_run_on_examples_stdlib_and_incomplete_code() {
             }
         }
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let mut sources = vec!["def main (argument: int) -> int = { pri".into()];
     visit(&root.join("examples"), &mut sources);
     visit(&root.join("stdlib"), &mut sources);
@@ -215,7 +215,7 @@ fn queries_run_on_examples_stdlib_and_incomplete_code() {
 #[test]
 fn comparison_operators_are_not_type_brackets() {
     let source = "def main () -> () = { var less = 1 < 2; var greater = 2 > 1; };";
-    let query = include_str!("../zed-resin/languages/resin/brackets.scm");
+    let query = include_str!("../../../editors/zed/languages/resin/brackets.scm");
     assert!(
         !captures(query, source)
             .iter()

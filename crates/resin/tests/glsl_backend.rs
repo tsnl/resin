@@ -12,7 +12,7 @@ use support::module;
 
 fn example(name: &str) -> lir::Module {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples")
+        .join("../../examples")
         .join(name);
     resin::compiler::generate_program(&resin::ast::load(&path).unwrap()).unwrap()
 }

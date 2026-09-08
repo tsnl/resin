@@ -2,8 +2,20 @@
 
 Resin's compiler is a sequence of explicit languages and passes. Each phase is an
 unpublished Cargo workspace crate; public data describes its output, and private
-implementation modules construct it. The root `resin` crate is the driver and
+implementation modules construct it. The `resin` crate is the driver and
 re-exports the phase crates for library users.
+
+The root manifest is a virtual workspace. All native Rust packages live under
+`crates/`: the driver in `resin`, the native C ABI in `runtime`, the language server
+in `lsp`, and the compiler phases alongside them. Each package owns its source and
+tests. Shared Resin examples, the standard library, and documentation stay at the
+repository root. `resin` is the default member, so `cargo run -- examples/eg001.resin`
+still works there; use `--workspace` to build or test every native package.
+
+`crates/tree-sitter-resin` keeps the grammar, generated parser, queries, JavaScript
+tooling, and Rust bindings together as one package. `editors/zed` is an independent
+Cargo workspace for the WASI extension and its language queries. Its manifest pins
+a repository commit and the grammar's path; update both when relocating the grammar.
 
 ```mermaid
 flowchart LR
@@ -38,7 +50,7 @@ language uses only shared source identities and concrete types. LIR lowering nev
 receives CST, AST, source namespaces, or an inference solver. Codegen consumes the
 LIR certificate; it cannot reach the checker's private state.
 
-All seven crates have `publish = false`. Path dependencies are declared centrally
+All workspace packages have `publish = false`. Path dependencies are declared centrally
 in the workspace manifest. Keep `common` small: source locations and diagnostics,
 resolved types and values, concrete operation and layout rules, and tiny utilities.
 It is not a home for phase-specific state moved to avoid a dependency cycle.
@@ -141,10 +153,10 @@ editor analysis even on failure. The `Analysis` query methods accept a small
 first error. Convenience C/GLSL `emit` functions verify, lower, and print for
 callers holding ordinary LIR.
 
-The driver in [compiler/passes.rs](../src/compiler/passes.rs) sequences HIR,
-LIR, and verification. [compiler/build.rs](../src/compiler/build.rs) and
-[compiler/shaders.rs](../src/compiler/shaders.rs) coordinate target generation
-and the [toolchain](../src/toolchain.rs), which owns external processes and caches.
+The driver in [compiler/passes.rs](../crates/resin/src/compiler/passes.rs) sequences HIR,
+LIR, and verification. [compiler/build.rs](../crates/resin/src/compiler/build.rs) and
+[compiler/shaders.rs](../crates/resin/src/compiler/shaders.rs) coordinate target generation
+and the [toolchain](../crates/resin/src/toolchain.rs), which owns external processes and caches.
 No language crate imports the driver, invokes native compilers, or executes code.
 
 ## Sessions and incrementality

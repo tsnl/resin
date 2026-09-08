@@ -8,12 +8,17 @@ driver; host-only programs do not require Vulkan or a GPU.
 New to the implementation? Start with the [guided repository tour](TOUR.md) and the
 [compiler architecture](doc/architecture.md), including the phase crates and their public APIs.
 
+The root is a virtual Cargo workspace: native packages and their tests live under
+`crates/`, and the Zed extension lives under `editors/zed/`. The default package is
+`resin`, so Cargo commands below still run from the repository root. Use `--workspace`
+to build or test all native packages.
+
 ## Development
 
 On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler,
 CMake, GLFW's native build dependencies, and `glslc`. On Linux it also supplies Vulkan tools,
 validation layers, and RenderDoc.
-The parser is included in `tree-sitter-resin/`; run `cargo test --workspace` directly.
+The parser is included in `crates/tree-sitter-resin/`; run `cargo test --workspace` directly.
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
 
 Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW installation
@@ -53,7 +58,7 @@ also keeps its one-million default. The smaller test spans the same cloud volume
 checks synchronization, bounds, visible output, and sphere lighting.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
-After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
+After changing `crates/tree-sitter-resin/grammar.js`, regenerate from that directory with
 `tree-sitter generate --js-runtime native`.
 Commit grammar changes and generated files together in this repository.
 
@@ -83,8 +88,8 @@ XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WIN
 
 ## Editor support
 
-The [Zed extension](zed-resin/README.md) provides Resin syntax support and uses
-[`resin-lsp`](resin-lsp/README.md) for diagnostics, hover, go-to-definition, and
+The [Zed extension](editors/zed/README.md) provides Resin syntax support and uses
+[`resin-lsp`](crates/lsp/README.md) for diagnostics, hover, go-to-definition, and
 basic completion. Build the server with `nix-shell --run 'cargo build -p resin-lsp'`.
 
 Both the CLI and LSP use a persistent `resin::compiler::Session`: source overlays,
@@ -404,13 +409,13 @@ Delete `build/` to clean it, including after linked system library changes or ch
 behind a compiler wrapper.
 
 Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
-Generated C includes `resin_runtime.h` and its hierarchy from `resin-runtime/include`.
+Generated C includes `resin_runtime.h` and its hierarchy from `crates/runtime/include`.
 Cargo builds the runtime archive alongside the compiler. For relocated installations, set
 `RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB` (`libresin_runtime.a` on Unix,
 `resin_runtime.lib` on Windows MSVC). To compile emitted C manually on Linux:
 
 ```sh
-cc -std=c11 -fno-strict-aliasing -I resin-runtime/include fibonacci.c \
+cc -std=c11 -fno-strict-aliasing -I crates/runtime/include fibonacci.c \
   target/debug/deps/libresin_runtime.a -ldl -lpthread -lm -lrt -lutil -o fibonacci
 ```
 
@@ -452,7 +457,7 @@ such as `(x,)` and `(int,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.
-The [full formatting rules](resin-lsp/README.md#formatting) also apply to the CLI.
+The [full formatting rules](crates/lsp/README.md#formatting) also apply to the CLI.
 CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ## Strings, formatting, and output
@@ -561,7 +566,7 @@ keywords: definitions and parameters cannot use those names, but record fields c
 
 `std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
 working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
-The native Rust crate lives separately at `resin-runtime/`; it has no dependency on the standard
+The native Rust crate lives separately at `crates/runtime/`; it has no dependency on the standard
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
 to those modules. Public operations are static constructors and instance methods:
 

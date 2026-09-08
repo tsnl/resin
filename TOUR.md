@@ -4,13 +4,12 @@ Resin is a systems language for host CPUs and Vulkan GPUs. This is a reading
 path through its implementation, not a language reference; keep the
 [README](README.md) nearby for syntax and command-line options.
 
-The workspace contains the compiler driver at the root, seven unpublished compiler
-phase crates in [crates/](crates/) (including shared types and verification), the native
-runtime in [resin-runtime/](resin-runtime/), the parser in
-[tree-sitter-resin/](tree-sitter-resin/), and the language server in
-[resin-lsp/](resin-lsp/). The [Zed extension](zed-resin/) is a separate Cargo
-workspace. The [standard library](stdlib/) is written in Resin and wraps the
-runtime's C API.
+The root is a virtual Cargo workspace. [crates/](crates/) contains the compiler
+driver in [resin/](crates/resin/), seven compiler phase crates, and the supporting
+[runtime](crates/runtime/), [parser](crates/tree-sitter-resin/), and
+[language server](crates/lsp/). All are unpublished. The
+[Zed extension](editors/zed/) has a separate Cargo workspace under `editors/`.
+The [standard library](stdlib/) is written in Resin and wraps the runtime's C API.
 
 ## 1. Start with a program
 
@@ -93,14 +92,14 @@ pipelines and run them. Host-only programs follow the same recipe with an empty 
 
 ### The CLI connects the stages
 
-[src/bin/resin.rs](src/bin/resin.rs) only calls `cli::main`.
-[cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
+[crates/resin/src/bin/resin.rs](crates/resin/src/bin/resin.rs) only calls `cli::main`.
+[cli/mod.rs](crates/resin/src/cli/mod.rs) dispatches modes, and [args.rs](crates/resin/src/cli/args.rs)
 parses flags and chooses `Mode::Interpreter`, `Compiler`, or `Formatter`;
-[source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
+[source.rs](crates/resin/src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
 Interpreter mode builds a debug native executable and runs it. Compiler mode builds
 an optimized executable and copies it to the destination selected with `-o`.
 
-[cli/environment.rs](src/cli/environment.rs) captures the environment, working directory,
+[cli/environment.rs](crates/resin/src/cli/environment.rs) captures the environment, working directory,
 and executable/temp paths once. CLI arguments override `CC` and `GLSLC`, which override
 platform defaults. It resolves compiler paths, `RESIN_STDLIB`, runtime headers/archive,
 and cache settings before compilation. The CLI also chooses the explicit `CProfile`.
@@ -108,27 +107,27 @@ Tool discovery errors are reported only if that tool is needed, so host-only pro
 remain independent of `glslc`. Compiler subprocesses and cache fingerprints use the
 same captured environment.
 
-[compiler::Request::new](src/compiler.rs) validates the input/output combination and
+[compiler::Request::new](crates/resin/src/compiler.rs) validates the input/output combination and
 resolves native directory destinations, rejecting outputs that would overwrite the
 source. `Session::compile(&request)` analyzes through the caller's session, then passes
-verified LIR to [compiler/build.rs](src/compiler/build.rs). Every compilation follows the
+verified LIR to [compiler/build.rs](crates/resin/src/compiler/build.rs). Every compilation follows the
 same recipe: generate GLSL for all requested shaders, compile it to SPIR-V, embed the bytes
 in generated C, then compile and link the executable. `Session::compile` returns an
 `Executable` that keeps the build-cache lock while the caller runs it. Execution remains
 a separate step. Generated C, GLSL, and SPIR-V remain in the build cache for inspection.
 
 The session owns source overlays, cached parses, import dependencies, and
-immutable [compilation snapshots](src/compiler/snapshot.rs). A snapshot retains
+immutable [compilation snapshots](crates/resin/src/compiler/snapshot.rs). A snapshot retains
 the AST, resolved HIR, opaque editor analysis, diagnostics, and verified LIR when
 compilation succeeds. The CLI uses one session for its invocation; the language
 server retains one across edits.
 
-The compiler stages are separate crates re-exported by [src/lib.rs](src/lib.rs),
+The compiler stages are separate crates re-exported by [crates/resin/src/lib.rs](crates/resin/src/lib.rs),
 so tests and editor adapters can inspect the AST, HIR, and verified LIR through
 `Session::analyze` without building an executable.
 
 Formatting takes a separate path from `main` through
-[format.rs](src/cli/format.rs) to the shared
+[format.rs](crates/resin/src/cli/format.rs) to the shared
 [CST formatter](crates/cst/src/print.rs) library module. `--format` (or `-f`) formats
 files in place and searches directories recursively for `.resin` files;
 `--format --check` reports differences without writing and exits with status 1
@@ -148,10 +147,10 @@ The [architecture guide](doc/architecture.md) gives the full crate graph and pas
 contracts. Every phase follows the same path: `language.rs` describes its data,
 `lower` produces it from the preceding language, and `print` renders it.
 
-[grammar.js](tree-sitter-resin/grammar.js) defines concrete syntax. The
+[grammar.js](crates/tree-sitter-resin/grammar.js) defines concrete syntax. The
 [CST document](crates/cst/src/language.rs) pairs a Tree-sitter tree with source
 text; [CST lowering](crates/cst/src/lower.rs) reparses it incrementally. Skip the
-generated `src/parser.c` on a first read.
+generated `src/parser.c` inside the grammar package on a first read.
 
 [AST language](crates/ast/src/language.rs) defines source files, declarations,
 terms, and type syntax with byte spans. [AST lowering](crates/ast/src/lower.rs)
@@ -214,15 +213,15 @@ formats that tree without accessing LIR or typechecking facts. [function.rs](cra
 lowers instructions and block edges; [foreign.rs](crates/codegen/src/c/lower/foreign.rs)
 bridges Resin's unary calls to conventional C argument lists.
 
-[toolchain/c.rs](src/toolchain/c.rs) invokes the C compiler and statically links
-the runtime. [platform.rs](src/toolchain/platform.rs) selects the default
+[toolchain/c.rs](crates/resin/src/toolchain/c.rs) invokes the C compiler and statically links
+the runtime. [platform.rs](crates/resin/src/toolchain/platform.rs) selects the default
 compiler, archive name, flags, and system libraries: `cc` and
 `libresin_runtime.a` on Unix; GNU-style LLVM `clang` and `resin_runtime.lib`
 on Windows MSVC. Windows builds must keep Rust, GLFW, and emitted C on the
 same C runtime. Host-only programs need neither a Vulkan SDK nor a GPU.
 
 The C toolchain also owns the native build cache and locks that keep concurrent
-builds and runs from interfering. [dependencies.rs](src/toolchain/dependencies.rs)
+builds and runs from interfering. [dependencies.rs](crates/resin/src/toolchain/dependencies.rs)
 reads C compiler dependency files to track included headers.
 
 There are two artifact directories with different owners: Cargo builds the
@@ -233,14 +232,14 @@ and copies the output without running it. This does not change Cargo's Rust prof
 
 ## 3. Follow an editor change through the compiler
 
-Start again at [compiler::Session](src/compiler.rs). An editor supplies unsaved
+Start again at [compiler::Session](crates/resin/src/compiler.rs). An editor supplies unsaved
 text through `set_overlay`, removes it with `remove_overlay`, and reports disk
 changes with `file_changed`. Overlays take precedence over disk. Changes
 invalidate dependent entries; retained snapshots remain valid for their readers.
 
-[compiler/source.rs](src/compiler/source.rs) handles source lookup and path
-normalization; [compiler/syntax.rs](src/compiler/syntax.rs) caches CST and AST
-products together. The CST crate performs incremental reparsing. [snapshot.rs](src/compiler/snapshot.rs)
+[compiler/source.rs](crates/resin/src/compiler/source.rs) handles source lookup and path
+normalization; [compiler/syntax.rs](crates/resin/src/compiler/syntax.rs) caches CST and AST
+products together. The CST crate performs incremental reparsing. [snapshot.rs](crates/resin/src/compiler/snapshot.rs)
 builds the common result for compilation and editor queries. Parsing is
 incremental per file; semantic checking reruns an affected entry's import
 closure. This is separate from the native artifact cache.
@@ -251,7 +250,7 @@ recovers unfinished scopes without clearing the original syntax diagnostics.
 Invalid declarations still shadow outer names, and healthy siblings retain
 their types. Unknown types display as `?`; errors prevent executable generation.
 
-[analysis.rs](src/analysis.rs) adapts compiler snapshots to the opaque
+[analysis.rs](crates/resin/src/analysis.rs) adapts compiler snapshots to the opaque
 [HIR analysis API](crates/hir/src/analysis.rs). Queries select
 the source context view and look up declarations on demand. Member observations
 retain available fields, signatures, and canonical method origins even when later code fails.
@@ -259,23 +258,23 @@ Hover and member completion use these facts and
 [shared type formatting](crates/common/src/types/print.rs). There is no separate
 recovery compiler or fallback declaration index.
 
-The [language server](resin-lsp/README.md) adapts that compiler state to the
-Language Server Protocol over stdio. [server.rs](resin-lsp/src/server.rs)
+The [language server](crates/lsp/README.md) adapts that compiler state to the
+Language Server Protocol over stdio. [server.rs](crates/lsp/src/server.rs)
 handles requests, document versions, and file notifications;
-[text.rs](resin-lsp/src/text.rs) converts byte offsets to UTF-16 positions.
-[worker.rs](resin-lsp/src/worker.rs) runs the session in
+[text.rs](crates/lsp/src/text.rs) converts byte offsets to UTF-16 positions.
+[worker.rs](crates/lsp/src/worker.rs) runs the session in
 the background, coalesces edits, and discards obsolete results. Editor analysis
 never compiles C/GLSL, initializes a GPU, or executes Resin programs.
 
 `textDocument/formatting` uses the same [formatter](crates/cst/src/print.rs) as the
 CLI. The server formats the open document's current text and returns a text edit
-for the changed region. See the [formatting rules](resin-lsp/README.md#formatting)
+for the changed region. See the [formatting rules](crates/lsp/README.md#formatting)
 for layout conventions.
 
-Finally, [zed-resin/src/lib.rs](zed-resin/src/lib.rs) locates and launches the
-native server from Zed's WASI extension. Its [language queries](zed-resin/languages/resin/)
+Finally, [editors/zed/src/lib.rs](editors/zed/src/lib.rs) locates and launches the
+native server from Zed's WASI extension. Its [language queries](editors/zed/languages/resin/)
 provide highlighting, outlines, and other syntax features. See the
-[extension README](zed-resin/README.md) for installation and configuration;
+[extension README](editors/zed/README.md) for installation and configuration;
 the extension builds separately from the main Cargo workspace.
 
 ## 4. Follow a shader into the runtime
@@ -295,8 +294,8 @@ Read `build/shaders/<hash>/shader.glsl` and `shader.spv` after the build.
 shader entry declarations. [shader interfaces](crates/common/src/types/shader.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
 host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
-[shader build orchestration](src/compiler/shaders.rs) enumerates those declaration
-requests and emits GLSL. [toolchain/shaders.rs](src/toolchain/shaders.rs) caches the
+[shader build orchestration](crates/resin/src/compiler/shaders.rs) enumerates those declaration
+requests and emits GLSL. [toolchain/shaders.rs](crates/resin/src/toolchain/shaders.rs) caches the
 external compiler output, supplying SPIR-V for embedding in C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path.
@@ -310,8 +309,8 @@ foreign calls and recursion rather than making them work on the device.
 
 The remaining GPU operations are ordinary standard-library calls. Follow one
 from [stdlib/gpu.resin](stdlib/gpu.resin), through
-[resin_runtime.h](resin-runtime/include/resin_runtime.h) and its included
-headers, to [the runtime](resin-runtime/src/lib.rs). The same pattern applies
+[resin_runtime.h](crates/runtime/include/resin_runtime.h) and its included
+headers, to [the runtime](crates/runtime/src/lib.rs). The same pattern applies
 to images and windows. Wrappers omit the native `resin_` prefix and return
 `Result<T, RuntimeError>`, with created handles in the success value.
 [stdlib/status.resin](stdlib/status.resin) translates integer status codes into
@@ -319,16 +318,16 @@ named error structs; the C ABI remains unchanged.
 
 Inside the runtime, the useful landmarks are:
 
-- [gpu/device.rs](resin-runtime/src/gpu/device.rs): Vulkan device discovery and
+- [gpu/device.rs](crates/runtime/src/gpu/device.rs): Vulkan device discovery and
   required features.
-- [gpu/mod.rs](resin-runtime/src/gpu/mod.rs): allocations, images, command
+- [gpu/mod.rs](crates/runtime/src/gpu/mod.rs): allocations, images, command
   recording, synchronization between operations, and submission.
-- [gpu/pipeline.rs](resin-runtime/src/gpu/pipeline.rs): conventional Vulkan
+- [gpu/pipeline.rs](crates/runtime/src/gpu/pipeline.rs): conventional Vulkan
   compute and graphics pipelines.
-- [gpu/present.rs](resin-runtime/src/gpu/present.rs) and
-  [window/](resin-runtime/src/window/): swapchains, presentation, and statically
+- [gpu/present.rs](crates/runtime/src/gpu/present.rs) and
+  [window/](crates/runtime/src/window/): swapchains, presentation, and statically
   linked GLFW.
-- [allocator/range.rs](resin-runtime/src/allocator/range.rs): aligned
+- [allocator/range.rs](crates/runtime/src/allocator/range.rs): aligned
   suballocation using a sorted list of free ranges.
 
 Buffers make the host/device boundary concrete. `Span<T>` pairs an address with
@@ -364,24 +363,24 @@ Tests are executable descriptions of the boundaries above:
 
 | Change | Useful tests |
 | --- | --- |
-| Syntax or AST shape | [parser corpus](tree-sitter-resin/test/corpus/), [mutation_ast.rs](tests/mutation_ast.rs) |
-| Grammar JavaScript types, lint, or formatting | Run `npm run check` in [tree-sitter-resin/](tree-sitter-resin/README.md) |
-| Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
-| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typing-rule tests](crates/common/src/types/check/tests.rs), [verifier tests](crates/lir-verifier/src/tests.rs) |
-| Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
-| Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
-| Automatic destruction, scope exits, and copying | [shared.rs](tests/shared.rs), [ownership example](examples/ownership.resin), [C execution tests](tests/c_backend.rs) |
-| Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
-| Standard-library Results and native failure cleanup | [stdlib.rs](tests/stdlib.rs) (no GPU or windows required) |
-| Console input, byte handling, and allocation failures | [console.rs](tests/console.rs), [input example](examples/input.resin) |
-| Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
-| Source formatting, file traversal, or format checks | [formatting.rs](tests/formatting.rs), [format_cli.rs](tests/format_cli.rs), [LSP formatting tests](resin-lsp/tests/stdio.rs) |
-| Session invalidation, editor queries, or recovery | [session tests](src/compiler.rs), [analysis.rs](tests/analysis.rs) |
-| LSP protocol, buffer versions, or watched files | [stdio.rs](resin-lsp/tests/stdio.rs) |
-| Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
-| Shader generation or execution | [glsl_backend.rs](tests/glsl_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |
+| Syntax or AST shape | [parser corpus](crates/tree-sitter-resin/test/corpus/), [mutation_ast.rs](crates/resin/tests/mutation_ast.rs) |
+| Grammar JavaScript types, lint, or formatting | Run `npm run check` in [crates/tree-sitter-resin/](crates/tree-sitter-resin/README.md) |
+| Imports, exports, or entry visibility | [modules.rs](crates/resin/tests/modules.rs), [cli.rs](crates/resin/tests/cli.rs) |
+| Typing, conversions, or IR invariants | [nominal_types.rs](crates/resin/tests/nominal_types.rs), [typing-rule tests](crates/common/src/types/check/tests.rs), [verifier tests](crates/lir-verifier/src/tests.rs) |
+| Explicit type holes and return inference | [inference.rs](crates/resin/tests/inference.rs), [inference example](examples/inference.resin) |
+| Structs, aliases, unions, and typed errors | [results.rs](crates/resin/tests/results.rs), [errors example](examples/errors.resin) |
+| Automatic destruction, scope exits, and copying | [shared.rs](crates/resin/tests/shared.rs), [ownership example](examples/ownership.resin), [C execution tests](crates/resin/tests/c_backend.rs) |
+| Host code generation or C interop | [c_backend.rs](crates/resin/tests/c_backend.rs), [foreign.rs](crates/resin/tests/foreign.rs), [printing.rs](crates/resin/tests/printing.rs) |
+| Standard-library Results and native failure cleanup | [stdlib.rs](crates/resin/tests/stdlib.rs) (no GPU or windows required) |
+| Console input, byte handling, and allocation failures | [console.rs](crates/resin/tests/console.rs), [input example](examples/input.resin) |
+| Compilation and artifact reuse | [build_cache.rs](crates/resin/tests/build_cache.rs), [cli.rs](crates/resin/tests/cli.rs) |
+| Source formatting, file traversal, or format checks | [formatting.rs](crates/resin/tests/formatting.rs), [format_cli.rs](crates/resin/tests/format_cli.rs), [LSP formatting tests](crates/lsp/tests/stdio.rs) |
+| Session invalidation, editor queries, or recovery | [session tests](crates/resin/src/compiler.rs), [analysis.rs](crates/resin/tests/analysis.rs) |
+| LSP protocol, buffer versions, or watched files | [stdio.rs](crates/lsp/tests/stdio.rs) |
+| Zed syntax features | [zed_queries.rs](crates/resin/tests/zed_queries.rs) |
+| Shader generation or execution | [glsl_backend.rs](crates/resin/tests/glsl_backend.rs), [gpu_backend.rs](crates/resin/tests/gpu_backend.rs), [window_backend.rs](crates/resin/tests/window_backend.rs) |
 
-[resin-runtime/tests/](resin-runtime/tests/) also exercises the native runtime
+[crates/runtime/tests/](crates/runtime/tests/) also exercises the native runtime
 with GLSL fixtures, independently of the Resin compiler. This is useful for
 separating a Vulkan runtime bug from a language or code-generation bug.
 

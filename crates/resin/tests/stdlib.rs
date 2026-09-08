@@ -32,7 +32,7 @@ fn success(output: &std::process::Output) {
 
 #[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let source = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
     let path = source.path().join("main.resin");
     fs::write(&path, "import { \"std/gpu.resin\", \"std/window.resin\", \"std/image.resin\", \"std/console.resin\" };").unwrap();
@@ -46,9 +46,10 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
             public.entries.is_empty(),
             "operations are methods, not free function exports"
         );
-        let header =
-            fs::read_to_string(root.join(format!("resin-runtime/include/resin_runtime/{name}.h")))
-                .unwrap();
+        let header = fs::read_to_string(
+            Path::new(resin_runtime::INCLUDE_DIR).join(format!("resin_runtime/{name}.h")),
+        )
+        .unwrap();
         let mut checked = 0;
         for line in header.lines() {
             let Some(declaration) = line.strip_prefix("ResinStatus resin_") else {

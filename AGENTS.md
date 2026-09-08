@@ -23,6 +23,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   do not work around a boundary with public implementation modules or reverse dev-dependencies.
   Language nodes are public data. Solvers, scopes, builders, and traversal state stay private;
   expose a small set of lowering, printing, and query operations instead.
+- Keep the root manifest a virtual workspace, with all native Rust packages under
+  `crates/`, including the `resin` driver, `runtime`, `lsp`, and `tree-sitter-resin`.
+  Keep the complete Tree-sitter package together. Editor integrations live under
+  `editors/`; the Zed WASI extension has its own Cargo workspace in `editors/zed`.
+  Each crate owns its tests; shared examples, `stdlib`, and documentation stay at
+  the repository root. Keep `resin` as the default member for root Cargo commands.
 - Keep `common` narrow: source locations, diagnostics, concrete types, layout, and small
   utilities used by multiple phases. Do not move a phase's state there just to break a cycle.
   C and GLSL each have a target language, lowering, and printing inside `codegen`.
@@ -57,7 +63,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
   Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the
   runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.
-- Keep the native C ABI in `resin-runtime/` and language-facing modules in `stdlib/`.
+- Keep the native C ABI in `crates/runtime/` and language-facing modules in `stdlib/`.
   Examples import standard-library functionality through `std/` paths. Each file has a private
   scope with explicit exports; do not reintroduce textual inclusion.
 - Host entries take unit or `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.
@@ -66,8 +72,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `--` separates run arguments from compiler options; execution arguments stay out of build requests.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
-- Keep `src/bin/resin.rs` as a wrapper around `cli::main`; argument-to-`Mode` dispatch
-  lives in `src/cli/`, including environment/default and build-profile resolution.
+- Keep `crates/resin/src/bin/resin.rs` as a wrapper around `cli::main`; argument-to-`Mode` dispatch
+  lives in `crates/resin/src/cli/`, including environment/default and build-profile resolution.
   Construct validated requests with `compiler::Request::new`; `Session::compile` owns
   analysis and dispatches checked IR to the backend. Every compilation generates GLSL for
   requested shaders, compiles SPIR-V, embeds it in C, then builds an executable. Inspect
@@ -167,6 +173,6 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   reset the server while another window test connects.
 - Install the matching parser CLI inside the shell with
   `cargo install --locked tree-sitter-cli --version 0.27.0`, then regenerate from
-  `tree-sitter-resin/` with `tree-sitter generate --js-runtime native`.
-- The Tree-sitter grammar, generated parser, and Rust bindings live in `tree-sitter-resin/`
+  `crates/tree-sitter-resin/` with `tree-sitter generate --js-runtime native`.
+- The Tree-sitter grammar, generated parser, and Rust bindings live in `crates/tree-sitter-resin/`
   as ordinary files in this repository. Commit grammar changes and regenerated files together.

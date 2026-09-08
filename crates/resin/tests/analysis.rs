@@ -49,7 +49,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         let analysis = Analysis::new(
             &project.path("main.resin"),
             &project.sources,
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib"),
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib"),
         );
         let path = project.path("main.resin");
         let call = source.find("host_pointer").unwrap();

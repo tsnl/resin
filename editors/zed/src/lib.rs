@@ -25,7 +25,7 @@ impl zed::Extension for Resin {
             }
             binary.path
         });
-        let command = configured.or_else(|| worktree.which("resin-lsp")).ok_or("Install resin-lsp with nix-shell --run 'cargo install --path resin-lsp --locked', or configure lsp.resin-lsp.binary.path in Zed.")?;
+        let command = configured.or_else(|| worktree.which("resin-lsp")).ok_or("Install resin-lsp with nix-shell --run 'cargo install --path crates/lsp --locked', or configure lsp.resin-lsp.binary.path in Zed.")?;
         Ok(zed::Command {
             command,
             args,
