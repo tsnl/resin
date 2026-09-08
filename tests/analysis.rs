@@ -76,7 +76,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
                 "missing {name}: {items:?}"
             );
         }
-        assert!(items.iter().all(|item| item.name != "drop"));
+        assert!(items.iter().any(|item| item.name == "drop"));
     }
 }
 
