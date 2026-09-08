@@ -7,9 +7,7 @@ use std::{
 };
 
 use resin::{
-    ast,
-    backend::{c, glsl},
-    ir,
+    ast, c, glsl, lir,
     toolchain::{self, TempDir},
 };
 
@@ -28,8 +26,8 @@ impl Project {
         project
     }
 
-    fn compile(&self) -> Result<ir::Module, ast::SourceError> {
-        ir::generate_program(&ast::load(&self.0.path().join("main.resin"))?)
+    fn compile(&self) -> Result<lir::Module, ast::SourceError> {
+        resin::compiler::generate_program(&ast::load(&self.0.path().join("main.resin"))?)
     }
 
     fn run(&self) -> Output {
@@ -77,7 +75,7 @@ fn ast_preserves_exports_imports_and_their_spans() {
     assert_eq!(file.stmts.len(), 1);
     assert!(ast::print::format_source(&file).contains("(export answer Box)"));
     assert!(
-        ir::generate(&file)
+        resin::compiler::generate(&file)
             .unwrap_err()
             .to_string()
             .contains("UnresolvedImport")
@@ -297,7 +295,7 @@ fn invalid_exports_are_rejected_even_in_the_entry_file() {
     ] {
         Project::new(&[("main.resin", source)]).error(error);
         assert!(
-            ir::generate(&support::parse(source))
+            resin::compiler::generate(&support::parse(source))
                 .unwrap_err()
                 .to_string()
                 .contains(error)
@@ -563,8 +561,8 @@ fn entry_bindings_are_verified() {
     let mut module = support::module("export { main }; def main () -> () = {};");
     module
         .entries
-        .insert("main".into(), ir::FunctionId::from_index(999));
-    assert!(ir::verify(&module).is_err());
+        .insert("main".into(), lir::FunctionId::from_index(999));
+    assert!(resin::lir_verifier::verify(&module).is_err());
     assert!(c::emit(&module, "main").is_err());
 }
 
@@ -591,14 +589,14 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
         let mut file = support::parse("");
         file.stmts.push(statement);
         assert_eq!(
-            ir::generate(&file).unwrap_err().kind,
-            ir::GenerateErrorKind::InvalidModuleItem
+            resin::compiler::generate(&file).unwrap_err().kind,
+            resin::diagnostic::GenerateErrorKind::InvalidModuleItem
         );
         let project = Project::new(&[("main.resin", "")]);
         let mut program = ast::load(&project.0.path().join("main.resin")).unwrap();
         program.modules[0].file = file;
         assert!(
-            ir::generate_program(&program)
+            resin::compiler::generate_program(&program)
                 .unwrap_err()
                 .to_string()
                 .contains("InvalidModuleItem")
@@ -643,7 +641,7 @@ fn shader_objects_can_reference_private_helpers() {
             .iter()
             .flat_map(|f| &f.blocks)
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, ir::Instr::Shader { .. }))
+            .any(|i| matches!(i, lir::Instr::Shader { .. }))
     );
 }
 
@@ -710,7 +708,7 @@ fn methods_validate_declarations_and_call_receivers() {
             "method receiver does not match",
         ),
     ] {
-        let error = ir::generate(&support::parse(source))
+        let error = resin::compiler::generate(&support::parse(source))
             .unwrap_err()
             .to_string();
         assert!(error.contains(message), "{error}");
@@ -748,7 +746,7 @@ fn method_syntax_and_field_calls_have_distinct_meanings() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let error = ir::generate(&support::parse(
+    let error = resin::compiler::generate(&support::parse(
         "struct Record { call: (int) -> int }; def f(r: Record) -> int = { r.call(1) };",
     ))
     .unwrap_err();
@@ -759,7 +757,10 @@ fn method_syntax_and_field_calls_have_distinct_meanings() {
 fn indexing_methods_require_ulong_and_do_not_replace_nominal_methods() {
     for arg in ["1_f", "1 == 1", "", "0, 1", "-1", "0_ui", "0_i", "0_l"] {
         let source = format!("def f() = {{ var values = [1, 2]; values.at({arg}); }};");
-        assert!(ir::generate(&support::parse(&source)).is_err(), "{source}");
+        assert!(
+            resin::compiler::generate(&support::parse(&source)).is_err(),
+            "{source}"
+        );
     }
     let project = Project::new(&[(
         "main.resin",
@@ -791,14 +792,14 @@ fn aliases_share_the_nominal_namespace_and_origin() {
     project.error("defined in this module");
     let source = "struct Item {}; type Alias = Item; impl Item { def f() = {}; } impl Alias { def f() = {}; }";
     assert!(
-        ir::generate(&support::parse(source))
+        resin::compiler::generate(&support::parse(source))
             .unwrap_err()
             .to_string()
             .contains("duplicate method")
     );
     let source = "type Number = int; impl Number { def f() = {}; }";
     assert!(
-        ir::generate(&support::parse(source))
+        resin::compiler::generate(&support::parse(source))
             .unwrap_err()
             .to_string()
             .contains("nominal struct")

@@ -7,7 +7,7 @@ use std::{
     process::Command,
 };
 
-use crate::backend::Error;
+use crate::codegen::Error;
 
 use super::platform::{C_FLAGS, LIBRARIES};
 use super::{Settings, TempDir, dependencies, io_error, parent, write_output};

@@ -1,8 +1,8 @@
 #[path = "support/toolchain.rs"]
 mod config;
 use resin::{
-    backend::glsl::{self, Stage},
-    ir, toolchain,
+    glsl::{self, Stage},
+    lir, toolchain,
 };
 
 #[path = "support/shaders.rs"]
@@ -10,11 +10,11 @@ mod shaders;
 mod support;
 use support::module;
 
-fn example(name: &str) -> ir::Module {
+fn example(name: &str) -> lir::Module {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(name);
-    ir::generate_program(&resin::ast::load(&path).unwrap()).unwrap()
+    resin::compiler::generate_program(&resin::ast::load(&path).unwrap()).unwrap()
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn inferred_shader_results_lower_without_backend_inference() {
     let m = module(
         "export { kernel }; def kernel(i: uint, output: Ptr<uint>) -> _ = { output.* := { var value: _; value := i + 1; value }; };",
     );
-    assert_eq!(m.functions[0].result, ir::Ty::Unit);
+    assert_eq!(m.functions[0].result, lir::Ty::Unit);
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
         toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();

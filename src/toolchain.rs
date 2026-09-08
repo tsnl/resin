@@ -5,8 +5,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::backend::Error;
-use crate::backend::glsl::Stage;
+use crate::codegen::Error;
+use crate::types::shader::Stage;
 
 mod c;
 mod dependencies;

@@ -4,7 +4,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::backend::{Error, glsl};
+use crate::{codegen::Error, glsl};
 
 use super::{Settings, c, compile_glsl, io_error, write_output};
 

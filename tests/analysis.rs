@@ -1158,10 +1158,10 @@ fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
         let file = analysis
             .recovered_file(&project.path("main.resin"))
             .unwrap();
-        let error = resin::ir::generate(file).unwrap_err();
+        let error = resin::compiler::generate(file).unwrap_err();
         assert_eq!(
             error.kind,
-            resin::ir::GenerateErrorKind::IncompleteSyntax,
+            resin::diagnostic::GenerateErrorKind::IncompleteSyntax,
             "{source}: {error}"
         );
         assert!(error.span.start <= error.span.end && error.span.end <= source.len());

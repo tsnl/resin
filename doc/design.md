@@ -83,46 +83,30 @@ C ABI. Vulkan buffer device addresses implement the current device address profi
 
 ## Compiler architecture
 
-The tree-sitter AST remains an untyped source representation. The generator's lexical scopes
-resolve value and type names. `TyperContext` owns a `Vec<TypeDef>` and the bottom-up rules that
-accept already-resolved child types and return the enclosing type; it does not walk syntax or emit
-code. It reserves nominal identities before recursive RHS evaluation. Bodies start as `None`;
-completion validates the body before setting `Some(body)` through `&mut self`. Redefinition and
-exporting unfinished tables are errors; failed validation remains retryable. The generator reuses
-one context and moves its completed definition table into the IR module without cloning.
-Standalone clients can start with `TyperContext::new()` or take ownership of an existing table
-with `from_definitions`.
-The evaluator resolves type expressions and literals. Source checking in
-`generate/check/` collects constraints, unifies ordinary type holes, and solves error-set
-inclusion to a fixed point in function dependency order. It builds the explicit tree in
-`generate/typed.rs` and resolves all of its inference handles before returning it.
-The second pass in `generate/lower.rs` traverses that concrete typed tree and emits IR;
-its generator holds no inference solver or deferred emission callbacks. Source contexts
-captured on typed nodes preserve declaration visibility across the passes.
-Failed constraints are isolated and retried so healthy declarations and expressions retain
-editor information. Invalid bodies are withheld from lowering; any diagnostics prevent
-publishing executable IR.
+The compiler is a workspace of unpublished phase crates. The data flow is source text →
+CST → AST → HIR → LIR → verified LIR → C/GLSL. Each language has a `language.rs`,
+incoming `lower` pass, and `print` module. The separate `lir-verifier` crate certifies
+LIR before target lowering. See [compiler architecture](architecture.md) for the
+crate graph, pass contracts, public entry points, and a reading path.
 
-Lowering records owned locals per lexical scope and emits conditional destruction at
-normal and error exits. Copy operations retain shared fields; compiler-owned temporary
-transfers disarm the source's cleanup. These instructions do not impose source-level
-move checking: named values remain usable after reads.
+HIR is a resolved, typed tree. Its construction declares names, checks expressions,
+solves dependency groups, and elaborates source forms: methods become ordinary calls,
+short-circuit operators become conditionals, field projections are resolved, and layout
+queries become constants. Inference variables and lexical scopes remain private to HIR
+construction and editor analysis. Failed constraints preserve healthy editor facts;
+source errors prevent publishing a complete HIR module.
 
-The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks
-belong to `types::definitions`, shared by the typer and verifier. The typer separates definition
-ownership, typing rules, and conversions. Generation keeps syntax lowering and scopes together,
-but its evaluator borrows only scopes and types, and its function builder
-depends only on IR data. Verification separates control-flow traversal, instruction checks, and
-type checks; printing separates name allocation from formatting. Each pass owns its diagnostics.
+LIR lowering consumes HIR alone and makes storage, definite initialization, evaluation
+order, cleanup, and control flow explicit. Its typed stack machine has one parameter
+local per function and a flat list of basic blocks. Lowering records owned locals per
+lexical scope and emits conditional destruction at normal and error exits. Copy operations
+retain shared fields; compiler temporary transfers disarm the source's cleanup. Named
+values remain usable after reads; this is not source-level move checking.
 
-The first IR is a typed stack machine: each function has one parameter local and owns a flat list
-of basic blocks. Instructions make
-evaluation order explicit, and terminators provide control flow. Locals provide stable storage;
-stack values include literals, aggregates, function references, and addresses,
-with field and array access resolved from type information. A separate verifier checks stack effects
-and block edges after generation. Privileged operators retain their checked monomorphic signatures
-in IR, while the backend delays selecting or synthesizing their concrete implementations until it
-must emit the target.
+Shared concrete types and layout rules live in `resin-common`. The source checker and
+LIR verifier reuse these rules without sharing source scopes or inference state. Target
+lowering chooses the ABI and device representation; target printers consume only their
+own C/GLSL source trees. The driver invokes native tools after these pure passes finish.
 
 The Rust runtime methods are an unsafe convenience interface with the same lifetime and
 synchronization contracts as the C ABI. Command recordings keep pending image layouts separate
@@ -131,9 +115,8 @@ changes. The single queue conservatively orders buffer-device-address accesses b
 rendering, and copies with global memory barriers. This favors correctness until resource access
 information permits narrower barriers.
 
-Backends scan this IR to produce the artifacts for one program. The host path emits C which links
-against the runtime. Device paths emit SPIR-V and embed its words directly in that generated C; the
-first implementation may emit GLSL and invoke `glslc`, while later backends can lower IR directly.
+Target lowering produces C and GLSL source. The toolchain compiles GLSL with `glslc` and
+embeds the resulting SPIR-V words in C, then compiles and links C against the runtime.
 Pipeline construction passes the embedded SPIR-V pointer and byte length to the runtime. This keeps
 the compiler/runtime seam small while leaving room for multiple host compilers, graphics APIs, and
 device code generators.

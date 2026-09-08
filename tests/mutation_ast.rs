@@ -1,14 +1,7 @@
-use resin::ast::{SourceFile, StmtKind, Term, TermKind, generate::AstGen, print};
-use tree_sitter::Parser;
+use resin::ast::{SourceFile, StmtKind, Term, TermKind, print};
 
 fn parse(src: &str) -> SourceFile {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .expect("failed to load Resin grammar");
-    let tree = parser.parse(src, None).expect("parser returned no tree");
-    AstGen::new(src)
-        .gen_source_file(tree.root_node())
+    resin::ast::lower::generate(&resin::cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 

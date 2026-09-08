@@ -3,9 +3,8 @@ mod config;
 use std::{ffi::OsString, process::Command};
 
 use resin::{
-    ast::AstGen,
-    backend::{c, glsl},
-    ir::{self, Instr, Ty},
+    c, glsl,
+    lir::{Instr, Ty},
     toolchain::{self, TempDir},
 };
 
@@ -64,7 +63,7 @@ fn print_is_unary_and_returns_unit() {
         matches!(params.as_slice(), [Ty::Defined { definition }] if m.types[definition.index()].name().unwrap().as_ref() == "String")
     );
     assert_eq!(result, &Ty::Unit);
-    let typer = ir::TyperContext::from_definitions(m.types.clone());
+    let typer = resin::types::TyperContext::from_definitions(m.types.clone());
     assert_eq!(
         typer.type_builtin_call("print", params).unwrap().result,
         Ty::Unit
@@ -199,9 +198,12 @@ fn print_cannot_be_shadowed_by_a_local_or_parameter() {
         "export { main }; def main () -> () = { var print = 1; };",
         "def apply (print: (int) -> int) -> int = { print(41) };",
     ] {
-        let error = ir::generate(&support::parse(source)).unwrap_err();
+        let error = resin::compiler::generate(&support::parse(source)).unwrap_err();
         assert!(
-            matches!(error.kind, ir::GenerateErrorKind::ReservedBuiltin { .. }),
+            matches!(
+                error.kind,
+                resin::diagnostic::GenerateErrorKind::ReservedBuiltin { .. }
+            ),
             "{error}"
         );
     }
@@ -265,16 +267,10 @@ fn invalid_print_types_are_rejected() {
             "UnformattableType",
         ),
     ] {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_resin::LANGUAGE.into())
-            .unwrap();
-        let tree = parser.parse(source, None).unwrap();
-        assert!(!tree.root_node().has_error(), "{source}");
-        let ast = AstGen::new(source)
-            .gen_source_file(tree.root_node())
-            .unwrap();
-        let error = ir::generate(&ast).unwrap_err().to_string();
+        let syntax = resin::cst::Document::reparse(source.to_string(), None);
+        assert!(!syntax.tree().root_node().has_error(), "{source}");
+        let ast = resin::ast::lower::generate(&syntax).unwrap();
+        let error = resin::compiler::generate(&ast).unwrap_err().to_string();
         assert!(error.contains(diagnostic), "{source}: {error}");
     }
 }

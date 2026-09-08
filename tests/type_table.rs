@@ -1,8 +1,8 @@
 mod support;
 
 use resin::{
-    backend::{c, glsl},
-    ir::{self, Ty, TypeDef, TypeId, TypeTable},
+    c, glsl,
+    lir::{self, Ty, TypeDef, TypeId, TypeTable},
 };
 
 #[test]
@@ -70,23 +70,23 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
     // A type literal is another consumer of the very same ID, including when
     // direct IR clients add it after source lowering has completed the table.
     let type_function = module.functions.len();
-    module.functions.push(ir::Function {
+    module.functions.push(lir::Function {
         name: Some("type_value".into()),
         foreign: None,
         result: Ty::Type,
-        locals: vec![ir::Local {
+        locals: vec![lir::Local {
             name: None,
             ty: Ty::Unit,
         }],
-        entry: ir::BlockId::from_index(0),
-        blocks: vec![ir::BasicBlock {
+        entry: lir::BlockId::from_index(0),
+        blocks: vec![lir::BasicBlock {
             name: None,
-            instrs: vec![ir::Instr::Push {
-                value: ir::Value::Type {
+            instrs: vec![lir::Instr::Push {
+                value: lir::Value::Type {
                     ty: optional.clone(),
                 },
             }],
-            terminator: ir::Terminator::Return,
+            terminator: lir::Terminator::Return,
         }],
     });
     let host = c::emit(&module, "main").unwrap();
@@ -131,10 +131,10 @@ fn verifier_rejects_duplicate_definitions_and_nested_union_payloads() {
             variants: vec![Ty::None, Ty::union_of([Ty::Int32, Ty::Bool])],
         })],
     ] {
-        let module = ir::Module {
+        let module = lir::Module {
             types: TypeTable::from(definitions),
             ..Default::default()
         };
-        assert!(ir::verify(&module).is_err());
+        assert!(resin::lir_verifier::verify(&module).is_err());
     }
 }

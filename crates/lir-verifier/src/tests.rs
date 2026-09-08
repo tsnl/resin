@@ -1,0 +1,518 @@
+use super::*;
+use crate::lir::{BasicBlock, Local, LocalId, TypeDef};
+use crate::lir::{BlockId, Function, Instr, Module, Terminator, Ty, TypeId, Value};
+
+#[test]
+fn ascribe_wraps_and_unwraps_a_nominal_representation() {
+    let meters = Ty::Defined {
+        definition: TypeId::from_index(0),
+    };
+    for result in [meters.clone(), record()] {
+        let mut instrs = vec![
+            Instr::Push {
+                value: Value::Int32 { value: 3 },
+            },
+            Instr::MakeRecord {
+                fields: vec!["value".into()],
+            },
+            Instr::Ascribe { ty: meters.clone() },
+        ];
+        if result != meters {
+            instrs.push(Instr::Ascribe { ty: result.clone() });
+        }
+        verify(&Module {
+            types: vec![TypeDef::new("Meters", record())].into(),
+            functions: vec![Function {
+                foreign: None,
+                name: None,
+                result,
+                locals: vec![Local {
+                    name: None,
+                    ty: Ty::Unit,
+                }],
+                entry: BlockId::from_index(0),
+                blocks: vec![BasicBlock {
+                    name: None,
+                    instrs,
+                    terminator: Terminator::Return,
+                }],
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+    }
+}
+
+fn record() -> Ty {
+    Ty::Record {
+        fields: vec![crate::lir::RecordField {
+            name: "value".into(),
+            ty: Ty::Int32,
+        }],
+    }
+}
+
+#[test]
+fn chained_assignment_preserves_the_value() {
+    let function = Function {
+        foreign: None,
+        name: None,
+        result: Ty::Int32,
+        locals: vec![
+            Local {
+                name: None,
+                ty: Ty::Int32,
+            },
+            Local {
+                name: None,
+                ty: Ty::Int32,
+            },
+        ],
+        entry: BlockId::from_index(0),
+        blocks: vec![BasicBlock {
+            name: None,
+            instrs: vec![
+                Instr::LocalAddress {
+                    local: LocalId::from_index(0),
+                },
+                Instr::LocalAddress {
+                    local: LocalId::from_index(1),
+                },
+                Instr::Push {
+                    value: Value::Int32 { value: 1 },
+                },
+                Instr::Store,
+                Instr::Store,
+            ],
+            terminator: Terminator::Return,
+        }],
+    };
+
+    verify(&Module {
+        functions: vec![function],
+        ..Default::default()
+    })
+    .unwrap();
+}
+
+#[test]
+fn conflicting_join_stacks_are_rejected() {
+    let function = Function {
+        foreign: None,
+        name: None,
+        result: Ty::Int32,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Unit,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![
+            BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push {
+                    value: Value::Bool { value: true },
+                }],
+                terminator: Terminator::Branch {
+                    then: BlockId::from_index(1),
+                    els: BlockId::from_index(2),
+                },
+            },
+            BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push {
+                    value: Value::Int32 { value: 1 },
+                }],
+                terminator: Terminator::Break {
+                    target: BlockId::from_index(3),
+                },
+            },
+            BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push {
+                    value: Value::Float32 { value: 1.0 },
+                }],
+                terminator: Terminator::Break {
+                    target: BlockId::from_index(3),
+                },
+            },
+            BasicBlock {
+                name: None,
+                instrs: vec![],
+                terminator: Terminator::Return,
+            },
+        ],
+    };
+
+    let error = verify(&Module {
+        functions: vec![function],
+        ..Default::default()
+    })
+    .unwrap_err();
+
+    assert!(matches!(
+        error.kind,
+        VerifyErrorKind::ConflictingBasicBlockStack { .. }
+    ));
+}
+
+#[test]
+fn indirect_calls_use_the_callee_on_the_stack() {
+    let target = Function {
+        foreign: None,
+        name: None,
+        result: Ty::Int32,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Int32,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![BasicBlock {
+            name: None,
+            instrs: vec![
+                Instr::LocalAddress {
+                    local: LocalId::from_index(0),
+                },
+                Instr::Load,
+            ],
+            terminator: Terminator::Return,
+        }],
+    };
+    let caller = Function {
+        foreign: None,
+        name: None,
+        result: Ty::Int32,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Unit,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![BasicBlock {
+            name: None,
+            instrs: vec![
+                Instr::Function {
+                    function: FunctionId::from_index(0),
+                },
+                Instr::Push {
+                    value: Value::Int32 { value: 4 },
+                },
+                Instr::Call,
+            ],
+            terminator: Terminator::Return,
+        }],
+    };
+
+    verify(&Module {
+        functions: vec![target, caller],
+        ..Default::default()
+    })
+    .unwrap();
+}
+
+#[test]
+fn loop_backedges_must_match_the_header_stack() {
+    let function = Function {
+        foreign: None,
+        name: None,
+        result: Ty::Unit,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Unit,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![
+            BasicBlock {
+                name: None,
+                instrs: vec![],
+                terminator: Terminator::Break {
+                    target: BlockId::from_index(1),
+                },
+            },
+            BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push {
+                    value: Value::Bool { value: true },
+                }],
+                terminator: Terminator::Branch {
+                    then: BlockId::from_index(2),
+                    els: BlockId::from_index(3),
+                },
+            },
+            BasicBlock {
+                name: None,
+                instrs: vec![],
+                terminator: Terminator::Break {
+                    target: BlockId::from_index(1),
+                },
+            },
+            BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push { value: Value::Unit }],
+                terminator: Terminator::Return,
+            },
+        ],
+    };
+
+    verify(&Module {
+        functions: vec![function],
+        ..Default::default()
+    })
+    .unwrap();
+}
+
+#[test]
+fn all_functions_require_parameter_local_zero() {
+    for foreign in [
+        None,
+        Some(crate::lir::Foreign {
+            header: "test.h".into(),
+            params: vec![],
+        }),
+    ] {
+        let mut function = Function {
+            name: Some("f".into()),
+            foreign,
+            result: Ty::Unit,
+            locals: vec![],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs: vec![Instr::Push { value: Value::Unit }],
+                terminator: Terminator::Return,
+            }],
+        };
+        if function.foreign.is_some() {
+            function.blocks.clear();
+        }
+        assert_eq!(function.ty(), None);
+        let mut module = Module {
+            functions: vec![function],
+            ..Default::default()
+        };
+        assert!(matches!(
+            verify(&module).unwrap_err().kind,
+            VerifyErrorKind::InvalidLocal { local: 0 }
+        ));
+        module.functions[0].locals.push(Local {
+            name: None,
+            ty: Ty::Unit,
+        });
+        verify(&module).unwrap();
+        assert_eq!(
+            module.functions[0].ty(),
+            Some(Ty::Function {
+                param: Box::new(Ty::Unit),
+                result: Box::new(Ty::Unit)
+            })
+        );
+    }
+}
+
+fn builtin_module(name: &str, params: &[Ty], result: Ty) -> Module {
+    let mut instrs: Vec<_> = params
+        .iter()
+        .enumerate()
+        .flat_map(|(index, _)| {
+            [
+                Instr::LocalAddress {
+                    local: LocalId::from_index(index + 1),
+                },
+                Instr::Load,
+            ]
+        })
+        .collect();
+    instrs.push(Instr::CallBuiltin {
+        name: name.into(),
+        params: params.to_vec(),
+        result: result.clone(),
+    });
+    Module {
+        functions: vec![Function {
+            foreign: None,
+            name: None,
+            result,
+            locals: std::iter::once(Ty::Unit)
+                .chain(params.iter().cloned())
+                .map(|ty| Local { name: None, ty })
+                .collect(),
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs,
+                terminator: Terminator::Return,
+            }],
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn builtin_instructions_check_names_arity_and_operand_rules() {
+    for (name, params, result) in [
+        ("unknown", vec![], Ty::Unit),
+        ("==", vec![Ty::Int32], Ty::Bool),
+        ("+", vec![], Ty::Int32),
+        ("+", vec![Ty::Int32, Ty::Float64], Ty::Int32),
+        ("&&", vec![Ty::Int32, Ty::Int32], Ty::Bool),
+        ("print", vec![Ty::Int32], Ty::Unit),
+    ] {
+        assert!(
+            matches!(
+                verify(&builtin_module(name, &params, result))
+                    .unwrap_err()
+                    .kind,
+                VerifyErrorKind::InvalidBuiltin(_)
+            ),
+            "{name} {params:?}"
+        );
+    }
+}
+
+#[test]
+fn builtin_results_are_derived_from_the_operation() {
+    for (name, params, result, expected) in [
+        ("==", vec![Ty::Int32, Ty::Int32], Ty::Int32, Ty::Bool),
+        ("+", vec![Ty::Int32, Ty::Int32], Ty::Bool, Ty::Int32),
+        ("!", vec![Ty::Bool], Ty::Unit, Ty::Bool),
+    ] {
+        assert_eq!(
+            verify(&builtin_module(name, &params, result.clone()))
+                .unwrap_err()
+                .kind,
+            VerifyErrorKind::TypeMismatch {
+                expected,
+                found: result
+            }
+        );
+    }
+}
+
+#[test]
+fn builtin_pointer_comparison_is_valid_but_arithmetic_is_not() {
+    let pointer = Ty::Pointer {
+        pointee: Box::new(Ty::Int32),
+    };
+    verify(&builtin_module(
+        "==",
+        &[pointer.clone(), pointer.clone()],
+        Ty::Bool,
+    ))
+    .unwrap();
+    assert_eq!(
+        verify(&builtin_module(
+            "+",
+            &[pointer.clone(), pointer.clone()],
+            pointer
+        ))
+        .unwrap_err()
+        .kind,
+        VerifyErrorKind::PointerArithmetic
+    );
+}
+
+#[test]
+fn builtin_verification_preserves_arithmetic_without_numeric_traits() {
+    verify(&builtin_module("+", &[record(), record()], record())).unwrap();
+}
+
+#[test]
+fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
+    let first = TypeId::from_index(0);
+    let second = TypeId::from_index(1);
+    for (from, to) in [
+        (Ty::Int32, Ty::Float64),
+        (
+            Ty::Defined { definition: first },
+            Ty::union([first, second]),
+        ),
+        (
+            Ty::UInt64,
+            Ty::Pointer {
+                pointee: Box::new(Ty::Int32),
+            },
+        ),
+        (
+            Ty::Defined { definition: first },
+            Ty::Defined { definition: second },
+        ),
+    ] {
+        let function = Function {
+            foreign: None,
+            name: None,
+            result: to.clone(),
+            locals: vec![Local {
+                name: None,
+                ty: from.clone(),
+            }],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs: vec![
+                    Instr::LocalAddress {
+                        local: LocalId::from_index(0),
+                    },
+                    Instr::Load,
+                    Instr::Ascribe { ty: to.clone() },
+                ],
+                terminator: Terminator::Return,
+            }],
+        };
+        let error = verify(&Module {
+            types: vec![
+                TypeDef::new("First", record()),
+                TypeDef::new("Second", record()),
+            ]
+            .into(),
+            functions: vec![function],
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert_eq!(
+            error.kind,
+            VerifyErrorKind::TypeMismatch {
+                expected: to,
+                found: from
+            }
+        );
+    }
+}
+
+#[test]
+fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
+    let mut definition = TypeDef::new("Resource", record());
+    if let crate::lir::TypeDef::Nominal { drop, .. } = &mut definition {
+        *drop = Some(FunctionId::from_index(0));
+    }
+    let mut module = Module {
+        types: vec![definition].into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidDropHook
+    );
+    module.functions.push(Function {
+        name: None,
+        foreign: None,
+        result: Ty::Unit,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Unit,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![BasicBlock {
+            name: None,
+            instrs: vec![Instr::Push { value: Value::Unit }],
+            terminator: Terminator::Return,
+        }],
+    });
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidDropHook
+    );
+    module.functions[0].locals[0].ty = Ty::Pointer {
+        pointee: Box::new(Ty::Defined {
+            definition: TypeId::from_index(0),
+        }),
+    };
+    verify(&module).unwrap();
+}

@@ -3,9 +3,7 @@ mod config;
 use std::{ffi::OsString, fs, process::Command};
 
 use resin::{
-    ast,
-    backend::c,
-    ir,
+    ast, c, lir,
     toolchain::{self, TempDir},
 };
 
@@ -29,7 +27,7 @@ fn error(source: &str) -> String {
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let path = temp.path().join("source.resin");
     fs::write(&path, source).unwrap();
-    ir::generate_program(&ast::load(&path).unwrap())
+    resin::compiler::generate_program(&ast::load(&path).unwrap())
         .unwrap_err()
         .to_string()
 }
@@ -139,7 +137,7 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
         "export { main }; import { \"nested/library.resin\", \"common.resin\" }; def main () -> int = { helper() };",
     )
     .unwrap();
-    let module = ir::generate_program(&ast::load(&main).unwrap()).unwrap();
+    let module = resin::compiler::generate_program(&ast::load(&main).unwrap()).unwrap();
     assert_eq!(module.functions.len(), 2);
     fs::write(
         temp.path().join("common.resin"),
@@ -178,7 +176,7 @@ fn spirv_requires_a_decorated_function_declaration() {
         "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
-    assert_eq!(main.locals[1].ty, ir::Ty::shader());
+    assert_eq!(main.locals[1].ty, lir::Ty::shader());
     assert_eq!(module.shaders.len(), 1);
     assert!(
         c::emit(&module, "main")

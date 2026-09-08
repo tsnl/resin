@@ -1,5 +1,5 @@
 //! Explicit host settings supplied by the compiler's caller.
-use crate::backend::Error;
+use crate::codegen::Error;
 use std::{
     collections::BTreeMap,
     ffi::OsString,

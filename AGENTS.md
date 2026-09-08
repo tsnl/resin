@@ -3,6 +3,39 @@
 Resin is a simple systems programming language targeting both host (CPU) and device (GPU). 
 Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functionality.
 
+## Architecture and style
+
+- Make the compiler educational to read. Prefer explicit data and direct control flow;
+  a reader should be able to tell what a pass consumes, produces, and computes locally.
+- Follow one direction: syntax → AST → HIR → LIR → verified LIR → C/GLSL → native tools.
+  Put each language's definitions in `language.rs`, its incoming translation in `lower`,
+  and its textual rendering in `print`. Keep module entry points short and navigable.
+- HIR is a typed, desugared tree with resolved bindings, calls, and operations. Source
+  scopes, method namespaces, inference variables, and recovery belong to HIR construction.
+  LIR describes storage, cleanup, stack operations, and explicit control-flow blocks.
+  Keep `crates/lir-verifier` independent; LIR definitions do not invoke their verifier.
+- Keep common resolved types and layout rules in `crates/common/src/types`; they must not depend on a
+  frontend, backend, or verifier. The compiler driver sequences passes and the toolchain
+  owns external processes. Printers consume their own language, without reaching upstream.
+- Each compiler phase is an unpublished workspace crate under `crates/`: `cst`, `ast`,
+  `hir`, `lir`, `lir-verifier`, and `codegen`, with `common` for shared vocabulary.
+  Use `publish = false` and local path dependencies. Keep dependencies acyclic and explicit;
+  do not work around a boundary with public implementation modules or reverse dev-dependencies.
+  Language nodes are public data. Solvers, scopes, builders, and traversal state stay private;
+  expose a small set of lowering, printing, and query operations instead.
+- Keep `common` narrow: source locations, diagnostics, concrete types, layout, and small
+  utilities used by multiple phases. Do not move a phase's state there just to break a cycle.
+  C and GLSL each have a target language, lowering, and printing inside `codegen`.
+- Prefer small functions with descriptive names, ideally fewer than ten lines of logic.
+  Split by a meaningful operation, not an arbitrary line count. Exhaustive language
+  dispatch and simple data definitions may be longer when that keeps the cases together.
+- Use concrete representations and a few explicit passes rather than callback frameworks,
+  hidden cross-pass state, or speculative abstractions. Explain invariants and non-obvious
+  ownership choices close to the code that needs them.
+- Take inspiration from [Bitwise](https://github.com/pervognsen/bitwise): visible data,
+  direct constructors, and code that teaches how the system works. Preserve Resin's
+  behavior and idiomatic Rust; the reference is an ethos, not a mandate to copy C idioms.
+
 ## Cost control
 
 - Run automatic CI for pull requests and pushes on Linux only. Keep Windows and macOS
@@ -53,8 +86,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   identifiers. Desugar method calls into ordinary functions before IR; method namespaces
   and module origins belong to frontend metadata. Compiler-provided methods use the
   same declaration lookup, argument checking, and editor analysis as source methods;
-  register their signatures and generated IR bodies in `generate/builtin_methods.rs`.
-  Only IR generation recognizes `drop` as a hook; direct calls remain ordinary calls.
+  register their signatures and intrinsic operations in `crates/hir/src/lower/builtin_methods.rs`.
+  HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
 - Reading existing values performs compiler-defined copying. Function and type
   applications consume their argument results; operators do the same, and aggregate
   constructors consume their field initializers. `impl` defines inherent methods and
@@ -79,7 +112,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Function result annotations default to unit when omitted, including foreign functions.
   Explicit `_` holes opt into inference in local annotations and function results, including
   nested type positions. Keep parameters, type definitions, and foreign signatures fully explicit.
-  Check source expressions into a typed tree, then lower that tree to IR in a separate pass.
+  Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.

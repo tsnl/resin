@@ -3,8 +3,7 @@ mod config;
 mod support;
 
 use resin::{
-    backend::c,
-    ir,
+    c,
     toolchain::{self, TempDir},
 };
 use std::{ffi::OsString, process::Command};
@@ -46,7 +45,7 @@ fn run(source: &str) {
 
 fn rejects(source: &str, message: &str) {
     let source = format!("{RESOURCE} {source}");
-    let error = ir::generate(&support::parse(&source))
+    let error = resin::compiler::generate(&support::parse(&source))
         .unwrap_err()
         .to_string();
     assert!(error.contains(message), "expected {message:?}: {error}");
@@ -485,7 +484,7 @@ fn weak_payloads_require_upgrade_before_dereference_or_field_access() {
         "def f(value: Weak<Resource>) = { value.read(); };",
     ] {
         assert!(
-            ir::generate(&support::parse(&format!("{RESOURCE} {source}"))).is_err(),
+            resin::compiler::generate(&support::parse(&format!("{RESOURCE} {source}"))).is_err(),
             "{source}"
         );
     }

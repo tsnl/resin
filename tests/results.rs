@@ -1,10 +1,12 @@
-use resin::ir::{self, Ty, TypeId};
+use resin::lir::{self, Ty, TypeId};
 
 mod support;
 use support::{module, parse};
 
 fn rejects(source: &str, message: &str) {
-    let error = ir::generate(&parse(source)).unwrap_err().to_string();
+    let error = resin::compiler::generate(&parse(source))
+        .unwrap_err()
+        .to_string();
     assert!(error.contains(message), "{source}\n{error}");
 }
 
@@ -159,15 +161,15 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     let instruction = m.functions[0].blocks[0]
         .instrs
         .iter_mut()
-        .find(|i| matches!(i, ir::Instr::MakeVariant { .. }))
+        .find(|i| matches!(i, lir::Instr::MakeVariant { .. }))
         .unwrap();
-    let ir::Instr::MakeVariant { tag, .. } = instruction else {
+    let lir::Instr::MakeVariant { tag, .. } = instruction else {
         unreachable!()
     };
-    *tag = ir::Case::Type(Ty::Bool);
+    *tag = lir::Case::Type(Ty::Bool);
     assert!(matches!(
-        ir::verify(&m).unwrap_err().kind,
-        ir::VerifyErrorKind::InvalidVariant
+        resin::lir_verifier::verify(&m).unwrap_err().kind,
+        resin::lir_verifier::VerifyErrorKind::InvalidVariant
     ));
 
     let mut m = module(source);
@@ -176,8 +178,8 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
         error: Box::new(Ty::Bool),
     };
     assert!(matches!(
-        ir::verify(&m).unwrap_err().kind,
-        ir::VerifyErrorKind::InvalidVariant
+        resin::lir_verifier::verify(&m).unwrap_err().kind,
+        resin::lir_verifier::VerifyErrorKind::InvalidVariant
     ));
 
     let mut m = module(source);
@@ -192,8 +194,8 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
         ],
     };
     assert!(matches!(
-        ir::verify(&m).unwrap_err().kind,
-        ir::VerifyErrorKind::InvalidVariant
+        resin::lir_verifier::verify(&m).unwrap_err().kind,
+        resin::lir_verifier::VerifyErrorKind::InvalidVariant
     ));
 }
 
@@ -268,8 +270,8 @@ fn ir_never_elimination_cannot_consume_an_inhabited_value() {
             .blocks
             .iter()
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, resin::ir::Instr::Eliminate { .. }))
+            .any(|i| matches!(i, resin::lir::Instr::Eliminate { .. }))
     );
-    m.functions[0].locals[0].ty = resin::ir::Ty::Int32;
-    assert!(resin::ir::verify(&m).is_err());
+    m.functions[0].locals[0].ty = resin::lir::Ty::Int32;
+    assert!(resin::lir_verifier::verify(&m).is_err());
 }

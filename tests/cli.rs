@@ -583,7 +583,7 @@ fn removed_output_modes_are_rejected_before_building() {
     let input = temp.path().join("source.resin");
     fs::write(&input, "export { main }; def main() = {};").unwrap();
     for mode in [
-        "c", "glsl", "spirv", "ir", "ast", "cst", "check", "exe", "run",
+        "c", "glsl", "spirv", "lir", "ast", "cst", "check", "exe", "run",
     ] {
         let output = invoke(temp.path(), &input, &["--output", mode, "-o", "output"]);
         assert_eq!(output.status.code(), Some(2));

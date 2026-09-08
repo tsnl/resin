@@ -9,9 +9,7 @@ use std::{
 };
 
 use resin::{
-    ast,
-    backend::c,
-    ir,
+    ast, c,
     toolchain::{self, TempDir},
 };
 
@@ -25,7 +23,7 @@ impl Program {
         let temp = TempDir::new(&std::env::temp_dir()).unwrap();
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
-        let module = ir::generate_program(&ast::load(&path).unwrap()).unwrap();
+        let module = resin::compiler::generate_program(&ast::load(&path).unwrap()).unwrap();
         Self::compile(temp, &c::emit(&module, "main").unwrap())
     }
 
@@ -214,7 +212,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         );
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
-        let module = ir::generate_program(&ast::load(&path).unwrap()).unwrap();
+        let module = resin::compiler::generate_program(&ast::load(&path).unwrap()).unwrap();
         // Include before the generated header list so all foreign calls use the test shims.
         let source = format!(
             "#include \"{header}\"\n{}",

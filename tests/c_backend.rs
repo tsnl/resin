@@ -3,18 +3,17 @@ mod config;
 use std::{ffi::OsString, fs, process::Command};
 
 use resin::{
-    backend::c,
-    ir,
+    c, lir,
     toolchain::{self, TempDir},
 };
 mod support;
 use support::module;
 
-fn run_module(module: &ir::Module) -> std::process::Output {
+fn run_module(module: &lir::Module) -> std::process::Output {
     run_entry(module, "main")
 }
 
-fn run_entry(module: &ir::Module, entry: &str) -> std::process::Output {
+fn run_entry(module: &lir::Module, entry: &str) -> std::process::Output {
     let source = c::emit(module, entry).unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let output = temp
@@ -30,7 +29,7 @@ fn run_entry(module: &ir::Module, entry: &str) -> std::process::Output {
 #[test]
 fn ownership_example_releases_memory_on_success_and_failure() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ownership.resin");
-    let m = ir::generate_program(&resin::ast::load(&path).unwrap()).unwrap();
+    let m = resin::compiler::generate_program(&resin::ast::load(&path).unwrap()).unwrap();
     let success = run_entry(&m, "main");
     assert!(
         success.status.success(),
@@ -97,7 +96,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let ir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
+    let lir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -153,7 +152,7 @@ fn numbered_examples_compile_as_strict_c11() {
                 .starts_with("eg")
         {
             let program = resin::ast::load(&path).unwrap();
-            let module = ir::generate_program(&program).unwrap();
+            let module = resin::compiler::generate_program(&program).unwrap();
             let output = run_module(&module);
             assert_eq!(
                 output.status.code(),
@@ -323,7 +322,7 @@ fn unsupported_operations_report_backend_errors() {
 #[test]
 fn invalid_ir_is_rejected_before_emitting() {
     assert!(
-        c::emit(&ir::Module::default(), "main")
+        c::emit(&lir::Module::default(), "main")
             .unwrap_err()
             .to_string()
             .contains("export { main }")
@@ -331,7 +330,7 @@ fn invalid_ir_is_rejected_before_emitting() {
     let mut m = module("export { main }; def main () -> int = { 0 };");
     m.functions[0].blocks[0]
         .instrs
-        .insert(0, ir::Instr::Discard);
+        .insert(0, lir::Instr::Discard);
     assert!(
         c::emit(&m, "main")
             .unwrap_err()
@@ -368,7 +367,7 @@ fn failed_compilation_preserves_existing_output() {
 
 #[test]
 fn loops_carry_typed_stack_values_across_edges() {
-    use ir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
+    use lir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
@@ -444,7 +443,7 @@ fn loops_carry_typed_stack_values_across_edges() {
 
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
-    use ir::{Instr::*, Local, LocalId, Ty, Value};
+    use lir::{Instr::*, Local, LocalId, Ty, Value};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
@@ -657,7 +656,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             if (valid && particle.x != first.x && color.r >= 0_f && color.r <= 1_f && color.b >= 0_f && color.b <= 1_f) { 0 } else { 1 }
         };
     "#).stmts);
-    let m = ir::generate_program(&program).unwrap();
+    let m = resin::compiler::generate_program(&program).unwrap();
     assert!(m.shaders.values().all(|entry| !entry.embedded));
     assert!(run_module(&m).status.success());
 }
