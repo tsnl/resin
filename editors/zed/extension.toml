@@ -8,7 +8,7 @@ repository = "https://github.com/tsnl/resin"
 
 [grammars.resin]
 repository = "https://github.com/tsnl/resin"
-rev = "78de8fe94d04ea4f032301ef7ae7f6692cdfc6cf"
+rev = "49e4dae50e42d4f1274d24fbde27d4dc9cf7aadf"
 path = "crates/tree-sitter-resin"
 
 [language_servers.resin-lsp]
