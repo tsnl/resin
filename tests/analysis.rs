@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[test]
 fn option_payload_fields_remain_available_in_incomplete_code() {
-    let source = "struct Item { count: int }; def f(value: Option<Item>) = { value!.; };";
+    let source = "struct Item { count: int }; def f(value: Item | None) = { value!.; };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
         &project.path("main.resin"),

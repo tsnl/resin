@@ -257,6 +257,10 @@ impl Generator {
                 self.emit(Instr::Push { value: Value::Unit });
                 Ok(Ty::Unit)
             }
+            TermKind::None => {
+                self.emit(Instr::Push { value: Value::None });
+                Ok(Ty::None)
+            }
             TermKind::String { value } => {
                 let bytes = value.as_bytes();
                 self.emit(Instr::Push {
@@ -281,11 +285,9 @@ impl Generator {
             }
             TermKind::If { cond, then, els } => self.gen_if(cond, then, els, expected),
             TermKind::Unwrap { value } => {
-                let Ty::Option { value } = self.gen_term(value, None)? else {
-                    unreachable!("checked Option operand")
-                };
-                self.emit(Instr::UnwrapOption);
-                Ok(*value)
+                let input = self.gen_term(value, None)?;
+                self.emit(Instr::ExcludeNone);
+                Ok(input.without_none().expect("checked None exclusion"))
             }
             TermKind::Try { value } => self.gen_try(term.span, value),
             TermKind::Match { value, arms } => self.gen_match(term.span, value, arms, expected),

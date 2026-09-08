@@ -28,7 +28,9 @@ impl Scan {
                 self.term(value);
                 for arm in arms {
                     let before = self.locals.clone();
-                    self.bind(&arm.name.val);
+                    if let Some(name) = &arm.name {
+                        self.bind(&name.val);
+                    }
                     self.term(&arm.body);
                     self.locals = before;
                 }
@@ -86,7 +88,7 @@ impl Scan {
             TermKind::Deref { pointer } => self.term(pointer),
             TermKind::Address { place } => self.term(place),
             TermKind::Field { base, .. } | TermKind::FieldHole { base } => self.term(base),
-            TermKind::Unit | TermKind::Num { .. } | TermKind::String { .. } => {}
+            TermKind::None | TermKind::Unit | TermKind::Num { .. } | TermKind::String { .. } => {}
         }
     }
 }

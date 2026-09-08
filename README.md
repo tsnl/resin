@@ -256,8 +256,9 @@ Register resource cleanup with `defer` before using further fallible operations.
 
 ### Optional values
 
-`Option<T>` holds `some(value)` or `none()`. Exhaustive `match` handles both cases;
-postfix `optional!` returns the payload or traps on `none`. See [optional values](doc/options.md).
+`T | None` is an ordinary union containing the builtin singleton `None`. Values of
+`T` widen into it directly. Exhaustive `match` handles absence; postfix `optional!`
+removes `None` or traps. See [optional values](doc/options.md).
 
 ### Deferred cleanup
 

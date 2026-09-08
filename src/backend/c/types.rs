@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Write};
 use crate::ir::{Instr, Module, Ty, TypeId, Value, verify::FunctionTypes};
 
 pub(super) struct Types<'a> {
+    pub tags: crate::ir::types::tags::VariantTags,
     pub module: &'a Module,
     pub shaders: &'a [super::Shader],
     types: Vec<Ty>,
@@ -17,6 +18,7 @@ impl<'a> Types<'a> {
     ) -> Self {
         let mut types = Self {
             module,
+            tags: crate::ir::types::tags::VariantTags::new(module, analysis),
             shaders,
             types: Vec::new(),
             ids: HashMap::new(),
@@ -59,7 +61,7 @@ impl<'a> Types<'a> {
         self.types.push(ty.clone());
         self.ids.insert(ty.clone(), id);
         match ty {
-            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } => {
                 for (_, payload) in ty.payloads().unwrap() {
                     self.intern(&payload);
                 }
@@ -199,9 +201,10 @@ impl<'a> Types<'a> {
         }
         emitted[self.id(ty)] = true;
         let body = match ty {
-            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } => {
                 let mut fields = String::new();
-                for (tag, payload) in ty.payloads().unwrap() {
+                for (case, payload) in ty.payloads().unwrap() {
+                    let tag = self.tags.tag(&case);
                     self.definition(&payload, emitted, out);
                     write!(fields, " {} v{tag};", self.name(&payload)).unwrap();
                 }
@@ -253,7 +256,7 @@ impl<'a> Types<'a> {
 
 fn scalar(ty: &Ty) -> Option<&'static str> {
     Some(match ty {
-        Ty::Unit => "uint8_t",
+        Ty::Unit | Ty::None => "uint8_t",
         Ty::Type => "size_t",
         Ty::Bool => "bool",
         Ty::Int8 => "int8_t",

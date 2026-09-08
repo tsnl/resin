@@ -610,7 +610,7 @@
       },
       "name": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "lid",
@@ -623,19 +623,15 @@
         "required": true,
         "types": [
           {
+            "type": "None",
+            "named": false
+          },
+          {
             "type": "err",
             "named": false
           },
           {
-            "type": "none",
-            "named": false
-          },
-          {
             "type": "ok",
-            "named": false
-          },
-          {
-            "type": "some",
             "named": false
           },
           {
@@ -1207,10 +1203,6 @@
         "required": false,
         "types": [
           {
-            "type": "Option",
-            "named": false
-          },
-          {
             "type": "Ptr",
             "named": false
           },
@@ -1432,7 +1424,7 @@
     "named": false
   },
   {
-    "type": "Option",
+    "type": "None",
     "named": false
   },
   {
@@ -1529,10 +1521,6 @@
     "named": false
   },
   {
-    "type": "none",
-    "named": false
-  },
-  {
     "type": "number",
     "named": true
   },
@@ -1550,10 +1538,6 @@
   },
   {
     "type": "short",
-    "named": false
-  },
-  {
-    "type": "some",
     "named": false
   },
   {

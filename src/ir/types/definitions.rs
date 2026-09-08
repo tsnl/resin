@@ -34,15 +34,14 @@ pub(crate) fn check_record(id: TypeId, ty: &Ty) -> Result<(), DefinitionError> {
 pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), DefinitionError> {
     match ty {
         Ty::Union { variants } => {
-            if variants.len() == 1
-                || variants
-                    .windows(2)
-                    .any(|pair| pair[0].index() >= pair[1].index())
-            {
+            if variants.len() == 1 || variants.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(DefinitionError::InvalidUnion);
             }
-            for id in variants {
-                get(definitions, *id)?;
+            for variant in variants {
+                if matches!(variant, Ty::Union { .. }) {
+                    return Err(DefinitionError::InvalidUnion);
+                }
+                check_references(definitions, variant)?;
             }
         }
         Ty::Result { value, error } => {
@@ -56,7 +55,6 @@ pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             get(definitions, *definition)?;
         }
         Ty::Pointer { pointee } => check_references(definitions, pointee)?,
-        Ty::Option { value } => check_references(definitions, value)?,
         Ty::Span { element } | Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
@@ -88,14 +86,8 @@ fn check_inline(
 ) -> Result<(), DefinitionError> {
     match ty {
         Ty::Union { variants } => {
-            for definition in variants {
-                check_inline(
-                    definitions,
-                    &Ty::Defined {
-                        definition: *definition,
-                    },
-                    active,
-                )?;
+            for variant in variants {
+                check_inline(definitions, variant, active)?;
             }
         }
         Ty::Result { value, error } => {
@@ -111,7 +103,6 @@ fn check_inline(
             check_inline(definitions, body, active)?;
             active.pop();
         }
-        Ty::Option { value } => check_inline(definitions, value, active)?,
         Ty::Array { element, .. } => check_inline(definitions, element, active)?,
         Ty::Record { fields } => {
             for field in fields {

@@ -6,6 +6,7 @@ use crate::{
 };
 
 pub(super) struct Types<'a> {
+    pub tags: crate::ir::types::tags::VariantTags,
     pub module: &'a Module,
     records: Vec<Ty>,
     seen: HashSet<Ty>,
@@ -13,9 +14,10 @@ pub(super) struct Types<'a> {
 }
 
 impl<'a> Types<'a> {
-    pub fn new(module: &'a Module) -> Self {
+    pub fn new(module: &'a Module, analysis: &[crate::ir::verify::FunctionTypes]) -> Self {
         Self {
             module,
+            tags: crate::ir::types::tags::VariantTags::new(module, analysis),
             records: Vec::new(),
             seen: HashSet::new(),
             buffers: Vec::new(),
@@ -27,13 +29,13 @@ impl<'a> Types<'a> {
             return Ok(());
         }
         match ty {
-            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } => {
                 for (_, payload) in ty.payloads().unwrap() {
                     self.register(&payload)?;
                 }
                 self.records.push(ty.clone());
             }
-            Ty::Unit | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 => {}
+            Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 => {}
             Ty::Span { element } => {
                 self.buffer(element)?;
                 self.records.push(ty.clone());
@@ -80,7 +82,7 @@ impl<'a> Types<'a> {
 
     pub fn name(&self, ty: &Ty) -> String {
         match ty {
-            Ty::Unit | Ty::UInt32 => "uint".into(),
+            Ty::Unit | Ty::None | Ty::UInt32 => "uint".into(),
             Ty::UInt64 | Ty::Pointer { .. } => "uint64_t".into(),
             Ty::Int32 => "int".into(),
             Ty::Bool => "bool".into(),
@@ -117,7 +119,7 @@ impl<'a> Types<'a> {
 
     pub fn zero(&self, ty: &Ty) -> String {
         match ty {
-            Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
+            Ty::Union { .. } | Ty::Result { .. } => {
                 let mut values = vec!["0u".into()];
                 values.extend(ty.payloads().unwrap().iter().map(|(_, ty)| self.zero(ty)));
                 format!("{}({})", self.name(ty), values.join(", "))
@@ -157,9 +159,10 @@ impl<'a> Types<'a> {
             .iter()
             .map(|ty| {
                 let fields = match ty {
-                    Ty::Union { .. } | Ty::Result { .. } | Ty::Option { .. } => {
+                    Ty::Union { .. } | Ty::Result { .. } => {
                         let mut fields = String::from("uint tag;");
-                        for (tag, payload) in ty.payloads().unwrap() {
+                        for (case, payload) in ty.payloads().unwrap() {
+                            let tag = self.tags.tag(&case);
                             write!(fields, " {} v{tag};", self.name(&payload)).unwrap();
                         }
                         fields

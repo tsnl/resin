@@ -58,18 +58,10 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
             }
             variants
                 .iter()
-                .map(|definition| {
-                    format_type(
-                        &Ty::Defined {
-                            definition: *definition,
-                        },
-                        typer,
-                    )
-                })
+                .map(|member| format_type(member, typer))
                 .collect::<Vec<_>>()
                 .join(" | ")
         }
-        Ty::Option { value } => format!("Option<{}>", format_type(value, typer)),
         Ty::Result { value, error } => format!(
             "Result<{}, {}>",
             format_type(value, typer),
@@ -77,6 +69,7 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
         ),
         Ty::Type => "type".into(),
         Ty::Unit => "()".into(),
+        Ty::None => "None".into(),
         Ty::Bool => "bool".into(),
         Ty::Int8 => "sbyte".into(),
         Ty::Int16 => "short".into(),

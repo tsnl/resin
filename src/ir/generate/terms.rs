@@ -71,18 +71,6 @@ impl Generator {
         }
         if let TermKind::Var { name } = &func.val {
             match name.val.as_ref() {
-                "some" | "none" => {
-                    let Ty::Option { value } = expected else {
-                        unreachable!("checked Option constructor")
-                    };
-                    let some = name.val.as_ref() == "some";
-                    self.gen_term(arg, Some(if some { value } else { &Ty::Unit }))?;
-                    self.emit(Instr::MakeVariant {
-                        ty: expected.clone(),
-                        tag: u32::from(some),
-                    });
-                    return Ok(expected.clone());
-                }
                 "absurd" => {
                     self.gen_term(arg, Some(&Ty::union([])))?;
                     self.emit(Instr::Eliminate {

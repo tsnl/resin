@@ -85,7 +85,7 @@ pub(crate) fn emit_verified(
         &mut reachable,
     )?;
     let function = &module.functions[entry.index()];
-    let mut types = Types::new(module);
+    let mut types = Types::new(module, analysis);
     for &index in &reachable {
         let function = &module.functions[index];
         for local in &function.locals {

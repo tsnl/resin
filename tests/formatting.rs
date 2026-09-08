@@ -212,7 +212,7 @@ fn singleton_tuples_do_not_expand_for_their_trailing_comma() {
 #[test]
 fn optional_unwrap_suffix_stays_attached_and_preserves_operators() {
     check(
-        "def f(x: Option<Option<int>>) -> bool = { x ! ! != 0 };",
-        "def f(x: Option<Option<int>>) -> bool = {\n\tx!! != 0\n};\n",
+        "def f(x: int | None) -> bool = { x ! != 0 };",
+        "def f(x: int | None) -> bool = {\n\tx! != 0\n};\n",
     );
 }

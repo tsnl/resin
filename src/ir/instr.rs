@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::util::define_id;
 
-use super::{FunctionId, LocalId, Ty, Value};
+use super::{Case, FunctionId, LocalId, Ty, Value};
 
 define_id! {
     pub struct BlockId(usize);
@@ -69,13 +69,15 @@ pub enum Instr {
     },
     MakeVariant {
         ty: Ty,
-        tag: u32,
+        tag: Case,
     },
-    VariantTag,
-    /// Consume Some and transfer its payload; trap on None.
-    UnwrapOption,
+    IsVariant {
+        tag: Case,
+    },
+    /// Exclude None from a value; trap if that is the active case.
+    ExcludeNone,
     VariantPayload {
-        tag: u32,
+        tag: Case,
     },
     Widen {
         ty: Ty,
@@ -179,8 +181,8 @@ impl Instr {
             | Self::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
             Self::AccessStatic { .. }
             | Self::MakeVariant { .. }
-            | Self::UnwrapOption
-            | Self::VariantTag
+            | Self::ExcludeNone
+            | Self::IsVariant { .. }
             | Self::VariantPayload { .. }
             | Self::Widen { .. }
             | Self::Load

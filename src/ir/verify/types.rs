@@ -36,15 +36,8 @@ pub(super) fn check_value(
     ) -> Result<(), VerifyError> {
         match ty {
             Ty::Union { variants } => {
-                for definition in variants {
-                    visit(
-                        table,
-                        &Ty::Defined {
-                            definition: *definition,
-                        },
-                        location,
-                        seen,
-                    )?;
+                for member in variants {
+                    visit(table, member, location, seen)?;
                 }
             }
             Ty::Result { value, error } => {
@@ -63,7 +56,6 @@ pub(super) fn check_value(
                     seen,
                 )?;
             }
-            Ty::Option { value } => visit(table, value, location, seen)?,
             Ty::Array { element, .. } => visit(table, element, location, seen)?,
             Ty::Record { fields } => {
                 for field in fields {

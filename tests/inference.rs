@@ -455,6 +455,6 @@ fn never_elimination_requires_an_empty_input_and_resolved_context() {
         ),
         Ty::Int32
     );
-    rejects("def bad(n: int) -> int = { absurd(n) };", "nominal structs");
+    rejects("def bad(n: int) -> int = { absurd(n) };", "TypeMismatch");
     rejects("def ambiguous(n: Never) -> _ = { absurd(n) };", "infer");
 }

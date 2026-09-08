@@ -21,7 +21,7 @@ pub use print::format_module;
 pub use typer::{
     BuiltinCall, Conv, Converted, FieldAccess, TypeError, TypeErrorKind, TyperContext,
 };
-pub use types::{RecordField, Ty, TypeDef, TypeId};
+pub use types::{Case, RecordField, Ty, TypeDef, TypeId};
 pub use value::{
     ArrayValue, FunctionId, LocalId, RecordFieldValue, RecordValue, StaticAddressValue, Value,
 };

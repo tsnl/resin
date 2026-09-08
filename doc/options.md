@@ -1,26 +1,53 @@
 # Optional values
 
-`Option<T>` is either `some(value)` or `none()`. An empty option needs enough type
-context to determine `T`; options may contain structs, tuples, functions, or other options.
+`None` is a builtin singleton: it names both a type and its only value. An optional
+integer is the ordinary structural union `int | None`. Any integer widens into that
+union directly; `None` represents absence.
 
 ```resin
-def choose(value: Option<int>) -> int = {
-    match (value) { some(number) => { number }, none(unused) => { 0 } }
+type OptionalInt = int | None;
+
+def choose(value: OptionalInt) -> int = {
+    match (value) { int(number) => { number }, None => { 0 } }
 };
 ```
 
-Matching requires both variants exactly once. Postfix `!` unwraps an option:
+`match` covers every member exactly once. A type pattern binds the value of that
+type; the singleton case can be written `None => { ... }` without a binding.
+There is no user-defined singleton declaration syntax yet.
+
+Union members may be primitive, nominal, or structural types. Aliases are
+transparent, nesting flattens, and repeated members collapse: `OptionalInt | None`
+is the same type as `int | None`. A union does not distinguish two occurrences of
+`None`; use a wrapper struct if those cases need different meanings.
+
+Postfix `!` removes `None` from the operand's possible types:
 
 ```resin
-var value = some(42);
-var number = value!;
+def require_number(value: int | None) -> int = { value! };
+def require_choice(value: int | bool | None) -> int | bool = { value! };
 ```
 
-Unwrapping evaluates the operand once. `some` yields its payload; `none` traps with
-`cannot unwrap none` on the host. A shader stops the invocation and propagates failure
-through callers, preserving prior writes, as for bounds and numeric-conversion traps.
-Traps do not unwind cleanup. Prefer `match` when absence is expected.
+The operand is evaluated once. If it is `None`, the host traps with
+`cannot unwrap None`. Otherwise the value keeps its member type; the result can
+then widen into a larger union at its consumer. Mutable pointer and Span element
+types remain invariant: `Ptr<int> | None` does not become `Ptr<int | None>`.
 
-Postfix operations compose from left to right: `nested!!` unwraps two nested options,
-and `optional_record!.field` unwraps before selecting a field. Prefix `!` still negates
-a Boolean. Options use a tag and inline payload, with tag zero for `none` and one for `some`.
+In a shader, failure stops the invocation and propagates through shader callers,
+preserving prior writes, as for bounds and numeric-conversion traps. This does not
+report a panic to the host or roll back a dispatch. Traps do not unwind cleanup.
+Prefer `match` when absence is expected. Shader-local unions support only payloads
+supported by the shader backend; union buffer layouts are not part of this change.
+
+Postfix operations compose from left to right: `optional_record!.field` excludes
+`None` before selecting a field. Prefix `!` still negates a Boolean. A second
+postfix `!` is invalid once no `None` remains.
+
+`Result<T, E>` retains distinct `ok` and `err` cases even when `T` and `E` overlap.
+It can be a member of a union, such as `Result<int, Error> | None`; `!` on that
+union removes only `None`, leaving the Result intact. Use `?` or `match` to handle
+the Result. Postfix `!` on a bare Result is not supported in this change.
+
+Ordinary unions use module-wide u32 tags for member type identity, rather than
+positions in a particular union. Widening preserves those identities. Results
+have a separate tag domain for success and failure.

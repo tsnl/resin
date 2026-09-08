@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::{
     backend::Error,
-    ir::{Instr, Terminator, Ty, verify::FunctionTypes},
+    ir::{Case, Instr, Terminator, Ty, verify::FunctionTypes},
 };
 
 use super::{Slot, ops, types::Types, value::literal};
@@ -124,24 +124,22 @@ fn instruction(
             writeln!(out, "  r_l{} = {};", local.index(), args[0].expr).unwrap();
             return Ok(None);
         }
-        Instr::MakeVariant { ty, tag } => variant(types, ty, *tag, &args[0].expr),
-        Instr::UnwrapOption => {
+        Instr::MakeVariant { ty, tag } => variant(types, ty, tag, &args[0].expr),
+        Instr::ExcludeNone => {
+            let condition = is_variant(types, &args[0].ty, &Case::Type(Ty::None), &args[0].expr);
             writeln!(
                 out,
-                "  if (({}).tag != 1u) resin_fail(\"cannot unwrap none\");",
-                args[0].expr
+                "  if ({condition}) resin_fail(\"cannot unwrap None\");"
             )
             .unwrap();
-            format!("({}).payload.v1", args[0].expr)
+            widen(types, &args[0].ty, result.unwrap(), &args[0].expr)
         }
-        Instr::VariantTag => match &args[0].ty {
-            Ty::Defined { definition } => format!("{}u", definition.tag()),
-            _ => format!("({}).tag", args[0].expr),
-        },
+        Instr::IsVariant { tag } => is_variant(types, &args[0].ty, tag, &args[0].expr),
         Instr::VariantPayload { tag } => {
-            if matches!(args[0].ty, Ty::Defined { .. }) {
+            if matches!(tag, Case::Type(member) if member == &args[0].ty) {
                 args[0].expr.clone()
             } else {
+                let tag = types.tags.tag(tag);
                 writeln!(
                     out,
                     "  if (({}).tag != {tag}u) resin_fail(\"invalid union tag\");",
@@ -275,39 +273,51 @@ fn instruction(
     Ok(Some(expr))
 }
 
-fn variant(types: &Types<'_>, ty: &Ty, tag: u32, value: &str) -> String {
-    if matches!(ty, Ty::Defined { .. }) {
-        value.into()
-    } else {
-        format!(
-            "({}){{ .tag = {tag}u, .payload = {{ .v{tag} = {value} }} }}",
-            types.name(ty)
-        )
+fn is_variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
+    if matches!(case, Case::Type(member) if member == ty) {
+        return "true".into();
     }
+    format!("(({value}).tag == {}u)", types.tags.tag(case))
 }
 
+fn variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
+    if matches!(case, Case::Type(member) if member == ty) {
+        return value.into();
+    }
+    let tag = types.tags.tag(case);
+    format!(
+        "({}){{ .tag = {tag}u, .payload = {{ .v{tag} = {value} }} }}",
+        types.name(ty)
+    )
+}
+
+// Also used after the checked exclusion of None. Cases absent from the target
+// cannot be selected on that path; payloads retain their module-wide identities.
 fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     if from == to {
         return value.into();
     }
-    if let Ty::Defined { definition } = from {
-        return variant(types, to, definition.tag(), value);
+    if matches!(to, Ty::Union { variants } if variants.contains(from)) {
+        return variant(types, to, &Case::Type(from.clone()), value);
     }
     let initializer = if matches!(to, Ty::Defined { .. }) {
         ".value = {0}"
     } else {
-        ".tag = 0"
+        "0"
     };
     let mut expression = format!("({}){{ {initializer} }}", types.name(to));
-    for (tag, payload) in from.payloads().unwrap().into_iter().rev() {
-        let target = to.payload(tag).unwrap();
+    for (case, payload) in from.payloads().unwrap_or_default().into_iter().rev() {
+        let Some(target) = to.payload(&case) else {
+            continue;
+        };
+        let tag = types.tags.tag(&case);
         let payload = widen(
             types,
             &payload,
             &target,
             &format!("({value}).payload.v{tag}"),
         );
-        let constructed = variant(types, to, tag, &payload);
+        let constructed = variant(types, to, &case, &payload);
         expression = format!("(({value}).tag == {tag}u ? {constructed} : {expression})");
     }
     expression

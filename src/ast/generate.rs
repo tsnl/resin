@@ -452,6 +452,7 @@ impl<'a> AstGen<'a> {
                 },
                 span,
             ),
+            "unary_type" if self.text(child) == "None" => Spanned::new(TermKind::None, span),
             "number" => Spanned::new(
                 TermKind::Num {
                     value: self.text(child).into(),
@@ -466,15 +467,19 @@ impl<'a> AstGen<'a> {
                     .map(|arm| {
                         let variant = arm.child_by_field_name("variant").unwrap_or(arm);
                         let variant = match variant.kind() {
-                            "some" => MatchVariant::Some,
-                            "none" => MatchVariant::None,
+                            "None" => MatchVariant::Type(Spanned::new(
+                                TypeKind::Atom {
+                                    name: Ident::new("None".into(), self.span(variant)),
+                                },
+                                self.span(variant),
+                            )),
                             "ok" => MatchVariant::Ok,
                             "err" => MatchVariant::Err,
                             _ => MatchVariant::Type(self.gen_type(variant)),
                         };
                         MatchArm {
                             variant,
-                            name: self.ident(arm.child_by_field_name("name").unwrap_or(arm)),
+                            name: arm.child_by_field_name("name").map(|node| self.ident(node)),
                             body: self.gen_body(arm.child_by_field_name("body").unwrap_or(arm)),
                         }
                     })
@@ -869,10 +874,8 @@ impl<'a> AstGen<'a> {
     fn ident(&self, node: Node) -> Ident {
         let text = if self.recovering
             && (node.is_missing()
-                || !matches!(
-                    node.kind(),
-                    "lid" | "uid" | "builtin_type" | "Ptr" | "Span" | "Option"
-                )) {
+                || !matches!(node.kind(), "lid" | "uid" | "builtin_type" | "Ptr" | "Span"))
+        {
             ""
         } else {
             self.text(node)

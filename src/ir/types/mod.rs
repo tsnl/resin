@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::util::define_id;
 
 pub(crate) mod definitions;
+pub(crate) mod tags;
 
 define_id! {
     pub struct TypeId(usize);
@@ -30,16 +31,17 @@ impl TypeDef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecordField {
     pub name: Arc<str>,
     pub ty: Ty,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ty {
     Type,
     Unit,
+    None,
     Bool,
     Int8,
     Int16,
@@ -55,61 +57,89 @@ pub enum Ty {
     Defined { definition: TypeId },
     Pointer { pointee: Box<Ty> },
     Span { element: Box<Ty> },
-    Option { value: Box<Ty> },
     Array { element: Box<Ty>, length: usize },
     Record { fields: Vec<RecordField> },
     Function { param: Box<Ty>, result: Box<Ty> },
-    Union { variants: Vec<TypeId> },
+    Union { variants: Vec<Ty> },
     Result { value: Box<Ty>, error: Box<Ty> },
 }
 
+/// Result cases are tagged independently of their payload type. Ordinary union
+/// cases carry type identity until the module's runtime tags are assigned.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Case {
+    Ok,
+    Err,
+    Type(Ty),
+}
+
 impl Ty {
-    pub fn payloads(&self) -> Option<Vec<(u32, Ty)>> {
+    pub fn payloads(&self) -> Option<Vec<(Case, Ty)>> {
         match self {
-            Self::Option { value } => Some(vec![(0, Ty::Unit), (1, *value.clone())]),
-            Self::Result { value, error } => Some(vec![(0, *value.clone()), (1, *error.clone())]),
+            Self::Result { value, error } => Some(vec![
+                (Case::Ok, *value.clone()),
+                (Case::Err, *error.clone()),
+            ]),
             Self::Union { variants } => Some(
                 variants
                     .iter()
-                    .map(|id| (id.tag(), Self::Defined { definition: *id }))
+                    .map(|ty| (Case::Type(ty.clone()), ty.clone()))
                     .collect(),
             ),
             _ => None,
         }
     }
 
-    pub fn payload(&self, tag: u32) -> Option<Ty> {
-        match self {
-            Self::Option { .. } if tag == 0 => Some(Ty::Unit),
-            Self::Option { value } if tag == 1 => Some(*value.clone()),
-            Self::Result { value, .. } if tag == 0 => Some(*value.clone()),
-            Self::Result { error, .. } if tag == 1 => Some(*error.clone()),
-            _ => self
-                .variants()?
-                .into_iter()
-                .find(|id| id.tag() == tag)
-                .map(|definition| Self::Defined { definition }),
-        }
-    }
-
-    pub fn variants(&self) -> Option<Vec<TypeId>> {
-        match self {
-            Self::Defined { definition } => Some(vec![*definition]),
-            Self::Union { variants } => Some(variants.clone()),
+    pub fn payload(&self, case: &Case) -> Option<Ty> {
+        match (self, case) {
+            (Self::Result { value, .. }, Case::Ok) => Some(*value.clone()),
+            (Self::Result { error, .. }, Case::Err) => Some(*error.clone()),
+            (_, Case::Type(ty)) if self.members().contains(ty) => Some(ty.clone()),
             _ => None,
         }
     }
 
+    /// Nominal variants used by Result error-set inference.
+    pub fn variants(&self) -> Option<Vec<TypeId>> {
+        self.members()
+            .into_iter()
+            .map(|ty| match ty {
+                Self::Defined { definition } => Some(definition),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn members(&self) -> Vec<Ty> {
+        match self {
+            Self::Union { variants } => variants.clone(),
+            _ => vec![self.clone()],
+        }
+    }
+
     pub fn union(variants: impl IntoIterator<Item = TypeId>) -> Self {
-        let mut variants: Vec<_> = variants.into_iter().collect();
-        variants.sort_by_key(|id| id.index());
+        Self::union_of(
+            variants
+                .into_iter()
+                .map(|definition| Self::Defined { definition }),
+        )
+    }
+
+    pub fn union_of(variants: impl IntoIterator<Item = Ty>) -> Self {
+        let mut variants: Vec<_> = variants.into_iter().flat_map(|ty| ty.members()).collect();
+        variants.sort();
         variants.dedup();
         match variants.as_slice() {
-            [definition] => Self::Defined {
-                definition: *definition,
-            },
+            [ty] => ty.clone(),
             _ => Self::Union { variants },
         }
+    }
+
+    pub fn without_none(&self) -> Option<Self> {
+        let members = self.members();
+        members
+            .contains(&Self::None)
+            .then(|| Self::union_of(members.into_iter().filter(|ty| ty != &Self::None)))
     }
 
     pub fn widens_to(&self, to: &Self) -> bool {
@@ -127,10 +157,7 @@ impl Ty {
                     error: be,
                 },
             ) => av == bv && ae.widens_to(be),
-            _ => match (self.variants(), to.variants()) {
-                (Some(from), Some(to)) => from.iter().all(|id| to.contains(id)),
-                _ => false,
-            },
+            _ => self.members().iter().all(|ty| to.members().contains(ty)),
         }
     }
 

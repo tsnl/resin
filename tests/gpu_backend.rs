@@ -463,7 +463,7 @@ fn optional_unwrap_stops_shader_callers_on_none() {
     compute_values(
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
-        def choose(i: uint) -> uint = { var value: Option<uint>; value := if ((i & 1I) == 0I) { some(i) } else { none() }; value! };
+        def choose(i: uint) -> uint = { var value: uint | None; value := if ((i & 1I) == 0I) { i } else { None }; value! };
         def kernel(i: uint, root: Ptr<Root>) = {
             if (i < root.count) {
                 var output = Span<uint> { data = root.pixels, length = 67L };
@@ -473,6 +473,32 @@ fn optional_unwrap_stops_shader_callers_on_none() {
             };
         };"#,
         |index| if index % 2 == 0 { index + 1 } else { 7 },
+    );
+}
+
+#[test]
+fn none_elimination_preserves_shader_union_members() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        def choose(i: uint) -> uint | bool | None = {
+            if ((i & 3I) == 0I) { None } else { if ((i & 3I) == 1I) { i } else { 1I == 1I } }
+        };
+        def read(i: uint) -> uint = {
+            match (choose(i)!) { uint(n) => { n + 1I }, bool(b) => { if (b) { 42I } else { 0I } } }
+        };
+        def kernel(i: uint, root: Ptr<Root>) = {
+            if (i < root.count) {
+                var output = Span<uint> { data = root.pixels, length = 67L };
+                output(i).* := 7I;
+                output(i).* := read(i);
+            };
+        };"#,
+        |index| match index % 4 {
+            0 => 7,
+            1 => index + 1,
+            _ => 42,
+        },
     );
 }
 

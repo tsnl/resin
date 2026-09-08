@@ -227,10 +227,7 @@ impl Recovery<'_> {
     }
     fn term(&mut self, term: &Term, expected: Option<&Ty>) -> Option<Ty> {
         let found = match &term.val {
-            TermKind::Unwrap { value } => match self.term(value, None) {
-                Some(Ty::Option { value }) => Some(*value),
-                _ => None,
-            },
+            TermKind::Unwrap { value } => self.term(value, None).and_then(|ty| ty.without_none()),
             TermKind::Try { value } => match self.term(value, None) {
                 Some(Ty::Result { value, .. }) => Some(*value),
                 _ => None,
@@ -241,10 +238,6 @@ impl Recovery<'_> {
                 for arm in arms {
                     self.scopes.push();
                     let payload = match (&input, &arm.variant) {
-                        (Some(Ty::Option { value }), crate::ast::MatchVariant::Some) => {
-                            Some(*value.clone())
-                        }
-                        (Some(Ty::Option { .. }), crate::ast::MatchVariant::None) => Some(Ty::Unit),
                         (Some(Ty::Result { value, .. }), crate::ast::MatchVariant::Ok) => {
                             Some(*value.clone())
                         }
@@ -254,7 +247,9 @@ impl Recovery<'_> {
                         (_, crate::ast::MatchVariant::Type(ann)) => self.ty(ann),
                         _ => None,
                     };
-                    self.bind(&arm.name, payload);
+                    if let Some(name) = &arm.name {
+                        self.bind(name, payload);
+                    }
                     let ty = self.term(&arm.body, output.as_ref());
                     if output.is_none() {
                         output = ty;
@@ -283,6 +278,7 @@ impl Recovery<'_> {
                 }
                 None
             }
+            TermKind::None => Some(Ty::None),
             TermKind::Unit => Some(Ty::Unit),
             TermKind::Num { value } => Evaluator {
                 scopes: &self.scopes,

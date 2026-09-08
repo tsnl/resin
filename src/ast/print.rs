@@ -149,15 +149,17 @@ fn sexp_term(term: &Term) -> SExp {
             let mut items = vec![sexp_term(value)];
             items.extend(arms.iter().map(|arm| {
                 let variant = match &arm.variant {
-                    MatchVariant::Some => symbol("some"),
-                    MatchVariant::None => symbol("none"),
                     MatchVariant::Ok => symbol("ok"),
                     MatchVariant::Err => symbol("err"),
                     MatchVariant::Type(ty) => sexp_typespec(ty),
                 };
                 list(
                     "arm",
-                    vec![variant, symbol(arm.name.val.as_ref()), sexp_term(&arm.body)],
+                    vec![
+                        variant,
+                        symbol(arm.name.as_ref().map_or("_", |name| name.val.as_ref())),
+                        sexp_term(&arm.body),
+                    ],
                 )
             }));
             list_sp("match", term.span, items)
@@ -193,6 +195,7 @@ fn sexp_term(term: &Term) -> SExp {
             items.push(sexp_term(tail));
             list_sp("block", term.span, items)
         }
+        TermKind::None => symbol("None"),
         TermKind::Unit => list_sp("unit", term.span, vec![]),
         TermKind::Call { func, arg } => {
             list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])

@@ -7,7 +7,6 @@ pub(super) enum Head {
     Atom(Ty),
     Pointer,
     Span,
-    Option,
     Array(usize),
     Record(Vec<Arc<str>>),
     Function,
@@ -56,7 +55,6 @@ impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
-            Ty::Option { value } => Self::Node(Head::Option, vec![(*value).into()]),
             Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
@@ -78,9 +76,6 @@ impl Head {
             Self::Atom(ty) => ty.clone(),
             Self::Pointer => Ty::Pointer {
                 pointee: Box::new(children.next().unwrap()),
-            },
-            Self::Option => Ty::Option {
-                value: Box::new(children.next().unwrap()),
             },
             Self::Span => Ty::Span {
                 element: Box::new(children.next().unwrap()),

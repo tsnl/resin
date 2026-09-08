@@ -60,9 +60,10 @@ const BUILTIN_TYPES = [
   "float32",
   "float64",
   "Never",
+  "None",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Span", "Result", "Option"];
+const TYPE_FORMERS = ["Ptr", "Span", "Result"];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -362,10 +363,15 @@ export default grammar({
       ),
     match_arm: ($) =>
       seq(
-        field("variant", choice($.type, "ok", "err", "some", "none")),
-        "(",
-        field("name", $.lid),
-        ")",
+        choice(
+          seq(
+            field("variant", choice($.type, "ok", "err")),
+            "(",
+            field("name", $.lid),
+            ")",
+          ),
+          field("variant", "None"),
+        ),
         "=>",
         field("body", $.block_body),
       ),
@@ -414,7 +420,7 @@ export default grammar({
     unary_type: ($) =>
       choice(
         seq(
-          field("former", choice("Ptr", "Span", "Option")),
+          field("former", choice("Ptr", "Span")),
           "<",
           field("arg", $.type),
           ">",
@@ -463,7 +469,7 @@ export default grammar({
     uid: () =>
       token(
         new RustRegex(
-          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never"])}`,
+          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never", "None"])}`,
         ),
       ),
 

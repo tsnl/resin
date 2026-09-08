@@ -544,19 +544,9 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Keyword,
     ),
     (
-        "Option",
-        "Option<T> — some(value) or none(); postfix ! unwraps or traps.",
+        "None",
+        "None — singleton value and type; T | None permits absence, postfix ! excludes it or traps.",
         DefinitionKind::Type,
-    ),
-    (
-        "some",
-        "some(value) — construct an inhabited Option.",
-        DefinitionKind::Function,
-    ),
-    (
-        "none",
-        "none() — construct an empty Option.",
-        DefinitionKind::Function,
     ),
     ("bool", "bool", DefinitionKind::Type),
     (

@@ -70,7 +70,6 @@ impl<'a> Checker<'a> {
                 let head = match head.val.as_ref() {
                     "Ptr" => Head::Pointer,
                     "Span" => Head::Span,
-                    "Option" => Head::Option,
                     _ => return Err(error(head.span, "unknown type former")),
                 };
                 Type::Node(head, vec![self.annotation(arg, infer)?])
@@ -139,8 +138,18 @@ impl<'a> Checker<'a> {
     }
 
     pub fn term(&mut self, term: &Term, expected: Option<Type>) -> Result<Type> {
-        let contextual = expected.is_some();
-        let out = expected.unwrap_or_else(|| self.solver.fresh());
+        // Control-flow branches share their result context. Other expressions
+        // first produce their own value, which may then widen at the consumer.
+        let propagate = matches!(
+            term.val,
+            TermKind::If { .. } | TermKind::Match { .. } | TermKind::Block { .. }
+        ) || matches!(&term.val, TermKind::Call { func, .. } if matches!(&func.val, TermKind::Var { name } if matches!(name.val.as_ref(), "ok" | "err" | "absurd")));
+        let contextual = propagate && expected.is_some();
+        let out = if propagate {
+            expected.clone().unwrap_or_else(|| self.solver.fresh())
+        } else {
+            self.solver.fresh()
+        };
         let span = term.span;
         let mut equate = None;
         match &term.val {
@@ -151,9 +160,12 @@ impl<'a> Checker<'a> {
                 });
             }
             TermKind::Unit => equate = Some(Ty::Unit.into()),
+            TermKind::None => equate = Some(Ty::None.into()),
             TermKind::Unwrap { value } => {
                 let payload = self.solver.fresh();
-                self.term(value, Some(Type::Node(Head::Option, vec![payload.clone()])))?;
+                let input = self.term(value, None)?;
+                self.constraints
+                    .push((span, Constraint::ExcludeNone(input, payload.clone())));
                 equate = Some(payload);
             }
             TermKind::Try { value } => {
@@ -176,17 +188,17 @@ impl<'a> Checker<'a> {
                     self.push();
                     let payload = self.solver.fresh();
                     let variant = match &arm.variant {
-                        ast::MatchVariant::Some => Pattern::Some,
-                        ast::MatchVariant::None => Pattern::None,
                         ast::MatchVariant::Ok => Pattern::Ok,
                         ast::MatchVariant::Err => Pattern::Err,
                         ast::MatchVariant::Type(ty) => Pattern::Type(self.annotation(ty, false)?),
                     };
                     self.constraints.push((
-                        arm.name.span,
+                        arm.body.span,
                         Constraint::Variant(input.clone(), variant, payload.clone()),
                     ));
-                    self.bind(&arm.name, payload)?;
+                    if let Some(name) = &arm.name {
+                        self.bind(name, payload)?;
+                    }
                     self.term(&arm.body, Some(out.clone()))?;
                     self.pop();
                 }
@@ -302,23 +314,6 @@ impl<'a> Checker<'a> {
             }
             TermKind::Call { func, arg } => {
                 if let TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "some" | "none")
-                {
-                    let value = self.solver.fresh();
-                    self.solver.unify(
-                        &out,
-                        &Type::Node(Head::Option, vec![value.clone()]),
-                        span,
-                    )?;
-                    self.term(
-                        arg,
-                        Some(if name.val.as_ref() == "some" {
-                            value
-                        } else {
-                            Ty::Unit.into()
-                        }),
-                    )?;
-                } else if let TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
                     self.term(arg, Some(Ty::union([]).into()))?;
@@ -390,6 +385,10 @@ impl<'a> Checker<'a> {
             } else {
                 self.solver.unify(&ty, &out, span)?;
             }
+        }
+        if !propagate && let Some(expected) = expected {
+            self.constraints
+                .push((span, Constraint::Coerce(out.clone(), expected)));
         }
         self.expressions.push((term, span, out.clone()));
         Ok(out)

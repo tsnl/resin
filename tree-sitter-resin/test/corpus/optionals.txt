@@ -1,0 +1,125 @@
+==================
+None singleton and ordinary optional unions
+==================
+type OptionalInt = int | None;
+def choose(value: OptionalInt) -> int = {
+    match (value) { int(number) => { number }, None => { 0 } }
+};
+def require(value: OptionalInt) -> int = { value! };
+def empty() -> None = { None };
+
+---
+
+(source_file
+  (type_definition
+    (type_define
+      (uid)
+      (type
+        (infix_type
+          (union_type
+            (union_type
+              (unary_type
+                (primary_type
+                  (builtin_type))))
+            (unary_type
+              (primary_type
+                (builtin_type))))))))
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (uid)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (match_term
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (lid)))))))
+                    (match_arm
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))
+                      (lid)
+                      (block_body
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (lid)))))))))
+                    (match_arm
+                      (block_body
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (number))))))))))))))))))
+  (function_definition
+    (lid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (uid)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid))
+                (unwrap_suffix))))))))
+  (function_definition
+    (lid)
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))))))))
