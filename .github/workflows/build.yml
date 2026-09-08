@@ -52,11 +52,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - name: Linux dependencies
+      - name: Linux dependencies and Rust toolchain
         if: runner.os == 'Linux'
         run: |
+          # Rustup installs the pinned toolchain on first use. Overlap that
+          # download with apt instead of waiting for the Rust cache step.
+          rustc --version &
+          toolchain_pid=$!
           sudo apt-get update
           sudo apt-get install -y cmake pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc mesa-vulkan-drivers
+          wait "$toolchain_pid"
       - name: Select the Linux software Vulkan driver
         if: runner.os == 'Linux'
         shell: bash
