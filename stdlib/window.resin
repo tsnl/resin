@@ -5,7 +5,7 @@ import { "status.resin" };
 struct ButtonState { down: bool, pressed: bool, released: bool };
 
 def button_state(bits: uint) -> ButtonState = {
-	ButtonState { down = (bits & 1I) != 0I, pressed = (bits & 2I) != 0I, released = (bits & 4I) != 0I }
+	ButtonState { down = (bits & 1_ui) != 0_ui, pressed = (bits & 2_ui) != 0_ui, released = (bits & 4_ui) != 0_ui }
 };
 
 extern type ResinWindow;
@@ -61,14 +61,14 @@ impl WindowOwner {
 		button_state(resin_window_mouse_button_state(self.handle, button))
 	};
 	def cursor_position(self: Window) -> Result<(float64, float64), RuntimeError> = {
-		var x = 0.0d;
-		var y = 0.0d;
+		var x = 0.0_d;
+		var y = 0.0_d;
 		RuntimeStatus.from_code(resin_window_cursor_position(self.handle, &x, &y))?;
 		ok((x, y))
 	};
 	def scroll_delta(self: Window) -> Result<(float64, float64), RuntimeError> = {
-		var x = 0.0d;
-		var y = 0.0d;
+		var x = 0.0_d;
+		var y = 0.0_d;
 		RuntimeStatus.from_code(resin_window_scroll_delta(self.handle, &x, &y))?;
 		ok((x, y))
 	};

@@ -478,8 +478,8 @@ fn all_glsl_is_generated_before_shader_or_c_compilers_run() {
         &project.input,
         r#"
         export { main };
-        @compute_shader def good(i: uint, output: Ptr<uint>) = { output.* := { i + 1I }; };
-        @compute_shader def bad(i: uint, output: Ptr<uint>) = { output.* := { i / 2I }; };
+        @compute_shader def good(i: uint, output: Ptr<uint>) = { output.* := { i + 1_ui }; };
+        @compute_shader def bad(i: uint, output: Ptr<uint>) = { output.* := { i / 2_ui }; };
         def main() = { var first = good.spirv; var second = bad.spirv; };
     "#,
     )

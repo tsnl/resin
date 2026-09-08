@@ -210,7 +210,7 @@ fn windows_present_resize_and_release_resources() {
                 assert(width > 0 && height > 0);
                 ResinCommandBuffer *commands = NULL;
                 check(resin_gpu_start_command_recording(gpu, &commands));
-                check(resin_gpu_begin_rendering(commands, image, 0.25f, 0.5f, (float)frame / 24.0f, 1.0f));
+                check(resin_gpu_begin_rendering(commands, image, 0.25_f, 0.5_f, (float)frame / 24.0_f, 1.0_f));
                 check(resin_gpu_end_rendering(commands));
                 check(resin_gpu_submit(gpu, commands));
                 ResinCommandBuffer *stale = NULL;

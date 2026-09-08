@@ -26,7 +26,7 @@ fn shader_indexing_emits_no_bounds_checks() {
         "view.at(ulong(i))",
     ] {
         let m = module(&format!(
-            "export {{ kernel }}; def kernel(i: uint, output: Ptr<uint>) = {{ var values = [1I, 2I]; var view = Span<uint> {{ data = output, length = 2L }}; output.* := {indexing}.*; }};"
+            "export {{ kernel }}; def kernel(i: uint, output: Ptr<uint>) = {{ var values = [1_ui, 2_ui]; var view = Span<uint> {{ data = output, length = 2_ul }}; output.* := {indexing}.*; }};"
         ));
         let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
         assert!(!source.contains("r_failed = true"), "{source}");
@@ -186,7 +186,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
 fn unsupported_shader_features_are_diagnosed() {
     for (source, expected) in [
         (
-            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i) }; }; def helper (i: uint) -> uint = { var output = 0I; kernel(i, &output); output };",
+            "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { output.* := { helper(i) }; }; def helper (i: uint) -> uint = { var output = 0_ui; kernel(i, &output); output };",
             "recursive shader call graph",
         ),
         (
@@ -275,7 +275,7 @@ fn imported_backend_errors_retain_expression_origins() {
     let helper = temp.path().join("helper.resin");
     let entry = temp.path().join("main.resin");
     let mut session = resin::compiler::Session::default();
-    session.set_overlay(&helper, "export { helper }; struct E {}; def helper(n: uint) -> Result<uint, E> = { n / 2I; var r: Result<(), E>; r := if (n == 0I) { err(E {}) } else { ok(()) }; r?; ok(n) };".into()).unwrap();
+    session.set_overlay(&helper, "export { helper }; struct E {}; def helper(n: uint) -> Result<uint, E> = { n / 2_ui; var r: Result<(), E>; r := if (n == 0_ui) { err(E {}) } else { ok(()) }; r?; ok(n) };".into()).unwrap();
     session.set_overlay(&entry, "export { kernel }; import { \"helper.resin\" }; def kernel(i: uint, p: Ptr<uint>) = { match (helper(i)) { ok(n) => { p.* := n; }, err(e) => {} }; };".into()).unwrap();
     let snapshot = session.analyze(&entry).unwrap();
     let m = snapshot.module().unwrap();
@@ -287,7 +287,7 @@ fn imported_backend_errors_retain_expression_origins() {
         .values()
         .filter(|o| {
             o.path == helper
-                && m.origins.sources[&o.path].get(o.span.start..o.span.end) == Some("n / 2I")
+                && m.origins.sources[&o.path].get(o.span.start..o.span.end) == Some("n / 2_ui")
         })
         .collect();
     assert!(
@@ -302,7 +302,7 @@ fn imported_backend_errors_retain_expression_origins() {
         "{error}"
     );
     assert!(
-        error.contains("n / 2I") && error.contains("function helper"),
+        error.contains("n / 2_ui") && error.contains("function helper"),
         "{error}"
     );
     assert!(error.contains("unsupported shader builtin"), "{error}");
@@ -348,7 +348,7 @@ fn managed_fields_are_opaque_until_consumed_by_a_shader() {
 #[test]
 fn options_of_plain_values_work_in_shaders() {
     let m = module(
-        "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { var value: uint | None; value := if (i == 0I) { 42I } else { None }; output.* := match (value) { uint(n) => { n }, None => { 0I } }; };",
+        "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { var value: uint | None; value := if (i == 0_ui) { 42_ui } else { None }; output.* := match (value) { uint(n) => { n }, None => { 0_ui } }; };",
     );
     let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {

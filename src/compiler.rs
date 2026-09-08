@@ -348,7 +348,7 @@ mod verification_tests {
     #[test]
     fn snapshots_reuse_verification_for_multiple_backends_and_invalidate_on_edit() {
         let path = std::env::temp_dir().join("resin-verification-cache.resin");
-        let source = "export { main, a, b }; def main() -> int = { 0 }; @compute_shader def a(i: uint, p: Ptr<uint>) = { p.* := i; }; @compute_shader def b(i: uint, p: Ptr<uint>) = { p.* := i + 1I; };";
+        let source = "export { main, a, b }; def main() -> int = { 0 }; @compute_shader def a(i: uint, p: Ptr<uint>) = { p.* := i; }; @compute_shader def b(i: uint, p: Ptr<uint>) = { p.* := i + 1_ui; };";
         let mut session = Session::default();
         session.set_overlay(&path, source.into()).unwrap();
         ANALYSES.set(0);

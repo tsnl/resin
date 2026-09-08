@@ -122,27 +122,38 @@ Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and b
 arguments use `Name {...}` and `Converter [...]`. These spaces are a convention, not required syntax.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
 
-Numeric literals accept case-sensitive suffixes that fix their primitive type:
+Numeric suffixes are case insensitive and fix the literal's primitive type. Prefix an
+integer width with `u` for unsigned values. The formatter writes lowercase suffixes with
+an underscore separator; the separator is optional in source except for hexadecimal `b`.
 
 | Suffix | Type | Example |
 | --- | --- | --- |
-| `b` / `B` | `sbyte` / `ubyte` (8 bits) | `-128b`, `255B` |
-| `h` / `H` | `short` / `ushort` (16 bits) | `-32768h`, `65535H` |
-| `i` / `I` | `int` / `uint` (32 bits) | `42i`, `42I` |
-| `l` / `L` | `long` / `ulong` (64 bits) | `42l`, `42L` |
-| `f` / `d` | `float32` / `float64` | `1.5f`, `1e3d` |
+| `b` / `ub` | `sbyte` / `ubyte` (8 bits) | `-128_b`, `255_ub` |
+| `h` / `uh` | `short` / `ushort` (16 bits) | `-32768_h`, `65535_uh` |
+| `i` / `ui` | `int` / `uint` (32 bits) | `42_i`, `42_ui` |
+| `l` / `ul` | `long` / `ulong` (64 bits) | `42_l`, `42_ul` |
+| `f` / `d` | `float32` / `float64` | `1.5_f`, `1e3_d` |
 
-These widths are the same on every target. Unsuffixed literals retain contextual typing;
-a suffixed literal cannot be retyped by an annotation or ascription. Out-of-range literals
-are errors, including negative unsigned literals and floating-point overflow. Integer suffixes
-require integer notation. Hexadecimal literals accept `h/H`, `i/I`, and `l/L` suffixes,
-for example `0xffff_ffffI`. Hex digits `b/B/d/f` remain digits; use `ubyte(0xff)` for a byte.
+These widths are the same on every target. For example, `42UI`, `42uI`, and `42_ui`
+all mean the same thing, and format as `42_ui`. Uppercase `42L` now means signed `long`;
+use `42_ul` for unsigned `ulong`.
+
+Unsuffixed literals take their type from context, including later assignments and uses.
+Integer notation can infer any numeric type; decimal-point and exponent notation infer
+floating-point types. Unconstrained integers default to `long`, and floats to `float64`.
+A suffixed literal cannot be retyped by an annotation or ascription. Out-of-range literals
+are errors, including negative unsigned literals and floating-point overflow. Integer
+suffixes require integer notation. Hexadecimal literals accept integer suffixes, such as
+`0xffff_ffff_ui` and `0xff_ub`. A signed byte suffix needs its separator (`0x7f_b`);
+otherwise `b/B` remains a hex digit. Hex `d/D/f/F` always remain digits.
+Use an explicit supported width for otherwise unconstrained shader literals, such as
+`var step = 0_i;`: the shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32`.
 
 An `if` without `else` has an implicit unit branch, so its body must also yield unit:
 
 ```resin
-if (count > 0L) {
-    count := count - 1L;
+if (count > 0_ul) {
+    count := count - 1_ul;
 };
 ```
 
@@ -170,7 +181,7 @@ def main() = {
 Holes can nest inside local annotations, local type ascriptions, and function
 return annotations: `Ptr<Ptr<_>>`, `Span<_>`, `(_, Ptr<_>)`, and `(int) -> _`
 all use the same inference mechanism. Each `_` is independent. Local constraints
-can come from later assignments or uses; numeric literals default to `int` or
+can come from later assignments or uses; numeric literals default to `long` or
 `float64` only after those constraints have been considered.
 
 Every function uses the same checker, including functions with no explicit holes.
@@ -546,7 +557,7 @@ struct GpuOwner { handle: Ptr<ResinGpu> };
 type Gpu = Arc<GpuOwner>;
 impl GpuOwner {
     def new() -> Result<Gpu, RuntimeError> = {
-        var handle = Ptr<ResinGpu>(0L);
+        var handle = Ptr<ResinGpu>(0_ul);
         RuntimeStatus.from_code(resin_gpu_create(&handle))?;
         ok(Gpu { handle = handle })
     };

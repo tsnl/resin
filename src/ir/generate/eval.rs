@@ -221,7 +221,7 @@ mod tests {
         };
         let span = Span { start: 0, end: 0 };
         for (text, expected, value, ty) in [
-            ("0x1_e", None, Value::Int32 { value: 30 }, Ty::Int32),
+            ("0x1_e", None, Value::Int64 { value: 30 }, Ty::Int64),
             ("1e3", None, Value::Float64 { value: 1000.0 }, Ty::Float64),
             (
                 "1.5",

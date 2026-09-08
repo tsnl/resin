@@ -24,7 +24,7 @@ type InputError = EndOfInput | InputReadError | InputOutOfMemory;
 
 def resize_input(memory: Ptr<ubyte>, capacity: ulong) -> Result<Ptr<ubyte>, InputOutOfMemory> = {
 	var resized = realloc(memory, capacity);
-	if (ulong(resized) == 0L) {
+	if (ulong(resized) == 0_ul) {
 		err(InputOutOfMemory {})
 	} else {
 		ok(resized)
@@ -35,7 +35,7 @@ def check_input_end(byte: int, length: ulong) -> Result<(), EndOfInput | InputRe
 	if (byte < 0 && resin_stdin_error() != 0) {
 		err(InputReadError {})
 	} else {
-		if (byte < 0 && length == 0L) {
+		if (byte < 0 && length == 0_ul) {
 			err(EndOfInput {})
 		} else {
 			ok(())
@@ -49,11 +49,11 @@ impl Console {
 	// Writes every byte (including embedded NULs), flushes, and adds no newline.
 	def print(line: InputLine) -> Result<(), InputWriteError> = {
 		var bytes = Span<ubyte> { data = line.data, length = line.length };
-		var index = 0L;
+		var index = 0_ul;
 		var written = 0;
 		while (index < line.length && written >= 0) {
 			written := resin_console_putchar(bytes(index).*);
-			index := index + 1L;
+			index := index + 1_ul;
 		};
 		var flushed = resin_stdout_flush();
 		if (written < 0 || flushed != 0) {
@@ -65,41 +65,41 @@ impl Console {
 
 	def read_byte() -> Result<ubyte, EndOfInput | InputReadError> = {
 		var byte = getchar();
-		check_input_end(byte, 0L)?;
+		check_input_end(byte, 0_ul)?;
 		ok(resin_console_byte(byte))
 	};
 	// Reads bytes through LF or EOF; only CR immediately before LF is stripped.
 	def read_line() -> Result<InputLine, InputError> = {
 		var buffer = InputLine {
-			data = resize_input(Ptr<ubyte>(0L), 128L)?,
-			length = 128L,
+			data = resize_input(Ptr<ubyte>(0_ul), 128_ul)?,
+			length = 128_ul,
 		};
-		var length = 0L;
+		var length = 0_ul;
 		var byte = getchar();
 		while (byte >= 0 && byte != 10) {
-			if (length == buffer.length - 1L) {
+			if (length == buffer.length - 1_ul) {
 				// Reserve the terminator and reject growth that would wrap.
 				var grown: Result<ulong, InputOutOfMemory>;
-				grown := if (buffer.length > 18446744073709551615L / 2L) {
+				grown := if (buffer.length > 18446744073709551615_ul / 2_ul) {
 					err(InputOutOfMemory {})
 				} else {
-					ok(buffer.length * 2L)
+					ok(buffer.length * 2_ul)
 				};
 				var capacity = grown?;
 				buffer.data := resize_input(buffer.data, capacity)?;
 				buffer.length := capacity;
 			};
 			Span<ubyte> { data = buffer.data, length = buffer.length }(length).* := resin_console_byte(byte);
-			length := length + 1L;
+			length := length + 1_ul;
 			byte := getchar();
 		};
 		check_input_end(byte, length)?;
-		if (byte == 10 && length > 0L) {
-			if (Span<ubyte> { data = buffer.data, length = buffer.length }(length - 1L).* == 13B) {
-				length := length - 1L;
+		if (byte == 10 && length > 0_ul) {
+			if (Span<ubyte> { data = buffer.data, length = buffer.length }(length - 1_ul).* == 13_ub) {
+				length := length - 1_ul;
 			};
 		};
-		Span<ubyte> { data = buffer.data, length = buffer.length }(length).* := 0B;
+		Span<ubyte> { data = buffer.data, length = buffer.length }(length).* := 0_ub;
 		buffer.length := length;
 		ok(buffer)
 	};

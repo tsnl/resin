@@ -212,7 +212,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
 
             var commands = gpu.start_command_recording()?;
 
-            commands.set_pipeline(GpuPipeline { handle = Ptr<ResinPipeline>(0L), gpu = gpu })?;
+            commands.set_pipeline(GpuPipeline { handle = Ptr<ResinPipeline>(0_ul), gpu = gpu })?;
             commands.submit()?;
             ok(())
         };
@@ -301,8 +301,8 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
         export { main };
         import { "std/gpu.resin", "std/window.resin", "std/status.resin" };
         def main() -> int = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
-            var image = GpuImage { handle = Ptr<ResinImage>(0L), gpu = gpu };
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
+            var image = GpuImage { handle = Ptr<ResinImage>(0_ul), gpu = gpu };
             var first = match (gpu.present(image)) { ok(shown) => { shown }, err(e) => { 1 == 0 } };
             var second = match (gpu.present(image)) { ok(shown) => { !shown }, err(e) => { 1 == 0 } };
             var third = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
@@ -335,8 +335,8 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
             width == uint(640) && height == uint(480)
         };
         def main() -> Result<int, _> = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
-            var window = Window { handle = Ptr<ResinWindow>(0L) };
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
+            var window = Window { handle = Ptr<ResinWindow>(0_ul) };
             var count = Gpu.device_count()?;
             var address = gpu.host_to_device_pointer(Ptr<ubyte>(ulong(0)))?;
             var size = window.framebuffer_size()?;
@@ -433,7 +433,7 @@ fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
             var b = [ubyte(3), ubyte(4), ubyte(5)];
             var vertex = Span<ubyte> { data = Ptr<ubyte>(&a), length = ulong(2) };
             var fragment = Span<ubyte> { data = Ptr<ubyte>(&b), length = ulong(3) };
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
             var compute = gpu.create_compute_pipeline(vertex)?;
             var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
             ok(if (ulong(compute.handle) == ulong(1) && ulong(graphics.handle) == ulong(2)) { 0 } else { 1 })
@@ -469,9 +469,9 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         r#"
         export { main };
         import { "std/window.resin" };
-        def coordinates(x: float64, y: float64) -> bool = { x == 12.5d && y == -3.25d };
+        def coordinates(x: float64, y: float64) -> bool = { x == 12.5_d && y == -3.25_d };
         def main() -> Result<int, _> = {
-            var window = Window { handle = Ptr<ResinWindow>(0L) };
+            var window = Window { handle = Ptr<ResinWindow>(0_ul) };
             var key = window.key_state(Window.keys().w);
             var mouse = window.mouse_button_state(Window.mouse_buttons().left);
             var valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
@@ -515,11 +515,11 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
 #[test]
 fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
     for setup in [
-        r#"var host = (GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu }).host_pointer();
-            var device = (GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu }).device_pointer();"#,
-        r#"var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu };
+        r#"var host = (GpuBuffer { handle = Ptr<ResinAllocation>(1_ul), gpu = gpu }).host_pointer();
+            var device = (GpuBuffer { handle = Ptr<ResinAllocation>(2_ul), gpu = gpu }).device_pointer();"#,
+        r#"var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1_ul), gpu = gpu };
             var host = host_buffer.host_pointer();
-            var device_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu };
+            var device_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(2_ul), gpu = gpu };
             var device = device_buffer.device_pointer();"#,
     ] {
         let source = r#"
@@ -527,10 +527,10 @@ fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
         import { "std/gpu.resin" };
         extern "resin_runtime.h" def test_frees() -> int;
         def main() -> int = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
             var valid = {
                 BUFFER_ADDRESSES
-                test_frees() == 0 && host.* == 42B && device == 101L
+                test_frees() == 0 && host.* == 42_ub && device == 101_ul
             };
             if (valid && test_frees() == 2) { 0 } else { 1 }
         };

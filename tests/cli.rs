@@ -496,7 +496,7 @@ fn invalid_options_and_source_report_errors() {
 #[test]
 fn decorated_host_calls_need_no_glslc() {
     success(&cli(
-        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() -> int = { var output = 0I; kernel(7I, &output); if (output == 7I) { 0 } else { 1 } };",
+        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ui, &output); if (output == 7_ui) { 0 } else { 1 } };",
         &["--glslc", "/does/not/exist/glslc"],
     ));
 }
@@ -511,16 +511,16 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     fs::write(&input, r#"
         export { main };
         import { "std/graphics.resin" };
-        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i + 1I }; };
+        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i + 1_ui }; };
         @vertex_shader def vertex(i: int) -> Vertex = {
             Vertex {
-                position = Position { x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f },
-                color = Color { r = 1.0f, g = 0.0f, b = 0.0f, a = 1.0f },
+                position = Position { x = 0.0_f, y = 0.0_f, z = 0.0_f, w = 1.0_f },
+                color = Color { r = 1.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f },
             }
         };
         @fragment_shader def fragment(color: Color) -> Color = { color };
         def main() -> int = {
-            if (kernel.spirv.length > 0L && vertex.spirv.length > 0L && fragment.spirv.length > 0L) { 0 } else { 1 }
+            if (kernel.spirv.length > 0_ul && vertex.spirv.length > 0_ul && fragment.spirv.length > 0_ul) { 0 } else { 1 }
         };
     "#).unwrap();
     let destination = temp

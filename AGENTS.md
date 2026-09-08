@@ -65,9 +65,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   write strings verbatim. Use `.data` when passing literal storage to C.
   Device-backed byte spans use 8-bit storage; shader literal spans need an addressable
   constant-storage implementation and are currently rejected explicitly.
-- Numeric suffixes are case-sensitive: `b/B`, `h/H`, `i/I`, and `l/L` select signed/unsigned
-  8/16/32/64-bit integers; `f/d` select float32/float64. Suffixes fix literal types and retain
-  range checking. Hex literals only accept suffixes that are not hex digits (`h/H`, `i/I`, `l/L`).
+- Numeric suffixes are case insensitive: `b/h/i/l` select signed 8/16/32/64-bit integers,
+  `ub/uh/ui/ul` select unsigned widths, and `f/d` select float32/float64. The formatter
+  emits lowercase suffixes preceded by an underscore. Suffixes fix literal types and retain
+  range checking. Hex accepts integer suffixes; signed `b` requires an underscore so bare
+  `b/B` remains a digit, and hex `d/D/f/F` always remain digits. Unsuffixed numeric literals
+  infer their type from context, defaulting to `long` for integers and `float64` for floats.
   One-armed `if` is equivalent to an explicit `else {}` and requires a unit-valued body.
 - Function result annotations default to unit when omitted, including foreign functions.
   Explicit `_` holes opt into inference in local annotations and function results, including

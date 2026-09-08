@@ -415,7 +415,7 @@ def main() -> () = {
         &module.functions[0].locals[2].ty,
         Ty::Span { element } if **element == Ty::Int32
     ));
-    assert_eq!(module.functions[0].locals[1].ty, Ty::Int32);
+    assert_eq!(module.functions[0].locals[1].ty, Ty::Int64);
 }
 
 #[test]

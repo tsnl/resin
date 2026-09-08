@@ -41,7 +41,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             r#"import {{ "std/gpu.resin" }};
             def f() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
-                var buffer = gpu.malloc(4L, 4L, Memory.default())?;
+                var buffer = gpu.malloc(4_ul, 4_ul, Memory.default())?;
                 buffer.host_pointer();
                 {tail}"#
         );
@@ -197,7 +197,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
             let source = format!(
-                "def main() = {{ var values = [1, 2]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2L }} }}; {receiver}.at(0).* := 3;{tail} }};"
+                "def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0).* := 3;{tail} }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.analyze();
@@ -400,7 +400,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
                 },
                 "{source}"
             );
-            assert_eq!(items[0].detail, "count: int");
+            assert_eq!(items[0].detail, "count: long");
             assert_eq!(items[0].kind, resin::analysis::DefinitionKind::Field);
             assert_eq!(items[0].replace.start, start);
             assert_eq!(items[0].replace.end, start + field.len());
@@ -1011,7 +1011,7 @@ fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
                 .iter()
                 .map(|item| item.detail.as_str())
                 .collect::<Vec<_>>(),
-            ["count: int"],
+            ["count: long"],
             "{source}"
         );
     }
@@ -1184,7 +1184,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
             .hover(&path, source.find("p =").unwrap())
             .unwrap()
             .text,
-        "p: Ptr<int>"
+        "p: Ptr<long>"
     );
     assert_eq!(
         analysis
@@ -1216,8 +1216,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
 
 #[test]
 fn suffixes_and_one_armed_if_have_editor_types() {
-    let source =
-        "def main() = { var count = 42L; if (count > 0L) { var speed = 1.5f; speed; }; count; };";
+    let source = "def main() = { var count = 42_ul; if (count > 0_ul) { var speed = 1.5_f; speed; }; count; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     assert!(

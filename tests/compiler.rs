@@ -122,7 +122,7 @@ fn session_compilation_uses_overlays_and_explicit_profiles() {
         ),
         (CProfile::Release, None, 43, "release"),
     ] {
-        session.set_overlay(&source, format!("export {{ main }}; @compute_shader def kernel(i: uint, output: Ptr<uint>) = {{ output.* := i; }}; def main() -> int = {{ var output = 0I; kernel({code}I, &output); if (output == {code}I) {{ {code} }} else {{ 0 }} }};")).unwrap();
+        session.set_overlay(&source, format!("export {{ main }}; @compute_shader def kernel(i: uint, output: Ptr<uint>) = {{ output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ui, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
         let snapshot = session.analyze(&source).unwrap();
         let request = Request::new(
             input(&source),

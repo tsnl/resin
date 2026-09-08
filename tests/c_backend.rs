@@ -112,7 +112,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
 #[test]
 fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
     runs(
-        "export { main }; def main() -> _ = { var n: _; var p: Ptr<_>; n := 40; p := &n; p.* := p.* + 2; p.* };",
+        "export { main }; def main() -> _ = { var n: _; var p: Ptr<_>; n := 40_i; p := &n; p.* := p.* + 2; p.* };",
         42,
     );
     runs(
@@ -120,7 +120,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
         0,
     );
     runs(
-        "export { main }; def main() -> _ = { var n = 0; var pair: { a: _, b: _ }; pair := { b = (n := n + 1), a = (n := n + 1) }; pair.a * 10 + pair.b };",
+        "export { main }; def main() -> _ = { var n = 0_i; var pair: { a: _, b: _ }; pair := { b = (n := n + 1), a = (n := n + 1) }; pair.a * 10 + pair.b };",
         21,
     );
     runs(
@@ -504,7 +504,7 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
         };
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
         def main() -> int = {
-            var values = [10, 20, 30]; var calls = 0;
+            var values = [10_i, 20, 30]; var calls = 0;
             var p: Ptr<int>; p := view(Ptr<int>(&values), &calls)(index(&calls));
             p.* := 42;
             var copied = values;
@@ -523,12 +523,12 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
         struct Holder { values: Span<int> };
         def view(p: Ptr<int>, calls: Ptr<int>) -> Holder = {
             calls.* := calls.* + 1;
-            Holder { values = Span<int> { data = p, length = 3L } }
+            Holder { values = Span<int> { data = p, length = 3_ul } }
         };
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
         def element(s: Span<int>, i: ulong) -> Ptr<int> = { s.at(i) };
         def main() -> int = {
-            var values = [10, 20, 30]; var calls = 0;
+            var values = [10_i, 20, 30]; var calls = 0;
             var p = view(Ptr<int>(&values), &calls).values.at(ulong(index(&calls)));
             p.* := 42;
             var record = { values = [3, 4] };
@@ -545,11 +545,11 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
 #[test]
 fn at_indexing_checks_bounds_before_later_effects() {
     for receiver in ["values", "holder.values"] {
-        for index in ["2", "18446744073709551615L"] {
+        for index in ["2", "18446744073709551615_ul"] {
             let output = run_module(&module(&format!(
                 r#"export {{ main }}; def main() -> int = {{
                     var values = [1, 2];
-                    var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2L }} }};
+                    var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
                     {receiver}.at({index}).* := 9;
                     print("after"); 0
                 }};"#
@@ -585,7 +585,7 @@ fn decorated_functions_and_their_helpers_remain_host_callable() {
         r#"export { main };
         def twice(i: uint) -> uint = { i * uint(2) };
         @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { twice(i) }; };
-        def main() -> int = { var f = kernel; var output = 0I; f(21I, &output); if (output == 42I) { 0 } else { 1 } };
+        def main() -> int = { var f = kernel; var output = 0_ui; f(21_ui, &output); if (output == 42_ui) { 0 } else { 1 } };
     "#,
         0,
     );
@@ -599,20 +599,20 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     file.stmts.retain(|s| !matches!(&s.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     file.stmts.extend(support::parse(r#"
         def main() -> int = {
-            var particle = Particle { x = 0f, y = 0f, z = 0f, vx = 0f, vy = 0f, vz = 0f };
-            var particles = Span<Particle> { data = &particle, length = 1L };
-            initialize(particles, 12345I);
+            var particle = Particle { x = 0_f, y = 0_f, z = 0_f, vx = 0_f, vy = 0_f, vz = 0_f };
+            var particles = Span<Particle> { data = &particle, length = 1_ul };
+            initialize(particles, 12345_ui);
             var first = particle;
-            initialize(particles, 12345I);
+            initialize(particles, 12345_ui);
             var valid = particle.x == first.x && particle.vz == first.vz;
-            initialize(particles, 54321I);
+            initialize(particles, 54321_ui);
             valid := valid && particle.x != first.x && particle.vx != first.vx;
-            valid := valid && particle.x >= -24f && particle.x < 24f && particle.y >= -30f && particle.y < 30f && particle.z >= 0f && particle.z < 50f && particle.vx >= -6f && particle.vx < 6f && particle.vy >= -6f && particle.vy < 6f && particle.vz >= -6f && particle.vz < 6f;
-            var params = Params { count = 1I, dt = 0.005f, yaw_cos = 1f, yaw_sin = 0f, pitch_cos = 1f, pitch_sin = 0f, zoom = 1f, aspect = 0.625f, radius = 0.0012f, particles = particles };
+            valid := valid && particle.x >= -24_f && particle.x < 24_f && particle.y >= -30_f && particle.y < 30_f && particle.z >= 0_f && particle.z < 50_f && particle.vx >= -6_f && particle.vx < 6_f && particle.vy >= -6_f && particle.vy < 6_f && particle.vz >= -6_f && particle.vz < 6_f;
+            var params = Params { count = 1_ui, dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };
             var steps = 0;
             while (steps < 2000) {
-                kernel(0I, &params);
-                valid := valid && particle.x > -100f && particle.x < 100f && particle.y > -100f && particle.y < 100f && particle.z > -100f && particle.z < 100f;
+                kernel(0_ui, &params);
+                valid := valid && particle.x > -100_f && particle.x < 100_f && particle.y > -100_f && particle.y < 100_f && particle.z > -100_f && particle.z < 100_f;
                 steps := steps + 1;
             };
             // Check every particle boundary, including float32 rounding above 2^24.
@@ -621,40 +621,40 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
                 valid := valid && particle_index(index * 24) == index && particle_index(index * 24 + 23) == index;
                 index := index + 1;
             };
-            particle := Particle { x = 0f, y = -20f, z = 25f, vx = 0f, vy = 0f, vz = 0f };
+            particle := Particle { x = 0_f, y = -20_f, z = 25_f, vx = 0_f, vy = 0_f, vz = 0_f };
             var near = vertex(0, &params);
             var near_rim = vertex(1, &params);
-            particle.y := 20f;
+            particle.y := 20_f;
             var far = vertex(0, &params);
             var far_rim = vertex(1, &params);
             valid := valid && fragment(near.color).b > fragment(far.color).b;
             valid := valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
             // Camera controls change the projection without changing the simulation.
-            var camera = Camera { yaw = 0f, pitch = 0f, zoom = 1f };
+            var camera = Camera { yaw = 0_f, pitch = 0_f, zoom = 1_f };
             apply_camera(camera, &params);
             var before = vertex(1, &params);
-            camera.zoom := 2f;
+            camera.zoom := 2_f;
             apply_camera(camera, &params);
             var zoomed = vertex(1, &params);
-            valid := valid && zoomed.position.x == before.position.x * 2f;
-            move_camera(&camera, 100d, 50d, 0d);
+            valid := valid && zoomed.position.x == before.position.x * 2_f;
+            move_camera(&camera, 100_d, 50_d, 0_d);
             apply_camera(camera, &params);
             var orbited = vertex(0, &params);
-            valid := valid && orbited.position.x > 0f && orbited.position.y < 0f;
+            valid := valid && orbited.position.x > 0_f && orbited.position.y < 0_f;
             var yaw_length = params.yaw_cos * params.yaw_cos + params.yaw_sin * params.yaw_sin;
             var pitch_length = params.pitch_cos * params.pitch_cos + params.pitch_sin * params.pitch_sin;
-            valid := valid && yaw_length > 0.999f && yaw_length < 1.001f && pitch_length > 0.999f && pitch_length < 1.001f;
-            move_camera(&camera, 0d, 1000000d, 1000000d);
-            valid := valid && camera.pitch == 1.4f && camera.zoom == 3f;
-            move_camera(&camera, 0d, -1000000d, -1000000d);
-            valid := valid && camera.pitch == -1.4f && camera.zoom == 0.35f;
+            valid := valid && yaw_length > 0.999_f && yaw_length < 1.001_f && pitch_length > 0.999_f && pitch_length < 1.001_f;
+            move_camera(&camera, 0_d, 1000000_d, 1000000_d);
+            valid := valid && camera.pitch == 1.4_f && camera.zoom == 3_f;
+            move_camera(&camera, 0_d, -1000000_d, -1000000_d);
+            valid := valid && camera.pitch == -1.4_f && camera.zoom == 0.35_f;
             camera := default_camera();
-            move_camera(&camera, 0d, 0d, 0.5d);
-            valid := valid && camera.zoom > 1f && camera.zoom < 1.1f;
-            move_camera(&camera, 0d, 0d, -0.5d);
-            valid := valid && camera.zoom > 0.999f && camera.zoom < 1.001f;
+            move_camera(&camera, 0_d, 0_d, 0.5_d);
+            valid := valid && camera.zoom > 1_f && camera.zoom < 1.1_f;
+            move_camera(&camera, 0_d, 0_d, -0.5_d);
+            valid := valid && camera.zoom > 0.999_f && camera.zoom < 1.001_f;
             var color = fragment(far.color);
-            if (valid && particle.x != first.x && color.r >= 0f && color.r <= 1f && color.b >= 0f && color.b <= 1f) { 0 } else { 1 }
+            if (valid && particle.x != first.x && color.r >= 0_f && color.r <= 1_f && color.b >= 0_f && color.b <= 1_f) { 0 } else { 1 }
         };
     "#).stmts);
     let m = ir::generate_program(&program).unwrap();
@@ -674,10 +674,10 @@ fn spirv_is_only_special_on_function_declarations() {
 fn suffixed_literals_execute_with_their_selected_widths() {
     runs(
         r#"export { main }; def main() -> int = {
-        var a = -128b; var b = 255B; var c = -32768h; var d = 65535H;
-        var e = -2147483648i; var f = 4294967295I;
-        var g = -9223372036854775808l; var h = 18446744073709551615L;
-        if (a < 0b && b > 0B && c < 0h && d > 0H && e < 0i && f > 0I && g < 0l && h == 0xffffffffffffffffL && 1.5f + 2.5f == 4f && 1e2d == 100d && 1.0000000596046448f > 1f) { 0 } else { 1 }
+        var a = -128_b; var b = 255_ub; var c = -32768_h; var d = 65535_uh;
+        var e = -2147483648_i; var f = 4294967295_ui;
+        var g = -9223372036854775808_l; var h = 18446744073709551615_ul;
+        if (a < 0_b && b > 0_ub && c < 0_h && d > 0_uh && e < 0_i && f > 0_ui && g < 0_l && h == 0xffffffffffffffff_ul && 1.5_f + 2.5_f == 4_f && 1e2_d == 100_d && 1.0000000596046448_f > 1_f) { 0 } else { 1 }
     };"#,
         0,
     );
@@ -770,16 +770,16 @@ fn host_byte_arrays_have_explicit_sentinel_storage() {
         export { main };
         extern "string.h" def strlen(p: Ptr<ubyte>) -> ulong;
         def main() -> int = {
-            var binary = [65B, 66B];
+            var binary = [65_ub, 66_ub];
             var copied = binary;
-            var nested = [[1B, 2B], [3B, 4B]];
+            var nested = [[1_ub, 2_ub], [3_ub, 4_ub]];
             var empty = "";
-            var embedded = [65B, 0B, 66B];
-            if (strlen(Ptr<ubyte>(&copied)) == 2L &&
-                strlen(empty.data) == 0L &&
-                strlen(Ptr<ubyte>(&embedded)) == 1L &&
-                ulong(nested(1)) - ulong(nested(0)) == 3L &&
-                copied(1).* == 66B) { 0 } else { 1 }
+            var embedded = [65_ub, 0_ub, 66_ub];
+            if (strlen(Ptr<ubyte>(&copied)) == 2_ul &&
+                strlen(empty.data) == 0_ul &&
+                strlen(Ptr<ubyte>(&embedded)) == 1_ul &&
+                ulong(nested(1)) - ulong(nested(0)) == 3_ul &&
+                copied(1).* == 66_ub) { 0 } else { 1 }
         };
     "#,
         0,
@@ -799,11 +799,11 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
         struct Inner { x: uint, y: ulong, z: float32 };
         struct Outer { first: uint, inner: Inner, last: float32 };
         def main() -> int = {
-            var side = 0I;
-            var values = [1I, 2I, 3I];
-            if (size_of(uint) == 4L && align_of(ulong) == 8L && size_of(Outer) == 40L &&
-                align_of(Outer) == 8L && size_of(Span<uint>) == 16L &&
-                size_of(values) == 12L && size_of(side := 1I) == 4L && side == 0I) { 0 } else { 1 }
+            var side = 0_ui;
+            var values = [1_ui, 2_ui, 3_ui];
+            if (size_of(uint) == 4_ul && align_of(ulong) == 8_ul && size_of(Outer) == 40_ul &&
+                align_of(Outer) == 8_ul && size_of(Span<uint>) == 16_ul &&
+                size_of(values) == 12_ul && size_of(side := 1_ui) == 4_ul && side == 0_ui) { 0 } else { 1 }
         };
     "#,
         0,
@@ -815,22 +815,22 @@ fn numeric_conversions_check_runtime_values_and_boundaries() {
     runs(include_str!("fixtures/numeric_conversions.resin"), 0);
     runs(
         r#"export { main }; def main() -> int = {
-        var n = 255I; var negative = -128i; var wide = 18446744073709551615L;
-        var nan = float32(0.0d / 0.0d); var large = 1.0e100d; var tiny = -1.0e-100d;
-        if (ubyte(n) == 255B && sbyte(negative) == -128b && ulong(wide) == wide &&
-            float64(n) == 255.0d && float32(large) > 1.0e30f && float32(tiny) == 0.0f && nan != nan) { 0 } else { 1 }
+        var n = 255_ui; var negative = -128_i; var wide = 18446744073709551615_ul;
+        var nan = float32(0.0_d / 0.0_d); var large = 1.0e100_d; var tiny = -1.0e-100_d;
+        if (ubyte(n) == 255_ub && sbyte(negative) == -128_b && ulong(wide) == wide &&
+            float64(n) == 255.0_d && float32(large) > 1.0e30_f && float32(tiny) == 0.0_f && nan != nan) { 0 } else { 1 }
     };"#,
         0,
     );
     for expr in [
-        "ubyte(256I)",
-        "uint(-1i)",
-        "int(2147483648I)",
-        "uint(4294967296.0d)",
-        "long(9223372036854775808.0d)",
-        "ulong(18446744073709551616.0d)",
-        "int(0.0d / 0.0d)",
-        "int(1.0d / 0.0d)",
+        "ubyte(256_ui)",
+        "uint(-1_i)",
+        "int(2147483648_ui)",
+        "uint(4294967296.0_d)",
+        "long(9223372036854775808.0_d)",
+        "ulong(18446744073709551616.0_d)",
+        "int(0.0_d / 0.0_d)",
+        "int(1.0_d / 0.0_d)",
     ] {
         let source = format!("export {{ main }}; def main() = {{ {expr}; }};");
         let output = run_module(&module(&source));

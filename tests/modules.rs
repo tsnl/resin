@@ -757,7 +757,7 @@ fn method_syntax_and_field_calls_have_distinct_meanings() {
 
 #[test]
 fn indexing_methods_require_ulong_and_do_not_replace_nominal_methods() {
-    for arg in ["1f", "1 == 1", "", "0, 1", "-1", "0I", "0i", "0l"] {
+    for arg in ["1_f", "1 == 1", "", "0, 1", "-1", "0_ui", "0_i", "0_l"] {
         let source = format!("def f() = {{ var values = [1, 2]; values.at({arg}); }};");
         assert!(ir::generate(&support::parse(&source)).is_err(), "{source}");
     }

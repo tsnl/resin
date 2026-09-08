@@ -5,13 +5,13 @@ import { "std/gpu.resin", "std/image.resin" };
 struct Root { count: uint, pixels: Ptr<uint> };
 
 def pixel(index: uint) -> uint = {
-	0xff400000I | (index & 0xffffI)
+	0xff400000_ui | (index & 0xffff_ui)
 };
 
 @compute_shader
 def kernel(index: uint, root: Ptr<Root>) = {
 	if (index < root.count) {
-		var pixels = Span<uint> { data = root.pixels, length = 65536L };
+		var pixels = Span<uint> { data = root.pixels, length = 65536_ul };
 		pixels(index).* := pixel(index);
 	};
 };
@@ -21,12 +21,12 @@ def main() -> Result<(), _> = {
 
 	var pipeline = gpu.create_compute_pipeline(kernel.spirv)?;
 
-	var pixels = gpu.malloc(65536L * size_of(uint), align_of(uint), Memory.default())?;
+	var pixels = gpu.malloc(65536_ul * size_of(uint), align_of(uint), Memory.default())?;
 
 	var root = gpu.malloc(size_of(Root), align_of(Root), Memory.default())?;
 
 	var data = Ptr<Root>(root.host_pointer());
-	data.* := Root { count = 65536I, pixels = Ptr<uint>(pixels.device_pointer()) };
+	data.* := Root { count = 65536_ui, pixels = Ptr<uint>(pixels.device_pointer()) };
 	var commands = gpu.start_command_recording()?;
 
 	commands.set_pipeline(pipeline)?;

@@ -23,9 +23,9 @@ struct Params {
 // Relax the initial random velocities toward the Lorenz attractor's flow.
 // Two small, fixed substeps keep the simulation stable, independently of camera motion.
 def advance(p: Particle, dt: float32) -> Particle = {
-	var vx = 0.15f * p.vx + 0.85f * (10.0f * (p.y - p.x));
-	var vy = 0.15f * p.vy + 0.85f * (p.x * (28.0f - p.z) - p.y);
-	var vz = 0.15f * p.vz + 0.85f * (p.x * p.y - 2.666667f * p.z);
+	var vx = 0.15_f * p.vx + 0.85_f * (10.0_f * (p.y - p.x));
+	var vy = 0.15_f * p.vy + 0.85_f * (p.x * (28.0_f - p.z) - p.y);
+	var vz = 0.15_f * p.vz + 0.85_f * (p.x * p.y - 2.666667_f * p.z);
 	Particle {
 		x = p.x + vx * dt,
 		y = p.y + vy * dt,
@@ -47,7 +47,7 @@ def kernel(index: uint, root: Ptr<Params>) -> () = {
 // Float division is available in shaders. Correct rounding at the upper end of
 // the 24-million-vertex draw, where adjacent integers no longer fit in float32.
 def particle_index(index: int) -> int = {
-	var particle = int(float32(index) / 24.0f);
+	var particle = int(float32(index) / 24.0_f);
 	if (particle * 24 > index) {
 		particle := particle - 1;
 	};
@@ -55,10 +55,10 @@ def particle_index(index: int) -> int = {
 };
 
 def positive(value: float32) -> float32 = {
-	if (value > 0.0f) {
+	if (value > 0.0_f) {
 		value
 	} else {
-		0.0f
+		0.0_f
 	}
 };
 
@@ -66,19 +66,19 @@ def positive(value: float32) -> float32 = {
 // units per simulation second. Fixed anchors keep colors stable across frames
 // and reseeds. Interpolate squared speeds to avoid a square root per vertex.
 def speed_heat(squared_speed: float32) -> float32 = {
-	var heat = if (squared_speed < 2025.0f) {
-		0.25f * (squared_speed - 400.0f) / 1625.0f
-	} else if (squared_speed < 4225.0f) {
-		0.25f + 0.25f * (squared_speed - 2025.0f) / 2200.0f
-	} else if (squared_speed < 13225.0f) {
-		0.5f + 0.25f * (squared_speed - 4225.0f) / 9000.0f
+	var heat = if (squared_speed < 2025.0_f) {
+		0.25_f * (squared_speed - 400.0_f) / 1625.0_f
+	} else if (squared_speed < 4225.0_f) {
+		0.25_f + 0.25_f * (squared_speed - 2025.0_f) / 2200.0_f
+	} else if (squared_speed < 13225.0_f) {
+		0.5_f + 0.25_f * (squared_speed - 4225.0_f) / 9000.0_f
 	} else {
-		0.75f + 0.25f * (squared_speed - 13225.0f) / 35175.0f
+		0.75_f + 0.25_f * (squared_speed - 13225.0_f) / 35175.0_f
 	};
-	if (heat < 0.0f) {
-		0.0f
-	} else if (heat > 1.0f) {
-		1.0f
+	if (heat < 0.0_f) {
+		0.0_f
+	} else if (heat > 1.0_f) {
+		1.0_f
 	} else {
 		heat
 	}
@@ -88,14 +88,14 @@ def heat_color(heat: float32) -> Color = {
 	// Blue, cyan, warm yellow, orange, coral red. These are albedo colors;
 	// the fragment shader applies lighting and distance fog afterwards.
 	var colors = [
-		Color { r = 0.16f, g = 0.30f, b = 0.90f, a = 1.0f },
-		Color { r = 0.08f, g = 0.75f, b = 0.82f, a = 1.0f },
-		Color { r = 0.95f, g = 0.88f, b = 0.38f, a = 1.0f },
-		Color { r = 0.98f, g = 0.46f, b = 0.12f, a = 1.0f },
-		Color { r = 0.88f, g = 0.10f, b = 0.16f, a = 1.0f },
+		Color { r = 0.16_f, g = 0.30_f, b = 0.90_f, a = 1.0_f },
+		Color { r = 0.08_f, g = 0.75_f, b = 0.82_f, a = 1.0_f },
+		Color { r = 0.95_f, g = 0.88_f, b = 0.38_f, a = 1.0_f },
+		Color { r = 0.98_f, g = 0.46_f, b = 0.12_f, a = 1.0_f },
+		Color { r = 0.88_f, g = 0.10_f, b = 0.16_f, a = 1.0_f },
 	];
-	var scaled = heat * 4.0f;
-	var segment = if (scaled < 3.0f) {
+	var scaled = heat * 4.0_f;
+	var segment = if (scaled < 3.0_f) {
 		int(scaled)
 	} else {
 		3
@@ -107,7 +107,7 @@ def heat_color(heat: float32) -> Color = {
 		r = low.r + (high.r - low.r) * blend,
 		g = low.g + (high.g - low.g) * blend,
 		b = low.b + (high.b - low.b) * blend,
-		a = 1.0f,
+		a = 1.0_f,
 	}
 };
 
@@ -115,37 +115,37 @@ def heat_color(heat: float32) -> Color = {
 def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 	var particle = particle_index(index);
 	var local = index - particle * 24;
-	var sector = int(float32(local) / 3.0f);
+	var sector = int(float32(local) / 3.0_f);
 	var corner = local - sector * 3;
 	var p = root.particles.at(ulong(particle)).*;
 	var horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
-	var height = (p.z - 25.0f) * 0.9f;
+	var height = (p.z - 25.0_f) * 0.9_f;
 	var depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;
-	var perspective = root.zoom / (1.0f + depth * 0.012f);
-	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036f;
-	var y = (height * root.pitch_cos + horizontal_depth * root.pitch_sin) * 0.036f;
+	var perspective = root.zoom / (1.0_f + depth * 0.012_f);
+	var x = (p.x * root.yaw_cos + p.y * root.yaw_sin) * 0.036_f;
+	var y = (height * root.pitch_cos + horizontal_depth * root.pitch_sin) * 0.036_f;
 
 	// Eight triangles form a camera-facing octagon. Interpolated disk coordinates
 	// let the fragment shader light a smooth hemisphere without a sphere mesh.
-	var nx = 0.0f;
-	var ny = 0.0f;
+	var nx = 0.0_f;
+	var ny = 0.0_f;
 	if (corner != 0) {
 		var rim = (sector + corner - 1) & 7;
-		var xs = [1.0f, 0.707107f, 0.0f, -0.707107f, -1.0f, -0.707107f, 0.0f, 0.707107f];
-		var ys = [0.0f, 0.707107f, 1.0f, 0.707107f, 0.0f, -0.707107f, -1.0f, -0.707107f];
+		var xs = [1.0_f, 0.707107_f, 0.0_f, -0.707107_f, -1.0_f, -0.707107_f, 0.0_f, 0.707107_f];
+		var ys = [0.0_f, 0.707107_f, 1.0_f, 0.707107_f, 0.0_f, -0.707107_f, -1.0_f, -0.707107_f];
 		nx := xs(rim).*;
 		ny := ys(rim).*;
 	};
 	var squared_speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
 	var heat = speed_heat(squared_speed);
-	var distance = positive(1.0f + depth * 0.025f);
-	var visibility = 1.0f / (1.0f + 0.4f * distance * distance);
+	var distance = positive(1.0_f + depth * 0.025_f);
+	var visibility = 1.0_f / (1.0_f + 0.4_f * distance * distance);
 	Vertex {
 		position = Position {
 			x = (x + nx * root.radius) * perspective * root.aspect,
 			y = -(y + ny * root.radius) * perspective,
-			z = 0.0f,
-			w = 1.0f,
+			z = 0.0_f,
+			w = 1.0_f,
 		},
 		// The fixed Color varying carries disk coordinates, speed, and fog to fragment.
 		color = Color { r = nx, g = ny, b = heat, a = visibility },
@@ -156,57 +156,57 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 def fragment(color: Color) -> Color = {
 	var nx = color.r;
 	var ny = color.g;
-	var squared_z = positive(1.0f - nx * nx - ny * ny);
+	var squared_z = positive(1.0_f - nx * nx - ny * ny);
 	// Five bounded Newton steps approximate sqrt on [0, 1], including the rim.
-	var nz = 1.0f;
-	var step = 0;
+	var nz = 1.0_f;
+	var step = 0_i;
 	while (step < 5) {
-		nz := 0.5f * (nz + squared_z / nz);
+		nz := 0.5_f * (nz + squared_z / nz);
 		step := step + 1;
 	};
 	// Camera-space light from the upper left; a tight, pale specular highlight.
-	var diffuse = positive(-0.4f * nx + 0.55f * ny + 0.733f * nz);
-	var specular = positive(-0.215f * nx + 0.295f * ny + 0.931f * nz);
+	var diffuse = positive(-0.4_f * nx + 0.55_f * ny + 0.733_f * nz);
+	var specular = positive(-0.215_f * nx + 0.295_f * ny + 0.931_f * nz);
 	specular := specular * specular;
 	specular := specular * specular;
 	specular := specular * specular;
 	specular := specular * specular;
 	specular := specular * specular;
-	var light = 0.16f + 0.64f * diffuse;
-	var shine = 0.2f * specular;
+	var light = 0.16_f + 0.64_f * diffuse;
+	var shine = 0.2_f * specular;
 	var albedo = heat_color(color.b);
 	var fog = color.a;
 	Color {
-		r = 0.004f * (1.0f - fog) + (albedo.r * light + shine) * fog,
-		g = 0.008f * (1.0f - fog) + (albedo.g * light + shine) * fog,
-		b = 0.02f * (1.0f - fog) + (albedo.b * light + shine) * fog,
-		a = 1.0f,
+		r = 0.004_f * (1.0_f - fog) + (albedo.r * light + shine) * fog,
+		g = 0.008_f * (1.0_f - fog) + (albedo.g * light + shine) * fog,
+		b = 0.02_f * (1.0_f - fog) + (albedo.b * light + shine) * fog,
+		a = 1.0_f,
 	}
 };
 
 // Host-only xorshift32: reproducible random positions and independent velocities.
 def random(state: Ptr<uint>) -> float32 = {
 	var x = state.*;
-	x := x ^ (x << 13I);
-	x := x ^ (x >> 17I);
-	x := x ^ (x << 5I);
+	x := x ^ (x << 13_ui);
+	x := x ^ (x >> 17_ui);
+	x := x ^ (x << 5_ui);
 	state.* := x;
-	float32(x & 0xffffffI) / 16777216.0f
+	float32(x & 0xffffff_ui) / 16777216.0_f
 };
 
 def initialize(particles: Span<Particle>, seed: uint) -> () = {
-	var state = seed | 1I;
-	var index = 0L;
+	var state = seed | 1_ui;
+	var index = 0_ul;
 	while (index < particles.length) {
 		particles(index).* := Particle {
-			x = random(&state) * 48.0f - 24.0f,
-			y = random(&state) * 60.0f - 30.0f,
-			z = random(&state) * 50.0f,
-			vx = random(&state) * 12.0f - 6.0f,
-			vy = random(&state) * 12.0f - 6.0f,
-			vz = random(&state) * 12.0f - 6.0f,
+			x = random(&state) * 48.0_f - 24.0_f,
+			y = random(&state) * 60.0_f - 30.0_f,
+			z = random(&state) * 50.0_f,
+			vx = random(&state) * 12.0_f - 6.0_f,
+			vy = random(&state) * 12.0_f - 6.0_f,
+			vz = random(&state) * 12.0_f - 6.0_f,
 		};
-		index := index + 1L;
+		index := index + 1_ul;
 	};
 };
 
@@ -221,7 +221,7 @@ def mouse_position(x: float64, y: float64) -> MousePosition = {
 	MousePosition { x = x, y = y }
 };
 def default_camera() -> Camera = {
-	Camera { yaw = 0.0f, pitch = 0.24f, zoom = 1.0f }
+	Camera { yaw = 0.0_f, pitch = 0.24_f, zoom = 1.0_f }
 };
 
 def clamp(value: float32, low: float32, high: float32) -> float32 = {
@@ -235,10 +235,10 @@ def clamp(value: float32, low: float32, high: float32) -> float32 = {
 };
 
 def move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) = {
-	camera.yaw := camera.yaw + float32(dx) * 0.006f;
+	camera.yaw := camera.yaw + float32(dx) * 0.006_f;
 	// Stop short of the poles so dragging never flips the view upside down.
-	camera.pitch := clamp(camera.pitch + float32(dy) * 0.006f, -1.4f, 1.4f);
-	camera.zoom := clamp(camera.zoom * expf(clamp(float32(scroll), -20.0f, 20.0f) * 0.12f), 0.35f, 3.0f);
+	camera.pitch := clamp(camera.pitch + float32(dy) * 0.006_f, -1.4_f, 1.4_f);
+	camera.zoom := clamp(camera.zoom * expf(clamp(float32(scroll), -20.0_f, 20.0_f) * 0.12_f), 0.35_f, 3.0_f);
 };
 
 def apply_camera(camera: Camera, params: Ptr<Params>) = {
@@ -250,7 +250,7 @@ def apply_camera(camera: Camera, params: Ptr<Params>) = {
 };
 
 def main() -> Result<(), _> = {
-	var count = 1000000I;
+	var count = 1000000_ui;
 	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	var window = Window.new(1280, 800, String.from_str(title))?;
 
@@ -266,19 +266,19 @@ def main() -> Result<(), _> = {
 	var root = gpu.malloc(size_of(Params), align_of(Params), Memory.default())?;
 
 	var host_particles = Span<Particle> { data = Ptr<Particle>(particles.host_pointer()), length = ulong(count) };
-	var seed = 0x9e3779b9I;
+	var seed = 0x9e3779b9_ui;
 	initialize(host_particles, seed);
 	var params = Ptr<Params>(root.host_pointer());
 	params.* := Params {
 		count = count,
-		dt = 0.005f,
-		yaw_cos = 1.0f,
-		yaw_sin = 0.0f,
-		pitch_cos = 1.0f,
-		pitch_sin = 0.0f,
-		zoom = 1.0f,
-		aspect = 0.625f,
-		radius = 0.004f,
+		dt = 0.005_f,
+		yaw_cos = 1.0_f,
+		yaw_sin = 0.0_f,
+		pitch_cos = 1.0_f,
+		pitch_sin = 0.0_f,
+		zoom = 1.0_f,
+		aspect = 0.625_f,
+		radius = 0.004_f,
 		particles = Span<Particle> { data = Ptr<Particle>(particles.device_pointer()), length = ulong(count) },
 	};
 	var address = root.device_pointer();
@@ -298,7 +298,7 @@ def main() -> Result<(), _> = {
 			paused := !paused;
 		};
 		if (reset.pressed) {
-			seed := seed * 1664525I + 1013904223I;
+			seed := seed * 1664525_ui + 1013904223_ui;
 			initialize(host_particles, seed);
 		};
 		var cursor = mouse_position(window.cursor_position()?);
@@ -306,17 +306,17 @@ def main() -> Result<(), _> = {
 		var dragging = window.focused() && left.down;
 		var scroll = mouse_position(window.scroll_delta()?);
 		if (automatic && !paused) {
-			camera.yaw := camera.yaw + 0.0015f;
+			camera.yaw := camera.yaw + 0.0015_f;
 		};
 		if (window.focused()) {
-			if (dragging || scroll.y != 0.0d) {
+			if (dragging || scroll.y != 0.0_d) {
 				automatic := 1 == 0;
 			};
 			// A fresh press/focus starts a drag without jumping from the old cursor position.
 			if (dragging && was_dragging && !left.pressed) {
-				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0d);
+				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0_d);
 			};
-			move_camera(&camera, 0.0d, 0.0d, scroll.y);
+			move_camera(&camera, 0.0_d, 0.0_d, scroll.y);
 			if (window.key_state(Window.keys().home).pressed) {
 				camera := default_camera();
 				automatic := 1 == 1;
@@ -329,11 +329,11 @@ def main() -> Result<(), _> = {
 
 		if (!paused) {
 			commands.set_pipeline(compute)?;
-			commands.dispatch(address, (count + 63I) / 64I, 1, 1)?;
+			commands.dispatch(address, (count + 63_ui) / 64_ui, 1, 1)?;
 		};
-		commands.begin_rendering(image, 0.004f, 0.008f, 0.02f, 1.0f)?;
+		commands.begin_rendering(image, 0.004_f, 0.008_f, 0.02_f, 1.0_f)?;
 		commands.set_pipeline(graphics)?;
-		commands.draw(address, count * 24I)?;
+		commands.draw(address, count * 24_ui)?;
 		commands.end_rendering()?;
 		commands.submit()?;
 		gpu.present(image)?;
