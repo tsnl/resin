@@ -25,8 +25,7 @@ pub struct Snapshot {
     pub dependencies: BTreeSet<PathBuf>,
     pub(crate) semantics: SemanticData,
     program: Result<ast::Program, ast::SourceError>,
-    module: Result<ir::Module, ast::SourceError>,
-    verification: ir::verify::ModuleTypes,
+    module: Result<ir::verify::VerifiedModule, ast::SourceError>,
 }
 
 impl Snapshot {
@@ -88,7 +87,6 @@ impl Snapshot {
                 },
                 Err,
             ),
-            verification: checked.verification,
         }
     }
 
@@ -102,15 +100,14 @@ impl Snapshot {
     }
 
     pub fn module(&self) -> Result<&ir::Module, ast::SourceError> {
-        self.module.as_ref().map_err(Clone::clone)
+        self.module
+            .as_ref()
+            .map(|checked| checked.view().module())
+            .map_err(Clone::clone)
     }
 
     pub(crate) fn verified(&self) -> Result<ir::verify::Verified<'_>, crate::backend::Error> {
-        let module = self.module()?;
-        Ok(ir::verify::Verified {
-            module,
-            analysis: &self.verification,
-        })
+        Ok(self.module.as_ref().map_err(Clone::clone)?.view())
     }
 
     pub fn syntax_tree(&self, path: &Path) -> Option<&tree_sitter::Tree> {

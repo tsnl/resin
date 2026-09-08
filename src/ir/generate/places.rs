@@ -24,7 +24,7 @@ impl Generator {
         let ty = self.gen_term(value, Some(&pointee))?;
         self.emit(Instr::Store);
         if let Form::Var { name } = &place.form {
-            self.scopes
+            self.environment
                 .lookup_value_mut(&name.val)
                 .expect("assigned binding")
                 .initialization = Initialization::Initialized;
@@ -100,7 +100,7 @@ impl Generator {
             }
             Form::Field { base, name }
                 if name.val.as_ref() == "spirv"
-                    && matches!(&base.form, Form::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| matches!(binding.kind, ValueBindingKind::Function(_)))) =>
+                    && matches!(&base.form, Form::Var { name } if self.environment.lookup_value(&name.val).is_some_and(|binding| matches!(binding.kind, ValueBindingKind::Function(_)))) =>
             {
                 self.gen_term(term, None).map(Operand::Value)
             }

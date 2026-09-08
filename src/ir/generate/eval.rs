@@ -3,11 +3,11 @@ use std::fmt;
 use crate::ast::{Span, Type};
 use crate::ir::{Ty, TyperContext, Value};
 
-use super::scope::Scopes;
+use super::scope::ContextView;
 use super::{GenerateError, GenerateErrorKind};
 
 pub(in crate::ir) struct Evaluator<'a> {
-    pub(in crate::ir) scopes: &'a Scopes,
+    pub(in crate::ir) scopes: &'a ContextView,
     pub(in crate::ir) typer: &'a TyperContext,
 }
 
@@ -54,7 +54,7 @@ impl Evaluator<'_> {
         let mut solver = crate::ir::typecheck::infer::solver::Solver::default();
         let inferred = super::annotation::Decoder {
             solver: &mut solver,
-            holes: &mut Vec::new(),
+            holes: Vec::new(),
             resolve: &mut |name| {
                 if name.val.as_ref() == "String" {
                     return Ok(self
@@ -68,7 +68,7 @@ impl Evaluator<'_> {
             },
         }
         .decode(ty, false)?;
-        solver.require(&inferred, ty.span)
+        solver.require(&inferred.ty, ty.span)
     }
 }
 
@@ -174,14 +174,20 @@ fn is_hex_literal(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::ast::{Ident, TypeKind};
+    use crate::ir::generate::scope::Scopes;
 
     #[test]
     fn evaluation_only_needs_scopes_and_types() {
         let typer = TyperContext::new();
         let mut scopes = Scopes::new();
-        scopes.define_alias("Byte".into(), Ty::Int8).unwrap();
+        scopes
+            .define_alias(
+                &Ident::new("Byte".into(), Span { start: 0, end: 4 }),
+                Ty::Int8,
+            )
+            .unwrap();
         let evaluator = Evaluator {
-            scopes: &scopes,
+            scopes: scopes.view(),
             typer: &typer,
         };
         let span = Span { start: 4, end: 8 };
@@ -210,7 +216,7 @@ mod tests {
         let scopes = Scopes::new();
         let typer = TyperContext::new();
         let evaluator = Evaluator {
-            scopes: &scopes,
+            scopes: scopes.view(),
             typer: &typer,
         };
         let span = Span { start: 0, end: 0 };

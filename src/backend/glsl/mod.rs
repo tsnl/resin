@@ -60,15 +60,7 @@ pub fn emit_function(
     entry: ir::FunctionId,
     stage: Stage,
 ) -> Result<String, Error> {
-    let analysis = ir::verify::analyze(module)?;
-    emit_verified(
-        ir::verify::Verified {
-            module,
-            analysis: &analysis,
-        },
-        entry,
-        stage,
-    )
+    ir::verify::with_verified(module, |checked| emit_verified(checked, entry, stage))
 }
 
 pub(crate) fn emit_verified(
@@ -76,7 +68,8 @@ pub(crate) fn emit_verified(
     entry: ir::FunctionId,
     stage: Stage,
 ) -> Result<String, Error> {
-    let ir::verify::Verified { module, analysis } = checked;
+    let module = checked.module();
+    let analysis = checked.analysis();
     let mut reachable = Vec::new();
     visit(
         module,

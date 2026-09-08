@@ -4,21 +4,34 @@ use std::collections::HashSet;
 use super::{GenerateError, GenerateErrorKind};
 use crate::ast::{self, Ident, Span, TypeKind};
 use crate::ir::typecheck::infer::{
-    solver::Solver,
+    solver::{Solver, VariableId},
     types::{Head, Type},
 };
 use crate::ir::{Ty, TypeError, TypeErrorKind};
 
 type Result<T> = std::result::Result<T, GenerateError>;
 
+pub(super) struct Decoded {
+    pub ty: Type,
+    pub holes: Vec<(Span, VariableId)>,
+}
+
 pub(super) struct Decoder<'a> {
     pub solver: &'a mut Solver,
-    pub holes: &'a mut Vec<(Span, Type)>,
+    pub holes: Vec<(Span, VariableId)>,
     pub resolve: &'a mut dyn FnMut(&Ident) -> Result<Type>,
 }
 
 impl Decoder<'_> {
-    pub fn decode(&mut self, ann: &ast::Type, infer: bool) -> Result<Type> {
+    pub fn decode(mut self, ann: &ast::Type, infer: bool) -> Result<Decoded> {
+        let ty = self.ty(ann, infer)?;
+        Ok(Decoded {
+            ty,
+            holes: self.holes,
+        })
+    }
+
+    fn ty(&mut self, ann: &ast::Type, infer: bool) -> Result<Type> {
         Ok(match &ann.val {
             TypeKind::Unit => Ty::Unit.into(),
             TypeKind::Hole => {
@@ -34,15 +47,15 @@ impl Decoder<'_> {
                         "type holes are only allowed in local annotations and function results",
                     ));
                 }
-                let ty = self.solver.fresh();
-                self.holes.push((ann.span, ty.clone()));
-                ty
+                let variable = self.solver.fresh_variable();
+                self.holes.push((ann.span, variable));
+                variable.ty()
             }
             TypeKind::Atom { name } => builtin_ty(&name.val)
                 .map(|ty| Ok(ty.into()))
                 .unwrap_or_else(|| (self.resolve)(name))?,
             TypeKind::App { head, arg } => {
-                let arg = self.decode(arg, infer)?;
+                let arg = self.ty(arg, infer)?;
                 let head = match head.val.as_ref() {
                     "Ptr" => Head::Pointer,
                     "Arc" => Head::Arc,
@@ -60,12 +73,12 @@ impl Decoder<'_> {
                 Type::Node(head, vec![arg])
             }
             TypeKind::Func { from, to } => {
-                Type::function(self.decode(from, infer)?, self.decode(to, infer)?)
+                Type::function(self.ty(from, infer)?, self.ty(to, infer)?)
             }
             TypeKind::Record { fields } => {
                 let fields = fields
                     .iter()
-                    .map(|(name, ty)| Ok((name.val.clone(), self.decode(ty, infer)?)))
+                    .map(|(name, ty)| Ok((name.val.clone(), self.ty(ty, infer)?)))
                     .collect::<Result<Vec<_>>>()?;
                 let mut names = HashSet::new();
                 for (name, _) in &fields {
@@ -81,14 +94,14 @@ impl Decoder<'_> {
                 Type::record(fields)
             }
             TypeKind::Result { value, error } => {
-                let value = self.decode(value, infer)?;
-                let error = self.decode(error, infer)?;
+                let value = self.ty(value, infer)?;
+                let error = self.ty(error, infer)?;
                 self.solver.errors(&error, ann.span)?;
                 Type::result(value, error)
             }
             TypeKind::Union { left, right } => {
-                let left = self.decode(left, false)?;
-                let right = self.decode(right, false)?;
+                let left = self.ty(left, false)?;
+                let right = self.ty(right, false)?;
                 Ty::union_of([
                     self.solver.require(&left, ann.span)?,
                     self.solver.require(&right, ann.span)?,

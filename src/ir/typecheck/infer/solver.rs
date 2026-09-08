@@ -23,6 +23,16 @@ struct Variable {
     variants: Vec<TypeId>,
 }
 
+/// An allocated inference variable, retained independently of its resolved type.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::ir) struct VariableId(usize);
+
+impl VariableId {
+    pub fn ty(self) -> Type {
+        Type::Variable(self.0)
+    }
+}
+
 #[derive(Clone, Default)]
 pub(in crate::ir) struct Solver {
     variables: Vec<Variable>,
@@ -31,6 +41,10 @@ pub(in crate::ir) struct Solver {
 
 impl Solver {
     pub fn fresh(&mut self) -> Type {
+        self.fresh_variable().ty()
+    }
+
+    pub fn fresh_variable(&mut self) -> VariableId {
         self.variable(Class::Any)
     }
 
@@ -43,16 +57,17 @@ impl Solver {
         } else {
             Class::Float
         })
+        .ty()
     }
 
-    fn variable(&mut self, class: Class) -> Type {
+    fn variable(&mut self, class: Class) -> VariableId {
         let id = self.variables.len();
         self.variables.push(Variable {
             value: None,
             class,
             variants: vec![],
         });
-        Type::Variable(id)
+        VariableId(id)
     }
 
     pub fn errors(&mut self, ty: &Type, span: Span) -> Result<()> {
@@ -254,17 +269,8 @@ impl Solver {
         }
     }
 
-    /// Invalidate original inference holes without replacing explicit type structure.
-    pub fn invalidate(&mut self, ty: &Type) {
-        match ty {
-            Type::Variable(id) => self.variables[*id].value = Some(Type::Invalid),
-            Type::Node(_, children) => {
-                for child in children {
-                    self.invalidate(child);
-                }
-            }
-            Type::Invalid => {}
-        }
+    pub fn invalidate(&mut self, variable: VariableId) {
+        self.variables[variable.0].value = Some(Type::Invalid);
     }
 
     pub fn require(&self, ty: &Type, span: Span) -> Result<Ty> {

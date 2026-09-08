@@ -1,17 +1,25 @@
 use super::{
     GenerateError, Generator,
     plan::{Annotation, Signature, Term, error},
+    scope::{DeclarationId, Scopes},
+    semantic::DefinitionKind,
 };
 use crate::{
     ast::{Ident, SourceFile, StmtKind},
     ir::{
         Instr, Ty,
-        typecheck::{FunctionBody, ReceiverConversion},
+        typecheck::{FunctionBody, ReceiverConversion, infer::types::Type},
     },
 };
+use std::{collections::BTreeMap, sync::Arc};
 
 impl Generator {
-    pub(super) fn declare_methods(&mut self, file: &SourceFile) {
+    pub(super) fn declare_methods(
+        &mut self,
+        file: &SourceFile,
+        scopes: &mut Scopes,
+    ) -> BTreeMap<Arc<str>, DeclarationId> {
+        let mut declarations = BTreeMap::new();
         for stmt in file.declarations() {
             let StmtKind::Function {
                 receiver: Some(receiver),
@@ -24,8 +32,28 @@ impl Generator {
             else {
                 continue;
             };
-            let receiver_type = self
-                .scopes
+            if declarations.contains_key(&name.val) {
+                self.errors.push(GenerateError {
+                    span: name.span,
+                    kind: super::GenerateErrorKind::DuplicateValue {
+                        name: name.val.clone(),
+                    },
+                });
+                continue;
+            }
+            let declaration =
+                match scopes.define_inferred(name, Type::Invalid, DefinitionKind::Function) {
+                    Ok(id) => id,
+                    Err(duplicate) => {
+                        self.errors.push(GenerateError {
+                            span: name.span,
+                            kind: super::GenerateErrorKind::DuplicateValue { name: duplicate },
+                        });
+                        continue;
+                    }
+                };
+            declarations.insert(name.val.clone(), declaration);
+            let receiver_type = scopes
                 .resolve_type(receiver)
                 .and_then(|ty| self.solver.require(&ty, receiver.span));
             let definition = match receiver_type {
@@ -52,27 +80,28 @@ impl Generator {
                 ));
                 continue;
             }
+            scopes.record_method_definition(definition, declaration);
             let checked = (|| {
                 if !decorators.is_empty() {
                     return Err(error(name.span, "methods cannot be shader entries"));
                 }
+                let evaluator = super::eval::Evaluator {
+                    scopes: scopes.view(),
+                    typer: &self.typer,
+                };
                 let signature = Signature {
+                    declaration: Some(declaration),
+                    parameters: vec![],
                     params: params
                         .iter()
                         .map(|(name, ann)| {
                             Ok((
                                 name.clone(),
-                                Annotation {
-                                    ty: self.evaluator().ty(ann)?.into(),
-                                    span: ann.span,
-                                },
+                                Annotation::concrete(evaluator.ty(ann)?, ann.span),
                             ))
                         })
                         .collect::<Result<_, GenerateError>>()?,
-                    result: Annotation {
-                        ty: self.evaluator().ty(result)?.into(),
-                        span: result.span,
-                    },
+                    result: Annotation::concrete(evaluator.ty(result)?, result.span),
                 };
                 let function = self.declare_function(name, &signature)?;
                 let short = name.val.rsplit('.').next().unwrap();
@@ -96,11 +125,11 @@ impl Generator {
                 }
                 Ok(())
             })();
-            self.scopes.record_method_definition(definition, name);
             if let Err(error) = checked {
                 self.errors.push(error);
             }
         }
+        declarations
     }
 
     pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, GenerateError> {

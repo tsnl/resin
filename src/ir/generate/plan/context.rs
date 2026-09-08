@@ -1,34 +1,17 @@
+use super::super::semantic::DefinitionKind;
 use super::{GenerateError, Planner, Result, Type};
 use crate::ir::typecheck::check_binding_name;
-use crate::{
-    ast::{self, Ident},
-    ir::GenerateErrorKind,
-};
+use crate::{ast::Ident, ir::GenerateErrorKind};
 impl Planner<'_> {
-    pub fn annotation(&mut self, ann: &ast::Type, infer: bool) -> Result<Type> {
-        super::super::annotation::Decoder {
-            solver: &mut self.typing.solver,
-            holes: &mut self.holes,
-            resolve: &mut |name| {
-                if name.val.as_ref() == "String" {
-                    return Ok(self
-                        .typing
-                        .typer
-                        .string_type
-                        .clone()
-                        .expect("builtin String")
-                        .into());
-                }
-                self.scopes.resolve_type(name)
-            },
-        }
-        .decode(ann, infer)
-    }
-
-    pub fn bind(&mut self, name: &Ident, ty: Type) -> Result<()> {
+    pub fn bind(
+        &mut self,
+        name: &Ident,
+        ty: Type,
+        kind: DefinitionKind,
+    ) -> Result<super::super::scope::DeclarationId> {
         check_binding_name(name)?;
         self.scopes
-            .define_inferred(name, ty, false)
+            .define_inferred(name, ty, kind)
             .map_err(|duplicate| GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::DuplicateValue { name: duplicate },

@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use super::{
-    GenerateError, Inference, Result, error,
+    Equation, GenerateError, Inference, Result, error,
     types::{Head, Type},
 };
 use crate::{ast::Span, ir::Ty};
@@ -43,28 +43,37 @@ impl Inference<'_> {
         let mut errors = Vec::new();
         'retry: loop {
             self.solver = baseline.clone();
-            for output in &failed {
-                self.solver.invalidate(output);
+            for owner in &failed {
+                self.fail(*owner);
             }
             self.constraints = equations
                 .iter()
-                .filter(|(_, out, _)| !failed.contains(out))
+                .filter(|equation| !failed.contains(&equation.owner))
                 .cloned()
                 .collect();
             loop {
                 let before = self.solver.revision;
                 let pending = std::mem::take(&mut self.constraints);
-                for (span, output, constraint) in pending {
+                for Equation {
+                    span,
+                    owner,
+                    relation: constraint,
+                } in pending
+                {
                     if constraint.inputs().iter().any(|ty| self.solver.invalid(ty)) {
-                        failed.push(output);
+                        failed.push(owner);
                         continue 'retry;
                     }
                     match self.constraint(&constraint, span) {
                         Ok(true) => {}
-                        Ok(false) => self.constraints.push((span, output, constraint)),
+                        Ok(false) => self.constraints.push(Equation {
+                            span,
+                            owner,
+                            relation: constraint,
+                        }),
                         Err(error) => {
                             errors.push(error);
-                            failed.push(output);
+                            failed.push(owner);
                             continue 'retry;
                         }
                     }
@@ -73,7 +82,12 @@ impl Inference<'_> {
                     continue;
                 }
                 let mut seeded = false;
-                for (span, _, constraint) in &self.constraints {
+                for Equation {
+                    span,
+                    relation: constraint,
+                    ..
+                } in &self.constraints
+                {
                     if let Constraint::Record(fields, out) = constraint
                         && matches!(self.solver.head(out), Type::Variable(_))
                     {
@@ -87,7 +101,11 @@ impl Inference<'_> {
                     continue;
                 }
                 // Receiver defaults select the parameter types before argument defaults.
-                for (_, _, constraint) in &self.constraints {
+                for Equation {
+                    relation: constraint,
+                    ..
+                } in &self.constraints
+                {
                     if let Constraint::Method(receiver, ..) = constraint {
                         seeded |= self.solver.default_numbers(std::slice::from_ref(receiver));
                     }
@@ -98,12 +116,12 @@ impl Inference<'_> {
                 if self.solver.finish_errors(roots) {
                     continue;
                 }
-                if let Some((span, output, _)) = self.constraints.first() {
+                if let Some(Equation { span, owner, .. }) = self.constraints.first() {
                     errors.push(error(
                         *span,
                         "cannot infer this operation; annotate its operand or result",
                     ));
-                    failed.push(output.clone());
+                    failed.push(*owner);
                     continue 'retry;
                 }
                 return errors;

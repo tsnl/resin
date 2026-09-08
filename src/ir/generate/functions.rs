@@ -70,8 +70,8 @@ impl Generator {
         builder.parameter(None, param.clone());
         builder.result(result.clone());
         self.module.functions.push(builder.finish());
-        self.bind_value(
-            name,
+        self.environment.bind(
+            signature.declaration.expect("planned function declaration"),
             ValueBinding {
                 shader: false,
                 kind: ValueBindingKind::Function(id),
@@ -81,7 +81,7 @@ impl Generator {
                 }),
                 initialization: Initialization::Initialized,
             },
-        )?;
+        );
         Ok(id)
     }
 
@@ -91,7 +91,10 @@ impl Generator {
         signature: &Signature,
         body: &Term,
     ) -> Result<(), GenerateError> {
-        let binding = self.resolve_value(name)?;
+        let binding = self
+            .environment
+            .binding(signature.declaration.expect("planned function declaration"))
+            .expect("declared function");
         let ValueBindingKind::Function(id) = binding.kind else {
             unreachable!()
         };
@@ -100,7 +103,6 @@ impl Generator {
         let result = self.module.functions[id.index()].result.clone();
         self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
         self.function().result(result.clone());
-        self.scopes.push_at(body.span);
         self.owned.push(vec![LocalId::from_index(0)]);
         self.bind_params(signature)?;
         self.gen_term(body, Some(&result))?;
@@ -109,7 +111,6 @@ impl Generator {
         self.terminate(Terminator::Return);
         self.module.functions[id.index()] = self.function.take().unwrap().finish();
         self.function_id = None;
-        self.scopes.pop();
         Ok(())
     }
 
@@ -149,15 +150,15 @@ impl Generator {
                 }
                 local
             };
-            self.bind_value(
-                name,
+            self.environment.bind(
+                signature.parameters[index].expect("planned parameter"),
                 ValueBinding {
                     shader: false,
                     kind: ValueBindingKind::Local(local),
                     ty: Some(ty.clone()),
                     initialization: Initialization::Initialized,
                 },
-            )?;
+            );
         }
         if params.len() > 1 && param_ty.needs_drop(self.typer.definitions()) {
             self.emit(Instr::ForgetLocal { local: parameter });

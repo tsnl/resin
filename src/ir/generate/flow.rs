@@ -14,7 +14,7 @@ impl Generator {
 
         self.switch(condition);
         self.gen_term(cond, None)?;
-        let after_condition = self.scopes.clone();
+        let after_condition = self.environment.clone();
         self.terminate(Terminator::Branch {
             then: body_block,
             els: exit,
@@ -25,7 +25,7 @@ impl Generator {
         self.emit(Instr::Discard);
         self.terminate(Terminator::Break { target: condition });
 
-        self.scopes = after_condition;
+        self.environment = after_condition;
         self.switch(exit);
         self.emit(Instr::Push { value: Value::Unit });
         Ok(Ty::Unit)
@@ -47,17 +47,17 @@ impl Generator {
             els: else_block,
         });
 
-        let before = self.scopes.clone();
+        let before = self.environment.clone();
         self.switch(then_block);
         let _ = self.gen_term(then, Some(expected))?;
         self.terminate(Terminator::Break { target: join_block });
-        let after_then = self.scopes.clone();
+        let after_then = self.environment.clone();
 
-        self.scopes = before;
+        self.environment = before;
         self.switch(else_block);
         let _ = self.gen_term(els, Some(expected))?;
         self.terminate(Terminator::Break { target: join_block });
-        self.scopes.intersect_initialization(&after_then);
+        self.environment.intersect_initialization(&after_then);
 
         self.switch(join_block);
         Ok(expected.clone())
@@ -69,7 +69,6 @@ impl Generator {
         tail: &Term,
         expected: &Ty,
     ) -> Result<Ty, GenerateError> {
-        self.scopes.push_at(self.source_span);
         self.owned.push(vec![]);
         for stmt in stmts {
             stmt(self)?;
@@ -77,7 +76,6 @@ impl Generator {
         let ty = self.gen_term(tail, Some(expected))?;
         self.cleanup(self.owned.len() - 1, &ty);
         self.owned.pop();
-        self.scopes.pop();
         Ok(ty)
     }
 
@@ -94,7 +92,7 @@ impl Generator {
             then: then_block,
             els: else_block,
         });
-        let before_right = self.scopes.clone();
+        let before_right = self.environment.clone();
         if name == "&&" {
             self.switch(then_block);
             self.gen_term(&args[1], None)?;
@@ -115,7 +113,7 @@ impl Generator {
             self.terminate(Terminator::Break { target: join_block });
         }
         self.switch(join_block);
-        self.scopes.intersect_initialization(&before_right);
+        self.environment.intersect_initialization(&before_right);
         Ok(Ty::Bool)
     }
 }

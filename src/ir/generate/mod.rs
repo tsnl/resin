@@ -32,7 +32,7 @@ pub use modules::generate_program;
 use crate::ir::typecheck::SourceModuleId;
 use builder::FunctionBuilder;
 use eval::Evaluator;
-use scope::{Scopes, ValueBindingKind};
+use scope::{Cursor, Environment, Scopes, ValueBindingKind};
 
 /// Lower a source file to a verified IR module.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
@@ -45,12 +45,14 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
         });
     }
     let mut generator = Generator::new();
-    generator.generate_file(file);
+    generator.generate_file(file, Scopes::new());
     if let Some(error) = std::mem::take(&mut generator.errors).into_iter().next() {
         return Err(error);
     }
     generator.module.entries = generator.exported_functions(file)?;
-    generator.finish().map(|(module, _)| module)
+    generator
+        .finish()
+        .map(crate::ir::verify::VerifiedModule::into_module)
 }
 
 struct Generator {
@@ -61,7 +63,7 @@ struct Generator {
     function_id: Option<crate::ir::FunctionId>,
     typer: TyperContext,
     function: Option<FunctionBuilder>,
-    scopes: Scopes,
+    environment: Environment,
     solver: crate::ir::typecheck::infer::solver::Solver,
     owned: Vec<Vec<LocalId>>,
     errors: Vec<GenerateError>,
@@ -77,61 +79,21 @@ impl Generator {
             function_id: None,
             typer: builtins::typer(),
             function: None,
-            scopes: Scopes::new(),
+            environment: Environment::new(),
             solver: Default::default(),
             owned: vec![],
             errors: vec![],
         }
     }
 
-    fn generate_file(&mut self, file: &SourceFile) {
-        for stmt in file.declarations() {
-            let result = match &stmt.val {
-                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. } => {
-                    Err(GenerateError {
-                        span: stmt.span,
-                        kind: GenerateErrorKind::InvalidModuleItem,
-                    })
-                }
-                StmtKind::ForeignType { name } => {
-                    let result =
-                        self.scopes
-                            .define_foreign_type(name.val.clone())
-                            .map_err(|name| GenerateError {
-                                span: stmt.span,
-                                kind: GenerateErrorKind::DuplicateType { name },
-                            });
-                    self.scopes.record_definition(
-                        name,
-                        true,
-                        Some(&Ty::Foreign {
-                            name: name.val.clone(),
-                        }),
-                        &self.typer,
-                    );
-                    result
-                }
-                _ => Ok(()),
-            };
-            if let Err(error) = result {
-                self.errors.push(error);
-            }
-        }
-        for stmt in file.declarations() {
-            let result = match &stmt.val {
-                StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
-                StmtKind::Struct { name, body } => self.gen_struct(name, body),
-                _ => Ok(()),
-            };
-            if let Err(error) = result {
-                self.errors.push(error);
-            }
-        }
-        self.declare_methods(file);
-        let planned = plan::file(file, &mut self.typer, &self.scopes, self.source_module);
+    fn generate_file(&mut self, file: &SourceFile, mut scopes: Scopes) {
+        self.errors
+            .extend(scopes.prepare(file, &mut self.typer, self.source_module));
+        let methods = self.declare_methods(file, &mut scopes);
+        let planned = plan::file(file, &mut self.typer, scopes, self.source_module, methods);
         self.solver = planned.solver;
         self.errors.extend(planned.errors);
-        self.scopes.lowering();
+        self.environment.context = planned.context;
         let mut declared = std::collections::BTreeSet::new();
         for stmt in file.declarations() {
             let result = (|| {
@@ -146,7 +108,10 @@ impl Generator {
                             return Ok(());
                         }
                         let id = if name.val.contains('.') {
-                            let Some(binding) = self.scopes.lookup_value(&name.val) else {
+                            let Some(binding) = signature
+                                .declaration
+                                .and_then(|id| self.environment.binding(id))
+                            else {
                                 return Ok(());
                             };
                             let ValueBindingKind::Function(id) = binding.kind else {
@@ -190,7 +155,7 @@ impl Generator {
                                     message: message.into(),
                                 },
                             })?;
-                            self.scopes.lookup_value_mut(&name.val).unwrap().shader = true;
+                            self.environment.lookup_value_mut(&name.val).unwrap().shader = true;
                             self.module.shaders.insert(
                                 id,
                                 crate::ir::shader::ShaderEntry {
@@ -218,15 +183,16 @@ impl Generator {
         for stmt in file.declarations() {
             if let StmtKind::Function { name, .. } = &stmt.val
                 && let Some(body) = planned.bodies.get(&name.val)
-                && self.scopes.lookup_value(&name.val).is_some()
+                && self.environment.lookup_value(&name.val).is_some()
                 && !self.solver.invalid(&body.ty)
             {
-                let scopes = self.scopes.clone();
-                if let Err(error) = self.gen_function(name, &planned.signatures[&name.val], body) {
+                let environment = self.environment.clone();
+                let result = self.gen_function(name, &planned.signatures[&name.val], body);
+                self.environment = environment;
+                if let Err(error) = result {
                     if !self.errors.contains(&error) {
                         self.errors.push(error);
                     }
-                    self.scopes = scopes;
                     self.function = None;
                     self.function_id = None;
                     self.owned.clear();
@@ -235,23 +201,21 @@ impl Generator {
         }
     }
 
-    fn finish(mut self) -> Result<(Module, crate::ir::verify::ModuleTypes), GenerateError> {
+    fn finish(mut self) -> Result<crate::ir::verify::VerifiedModule, GenerateError> {
         self.module.types = self.typer.into_definitions().map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::Type(err.kind),
         })?;
-        let verification =
-            crate::ir::verify::analyze(&self.module).map_err(|err| GenerateError {
-                span: Span { start: 0, end: 0 },
-                kind: GenerateErrorKind::InvalidIr(err),
-            })?;
-        self.module.types = verification.types.clone();
-        Ok((self.module, verification))
+        crate::ir::verify::VerifiedModule::new(self.module).map_err(|err| GenerateError {
+            span: Span { start: 0, end: 0 },
+            kind: GenerateErrorKind::InvalidIr(err),
+        })
     }
 
     // `to` requests an emitted value conversion, never a typing context.
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, GenerateError> {
         let before = std::mem::replace(&mut self.source_span, term.span);
+        let context = self.environment.context.select(term.context);
         let result = (|| {
             let checked = self.solver.require(&term.ty, term.span)?;
             let found = (term.emit)(self, &checked)?;
@@ -263,6 +227,18 @@ impl Generator {
             }
         })();
         self.source_span = before;
+        self.environment.context.select(context);
+        result
+    }
+
+    fn with_context<T>(
+        &mut self,
+        context: Cursor,
+        emit: impl FnOnce(&mut Self) -> Result<T, GenerateError>,
+    ) -> Result<T, GenerateError> {
+        let before = self.environment.context.select(context);
+        let result = emit(self);
+        self.environment.context.select(before);
         result
     }
 
@@ -322,7 +298,7 @@ impl Generator {
 
     fn evaluator(&self) -> Evaluator<'_> {
         Evaluator {
-            scopes: &self.scopes,
+            scopes: &self.environment.context,
             typer: &self.typer,
         }
     }

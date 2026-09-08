@@ -1,4 +1,4 @@
-//! Retained lexical contexts, with separate inference and storage enrichment.
+//! Constructed lexical contexts and a separate mapping to emitted storage.
 use crate::{
     ast::{Ident, SourceLocation, Span},
     ir::generate::semantic::{Definition, DefinitionKind, SemanticData},
@@ -15,10 +15,10 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Clone)]
+pub(crate) type DeclarationId = usize;
+#[derive(Clone, Copy)]
 pub(super) struct Symbol {
-    definition: usize,
-    pub(super) binding: Option<ValueBinding>,
+    pub(super) definition: DeclarationId,
 }
 #[derive(Clone)]
 pub(in crate::ir) struct ValueBinding {
@@ -38,7 +38,6 @@ pub(super) enum ValueBindingKind {
     Local(LocalId),
     Function(FunctionId),
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Cursor {
     scope: usize,
@@ -48,7 +47,8 @@ pub(crate) struct Cursor {
 struct Entry {
     name: Arc<str>,
     is_type: bool,
-    definition: usize,
+    definition: DeclarationId,
+    visible_from: usize,
 }
 #[derive(Clone, Debug)]
 struct Context {
@@ -61,9 +61,7 @@ struct Context {
 pub(crate) struct Contexts {
     scopes: Vec<Context>,
     pub definitions: Vec<Definition>,
-    inferred: HashMap<usize, (Type, bool)>,
-    shaders: HashSet<usize>,
-    expressions: Vec<(SourceLocation, Type, bool)>,
+    shaders: HashSet<DeclarationId>,
 }
 impl Contexts {
     fn lookup(&self, mut cursor: Cursor, name: &str, is_type: bool) -> Option<usize> {
@@ -91,21 +89,11 @@ impl Contexts {
             id = *child;
         }
         let scope = &self.scopes[id];
-        let prefix = if scope.parent.is_none() {
-            scope.entries.len()
-        } else {
-            scope
-                .entries
-                .iter()
-                .take_while(|entry| {
-                    let definition = &self.definitions[entry.definition];
-                    matches!(
-                        definition.kind,
-                        DefinitionKind::Parameter | DefinitionKind::Function
-                    ) || definition.location.span.end <= offset
-                })
-                .count()
-        };
+        let prefix = scope
+            .entries
+            .iter()
+            .take_while(|entry| entry.visible_from <= offset)
+            .count();
         Some(Cursor { scope: id, prefix })
     }
     pub(crate) fn definition(
@@ -128,7 +116,7 @@ impl Contexts {
         while let Some(view) = at {
             let scope = &self.scopes[view.scope];
             for entry in &scope.entries[..view.prefix] {
-                if self.definitions[entry.definition].member {
+                if entry.name.is_empty() || self.definitions[entry.definition].member {
                     continue;
                 }
                 names
@@ -145,368 +133,25 @@ impl Contexts {
     }
 }
 
+/// Lookup capability shared by construction, evaluation and emission.
 #[derive(Clone)]
-pub(in crate::ir) struct Scopes {
+pub(in crate::ir) struct ContextView {
     cursor: Cursor,
-    path: std::path::PathBuf,
+    path: PathBuf,
     data: Rc<RefCell<SemanticData>>,
-    values: HashMap<usize, ValueBinding>,
-    reuse: bool,
 }
-impl Scopes {
-    pub(in crate::ir) fn planning(&self) -> Self {
-        Self {
-            reuse: false,
-            ..self.clone()
-        }
+impl ContextView {
+    pub(super) fn capture(&self) -> Cursor {
+        self.cursor
     }
-    pub(in crate::ir) fn lowering(&mut self) {
-        self.reuse = true;
-        self.cursor.prefix = self.data.borrow().contexts.scopes[self.cursor.scope]
-            .entries
-            .len();
+    pub(super) fn select(&mut self, cursor: Cursor) -> Cursor {
+        std::mem::replace(&mut self.cursor, cursor)
     }
-    pub(super) fn for_source(path: PathBuf, shared: Rc<RefCell<SemanticData>>) -> Self {
-        let mut data = shared.borrow_mut();
-        let id = data.contexts.scopes.len();
-        data.contexts.scopes.push(Context {
-            parent: None,
-            location: SourceLocation {
-                path: path.clone(),
-                span: Span {
-                    start: 0,
-                    end: usize::MAX,
-                },
-            },
-            entries: vec![],
-            children: vec![],
-        });
-        drop(data);
-        Self {
-            cursor: Cursor {
-                scope: id,
-                prefix: 0,
-            },
-            path,
-            data: shared,
-            values: HashMap::new(),
-            reuse: false,
-        }
-    }
-    pub(super) fn new() -> Self {
-        Self::for_source(
-            "<source>".into(),
-            Rc::new(RefCell::new(SemanticData::default())),
-        )
-    }
-    pub(in crate::ir) fn push_at(&mut self, span: Span) {
-        let mut data = self.data.borrow_mut();
-        let contexts = &mut data.contexts;
-        let found = contexts.scopes[self.cursor.scope]
-            .children
-            .iter()
-            .copied()
-            .find(|&id| contexts.scopes[id].location.span == span);
-        let id = found.unwrap_or_else(|| {
-            let id = contexts.scopes.len();
-            contexts.scopes.push(Context {
-                parent: Some(self.cursor),
-                location: SourceLocation {
-                    path: self.path.clone(),
-                    span,
-                },
-                entries: vec![],
-                children: vec![],
-            });
-            contexts.scopes[self.cursor.scope].children.push(id);
-            id
-        });
-        self.cursor = Cursor {
-            scope: id,
-            prefix: 0,
-        };
-    }
-    pub(in crate::ir) fn pop(&mut self) {
-        self.cursor = self.data.borrow().contexts.scopes[self.cursor.scope]
-            .parent
-            .expect("cannot pop root context");
-    }
-    fn declare(&mut self, name: Arc<str>, is_type: bool) -> Result<usize, Arc<str>> {
-        let mut data = self.data.borrow_mut();
-        let contexts = &mut data.contexts;
-        let scope = &contexts.scopes[self.cursor.scope];
-        let duplicate = (is_type && name.as_ref() == "String")
-            || !self.reuse
-                && scope.entries[..self.cursor.prefix]
-                    .iter()
-                    .any(|e| e.name == name && e.is_type == is_type);
-        let existing = if self.reuse {
-            scope
-                .entries
-                .iter()
-                .position(|e| e.name == name && e.is_type == is_type)
-        } else {
-            None
-        };
-        let id = if let Some(index) = existing {
-            self.cursor.prefix = self.cursor.prefix.max(index + 1);
-            scope.entries[index].definition
-        } else {
-            let id = contexts.definitions.len();
-            contexts.definitions.push(Definition {
-                name: name.to_string(),
-                location: SourceLocation {
-                    path: self.path.clone(),
-                    span: Span { start: 0, end: 0 },
-                },
-                kind: if is_type {
-                    DefinitionKind::Type
-                } else {
-                    DefinitionKind::Variable
-                },
-                label: name.to_string(),
-                member: false,
-                ty: None,
-            });
-            contexts.scopes[self.cursor.scope].entries.push(Entry {
-                name: name.clone(),
-                is_type,
-                definition: id,
-            });
-            id
-        };
-        if existing.is_none() {
-            self.cursor.prefix = contexts.scopes[self.cursor.scope].entries.len();
-        }
-        if duplicate { Err(name) } else { Ok(id) }
-    }
-    fn lookup(&self, name: &str, is_type: bool) -> Option<usize> {
+    fn lookup(&self, name: &str, is_type: bool) -> Option<DeclarationId> {
         self.data
             .borrow()
             .contexts
             .lookup(self.cursor, name, is_type)
-    }
-    pub(in crate::ir) fn define_inferred(
-        &mut self,
-        name: &Ident,
-        ty: Type,
-        function: bool,
-    ) -> Result<(), Arc<str>> {
-        if name.val.is_empty() {
-            return Ok(());
-        }
-        if function && let Some(id) = self.lookup(&name.val, false) {
-            let mut data = self.data.borrow_mut();
-            let definition = &mut data.contexts.definitions[id];
-            if definition.location.path == self.path && definition.location.span == name.span {
-                definition.kind = DefinitionKind::Function;
-                data.contexts.inferred.insert(id, (ty, true));
-                return Ok(());
-            }
-        }
-        let result = self.declare(name.val.clone(), false);
-        let mut data = self.data.borrow_mut();
-        let id = data.contexts.scopes[self.cursor.scope].entries[self.cursor.prefix - 1].definition;
-        let definition = &mut data.contexts.definitions[id];
-        definition.location.span = name.span;
-        if function {
-            definition.kind = DefinitionKind::Function;
-            definition.member = name.val.contains('.');
-        }
-        data.contexts.inferred.insert(id, (ty, function));
-        result.map(|_| ())
-    }
-    pub(in crate::ir) fn mark_shader(&self, name: &Ident) {
-        if let Some(id) = self.lookup(&name.val, false) {
-            self.data.borrow_mut().contexts.shaders.insert(id);
-        }
-    }
-    pub(in crate::ir) fn is_shader(&self, name: &str) -> bool {
-        self.lookup(name, false)
-            .is_some_and(|id| self.data.borrow().contexts.shaders.contains(&id))
-    }
-    pub(in crate::ir) fn define_invalid_type(&mut self, name: &Ident) {
-        let _ = self.declare(name.val.clone(), true);
-        let mut data = self.data.borrow_mut();
-        let id = data.contexts.scopes[self.cursor.scope].entries[self.cursor.prefix - 1].definition;
-        data.contexts.definitions[id].location.span = name.span;
-    }
-    pub(in crate::ir) fn set_inferred(&mut self, name: &Ident, ty: Type) {
-        if let Some(id) = self.lookup(&name.val, false) {
-            self.data
-                .borrow_mut()
-                .contexts
-                .inferred
-                .insert(id, (ty, false));
-        }
-    }
-    pub(in crate::ir) fn lookup_inferred(&self, name: &str) -> Option<(Type, bool)> {
-        let id = self.lookup(name, false)?;
-        let data = self.data.borrow();
-        Some(data.contexts.inferred.get(&id).cloned().unwrap_or_else(|| {
-            (
-                data.contexts.definitions[id]
-                    .ty
-                    .clone()
-                    .map(Type::from)
-                    .unwrap_or(Type::Invalid),
-                false,
-            )
-        }))
-    }
-    pub(in crate::ir) fn set_definition_kind(&mut self, name: &Ident, kind: DefinitionKind) {
-        if let Some(id) = self.lookup(&name.val, kind == DefinitionKind::Type) {
-            self.data.borrow_mut().contexts.definitions[id].kind = kind;
-        }
-    }
-    pub(in crate::ir) fn record_inferred(&self, span: Span, ty: Type) {
-        self.record_members(span, ty, false);
-    }
-    pub(in crate::ir) fn record_members(&self, span: Span, ty: Type, associated: bool) {
-        self.data.borrow_mut().contexts.expressions.push((
-            SourceLocation {
-                path: self.path.clone(),
-                span,
-            },
-            ty,
-            associated,
-        ));
-    }
-    pub(super) fn record_method_definition(&mut self, receiver: TypeId, name: &Ident) {
-        let id = self
-            .lookup(&name.val, false)
-            .filter(|&id| {
-                let data = self.data.borrow();
-                let location = &data.contexts.definitions[id].location;
-                location.path == self.path && location.span == name.span
-            })
-            .unwrap_or_else(|| {
-                let _ = self.declare(name.val.clone(), false);
-                self.data.borrow().contexts.scopes[self.cursor.scope].entries
-                    [self.cursor.prefix - 1]
-                    .definition
-            });
-        let mut data = self.data.borrow_mut();
-        let definition = &mut data.contexts.definitions[id];
-        definition.location.span = name.span;
-        definition.kind = DefinitionKind::Function;
-        definition.member = true;
-        data.method_origins
-            .entry((receiver, name.val.rsplit('.').next().unwrap().to_string()))
-            .or_insert(id);
-    }
-    pub(in crate::ir) fn resolve_inferred(&self, solver: &Solver, typer: &TyperContext) {
-        let mut data = self.data.borrow_mut();
-        let inferred: Vec<_> = data
-            .contexts
-            .inferred
-            .iter()
-            .filter(|(id, _)| data.contexts.definitions[**id].location.path == self.path)
-            .filter_map(|(&id, (ty, _))| solver.resolve(ty).map(|ty| (id, ty)))
-            .collect();
-        for (id, ty) in inferred {
-            data.contexts.definitions[id].ty = Some(ty);
-        }
-        let expressions: Vec<_> = data
-            .contexts
-            .expressions
-            .iter()
-            .filter(|(location, _, _)| location.path == self.path)
-            .filter_map(|(location, ty, associated)| {
-                solver
-                    .resolve(ty)
-                    .map(|ty| (location.clone(), ty, *associated))
-            })
-            .collect();
-        for (location, ty, associated) in expressions {
-            data.record_members(location, &ty, associated, typer);
-        }
-        data.contexts
-            .expressions
-            .retain(|(location, _, _)| location.path != self.path);
-        let finished: Vec<_> = data
-            .contexts
-            .inferred
-            .keys()
-            .copied()
-            .filter(|id| data.contexts.definitions[*id].location.path == self.path)
-            .collect();
-        for id in finished {
-            data.contexts.inferred.remove(&id);
-        }
-        data.typer = typer.clone();
-    }
-    pub(super) fn record_definition(
-        &self,
-        name: &Ident,
-        is_type: bool,
-        ty: Option<&Ty>,
-        typer: &TyperContext,
-    ) {
-        if let Some(id) = self.lookup(&name.val, is_type) {
-            let mut data = self.data.borrow_mut();
-            let definition = &mut data.contexts.definitions[id];
-            definition.location.span = name.span;
-            definition.ty = ty.cloned().or_else(|| definition.ty.clone());
-            data.typer = typer.clone();
-        }
-    }
-    pub(super) fn record_binding_type(&self, name: &Arc<str>, ty: &Ty, typer: &TyperContext) {
-        if let Some(id) = self.lookup(name, false) {
-            let mut data = self.data.borrow_mut();
-            data.contexts.definitions[id].ty = Some(ty.clone());
-            data.typer = typer.clone();
-        }
-    }
-    pub(super) fn symbol(&self, name: &str) -> Option<Symbol> {
-        let definition = self
-            .lookup(name, false)
-            .or_else(|| self.lookup(name, true))?;
-        Some(Symbol {
-            definition,
-            binding: self.values.get(&definition).cloned(),
-        })
-    }
-    pub(super) fn import(&mut self, name: Arc<str>, symbol: Symbol) {
-        let mut data = self.data.borrow_mut();
-        let is_type = data.contexts.definitions[symbol.definition].kind == DefinitionKind::Type;
-        let scope = &mut data.contexts.scopes[self.cursor.scope];
-        scope.entries.push(Entry {
-            name,
-            is_type,
-            definition: symbol.definition,
-        });
-        self.cursor.prefix = scope.entries.len();
-        if let Some(binding) = symbol.binding {
-            self.values.insert(symbol.definition, binding);
-        }
-    }
-    pub(super) fn define_value(
-        &mut self,
-        name: Arc<str>,
-        binding: ValueBinding,
-    ) -> Result<(), Arc<str>> {
-        let id = self.declare(name, false)?;
-        self.values.insert(id, binding);
-        Ok(())
-    }
-    pub(in crate::ir) fn define_type(
-        &mut self,
-        name: Arc<str>,
-        definition: TypeId,
-    ) -> Result<(), Arc<str>> {
-        self.define_alias(name, Ty::Defined { definition })
-    }
-    pub(super) fn define_foreign_type(&mut self, name: Arc<str>) -> Result<(), Arc<str>> {
-        self.define_alias(name.clone(), Ty::Foreign { name })
-    }
-    pub(in crate::ir) fn define_alias(&mut self, name: Arc<str>, ty: Ty) -> Result<(), Arc<str>> {
-        let id = self.declare(name, true)?;
-        self.data.borrow_mut().contexts.definitions[id].ty = Some(ty);
-        Ok(())
-    }
-    pub(in crate::ir) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
-        self.values.get(&self.lookup(name, false)?)
     }
     pub(in crate::ir) fn resolve_type(&self, name: &Ident) -> Result<Type, super::GenerateError> {
         let id = self
@@ -523,8 +168,267 @@ impl Scopes {
             .map(Type::from)
             .unwrap_or(Type::Invalid))
     }
+}
+/// The only capability that can construct contexts. Pending types belong to this module's solver.
+pub(in crate::ir) struct Scopes {
+    view: ContextView,
+    inferred: HashMap<DeclarationId, (Type, bool)>,
+    expressions: Vec<(SourceLocation, Type, bool)>,
+}
+impl Scopes {
+    pub(super) fn for_source(path: PathBuf, data: Rc<RefCell<SemanticData>>) -> Self {
+        let mut shared = data.borrow_mut();
+        let scope = shared.contexts.scopes.len();
+        shared.contexts.scopes.push(Context {
+            parent: None,
+            location: SourceLocation {
+                path: path.clone(),
+                span: Span {
+                    start: 0,
+                    end: usize::MAX,
+                },
+            },
+            entries: vec![],
+            children: vec![],
+        });
+        drop(shared);
+        Self {
+            view: ContextView {
+                cursor: Cursor { scope, prefix: 0 },
+                path,
+                data,
+            },
+            inferred: HashMap::new(),
+            expressions: vec![],
+        }
+    }
+    pub(super) fn new() -> Self {
+        Self::for_source(
+            "<source>".into(),
+            Rc::new(RefCell::new(SemanticData::default())),
+        )
+    }
+    pub(super) fn view(&self) -> &ContextView {
+        &self.view
+    }
+    pub(super) fn capture(&self) -> Cursor {
+        self.view.capture()
+    }
+    pub(super) fn restore(&mut self, cursor: Cursor) {
+        self.view.select(cursor);
+    }
+    pub(super) fn finish(self) -> ContextView {
+        self.view
+    }
+    pub(in crate::ir) fn push_at(&mut self, span: Span) {
+        let mut data = self.view.data.borrow_mut();
+        let contexts = &mut data.contexts;
+        let id = contexts.scopes.len();
+        contexts.scopes.push(Context {
+            parent: Some(self.view.cursor),
+            location: SourceLocation {
+                path: self.view.path.clone(),
+                span,
+            },
+            entries: vec![],
+            children: vec![],
+        });
+        contexts.scopes[self.view.cursor.scope].children.push(id);
+        self.view.cursor = Cursor {
+            scope: id,
+            prefix: 0,
+        };
+    }
+    pub(in crate::ir) fn pop(&mut self) {
+        self.view.cursor = self.view.data.borrow().contexts.scopes[self.view.cursor.scope]
+            .parent
+            .expect("cannot pop root context");
+    }
+    fn declare(
+        &mut self,
+        name: &Ident,
+        kind: DefinitionKind,
+    ) -> (DeclarationId, Result<(), Arc<str>>) {
+        let mut data = self.view.data.borrow_mut();
+        let contexts = &mut data.contexts;
+        let scope = &mut contexts.scopes[self.view.cursor.scope];
+        let is_type = kind == DefinitionKind::Type;
+        let duplicate = (is_type && name.val.as_ref() == "String")
+            || scope.entries[..self.view.cursor.prefix]
+                .iter()
+                .any(|entry| entry.name == name.val && entry.is_type == is_type);
+        let id = contexts.definitions.len();
+        contexts.definitions.push(Definition {
+            name: name.val.to_string(),
+            location: SourceLocation {
+                path: self.view.path.clone(),
+                span: name.span,
+            },
+            kind,
+            label: name.val.to_string(),
+            member: kind == DefinitionKind::Function && name.val.contains('.'),
+            ty: None,
+        });
+        let visible_from = if scope.parent.is_none() || kind == DefinitionKind::Parameter {
+            scope.location.span.start
+        } else {
+            name.span.end
+        };
+        scope.entries.push(Entry {
+            name: name.val.clone(),
+            is_type,
+            definition: id,
+            visible_from,
+        });
+        self.view.cursor.prefix = scope.entries.len();
+        (
+            id,
+            if duplicate {
+                Err(name.val.clone())
+            } else {
+                Ok(())
+            },
+        )
+    }
+    pub(in crate::ir) fn define_inferred(
+        &mut self,
+        name: &Ident,
+        ty: Type,
+        kind: DefinitionKind,
+    ) -> Result<DeclarationId, Arc<str>> {
+        let (id, result) = self.declare(name, kind);
+        self.inferred
+            .insert(id, (ty, kind == DefinitionKind::Function));
+        result.map(|()| id)
+    }
+    pub(in crate::ir) fn set_inferred(&mut self, id: DeclarationId, ty: Type) {
+        let function =
+            self.view.data.borrow().contexts.definitions[id].kind == DefinitionKind::Function;
+        self.inferred.insert(id, (ty, function));
+    }
+    pub(in crate::ir) fn lookup_inferred(&self, name: &str) -> Option<(Type, bool)> {
+        let id = self.view.lookup(name, false)?;
+        Some(self.inferred.get(&id).cloned().unwrap_or_else(|| {
+            (
+                self.view.data.borrow().contexts.definitions[id]
+                    .ty
+                    .clone()
+                    .map(Type::from)
+                    .unwrap_or(Type::Invalid),
+                false,
+            )
+        }))
+    }
+    pub(in crate::ir) fn resolve_type(&self, name: &Ident) -> Result<Type, super::GenerateError> {
+        self.view.resolve_type(name)
+    }
+    pub(in crate::ir) fn mark_shader(&self, name: &Ident) {
+        if let Some(id) = self.view.lookup(&name.val, false) {
+            self.view.data.borrow_mut().contexts.shaders.insert(id);
+        }
+    }
+    pub(in crate::ir) fn is_shader(&self, name: &str) -> bool {
+        self.view
+            .lookup(name, false)
+            .is_some_and(|id| self.view.data.borrow().contexts.shaders.contains(&id))
+    }
+    pub(in crate::ir) fn record_inferred(&mut self, span: Span, ty: Type) {
+        self.record_members(span, ty, false);
+    }
+    pub(in crate::ir) fn record_members(&mut self, span: Span, ty: Type, associated: bool) {
+        self.expressions.push((
+            SourceLocation {
+                path: self.view.path.clone(),
+                span,
+            },
+            ty,
+            associated,
+        ));
+    }
+    pub(super) fn record_method_definition(&mut self, receiver: TypeId, id: DeclarationId) {
+        let mut data = self.view.data.borrow_mut();
+        let definition = &mut data.contexts.definitions[id];
+        definition.member = true;
+        let name = definition.name.rsplit('.').next().unwrap().to_string();
+        data.method_origins.entry((receiver, name)).or_insert(id);
+    }
+    pub(in crate::ir) fn resolve_inferred(&mut self, solver: &Solver, typer: &TyperContext) {
+        let mut data = self.view.data.borrow_mut();
+        for (id, (ty, _)) in self.inferred.drain() {
+            data.contexts.definitions[id].ty = solver.resolve(&ty);
+        }
+        for (location, ty, associated) in self.expressions.drain(..) {
+            if let Some(ty) = solver.resolve(&ty) {
+                data.record_members(location, &ty, associated, typer);
+            }
+        }
+        data.typer = typer.clone();
+    }
+    pub(super) fn import(&mut self, name: Arc<str>, symbol: Symbol) {
+        let mut data = self.view.data.borrow_mut();
+        let is_type = data.contexts.definitions[symbol.definition].kind == DefinitionKind::Type;
+        let scope = &mut data.contexts.scopes[self.view.cursor.scope];
+        scope.entries.push(Entry {
+            name,
+            is_type,
+            definition: symbol.definition,
+            visible_from: scope.location.span.start,
+        });
+        self.view.cursor.prefix = scope.entries.len();
+    }
+    pub(in crate::ir) fn define_invalid_type(&mut self, name: &Ident) {
+        let _ = self.declare(name, DefinitionKind::Type);
+    }
+    pub(in crate::ir) fn define_type(
+        &mut self,
+        name: &Ident,
+        definition: TypeId,
+    ) -> Result<DeclarationId, Arc<str>> {
+        self.define_alias(name, Ty::Defined { definition })
+    }
+    pub(in crate::ir) fn define_alias(
+        &mut self,
+        name: &Ident,
+        ty: Ty,
+    ) -> Result<DeclarationId, Arc<str>> {
+        let (id, result) = self.declare(name, DefinitionKind::Type);
+        self.view.data.borrow_mut().contexts.definitions[id].ty = Some(ty);
+        result.map(|()| id)
+    }
+}
+/// Emission can select retained contexts and map declarations to storage, but cannot declare names.
+#[derive(Clone)]
+pub(super) struct Environment {
+    pub(super) context: ContextView,
+    values: HashMap<DeclarationId, ValueBinding>,
+}
+impl Environment {
+    pub(super) fn new() -> Self {
+        Self {
+            context: Scopes::new().finish(),
+            values: HashMap::new(),
+        }
+    }
+    pub(super) fn bind(&mut self, id: DeclarationId, binding: ValueBinding) {
+        self.values.insert(id, binding);
+    }
+    pub(super) fn binding_mut(&mut self, id: DeclarationId) -> Option<&mut ValueBinding> {
+        self.values.get_mut(&id)
+    }
+    pub(super) fn binding(&self, id: DeclarationId) -> Option<&ValueBinding> {
+        self.values.get(&id)
+    }
+    pub(super) fn symbol(&self, name: &str) -> Option<Symbol> {
+        self.context
+            .lookup(name, false)
+            .or_else(|| self.context.lookup(name, true))
+            .map(|definition| Symbol { definition })
+    }
+    pub(super) fn lookup_value(&self, name: &str) -> Option<&ValueBinding> {
+        self.values.get(&self.context.lookup(name, false)?)
+    }
     pub(super) fn lookup_value_mut(&mut self, name: &str) -> Option<&mut ValueBinding> {
-        let id = self.lookup(name, false)?;
+        let id = self.context.lookup(name, false)?;
         self.values.get_mut(&id)
     }
     pub(super) fn intersect_initialization(&mut self, other: &Self) {
@@ -535,10 +439,5 @@ impl Scopes {
                 binding.initialization = Initialization::Uninitialized;
             }
         }
-    }
-}
-impl Default for Scopes {
-    fn default() -> Self {
-        Self::new()
     }
 }
