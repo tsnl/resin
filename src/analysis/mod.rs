@@ -49,7 +49,7 @@ pub struct Analysis {
     stdlib: PathBuf,
     program: Option<ast::Program>,
     module: Option<ir::Module>,
-    verification: std::sync::OnceLock<Result<Vec<ir::verify::FunctionTypes>, ir::VerifyError>>,
+    verification: std::sync::OnceLock<Result<ir::verify::ModuleTypes, ir::VerifyError>>,
     load_error: Option<ast::SourceError>,
     compile_error: Option<ast::SourceError>,
 }

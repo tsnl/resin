@@ -5,29 +5,45 @@ use std::sync::Arc;
 use crate::util::define_id;
 
 pub(crate) mod definitions;
-pub(crate) mod tags;
+mod table;
+pub use table::TypeTable;
 
 define_id! {
     pub struct TypeId(usize);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// A nominal record. Incomplete bodies exist only while resolving recursive fields.
-/// The typer and verifier reject non-record bodies, including handwritten IR.
-pub struct TypeDef {
-    pub name: Arc<str>,
-    pub(super) body: Option<Ty>,
+/// An entry in the module's canonical type table. Only nominal records can have
+/// incomplete bodies while resolving recursive fields.
+pub enum TypeDef {
+    Nominal { name: Arc<str>, body: Option<Ty> },
+    Structural(Ty),
 }
 
 impl TypeDef {
     pub fn new(name: impl Into<Arc<str>>, body: Ty) -> Self {
-        Self {
+        Self::Nominal {
             name: name.into(),
             body: Some(body),
         }
     }
+    pub fn name(&self) -> Option<&Arc<str>> {
+        match self {
+            Self::Nominal { name, .. } => Some(name),
+            Self::Structural(_) => None,
+        }
+    }
     pub fn body(&self) -> Option<&Ty> {
-        self.body.as_ref()
+        match self {
+            Self::Nominal { body, .. } => body.as_ref(),
+            Self::Structural(ty) => Some(ty),
+        }
+    }
+    pub fn ty(&self, id: TypeId) -> Ty {
+        match self {
+            Self::Nominal { .. } => Ty::Defined { definition: id },
+            Self::Structural(ty) => ty.clone(),
+        }
     }
 }
 
@@ -65,12 +81,22 @@ pub enum Ty {
 }
 
 /// Result cases are tagged independently of their payload type. Ordinary union
-/// cases carry type identity until the module's runtime tags are assigned.
+/// cases use the index of their payload type in the module's type table.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Case {
     Ok,
     Err,
     Type(Ty),
+}
+
+impl Case {
+    pub(crate) fn tag(&self, types: &TypeTable) -> u32 {
+        match self {
+            Self::Ok => 0,
+            Self::Err => 1,
+            Self::Type(ty) => types.id(ty).expect("verified union member").tag(),
+        }
+    }
 }
 
 impl Ty {
@@ -246,9 +272,6 @@ impl Ty {
 
 impl TypeId {
     pub fn tag(self) -> u32 {
-        u32::try_from(self.index())
-            .expect("too many nominal types")
-            .checked_add(1)
-            .expect("too many nominal types")
+        u32::try_from(self.index()).expect("too many types")
     }
 }

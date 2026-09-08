@@ -21,7 +21,7 @@ pub use print::format_module;
 pub use typer::{
     BuiltinCall, Conv, Converted, FieldAccess, TypeError, TypeErrorKind, TyperContext,
 };
-pub use types::{Case, RecordField, Ty, TypeDef, TypeId};
+pub use types::{Case, RecordField, Ty, TypeDef, TypeId, TypeTable};
 pub use value::{
     ArrayValue, FunctionId, LocalId, RecordFieldValue, RecordValue, StaticAddressValue, Value,
 };
@@ -31,8 +31,8 @@ pub use verify::{VerifyError, VerifyErrorKind, VerifyLocation, verify};
 pub struct Module {
     /// Functions exported by the entry source file.
     pub entries: BTreeMap<Arc<str>, FunctionId>,
-    /// Nominal definitions, indexed by [`TypeId`].
-    pub types: Vec<TypeDef>,
+    /// Canonical nominal and structural definitions, indexed by [`TypeId`].
+    pub types: TypeTable,
     pub functions: Vec<Function>,
     /// Decorated shader candidates and whether their static artifact is requested.
     pub shaders: BTreeMap<FunctionId, shader::ShaderEntry>,

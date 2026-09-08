@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::ast::{SourceFile, Span, Stmt, StmtKind, Term, TermKind};
-use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, Value, verify};
+use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, Value};
 
 mod bindings;
 mod builder;
@@ -194,10 +194,11 @@ impl Generator {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::Type(err.kind),
         })?;
-        verify(&self.module).map_err(|err| GenerateError {
+        let analysis = crate::ir::verify::analyze(&self.module).map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::InvalidIr(err),
         })?;
+        self.module.types = analysis.types;
         Ok(self.module)
     }
 

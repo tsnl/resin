@@ -60,6 +60,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic. The C ABI retains
   pointer/length pairs; language-facing pipeline creation accepts spans.
 - Unions contain value types and use module-wide u32 type IDs, not variant positions.
+  Type IDs index one canonical table of nominal, primitive, and structural definitions;
+  host and shader emission share it. Union tags are the active payload's table index.
   `None` is a builtin singleton type and value; `T | None` expresses optionality. Postfix `!`
   removes `None` or traps, preserving the other members; it does not unwrap Results.
   `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix

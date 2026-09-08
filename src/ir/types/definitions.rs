@@ -16,9 +16,11 @@ pub(crate) fn get(definitions: &[TypeDef], id: TypeId) -> Result<&TypeDef, Defin
 }
 
 pub(crate) fn body(definitions: &[TypeDef], id: TypeId) -> Result<&Ty, DefinitionError> {
-    let body = get(definitions, id)?
-        .body()
-        .ok_or(DefinitionError::Incomplete(id))?;
+    let definition = get(definitions, id)?;
+    if definition.name().is_none() {
+        return Err(DefinitionError::NonRecord(id));
+    }
+    let body = definition.body().ok_or(DefinitionError::Incomplete(id))?;
     check_record(id, body)?;
     Ok(body)
 }
@@ -52,7 +54,9 @@ pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             check_references(definitions, error)?;
         }
         Ty::Defined { definition } => {
-            get(definitions, *definition)?;
+            if get(definitions, *definition)?.name().is_none() {
+                return Err(DefinitionError::NonRecord(*definition));
+            }
         }
         Ty::Pointer { pointee } => check_references(definitions, pointee)?,
         Ty::Span { element } | Ty::Array { element, .. } => check_references(definitions, element)?,
@@ -122,7 +126,7 @@ mod tests {
     fn invalid_and_unfinished_definitions_are_distinct() {
         let id = TypeId::from_index(0);
         assert_eq!(body(&[], id), Err(DefinitionError::Invalid(id)));
-        let table = [TypeDef {
+        let table = [TypeDef::Nominal {
             name: "Pending".into(),
             body: None,
         }];

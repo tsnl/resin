@@ -171,5 +171,5 @@ fn deferred_inference_and_local_structs_are_reused_at_each_exit() {
     let m = module(
         "struct E {}; def f(r: Result<(), E>) -> Result<(), _> = { defer { struct Local { n: int }; type Alias = Local; var x: _; x := Alias { n = 42 }; print(\"{0}\", (x.n,)); }; r?; r?; ok(()) };",
     );
-    assert_eq!(m.types.len(), 2);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 2);
 }

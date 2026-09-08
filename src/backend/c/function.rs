@@ -139,7 +139,7 @@ fn instruction(
             if matches!(tag, Case::Type(member) if member == &args[0].ty) {
                 args[0].expr.clone()
             } else {
-                let tag = types.tags.tag(tag);
+                let tag = types.tag(tag);
                 writeln!(
                     out,
                     "  if (({}).tag != {tag}u) resin_fail(\"invalid union tag\");",
@@ -277,14 +277,14 @@ fn is_variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
     if matches!(case, Case::Type(member) if member == ty) {
         return "true".into();
     }
-    format!("(({value}).tag == {}u)", types.tags.tag(case))
+    format!("(({value}).tag == {}u)", types.tag(case))
 }
 
 fn variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
     if matches!(case, Case::Type(member) if member == ty) {
         return value.into();
     }
-    let tag = types.tags.tag(case);
+    let tag = types.tag(case);
     format!(
         "({}){{ .tag = {tag}u, .payload = {{ .v{tag} = {value} }} }}",
         types.name(ty)
@@ -310,7 +310,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
         let Some(target) = to.payload(&case) else {
             continue;
         };
-        let tag = types.tags.tag(&case);
+        let tag = types.tag(&case);
         let payload = widen(
             types,
             &payload,

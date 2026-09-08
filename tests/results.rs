@@ -13,7 +13,7 @@ fn structs_mint_identities_and_aliases_do_not() {
     let m = module(
         "struct Point { x: int }; type Position = Point; type Number = int; def copy(p: Position) -> Point = { p }; def number(n: Number) -> int = { n };",
     );
-    assert_eq!(m.types.len(), 1);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(
         m.functions[0].result,
         Ty::Defined {
@@ -45,7 +45,7 @@ fn unions_are_canonical_and_tags_belong_to_structs() {
             ]
         }
     );
-    assert_eq!(TypeId::from_index(0).tag(), 1);
+    assert_eq!(TypeId::from_index(0).tag(), 0);
     module("type Choice = int | bool;");
 }
 

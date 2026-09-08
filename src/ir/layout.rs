@@ -126,7 +126,8 @@ mod tests {
                         pointee: Box::new(node.clone()),
                     },
                 ]),
-            )],
+            )]
+            .into(),
             ..Module::default()
         };
         let l = layout(&module.types, &node).unwrap();

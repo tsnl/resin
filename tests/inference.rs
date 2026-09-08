@@ -185,7 +185,7 @@ fn nominal_identity_and_local_type_definitions_survive_inference() {
     let m = module(
         "def main() -> _ = { struct Meters { value: int }; var distance = Meters { value = 42 }; distance.value };",
     );
-    assert_eq!(m.types.len(), 1);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(m.functions[0].result, Ty::Int32);
 }
 

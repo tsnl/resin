@@ -84,7 +84,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![linked_list_type()],
+        types: vec![linked_list_type()].into(),
         functions: vec![function],
     })
     .unwrap();
@@ -107,7 +107,8 @@ fn an_inline_recursive_type_is_rejected() {
                     ty: recursive,
                 }],
             },
-        )],
+        )]
+        .into(),
         functions: vec![],
     };
 
@@ -125,7 +126,7 @@ fn incomplete_definitions_are_rejected_by_the_verifier_and_printed_explicitly() 
     let module = Module {
         shaders: Default::default(),
         origins: Default::default(),
-        types: context.definitions().to_vec(),
+        types: context.definitions().to_vec().into(),
         ..Default::default()
     };
     let err = verify(&module).unwrap_err();
@@ -171,7 +172,8 @@ fn nominal_types_do_not_equal_their_representations() {
                     ty: Ty::Int32,
                 }],
             },
-        )],
+        )]
+        .into(),
         functions: vec![function],
     };
 

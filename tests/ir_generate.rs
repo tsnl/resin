@@ -172,8 +172,11 @@ fn type_mismatch_is_a_type_error() {
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
     let module = compile("struct List { value: int, next: Ptr<List> };");
-    assert_eq!(module.types.len(), 1);
-    assert_eq!(module.types[0].name.as_ref(), "List");
+    assert_eq!(
+        module.types.iter().filter(|d| d.name().is_some()).count(),
+        1
+    );
+    assert_eq!(module.types[0].name().unwrap().as_ref(), "List");
     let Ty::Record { fields } = module.types[0].body().unwrap() else {
         panic!("expected a record body");
     };

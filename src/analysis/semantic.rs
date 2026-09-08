@@ -85,7 +85,8 @@ pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
         Ty::Defined { definition } => typer
             .definitions()
             .get(definition.index())
-            .map(|d| d.name.to_string())
+            .and_then(|d| d.name())
+            .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, typer)),
         Ty::Span { element } => format!("Span<{}>", format_type(element, typer)),

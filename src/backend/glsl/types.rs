@@ -2,11 +2,11 @@ use std::{collections::HashSet, fmt::Write};
 
 use crate::{
     backend::Error,
-    ir::{Module, Ty},
+    ir::{Case, Module, Ty, TypeTable},
 };
 
 pub(super) struct Types<'a> {
-    pub tags: crate::ir::types::tags::VariantTags,
+    pub table: &'a TypeTable,
     pub module: &'a Module,
     records: Vec<Ty>,
     seen: HashSet<Ty>,
@@ -14,14 +14,18 @@ pub(super) struct Types<'a> {
 }
 
 impl<'a> Types<'a> {
-    pub fn new(module: &'a Module, analysis: &[crate::ir::verify::FunctionTypes]) -> Self {
+    pub fn new(module: &'a Module, table: &'a TypeTable) -> Self {
         Self {
             module,
-            tags: crate::ir::types::tags::VariantTags::new(module, analysis),
+            table,
             records: Vec::new(),
             seen: HashSet::new(),
             buffers: Vec::new(),
         }
+    }
+
+    pub fn tag(&self, case: &Case) -> u32 {
+        case.tag(self.table)
     }
 
     pub fn register(&mut self, ty: &Ty) -> Result<(), Error> {
@@ -71,10 +75,10 @@ impl<'a> Types<'a> {
 
     pub fn buffer(&mut self, ty: &Ty) -> Result<String, Error> {
         crate::backend::layout::layout(self.module, ty)?;
-        if let Some(index) = self.buffers.iter().position(|t| t == ty) {
+        let index = self.table.id(ty).expect("verified buffer type").index();
+        if self.buffers.contains(ty) {
             return Ok(format!("r_p{index}"));
         }
-        let index = self.buffers.len();
         self.buffers.push(ty.clone());
         self.register(ty)?;
         Ok(format!("r_p{index}"))
@@ -87,7 +91,7 @@ impl<'a> Types<'a> {
             Ty::Int32 => "int".into(),
             Ty::Bool => "bool".into(),
             Ty::Float32 => "float".into(),
-            _ => format!("r_t{}", self.records.iter().position(|t| t == ty).unwrap()),
+            _ => format!("r_t{}", self.table.id(ty).expect("verified type").index()),
         }
     }
 
@@ -162,7 +166,7 @@ impl<'a> Types<'a> {
                     Ty::Union { .. } | Ty::Result { .. } => {
                         let mut fields = String::from("uint tag;");
                         for (case, payload) in ty.payloads().unwrap() {
-                            let tag = self.tags.tag(&case);
+                            let tag = self.tag(&case);
                             write!(fields, " {} v{tag};", self.name(&payload)).unwrap();
                         }
                         fields
@@ -187,7 +191,8 @@ impl<'a> Types<'a> {
                 format!("struct {} {{ {fields} }};\n", self.name(ty))
             })
             .collect();
-        for (index, ty) in self.buffers.iter().enumerate() {
+        for ty in &self.buffers {
+            let index = self.table.id(ty).expect("verified buffer type").index();
             let layout = crate::backend::layout::layout(self.module, ty).unwrap();
             writeln!(out, "layout(buffer_reference, std430, buffer_reference_align = {}) buffer r_p{index} {{ {} value; }};", layout.align, self.name(ty)).unwrap();
         }

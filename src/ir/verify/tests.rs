@@ -35,7 +35,7 @@ fn ascribe_wraps_a_representation() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![TypeDef::new("Meters", record())],
+        types: vec![TypeDef::new("Meters", record())].into(),
         functions: vec![function],
     })
     .unwrap();
@@ -75,7 +75,7 @@ fn ascribe_unwraps_one_nominal_layer() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![TypeDef::new("Meters", record())],
+        types: vec![TypeDef::new("Meters", record())].into(),
         functions: vec![function],
     })
     .unwrap();
@@ -130,7 +130,7 @@ fn chained_assignment_preserves_the_value() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![],
+        types: vec![].into(),
         functions: vec![function],
     })
     .unwrap();
@@ -188,7 +188,7 @@ fn conflicting_join_stacks_are_rejected() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![],
+        types: vec![].into(),
         functions: vec![function],
     })
     .unwrap_err();
@@ -249,7 +249,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![],
+        types: vec![].into(),
         functions: vec![target, caller],
     })
     .unwrap();
@@ -303,7 +303,7 @@ fn loop_backedges_must_match_the_header_stack() {
         shaders: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
-        types: vec![],
+        types: vec![].into(),
         functions: vec![function],
     })
     .unwrap();

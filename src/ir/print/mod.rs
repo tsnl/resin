@@ -32,7 +32,11 @@ fn sexp_module(module: &Module) -> SExp {
     }
     for (index, def) in module.types.iter().enumerate() {
         items.push(list(
-            "type",
+            if def.name().is_some() {
+                "type"
+            } else {
+                "structural-type"
+            },
             vec![
                 symbol(names.types[index].as_ref()),
                 def.body()

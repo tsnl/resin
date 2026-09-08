@@ -48,10 +48,15 @@ It can be a member of a union, such as `Result<int, Error> | None`; `!` on that
 union removes only `None`, leaving the Result intact. Use `?` or `match` to handle
 the Result. Postfix `!` on a bare Result is not supported in this change.
 
-Ordinary unions use module-wide u32 tags for member type identity, rather than
-positions in a particular union. For example, `int` has the same tag in
+Every nominal, primitive, and structural type is interned in one module-wide
+vector of type definitions. A type's ID is its index in that vector; an ordinary
+union's u32 tag is exactly its active payload's type ID. The host and GPU use the
+same table. Aliases share their underlying type's entry, while separate nominal
+structs retain distinct entries even when their fields are identical.
+
+For example, `int` has the same tag in
 `int | None` and `int | bool | None`, on both the host and the GPU. Widening
-preserves that tag. A union itself is never a member and has no payload tag:
+preserves that tag. A union type has a table entry, but is never itself a payload:
 `(int | None) | bool` is flattened to `int | None | bool` before lowering.
 Numeric tag values are local to the compiled program; they are not a stable
 serialization format or ABI between separate builds. Results have a separate

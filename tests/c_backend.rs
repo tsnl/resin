@@ -200,7 +200,12 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
     let mut m = module(
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
-    m.types[0].name = "quoted\"name\\value".into();
+    let mut definitions = m.types.to_vec();
+    let ir::TypeDef::Nominal { name, .. } = &mut definitions[0] else {
+        unreachable!()
+    };
+    *name = "quoted\"name\\value".into();
+    m.types = definitions.into();
     let output = run_module(&m);
     assert_eq!(
         String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),

@@ -327,7 +327,7 @@ fn instruction(
             if matches!(tag, Case::Type(member) if member == &args[0].ty) {
                 args[0].expr.clone()
             } else {
-                format!("({}).v{}", args[0].expr, types.tags.tag(tag))
+                format!("({}).v{}", args[0].expr, types.tag(tag))
             }
         }
         Instr::Widen { ty } => widen(types, &args[0].ty, ty, &args[0].expr),
@@ -436,14 +436,14 @@ fn is_variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
     if matches!(case, Case::Type(member) if member == ty) {
         return "true".into();
     }
-    format!("(({value}).tag == {}u)", types.tags.tag(case))
+    format!("(({value}).tag == {}u)", types.tag(case))
 }
 
 fn variant(types: &Types<'_>, ty: &Ty, case: &Case, value: &str) -> String {
     if matches!(case, Case::Type(member) if member == ty) {
         return value.into();
     }
-    let mut fields = vec![format!("{}u", types.tags.tag(case))];
+    let mut fields = vec![format!("{}u", types.tag(case))];
     fields.extend(ty.payloads().unwrap().iter().map(|(candidate, ty)| {
         if candidate == case {
             value.into()
@@ -466,7 +466,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
         let Some(target) = to.payload(&case) else {
             continue;
         };
-        let tag = types.tags.tag(&case);
+        let tag = types.tag(&case);
         let payload = widen(types, &payload, &target, &format!("({value}).v{tag}"));
         let constructed = variant(types, to, &case, &payload);
         expression = format!("(({value}).tag == {tag}u ? {constructed} : {expression})");
