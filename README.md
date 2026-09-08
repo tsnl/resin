@@ -40,8 +40,10 @@ Vulkan 1.3 feature requirements. Some MoltenVK devices and presentation paths ma
 `unsupported`; macOS build support is not a promise that every GPU demo works.
 Native CI builds and tests the compiler, runtime, and language server without opening windows.
 Pull requests and pushes to `main` run on Linux; manually dispatching the `Build` workflow
-also checks Windows and macOS. CI caches Rust dependencies and uses `cargo nextest` to run
-tests across suites concurrently, followed by `cargo test --doc` for documentation tests.
+also checks Windows and macOS. CI caches Rust dependencies and checks Clippy before building
+executables. Example formatting, `cargo test --doc`, and a host smoke check then run before
+`cargo nextest` executes integration and GPU tests across suites concurrently. A failed check
+skips the remaining steps in its job; grammar checks run in parallel with the native job.
 CI omits Rust debug symbols to reduce compile and native-link work while retaining debug
 assertions and overflow checks. Local Cargo profile defaults are unchanged.
 CI sets `RESIN_TEST_PARTICLE_COUNT=10000` for the particle compute/render test.
