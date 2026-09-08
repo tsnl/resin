@@ -303,8 +303,11 @@ impl State {
                 let items = analysis
                     .completions(&document.path, offset)
                     .into_iter()
-                    .map(|item| lsp::CompletionItem {
+                    .enumerate()
+                    .map(|(index, item)| lsp::CompletionItem {
                         label: item.name.clone(),
+                        // Preserve analysis ordering when clients sort completion items.
+                        sort_text: Some(format!("{index:010}")),
                         detail: Some(item.detail),
                         kind: Some(match item.kind {
                             DefinitionKind::Function => lsp::CompletionItemKind::FUNCTION,
