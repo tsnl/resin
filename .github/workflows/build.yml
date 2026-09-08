@@ -101,6 +101,7 @@ jobs:
         run: ./target/debug/resin examples/eg001.resin
       - name: Test without opening windows
         env:
+          RESIN_TEST_PARTICLE_COUNT: 10000
           RESIN_REQUIRE_GLSLC: ${{ runner.os == 'Linux' && '1' || '0' }}
           RESIN_REQUIRE_GPU: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: cargo nextest run --workspace --all-features --locked --no-fail-fast -- --skip windows_present_resize_and_release_resources --skip resin_window_example_uses_bundled_glfw --skip resin_particles_example_computes_and_presents

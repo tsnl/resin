@@ -44,6 +44,10 @@ also checks Windows and macOS. CI caches Rust dependencies and uses `cargo nexte
 tests across suites concurrently, followed by `cargo test --doc` for documentation tests.
 CI omits Rust debug symbols to reduce compile and native-link work while retaining debug
 assertions and overflow checks. Local Cargo profile defaults are unchanged.
+CI sets `RESIN_TEST_PARTICLE_COUNT=10000` for the particle compute/render test.
+Its default remains one million particles for local stress testing; the particle example
+also keeps its one-million default. The smaller test spans the same cloud volume and
+checks synchronization, bounds, visible output, and sphere lighting.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
 After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
