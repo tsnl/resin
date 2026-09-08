@@ -367,6 +367,8 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         features10: vk::PhysicalDeviceFeatures::default().shader_int64(true),
         vulkan12: vk::PhysicalDeviceVulkan12Features::default()
             .buffer_device_address(true)
+            .storage_buffer8_bit_access(vulkan12.storage_buffer8_bit_access == vk::TRUE)
+            .shader_int8(vulkan12.shader_int8 == vk::TRUE)
             .timeline_semaphore(true),
         vulkan13: vk::PhysicalDeviceVulkan13Features::default()
             .synchronization2(true)

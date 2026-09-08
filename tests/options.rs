@@ -171,7 +171,7 @@ fn unwrapping_none_traps_before_following_side_effects() {
             def main() -> int = {{
                 var absent: int | None; absent := None;
                 var value: int; value := {value}!;
-                print("not reached", ());
+                print("not reached");
                 value
             }};
         "#

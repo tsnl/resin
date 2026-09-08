@@ -63,7 +63,7 @@ def fragment(color: Color) -> Color = {
 
 def main() -> Result<(), _> = {
 	var title = "Resin triangle";
-	var window = Window.new(640, 480, Ptr<ubyte>(&title))?;
+	var window = Window.new(640, 480, title.data)?;
 
 	var gpu = Gpu.new_for_window(window)?;
 
@@ -83,6 +83,6 @@ def main() -> Result<(), _> = {
 		gpu.present(image)?;
 		window.poll_events()?;
 	};
-	print("window demo complete\n", ());
+	print("window demo complete\n");
 	ok(())
 };

@@ -126,7 +126,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
                 code := code + 1;
             };
             var message = "io error";
-            valid := valid && strcmp(RuntimeStatus.message(IoError {}), Ptr<ubyte>(&message)) == 0;
+            valid := valid && strcmp(RuntimeStatus.message(IoError {}), message.data) == 0;
             ok(if (valid) { 0 } else { 1 })
         };
         "#,
@@ -167,12 +167,12 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         def main() -> Result<int, _> = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
-            ImageData.write_pixels(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?;
-            var image = ImageData.read_png(Ptr<ubyte>(&path), 0)?;
+            ImageData.write_pixels(path.data, 1, 1, 4, Ptr<ubyte>(&pixels), 0)?;
+            var image = ImageData.read_png(path.data, 0)?;
             var alias = image;
             var copy_path = "copy.png";
-            alias.write_png(Ptr<ubyte>(&copy_path))?;
-            var copied = ImageData.read_png(Ptr<ubyte>(&copy_path), 0)?;
+            alias.write_png(copy_path.data)?;
+            var copied = ImageData.read_png(copy_path.data, 0)?;
             ok(if (copied.width == image.width && copied.height == image.height && copied.pixels.* == image.pixels.*
                 && image.width == uint(1) && image.height == uint(1) && image.channels == uint(4)
                 && image.pixels.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
@@ -182,12 +182,12 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     );
     success(&output);
     for call in [
-        "ImageData.read_png(Ptr<ubyte>(&path), 4)?",
-        "ImageData.write_pixels(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?",
+        "ImageData.read_png(path.data, 4)?",
+        "ImageData.write_pixels(path.data, 1, 1, 4, Ptr<ubyte>(&pixels), 0)?",
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"std/image.resin\" }}; struct Cleanup {{}}; impl Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(\"cleanup\\n\", ()); }}; }} def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"std/image.resin\" }}; struct Cleanup {{}}; impl Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }} def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -402,7 +402,7 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         export { main };
         import { "std/console.resin" };
         struct Cleanup {};
-        impl Cleanup { def drop(self: Ptr<Cleanup>) = { print("cleanup\n", ()); }; }
+        impl Cleanup { def drop(self: Ptr<Cleanup>) = { print("cleanup\n"); }; }
         def main() -> Result<(), _> = {
             var cleanup = Cleanup {};
             Console.read_byte()?;

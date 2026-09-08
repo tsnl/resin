@@ -73,11 +73,11 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                     ok(line) => {
 
                         if (Ptr<ubyte>(ulong(line.data) + line.length).* != ubyte(0)) {
-                            print("missing terminator", ());
+                            print("missing terminator");
                         } else {};
-                        print("[{0}:", (line.length,));
+                        print(fmt("[{0}:", (line.length,)));
                         Console.print(line)?;
-                        print("]", ());
+                        print("]");
                     },
                     err(error) => {
                         match (error) {
@@ -228,4 +228,49 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn streams_write_literals_and_owned_strings_verbatim() {
+    let program = Program::new(
+        r#"
+        export { main };
+        import { "std/io.resin" };
+        def literal() -> Span<ubyte> = { "static\0bytes" };
+        def main() -> Result<(), _> = {
+            var out = Io.stdout();
+            var error = Io.stderr();
+            var text = fmt("n = {0}", (42,));
+            var copy = text;
+            out.write("raw {0}\0")?;
+            out.write(copy)?;
+            error.write(fmt("error: {0}\n", (text,)))?;
+            error.write(literal())?;
+            ok(())
+        };
+    "#,
+    );
+    let output = program.run(b"");
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(output.stdout, b"raw {0}\0n = 42");
+    assert_eq!(output.stderr, b"error: n = 42\nstatic\0bytes");
+}
+
+#[test]
+fn stream_write_failure_propagates_as_a_library_error() {
+    let program = Program::new(
+        r#"
+        export { main };
+        import { "std/io.resin" };
+        def main() -> Result<(), _> = {
+            Output { stream = 99I }.write("unwritten")?;
+            print("not reached");
+            ok(())
+        };
+    "#,
+    );
+    let output = program.run(b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("WriteError"));
 }

@@ -25,18 +25,18 @@ def calculate(n: int) -> Result<int, _> = {
 def main() -> Result<(), _> = {
 	RuntimeStatus.from_code(0)?;
 	var answer = calculate(84)?;
-	print("answer = {0}\n", (answer,));
+	print(fmt("answer = {0}\n", (answer,)));
 	match (calculate(-1)) {
 		ok(value) => {
-			print("unexpected success: {0}\n", (value,))
+			print(fmt("unexpected success: {0}\n", (value,)))
 		},
 		err(error) => {
 			match (error) {
 				DivideByZero(zero) => {
-					print("division by zero\n", ())
+					print("division by zero\n")
 				},
 				NegativeInput(negative) => {
-					print("negative input: {0}\n", (negative.value,))
+					print(fmt("negative input: {0}\n", (negative.value,)))
 				},
 			}
 		},

@@ -174,10 +174,10 @@ fn linked_list_type_is_finite_through_its_pointer() {
     let module = compile("struct List { value: int, next: Ptr<List> };");
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
-        1
+        2
     );
-    assert_eq!(module.types[0].name().unwrap().as_ref(), "List");
-    let Ty::Record { fields } = module.types[0].body().unwrap() else {
+    assert_eq!(module.types[1].name().unwrap().as_ref(), "List");
+    let Ty::Record { fields } = module.types[1].body().unwrap() else {
         panic!("expected a record body");
     };
     assert!(matches!(fields[1].ty, Ty::Pointer { .. }));
@@ -251,7 +251,7 @@ def from_meters (m: Meters) -> int = { m.value };
     );
     verify(&module).unwrap();
     let meters = Ty::Defined {
-        definition: resin::ir::TypeId::from_index(0),
+        definition: resin::ir::TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -337,7 +337,7 @@ def main() -> () = {
     assert_eq!(
         module.functions[0].locals[1].ty,
         Ty::Defined {
-            definition: resin::ir::TypeId::from_index(1),
+            definition: resin::ir::TypeId::from_index(2),
         }
     );
     assert_eq!(
@@ -361,7 +361,7 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
     );
     verify(&module).unwrap();
     let list = Ty::Defined {
-        definition: resin::ir::TypeId::from_index(0),
+        definition: resin::ir::TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),

@@ -14,7 +14,7 @@
 (foreign_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (closed_term))
 ((primary_term (lid) @function.builtin)
-  (#any-of? @function.builtin "print" "ok" "err" "replace"))
+  (#any-of? @function.builtin "print" "fmt" "ok" "err"))
 
 (field_access name: (lid) @property)
 (method_call name: (lid) @function)

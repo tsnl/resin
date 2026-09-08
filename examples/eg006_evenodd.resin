@@ -17,5 +17,5 @@ def odd(n: int) -> int = {
 };
 
 def main() -> () = {
-	print("even(10) = {0}, odd(9) = {1}\n", (even(10), odd(9)));
+	print(fmt("even(10) = {0}, odd(9) = {1}\n", (even(10), odd(9))));
 };

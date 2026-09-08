@@ -200,6 +200,10 @@ fn sexp_value(names: &Names, value: &Value) -> SExp {
     match value {
         Value::Type { ty } => list("type", vec![sexp_ty(names, ty)]),
         Value::None => symbol("None"),
+        Value::Bytes { value } => list(
+            "bytes",
+            value.iter().map(|v| symbol(v.to_string())).collect(),
+        ),
         Value::Unit => symbol("unit"),
         Value::Bool { value } => list("bool", vec![symbol(value.to_string())]),
         Value::Int8 { value } => list("sbyte", vec![symbol(value.to_string())]),

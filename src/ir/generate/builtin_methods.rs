@@ -10,10 +10,8 @@ use crate::ir::{
     typer::{FunctionBody, FunctionDecl},
 };
 
-pub(super) fn typer() -> TyperContext {
-    let mut typer = TyperContext::new();
+pub(super) fn register(typer: &mut TyperContext) {
     typer.register_method_definitions(definitions);
-    typer
 }
 
 fn pointer(ty: Ty) -> Ty {

@@ -57,7 +57,7 @@ impl Scope {
     }
 
     fn define_type(&mut self, name: Arc<str>, ty: Ty) -> Result<(), Arc<str>> {
-        if self.types.contains_key(&name) {
+        if name.as_ref() == "String" || self.types.contains_key(&name) {
             return Err(name);
         }
         self.types.insert(name, ty);

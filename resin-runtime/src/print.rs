@@ -33,28 +33,71 @@ pub struct ResinPrintArg {
     value: ResinPrintData,
 }
 
+/// Write bytes to stdout and flush, without interpreting braces or adding a newline.
+/// # Safety
+/// `data` must be readable for `length` bytes; NULL is allowed for an empty buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_print(data: *const u8, length: usize) {
+    if unsafe { resin_stream_write(0, data, length) } != 0 {
+        fail("stdout write failed");
+    }
+}
+
+/// Write and flush stdout (0) or stderr (1). Returns zero on success.
+/// # Safety
+/// `data` must be readable for `length` bytes; NULL is allowed for an empty buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_stream_write(stream: u32, data: *const u8, length: usize) -> i32 {
+    let bytes = unsafe { slice(data, length) };
+    fn write(mut stream: impl Write, bytes: &[u8]) -> io::Result<()> {
+        stream.write_all(bytes).and_then(|()| stream.flush())
+    }
+    let result = match stream {
+        0 => write(io::stdout().lock(), bytes),
+        1 => write(io::stderr().lock(), bytes),
+        _ => return -1,
+    };
+    if result.is_ok() { 0 } else { -1 }
+}
+
+/// Format into an Arc allocation containing a span followed by its byte storage.
+/// The span layout matches Resin's `Span<ubyte>` on the supported 64-bit targets.
 /// # Safety
 /// `format` and `args` must be readable for their given lengths, as must each
-/// byte argument. The union member must match its tag in resin_runtime/print.h.
-/// Null pointers are allowed only for empty buffers.
+/// byte argument. Union members must match their tags; NULL is allowed for empty buffers.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn resin_print(
+pub unsafe extern "C" fn resin_format(
     format: *const u8,
     length: usize,
     args: *const ResinPrintArg,
     count: usize,
-) {
+) -> *mut crate::shared::ResinArc {
     let format = unsafe { slice(format, length) };
     let args = unsafe { slice(args, count) };
     let parts = parse(format, count).unwrap_or_else(|message| fail(message));
     if args.iter().any(|arg| arg.kind > POINTER) {
-        fail("invalid print argument tag");
+        fail("invalid format argument tag");
     }
-    let mut out = io::stdout().lock();
-    let result = unsafe { render(&mut out, &parts, args) }.and_then(|()| out.flush());
-    if let Err(error) = result {
-        fail(&format!("print: {error}"));
+    let mut bytes = Vec::new();
+    unsafe { render(&mut bytes, &parts, args) }
+        .unwrap_or_else(|error| fail(&format!("format: {error}")));
+    let size = size_of::<ResinPrintBytes>()
+        .checked_add(bytes.len())
+        .and_then(|n| n.checked_add(1))
+        .unwrap_or_else(|| fail("formatted string is too large"));
+    unsafe extern "C" fn destroy(_: *mut std::ffi::c_void) {}
+    let owner = crate::shared::resin_arc_new(size, align_of::<ResinPrintBytes>(), destroy);
+    unsafe {
+        let payload = crate::shared::resin_arc_data(owner).cast::<ResinPrintBytes>();
+        let data = payload.add(1).cast::<u8>();
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
+        *data.add(bytes.len()) = 0;
+        payload.write(ResinPrintBytes {
+            data,
+            length: bytes.len(),
+        });
     }
+    owner
 }
 
 unsafe fn slice<'a, T>(data: *const T, length: usize) -> &'a [T] {
@@ -88,19 +131,19 @@ fn parse(format: &[u8], count: usize) -> Result<Vec<Part<'_>>, &'static str> {
                     index = index
                         .checked_mul(10)
                         .and_then(|n| n.checked_add(usize::from(digit - b'0')))
-                        .ok_or("print index is too large")?;
+                        .ok_or("format index is too large")?;
                     i += 1;
                 }
                 if i == start || format.get(i) != Some(&b'}') {
-                    return Err("print expects {0}, {1}, ... or escaped {{ and }} braces");
+                    return Err("format expects {0}, {1}, ... or escaped {{ and }} braces");
                 }
                 if index >= count {
-                    return Err("print index out of range");
+                    return Err("format index out of range");
                 }
                 parts.push(Part::Arg(index));
                 i += 1;
             }
-            b'}' => return Err("unescaped } in print format"),
+            b'}' => return Err("unescaped } in format"),
             _ => {
                 let start = i;
                 while i < format.len() && !matches!(format[i], b'{' | b'}') {

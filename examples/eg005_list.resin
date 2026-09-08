@@ -21,5 +21,5 @@ def at(p: Ptr<List>) -> int = {
 def main() -> () = {
 	var tail = cons(2, Ptr<List>(ulong(0)));
 	var head = cons(1, &tail);
-	print("list = {0}, {1}\n", (car(head), at(cdr(head))));
+	print(fmt("list = {0}, {1}\n", (car(head), at(cdr(head)))));
 };

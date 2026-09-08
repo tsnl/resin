@@ -316,7 +316,7 @@ impl Analysis {
         bindings
             .into_values()
             .flatten()
-            .filter(|d| !matches!(d.name.as_str(), "print"))
+            .filter(|d| !matches!(d.name.as_str(), "print" | "fmt"))
             .collect()
     }
 
@@ -518,8 +518,18 @@ fn merge_binding(
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
+        "fmt",
+        "fmt(format, arguments) -> String\n\nFormat a tuple using numbered placeholders {0}, {1}, … into an owned String. Host-only.",
+        DefinitionKind::Function,
+    ),
+    (
+        "String",
+        "String\n\nOwned bytes, wrapping Arc<Span<ubyte>>. Copies retain the allocation. String literals have type Span<ubyte>.",
+        DefinitionKind::Type,
+    ),
+    (
         "print",
-        "print(format, arguments)\n\nPrint formatted values on the host. Numbered placeholders use {0}, {1}, ….",
+        "print(text) -> ()\n\nWrite a String or Span<ubyte> to stdout verbatim and flush.",
         DefinitionKind::Function,
     ),
     (

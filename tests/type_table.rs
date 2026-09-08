@@ -30,14 +30,14 @@ fn nominal_and_structural_types_share_one_index_space() {
     }
     let first = module.functions[0].result.clone();
     let second = Ty::Defined {
-        definition: TypeId::from_index(1),
+        definition: TypeId::from_index(2),
     };
     let record = module.functions[1].result.clone();
     assert_ne!(module.types.id(&first), module.types.id(&second));
     assert_ne!(module.types.id(&first), module.types.id(&record));
-    assert_eq!(module.types[0].body(), module.types[1].body());
+    assert_eq!(module.types[1].body(), module.types[2].body());
     assert_eq!(
-        module.types.id(module.types[0].body().unwrap()),
+        module.types.id(module.types[1].body().unwrap()),
         module.types.id(&record)
     );
     assert_eq!(

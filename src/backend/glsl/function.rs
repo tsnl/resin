@@ -540,6 +540,11 @@ fn builtin(types: &Types<'_>, name: &str, args: &[Slot], result: &Ty) -> Result<
         ("&&" | "||", [a, b]) if ty == &Ty::Bool => format!("({a}) {name} ({b})"),
         _ => return Err(unsupported()),
     };
+    let expr = if result == &Ty::UInt8 {
+        format!("uint8_t({expr})")
+    } else {
+        expr
+    };
     Ok(types.wrap(result, expr))
 }
 
@@ -548,6 +553,8 @@ fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> Result<String, Error> {
         Value::None | Value::Unit => "0u".into(),
         Value::Bool { value } => value.to_string(),
         Value::Int32 { value } => format!("int({}u)", *value as u32),
+        Value::UInt8 { value } => format!("uint8_t({value})"),
+        Value::Bytes { .. } => return Err(Error("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into())),
         Value::UInt32 { value } => format!("{value}u"),
         Value::UInt64 { value } => format!("{value}ul"),
         Value::Float32 { value } if value.is_finite() => format!("{value:e}"),

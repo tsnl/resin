@@ -45,6 +45,7 @@ impl<'a> Types<'a> {
             | Ty::None
             | Ty::Bool
             | Ty::Int32
+            | Ty::UInt8
             | Ty::UInt32
             | Ty::UInt64
             | Ty::Float32 => {}
@@ -94,6 +95,7 @@ impl<'a> Types<'a> {
 
     pub fn name(&self, ty: &Ty) -> String {
         match ty {
+            Ty::UInt8 => "uint8_t".into(),
             Ty::Unit | Ty::None | Ty::UInt32 => "uint".into(),
             Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => "uint64_t".into(),
             Ty::Int32 => "int".into(),
@@ -162,6 +164,14 @@ impl<'a> Types<'a> {
                 self.zero(self.module.types[definition.index()].body().unwrap())
             ),
             _ => format!("{}(0)", self.name(ty)),
+        }
+    }
+
+    pub fn extensions(&self) -> &'static str {
+        if self.seen.contains(&Ty::UInt8) {
+            "#extension GL_EXT_shader_8bit_storage : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require\n"
+        } else {
+            ""
         }
     }
 

@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "shared.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,8 +37,14 @@ typedef struct ResinPrintArg {
 } ResinPrintArg;
 
 // Buffers must remain readable during the call; NULL is allowed only for zero lengths.
-// Invalid formats terminate the program. No newline is added.
-void resin_print(const uint8_t *format, size_t length, const ResinPrintArg *args, size_t count);
+// Writes bytes verbatim to stdout, flushes, and adds no newline. Failure terminates.
+void resin_print(const uint8_t *data, size_t length);
+// Writes and flushes stdout (0) or stderr (1). Returns zero on success, -1 on failure.
+int32_t resin_stream_write(uint32_t stream, const uint8_t *data, size_t length);
+
+// Returns an owned Arc<Span<ubyte>> with byte storage in the same allocation.
+// The logical length excludes a trailing NUL. Invalid formats terminate the program.
+ResinArc *resin_format(const uint8_t *format, size_t length, const ResinPrintArg *args, size_t count);
 
 #ifdef __cplusplus
 }

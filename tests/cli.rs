@@ -63,7 +63,7 @@ fn artifact(cwd: &Path, profile: &str) -> PathBuf {
 #[test]
 fn omitted_unit_returns_run_and_reject_non_unit_tails() {
     let output = cli(
-        r#"export { main }; def greet() = { print("hello\n", ()); }; def main() = { greet() };"#,
+        r#"export { main }; def greet() = { print("hello\n"); }; def main() = { greet() };"#,
         &[],
     );
     success(&output);
@@ -78,7 +78,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"std/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(\"cleanup\\n\", ()); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
+        "export { main }; import { \"std/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));
@@ -97,7 +97,7 @@ fn default_output_builds_in_cwd_and_runs() {
     let input = sources.join("hello world.resin");
     fs::write(
         &input,
-        r#"export { main }; def main () -> int = { print("hello\n", ()); 7 };"#,
+        r#"export { main }; def main () -> int = { print("hello\n"); 7 };"#,
     )
     .unwrap();
     let output = invoke(temp.path(), &input, &[]);
@@ -155,9 +155,9 @@ fn strings_are_c_compatible_in_both_profiles() {
         def main() -> int = {
             var path = "triangle.png";
             var text = "a\0b";
-            if (strlen(Ptr<ubyte>(&path)) == ulong(12)
-                && strlen(Ptr<ubyte>(&text)) == ulong(1)) {
-                print("{0}:{1}", (path, text));
+            if (strlen(path.data) == ulong(12)
+                && strlen(text.data) == ulong(1)) {
+                print(fmt("{0}:{1}", (path, text)));
                 0
             } else { 1 }
         };
@@ -184,7 +184,7 @@ fn executable_destination_builds_without_running() {
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
-        r#"export { main }; def main () -> int = { print("ran\n", ()); 7 };"#,
+        r#"export { main }; def main () -> int = { print("ran\n"); 7 };"#,
     )
     .unwrap();
     let destination = format!("dist/custom program{}", std::env::consts::EXE_SUFFIX);
@@ -209,7 +209,7 @@ fn output_directories_receive_the_source_name() {
         let input = temp.path().join("hello.resin");
         fs::write(
             &input,
-            r#"export { main }; def main() -> () = { print("hello\n", ()); };"#,
+            r#"export { main }; def main() -> () = { print("hello\n"); };"#,
         )
         .unwrap();
         let output = invoke(temp.path(), &input, &["-o", destination]);
@@ -238,7 +238,7 @@ fn sources_with_the_same_name_have_separate_caches() {
         let input = directory.join("source.resin");
         fs::write(
             &input,
-            format!(r#"export {{ main }}; def main() -> () = {{ print("{folder}", ()); }};"#),
+            format!(r#"export {{ main }}; def main() -> () = {{ print(fmt("{folder}", ())); }};"#),
         )
         .unwrap();
         let output = invoke(temp.path(), &input, &[]);
@@ -254,7 +254,7 @@ fn invalid_destination_parents_fail_before_building_or_running() {
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
-        r#"export { main }; def main() -> () = { print("ran\n", ()); };"#,
+        r#"export { main }; def main() -> () = { print("ran\n"); };"#,
     )
     .unwrap();
     fs::write(temp.path().join("not-a-directory"), "keep me").unwrap();
@@ -274,7 +274,7 @@ fn directory_outputs_cannot_overwrite_the_source() {
     let input = temp
         .path()
         .join(format!("source{}", std::env::consts::EXE_SUFFIX));
-    let source = r#"export { main }; def main() -> () = { print("must not run", ()); };"#;
+    let source = r#"export { main }; def main() -> () = { print("must not run"); };"#;
     fs::write(&input, source).unwrap();
     let output = invoke(temp.path(), &input, &["-o", "."]);
     assert!(!output.status.success());
@@ -298,7 +298,7 @@ fn run_returns_the_program_exit_status() {
 #[test]
 fn run_prints_program_output() {
     let output = cli(
-        r#"export { main }; def main() -> () = { var n = 42; print("x = {0}\n", (n,)); };"#,
+        r#"export { main }; def main() -> () = { var n = 42; print(fmt("x = {0}\n", (n,))); };"#,
         &[],
     );
     success(&output);
@@ -309,8 +309,8 @@ fn run_prints_program_output() {
 fn one_file_can_have_multiple_exported_entry_points() {
     let source = r#"
         export { main, demo, status };
-        def main() -> () = { print("main", ()); };
-        def demo() -> () = { print("demo", ()); };
+        def main() -> () = { print("main"); };
+        def demo() -> () = { print("demo"); };
         def status() -> int = { 23 };
     "#;
     for (entry, expected, code) in [

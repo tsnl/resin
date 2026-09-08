@@ -58,6 +58,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Native wrappers must make their copying safe or expose Arc-based ownership;
   `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.
   See `doc/lifetimes.md` for lifecycle rules.
+- String literals are `Span<ubyte>` over static NUL-terminated bytes, with the terminator
+  excluded from length. `fmt(format, arguments)` returns the builtin nominal `String`,
+  wrapping `Arc<Span<ubyte>>`; formatting and reference counting are host-only.
+  `print(text)` and the ordinary `Io.stdout().write(text)` / `Io.stderr().write(text)` methods
+  write strings verbatim. Use `.data` when passing literal storage to C.
+  Device-backed byte spans use 8-bit storage; shader literal spans need an addressable
+  constant-storage implementation and are currently rejected explicitly.
 - Numeric suffixes are case-sensitive: `b/B`, `h/H`, `i/I`, and `l/L` select signed/unsigned
   8/16/32/64-bit integers; `f/d` select float32/float64. Suffixes fix literal types and retain
   range checking. Hex literals only accept suffixes that are not hex digits (`h/H`, `i/I`, `l/L`).

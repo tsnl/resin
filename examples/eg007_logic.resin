@@ -19,7 +19,9 @@ def pair(a: int, b: int) -> { a: int, b: int } = {
 def main() -> () = {
 	var xs = [1, 2, 3];
 	print(
-		"clamp(5, 0, 10) = {0}, both(1, 2) = {1}, pair(3, 4).a = {2}\n",
-		(clamp(5, 0, 10), both(1, 2), pair(3, 4).a),
+		fmt(
+			"clamp(5, 0, 10) = {0}, both(1, 2) = {1}, pair(3, 4).a = {2}\n",
+			(clamp(5, 0, 10), both(1, 2), pair(3, 4).a),
+		)
 	);
 };

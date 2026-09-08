@@ -203,15 +203,7 @@ impl<'a> Checker<'a> {
                 }
             }
             TermKind::Num { value } => equate = Some(self.solver.number(value)),
-            TermKind::String { value } => {
-                equate = Some(
-                    Ty::Array {
-                        element: Box::new(Ty::UInt8),
-                        length: value.len(),
-                    }
-                    .into(),
-                )
-            }
+            TermKind::String { .. } => equate = Some(Ty::byte_span().into()),
             TermKind::Var { name } => equate = Some(self.value(name)?),
             TermKind::Type { ty } => {
                 self.annotation(ty, true)?;
@@ -390,12 +382,12 @@ impl<'a> Checker<'a> {
                     }
                     equate = Some(to);
                 } else if let TermKind::Var { name } = &func.val
-                    && name.val.as_ref() == "print"
+                    && matches!(name.val.as_ref(), "print" | "fmt")
                 {
                     let arg = self.term(arg, None)?;
                     self.constraints.push((
                         span,
-                        Constraint::Builtin("print".into(), vec![arg], out.clone()),
+                        Constraint::Builtin(name.val.clone(), vec![arg], out.clone()),
                     ));
                 } else {
                     let func = self.term(func, None)?;

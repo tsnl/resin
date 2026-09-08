@@ -252,7 +252,7 @@ def apply_camera(camera: Camera, params: Ptr<Params>) = {
 def main() -> Result<(), _> = {
 	var count = 1000000I;
 	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
-	var window = Window.new(1280, 800, Ptr<ubyte>(&title))?;
+	var window = Window.new(1280, 800, title.data)?;
 
 	var gpu = Gpu.new_for_window(window)?;
 
@@ -339,6 +339,6 @@ def main() -> Result<(), _> = {
 		gpu.present(image)?;
 		window.poll_events()?;
 	};
-	print("particles demo complete\n", ());
+	print("particles demo complete\n");
 	ok(())
 };

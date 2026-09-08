@@ -91,7 +91,7 @@ def fibonacci(n: int) -> int = {
 };
 
 def main() = {
-    print("fibonacci(10) = {0}\n", (fibonacci(10),));
+    print(fmt("fibonacci(10) = {0}\n", (fibonacci(10),)));
 };
 ```
 
@@ -163,7 +163,7 @@ def main() = {
     var pointer: Ptr<_>;
     value := next(41);
     pointer := &value;
-    print("value = {0}\n", (pointer.*,));
+    print(fmt("value = {0}\n", (pointer.*,)));
 };
 ```
 
@@ -228,11 +228,11 @@ Handle failures with exhaustive, duplicate-free matches:
 ```resin
 def describe(result: Result<int, CalculationError>) = {
     match (result) {
-        ok(value) => { print("value = {0}\n", (value,)) },
+        ok(value) => { print(fmt("value = {0}\n", (value,))) },
         err(error) => {
             match (error) {
-                DivideByZero(zero) => { print("division by zero\n", ()) },
-                NegativeInput(negative) => { print("negative: {0}\n", (negative.value,)) },
+                DivideByZero(zero) => { print("division by zero\n") },
+                NegativeInput(negative) => { print(fmt("negative: {0}\n", (negative.value,))) },
             }
         },
     }
@@ -398,33 +398,50 @@ line between example functions and between logical sections inside a function.
 The [full formatting rules](resin-lsp/README.md#formatting) also apply to the CLI.
 CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
-## Printing
+## Strings, formatting, and output
 
-`print` is a polymorphic host builtin returning unit. Its one argument is a tuple containing a
-format string and a tuple of values, not C-style variadic arguments.
+String literals have type `Span<ubyte>`. They refer to static UTF-8 bytes, so copying or returning
+one does not allocate or introduce an owner. The span's length excludes a trailing NUL; embedded
+and explicitly trailing `\0` bytes count toward its length. The escapes are `\n`, `\r`, `\t`,
+`\0`, `\"`, and `\\`. Pass `text.data` to C functions that take a NUL-terminated string.
+Literal storage may be shared; treat it as read-only.
+
+`fmt(format, arguments)` is a polymorphic host builtin returning `String`, an ordinary nominal
+wrapper with a `bytes: Arc<Span<ubyte>>` field. Its allocation contains both the span and its bytes,
+plus a trailing NUL. Copying a String retains the allocation; the final owner releases it.
+Extracting a raw span or pointer does not retain that owner.
 
 ```resin
 export { main };
+import { "std/io.resin" };
 
-def main() -> () = {
+def main() -> Result<(), _> = {
     var n = 42;
-    print("x = {0}\n", (n,));
-    print("{1}, {0}; literal {{braces}}\n", (n, "hello"));
-    print("done\n", ());
+    var message = fmt("n = {0}\n", (n,));
+    Io.stdout().write(message)?;
+    Io.stderr().write(fmt("diagnostic: {0}", (message,)))?;
+    print("done\n");
+    ok(())
 };
 ```
 
-Placeholders are zero-based and may repeat. Newlines are explicit. Invalid formats or indices
-fail before the call writes output. Printable values are numbers, booleans, unit, byte strings,
-pointer addresses, and nominal wrappers of those. Arguments evaluate once, left-to-right,
-including unused ones. `print` is a compiler builtin and cannot be redefined or shadowed.
+Formats and string arguments accept `Span<ubyte>` or `String`. Other supported arguments are
+numbers, booleans, unit, and pointer addresses. The argument tuple is explicit, including the
+trailing comma for a single argument. `{0}`, `{1}`, etc. are zero-based and may repeat;
+`{{` and `}}` escape braces. Arguments evaluate once in source order, including unused arguments.
+Malformed formats and invalid indices terminate with a diagnostic before any formatted output
+is written. Formatting itself performs no output.
 
-Strings are UTF-8 byte arrays with `\n`, `\r`, `\t`, `\0`, `\"`, and `\\` escapes.
-Host byte-array storage includes an extra trailing NUL, so string literals can be passed to C
-without writing `"triangle.png\0"`. The terminator is outside the logical array length and is not
-printed. Explicit `\0` bytes remain part of the string, including at the end; Resin's length-based
-printing preserves them, while C string functions stop at the first NUL. Import paths, foreign
-headers, and shader-stage names still use the decoded literal text, without an added terminator.
+`Io.stdout()` and `Io.stderr()` return ordinary library `Output` values. Their `write` method
+accepts `Span<ubyte> | String`, writes bytes verbatim, flushes, adds no newline, and returns
+`Result<(), WriteError>`. The builtin `print(text)` is a stdout shorthand returning unit;
+it terminates on an output error. Neither writer interprets braces. Both `fmt` and `print`
+are reserved builtins and host-only. No formatting operator or string method is introduced.
+
+Device-backed `Span<ubyte>` values support shader reads and writes using 8-bit storage and
+arithmetic extensions. The runtime enables the corresponding Vulkan features when available.
+Shader literal spans remain unsupported: GLSL constant arrays cannot supply the device-buffer
+addresses used by Resin spans. Pass a span of uploaded bytes in the shader root instead.
 
 ## Console input
 
@@ -437,11 +454,11 @@ export { main };
 import { "std/console.resin" };
 
 def main() -> Result<(), _> = {
-    print("Name: ", ());
+    print("Name: ");
     var name = Console.read_line()?;
-    print("Hello, ", ());
+    print("Hello, ");
     Console.print(name)?;
-    print("!\n", ());
+    print("!\n");
     ok(())
 };
 ```
@@ -479,7 +496,7 @@ functions within one file remain supported.
 Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `impl`, `def`, `var`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
 `Ptr`/`Span`/`Arc`/`Weak`/`Result`/`None` are reserved, including in parameters and field names.
-Names such as `if_value` are ordinary identifiers. `print`, `ok`, `err`,
+Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
 `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
@@ -494,9 +511,10 @@ to those modules. Public operations are static constructors and instance methods
 - `std/image.resin`: PNG reading and writing.
 - `std/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
+- `std/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
 - `std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
-The polymorphic `print` operation is a compiler builtin; decorated shaders expose `.spirv`.
+The polymorphic `fmt` operation and string-only `print` are compiler builtins; decorated shaders expose `.spirv`.
 Runtime flags are static methods, such as `Memory.default()`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
@@ -507,7 +525,7 @@ import { "std/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
-    print("GPU ready\n", ());
+    print("GPU ready\n");
     ok(())
 };
 ```
@@ -562,7 +580,7 @@ var values = [10, 20, 30];
 values.at(1).* := 42;
 var view = Span<int> { data = Ptr<int>(&values), length = ulong(3) };
 var element = view.at(1);
-print("{0}\n", (element.*,));
+print(fmt("{0}\n", (element.*,)));
 ```
 
 The original `values(index)` spelling also remains available. `Span<T>` has `data: Ptr<T>`
@@ -575,7 +593,7 @@ allocation size, or lifetime.
 
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. String literals are NUL-terminated; pass their storage with a
-byte-pointer cast, such as `Ptr<ubyte>(&path)` for `var path = "triangle.png";`.
+span data field, such as `path.data` for `var path = "triangle.png";`.
 
 ## Loops
 
@@ -591,7 +609,7 @@ def main() -> () = {
         sum := sum + n;
         n := n + 1;
     };
-    print("sum = {0}\n", (sum,));
+    print(fmt("sum = {0}\n", (sum,)));
 };
 ```
 
@@ -623,7 +641,7 @@ export { main };
 def kernel(index: uint, output: Ptr<uint>) = { output.* := index; };
 def main() = {
     var code = kernel.spirv;
-    print("shader size: {0} bytes\n", (code.length,));
+    print(fmt("shader size: {0} bytes\n", (code.length,)));
 };
 ```
 
@@ -690,12 +708,12 @@ Use `buffer.host_pointer()` to initialize mapped data on the CPU. Store
 interchangeable with host addresses. Pointer types do not enforce the address space or bounds.
 Calling the same function on the CPU requires a root containing host pointers instead.
 
-Shader bodies support 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
+Shader bodies support `ubyte`, 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
 indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
 unchecked `.at()` indexing. Local addresses
 may only be used directly for loads, stores, indexing, and field access; they cannot be stored, passed,
-returned, or carried across control-flow edges. Device addresses can. `print` is host-only.
+returned, or carried across control-flow edges. Device addresses can. `fmt` and `print` are host-only.
 
 Invocations must avoid racing on shared buffers. Workgroup-local storage, shader barriers, and
 atomics are not exposed yet. For multi-pass algorithms, record separate dispatches: the runtime
@@ -717,7 +735,7 @@ A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 
 integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
 Shader objects, map_memory2, maintenance5, and maintenance6 are not required. Optional memory-priority and pageable-memory features are enabled when supported.
 Shader capabilities are limited to the profile Resin emits; externally supplied SPIR-V must
-fit that profile too. Unsupported shader capabilities are not enabled opportunistically.
+fit that profile too. The emitted byte profile additionally enables supported `storageBuffer8BitAccess` and `shaderInt8` features.
 
 ## Windowing
 
@@ -819,13 +837,14 @@ array literals. Its logical length is N; its physical storage is N+1 bytes with 
 trailing zero, alignment 1, and stride N+1 when nested in another array. The sentinel
 is outside checked indexing and is preserved by whole-array copies. Empty byte arrays
 occupy one zero byte. Embedded zero bytes count toward logical length; C string
-functions stop at the first zero. This contract supports passing a string or byte
-array's storage to a C function through an explicit `Ptr<ubyte>` cast.
+functions stop at the first zero. Byte-array storage can be passed to C through an explicit `Ptr<ubyte>` cast;
+string literals instead expose their storage as the span's `.data` field.
 
 For packed binary data, use a `Span<ubyte>` over an explicitly allocated N-byte region
 and copy only the N logical elements. Copying the entire array representation also
-copies its sentinel and is inappropriate for a packed wire format. There is no separate
-string type or implicit packed conversion. Byte arrays currently have no shared
+copies its sentinel and is inappropriate for a packed wire format. There is no implicit packed
+conversion. `String` uses packed owned bytes rather than the sentinel-array representation.
+Byte arrays currently have no shared
 host/device storage layout, so shared-layout queries must reject them; they must not
 silently report the host representation as a device layout.
 
@@ -861,7 +880,7 @@ C traps abort the process; shader traps stop that invocation and propagate failu
 through helper calls. Traps do not unwind automatic cleanup.
 A shader trap is not a host-visible Result error, and earlier writes remain visible.
 
-The shared shader profile supports `int`, `uint`, `ulong`, and `float32` conversions.
+The shared shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32` conversions.
 Other numeric types remain available on the host and are diagnosed when reached by a
 shader. There are no implicit numeric conversions. `float32(1)` still contextually types
 a direct unsuffixed literal; suffixes fix source literal types. A conversion of a local

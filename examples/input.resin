@@ -3,11 +3,11 @@ export { main };
 import { "std/console.resin" };
 
 def main() -> Result<(), _> = {
-	print("What is your name? ", ());
+	print("What is your name? ");
 	var name = Console.read_line()?;
 
-	print("Hello, ", ());
+	print("Hello, ");
 	Console.print(name)?;
-	print("!\n", ());
+	print("!\n");
 	ok(())
 };

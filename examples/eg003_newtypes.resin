@@ -17,5 +17,5 @@ def to_int(d: Distance) -> int = {
 
 def main() -> () = {
 	var distance = to_distance(to_meters(42));
-	print("distance = {0}, as int = {1}\n", (distance.value, to_int(distance)));
+	print(fmt("distance = {0}, as int = {1}\n", (distance.value, to_int(distance))));
 };

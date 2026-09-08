@@ -314,6 +314,17 @@ impl Checker<'_> {
             Constraint::Builtin(name, args, out) => {
                 if name.as_ref() == "print" {
                     self.solver.unify(out, &Ty::Unit.into(), span)?;
+                } else if name.as_ref() == "fmt" {
+                    self.solver.unify(
+                        out,
+                        &self
+                            .typer
+                            .string_type
+                            .clone()
+                            .expect("builtin String")
+                            .into(),
+                        span,
+                    )?;
                 } else if matches!(name.as_ref(), "&&" | "||" | "!") {
                     self.solver.unify(out, &Ty::Bool.into(), span)?;
                     for arg in args {
