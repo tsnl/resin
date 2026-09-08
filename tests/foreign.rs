@@ -169,13 +169,13 @@ fn spirv_requires_a_decorated_function_declaration() {
         "@compute_shader @vertex_shader def kernel(i: uint) -> uint = { i };",
         "@compute_shader def kernel(i: int) -> int = { i };",
         "@compute_shader def kernel(i: uint) -> uint = { i };",
-        "@compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var alias = kernel; var code = alias.spirv; };",
+        "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var alias = kernel; var code = alias.spirv; };",
         "extern \"stdlib.h\" def abs(i: int) -> int; def main() = { var code = abs.spirv; };",
     ] {
         assert!(!error(source).is_empty(), "{source}");
     }
     let module = module(
-        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() = { var code = kernel.spirv; };",
+        "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
     assert_eq!(main.locals[1].ty, ir::Ty::shader());
@@ -191,4 +191,17 @@ fn spirv_requires_a_decorated_function_declaration() {
 #[test]
 fn shader_is_an_ordinary_available_function_name() {
     module("def shader(n: int) -> int = { n + 1 };");
+}
+
+#[test]
+fn compute_declarations_require_ulong_indices() {
+    for ty in ["uint", "int", "long"] {
+        let source = format!(
+            "@compute_shader def kernel(index: {ty}, output: Ptr<ulong>) = {{ output.* := ulong(index); }};"
+        );
+        assert!(error(&source).contains("expected (ulong, Ptr<T>)"));
+    }
+    module(
+        "@compute_shader def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };",
+    );
 }

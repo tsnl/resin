@@ -61,7 +61,7 @@ pub fn validate(
     let input_shape = shape(typer, input)?;
     let result = shape(typer, &function.result)?;
     let interface = match stage {
-        "compute" if root && input_shape == Ty::UInt32 && result == Ty::Unit => {
+        "compute" if root && input_shape == Ty::UInt64 && result == Ty::Unit => {
             Some(Interface::Compute {
                 index: input.clone(),
             })
@@ -100,7 +100,7 @@ pub fn validate(
         Err(format!(
             "invalid @{stage}_shader signature: {}",
             match stage {
-                "compute" => "expected (uint, Ptr<T>) -> ()",
+                "compute" => "expected (ulong, Ptr<T>) -> ()",
                 "vertex" => "expected int or (int, Ptr<T>) returning a position/color record",
                 "fragment" =>
                     "expected Color or (Color, Ptr<T>) returning Color with float32 r/g/b/a fields",

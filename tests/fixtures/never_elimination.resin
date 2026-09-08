@@ -8,10 +8,10 @@ def infallible(n: uint, p: Ptr<uint>) -> Result<uint, Never> = {
 def unwrap(r: Result<uint, Never>) -> uint = {
     match (r) { ok(n) => { n }, err(impossible) => { absurd(impossible) } }
 };
-def kernel(i: uint, p: Ptr<uint>) = {
-    if (i == 0_ui) {
+def kernel(i: ulong, p: Ptr<uint>) = {
+    if (i == 0_ul) {
         var n = unwrap(infallible(41_ui, p));
         p.* := p.* + n;
     };
 };
-def main() -> int = { var result = 0_ui; kernel(0_ui, &result); if (result == 42_ui) { 0 } else { 1 } };
+def main() -> int = { var result = 0_ui; kernel(0_ul, &result); if (result == 42_ui) { 0 } else { 1 } };

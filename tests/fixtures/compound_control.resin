@@ -4,12 +4,12 @@ struct Pair { a: uint, b: uint };
 def touch(p: Ptr<State>) -> uint = { var old = p.counter; p.counter := old + 1_ui; old };
 def choose(p: Ptr<State>) -> Ptr<uint> = { touch(p); &p.result };
 def identity(n: uint) -> uint = { n };
-def kernel(i: uint, root: Ptr<State>) = {
-    if (i == 0_ui) {
+def kernel(i: ulong, root: Ptr<State>) = {
+    if (i == 0_ul) {
         var x = 0_ui;
-        x := if (i == 0_ui) { 7_ui } else { 8_ui };
+        x := if (i == 0_ul) { 7_ui } else { 8_ui };
         var flag = 1_i == 2;
-        flag := i == 0_ui && touch(root) == 0_ui;
+        flag := i == 0_ul && touch(root) == 0_ui;
         var values = [0_ui, 0_ui];
         values(touch(root) - 1_ui).* := if (flag) { touch(root) + 9_ui } else { 12_ui };
         var pair = Pair { b = if (flag) { touch(root) } else { 99_ui }, a = touch(root) };
@@ -19,6 +19,6 @@ def kernel(i: uint, root: Ptr<State>) = {
 };
 def main() -> int = {
     var root = State { counter = 0_ui, result = 0_ui };
-    kernel(0_ui, &root);
+    kernel(0_ul, &root);
     if (root.result == 42_ui) { 0 } else { 1 }
 };

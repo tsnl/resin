@@ -496,7 +496,7 @@ fn invalid_options_and_source_report_errors() {
 #[test]
 fn decorated_host_calls_need_no_glslc() {
     success(&cli(
-        "export { main }; @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ui, &output); if (output == 7_ui) { 0 } else { 1 } };",
+        "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ul, &output); if (output == 7_ui) { 0 } else { 1 } };",
         &["--glslc", "/does/not/exist/glslc"],
     ));
 }
@@ -511,7 +511,7 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     fs::write(&input, r#"
         export { main };
         import { "std/graphics.resin" };
-        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := { i + 1_ui }; };
+        @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + 1_ui }; };
         @vertex_shader def vertex(i: int) -> Vertex = {
             Vertex {
                 position = Position { x = 0.0_f, y = 0.0_f, z = 0.0_f, w = 1.0_f },
@@ -568,7 +568,7 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
             "generated C must embed the compiled SPIR-V exactly"
         );
     }
-    for marker in ["gl_GlobalInvocationID", "gl_VertexIndex", "r_output"] {
+    for marker in ["gl_WorkGroupID", "gl_VertexIndex", "r_output"] {
         assert!(
             sources.iter().any(|source| source.contains(marker)),
             "{marker}"

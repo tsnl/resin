@@ -9,9 +9,9 @@ def pixel(index: uint) -> uint = {
 };
 
 @compute_shader
-def kernel(index: uint, root: Ptr<Root>) = {
-	if (ulong(index) < root.pixels.length) {
-		root.pixels.at(ulong(index)).* := pixel(index);
+def kernel(index: ulong, root: Ptr<Root>) = {
+	if (index < root.pixels.length) {
+		root.pixels.at(index).* := pixel(uint(index));
 	};
 };
 
